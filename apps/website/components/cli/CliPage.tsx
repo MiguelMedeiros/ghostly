@@ -32,7 +32,7 @@ export function CliPage() {
               <i />
               <i />
             </div>
-            <pre className="cl-term" aria-label={t.hero.term} tabIndex={0}>
+            <pre className="cl-term" role="region" aria-label={t.hero.term} tabIndex={0}>
               <code>{SESSION}</code>
             </pre>
           </div>

@@ -6,7 +6,7 @@
 | Status | Draft |
 | Kind | Adapter |
 | Dependencies | [Payment Negotiation 200](200-payments.md), [Capabilities 03](03-capabilities.md), authenticated live data transport |
-| Implementation | Experimental browser adapter, Second's Bark SDK `@secondts/bark` 0.25.0 (bark 0.7.1, WebAssembly). New makes a Mainnet wallet on Second's Bitcoin server and a Testnet one on their signet server, each in one click. Regtest evidence below; no Ghostly test has moved real money. |
+| Implementation | Experimental browser adapter, Second's Bark SDK `@secondts/bark` 0.27.0 (bark 0.8.1, WebAssembly). New makes a Mainnet wallet on Second's Bitcoin server and a Testnet one on their signet server, each in one click. Regtest evidence below; no Ghostly test has moved real money. |
 | Summary | A second Ark provider (Second's Bark) beside Arkade, so Ark isn't tied to one implementation. |
 | Availability | Available |
 | Notes | Experimental. Mainnet on Second's Bitcoin server, Testnet on their signet server; no unilateral exit yet. Not interchangeable with Arkade: its own payment method and capability. |
@@ -29,7 +29,7 @@ So Bark is its own payment method, `bark`, with its own capability `payments-bar
 
 Second opened its Bitcoin server to anyone on 2026-06-09 ([announcement](https://second.tech/blog/bark-now-on-bitcoin-mainnet/), [Bitcoin Magazine](https://bitcoinmagazine.com/news/second-launches-bark-on-bitcoin-mainnet), [changelog](https://second.tech/docs/changelog): bark 0.2.3 that day). No account is needed. Second's own guide says to start small and not to store more than one is willing to lose.
 
-**SDK.** Any `@secondts/bark` built on bark 0.6.0 or newer (npm 0.15.0+) speaks the current protocol; Ghostly pins **0.25.0** (2026-09-24, bark 0.7.1, the same core as 0.24.0). It is the first build whose SDK refuses an address of another network (before, a wrong-network address could still build a valid output), which matters with real money. The bindings changes of 0.25.0 (`mailboxAuthorization(expirySecs)`, an optional `LightningReceive.amountSats`, `drainAll` on exits) touch nothing Ghostly calls, and the WebAssembly still loads as in #77.
+**SDK.** Any `@secondts/bark` built on bark 0.6.0 or newer (npm 0.15.0+) speaks the current protocol; Ghostly pins **0.27.0** (2026-11-10, bark 0.8.1). 0.25.0 (bark 0.7.1) was the first build whose SDK refuses an address of another network (before, a wrong-network address could still build a valid output), which matters with real money. Of the bindings changes since, only `sendArkoorPayment` touches Ghostly: it answers the id of the movement that records the payment. The regtest suite passes against captaind 0.7.1 and 0.8.1.
 
 **What the server says about itself.** Read once, read-only, with `GetArkInfo` over gRPC-web on 2026-09-26 (decoded with bark 0.7.1's `bark_server.proto`):
 

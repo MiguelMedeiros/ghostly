@@ -72,7 +72,28 @@ describe("the argument parser", () => {
     expect(parseArgs(["alice", "note.webm", "--voice", "4200"], options!).options).toEqual({ voice: 4200 });
     expect(parseArgs(["alice", "note.webm", "--voice=4200", "--name", "hi.webm"], options!).options).toEqual({ voice: 4200, name: "hi.webm" });
     expect(parseArgs(["alice", "note.webm", "--voice", "--name", "hi.webm"], options!).options).toEqual({ voice: true, name: "hi.webm" });
-    expect(() => parseArgs(["--voice=soon"], options!)).toThrow(/takes a number/);
+    expect(() => parseArgs(["--voice=soon"], options!)).toThrow(new CliError("usage", "--voice takes a length in milliseconds, not \"soon\""));
+  });
+
+  it("answers a length --voice did not take (2s) as its own, not as one argument too many", () => {
+    const send = COMMANDS["file send"]!;
+    const run = (argv: string[]) => { const parsed = parseArgs(argv, send.options!, idSlot(send)); return positionals(send, parsed.positionals); };
+    // Before, "Too many arguments: ghostly file send <chat|group> <path> …", which does not say --voice is the problem.
+    for (const [argv, typed] of [[["bob", "v.wav", "--voice", "2s"], "2s"], [["bob", "v.wav", "--voice", "1.5s"], "1.5s"], [["bob", "--voice", "2000ms", "v.wav"], "2000ms"], [["--voice", "2s", "bob", "v.wav"], "2s"]] as const) {
+      expect(() => run([...argv]), argv.join(" ")).toThrow(new CliError("usage", `--voice takes a length in milliseconds, not ${JSON.stringify(typed)}`));
+    }
+    // A word after a lone --voice that the line has room for is still a positional, and a word too many elsewhere is still that.
+    expect(run(["bob", "--voice", "v.wav"])).toEqual({ chat: "bob", path: "v.wav" });
+    expect(() => run(["bob", "v.wav", "extra", "--voice"])).toThrow(/^Too many arguments: ghostly file send /);
+  });
+
+  it("answers --voice \"$MS\" with MS unset as --voice's empty value, not a word too many or a missing <path>", () => {
+    const send = COMMANDS["file send"]!;
+    const run = (argv: string[]) => { const parsed = parseArgs(argv, send.options!, idSlot(send)); return positionals(send, parsed.positionals); };
+    // Before, "Too many arguments: ghostly file send …" after the path, and "Missing <path>" before it, the path given.
+    for (const argv of [["bob", "v.wav", "--voice", ""], ["bob", "--voice", "", "v.wav"]]) {
+      expect(() => run(argv), argv.join(" ")).toThrow(new CliError("usage", "--voice takes a length in milliseconds, not \"\""));
+    }
   });
 
   it("takes ids that start with a single dash where the command says ids come, never as text", () => {
@@ -117,6 +138,26 @@ describe("the argument parser", () => {
     expect(() => params("wallet receive", ["-x"])).toThrow(/^Unknown option -x for ghostly wallet receive/);
     expect(() => params("wallet receive", ["5", "-6"])).toThrow(/^Unknown option -6 for ghostly wallet receive/);
     expect(parseArgs(["-5"], { five: { type: "boolean", short: "5", description: "" } }, undefined, { command: "x", number: () => true })).toEqual({ positionals: [], options: { five: true } });
+  });
+
+  // Before, `chat pay payee 1e3` paid 1,000 sats: an amount was read as JavaScript reads a number, so a typo of `2e3`
+  // for `23` paid 2,000, and `0x10` paid 16.
+  it("reads an amount and a number flag only as decimal digits, refusing 1e3, 0x10, 0b11 and 0o7", () => {
+    const params = (name: string, argv: string[]) => {
+      const command = COMMANDS[name];
+      const parsed = parseArgs(argv, command.options ?? {}, idSlot(command), { command: name, number: numberSlot(command) });
+      return command.params!(parsed, positionals(command, parsed.positionals));
+    };
+    for (const typed of ["1e3", "2E3", "0x10", "0b11", "0o7", " 21", "21 ", "+21", "1_000"]) {
+      for (const [name, argv] of [["chat pay", ["bob", typed]], ["chat request", ["bob", typed]], ["wallet receive", [typed]]] as const)
+        expect(() => params(name, [...argv]), `${name} ${argv.join(" ")}`).toThrow(new CliError("usage", `<sats> takes a whole number from 1 up, not ${JSON.stringify(typed)}`));
+      for (const flag of ["amount", "max-fee"])
+        expect(() => params("pay", ["lnurl1x", `--${flag}`, typed]), `pay --${flag} ${typed}`).toThrow(new CliError("usage", `--${flag} takes a number, not ${JSON.stringify(typed)}`));
+    }
+    expect(params("chat pay", ["bob", "0021"])).toMatchObject({ amount: 21 });
+    expect(params("pay", ["lnurl1x", "--amount", "1000", "--max-fee", "0"])).toMatchObject({ amount: 1000, maxFee: 0 });
+    expect(parseArgs(["--left", "12.5"], COMMANDS["usage send"].options!).options).toEqual({ left: 12.5 });
+    expect(parseArgs(["--hold", "-5"], COMMANDS["chat disconnect"].options!).options).toEqual({ hold: -5 });
   });
 
   it("names the nearest option of the command for a typo, and none for a word near nothing", () => {
@@ -275,7 +316,26 @@ describe("the argument parser", () => {
     expect(() => accept("bob", "--off")).toThrow(new CliError("usage", "--off and --networks change one method: ghostly chat accept <chat> <method> [--off] [--networks mainnet,testnet]"));
     expect(() => accept("bob", "--networks", "testnet")).toThrow(/^--off and --networks change one method/);
     expect(accept("bob", "cashu", "--off")).toEqual({ chat: "bob", method: "cashu", on: false, networks: undefined });
+    // A word --networks does not take is a usage error before the profile opens. Before, the API answered it after the
+    // one-shot had opened the profile and asked the relays: bad_request (exit 1), "networks must list mainnet and/or testnet".
+    for (const networks of ["foo", "Testnet", "testnet,foo", "testnet;mainnet"]) expect(() => accept("bob", "cashu", "--networks", networks), networks).toThrow(new CliError("usage", `--networks takes mainnet, testnet or mainnet,testnet, not ${JSON.stringify(networks)}`));
+    for (const networks of ["", ",", " , "]) expect(() => accept("bob", "cashu", "--networks", networks), JSON.stringify(networks)).toThrow(new CliError("usage", `--networks takes mainnet, testnet or mainnet,testnet (to stop taking it: --off), not ${JSON.stringify(networks)}`));
+    expect(accept("bob", "cashu", "--networks", "mainnet, testnet")).toEqual({ chat: "bob", method: "cashu", on: true, networks: ["mainnet", "testnet"] });
+    expect(accept("bob", "cashu", "--networks", "testnet")).toEqual({ chat: "bob", method: "cashu", on: true, networks: ["testnet"] });
     expect(positionals(COMMANDS["chat transport"], ["bob", "iroh/1"])).toEqual({ chat: "bob", transport: "iroh/1" });
+  });
+
+  it("react and group react refuse an <emoji> that is not one emoji as a usage error, before the profile opens", () => {
+    const params = (name: string, ...argv: string[]) => { const c = COMMANDS[name], parsed = parseArgs(argv, c.options ?? {}); return c.params!(parsed, positionals(c, parsed.positionals)); };
+    for (const [name, target] of [["react", "bob"], ["group react", "team"]]) {
+      // Before, a one-shot opened the profile and went online, then the engine answered "A reaction is one emoji" (exit 1).
+      for (const emoji of ["notanemoji", "ab", "1", "👍👍", "👍 👍", ":+1:"]) {
+        expect(() => params(name, target, "m1", ...emoji.split(" ")), `${name} ${emoji}`).toThrow(new CliError("usage", `<emoji> takes one emoji, not ${JSON.stringify(emoji)}`));
+      }
+      for (const argv of [[target, "m1"], [target, "m1", ""]]) expect(() => params(name, ...argv), `${name} ${JSON.stringify(argv)}`).toThrow(new CliError("usage", "Give one emoji, or --remove to take yours back"));
+      for (const emoji of ["👍", "❤", "👨‍👩‍👧", "🇧🇷"]) expect(params(name, target, "m1", emoji).emoji, `${name} ${emoji}`).toBe(emoji);
+      expect(params(name, target, "m1", "--remove").remove).toBe(true);
+    }
   });
 
   it("a required positional given as \"\" is the usage error a missing one is, before the profile opens, in every command", () => {
@@ -284,6 +344,13 @@ describe("the argument parser", () => {
     expect(() => positionals(COMMANDS["group create"], ["", ""])).toThrow(/^Missing <name>/);
     // `chat rename <chat> ""` gives the chat back the contact's name, by design.
     expect(positionals(COMMANDS["chat rename"], ["abc", ""])).toEqual({ chat: "abc", name: "" });
+    expect(positionals(COMMANDS["chat rename"], ["abc"])).toEqual({ chat: "abc", name: undefined });
+    // So the usage line shows a `name...?` that may be left out as optional: `chat rename <chat> <name...>` read as required.
+    const shownRequired = Object.entries({ ...COMMANDS, ...TEXT_COMMANDS }).flatMap(([name, command]) => {
+      const last = command.args?.at(-1);
+      return last?.endsWith("...?") && command.usage.split(/\s+/).includes(`<${last.slice(0, -1)}>`) ? [name] : [];
+    });
+    expect(shownRequired).toEqual([]);
     // Before: 63 commands opened the profile, then answered bad_request "<param> is required" (exit 1).
     const sweep = Object.entries({ ...COMMANDS, ...TEXT_COMMANDS }).flatMap(([name, command]) => {
       // Every positional but a leading optional one (`[<chat>] <file>`) gets a word.
@@ -451,9 +518,11 @@ describe("the argument parser", () => {
     usage("file send", ["alice", "a.wav", "--voice", "--peaks", ""], `${peaks} ""`);
     usage("file send", ["alice", "a.wav", "--voice", "--peaks", new Array(129).fill(1).join(",")], `${peaks} "${new Array(129).fill(1).join(",")}"`);
     usage("file send", ["alice", "a.wav", "--peaks", "1,2"], "--peaks is a voice note's waveform: not without --voice");
-    expect(params("file send", ["alice", "a.wav", "--voice"])).toMatchObject({ voice: true, peaks: undefined });
-    expect(params("file send", ["alice", "a.wav", "--voice", "900000", "--peaks", "0,40,255"])).toMatchObject({ voice: 900000, peaks: ["0", "40", "255"] });
-    expect(params("file send", ["alice", "a.wav"])).toMatchObject({ voice: undefined, peaks: undefined });
+    // A file that is there: `file send` looks at it before the profile opens.
+    const sound = import.meta.filename;
+    expect(params("file send", ["alice", sound, "--voice"])).toMatchObject({ voice: true, peaks: undefined });
+    expect(params("file send", ["alice", sound, "--voice", "900000", "--peaks", "0,40,255"])).toMatchObject({ voice: 900000, peaks: ["0", "40", "255"] });
+    expect(params("file send", ["alice", sound])).toMatchObject({ voice: undefined, peaks: undefined });
     // Each of the three is enough for an update, and a code is taken as typed.
     expect(params("button update", ["alice", "m1", "--chosen", "yes"])).toMatchObject({ chosen: "yes", close: false });
     expect(params("button update", ["alice", "m1", "--close"])).toMatchObject({ close: true });
@@ -505,6 +574,9 @@ describe("the argument parser", () => {
     expect(params("file save", ["f1", "--wait", "--timeout", "5"])).toMatchObject({ wait: true, timeout: 5 });
     expect(params("identity complete", ["d1", "--evidence-file", "proof.txt"])).toEqual({ draft: "d1", evidenceFile: resolve("proof.txt"), stdin: false });
     expect(params("identity complete", ["d1", "--stdin"])).toEqual({ draft: "d1", evidenceFile: undefined, stdin: true });
+    // `-` is stdin, as for --passphrase-file: not a file named "-" in the folder.
+    expect(params("identity complete", ["d1", "--evidence-file", "-"])).toEqual({ draft: "d1", evidenceFile: undefined, stdin: true });
+    expect(() => params("identity complete", ["d1", "--evidence-file", "-", "--stdin"])).toThrow("--evidence-file or --stdin, not both");
   });
 });
 
@@ -533,8 +605,30 @@ describe("errors", () => {
     // A contact with no wallet was `engine`, telling both sides to update the same release: what to do, and a reason to branch on.
     expect(asCliError(engineError("contactNoWallet")).toJSON()).toEqual({ code: "refused", message: "Your contact has no wallet yet: they need one to pay or be paid (on a CLI: ghostly wallet create cashu)", details: { reason: "contact_no_wallet" } });
     expect(asCliError(engineError("contactNoPayments")).toJSON()).toEqual({ code: "refused", message: "Your contact has payments off in this chat, or needs an updated Ghostly", details: { reason: "contact_payments_off" } });
+    // A mint that failed `pay`'s quote or `wallet faucet` (a 500, a closed socket) said only its own words ("internal
+    // error"): now it is named, with nothing paid and the next step, its words kept last. Its code is still `engine`.
+    const mint = { host: "testnut.cashu.space", reason: "internal error" };
+    expect(asCliError(engineError("mintFailedQuote", mint)).toJSON()).toEqual({ code: "engine", message: "testnut.cashu.space could not take this payment right now, and no sats left your wallet: try again later. The mint said: internal error" });
+    expect(asCliError(engineError("mintFailedFaucet", mint)).toJSON()).toEqual({ code: "engine", message: "testnut.cashu.space could not give test coins right now: try again later. The mint said: internal error" });
+    // `wallet receive` at a mint that failed (a 503) said "No mint could create an invoice: down" as `engine`: now the mint
+    // is named, with the next step, and it is `unavailable` (try again later), as a mint with no answer at all.
+    expect(asCliError(engineError("mintFailedInvoice", { host: "127.0.0.1:4701", reason: "down" })).toJSON()).toEqual({ code: "unavailable", message: "127.0.0.1:4701 could not create an invoice right now: try again later. The mint said: down" });
     // One the table does not name stays the engine's, in its words.
     expect(asCliError(engineError("outcomeUnknown")).toJSON()).toEqual({ code: "engine", message: "Outcome unknown. Check the existing payment; do not send another." });
+  });
+
+  // Found in a bug hunt: `chat request bob 100 --method arkade` to a contact with a Cashu wallet only was `engine`, "Your
+  // contact has no Testnet Ark wallet", while one with no wallet at all is `refused` with its reason and the next step.
+  it("say a contact with no wallet of the way or network asked as a contact with no wallet: refused, its next step", () => {
+    const noWallet = (message: string) => asCliError(new Error(message)).toJSON();
+    expect(noWallet("Your contact has no Testnet Ark wallet")).toEqual({ code: "refused", message: "Your contact has no Testnet Ark wallet (on a CLI: ghostly wallet create arkade)", details: { reason: "contact_no_wallet" } });
+    expect(noWallet("Your contact has no Testnet on-chain Bitcoin wallet")).toEqual({ code: "refused", message: "Your contact has no Testnet on-chain Bitcoin wallet (on a CLI: ghostly wallet create bitcoin)", details: { reason: "contact_no_wallet" } });
+    expect(noWallet("Your contact has no Mainnet Cashu wallet")).toEqual({ code: "refused", message: "Your contact has no Mainnet Cashu wallet (on a CLI: ghostly wallet create cashu --network mainnet)", details: { reason: "contact_no_wallet" } });
+    for (const rail of ["USDT", "Fedimint", "Spark", "Lightning"]) expect(noWallet(`Your contact has no Testnet ${rail} wallet`).message, rail).toBe(`Your contact has no Testnet ${rail} wallet (on a CLI: ghostly wallet create ${rail.toLowerCase()})`);
+    // Bark runs in the app only: no command to give, the reason still.
+    expect(noWallet("Your contact has no Testnet Bark wallet")).toEqual({ code: "refused", message: "Your contact has no Testnet Bark wallet", details: { reason: "contact_no_wallet" } });
+    // A way of paying the engine does not name keeps its words and code.
+    expect(noWallet("Your contact has no Testnet Gold wallet").code).toBe("engine");
   });
 
   it("say a local path could not be opened as the person's path, not as the engine refusing", async () => {

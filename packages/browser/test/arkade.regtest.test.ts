@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { test, expect, vi } from 'vitest';
 import { generateMnemonic } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
-import { Wallet, MnemonicIdentity, ArkNote, RestArkProvider, InMemoryWalletRepository, InMemoryContractRepository } from '@arkade-os/sdk';
+import { Wallet, MnemonicIdentity, ArkNote, RestArkProvider, RestIndexerProvider, EsploraProvider, InMemoryWalletRepository, InMemoryContractRepository } from '@arkade-os/sdk';
 import { ArkadeAdapter } from '../src/engine/paymentAdapters/arkade';
 import type { PaymentReview, PaymentTarget } from '@ghostly/core';
 import { PaymentCoordinator } from '../src/engine/paymentAdapters/coordinator';
@@ -21,7 +21,7 @@ test.skipIf(!enabled)('real regtest Ark transfer and read-only receipt reconcili
  const storage=()=>({walletRepository:new InMemoryWalletRepository(),contractRepository:new InMemoryContractRepository()});
  const aliceMnemonic=generateMnemonic(wordlist);
  const aliceStorage=storage();
- const funder=await Wallet.create({identity:MnemonicIdentity.fromMnemonic(aliceMnemonic,{isMainnet:false}),arkServerUrl:provider,esploraUrl:config.explorer,settlementConfig:false,walletMode:"hd",storage:aliceStorage});
+ const funder=await Wallet.create({identity:MnemonicIdentity.fromMnemonic(aliceMnemonic,{isMainnet:false}),operatorProvider:new RestArkProvider(provider),indexerProvider:new RestIndexerProvider(provider),onchainProvider:new EsploraProvider(config.explorer),settlementConfig:false,walletMode:"hd",storage:aliceStorage});
  const note=arkNote(10000);
  await funder.settle({inputs:[ArkNote.fromString(note)],outputs:[{address:await funder.getAddress(),amount:9900n}]});
  await funder.dispose();

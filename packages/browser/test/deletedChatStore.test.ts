@@ -157,6 +157,26 @@ it("the same invite joined again while such a store is under way shows nothing o
   expect(t.heard(before).told).toBeGreaterThan(0);
 }, 60_000);
 
+it("the same invite joined again after the chat is deleted shows none of the deleted chat's reactions on the chat list", async () => {
+  const t = await setup();
+  const wire = WIRE("h");
+  expect(await t.contact.sendMessage("My PIN is 4711", Date.now(), wire)).toBeNull();
+  await vi.waitFor(async () => expect((await db.getMessages(t.id)).map(m => m.text)).toEqual(["My PIN is 4711"]));
+  expect((await t.node.react({ linkId: t.id, messageId: `peer_${wire}`, emoji: "👍" })).error).toBeNull();
+  await vi.waitFor(() => expect(t.view()?.lastReaction).toMatchObject({ by: "me", emoji: "👍", snippet: "My PIN is 4711" }));
+  await t.settled();
+  t.node.removeLink({ linkId: t.id });
+  const joined = await (t.node as unknown as { addLink: (params: unknown) => Promise<string> }).addLink({ ...t.row, participationSeedB64: t.row.participationSeed });
+  expect(joined).toBe(t.id);
+  expect(await db.getMessages(t.id)).toEqual([]);
+  expect(t.view()).toBeDefined();
+  expect(t.view()!.lastReaction).toBeUndefined();
+  // Nor does the engine keep any other note of the deleted chat's history under its id.
+  const kept = t.node as unknown as Record<"reactionNotesBefore" | "newestAt" | "placedAt" | "clockLeads", Map<string, unknown>> & { reactionNotesWhole: Set<string> };
+  expect([kept.reactionNotesBefore.has(t.id), kept.reactionNotesWhole.has(t.id), kept.newestAt.has(t.id), kept.placedAt.has(t.id), kept.clockLeads.has(t.id)])
+    .toEqual([false, false, false, false, false]);
+}, 60_000);
+
 it("a message to a chat nobody deletes is stored, told and announced as before, a reply to one not here included", async () => {
   const t = await setup({ history: 3 });
   const before = t.mark();

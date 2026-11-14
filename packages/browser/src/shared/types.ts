@@ -1,4 +1,4 @@
-import type { CommunityMessageFrame, DiscoveryStatus, GroupMention, GroupMessageFrame, ImageMeta, LinkPreview, PairingProgress, PaymentMethodName, RoutineCard, StatusCard, TaskCard, TypingKind, UsageCard, VideoMeta, VoiceMeta, WirePin, WireReaction } from "@ghostly/core";
+import type { CommunityMessageFrame, DiscoveryStatus, GroupEditFrame, GroupMention, GroupMessageFrame, ImageMeta, LinkPreview, PairingProgress, PaymentMethodName, PersonStatus, Presence, RoutineCard, StatusCard, TaskCard, TypingKind, UsageCard, VideoMeta, VoiceMeta, WirePin, WireReaction } from "@ghostly/core";
 import type { UsdtWalletView } from "../engine/paymentAdapters/usdtWallet";
 import type { ArkWalletView } from "../engine/paymentAdapters/arkWallet";
 import type { BarkWalletView } from "../engine/paymentAdapters/barkWallet";
@@ -242,9 +242,10 @@ export interface StoredGroup {
    * edge to the admin, until the admin's commit removing me arrives or `at` is a week old, so
    * a leave said while the admin was away still reaches it. With hubs, the edges to my hubs too, which carry my
    * signed leave (`bye`) to the admin. `bye` is kept without hubs too: opening the group's link again takes it along
-   * (`owedBye`).
+   * (`owedBye`). An admin that leaves keeps its `farewells` here too, and the edges to them: `heard`, when the admin my
+   * leave went to took it, and the tombstone stays for those farewells alone.
    */
-  left?: { at: number; admin: string; hubs?: string[]; bye?: GroupByeFrame };
+  left?: { at: number; admin: string; hubs?: string[]; bye?: GroupByeFrame; heard?: number };
   /**
    * Left while the admin was away, then back by the group's link before it heard the leave: the signed leave of my old
    * key, said to the admin on my new key's edge, so it takes the old key out (it was in every roster twice for good,
@@ -302,11 +303,16 @@ export interface GroupLive {
 }
 
 /**
- * What a pin or a deletion for everyone changes of a private group's record, in a row of its own (settings store,
- * `groupLightKey`), apart from `GroupLive` so that a message does not write them too: there while the record is behind
- * on them, deleted each time the record is written whole (`engine/groupRows.ts`).
+ * What a pin, a deletion for everyone, a change of hubs or a member's edit changes of a private group's record, in a
+ * row of its own (settings store, `groupLightKey`), apart from `GroupLive` so that a message does not write them too:
+ * there while the record is behind on them, deleted each time the record is written whole (`engine/groupRows.ts`).
+ * `hubs`: the record's (`StoredGroup.hubs`); absent in a row from before it was kept here, where the record's count.
+ * `large`: the members noted in `StoredGroup.large` since the record was written, which the record's are added to.
+ * `relayEdits`: the state's (`GroupState.relayEdits`); absent in rows from before it was kept here, whose record holds
+ * them. `of`: what the record held of them when the row was written (a hash); a record that holds something else now
+ * was written by an app from before since, and counts. Absent in rows from before it.
  */
-export interface GroupLight { pin?: StoredPin; removedIds: string[]; removals: Removal[] }
+export interface GroupLight { pin?: StoredPin; removedIds: string[]; removals: Removal[]; hubs?: string[]; large?: string[]; relayEdits?: GroupEditFrame[]; of?: string }
 
 export interface GroupMemberView {
   key: string;
@@ -851,6 +857,12 @@ export interface WalletAwaitingView {
   paymentId?: string;
   /** Lightning: the card it goes through. */
   card?: string;
+  /**
+   * `sent`: its bubble, with the chat's Take it back, is in no chat that can be opened: the chat it went in was deleted
+   * since (or joined again by the same invite, without its old history), or its group is gone. The Wallet page offers
+   * it instead. A group member who left, whose edge closed, leaves the bubble in the group: not this.
+   */
+  chatGone?: true;
 }
 
 /**
@@ -1471,6 +1483,21 @@ export interface Settings {
    */
   sendTyping?: boolean;
   /**
+   * Whether paired contacts see when this profile is online (WISP 401 § Presence and status, "Share when I'm online").
+   * Absent means yes; off, no presence is said (a set status still is), and a contact's is still shown.
+   */
+  sharePresence?: boolean;
+  /**
+   * Whether a headless daemon running this profile (the CLI's `settings set daemonPresence true`) says it is active
+   * while it runs, as a page does on input. Absent means no: kept only while on. The apps never read it.
+   */
+  daemonPresence?: boolean;
+  /**
+   * The status this profile set (availability, emoji, text, until when), said to every paired contact whose app offers
+   * `status/1`. Set and cleared through `setOwnStatus`/`clearOwnStatus`, never a settings patch; this device's own.
+   */
+  ownStatus?: PersonStatus;
+  /**
    * Whether files are downloaded without asking where the rules allow it (WISP 503: a group's voice messages, and its
    * files up to 8 MiB within 256 MiB a group). Absent means on; off, each waits for a Download.
    */
@@ -1819,6 +1846,13 @@ export interface LinkView {
   callsUnavailable?: string | null;
   /** Paired 1:1 chats: the contact is typing now (`typing/1` on the live session). Absent otherwise. Never stored. */
   peerTyping?: boolean;
+  /**
+   * Paired 1:1 chats: the contact is online and shares it (`status/1`): active or idle. Absent otherwise; ends with the
+   * session. Never stored.
+   */
+  peerPresence?: Presence;
+  /** Paired 1:1 chats: the status the contact set, while it lasts (heard on a live session, kept until the engine stops). */
+  peerStatus?: PersonStatus;
   /** Paired 1:1 chats: this side's wake-up token for this chat (the push worker's table), when it shared its subscription. */
   wakeToken?: string;
   /** Paired 1:1 chats: the contact was told not to wake this side while the chat is muted (`setWakeMuted`). */

@@ -2,12 +2,12 @@ import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { answersOffer, callSignalHeardAt, parseCallSignal, signalHasVideo, BURST_RING_MS, CALL_SIGNAL_MAX_AGE_MS, QUICK_REDIAL_MS, type CallSignal } from "@ghostly/core";
-import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
+import type { EngineState, LinkView, Settings } from "@ghostly/browser/shared/types";
 import { findChat, findOwnNamedChat } from "../apiKit";
 import { CliError } from "../errors";
-import { AudioSocket, audioSocketPath, clearAudioSockets } from "./audioSocket";
+import { AudioSocket, audioSocketPath, clearAudioSockets, feedQueue, sharedFolder } from "./audioSocket";
 import { callIceServers, CallMedia, callUsesTurn, EarlyAnswer, loadCallStack, type CallStack, type MediaOptions } from "./media";
-import { DEFAULT_RATE, FRAME_MS, isCallRate, PlaybackQueue, type CallRate } from "./pcm";
+import { DEFAULT_RATE, FRAME_MS, isCallRate, monotonic, PlaybackQueue, type CallRate } from "./pcm";
 
 /**
  * Voice calls on the headless Ghostly (WISP 1100 § Calls): the calls/1 signals of the chat session (WISP 601), the
@@ -20,9 +20,14 @@ import { DEFAULT_RATE, FRAME_MS, isCallRate, PlaybackQueue, type CallRate } from
 export type CallState = "ringing" | "connecting" | "connected";
 export type EndReason = "hangup" | "remote-hangup" | "missed" | "rejected" | "unanswered" | "crossed" | "failed" | "stopped";
 
-/** What the engine gives the calls: its state, and a way to send this side's signal. */
+/**
+ * What the engine gives the calls: its state, one chat's view and its settings without building every chat's (each
+ * `getState` builds a view of every chat, ~15-20 µs a chat on the daemon's thread), and a way to send this side's signal.
+ */
 export interface CallEngine {
   getState(): EngineState;
+  chatView(linkId: string): LinkView | undefined;
+  getSettings(): Settings;
   setCallSignal(params: { linkId: string; signal: string | null }): Promise<void> | void;
 }
 
@@ -30,6 +35,8 @@ export interface CallHost {
   engine: CallEngine;
   emit(type: string, id: string, fields: Record<string, unknown>): void;
   profileDir: string;
+  /** GHOSTLY_CALL_SOCKET_DIR (`callSocketDir`): the folder for the calls' sockets, shared with another user's group. */
+  socketDir?: string;
   /** Whether this host answers and places calls: a daemon does; a one-shot command leaves, so it only reports. */
   answers?: boolean;
   /** The media stack (tests give their own). */
@@ -115,7 +122,7 @@ interface Call {
   ignoring: boolean;
   /** Counts the connections made for the call: one that comes back after a newer one was asked for is closed. */
   attempt: number;
-  /** The attempt whose connection has the contact's answer (0: none yet), and when it went in (Date.now()). */
+  /** The attempt whose connection has the contact's answer (0: none yet), and when it went in (`monotonic`). */
   answered: number;
   answeredAt: number;
   media: CallMedia | null;
@@ -128,6 +135,8 @@ interface Call {
   queue: PlaybackQueue | null;
   startedAt: number;
   connectedAt: number | null;
+  /** The same moment on the call's own clock (`monotonic`), for its length: the time it lasted, whatever the device's clock did. */
+  connectedTick: number | null;
   timer: ReturnType<typeof setTimeout> | null;
   /** The connected call's watch on the contact's packets (`watch`). */
   watcher: ReturnType<typeof setInterval> | null;
@@ -174,7 +183,9 @@ export class CallManager {
     this.configPath = join(host.profileDir, "calls.json");
     this.auto = readAuto(this.configPath);
     // A daemon starts with no call: a socket left in its folder is one a daemon that crashed during a call never closed.
-    if (host.answers !== false) clearAudioSockets(host.profileDir);
+    // A shared folder is checked at the start too: a daemon refuses it then, not at its first call.
+    if (host.answers !== false && host.socketDir) sharedFolder(host.socketDir);
+    if (host.answers !== false) clearAudioSockets(host.profileDir, host.socketDir);
   }
 
   private get now(): number { return (this.host.now ?? Date.now)(); }
@@ -287,7 +298,7 @@ export class CallManager {
     call.offering = false;
     call.state = "connecting";
     const attempt = (call.answered = call.attempt);
-    call.answeredAt = Date.now();
+    call.answeredAt = monotonic();
     try {
       call.media!.applyAnswer(answer);
     } catch (error) {
@@ -374,7 +385,7 @@ export class CallManager {
    */
   private prepare(call: Call): void {
     if (this.host.answers === false || call.ended || call.state !== "ringing") return;
-    const settings = this.host.engine.getState().settings;
+    const settings = this.host.engine.getSettings();
     const iceServers = settings?.iceServers ?? [];
     // Hide my IP from contacts: no call is answered here (`callable`), so none is made ahead either.
     if (settings?.relayOnly === true || callUsesTurn(callIceServers(iceServers))) return;
@@ -442,7 +453,7 @@ export class CallManager {
     // The contact's call held back here (QUICK_REDIAL_MS) may still ring there: ours would cross it, and theirs, the
     // earlier offer, would win on their side while this side has already spent it. It rings here instead, as the apps do.
     const held = this.held.get(link.id);
-    if (held && this.now - held.at < RING_MS) {
+    if (held && this.within(held.at, RING_MS)) {
       this.incoming(link.id, held.offer);
       throw new CliError("busy", "The contact is calling: their call rings here");
     }
@@ -469,6 +480,8 @@ export class CallManager {
   }
 
   async answer(ref: string | undefined, options: { rate?: unknown }): Promise<Record<string, unknown>> {
+    // A one-shot answers no call: it said "No call is on" instead when none rang.
+    if (this.host.answers === false) throw new CliError("unavailable", CALLS_NEED_DAEMON);
     const call = this.find(ref, (c) => c.direction === "in" && c.state === "ringing");
     if (call.direction !== "in" || call.state !== "ringing") throw new CliError("refused", "That call is not ringing here");
     this.callable(call.chat);
@@ -488,7 +501,10 @@ export class CallManager {
       if (call.ended) throw new CliError("unavailable", "The call ended before it was answered");
       await this.send(call.chat, { t: "a", ts: this.stamp(call.chat), o: call.offer!.ts, ...call.media!.local, v: 0 });
     } catch (error) {
-      await this.end(call, "failed", true, false);
+      // Its call.incoming went out: call.ended does too, for the program (or hook) waiting on that call. The contact's
+      // app still rings: the hang-up says this side could not connect (`r: "u"`), as an app's whose microphone was
+      // refused does, so the contact's chat says the call failed, not that it was declined.
+      await this.end(call, "failed", "unreachable");
       throw error;
     } finally {
       // Unused (the call ended first): closed. Nothing once its connection is the call's.
@@ -516,6 +532,8 @@ export class CallManager {
 
   /** Drops the audio the program queued and the call has not sent yet (barge-in). */
   flush(ref: string | undefined): Record<string, unknown> {
+    // Only the daemon's calls queue audio.
+    if (this.host.answers === false) throw new CliError("unavailable", CALLS_NEED_DAEMON);
     const call = this.find(ref);
     const flushedMs = call.queue?.flush() ?? 0;
     return { call: call.id, chat: call.chat, flushedMs };
@@ -566,7 +584,7 @@ export class CallManager {
     if (clearing) { clearTimeout(clearing); this.clearing.delete(chat); }
     const call: Call = {
       id: randomBytes(6).toString("hex"), chat, direction, state: "ringing", rate, video: false, offer: null, offerTs: 0,
-      offering: false, redials: 0, reanswers: 0, ignoring: false, attempt: 0, answered: 0, answeredAt: 0, media: null, early: null, making: null, earlyTimer: null, socket: null, queue: null, startedAt: this.now, connectedAt: null, timer: null,
+      offering: false, redials: 0, reanswers: 0, ignoring: false, attempt: 0, answered: 0, answeredAt: 0, media: null, early: null, making: null, earlyTimer: null, socket: null, queue: null, startedAt: this.now, connectedAt: null, connectedTick: null, timer: null,
       watcher: null, stalledFrom: null, stalls: 0, ended: false,
     };
     this.calls.set(call.id, call);
@@ -579,9 +597,7 @@ export class CallManager {
    */
   private async attach(call: Call, create: (options: MediaOptions) => Promise<CallMedia>): Promise<void> {
     const queue = (call.queue = new PlaybackQueue(call.rate));
-    const socket = await AudioSocket.open(audioSocketPath(this.host.profileDir, call.id), call.rate, {
-      onAudio: (chunk) => queue.push(chunk),
-    });
+    const socket = await AudioSocket.open(audioSocketPath(this.host.profileDir, call.id, this.host.socketDir), call.rate, feedQueue(queue), { shared: !!this.host.socketDir });
     if (call.ended) { await socket.close(); return; }
     call.socket = socket;
     await this.connect(call, create);
@@ -602,7 +618,7 @@ export class CallManager {
       rate: call.rate,
       queue: call.queue ?? undefined,
       log: (line) => process.stderr.write(`ghostly: call ${call.id}: ${line}\n`),
-      iceServers: this.host.engine.getState().settings?.iceServers ?? [],
+      iceServers: this.host.engine.getSettings()?.iceServers ?? [],
       onFrame: (frame) => call.socket?.write(frame),
       onState: (state) => {
         if (call.ended || attempt !== call.attempt) return;
@@ -613,14 +629,15 @@ export class CallManager {
         // The answer went in and the connection failed at once, before it ever connected: the race's other ending (a
         // contact out of reach fails later, and ends the call as before).
         if (state === "failed" && call.direction === "out" && call.answered === attempt && call.state !== "connected"
-          && Date.now() - call.answeredAt < RACE_FAIL_MS) {
+          && monotonic() - call.answeredAt < RACE_FAIL_MS) {
           this.refused(call, "the connection failed as the answer went in");
           return;
         }
         // The contact's app closes its connection as it hangs up, and that is often here before its hang-up signal
         // (which crosses the chat session): the signal gets a moment to say so. Without one, a connection the
-        // contact closed was still a hang-up; one that failed ends the call as it does in the apps, with nothing to say.
-        this.arm(call, MEDIA_GRACE_MS, state === "closed" ? "remote-hangup" : "failed", false);
+        // contact closed was still a hang-up; one that failed ends the call, and the contact is told, as the apps tell
+        // it: its side may still say "Connecting..." or "Reconnecting..." (WISP 601 "Couldn't connect").
+        this.arm(call, MEDIA_GRACE_MS, state === "closed" ? "remote-hangup" : "failed", state !== "closed");
       },
     });
     if (call.ended || attempt !== call.attempt) {
@@ -635,6 +652,7 @@ export class CallManager {
     if (call.state === "connected") return;
     call.state = "connected";
     call.connectedAt = this.now;
+    call.connectedTick = monotonic();
     this.disarm(call);
     this.host.emit("call.connected", `call.connected:${call.id}`, { call: call.id, chat: call.chat, direction: call.direction, audio: this.audioInfo(call) });
     this.watch(call);
@@ -648,11 +666,20 @@ export class CallManager {
    */
   private watch(call: Call): void {
     const { afterMs, endMs } = this.host.stall ?? { afterMs: STALL_MS, endMs: STALL_END_MS };
-    const since = Date.now();
+    // On the audio's clock (`monotonic`): on the device's, a clock set ahead read as that long without a packet, and ended the call.
+    const since = monotonic(), every = Math.min(1000, afterMs / 5);
+    // A tick that comes far past its interval comes after a stall of this side's own (its loop held by other work, the
+    // process stopped or swapped out), and before the packets the contact sent meanwhile are read: that time is not the
+    // contact's silence (`own`, until something is heard after it), and the call is judged on the next tick, once read.
+    let ticked = since, own = 0, ownUntil = 0;
     call.watcher = setInterval(() => {
       if (call.ended) return;
+      const now = monotonic(), gap = now - ticked;
+      ticked = now;
+      if (gap > 2 * every) { own += gap - every; ownUntil = now; return; }
       const heardAt = Math.max(since, call.media?.audio.heardAt ?? 0);
-      const silentMs = Date.now() - heardAt;
+      if (heardAt >= ownUntil) own = 0;
+      const silentMs = now - heardAt - own;
       const fields = { call: call.id, chat: call.chat, direction: call.direction };
       if (silentMs >= endMs) {
         process.stderr.write(`ghostly: call ${call.id}: nothing heard from the contact for ${Math.round(silentMs / 1000)} s\n`);
@@ -668,11 +695,12 @@ export class CallManager {
         process.stderr.write(`ghostly: call ${call.id}: resumed after ${gapMs} ms\n`);
         this.host.emit("call.resumed", `call.resumed:${call.id}:${call.stalls}`, { ...fields, silentMs: gapMs });
       }
-    }, Math.min(1000, afterMs / 5));
+    }, every);
     call.watcher.unref?.();
   }
 
-  private async end(call: Call, reason: EndReason, tell: boolean, report = true): Promise<void> {
+  /** `tell`: the contact is sent a hang-up; `"unreachable"`, one that says this side could not connect (`r: "u"`, WISP 601). */
+  private async end(call: Call, reason: EndReason, tell: boolean | "unreachable", report = true): Promise<void> {
     if (call.ended) return;
     call.ended = true;
     call.reason = reason;
@@ -684,7 +712,7 @@ export class CallManager {
     // The contact's call that ended before it connected, not by this side, after it barely rang (auto-answered or not):
     // the next one that comes right after it is held back (`QUICK_REDIAL_MS`). One that rang a while holds nothing back.
     if (call.direction === "in" && call.connectedAt === null && reason !== "hangup" && reason !== "stopped") {
-      if (this.now - call.startedAt < BURST_RING_MS) this.missedAt.set(call.chat, this.now);
+      if (this.within(call.startedAt, BURST_RING_MS)) this.missedAt.set(call.chat, this.now);
       else this.missedAt.delete(call.chat);
     }
     if (report) process.stderr.write(`ghostly: call ${call.id}: ended (${reason})${call.media ? `, ice ${call.media.ice.state}` : ""}\n`);
@@ -698,7 +726,11 @@ export class CallManager {
     // stopping daemon waits for it, below).
     const closing = call.socket?.close();
     if (tell) {
-      await this.send(call.chat, { t: "h", ts: this.stamp(call.chat) }).catch(() => {});
+      // A call that failed before it ever connected says so too (`r: "u"`, WISP 601 "Couldn't connect"), as the apps do:
+      // a plain hang-up reaches a caller that still rings as a decline.
+      const unreachable = tell === "unreachable" || (reason === "failed" && call.connectedAt === null);
+      const hangUp: CallSignal = unreachable ? { t: "h", ts: this.stamp(call.chat), r: "u" } : { t: "h", ts: this.stamp(call.chat) };
+      await this.send(call.chat, hangUp).catch(() => {});
       if (!this.stopping) {
         const timer = setTimeout(() => {
           this.clearing.delete(call.chat);
@@ -714,7 +746,7 @@ export class CallManager {
     if (report) {
       this.host.emit("call.ended", `call.ended:${call.id}`, {
         call: call.id, chat: call.chat, direction: call.direction, reason,
-        ...(call.connectedAt !== null ? { duration: this.now - call.connectedAt } : {}),
+        ...(call.connectedTick !== null ? { duration: Math.round(monotonic() - call.connectedTick) } : {}),
       });
     }
     if (this.stopping) await closing;
@@ -724,15 +756,24 @@ export class CallManager {
   private paced(chat: string): void {
     const pace = this.host.callPaceMs ?? CALL_PACE_MS, last = this.unansweredAt.get(chat);
     if (!pace || last === undefined) return;
+    if (!this.within(last, pace)) { this.unansweredAt.delete(chat); return; }
     const left = last + pace - this.now;
-    if (left <= 0) { this.unansweredAt.delete(chat); return; }
     throw new CliError("busy", `Your last call in this chat ended unanswered a moment ago: call again in ${Math.ceil(left / 100) / 10} s`, { retryAfterMs: left });
   }
 
   /** Whether the contact's call coming now in the chat is held back: its last one was missed after it barely rang, or held, a moment ago. */
   private quickRedial(chat: string): boolean {
     const quick = this.host.quickRedialMs ?? QUICK_REDIAL_MS, last = this.missedAt.get(chat);
-    return !!quick && last !== undefined && this.now - last < quick;
+    return !!quick && last !== undefined && this.within(last, quick);
+  }
+
+  /**
+   * Whether less than `ms` passed since `at`, on the device's clock (`now`, which the timestamps the contact sees are on).
+   * An `at` later than now is the clock set back since: the wait is taken as over, not as lasting as long as the jump.
+   */
+  private within(at: number, ms: number): boolean {
+    const passed = this.now - at;
+    return passed >= 0 && passed < ms;
   }
 
   private arm(call: Call, ms: number, reason: EndReason, tell: boolean): void {
@@ -789,7 +830,7 @@ export class CallManager {
     if (ref) {
       const byId = this.calls.get(ref);
       if (byId) return byId;
-      const call = this.byChat(this.chatId(ref));
+      const call = this.byChat(this.chatOf(ref).id);
       if (!call) throw new CliError("not_found", `No call in chat ${ref}`);
       return call;
     }
@@ -801,24 +842,35 @@ export class CallManager {
   }
 
   private link(chat: string): LinkView | undefined {
-    return this.host.engine.getState().links.find((l) => l.id === chat);
+    return this.host.engine.chatView(chat);
   }
 
-  /** A chat by id, contact key, prefix or name (the API's rules, `findChat`); a group's says it is one. */
-  private chatId(ref: string): string {
+  /**
+   * A chat by id, contact key, prefix or name (the API's rules, `findChat`); a group's says it is one. By its id (as
+   * events name it, and a call's own chat), only that chat's view is built: a call placed and hung up built every chat's
+   * five times, one rung and answered six, ~0.2 s of the daemon's thread at 2,000 chats.
+   */
+  private chatOf(ref: string): LinkView {
+    const byId = this.link(ref);
+    if (byId) return byId;
     const { links, groups } = this.host.engine.getState();
-    return findChat(links, ref, groups).id;
+    return findChat(links, ref, groups);
   }
 
   /** The chat, if a call can go in it now; else why not (the engine's reason). */
   private callable(ref: string): LinkView {
-    const link = this.link(this.chatId(ref))!;
+    const link = this.chatOf(ref);
     // A one-shot's chat is not live yet, and never would be in time: it said "Calls need a live connection" before
     // the daemon it needs (`stack`).
     if (this.host.answers === false) throw new CliError("unavailable", CALLS_NEED_DAEMON);
     if (!link.profile) throw new CliError("unavailable", "Calls are in chats made since 0.4 (the chat session): this is a compatibility chat");
+    // Not live (the contact's app closed or asleep): the engine's words alone left the person with nothing to do next.
+    if (link.callsUnavailable === CALLS_NEED_LIVE) {
+      const shown = /^[\w.:-]+$/.test(link.label ?? "") ? link.label! : link.id;
+      throw new CliError("unavailable", `${CALLS_NEED_LIVE}, and your contact's app is not connected now: ghostly chat wait ${shown} --until live waits for it, then call again`, { chat: link.id });
+    }
     if (link.callsUnavailable) throw new CliError("unavailable", link.callsUnavailable);
-    if (this.host.engine.getState().settings?.relayOnly === true) throw new CliError("unavailable", CALLS_OFF_RELAY_ONLY);
+    if (this.host.engine.getSettings()?.relayOnly === true) throw new CliError("unavailable", CALLS_OFF_RELAY_ONLY);
     return link;
   }
 
@@ -828,6 +880,8 @@ export class CallManager {
 }
 
 const CALLS_NEED_DAEMON = "Calls need the daemon (a call outlives this command): start it with `ghostly daemon --detach`";
+/** The engine's `callsUnavailable` for a chat with no live session (ghostlink's, or node.ts's with no link running). */
+const CALLS_NEED_LIVE = "Calls need a live connection";
 /**
  * Hide my IP from contacts (`relayOnly`, WISP 601 Relay only): libdatachannel's relay policy only keeps the other
  * candidates out of the signal; its ICE still checks from this machine's own sockets, and a call connected on a direct

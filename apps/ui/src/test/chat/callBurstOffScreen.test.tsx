@@ -86,13 +86,13 @@ describe("a burst of a contact's calls", () => {
   });
 
   it("rings again off screen once a person could have redialled", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.useFakeTimers({ toFake: ["Date", "performance"] });
     renderApp(<OffScreen />);
     signal("o");
     await act(async () => {});
     signal("h");
     await act(async () => {});
-    vi.setSystemTime(Date.now() + QUICK_REDIAL_MS);
+    vi.advanceTimersByTime(QUICK_REDIAL_MS);
     signal("o");
     await act(async () => {});
     expect(rings()).toBe(2);

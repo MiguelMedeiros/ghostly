@@ -2,6 +2,7 @@ import { generatePrimeSync, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import * as openpgp from 'openpgp';
+import * as lightweight from 'openpgp/lightweight';
 import { fromBase64Url, toBase64Url } from '@ghostly/core';
 import {
   PGP_LIMITS, assertSignableStatement, fetchKeyFromKeyserver, formatFingerprint, keyserverVerifiedEmails,
@@ -78,6 +79,13 @@ describe('OpenPGP proof: refused', () => {
     await refuse('secp256k1-clearsign', 'secp256k1', /secp256k1.*does not accept/);
   });
   it('a SHA-1 signature', () => refuse('alice-sha1', 'alice', /weak hash/));
+  it('a v5 key, as GnuPG 2.3 and later make Ed448 ones, named as such and not as no key at all', async () => {
+    await refuse('ed448-v5-clearsign', 'ed448-v5', /^This is an OpenPGP v5 key, which Ghostly does not accept\./);
+    await expect(readPgpPublicKey(read('ed448-v5.pub.asc'), { now: NOW })).rejects.toThrow(/OpenPGP v5 key/);
+    // Off the wire too: the same key in binary.
+    const { data } = await openpgp.unarmor(read('ed448-v5.pub.asc'));
+    await expect(verifyPgpEvidence({ scheme: 'openpgp/1', key: toBase64Url(data as Uint8Array), signature: toBase64Url(new Uint8Array([0xc2, 0])) }, statement, { now: NOW })).rejects.toThrow(/OpenPGP v5 key/);
+  });
   it('an inline signed message and a message with two signers', async () => {
     await refuse('alice-inline', 'alice', /gpg --sign/);
     await refuse('two-signers', 'alice', /one key only/);
@@ -207,6 +215,90 @@ describe('OpenPGP proof: RSA keys sized before any signature is verified', () =>
     const key = await openpgp.readKey({ binaryKey: fromBase64Url(evidence.key) });
     (key.keyPacket as unknown as { publicParams: { n: Uint8Array } }).publicParams.n = Uint8Array.from({ length: 1040 }, () => 0xff);
     await expect(verifyPgpEvidence({ ...evidence, key: toBase64Url(key.write()) }, statement)).rejects.toThrow(/RSA 8320.*does not accept/);
+  }, 60_000);
+});
+
+describe('OpenPGP proof: a contact\'s key costs a bounded number of verifications', () => {
+  // Brainpool and Ed448 have no WebCrypto path in OpenPGP.js: every verification runs in JavaScript.
+  // The Node build cannot make brainpool keys; the lightweight build is the one the app (and the verifier here) runs.
+  const kinds = [['brainpoolP512r1', { type: 'ecc', curve: 'brainpoolP512r1' }], ['Ed448', { type: 'curve448' }]] as const;
+  async function proof(kind: (typeof kinds)[number][1], options: { userIds?: number; subkey?: boolean; date?: Date } = {}) {
+    const date = options.date ?? new Date();
+    const userIDs = Array.from({ length: options.userIds ?? 1 }, (_, i) => ({ name: `Gil Test ${i}`, email: `gil${i}@example.org` }));
+    const { privateKey, publicKey } = await lightweight.generateKey({ ...kind, userIDs, date, subkeys: options.subkey ? [{ sign: true }] : [{}], format: 'object' } as lightweight.GenerateKeyOptions & { format: 'object' });
+    const signature = await lightweight.sign({ message: await lightweight.createMessage({ text: statement }), signingKeys: privateKey, detached: true, format: 'binary' }) as Uint8Array;
+    return { privateKey, publicKey, signature, evidence: (key = publicKey): PgpEvidence => ({ scheme: 'openpgp/1', key: toBase64Url(key.write()), signature: toBase64Url(signature) }) };
+  }
+  /** A copy whose hashed part is unchanged (so it passes the 2-byte hash prefix check) and whose value is not. */
+  async function spoiled(sig: lightweight.SignaturePacket) {
+    const bytes = sig.write().slice(); bytes[bytes.length - 3] ^= 0x5a; // inside the last MPI
+    const copy = new lightweight.SignaturePacket(); await (copy as unknown as { read(b: Uint8Array): Promise<void> }).read(bytes);
+    return copy;
+  }
+  /** Counts signature verifications, and those that failed on the signature value itself (the costly ones). */
+  function counting() {
+    const verify = lightweight.SignaturePacket.prototype.verify;
+    const counts = { calls: 0, failed: 0 };
+    const spy = vi.spyOn(lightweight.SignaturePacket.prototype, 'verify').mockImplementation(function (this: lightweight.SignaturePacket, ...args) {
+      counts.calls++;
+      return verify.apply(this, args).catch((e: Error) => { if (e.message === 'Signature verification failed') counts.failed++; throw e; });
+    });
+    return { counts, restore: () => spy.mockRestore() };
+  }
+
+  it.each(kinds)('%s: a key padded with spoiled copies of its self-certification is refused after one failed verification', async (_, kind) => {
+    const { publicKey, evidence } = await proof(kind);
+    const certs = publicKey.users[0].selfCertifications;
+    const copy = await spoiled(certs[0]);
+    // One copy is within any per-user-ID count; the probe's padding filled the 9 KiB.
+    for (const copies of [1, 30]) {
+      certs.splice(1);
+      while (certs.length <= copies && publicKey.write().length + copy.write().length + 2 <= PGP_LIMITS.sharedKey) certs.push(await spoiled(certs[0]));
+      const { counts, restore } = counting();
+      try { await expect(verifyPgpEvidence(evidence(), statement)).rejects.toThrow(/Invalid OpenPGP proof/); }
+      finally { restore(); }
+      expect(counts.failed).toBeLessThanOrEqual(1);
+    }
+  }, 60_000);
+  it('a signing subkey padded with spoiled copies of its binding signature is refused after one failed verification', async () => {
+    const { publicKey, evidence } = await proof(kinds[0][1], { subkey: true });
+    const bindings = publicKey.subkeys[0].bindingSignatures;
+    bindings.push(await spoiled(bindings[0]));
+    const { counts, restore } = counting();
+    try { await expect(verifyPgpEvidence(evidence(), statement)).rejects.toThrow(/Invalid OpenPGP proof/); }
+    finally { restore(); }
+    expect(counts.failed).toBeLessThanOrEqual(1);
+  }, 60_000);
+  it('a key with more signatures than a minimal key carries is refused before any is verified', async () => {
+    const { publicKey, evidence } = await proof(kinds[0][1]);
+    const certs = publicKey.users[0].selfCertifications;
+    certs.push(certs[0], certs[0]); // valid, and still more self-certifications than one user ID needs
+    const { counts, restore } = counting();
+    try { await expect(verifyPgpEvidence(evidence(), statement)).rejects.toThrow(/Invalid OpenPGP proof/); }
+    finally { restore(); }
+    expect(counts.calls).toBe(0);
+  }, 60_000);
+  it.each(kinds)('%s: an honest key still proves, with 16 user IDs, a signing subkey, and self-signatures superseded since', async (_, kind) => {
+    const before = new Date(Date.now() - 10 * day * 1000);
+    const { privateKey, publicKey, signature } = await proof(kind, { userIds: PGP_LIMITS.userIds, date: before });
+    const { evidence, verified } = await preparePgpEvidence({ statement, signature: lightweight.armor(lightweight.enums.armor.signature, signature), publicKey: publicKey.armor() });
+    expect(verified.userIds).toHaveLength(PGP_LIMITS.userIds);
+    await expect(verifyPgpEvidence(evidence, statement)).resolves.toMatchObject({ fingerprint: verified.fingerprint, userIds: verified.userIds });
+    // Expiry extended twice (gpg --quick-set-expire): every user ID gets newer self-certifications, the old ones stay.
+    const userIDs = publicKey.users.map(u => ({ name: u.userID!.name, email: u.userID!.email }));
+    let extended = publicKey;
+    for (const days of [5, 3]) {
+      const { publicKey: again } = await lightweight.reformatKey({ privateKey, userIDs, date: new Date(Date.now() - days * day * 1000), format: 'object' });
+      extended = await extended.update(again);
+    }
+    expect(extended.users[0].selfCertifications).toHaveLength(3);
+    const signed = await proof(kind, { subkey: true });
+    const withSubkey = await preparePgpEvidence({ statement, signature: lightweight.armor(lightweight.enums.armor.signature, signed.signature), publicKey: signed.publicKey.armor() });
+    await expect(verifyPgpEvidence(withSubkey.evidence, statement)).resolves.toMatchObject({ signingFingerprint: signed.publicKey.subkeys[0].getFingerprint().toUpperCase() });
+    const again = await preparePgpEvidence({ statement, signature: lightweight.armor(lightweight.enums.armor.signature, signature), publicKey: extended.armor() });
+    const shared = await lightweight.readKey({ binaryKey: fromBase64Url(again.evidence.key) });
+    expect(shared.users.map(u => u.selfCertifications.length)).toEqual(Array(PGP_LIMITS.userIds).fill(1));
+    await expect(verifyPgpEvidence(again.evidence, statement)).resolves.toMatchObject({ fingerprint: verified.fingerprint, userIds: verified.userIds });
   }, 60_000);
 });
 

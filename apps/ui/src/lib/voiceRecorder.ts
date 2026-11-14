@@ -61,6 +61,7 @@ export class VoiceRecorder {
   private chunks: Blob[] = [];
   private readonly levels: number[] = [];
   private type: { recorder: string; file: string } | null = null;
+  /** On the monotonic clock (`performance.now()`): the device's clock being set mid-recording changes nothing. */
   private startedAt = 0;
   private before = 0;
   private closed = false;
@@ -91,7 +92,7 @@ export class VoiceRecorder {
       // last data. The time recorded until then is kept, and the recording waits to be sent or discarded.
       recorder.addEventListener("stop", () => {
         if (this.stopping) return;
-        if (this.running) this.before += Date.now() - this.startedAt;
+        if (this.running) this.before += performance.now() - this.startedAt;
         this.running = false;
         this.endedAlone = true;
         this.release();
@@ -104,7 +105,7 @@ export class VoiceRecorder {
       this.release();
       throw new MicrophoneError("unsupported", error instanceof Error ? error.message : MICROPHONE_MESSAGES.unsupported);
     }
-    this.startedAt = Date.now();
+    this.startedAt = performance.now();
     this.running = true;
     this.startMeter(stream);
   }
@@ -124,7 +125,7 @@ export class VoiceRecorder {
 
   /** Milliseconds recorded, pauses left out. */
   elapsed(): number {
-    return this.before + (this.recording ? Date.now() - this.startedAt : 0);
+    return this.before + (this.recording ? performance.now() - this.startedAt : 0);
   }
 
   /** The waveform so far, for the preview of a paused recording. */
@@ -139,14 +140,14 @@ export class VoiceRecorder {
 
   pause(): void {
     if (!this.recording) return;
-    this.before += Date.now() - this.startedAt;
+    this.before += performance.now() - this.startedAt;
     this.running = false;
     this.recorder!.pause();
   }
 
   resume(): void {
     if (!this.paused || this.before >= VOICE_LIMITS.maxDurationMs) return;
-    this.startedAt = Date.now();
+    this.startedAt = performance.now();
     this.running = true;
     this.recorder!.resume();
   }

@@ -1,5 +1,5 @@
 import { emptyIdentityLedger, emptyProofLedger, type IdentityLedger, type ProofLedger } from "@ghostly/core";
-import { APP_STORAGE_CHAT_INDEX, CARD_INDEX, GROUP_LIGHT_RANGE, GROUP_LIVE_RANGE, STORES, fileStore, groupLightKey, groupLiveKey, store, wrap, committed, openDb } from "../shared/idb";
+import { APP_STORAGE_CHAT_INDEX, CARD_INDEX, FILE_INDEX, GROUP_LIGHT_RANGE, GROUP_LIVE_RANGE, STORES, fileStore, groupLightKey, groupLiveKey, store, wrap, committed, openDb } from "../shared/idb";
 import { removeFileBytes } from "../shared/fileBytes";
 import { withoutFrame } from "../shared/messageChanges";
 import type { GroupLight, GroupLive, MessagePage, Settings, StoredGroup, StoredLink, StoredMessage, StoredService } from "../shared/types";
@@ -295,6 +295,15 @@ export const db = {
     const index = (await store(STORES.messages, "readonly")).index(CARD_INDEX);
     const kinds = await Promise.all(["task", "routine", "usage"].map((kind) => wrap<StoredMessage[]>(index.getAll(kind))));
     return kinds.flat().sort((a, b) => a.timestamp - b.timestamp || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  },
+  /**
+   * A chat's or a group's messages that carry a file, by time (then id), as `getMessages` has them. Reads the file index
+   * only (`FILE_INDEX`): a chat of thousands of texts and a few files costs the files.
+   */
+  async getFileMessages(linkId: string): Promise<StoredMessage[]> {
+    const index = (await store(STORES.messages, "readonly")).index(FILE_INDEX);
+    const messages = await wrap<StoredMessage[]>(index.getAll(IDBKeyRange.bound([linkId], [linkId, []])));
+    return messages.sort((a, b) => a.timestamp - b.timestamp || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   },
   /** Returns false when the message was already stored. */
   addMessage(message: StoredMessage): Promise<boolean> {

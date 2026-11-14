@@ -107,3 +107,26 @@ test("the Ghostly card's lines are whole in every language, none cut to an ellip
     expect(cut, `${language}: lines cut on the card`).toEqual([]);
   }
 });
+
+test("in forced colors each card of the Identities deck hides the ones behind it", { tag: ["@feature:proofs.page", "@feature:app.accessibility", "@feature:app.theme"] }, async ({ peer }) => {
+  const alice = await peer("idpage-forced");
+  await injectNostrSigner(alice);
+  const { page } = alice;
+  await page.getByTestId("account-identities").click();
+  for (let i = 0; i < 2; i++) {
+    await page.getByTestId("identities-new").click();
+    const add = page.getByTestId("add-identity");
+    await add.getByTestId("add-identity-nostr").click();
+    await add.getByTestId("add-identity-start").click();
+    await expect(add).toHaveCount(0);
+  }
+  const deck = page.getByTestId("identities-page").locator(".deck");
+  await expect(deck).toHaveAttribute("data-mode", "stack");
+  await expect(deck.locator("[data-deck=face]")).toHaveCount(3);
+
+  // Forced colors drop the faces' gradients, all that painted them: each face needs a background of its own, or the
+  // names of the cards behind read through the chosen one.
+  await page.emulateMedia({ forcedColors: "active", colorScheme: "dark" });
+  const backgrounds = await deck.locator("[data-deck=face]").evaluateAll((faces) => faces.map((f) => getComputedStyle(f).backgroundColor));
+  for (const background of backgrounds) expect(background, "a card's face in forced colors").toMatch(/^rgb\(/);
+});

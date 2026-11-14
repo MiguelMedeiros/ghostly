@@ -8,6 +8,7 @@ import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/typ
 import { ContactIdentitiesPanel } from "../../components/identities/ContactIdentitiesPanel";
 import { linkView } from "../fakeEngine";
 import { renderApp } from "../render";
+import { axeViolations } from "../axe";
 import { DAY, identitiesView, now, receivedView } from "./views";
 
 // covers: proofs.badges, proofs.recheck, proofs.expiry, proofs.unverifiable, proofs.public-activity
@@ -105,7 +106,8 @@ describe("ContactIdentitiesPanel", () => {
       expect(screen.queryByTestId("chat-identity-back")).not.toBeInTheDocument();
       const card = await turnOver(user, 0);
       expect(card).toHaveAttribute("data-status", "failed");
-      expect(within(card).getByTestId("chat-identity-received-status")).toHaveTextContent(/^Check failed: DNS lookup failed$/);
+      // A reason the app does not know reads as its own line, never as the check's English.
+      expect(within(card).getByTestId("chat-identity-received-status")).toHaveTextContent(/^Check failed: This proof couldn't be verified$/);
       expect(card).toHaveTextContent("DNS TXT record for example.org");
       expect(within(card).getByTestId("chat-identity-checked")).toHaveTextContent(/^On this device /);
       expect(card).toHaveTextContent("Valid until");
@@ -233,9 +235,28 @@ describe("ContactIdentitiesPanel", () => {
         expect(nameLine(card)).toHaveTextContent("Nome: assinado por GitLab");
       });
 
+      it("a name the account set for itself, in Portuguese", async () => {
+        const card = await backIn("pt", google("Signed by Microsoft; name set on the account, not checked by Microsoft"));
+        expect(nameLine(card)).toHaveTextContent("Nome: assinado por Microsoft; nome definido na conta, não verificado por Microsoft");
+        expect(nameLine(card)).not.toHaveTextContent(/Signed|checked/);
+      });
+
+      it("a name the account set for itself, beside an email the provider checked, in Arabic", async () => {
+        const card = await backIn("ar", google("Signed by Google; email verified by Google; name set on the account, not checked by Google"));
+        expect(nameLine(card)).toHaveTextContent("الاسم: موقَّع من Google؛ تحققت Google من البريد الإلكتروني؛ الاسم مضبوط في الحساب، لم تتحقق منه Google");
+      });
+
       it("any other source as written", async () => {
         const card = await backIn("pt", google("Signed by Google; email verified by Microsoft"));
         expect(nameLine(card)).toHaveTextContent("Nome: Signed by Google; email verified by Microsoft");
+      });
+
+      it("how a Nostr proof was checked, in Arabic", async () => {
+        const npub = "a".repeat(64);
+        const card = await backIn("ar", receivedView({ provider: "nostr", subject: npub, verified: { subject: npub, source: "Nostr signature (NIP-01, BIP-340)" } }));
+        const how = card.querySelector("dl")!.querySelector("bdi")!;
+        expect(how).toHaveTextContent("توقيع Nostr (NIP-01, BIP-340)");
+        expect(how).not.toHaveTextContent(/signature/);
       });
     });
 
@@ -361,6 +382,7 @@ describe("ContactIdentitiesPanel", () => {
     const panel = screen.getByRole("complementary", { name: "Identities with Alice" });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(panel).not.toHaveAttribute("aria-modal");
+    expect(await axeViolations(panel)).toEqual([]);
     expect(panel).toHaveFocus();
     const composer = screen.getByTestId("composer");
     for (let i = 0; i < 14 && document.activeElement !== composer; i++) await user.tab();
@@ -383,6 +405,8 @@ describe("ContactIdentitiesPanel", () => {
     const { user } = besideChat(false);
     const panel = screen.getByRole("dialog", { name: "Identities with Alice" });
     expect(panel).toHaveAttribute("aria-modal", "true");
+    // A role ARIA in HTML allows on its element: `dialog` on an <aside> is flagged by every checker.
+    expect(await axeViolations(panel)).toEqual([]);
     for (let i = 0; i < 14; i++) { await user.tab(); expect(panel).toContainElement(document.activeElement as HTMLElement); }
   });
 });

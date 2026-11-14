@@ -36,18 +36,25 @@
     "stopped": "Detenido"
   },
   "window": {
+    "blocked": "Este navegador bloquea lo que {{app}} necesita para abrirse aquí: almacenamiento para un sitio dentro de otro. Permítelo para este sitio, o abre {{app}} en la app de escritorio de Ghostly o en la extensión.",
     "busy": "{{app}} está cargando demasiadas páginas a la vez en la máquina de tu contacto. Vuelve a intentarlo en un momento.",
     "callOn": "Hay una llamada en curso. Termínala para abrir {{app}}.",
     "elsewhere": "{{app}} intentó llevarte a otro sitio, fuera de lo que comparte tu contacto.",
     "failed": "La solicitud falló.",
     "label": "{{app}}, compartido por {{contact}}",
+    "loading": "Abriendo {{app}} en el equipo de tu contacto…",
     "notAnswering": "{{app}} no responde en el equipo de tu contacto. Pídele que compruebe que está en marcha.",
     "offline": "Tu contacto está desconectado, así que {{app}} no puede abrirse ahora. Se abrirá de nuevo aquí cuando vuelva.",
+    "openLink": "Abrir {{site}}",
     "owner": "App de {{contact}}, que se ejecuta en su equipo. No es Ghostly: nunca escribas aquí tus palabras de recuperación ni contraseñas.",
+    "reaching": "Intentando llegar a tu contacto…",
     "retry": "Reintentar",
+    "stillOffline": "Tu contacto sigue desconectado, así que {{app}} no puede abrirse ahora. Se abrirá de nuevo aquí cuando vuelva.",
     "tooSlow": "{{app}} no respondió a tiempo en el equipo de tu contacto. Vuelve a intentarlo en un momento.",
+    "unguarded": "Esta página de {{app}} no se puede mostrar aquí: impide que las protecciones de Ghostly se ejecuten en ella. Pide a tu contacto que lo revise.",
     "unreachable": "Este servicio no está accesible. Los servicios existen mientras su fantasma está en línea.",
-    "unshared": "{{app}} ya no se comparte contigo."
+    "unshared": "{{app}} ya no se comparte contigo.",
+    "upload": "La app de un contacto no puede recibir archivos desde la extensión del navegador. Para enviar este, abre la app en Ghostly en la web o en el escritorio."
   },
   "yourApps": "Tus apps"
 }

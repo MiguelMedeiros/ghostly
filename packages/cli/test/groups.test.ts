@@ -9,6 +9,7 @@ import { COMMANDS, TEXT_COMMANDS } from "../src/commands";
 import { EventHub, type GhostlyEvent } from "../src/events";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 import { pageOf } from "./support/messagePage";
+import { groupViewOf } from "./support/chatView";
 import { groupJson, groupMessageJson } from "../src/views";
 // covers: headless.groups, headless.group-admin, groups.rename
 
@@ -32,6 +33,8 @@ const message = (id: string, fields: Partial<StoredMessage> = {}): StoredMessage
 function fake(messages: StoredMessage[] = []) {
   const node = {
     getState: () => ({ links: [], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
+    groupView: groupViewOf,
+    getSettings: () => ({}),
     groupMessages: vi.fn(async () => messages),
     messagePage: vi.fn(async (params: { limit?: number; before?: string | number }) => pageOf(messages, params)),
     sendGroupMessage: vi.fn(async () => ({ error: null, messageId: "mekey:0:7" })),
@@ -51,6 +54,68 @@ describe("group join", () => {
     await expect(callApi(ctx(answer(new Error("This is not a link to a group"))), "group.join", { link: "hello" })).rejects.toMatchObject({ code: "bad_request", message: "This is not a link to a group" });
     await expect(callApi(ctx(answer(new Error("Go online to join a group"))), "group.join", { link: LINK })).rejects.toThrow("Go online to join a group");
     await expect(callApi(ctx(answer(new Error("Go online to join a group"))), "group.join", { link: LINK })).rejects.not.toMatchObject({ code: "bad_request" });
+  });
+});
+
+describe("a one-shot group join", () => {
+  // Found in a bug hunt: with no daemon it left at once with {"group": id} and exit 0; the knock ends with the
+  // command, so nobody let it in, even with the community's admin online, and nothing said so.
+  const knocking = (stage: string) => ({ id: "g9", name: "", createdAt: 1, profile: "community", isAdmin: false, canSend: false, lastMessageAt: 0, invited: [], memberLinks: {}, members: [],
+    invitation: { linkId: "c1", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage } }) as unknown as GroupView;
+  function oneShot(mode: "one-shot" | "daemon" = "one-shot") {
+    let groups: GroupView[] = [];
+    const listeners = new Set<(s: EngineState) => void>();
+    const getState = () => ({ links: [], groups, settings: {}, transport: {} }) as unknown as EngineState;
+    const node = { getState, joinGroupByLink: vi.fn(async () => { groups = [knocking("knocking")]; return { groupId: "g9" }; }) };
+    const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: (l: (s: EngineState) => void) => { listeners.add(l); return () => listeners.delete(l); }, lastSeq: 0, replay: () => [] }, mode, version: "test" } as unknown as ApiContext;
+    const set = (g: GroupView[]) => { groups = g; for (const l of listeners) l(getState()); };
+    return { ctx, set };
+  }
+
+  it("waits until a member's app lets it in, and says it is in", async () => {
+    const { ctx, set } = oneShot();
+    const answer = callApi(ctx, "group.join", { link: LINK });
+    setTimeout(() => set([knocking("admitted")]), 5);
+    setTimeout(() => set([{ ...knocking("admitted"), status: "active", invitation: undefined } as GroupView]), 10);
+    expect(await answer).toEqual({ group: "g9", joined: true, stage: null });
+  });
+
+  it("after 60 s not in, says so and the next step; the knock is kept for a daemon", async () => {
+    vi.useFakeTimers();
+    try {
+      const { ctx } = oneShot();
+      const answer = callApi(ctx, "group.join", { link: LINK });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(await answer).toEqual({ group: "g9", joined: false, stage: "knocking",
+        warning: "Not in yet: no member's app has let you in. A member's app lets you in only while this profile is running: keep it running (ghostly daemon --detach), then ghostly group show g9" });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("stops at a replaced link, with no daemon's note: knocking again does not get in", async () => {
+    const { ctx, set } = oneShot();
+    const answer = callApi(ctx, "group.join", { link: LINK });
+    setTimeout(() => set([knocking("replaced")]), 5);
+    expect(await answer).toEqual({ group: "g9", joined: false, stage: "replaced" });
+  });
+
+  // Found in a bug hunt: at "full" or "blocked" it left at once with no note, as if the join were over, though the
+  // engine goes on knocking (the room comes back) and the knock ends with the one-shot.
+  it("at a group with no room yet, answers at once and says the knock goes on only while the profile runs", async () => {
+    const said = {
+      full: "No room yet: the group is full",
+      blocked: "No room yet: the group waits for every member's app to take more than eight members",
+    };
+    for (const stage of ["full", "blocked"] as const) {
+      const { ctx, set } = oneShot();
+      const answer = callApi(ctx, "group.join", { link: LINK });
+      setTimeout(() => set([knocking(stage)]), 5);
+      expect(await answer).toEqual({ group: "g9", joined: false, stage,
+        warning: `${said[stage]}. Your app goes on knocking only while this profile is running, and gets in when there is room: keep it running (ghostly daemon --detach), then ghostly group show g9` });
+    }
+  });
+
+  it("through a daemon, answers at once as before", async () => {
+    expect(await callApi(oneShot("daemon").ctx, "group.join", { link: LINK })).toEqual({ group: "g9" });
   });
 });
 
@@ -166,6 +231,106 @@ describe("group rename", () => {
       await expect(callApi(ctx, "group.rename", { group: "Crew", name }), JSON.stringify(name)).rejects.toMatchObject({ code: "bad_request" });
     expect(node.renameGroup).toHaveBeenCalledTimes(1);
     expect(COMMANDS["group rename"].params!(parseArgs(["Crew", "Book", "club"], {}), { group: "Crew", name: "Book club" })).toEqual({ group: "Crew", name: "Book club" });
+  });
+});
+
+describe("group link", () => {
+  it("turns the link on only for a real true (or on left out), and refuses an on that is no boolean", async () => {
+    const { ctx, node } = fake();
+    const enableGroupLink = vi.fn(async () => ({ link: LINK })), disableGroupLink = vi.fn(async () => undefined);
+    Object.assign(node, { enableGroupLink, disableGroupLink });
+    // A word or a number read as "not false" turned the link on and answered it: whoever holds it joins.
+    for (const on of ["false", "off", 0, 1, "true", {}]) {
+      await expect(callApi(ctx, "group.link", { group: "Crew", on }), JSON.stringify(on)).rejects.toMatchObject({ code: "bad_request", message: "on must be true or false" });
+    }
+    // Off with a new link is no request at all, as `group link --off --reset` is refused.
+    await expect(callApi(ctx, "group.link", { group: "Crew", on: false, reset: true })).rejects.toMatchObject({ code: "bad_request" });
+    expect(enableGroupLink).not.toHaveBeenCalled();
+    expect(disableGroupLink).not.toHaveBeenCalled();
+    // null reads as false, as every other boolean parameter reads it.
+    expect(await callApi(ctx, "group.link", { group: "Crew", on: false })).toEqual({ group: "g1", link: null });
+    expect(await callApi(ctx, "group.link", { group: "Crew", on: null })).toEqual({ group: "g1", link: null });
+    expect(disableGroupLink).toHaveBeenCalledTimes(2);
+    expect(await callApi(ctx, "group.link", { group: "Crew" })).toEqual({ group: "g1", link: LINK, url: expect.stringMatching(/#\/join\//) });
+    expect(await callApi(ctx, "group.link", { group: "Crew", on: true, reset: true })).toEqual({ group: "g1", link: LINK, url: expect.stringMatching(/#\/join\//) });
+    expect(enableGroupLink.mock.calls).toEqual([[{ groupId: "g1" }], [{ groupId: "g1", reset: true }]]);
+  });
+
+  it("is refused to a member removed from the group, as group send is, never the link it held when it was removed", async () => {
+    // Before: the old link with exit 0, while `group show` said removed and link null; it may have been reset since.
+    const { ctx, node } = fake();
+    const enableGroupLink = vi.fn(async () => ({ link: LINK })), disableGroupLink = vi.fn(async () => undefined);
+    Object.assign(node, { enableGroupLink, disableGroupLink });
+    const out = (status: string, statusReason?: string) => {
+      node.getState = () => ({ links: [], groups: [{ ...group, profile: "community", isAdmin: false, canSend: false, status, statusReason }], settings: {}, transport: {} }) as unknown as EngineState;
+    };
+    out("removed", "You were removed from this group");
+    for (const params of [{}, { reset: true }, { on: false }])
+      await expect(callApi(ctx, "group.link", { group: "Crew", ...params }), JSON.stringify(params)).rejects.toMatchObject({ code: "refused", message: "You were removed from this group" });
+    out("left");
+    await expect(callApi(ctx, "group.link", { group: "Crew" })).rejects.toMatchObject({ code: "refused", message: "You are not in this group" });
+    expect(enableGroupLink).not.toHaveBeenCalled();
+    expect(disableGroupLink).not.toHaveBeenCalled();
+    // A community member who lost its hubs is still in it: it asks to be let in again by itself.
+    out("lost");
+    expect(await callApi(ctx, "group.link", { group: "Crew" })).toEqual({ group: "g1", link: LINK, url: expect.stringMatching(/#\/join\//) });
+  });
+});
+
+describe("group remove", () => {
+  it("says on stderr, as the app's Remove dialog does, that the link still lets the member back while it is on", async () => {
+    const { ctx, node } = fake();
+    const remove = async (member: string) => await callApi(ctx, "group.remove", { group: "Crew", member }) as Record<string, unknown>;
+    const removed = await remove("Ana");
+    expect(node.removeGroupMember).toHaveBeenCalledWith({ groupId: "g1", key: "anakey" });
+    expect(removed.warning).toBe("Ana can still join again with the group's link: ghostly group link g1 --reset gives it a new one and keeps them out");
+    // A warning names no secret, and the answer is the group as before.
+    expect(JSON.stringify(removed)).not.toContain(LINK);
+    expect(removed).toMatchObject({ id: "g1", link: "<hidden>" });
+    // No link on: nothing to say. A member the roster has no name for is "They".
+    const noLink = { ...group, entryLink: undefined } as GroupView;
+    node.getState = () => ({ links: [], groups: [noLink], settings: {}, transport: {} }) as unknown as EngineState;
+    expect(await remove("Ana")).not.toHaveProperty("warning");
+    node.getState = () => ({ links: [], groups: [group], settings: {}, transport: {} }) as unknown as EngineState;
+    expect((await remove("bokey")).warning).toMatch(/^They can still join again/);
+  });
+});
+
+describe("an invitation not yet joined", () => {
+  it("is refused by the admin commands, saying so, never sent to the engine as a group it has not", async () => {
+    // Before: rename, picture, link, rotate and invite answered the engine's "Group not found" (exit 1) while `group
+    // show` listed the group; remove and admin said "No member" of a roster that had not come yet.
+    const invited = (accepted: boolean) => ({ id: "g2", name: "Lab group", createdAt: 1, profile: "mesh", isAdmin: false, canSend: false, lastMessageAt: 0, invited: [], memberLinks: {}, members: [],
+      invitation: { linkId: "chat-ana", contact: "anakey", admin: "anakey", members: 2, accepted } }) as unknown as GroupView;
+    const { ctx, node } = fake();
+    const calls = [["group.rename", { name: "Mine" }], ["group.picture", { clear: true }], ["group.link", {}], ["group.link", { on: false }], ["group.rotate", {}],
+      ["group.invite", { chat: "ana" }], ["group.remove", { member: "Ana" }], ["group.admin", { member: "Ana" }], ["group.hub", { member: "Ana" }]] as const;
+    for (const [accepted, message] of [
+      [false, "You are not in Lab group yet: ghostly group accept 'Lab group' joins it"],
+      [true, "You are not in Lab group yet: you accepted its invitation, and its admin has not let you in"],
+    ] as const) {
+      node.getState = () => ({ links: [], groups: [group, invited(accepted)], settings: {}, transport: {} }) as unknown as EngineState;
+      for (const [method, params] of calls) await expect(callApi(ctx, method, { group: "Lab group", ...params }), method).rejects.toMatchObject({ code: "refused", message });
+    }
+    expect(node.renameGroup).not.toHaveBeenCalled();
+    expect(node.rotateGroup).not.toHaveBeenCalled();
+    expect(node.removeGroupMember).not.toHaveBeenCalled();
+    // A group joined is as before.
+    await callApi(ctx, "group.rename", { group: "Crew", name: "Crew 2" });
+    expect(node.renameGroup).toHaveBeenCalledWith({ groupId: "g1", name: "Crew 2" });
+  });
+});
+
+describe("an invitation that will not go on by itself", () => {
+  it("says a link join nobody answered and an invitation taken back, which read as a live invitation", () => {
+    const invited = (invitation: Record<string, unknown>) => ({ ...group, status: undefined, isAdmin: false, members: [], canSend: false, entryLink: undefined,
+      invitation: { linkId: "l1", contact: "", admin: "anakey", members: 2, accepted: false, ...invitation } }) as unknown as GroupView;
+    expect(groupJson(invited({ accepted: true, viaLink: true, stage: "knocked", unanswered: true })).invitation)
+      .toEqual({ chat: "l1", accepted: true, viaLink: true, stage: "knocked", unanswered: true });
+    expect(groupJson(invited({ linkId: "chat-ana", takenBack: true })).invitation)
+      .toEqual({ chat: "chat-ana", accepted: false, viaLink: false, stage: null, takenBack: true });
+    // One still going on is as before, with neither.
+    expect(groupJson(invited({ linkId: "chat-ana" })).invitation).toEqual({ chat: "chat-ana", accepted: false, viaLink: false, stage: null });
   });
 });
 

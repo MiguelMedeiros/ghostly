@@ -30,6 +30,8 @@ export interface IdCardContent {
   /** The identity in full, and as short as the provider writes it (npub1ab…yz, a domain, a login). */
   subject: string;
   short: string;
+  /** The subject is words in the app's language (the Ghostly card's "One key per chat"), not a key or a handle. */
+  subjectWords?: boolean;
   /** What the statement names, which picks the provider's mark: for an account, the provider it was made at. */
   bound: string;
   /** A name the evidence carried (a Nostr profile's), and its picture: a sanitized data URL, never a remote one. */
@@ -61,7 +63,7 @@ export interface IdCardContent {
 /** The profile's picture and name (one line, as the chat list shows it), when its network has them; else what the evidence carried. */
 const face = (profile: PublicProfileView | undefined, name: string | undefined, avatar: string | undefined) => {
   const picture = profile?.found && profile.avatar?.startsWith("data:image/") ? profile.avatar : avatar?.startsWith("data:image/") ? avatar : undefined;
-  return { name: (profile?.found ? cleanFaceName(profile.name) : undefined) ?? name, photo: picture };
+  return { name: (profile?.found ? cleanFaceName(profile.name) : undefined) ?? cleanFaceName(name), photo: picture };
 };
 /**
  * The profile and its lookup, for a provider with public profiles and only while the proof is current and verified:
@@ -139,7 +141,8 @@ export function receivedIdCard(r: ReceivedIdentityView, now = Date.now() / 1000,
     subject: r.verified.subject,
     short: shortSubject(r.provider, r.verified.subject),
     bound: r.subject,
-    ...face(pp.profile, r.display?.name ?? r.verified.display?.name, avatar),
+    // A looked-up name stored before it was cleaned, with nothing visible left, gives way to the proof's own.
+    ...face(pp.profile, cleanFaceName(r.display?.name) ?? r.verified.display?.name, avatar),
     category: categoryLabel(r.provider, r.verified.attester, t),
     attested,
     status,
@@ -235,6 +238,7 @@ export function ghostlyCard(t: Translate, profile: GhostlyProfile, place: { chat
     label: t("identities.ghostly.provider"),
     subject,
     short: place.chat ? shortKey(place.chat.key) : subject,
+    subjectWords: !place.chat,
     bound: GHOSTLY,
     name,
     photo,

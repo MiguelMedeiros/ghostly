@@ -1,15 +1,16 @@
 import type { BrowserHost } from "@ghostly/browser/host";
 import { engine } from "@ghostly/browser/platform/engine";
-import { UI_PORT, type RuntimeMessage, type ViewerPage } from "./messages";
+import { uiPortName, type RuntimeMessage, type ViewerPage } from "./messages";
 import { extensionUpdates } from "./updates";
 import { extensionOidc } from "./oidc";
 import { extensionAtproto } from "./atproto";
 import { loadSettings } from "../../ui/src/lib/settings";
 import { languageTag, textDirection } from "../../ui/src/lib/documentLanguage";
 import { translatorFor } from "../../ui/src/locales";
-import { markEngineRestart, pageProfileIsCurrent, startAsProfileInUse } from "./profile";
+import { activeNamespace, markEngineRestart, pageProfileIsCurrent, startAsProfileInUse } from "./profile";
 import { setServiceWindowsCloser } from "../../ui/src/lib/serviceWindows";
 import { forgetLocalAccess, releaseUnusedLocalAccess, withLocalAccess } from "./localAccess";
+import { allowLocalOrigin, localOriginAllowed } from "./localAllowList";
 
 // A contact's app tabs close when the profile locks, as Desktop's windows do: the worker serves them, page or not.
 setServiceWindowsCloser(() => void chrome.runtime.sendMessage({ target: "background", type: "close-services" } satisfies RuntimeMessage).catch(() => {}));
@@ -18,7 +19,7 @@ setServiceWindowsCloser(() => void chrome.runtime.sendMessage({ target: "backgro
 export function viewerPage(app?: string): ViewerPage {
   const { language } = loadSettings();
   const t = translatorFor(language);
-  return { lang: languageTag(language), dir: textDirection(language), unreachable: t("services.window.unreachable"), failed: t("services.window.failed"), ...(app ? { app } : {}) };
+  return { lang: languageTag(language), dir: textDirection(language), unreachable: t("services.window.unreachable"), failed: t("services.window.failed"), upload: t("services.window.upload"), ...(app ? { app } : {}) };
 }
 
 /** Ghostly Browser: the peer lives in the offscreen document, reached through extension messaging. */
@@ -29,7 +30,7 @@ export const extensionHost: BrowserHost = {
   oidc: extensionOidc,
   atproto: extensionAtproto,
 
-  async connect(onMessage, onDisconnect) {
+  async connect(onMessage, onDisconnect, since) {
     // Another tab switched profiles since this page started: it starts again as that one (ui/main.tsx)
     // rather than show one profile's pages over the other's peer.
     if (!pageProfileIsCurrent()) {
@@ -43,7 +44,8 @@ export const extensionHost: BrowserHost = {
       startAsProfileInUse();
       throw new Error("Switching profiles…");
     }
-    const port = chrome.runtime.connect({ name: UI_PORT });
+    // With the mark the extension's pages last mirrored: the peer sends no chat unchanged since.
+    const port = chrome.runtime.connect({ name: uiPortName(since) });
     port.onMessage.addListener(onMessage);
     port.onDisconnect.addListener(() => {
       void chrome.runtime.lastError;
@@ -62,8 +64,14 @@ export const extensionHost: BrowserHost = {
     markEngineRestart();
   },
 
-  // Chrome's own prompt, and only from a user gesture.
-  requestLocalAccess: (originPattern) => chrome.permissions.request({ origins: [originPattern] }),
+  // Chrome's own prompt, and only from a user gesture: it comes first. The exact address goes on this profile's list,
+  // the only addresses its peer reaches (localAllowList.ts).
+  async requestLocalAccess(originPattern, origin) {
+    const granted = await chrome.permissions.request({ origins: [originPattern] });
+    if (granted) await allowLocalOrigin(activeNamespace(), origin);
+    return granted;
+  },
+  localAccessAllowed: (origin) => localOriginAllowed(activeNamespace(), origin),
   // The share's app is added under the lock the give-back holds, so neither runs in the middle of the other.
   withLocalAccess,
   // Given back once no app of any profile is at that host, on any port (localAccess.ts).
@@ -87,6 +95,8 @@ export const extensionHost: BrowserHost = {
       peerPubKeyZ32,
       serviceId,
       tag,
+      // The page's own, as checked just above.
+      profile: activeNamespace(),
       page: viewerPage(engine.linkByPeer(peerPubKeyZ32)?.peerServices?.find((s) => s.id === serviceId)?.name),
       relayOnly,
     } satisfies RuntimeMessage);

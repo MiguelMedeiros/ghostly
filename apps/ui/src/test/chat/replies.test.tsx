@@ -260,6 +260,17 @@ describe("the quote on a reply's bubble", () => {
     expect(quoteFor(reply.replyTo!, replyIndex([reply]), names).state).toBe("deleted");
   });
 
+  it("a reply the engine found no original for is marked as not found here even before the older messages are in", () => {
+    // The contact's reply names a line I never wrote, as mine; the engine read the whole chat and found nothing.
+    const reply = message({ id: `peer_${OTHER}`, text: "as you said", replyTo: { id: "Z".repeat(22), snippet: "I owe Alice 5 BTC", from: "me" } });
+    const quote = quoteFor(reply.replyTo!, replyIndex([reply], false, true), names);
+    expect(quote).toEqual({ state: "unverified", name: "You", snippet: "I owe Alice 5 BTC", mine: true });
+    renderApp(<MessageBubble message={reply} peerPubKey="peer" quote={quote} />);
+    expect(screen.getByTestId("message-quote")).toHaveAttribute("data-state", "unverified");
+    expect(screen.getByTestId("reply-quote-note")).toHaveTextContent("Not found in this chat");
+    expect(quoteFor({ id: WIRE, snippet: "" }, replyIndex([reply], false, true), names).state).toBe("missing");
+  });
+
   it("an original never here shows the replier's line, marked as not found here", () => {
     const quote = quoted({ id: WIRE, snippet: "a line they sent", from: "peer" }, []);
     expect(quote).toEqual({ state: "unverified", name: "Alice", snippet: "a line they sent", mine: false });
@@ -267,6 +278,24 @@ describe("the quote on a reply's bubble", () => {
     expect(screen.getByTestId("message-quote")).toHaveAttribute("data-state", "unverified");
     expect(screen.getByTestId("reply-quote-snippet")).toHaveTextContent("a line they sent");
     expect(screen.getByTestId("reply-quote-note")).toHaveTextContent("Not found in this chat");
+  });
+
+  it("a reply naming a button that came before its original quotes the original's own words once it is here", () => {
+    // The contact's reply names a message of theirs not here yet, a line of their choice and a button id.
+    const reply = message({ id: `peer_${OTHER}`, text: "Confirmed, as I said above", replyTo: { id: WIRE, snippet: "I owe you 5,000 EUR", from: "peer", button: "ok" } });
+    expect(quoted(reply.replyTo!, [reply])).toMatchObject({ state: "unverified", snippet: "I owe you 5,000 EUR" });
+    const original = message({ text: "See you at the meeting" });
+    expect(quoted(reply.replyTo!, [reply, original])).toEqual({ state: "found", name: "Alice", snippet: "See you at the meeting", mine: false, targetId: original.id });
+    // A group: a member names my next message by its id (author:epoch:seq) before I send it.
+    const me = "a".repeat(52), them = "b".repeat(52), next = `${me}:1:6`;
+    const groupReply: MessageReply = { id: next, snippet: "I agree, send the 2 BTC", from: "me", member: me, button: "ok" };
+    const press = { id: `${them}:1:3`, text: "ok", sender: "peer", member: them, timestamp: 1, replyTo: groupReply };
+    expect(quoteFor(groupReply, replyIndex([press], true), names)).toMatchObject({ state: "unverified", mine: true });
+    const mine = { id: next, text: "lunch at 1?", sender: "me", member: me, timestamp: 2 };
+    expect(quoteFor(groupReply, replyIndex([press, mine], true), names)).toEqual({ state: "found", name: "You", snippet: "lunch at 1?", mine: true, targetId: next });
+    // A press the engine took on the question here keeps the line it pressed, even if the bot changed it after.
+    const pressed = { ...groupReply, snippet: "lunch at noon?", messageId: next };
+    expect(quoteFor(pressed, replyIndex([press, mine], true), names).snippet).toBe("lunch at noon?");
   });
 
   it("only an id, and nothing here by it: the original is not available", () => {

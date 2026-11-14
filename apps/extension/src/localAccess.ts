@@ -2,7 +2,8 @@ import { parseLocalTarget } from "@ghostly/core";
 import { localAccessPattern } from "@ghostly/browser/host";
 import { databaseExists } from "@ghostly/browser/backup/database";
 import { listProfiles, namespaceOf } from "../../ui/src/lib/profiles";
-import { databaseFor } from "./profile";
+import { activeNamespace, databaseFor } from "./profile";
+import { ALLOWED_PREFIX, allowedKey, allowedOrigins, disallowLocalOrigin } from "./localAllowList";
 
 /**
  * Chrome's optional host permissions for this machine's apps (`http://127.0.0.1/*`). One is granted per host, for
@@ -79,11 +80,32 @@ export function withLocalAccess(pattern: string, task: () => Promise<void>): Pro
   });
 }
 
-/** The last app of this profile at `origin` went (`removeService`): its host's pattern, if nothing else is there. */
-export const forgetLocalAccess = (origin: string): Promise<void> => release([localAccessPattern(origin)]);
+/** The last app of this profile at `origin` went (`removeService`): off its list (localAllowList.ts), and its host's pattern, if nothing else is there. */
+export async function forgetLocalAccess(origin: string): Promise<void> {
+  await disallowLocalOrigin(activeNamespace(), origin);
+  await release([localAccessPattern(origin)]);
+}
+
+/** Each listed profile keeps only the addresses it still shares an app at; a profile gone keeps none. */
+async function pruneAllowed(): Promise<void> {
+  const kept: Record<string, string[]> = {};
+  for (const profile of listProfiles()) {
+    const ns = namespaceOf(profile.id);
+    const shared = new Set<string>();
+    for (const target of await sharedTargets(databaseFor(ns))) {
+      try { shared.add(parseLocalTarget(target).origin); } catch { /* a target that no longer parses is reached nowhere */ }
+    }
+    kept[allowedKey(ns)] = (await allowedOrigins(ns)).filter((origin) => shared.has(origin));
+  }
+  const gone = Object.keys(await chrome.storage.local.get(null)).filter((key) => key.startsWith(ALLOWED_PREFIX) && !(key in kept));
+  await chrome.storage.local.set(kept);
+  if (gone.length) await chrome.storage.local.remove(gone);
+}
 
 /** A profile's apps all went (Clear all data, a profile deleted): every local pattern Chrome granted and nobody needs. */
 export async function releaseUnusedLocalAccess(): Promise<void> {
+  // A profile that could not be read loses nothing it allowed: what it keeps still needs Chrome's permission too.
+  await pruneAllowed().catch(() => {});
   const local = new Set(chrome.runtime.getManifest().optional_host_permissions ?? []);
   const { origins = [] } = await chrome.permissions.getAll();
   await release(origins.filter((pattern) => local.has(pattern)));

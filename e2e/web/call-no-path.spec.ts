@@ -51,9 +51,11 @@ test("a call that finds no path says the network may block calls, with Network s
   await alice.page.getByTestId("call-no-path-settings").click();
   await expect(alice.page.getByTestId("network-turn-field")).toBeVisible();
   await expect(alice.page.getByTestId("call-no-path")).toHaveCount(0);
-  // Closed by hand on the other side.
-  await bob.page.getByTestId("call-no-path-close").click();
+  // Closed from the keyboard on the other side: the focus goes to the chat's ⋮, not the page.
+  await bob.page.getByTestId("call-no-path-close").focus();
+  await bob.page.keyboard.press("Enter");
   await expect(bob.page.getByTestId("call-no-path")).toHaveCount(0);
+  await expect(bob.page.getByTestId("chat-options")).toBeFocused();
 });
 
 // A phone's Network screen has the relay lists above the TURN server: opened at its top, the field was below the fold.

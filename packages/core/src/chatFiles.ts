@@ -600,6 +600,12 @@ export class ChatFiles {
   private readonly moving = new Set<Entry>();
   /** Files that stopped sending for the chat's window alone: they go on once another's bytes are confirmed. */
   private readonly held = new Set<Entry>();
+  /**
+   * Files this side cancelled while no session carried the cancel (`pf-abort`), said on the next one. The session also
+   * goes for a moment when a move swaps it (its capabilities are agreed again): unsaid, the receiver showed the file
+   * moving, its bytes kept, until its idle nudge asked 30 s later.
+   */
+  private readonly unsaid = new Set<string>();
   private attached = false;
   private peerRoomValue: number | null = null;
   /** What the chat's files may have in flight, sized by the path. */
@@ -679,6 +685,7 @@ export class ChatFiles {
     this.refill = 0;
     this.host.uplink?.join(this);
     void this.sayRoom();
+    for (const id of this.unsaid) if (this.send({ t: "pf-abort", id })) this.unsaid.delete(id);
     this.sweep();
     for (const entry of this.entries.values()) {
       if (transferEnded(entry.record)) continue;
@@ -1395,7 +1402,7 @@ export class ChatFiles {
     const entry = this.entry(direction, id);
     if (transferEnded(entry.record)) return;
     if (direction === "out") {
-      this.send({ t: "pf-abort", id });
+      if (!this.send({ t: "pf-abort", id })) this.unsaid.add(id);
       this.end(entry, "cancelled", "You cancelled it");
     } else {
       void this.discardStored(entry);

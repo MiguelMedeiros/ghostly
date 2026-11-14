@@ -189,7 +189,11 @@ export function openGroupMeta(frame: { statement: GroupMetaStatement; k: number 
   const body = decryptText(messageKey, boxAad(frame.statement.g, frame.k, frame.statement.d), frame.nn, frame.c);
   if (body === null || sha256Hex(utf8Encode(body)) !== frame.statement.d) return null;
   const parsed = parseGroupMetaBody(body);
-  return parsed ? { meta: { ...frame.statement, body }, body: parsed } : null;
+  if (!parsed) return null;
+  const meta: GroupMeta = { ...frame.statement, body };
+  // The member keeps this statement as it is: its name and picture are read from here on without a second check.
+  parsedBodies.set(meta, { body, parsed });
+  return { meta, body: copyBody(parsed) };
 }
 
 /** Is `a` later than `b`: signed under a later commit, or a higher revision under the same one. */
@@ -243,14 +247,38 @@ export function parseGroupMetaTag(tag: unknown): { e: number; r: number } | unde
   return { e, r };
 }
 
+/**
+ * Each kept statement's body as `parseGroupMetaBody` reads it, worked out once per statement: the sessions' `name` and
+ * `picture` read it on every engine state, and checking a picture (`sanitizeAvatar`) costs ~0.2 ms at 40 KB. Keyed by
+ * the statement object, so an entry goes with the statement it was made for; the body it was made from is kept beside
+ * it, and a statement whose body was swapped in place is read again.
+ */
+const parsedBodies = new WeakMap<GroupMeta, { body: string; parsed: GroupMetaBody | null }>();
+
+function parsedBody(meta: GroupMeta): GroupMetaBody | null {
+  const hit = parsedBodies.get(meta);
+  if (hit && hit.body === meta.body) return hit.parsed;
+  const parsed = parseGroupMetaBody(meta.body);
+  parsedBodies.set(meta, { body: meta.body, parsed });
+  return parsed;
+}
+
+/** A body the caller may change without changing the one kept for its statement. */
+function copyBody(parsed: GroupMetaBody): GroupMetaBody {
+  const copy: GroupMetaBody = { ...parsed };
+  if (parsed.hubs) copy.hubs = { pin: [...parsed.hubs.pin], no: [...parsed.hubs.no] };
+  return copy;
+}
+
 /** What a kept statement's body says, `{}` for none. */
 export function groupMetaBody(meta: GroupMeta | undefined): GroupMetaBody {
-  return (meta && parseGroupMetaBody(meta.body)) || {};
+  const parsed = meta && parsedBody(meta);
+  return parsed ? copyBody(parsed) : {};
 }
 
 /** The picture a kept statement's body names, if it is one Ghostly shows. */
 export function groupMetaPicture(meta: GroupMeta | undefined): string | undefined {
-  return groupMetaBody(meta).pic;
+  return (meta && parsedBody(meta))?.pic;
 }
 
 /**
@@ -259,7 +287,7 @@ export function groupMetaPicture(meta: GroupMeta | undefined): string | undefine
  * names show, and what a member shows until the statement reaches them.
  */
 export function groupDisplayName(meta: GroupMeta | undefined, first: string): string {
-  return groupMetaBody(meta).name ?? first;
+  return (meta && parsedBody(meta))?.name ?? first;
 }
 
 /** What a new statement changed that members see (a line in the history); `null` for a field now unset. */

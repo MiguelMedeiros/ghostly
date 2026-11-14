@@ -1,9 +1,10 @@
 import { generateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
-import type { WalletNetwork } from "@ghostly/core";
+import { parsePaymentAmount, type WalletNetwork } from "@ghostly/core";
 import type { EngineState, NetworkWalletsView, PaymentView, WalletInstanceView, WalletOffer, WalletType } from "@ghostly/browser/shared/types";
-import { bool, chatOf, findOwnNamedChat, inviteTaken, node, num, oneOf, sentAt, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, chatOf, inviteTaken, node, num, oneOf, ownChatOf, sentAt, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { paymentNetwork } from "@ghostly/browser/engine/paymentAdapters/walletInstances";
+import { CASHU_MINT_SOURCE } from "@ghostly/browser/engine/paymentAdapters/providers/cashuMint";
 import { CliError, type ErrorCode } from "./errors";
 import { ADDRESS_TYPES, CHAT_METHODS, PAY_METHODS, WALLET_TYPES } from "./words";
 import { findSecret, secretWords } from "./secretGuard";
@@ -50,7 +51,8 @@ function createChecked(type: WalletType, n: WalletNetwork, offer: WalletOffer | 
   const source = sources.find((p) => p.id === provider);
   if (!source) throw new CliError("bad_request", `No ${type} source ${JSON.stringify(provider)} on ${n} (ghostly wallet list)`);
   const unknown = Object.keys(values).find((name) => !source.fields.some((f) => f.name === name));
-  if (unknown) throw new CliError("bad_request", `${provider} takes no --value ${unknown}: ${source.fields.length ? `its fields are ${source.fields.map((f) => f.name).join(", ")}` : "it has no fields"}`);
+  // Never the name itself: a secret given with no name= but with a base64 `=` (a macaroon, a rune) reads as one (`pairs`).
+  if (unknown) throw new CliError("bad_request", `one --value names no field of ${provider}: ${source.fields.length ? `its fields are ${source.fields.map((f) => f.name).join(", ")}` : "it has no fields"}`);
   const missing = source.fields.find((f) => !f.optional && !f.defaults?.[n] && !values[f.name]?.trim());
   if (missing) throw new CliError("bad_request", `${provider} needs --value ${missing.name}=<${missing.options?.map((o) => o.value).join("|") ?? missing.placeholder ?? missing.label.toLowerCase()}>`);
 }
@@ -71,12 +73,21 @@ function lightningCard(ctx: ApiContext, params: Params): void {
 }
 
 /**
+ * The card a payment, a request or a wallet command names. "" (an unset variable in a script: `--card "$CARD"`) is a
+ * usage error: taken as not given, it moved money through, or removed, the network's default card or the whole wallet.
+ */
+function cardParam(params: Params): string | undefined {
+  if (params.card === "") throw new CliError("usage", "--card needs a Lightning card id (ghostly wallet list)");
+  return str(params, "card");
+}
+
+/**
  * The Lightning card `card` names, checked before the engine is asked: given with another type of wallet it is a usage
  * error, and one not on the network is not_found. Before, the engine dropped it for every type but Lightning, so a card
  * that named nothing removed the whole wallet of that type and the answer echoed the card as removed.
  */
 function cardOf(ctx: ApiContext, params: Params, type: WalletType): string | undefined {
-  const card = str(params, "card");
+  const card = cardParam(params);
   if (card === undefined) return undefined;
   if (type !== "lightning") throw new CliError("usage", `--card names a Lightning card: not with ${type}`);
   lightningCard(ctx, params);
@@ -94,7 +105,21 @@ async function federationsOpen(ctx: ApiContext, ms = 30_000): Promise<void> {
   while (connecting() && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 250));
 }
 
-/** One wallet of the deck with its balance, in its own unit. Never a key, a phrase or a token. */
+/**
+ * An Arkade, Bark, Spark or USDT balance, known only once the wallet is open and read it: until then the view holds 0
+ * (USDT "0", also offline for good), which the app's total shows as "?" (walletTotals). `null` with `status` `locked` or
+ * `reading`, never a 0 a script takes for the balance.
+ */
+function readBalance<T extends number | string>(view: { locked: boolean; read?: true; balance: T } | undefined): { balance: T | null; status: string | null } {
+  if (!view) return { balance: null, status: null };
+  if (view.locked) return { balance: null, status: "locked" };
+  return view.read ? { balance: view.balance, status: null } : { balance: null, status: "reading" };
+}
+
+/**
+ * One wallet of the deck with its balance, in its own unit. Never a key, a phrase or a token. A balance not read yet
+ * is `null`, with `status` saying why (`locked`, `reading`, `error`).
+ */
 export function walletJson(instance: WalletInstanceView, s: EngineState) {
   const view = netView(s, instance.network);
   let balance: number | string | null = null, unit = "sat", address: string | null = null, status: string | null = null, error: string | null = null;
@@ -102,15 +127,25 @@ export function walletJson(instance: WalletInstanceView, s: EngineState) {
     case "cashu": balance = view?.balance ?? null; break;
     case "lightning": {
       const card = view?.lightnings?.find((c) => c.card === instance.card);
-      balance = card?.balance ?? null; status = card?.status ?? null; error = card?.error ?? null;
+      // Through the mints, the card pays from and into the Cashu balance, which the app's card shows (walletCardData):
+      // its own copy is read again only every 15 s, so after a payment it answered the balance from before it.
+      balance = (card?.providerId === CASHU_MINT_SOURCE ? view?.balance : card?.balance) ?? null; status = card?.status ?? null; error = card?.error ?? null;
       break;
     }
-    case "arkade": balance = view?.ark?.balance ?? null; address = view?.ark?.address ?? null; error = view?.ark?.error ?? null; break;
-    case "bark": balance = view?.bark?.balance ?? null; error = view?.bark?.error ?? null; break;
-    case "spark": balance = view?.spark?.balance ?? null; address = view?.spark?.address ?? null; error = view?.spark?.error ?? null; break;
+    case "arkade": ({ balance, status } = readBalance(view?.ark)); address = view?.ark?.address ?? null; error = view?.ark?.error ?? null; break;
+    case "bark": ({ balance, status } = readBalance(view?.bark)); error = view?.bark?.error ?? null; break;
+    case "spark": ({ balance, status } = readBalance(view?.spark)); address = view?.spark?.address ?? null; error = view?.spark?.error ?? null; break;
     case "bitcoin": balance = view?.bitcoin?.balance ?? null; address = view?.bitcoin?.address ?? null; status = view?.bitcoin?.status ?? null; error = view?.bitcoin?.error ?? null; break;
-    case "fedimint": balance = view?.fedimint?.balance ?? null; error = view?.fedimint?.error ?? null; break;
-    case "usdt": balance = view?.usdt?.balance ?? null; unit = "token-base"; address = view?.usdt?.address ?? null; error = view?.usdt?.error ?? null; break;
+    case "fedimint": {
+      // Every federation read, or the balance is not known (the app's total says "?"): one that did not answer could hold the most.
+      const federations = view?.fedimint?.federations ?? [];
+      const known = federations.every((f) => f.read && f.status === "ready");
+      balance = known ? view?.fedimint?.balance ?? null : null;
+      status = known ? null : federations.some((f) => f.status === "error") ? "error" : "reading";
+      error = view?.fedimint?.error ?? federations.find((f) => f.error)?.error ?? null;
+      break;
+    }
+    case "usdt": ({ balance, status } = readBalance(view?.usdt)); unit = "token-base"; address = view?.usdt?.address ?? null; error = view?.usdt?.error ?? null; break;
   }
   return {
     id: instance.id, type: instance.type, network: instance.network,
@@ -119,9 +154,23 @@ export function walletJson(instance: WalletInstanceView, s: EngineState) {
   };
 }
 
+/** A token amount (USDT) is in base units: its `decimals` say how many make one. Sats carry none. */
+const tokenDecimals = (p: PaymentView): { decimals?: number } => (p.target?.method === "usdt" ? { decimals: p.target.decimals ?? 6 } : {});
+
+/** USDT typed as the app's composer takes it ("5", "0.25") in base units: more decimals than the token has is refused. */
+function tokenUnits(text: string, decimals: number): number {
+  try {
+    const units = parsePaymentAmount(text.trim(), decimals);
+    if (units > 0) return units;
+  } catch (error) {
+    throw new CliError("bad_request", `amount: ${(error as Error).message}`);
+  }
+  throw new CliError("bad_request", "amount must be above 0");
+}
+
 export function paymentJson(p: PaymentView) {
   return {
-    id: p.id, chat: p.linkId, kind: p.kind, direction: p.direction, amount: p.amount, unit: p.unit, memo: p.memo ?? null,
+    id: p.id, chat: p.linkId, kind: p.kind, direction: p.direction, amount: p.amount, unit: p.unit, ...tokenDecimals(p), memo: p.memo ?? null,
     state: p.state, error: p.error ?? null, network: paymentNetwork(p), method: p.target?.method ?? (p.federation || p.federations ? "fedimint" : p.invoice ? "lightning" : p.mint || p.mints ? "cashu" : null),
     createdAt: p.createdAt, ...(p.group ? { group: p.group } : {}), ...(p.closed ? { closed: true } : {}), ...(p.txid ? { txid: p.txid } : {}),
   };
@@ -162,10 +211,14 @@ function badMintUrl(error: unknown): boolean {
   return code === "invalidMintUrl" || code === "mintNotHttps";
 }
 
+/** What the engine's faucet says with no test mint to ask. */
+const NO_TEST_MINT = /^The faucet did not pay: This wallet has no test mint\b/;
+
 /**
  * The engine's wallet refusals about what the person asked, by the words it writes (they carry no `engineCode`): a
  * wallet or card that is not there, a token or invoice that is not one, a wallet already made, no mint or source to do
- * it with. Before, each was `engine` (exit 1), which a bot reads as the engine failing and may retry.
+ * it with. Before, each was `engine` (exit 1), which a bot reads as the engine failing and may retry. With no wallet of
+ * the type at all, `wallet faucet`, `wallet receive` and `wallet address` say which to make first (`noWalletOf`).
  */
 const WALLET_REFUSALS: [RegExp, ErrorCode][] = [
   [/^There is no .+ to remove$/, "not_found"],
@@ -174,26 +227,37 @@ const WALLET_REFUSALS: [RegExp, ErrorCode][] = [
   [/^You already have a .+ wallet$/, "refused"],
   [/^No mint could create an invoice: No mint configured$/, "unavailable"],
   [/^No Bitcoin source is set up$/, "unavailable"],
-  [/^The faucet did not pay: This wallet has no test mint\b/, "unavailable"],
+  [NO_TEST_MINT, "unavailable"],
   [/^Ghostly cannot ask this wallet's faucet by itself\b/, "unavailable"],
+  // What a payment's state refuses: a payment the contact took (or a request) has nothing to take back, a request or an
+  // invoice already paid is not paid again.
+  [/^Nothing to (reclaim|take back)$/, "refused"],
+  [/^This request is no longer open$/, "refused"],
+  [/^This invoice is already paid$/, "refused"],
 ];
 
+const WALLET_NAMES: Record<WalletType, string> = { cashu: "Cashu", lightning: "Lightning", arkade: "Arkade", bark: "Bark", spark: "Spark", bitcoin: "Bitcoin", fedimint: "Fedimint", usdt: "USDT" };
+
 /**
- * `chat pay` or `chat request` refused for want of a Cashu wallet of that network at all: the engine says the wallet
- * is short of sats, or that no mint could make an invoice, and names nothing to do. `refused` with the command that
- * makes one, as a contact with no wallet is told; `details.reason` `no_wallet`. With a wallet, the engine's own words.
+ * A request refused for want of a wallet of that type and network at all: `chat pay`, `chat request`, `wallet receive`
+ * and the Cashu faucet with no Cashu wallet, an address with no wallet of its type. The engine says the wallet is short
+ * of sats, that it has no mint or source, and names nothing to do. `refused` with the command that makes one, as a
+ * contact with no wallet is told; `details.reason` `no_wallet`. With a wallet, the engine's own words.
  */
-function noWalletOf(ctx: ApiContext, n: WalletNetwork, error: unknown): unknown {
-  if ((state(ctx).wallet.wallets ?? []).some((w) => w.type === "cashu" && w.network === n)) return error;
+function noWalletOf(ctx: ApiContext, n: WalletNetwork, error: unknown, type: WalletType = "cashu"): unknown {
+  if ((state(ctx).wallet.wallets ?? []).some((w) => w.type === type && w.network === n)) return error;
   const name = n === "mainnet" ? "Mainnet" : "Testnet";
-  return new CliError("refused", `You have no ${name} Cashu wallet: ghostly wallet create cashu${n === "mainnet" ? " --network mainnet" : ""}`, { reason: "no_wallet" });
+  return new CliError("refused", `You have no ${name} ${WALLET_NAMES[type]} wallet: ghostly wallet create ${type}${n === "mainnet" ? " --network mainnet" : ""}`, { reason: "no_wallet" });
 }
 const engineCode = (error: unknown) => error instanceof Error ? (error as { engineCode?: unknown }).engineCode : undefined;
 /** What the engine says to a Cashu request it has no mint for: no mint for the invoice, or none to name for ecash. */
 const NO_MINT = /^(No mint could create an invoice: No mint configured|You have no (Mainnet|Testnet) Cashu wallet: create one in Wallet → New)$/;
-
 function walletRefusal(error: unknown): unknown {
   if (!(error instanceof Error) || error instanceof CliError) return error;
+  // A mint asked for a swap that has not answered (the engine's `SwapUnsettledError`, by its name, or a chat payment's
+  // error that carries it as `unsettled`): nothing is known to have failed, try again later, as a mint that cannot be
+  // reached at all is `unavailable`.
+  if (error.name === "SwapUnsettledError" || (error as { unsettled?: unknown }).unsettled === true) return new CliError("unavailable", error.message);
   const code = WALLET_REFUSALS.find(([pattern]) => pattern.test(error.message))?.[1];
   return code ? new CliError(code, error.message) : error;
 }
@@ -251,14 +315,17 @@ const WALLETS: Record<string, Method> = {
     const type = oneOf(params, "type", WALLET_TYPES, "cashu");
     if (network(params) !== "testnet") throw new CliError("refused", "Test coins are for Testnet wallets only");
     const card = cardOf(ctx, params, type);
-    return node(ctx).walletTestCoins({ type, network: "testnet", ...(card ? { card } : {}) });
+    // No test mint: the faucet of Cashu and of a Lightning card through the mints, which a Cashu wallet brings.
+    return node(ctx).walletTestCoins({ type, network: "testnet", ...(card ? { card } : {}) })
+      .catch((error: unknown) => { throw error instanceof Error && NO_TEST_MINT.test(error.message) ? noWalletOf(ctx, "testnet", error) : error; });
   },
 
   async "wallet.history"(ctx, params) {
     const n = network(params);
     const limit = num(params, "limit", 50, { min: 1, max: 10_000, whole: true });
     await federationsOpen(ctx);
-    return { network: n, history: (netView(state(ctx), n)?.history ?? []).slice(0, limit) };
+    // Read from the store: the wallet view keeps only the newest 100.
+    return { network: n, history: await node(ctx).walletHistory({ network: n, limit }) };
   },
 
   async "wallet.receive"(ctx, params) {
@@ -267,17 +334,22 @@ const WALLETS: Record<string, Method> = {
     const n = network(params);
     await federationsOpen(ctx);
     const card = cardOf(ctx, params, "lightning");
-    const invoice = await node(ctx).walletReceiveLightning({ amount, network: n, ...(card ? { card } : {}) });
+    const invoice = await node(ctx).walletReceiveLightning({ amount, network: n, ...(card ? { card } : {}) })
+      .catch((error: unknown) => { throw error instanceof Error && NO_MINT.test(error.message) ? noWalletOf(ctx, n, error) : error; });
     return { network: n, amount, invoice: invoice.invoice, expiresAt: invoice.expiresAt, paymentHash: invoice.paymentHash ?? null, source: invoice.source };
   },
 
   async "wallet.address"(ctx, params) {
     const type = oneOf(params, "type", ADDRESS_TYPES, "bitcoin");
     const n = network(params);
-    if (type === "bitcoin") return { type, network: n, address: await node(ctx).bitcoinReceiveAddress({ network: n }) };
+    if (type === "bitcoin") {
+      const address = await node(ctx).bitcoinReceiveAddress({ network: n })
+        .catch((error: unknown) => { throw error instanceof Error && /^No Bitcoin source is set up$/.test(error.message) ? noWalletOf(ctx, n, error, "bitcoin") : error; });
+      return { type, network: n, address };
+    }
     const view = netView(state(ctx), n);
     const address = type === "arkade" ? view?.ark?.address : type === "spark" ? view?.spark?.address : view?.usdt?.address;
-    if (!address) throw new CliError("unavailable", `No ${type} wallet with an address on ${n}`);
+    if (!address) throw noWalletOf(ctx, n, new CliError("unavailable", `No ${type} wallet with an address on ${n}`), type);
     return { type, network: n, address };
   },
 
@@ -308,7 +380,7 @@ const WALLETS: Record<string, Method> = {
     // A Lightning address's comment reaches its owner as a memo reaches a contact (agents#1624).
     const comment = memoOf(params, "pay", "comment");
     const text = str(params, "target", true).trim();
-    const card = str(params, "card");
+    const card = cardParam(params);
     let invoice = text.replace(/^lightning:/i, "");
     let n: WalletNetwork;
     let note: string | undefined;
@@ -316,7 +388,7 @@ const WALLETS: Record<string, Method> = {
     // mint says every invoice is paid, so one from `wallet receive` is credited only on its payer's word.
     if (params.chat !== undefined && !isInvoice(text)) throw new CliError("usage", "--chat names the chat an invoice came from: an address's or LNURL's invoice is its server's");
     // Its contact is told it was paid: a contact's own name or a prefix of its id never names the chat.
-    const chat = params.chat === undefined ? undefined : findOwnNamedChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
+    const chat = params.chat === undefined ? undefined : ownChatOf(ctx, params);
     if (chat) inviteTaken(chat);
     if (isInvoice(text)) {
       // Which wallet pays is named, never guessed from the invoice: test mints issue `lnbc` invoices too, and a
@@ -336,6 +408,9 @@ const WALLETS: Record<string, Method> = {
     if (n === "mainnet" && !bool(params, "confirmReal")) throw new CliError("confirm", "This pays real money (Mainnet): pass --confirm-real to confirm this payment");
     await federationsOpen(ctx);
     const quote =await node(ctx).walletQuoteInvoice({ invoice, network: n, ...(card ? { card } : {}) });
+    // With an invoice, --amount is what the payer expects it to ask: the invoice's writer never decides past it.
+    const expected = isInvoice(text) ? num(params, "amount", 0, { min: 1 }) : 0;
+    if (expected && quote.amount !== expected) throw new CliError("refused", `The invoice asks ${quote.amount} sats, not the ${expected} given with --amount`);
     const maxFee = params.maxFee === undefined ? null : num(params, "maxFee", 0);
     if (maxFee !== null && quote.feeReserve > maxFee) throw new CliError("refused", `The fee may reach ${quote.feeReserve} sats, more than the ${maxFee} allowed`);
     const paid = await node(ctx).walletPayQuote({ quote: quote.quote, mint: quote.mint, ...(note ? { note } : {}), ...real(params), ...(chat ? { linkId: chat.id, invoice } : {}) });
@@ -346,7 +421,7 @@ const WALLETS: Record<string, Method> = {
   async "chat.pay"(ctx, params) {
     const memo = memoOf(params, "pay");
     // Money moves: a contact's own name or a prefix of its id never names the chat.
-    const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
+    const link = ownChatOf(ctx, params);
     inviteTaken(link);
     const amount = num(params, "amount", 0, { min: 1 });
     if (!amount) throw new CliError("bad_request", "amount is required");
@@ -358,36 +433,46 @@ const WALLETS: Record<string, Method> = {
     return { chat: link.id, paymentId };
   },
 
-  /** A request in a chat (the payment sheet's Request): the contact's app pays it. */
+  /**
+   * A request in a chat (the payment sheet's Request): the contact's app pays it. A USDT amount given as text ("5",
+   * "0.25") is USDT, turned into base units with the wallet's decimals as the app's composer does; a number is base units.
+   * The answer says the amount asked: USDT's carries the engine's tag of a few base units, and its decimals.
+   */
   async "chat.request"(ctx, params) {
     const memo = memoOf(params, "request");
+    const card = cardParam(params);
     const link = chatOf(ctx, params);
-    const amount = num(params, "amount", 0, { min: 1 });
-    if (!amount) throw new CliError("bad_request", "amount is required");
     const method = params.method === undefined ? undefined : oneOf(params, "method", PAY_METHODS, "cashu");
+    const n = network(params);
+    const amount = method === "usdt" && typeof params.amount === "string" ? tokenUnits(params.amount, netView(state(ctx), n)?.usdt?.decimals ?? 6) : num(params, "amount", 0, { min: 1 });
+    if (!amount) throw new CliError("bad_request", "amount is required");
     const rail = params.rail === undefined ? undefined : oneOf(params, "rail", ["cashu", "lightning"] as const, "cashu");
     await federationsOpen(ctx);
-    const n = network(params);
     const { paymentId } = await node(ctx).requestPayment({
       linkId: link.id, amount, timestamp: sentAt(), network: n,
-      ...(memo ? { memo } : {}), ...(method ? { method } : {}), ...(rail ? { rail } : {}), ...(str(params, "card") ? { card: str(params, "card") } : {}),
+      ...(memo ? { memo } : {}), ...(method ? { method } : {}), ...(rail ? { rail } : {}), ...(card ? { card } : {}),
     }).catch((error: unknown) => { throw (!method || method === "cashu") && error instanceof Error && NO_MINT.test(error.message) ? noWalletOf(ctx, n, error) : error; });
-    return { chat: link.id, paymentId };
+    const asked = state(ctx).payments[paymentId];
+    return { chat: link.id, paymentId, ...(asked ? { amount: asked.amount, unit: asked.unit, ...tokenDecimals(asked) } : {}) };
   },
 
   /** Pays a request the contact made in a chat. */
   async "chat.payRequest"(ctx, params) {
     // Money moves: a contact's own name or a prefix of its id never names the chat.
-    const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
+    const s = state(ctx);
+    const link = ownChatOf(ctx, params, s);
     const paymentId = str(params, "payment", true);
-    const request = state(ctx).payments[paymentId];
+    const card = cardParam(params);
+    const request = s.payments[paymentId];
     if (!request || request.linkId !== link.id || request.kind !== "request") throw new CliError("not_found", `No request ${paymentId} in this chat`);
+    // One I made is the contact's to pay: the engine knew it only as "Unknown payment request" (engine, exit 1).
+    if (request.direction !== "in") throw new CliError("bad_request", `${JSON.stringify(paymentId)} is your own request: the contact pays it`);
     // The request says which network it is paid on: real money or test coins, never the choice of the payer.
     const n = paymentNetwork(request);
     if (n === "mainnet" && !bool(params, "confirmReal")) throw new CliError("confirm", "This request is for real money (Mainnet): pass --confirm-real to confirm this payment", { network: n });
     const via = params.via === undefined ? undefined : oneOf(params, "via", ["lightning"] as const, "lightning");
     await federationsOpen(ctx);
-    await node(ctx).payRequest({ linkId: link.id, paymentId, network: n, ...(via ? { via } : {}), ...(params.maxFee !== undefined ? { maxFee: num(params, "maxFee", 0) } : {}), ...(str(params, "card") ? { card: str(params, "card") } : {}), ...real(params) });
+    await node(ctx).payRequest({ linkId: link.id, paymentId, network: n, ...(via ? { via } : {}), ...(params.maxFee !== undefined ? { maxFee: num(params, "maxFee", 0) } : {}), ...(card ? { card } : {}), ...real(params) });
     return paymentJson(state(ctx).payments[paymentId] ?? request);
   },
 
@@ -414,14 +499,19 @@ const WALLETS: Record<string, Method> = {
   },
 
   async "payment.list"(ctx, params) {
-    const chat = params.chat === undefined ? null : chatOf(ctx, params).id;
-    const payments = Object.values(state(ctx).payments).filter((p) => !chat || p.linkId === chat).sort((a, b) => b.createdAt - a.createdAt).map(paymentJson);
+    const s = state(ctx);
+    const chat = params.chat === undefined ? null : chatOf(ctx, params, s).id;
+    const payments = Object.values(s.payments).filter((p) => !chat || p.linkId === chat).sort((a, b) => b.createdAt - a.createdAt).map(paymentJson);
     return { payments };
   },
 
   async "payment.check"(ctx, params) {
-    const link = chatOf(ctx, params);
-    if (state(ctx).payments[str(params, "payment", true)]?.linkId !== link.id) throw new CliError("not_found", `No payment ${JSON.stringify(str(params, "payment", true))} in this chat (ghostly payment list --chat ${link.id})`);
+    const s = state(ctx);
+    const link = chatOf(ctx, params, s);
+    const p = s.payments[str(params, "payment", true)];
+    if (p?.linkId !== link.id) throw new CliError("not_found", `No payment ${JSON.stringify(str(params, "payment", true))} in this chat (ghostly payment list --chat ${link.id})`);
+    // The contact's app is asked to look for a request it made: one of mine, or a payment, has nothing to look for.
+    if (p.kind !== "request" || p.direction !== "in") throw new CliError("bad_request", `${JSON.stringify(p.id)} is ${p.kind === "request" ? "your own request" : p.direction === "out" ? "a payment you sent" : "a payment you received"}: payment check is for a request the contact made of you`);
     await node(ctx).checkPayment({ linkId: link.id, paymentId: str(params, "payment", true) });
     return { chat: link.id, paymentId: str(params, "payment", true) };
   },

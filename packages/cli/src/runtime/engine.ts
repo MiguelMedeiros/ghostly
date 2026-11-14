@@ -1,22 +1,29 @@
-import { appendFileSync, existsSync, readFileSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ACTIVE_DHT_POLL_MS, DAEMON_WATCH_PEER_IDLE_MS, fromBase64Url, RTC_CONFIG, setLinkTraceSink } from "@ghostly/core";
+import { ACTIVE_DHT_POLL_MS, DAEMON_WATCH_PEER_IDLE_MS, fromBase64Url, RTC_CONFIG, setLinkTraceSink, setPublicKeyFastPath } from "@ghostly/core";
 import { MAX_IROH_RELAYS, irohRelayProblem } from "@ghostly/browser/platform/irohWeb";
 import type { EngineServer } from "@ghostly/browser/engine/server";
 import { loadCallStack } from "../calls/media";
 import { CliError } from "../errors";
 import { joinLogLine } from "../joinLog";
+import { nativePublicKey } from "../nativeEd25519";
 import { nodeLocalFetch } from "../services";
 import { nodeFedimintSdk } from "./fedimint";
 import { installFileFetch } from "./fileFetch";
 import { nodeHoldFetch } from "./holdFetch";
+import { nodePublicRelay } from "./irohRelay";
 import { nodePushSend } from "./pushSend";
 import { openPersistentIndexedDb, type PersistentIndexedDb } from "./storage";
 import { RESTORED_MARK, type ProfilePaths } from "../profiles";
 import { servedApps } from "../appServe";
 import { envSwitch } from "../envSwitch";
+import { watchWake } from "./wakeWatch";
+import { rtcThreads } from "./rtcThreads";
+
+// Every chat's keys are derived again at each start, and a one-shot is a start: by Node's Ed25519, not noble's.
+setPublicKeyFastPath(nativePublicKey);
 
 /** What runs a profile: its store, the engine and the host around it. */
 export interface Runtime {
@@ -134,6 +141,7 @@ async function installWebRtc(): Promise<boolean> {
     for (const name of ["RTCPeerConnection", "RTCSessionDescription", "RTCIceCandidate", "RTCDataChannel", "RTCDataChannelEvent", "RTCPeerConnectionIceEvent", "RTCCertificate"] as const) {
       scope[name] ??= (polyfill as unknown as Record<string, unknown>)[name];
     }
+    countConnections(scope);
     refuseDataAnswers(scope);
     if (!publicStun()) leaveOutPublicStun(scope);
     return true;
@@ -141,6 +149,23 @@ async function installWebRtc(): Promise<boolean> {
     process.stderr.write(`ghostly: WebRTC is unavailable (${error instanceof Error ? error.message : String(error)}); chats use HyperDHT, Iroh or the DHT\n`);
     return false;
   }
+}
+
+/** Each connection the engine makes is counted until it is closed, so libdatachannel's threads go with the last (`rtcThreads`). */
+function countConnections(scope: Record<string, unknown>): void {
+  const Base = scope.RTCPeerConnection as typeof RTCPeerConnection;
+  scope.RTCPeerConnection = class extends Base {
+    readonly #closed: () => void;
+    constructor(config?: RTCConfiguration) {
+      super(config);
+      this.#closed = rtcThreads.opened();
+      // libdatachannel may close it by itself (the contact's side ended it): no `close()` comes then.
+      this.addEventListener("connectionstatechange", () => { if (this.connectionState === "closed") this.#closed(); });
+    }
+    override close(): void {
+      try { super.close(); } finally { this.#closed(); }
+    }
+  };
 }
 
 /**
@@ -162,6 +187,15 @@ function refuseDataAnswers(scope: Record<string, unknown>): void {
       return super.setRemoteDescription(description);
     }
   };
+}
+
+/**
+ * For tests: `GHOSTLY_TEST_RELAY_REQUESTS_PER_MINUTE=<n>` gives the relays' budget n requests a minute (`Infinity`: no
+ * bound), so a test on loopback relays need not wait out the minute its pairing spent (`REQUESTS_PER_MINUTE`).
+ */
+function relayBudgetForTests(): { requestsPerMinute?: number } {
+  const perMinute = Number(process.env.GHOSTLY_TEST_RELAY_REQUESTS_PER_MINUTE);
+  return perMinute > 0 ? { requestsPerMinute: perMinute } : {};
 }
 
 /** `GHOSTLY_STUN=0`: every connection the engine makes leaves the apps' public STUN servers out of its configuration. */
@@ -201,7 +235,8 @@ function irohWasmBytes(): Buffer {
 
 /**
  * How a runtime starts: `deferGroups` leaves the groups' sessions unstarted (a one-shot for one chat); `deferChats` leaves
- * the saved chats unstarted until a call names one (a one-shot for one chat, or one that makes or joins one); `offline`
+ * the saved chats and the groups' edges unstarted until a call names one (a one-shot for one chat or one group, or one
+ * that makes or joins a chat); `offline`
  * starts no chat or group and publishes nothing (a one-shot that only reads); `logJoins` says the steps of a join
  * through a group's link on stderr (a daemon, whose log that is: `joinLog.ts`).
  */
@@ -209,6 +244,8 @@ export interface RuntimeOptions {
   deferGroups?: boolean; deferChats?: boolean; offline?: boolean; logJoins?: boolean;
   /** The chats whose group invitations this profile accepts by itself (`group auto`, `NodeOptions.autoJoins`). */
   autoJoins?: (linkId: string) => boolean;
+  /** Whether this run tells its contacts by push that it came online (`NodeOptions.onlineNotices`). Absent: never. */
+  onlineNotices?: () => boolean;
   /** The start keeps each history's newest rows that many, for the host's event check (`EngineServer.takeStartNewest`). */
   keepNewest?: number;
 }
@@ -246,6 +283,9 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
       if (said) process.stderr.write(said + "\n");
     });
   }
+  // The store a backup wrote for itself (`profile.backup`) and a killed process left: every message and key in the
+  // clear, past what was deleted since. This process holds the profile now, so no backup of it is running.
+  for (const name of existsSync(paths.db) ? readdirSync(paths.db) : []) if (/^backup-store-.*\.bin$/.test(name)) rmSync(join(paths.db, name), { force: true });
   const store = await openPersistentIndexedDb(paths.db);
   // A profile a restore made, started for the first time: its store is the backup's, as old as the backup. Its ecash
   // is checked with the mints and its unfinished payment attempts authorize nothing, as in the app's restore. Done
@@ -291,13 +331,16 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
   ]);
   const mainline = dht.off ? null : new (await import("./mainline")).Mainline({ bootstrap: dht.bootstrap, host: dht.host });
   // `GHOSTLY_PKARR_RELAYS`: those relays only, in place before the engine publishes anything (the setting is not read).
-  const transport = (mainline || pinned) ? new (await import("./mainline")).RelaysAndDht(mainline, pinned ? { relays: pinned } : {}, !!pinned) : null;
+  const relayOptions = { ...(pinned ? { relays: pinned } : {}), ...relayBudgetForTests() };
+  const transport = (mainline || pinned) ? new (await import("./mainline")).RelaysAndDht(mainline, relayOptions, !!pinned) : null;
   const apps = servedApps(paths.dir).length > 0;
   const server = new EngineServer({
     ...(transport ? { transport } : {}),
     irohWeb: true,
     // `GHOSTLY_IROH_RELAYS`: those relays only (the setting is not read).
     ...(pinnedIroh ? { irohRelays: pinnedIroh } : {}),
+    // A contact's Iroh relay is dialled only at a name whose every address is public now (./irohRelay.ts).
+    irohPublicRelay: nodePublicRelay(),
     // A CLI profile is one device's (WISP 06): no device state is kept for it.
     singleDevice: true,
     nativeTransports: { "hyperdht/1": (seedB64: string) => createHyperEndpoint(fromBase64Url(seedB64), network) },
@@ -322,9 +365,14 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     pushSend: (request) => nodePushSend(request),
     // Held items are read from the contact's storage on public addresses only (./holdFetch.ts).
     holdFetch: nodeHoldFetch(),
+    // libdatachannel keeps only its own candidates out of the offer under `iceTransportPolicy: "relay"`: its ICE still
+    // checks from this machine's sockets. With Hide my IP from contacts on, chats and group edges go over the relays.
+    webrtcIgnoresRelayOnly: true,
     callsSupport: callsUnavailable === null,
     ...(callsUnavailable ? { callsUnavailable } : {}),
     ...(options.autoJoins ? { autoJoins: options.autoJoins } : {}),
+    // A headless profile shows no dot unless its daemon says presence: no online notice either (WISP 401 § Online notices).
+    onlineNotices: options.onlineNotices ?? (() => false),
     ...(options.deferGroups ? { deferGroups: true } : {}),
     ...(options.deferChats ? { deferChats: true } : {}),
     ...(options.offline ? { offline: true } : {}),
@@ -339,10 +387,14 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     await store.close().catch(() => {});
     throw error;
   }
+  // A machine back from sleep or on another network: the engine's wake, as a page's `visibilitychange`/`online` call it
+  // (./wakeWatch.ts). Without it a daemon's chats waited out their background pace, and a phone found it minutes later.
+  const stopWake = options.offline ? () => {} : watchWake(() => { server.node.wake({ network: true }); });
   let closing: Promise<void> | null = null;
   return {
     paths, server, store, webrtc, callsUnavailable, apps,
     close: () => (closing ??= (async () => {
+      stopWake();
       await server.node.shutdown({ quitting: true }).catch(() => {});
       await mainline?.destroy().catch(() => {});
       await store.close();

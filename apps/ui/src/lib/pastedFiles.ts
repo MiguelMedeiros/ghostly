@@ -181,6 +181,14 @@ export function pasteIsPictureOnly(data: DataTransfer | null): boolean {
   return !plain || plain === images[0].getAttribute("src")?.trim() || plain === images[0].src;
 }
 
+/**
+ * Whether a paste says it carries files and hands the page none of them, nor any text. iOS Safari pastes a file copied
+ * in Files (a PDF) that way: WebKit reads only pictures off the iPhone's clipboard, and keeps the rest from the page.
+ */
+export function pasteKeepsFiles(data: DataTransfer | null): boolean {
+  return pasteShowsNothing(data) && [...(data?.types ?? [])].includes("Files");
+}
+
 /** Whether a paste named copied files it did not hand over (WebKitGTK shows a file manager's copy as `text/uri-list` only). */
 export function pasteNamesFiles(data: DataTransfer | null): boolean {
   return !!data && [...(data.types ?? [])].some((type) => type === "Files" || type === "text/uri-list");

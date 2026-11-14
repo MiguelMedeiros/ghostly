@@ -34,6 +34,9 @@ it.each([[false, "missing"], [false, "failed"], [false, "pending"], [true, "miss
     node.setActiveLink({ linkId: row.id });
     await vi.waitFor(() => expect(current().availableTransports).toHaveLength(3));
     if (discovery === "failed") await vi.waitFor(() => expect(current().discoveryError).toContain("discovery publication unavailable"));
+    // A chosen transport first: on an Automatic chat, Iroh with Fallback off is what the Fallback switch sends (it stays
+    // Automatic, ghostly#6125), and this test is about saving choices without a handshake.
+    await node.setChatTransport({ linkId: row.id, transport: "hyperdht/1" });
     for (const preferred of ["iroh/1", "hyperdht/1", "webrtc/1"] as PairedTransport[]) {
       for (const fallback of [false, true]) {
         await node.setTransportPreference({ linkId: row.id, preferred, fallback });
@@ -129,5 +132,39 @@ it("leaving DHT only answers before the native listeners are up; a choice out of
     await chosen;
     expect(current().preferredTransport).toBe("iroh/1");
     await vi.waitFor(() => expect(current().availableTransports).toEqual(["iroh/1", "hyperdht/1"]));
+  } finally { up(); await node.shutdown(); await db.deleteLink(row.id); vi.unstubAllGlobals(); }
+}, 5000);
+
+it.each(["webrtc/1", "auto"] as const)("on an app with WebRTC, %s chosen out of DHT only answers before the native listeners are up", async choice => {
+  const row: StoredLink = { id: `dht-only-left-for-${choice}`, profile: "paired-chat/1", createdAt: 1,
+    seedB64: createIdentity().seedB64, encKeyB64: createIdentity().seedB64,
+    participationSeed: createIdentity().seedB64, peerPubKeyZ32: createIdentity().pubKeyZ32, pairedPeerKey: createIdentity().pubKeyZ32 };
+  await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true });
+  await db.putLink(row);
+  vi.stubGlobal("RTCPeerConnection", vi.fn(function () { throw new Error("No handshake in this test"); }));
+  const endpoint = (transport: NativeTransport): NativeEndpoint => ({ transport, descriptor: {}, connect: async () => { throw new Error("offline"); },
+    close: async () => {}, onConnection: null, onDescriptor: null });
+  // After DHT only, each listener waits until `up`: Iroh's relay out of reach kept the web's Connection panel greyed out
+  // 24 to 44 s after WebRTC was chosen, the chat live again in a second (bug hunt, 2026-11-08).
+  let starts = 0, up!: () => void;
+  const reachable = new Promise<void>(resolve => { up = resolve; });
+  const slow = (transport: NativeTransport) => async () => { if (starts++ >= 2) await reachable; return endpoint(transport); };
+  const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "local fixture", relays: [] }) };
+  const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() },
+    { transport, automaticWallets: false, nativeTransports: { "iroh/1": slow("iroh/1"), "hyperdht/1": slow("hyperdht/1") } });
+  const current = () => node.getState().links.find(l => l.id === row.id)!;
+  const settled = async (step: Promise<void>) => { let done = false; void step.then(() => { done = true; }); await new Promise(r => setTimeout(r, 50)); return done; };
+  try {
+    await node.start();
+    node.setActiveLink({ linkId: row.id });
+    await vi.waitFor(() => expect(current().availableTransports).toEqual(["webrtc/1", "iroh/1", "hyperdht/1"]));
+    await node.setChatTransport({ linkId: row.id, transport: "dht" });
+    await vi.waitFor(() => expect(current().availableTransports).toEqual(["webrtc/1"]));
+    expect(await settled(node.setChatTransport({ linkId: row.id, transport: choice }))).toBe(true);
+    expect(current().deliveryMode).toBe("stream");
+    // Automatic shows as the transport it picks, WebRTC here.
+    expect(current().preferredTransport).toBe("webrtc/1");
+    up();
+    await vi.waitFor(() => expect(current().availableTransports).toEqual(["webrtc/1", "iroh/1", "hyperdht/1"]));
   } finally { up(); await node.shutdown(); await db.deleteLink(row.id); vi.unstubAllGlobals(); }
 }, 5000);

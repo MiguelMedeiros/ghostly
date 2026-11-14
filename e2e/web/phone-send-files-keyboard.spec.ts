@@ -43,6 +43,55 @@ const placed = (locator: Locator) => locator.evaluate((element) => {
   return { top: Math.round(box.top), bottom: Math.round(box.bottom), tappable: !!hit && (hit === element || element.contains(hit)), picture };
 });
 
+/** A photo and `others` more files, pasted into the message field at once. */
+function pasteFiles(page: Page, others: number): Promise<void> {
+  return page.evaluate(async (others) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 900;
+    canvas.height = 1200;
+    canvas.getContext("2d")!.fillRect(0, 0, 900, 1200);
+    const blob = await new Promise<Blob>((done) => canvas.toBlob((b) => done(b!), "image/png"));
+    const data = new DataTransfer();
+    data.items.add(new File([blob], "IMG_0042.png", { type: "image/png" }));
+    for (let i = 1; i <= others; i++) data.items.add(new File([new Uint8Array(100 * i)], `notes-${i}.txt`, { type: "text/plain" }));
+    document.querySelector("textarea")!.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+  }, others);
+}
+
+/** How far the tiles of the files reach over one another, in px (0: none does). */
+const tilesOverlap = (page: Page) => page.getByTestId("attachment-list").evaluate((list) => {
+  const tiles = [...list.querySelectorAll("[data-testid=attachment-item]")].map((tile) => tile.getBoundingClientRect());
+  let worst = 0;
+  for (const [i, a] of tiles.entries()) for (const b of tiles.slice(i + 1)) {
+    if (Math.min(a.right, b.right) > Math.max(a.left, b.left)) worst = Math.max(worst, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+  }
+  return Math.round(worst);
+});
+
+test("an iPhone on its side: several files in Send files keep their tiles apart, keyboard up or down", { tag: ["@feature:app.mobile-layout", "@feature:app.composer.paste-files"] }, async ({ peer }) => {
+  // The shortened list shrank its rows while the tiles stayed square: each row was drawn over the one above, 31 px with 4
+  // files, 123 px with the keyboard up.
+  const screen = SCREENS[1];
+  const { page } = await peer("send-files-tiles", { mobile: true, viewport: { width: screen.width, height: screen.height } });
+  await iosKeyboard(page);
+  await page.getByTestId("sidebar-new-chat").filter({ visible: true }).first().click();
+  await expect(page.locator("textarea")).toBeVisible();
+
+  await pasteFiles(page, 3);
+  const sheet = page.getByTestId("attachment-sheet");
+  await expect(sheet.getByTestId("attachment-item")).toHaveCount(4);
+  await expect.poll(() => tilesOverlap(page)).toBe(0);
+  await keyboard(page, screen.keyboard);
+  await expect(page.locator("html")).toHaveAttribute("data-keyboard", "true");
+  await expect.poll(() => tilesOverlap(page)).toBe(0);
+  // The list scrolls to the last one, which a tap then reaches.
+  const last = sheet.getByTestId("attachment-item").last();
+  await last.scrollIntoViewIfNeeded();
+  await expect.poll(() => placed(last).then((at) => at.tappable)).toBe(true);
+  await sheet.getByTestId("attachment-cancel").click();
+  await expect(sheet).toHaveCount(0);
+});
+
 for (const screen of SCREENS) {
   for (const language of ["en", "ar"]) {
     test(`${screen.name}, ${language}: Send files keeps its caption, Cancel and Send above the keyboard`, { tag: ["@feature:app.mobile-layout", "@feature:app.composer.paste-files"] }, async ({ peer }) => {

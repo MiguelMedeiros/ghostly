@@ -28,7 +28,7 @@
   },
   "delivery": {
     "delivered": "Entregado (acuse recibido)",
-    "failed": "Falló",
+    "failed": "No enviado",
     "held": "Guardado para el contacto",
     "queued": "Aún sin confirmar, se reenvía solo",
     "sending": "Enviando",

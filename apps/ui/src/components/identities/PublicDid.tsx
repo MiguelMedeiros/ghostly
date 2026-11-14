@@ -68,7 +68,7 @@ export function PublicDid({ state }: { state: Pick<EngineState, "did" | "identit
                   <p className="text-sm text-text-primary break-words">{card.label} <span className="text-text-muted">{card.short}</span></p>
                   <p className="text-xs text-text-muted break-all">{current ? p.publicUri : t("identities.did.expired")}</p>
                 </div>
-                <Switch testId="did-list" checked={listed} disabled={!!busy || (!listed && !current)}
+                <Switch testId="did-list" checked={listed} disabled={(!!busy && busy !== p.id) || (!listed && !current)} busy={busy === p.id}
                   label={t("identities.did.listOne", { identity: `${card.label} ${card.short}` })} onChange={next => list(p.id, next)} />
               </div>
             );

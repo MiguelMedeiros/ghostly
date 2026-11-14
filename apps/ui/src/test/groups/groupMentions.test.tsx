@@ -77,6 +77,13 @@ describe("the composer's @", () => {
     expect(composer()).toHaveFocus();
   });
 
+  it("outlines the member the arrows are on in forced colors, where its background is gone, and no other", async () => {
+    const { user } = openGroup(active());
+    await user.type(composer(), "@");
+    await user.keyboard("{ArrowDown}");
+    expect(options().map(o => o.classList.contains("forced-colors:outline-[color:Highlight]"))).toEqual([false, true]);
+  });
+
   it("gives each member a 44 px row on a phone, and the desktop keeps its rows", async () => {
     const { user } = openGroup(active());
     await user.type(composer(), "@");

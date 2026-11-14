@@ -33,8 +33,8 @@ test.use({
 
 interface Site { server: Server; origin: string; requests: string[] }
 
-/** A site with a page that describes itself, and its picture. It allows reading (CORS), as some sites do. */
-async function site(): Promise<Site> {
+/** A site with a page that describes itself (`title`, `description`), and its picture. It allows reading (CORS), as some sites do. */
+async function site({ title = "Ghosts &amp; peers", description = "Chat with no server in the middle." } = {}): Promise<Site> {
   const requests: string[] = [];
   const server = createServer((request, response) => {
     requests.push(request.url ?? "");
@@ -46,8 +46,8 @@ async function site(): Promise<Site> {
     }
     response.setHeader("content-type", "text/html; charset=utf-8");
     response.end(`<!doctype html><html><head><title>Plain</title>
-      <meta property="og:title" content="Ghosts &amp; peers">
-      <meta property="og:description" content="Chat with no server in the middle.">
+      <meta property="og:title" content="${title}">
+      <meta property="og:description" content="${description}">
       <meta property="og:site_name" content="Ghostly Test News">
       <meta property="og:image" content="/card.png">
       </head><body>…</body></html>`);
@@ -109,6 +109,39 @@ test("a link preview is made by the sender and drawn by the receiver without con
   }
 });
 
+test("a preview's title and description show two lines at most, a long word broken inside the card", { tag: ["@feature:chat.link-preview.render"] }, async ({ peer }) => {
+  // A long headline in Arabic, and a description that is one long word (a file name, an address), as pages have.
+  const news = await site({
+    title: "عنوان طويل لمقالة عن الأشباح والأقران والدردشة بدون خادم في المنتصف ".repeat(3),
+    description: `Screenshot_2026-11-14_at_12.34.56${"_with_a_very_long_name".repeat(8)}.png`,
+  });
+  try {
+    const [alice, bob] = await Promise.all([peer("clamp-alice"), peer("clamp-bob")]);
+    await pair(alice, bob);
+    await alice.page.getByPlaceholder("Message…").fill(`look ${news.origin}/long`);
+    await expect(alice.page.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready");
+    await alice.page.getByPlaceholder("Message…").press("Enter");
+
+    for (const side of [alice, bob]) {
+      const card = bubble(side, "look").getByTestId("link-preview-card");
+      await expect(card).toBeVisible();
+      for (const testId of ["link-preview-title", "link-preview-description"]) {
+        const box = await card.getByTestId(testId).evaluate((element) => ({
+          lines: element.getBoundingClientRect().height / parseFloat(getComputedStyle(element).lineHeight),
+          cut: element.scrollHeight > element.clientHeight,
+          wide: element.scrollWidth > element.clientWidth,
+        }));
+        // Before, both drew every line they had (the headline 7 lines) and the long word ran past the card's edge, cut with no "…".
+        expect(Math.round(box.lines), testId).toBe(2);
+        expect(box.cut, testId).toBe(true);
+        expect(box.wide, testId).toBe(false);
+      }
+    }
+  } finally {
+    news.server.close();
+  }
+});
+
 test("a place in a message shows a location card, and its map loads from OpenStreetMap only on tap", { tag: ["@feature:chat.location.card"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("place-alice"), peer("place-bob")]);
   const tiles: string[] = [];
@@ -131,4 +164,29 @@ test("a place in a message shows a location card, and its map loads from OpenStr
   await expect.poll(() => tiles.length).toBe(4);
   for (const tile of tiles) expect(tile).toMatch(/^https:\/\/tile\.openstreetmap\.org\/15\/\d+\/\d+\.png$/);
   await expect(card.getByTestId("location-open")).toHaveAttribute("href", /^https:\/\/(maps\.apple\.com|www\.openstreetmap\.org)\//);
+
+  // Show map from the keyboard: the button goes, and the focus moves to the map rather than to the page.
+  await say(alice, "and later at geo:0,0?q=38.6916,-9.2160(Torre%20de%20Bel%C3%A9m)");
+  const later = bubble(bob, "and later at").getByTestId("location-card");
+  await later.getByTestId("location-show-map").focus();
+  await bob.page.keyboard.press("Enter");
+  await expect(later.getByTestId("location-map")).toBeVisible();
+  await expect(later.getByRole("group", { name: "Torre de Belém" })).toBeFocused();
+
+  // In Arabic the coordinates still read left to right: the minus is drawn before its number, not after it.
+  await bob.page.evaluate(() => {
+    const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language: "ar" }));
+  });
+  await bob.page.reload();
+  await expect(bob.page.locator("html")).toHaveAttribute("dir", "rtl");
+  const coordinates = bubble(bob, "meet me at").getByTestId("location-coordinates");
+  await expect(coordinates).toHaveText("38.69160, -9.21600");
+  const drawn = await coordinates.evaluate((el) => {
+    const text = el.firstChild as Text;
+    const left = (i: number) => { const range = document.createRange(); range.setStart(text, i); range.setEnd(text, i + 1); return range.getBoundingClientRect().left; };
+    const minus = text.data.indexOf("-");
+    return { minusBeforeDigit: left(minus) < left(minus + 1), latitudeFirst: left(0) < left(minus) };
+  });
+  expect(drawn).toEqual({ minusBeforeDigit: true, latitudeFirst: true });
 });

@@ -55,9 +55,9 @@ export function sectionInView(boxes: readonly SectionBox[], line: number, viewBo
 /**
  * What a setting needs to be there at all: several profiles, an updater, wake-up push, wake-ups turned on (the online
  * notice rides on the subscription), calls' devices, translation (a `VITE_TRANSLATE` Desktop build,
- * lib/translateSettings.ts).
+ * lib/translateSettings.ts), the Android app (staying connected in the background).
  */
-export type SettingNeeds = "profiles" | "updates" | "wake" | "wakeOn" | "media" | "translate";
+export type SettingNeeds = "profiles" | "updates" | "wake" | "wakeOn" | "media" | "translate" | "android";
 
 /** One option the menu's search finds, by its row's label or by other words people look for it by. */
 export interface SettingEntry {
@@ -78,6 +78,7 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
   { section: "appearance", label: "settings.colorTheme", words: "settings.searchWords.colour" },
   { section: "appearance", label: "settings.colorScheme", words: "settings.searchWords.mode" },
   { section: "appearance", label: "settings.chatListDensity", words: "settings.searchWords.chatList" },
+  { section: "appearance", label: "settings.textSize", words: "settings.searchWords.textSize" },
   { section: "appearance", label: "settings.language", words: "settings.searchWords.language" },
   { section: "appearance", label: "settings.translate.name", words: "settings.translate.searchWords", needs: "translate" },
   { section: "appearance", label: "settings.reduceMotion", words: "settings.searchWords.motion" },
@@ -90,11 +91,13 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
   { section: "notifications", label: "settings.systemNotifications", words: "settings.searchWords.systemNotices" },
   { section: "notifications", label: "pwa.wake", words: "settings.searchWords.wake", needs: "wake" },
   { section: "notifications", label: "pwa.wakeOnline", needs: "wakeOn" },
+  { section: "notifications", label: "settings.stayConnected", words: "settings.searchWords.stayConnected", needs: "android" },
   { section: "media", label: "settings.media.microphone", words: "settings.searchWords.microphone", needs: "media" },
   { section: "media", label: "settings.media.camera", words: "settings.searchWords.camera", needs: "media" },
   { section: "media", label: "settings.media.speaker", words: "settings.searchWords.speaker", needs: "media" },
   { section: "privacy", label: "settings.linkPreviews", words: "settings.searchWords.linkPreviews" },
   { section: "privacy", label: "settings.sendTyping" },
+  { section: "privacy", label: "settings.sharePresence" },
   { section: "privacy", label: "settings.publicProfiles", words: "settings.searchWords.publicProfiles" },
   { section: "privacy", label: "settings.lockScreen", words: "settings.searchWords.lock" },
   { section: "privacy", label: "settings.password", opens: "passwordForm" },

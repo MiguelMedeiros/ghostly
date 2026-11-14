@@ -1,9 +1,10 @@
-import { appendFileSync, closeSync, existsSync, fstatSync, ftruncateSync, openSync, readFileSync, readSync, renameSync, rmSync, truncateSync, writeFileSync, writeSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, fstatSync, ftruncateSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync, truncateSync, writeFileSync, writeSync } from "node:fs";
 import type { AppFrameEvent } from "@ghostly/core";
 import type { EngineClientSink } from "@ghostly/browser/engine/server";
 import type { EngineEvent, RpcResponse } from "@ghostly/browser/shared/rpc";
-import type { EngineState, GroupView, LinkView, PinView, StoredMessage } from "@ghostly/browser/shared/types";
-import { chatJson, chatMessageJson, groupJson, groupMessageJson, type MessageJson } from "./views";
+import { parsePayLink } from "@ghostly/browser/shared/payLinks";
+import type { EngineState, FileTransferView, GroupView, LinkView, PinView, StoredMessage } from "@ghostly/browser/shared/types";
+import { chatJson, chatMessageJson, groupJson, groupMessageJson, groupPayTwins, type MessageJson } from "./views";
 import { paymentJson } from "./wallets";
 
 /**
@@ -53,7 +54,7 @@ export const JOIN_NOTICE = /^👋 (?:(.+) )?joined$/;
 type Listener = (event: GhostlyEvent) => void;
 type Seen = Map<string, Map<string, string>>;
 
-interface ChatShape { stage: string | null; live: boolean; transport: string | null; name: string | null; typing: boolean; typingKind: string; typingStatus: string | null; pin: PinView | null }
+interface ChatShape { stage: string | null; live: boolean; transport: string | null; name: string | null; typing: boolean; typingKind: string; typingStatus: string | null; pin: PinView | null; peer: string | null }
 interface GroupShape { status: string | null; members: string[]; typing: Record<string, { kind: string; status?: string }>; pin: PinView | null }
 
 /**
@@ -82,6 +83,17 @@ export class EventHub {
   private typingChanges = 0;
   private journalLines = 0;
   private journalBytes = 0;
+  /**
+   * Where the journal first names each chat, group and message (`namedIn`), by the hash of the id as written
+   * (`hashOfId`; two ids that share one only read more), so `forget` reads it from there on: each deletion read the
+   * whole journal (up to 32 MiB) from disk and searched it, a contact's delete for everyone included. Built from the
+   * journal at the first `forget`, kept by `emit`; null again once lines move (a trim, a rewrite).
+   */
+  private firstNamed: Map<number, number> | null = null;
+  /** The journal's size `firstNamed` covers: another size (a write it did not see) builds it again. */
+  private namedSize = 0;
+  /** Where the first line that cannot be read is, which `forget` reads from too: it may name what is removed. */
+  private unreadableAt = Infinity;
   private readonly listeners = new Set<Listener>();
   private readonly stateListeners = new Set<(state: EngineState) => void>();
   private readonly callListeners = new Set<(chat: string, signal: string) => void>();
@@ -98,7 +110,19 @@ export class EventHub {
   /** `file.*` events whose message was not seen yet: they wait for it a moment (the engine stores it right after). */
   private pendingFiles = new Map<string, { timer: ReturnType<typeof setTimeout>; emits: ((messageId: string | null) => void)[] }>();
   private baselined = false;
-  /** Chats and groups whose history the baseline did not read whole, and how to read it: until a file event needs it. */
+  /** Whether the chats and groups are known (`perChat`, `baseline`): a change to them is an event from then on. */
+  private stateKnown = false;
+  /**
+   * How a chat or group is caught up when its history's first event comes (`perChat`): until then its notes are not
+   * read. Null when the baseline took them all.
+   */
+  private chatReads: ChatReads | null = null;
+  /** Chats and groups caught up (`perChat`): their events are handled as they come. */
+  private caught = new Set<string>();
+  /** Chats and groups being caught up, and the events of their histories that wait for it, in order. */
+  private behind = new Map<string, (EngineEvent | RpcResponse)[]>();
+  private catchingUp = new Set<Promise<void>>();
+  /** Chats and groups whose history the baseline did not read whole, and how to read their file rows: until a file event needs them. */
   private unread = new Map<string, (chat: string) => Promise<readonly StoredMessage[]>>();
   /**
    * Whether the seen set notes mentions (`+m`): false on a set written before it did, whose mentions were reported with
@@ -114,8 +138,11 @@ export class EventHub {
   /** `seenDb`: the IndexedDB database of the seen set (tests give each hub its own). */
   constructor(private readonly journalPath: string, private readonly now: () => number = Date.now, private readonly seenDb = SEEN_DB) {}
 
-  /** Loads the journal's last seq and the seen set; call before `sink` is attached. */
-  async open(): Promise<void> {
+  /**
+   * Loads the journal's last seq and the seen set; call before `sink` is attached. `seen: false`: the seen set is read
+   * later, whole (`loadSeen`) or as each chat needs it (`loadOwnNotes`, `perChat`).
+   */
+  async open({ seen = true }: { seen?: boolean } = {}): Promise<void> {
     // A journal that cannot be read never keeps the profile from opening: it is set aside and a new one begins.
     const reserved = readDropped(this.journalPath + ".reserved") ?? 0;
     try {
@@ -157,19 +184,47 @@ export class EventHub {
       this.seq = reserved;
       this.markDropped(Math.max(this.dropped, reserved));
     }
-    this.db = await new Promise<IDBDatabase>((resolve, reject) => {
+    if (seen) await this.loadSeen();
+  }
+
+  /** Reads the whole seen set (`open` with `seen: false`); call before `baseline`. */
+  async loadSeen(): Promise<void> {
+    await this.openSeen();
+    await this.readNotes();
+  }
+
+  /**
+   * Reads only the seen set's own notes (its marks, the transfers under way, what this side said once), for `perChat`:
+   * true when that can catch the chats up one by one. Not on a first run, nor on a set without its marks, which the
+   * baseline reads whole once (`loadSeen`).
+   */
+  async loadOwnNotes(): Promise<boolean> {
+    await this.openSeen();
+    // Keys are [chat, id]: [x] sorts before [x, any id], and [x, []] after it (an array after every string).
+    await this.readNotes(IDBKeyRange.bound([FORMAT], [FORMAT, []]));
+    await this.readNotes(IDBKeyRange.bound([UNDERWAY], [UNDERWAY, []]));
+    await this.readNotes(IDBKeyRange.bound(["said:"], ["said;"], false, true));
+    return !this.firstRun && this.mentionsNoted && this.agesNoted;
+  }
+
+  private async openSeen(): Promise<void> {
+    this.db ??= await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open(this.seenDb, 1);
       request.onupgradeneeded = () => { request.result.createObjectStore(SEEN); this.firstRun = true; };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
-    // Two requests for the whole set, never a cursor: a cursor costs one tree search per row on Node's IndexedDB.
+  }
+
+  /** The notes in `range` (all with none) into memory. */
+  private async readNotes(range?: IDBKeyRange): Promise<void> {
+    // Two requests for the whole range, never a cursor: a cursor costs one tree search per row on Node's IndexedDB.
     const store = this.db.transaction(SEEN).objectStore(SEEN);
     const all = <T>(request: IDBRequest<T[]>) => new Promise<T[]>((resolve, reject) => {
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
-    const [keys, values] = await Promise.all([all(store.getAllKeys()), all(store.getAll() as IDBRequest<string[]>)]);
+    const [keys, values] = await Promise.all([all(store.getAllKeys(range)), all(store.getAll(range) as IDBRequest<string[]>)]);
     for (let i = 0; i < keys.length; i++) {
       const [chat, id] = keys[i] as [string, string];
       this.seenOf(chat).set(id, values[i]);
@@ -190,12 +245,14 @@ export class EventHub {
    * missing from the seen set are news (they came while no process derived events, a crash), except on a first
    * run, which only learns the history that was already there.
    */
-  baseline(state: EngineState, histories: Map<string, readonly StoredMessage[]>, rest?: { newest: Map<string, readonly StoredMessage[]>; whole: (chat: string) => Promise<readonly StoredMessage[]> }): void {
+  baseline(state: EngineState, histories: Map<string, readonly StoredMessage[]>, rest?: { newest: Map<string, readonly StoredMessage[]>; files: (chat: string) => Promise<readonly StoredMessage[]> }): void {
     this.stateChanged(state);
+    this.stateKnown = true;
     for (const [chat, messages] of histories) this.messages(chat, messages);
     // `rest.newest`: chats and groups in step (`inStep`), only their newest messages read. Nothing in them is news;
-    // a file of an older message is looked up when an event needs it (`rest.whole` reads the history then).
-    for (const [chat, messages] of rest?.newest ?? []) { this.messages(chat, messages, []); this.unread.set(chat, rest!.whole); }
+    // a file of an older message is looked up when an event needs it (`rest.files` reads the history's file rows then:
+    // the whole history, read for a contact's first file of each run, was the read the newest spare a start).
+    for (const [chat, messages] of rest?.newest ?? []) { this.messages(chat, messages, []); this.unread.set(chat, rest!.files); }
     this.baselined = true;
     this.firstRun = false;
     // The set's own marks, in one write: it notes mentions, and (every history having been read whole while it did not)
@@ -213,13 +270,73 @@ export class EventHub {
   }
 
   /**
+   * The baseline one chat or group at a time, after `loadOwnNotes` said it can: the chats and groups are known now, and
+   * each one's notes are read (by key range) and its history caught up as the baseline would (`reads`) when the first
+   * event of its history comes; its events wait for that. A one-shot hears a few chats at most: the whole set, a note
+   * per message active in the last 30 days, took a `message send` 0.07 s and 56 MB at 50,000 notes.
+   */
+  perChat(state: EngineState, reads: ChatReads): void {
+    this.chatReads = reads;
+    this.stateChanged(state);
+    this.stateKnown = true;
+    this.baselined = true;
+    for (const id of [...state.links.map((link) => link.id), ...state.groups.map((group) => `group:${group.id}`)]) this.unread.set(id, reads.files);
+  }
+
+  /** The catch-ups still running (`perChat`): their events are told once they end. */
+  async caughtUp(): Promise<void> {
+    while (this.catchingUp.size) await Promise.all(this.catchingUp);
+  }
+
+  /** An event of a history not caught up yet (`perChat`): it waits, and the first one starts the catch-up. */
+  private waits(message: EngineEvent | RpcResponse): boolean {
+    if (!this.chatReads || (message.kind !== "messages" && message.kind !== "message-changes")) return false;
+    const chat = message.linkId;
+    if (this.caught.has(chat)) return false;
+    const waiting = this.behind.get(chat);
+    if (waiting) { waiting.push(message); return true; }
+    this.behind.set(chat, [message]);
+    const running = this.catchUp(chat, message.kind === "messages" && !message.more)
+      .catch((error: unknown) => { process.stderr.write(`ghostly: event error: ${error instanceof Error ? error.stack : String(error)}\n`); })
+      .then(() => {
+        this.caught.add(chat);
+        const events = this.behind.get(chat) ?? [];
+        this.behind.delete(chat);
+        // A chat or group removed meanwhile: its removal forgot it already.
+        const known = chat.startsWith("group:") ? this.groups.has(chat.slice(6)) : this.chats.has(chat);
+        if (known) for (const event of events) this.sink.post(event);
+        this.catchingUp.delete(running);
+      });
+    this.catchingUp.add(running);
+    return true;
+  }
+
+  /**
+   * One chat's or group's notes, and its history as the baseline takes it (`baseline`): its newest page when the history
+   * is in step with them (`inStep`), else whole. `whole`: the event that waits is its whole history, which says it all.
+   */
+  private async catchUp(chat: string, whole: boolean): Promise<void> {
+    await this.readNotes(IDBKeyRange.bound([chat], [chat, []]));
+    await this.readNotes(IDBKeyRange.bound([`reactions:${chat}`], [`reactions:${chat}`, []]));
+    const reads = this.chatReads!;
+    if (whole) this.unread.delete(chat);
+    else {
+      const page = await reads.newest(chat);
+      if (page && !page.more) this.messages(chat, page.messages);
+      else if (page && this.inStep(chat, page.messages)) this.messages(chat, page.messages, []);
+      else { this.messages(chat, await reads.whole(chat)); this.unread.delete(chat); }
+    }
+    this.sweep([chat, `reactions:${chat}`]);
+  }
+
+  /**
    * Drops the notes of settled messages, and of reactions, whose last activity is older than `SEEN_KEEP_MS`: from memory
    * and from the store. A message of mine still on its way (or failed, which a retry sends again) keeps its note. The
    * 30 days count back from the newest activity the set knows when the clock reads later than it: a clock run ahead (a
    * wrong RTC, a VM restored with a skewed clock) would otherwise drop the notes of the recent history, which the next
    * start with the clock right reports again.
    */
-  sweep(): number {
+  sweep(only?: readonly string[]): number {
     let newest = 0;
     for (const [chat, known] of this.seen) {
       if (chat === FORMAT || chat.startsWith("said:")) continue;
@@ -227,8 +344,10 @@ export class EventHub {
     }
     const cutoff = Math.min(this.now(), newest) - SEEN_KEEP_MS;
     let dropped = 0;
-    for (const [chat, known] of this.seen) {
-      if (chat === FORMAT || chat.startsWith("said:")) continue;
+    // `only`: these chats' notes (`perChat`), the newest activity read so far setting the 30 days.
+    for (const chat of only ?? [...this.seen.keys()]) {
+      const known = this.seen.get(chat);
+      if (!known || chat === FORMAT || chat === UNDERWAY || chat.startsWith("said:")) continue;
       const reactions = chat.startsWith("reactions:");
       const gone: [string, null][] = [];
       for (const [id, note] of known) {
@@ -287,7 +406,7 @@ export class EventHub {
       if (next > before + 1 && before < this.dropped)
         out.push({ seq: before, id: `events.gap:${before}:${next}`, type: "events.gap", at: this.now(), from: before + 1, to: Math.min(this.dropped, next - 1) });
     };
-    if (existsSync(this.journalPath)) for (const line of journalTail(this.journalPath).lines) {
+    if (existsSync(this.journalPath)) for (const line of journalAfter(this.journalPath, since)) {
       let event: GhostlyEvent;
       try { event = JSON.parse(line) as GhostlyEvent; } catch { continue; /* torn */ }
       if (event.seq <= before) continue;
@@ -366,8 +485,12 @@ export class EventHub {
       // A mark a full disk refused goes first, as `markDropped` would have it: ahead of the journal.
       if (this.markOwed) this.markDropped(this.dropped);
       const line = Buffer.from(JSON.stringify(event) + "\n");
-      appendWhole(this.journalPath, line);
+      const at = appendWhole(this.journalPath, line);
       written = true;
+      if (this.firstNamed && at === this.namedSize) {
+        for (const id of namedIn(event)) if (!this.firstNamed.has(hashOfId(id))) this.firstNamed.set(hashOfId(id), at);
+        this.namedSize = at + line.length;
+      } else this.firstNamed = null;
       this.journalBytes += line.length;
       if (++this.journalLines > JOURNAL_KEEP * 2 || this.journalBytes > JOURNAL_MAX_BYTES) this.trimJournal();
     } catch (error) {
@@ -405,6 +528,7 @@ export class EventHub {
     const kept = lines.slice(start);
     const first = firstSeq(kept);
     this.markDropped(Math.max(this.dropped, first === undefined ? this.seq : first - 1));
+    this.firstNamed = null;
     writeFileSync(this.journalPath + ".tmp", kept.length ? kept.join("\n") + "\n" : "", { mode: 0o600 });
     renameSync(this.journalPath + ".tmp", this.journalPath);
     this.journalLines = kept.length;
@@ -423,7 +547,10 @@ export class EventHub {
     try {
       rmSync(this.journalPath + ".unreadable", { force: true });
       if (!existsSync(this.journalPath)) return;
-      const { bytes, start, at } = journalWindow(this.journalPath);
+      // Only from the first line that names one of them on, and nothing when none does.
+      const named = this.namedFrom(ids);
+      if (named === undefined) return;
+      let { bytes, start, at } = journalWindow(this.journalPath, named);
       // A few ids: looked for in the bytes, and only the lines that name one are read. None named: nothing to write.
       // Many (a chat removed with its history, a long change): every line is read once, against all of them at once.
       const needles = ids.map((id) => JSON.stringify(id)), few = ids.length <= FORGET_SEARCHED_IDS;
@@ -458,6 +585,13 @@ export class EventHub {
         }
         return;
       }
+      // Written again whole: what came before the lines read is read too, and every line after the first edit moves.
+      this.firstNamed = null;
+      if (start === 0 && at > 0) {
+        const window = journalWindow(this.journalPath);
+        for (const edit of edits) { edit.from += at - window.at; edit.to += at - window.at; }
+        ({ bytes, start, at } = window);
+      }
       const parts: Buffer[] = [];
       let from = start, removed = 0;
       for (const edit of edits) {
@@ -473,11 +607,47 @@ export class EventHub {
       this.journalLines -= removed;
       this.journalBytes = written.length;
     } catch (error) {
+      this.firstNamed = null;
       process.stderr.write(`ghostly: event journal error: ${error instanceof Error ? error.message : String(error)}\n`);
     }
   }
 
+  /**
+   * The first place in the journal a line may name one of these ids (`namedIn`), or undefined when none does. The
+   * first call reads the journal for it once.
+   */
+  private namedFrom(ids: readonly string[]): number | undefined {
+    if (!this.firstNamed || statSync(this.journalPath).size !== this.namedSize) {
+      // In the bytes, never made into text: each value of a key `namedIn` reads (and of any `id`), by its hash.
+      const { bytes, start, at, size } = journalWindow(this.journalPath);
+      const firstNamed = new Map<number, number>();
+      for (const key of NAMING_KEYS) {
+        for (let found = bytes.indexOf(key, start); found !== -1; found = bytes.indexOf(key, found + key.length)) {
+          const open = found + key.length;
+          if (bytes[open] !== 0x22) continue;
+          let close = open + 1;
+          while (close < bytes.length && bytes[close] !== 0x22 && bytes[close] !== 0x0a) close += bytes[close] === 0x5c ? 2 : 1;
+          if (bytes[close] !== 0x22) continue;
+          const hash = hashOf(bytes, open, close + 1), line = at + Math.max(start, bytes.lastIndexOf(0x0a, found) + 1);
+          if ((firstNamed.get(hash) ?? Infinity) > line) firstNamed.set(hash, line);
+        }
+      }
+      // A line cut short (not `{…}`) cannot be read for what it names.
+      this.unreadableAt = Infinity;
+      for (const [from, to] of linesOf(bytes, start)) {
+        if (bytes[from] === 0x7b && bytes[to - 1] === 0x7d) continue;
+        if (bytes.subarray(from, to).some((byte) => byte !== 0x20)) { this.unreadableAt = at + from; break; }
+      }
+      this.firstNamed = firstNamed;
+      this.namedSize = size;
+    }
+    let from = this.unreadableAt;
+    for (const id of ids) from = Math.min(from, this.firstNamed.get(hashOfId(id)) ?? Infinity);
+    return from === Infinity ? undefined : from;
+  }
+
   private handle(message: EngineEvent | RpcResponse): void {
+    if (this.waits(message)) return;
     switch (message.kind) {
       case "state": this.stateChanged(message.state); break;
       case "messages": this.messages(message.linkId, message.messages); break;
@@ -500,13 +670,18 @@ export class EventHub {
   }
 
   private stateChanged(state: EngineState): void {
-    const quiet = !this.baselined;
+    const quiet = !this.stateKnown;
+    // A chat's id comes back when its invite is joined again, and a group's when it is joined again: each creation and
+    // removal carries its time in its id, or a listener that dedupes on it dropped the second.
     const links = new Map(state.links.map((link) => [link.id, link]));
+    // A chat whose view is the object the last state had did not change (the engine keeps an unchanged chat's view).
+    const last = new Map(this.state?.links.map((link) => [link.id, link]));
     for (const [id, link] of links) {
+      if (last.get(id) === link && this.chats.has(id)) continue;
       const shape = chatShape(link), before = this.chats.get(id);
       this.chats.set(id, shape);
       if (quiet) continue;
-      if (!before) { this.emit("chat.created", `chat.created:${id}`, { chat: id, summary: { ...chatJson(link), invite: null } }); continue; }
+      if (!before) { this.emit("chat.created", `chat.created:${id}:${this.now()}`, { chat: id, summary: { ...chatJson(link), invite: null } }); continue; }
       if (shape.stage && shape.stage !== before.stage) {
         const progress = link.pairingProgress;
         this.emit("chat.pairing", `chat.pairing:${id}:${shape.stage}:${progress?.since ?? this.now()}`, {
@@ -532,8 +707,10 @@ export class EventHub {
     }
     const removedChats = [...this.chats.keys()].filter((id) => !links.has(id));
     for (const id of removedChats) {
+      // The contact's key (`peer`) goes with it: `listen --from <key>` cannot ask the daemon for a chat that is gone.
+      const peer = this.chats.get(id)?.peer;
       this.chats.delete(id);
-      if (!quiet) this.emit("chat.removed", `chat.removed:${id}`, { chat: id });
+      if (!quiet) this.emit("chat.removed", `chat.removed:${id}:${this.now()}`, { chat: id, ...(peer ? { peer } : {}) });
     }
     // A chat removed deletes its history here: its events go too, but for its removal.
     const chatsGone = new Set(removedChats);
@@ -543,10 +720,9 @@ export class EventHub {
       const shape = groupShape(group), before = this.groups.get(id);
       this.groups.set(id, shape);
       if (quiet) continue;
-      if (!before) { this.emit("group.created", `group.created:${id}`, { group: id, summary: groupJson(group) }); continue; }
+      if (!before) { this.emit("group.created", `group.created:${id}:${this.now()}`, { group: id, summary: groupJson(group) }); continue; }
       if (shape.status !== before.status) this.emit("group.status", `group.status:${id}:${shape.status}:${this.now()}`, { group: id, status: shape.status });
-      const joined = shape.members.filter((key) => !before.members.includes(key));
-      const left = before.members.filter((key) => !shape.members.includes(key));
+      const { joined, left } = membersDiff(before.members, shape.members);
       if (joined.length || left.length) this.emit("group.members", `group.members:${id}:${this.now()}`, { group: id, joined, left });
       this.pinned("group", id, before.pin, shape.pin);
       // A member started or stopped writing in a private group (WISP 902 · Group Mesh § Typing), as `typing.*` in a chat,
@@ -563,20 +739,30 @@ export class EventHub {
     const removedGroups = [...this.groups.keys()].filter((id) => !groups.has(id));
     for (const id of removedGroups) {
       this.groups.delete(id);
-      if (!quiet) this.emit("group.removed", `group.removed:${id}`, { group: id });
+      if (!quiet) this.emit("group.removed", `group.removed:${id}:${this.now()}`, { group: id });
     }
     // A group left or forgotten: the same.
     const groupsGone = new Set(removedGroups);
     this.forget(removedGroups, (event) => groupsGone.has(event.group as string) && event.type !== "group.removed");
-    for (const [id, payment] of Object.entries(state.payments ?? {})) {
+    // A group's payment that went over a member's edge, or a community member's `cpay:` link, has no `group` of its own
+    // (only a request to the whole group does): its event names the group, as `listen --group` reads it.
+    let edgeGroups: Map<string, string> | undefined;
+    const groupOf = (linkId: string) => (edgeGroups ??= new Map(state.groups.flatMap((g) => g.members.flatMap((m) => m.edge ? [[m.edge.linkId, g.id] as const] : [])))).get(linkId)
+      ?? parsePayLink(linkId)?.groupId;
+    // The engine keeps every payment for good and hands the same views object until one changes: the same object as in
+    // the last state is skipped, or each state (every 50 ms under traffic) walked them all, 7 ms at 20,000.
+    const payments = state.payments === this.state?.payments ? {} : state.payments ?? {};
+    for (const [id, payment] of Object.entries(payments)) {
       const shape = `${payment.state}|${payment.error ?? ""}|${payment.closed ? 1 : 0}`, before = this.payments.get(id);
       this.payments.set(id, shape);
       if (quiet || before === shape) continue;
-      const json = paymentJson(payment);
+      const group = payment.group ?? groupOf(payment.linkId);
+      const json = { ...paymentJson(payment), ...(group && { group }) };
       if (before === undefined) this.emit("payment.created", `payment.created:${id}`, { chat: payment.linkId, payment: json });
       else this.emit("payment.updated", `payment.updated:${id}:${payment.state}:${this.now()}`, { chat: payment.linkId, payment: json });
     }
     for (const link of state.links) {
+      if (last.get(link.id) === link) continue;
       for (const identity of link.identities?.received ?? []) {
         const key = `${link.id}:${identity.id}`, shape = identity.status, before = this.received.get(key);
         this.received.set(key, shape);
@@ -589,27 +775,67 @@ export class EventHub {
         });
       }
     }
-    for (const [id, transfer] of Object.entries(state.transfers ?? {})) {
-      const shape = `${transfer.state}|${transfer.stage ?? ""}`, before = this.transfers.get(id);
-      this.transfers.set(id, shape);
-      if (quiet || before === shape) continue;
-      const chat = state.links.find((l) => id.startsWith(`${l.id}-`))?.id ?? null;
-      // A group's file (WISP 503) names its group.
-      const group = chat ? undefined : state.groups.find((g) => id.startsWith(`group-${g.id}-`))?.id;
-      const fields = { chat, ...(group ? { group } : {}), file: id, direction: transfer.direction ?? (id.includes("-in-") ? "in" : "out"), size: transfer.size, transferred: transfer.transferred, ...(transfer.error ? { error: transfer.error } : {}) };
-      let emit: ((messageId: string | null) => void) | null = null;
-      if (transfer.state === "done") { const key = `file.done:${id}`; emit = (messageId) => this.emit("file.done", key, { ...fields, messageId }); }
-      else if (transfer.state === "failed") { const key = `file.failed:${id}:${this.now()}`; emit = (messageId) => this.emit("file.failed", key, { ...fields, messageId, retry: !!transfer.retry }); }
-      else if (transfer.stage === "asking" && fields.direction === "in") { const key = `file.offered:${id}:${this.now()}`; emit = (messageId) => this.emit("file.offered", key, { ...fields, messageId, room: transfer.room ?? null }); }
-      else if (transfer.stage) {
-        const key = `file.stage:${id}:${transfer.stage}:${this.now()}`, stage = { stage: transfer.stage, ...(transfer.pausedBy ? { pausedBy: transfer.pausedBy } : {}) };
-        emit = (messageId) => this.emit("file.stage", key, { ...fields, messageId, ...stage });
-      }
-      if (emit) this.fileEvent(id, emit, chat ?? (group ? `group:${group}` : null));
-    }
+    for (const [id, transfer] of Object.entries(state.transfers ?? {})) this.transferChanged(id, transfer, state, quiet);
     this.state = state;
     for (const listener of this.stateListeners) {
       try { listener(state); } catch { /* its own */ }
+    }
+  }
+
+  /**
+   * A transfer's `file.*` event, when its shape changed. One under way is noted in the seen set until its end is told:
+   * one that ends while no hub watches (a stop, a start before the baseline) is told by the next start, at its baseline
+   * or from its record (`ended`), once. `quiet`: the baseline, which tells only those ends.
+   */
+  private transferChanged(id: string, transfer: FileTransferView, state: EngineState, quiet: boolean): void {
+    const shape = `${transfer.state}|${transfer.stage ?? ""}`, before = this.transfers.get(id);
+    this.transfers.set(id, shape);
+    const end = transfer.state === "done" || transfer.state === "failed", underway = this.seen.get(UNDERWAY)?.has(id) ?? false;
+    if (!end && !underway) {
+      this.seenOf(UNDERWAY).set(id, "yes");
+      this.persist(UNDERWAY, [[id, "yes"]]);
+    }
+    if ((quiet && !(end && underway)) || before === shape) return;
+    const chat = state.links.find((l) => id.startsWith(`${l.id}-`))?.id ?? null;
+    // A group's file (WISP 503) names its group.
+    const group = chat ? undefined : state.groups.find((g) => id.startsWith(`group-${g.id}-`))?.id;
+    const fields = { chat, ...(group ? { group } : {}), file: id, direction: transfer.direction ?? (id.includes("-in-") ? "in" : "out"), size: transfer.size, transferred: transfer.transferred, ...(transfer.error ? { error: transfer.error } : {}) };
+    // An end told is no longer under way: its note goes as it is told (one still waiting for its message at a stop stays).
+    const told = () => {
+      if (!this.seen.get(UNDERWAY)?.delete(id)) return;
+      this.persist(UNDERWAY, [[id, null]]);
+    };
+    let emit: ((messageId: string | null) => void) | null = null;
+    if (transfer.state === "done") { const key = `file.done:${id}`; emit = (messageId) => { told(); this.emit("file.done", key, { ...fields, messageId }); }; }
+    else if (transfer.state === "failed") { const key = `file.failed:${id}:${this.now()}`; emit = (messageId) => { told(); this.emit("file.failed", key, { ...fields, messageId, retry: !!transfer.retry }); }; }
+    else if (transfer.stage === "asking" && fields.direction === "in") { const key = `file.offered:${id}:${this.now()}`; emit = (messageId) => this.emit("file.offered", key, { ...fields, messageId, room: transfer.room ?? null }); }
+    else if (transfer.stage) {
+      const key = `file.stage:${id}:${transfer.stage}:${this.now()}`, stage = { stage: transfer.stage, ...(transfer.pausedBy ? { pausedBy: transfer.pausedBy } : {}) };
+      emit = (messageId) => this.emit("file.stage", key, { ...fields, messageId, ...stage });
+    }
+    if (emit) this.fileEvent(id, emit, chat ?? (group ? `group:${group}` : null));
+  }
+
+  /**
+   * After the baseline, before the sink is attached: the transfers noted under way that the engine's state no longer
+   * shows. A finished file has no transfer there after a restart, only its record (`stored`): one that ended while the
+   * daemon stopped is told now. A record gone (the file deleted) drops its note.
+   */
+  async ended(stored: (fileId: string) => Promise<{ direction?: "in" | "out"; transfer?: FileTransferView } | undefined>): Promise<void> {
+    const state = this.state;
+    if (!state) return;
+    for (const id of [...this.seen.get(UNDERWAY)?.keys() ?? []]) {
+      if (state.transfers?.[id]) continue;
+      let record;
+      try { record = await stored(id); } catch { continue; /* asked again at the next start */ }
+      if (!record) {
+        this.seen.get(UNDERWAY)?.delete(id);
+        this.persist(UNDERWAY, [[id, null]]);
+        continue;
+      }
+      const transfer = record.transfer;
+      if (transfer?.state !== "done" && transfer?.state !== "failed") continue;
+      this.transferChanged(id, { ...transfer, ...(record.direction ? { direction: record.direction } : {}) }, state, true);
     }
   }
 
@@ -636,7 +862,7 @@ export class EventHub {
     const timer = setTimeout(() => this.flushFile(fileId, null), FILE_MESSAGE_WAIT_MS);
     timer.unref?.();
     this.pendingFiles.set(fileId, { timer, emits: [emit] });
-    // A file of a message older than the ones the baseline read: the history is read now, once, for all its files.
+    // A file of a message older than the ones the baseline read: the history's file rows are read now, once, for all its files.
     const read = chat === null ? undefined : this.unread.get(chat);
     if (!read) return;
     this.unread.delete(chat!);
@@ -684,13 +910,19 @@ export class EventHub {
     this.reactions(chat, group, messages, quiet);
     const files: [string, string][] = [];
     const cutoff = this.now() - SEEN_KEEP_MS;
+    // A group's payment lines that say a payment note again (`groupPayTwins`), worked out once, when an event needs them.
+    let twinLines: ReadonlyMap<string, string> | undefined;
+    const twins = () => twinLines ??= group
+      ? groupPayTwins(messages, new Map(messages.flatMap((m) => (m.groupPay ? [[m.groupPay.id, m.groupPay] as const] : []))), this.state?.payments ?? {},
+        this.state?.groups.find((g) => g.id === group))
+      : new Map();
     for (const message of messages) {
       present.add(message.id);
       if (message.file && this.fileMessages.get(message.file.id) !== message.id) { this.fileMessages.set(message.file.id, message.id); files.push([message.file.id, message.id]); }
       let state = stateOf(message);
       const note = known.get(message.id), before = note === undefined ? undefined : stateIn(note);
       const at = activityOf(message);
-      const json = () => group ? groupMessageJson(message, this.state?.groups.find((g) => g.id === group)) : chatMessageJson(message, this.state?.links.find((l) => l.id === chat));
+      const json = () => group ? groupMessageJson(message, this.state?.groups.find((g) => g.id === group), twins().get(message.id)) : chatMessageJson(message, this.state?.links.find((l) => l.id === chat));
       if (before === undefined && cameAt(message) < cutoff) {
         // Came here longer ago than `SEEN_KEEP_MS`, with no note: its note was dropped (or it came, that long ago, while
         // nothing ran). No news, and no note again, unless it was active since: then an edit since is reported, once.
@@ -713,7 +945,11 @@ export class EventHub {
         if (timeIn(note!) === undefined) { const noted = noteOf(state, at); known.set(message.id, noted); changes.push([message.id, noted]); }
         continue;
       }
-      const noted = noteOf(state, at);
+      const [delivery] = splitState(state), [was] = before === undefined ? [undefined] : splitState(before);
+      const passed = passesIn(note, was), moved = !group && message.sender === "me" && was !== undefined && delivery !== was;
+      const again = moved && (passed.been & deliveryBit(delivery)) !== 0;
+      const passes = moved ? { count: passed.count + 1, been: passed.been | deliveryBit(delivery) } : passed;
+      const noted = noteOf(state, at, passes);
       known.set(message.id, noted);
       changes.push([message.id, noted]);
       if (quiet) continue;
@@ -733,23 +969,25 @@ export class EventHub {
       }
       // A press the engine learned after the reply was first seen here: a group reply first held from a copy a member
       // handed on without its reply box, which its author's whole copy completes (WISP 902 · Group Mesh § Catch-up).
-      if (message.sender === "peer" && message.press && !pressedIn(before)) this.pressed(chat, group, message, json());
+      // It carries the reply, as `group.message` gives it: its turn (`listen --turns`), which that event did not start,
+      // unless a mention learned with it says the reply too.
+      const mentioned = !!group && mentionedIn(state) && !mentionedIn(before) && this.mentionsNoted;
+      if (message.sender === "peer" && message.press && !pressedIn(before)) this.pressed(chat, group, message, json(), !!group && !mentioned);
       // A mention of me learned after the message was reported: a group message first held from a copy a member handed
       // on without its author's whole signature, which the whole copy completes (WISP 902 · Group Mesh § Catch-up), or
       // an edit that names me. Its `group.message` said no mention; this says it, once.
-      if (group && mentionedIn(state) && !mentionedIn(before) && this.mentionsNoted)
-        this.emit("group.mentioned", `group.mentioned:${group}:${message.id}`, { group, messageId: message.id, message: json() });
+      if (mentioned) this.emit("group.mentioned", `group.mentioned:${group}:${message.id}`, { group, messageId: message.id, message: json() });
       if (group) {
         // A new text in a group (WISP 902 § Edits): mine as made here, a member's as it came. Once per edit number.
         const [, edits] = splitState(state), [, edited] = splitState(before);
         if (edits > edited) this.emit("group.message.edited", `group.message.edited:${group}:${message.id}:${edits}`, { group, messageId: message.id, edits, message: json() });
       } else {
-        const [delivery, edits] = splitState(state), [was, edited] = splitState(before);
+        const [, edits] = splitState(state), [, edited] = splitState(before);
         // A new text (WISP 400 § Edits): mine as made here, the contact's as it came. Once per edit number. The engine's
         // own edit that sends a question's buttons again (WISP 406 · Message Buttons) is none: same text, nobody's edit.
         if (edits > edited && !(message.sender === "me" && message.edit?.restore)) this.emit("message.edited", `message.edited:${chat}:${message.id}:${edits}`, { chat, messageId: message.id, edits, message: json() });
-        if (message.sender === "me" && delivery !== was)
-          this.emit("message.delivery", `message.delivery:${chat}:${message.id}:${delivery}`, { chat, messageId: message.id, delivery, ...(message.deliveryError ? { error: message.deliveryError } : {}) });
+        if (moved)
+          this.emit("message.delivery", `message.delivery:${chat}:${message.id}:${delivery}${again ? `:${passes.count}` : ""}`, { chat, messageId: message.id, delivery, ...(message.deliveryError ? { error: message.deliveryError } : {}) });
       }
     }
     const gone: string[] = [];
@@ -784,16 +1022,16 @@ export class EventHub {
    * profile gave the chat, as `chat list` gives it; null without one, and in a group) and the reply (`replyId`).
    * `untrusted.name` is the name the person gave themselves, as an agent turn's: theirs to choose, so data, never
    * instructions, and under `untrusted` only. The engine marks a reply a press only while the buttons were open for
-   * that person.
+   * that person. `message` (the reply, as `group.message` gives it) only on a group press learned after its reply's event.
    */
-  private pressed(chat: string, group: string | null, message: StoredMessage, json: { nick: string | null }): void {
+  private pressed(chat: string, group: string | null, message: StoredMessage, json: { nick: string | null }, withReply = false): void {
     const press = message.press!;
     const link = group ? undefined : this.state?.links.find((l) => l.id === chat);
     const name = link ? chatJson(link).label : null;
     this.emit("button.pressed", `button.pressed:${group ?? chat}:${message.id}`, {
       ...(group ? { group } : { chat }), messageId: press.messageId, button: press.button, label: press.label,
       by: group ? message.member ?? null : chat, name, replyId: message.id, ...(press.inferred ? { inferred: true } : {}),
-      untrusted: { name: json.nick ?? null },
+      untrusted: { name: json.nick ?? null }, ...(withReply ? { message: json } : {}),
     });
   }
 
@@ -855,12 +1093,40 @@ const FORMAT = "format:";
 const MENTIONS_NOTED = "mentions";
 /** The seen set's mark that its notes carry their time. */
 const AGES_NOTED = "ages";
+/** The seen set's notes of the transfers seen under way whose end was not told yet, by file id. */
+const UNDERWAY = "files:";
+
+/** How `EventHub.perChat` reads a chat's or group's history when it catches it up, as the baseline does. */
+export interface ChatReads {
+  /** Its newest page, as the engine's start read it, while its history has not changed since; else null. */
+  newest(chat: string): Promise<{ messages: readonly StoredMessage[]; more: boolean } | null>;
+  whole(chat: string): Promise<readonly StoredMessage[]>;
+  /** Its file rows, read when a file event needs a message the page did not hold. */
+  files(chat: string): Promise<readonly StoredMessage[]>;
+}
 
 /**
  * A note: what the seen set keeps of a message (or a reaction's number), then `@` and the time of its last activity in
- * base 36 (`received+p#e2@mg3k1x2a`), by which `sweep` drops it. A note from before has no time.
+ * base 36 (`received+p#e2@mg3k1x2a`), by which `sweep` drops it. A note from before has no time. A message of mine whose
+ * delivery changed ends with its passes (`sent@mg3k1x2a!4.b`): `!`, how many changes, `.` and the deliveries it was in.
  */
-const noteOf = (state: string, at: number): string => `${state}@${Math.max(0, Math.floor(at)).toString(36)}`;
+const noteOf = (state: string, at: number, passes?: Passes): string =>
+  `${state}@${Math.max(0, Math.floor(at)).toString(36)}${passes?.count ? `!${passes.count}.${passes.been.toString(36)}` : ""}`;
+/**
+ * A message's delivery changes (`count`) and the deliveries it was in (`been`, a bit per `DELIVERIES`). A delivery it
+ * comes back to (sent again after its contact went away before the receipt; failed again after a retry) is reported
+ * with its count in its id: with the id of its first time, a listener that dedupes on it dropped it, and held the
+ * message as still on its way.
+ */
+interface Passes { count: number; been: number }
+const DELIVERIES = ["sending", "sent", "queued", "waiting", "held", "delivered", "failed"];
+const deliveryBit = (delivery: string) => { const at = DELIVERIES.indexOf(delivery); return 1 << (at === -1 ? DELIVERIES.length : at); };
+function passesIn(note: string | undefined, delivery: string | undefined): Passes {
+  const mark = note?.lastIndexOf("!") ?? -1;
+  if (mark === -1) return { count: 0, been: delivery === undefined ? 0 : deliveryBit(delivery) };
+  const [count, been] = note!.slice(mark + 1).split(".");
+  return { count: Number(count) || 0, been: parseInt(been ?? "", 36) || 0 };
+}
 function stateIn(note: string): string {
   const at = note.lastIndexOf("@");
   return at === -1 ? note : note.slice(0, at);
@@ -919,6 +1185,7 @@ function chatShape(link: LinkView): ChatShape {
   return {
     stage: view.stage, live: view.live, transport: view.transport, name: view.name, typing: !!link.peerTyping,
     typingKind: link.peerTyping ? link.peerTypingKind ?? "typing" : "typing", typingStatus: link.peerTyping ? link.peerTypingStatus ?? null : null, pin: link.pin ?? null,
+    peer: view.peer || null,
   };
 }
 
@@ -933,6 +1200,22 @@ function groupShape(group: GroupView): GroupShape {
 }
 
 /**
+ * Who joined and who left between two of `groupShape`'s sorted member lists, in one walk of both: a state comes up to
+ * every 50 ms, and a full community has 256 members, so a lookup of each key in the other list would cost each state
+ * O(members²) per group though nothing changed.
+ */
+function membersDiff(before: readonly string[], after: readonly string[]): { joined: string[]; left: string[] } {
+  const joined: string[] = [], left: string[] = [];
+  let i = 0, j = 0;
+  while (i < before.length || j < after.length) {
+    if (j >= after.length || (i < before.length && before[i] < after[j])) left.push(before[i++]);
+    else if (i >= before.length || after[j] < before[i]) joined.push(after[j++]);
+    else { i++; j++; }
+  }
+  return { joined, left };
+}
+
+/**
  * The journal's whole lines within its last `JOURNAL_MAX_BYTES`, and its size: never the whole file as one string, so
  * a journal grown past what a string can hold (or a trim's bound) is still read, and in bounded time. Lines `forget`
  * blanked are left out.
@@ -940,6 +1223,70 @@ function groupShape(group: GroupView): GroupShape {
 function journalTail(path: string): { lines: string[]; size: number } {
   const { bytes, start, size } = journalWindow(path);
   return { lines: bytes.toString("utf8", start).split("\n").filter((line) => line.trimStart()), size };
+}
+
+/** What `journalAfter` reads first from the journal's end; each read further back is twice the last. */
+const REPLAY_CHUNK = 64 * 1024;
+/** The bytes of a line's start that hold its seq (`seqAt`), and how they begin. */
+const SEQ_PREFIX = 32;
+const SEQ_START = Buffer.from('{"seq":');
+
+/**
+ * The journal's lines after `since`, within its last `JOURNAL_MAX_BYTES`, as `journalTail` gives them: its end is read
+ * back in growing chunks, each line's seq taken from its `{"seq":N` start (as each event is written), until a line at or
+ * before `since`; only what follows it is made into text. A line with no seq there (blanked by `forget`, torn) is passed
+ * over and given, as `journalTail` gives it.
+ */
+function journalAfter(path: string, since: number): string[] {
+  const fd = openSync(path, "r");
+  const read = (from: number, to: number) => {
+    const bytes = Buffer.alloc(to - from);
+    let done = 0;
+    while (done < bytes.length) {
+      const n = readSync(fd, bytes, done, bytes.length - done, from + done);
+      if (!n) break;
+      done += n;
+    }
+    return bytes.subarray(0, done);
+  };
+  try {
+    const size = fstatSync(fd).size;
+    // From one byte before the cut, as `journalWindow` reads: a line that begins exactly at it is kept whole.
+    const cut = Math.max(0, size - JOURNAL_MAX_BYTES - 1);
+    // A cursor before the journal's first event (`listen --since 0`, `events`): all of it, with nothing to look for.
+    if (cut === 0 && (seqAt(read(0, Math.min(size, SEQ_PREFIX)), 0) ?? -1) > since) return journalTail(path).lines;
+    // Where the earliest line checked begins in the file: it and every line after it are past `since`, or have no seq.
+    let after = size, found = false, from = size, chunk = REPLAY_CHUNK;
+    // What was read, the earliest first. Each chunk reads the start of the one after it too: a line that begins near
+    // its end has its seq there.
+    const chunks: Buffer[] = [];
+    while (from > cut && !found) {
+      const next = Math.max(cut, from - chunk), bytes = read(next, Math.min(size, from + SEQ_PREFIX));
+      chunks.unshift(bytes.subarray(0, Math.min(bytes.length, from - next)));
+      for (let newline = bytes.lastIndexOf(0x0a, from - next - 1); newline !== -1; newline = newline > 0 ? bytes.lastIndexOf(0x0a, newline - 1) : -1) {
+        const seq = seqAt(bytes, newline + 1);
+        if (seq !== undefined && seq <= since) { found = true; break; }
+        after = next + newline + 1;
+      }
+      // The file's first line, which no newline comes before. Past the window, the line it cut is not whole: left out.
+      if (!found && next === 0 && (seqAt(bytes, 0) ?? Infinity) > since) after = 0;
+      from = next;
+      chunk *= 2;
+    }
+    const bytes = chunks.length === 1 ? chunks[0] : Buffer.concat(chunks);
+    return bytes.toString("utf8", after - from).split("\n").filter((line) => line.trimStart());
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** The seq a journal line begins with (`{"seq":N,` or `{"seq":N}`), read from its first bytes, never made into text. */
+function seqAt(bytes: Buffer, at: number): number | undefined {
+  for (let i = 0; i < SEQ_START.length; i++) if (bytes[at + i] !== SEQ_START[i]) return undefined;
+  let seq = 0, i = at + SEQ_START.length;
+  const end = Math.min(bytes.length, at + SEQ_PREFIX);
+  for (; i < end && bytes[i] >= 0x30 && bytes[i] <= 0x39; i++) seq = seq * 10 + bytes[i] - 0x30;
+  return i > at + SEQ_START.length && (bytes[i] === 0x2c || bytes[i] === 0x7d) ? seq : undefined;
 }
 
 /**
@@ -974,8 +1321,7 @@ function journalEnd(path: string): { seq: number; first: number | undefined; lin
   if (bytes.length > start && bytes[bytes.length - 1] !== 0x0a) {
     const from = Math.max(start, bytes.lastIndexOf(0x0a) + 1);
     // Only the start of a cut line is made into text, for the seq it names.
-    const named = /^\{"seq":(\d+)[,}]/.exec(bytes.toString("latin1", from, Math.min(bytes.length, from + 32)))?.[1];
-    tail = { at: size - bytes.length + from, whole: read === from, seq: named === undefined ? undefined : Number(named) };
+    tail = { at: size - bytes.length + from, whole: read === from, seq: seqAt(bytes, from) };
   }
   return { seq, first, lines, size, tail };
 }
@@ -1024,9 +1370,10 @@ function writeMark(path: string, seq: number, create: boolean): void {
 
 /**
  * Appends a line whole or not at all: what a full disk took of it is cut back (as the store's journal does), so the
- * next line, once there is room, starts a line of its own instead of making one no reader can parse with it.
+ * next line, once there is room, starts a line of its own instead of making one no reader can parse with it. Returns
+ * where the line begins in the file.
  */
-function appendWhole(path: string, line: Buffer): void {
+function appendWhole(path: string, line: Buffer): number {
   const fd = openSync(path, "a", 0o600);
   let whole = -1;
   try {
@@ -1038,7 +1385,30 @@ function appendWhole(path: string, line: Buffer): void {
   } finally {
     closeSync(fd);
   }
+  return whole;
 }
+
+/**
+ * The ids an event is of, as `forget`'s callers tell what is removed: its chat, its group, its message (`messageId`,
+ * `message.id`), the reply that pressed it (`replyId`) and the message it quotes (`message.replyTo.id`).
+ */
+function namedIn(event: GhostlyEvent): string[] {
+  const message = event.message as { id?: unknown; replyTo?: { id?: unknown } } | undefined;
+  return [event.chat, event.group, event.messageId, event.replyId, message?.id, message?.replyTo?.id].filter((id): id is string => typeof id === "string");
+}
+
+/** The keys whose values `namedIn` reads, as a journal line has them: `id` stands for `message.id` and its quote's. */
+const NAMING_KEYS = ['"chat":', '"group":', '"messageId":', '"replyId":', '"id":'].map((key) => Buffer.from(key));
+
+/** FNV-1a of these bytes. */
+function hashOf(bytes: Uint8Array, from = 0, to = bytes.length): number {
+  let hash = 0x811c9dc5;
+  for (let i = from; i < to; i++) hash = Math.imul(hash ^ bytes[i], 0x01000193);
+  return hash >>> 0;
+}
+
+/** The hash of an id as a journal line writes it (quoted, escaped). */
+const hashOfId = (id: string) => hashOf(Buffer.from(JSON.stringify(id)));
 
 /** The bounds in `bytes` of each line from `start` on, its newline left out. */
 function linesOf(bytes: Buffer, start: number): [number, number][] {
@@ -1066,14 +1436,14 @@ function linesNaming(bytes: Buffer, start: number, needles: readonly string[]): 
 
 /**
  * The bytes of the journal's last `JOURNAL_MAX_BYTES`, `start` where its first whole line begins in them, `at` where
- * they begin in the file, and its size.
+ * they begin in the file, and its size. `lineAt`: where a line begins, read from there on when it is within them.
  */
-function journalWindow(path: string): { bytes: Buffer; start: number; at: number; size: number } {
+function journalWindow(path: string, lineAt = 0): { bytes: Buffer; start: number; at: number; size: number } {
   const fd = openSync(path, "r");
   try {
     const size = fstatSync(fd).size;
     // From one byte before the cut, so a line that begins exactly at it is kept whole.
-    const from = Math.max(0, size - JOURNAL_MAX_BYTES - 1);
+    const cut = Math.max(0, size - JOURNAL_MAX_BYTES - 1), from = Math.max(cut, lineAt);
     const buffer = Buffer.alloc(size - from);
     let read = 0;
     while (read < buffer.length) {
@@ -1083,7 +1453,7 @@ function journalWindow(path: string): { bytes: Buffer; start: number; at: number
     }
     const bytes = buffer.subarray(0, read);
     // The line cut by the window is not whole: it is left out.
-    return { bytes, start: from > 0 ? bytes.indexOf(10) + 1 || bytes.length : 0, at: from, size };
+    return { bytes, start: from > cut || from === 0 ? 0 : bytes.indexOf(10) + 1 || bytes.length, at: from, size };
   } finally {
     closeSync(fd);
   }

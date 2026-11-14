@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { createIdentity, identityFromSeedB64, sign } from "../src/identity";
 import { fromBase64Url, isZ32Key, toBase64Url } from "../src/bytes";
 import { confirmationTag, epochKeys, newEpochSecret } from "../src/groupCrypto";
@@ -944,6 +944,35 @@ describe("community admin changes are final", { timeout: 60_000 }, () => {
     expect(bob.session.state.side).toHaveLength(3);
   });
 
+  it("losing branches kept, however many, never push out the secrets of the branch followed", async () => {
+    // One member's branches are capped (`sideTips`, `sideCommits`); many members together can still keep more than
+    // `secrets`. Lifted here, so one member stands for them all.
+    const limits = COMMUNITY_LIMITS as unknown as { sideTips: number; sideCommits: number };
+    const kept = { sideTips: limits.sideTips, sideCommits: limits.sideCommits };
+    limits.sideTips = limits.sideCommits = COMMUNITY_LIMITS.side;
+    onTestFinished(() => { Object.assign(limits, kept); });
+    const { net, alice, bob, carol, mallory } = await group();
+    const tip = alice.session.top, tipRoster = alice.session.roster;
+    // Mallory signs more admissions after the tip than secrets are kept, each a branch of its own.
+    const flood = Array.from({ length: COMMUNITY_LIMITS.secrets + 4 }, () => forge(mallory, tip, tipRoster, { k: "add", s: createIdentity().pubKeyZ32 }).commit);
+    for (const commit of flood) for (const m of [alice, bob, carol]) await m.session.handle(mallory.session.myKey, commitFrame(commit));
+    await net.settle();
+    for (const m of [alice, bob, carol]) {
+      // One of them may be followed (it is as long as the others): every member the same one.
+      expect(m.session.topHash).toBe(alice.session.topHash);
+      expect(m.session.state.side.length).toBeGreaterThan(COMMUNITY_LIMITS.secrets - COMMUNITY_LIMITS.window);
+      expect(m.session.canSend).toBe(true);
+    }
+    await say(net, bob, "after the flood");
+    expect(net.texts(carol)).toContain("after the flood");
+    // And past the admin's next commit.
+    await alice.session.rotate();
+    await net.settle();
+    await say(net, carol, "after the rotation");
+    expect(net.texts(bob)).toContain("after the rotation");
+    for (const m of [alice, bob, carol]) expect(m.session.state.secrets[alice.session.topHash]).toBeDefined();
+  });
+
   it("a member away through the change who hears the longer branch first ends on the admin's", async () => {
     const { net, alice, bob, carol, mallory } = await group();
     const before = alice.session.top, beforeRoster = alice.session.roster, beforeSecret = fromBase64Url(mallory.session.state.secrets[alice.session.topHash]);
@@ -1165,11 +1194,45 @@ describe("a key let in only on a branch that lost", () => {
     alice.online = true;
     await net.meet(alice, bob);
     expect(bob.session.topHash).toBe(alice.session.topHash);
-    // Carol is told her admission lost (the link commit is what makes it lose) and asks again by the link she knew.
+    // The link commit is what makes her admission lose, and it carries the new link: no member sends it to her, so
+    // nothing she holds names the new link, and she is not told she lost.
     await net.meet(bob, carol);
-    expect(carol.session.status).toBe("lost");
+    await net.meet(alice, carol);
+    expect(JSON.stringify(carol.session.state)).not.toContain(entry);
+    expect(carol.session.state.chain.some(c => c.k === "link")).toBe(false);
+    expect(carol.session.status).toBe("active");
+    expect(carol.session.entryKey).toBe(old);
     expect(carol.session.lostEntryKey).toBe(old);
-    expect(carol.session.lostEntryKey).not.toBe(entry);
+  });
+
+  it("is heard no more once a member knows its admission lost, as one removed: neither shown nor handed on", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob");
+    await net.meet(alice, bob);
+    // Alice replaces the link while Bob, cut off, lets Carol in by the old one; Carol speaks on that branch.
+    bob.online = false;
+    await alice.session.replaceLink();
+    await net.settle();
+    bob.online = true; alice.online = false;
+    const carol = await net.admit(bob, "carol");
+    await say(net, carol, "before");
+    expect(net.texts(bob)).toEqual(["before"]);
+    alice.online = true;
+    await net.meet(alice, bob);
+    expect(bob.session.topHash).toBe(alice.session.topHash);
+    expect(bob.session.isRecentMember(carol.session.myKey)).toBe(false);
+    // Carol, not told yet (or an app that does not stop), writes again under her branch's epoch: Bob, who knows her
+    // admission lost, neither shows it nor hands it on.
+    const before = net.log.length;
+    await say(net, carol, "after");
+    expect(net.texts(bob)).toEqual(["before"]);
+    expect(net.texts(alice)).toEqual([]);
+    expect(net.log.slice(before).filter(f => f.from !== "carol" && f.t === "group-msg")).toEqual([]);
+    // What she said while her branch could still win is not handed on either, as for one removed.
+    alice.messages.length = 0;
+    await net.meet(alice, bob);
+    expect(net.texts(alice)).toEqual([]);
   });
 });
 

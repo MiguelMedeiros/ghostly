@@ -1,4 +1,4 @@
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageInput } from "../../components/MessageInput";
 import { TranslateError } from "../../desktop/translate";
@@ -55,6 +55,22 @@ describe("the composer's Translate", () => {
     expect(onSend).toHaveBeenCalledWith("SEE YOU TOMORROW [en-it]", undefined, { translated: { to: "it", original: "see you tomorrow" } });
     expect(field).toHaveValue("");
     expect(screen.queryByTestId("translate-preview")).not.toBeInTheDocument();
+  });
+
+  it("Enter that confirms an input method's candidate in the preview sends nothing, in WebKit too", async () => {
+    const { user, field, onSend } = setup({ language: "ja", translate: capitals() });
+    await user.type(field, "see you tomorrow");
+    await user.click(screen.getByTestId("composer-translate"));
+    const shown = await screen.findByTestId("translate-text");
+    fireEvent.keyDown(shown, { key: "Enter", isComposing: true });
+    // WebKit: compositionend before the Enter that confirmed the candidate, which comes as 229, no longer composing.
+    fireEvent.compositionEnd(shown, { data: "明日" });
+    fireEvent.keyDown(shown, { key: "Enter", keyCode: 229 });
+    fireEvent.compositionEnd(shown, { data: "明日" });
+    fireEvent.keyDown(shown, { key: "Enter" });
+    fireEvent.keyDown(shown, { key: "Escape", isComposing: true });
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByTestId("translate-preview")).toBeInTheDocument();
   });
 
   it("sends the translation as edited in the preview", async () => {

@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Settings as EngineSettings } from "@ghostly/browser/shared/types";
@@ -195,6 +195,32 @@ describe("this side typing", () => {
     fireEvent.change(box(), { target: { value: "abcd" } });
     unmount();
     expect(await told()).toEqual([true, false, true, false, true, false]);
+  });
+
+  it("an emoji put in the field says typing, but not while editing a sent message", async () => {
+    answering();
+    function Editing({ editing }: { editing: boolean }) {
+      const onTyping = useTypingSender("l-a", true);
+      return <LockScreenProvider><MessageInput onSend={async () => null} onTyping={onTyping}
+        edit={editing ? { key: "me_1", text: "see you at 8", snippet: "see you at 8", onSave: async () => null, onClose: () => {} } : undefined} /></LockScreenProvider>;
+    }
+    const pick = async (user: ReturnType<typeof renderApp>["user"]) => {
+      await user.click(screen.getByTestId("composer-expressions"));
+      await waitFor(() => expect(screen.getByTestId("emoji-grid").querySelector("[data-emoji]")).not.toBeNull());
+      await user.click(within(screen.getByTestId("emoji-grid")).getAllByRole("button", { name: "😀" })[0]);
+    };
+    const editing = renderApp(<Editing editing />);
+    await pick(editing.user);
+    expect(box()).toHaveValue("see you at 8😀");
+    // Typed words during the edit say nothing either.
+    fireEvent.change(box(), { target: { value: "see you at 9😀" } });
+    expect(await told()).toEqual([]);
+    editing.unmount();
+    // A new message: the emoji says typing.
+    const writing = renderApp(<Editing editing={false} />);
+    await pick(writing.user);
+    expect(box()).toHaveValue("😀");
+    expect(await told()).toEqual([true]);
   });
 });
 

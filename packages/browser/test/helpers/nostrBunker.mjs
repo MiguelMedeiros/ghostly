@@ -7,7 +7,9 @@ import { WebSocketServer } from 'ws';
 import { generateSecretKey, getPublicKey, finalizeEvent, verifyEvent } from 'nostr-tools/pure';
 import { encrypt, decrypt, getConversationKey } from 'nostr-tools/nip44';
 
-export async function startTestBunker(port = 0) {
+// `hold`: what the signer waits for before it answers `sign_event` (a promise, from a function called each time), as a
+// person who approves on their phone later.
+export async function startTestBunker(port = 0, { hold } = {}) {
   const signerKey = generateSecretKey(), userKey = generateSecretKey();
   const signerPub = getPublicKey(signerKey), userPub = getPublicKey(userKey);
   const subscriptions = new Map(); const methods = []; const sessions = new Set();
@@ -28,7 +30,7 @@ export async function startTestBunker(port = 0) {
   wss.on('connection',socket=>{
     const subs=new Map(); subscriptions.set(socket,subs);
     socket.on('close',()=>subscriptions.delete(socket));
-    socket.on('message',raw=>{
+    socket.on('message',async raw=>{
       try {
         const [op,id,value]=JSON.parse(raw.toString());
         if(op==='REQ') { subs.set(id,value); if(value.kinds?.includes(0) && value.authors?.includes(userPub)) socket.send(JSON.stringify(['EVENT',id,finalizeEvent({kind:0,tags:[],created_at:Math.floor(Date.now()/1000),content:JSON.stringify({name:'Ghostly test profile'})},userKey)])); socket.send(JSON.stringify(['EOSE',id])); return; }
@@ -45,6 +47,7 @@ export async function startTestBunker(port = 0) {
         else if(!sessions.has(event.pubkey)) error='Not authorized';
         else if(request.method==='get_public_key') result=userPub;
         else if(request.method==='sign_event') {
+          if(hold) await hold();
           const template=JSON.parse(request.params[0]);
           if(template.kind!==30078 || !(template.content.startsWith('["ghostly-peer-proof",1,') || template.content.startsWith('Ghostly identity proof v1: '))) error='Only Ghostly proof fixtures are allowed';
           else result=JSON.stringify(finalizeEvent(template,userKey));

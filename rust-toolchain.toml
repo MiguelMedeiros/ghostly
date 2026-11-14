@@ -1,0 +1,11 @@
+# The one Rust every build uses: CI, the release and your own `cargo` in this tree (rustup reads this file from the
+# folder cargo runs in or any folder above it, and installs it on first use). A new stable no longer turns dev red or
+# changes what ships by itself: raising `channel` is a pull request of its own that fixes what the new clippy and
+# rustfmt find (docs/TESTING.md, "The Rust toolchain").
+[toolchain]
+channel = "1.99.1"
+components = ["rustfmt", "clippy"]
+# The targets the builds cross-compile to, besides the machine's own: macOS on either chip (release.yml), and Android
+# on a phone and on the x86_64 emulator (android.yml, android-native.yml, android-e2e.yml).
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "aarch64-linux-android", "x86_64-linux-android"]
+profile = "minimal"

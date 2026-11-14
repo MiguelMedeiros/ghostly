@@ -297,6 +297,17 @@ describe("the Tasks board", () => {
     expect(cardIds("running")).toHaveLength(100);
   });
 
+  it("keeps the chosen view, grouping and tag filled in forced colors, where the accent's background is gone", async () => {
+    const { user } = profile([...rowsOfThree(), row("link-1", task({ id: "t", tags: ["core"] })), row("group:g1", routine(), { member: "hermes-key" })]);
+    await loaded();
+    await user.click(screen.getByTestId("tasks-group-bot"));
+    await user.click(screen.getAllByTestId("tasks-tag")[0]);
+    const pills = [screen.getByTestId("tasks-view-tasks"), screen.getByTestId("tasks-view-routines"), ...screen.getAllByRole("radio"), ...screen.getAllByTestId("tasks-tag")];
+    const chosen = (el: HTMLElement) => el.getAttribute("aria-pressed") === "true" || el.getAttribute("aria-checked") === "true";
+    expect(pills.filter(chosen).map((el) => el.dataset.testid)).toEqual(["tasks-view-tasks", "tasks-group-bot", "tasks-tag"]);
+    for (const pill of pills) expect(pill.classList.contains("forced-colors:bg-[color:Highlight]"), pill.dataset.testid).toBe(chosen(pill));
+  });
+
   it("lists routines on their own tab, a line each, never in the columns", async () => {
     const rows = [...rowsOfThree(), row("group:g1", routine({ lastRun: { at: NOW - 3_600_000, result: "ok" } }), { member: "hermes-key" })];
     const { user } = profile(rows);
@@ -523,6 +534,31 @@ describe("a card a bot sent to several chats", () => {
     expect(screen.getByTestId("where")).toHaveAttribute("data-jump", "in-g2");
   });
 
+  it("in Arabic, lists its chats and tags the way Arabic lists them, not with an English comma", async () => {
+    const state = everywhere();
+    const tagged = { ...blocked, tags: ["core", "web"] };
+    const { user, engine } = renderApp(<Tasks />, { route: "/tasks", language: "ar" });
+    engine.on("statusCardIndex", () => [
+      row("link-1", tagged, { id: "in-chat", editedAt: NOW - 3 * 60_000 }),
+      row("group:g1", tagged, { id: "in-g1", member: "coord-in-g1", editedAt: NOW - 2 * 60_000 }),
+      row("group:g2", tagged, { id: "in-g2", member: "coord-in-g2", editedAt: NOW - 60_000 }),
+    ]).setState(state);
+    await loaded();
+    const card = screen.getByTestId("tasks-board").querySelector<HTMLElement>('[data-card-id="relay"]')!;
+    expect(within(card).getByTestId("board-card-chat")).toHaveAttribute("title", "Phone وSala de Máquinas");
+    const label = within(card).getByTestId("board-card-open").getAttribute("aria-label")!;
+    expect(label).toContain("Phone وSala de Máquinas");
+    expect(label).not.toContain(", ");
+    await user.click(within(card).getByTestId("board-card-details-toggle"));
+    // Each chat and tag in its own direction, the list's words between them in the page's.
+    const chats = within(card).getByTestId("board-card-chats");
+    expect(chats).toHaveTextContent("Phone وSala de Máquinas وCoordinator");
+    expect([...chats.querySelectorAll("bdi")].map((name) => name.textContent)).toEqual(["Phone", "Sala de Máquinas", "Coordinator"]);
+    const tags = within(card).getByTestId("board-card-tags");
+    expect(tags).toHaveTextContent("core وweb");
+    expect([...tags.querySelectorAll("bdi")].map((tag) => tag.textContent)).toEqual(["core", "web"]);
+  });
+
   it("is one bot's: a column for the bot, and a column for each chat it is in", async () => {
     const state = everywhere();
     const { user, engine } = renderApp(<Tasks />, { route: "/tasks" });
@@ -589,6 +625,15 @@ describe("the Tasks board on a phone", () => {
     expect(tabs[2]).toHaveFocus();
     await user.keyboard("{Home}");
     expect(tabs[0]).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("keeps the chosen tab filled in forced colors, where the accent's background is gone", async () => {
+    viewport(375, 740);
+    const { user } = profile(rowsOfThree());
+    await loaded();
+    const tabs = within(screen.getByRole("tablist", { name: "Columns" })).getAllByRole("tab");
+    await user.click(tabs[3]);
+    expect(tabs.map((tab) => tab.classList.contains("forced-colors:bg-[color:Highlight]"))).toEqual([false, false, false, true, false]);
   });
 
   it("keeps the columns off screen out of Tab and the screen reader: Tab from a tab goes into its own column", async () => {

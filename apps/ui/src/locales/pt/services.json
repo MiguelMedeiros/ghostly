@@ -36,18 +36,25 @@
     "stopped": "Parado"
   },
   "window": {
+    "blocked": "Este navegador bloqueia o que {{app}} precisa para abrir aqui: armazenamento para um site dentro de outro. Permita isso para este site, ou abra {{app}} no app Ghostly para desktop ou na extensão.",
     "busy": "{{app}} está carregando páginas demais ao mesmo tempo na máquina do seu contato. Tente de novo daqui a pouco.",
     "callOn": "Há uma chamada em andamento. Encerre-a para abrir {{app}}.",
     "elsewhere": "{{app}} tentou levar você para outro lugar, fora do que seu contato compartilha.",
     "failed": "O pedido falhou.",
     "label": "{{app}}, compartilhado por {{contact}}",
+    "loading": "Abrindo {{app}} na máquina do seu contato…",
     "notAnswering": "{{app}} não está respondendo na máquina do seu contato. Peça ao seu contato que confira se está rodando.",
     "offline": "Seu contato está offline, então {{app}} não pode abrir agora. Ele abre de novo aqui quando o contato voltar.",
+    "openLink": "Abrir {{site}}",
     "owner": "App que roda na máquina de {{contact}}. Não é o Ghostly: nunca digite aqui suas palavras de recuperação ou senhas.",
+    "reaching": "Tentando alcançar seu contato…",
     "retry": "Tentar de novo",
+    "stillOffline": "Seu contato continua offline, então {{app}} não pode abrir agora. Ele abre de novo aqui quando o contato voltar.",
     "tooSlow": "{{app}} não respondeu a tempo na máquina do seu contato. Tente de novo daqui a pouco.",
+    "unguarded": "Esta página de {{app}} não pode ser mostrada aqui: ela impede que as proteções do Ghostly rodem nela. Peça ao seu contato para verificar.",
     "unreachable": "Este serviço não está acessível. Os serviços existem enquanto o fantasma deles está online.",
-    "unshared": "{{app}} não está mais compartilhado com você."
+    "unshared": "{{app}} não está mais compartilhado com você.",
+    "upload": "O app de um contato não recebe arquivos pela extensão do navegador. Para enviar este, abra o app no Ghostly na web ou no computador."
   },
   "yourApps": "Seus apps"
 }

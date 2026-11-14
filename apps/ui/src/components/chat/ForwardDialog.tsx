@@ -15,6 +15,7 @@ import { listParts, listText } from "../../lib/listText";
 import type { Translate } from "../../locales/translate";
 import { useBackCloses } from "../../hooks/useDismiss";
 import { SearchStatus } from "../ui/SearchStatus";
+import { FocusSafeButton } from "../ui/FocusSafeButton";
 
 /**
  * "Forward to…" (WISP 400 § Forwards): the chats and groups to send messages on to, most recent first, found by name,
@@ -134,10 +135,13 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
         </ul>
       )}
     </div>
+    {/* The alert around the list, not on it: on the <ul> it took the place of the list, and its lines were read as no list. */}
     {problems.length > 0 && (
-      <ul className="m-0 mx-4 mt-2 list-none space-y-1 p-0" role="alert" data-testid="forward-error">
-        {problems.map((p, i) => <li key={i} className="text-xs text-danger">{p.name ? <><bdi>{p.name}</bdi>{p.partial}: {p.error}</> : p.error}</li>)}
-      </ul>
+      <div className="mx-4 mt-2" role="alert" data-testid="forward-error">
+        <ul className="m-0 list-none space-y-1 p-0">
+          {problems.map((p, i) => <li key={i} className="text-xs text-danger">{p.name ? <><bdi>{p.name}</bdi>{p.partial}: {p.error}</> : p.error}</li>)}
+        </ul>
+      </div>
     )}
     {sentTo.length > 0 && <p className="m-0 mx-4 mt-1 line-clamp-2 break-words text-xs text-text-muted" data-testid="forward-sent"
       title={namesTitle(sentTo, t)}>{sentBefore}<NameList names={sentTo} />{sentAfter}</p>}
@@ -152,8 +156,8 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
           {full ? t("chat.forward.limit", { count: String(FORWARD_MAX_TARGETS) }) : ""}
         </p>
       </div>
-      <button type="button" data-testid="forward-cancel" onClick={onClose} disabled={busy}
-        className="min-h-10 rounded-lg px-3 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent cursor-pointer">{t("common.cancel")}</button>
+      <FocusSafeButton type="button" data-testid="forward-cancel" onClick={onClose} disabled={busy}
+        className="min-h-10 rounded-lg px-3 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent cursor-pointer">{t("common.cancel")}</FocusSafeButton>
       {/* Not disabled while it runs: a focused button that turns disabled drops the focus to the page, and a refusal
           left Enter doing nothing. A press then is ignored by `send`. */}
       <button type="button" data-testid="forward-send" onClick={() => void send()} disabled={!chosen.length}

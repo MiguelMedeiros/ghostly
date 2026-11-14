@@ -28,7 +28,7 @@
   },
   "delivery": {
     "delivered": "已送达（已收到回执）",
-    "failed": "失败",
+    "failed": "未发送",
     "held": "已为联系人暂存",
     "queued": "尚未确认，会自动重发",
     "sending": "发送中",

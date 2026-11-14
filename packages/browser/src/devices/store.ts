@@ -86,6 +86,7 @@ function openDevicesDb(): Promise<IDBDatabase> {
 export async function closeDevicesDb(): Promise<void> {
   const open = dbPromise;
   dbPromise = null;
+  checked.clear();
   // An open that never answered is not waited for: it is closed if it ever does.
   if (open) await Promise.race([open.then((db) => db.close(), () => {}), new Promise<void>((resolve) => setTimeout(resolve, 50))]);
 }
@@ -115,9 +116,42 @@ async function devicesDbExists(): Promise<boolean> {
 let lastWriteStrict = false;
 export const lastDeviceWriteWasStrict = (): boolean => lastWriteStrict;
 
+/**
+ * The last record a read checked, per profile: its write count, everything but its file lists (`heldFiles`,
+ * `leftFiles`, up to some 1 MB on a standby) as JSON, and on Desktop the file text it was found equal to. A standby
+ * screen reads its record every few seconds and it does not change in between: a read that finds the same write again
+ * skips the check of the lists, and on Desktop parsing the file and comparing the two copies. Every read still reads
+ * both copies and answers what it read, so a write by another window is never missed; the lists only change with a
+ * write, which moves `saved`.
+ */
+interface Checked { saved: number; rest: string; held: number; left: number; text: string | null }
+const checked = new Map<string, Checked>();
+
+function withoutLists(value: object): { rest: string; held: number; left: number } {
+  const { heldFiles, leftFiles, ...rest } = value as Partial<DeviceRecord>;
+  return { rest: JSON.stringify(rest), held: heldFiles?.length ?? -1, left: leftFiles?.length ?? -1 };
+}
+
+/** `stored` as a record: checked again unless it is the write the last read checked. */
+function parseStored(profile: string, stored: unknown): { record: DeviceRecord; known: Checked | null } {
+  const last = checked.get(profile);
+  if (last && stored && typeof stored === "object" && !Array.isArray(stored) && (stored as { saved?: unknown }).saved === last.saved) {
+    const { rest, held, left } = withoutLists(stored);
+    if (rest === last.rest && held === last.held && left === last.left) return { record: stored as DeviceRecord, known: last };
+  }
+  checked.delete(profile);
+  const record = parseDeviceRecord(stored);
+  checked.set(profile, { saved: record.saved, ...withoutLists(record), text: null });
+  return { record, known: null };
+}
+
 /** The record in the database: null when there is no database or no record; throws when what is there cannot be read. */
 async function readLocal(profile: string): Promise<DeviceRecord | null> {
-  if (!(await devicesDbExists())) return null;
+  return (await readLocalChecked(profile))?.record ?? null;
+}
+
+async function readLocalChecked(profile: string): Promise<{ record: DeviceRecord; known: Checked | null } | null> {
+  if (!(await devicesDbExists())) { checked.delete(profile); return null; }
   const read = async (): Promise<unknown> => {
     const db = await openDevicesDb();
     if (!db.objectStoreNames.contains(STORE)) throw new Error("The device state database has no records store");
@@ -128,7 +162,8 @@ async function readLocal(profile: string): Promise<DeviceRecord | null> {
     });
   };
   const stored = await within(read(), DEVICE_READ_TIMINGS.readMs, "The device state database");
-  return stored === undefined ? null : parseDeviceRecord(stored);
+  if (stored === undefined) { checked.delete(profile); return null; }
+  return parseStored(profile, stored);
 }
 
 /**
@@ -171,8 +206,7 @@ async function swapMany(writes: { profile: string; expected: number | null; reco
 class DeviceFileInvalid extends Error {}
 
 /** The file's record: null when it holds none. */
-async function readMirror(profile: string): Promise<DeviceRecord | null> {
-  const text = await within(mirror!.read(profile), DEVICE_READ_TIMINGS.readMs, "The device state file");
+function parseMirror(profile: string, text: string | null): DeviceRecord | null {
   if (text === null) return null;
   let filed: DeviceRecord;
   try { filed = parseDeviceRecord(JSON.parse(text)); } catch (error) { throw new DeviceFileInvalid(error instanceof Error ? error.message : String(error)); }
@@ -187,10 +221,15 @@ async function readMirror(profile: string): Promise<DeviceRecord | null> {
  */
 export async function readDeviceRecord(profile: string): Promise<DeviceRecord | null> {
   if (!mirror) return readLocal(profile);
-  let local: DeviceRecord | null = null, localError: unknown = null;
-  try { local = await readLocal(profile); } catch (error) { localError = error; }
-  let filed: DeviceRecord | null = null, fileError: unknown = null;
-  try { filed = await readMirror(profile); } catch (error) { fileError = error; }
+  let local: DeviceRecord | null = null, known: Checked | null = null, localError: unknown = null;
+  try { ({ record: local, known } = (await readLocalChecked(profile)) ?? { record: null, known: null }); } catch (error) { localError = error; }
+  let filed: DeviceRecord | null = null, text: string | null = null, fileError: unknown = null;
+  try {
+    text = await within(mirror.read(profile), DEVICE_READ_TIMINGS.readMs, "The device state file");
+    // The same write in the database and, word for word, the file the last read found equal to it: nothing to compare.
+    if (local && known && text !== null && text === known.text) return local;
+    filed = parseMirror(profile, text);
+  } catch (error) { fileError = error; }
   // The database exists and cannot be read. A file that stops the engine is believed; otherwise unreadable.
   if (localError) { if (filed && !runsEngine(filed.state)) return filed; throw localError; }
   // The file cannot be read. A record that stops the engine is believed. A file that is there and is not a record
@@ -201,15 +240,17 @@ export async function readDeviceRecord(profile: string): Promise<DeviceRecord | 
     if (!local && !(fileError instanceof DeviceFileInvalid)) return null;
     throw fileError;
   }
-  return reconcile(profile, local, filed);
+  return reconcile(profile, local, filed, text);
 }
 
-async function reconcile(profile: string, local: DeviceRecord | null, filed: DeviceRecord | null): Promise<DeviceRecord | null> {
+async function reconcile(profile: string, local: DeviceRecord | null, filed: DeviceRecord | null, text: string | null): Promise<DeviceRecord | null> {
   const winner = stricter(local, filed);
   if (!winner) return null;
-  const same = (a: DeviceRecord | null) => JSON.stringify(a) === JSON.stringify(winner);
-  if (!same(filed)) await mirror!.write(profile, JSON.stringify(winner));
-  if (!same(local)) await swap(profile, local ? local.saved : null, winner);
+  const json = JSON.stringify(winner);
+  const filedNow = filed === winner || text === json ? text : json;
+  if (filedNow !== text) await mirror!.write(profile, json);
+  if (local !== winner && JSON.stringify(local) !== json) await swap(profile, local ? local.saved : null, winner);
+  checked.set(profile, { saved: winner.saved, ...withoutLists(winner), text: filedNow });
   return winner;
 }
 
@@ -312,6 +353,7 @@ export async function listDeviceRecords(): Promise<DeviceRecord[]> {
  */
 export async function forgetDevice(profile: string): Promise<void> {
   await exclusive(async () => {
+    checked.delete(profile);
     if (mirror) await mirror.write(profile, null);
     await forgetDeviceSigningKey(profile);
     if (!(await devicesDbExists())) return;

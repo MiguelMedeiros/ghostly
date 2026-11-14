@@ -11,7 +11,8 @@ describe("the push relay's log of forwards (infra/services/push-relay)", () => {
 
   it("logs forwards and failures as counts, a line per status or cause a minute, however many clients push", async () => {
     const lines: string[] = [];
-    const relay = await startRelay({ hosts: [/^127\.0\.0\.1$/], proxies: 1, log: (...words: unknown[]) => lines.push(words.join(" ")) });
+    // Room for 60 to one endpoint: the limit per subscription is pushRelayEndpointLimit's.
+    const relay = await startRelay({ hosts: [/^127\.0\.0\.1$/], proxies: 1, limits: { perEndpoint: 100 }, log: (...words: unknown[]) => lines.push(words.join(" ")) });
     close = relay.close;
     const real = globalThis.fetch;
     // The push service: 201 for /ok, 404 for a made-up endpoint, nobody home for /down.
@@ -30,7 +31,7 @@ describe("the push relay's log of forwards (infra/services/push-relay)", () => {
     for (let n = 0; n < 60; n++) expect((await post(n, n % 3 === 0 ? "made-up" : "ok")).status).toBe(200);
     for (let n = 60; n < 65; n++) expect((await post(n, "down")).status).toBe(502);
     expect(lines).toEqual(["forwarded 404", "forwarded 201", "failed ECONNREFUSED"]);
-    expect(await (await fetch(`${url}healthz`)).json()).toMatchObject({ forwarded: 60, failed: 5, refused: 0 });
+    expect(relay.stats()).toMatchObject({ forwarded: 60, failed: 5, refused: 0 });
     await relay.close();
     close = undefined;
     expect(lines).toEqual(["forwarded 404", "forwarded 201", "failed ECONNREFUSED", "forwarded 404 19 more", "forwarded 201 39 more", "failed ECONNREFUSED 4 more"]);

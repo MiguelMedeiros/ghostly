@@ -15,14 +15,17 @@ export const TYPING_IDLE_MS = 5_000;
 /** The engine is told again at most this often while typing goes on (the wire is throttled there too). */
 const TELL_EVERY_MS = 1_000;
 
-/** The contact of this chat is typing now. */
+/**
+ * The contact of this chat is typing now. Not while the tab lost its peer (an extension tab, the Reconnecting notice):
+ * what it holds is the last it was told, and the peer that ends the typing after its timeout is the one gone.
+ */
 export function usePeerTyping(peerPubKey?: string): boolean {
-  return useSyncExternalStore(subscribe, () => !!(peerPubKey && engine.linkByPeer(peerPubKey)?.peerTyping));
+  return useSyncExternalStore(subscribe, () => !!(peerPubKey && !engine.reconnecting && engine.linkByPeer(peerPubKey)?.peerTyping));
 }
 
-/** What the contact of this chat is doing now (typing, recording, thinking, a bot's status), or null. */
+/** What the contact of this chat is doing now (typing, recording, thinking, a bot's status), or null; the same rule. */
 export function usePeerTypingActivity(peerPubKey?: string): TypingActivity | null {
-  const link = () => (peerPubKey ? engine.linkByPeer(peerPubKey) : undefined);
+  const link = () => (peerPubKey && !engine.reconnecting ? engine.linkByPeer(peerPubKey) : undefined);
   const typing = useSyncExternalStore(subscribe, () => !!link()?.peerTyping);
   const kind = useSyncExternalStore(subscribe, () => link()?.peerTypingKind ?? "typing");
   const status = useSyncExternalStore(subscribe, () => link()?.peerTypingStatus);

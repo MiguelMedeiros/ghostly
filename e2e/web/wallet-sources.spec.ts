@@ -93,12 +93,23 @@ test("Lightning cards: New adds one of its own beside the mints' card; invoices 
   await expect(page.getByTestId("wallet-card-lightning-mainnet")).toContainText("Invoices via Cashu");
   await expect(source.getByTestId("lightning-source-current")).toContainText("Cashu mints");
 
-  // The mints' card made the default for receiving, from its own settings.
+  // The mints' card made the default for receiving, from its own settings, with the keys: the switch keeps the focus
+  // once it is on for good (a disabled one would drop it to the page), and so does Rename once the name is saved.
   await showNetwork(page, "testnet");
   await mints.click();
-  await page.getByTestId("lightning-card-default").click();
+  const toggle = page.getByTestId("lightning-card-default"), rename = page.getByTestId("lightning-card-rename");
+  await toggle.focus();
+  await page.keyboard.press("Space");
   await expect(mints.getByTestId("wallet-card-tag")).toHaveText("Default");
   await expect(node.getByTestId("wallet-card-tag")).toHaveCount(0);
+  await expect(toggle).toHaveAttribute("aria-disabled", "true");
+  await expect(toggle).toBeFocused();
+  await page.getByTestId("lightning-card-name").fill("My Cashu card");
+  await rename.focus();
+  await page.keyboard.press("Enter");
+  await expect(mints).toContainText("My Cashu card");
+  await expect(rename).toHaveAttribute("aria-disabled", "true");
+  await expect(rename).toBeFocused();
 
   // Removing the node's card forgets it; the mints' card stays, alone again: the network's Lightning.
   await node.click();

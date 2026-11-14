@@ -69,7 +69,7 @@ describe("the rail", () => {
     expect(screen.queryByTestId("sidebar-resize")).not.toBeInTheDocument();
     const items = within(rail()).getAllByRole("button");
     expect(items.map(b => b.getAttribute("data-chat"))).toEqual(listOrder);
-    expect(rail()).toHaveAccessibleName("Chats");
+    expect(screen.getByRole("navigation", { name: "Chats" })).toContainElement(rail());
 
     const ana = items.find(b => b.getAttribute("data-chat") === "a")!;
     expect(ana).toHaveAttribute("title", "Ana");
@@ -136,6 +136,22 @@ describe("the rail", () => {
     expect(screen.queryByTestId("chat-rail")).not.toBeInTheDocument();
     expect(field).toHaveFocus();
     field.remove();
+  });
+
+  it("folds with the key that types L on any keyboard, as Ctrl+N and Ctrl+F do", () => {
+    saveSession(chat("a", { nick: "Ana" }));
+    list();
+    // Dvorak: L is at a US keyboard's P, and the key at L's place types N.
+    fireEvent.keyDown(window, { code: "KeyL", key: "N", altKey: true, shiftKey: true });
+    expect(screen.queryByTestId("chat-rail")).not.toBeInTheDocument();
+    fireEvent.keyDown(window, { code: "KeyP", key: "L", altKey: true, shiftKey: true });
+    expect(screen.getByTestId("chat-rail")).toBeInTheDocument();
+    // A keyboard with no Latin letters (Arabic): the key at L's place.
+    fireEvent.keyDown(window, { code: "KeyL", key: "م", altKey: true, shiftKey: true });
+    expect(screen.queryByTestId("chat-rail")).not.toBeInTheDocument();
+    // A French Mac: ⌥⇧L types |, still L's key.
+    fireEvent.keyDown(window, { code: "KeyL", key: "|", altKey: true, shiftKey: true });
+    expect(screen.getByTestId("chat-rail")).toBeInTheDocument();
   });
 
   it("stays as it is with Alt+Shift+L while a dialog is open, so the dialog gives the focus back to its opener", async () => {

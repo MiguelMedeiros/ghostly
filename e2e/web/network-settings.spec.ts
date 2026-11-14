@@ -66,6 +66,9 @@ test("Hide my IP from contacts needs a TURN server, is kept across a reload, and
   await save(page);
   await relayOnly.click();
   await expect(relayOnly).toHaveAttribute("aria-checked", "true");
+  // Busy while it worked, not disabled: the focus is still on it, so a keyboard's next Tab goes on from here.
+  await expect(relayOnly).not.toHaveAttribute("aria-busy");
+  await expect(relayOnly).toBeFocused();
   await page.reload();
   await expect(relayOnly).toHaveAttribute("aria-checked", "true");
 

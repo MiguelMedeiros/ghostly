@@ -1,5 +1,5 @@
 import {
-  COMMUNITY_TOPOLOGY, MESH_HUBS, beaconKeys, isDiscoveryBudgetError, beaconRecords, hubRank, lobbyKeys, lobbyRecords, mayBeHub, meshHubs, mergeBeacon, mergeLobby, pickMeshHubs, readBeacon, readLobby, rosterHas,
+  COMMUNITY_TOPOLOGY, MESH_HUBS, REACTION_LIMITS, ReactionWindow, beaconKeys, isDiscoveryBudgetError, beaconRecords, hubRank, lobbyKeys, lobbyRecords, mayBeHub, meshHubs, mergeBeacon, mergeLobby, pickMeshHubs, readBeacon, readLobby, rosterHas,
   type GhostRecord, type GroupCommit, type GroupEdgeFrame, type GroupReactedFrame, type GroupSession, type Hub,
 } from "@ghostly/core";
 import type { StoredGroup } from "../shared/types";
@@ -173,6 +173,8 @@ interface HubLive {
   gone: Map<string, number>;
   /** As a hub: the signed reactions I passed on, the latest per member and message, said again to a member back. */
   reactions: Map<string, GroupReactedFrame>;
+  /** As a hub: the reactions passed on per window from each member, as a member takes them (`REACTION_LIMITS.receive`). */
+  reactionPace: Map<string, ReactionWindow>;
   /** As a hub: the edges it keeps (every other member), held for it in the budget of connections while they open. */
   need: number;
   /** Members that said on their own edge that they leave (`group-bye`): no hub of mine, whatever the beacon says, until the commit takes them out. */
@@ -215,7 +217,7 @@ export class MeshHubs {
       const clocks = new HubClocks(() => live!.me, HUB_CLOCK_READ_GAP_MS);
       this.live.set(groupId, (live = { started: now, epoch: -1, beacon: [], clocks, me: "", firstRead: false, epochRead: false, lastRead: 0, lastWrite: 0, lastTry: 0, publishAfter: 0, readAt: 0, stepUpAt: 0, hub: false, hubSince: 0,
       members: new Map(), lastLobbyPoll: 0, lobbyBusyUntil: 0, myHubs: [], lobbyWrites: new Map(), hubWaits: new Map(), avoided: new Map(), hubsUp: new Set(),
-      seenHubs: new Map(), claimed: new Map(), reach: new Map(), reachLegacy: new Map(), reachHeard: new Map(), takesHubs: new Set(), sentReach: "", lastReach: 0, met: new Map(), expect: new Set(), wantedSize: 0, primed: false, gone: new Map(), reactions: new Map(), need: 0, departed: new Set(), unreached: new Map(), reachNone: new Map(), standFor: { at: "", mine: [] } }));
+      seenHubs: new Map(), claimed: new Map(), reach: new Map(), reachLegacy: new Map(), reachHeard: new Map(), takesHubs: new Set(), sentReach: "", lastReach: 0, met: new Map(), expect: new Set(), wantedSize: 0, primed: false, gone: new Map(), reactions: new Map(), reactionPace: new Map(), need: 0, departed: new Set(), unreached: new Map(), reachNone: new Map(), standFor: { at: "", mine: [] } }));
     }
     return live;
   }
@@ -724,13 +726,19 @@ export class MeshHubs {
 
   /**
    * As a hub, a member's signed reaction goes on to my other edges, the first time I see that number from that member
-   * for that message; and it is kept (the latest `REACTIONS_KEPT`) for members whose edge opens later.
+   * for that message; and it is kept (the latest `REACTIONS_KEPT`) for members whose edge opens later. Stepped down,
+   * one I kept still follows what I take: a hub again, I would say a reaction taken back meanwhile to a member back.
    */
   passReaction(groupId: string, session: GroupSession, from: string, frame: GroupReactedFrame): void {
     const live = this.live.get(groupId);
-    if (!live?.hub) return;
+    if (!live) return;
     const at = `${frame.k} ${frame.id}`, held = live.reactions.get(at);
     if (held && held.n >= frame.n) return;
+    if (!live.hub) { if (held) live.reactions.set(at, frame); return; }
+    // Paced per member before it goes on, as each member would take them: past the window, not passed on at all.
+    let pace = live.reactionPace.get(frame.k);
+    if (!pace) live.reactionPace.set(frame.k, pace = new ReactionWindow(REACTION_LIMITS.receive, REACTION_LIMITS.windowMs));
+    if (!pace.take()) return;
     live.reactions.delete(at);
     live.reactions.set(at, frame);
     while (live.reactions.size > REACTIONS_KEPT) live.reactions.delete(live.reactions.keys().next().value!);

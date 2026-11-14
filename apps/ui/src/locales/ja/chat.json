@@ -12,8 +12,13 @@
     "message": "{{name}}: {{text}}",
     "messages": "新着メッセージ {{count}} 件",
     "messagesFrom": "{{name}} から新着メッセージ {{count}} 件",
+    "notSent": "あなたのメッセージ「{{text}}」は送信されませんでした",
+    "notSentCount": "未送信のメッセージ {{count}} 件",
+    "paymentState": "{{payment}} · {{state}}",
     "pinMoved": "ピン留めしたチャット {{count}} 件中 {{place}} 番目に移動しました",
-    "rowMoved": "{{count}} 件中 {{place}} 番目に移動しました"
+    "rowMoved": "{{count}} 件中 {{place}} 番目に移動しました",
+    "waiting": "あなたのメッセージ「{{text}}」は相手がオンラインになるのを待っています",
+    "waitingCount": "相手のオンラインを待っているメッセージ {{count}} 件"
   },
   "audio": {
     "cantPlay": "この端末ではこの音声（{{format}}）を再生できません。ダウンロードして聴いてください。",
@@ -109,6 +114,7 @@
     "lookupLocal": "この端末で確認: 鍵そのものが識別子です。",
     "lookupPubky": "調べると Pubky の Pkarr リレー（{{relays}}）に問い合わせます。リレーにはあなたの IP アドレスとこの鍵が伝わります。",
     "lookupWeb": "調べると DNS-over-HTTPS リゾルバに {{host}} を問い合わせ、そこから did.json をダウンロードします。そのサーバーにはあなたの IP アドレスが伝わります。",
+    "lookupWebHiddenIp": "IPを隠す設定がオンのため、相手が選んだサーバー {{host}} には接続しません。",
     "muted": "Nostr のミュートリストにより非表示です。",
     "nip05": "（NIP-05、本人の記載どおり、未確認）",
     "noDids": "このアプリは DID を解決できません",
@@ -237,7 +243,6 @@
     "newOne": "新着メッセージ 1 件、最下部へ移動"
   },
   "keyChanged": "このチャットは停止しました。相手の鍵が変わりました。",
-  "lastSeen": "最終オンライン {{time}}",
   "listTime": {
     "days": "{{count}}日",
     "hours": "{{count}}時間",
@@ -310,17 +315,33 @@
   "online": "オンライン",
   "options": "オプション",
   "payments": {
-    "needLive": "支払いには直接接続が必要です",
+    "needLive": "送金には相手がオンラインである必要があります。ecash はキューで待ちません。請求なら相手が戻るまで待てます。",
     "noWallet": "相手はまだウォレットを持っていません",
     "off": "このチャットではオフです。「受け取る」で方法をオンにしてください",
     "offOrOld": "相手はこのチャットで支払いをオフにしているか、Ghostly の更新が必要です"
   },
+  "pictureHiddenIp": "IPを隠す設定がオンのため表示しません",
   "pinned": {
     "bar": "ピン留めされたメッセージ",
     "info": "ピン留めはチャットごとに1件で、参加者全員に表示されます。新しいピンが前のものに置き換わります。コミュニティでは管理者のみがピン留めできます。",
     "notHere": "このデバイスにはありません",
     "pin": "ピン留め",
     "unpin": "ピン留めを解除"
+  },
+  "presence": {
+    "availability": {
+      "away": "離席中",
+      "busy": "取り込み中",
+      "dnd": "おやすみモード"
+    },
+    "dot": {
+      "away": "オンライン、離席中",
+      "busy": "オンライン、取り込み中",
+      "dnd": "オンライン、おやすみモード",
+      "idle": "オンライン、アイドル",
+      "online": "オンライン"
+    },
+    "status": "ステータス: {{status}}"
   },
   "preview": {
     "arkAddress": "Ark アドレス",
@@ -372,8 +393,10 @@
     "copied": "コピーしました",
     "copy": "コピー",
     "copyCode": "コードをコピー",
-    "hiddenChars": "このコードには、<U+…> と表示される不可視の文字や文字の向きを変える文字が含まれています。「コードをコピー」ではそれらもコピーされます。",
+    "hiddenChars": "このコードには、{{marker}} と表示される不可視の文字や文字の向きを変える文字が含まれています。「コードをコピー」ではそれらもコピーされます。",
     "localTime": "あなたの時刻で {{time}}",
+    "notCopied": "コピーされませんでした",
+    "notCopiedHint": "コピーされませんでした。テキストを選択してコピーしてください。",
     "showAll": "すべて表示",
     "showLess": "折りたたむ",
     "spoiler": "非表示のテキスト。タップして表示",
@@ -463,7 +486,6 @@
     "showTranslation": "翻訳を表示",
     "translate": "翻訳する"
   },
-  "typeMessage": "メッセージを入力...",
   "typing": "入力中…",
   "typingRecording": "録音中…",
   "typingThinking": "考え中…",
@@ -482,6 +504,7 @@
     "tooLarge": "大きすぎてここでは再生できません。ダウンロードして観てください。"
   },
   "voice": {
+    "callPaused": "通話のためボイスメッセージを一時停止しました",
     "cancelled": "ボイスメッセージをキャンセルしました",
     "cantPlay": "このデバイスでは {{format}} の録音を再生できません。保存して別の場所で再生してください。",
     "couldNotPlay": "この録音を再生できませんでした。",
@@ -494,6 +517,7 @@
     "limit": "ボイスメッセージは最長 {{minutes}} 分です",
     "message": "ボイスメッセージ",
     "micDenied": "マイクにアクセスできません。ブラウザーかシステムの設定で許可してください。",
+    "micDeniedAndroid": "マイクにアクセスできません。Android に聞かれたときに許可するか、Android の設定で Ghostly にマイクを許可してください。",
     "micUnavailable": "マイクが見つかりません。接続するか、使用中のアプリを閉じてください。",
     "micUnsupported": "このブラウザではボイスメッセージを録音できません。",
     "pause": "ボイスメッセージを一時停止",
@@ -506,6 +530,7 @@
     "recordHint": "押し続けて録音、またはクリックでハンズフリー",
     "recorded": "録音 {{time}}",
     "recording": "録音中",
+    "resumeAfterCall": "通話後に再開",
     "sent": "ボイスメッセージを送信しました",
     "slideCancel": "スライドしてキャンセル",
     "speed": "再生速度 {{speed}}",

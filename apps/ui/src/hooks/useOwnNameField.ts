@@ -12,8 +12,9 @@ export function useOwnNameField() {
   const { settings, updateDefaultNickname } = useSettings();
   const saved = settings.defaultNickname;
   const [draft, setDraft] = useState(saved);
-  // Changed elsewhere (↻, the other field, another tab): shown, unless it is what is being typed, cleaned.
-  useEffect(() => setDraft((typed) => (cleanOwnName(typed) === saved ? typed : saved)), [saved]);
+  // Changed elsewhere (↻, the other field, another tab): shown, unless it is what is being typed, cleaned. Only then is
+  // it set: a page holding the field drew once more for every key typed.
+  useEffect(() => { if (cleanOwnName(draft) !== saved) setDraft(saved); }, [draft, saved]);
   const change = useCallback((value: string) => { setDraft(value); updateDefaultNickname(value); }, [updateDefaultNickname]);
   const field = useFittedNameField(draft, change, fitsOwnName);
   return { value: draft, ...field, onBlur: () => setDraft(saved) };

@@ -45,6 +45,11 @@ export interface IncomingShare {
    * again. False where it could not be kept. Without it, the share goes with this page.
    */
   carry?: () => boolean;
+  /**
+   * Told when the share is sent to a chat: it no longer waits in the picker, so a later share does not take its place
+   * (the Android app's copies stay until that chat's composer reads them, or the page goes).
+   */
+  sent?: () => void;
 }
 
 /** A share's files as Files, read now where they were not yet. */
@@ -61,7 +66,8 @@ export const MAX_WAITING_SHARES = 3;
 let pending: IncomingShare | null = null;
 /** Shares that came while `pending` waited (`receiveShare` with `behind`), oldest first: each is shown once the one before it goes. */
 let behind: IncomingShare[] = [];
-const forChat = new Map<string, IncomingShare>();
+/** Shares sent to a chat whose composer has not taken them yet, oldest first (one chat may be picked for several). */
+const forChat = new Map<string, IncomingShare[]>();
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((listener) => listener());
 
@@ -129,36 +135,81 @@ export function dropIncomingShare(): void {
 
 /**
  * The page is about to go (a profile switch restarts it; on the web, a share into the same window replaces it): the
- * shares that wait for a chat to be picked are kept for the next page, in their order. Those kept are the next page's,
- * no longer this one's, so a second call keeps nothing twice. Whether the one shown was. Nothing is redrawn: the page
- * is going.
+ * shares that wait for a chat to be picked are kept for the next page, in their order, after those sent to a chat
+ * whose composer has not taken them yet (the next page shows them in its picker again). Those kept are the next
+ * page's, no longer this one's, so a second call keeps nothing twice. Whether the next page has one to show. Nothing
+ * is redrawn: the page is going.
  */
 export function carryIncomingShare(): boolean {
   const carry = (share: IncomingShare | null) => { try { return share?.carry?.() ?? false; } catch { return false; } };
+  let sent = false;
+  for (const [chat, shares] of forChat) {
+    const left = shares.filter((share) => !carry(share));
+    sent ||= left.length < shares.length;
+    if (left.length) forChat.set(chat, left);
+    else forChat.delete(chat);
+  }
   const kept = carry(pending);
   behind = behind.filter((share) => !carry(share));
   if (kept) pending = behind.shift() ?? null;
-  return kept;
+  return kept || sent;
 }
 
-/** The chat picked: the share waits for its composer. `chat` is the composer's draft id (a session id, `group:<id>`). */
+/**
+ * The chat picked: the share waits for its composer, and the next one waiting, if any, is shown. `chat` is the
+ * composer's draft id (a session id, `group:<id>`). The same share picked again for a chat where it still waits (an
+ * edit open there, which the composer says) is not kept twice: shared again as it looked lost, it would go in twice.
+ */
 export function sendShareTo(chat: string): void {
   if (!pending) return;
-  forChat.set(chat, pending);
+  const waiting = forChat.get(chat) ?? [];
+  const share = pending;
+  if (!waiting.some((kept) => sameShare(kept, share))) {
+    forChat.set(chat, [...waiting, share]);
+    share.sent?.();
+  }
   pending = behind.shift() ?? null;
   emit();
 }
 
+/** Whether two shares bring the same: the same text and the same files (by name, size and type), in their order. */
+function sameShare(a: IncomingShare, b: IncomingShare): boolean {
+  return shareText(a) === shareText(b) && a.files.length === b.files.length
+    && a.files.every((file, i) => file.name === b.files[i]!.name && file.size === b.files[i]!.size && file.type === b.files[i]!.type);
+}
+
+/** The shares sent to one chat as one: their texts one under the other, and all their files, in their order. */
+function joinShares(shares: IncomingShare[]): IncomingShare {
+  if (shares.length === 1) return shares[0]!;
+  return {
+    title: "",
+    text: shares.map(shareText).filter(Boolean).join("\n"),
+    url: "",
+    files: shares.flatMap((share) => share.files),
+    ...(shares.some((share) => share.read) && { read: async () => (await Promise.all(shares.map(shareFiles))).flat() }),
+  };
+}
+
 /** The share waiting for this chat's composer, left in place. */
 export function peekShareFor(chat: string): IncomingShare | null {
-  return forChat.get(chat) ?? null;
+  const shares = forChat.get(chat);
+  return shares ? joinShares(shares) : null;
 }
 
 /** The share waiting for this chat's composer, taken: it is handed over once. */
 export function takeShareFor(chat: string): IncomingShare | null {
-  const share = forChat.get(chat) ?? null;
+  const share = peekShareFor(chat);
   forChat.delete(chat);
   return share;
+}
+
+/**
+ * A share a composer took but could not keep (its files read only once an edit had begun there): it waits for that
+ * chat's composer again, ahead of any sent there since. The composer says it waits by the edit, and looks again once
+ * it can take files (the edit ended); a share made meanwhile is still shown in the picker as usual.
+ */
+export function keepShareFor(chat: string, share: IncomingShare): void {
+  forChat.set(chat, [share, ...forChat.get(chat) ?? []]);
 }
 
 /**
@@ -199,7 +250,11 @@ export function onShareChange(listener: () => void): () => void {
   return subscribe(listener);
 }
 
-/** Tests only. */
+/**
+ * Every share this page holds is dropped: those in the picker and those sent to a chat whose composer has not taken
+ * them. The profile's data goes (Clear all data, Remove this profile here), and a share picked for a chat is a draft of
+ * it: none is carried to the page that loads next.
+ */
 export function resetIncomingShare(): void {
   pending = null;
   behind = [];

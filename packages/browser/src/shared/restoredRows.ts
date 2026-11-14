@@ -81,9 +81,10 @@ export async function markLeftOutFiles(ids: readonly string[]): Promise<void> {
     };
     const state = states.get(id);
     state.onsuccess = () => {
-      const value = state.result as { bytes?: unknown } | undefined;
-      if (!value || !("bytes" in value)) return;
-      const { bytes: _bytes, ...rest } = value;
+      // Nor that its bytes came back after an earlier restore (`leftOut: false`), read over the record's mark.
+      const value = state.result as { bytes?: unknown; leftOut?: unknown } | undefined;
+      if (!value || !("bytes" in value || "leftOut" in value)) return;
+      const { bytes: _bytes, leftOut: _leftOut, ...rest } = value;
       states.put(rest);
     };
   }

@@ -45,7 +45,7 @@ describe("a private group's message keeps the frame it came in", { timeout: 120_
     const { world, peers, id } = await meshOf(["alice", "bob"]);
     const [alice, bob] = peers;
     const extra = 5;
-    for (let i = 0; i < GROUP_LIMITS.relay + extra; i++) await alice.groups.send(id, `line ${i}`);
+    for (let i = 0; i < GROUP_LIMITS.relay + extra; i++) { await alice.groups.send(id, `line ${i}`); await world.run(400); }
     await world.settle();
     const rows = said(bob, id).filter(m => m.text.startsWith("line "));
     expect(rows).toHaveLength(GROUP_LIMITS.relay + extra);
@@ -69,7 +69,7 @@ describe("a private group's message keeps the frame it came in", { timeout: 120_
     // Alice alone writes 200 messages of 1,000 characters (a bot's reports), then her app closes too.
     for (let i = 0; i < 200; i++) {
       await alice.groups.send(id, `m ${i} ${"x".repeat(1_000)}`);
-      if (i % 8 === 7) await world.run(1_000);
+      await world.run(400);
     }
     await world.run(5_000);
     expect(world.texts(carol, id).filter(t => t.startsWith("m "))).toHaveLength(200);
@@ -84,7 +84,7 @@ describe("a private group's message keeps the frame it came in", { timeout: 120_
     const [alice, bob] = peers;
     // 256 texts as long as a message may be fit; 200 of them with a card each are more than the bytes kept.
     const card = { kind: "task", id: "t", title: "y".repeat(STATUS_CARD_LIMITS.bytes - 64) } as unknown as StatusCard;
-    for (let i = 0; i < 200; i++) await alice.groups.send(id, `${i} ${"x".repeat(GROUP_LIMITS.textBytes - 4)}`, [], undefined, undefined, card);
+    for (let i = 0; i < 200; i++) { await alice.groups.send(id, `${i} ${"x".repeat(GROUP_LIMITS.textBytes - 4)}`, [], undefined, undefined, card); await world.run(3_000); }
     await world.settle();
     const held = said(bob, id).filter(m => m.frame);
     expect(held.length).toBeLessThan(200);
@@ -104,7 +104,7 @@ describe("a private group's record carries none of the frames handed on", { time
     let records = 0;
     bob.store.putGroup = async (group, live) => { if (group.id === id) { records++; sizes.push(JSON.stringify(group).length + JSON.stringify(live ?? null).length); } await put(group, live); };
     bob.store.putGroupLive = async (groupId, live) => { if (groupId === id) sizes.push(JSON.stringify(live).length); await putLive(groupId, live); };
-    for (let i = 0; i < 50; i++) { await alice.groups.send(id, `line ${i} ${"x".repeat(200)}`); await world.settle(); await bob.groups.flush(); }
+    for (let i = 0; i < 50; i++) { await alice.groups.send(id, `line ${i} ${"x".repeat(200)}`); await world.run(400); await world.settle(); await bob.groups.flush(); }
     const stored = (await bob.store.getGroups()).find(g => g.id === id)!;
     expect(stored.state!.relay ?? []).toEqual([]);
     expect(said(bob, id).filter(m => m.frame)).toHaveLength(50);

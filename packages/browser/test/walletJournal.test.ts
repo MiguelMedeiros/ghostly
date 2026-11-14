@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bech32 } from "@scure/base";
 import { Amount, MeltChangeError, MintOperationError, PaymentRequest, getEncodedToken, getTokenMetadata, type Proof } from "@cashu/cashu-ts";
 import { CashuWallet, assertAmount, normalizeMintUrl } from "../src/engine/wallet";
-import { CASHU_REQUEST_TIMEOUT_MS, SWAP_SETTLED_MS } from "../src/engine/paymentAdapters/cashu";
+import { MELT_REQUEST_TIMEOUT_MS, SWAP_SETTLED_MS } from "../src/engine/paymentAdapters/cashu";
 import { TEST_MINT } from "../src/shared/mints";
 import { fakeInvoice } from "../src/engine/paymentAdapters/providers/testing";
 import type { PendingMelt, StoredPayment, StoredProof, StoredQuote, WalletTx } from "../src/shared/types";
@@ -69,6 +69,16 @@ describe("amounts and mint addresses", () => {
     await expect(setup().wallet.receiveLightning(2_000_000)).rejects.toThrow("not supported");
     expect(mint.send).not.toHaveBeenCalled();
     expect(mint.createMintQuoteBolt11).not.toHaveBeenCalled();
+  });
+
+  // The app reads the limit back out of the English line (errorText.ts) to say it in its language. A browser in
+  // Egyptian Arabic writes its numbers "١٬٠٠٠٬٠٠٠" by itself, which no rule read: the line showed in English.
+  it("says the limit in the English line the app translates, whatever the browser's own numbers", () => {
+    const own = Number.prototype.toLocaleString;
+    vi.spyOn(Number.prototype, "toLocaleString").mockImplementation(function (this: number, locales?: Intl.LocalesArgument, options?: Intl.NumberFormatOptions) {
+      return own.call(this, locales ?? "ar-EG", options);
+    });
+    expect(() => assertAmount(1_000_001)).toThrow(/^Amounts above 1,000,000 sats are not supported$/);
   });
 
   it("takes only https mints, or plain http on this very machine, and drops the trailing slash", () => {
@@ -469,7 +479,7 @@ describe("Lightning out", () => {
   });
 
   it("an unpaid payment whose proofs are partly spent gives back only the unspent ones", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
     mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("PENDING"));
     mint.completeMelt.mockResolvedValue({ quote: meltQuote("PENDING"), change: [] });
     const { wallet, events } = setup();
@@ -479,7 +489,7 @@ describe("Lightning out", () => {
     mint.checkProofsStates.mockResolvedValueOnce([{ state: "SPENT" }, { state: "UNSPENT" }, { state: "UNSPENT" }]);
     mint.checkProofsStates.mockImplementation(async (asked: unknown[]) => asked.map(() => ({ state: "UNSPENT" })));
     // Given up once no request of the payment can reach the mint any more.
-    await vi.advanceTimersByTimeAsync(CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS);
+    await vi.advanceTimersByTimeAsync(MELT_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS);
     expect(secrets()).toEqual(["b", "c", "d"]);
     expect(rows<StoredProof>("proofs").some((p) => p.unchecked), "checked, and found unspent").toBe(false);
     expect(rows<WalletTx>("walletTx").filter((tx) => tx.kind === "fee"), "a proof spent elsewhere is no fee of this payment").toEqual([]);
@@ -513,9 +523,9 @@ describe("Lightning out", () => {
 
   describe("a melt whose answer was lost", () => {
     /** A melt request's longest life plus the margin for a mint slow to act on it: past it, none can reach the mint. */
-    const OVERDUE = CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS;
-    // The wallet's clock moves with the polls: a melt is only given up once its request can no longer land.
-    beforeEach(() => { vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] }); });
+    const OVERDUE = MELT_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS;
+    // The wallet's clocks (wall and monotonic) move with the polls: a melt is only given up once its request can no longer land.
+    beforeEach(() => { vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] }); });
 
     it("stays pending while its request may still reach the mint, and is paid when the mint acts on it late", async () => {
       mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("UNPAID"));

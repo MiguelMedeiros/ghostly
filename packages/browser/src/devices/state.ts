@@ -192,7 +192,16 @@ export interface EarlierDeviceSet {
    * subscription, its wallets' home marks): stored in the move's own write, so a reload or a crash after it still clears them.
    */
   removed?: string;
+  /**
+   * Staying devices this set's frame went to over a live link, each with the secret that frame named then (base64url):
+   * such a device may hold that secret though its `set-ack` never came, and opens only that set's link (`links.ts`).
+   * Only devices still pending, at most one entry per device and secret. An older build ignores it.
+   */
+  delivered?: { key: string; d: string }[];
 }
+
+/** At most this many `delivered` entries per earlier set: every pending device, under every secret a record keeps. */
+export const MAX_DELIVERED = MAX_DEVICES * (MAX_EARLIER_SETS + 1);
 
 /**
  * After this device accepted a `set-update` (WISP 06 § Removing a device): the new device list, shown once ("Your
@@ -509,6 +518,7 @@ function isPush(value: unknown): value is DevicePush {
 export function isEarlierSet(value: unknown): value is EarlierDeviceSet {
   const set = value as Partial<EarlierDeviceSet> | null;
   if (!set || typeof set !== "object" || !bytes(set.d) || !bytes(set.tombstone) || !text(set.setUpdate) || !Array.isArray(set.pending) || !set.pending.every(bytes)) return false;
+  if (set.delivered !== undefined && (!Array.isArray(set.delivered) || set.delivered.length > MAX_DELIVERED || !set.delivered.every((entry) => !!entry && typeof entry === "object" && bytes(entry.key) && bytes(entry.d)))) return false;
   return set.pending.length <= MAX_DEVICES && (set.foreign === undefined || set.foreign === true) && optional(set.removed, bytes);
 }
 

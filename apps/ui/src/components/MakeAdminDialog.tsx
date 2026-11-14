@@ -24,7 +24,7 @@ export function MakeAdminDialog({ name, linkEnds = false, returnFocus, onClose, 
     <div className="mt-5 flex justify-end gap-2">
       <button ref={cancel} onClick={onClose} className="min-h-11 rounded-lg px-4 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("common.cancel")}</button>
       <button onClick={onConfirm} data-testid="group-make-admin-confirm"
-        className="min-h-11 rounded-lg bg-accent px-4 text-sm font-semibold text-panel-header hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent">{t("group.members.makeAdmin")}</button>
+        className="min-h-11 rounded-lg bg-accent px-4 text-sm font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] focus-visible:ring-2 focus-visible:ring-accent">{t("group.members.makeAdmin")}</button>
     </div>
   </dialog>, document.body);
 }

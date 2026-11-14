@@ -30,10 +30,10 @@ const FILE_IN_PATH = /\.(?:md|py|rs|sh)$/i;
 /**
  * Characters a browser reads as the dot between a host's labels, and ones that only look like it (Unicode's
  * confusables of "." and the middle, raised and word-separator dots fonts draw like it). Read before NFKC ("˙" would
- * become a space and an accent) and after it ("･" becomes "・").
+ * become a space and an accent) and after it ("･" becomes "・"). The combining dots stand alone, outside the class.
  */
 const DOTS =
-  /[\u00b7\u02d9\u0660\u06d4\u06f0\u0701\u0702\u0f0b\u0f0c\u1427\u16eb\u2022\u2024\u2027\u2219\u22c5\u2e30\u2e31\u2e33\u2e3c\u3002\u30fb\u318d\ua4f8\ua60e\ua78f\uff0e\uff61\u{10a50}]/gu;
+  /[\u00b7\u02d9\u0660\u06d4\u06f0\u0701\u0702\u0f0b\u0f0c\u1427\u16eb\u2022\u2024\u2027\u2219\u22c5\u2e30\u2e31\u2e33\u2e3c\u3002\u30fb\u318d\ua4f8\ua60e\ua78f\uff0e\uff61\u{10a50}\u2981]|\u0323|\u{1d16d}/gu;
 
 /**
  * A whole emoji: a keycap ("1️⃣"), a flag drawn from tags (🏴 and its tag letters), or pictographs joined by zero-width

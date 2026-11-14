@@ -28,6 +28,8 @@ export const RUST_INPUTS = [
   "native/transports/",
   "Cargo.toml",
   "Cargo.lock",
+  // The compiler, clippy and rustfmt the job runs: a bump is checked before it merges.
+  "rust-toolchain.toml",
   // app_sandbox.rs: the mini-app frame's copies of the web app's frame and core's bridge.
   "apps/web/public/app-frame.html",
   "packages/core/src/miniApp.ts",
@@ -37,6 +39,8 @@ export const RUST_INPUTS = [
   "native/translation/",
   // viewer.rs: a test keeps its connection policy the same as `service open`'s.
   "packages/cli/src/services.ts",
+  // viewer.rs: a test keeps its WebRTC guard the same as the web runner's.
+  "packages/core/src/viewerGuard.ts",
 ];
 
 /**
@@ -52,6 +56,10 @@ export const RUST_JOB = [".github/workflows/ci.yml", "tools/scripts/ci-changes.m
  */
 export const WEBSITE_INPUTS = [
   "apps/website/",
+  // The /android page's Android build facts, checked by apps/website/scripts/android-page.test.mjs.
+  "apps/desktop/tauri.android.conf.json",
+  "apps/desktop/gen/android/app/build.gradle.kts",
+  "docs/ANDROID.md",
   // Published under /reference by apps/website/scripts/sync-references.mjs, and scanned by check-dashes.mjs.
   "docs/wisps/",
   "docs/PROTOCOL.md",
@@ -67,6 +75,8 @@ export const WEBSITE_INPUTS = [
   "packages/cli/README.md",
   // llms.test.mjs checks the install line against the CLI's package name.
   "packages/cli/package.json",
+  // llms.test.mjs checks that the security model's events and press fields are the ones `listen --turns` emits.
+  "packages/cli/src/listen.ts",
   // llms.test.mjs checks that llms.txt's Android line follows the Release workflow's ANDROID_FROM.
   ".github/workflows/release.yml",
   // Quoted on /developers: sync-references.mjs's excerpt().
@@ -310,8 +320,11 @@ export function plan(files, { draft, tested = false, superseded = false }) {
   // No file list runs Tauri Backend unless it is a draft.
   const rust = all ? !draft : files.some((f) => covers(RUST_INPUTS, f) || (!draft && covers(RUST_JOB, f)));
   if (!all && !rust) why.push("Nothing the Rust job reads changed: Tauri Backend skipped");
-  // Then the tier: a draft keeps only the fast jobs.
-  if (draft) why.push("Draft: the fast tier only (lint and types, the affected unit tests). Leaving draft runs everything");
+  // Then the tier: a draft keeps only the fast jobs, and the site's checks and the Rust job when their gates are on.
+  if (draft) {
+    const fast = ["lint and types", "the affected unit tests", ...(site ? ["Website"] : []), ...(rust ? ["Tauri Backend"] : [])];
+    why.push(`Draft: the fast tier only (${fast.join(", ")}). Leaving draft runs everything`);
+  }
   return {
     lint: true,
     rust,

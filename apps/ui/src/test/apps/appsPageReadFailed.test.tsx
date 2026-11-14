@@ -90,6 +90,47 @@ describe("the Apps page when its reads fail", () => {
     expect(screen.queryByTestId("apps-stores-error")).toBeNull();
   });
 
+  it("keeps the focus in the section once Try again's read works, never on the page", async () => {
+    renderApp(<Apps />, { route: "/apps" });
+    const apps = await screen.findByTestId("apps-installed-error");
+    failing = false;
+    const again = within(apps).getByRole("button", { name: "Try again" });
+    again.focus();
+    await act(async () => { fireEvent.click(again); });
+    const row = (await screen.findAllByTestId("installed-app"))[0];
+    expect(screen.queryByTestId("apps-installed-error")).toBeNull();
+    expect(row).toContainElement(document.activeElement as HTMLElement);
+
+    const stores = screen.getByTestId("apps-stores-error");
+    const storesAgain = within(stores).getByRole("button", { name: "Try again" });
+    storesAgain.focus();
+    await act(async () => { fireEvent.click(storesAgain); });
+    const block = (await screen.findAllByTestId("app-store"))[0];
+    expect(screen.queryByTestId("apps-stores-error")).toBeNull();
+    expect(block).toContainElement(document.activeElement as HTMLElement);
+  });
+
+  it("goes to Add when Try again's read found nothing to focus", async () => {
+    renderApp(<Apps />, { route: "/apps" });
+    const apps = await screen.findByTestId("apps-installed-error");
+    fakeEngine.on("appList", () => []);
+    const again = within(apps).getByRole("button", { name: "Try again" });
+    again.focus();
+    await act(async () => { fireEvent.click(again); });
+    expect(await screen.findByTestId("apps-none")).toBeInTheDocument();
+    expect(document.activeElement).toBe(screen.getByTestId("apps-add"));
+  });
+
+  it("keeps the focus on Try again when the read fails again", async () => {
+    renderApp(<Apps />, { route: "/apps" });
+    const apps = await screen.findByTestId("apps-installed-error");
+    const again = within(apps).getByRole("button", { name: "Try again" });
+    again.focus();
+    await act(async () => { fireEvent.click(again); });
+    expect(screen.getByTestId("apps-installed-error")).toBeInTheDocument();
+    expect(document.activeElement).toBe(again);
+  });
+
   it("still says No apps yet. and No stores yet. when the reads found none", async () => {
     fakeEngine.on("appList", () => []).on("appStoreList", () => []);
     renderApp(<Apps />, { route: "/apps" });

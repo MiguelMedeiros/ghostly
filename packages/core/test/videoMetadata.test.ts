@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { BlobSource, BufferTarget, Conversion, EncodedPacketSink, Input, MP4, MovOutputFormat, Mp4OutputFormat, Output, QTFF } from "mediabunny";
-import { NO_VIDEO_METADATA, videoMetadataPatches, withoutVideoMetadata } from "../src/videoMetadata";
+import { NO_VIDEO_METADATA, VIDEO_METADATA_LIMITS, readingAhead, videoMetadataPatches, withoutVideoMetadata } from "../src/videoMetadata";
 import { H264_MP4, PLACE, box, hasPlace, headerTimes, metadataTrack, withFirst, withMovie, withTrack, xyzUdta } from "./support/videoFixtures";
 // covers: files.video.metadata
 
@@ -186,6 +186,37 @@ describe("withoutVideoMetadata", () => {
     }
   });
 
+  it("a 400 MiB free box or trailer goes as zeros without 400 MiB of zeros copied into the video sent", async () => {
+    const mp4 = withMovie(H264_MP4, [xyzUdta()]);
+    const size = 400 * 1024 * 1024;
+    // The source's 400 MiB made of one MiB of zeros by reference, as a file opened from disk holds none of its bytes.
+    const mib = new Blob([new Uint8Array(1024 * 1024)]);
+    const body = new Blob(Array.from({ length: size / mib.size }, () => mib));
+    const header = Buffer.alloc(8);
+    header.writeUInt32BE(8 + size, 0);
+    header.write("free", 4, "latin1");
+    const NativeBlob = Blob;
+    for (const [name, source] of [["free box", new Blob([mp4, header, body])], ["trailer", new Blob([mp4, header.subarray(0, 4), body])]] as const) {
+      // The bytes the strip hands a Blob to copy, as the Blob constructor copies every ArrayBufferView part.
+      let copied = 0;
+      vi.stubGlobal("Blob", class extends NativeBlob {
+        constructor(parts?: BlobPart[], options?: BlobPropertyBag) {
+          super(parts, options);
+          for (const part of parts ?? []) if (ArrayBuffer.isView(part)) copied += part.byteLength;
+        }
+      });
+      try {
+        const out = (await withoutVideoMetadata(source, "video/mp4"))!;
+        expect(out.size, name).toBe(source.size);
+        expect(copied, name).toBeLessThan(2 * 1024 * 1024);
+        expect(hasPlace(await bytesOf(out.slice(0, mp4.length + 8))), name).toBe(false);
+        expect((await bytesOf(out.slice(-1024 * 1024 - 5))).every((b) => b === 0), name).toBe(true);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    }
+  });
+
   it("any bytes after the last whole box (1 to 7 zeros, a phone's trailer) go as zeros, the size kept", async () => {
     const mp4 = withMovie(H264_MP4, [xyzUdta()]);
     const trailer = Buffer.from(`SEFT trailer ${PLACE}`, "latin1");
@@ -266,6 +297,57 @@ describe("withoutVideoMetadata", () => {
     await expect(withoutVideoMetadata(new Blob([inSefd]), "video/mp4")).rejects.toThrow(NO_VIDEO_METADATA);
   });
 
+  it("a fragmented video with a metadata or timecode track is refused, its samples in a fragment", async () => {
+    const u32 = (n: number) => Buffer.from([n >>> 24, (n >> 16) & 255, (n >> 8) & 255, n & 255]);
+    const fragmented = await repack(false, "fragmented");
+    const sample = Buffer.from(`GPS ${PLACE} motion`, "latin1");
+    // The track's table in `moov` holds no byte of it, its one sample is in a fragment at the end: a run that starts
+    // past its `moof` (the base is the `moof`'s start), of one sample of its size.
+    const moof = (offset: number) => box("moof", box("mfhd", u32(0), u32(99)),
+      box("traf", box("tfhd", u32(0x20000), u32(0)), box("trun", u32(0x201), u32(1), u32(offset), u32(sample.length))));
+    const tail = Buffer.concat([moof(moof(0).length + 8), box("mdat", sample)]);
+    for (const [handler, mime] of [["meta", "video/mp4"], ["meta", "video/quicktime"], ["tmcd", "video/quicktime"]]) {
+      const file = Buffer.concat([withMovie(fragmented, [], Buffer.alloc(0), handler), tail]);
+      expect(hasPlace(file)).toBe(true);
+      await expect(withoutVideoMetadata(new Blob([file]), mime), `${handler} ${mime}`).rejects.toThrow(NO_VIDEO_METADATA);
+    }
+    // The same fragmented video without such a track goes, its frames as they were.
+    const out = await bytesOf((await withoutVideoMetadata(new Blob([fragmented as BlobPart]), "video/mp4"))!);
+    expect(await played(out)).toEqual(await played(fragmented));
+  });
+
+  it("a subtitle or caption track's samples (a drone's or a dashcam's GPS and home point each second) are zeroed where they are", async () => {
+    const line = Buffer.from(`F/2.8, SS 1000, ISO 100, GPS ${PLACE} HOME ${PLACE} 2026-11-08 14:02:11`, "latin1");
+    const sample = Buffer.concat([Buffer.from([0, line.length]), line]);
+    for (const handler of ["text", "sbtl", "subt", "clcp"]) {
+      for (const mime of ["video/mp4", "video/quicktime"]) {
+        const captioned = withMovie(H264_MP4, [], sample, handler);
+        expect(hasPlace(captioned)).toBe(true);
+        const out = await bytesOf((await withoutVideoMetadata(new Blob([captioned]), mime))!);
+        expect(hasPlace(out), `${handler} ${mime}`).toBe(false);
+        const zeroed = await bytesOf((await withoutVideoMetadata(new Blob([withMovie(H264_MP4, [], Buffer.alloc(sample.length), handler)]), mime))!);
+        expect(Buffer.from(out).equals(zeroed), `${handler} ${mime}`).toBe(true);
+        expect(await played(out)).toEqual(await played(captioned));
+      }
+    }
+
+    // Fragmented: the track's table in `moov` holds none of it, its samples are in a fragment's run, zeroed there.
+    const u32 = (n: number) => Buffer.from([n >>> 24, (n >> 16) & 255, (n >> 8) & 255, n & 255]);
+    const fragmented = await repack(false, "fragmented");
+    const moof = (offset: number) => box("moof", box("mfhd", u32(0), u32(99)),
+      box("traf", box("tfhd", u32(0x20000), u32(0)), box("trun", u32(0x201), u32(1), u32(offset), u32(sample.length))));
+    const tail = Buffer.concat([moof(moof(0).length + 8), box("mdat", sample)]);
+    for (const handler of ["text", "sbtl", "subt", "clcp"]) {
+      const file = Buffer.concat([withMovie(fragmented, [], Buffer.alloc(0), handler), tail]);
+      expect(hasPlace(file)).toBe(true);
+      const out = await bytesOf((await withoutVideoMetadata(new Blob([file]), "video/mp4"))!);
+      expect(hasPlace(out), handler).toBe(false);
+      expect(out.length).toBe(file.length);
+      expect(out.subarray(-sample.length).every((b) => b === 0), handler).toBe(true);
+      expect(await played(out)).toEqual(await played(file));
+    }
+  });
+
   it("a fragmented video with a box it empties in each fragment is checked once per fragment, not against every other fragment", async () => {
     // A live encoder's recording: a `prft` (when the fragment was made) before each of 16,000 fragments, two samples each.
     const u32 = (n: number) => Buffer.from([n >>> 24, (n >> 16) & 255, (n >> 8) & 255, n & 255]);
@@ -300,6 +382,45 @@ describe("withoutVideoMetadata", () => {
     expect(timed / plain, `${timed} µs with a prft per fragment, ${plain} µs without`).toBeLessThan(5);
   }, 120_000);
 
+  it("a fragmented video with a caption run in each fragment checks each run once, not against every fragment's mdat", async () => {
+    // A dashcam's recording: a caption track (its GPS each second) with one run in each of 32,000 fragments, each
+    // fragment's own `mdat` holding it.
+    const u32 = (n: number) => Buffer.from([n >>> 24, (n >> 16) & 255, (n >> 8) & 255, n & 255]);
+    const line = Buffer.from(`GPS ${PLACE}`, "latin1");
+    const head = box("ftyp", Buffer.from("isom\0\0\0\0isom", "latin1"));
+    const moof = (n: number, offset: number) => box("moof", box("mfhd", u32(0), u32(n)),
+      box("traf", box("tfhd", u32(0x20000), u32(0)), box("trun", u32(0x201), u32(1), u32(offset), u32(line.length))));
+    // The same file with the track as a sound track: its runs are walked and checked the same, none zeroed. A `free`
+    // box makes both walk every fragment.
+    const recording = (handler: string) => {
+      const moov = (at: number) => box("moov", box("mvhd", Buffer.alloc(100)), metadataTrack(at, line.length, handler),
+        box("mvex", box("trex", u32(0), u32(0), u32(1), u32(0), u32(0), u32(0))));
+      const space = box("free", Buffer.alloc(8));
+      const first = head.length + space.length + moov(0).length + moof(0, 0).length + 8;
+      return Buffer.concat([head, space, moov(first), ...Array.from({ length: 32_000 }, (_, i) => [moof(i + 1, moof(0, 0).length + 8), box("mdat", line)]).flat()]);
+    };
+    // Read from memory, so the time is the walk's and the checks', not a Blob's reads.
+    const cpu = async (file: Buffer, zeroed: number) => {
+      const before = process.cpuUsage();
+      const patches = await videoMetadataPatches({ size: file.length, read: async (offset, length) => new Uint8Array(file.subarray(offset, offset + length)) }, "video/mp4");
+      const used = process.cpuUsage(before);
+      // The `free` box's body, and with captions every run (and the one in moov's table), as zeros.
+      expect(patches!.filter((patch) => !patch.bytes).length).toBe(1 + zeroed);
+      return used.user + used.system;
+    };
+    const plainFile = recording("soun"), captionedFile = recording("text");
+    const best = async (file: Buffer, zeroed: number) => {
+      let least = Infinity;
+      for (let run = 0; run < 3; run++) least = Math.min(least, await cpu(file, zeroed));
+      return least;
+    };
+    await cpu(plainFile, 0);
+    await cpu(captionedFile, 32_000);
+    // About as long with captions (each run one more range); before, each run against every `mdat`: almost five times.
+    const plain = await best(plainFile, 0), captioned = await best(captionedFile, 32_000);
+    expect(captioned / plain, `${captioned} µs with captions, ${plain} µs without`).toBeLessThan(3);
+  }, 120_000);
+
   it("a fragmented video's boxes are read a window at a time, not one read per box header and one per moof", async () => {
     // A read from a Blob costs about the same whatever its size (half a millisecond in Chromium): what counts is how many.
     const u32 = (n: number) => Buffer.from([n >>> 24, (n >> 16) & 255, (n >> 8) & 255, n & 255]);
@@ -327,6 +448,57 @@ describe("withoutVideoMetadata", () => {
     // Fragments of 100 KB: one read for a fragment's three headers and its `moof`, one for its `prft` and `moof` again
     // when they are emptied and copied (five before).
     expect(await reads(recording(40, 50_000), 40)).toBeLessThanOrEqual(2 * 40 + 4);
+  });
+
+  it("a walk through the whole file reads it in growing windows; one that jumps reads a small window at each jump", async () => {
+    // In Chromium a Blob's read costs ~0.3 ms plus ~0.9 ms per MiB: an Ogg's pages or a live WebM's blocks (a browser's
+    // own recording, clusters of unknown size) read 64 KiB at a time took 5 s to walk 512 MiB before the bubble showed.
+    const size = 32 * 2 ** 20;
+    const counted = () => {
+      const seen = { reads: 0, bytes: 0 };
+      const source = readingAhead({ size, read: async (offset, length) => {
+        const bytes = new Uint8Array(Math.max(0, Math.min(length, size - offset)));
+        seen.reads++;
+        seen.bytes += bytes.length;
+        return bytes;
+      } });
+      return { source, seen };
+    };
+    // A page header every 8,252 bytes, each page's body skipped (509 reads of 64 KiB before).
+    const walk = counted();
+    for (let at = 0; at + 27 <= size; at += 8252) expect((await walk.source.read(at, 27)).length).toBe(27);
+    expect(walk.seen.reads).toBeLessThan(24);
+    expect(walk.seen.bytes).toBeLessThan(size + 8 * 2 ** 20);
+    // A box header every 1 MiB, the samples between skipped: each jump reads 64 KiB, never more.
+    const jumps = counted();
+    for (let at = 0; at < size; at += 2 ** 20) await jumps.source.read(at, 16);
+    expect(jumps.seen.reads).toBe(32);
+    expect(jumps.seen.bytes).toBe(32 * VIDEO_METADATA_LIMITS.readAhead);
+  });
+
+  it("a fragmented video is sent as a Blob of a few parts, not a slice of the file and a part per fragment", async () => {
+    // Chromium builds a Blob a part at a time and slices a File through its blob registry: 37,500 frame-sized fragments
+    // froze the page 6.6 s before their bubble showed, and reading the copy back took as long again.
+    const u32 = (n: number) => Buffer.from([n >>> 24, (n >> 16) & 255, (n >> 8) & 255, n & 255]);
+    const head = box("ftyp", Buffer.from("isom\0\0\0\0isom", "latin1"));
+    const moov = box("moov", box("mvhd", Buffer.alloc(100)), metadataTrack(0, 4, "soun"), box("mvex", box("trex", u32(0), u32(1), u32(1), u32(0), u32(6), u32(0))));
+    const prft = box("prft", u32(0), u32(1), Buffer.alloc(8), u32(0));
+    const moof = (n: number, sample: number, offset: number) => box("moof", box("mfhd", u32(0), u32(n)), box("traf", box("tfhd", u32(0x20010), u32(1), u32(sample)), box("trun", u32(1), u32(2), u32(offset))));
+    // A frame per fragment, 1,000 of them, a `prft` (emptied) before each; then one fragment of 6 MB, read as it is.
+    const fragment = (i: number, sample: number) => [prft, moof(i + 1, sample, moof(0, 0, 0).length + 8), box("mdat", Buffer.alloc(sample * 2, (i * 7) & 255))];
+    const file = Buffer.concat([head, moov, ...Array.from({ length: 1_000 }, (_, i) => fragment(i, 600)).flat(), ...fragment(1_000, 3_000_000)]);
+    const blob = new Blob([file]);
+    let slices = 0;
+    const source = { size: blob.size, type: blob.type, slice: (start?: number, end?: number) => { slices++; return blob.slice(start, end); } } as Blob;
+    const out = Buffer.from(await bytesOf((await withoutVideoMetadata(source, "video/mp4"))!));
+    // What it sends: the file with each patch put where it goes.
+    const patches = (await videoMetadataPatches({ size: file.length, read: async (offset, length) => Uint8Array.from(file.subarray(offset, offset + length)) }, "video/mp4"))!;
+    const expected = Buffer.from(file);
+    for (const { start, end, bytes } of patches) if (bytes) expected.set(bytes, start); else expected.fill(0, start, end);
+    expect(out.equals(expected)).toBe(true);
+    expect(out.includes(Buffer.from("prft", "latin1"))).toBe(false);
+    // The reads of the walk (a window each, under 100 for 1,000 such fragments) and a few parts: 2,000 more before.
+    expect(slices).toBeLessThan(150);
   });
 
   it("a video with nothing left to remove goes the same: the fixture's encoder tag (udta/meta/ilst) went the first time", async () => {

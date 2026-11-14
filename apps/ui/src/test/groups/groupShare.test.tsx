@@ -1,6 +1,6 @@
 import { act, screen, within } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createIdentity, encodeGroupEntryLink } from "@ghostly/core";
 import type { GroupMemberView, GroupView } from "@ghostly/browser/shared/types";
 import { GroupShareDialog } from "../../components/GroupLinkPanel";
@@ -81,6 +81,30 @@ describe("the group header's Share link", () => {
     await user.click(screen.getByTestId("group-share"));
     expect(await screen.findByTestId("group-notice")).toHaveTextContent("The group is full");
     expect(screen.queryByTestId("group-share-dialog")).not.toBeInTheDocument();
+  });
+});
+
+describe("the group header on the narrowest phone", () => {
+  /** How wide the window is, as matchMedia reads it. */
+  const viewport = (width: number, height = 640) => (window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height });
+  afterEach(() => viewport(1024, 768));
+
+  // At 320px the back button, the picture, the connection, Share link and ⋮ left the name about 70px ("Clube d…").
+  it("has Share link as a row of ⋮, which opens the link, and leaves its room to the name", async () => {
+    viewport(320);
+    const { user } = openGroup(admin({ entryLink: LINK }));
+    expect(screen.queryByTestId("group-share")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("group-options"));
+    await user.click(within(screen.getByTestId("group-options-menu")).getByTestId("group-share"));
+    expect(await screen.findByTestId("group-share-dialog")).toHaveTextContent("Share Friends");
+  });
+
+  it("keeps Share link in the header on a wider phone, and not in ⋮", async () => {
+    viewport(390);
+    const { user } = openGroup(admin({ entryLink: LINK }));
+    expect(screen.getByTestId("group-share")).toBeInTheDocument();
+    await user.click(screen.getByTestId("group-options"));
+    expect(within(screen.getByTestId("group-options-menu")).queryByTestId("group-share")).not.toBeInTheDocument();
   });
 });
 

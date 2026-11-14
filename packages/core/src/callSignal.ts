@@ -273,7 +273,9 @@ export function extractParamsFromSdp(sdp: string, { maxCandidates = 2, loopback 
       if (currentMedia === "a" && opus === null && /^opus/i.test(rtpmap[2])) opus = pt;
       if (currentMedia === "v" && vp8 === null && /^VP8/i.test(rtpmap[2])) vp8 = pt;
     }
-    if (line.startsWith("a=candidate:")) {
+    // Component 1 alone: the rebuilt SDP says `a=rtcp-mux`, so a component 2 line (webrtc-rs, the Linux Desktop,
+    // lists one of every candidate) is no path, and it would take another candidate's slot.
+    if (line.startsWith("a=candidate:") && line.split(" ")[1] === "1") {
       candidates.push(line.substring("a=candidate:".length));
     }
     if (line.startsWith("a=ssrc:")) {

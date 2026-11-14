@@ -1,3 +1,5 @@
+import { getBrowserHost, type BrowserHost } from "@ghostly/browser/host";
+import { findSecret } from "./parse/secrets";
 import { servicesPlatform } from "./platform";
 
 export type ShareOutcome = "shared" | "copied" | "cancelled";
@@ -23,9 +25,30 @@ export async function copyText(text: string): Promise<void> {
 }
 
 /**
+ * Copies a secret (an invite, a device's link, a group's link, ecash): marked sensitive where the host can (the apps,
+ * whose clipboard histories and managers then keep no copy of it), elsewhere as `copyText`. A
+ * refused sensitive copy throws: the caller shows the text to copy by hand rather than copy it unmarked.
+ */
+export async function copySecret(text: string): Promise<void> {
+  let host: BrowserHost | null = null;
+  try { host = getBrowserHost(); } catch { /* none yet: the page copies */ }
+  if (host?.copySecret) return host.copySecret(text);
+  return copyText(text);
+}
+
+/**
+ * Copies a message's words (its Copy, an edit's earlier text in its details): as a secret when they hold one the
+ * composer would ask about (a Cashu token, a seed, a key), as plain text otherwise.
+ */
+export async function copyMessageText(text: string): Promise<void> {
+  return findSecret(text) ? copySecret(text) : copyText(text);
+}
+
+/**
  * Shares a link the best way this device has: the system's share sheet (the desktop app, through
  * its host), the Web Share API (phones, most browsers), and otherwise a copy, so there is always
- * something to paste. `anchor` is the button, for a sheet that points at it.
+ * something to paste. `anchor` is the button, for a sheet that points at it. The link is a secret (a group's): the
+ * copy is `copySecret`.
  */
 export async function shareLink(url: string, title: string, anchor?: HTMLElement | null): Promise<ShareOutcome> {
   const box = anchor?.getBoundingClientRect();
@@ -41,6 +64,6 @@ export async function shareLink(url: string, title: string, anchor?: HTMLElement
       if (cause instanceof DOMException && cause.name === "AbortError") return "cancelled";
     }
   }
-  await copyText(url);
+  await copySecret(url);
   return "copied";
 }

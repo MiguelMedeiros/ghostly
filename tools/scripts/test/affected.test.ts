@@ -1,7 +1,9 @@
+import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { bundleReaches, checkPaths, featureGrep, globToRegExp, plan, specsImporting, testsReaching, throughCoreBarrel, UNIT_PROJECTS } from "../affected/select.mjs";
+import { codeFiles as repoCode, knownFiles, workspacePackages } from "../affected/files.mjs";
+import { bundleReaches, checkPaths, featureGrep, globToRegExp, namedPaths, packageImports, parseUnitGroup, plan, specsImporting, testsReaching, throughCoreBarrel, UNIT_ALONE, UNIT_PROJECTS, unitGroupOf, workspaceExports } from "../affected/select.mjs";
 
 // A small repository: a few features, a paths map, specs tagged with them, and core modules behind a barrel.
 const inventory = {
@@ -75,7 +77,9 @@ describe("a UI-only change", () => {
     expect(unit.ui.mode).toBe("related");
     expect(unit.ui.files).toEqual(["apps/ui/src/components/PaymentComposer.tsx"]);
     expect(unit.extension.mode).toBe("related");
-    for (const name of ["core", "browser", "sdk", "matrix", "scripts"]) expect(unit[name].mode).toBe("skip");
+    for (const name of ["core", "browser", "sdk", "matrix"]) expect(unit[name].mode).toBe("skip");
+    // Of the scripts, only the one that checks the UI's imports are declared.
+    expect(unit.scripts.files).toEqual(["tools/scripts/test/workspaceDepsDeclared.test.ts"]);
   });
 
   it("lints the file and typechecks what compiles apps/ui/src/, not the packages under it", () => {
@@ -208,6 +212,28 @@ describe("tests that import across workspaces", () => {
     expect(byName(p.unit).matrix.files).toEqual(["e2e/matrix/rails.test.ts"]);
   });
 
+  it("a file renamed or deleted inside a project's sources runs the tests that still import the old path", () => {
+    // test-affected.mjs diffs with --no-renames: a rename is the old path (deleted) and the new one. vitest is given
+    // only files that exist, so the tests importing the old path were never selected and failed first in the batch.
+    const files: Record<string, string> = {
+      "tools/scripts/tarball.mjs": `export function tarGz() {}`,
+      "tools/scripts/prepare-translation-runtime.mjs": `import { tarGz } from "./tarball.mjs";`,
+      "tools/scripts/test/tarGz.test.ts": `import { tarGz } from "../tar-gz.mjs";`,
+      "tools/scripts/test/translationRuntime.test.ts": `import { tarGz } from "../tar-gz.mjs";\nimport "../prepare-translation-runtime.mjs";`,
+      "tools/scripts/test/other.test.ts": `import { x } from "../other.mjs";`,
+    };
+    const rename = changed("-tools/scripts/tar-gz.mjs", "tools/scripts/tarball.mjs", "tools/scripts/prepare-translation-runtime.mjs");
+    const scripts = byName(plan({ changed: rename, inventory, e2eFiles, codeFiles: files }).unit).scripts;
+    expect(scripts.mode).toBe("related");
+    expect(scripts.files).toEqual([
+      "tools/scripts/tarball.mjs", "tools/scripts/prepare-translation-runtime.mjs",
+      "tools/scripts/test/tarGz.test.ts", "tools/scripts/test/translationRuntime.test.ts",
+    ]);
+    // A delete alone, too.
+    expect(byName(plan({ changed: changed("-tools/scripts/tar-gz.mjs"), inventory, e2eFiles, codeFiles: files }).unit).scripts.files)
+      .toEqual(["tools/scripts/test/tarGz.test.ts", "tools/scripts/test/translationRuntime.test.ts"]);
+  });
+
   it("keeps to the test files the project runs", () => {
     expect(testsReaching(["packages/browser/test/helpers/fake.ts"], codeFiles, ["packages/browser/test/**"])).toEqual([]);
     expect(testsReaching(["apps/ui/src/components/ChatConnection.tsx"], codeFiles, ["e2e/matrix/*"])).toEqual([]);
@@ -290,6 +316,133 @@ describe("the CLI", () => {
   });
 });
 
+describe("imports by package name", () => {
+  // packages/browser/test/irohWeb.test.ts loads the committed wasm through `import("@ghostly/iroh-web")`: no relative
+  // path leads there, so a rebuilt packages/iroh-web/pkg used to run no browser test.
+  const packages = workspaceExports({
+    "packages/iroh-web/package.json": JSON.stringify({ name: "@ghostly/iroh-web", exports: { ".": "./pkg/ghostly_iroh_web.js", "./wasm": "./pkg/ghostly_iroh_web_bg.wasm" } }),
+    "packages/browser/package.json": JSON.stringify({ name: "@ghostly/browser", exports: { "./*": "./src/*.ts" } }),
+    "packages/core/package.json": JSON.stringify({ name: "@ghostly/core", exports: { ".": "./src/index.ts", "./miniApp": "./src/miniApp.ts" } }),
+    "packages/sdk/package.json": JSON.stringify({ name: "@ghostlytools/sdk", exports: { ".": { types: "./dist/index.d.ts", default: "./dist/index.js" } } }),
+    "infra/relay/package.json": JSON.stringify({ name: "relay", main: "relay.mjs" }),
+    "apps/web/package.json": JSON.stringify({ name: "@ghostly/web", private: true }),
+  });
+  const codeFiles: Record<string, string> = {
+    "packages/iroh-web/pkg/ghostly_iroh_web.js": `export function initSync() {}`,
+    "packages/browser/src/platform/irohWeb.ts": `export const load = () => import("@ghostly/iroh-web");`,
+    "packages/browser/src/engine/node.ts": `import { load } from "../platform/irohWeb";`,
+    "packages/browser/test/irohWeb.test.ts": `const m = await import("@ghostly/iroh-web");\nconst wasm = createRequire(import.meta.url).resolve("@ghostly/iroh-web/wasm");`,
+    "packages/browser/test/engine.test.ts": `import { start } from "../src/engine/node";`,
+    "packages/browser/test/other.test.ts": `import { x } from "@ghostly/other";`,
+    "packages/core/src/index.ts": `export * from "./bytes";`,
+    "packages/core/src/bytes.ts": `export const hex = 1;`,
+    "e2e/matrix/bytes.test.ts": `import { hex } from "@ghostly/core";`,
+    "e2e/matrix/node.test.ts": `import { start } from "@ghostly/browser/engine/node";`,
+  };
+
+  it("reads each workspace's exports, conditions and main", () => {
+    expect(packages).toEqual({
+      "@ghostly/iroh-web": [[".", "packages/iroh-web/pkg/ghostly_iroh_web.js"], ["./wasm", "packages/iroh-web/pkg/ghostly_iroh_web_bg.wasm"]],
+      "@ghostly/browser": [["./*", "packages/browser/src/*.ts"]],
+      "@ghostly/core": [[".", "packages/core/src/index.ts"], ["./miniApp", "packages/core/src/miniApp.ts"]],
+      "@ghostlytools/sdk": [[".", "packages/sdk/dist/index.js"]],
+      relay: [[".", "infra/relay/relay.mjs"]],
+    });
+    expect(packageImports(codeFiles["packages/browser/test/irohWeb.test.ts"], packages)).toEqual(["packages/iroh-web/pkg/ghostly_iroh_web", "packages/iroh-web/pkg/ghostly_iroh_web_bg.wasm"]);
+    expect(packageImports(`import "@ghostly/browser/engine/node.ts";\nimport x from "@ghostly/core/miniApp";\nimport y from "@ghostly/core/nope";\nimport z from "react";`, packages)).toEqual(["packages/browser/src/engine/node", "packages/core/src/miniApp"]);
+  });
+
+  it("fills every * of an exports target, as Node does", () => {
+    const pkgs = { "@ghostly/x": [["./*", "packages/x/src/*/*.ts"]] };
+    expect(packageImports(`import "@ghostly/x/a";`, pkgs)).toEqual(["packages/x/src/a/a"]);
+  });
+
+  it("a rebuilt packages/iroh-web/pkg runs the browser tests that load it, directly or through the engine", () => {
+    const browser = (file: string) => byName(plan({ changed: changed(file), inventory, e2eFiles, codeFiles, packages }).unit).browser;
+    expect(browser("packages/iroh-web/pkg/ghostly_iroh_web.js")).toMatchObject({ mode: "related", files: ["packages/browser/test/engine.test.ts", "packages/browser/test/irohWeb.test.ts"] });
+    expect(browser("packages/iroh-web/pkg/ghostly_iroh_web_bg.wasm")).toMatchObject({ mode: "related", files: ["packages/browser/test/irohWeb.test.ts"] });
+  });
+
+  it("follows a subpath into another project's sources, but not @ghostly/core's barrel (throughCoreBarrel reads it)", () => {
+    expect(testsReaching(["packages/browser/src/platform/irohWeb.ts"], codeFiles, ["e2e/matrix/*"], packages)).toEqual(["e2e/matrix/node.test.ts"]);
+    expect(testsReaching(["packages/core/src/bytes.ts"], codeFiles, ["e2e/matrix/*"], packages)).toEqual([]);
+  });
+
+  it("the built CLI takes in what it imports by package name", () => {
+    const files = {
+      "packages/cli/src/bin.ts": `const iroh = await import("@ghostly/iroh-web");`,
+      "packages/iroh-web/pkg/ghostly_iroh_web.js": `export function initSync() {}`,
+    };
+    expect(bundleReaches("packages/cli/src/bin.ts", files, packages)).toContain("packages/iroh-web/pkg/ghostly_iroh_web");
+    expect(byName(plan({ changed: changed("packages/iroh-web/pkg/ghostly_iroh_web.js"), inventory, e2eFiles, codeFiles: files, packages }).unit).cli.files).toEqual(["packages/cli/test/support/cli.ts"]);
+  });
+});
+
+describe("the real repository's import graph", () => {
+  // test-affected.mjs reads it through tools/scripts/affected/files.mjs. It used to read a list of folders, so a chain
+  // through native/ or apps/web/'s own files was cut: a change to native/transports/hyperdht/redial.mjs ran 1 of the
+  // 8 browser tests that reach it (through endpoint.mjs) and no CLI test, apps/web/appsTestFlag.ts none of the 3 UI
+  // tests that reach it (through apps/web/runnerPolicy.ts), and a rebuilt @ghostly/iroh-web no browser test.
+  const root = join(import.meta.dirname, "..", "..", "..");
+  let real: { codeFiles: Record<string, string>; packages: Record<string, [string, string][]>; e2eFiles: Record<string, string> } | undefined;
+  const load = () => {
+    if (real) return real;
+    const known = knownFiles(root);
+    const codeFiles = repoCode(root, known);
+    return (real = { codeFiles, packages: workspacePackages(root, known), e2eFiles: Object.fromEntries(Object.entries(codeFiles).filter(([p]) => p.startsWith("e2e/"))) });
+  };
+  const realPlan = (...files: string[]) => {
+    const { codeFiles, packages, e2eFiles } = load();
+    const inventory = JSON.parse(readFileSync(join(root, "e2e/features.json"), "utf8"));
+    return byName(plan({ changed: changed(...files), inventory, e2eFiles, codeFiles, packages }).unit);
+  };
+
+  it("reads every TypeScript/JavaScript file git knows, and the workspaces' package names", () => {
+    const { codeFiles, packages } = load();
+    for (const file of ["native/transports/hyperdht/endpoint.mjs", "apps/web/runnerPolicy.ts", "infra/services/hyperdht-relay/relay.mjs", "packages/browser/test/irohWeb.test.ts"]) {
+      expect(Object.keys(codeFiles), file).toContain(file);
+    }
+    expect(packages["@ghostly/iroh-web"]).toContainEqual([".", "packages/iroh-web/pkg/ghostly_iroh_web.js"]);
+  });
+
+  it("a change behind native/, apps/web/ or @ghostly/iroh-web runs the tests that reach it", { timeout: 30_000 }, () => {
+    const unit = realPlan("native/transports/hyperdht/redial.mjs", "packages/iroh-web/pkg/ghostly_iroh_web_bg.wasm", "apps/web/appsTestFlag.ts");
+    expect(unit.browser.files).toEqual(expect.arrayContaining([
+      "packages/browser/test/hyperdhtRedial.test.ts",
+      "packages/browser/test/hyperdhtEndpointBuffered.test.ts",
+      "packages/browser/test/hyperdhtEndpointClose.test.ts",
+      "packages/browser/test/hyperdhtEndpointEphemeral.test.ts",
+      "packages/browser/test/hyperdhtEndpointRedial.test.ts",
+      "packages/browser/test/hyperdhtEndpointShared.test.ts",
+      "packages/browser/test/hyperdhtRelay.test.ts",
+      "packages/browser/test/nativeMigration.test.ts",
+      "packages/browser/test/irohWeb.test.ts",
+      "packages/browser/test/irohWebRelays.test.ts",
+    ]));
+    // The built CLI loads endpoint.mjs (src/runtime/engine.ts), and with it redial.mjs.
+    expect(unit.cli.files).toContain("packages/cli/test/support/cli.ts");
+    expect(unit.ui.files).toEqual(expect.arrayContaining([
+      "apps/ui/src/test/apps/runnerCheck.test.ts",
+      "apps/ui/src/test/apps/runnerRetry.test.tsx",
+      "apps/ui/src/test/security/contentSecurityPolicy.test.ts",
+    ]));
+  });
+
+  it("a file few tests reach still runs only those", { timeout: 30_000 }, () => {
+    // native/ is read now too: one of its files that only a scripts test imports must not pull in anything else.
+    const unit = realPlan("native/translation/protocol.mjs");
+    const picked = Object.values(unit).flatMap((u) => (u.mode === "whole" ? [`${u.name}: whole`] : u.files ?? []));
+    expect(picked).toEqual(["tools/scripts/test/translationRuntime.test.ts"]);
+    expect(realPlan("native/transports/hyperdht/redial.mjs").browser.files.length).toBeLessThan(20);
+  });
+
+  it("a UI locale file reaches the code that says its strings and the key checks", { timeout: 30_000 }, () => {
+    // fileAnnouncements.test.tsx checks chat.announce.fileOffer through lib/fileAnnounce.ts.
+    expect(realPlan("apps/ui/src/locales/en/chat.json").ui.files).toEqual(expect.arrayContaining(["apps/ui/src/lib/fileAnnounce.ts", "apps/ui/src/test/i18n/keys.test.ts"]));
+    expect(realPlan("apps/ui/src/locales/ja/home.json").ui.files).not.toContain("apps/ui/src/lib/fileAnnounce.ts");
+  });
+});
+
 describe("fallbacks", () => {
   it("a lockfile or root package.json runs everything", () => {
     for (const file of ["package-lock.json", "package.json", "tools/patches/sodium.patch"]) {
@@ -305,16 +458,27 @@ describe("fallbacks", () => {
   it('a package.json whose "scripts" alone changed installs nothing new: it is left out', () => {
     const p = plan({ changed: [{ path: "package.json", exists: true, scriptsOnly: true }], inventory, e2eFiles });
     expect(p.scriptsOnly).toEqual(["package.json"]);
-    expect(p.unit.every((u) => u.mode === "skip")).toBe(true);
+    expect(p.unit.filter((u) => u.name !== "scripts").every((u) => u.mode === "skip")).toBe(true);
     expect(p.lint.mode).toBe("skip");
     expect(p.e2e.mode).toBe("skip");
+  });
+
+  it("the root package.json's scripts alone still run the scripts tests that read its postinstall", () => {
+    const p = plan({ changed: [{ path: "package.json", exists: true, scriptsOnly: true }], inventory, e2eFiles });
+    const scripts = byName(p.unit).scripts;
+    expect(scripts.mode).toBe("related");
+    expect(scripts.files).toEqual(["tools/scripts/test/releaseInstallScripts.test.ts", "tools/scripts/test/webAppsTestFlag.test.ts"]);
+    // A workspace's package.json is not the root's.
+    const site = byName(plan({ changed: [{ path: "apps/website/package.json", exists: true, scriptsOnly: true }], inventory, e2eFiles }).unit).scripts;
+    expect(site.mode).toBe("skip");
   });
 
   it("core's index.ts runs every project that imports core whole, and every spec", () => {
     const p = plan({ changed: changed("packages/core/src/index.ts"), inventory, e2eFiles, codeFiles: {} });
     const unit = byName(p.unit);
     for (const name of ["core", "browser", "sdk", "extension", "ui", "cli"]) expect(unit[name].mode).toBe("whole");
-    for (const name of ["matrix", "scripts"]) expect(unit[name].mode).toBe("skip");
+    expect(unit.matrix.mode).toBe("skip");
+    expect(unit.scripts.files).toEqual(["tools/scripts/test/workspaceDepsDeclared.test.ts"]);
     expect(p.e2e.mode).toBe("whole");
     expect(p.e2e.specs).not.toContain("e2e/desktop/smoke.spec.ts");
   });
@@ -415,8 +579,14 @@ describe("the rest", () => {
       ["CHANGELOG.md", "bumpVersion.test.ts"],
       ["apps/desktop/src/translate.rs", "translationRuntimes.test.ts"],
       ["e2e/playwright.config.ts", "e2eWorkflow.test.ts"],
+      ["rust-toolchain.toml", "rustToolchain.test.ts"],
       ["native/transports/iroh-web/src/lib.rs", "irohWebBuild.test.ts"],
       ["packages/iroh-web/pkg/ghostly_iroh_web_bg.wasm", "irohWebBuild.test.ts"],
+      // It lists the files with git, so no path of them is in its text: an import added or a dependency dropped.
+      ["packages/browser/src/shared/features.ts", "workspaceDepsDeclared.test.ts"],
+      ["packages/browser/package.json", "workspaceDepsDeclared.test.ts"],
+      ["apps/ui/src/components/rich/highlight.ts", "workspaceDepsDeclared.test.ts"],
+      ["apps/mini/chess/package.json", "workspaceDepsDeclared.test.ts"],
     ];
     for (const [file, test] of cases) {
       const p = scripts(file);
@@ -444,6 +614,130 @@ describe("the rest", () => {
     expect([...missed]).toEqual([]);
   });
 
+  it("a file a test of another project reads from disk by its name runs that test", () => {
+    // Only the scripts project had a `reads` list: a changed nginx-headers.conf, tauri.conf.json or docs/CLI.md ran
+    // none of the app's or the CLI's tests that read it, and they went red first in the train's batch.
+    const codeFiles = {
+      "apps/ui/src/test/security/csp.test.ts": `const read = (path: string) => readFileSync(join(import.meta.dirname, "../../../../..", path), "utf8");
+const web = () => read("apps/web/nginx-headers.conf");`,
+      "apps/ui/src/test/ui/ink.test.ts": `const SRC = join(fileURLToPath(import.meta.url), "../../..");\nconst CSS = readFileSync(join(SRC, "index.css"), "utf8");`,
+      "apps/ui/src/test/app/sounds.test.ts": `const main = readFileSync(join(import.meta.dirname, "..", "..", "..", "..", "web", "src", "main.tsx"), "utf8");`,
+      "apps/ui/src/test/pwa/icons.test.ts": "for (const icon of icons) read(`apps/web/public${icon.src}`);",
+      "apps/ui/src/test/chat/bubble.test.tsx": `import { Bubble } from "../../components/Bubble";\nvi.mock("../../lib/sounds");`,
+      "packages/cli/test/agentDocs.test.ts": `const ROOT = resolve(import.meta.dirname, "../../..");\nconst DOCS = ["packages/cli/SKILL.md", "docs/AI-AGENTS.md"];
+for (const doc of [...DOCS, "docs/CLI.md"]) readFileSync(resolve(ROOT, doc), "utf8");`,
+      "packages/cli/test/appInit.test.ts": `paths: { "@ghostlytools/sdk/app": [resolve(import.meta.dirname, "../../sdk/src/app.ts")] }`,
+      "packages/core/test/atproto.test.ts": "const fixture = (name: string) => readFileSync(new URL(`./fixtures/atproto/${name}`, import.meta.url));",
+      "apps/extension/test/locales.test.ts": `const LOCALES = join(import.meta.dirname, "..", "public", "_locales");`,
+    };
+    const run = (file: string) => Object.fromEntries(plan({ changed: changed(file), inventory, e2eFiles, codeFiles }).unit
+      .filter((u) => u.mode !== "skip").map((u) => [u.name, (u.files ?? []).filter((f: string) => f.includes(".test."))]));
+    expect(run("apps/web/nginx-headers.conf").ui).toEqual(["apps/ui/src/test/security/csp.test.ts"]);
+    expect(run("apps/ui/src/index.css").ui).toEqual(["apps/ui/src/test/ui/ink.test.ts"]);
+    expect(run("apps/web/src/main.tsx").ui).toEqual(["apps/ui/src/test/app/sounds.test.ts"]);
+    expect(run("apps/web/public/icon-512.png").ui).toEqual(["apps/ui/src/test/pwa/icons.test.ts"]);
+    expect(run("docs/CLI.md")).toEqual({ cli: ["packages/cli/test/agentDocs.test.ts"] });
+    expect(run("packages/cli/SKILL.md").cli).toEqual(["packages/cli/test/agentDocs.test.ts"]);
+    expect(run("-docs/AI-AGENTS.md").cli).toEqual(["packages/cli/test/agentDocs.test.ts"]);
+    expect(run("packages/sdk/src/app.ts").cli).toEqual(["packages/cli/test/appInit.test.ts"]);
+    expect(run("packages/core/test/fixtures/atproto/repo.car").core).toEqual(["packages/core/test/atproto.test.ts"]);
+    expect(run("apps/extension/public/_locales/de/messages.json").extension).toEqual(["apps/extension/test/locales.test.ts"]);
+    // What it imports is vitest's to follow, and a file no test names runs none of them.
+    expect(run("apps/ui/src/components/Bubble.tsx").ui).toEqual([]);
+    expect(run("apps/ui/src/lib/sounds.ts").ui).toEqual([]);
+    expect(run("docs/TESTING.md")).toEqual({});
+    expect(run("apps/web/nginx.conf").ui).toBeUndefined();
+  });
+
+  it("a UI locale file runs the tests of the code that uses its strings, and the tests that read the locales", () => {
+    // The UI's test config reads the locale files with readFileSync (localesAtOnce), so they are in no import graph:
+    // a draft changing only en/chat.json ran 2 of the 806 UI tests, none that checks a chat string.
+    const codeFiles = {
+      "apps/ui/src/lib/fileAnnounce.ts": `export const offer = (t) => t("chat.announce.fileOffer", { name });`,
+      "apps/ui/src/components/FileStage.tsx": "export const Stage = ({ stage }) => <span>{t(`chat.stage.${stage}`)}</span>;",
+      "apps/ui/src/components/HomeEmpty.tsx": `export const HomeEmpty = () => <p>{t("home.empty")}</p>;`,
+      "apps/ui/src/components/Chatty.tsx": `export const Chatty = () => <p>{t("chatTranslate.on")}</p>;`,
+      "apps/ui/src/test/chat/fileAnnouncements.test.tsx": `import { offer } from "../../lib/fileAnnounce";\nexpect(heard).toEqual(["Alice wants to send report.pdf"]);`,
+      "apps/ui/src/test/i18n/locales.ts": `import { loadedLocale } from "../../locales";`,
+      "apps/ui/src/test/i18n/keys.test.ts": `import english from "../../locales/en";\nimport { LOCALES } from "./locales";`,
+      "apps/ui/src/test/i18n/plurals.test.ts": `import { LOCALES, lookup } from "./locales";`,
+      "apps/ui/src/test/home/home.test.tsx": `import { HomeEmpty } from "../../components/HomeEmpty";`,
+      // t()'s helpers are no locale: a test saying a string through englishT names its key.
+      "apps/ui/src/test/lib/listText.test.ts": `import { englishT } from "../../locales/translate";`,
+    };
+    const ui = (...files: string[]) => byName(plan({ changed: changed(...files), inventory, e2eFiles, codeFiles }).unit).ui;
+    const readers = ["apps/ui/src/test/i18n/keys.test.ts", "apps/ui/src/test/i18n/plurals.test.ts"];
+    const chat = ui("apps/ui/src/locales/en/chat.json");
+    expect(chat.mode).toBe("related");
+    expect([...chat.files].sort()).toEqual(["apps/ui/src/components/FileStage.tsx", "apps/ui/src/lib/fileAnnounce.ts", "apps/ui/src/locales/en/chat.json", ...readers]);
+    expect(chat.reason).toContain("using a changed locale file's strings");
+    // Another language's file, a deleted one too (its keys go missing).
+    expect([...ui("-apps/ui/src/locales/fr/home.json").files].sort()).toEqual(["apps/ui/src/components/HomeEmpty.tsx", ...readers]);
+    // A JSON elsewhere in the UI is no locale.
+    expect(ui("apps/ui/src/lib/countries.json").files).toEqual(["apps/ui/src/lib/countries.json"]);
+  });
+
+  describe("the real repository", () => {
+    const root = join(import.meta.dirname, "..", "..", "..");
+    const projects = UNIT_PROJECTS.filter((p) => p.tests.length && !p.reads);
+    const tests: Record<string, string> = {};
+    const walk = (dir: string): void => {
+      for (const name of readdirSync(join(root, dir))) {
+        const path = `${dir}/${name}`;
+        if (name === "node_modules" || name === "dist") continue;
+        if (statSync(join(root, path)).isDirectory()) walk(path);
+        else if (/\.test\.[cm]?[jt]sx?$/.test(name) && projects.some((p) => p.tests.some((g) => globToRegExp(g).test(path)))) tests[path] = readFileSync(join(root, path), "utf8");
+      }
+    };
+    for (const dir of ["apps/ui/src", "apps/extension/test", "apps/mini", "packages", "e2e/matrix"]) walk(dir);
+
+    it("a config, crate, doc or skill the app's, the extension's or the CLI's tests read runs those tests", { timeout: 30_000 }, () => {
+      const cases: [string, string, string[]][] = [
+        ["apps/web/nginx-headers.conf", "ui", ["apps/ui/src/test/security/contentSecurityPolicy.test.ts"]],
+        ["apps/desktop/tauri.conf.json", "ui", ["apps/ui/src/test/security/contentSecurityPolicy.test.ts", "apps/ui/src/test/desktop/windowFirstMouse.test.ts", "apps/ui/src/test/chat/messageBubble.test.tsx"]],
+        ["apps/extension/public/manifest.json", "ui", ["apps/ui/src/test/security/contentSecurityPolicy.test.ts"]],
+        ["apps/desktop/src/hyperdht.rs", "ui", ["apps/ui/src/test/i18n/errorText.test.ts"]],
+        ["native/transports/src/iroh_transport.rs", "ui", ["apps/ui/src/test/i18n/errorText.test.ts"]],
+        ["apps/web/index.html", "ui", ["apps/ui/src/test/pwa/manifest.test.ts"]],
+        ["apps/website/lib/pageMeta.ts", "ui", ["apps/ui/src/test/pwa/manifest.test.ts"]],
+        ["packages/sdk/src/app.ts", "cli", ["packages/cli/test/appInit.test.ts"]],
+        ["docs/CLI.md", "cli", ["packages/cli/test/agentDocs.test.ts"]],
+        ["docs/AI-AGENTS.md", "cli", ["packages/cli/test/agentDocs.test.ts", "packages/cli/test/agentConduct.test.ts"]],
+        ["packages/cli/SKILL.md", "cli", ["packages/cli/test/agentDocs.test.ts", "packages/cli/test/agentConduct.test.ts"]],
+        ["apps/extension/public/_locales/en/messages.json", "extension", ["apps/extension/test/manifestLocales.test.ts"]],
+      ];
+      for (const [file, project, readers] of cases) {
+        const p = byName(plan({ changed: changed(file), inventory, e2eFiles, codeFiles: tests }).unit)[project];
+        expect(p.mode, file).toBe("related");
+        expect(p.files, file).toEqual(expect.arrayContaining(readers));
+      }
+      // A doc none of them reads still runs none of them.
+      const names = projects.map((p) => p.name);
+      const doc = plan({ changed: changed("docs/TESTING.md"), inventory, e2eFiles, codeFiles: tests }).unit;
+      expect(doc.filter((u) => names.includes(u.name)).every((u) => u.mode === "skip")).toBe(true);
+    });
+
+    it("every repository file a test reads by name runs that test", { timeout: 30_000 }, () => {
+      // `read("x")`, `readFileSync(join(ROOT, "x"))`, `join(import.meta.dirname, "../../..", "x")` and the like: each
+      // existing file such a call names must be among the paths plan() sees the test name (namedPaths).
+      const reads = /\b(?:read|json|source|root|readFileSync|readdirSync|existsSync|statSync)\(\s*(?:(?:join|resolve)\(\s*[\w.]+(?:\([^()]*\))?\s*,\s*)?((?:["'][^"'`$\n]+["']\s*,\s*)*["'][^"'`$\n]+["'])/g;
+      const missed: string[] = [];
+      for (const [test, text] of Object.entries(tests)) {
+        const dir = test.split("/").slice(0, -1).join("/");
+        const named = namedPaths(test, text);
+        for (const [, args] of text.matchAll(reads)) {
+          const name = [...args.matchAll(/["']([^"']+)["']/g)].map((m) => m[1]).join("/");
+          const file = [root, join(root, dir), join(root, test)].map((base) => join(base, name)).find((f) => f.startsWith(`${root}/`) && existsSync(f) && statSync(f).isFile());
+          if (!file) continue;
+          const path = file.slice(root.length + 1);
+          if (!named.some((n) => n.path === path || (n.dir && path.startsWith(`${n.path}/`)))) missed.push(`${test} reads ${path}`);
+        }
+      }
+      expect(Object.keys(tests).length).toBeGreaterThan(1000);
+      expect(missed).toEqual([]);
+    });
+  });
+
   it("a file whose named paths CI's gates must cover runs the check of them, which reads it from disk", () => {
     // ci-changes.test.ts reads the website's scripts, the packages' code and the crates' Rust for the paths they name:
     // no import graph shows it. A draft's tier is all the train waits for, so a website script naming an uncovered
@@ -460,6 +754,7 @@ describe("the rest", () => {
     expect(r("apps/desktop/src/lib.rs")).toEqual({ desktop: "run" });
     expect(r("native/transports/src/lib.rs")).toEqual({ desktop: "run" });
     expect(r("Cargo.lock")).toEqual({ desktop: "run" });
+    expect(r("rust-toolchain.toml")).toEqual({ desktop: "run" });
     expect(r("docs/README.md")).toEqual({ desktop: "skip" });
   });
 
@@ -480,6 +775,66 @@ describe("the rest", () => {
   it("checkPaths flags a pattern no feature matches", () => {
     expect(checkPaths(inventory)).toEqual([]);
     expect(checkPaths({ features: inventory.features, paths: { "src/x.ts": ["payment.*", "groups.create"] } })).toEqual(['paths["src/x.ts"]: "payment.*" matches no feature']);
+  });
+});
+
+describe("--unit-group: the draft tier's unit projects over a few runners", () => {
+  const names = UNIT_PROJECTS.map((u) => u.name);
+  const groups = (count: number) => Array.from({ length: count }, (_, i) => names.filter((n) => unitGroupOf(n, count) === i + 1));
+
+  it("puts ui, browser and cli on runners of their own and everything else on the last", () => {
+    expect(UNIT_ALONE.filter((n) => !names.includes(n))).toEqual([]);
+    expect(groups(4)).toEqual([["ui"], ["browser"], ["cli"], names.filter((n) => !UNIT_ALONE.includes(n))]);
+  });
+
+  it("runs every project in exactly one group, whatever the count", () => {
+    for (const count of [1, 2, 3, 4, 5, 8]) expect(groups(count).flat().sort()).toEqual([...names].sort());
+    expect(groups(1)).toEqual([names]);
+    expect(groups(2)).toEqual([["ui"], names.filter((n) => n !== "ui")]);
+  });
+
+  it("reads <i>/<n> with 1 ≤ i ≤ n", () => {
+    expect(parseUnitGroup("2/4")).toEqual({ index: 2, count: 4 });
+    expect(parseUnitGroup("1/1")).toEqual({ index: 1, count: 1 });
+    for (const bad of ["0/4", "5/4", "2", "2/", "/4", "a/b", "2/4/1", " 2/4", "", undefined]) expect(parseUnitGroup(bad)).toBeNull();
+  });
+
+  const script = join(import.meta.dirname, "..", "test-affected.mjs");
+  const affected = (...args: string[]) => spawnSync(process.execPath, [script, ...args], { encoding: "utf8", timeout: 60_000 });
+
+  it("refuses a group it cannot read before it plans anything", () => {
+    const r = affected("--unit-group", "5/4", "--list");
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("--unit-group 5/4: give <i>/<n>");
+  });
+
+  it("plans only its group's projects: a core change in group 1 of 4 runs ui, the others say whose they are", () => {
+    const r = affected("--list", "--no-e2e", "--unit-group", "1/4", "--files", "packages/core/src/http.ts");
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("unit (vitest): group 1 of 4 (--unit-group)");
+    expect(r.stdout).toMatch(/\n {2}related ui {8}/);
+    expect(r.stdout).toMatch(/\n {2}other {3}browser {3}group 2 runs it \(related: /);
+    expect(r.stdout).toMatch(/\n {2}other {3}core {6}group 4 runs it \(related: /);
+  }, 60_000);
+
+  it("says a project nothing reaches is skipped, never that another group runs it", () => {
+    // Group 1 of 4 told the author that group 4 runs core's tests, and group 4 skipped them: they ran nowhere.
+    const r = affected("--no-e2e", "--no-rust", "--no-lint", "--no-typecheck", "--unit-group", "1/4", "--files", "docs/TESTING.md");
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/\n {2}skip {4}core {6}nothing it imports changed\n/);
+    expect(r.stdout).toContain("· skipped unit core: nothing it imports changed");
+    expect(r.stdout).not.toContain("runs it");
+  }, 60_000);
+
+  it("is what ci.yml's draft tier runs: one runner per group, each project of UNIT_ALONE on its own", () => {
+    const ci = readFileSync(join(import.meta.dirname, "..", "..", "..", ".github", "workflows", "ci.yml"), "utf8");
+    const job = /^ {2}affected-tests:\n((?: {4}.*\n|\n)+)/m.exec(ci)?.[1] ?? "";
+    const list = /^ {8}group: \[([\d, ]+)\]$/m.exec(job)?.[1].split(",").map(Number) ?? [];
+    const count = list.length;
+    expect(list).toEqual(Array.from({ length: count }, (_, i) => i + 1));
+    expect(count).toBeGreaterThan(UNIT_ALONE.length);
+    expect(job).toContain(`name: Affected unit tests (draft \${{ matrix.group }}/${count})`);
+    expect(job).toMatch(new RegExp(`run: node tools/scripts/test-affected\\.mjs .*--unit-group \\$\\{\\{ matrix\\.group \\}\\}/${count}( |$)`, "m"));
   });
 });
 

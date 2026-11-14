@@ -12,8 +12,13 @@
     "message": "{{name}}: {{text}}",
     "messages": "{{count}} new messages",
     "messagesFrom": "{{count}} new messages from {{name}}",
+    "notSent": "Your message “{{text}}” was not sent",
+    "notSentCount": "{{count}} messages not sent",
+    "paymentState": "{{payment}} · {{state}}",
     "pinMoved": "Moved to place {{place}} of {{count}} pinned chats",
-    "rowMoved": "Moved to place {{place}} of {{count}}"
+    "rowMoved": "Moved to place {{place}} of {{count}}",
+    "waiting": "Your message “{{text}}” is waiting for your contact to be online",
+    "waitingCount": "{{count}} messages waiting for your contact to be online"
   },
   "audio": {
     "cantPlay": "This device can't play this audio ({{format}}). Download it to listen.",
@@ -109,6 +114,7 @@
     "lookupLocal": "Checked on this device: the key is the identifier.",
     "lookupPubky": "Looking it up asks Pubky's Pkarr relays ({{relays}}), which learn your IP address and this key.",
     "lookupWeb": "Looking it up asks your DNS-over-HTTPS resolver about {{host}} and downloads its did.json from there: that server learns your IP address.",
+    "lookupWebHiddenIp": "Hide my IP is on, so {{host}}, a server your contact chose, isn't contacted.",
     "muted": "Hidden by your Nostr mute list.",
     "nip05": "(NIP-05, as they wrote it, not checked)",
     "noDids": "This app cannot resolve DIDs",
@@ -237,7 +243,6 @@
     "newOne": "1 new message, scroll to bottom"
   },
   "keyChanged": "This chat stopped: your contact's key changed.",
-  "lastSeen": "Last seen {{time}}",
   "listTime": {
     "days": "{{count}}d",
     "hours": "{{count}}h",
@@ -310,17 +315,33 @@
   "online": "online",
   "options": "Options",
   "payments": {
-    "needLive": "Payments need a live connection",
+    "needLive": "Send needs your contact online: ecash never waits in a queue. A request can wait until they are back.",
     "noWallet": "Your contact has no wallet yet",
     "off": "Off in this chat: turn a way on in Accept",
     "offOrOld": "Your contact has payments off in this chat, or needs an updated Ghostly"
   },
+  "pictureHiddenIp": "Not shown while Hide my IP is on",
   "pinned": {
     "bar": "Pinned message",
     "info": "One pinned message per chat, seen by everyone in it. A new pin replaces it. In a community, only the admin pins.",
     "notHere": "Not on this device",
     "pin": "Pin",
     "unpin": "Unpin"
+  },
+  "presence": {
+    "availability": {
+      "away": "Away",
+      "busy": "Busy",
+      "dnd": "Do not disturb"
+    },
+    "dot": {
+      "away": "Online, away",
+      "busy": "Online, busy",
+      "dnd": "Online, do not disturb",
+      "idle": "Online, idle",
+      "online": "Online"
+    },
+    "status": "Status: {{status}}"
   },
   "preview": {
     "arkAddress": "Ark address",
@@ -372,8 +393,10 @@
     "copied": "Copied",
     "copy": "Copy",
     "copyCode": "Copy code",
-    "hiddenChars": "This code holds hidden or direction-changing characters, shown as <U+…>. Copy code copies them too.",
+    "hiddenChars": "This code holds hidden or direction-changing characters, shown as {{marker}}. Copy code copies them too.",
     "localTime": "{{time}} your time",
+    "notCopied": "Not copied",
+    "notCopiedHint": "Not copied. Select the text and copy it.",
     "showAll": "Show all",
     "showLess": "Show less",
     "spoiler": "Hidden text. Tap to show it",
@@ -463,7 +486,6 @@
     "showTranslation": "Show translation",
     "translate": "Translate"
   },
-  "typeMessage": "Type a message...",
   "typing": "typing…",
   "typingRecording": "recording audio…",
   "typingThinking": "thinking…",
@@ -482,6 +504,7 @@
     "tooLarge": "Too large to play here. Download it to watch."
   },
   "voice": {
+    "callPaused": "Voice message paused for the call",
     "cancelled": "Voice message cancelled",
     "cantPlay": "This device can't play {{format}} recordings. Save it to play elsewhere.",
     "couldNotPlay": "Could not play this recording.",
@@ -494,6 +517,7 @@
     "limit": "Voice messages are at most {{minutes}} minutes",
     "message": "Voice message",
     "micDenied": "No access to the microphone. Allow it in your browser or system settings.",
+    "micDeniedAndroid": "No access to the microphone. Allow it when Android asks, or in Android's settings for Ghostly.",
     "micUnavailable": "No microphone found. Connect one, or close the app using it.",
     "micUnsupported": "This browser can't record voice messages.",
     "pause": "Pause voice message",
@@ -506,6 +530,7 @@
     "recordHint": "Hold to record, or click for hands-free",
     "recorded": "Recorded {{time}}",
     "recording": "Recording",
+    "resumeAfterCall": "Resume after the call",
     "sent": "Voice message sent",
     "slideCancel": "Slide to cancel",
     "speed": "Playback speed {{speed}}",

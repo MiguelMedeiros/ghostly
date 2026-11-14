@@ -1,4 +1,5 @@
 import { screen, within } from "@testing-library/react";
+import { useRef, useState } from "react";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CALLS_BLOCKED_GUIDE, CallNoPathNotice } from "../../components/CallNoPathNotice";
@@ -37,6 +38,20 @@ describe("the note when a call found no path to the contact", () => {
 
     await view.user.click(within(note).getByRole("button", { name: "Close" }));
     expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  // Closed from the keyboard, the note went with its focused × and the focus fell to the page.
+  it("closed from the keyboard, gives the focus to the chat's ⋮", async () => {
+    function Chat() {
+      const options = useRef<HTMLButtonElement>(null);
+      const [shown, setShown] = useState(true);
+      return <><button ref={options} data-testid="chat-options">⋮</button>{shown && <CallNoPathNotice returnFocus={options} onClose={() => setShown(false)} />}<textarea data-testid="composer" /></>;
+    }
+    const { user } = renderApp(<Chat />);
+    screen.getByRole("button", { name: "Close" }).focus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByTestId("chat-options")).toHaveFocus();
   });
 
   it("with a TURN server set, says the call did not get through it either and what to check, not to add one", () => {

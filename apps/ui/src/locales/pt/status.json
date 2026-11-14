@@ -1,0 +1,34 @@
+{
+  "availabilities": {
+    "available": "Disponível",
+    "away": "Ausente",
+    "busy": "Ocupado",
+    "dnd": "Não perturbe"
+  },
+  "availability": "Disponibilidade",
+  "clear": "Limpar status",
+  "customLabel": "Limpar em",
+  "dndHint": "As mensagens chegam sem som nem aviso. As chamadas ainda tocam.",
+  "emoji": "Emoji",
+  "emojiMore": "Mais emojis",
+  "end": "Limpar depois de",
+  "ends": {
+    "1h": "1 hora",
+    "30m": "30 minutos",
+    "4h": "4 horas",
+    "custom": "Escolher um horário…",
+    "keep": "Até {{time}}",
+    "never": "Não limpar",
+    "today": "Hoje",
+    "week": "Esta semana"
+  },
+  "linkLike": "Isto parece um link, e um status não pode ter um. Mude o texto para salvar.",
+  "menuLabel": "Seu status: {{status}}. Mudar status",
+  "past": "Escolha um horário depois de agora.",
+  "placeholder": "Qual é o seu status?",
+  "set": "Definir um status",
+  "shared": "Seus contatos o veem ao lado do seu nome.",
+  "text": "Texto do status",
+  "title": "Status",
+  "until": "até {{time}}"
+}

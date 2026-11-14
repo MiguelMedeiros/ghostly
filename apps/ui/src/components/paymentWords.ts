@@ -1,7 +1,10 @@
 import { decodeBolt11 } from "@ghostly/core";
 import { isWorthlessMint } from "@ghostly/browser/shared/mints";
+import type { GroupPayNote, GroupView } from "@ghostly/browser/shared/types";
+import { groupPayStatus, groupPayTitle } from "../lib/groupPayments";
 import type { Translate } from "../contexts/I18nContext";
 import { formatAmount, formatDecimal, formatTokenAmount } from "../lib/amount";
+import { problemLine } from "../lib/problemText";
 import type { ChatPayment, WalletState } from "../lib/platform";
 import { satsIn } from "./NetworkTag";
 
@@ -87,21 +90,51 @@ export function paymentLine(t: Translate, payment: ChatPayment, state: WalletSta
   return t("chat.preview.payment", { what: paymentTitle(t, payment), amount });
 }
 
-/** Digits as the engine's `toLocaleString` may write them: Latin, Arabic-Indic, Eastern Arabic-Indic. */
-const DIGITS = "0-9٠-٩۰-۹";
+/**
+ * Where a payment or a request stands, as its bubble's state line says it: "Paid", "Taken back · <why>", "Lightning
+ * payment pending…". Empty for a request taken back with nothing to say (its bubble shows no state then).
+ */
+export function paymentStateLine(t: Translate, payment: ChatPayment, expired = false): string {
+  const outgoing = payment.direction === "out";
+  // An expired request says so and what is left to do; its old error is no longer the news.
+  if (expired) return `${t("payments.bubble.state.request.expired")} · ${t(outgoing ? "payments.bubble.expiredNext.mine" : "payments.bubble.expiredNext.theirs")}`;
+  const label = payment.lightningPending && payment.state === "pending" ? t("payments.bubble.state.lightningPending")
+    : payment.kind === "payment" && payment.state === "pending" && payment.target?.method === "bitcoin" ? t("payments.bubble.state.waitingConfirmation")
+    // One the contact sent: their part is done, what is left is this wallet's own check of it.
+    : payment.kind === "payment" && payment.state === "pending" && !outgoing ? t("payments.bubble.state.checking")
+    : payment.closed ? t("payments.bubble.state.closed")
+    : payment.kind === "payment" ? t(`payments.bubble.state.payment.${payment.state}`)
+    : payment.state === "reclaimed" ? "" : t(`payments.bubble.state.request.${payment.state}`);
+  return payment.error && payment.state !== "settled" ? `${label} · ${problemLine(payment.error, t)}` : label;
+}
+
+/** How much a group's payment note is for: "21 test sats", "1.5 USDT". */
+export const groupPayAmount = (note: GroupPayNote, t: Translate): string => note.decimals
+  ? `${formatTokenAmount(note.amount, note.decimals, t.language)} ${note.unit === "testusdt" ? t("payments.group.testUsdt") : "USDT"}`
+  : `${formatAmount(Number(note.amount), t.language)} ${satsIn(t, note.test ? "testnet" : "mainnet", Number(note.amount))}`;
+
+/** A group's payment note read out as it changes (MessageAnnouncer): who pays whom, how much, and where it stands now. */
+export const groupPayNoteLine = (note: GroupPayNote, group: GroupView, t: Translate): string =>
+  `${groupPayTitle(note, group, t)} · ${groupPayAmount(note, t)} · ${groupPayStatus(note, group, t).text}`;
+
 /**
  * The English line the app keeps with a payment's message (Chat.tsx, the engine's payments.ts): "⚡ 1,000 sats",
- * "⚡ Requested 1,000 test sats", "Requested 2100 test sats on Ark", "Requested 1.5 TEST-USDT".
+ * "⚡ Requested 1,000 test sats", "Requested 2100 test sats on Ark", "Requested 1.5 TEST-USDT". Lines written before
+ * the amount was always "en-US" carry the device's digits (any script: ২১,০০০, ၂၁,၀၀၀) and grouping (Safari's Swiss ’).
  */
-const STORED_LINE = new RegExp(`^(?:⚡ )?(Requested )?([${DIGITS}][${DIGITS}.,'٫٬\\s]*?) (test sats|sats|[A-Z][A-Z0-9-]*)(?: on (?:Ark|Bark|Fedimint|Spark)| on-chain| from the group)?$`);
-const DIGIT = new RegExp(`[${DIGITS}]`);
+const STORED_LINE = /^(?:⚡ )?(Requested )?(\p{Nd}[\p{Nd}.,'’٫٬\s]*?) (test sats|sats|[A-Z][A-Z0-9-]*)(?: on (?:Ark|Bark|Fedimint|Spark)| on-chain| from the group)?$/u;
+const DIGIT = /^\p{Nd}$/u;
 /** A token amount as the engine writes it (`formatPaymentAmount`): Latin digits, a point, no grouping. */
 const PLAIN_DECIMAL = /^\d+(?:\.\d+)?$/;
+/** A decimal digit's value: Unicode keeps each script's digits as a run of ten from 0, runs side by side. */
+function digitValue(digit: string): number {
+  const code = digit.codePointAt(0)!;
+  let first = code;
+  while (DIGIT.test(String.fromCodePoint(first - 1))) first--;
+  return (code - first) % 10;
+}
 /** A whole number of sats as written there, whatever its digits and grouping marks. */
-const satsWritten = (number: string) => Number([...number].filter((c) => DIGIT.test(c)).map((c) => {
-  const code = c.charCodeAt(0);
-  return code >= 0x6f0 ? code - 0x6f0 : code >= 0x660 ? code - 0x660 : code - 48;
-}).join(""));
+const satsWritten = (number: string) => Number([...number].filter((c) => DIGIT.test(c)).map(digitValue).join(""));
 
 /**
  * A payment's stored line said as `paymentLine` says it, for when the wallet does not know the payment (not loaded yet,

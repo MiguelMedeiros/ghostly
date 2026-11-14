@@ -216,6 +216,8 @@ is shared. The contact's app never trusts the sender's check.
   `recheck: { afterSeconds }`. The contact's app shows when it last checked and always offers "Check again"
   (`recheckDue` marks it due after that time), and shows a failed re-check honestly ("Could not be confirmed
   on …"), without deleting the proof. `describeIdentityProof` then requires the harness to have `revoke()`.
+  A server that limits lookups per IP also gets `perHour`, well under that limit: the app re-checks no more of
+  that provider's proofs an hour on its own, so a check a person starts still gets an answer.
 
 ## On the wire
 

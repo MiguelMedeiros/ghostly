@@ -484,6 +484,13 @@ describe("the words", () => {
     expect(buildDetails(message(), null, { t: translateWith(locales.ar, "ar") }).sections[1].rows[0].value).toBe(clock("ar"));
   });
 
+  it.each(Object.keys(locales) as (keyof typeof locales)[])("a text that did not go is Not sent as in its bubble, in %s", (language) => {
+    const t = translateWith(locales[language], language);
+    const state = buildDetails(message({ delivery: "failed" }), null, { t }).sections.find(s => s.id === "delivery")!.rows[0];
+    expect(state.value).toBe(t("chat.delivery.failed"));
+    expect(buildDetails(message({ delivery: "failed" }), null).json).toMatchObject({ delivery: { State: "Not sent" } });
+  });
+
   it("in another language, each send's outcome too, with the engine's reason kept as it came", () => {
     const sends = (t?: ReturnType<typeof translateWith>) => buildDetails(message({ delivery: "queued" }), textView({
       details: { sends: [{ at: 1_700_000_000_100, path: "webrtc/1", relayed: false, result: "sent" }, { at: 1_700_000_020_100, path: "webrtc/1", relayed: false, result: "failed", error: "closed" }, { at: 1_700_000_050_100, path: "hyperdht/1", relayed: true }], attempts: 3 },

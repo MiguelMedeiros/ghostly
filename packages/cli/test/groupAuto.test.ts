@@ -11,6 +11,7 @@ import { idSlot, positionals, COMMANDS } from "../src/commands";
 import { CliError } from "../src/errors";
 import { GroupAutoJoin } from "../src/groupAuto";
 import { groupJson } from "../src/views";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.group-auto
 
 /**
@@ -25,7 +26,7 @@ const invited = (id: string, linkId: string, fields: Partial<NonNullable<GroupVi
 function world(dir = mkdtempSync(join(tmpdir(), "ghostly-group-auto-")), joins = true) {
   const s = { links: [link("chat-owner", OWNER, { label: "Miguel", peerNick: "Miguel" }), link("chat-other", OTHER, { peerNick: "Mallory" })], groups: [] as GroupView[] };
   const engine = {
-    getState: () => s as unknown as EngineState,
+    chatView: chatViewOf, getState: () => s as unknown as EngineState,
     acceptGroupInvitation: vi.fn(async ({ groupId }: { groupId: string }) => {
       s.groups = s.groups.map((g) => (g.id === groupId ? { ...g, invitation: { ...g.invitation!, accepted: true } } : g));
     }),
@@ -185,7 +186,7 @@ describe("group auto", () => {
     const groups = new Groups(host, store);
     const links = [link("chat-owner", OWNER, { label: "Miguel" }), link("chat-other", OTHER)];
     const state = () => ({ links, groups: groups.views() }) as unknown as EngineState;
-    const engine = { getState: state, acceptGroupInvitation: vi.fn(({ groupId }: { groupId: string }) => groups.accept(groupId)),
+    const engine = { chatView: chatViewOf, getState: state, acceptGroupInvitation: vi.fn(({ groupId }: { groupId: string }) => groups.accept(groupId)),
       switchGroup: vi.fn(({ groupId, to }: { groupId: string; to: string }) => groups.switchGroup(groupId, to)) };
     const lines: string[] = [];
     const auto = new GroupAutoJoin({ engine, profileDir: mkdtempSync(join(tmpdir(), "ghostly-group-auto-")), joins: true, log: (line) => lines.push(line) });
@@ -257,7 +258,7 @@ describe("group auto", () => {
 
   it("over the API: group.auto reads and sets it, group.list shows it, chat.remove forgets the chat", async () => {
     const w = world();
-    Object.assign(w.engine, { removeLink: vi.fn(async () => undefined) });
+    Object.assign(w.engine, { removeLink: vi.fn(async () => undefined), removalsPending: () => [] });
     const ctx = { runtime: { server: { node: w.engine }, paths: { name: "default" } }, calls: { list: () => [], forgetChat: () => {} }, groupAuto: w.auto, mode: "daemon", version: "test" } as unknown as ApiContext;
     expect(await callApi(ctx, "group.auto", {})).toEqual({ autoJoin: { on: false, from: [] } });
     await expect(callApi(ctx, "group.auto", { on: true })).rejects.toMatchObject({ code: "bad_request" });

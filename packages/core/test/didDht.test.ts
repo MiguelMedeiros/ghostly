@@ -8,6 +8,7 @@ import {
 } from "../src/didDht";
 import { createIdentity } from "../src/identity";
 import { MAX_DNS_PACKET_BYTES, openRelayPayload, PacketTooLargeError } from "../src/pkarr";
+import { DEFAULT_RELAYS } from "../src/relay";
 
 // covers: did.dht.document
 
@@ -244,10 +245,31 @@ describe("resolveDidDht", () => {
     expect(asked).toEqual([`https://a.test/${identity.pubKeyZ32}`, `https://b.test/${identity.pubKeyZ32}`]);
   });
 
-  it("asks one relay when it answers", async () => {
-    const { fetch, asked } = relays({ "https://a.test": payload, "https://b.test": payload });
-    await resolveDidDht(did, { fetch, relays: ["https://a.test", "https://b.test"] });
-    expect(asked).toHaveLength(1);
+  it("asks every relay and keeps the newest packet, wherever it is", async () => {
+    // The older document still lists a second key, which its owner has since removed.
+    const base = didDhtDocument(identity.publicKey);
+    const removed = `${did}#1`;
+    const withSecond: DidDhtDocument = {
+      ...base,
+      verificationMethod: [...base.verificationMethod!, { ...base.verificationMethod![0], id: removed, publicKeyJwk: { ...base.verificationMethod![0].publicKeyJwk, x: toBase64Url(createIdentity().publicKey), kid: "1" } }],
+      authentication: [...base.authentication!, removed],
+    };
+    const older = signDidDhtPacket(identity, encodeDidDhtPacket(withSecond), seq);
+    expect(openDidDhtPayload(did, older).document.verificationMethod).toHaveLength(2);
+    const newer = signDidDhtPacket(identity, encodeDidDhtPacket(didDhtDocument(identity.publicKey)), seq + 1);
+    for (const order of [["https://a.test", "https://b.test"], ["https://b.test", "https://a.test"]]) {
+      const { fetch, asked } = relays({ "https://a.test": older, "https://b.test": newer });
+      const resolved = await resolveDidDht(did, { fetch, relays: order });
+      expect(resolved).toMatchObject({ relay: "https://b.test", metadata: { versionId: String(seq + 1) } });
+      expect(resolved.document.verificationMethod).toHaveLength(1);
+      expect(asked).toHaveLength(2);
+    }
+  });
+
+  it("does not let an older packet undo a deactivation", async () => {
+    const ended = signDidDhtPacket(identity, encodeDidDhtDeactivated(identity.publicKey), seq + 1);
+    const resolved = await resolveDidDht(did, { ...relays({ "https://a.test": payload, "https://b.test": ended }), relays: ["https://a.test", "https://b.test"] });
+    expect(resolved.metadata.deactivated).toBe(true);
   });
 
   it("moves past a relay serving a forged packet, and says so when none is good", async () => {
@@ -305,7 +327,7 @@ describe("resolveDidDht", () => {
 
   it("uses the public relays by default", async () => {
     const { fetch, asked } = relays({ "https://pkarr.pubky.org": payload });
-    await resolveDidDht(did, { fetch });
-    expect(asked).toEqual([`https://pkarr.pubky.org/${toZ32(identity.publicKey)}`]);
+    await expect(resolveDidDht(did, { fetch })).resolves.toMatchObject({ relay: "https://pkarr.pubky.org" });
+    expect(asked).toEqual(DEFAULT_RELAYS.map((relay) => `${relay}/${toZ32(identity.publicKey)}`));
   });
 });

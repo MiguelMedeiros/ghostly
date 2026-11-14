@@ -13,6 +13,9 @@ const UPSCALE = 2.5;
 /** The width a picture of `natural` pixels is drawn at: as it arrived when large, scaled up (smoothly, within limits) when small. */
 const viewerWidth = (natural: number) => Math.max(natural, Math.min(natural * UPSCALE, SHOWN));
 
+/** A phone on its side: the notch's and the rounded corners' width, which the picture keeps clear of (index.css `.picture-viewer-area`). */
+const SIDE_INSETS = "env(safe-area-inset-left) - env(safe-area-inset-right)";
+
 /**
  * A contact's or a group's picture, large: centered over the page with the name under it, a full-screen sheet on a
  * phone. Escape, the close button and a click outside the picture close it, and the focus goes back to what opened
@@ -66,15 +69,15 @@ export function AvatarViewer({ src, name, onClose, returnFocus, picture = false 
         onPointerUp={e => { handlers.onPointerUp(e); if (gestured()) backdrop.onPointerCancel(); else backdrop.onPointerUp(e); }}
         onPointerCancel={e => { handlers.onPointerCancel(e); backdrop.onPointerCancel(); }}
         onDoubleClick={handlers.onDoubleClick}
-        className="flex h-full w-full touch-none select-none items-center justify-center p-4 max-md:bg-sidebar-bg max-md:p-0">
+        className="picture-viewer-area flex h-full w-full touch-none select-none items-center justify-center py-4 max-md:bg-sidebar-bg max-md:py-0">
         <figure className="m-0 flex max-w-full flex-col items-center gap-3">
           {picture ? (
             <img ref={image} src={src} alt="" draggable={false} data-testid="avatar-viewer-image" data-zoom={zoom.scale.toFixed(2)}
-              style={{ maxWidth: "calc(100vw - 2rem)", maxHeight: "calc(100dvh - 8rem)", ...zoomStyle }}
+              style={{ maxWidth: `calc(100vw - 2rem - ${SIDE_INSETS})`, maxHeight: "calc(100dvh - 8rem)", ...zoomStyle }}
               className={`block h-auto w-auto rounded-lg object-contain shadow-2xl ${zoomed ? "cursor-grab active:cursor-grabbing" : "cursor-zoom-in"}`} />
           ) : (
             <img ref={image} src={src} alt="" draggable={false} data-testid="avatar-viewer-image" data-zoom={zoom.scale.toFixed(2)} onLoad={e => setNatural(e.currentTarget.naturalWidth || undefined)}
-              style={{ width: `min(${viewerWidth(natural ?? 128)}px, calc(100vw - 2rem), 70dvh)`, height: "auto", ...zoomStyle }}
+              style={{ width: `min(${viewerWidth(natural ?? 128)}px, calc(100vw - 2rem - ${SIDE_INSETS}), 70dvh)`, height: "auto", ...zoomStyle }}
               className={`aspect-square rounded-2xl object-cover shadow-2xl max-md:rounded-xl ${zoomed ? "cursor-grab active:cursor-grabbing" : "cursor-zoom-in"}`} />
           )}
           {/* `dir` on the box that cuts: the "…" goes at the name's own end, not at its start in the other direction. */}
@@ -82,8 +85,7 @@ export function AvatarViewer({ src, name, onClose, returnFocus, picture = false 
         </figure>
       </div>
       <button type="button" aria-label={t("common.close")} data-testid="avatar-viewer-close" onClick={onClose}
-        style={{ top: "max(0.75rem, env(safe-area-inset-top))" }}
-        className="absolute end-3 flex h-11 w-11 items-center justify-center rounded-full bg-black/40 text-white hover:bg-black/60 max-md:bg-transparent max-md:text-text-secondary max-md:hover:bg-surface-hover">
+        className="picture-viewer-close absolute flex h-11 w-11 items-center justify-center rounded-full bg-black/40 text-white hover:bg-black/60 max-md:bg-transparent max-md:text-text-secondary max-md:hover:bg-surface-hover">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
       </button>
     </dialog>,

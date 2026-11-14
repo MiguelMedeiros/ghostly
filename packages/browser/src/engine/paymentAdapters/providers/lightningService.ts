@@ -216,6 +216,7 @@ export class LightningService {
     // paid nor expire, and its chat request would wait for good. A source that reports its own (the mints) is told.
     if (!provider.capabilities.lookup && !provider.settlesItself) throw new Error(`${descriptor.label} cannot look up its invoices, so a payment to it would never be seen: receive with another Lightning card, or connect it with invoice lookup allowed`);
     const created = await provider.createInvoice(amount, context.memo ?? "Ghostly");
+    this.sources.answered(provider);
     const decoded = decodeBolt11(created.invoice);
     // What goes to a contact must be the invoice we asked for: this amount, this hash, the right chain.
     if (!decoded || decoded.amountSat !== amount || (decoded.paymentHash && decoded.paymentHash !== created.paymentHash) || created.amount !== amount) throw new Error(`${descriptor.label} returned an invoice that does not match the request`);
@@ -314,6 +315,7 @@ export class LightningService {
     if (this.mode === "testnet" && decoded.network === "bitcoin" && !(provider instanceof CashuMintLightning)) throw new Error(BITCOIN_INVOICE_ON_TESTNET);
     if (!provider.capabilities.send) throw new Error(`${descriptor.label} cannot pay invoices`);
     const maxFee = provider.estimateFee ? await provider.estimateFee(decoded.invoice, decoded.amountSat) : defaultFeeCap(decoded.amountSat);
+    if (provider.estimateFee) this.sources.answered(provider);
     if (!Number.isSafeInteger(maxFee) || maxFee < 0) throw new Error(`${descriptor.label} returned an invalid fee`);
     const id = crypto.randomUUID();
     this.quotes.set(id, { providerId: descriptor.id, provider, invoice: decoded.invoice, amount: decoded.amountSat, maxFee, paymentHash: decoded.paymentHash });
@@ -340,16 +342,26 @@ export class LightningService {
     paying += 1;
     try {
       const result = await quote.provider.payInvoice(quote.invoice, quote.maxFee, context.note);
+      // The source answered: a card that could not read its balance reads it now; one paid reads it now anyway (it changed).
+      if (result.state === "paid") this.sources.balanceChanged(quote.provider); else this.sources.answered(quote.provider);
       op = result.state === "paid" ? { ...op, state: "paid", fee: result.fee, ref: result.ref ?? op.ref, settledAt: Date.now() } : { ...op, state: "pending", ref: result.ref ?? op.ref };
     } catch (error) {
-      if (isNothingSpentError(error)) { await this.put({ ...op, state: "failed", error: redact(error) }); throw error; }
+      if (isNothingSpentError(error)) { await this.put({ ...op, state: "failed", error: redact(error) }); await this.showRecent(); throw error; }
       // A source that cannot look payments up never settles this by itself: say so rather than "being checked".
       op = { ...op, state: "unknown", error: quote.provider.capabilities.lookup ? "No answer from the source. It is being checked; nothing is paid again." : "No answer from the source, and it cannot be asked: check this payment in the wallet itself. It is never paid again." };
     } finally { paying -= 1; }
     await this.put(op);
+    await this.showRecent();
     if (op.state !== "paid") this.schedule(OUT_POLL_MS);
     return op.state === "paid";
   }
+
+  /**
+   * A payment ended (paid, refused, or left to be checked): the recent list says so now. It was read again only by a
+   * later pass, which a balance that changed brought: one refused right after a paid one kept the paid one first. A
+   * read that fails leaves it to the next pass: the payment's own outcome is what the caller hears.
+   */
+  private async showRecent() { if (await this.loadRecent().catch(() => false)) this.events.changed(); }
 
   /** The Cashu wallet settled a melt it had left pending. */
   async reportPaymentResolved(invoice: string, paid: boolean, context: { paymentId?: string; mint?: string } = {}) {
@@ -416,12 +428,14 @@ export class LightningService {
           if (op.providerId !== providerId || !provider.interruptedPayment || notYet(op)) continue;
           try {
             const outcome = await provider.interruptedPayment({ invoice: op.invoice, paymentHash: op.paymentHash, ref: op.ref });
+            this.sources.answered(provider);
             if (outcome === "pending") missed(op);
             if (outcome !== "paid" && outcome !== "failed") continue;
             this.outAsk.forget(op.paymentHash);
             // Written only over the state that was asked about: the source's own report wins.
             if ((await this.get("out", op.paymentHash))?.state !== "unknown") continue;
             await this.put({ ...op, state: outcome, error: outcome === "failed" ? "The payment did not go through" : undefined, settledAt: Date.now() });
+            if (outcome === "paid") this.sources.balanceChanged(provider);
             this.events.resolved(op, outcome === "paid");
           } catch { missed(op); }
           continue;
@@ -444,17 +458,20 @@ export class LightningService {
           if (op.direction === "in") {
             const status = await provider.invoiceStatus({ invoice: op.invoice, paymentHash: op.paymentHash, amount: op.amount, expiresAt: op.expiresAt, ref: op.ref });
             this.invoiceAsk.forget(op.paymentHash);
+            this.sources.answered(provider);
             if (!(await unchanged())) continue;
-            if (status.state === "paid") { await this.put({ ...op, state: "paid", settledAt: Date.now() }); this.events.received(op); }
+            if (status.state === "paid") { await this.put({ ...op, state: "paid", settledAt: Date.now() }); this.sources.balanceChanged(provider); this.events.received(op); }
             else if (status.state === "expired" || op.expiresAt + INVOICE_PACE.expiryGraceMs < Date.now()) await this.put({ ...op, state: "expired" });
             else invoiceDue = Math.min(invoiceDue, this.nextAsk(op, Date.now()));
           } else {
             const status = await provider.paymentStatus({ invoice: op.invoice, paymentHash: op.paymentHash, ref: op.ref });
+            this.sources.answered(provider);
             if (status.state === "pending") { missed(op); continue; }
             this.outAsk.forget(op.paymentHash);
             // Written only over the state that was asked about: anything newer wins.
             if (!(await unchanged())) continue;
             await this.put({ ...op, state: status.state, fee: status.fee ?? op.fee, error: status.state === "failed" ? "The payment did not go through" : undefined, settledAt: Date.now() });
+            if (status.state === "paid") this.sources.balanceChanged(provider);
             this.events.resolved(op, status.state === "paid");
           }
         } catch {

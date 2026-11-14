@@ -20,7 +20,7 @@ const installed = (patch: Partial<InstalledAppView> = {}): InstalledAppView => (
 });
 const preview = (patch: Partial<AppPreview> = {}): AppPreview => ({
   digest: DIGEST, ref: REF, publisher: KEY, fingerprint: "yz7m oxuc bd4u 8aqt", from: URL_, icon: null, install: "new", asks: ["chat"],
-  run: { status: "ok" }, listedBy: [], unknownPublisher: true,
+  run: { status: "ok" }, listedBy: [], unknownPublisher: true, stage: "screen",
   manifest: { ghostlyApp: 1, publisher: KEY, name: "chess", version: "2.0.1", sequence: 12, kind: "mini-app", title: "Chess", tagline: "Play chess with a contact",
     entry: "index.html", permissions: ["chat"], runtime: { host: ">=1.2", clients: ["web", "desktop"] }, license: "MIT", files: [] },
   ...patch,

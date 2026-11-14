@@ -101,6 +101,12 @@ export interface IrohWebOptions {
    * the relay its descriptor names, and a contact who runs that relay would see this profile's address there.
    */
   ownRelaysOnly?: boolean;
+  /**
+   * Whether a contact's relay is at a public address, or at a name whose every address is public now: asked before each
+   * dial through a relay that is not one of `relays`, where the host has a resolver (the CLI's `nodePublicRelay`). A page
+   * has none; a contact's relay is held there to what its URL says (`dialableIrohRelay`).
+   */
+  publicRelay?: (relay: string) => Promise<boolean>;
 }
 
 const SEND_BUDGET = 120 * 1024;
@@ -251,6 +257,10 @@ export async function createIrohWebEndpoint(seedB64: string, options: IrohWebOpt
       if (!dialableIrohRelay((descriptor as { relay?: unknown } | null)?.relay, relays)) throw new Error("The contact's Iroh relay is not one this device dials");
       const dialled = irohDescriptor(descriptor, BROWSER_SPELLING);
       if (options.ownRelaysOnly && !onOwnRelay(dialled, relays)) throw new Error("The contact is not on one of this profile's Iroh relays");
+      const relay = (dialled as { relay?: unknown } | null)?.relay;
+      if (options.publicRelay && typeof relay === "string" && !onOwnRelay(dialled, relays) && !await options.publicRelay(relay))
+        throw new Error("The contact's Iroh relay is not one this device dials");
+      if (stopped) throw new Error("Iroh endpoint is stopped");
       const conn = await node.connect(dialled, options.connectMs ?? 20_000);
       if (stopped) { conn.close(); throw new Error("Iroh endpoint is stopped"); }
       return bind(conn);

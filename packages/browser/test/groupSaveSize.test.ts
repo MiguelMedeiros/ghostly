@@ -1,11 +1,13 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createIdentity, type GroupSession } from "@ghostly/core";
+import { REMOVED_TEXT, createIdentity, type GroupSession } from "@ghostly/core";
 import { db } from "../src/engine/db";
 import { Groups, type GroupStore, type GroupsHost } from "../src/engine/groups";
 import { SEQ_BLOCK } from "../src/engine/groupRows";
-import { STORES, clearProfileStores, groupLiveKey, store, wrap } from "../src/shared/idb";
-import type { StoredGroup } from "../src/shared/types";
+import { openRows } from "../src/engine/sealedRows";
+import { STORES, clearProfileStores, committed, groupLightKey, groupLiveKey, store, wrap } from "../src/shared/idb";
+import type { GroupLight, StoredGroup } from "../src/shared/types";
+import { CommunityWorld } from "./communityWorld";
 // covers: groups.send
 
 /*
@@ -142,6 +144,39 @@ describe("a private group's saves", () => {
     expect(third.groups.isRemoved(id, "member:0:199")).toBe(true);
   }, 30_000);
 
+  it("a member's edit or deletion for everyone that comes in writes the edits it keeps to hand on, not the whole record, and they are there when the app starts again", async () => {
+    const world = new CommunityWorld();
+    vi.spyOn(Date, "now").mockImplementation(() => world.now);
+    const [alice, bob] = ["alice", "bob"].map(name => world.add(name));
+    const id = await alice.groups.create("Ghosts", "mesh");
+    await bob.groups.joinByLink(await alice.groups.enableLink(id));
+    await world.until(() => world.member(bob, id), 5 * 60_000);
+    for (let i = 0; i < 40; i++) {
+      const key = createIdentity().pubKeyZ32;
+      await sessionOf(alice.groups, id).admit(key);
+      await sessionOf(alice.groups, id).remove(key);
+    }
+    await world.run(60_000);
+    const { messageId } = await bob.groups.send(id, "hello");
+    await world.until(() => alice.messages.some(m => m.id === messageId), 60_000);
+    await alice.groups.flush();
+    const raw = alice.store as Required<GroupStore>;
+    expect(JSON.stringify((await raw.getGroups()).find(g => g.id === id)).length, "the record holds the chain").toBeGreaterThan(40_000);
+    const edits: Array<[string, { e: number; m: string; rm?: true }]> = [["an edit", { e: 1, m: "hello again" }], ["another", { e: 2, m: "hello, all" }], ["a deletion for everyone", { e: 3, m: REMOVED_TEXT, rm: true }]];
+    for (const [action, edit] of edits) {
+      const record = vi.spyOn(raw, "putGroup");
+      expect(await bob.groups.sendEdit(id, { id: messageId!, ts: world.now, ...edit })).toBeNull();
+      await world.run(5_000);
+      await alice.groups.flush();
+      expect(record.mock.calls.filter(([g]) => g.id === id).length, `${action}: the record is not written`).toBe(0);
+      record.mockRestore();
+    }
+    const kept = sessionOf(alice.groups, id).state.relayEdits!.map(f => f.v);
+    expect(kept).toEqual([3]);
+    await world.restart(alice);
+    expect(sessionOf(alice.groups, id).state.relayEdits!.map(f => f.v), "kept to hand on after a restart").toEqual(kept);
+  }, 60_000);
+
   it("started again, the group goes on from its last number, without a gap or a number used twice", async () => {
     const first = engine();
     await first.groups.load();
@@ -180,6 +215,95 @@ describe("a private group's saves", () => {
     await back.groups.send(id, "back");
     expect(back.said[0]).toBeGreaterThan(Math.max(...old.said));
     expect(new Set([...now.said, ...old.said, ...back.said]).size).toBe(now.said.length + old.said.length + back.said.length);
+  });
+
+  it("a pin, an unpin or a member's deletion for everyone taken by an app from before is not undone back here by the row of their own", async () => {
+    await clearProfileStores();
+    const now = engine();
+    await now.groups.load();
+    const [one, two] = [await grown(now.groups, 3, 0), await grown(now.groups, 3, 0)];
+    const m1 = (await now.groups.send(one, "m1")).messageId!, m2 = (await now.groups.send(one, "m2")).messageId!;
+    const at = Date.now();
+    // Group two: its record holds a pin (a commit wrote it whole), then a newer one goes to their row.
+    await now.groups.setPin(two, { id: "first", n: at, by: "me", at });
+    await sessionOf(now.groups, two).rotate();
+    await now.groups.setPin(two, { id: "second", n: at + 1, by: "me", at });
+    // Group one: a pin and a member's deletion in their row alone.
+    await now.groups.setPin(one, { id: m1, n: at, by: "me", at });
+    await now.groups.removed(one, "member:0:1");
+    await now.groups.flush();
+
+    // As the apps from before do: the groups' records, no small rows, no row for the pin and the deletions.
+    const before: GroupStore = { getGroups: () => db.getGroups(), putGroup: group => db.putGroup(group), deleteGroup: groupId => db.deleteGroup(groupId), getMessages: linkId => db.getMessages(linkId) };
+    const old = engine(before);
+    await old.groups.load();
+    expect(old.groups.pinOf(one)).toBeUndefined();
+    expect(old.groups.pinOf(two)).toMatchObject({ id: "first" });
+    // It pins, unpins and hears a deletion; it sends nothing and takes no commit.
+    await old.groups.setPin(one, { id: m2, n: at + 2, by: "me", at });
+    await old.groups.setPin(two, { id: "", n: at + 2, by: "me", at });
+    await old.groups.removed(one, "member:0:2");
+    await old.groups.flush();
+
+    const back = engine();
+    await back.groups.load();
+    expect(back.groups.pinOf(one)).toMatchObject({ id: m2 });
+    expect(back.groups.pinOf(two)).toMatchObject({ id: "" });
+    expect(back.groups.isRemoved(one, "member:0:2")).toBe(true);
+    // What the app from before never saw is lost with its row, as when it sends.
+    expect(back.groups.isRemoved(one, "member:0:1")).toBe(false);
+
+    // What this app takes from here on goes to their row again, and counts at the next start.
+    await back.groups.removed(one, "member:0:3");
+    await back.groups.setPin(one, { id: m1, n: at + 3, by: "me", at });
+    await back.groups.flush();
+    const third = engine();
+    await third.groups.load();
+    expect(third.groups.pinOf(one)).toMatchObject({ id: m1, n: at + 3 });
+    expect(third.groups.isRemoved(one, "member:0:2")).toBe(true);
+    expect(third.groups.isRemoved(one, "member:0:3")).toBe(true);
+  });
+
+  it("v1.10.1 loads a group whose small row carries `of` as if the row were not there; a row without `of`, from builds before, still counts here", async () => {
+    await clearProfileStores();
+    const now = engine();
+    await now.groups.load();
+    const id = await grown(now.groups, 3, 0);
+    const sent = (await now.groups.send(id, "pin me")).messageId!;
+    const at = Date.now();
+    await now.groups.setPin(id, { id: sent, n: at, by: "me", at });
+    await now.groups.removed(id, "member:0:1");
+    await now.groups.flush();
+    const getLight = async () => wrap((await store(STORES.settings, "readonly")).get(groupLightKey(id))) as Promise<GroupLight>;
+    const putLight = async (light: GroupLight) => committed((await store(STORES.settings, "readwrite")).put(light, groupLightKey(id)));
+    const light = await getLight();
+    expect(light.of, "the row carries `of`").toEqual(expect.any(String));
+    expect(light).toMatchObject({ pin: { id: sent }, removedIds: ["member:0:1"] });
+
+    // v1.10.1's db.getGroups (`git show v1.10.1:packages/browser/src/engine/db.ts`): the groups store alone.
+    const getGroupsV1101 = async () => openRows(STORES.groups, await wrap((await store(STORES.groups, "readonly")).getAll()) as StoredGroup[]);
+    const read = await getGroupsV1101();
+    await committed((await store(STORES.settings, "readwrite")).delete(groupLightKey(id)));
+    expect(await getGroupsV1101(), "the row and its `of` change nothing it reads").toEqual(read);
+    await putLight(light);
+
+    // A row as builds before `of` wrote it: this one takes its pin and deletion, as it did.
+    const { of: _, ...withoutOf } = light;
+    await putLight(withoutOf);
+    const back = engine();
+    await back.groups.load();
+    expect(back.groups.pinOf(id)).toMatchObject({ id: sent, n: at });
+    expect(back.groups.isRemoved(id, "member:0:1")).toBe(true);
+    await putLight(light);
+
+    // v1.10.1 itself: the group loads, without the pin and deletion it never saw, and goes on sending.
+    const v1101: GroupStore = { getGroups: getGroupsV1101, putGroup: group => db.putGroup(group), deleteGroup: groupId => db.deleteGroup(groupId), getMessages: linkId => db.getMessages(linkId) };
+    const old = engine(v1101);
+    await old.groups.load();
+    expect(old.groups.pinOf(id)).toBeUndefined();
+    expect(old.groups.isRemoved(id, "member:0:1")).toBe(false);
+    await old.groups.send(id, "from 1.10.1");
+    expect(old.said[0]).toBeGreaterThan(Math.max(...now.said));
   });
 
   it("killed right after a send saved its counter and frame: that save went to the small row, and opened again the text is stored and said", async () => {

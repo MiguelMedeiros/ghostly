@@ -13,7 +13,7 @@
  *   page and caches nothing, and only shows wake-ups (WISP 401 § Wake-up push). A scope per profile gives each
  *   profile a push subscription of its own, so contacts of two profiles cannot tell they share a browser.
  */
-import { CACHE_PREFIX, SHARED_ROUTE, assetAnswer, classify, installList, precacheMode, pushNotice, pushScopeProfile, quietWakeNotice, quietWakeTag, readShare, readShareBody, TOO_LARGE_SHARE, type SharedItem } from "./policy";
+import { CACHE_PREFIX, SHARED_ROUTE, assetAnswer, carriedOver, classify, installList, precacheMode, pushNotice, pushScopeProfile, quietWakeNotice, quietWakeTag, readShare, readShareBody, TOO_LARGE_SHARE, type SharedItem } from "./policy";
 import { readWakeEntry, readWakeText, type WakeText } from "./wakeStore";
 import { readPushDeviceView } from "./deviceState";
 import { deviceNoticeWords } from "./deviceWords";
@@ -25,6 +25,8 @@ declare const __SW_BUILD__: string;
 declare const __SW_PRECACHE__: string[];
 /** The files of each language but English, left out of `__SW_PRECACHE__`: the install takes the person's own (`installList`). */
 declare const __SW_LANGUAGES__: Record<string, string[]>;
+/** The build's other hashed files, kept on their first use (`asset`): the install takes them from an older cache only. */
+declare const __SW_LAZY__: string[];
 
 // The few worker APIs used here, typed locally: the web app's tsconfig has the DOM library, not WebWorker's.
 interface ExtendableEvent extends Event { waitUntil(promise: Promise<unknown>): void }
@@ -61,13 +63,17 @@ const PUSH_PROFILE = pushScopeProfile(worker.registration.scope);
 worker.addEventListener("install", (event) => {
   if (PUSH_PROFILE !== null) return;
   event.waitUntil((async () => {
-    // The languages the person reads in: the browser's, and those a page of the previous build fetched into its cache.
+    // What the caches of earlier builds hold, and which holds it.
     const older = (await caches.keys()).filter((name) => name.startsWith(CACHE_PREFIX) && name !== CACHE);
-    const held = (await Promise.all(older.map(async (name) => (await (await caches.open(name)).keys()).map((request) => new URL(request.url).pathname)))).flat();
-    const list = installList(__SW_PRECACHE__, __SW_LANGUAGES__, navigator.languages?.length ? navigator.languages : [navigator.language], held);
-    // The page and the files beside it past the browser's HTTP cache; the hashed files from it when it has them.
+    const held = new Map<string, string>();
+    for (const name of older) for (const request of await (await caches.open(name)).keys()) held.set(new URL(request.url).pathname, name);
+    // The languages the person reads in: the browser's, and those a page of the previous build fetched into its cache.
+    const list = installList(__SW_PRECACHE__, __SW_LANGUAGES__, navigator.languages?.length ? navigator.languages : [navigator.language], [...held.keys()]);
     const cache = await caches.open(CACHE);
-    await cache.addAll(list.map((path) => new Request(path, { cache: precacheMode(path) })));
+    // The hashed files an earlier build's cache holds, from there (`carriedOver`).
+    const carried = new Set(await carryOver(cache, carriedOver(list, __SW_LAZY__, held), held));
+    // The rest: the page and the files beside it past the browser's HTTP cache; the hashed files from it when it has them.
+    await cache.addAll(list.filter((path) => !carried.has(path)).map((path) => new Request(path, { cache: precacheMode(path) })));
   })());
 });
 
@@ -81,6 +87,22 @@ worker.addEventListener("activate", (event) => {
     await worker.clients.claim();
   })());
 });
+
+/** Puts each of `paths` in `cache` from the older cache `held` names for it: the paths it could, the others to download. */
+async function carryOver(cache: Cache, paths: readonly string[], held: ReadonlyMap<string, string>): Promise<string[]> {
+  const done = await Promise.all(paths.map(async (path) => {
+    try {
+      // Gone meanwhile (another tab's new worker deleted that cache): downloaded as any other.
+      const kept = await caches.match(path, { cacheName: held.get(path) });
+      if (!kept) return null;
+      await cache.put(path, kept);
+      return path;
+    } catch {
+      return null;
+    }
+  }));
+  return done.filter((path): path is string => path !== null);
+}
 
 async function fromCache(key: string, request: Request): Promise<Response> {
   const cached = await caches.match(key, { cacheName: CACHE });
@@ -441,15 +463,29 @@ function askWindow(client: WindowClient): Promise<WindowSays | null> {
   });
 }
 
-/** Tells a window it only guessed at (`silent`) to open the chat; false when it hands it back, null when it says nothing in time. */
-function tellSilent(client: WindowClient, message: Extract<FromWorker, { type: "open-chat" }>): Promise<boolean | null> {
+/** Tells a window it only guessed at (`silent`) to open the chat; false when it hands it back, null when it says nothing within `wait`. */
+function tellSilent(client: WindowClient, message: Extract<FromWorker, { type: "open-chat" }>, wait: number): Promise<boolean | null> {
   return new Promise((resolve) => {
     const channel = new MessageChannel();
     const done = (taken: boolean | null) => { clearTimeout(timer); channel.port1.close(); resolve(taken); };
-    const timer = setTimeout(() => done(null), OPEN_BACK_MS);
+    const timer = setTimeout(() => done(null), wait);
     channel.port1.onmessage = ({ data }: MessageEvent<Partial<ChatTaken> | null>) => done(typeof data?.taken === "boolean" ? data.taken : null);
     try { client.postMessage({ ...message, silent: true }, [channel.port2]); } catch { done(null); }
   });
+}
+
+/**
+ * Whether a window holds `profile`'s peer lock (`ghostly-peer`, `ghostly-peer-<ns>`), named after the database its page
+ * wrote in the wake text (`ghostly`, `ghostly_<ns>`): what a frozen tab cannot say. Null when the worker cannot tell (no
+ * Web Locks in this browser's workers, or no page of the profile wrote its database name yet).
+ */
+async function profileRuns(profile: string): Promise<boolean | null> {
+  const db = (await readWakeText(profile).catch(() => undefined))?.db;
+  const lock = db === "ghostly" ? "ghostly-peer" : db?.startsWith("ghostly_") ? `ghostly-peer-${db.slice("ghostly_".length)}` : null;
+  const locks = worker.navigator?.locks;
+  if (!lock || !locks) return null;
+  const state = await locks.query().catch(() => null);
+  return state ? (state.held ?? []).some(({ name }) => name === lock) : null;
 }
 
 /**
@@ -473,13 +509,21 @@ async function openFrom(notification: Shown): Promise<void> {
     open.postMessage(message);
     return;
   }
-  // None says it runs the profile, but one said nothing: it may be the profile's own, frozen or busy (focusing
-  // unfreezes it, and the message waits for it), so it gets the chat rather than a new window stuck behind its lock.
-  // It may as well be another profile's frozen tab: that one says so once unfrozen, and the chat goes to a new window.
+  // None says it runs the profile, but one said nothing: it may be the profile's own, frozen or busy, so it gets the chat
+  // rather than a new window stuck behind its lock. It may as well be another profile's: that one hands the chat back,
+  // and the chat goes to a new window. A tap lets the worker focus a window or open one, not both (Chromium refuses the
+  // second), so it is told before it is focused: one that hands the chat back has not spent the tap. Only a hidden page
+  // can be frozen, and it answers nothing until focusing unfreezes it (the message waits for it): that one is focused
+  // after `OPEN_ASK_MS`; one on screen is busy, and has `OPEN_BACK_MS` to answer. A frozen tab of another profile would
+  // say so only once focused, with the tap spent: when no window holds the profile's peer lock, it is not the profile's,
+  // and the new window opens without it.
   const silent = windows.find((_, i) => !said[i]);
-  if (silent) {
-    await silent.focus?.().catch(() => undefined);
-    if ((await tellSilent(silent, message)) !== false) return;
+  if (silent && (await profileRuns(data.profile)) !== false) {
+    const onScreen = silent.focused || silent.visibilityState === "visible";
+    if ((await tellSilent(silent, message, onScreen ? OPEN_BACK_MS : OPEN_ASK_MS)) !== false) {
+      await silent.focus?.().catch(() => undefined);
+      return;
+    }
   }
   // A new window of the app: it takes the chat (and the profile) from this message once it has started.
   const opened = await worker.clients.openWindow(`/#${data.path}`);

@@ -2,7 +2,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { useSameValue } from "../hooks/useSameValue";
-import { copyText } from "../lib/shareLink";
+import { copySecret } from "../lib/shareLink";
 import { CopiedStatus } from "./chat/LinkQrDialog";
 
 interface QRCodeDisplayProps {
@@ -33,7 +33,8 @@ export function QRCodeDisplay({ value, qr, label, copyLabel }: QRCodeDisplayProp
   const handleCopy = async () => {
     setError(""); setCopied(false); clearTimeout(copiedTimer.current);
     try {
-      await copyText(value);
+      // An invite or a device's link: a secret.
+      await copySecret(value);
       if (currentValue.current !== value) return;
       setRefused(false); setCopied(true);
       copiedTimer.current = setTimeout(() => setCopied(false), 2000);
@@ -51,7 +52,8 @@ export function QRCodeDisplay({ value, qr, label, copyLabel }: QRCodeDisplayProp
           {label}
         </span>
       )}
-      <div data-testid="invite-qr" className="bg-white p-4 rounded-xl max-w-full [&_svg]:max-w-full [&_svg]:h-auto">
+      {/* An image: forced colors keep its white box, the quiet zone a scanner needs around the code's black modules. */}
+      <div data-testid="invite-qr" className="bg-white p-4 rounded-xl max-w-full forced-color-adjust-none [&_svg]:max-w-full [&_svg]:h-auto">
         <QRCodeSVG
           value={encoded}
           size={232}
@@ -63,7 +65,7 @@ export function QRCodeDisplay({ value, qr, label, copyLabel }: QRCodeDisplayProp
         />
       </div>
       <button onClick={() => void handleCopy()}
-        className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-panel-header cursor-pointer hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-alt">
+        className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-panel-header cursor-pointer hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-alt">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
           <rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h3"/>
         </svg>

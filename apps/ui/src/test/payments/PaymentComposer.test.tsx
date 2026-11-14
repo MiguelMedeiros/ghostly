@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Language } from "../../lib/settings";
@@ -62,6 +62,8 @@ const request = () => screen.getByTestId("payment-request");
 /** A card by its type and network: `card("cashu-mainnet")`. */
 const card = (id: string) => screen.getByTestId(`payment-card-${id}`);
 const hint = () => screen.getByText((_, el) => !!el?.classList.contains("payment-back-hint"));
+/** The card back's line under its name: what it holds, and whom with. */
+const meta = () => screen.getByTestId("payment-back").querySelector(".payment-back-meta");
 /** The sheet's Mainnet | Testnet tab. */
 const tab = (network: WalletNetwork) => screen.getByTestId(`payment-tab-${network}`);
 /** The ids of the cards the deck shows. */
@@ -176,6 +178,16 @@ describe("the cards", () => {
     expect(screen.getByTestId("payment-card-usdt-testnet").querySelector("[data-testid=wallet-card-network]")).toHaveTextContent("Testnet");
   });
 
+  it("shows a shared balance's number on one card only: Lightning through the mints says it uses Cashu's, its back keeps the amount", async () => {
+    const { user } = open();
+    expect(card("cashu-mainnet")).toHaveTextContent("1,000 sats");
+    expect(card("lightning-mainnet")).toHaveTextContent("Uses your Cashu balance");
+    expect(card("lightning-mainnet")).not.toHaveTextContent("1,000");
+    await user.click(card("lightning-mainnet"));
+    // Turned over, it is the only card shown: what it can spend, as before.
+    expect(meta()).toHaveTextContent("1,000 sats · with Alice");
+  });
+
   it("starts on the card used last time, on its network's tab", () => {
     rememberRail("peer", "arkade:testnet");
     open();
@@ -233,7 +245,7 @@ describe("the cards", () => {
     expect(card("bark-testnet")).toHaveAttribute("aria-checked", "true");
     expect(screen.getByTestId("payment-use")).toBeDisabled();
     act(() => fakeEngine.update({ wallet: { ...fakeEngine.state.wallet, ark: arkReady() } }));
-    expect(await screen.findByText("Use Ark")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("payment-use")).toHaveTextContent("Use Ark"));
     expect(card("arkade-testnet")).toHaveAttribute("aria-checked", "true");
   });
 
@@ -253,7 +265,7 @@ describe("the cards", () => {
     expect(screen.getByTestId("payment-composer")).toHaveAttribute("data-network", "testnet");
     expect(within(back).getByText("Ark · Testnet")).toBeInTheDocument();
     expect(within(back).getByTestId("payment-back-network")).toHaveTextContent("Test money");
-    expect(within(back).getByText("5,000 test sats · with Alice")).toBeInTheDocument();
+    expect(meta()).toHaveTextContent("5,000 test sats · with Alice");
     expect(screen.queryByRole("radiogroup")).not.toBeInTheDocument();
   });
 
@@ -264,7 +276,7 @@ describe("the cards", () => {
     expect(back).toHaveAttribute("data-network", "mainnet");
     expect(within(back).getByText("Cashu")).toBeInTheDocument();
     expect(within(back).getByTestId("payment-back-network")).toHaveTextContent("Real money");
-    expect(within(back).getByText("1,000 sats · with Alice")).toBeInTheDocument();
+    expect(meta()).toHaveTextContent("1,000 sats · with Alice");
   });
 
   it("moves along the cards with the arrow keys and turns the chosen one over with Enter", async () => {
@@ -341,6 +353,27 @@ describe("the cards", () => {
     await user.keyboard("{Escape}");
     expect(await screen.findByRole("radiogroup", { name: "Pay with" })).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  // Escape drops an input method's candidate (Japanese, Chinese, Korean…): Chromium sends it while composing, WebKit
+  // right after the composition ended, as 229. It turned the card back, or closed the sheet, with the memo typed so far.
+  it("leaves an input method's Escape in the memo alone: the card stays turned, the sheet open", async () => {
+    rememberNetwork("peer", "testnet");
+    document.documentElement.dataset.reduceMotion = "true";
+    const { user, onClose } = open();
+    await user.click(card("arkade-testnet"));
+    await waitFor(() => expect(amount()).toHaveFocus());
+    const memo = screen.getByRole("textbox", { name: "What for? (optional)" });
+    memo.focus();
+    fireEvent.compositionStart(memo);
+    fireEvent.keyDown(memo, { key: "Escape", isComposing: true });
+    fireEvent.compositionEnd(memo, { data: "" });
+    fireEvent.keyDown(memo, { key: "Escape", keyCode: 229 });
+    await act(async () => {});
+    expect(screen.queryByRole("radiogroup", { name: "Pay with" })).not.toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    await user.keyboard("{Escape}");
+    expect(await screen.findByRole("radiogroup", { name: "Pay with" })).toBeInTheDocument();
   });
 
   it("never closes on a click inside, on the cards or on a turned card", async () => {
@@ -610,6 +643,12 @@ describe("sending Cashu from the chat's wallet", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  it("names the contact as the review's destination, not their key", async () => {
+    await sendCashu([mint(TEST_MINT, 500)], "30");
+    const review = await screen.findByRole("region", { name: "Payment review" });
+    expect(within(review).getByTestId("review-destination")).toHaveTextContent(/^Alice$/);
+  });
+
   it("pays real sats from a real mint, on the Mainnet wallet", async () => {
     const { engine } = await sendCashu([mint(REAL_MINT, 500)], "30");
     await screen.findByRole("region", { name: "Payment review" });
@@ -733,7 +772,8 @@ describe("sending on Ark, Bark, on-chain and USDT", () => {
   ])("on %s, asks the contact's app for an address first, on the card's network", async (rail, id, typed, units) => {
     const { engine } = await ask(id, typed);
     expect(engine.callsTo("askToPay")).toEqual([{ linkId: "link-1", amount: units, method: rail, memo: "lunch", timestamp: expect.any(Number), network: id.split(":")[1] }]);
-    expect(send()).toBeDisabled();
+    // Send was pressed and keeps the focus while it waits: off by aria-disabled. Request is plain disabled.
+    expect(send()).toHaveAttribute("aria-disabled", "true");
     expect(request()).toBeDisabled();
     expect(engine.callsTo("preparePayment")).toEqual([]);
   });
@@ -763,6 +803,20 @@ describe("sending on Ark, Bark, on-chain and USDT", () => {
     tick(45_600);
     expect(await screen.findByRole("alert")).toHaveTextContent("Your contact's app didn't answer" + "They can send you a Request instead.");
     expect(send()).toHaveTextContent("Send");
+    expect(send()).toBeEnabled();
+  });
+
+  it("gives up 45 s after Send asked, though the chat behind redraws the sheet with a new context every few seconds", async () => {
+    // The chat page builds its review context on every draw (a message, a link or wallet change): the 45 s started
+    // again at each, and in a live chat the sheet said "Asking for an address…" for good, Send disabled.
+    const { rerender, onSend, onRequest, onClose } = await ask("arkade:testnet", "3");
+    for (let s = 10; s <= 40; s += 10) {
+      tick(10_000);
+      rerender(<><PaymentComposer balance={1_000} onSend={onSend} onRequest={onRequest} onClose={onClose} reviewContext={reviewContext()} contact="Alice" /><Where /></>);
+      expect(send()).toHaveTextContent("Asking for an address…");
+    }
+    tick(5_600);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Your contact's app didn't answer");
     expect(send()).toBeEnabled();
   });
 

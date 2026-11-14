@@ -34,6 +34,7 @@ export function descriptorProblems(p: IdentityProofProvider): string[] {
   const { defaultDays, maxDays } = p.validity;
   if (!(Number.isInteger(defaultDays) && Number.isInteger(maxDays) && defaultDays >= 1 && defaultDays <= maxDays && maxDays * DAY <= IDENTITY_MAX_VALIDITY)) problems.push("validity must be whole days, 1 ≤ default ≤ max ≤ 400");
   if (p.recheck && !(Number.isInteger(p.recheck.afterSeconds) && p.recheck.afterSeconds >= 60)) problems.push("recheck.afterSeconds must be at least 60");
+  if (p.recheck?.perHour !== undefined && !(Number.isInteger(p.recheck.perHour) && p.recheck.perHour >= 1)) problems.push("recheck.perHour must be a whole number, at least 1");
   if (!p.signers.length) problems.push("no signers");
   const ids = p.signers.map(s => s.id);
   if (new Set(ids).size !== ids.length) problems.push("signer ids are not unique");

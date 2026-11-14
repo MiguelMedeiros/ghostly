@@ -1,0 +1,1 @@
+a profile with a lock screen keeps no contact's name in its push worker's table: its online notice says "A contact is online", since the system shows it over the device's own lock too. The table is written again when the lock is turned on or off.

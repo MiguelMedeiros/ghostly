@@ -449,15 +449,16 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     w.drop();
     // Its message deleted: the abort finds no session, and the record goes with the message.
     w.a.files.forget("out", "forgot-01");
-    w.a.files.forget("out", "forgot-02");
     w.a.records.delete("out:forgot-01");
-    w.a.records.delete("out:forgot-02");
     w.attach();
     expect(w.b.files.request("forgot-01")).toBe(true);
     await until(() => state(w.b, "in", "forgot-01") === "cancelled");
     expect(w.b.records.get("in:forgot-01")?.error).toBe("Cancelled by the sender");
     await until(() => w.b.disks.get("forgot-01")!.discarded);
     w.drop();
+    // The abort the next session would have said goes with the app's restart.
+    w.a.files.forget("out", "forgot-02");
+    w.a.records.delete("out:forgot-02");
     w.restart("a");
     w.attach();
     expect(w.b.files.request("forgot-02")).toBe(true);
@@ -564,6 +565,26 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     expect(w.a.files.get("out", "pkeep-01")).toMatchObject({ state: "paused", pausedBy: "me" });
     expect(w.a.sent.filter((f) => f.t === "pf-data" && f.id === "pkeep-01").length).toBe(dataBefore);
     expect(w.b.disks.get("pkeep-01")!.discarded).toBe(false);
+  });
+
+  it("the sender cancels a file under way while no session is open: the next one says so at once, not the receiver's idle nudge", async () => {
+    const w = wire();
+    w.attach();
+    send(w, file("gone-001", 4 * 1024 * 1024));
+    await until(() => (w.b.transferred.get("in:gone-001") ?? 0) > 100_000);
+    // A move swaps the session: the contact has not said what it supports on the new one yet.
+    w.drop();
+    w.a.files.cancel("out", "gone-001");
+    expect(state(w.a, "out", "gone-001")).toBe("cancelled");
+    w.attach();
+    // Before: active, its progress frozen, until its nudge asked 30 s later (`FILE_LIMITS.idleMs`).
+    await until(() => state(w.b, "in", "gone-001") === "cancelled", 2_000);
+    expect(w.b.records.get("in:gone-001")?.error).toBe("Cancelled by the sender");
+    expect(w.b.disks.get("gone-001")!.discarded).toBe(true);
+    // Said once: the session after it does not say it again.
+    w.drop(); w.attach();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(w.a.sent.filter((f) => f.t === "pf-abort" && f.id === "gone-001")).toHaveLength(1);
   });
 
   it("the sender cancels: the receiver drops what it had; the receiver cancels: the sender stops", async () => {

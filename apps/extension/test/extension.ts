@@ -57,20 +57,36 @@ async function workerStarted(world: FakeWorld, from: number): Promise<void> {
   await new Promise((resolve) => fire(world.chrome.runtime.onMessage, { target: "background", type: "ensure-engine" }, sender, resolve));
 }
 
+/**
+ * Chrome reloads the extension (Update and restart, a reload in chrome://extensions, turned off and on): its pages, its
+ * session storage, its offscreen document and its debugger sessions go, and a new worker starts. Every other tab stays,
+ * a contact's app in one included. `meanwhile` runs before the new worker starts, as a page may do anything then.
+ */
+export async function reloadExtension(world: FakeWorld, meanwhile?: () => void): Promise<void> {
+  const own = world.chrome.runtime.getURL("");
+  for (const tab of [...world.tabs.values()]) if (tab.url.startsWith(own)) world.tabs.delete(tab.id);
+  world.session.clear();
+  world.endOffscreen();
+  resetEngine();
+  meanwhile?.();
+  await restartServiceWorker(world);
+}
+
 export function engine(): FakeEngineServer {
   const servers = engineControl().servers;
   if (servers.length !== 1) throw new Error(`expected one engine, found ${servers.length}`);
   return servers[0];
 }
 
-/** Opens a viewer tab for PEER's service from a page, and returns the tab id. */
-export async function openViewer(world: FakeWorld, peer = PEER, service = SERVICE, tag = TAG, page?: unknown, relayOnly?: unknown): Promise<number> {
+/** Opens a viewer tab for PEER's service from a page of `profile` (the first one's by default), and returns the tab id. */
+export async function openViewer(world: FakeWorld, peer = PEER, service = SERVICE, tag = TAG, page?: unknown, relayOnly?: unknown, profile = ""): Promise<number> {
   const reply = (await world.chrome.runtime.sendMessage({
     target: "background",
     type: "open-service",
     peerPubKeyZ32: peer,
     serviceId: service,
     tag,
+    profile,
     page,
     ...(relayOnly !== undefined ? { relayOnly } : {}),
   })) as { ok: boolean; error?: string };
@@ -85,10 +101,11 @@ export async function pauseRequest(
   world: FakeWorld,
   tabId: number,
   request: { url: string; method?: string; headers?: Record<string, string>; postData?: string; postDataEntries?: { bytes?: string }[] },
+  resourceType?: string,
 ): Promise<{ method: string; params: Record<string, unknown> }> {
   const before = world.callsTo("debugger.sendCommand").length;
   const requestId = `r${Math.random()}`;
-  fire(world.chrome.debugger.onEvent, { tabId }, "Fetch.requestPaused", { requestId, request: { method: "GET", headers: {}, ...request } });
+  fire(world.chrome.debugger.onEvent, { tabId }, "Fetch.requestPaused", { requestId, request: { method: "GET", headers: {}, ...request }, ...(resourceType ? { resourceType } : {}) });
   for (let i = 0; i < 50; i++) {
     const answer = world
       .callsTo("debugger.sendCommand")
@@ -98,6 +115,23 @@ export async function pauseRequest(
     await settle(1);
   }
   throw new Error("the paused request was never answered");
+}
+
+/**
+ * Asks the peer for a contact's app's request over the viewer port, as the worker does (`askPeer`), as `sender`: the
+ * worker by default. Undefined when the port closes with no answer.
+ */
+export async function askPeer(
+  world: FakeWorld,
+  request: Partial<{ peerPubKeyZ32: string; serviceId: string; method: string; path: string; headers: [string, string][]; bodyB64: string | null }> = {},
+  sender: chrome.runtime.MessageSender = { id: world.chrome.runtime.id, url: world.chrome.runtime.getURL("background.js") },
+): Promise<unknown> {
+  const port = world.connectFrom(sender, "viewer");
+  return new Promise((resolve) => {
+    port.onMessage.addListener((message: unknown) => resolve((message as { reply: unknown }).reply));
+    port.onDisconnect.addListener(() => resolve(undefined));
+    port.postMessage({ id: 1, request: { peerPubKeyZ32: PEER, serviceId: SERVICE, method: "GET", path: "/", headers: [], bodyB64: null, ...request } });
+  });
 }
 
 export function bodyText(params: Record<string, unknown>): string {

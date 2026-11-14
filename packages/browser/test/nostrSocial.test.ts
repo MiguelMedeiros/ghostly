@@ -140,7 +140,7 @@ describe("the relay client", () => {
     relay.add({ kind: 1, tags: [], content: "first", created_at: now - 3 }, alice);
     relay.add({ kind: 1, tags: [], content: "second", created_at: now - 2 }, alice);
     relay.add({ kind: 1, tags: [], content: "bob's", created_at: now - 1 }, bob);
-    const result = await readRelays([relay.url, "ws://127.0.0.1:1", relay.url.replace("ws://", "ws://") + "/"], { kinds: [1], authors: [A] }, { makeSocket: nodeSocket, timeoutMs: 3000 });
+    const result = await readRelays([relay.url, "ws://127.0.0.1:1", relay.url + "/"], { kinds: [1], authors: [A] }, { makeSocket: nodeSocket, timeoutMs: 3000 });
     expect(result.events.map(e => e.content)).toEqual(["second", "first"]);
     expect(result.answered).toEqual([relay.url, relay.url + "/"]);
     expect(result.failed).toEqual(["ws://127.0.0.1:1"]);

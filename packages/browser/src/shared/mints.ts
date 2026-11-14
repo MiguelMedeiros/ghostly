@@ -1,4 +1,4 @@
-import type { WalletNetwork } from "@ghostly/core";
+import { trimEndOf, type WalletNetwork } from "@ghostly/core";
 /**
  * Mints a new wallet starts with, so nobody has to know what a mint is before
  * receiving sats. The first one that answers is where Lightning invoices are
@@ -30,15 +30,17 @@ export const isTestMint = (url: string) => TEST_MINTS.includes(mintUrlSpelling(u
  * A mint URL spelled as the wallet stores its mints: lower-case scheme and host, no default port, no trailing slash.
  * Another Cashu wallet's token or request names a mint as its user typed it (`HTTPS://Mint.Example:443/`), which is
  * still one of ours. Not a check: `normalizeMintUrl` is the one that refuses a mint.
+ * Its slashes come off in one pass (`trimEndOf`): a contact's token names any mint, and a `/\/+$/` retried from every
+ * `/` of a long run that does not end it froze the page for seconds.
  */
 export function mintUrlSpelling(url: string): string {
   try {
     const parsed = new URL(url.trim());
-    if (parsed.origin !== "null") return `${parsed.origin}${parsed.pathname.replace(/\/+$/, "")}`;
+    if (parsed.origin !== "null") return `${parsed.origin}${trimEndOf(parsed.pathname, "/")}`;
   } catch {
     // not a URL: compared as written
   }
-  return url.trim().replace(/\/+$/, "");
+  return trimEndOf(url.trim(), "/");
 }
 
 /** A mint on this very machine (a local test server): whatever it issues is not money anyone else holds. */
@@ -66,7 +68,7 @@ export const paysItsOwnInvoices = isWorthlessMint;
  * `GHOSTLY_TEST_MINTS`, for regtest and e2e stacks). Nothing else declares one: the apps never do.
  */
 const declaredTestMints = new Set<string>();
-const bare = (url: string) => url.trim().replace(/\/+$/, "");
+const bare = (url: string) => trimEndOf(url.trim(), "/");
 export function declareTestMints(urls: readonly string[]): void {
   for (const url of urls) if (isLocalMint(bare(url))) declaredTestMints.add(bare(url));
 }

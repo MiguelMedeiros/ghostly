@@ -36,12 +36,12 @@ export function ChatFolderMenu({ chat, open, onClose, anchorRef, returnFocus }: 
   return <>
     <Menu testId="chat-folder-menu" open={open} onClose={onClose} anchorRef={anchorRef} focusFirst label={t("sidebar.folder.move")}>
       {folders.map(folder => (
-        <MenuItem key={folder.id} testId="chat-folder-choice" data={{ "data-folder": folder.id }} checked={current === folder.id} icon={<Tick on={current === folder.id} />} onClick={() => put(folder.id)}>
+        <MenuItem key={folder.id} testId="chat-folder-choice" data={{ "data-folder": folder.id }} radio checked={current === folder.id} icon={<Tick on={current === folder.id} />} onClick={() => put(folder.id)}>
           <span dir="auto">{folder.name}</span>
         </MenuItem>
       ))}
       {folders.length > 0 && <>
-        <MenuItem testId="chat-folder-none" checked={current === undefined} icon={<Tick on={current === undefined} />} onClick={() => put(undefined)}>{t("sidebar.folder.none")}</MenuItem>
+        <MenuItem testId="chat-folder-none" radio checked={current === undefined} icon={<Tick on={current === undefined} />} onClick={() => put(undefined)}>{t("sidebar.folder.none")}</MenuItem>
         <MenuSeparator />
       </>}
       <MenuItem testId="chat-folder-new" icon={<FolderIcon />} onClick={() => { onClose(); setNaming(true); }}>{t("sidebar.folder.new")}</MenuItem>

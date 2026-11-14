@@ -9,7 +9,7 @@ import { commands as identities } from "./identities";
 import { commands as payments } from "./payments";
 import { commands as services } from "./services";
 import { type Command, wait, groupWait, force, reply, buttonOptions, listed } from "./shared";
-import type { OptionSpec } from "../args";
+import { strayValue, type OptionSpec } from "../args";
 
 export type { Command };
 
@@ -153,7 +153,10 @@ export function positionals(command: { usage: string; args?: string[]; words?: R
   return out;
 }
 
-/** Words past a usage's arguments are refused, never dropped: `profile use my bot` would select `my`. */
+/**
+ * Words past a usage's arguments are refused, never dropped: `profile use my bot` would select `my`. One of them right
+ * after an option that stood alone (`file send bob v.wav --voice 2s`) is refused as that option's value.
+ */
 export function noMoreThan(count: number, values: readonly string[], usage: string): void {
-  if (values.length > count) throw new CliError("usage", `Too many arguments: ghostly ${usage}`);
+  if (values.length > count) throw strayValue(values) ?? new CliError("usage", `Too many arguments: ghostly ${usage}`);
 }

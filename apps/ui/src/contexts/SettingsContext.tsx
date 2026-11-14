@@ -5,6 +5,7 @@ import {
   useContext,
   useState,
   useEffect,
+  useLayoutEffect,
   useCallback,
   useRef,
   type ReactNode,
@@ -12,6 +13,7 @@ import {
 import {
   loadSettings,
   saveSettingsChanges,
+  sameSettings,
   settingsWithChanges,
   isSettingsStorageEvent,
   type AppSettings,
@@ -23,6 +25,7 @@ import {
   type LockScreenSettings,
   type NotificationSettings,
 } from "../lib/settings";
+import { applyTextSize, type TextSize } from "../lib/textSize";
 import { getRandomGhostName } from "../lib/storage";
 import { cleanOwnName } from "../lib/ownName";
 
@@ -37,6 +40,7 @@ interface SettingsContextValue {
   updateDefaultNickname: (nickname: string) => void;
   updateReduceMotion: (reduce: boolean) => void;
   updateChatListDensity: (density: ChatListDensity) => void;
+  updateTextSize: (size: TextSize) => void;
   updateChatListCollapsed: (collapsed: boolean) => void;
   updateCheckForUpdates: (check: boolean) => void;
   updateLinkPreviews: (on: boolean) => void;
@@ -52,6 +56,9 @@ interface SettingsContextValue {
 
 const SettingsContext = createContext<SettingsContextValue | null>(null);
 
+/** Translate received messages (Settings), on its own: every bubble reads it, and the whole settings drew them all. */
+const TranslateMessagesContext = createContext(false);
+
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
   // The settings as this page last read or saved them. The extension runs the app in several tabs at once: a change
@@ -64,8 +71,14 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     // is. They are read (the language, the theme, the lock) and never written back.
     if (knownDeviceGate()?.full === false) return;
     const saved = saveSettingsChanges(synced.current, settings);
+    // The saved copy is always a new object. It is taken only when it holds something another tab stored: otherwise
+    // every reader of the settings would draw a second time for nothing.
+    if (sameSettings(saved, settings)) {
+      synced.current = settings;
+      return;
+    }
     synced.current = saved;
-    if (saved !== settings) setSettings(saved);
+    setSettings(saved);
   }, [settings]);
 
   const followStored = useCallback(() => {
@@ -134,6 +147,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setSettings((prev) => ({ ...prev, chatListDensity }));
   }, []);
 
+  const updateTextSize = useCallback((textSize: TextSize) => {
+    setSettings((prev) => ({ ...prev, textSize }));
+  }, []);
+
   const updateChatListCollapsed = useCallback((chatListCollapsed: boolean) => {
     setSettings((prev) => ({ ...prev, chatListCollapsed }));
   }, []);
@@ -157,6 +174,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     document.documentElement.dataset.reduceMotion = String(settings.reduceMotion);
   }, [settings.reduceMotion]);
+
+  // Before the page is drawn: a chat opened at Huge is never drawn once at the default size first.
+  useLayoutEffect(() => applyTextSize(settings.textSize), [settings.textSize]);
 
   const randomizeNickname = useCallback(() => {
     const randomName = getRandomGhostName();
@@ -186,6 +206,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         updateDefaultNickname,
         updateReduceMotion,
         updateChatListDensity,
+        updateTextSize,
         updateChatListCollapsed,
         updateCheckForUpdates,
         updateLinkPreviews,
@@ -197,9 +218,14 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         followStored,
       }}
     >
-      {children}
+      <TranslateMessagesContext.Provider value={settings.translateMessages}>{children}</TranslateMessagesContext.Provider>
     </SettingsContext.Provider>
   );
+}
+
+/** `settings.translateMessages`, drawing again only when it changes, not on every other setting. */
+export function useTranslateMessages(): boolean {
+  return useContext(TranslateMessagesContext);
 }
 
 export function useSettings(): SettingsContextValue {

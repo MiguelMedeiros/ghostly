@@ -211,6 +211,13 @@ describe("Settings, Network: push relay", () => {
     expect(screen.queryByTestId("network-push-relay-refused")).toBeNull();
   });
 
+  it("a relay at its limit (429) is said to be busy, not to answer as no push relay", () => {
+    fakeEngine.update({ transport, settings: { relays: RELAYS, pushRelay: RELAY }, pushRelayRefused: { url: RELAY, at: 1, http: 429, text: "Too many" } });
+    renderApp(<NetworkSettings />);
+    expect(screen.getByTestId("network-push-relay-refused").textContent).toBe(
+      "The last wake-up through this relay was turned away: it was at its limit (HTTP 429). It wakes contacts again once it has room.The relay said: “Too many”");
+  });
+
   it("pt: says it in the app's language, the relay's words as it gave them", () => {
     fakeEngine.update({ transport, settings: { relays: RELAYS, pushRelay: RELAY }, pushRelayRefused: refused });
     renderApp(<NetworkSettings />, { language: "pt" });
@@ -296,6 +303,26 @@ describe("Settings, Network: Hide my IP from contacts", () => {
     await user.click(screen.getByTestId("network-save"));
     expect(screen.getByLabelText("TURN server URL")).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByTestId("network-turn-field")).toHaveTextContent("Hide my IP needs this TURN server. Turn it off first, then remove the server.");
+  });
+
+  // Every connection to a contact goes through the TURN server then, and the engine keeps it: it is not optional.
+  for (const language of LANGUAGES) {
+    it(`${language}: while it is on, the TURN server's hint says it is required, not optional`, () => {
+      const { engine } = renderApp(<NetworkSettings />, { language });
+      act(() => engine.update({ transport, settings: { relays: RELAYS, iceServers: [TURN], relayOnly: true } }));
+      const field = screen.getByTestId("network-turn-field");
+      expect(field).not.toHaveTextContent(lookup(language, "network.turnHint")!);
+      expect(field).toHaveTextContent(lookup(language, "network.turnHintRelayOnly")!);
+      act(() => engine.update({ settings: { relays: RELAYS, iceServers: [TURN] } }));
+      expect(screen.getByTestId("network-turn-field")).toHaveTextContent(lookup(language, "network.turnHint")!);
+    });
+  }
+
+  it("while it is on, the TURN server's hint says so in English", () => {
+    const { engine } = renderApp(<NetworkSettings />);
+    act(() => engine.update({ transport, settings: { relays: RELAYS, iceServers: [TURN], relayOnly: true } }));
+    expect(screen.getByTestId("network-turn-field")).toHaveTextContent("Required while Hide my IP is on: calls and chats go through it.");
+    expect(screen.getByTestId("network-turn-field")).not.toHaveTextContent("Optional");
   });
 
   it("on the Desktop, while it is on, offers the HyperDHT relay its HyperDHT then goes through", async () => {
@@ -384,7 +411,7 @@ describe("Settings, Network: a refused field is said in the page's language, und
     await user.click(screen.getByTestId("network-save"));
     expect(engine.callsTo("updateSettings")).toEqual([]);
     // Not "Use a wss:// relay address" in an Arabic page.
-    expect(hyperdht).toHaveAccessibleDescription("استخدم wss:// في عنوان المرحّل");
+    expect(hyperdht).toHaveAccessibleDescription("استخدم \u2066wss://\u2069 في عنوان المرحّل");
     expect(push).toHaveAccessibleDescription("أزِل اسم المستخدم وكلمة المرور من العنوان");
     expect(marked()).toEqual(["network-hyperdht-relay", "network-push-relay"]);
     // The error sits right under the field that points at it.
@@ -423,7 +450,7 @@ describe("Settings, Network: a refused field is said in the page's language, und
     const url = screen.getByLabelText(arNetwork.turnUrl);
     await user.type(url, "https://turn.example.org");
     await user.click(screen.getByTestId("network-save"));
-    expect(url).toHaveAccessibleDescription("ليس عنوان TURN أو STUN (مثل turn:host:port): https://turn.example.org");
+    expect(url).toHaveAccessibleDescription("ليس عنوان TURN أو STUN (مثل \u2066turn:host:port\u2069): https://turn.example.org");
     expect(marked()).toEqual(["network-turn-url"]);
     expect(url).toHaveFocus();
     await user.clear(url);

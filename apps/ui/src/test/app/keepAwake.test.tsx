@@ -116,6 +116,28 @@ describe("how often the device set is asked for", () => {
       expect(fakeEngine.callsTo("deviceHandoffView").length - before).toBe(12);
     } finally { vi.useRealTimers(); }
   });
+
+  it("with the switch off, a profile with a device set reads the set once and then only looks for a handoff", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      const keepAwake = vi.fn(async (on: boolean) => on);
+      fakeEngine.keepAwake = keepAwake;
+      let step: HandoffView["step"] | null = null;
+      fakeEngine.on("deviceSet", () => active);
+      fakeEngine.on("deviceHandoffView", () => (step ? handoff(step) : null));
+      renderHook(() => useComputerAwake());
+      await minute();
+      // On Desktop each read of the set reads the device state's file too: only the handoff can keep it awake here.
+      expect(fakeEngine.callsTo("deviceSet")).toHaveLength(1);
+      expect(fakeEngine.callsTo("deviceHandoffView")).toHaveLength(13);
+      expect(keepAwake).not.toHaveBeenCalledWith(true, false);
+      // A handoff still keeps it awake within 5 s.
+      step = "copying";
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+      expect(keepAwake).toHaveBeenLastCalledWith(true, false);
+      expect(fakeEngine.callsTo("deviceSet")).toHaveLength(1);
+    } finally { vi.useRealTimers(); }
+  });
 });
 
 describe("the switch", () => {

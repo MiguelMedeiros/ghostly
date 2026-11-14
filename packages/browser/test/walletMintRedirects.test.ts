@@ -24,6 +24,8 @@ describe("a mint's redirects", () => {
     const MINT = "https://mint.example";
     seed("proofs", [{ mint: MINT, id: KEYSET, amount: 128, secret: "a", C: KEYS[1] }]);
     const asked: { method: string; path: string; redirect?: RequestRedirect }[] = [];
+    // Built once: the invoice carries the second it was made, and the melt quote must name the very invoice asked about.
+    const invoice = fakeInvoice(10, new Uint8Array(32).fill(3));
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = new URL(String(input)).pathname;
       asked.push({ method: init?.method ?? "GET", path, redirect: init?.redirect });
@@ -33,7 +35,7 @@ describe("a mint's redirects", () => {
       if (path === "/v1/keys" || path === `/v1/keys/${KEYSET}`) return answer({ keysets: [{ id: KEYSET, unit: "sat", keys: KEYS }] });
       if (path === "/v1/mint/quote/bolt11/q0") return answer({ quote: "q0", request: fakeInvoice(10, new Uint8Array(32).fill(1)), amount: 10, unit: "sat", state: "UNPAID", expiry: 4_000_000_000 });
       if (path === "/v1/melt/quote/bolt11/m0") return answer({ quote: "m0", request: fakeInvoice(10, new Uint8Array(32).fill(2)), amount: 10, unit: "sat", fee_reserve: 1, state: "UNPAID", expiry: 4_000_000_000 });
-      if (path === "/v1/melt/quote/bolt11") return answer({ quote: "m1", request: fakeInvoice(10, new Uint8Array(32).fill(3)), amount: 10, unit: "sat", fee_reserve: 1, state: "UNPAID", expiry: 4_000_000_000 });
+      if (path === "/v1/melt/quote/bolt11") return answer({ quote: "m1", request: invoice, amount: 10, unit: "sat", fee_reserve: 1, state: "UNPAID", expiry: 4_000_000_000 });
       return new Response("not found", { status: 404 });
     }));
 
@@ -41,7 +43,7 @@ describe("a mint's redirects", () => {
     await cashu.checkMint(MINT);
     await cashu.mintQuoteState(MINT, "q0");
     await cashu.meltQuoteState(MINT, "m0");
-    await cashu.quoteInvoice(fakeInvoice(10, new Uint8Array(32).fill(3)), MINT);
+    await cashu.quoteInvoice(invoice, MINT);
 
     const paths = asked.map((a) => `${a.method} ${a.path}`);
     for (const path of ["GET /v1/info", "GET /v1/keysets", "GET /v1/mint/quote/bolt11/q0", "GET /v1/melt/quote/bolt11/m0", "POST /v1/melt/quote/bolt11"]) expect(paths).toContain(path);

@@ -14,12 +14,17 @@ import android.webkit.WebView
 import android.widget.Button
 import android.widget.TextView
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.ActivityResult
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.ColorUtils
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsAnimationCompat
 import androidx.core.view.WindowInsetsCompat
+import java.io.File
+import kotlin.concurrent.thread
 
 class MainActivity : TauriActivity() {
   companion object {
@@ -29,6 +34,8 @@ class MainActivity : TauriActivity() {
      */
     const val MIN_WEBVIEW = 111
     private const val WEBVIEW_PACKAGE = "com.google.android.webview"
+    /** The saved state's name of the photo the camera app is taking ([cameraPhoto]). */
+    private const val CAMERA_PHOTO = "tools.ghostly.app.cameraPhoto"
   }
 
   /** The WebView's version when it is older than the minimum: the page is then hidden behind the update screen. */
@@ -50,6 +57,59 @@ class MainActivity : TauriActivity() {
   private var resumed = false
   private var focused = false
   private var cover: View? = null
+  /** The page's WebView, for the text size a font size change while the app runs asks for. */
+  private var webView: WebView? = null
+
+  /**
+   * The composer's Camera (CameraChromeClient): the camera app's answer comes to this launcher. The page that asked
+   * waits for it in memory ([cameraAnswer]); the photo's name ([cameraPhoto], in `cache/camera`) is kept in the saved
+   * state too, since Android often ends the process behind a camera app and makes the activity again for its answer.
+   */
+  private lateinit var cameraLauncher: ActivityResultLauncher<Intent>
+  private var cameraAnswer: ((ActivityResult) -> Unit)? = null
+  private var cameraPhoto: String? = null
+
+  /** Opens the camera app (`intent`) to write `file`; `answer` gets its result while this process lives. */
+  fun takePhoto(intent: Intent, file: File, answer: (ActivityResult) -> Unit) {
+    cameraAnswer = answer
+    cameraPhoto = file.name
+    try {
+      cameraLauncher.launch(intent)
+    } catch (e: ActivityNotFoundException) {
+      cameraAnswer = null
+      cameraPhoto = null
+      throw e
+    }
+  }
+
+  /**
+   * The camera app's answer. With no page waiting for it (Android ended the process meanwhile, and the page that
+   * asked went with it), the photo it took is not lost without a word: it comes back as a share, Exif taken away
+   * first as for the composer, so the person picks the chat and finds it on the attachment sheet (SharePicker).
+   */
+  private fun cameraAnswered(result: ActivityResult) {
+    val answer = cameraAnswer
+    val name = cameraPhoto
+    cameraAnswer = null
+    cameraPhoto = null
+    if (answer != null) return answer(result)
+    val file = File(CameraFiles.folder(cacheDir), name ?: return)
+    if (result.resultCode != RESULT_OK || file.length() == 0L) {
+      file.delete()
+      return
+    }
+    thread(name = "ghostly-camera") {
+      val stripped = CameraPhoto.strip(file)
+      if (!stripped) file.delete()
+      runOnUiThread { if (stripped) GhostlyHostPlugin.photoBack(file) }
+    }
+  }
+
+  override fun onSaveInstanceState(outState: Bundle) {
+    super.onSaveInstanceState(outState)
+    cameraPhoto?.let { outState.putString(CAMERA_PHOTO, it) }
+    SavePicker.keep(outState)
+  }
 
   override fun onCreate(savedInstanceState: Bundle?) {
     // Before the page loads. Debug builds take `--ei ghostly_min_webview <major>`, so the screen can be seen on an
@@ -78,10 +138,15 @@ class MainActivity : TauriActivity() {
     if (LaunchIntent.takenBefore(savedInstanceState != null, intent?.flags ?: 0)) {
       intent?.putExtra(GhostlyHostPlugin.EXTRA_HANDLED, true)
     }
-    // The camera's photos a previous page held (CameraCapture.kt): this start's page holds none of them.
-    CameraFiles.sweep(cacheDir)
+    // The camera's photos a previous page held (CameraCapture.kt): this start's page holds none of them. The one the
+    // camera app is still taking stays, for its answer (`cameraAnswered`).
+    cameraPhoto = savedInstanceState?.getString(CAMERA_PHOTO)
+    CameraFiles.sweep(cacheDir, cameraPhoto)
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
+    // After wry's and Tauri's own, in the same order at every create: Android hands an answer to the launcher
+    // registered in the same place, in an activity made again too.
+    cameraLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult(), ::cameraAnswered)
     // Save a copy's picker: its answer reaches this activity even when Android ended the process meanwhile.
     SavePicker.register(this, savedInstanceState)
     // Edge to edge is enforced from Android 15 (target SDK 35 and up), so the page would draw under the status bar,
@@ -111,6 +176,7 @@ class MainActivity : TauriActivity() {
   /** The page's WebView is made: hidden, with the update screen over it, when the WebView is too old to run it. */
   override fun onWebViewCreate(webView: WebView) {
     super.onWebViewCreate(webView)
+    this.webView = webView
     // wry sets its WebChromeClient after this callback: the camera's capture goes in over it on the next turn.
     window.decorView.post {
       val wry = webView.webChromeClient
@@ -161,9 +227,15 @@ class MainActivity : TauriActivity() {
     super.onNewIntent(intent)
   }
 
-  override fun onSaveInstanceState(outState: Bundle) {
-    super.onSaveInstanceState(outState)
-    SavePicker.keep(outState)
+  /**
+   * The system's font size changed while the app runs. The WebView takes it as its text zoom only as it is made, and
+   * the activity is not made again for it (configChanges, fontScale): the page kept the old size until the app was
+   * started again. The same zoom a WebView made now would take (100 × the font scale, cut to a whole percent).
+   */
+  override fun onConfigurationChanged(newConfig: Configuration) {
+    super.onConfigurationChanged(newConfig)
+    val zoom = (100 * newConfig.fontScale).toInt()
+    webView?.settings?.let { if (it.textZoom != zoom) it.textZoom = zoom }
   }
 
   override fun onResume() {
@@ -193,6 +265,9 @@ class MainActivity : TauriActivity() {
     val show = SwitcherPicture.covered(lockOn, resumed, focused)
     if (!show && cover == null) return
     val view = cover ?: layoutInflater.inflate(R.layout.lock_cover, null).also {
+      // It takes the touches it gets, as the page's own cover does: in split screen the app's half shows it while the
+      // other app has the focus, and a tap there only brings the app back, not on whatever the page has under it.
+      it.isClickable = true
       // Above the WebView (and the update screen): the content view's last child.
       addContentView(it, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
       cover = it
@@ -203,6 +278,15 @@ class MainActivity : TauriActivity() {
       val dark = ColorUtils.calculateLuminance(background) < 0.5
       view.findViewById<TextView>(R.id.lock_cover_line).setTextColor(if (dark) 0xDEFFFFFF.toInt() else 0xDE000000.toInt())
       view.bringToFront()
+    }
+    // The page under it goes out of the accessibility tree with it (the cover itself is out of it, noHideDescendants):
+    // TalkBack would read the page it hides, and its double tap press a button there as a tap did.
+    val content = findViewById<ViewGroup>(android.R.id.content)
+    for (i in 0 until content.childCount) {
+      val child = content.getChildAt(i)
+      if (child !== view) {
+        child.importantForAccessibility = if (show) View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS else View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+      }
     }
     view.visibility = if (show) View.VISIBLE else View.GONE
   }

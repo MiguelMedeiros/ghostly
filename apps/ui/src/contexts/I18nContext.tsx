@@ -78,8 +78,12 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   setRestoredProfileName((name) => t("profile.restoredName", { name }));
   useEffect(() => { window.dispatchEvent(new Event("profiles-updated")); }, [t]);
 
+  // The same object while none of it changes: this draws on every setting, and a fresh one drew everything that
+  // translates (every message on screen) again with it.
+  const value = useMemo(() => ({ t, language, dir, languageNotLoaded, retryLanguage }), [t, language, dir, languageNotLoaded, retryLanguage]);
+
   return (
-    <I18nContext.Provider value={{ t, language, dir, languageNotLoaded, retryLanguage }}>
+    <I18nContext.Provider value={value}>
       {children}
     </I18nContext.Provider>
   );

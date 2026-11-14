@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { asksEachAlone } from "../desktop/androidMediaDenied";
 import { DEVICES_EVENT, EMPTY_DEVICES, hasMediaDevices, isMediaDenied, listDevices, loadDeviceChoices, watchDevices, type DeviceChoices, type DeviceList } from "../lib/mediaDevices";
 
 /**
@@ -49,6 +50,23 @@ export function useMediaDevices(): {
   const allowNames = useCallback(async () => {
     const media = navigator.mediaDevices;
     if (!media?.getUserMedia) return;
+    if (asksEachAlone()) {
+      // Either one allowed names the devices; "Blocked" only when both were refused.
+      let allowed = false;
+      let refused = false;
+      for (const constraints of [{ audio: true }, { video: true }]) {
+        try {
+          const stream = await media.getUserMedia(constraints);
+          stream.getTracks().forEach((track) => track.stop());
+          allowed = true;
+        } catch (error) {
+          refused ||= isMediaDenied(error);
+        }
+      }
+      setDenied(refused && !allowed);
+      await refresh();
+      return;
+    }
     let refused = false;
     // Either one is enough for names; a machine with no camera still names its microphones. The first ask stays the
     // tap's own first step, with nothing awaited before it, for a browser that prompts only inside a tap.

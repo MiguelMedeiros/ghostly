@@ -18,6 +18,10 @@ export const goesOn = (mode: "daemon" | "one-shot"): string => mode === "one-sho
 function oneShotWait(method: string, params: Record<string, unknown>): string | undefined {
   const group = typeof params.group === "string" || (typeof params.chat === "string" && params.chat.startsWith("group:"));
   switch (method) {
+    // On a chat nobody joined yet these answer at once (apiKit `oneShotWaits`); a notice comes only if a call is still
+    // going after WAIT_NOTICE_MS.
+    case "chat.send": return "sent";
+    case "chat.edit": return "confirmed";
     case "file.send": case "task.send": case "routine.send": case "button.press": return group ? undefined : "sent";
     // `--all` reports to each 1:1 chat in turn, each waiting as one named would.
     case "usage.send": return group ? undefined : "sent";
@@ -72,6 +76,10 @@ export const chatState = (until: string): { to: string; not: string } => CHAT_ST
 
 /** What a call waits for, in a person's words, or null for a call that does not wait. */
 export function waitNotice(method: string, given: Record<string, unknown>, mode: "daemon" | "one-shot"): WaitNotice | null {
+  // A one-shot join by a group's link waits to be let in (api.ts `letIn`); through a daemon it answers at once.
+  if (method === "group.join") return mode === "one-shot"
+    ? { waiting: "waiting for a member's app to let this profile in (up to 60 s; Ctrl-C stops waiting)", stopped: "not let in yet: the knock goes on while this profile is running (ghostly daemon --detach)" }
+    : null;
   const params = waitOf(method, given, mode);
   const waits = waitsFor(method, params);
   if (waits === undefined) return null;

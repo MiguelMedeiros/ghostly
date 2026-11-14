@@ -59,6 +59,9 @@ const MAX_BOOKS: usize = 16;
 const COMPACT_AFTER: usize = 1_000;
 /// A link's id: 16 random bytes in base64url (`random_id`).
 const ID_CHARS: usize = 22;
+/// How long `list` answers each link's `available` as it last found it, rather than looking at every file on disk again:
+/// 100,000 links took 150-200 ms a list on a local disk, more on a network share.
+const RECHECK_AFTER: Duration = Duration::from_secs(2);
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 struct Link {
@@ -90,15 +93,18 @@ pub struct Entry {
 
 /// One app's links, in the order they were picked, and where each id is among them. A forgotten link leaves a hole
 /// (`None`) until the file is written whole again (`LinkedFiles::compact`); `gone` counts the forgotten lines on disk.
+/// `made` tells this book from every other made since the start: a forget leaves each link where it was, so it keeps it.
 #[derive(Default, Clone)]
 struct Book {
     links: Vec<Option<Link>>,
     by_id: HashMap<String, usize>,
     gone: usize,
+    made: u64,
 }
 
 impl Book {
     fn new(links: Vec<Link>) -> Self {
+        static MADE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let by_id = links
             .iter()
             .enumerate()
@@ -108,6 +114,7 @@ impl Book {
             links: links.into_iter().map(Some).collect(),
             by_id,
             gone: 0,
+            made: MADE.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         }
     }
 
@@ -160,6 +167,15 @@ pub struct LinkedFiles {
     /// The apps whose system dialog is up, by their links file (`start_pick`): kept here and not in the page, which a
     /// reload (a profile switch) starts again while the dialog stays on screen.
     picking: Arc<Mutex<HashSet<PathBuf>>>,
+    /// What `list` last found on disk for each app's links, by their file.
+    looked: Arc<Mutex<HashMap<PathBuf, Looked>>>,
+}
+
+/// Which of a book's links `list` found there as they were (by their place in it, a hole `false`), and when.
+struct Looked {
+    book: u64,
+    at: Instant,
+    available: Arc<Vec<bool>>,
 }
 
 /// A pick whose dialog is up: its app gets no other until this one is answered and dropped.
@@ -497,6 +513,7 @@ impl LinkedFiles {
             writing: Arc::default(),
             cleared: Arc::default(),
             picking: Arc::default(),
+            looked: Arc::default(),
         }
     }
 
@@ -693,9 +710,40 @@ impl LinkedFiles {
         Ok(added)
     }
 
-    /// Every link the app keeps; `available` says whether its file is there as it was.
+    /// Every link the app keeps; `available` says whether its file is there as it was, as last looked at: each file is
+    /// looked at again once `RECHECK_AFTER` passed, or the links changed other than by a forget.
     pub fn list(&self, space: &str, app: &str) -> Result<Vec<Entry>, String> {
-        Ok(self.load(space, app)?.live().map(entry).collect())
+        let file = self.file(space, app)?;
+        let book = self.load(space, app)?;
+        let fresh = locked(&self.looked)
+            .get(&file)
+            .filter(|seen| seen.book == book.made && seen.at.elapsed() < RECHECK_AFTER)
+            .map(|seen| seen.available.clone());
+        let found = match fresh {
+            Some(found) => found,
+            None => {
+                let at = Instant::now();
+                let found: Arc<Vec<bool>> = Arc::new(
+                    book.links
+                        .iter()
+                        .map(|link| link.as_ref().is_some_and(available))
+                        .collect(),
+                );
+                let seen = Looked {
+                    book: book.made,
+                    at,
+                    available: found.clone(),
+                };
+                keep(&mut locked(&self.looked), file, seen);
+                found
+            }
+        };
+        Ok(book
+            .links
+            .iter()
+            .zip(found.iter())
+            .filter_map(|(link, &there)| link.as_ref().map(|link| shown(link, there)))
+            .collect())
     }
 
     /// One link as `list` gives it, or None for an id the app does not keep: what `files.serve` looks up, so serving
@@ -799,6 +847,7 @@ impl LinkedFiles {
         let removed = fs::remove_dir_all(&folder);
         // After the files went: a read meanwhile finds them gone, not kept in memory.
         locked(&self.books).retain(|file, _| !file.starts_with(&folder));
+        locked(&self.looked).retain(|file, _| !file.starts_with(&folder));
         match removed {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
             _ => Ok(()),
@@ -806,13 +855,21 @@ impl LinkedFiles {
     }
 }
 
-/// A link as the app sees it, `available` when its file is there as it was: itself, not a symbolic link to one. Looked
-/// at, not opened (a list of 100,000): a folder above swapped for a link shows at the read, refused there.
+/// A link as the app sees it, `available` when its file is there as it was now.
 fn entry(link: &Link) -> Entry {
-    let available = fs::symlink_metadata(&link.full).is_ok_and(|meta| {
+    shown(link, available(link))
+}
+
+/// Whether a link's file is there as it was: itself, not a symbolic link to one. Looked at, not opened (a list of
+/// 100,000): a folder above swapped for a link shows at the read, refused there.
+fn available(link: &Link) -> bool {
+    fs::symlink_metadata(&link.full).is_ok_and(|meta| {
         let other_file = matches!((link.file, path_id(&meta)), (Some(at), Some(id)) if at != id);
         meta.is_file() && !other_file && stamp(&meta) == (link.size, link.modified)
-    });
+    })
+}
+
+fn shown(link: &Link, available: bool) -> Entry {
     Entry {
         id: link.id.clone(),
         path: link.path.clone(),
@@ -827,8 +884,8 @@ fn forgotten_file(file: &Path) -> PathBuf {
     file.with_extension("forgotten")
 }
 
-/// Keeps an app's links in memory, letting another app's go past `MAX_BOOKS`.
-fn keep(books: &mut HashMap<PathBuf, Arc<Book>>, file: PathBuf, book: Arc<Book>) {
+/// Keeps an app's links (or what was found of them) in memory, letting another app's go past `MAX_BOOKS`.
+fn keep<T>(books: &mut HashMap<PathBuf, T>, file: PathBuf, book: T) {
     if books.len() >= MAX_BOOKS && !books.contains_key(&file) {
         if let Some(other) = books.keys().next().cloned() {
             books.remove(&other);
@@ -1487,6 +1544,36 @@ mod tests {
         let other = APP.replace("/cinema", "/chess");
         assert_eq!(links.entry("ghostly", &other, &up.id).unwrap(), None);
         assert!(links.entry("../x", APP, &up.id).is_err());
+    }
+
+    // Every list looked at each linked file on disk: 150-200 ms a list with 100,000 links.
+    #[test]
+    fn a_list_looks_at_the_files_again_once_its_last_look_is_old_or_a_pick_came() {
+        let links = LinkedFiles::new(folder());
+        let root = films();
+        let added = pick(&links, walk(&root, &["mp4".to_string()]).unwrap()).unwrap();
+        let up = &added[1];
+        let available = || -> Vec<bool> {
+            let listed = links.list("ghostly", APP).unwrap();
+            listed.iter().map(|e| e.available).collect()
+        };
+        assert_eq!(available(), [true, true]);
+        // As last looked at; the one link looked up alone is looked at now.
+        fs::write(root.join("Up.mp4"), b"01234567890").unwrap();
+        assert_eq!(available(), [true, true]);
+        let alone = links.entry("ghostly", APP, &up.id).unwrap().unwrap();
+        assert!(!alone.available);
+        // A pick looks at them all again.
+        let srt = pick(&links, picked_files(vec![root.join("Up.srt")], &[])).unwrap();
+        assert_eq!(available(), [true, false, true]);
+        // A forget leaves the others as last looked at.
+        fs::remove_file(root.join("Season 1").join("E01.mp4")).unwrap();
+        links.forget("ghostly", APP, &srt[0].id).unwrap();
+        assert_eq!(available(), [true, false]);
+        // Once the last look is old, looked at again.
+        let file = links.file("ghostly", APP).unwrap();
+        locked(&links.looked).get_mut(&file).unwrap().at -= RECHECK_AFTER;
+        assert_eq!(available(), [false, false]);
     }
 
     #[test]

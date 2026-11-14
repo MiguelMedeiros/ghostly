@@ -281,6 +281,18 @@ describe("GroupChat: joining through a link", () => {
     expect(engine.callsTo("acceptGroupInvitation")).toEqual([{ groupId: "group-1" }]);
   });
 
+  it("Try again on a link nobody answered keeps the focus on the card, on its Cancel joining", async () => {
+    // Try again goes once the knock starts again: the focus went with it, to the page.
+    const joining = (unanswered: boolean) => groupView({ createdAt: Date.now() - 2 * 60 * 60_000, canSend: false,
+      invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "knocking", ...(unanswered && { unanswered }) } });
+    const { user, engine } = openGroup(joining(true));
+    engine.on("acceptGroupInvitation", () => { fakeEngine.update({ groups: [joining(false)] }); });
+    within(screen.getByTestId("group-joining")).getByTestId("group-link-retry").focus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("group-link-retry")).not.toBeInTheDocument();
+    expect(screen.getByTestId("group-joining-cancel")).toHaveFocus();
+  });
+
   it("a full community: says it is full (n of max), with the knock left, and never that the link may be old", async () => {
     openGroup(groupView({ profile: "community", createdAt: Date.now() - 2 * 60_000 + 400, canSend: false,
       invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "full", full: { n: 256, max: 256 } } }));
@@ -327,6 +339,14 @@ describe("GroupChat: joining through a link", () => {
     expect(card).not.toHaveTextContent("You are in in a moment");
     expect(card.querySelector(".animate-spin")).toBeNull();
     expect(screen.getByTestId("group-joining-cancel")).toBeInTheDocument();
+  });
+
+  it("with Hide my IP on and no transport for group links, the joining card says Hide my IP is why", () => {
+    fakeEngine.update({ transport: { protocol: "webrtc/1", relays: [], webrtc: false, groupLinks: false }, settings: { ...fakeEngine.state.settings, relayOnly: true } });
+    openGroup({ ...groupView({ canSend: false, invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "answered" } }), profile: "community" });
+    const card = screen.getByTestId("group-joining");
+    expect(card).toHaveTextContent("With Hide my IP on, HyperDHT needs a HyperDHT relay · Settings, Network");
+    expect(card).not.toHaveTextContent("web app");
   });
 
   it("Cancel joining is a thumb's height on a phone", () => {
@@ -650,6 +670,18 @@ describe("GroupChat: out of the group", () => {
     await user.keyboard("{Enter}");
     expect(await screen.findByText("You were removed. Open the group's link to join again.")).toBeInTheDocument();
     expect(screen.getByTestId("group-options")).toHaveFocus();
+  });
+
+  it("removed from a community and knocking again: Try again on a link nobody answered keeps the focus on the notice's Cancel joining", async () => {
+    // Try again goes once the knock starts again: the focus went with it, to the page.
+    const unanswered = () => ({ ...knockingAgain(), invitation: { ...knockingAgain().invitation!, unanswered: true } });
+    const { user, engine } = openGroup(unanswered());
+    engine.on("acceptGroupInvitation", () => { fakeEngine.update({ groups: [knockingAgain()] }); });
+    within(screen.getByTestId("group-notice")).getByTestId("group-link-retry").focus();
+    await user.keyboard("{Enter}");
+    expect(engine.callsTo("acceptGroupInvitation")).toEqual([{ groupId: "group-1" }]);
+    expect(screen.queryByTestId("group-link-retry")).not.toBeInTheDocument();
+    expect(screen.getByTestId("group-rejoin-cancel")).toHaveFocus();
   });
 
   it("removed from a community and knocking again: a cancel the engine refuses is said, and the knock goes on", async () => {
@@ -1065,6 +1097,19 @@ describe("GroupChat: leaving", () => {
     expect(await leaveFromMenu(user)).toHaveTextContent(line);
   });
 
+  // The last one in: nobody is left to answer the link or let anyone in, so leaving (or Delete) ends the group for good.
+  it.each([
+    ["mesh", "group-leave"], ["community", "group-leave"], ["mesh", "group-forget"], ["community", "group-forget"],
+  ] as const)("tells the last member of a %s group that it ends, not how to come back (%s)", async (profile, item) => {
+    const { user } = openGroup(active({ profile, isAdmin: true, members: [member({ key: ME, me: true, online: true, role: "admin" })] }));
+    await user.click(screen.getByTestId("group-options"));
+    await user.click(screen.getByTestId(item));
+    const dialog = screen.getByTestId("group-leave-dialog");
+    expect(dialog).toHaveTextContent("You are the only member: the group and its history end here, and nobody can join it again.");
+    expect(dialog).not.toHaveTextContent("come back");
+    expect(within(dialog).getByTestId("group-leave-confirm")).toBeEnabled();
+  });
+
   it("leaves, and goes back to the chat list: the group is gone from it", async () => {
     const { user, engine } = openGroup(active());
     engine.on("leaveGroup", () => ({}));
@@ -1209,7 +1254,7 @@ describe("GroupChat: history and sending", () => {
       stored({ id: "e2", event: "gone", member: gone, text: "Caio is no longer a member" }),
     ]);
     expect(await screen.findByText("~Caio")).toBeInTheDocument();
-    expect(screen.getByText("Caio joined")).toBeInTheDocument();
+    expect(screen.getAllByTestId("group-event")[0]).toHaveTextContent(/^Caio joined$/);
     expect(screen.queryByText(/Member goneyyyy/)).not.toBeInTheDocument();
   });
 

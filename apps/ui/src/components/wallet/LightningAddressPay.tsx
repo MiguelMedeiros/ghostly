@@ -12,6 +12,8 @@ import { satsIn } from "../NetworkTag";
 import { useAmountText } from "../../hooks/useAmountText";
 import { problemText, type Problem } from "../../lib/problemText";
 import { Notice } from "../ui/Notice";
+import { shownUrl } from "../../lib/parse/links";
+import { FocusSafeButton } from "../ui/FocusSafeButton";
 
 interface Quote { quote: string; mint: string; amount: number; feeReserve: number; source?: string }
 interface Invoice { invoice: string; note: string; successAction?: { tag: "message" | "url"; message?: string; description?: string; url?: string } }
@@ -73,7 +75,8 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
       <div className="space-y-1.5" data-testid="lnurl-done">
         <p ref={stepLine} tabIndex={-1} className={`${dense ? "text-xs" : "text-sm"} font-semibold text-accent m-0 focus:outline-none`} data-testid={outcome === "paid" ? "lnurl-paid" : "lnurl-pending"}>{outcome === "paid" ? t("wallet.lightning.paidTo", { amount: quote ? formatAmount(quote.amount, t.language) : "", unit, to: text }) : t("wallet.lightning.pending")}</p>
         {invoice?.successAction?.tag === "message" && invoice.successAction.message && <p className={muted} data-testid="lnurl-success">{t("wallet.lightning.says", { domain: info?.domain ?? "", message: invoice.successAction.message })}</p>}
-        {invoice?.successAction?.tag === "url" && invoice.successAction.url && <p className={muted}>{fillNodes(t("wallet.lightning.linkLine", { what: invoice.successAction.description || t("wallet.lightning.leftLink", { domain: info?.domain ?? "" }) }), { link: <a className="underline" {...externalLinkProps(invoice.successAction.url)}>{invoice.successAction.url}</a> })}</p>}
+        {/* The service's link reads as the address it opens, as a chat's does, and its words cannot reorder it. */}
+        {invoice?.successAction?.tag === "url" && invoice.successAction.url && <p className={muted}>{fillNodes(t("wallet.lightning.linkLine"), { what: invoice.successAction.description ? <bdi>{invoice.successAction.description}</bdi> : t("wallet.lightning.leftLink", { domain: info?.domain ?? "" }), link: <a className="underline" dir="ltr" {...externalLinkProps(invoice.successAction.url)}>{shownUrl(invoice.successAction.url)}</a> })}</p>}
         {onDone && <button type="button" className={quiet} onClick={onDone}>{t("wallet.lightning.done")}</button>}
       </div>
     );
@@ -109,10 +112,10 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
         {/* The server's own words, in any script: laid out by their own direction. */}
         {info.description && <p className={muted} dir="auto">{info.description}</p>}
         {over !== undefined && <p className={`${dense ? "text-[11px]" : "text-xs"} text-danger-ink m-0`} data-testid="lnurl-over">{t("payments.composer.tooMuch", { amount: formatAmount(over, t.language), unit })}</p>}
-        {confirming && over === undefined ? <ConfirmRealMoney what={t("wallet.lightning.confirmWhat", { amount: formatAmount(quote.amount, t.language), fee: formatAmount(quote.feeReserve, t.language) })} busy={busy} onSend={() => pay(true)} onBack={() => setConfirming(false)} /> : (
+        {confirming && over === undefined ? <ConfirmRealMoney what={t("wallet.lightning.confirmWhat", { amount: formatAmount(quote.amount, t.language), unit, fee: formatAmount(quote.feeReserve, t.language), feeUnit: satsIn(t, real ? "mainnet" : "testnet", quote.feeReserve) })} busy={busy} onSend={() => pay(true)} onBack={() => setConfirming(false)} /> : (
           <div className="flex flex-wrap gap-2">
             <button type="button" className={primary} disabled={over !== undefined} {...working} data-testid="lnurl-pay" onClick={() => real ? setConfirming(true) : pay(false)}>{busy ? t("wallet.lightning.paying") : t("wallet.lightning.pay")}</button>
-            <button type="button" className={quiet} disabled={busy} onClick={() => { setError(null); setQuote(null); setInvoice(null); }}>{t("common.cancel")}</button>
+            <FocusSafeButton type="button" className={quiet} disabled={busy} onClick={() => { setError(null); setQuote(null); setInvoice(null); }}>{t("common.cancel")}</FocusSafeButton>
           </div>
         )}
         {error && <Notice problem={error} testId="lnurl-error" className={`${dense ? "text-[11px]" : "text-xs"} m-0`} />}
@@ -164,12 +167,12 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
       {/* The line's dim is its text's only: Max keeps full-strength ink and the panel's phone-sized target. */}
       {holds !== undefined && <p className={`${dense ? "text-[11px]" : "text-xs"} m-0 flex flex-wrap items-center gap-2`} data-testid="lnurl-balance">
         <span className="opacity-70">{t("wallet.send.balance", { amount: formatAmount(holds, t.language), unit })}</span>
-        {!fixed && max !== undefined && max >= info.minSat && <button type="button" className="min-h-6 max-md:min-h-11 rounded-md px-2.5 py-1 font-bold bg-black/20 hover:bg-black/30 cursor-pointer disabled:opacity-40" disabled={busy} data-testid="lnurl-max" onClick={() => { maxed.current = true; setAmount(String(max)); }}>{t("wallet.send.max")}</button>}
+        {!fixed && max !== undefined && max >= info.minSat && <FocusSafeButton type="button" className="min-h-6 max-md:min-h-11 rounded-md px-2.5 py-1 font-bold bg-black/20 hover:bg-black/30 cursor-pointer disabled:opacity-40" disabled={busy} data-testid="lnurl-max" onClick={() => { maxed.current = true; setAmount(String(max)); }}>{t("wallet.send.max")}</FocusSafeButton>}
       </p>}
       {info.commentAllowed > 0 && <input data-testid="lnurl-comment" className={field} placeholder={t("wallet.lightning.commentFor", { to: info.text })} maxLength={info.commentAllowed} value={comment} onChange={(e) => setComment(e.target.value)} {...composition.inputProps} onKeyDown={onEnter} />}
       <div className="flex flex-wrap gap-2">
         <button type="button" className={primary} disabled={!Number(amount)} {...working} data-testid="lnurl-invoice" onClick={getInvoice}>{busy ? t("wallet.lightning.askingInvoice") : t("wallet.lightning.getInvoice")}</button>
-        <button type="button" className={quiet} disabled={busy} onClick={() => { setError(null); setInfo(null); setAmount(""); setComment(""); }}>{t("common.back")}</button>
+        <FocusSafeButton type="button" className={quiet} disabled={busy} onClick={() => { setError(null); setInfo(null); setAmount(""); setComment(""); }}>{t("common.back")}</FocusSafeButton>
       </div>
       {error && <Notice problem={error} testId="lnurl-error" className={`${dense ? "text-[11px]" : "text-xs"} m-0`} />}
     </div>

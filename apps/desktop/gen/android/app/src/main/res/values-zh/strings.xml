@@ -3,6 +3,9 @@
     <string name="channel_transfers">文件传输</string>
     <string name="transfer_title">正在收发文件</string>
     <string name="transfer_text">Ghostly 会继续运行，直到传输完成。</string>
+    <string name="channel_connection">连接</string>
+    <string name="connection_title">Ghostly 已连接</string>
+    <string name="connection_text">你的聊天和群组在后台保持连接。</string>
     <string name="channel_calls">通话</string>
     <string name="call_title">与 %1$s 通话中</string>
     <string name="call_public">通话中</string>

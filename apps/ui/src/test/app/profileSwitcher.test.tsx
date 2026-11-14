@@ -141,23 +141,36 @@ describe("the account switcher on the account bar", () => {
     await user.keyboard("{Alt>}{Shift>}P{/Shift}{/Alt}");
     const items = [...menu().querySelectorAll<HTMLElement>("[role^=menuitem]")];
     // Each profile's initial is drawn, not text: a profile reads as its name, not "WWork".
-    expect(items.map((item) => item.textContent)).toEqual([expect.stringContaining("Personal"), "Work", "Family", "+Add a profile", "Add this device to another profile", "Manage profiles"]);
-    // The first other profile has the focus: the likeliest next step.
-    expect(items[1]).toHaveFocus();
-    await user.keyboard("{ArrowDown}");
+    expect(items.map((item) => item.textContent)).toEqual([expect.stringContaining("Personal"), "Set a status", "Work", "Family", "+Add a profile", "Add this device to another profile", "Manage profiles"]);
+    // The first other profile has the focus: the likeliest next step (past this profile's status).
     expect(items[2]).toHaveFocus();
+    await user.keyboard("{ArrowDown}");
+    expect(items[3]).toHaveFocus();
     await user.keyboard("{End}");
-    expect(items[5]).toHaveFocus();
+    expect(items[6]).toHaveFocus();
     await user.keyboard("{ArrowDown}");
     expect(items[0]).toHaveFocus();
     await user.keyboard("{ArrowUp}");
-    expect(items[5]).toHaveFocus();
+    expect(items[6]).toHaveFocus();
     await user.keyboard("{Home}");
     expect(items[0]).toHaveFocus();
 
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(before).toHaveFocus();
+  });
+
+  it("opens with the key that types P on any keyboard, as Ctrl+N and Ctrl+F do", () => {
+    createProfile("Work");
+    renderBar();
+    // Dvorak: the key at a US keyboard's P types L (the chat list's Alt+Shift+L), and P is at R's place.
+    fireEvent.keyDown(window, { code: "KeyP", key: "L", altKey: true, shiftKey: true });
+    expect(screen.queryByTestId("profile-switcher")).not.toBeInTheDocument();
+    fireEvent.keyDown(window, { code: "KeyR", key: "P", altKey: true, shiftKey: true });
+    expect(screen.getByTestId("profile-switcher")).toBeInTheDocument();
+    // A keyboard with no Latin letters (Russian): the key at P's place.
+    fireEvent.keyDown(window, { code: "KeyP", key: "З", altKey: true, shiftKey: true });
+    expect(screen.queryByTestId("profile-switcher")).not.toBeInTheDocument();
   });
 
   it("stays shut on Alt+Shift+P behind a modal dialog or the lock screen, and opens again once it is gone", async () => {

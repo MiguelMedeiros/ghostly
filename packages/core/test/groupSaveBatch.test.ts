@@ -27,7 +27,7 @@ describe("a private group's state is saved once for a burst of messages", { time
     const { mesh, alice, bob } = await two();
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const before = saves(mesh, bob);
-    for (let i = 0; i < 100; i++) await alice.sendText(`line ${i}`, 1_000 + i);
+    for (let i = 0; i < 100; i++) { mesh.tick(400); await alice.sendText(`line ${i}`, 1_000 + i); }
     await mesh.settle();
     expect(mesh.texts(bob)).toHaveLength(100);
     // Every message reached Bob's app; his state waits.

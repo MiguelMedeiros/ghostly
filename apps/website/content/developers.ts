@@ -257,6 +257,7 @@ export const developers = {
     feature: "Feature",
     clients: ["Web app", "Desktop", "Extension", "CLI"],
     none: "No",
+    noneSaid: "Not supported",
     rows: [
       { name: "Text chat, ghostly1 invites", cells: [A, A, A, A] },
       { name: "Pinned keys, durable outbox", cells: [A, A, A, A] },
