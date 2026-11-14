@@ -11,7 +11,7 @@ import { asCliError, CliError } from "./errors";
 import { shellWord } from "./shellWord";
 import {
   bool, chatOf, chatOrGroup, dhtOnly, findChat, findChatOrGroup, findGroup, groupById, groupNameOf, groupOf, groupPrefixed, inviteTaken, keptForJoin, list, messageOf, noMessage, nobodyJoined, node, num, oneOf, oneShotWaits, settingsOf, shownName, sinceSeq, somebodyJoined, state, str, transportOffered, waitForState,
-  type ApiContext, type Method, type Params, type RefPlace,
+  type ApiContext, type CallScope, type Method, type Params, type RefPlace,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
 import { checkShownName } from "./profiles";
@@ -272,9 +272,15 @@ const ONE_SHOT_JOIN_S = 60;
  * in only while its knocks go on, and they stop when the command leaves. It left at once with `{"group": id}` and exit
  * 0, in 0.5 s, the admin online: the group stayed an invitation at "knocking" and nothing said a daemon had to run for
  * the knock to be answered. The answer says whether it is in and at what stage it waits, and what to do when it is not.
+ * A contact's invitation to the group, not accepted, keeps its place and the link is only kept beside it: nothing
+ * knocks, and only `group accept` moves it, so it answers at once with that.
  */
 async function letIn(ctx: ApiContext, groupId: string): Promise<Record<string, unknown>> {
   const seen = (s: EngineState) => s.groups.find((g) => g.id === groupId);
+  const invited = seen(state(ctx))?.invitation;
+  if (invited && !invited.viaLink && !invited.accepted) {
+    return { group: groupId, joined: false, stage: null, warning: `Not in yet: ${invited.contact || "a contact"} invited you to this group and the invitation waits for your answer. Accept it: ghostly group accept ${shellWord(groupId, groupId)}` };
+  }
   const done = (g: GroupView | undefined) => !g || g.status === "active" || JOIN_STOPS.has(g.invitation?.stage ?? "");
   const group = await waitForState(ctx, (s) => { const g = seen(s); return done(g) ? { g } : undefined; }, ONE_SHOT_JOIN_S * 1000, `group ${groupId} to let this profile in`)
     .then(({ g }) => g, (error: unknown) => { if (error instanceof CliError && error.code === "timeout") return seen(state(ctx)); throw error; });
@@ -286,6 +292,7 @@ async function letIn(ctx: ApiContext, groupId: string): Promise<Record<string, u
   const full = stage === "full" ? group.invitation?.full : undefined;
   const noRoom = stage ? NO_ROOM[stage] : undefined;
   if (noRoom) return { group: groupId, joined, stage, warning: `${noRoom}${full ? ` (${full.n} of ${full.max} members)` : ""}. Your app goes on knocking only while this profile is running, and gets in when there is room: ${show}` };
+  if (stage === "admitted") return { group: groupId, joined, stage, warning: `Not in yet: a member's app let you in, and the group's welcome has not finished arriving. It arrives only while this profile is running: ${show}` };
   return { group: groupId, joined, stage, warning: `Not in yet: no member's app has let you in. A member's app lets you in only while this profile is running: ${show}` };
 }
 
@@ -1366,10 +1373,13 @@ export { findChat, findGroup, startNamedChats } from "./apiKit";
 export type { ApiContext } from "./apiKit";
 export const API_METHODS: readonly string[] = Object.keys(METHODS);
 
-/** Runs one method of the API: one the table lists itself (`constructor`, which every object has, is none). */
-export async function callApi(ctx: ApiContext, method: string, params: unknown = {}): Promise<unknown> {
+/**
+ * Runs one method of the API: one the table lists itself (`constructor`, which every object has, is none). `call`: who
+ * asked, from a daemon's connection (`host.ts`).
+ */
+export async function callApi(ctx: ApiContext, method: string, params: unknown = {}, call?: CallScope): Promise<unknown> {
   const run = Object.hasOwn(METHODS, method) ? METHODS[method] : undefined;
   if (!run) throw new CliError("not_found", `No method ${method}`);
   if (params === null || typeof params !== "object" || Array.isArray(params)) throw new CliError("bad_request", "params must be an object");
-  return run(ctx, await withStoredIds(ctx, params as Params));
+  return run(ctx, await withStoredIds(ctx, params as Params), call);
 }

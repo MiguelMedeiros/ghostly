@@ -142,6 +142,46 @@ test("a preview's title and description show two lines at most, a long word brok
   }
 });
 
+test("a preview's words read in their own direction, in English and in Arabic", { tag: ["@feature:chat.link-preview.render"] }, async ({ peer }) => {
+  const news = await site({ title: "Hello world!", description: "مرحبا بكم!" });
+  try {
+    const [alice, bob] = await Promise.all([peer("bidi-alice"), peer("bidi-bob")]);
+    await pair(alice, bob);
+    await bob.page.evaluate(() => {
+      const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+      localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language: "ar" }));
+    });
+    await bob.page.reload();
+    await expect(bob.page.locator("html")).toHaveAttribute("dir", "rtl");
+    await alice.page.getByPlaceholder("Message…").fill(`${news.origin}/both`);
+    await expect(alice.page.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready");
+    await alice.page.getByPlaceholder("Message…").press("Enter");
+
+    for (const [side, app] of [[alice, "ltr"], [bob, "rtl"]] as const) {
+      const card = chat(side).getByTestId("link-preview-card").last();
+      await expect(card).toBeVisible();
+      for (const [testId, own] of [["link-preview-title", "ltr"], ["link-preview-description", "rtl"]] as const) {
+        // Before, both lines took the app's direction: "!Hello world" in Arabic, "مرحبا بكم!" with its "!" at the far end in
+        // English. Polled: the row is drawn again as the message is delivered, and a node read meanwhile has no box.
+        await expect.poll(() => card.getByTestId(testId).evaluate((element, own) => {
+          const text = element.firstChild as Text;
+          const rect = (from: number, to: number) => { const range = document.createRange(); range.setStart(text, from); range.setEnd(text, to); return range.getBoundingClientRect(); };
+          const first = rect(0, 1), mark = rect(text.data.length - 1, text.data.length), all = rect(0, text.data.length), box = element.getBoundingClientRect();
+          return {
+            direction: getComputedStyle(element).direction,
+            // The final "!" at the end its words read toward: after "Hello" in English, before "مرحبا" in Arabic.
+            markAtEnd: own === "rtl" ? mark.left < first.left : mark.left > first.left,
+            // Starting at its words' own start, as the message's text does.
+            ownStart: own === "rtl" ? Math.abs(box.right - all.right) < 2 : Math.abs(all.left - box.left) < 2,
+          };
+        }, own), `${app} app, ${testId}`).toEqual({ direction: own, markAtEnd: true, ownStart: true });
+      }
+    }
+  } finally {
+    news.server.close();
+  }
+});
+
 test("a place in a message shows a location card, and its map loads from OpenStreetMap only on tap", { tag: ["@feature:chat.location.card"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("place-alice"), peer("place-bob")]);
   const tiles: string[] = [];

@@ -6,15 +6,15 @@
     "tryAgain": "Réessayer"
   },
   "profileUnavailable": {
-    "detail": "Ce que le système a dit :",
+    "detail": "Ce que le système a dit :",
     "info": "Rien n'a été modifié ni supprimé. Tant qu'il est fermé, ce profil ne se connecte à personne et n'envoie rien. Ghostly {{app}} lit les données de profil jusqu'à la version {{supported}}.",
     "newerHint": "Mettez l'app à jour pour l'ouvrir.",
-    "newerInfo": "Ses données sont à la version {{stored}} ; Ghostly {{app}} lit jusqu'à la {{supported}}. Rien n'a été ouvert, envoyé ni modifié : vos discussions, vos clés et vos portefeuilles sont toujours là.",
+    "newerInfo": "Ses données sont à la version {{stored}} ; Ghostly {{app}} lit jusqu'à la {{supported}}. Rien n'a été ouvert, envoyé ni modifié : vos discussions, vos clés et vos portefeuilles sont toujours là.",
     "newerTitle": "Ce profil a été utilisé en dernier par une version plus récente de Ghostly.",
     "noUpdate": "Aucune version plus récente n'est encore sortie. Ouvrez ce profil avec l'app qui l'a utilisé en dernier.",
     "reason": {
       "blocked": "Une autre fenêtre ou un autre onglet Ghostly le garde ouvert avec une version plus ancienne.",
-      "denied": "Ce navigateur ne donne pas de stockage à Ghostly ici : une fenêtre privée, ou le stockage bloqué pour ce site.",
+      "denied": "Ce navigateur ne donne pas de stockage à Ghostly ici : une fenêtre privée, ou le stockage bloqué pour ce site.",
       "failed": "Les données ne se sont pas ouvertes, et le système n'a pas donné de raison claire.",
       "full": "Cet appareil n'a plus d'espace de stockage."
     },

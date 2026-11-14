@@ -36,8 +36,10 @@ export function useLabelsFit(header: RefObject<HTMLElement | null>, logo: RefObj
       }
     };
     check();
+    // The logo and the buttons too: Android's font size (the WebView's text zoom) grows the words but not the header's
+    // box, whose size alone would never say so.
     const observer = new ResizeObserver(check);
-    observer.observe(box);
+    for (const element of [box, logo.current, buttons.current]) if (element) observer.observe(element);
     return () => observer.disconnect();
   }, [header, logo, buttons, given, shownFor, gap, steps]);
   return given;

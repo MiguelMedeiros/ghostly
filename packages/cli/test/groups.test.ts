@@ -62,11 +62,11 @@ describe("a one-shot group join", () => {
   // command, so nobody let it in, even with the community's admin online, and nothing said so.
   const knocking = (stage: string) => ({ id: "g9", name: "", createdAt: 1, profile: "community", isAdmin: false, canSend: false, lastMessageAt: 0, invited: [], memberLinks: {}, members: [],
     invitation: { linkId: "c1", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage } }) as unknown as GroupView;
-  function oneShot(mode: "one-shot" | "daemon" = "one-shot") {
+  function oneShot(mode: "one-shot" | "daemon" = "one-shot", joined = knocking("knocking")) {
     let groups: GroupView[] = [];
     const listeners = new Set<(s: EngineState) => void>();
     const getState = () => ({ links: [], groups, settings: {}, transport: {} }) as unknown as EngineState;
-    const node = { getState, joinGroupByLink: vi.fn(async () => { groups = [knocking("knocking")]; return { groupId: "g9" }; }) };
+    const node = { getState, joinGroupByLink: vi.fn(async () => { groups = [joined]; return { groupId: "g9" }; }) };
     const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: (l: (s: EngineState) => void) => { listeners.add(l); return () => listeners.delete(l); }, lastSeq: 0, replay: () => [] }, mode, version: "test" } as unknown as ApiContext;
     const set = (g: GroupView[]) => { groups = g; for (const l of listeners) l(getState()); };
     return { ctx, set };
@@ -88,6 +88,29 @@ describe("a one-shot group join", () => {
       await vi.advanceTimersByTimeAsync(60_000);
       expect(await answer).toEqual({ group: "g9", joined: false, stage: "knocking",
         warning: "Not in yet: no member's app has let you in. A member's app lets you in only while this profile is running: keep it running (ghostly daemon --detach), then ghostly group show g9" });
+    } finally { vi.useRealTimers(); }
+  });
+
+  // Found in a bug hunt: a contact's invitation to the group, not accepted, keeps its place and the link is only noted
+  // beside it; nothing knocks, so it waited the full 60 s and then said to keep a daemon running, which never gets in.
+  it("a contact's invitation to the group, not accepted yet: answers at once with group accept", async () => {
+    vi.useFakeTimers();
+    try {
+      const invited = { ...knocking("knocking"), invitation: { linkId: "c1", contact: "Alice", admin: "ak", members: 3, accepted: false } } as unknown as GroupView;
+      const answer = callApi(oneShot("one-shot", invited).ctx, "group.join", { link: LINK });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(await Promise.race([answer, Promise.resolve("still waiting")])).toEqual({ group: "g9", joined: false, stage: null,
+        warning: "Not in yet: Alice invited you to this group and the invitation waits for your answer. Accept it: ghostly group accept g9" });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("let in but no welcome after 60 s: says it was let in, not that nobody did", async () => {
+    vi.useFakeTimers();
+    try {
+      const answer = callApi(oneShot("one-shot", knocking("admitted")).ctx, "group.join", { link: LINK });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(await answer).toEqual({ group: "g9", joined: false, stage: "admitted",
+        warning: "Not in yet: a member's app let you in, and the group's welcome has not finished arriving. It arrives only while this profile is running: keep it running (ghostly daemon --detach), then ghostly group show g9" });
     } finally { vi.useRealTimers(); }
   });
 
