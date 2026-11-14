@@ -65,3 +65,45 @@ export async function openSecret(secret: SealedSecret, at: SecretPlace): Promise
   if (!slot) throw new Error(LOCKED);
   return openField(slot, { db: PEER_DB, ...at }, secret);
 }
+
+/**
+ * A secret field of a wallet record (a seed, an API key, a source's secrets). Version 1 is sealed with the record's
+ * one `deviceKey`, kept beside its fields as wallet records always kept it; a record of version 2 fields has none.
+ */
+export type RecordSecret = EncryptedSeed | SealedField;
+export interface RecordSealer {
+  /** What the record keeps beside its secrets: its device key (version 1), or nothing (version 2). */
+  beside: { deviceKey?: string };
+  seal(value: string, field: string): Promise<RecordSecret>;
+}
+
+/** Seals the secrets of one record as the profile wants them now: all under one fresh device key, or each under DK. */
+export function recordSealer(at: Omit<SecretPlace, "field">): RecordSealer {
+  const key = slot;
+  if (key) return { beside: {}, seal: (value, field) => sealField(key, { db: PEER_DB, ...at, field }, value) };
+  const deviceKey = newDeviceKey();
+  return { beside: { deviceKey }, seal: (value) => sealSeed(value, deviceKey) };
+}
+
+/** Opens one secret of a record, either version: `deviceKey` is the one the record keeps, if any. */
+export function openRecordSecret(secret: RecordSecret, deviceKey: string | undefined, at: SecretPlace): Promise<string> {
+  return openSecret(isSealedField(secret) ? secret : { sealed: secret, deviceKey: deviceKey ?? "" }, at);
+}
+
+/**
+ * A seed sealed with a wallet password the person chose keeps that password (WISP 04, Encrypted profile, Keys); with
+ * the data key set, it is sealed under it as well, like the rest of the record, so a copy of the profile does not
+ * offer it to guessing.
+ */
+export async function sealPasswordSeed(seed: EncryptedSeed, at: SecretPlace): Promise<RecordSecret> {
+  return slot ? sealField(slot, { db: PEER_DB, ...at }, JSON.stringify(seed)) : seed;
+}
+
+/** The password-sealed seed inside, whichever way it is kept; the password still opens it. */
+export async function openPasswordSeed(secret: RecordSecret, at: SecretPlace): Promise<EncryptedSeed> {
+  if (!isSealedField(secret)) {
+    if (!takesUnsealed()) throw new Error("A secret of this profile was not sealed with its key");
+    return secret;
+  }
+  return JSON.parse(await openSecret(secret, at)) as EncryptedSeed;
+}
