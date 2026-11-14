@@ -101,12 +101,14 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
       const menu = ref.current, anchor = anchorRef.current;
       if (!menu || !anchor) return;
       const box = bounds(anchor, within);
-      // Measured at its own height, without a cap from an earlier fit.
-      const cap = menu.style.maxHeight;
+      // Measured at its own height, without a cap from an earlier fit. Uncapped it has nothing to scroll, so a menu
+      // scrolled to its last rows went back to its top: its scroll is put back with the cap.
+      const cap = menu.style.maxHeight, scrolled = menu.scrollTop;
       menu.style.maxHeight = "";
       if (portal) {
         const rect = menu.getBoundingClientRect(), opener = opening(anchor);
         menu.style.maxHeight = cap;
+        menu.scrollTop = scrolled;
         const { up, room } = side(opener, rect.height, box);
         const height = room ?? rect.height;
         // Lined up with the opener's start or end edge (the end is the left one in a right-to-left page), kept in the bounds.
@@ -124,14 +126,17 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
       const { up, room } = side(opener, rect.height, box);
       menu.style.translate = before;
       menu.style.maxHeight = cap;
+      menu.scrollTop = scrolled;
       setPlace(was => was.shift === shift && was.up === up && was.room === room ? was : { shift, up, room });
     };
+    // A scroll of the page under it moves its opener; one of its own rows (the wheel, its scrollbar, End) moves nothing.
+    const pageScrolled = (e: Event) => { if (!(e.target instanceof Node && ref.current?.contains(e.target))) fit(); };
     fit();
     window.addEventListener("resize", fit);
-    if (portal) window.addEventListener("scroll", fit, true);
+    if (portal) window.addEventListener("scroll", pageScrolled, true);
     return () => {
       window.removeEventListener("resize", fit);
-      window.removeEventListener("scroll", fit, true);
+      window.removeEventListener("scroll", pageScrolled, true);
     };
   }, [open, phone, anchorRef, prefer, portal, align, within, at]);
 

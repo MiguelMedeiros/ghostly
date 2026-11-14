@@ -4,6 +4,7 @@ import { callApi, type ApiContext } from "../src/api";
 import { findGroup } from "../src/apiKit";
 import { main } from "../src/main";
 import { home } from "./support/cli";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.cli, chat.saved
 
 /** A ref that names nothing is said the same way on a profile, a chat or a group: quoted as given, with where to look. */
@@ -28,7 +29,7 @@ describe("not-found words", () => {
 
   it("saved add and remove say group on a group, as pin and message details do", async () => {
     const node = {
-      getState: () => ({ links: [{ id: "chat-one", label: "Alice", peerNick: "Alice", pairing: { status: "ready" } } as unknown as LinkView], groups: [{ id: "g1", name: "Crew", status: "active" }], settings: {}, transport: {} }) as unknown as EngineState,
+      chatView: chatViewOf, getState: () => ({ links: [{ id: "chat-one", label: "Alice", peerNick: "Alice", pairing: { status: "ready" } } as unknown as LinkView], groups: [{ id: "g1", name: "Crew", status: "active" }], settings: {}, transport: {} }) as unknown as EngineState,
       saveMessage: vi.fn(async () => ({ error: "That message is not in this chat" })),
     };
     const ctx = { runtime: { server: { node } }, mode: "daemon" } as unknown as ApiContext;

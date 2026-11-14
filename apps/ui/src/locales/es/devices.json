@@ -253,8 +253,7 @@
     "doneInfo": "Ya no puede tomar este perfil. Tus otros dispositivos reciben el cambio la próxima vez que abran Ghostly.",
     "fail": {
       "busy": "Otra cosa está cambiando tus dispositivos. Inténtalo de nuevo en un momento.",
-      "failed": "Algo salió mal. No se cambió nada.",
-      "offline": "Conéctate para cambiar tus dispositivos."
+      "failed": "Algo salió mal. No se cambió nada."
     },
     "go": "Quitar",
     "lost": "Perdido o robado",
@@ -336,7 +335,6 @@
       "unreadable": "No se inició nada."
     },
     "info": "Solo un dispositivo envía, recibe y paga a la vez, para que tus mensajes y tu dinero nunca estén en dos lugares.",
-    "link": "{{device}}: {{status}}",
     "links": "Tus dispositivos",
     "notice": {
       "hint": "Si esta lista parece incorrecta, no uses este dispositivo.",

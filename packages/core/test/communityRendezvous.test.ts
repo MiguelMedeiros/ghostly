@@ -65,19 +65,40 @@ describe("community rendezvous: beacon and lobbies", () => {
     expect(mergeLobby([{ key: "x", ts: now - COMMUNITY_TOPOLOGY.lobbyFreshMs - 1 }], { key: hub, ts: now }, now)).toEqual([{ key: hub, ts: now }]);
   });
 
-  it("becomes a hub when there are too few, or all are full; otherwise picks the least loaded", () => {
+  it("becomes a hub when there are too few, or all are full; otherwise picks one with room", () => {
     const now = Date.now(), [me, a, b, c] = keys(4);
     expect(shouldBeHub(me, [], now)).toBe(true);
     expect(shouldBeHub(me, [{ key: a, ts: now, load: 0 }], now)).toBe(true);
     const two: Hub[] = [{ key: a, ts: now, load: 5 }, { key: b, ts: now, load: 1 }];
     expect(shouldBeHub(me, two, now)).toBe(false);
-    expect(pickHubs(me, [...two, { key: c, ts: now, load: COMMUNITY_TOPOLOGY.hubCapacity }], now)).toEqual([b]);
-    expect(pickHubs(me, two, now, new Set([b]))).toEqual([a]);
+    const picked = pickHubs(me, [...two, { key: c, ts: now, load: COMMUNITY_TOPOLOGY.hubCapacity }], now);
+    expect(picked).toHaveLength(1);
+    expect([a, b]).toContain(picked[0]);
+    expect(pickHubs(me, two, now, new Set([picked[0]]))).toEqual([picked[0] === a ? b : a]);
+    // The same hubs, the same pick: a member does not go from hub to hub.
+    expect(pickHubs(me, [...two].reverse(), now)).toEqual(picked);
     const full: Hub[] = [{ key: a, ts: now, load: COMMUNITY_TOPOLOGY.hubCapacity }, { key: b, ts: now, load: COMMUNITY_TOPOLOGY.hubCapacity }];
     expect(shouldBeHub(me, full, now)).toBe(true);
     const many: Hub[] = keys(COMMUNITY_TOPOLOGY.maxHubs).map(key => ({ key, ts: now, load: COMMUNITY_TOPOLOGY.hubCapacity }));
     expect(shouldBeHub(me, many, now)).toBe(false);
     expect(freshHubs([{ key: a, ts: now - COMMUNITY_TOPOLOGY.beaconFreshMs, load: 0 }], now)).toEqual([]);
+  });
+
+  /**
+   * The members a closing hub carried pick at once (bug hunt, 2026-11-11): all of them took the least loaded hub, which
+   * opened every edge at once on its relays' budget and brought none up for minutes. Spread in proportion to room.
+   */
+  it("members picking at once spread over the hubs in proportion to the room each has left", () => {
+    const now = Date.now(), [a, b] = keys(2);
+    const hubs: Hub[] = [{ key: a, ts: now, load: 24 }, { key: b, ts: now, load: 8 }];
+    const members = keys(400);
+    const onA = members.filter(m => pickHubs(m, hubs, now)[0] === a).length;
+    // Room 24 and 40: about 150 of 400 ask a, not none.
+    expect(onA).toBeGreaterThan(400 * 24 / 64 - 40);
+    expect(onA).toBeLessThan(400 * 24 / 64 + 40);
+    // A hub that republished lately still goes first, whatever its load.
+    const late: Hub[] = [{ key: a, ts: now, load: 40 }, { key: b, ts: now - COMMUNITY_TOPOLOGY.beaconEveryMs * 2, load: 0 }];
+    expect(members.every(m => pickHubs(m, late, now)[0] === a)).toBe(true);
   });
 
   it("the hubs at the door: settled ones; a hub that sees no other is the door alone, listed yet or not", () => {

@@ -9,6 +9,7 @@
   "downloading": "Baixando... {{percent}}%",
   "errorDetails": "O que o atualizador disse",
   "failed": "Não foi possível verificar atualizações",
+  "installFailed": "A atualização não foi instalada. Tente de novo.",
   "installing": "Atualizando...",
   "lastChecked": "Última verificação às {{when}}",
   "later": "Depois",

@@ -253,8 +253,7 @@
     "doneInfo": "Il ne peut plus prendre ce profil. Vos autres appareils reçoivent le changement la prochaine fois qu’ils ouvrent Ghostly.",
     "fail": {
       "busy": "Autre chose modifie vos appareils. Réessayez dans un instant.",
-      "failed": "Un problème est survenu. Rien n’a été modifié.",
-      "offline": "Passez en ligne pour modifier vos appareils."
+      "failed": "Un problème est survenu. Rien n’a été modifié."
     },
     "go": "Retirer",
     "lost": "Perdu ou volé",
@@ -336,7 +335,6 @@
       "unreadable": "Rien n'a été démarré."
     },
     "info": "Un seul appareil envoie, reçoit et paie à la fois, pour que vos messages et votre argent ne soient jamais à deux endroits.",
-    "link": "{{device}} : {{status}}",
     "links": "Vos appareils",
     "notice": {
       "hint": "Si cette liste vous semble fausse, n’utilisez pas cet appareil.",

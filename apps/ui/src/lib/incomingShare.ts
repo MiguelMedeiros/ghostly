@@ -45,6 +45,11 @@ export interface IncomingShare {
    * again. False where it could not be kept. Without it, the share goes with this page.
    */
   carry?: () => boolean;
+  /**
+   * Told when the share is sent to a chat: it no longer waits in the picker, so a later share does not take its place
+   * (the Android app's copies stay until that chat's composer reads them, or the page goes).
+   */
+  sent?: () => void;
 }
 
 /** A share's files as Files, read now where they were not yet. */
@@ -159,7 +164,10 @@ export function sendShareTo(chat: string): void {
   if (!pending) return;
   const waiting = forChat.get(chat) ?? [];
   const share = pending;
-  if (!waiting.some((kept) => sameShare(kept, share))) forChat.set(chat, [...waiting, share]);
+  if (!waiting.some((kept) => sameShare(kept, share))) {
+    forChat.set(chat, [...waiting, share]);
+    share.sent?.();
+  }
   pending = behind.shift() ?? null;
   emit();
 }

@@ -1,0 +1,1 @@
+A receiver takes a file without asking only while it fits in its free space beside what the files it already took (from any contact, not ended) still have to bring; one that fits only without them waits for its person, as a file past the limits does. A file larger than the whole free space is still refused with `no-room`. No new frame.

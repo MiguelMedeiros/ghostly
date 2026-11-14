@@ -36,20 +36,24 @@ export function isRunnerPolicy(policy: string, internet = false): boolean {
 
 const checked = new Map<string, Promise<boolean | null>>();
 
+/** A response that is no answer of the runner page's: the server failing (a proxy's 502 while it restarts), too busy, or timing out. */
+const notAnswered = (status: number) => status >= 500 || status === 408 || status === 429;
+
 /**
  * Whether the runner at `url` comes with its policy as a header (`internet`: the network runner's), or null when the
- * page could not be asked (offline, a dropped request). An answer is kept for the page's life; null is not, so the next
- * ask goes out again.
+ * page could not be asked (offline, a dropped request, a server error). An answer is kept for the page's life; null is
+ * not, so the next ask goes out again.
  */
 export function runnerPolicy(url: string, fetcher: typeof fetch = fetch, internet = false): Promise<boolean | null> {
   const key = `${internet ? "net" : "plain"} ${url}`;
   let answer = checked.get(key);
   if (!answer) {
+    const unasked = () => {
+      if (checked.get(key) === asking) checked.delete(key);
+      return null;
+    };
     const asking: Promise<boolean | null> = fetcher(url, { cache: "no-store", credentials: "omit", redirect: "error" })
-      .then((response) => response.ok && isRunnerPolicy(response.headers.get("content-security-policy") ?? "", internet), () => {
-        if (checked.get(key) === asking) checked.delete(key);
-        return null;
-      });
+      .then((response) => notAnswered(response.status) ? unasked() : response.ok && isRunnerPolicy(response.headers.get("content-security-policy") ?? "", internet), unasked);
     answer = asking;
     checked.set(key, answer);
   }

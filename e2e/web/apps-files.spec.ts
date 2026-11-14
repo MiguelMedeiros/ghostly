@@ -78,7 +78,8 @@ test("an app granted files reads a folder the person picks through the client's 
     // The folder, through the browser's picker, which the sheet's button opens.
     const sheet = ana.page.getByTestId("app-files-sheet");
     await appFrame(ana).locator("#pick").click();
-    await expect(sheet).toContainText("Reader asks to read a folder");
+    // The app's name is isolated in its own direction (U+2068 ... U+2069), whatever the page's.
+    await expect(sheet).toContainText("\u2068Reader\u2069 asks to read a folder");
     const chooser = ana.page.waitForEvent("filechooser");
     await sheet.getByTestId("app-files-choose").click();
     await (await chooser).setFiles(films);

@@ -262,6 +262,9 @@ class MainActivity : TauriActivity() {
     val show = SwitcherPicture.covered(lockOn, resumed, focused)
     if (!show && cover == null) return
     val view = cover ?: layoutInflater.inflate(R.layout.lock_cover, null).also {
+      // It takes the touches it gets, as the page's own cover does: in split screen the app's half shows it while the
+      // other app has the focus, and a tap there only brings the app back, not on whatever the page has under it.
+      it.isClickable = true
       // Above the WebView (and the update screen): the content view's last child.
       addContentView(it, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
       cover = it
@@ -272,6 +275,15 @@ class MainActivity : TauriActivity() {
       val dark = ColorUtils.calculateLuminance(background) < 0.5
       view.findViewById<TextView>(R.id.lock_cover_line).setTextColor(if (dark) 0xDEFFFFFF.toInt() else 0xDE000000.toInt())
       view.bringToFront()
+    }
+    // The page under it goes out of the accessibility tree with it (the cover itself is out of it, noHideDescendants):
+    // TalkBack would read the page it hides, and its double tap press a button there as a tap did.
+    val content = findViewById<ViewGroup>(android.R.id.content)
+    for (i in 0 until content.childCount) {
+      val child = content.getChildAt(i)
+      if (child !== view) {
+        child.importantForAccessibility = if (show) View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS else View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+      }
     }
     view.visibility = if (show) View.VISIBLE else View.GONE
   }

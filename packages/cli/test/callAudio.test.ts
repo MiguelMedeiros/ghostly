@@ -1,7 +1,7 @@
 import { createSocket } from "node:dgram";
 import { describe, expect, it, vi } from "vitest";
 import { CallAudio, type OpusCodec, type RtpTrack } from "../src/calls/audio";
-import { callIceServers, CallMedia, callUsesTurn, gathering, HOST_GATHER_MS, loadCallStack, type CallStack } from "../src/calls/media";
+import { callIceServers, CallMedia, callUsesTurn, gathering, HOST_GATHER_MS, loadCallStack, trackSend, type CallStack } from "../src/calls/media";
 import { bytesToMs, frameBytes, PARTIAL_WAIT_MS, PlaybackQueue, type CallRate } from "../src/calls/pcm";
 import { isRtcp, parseRtp, ReorderBuffer, RtpWriter, sequenceDelta, TICKS_PER_FRAME, type RtpPacket } from "../src/calls/rtp";
 import { dominantHz, level, tone } from "./support/tone";
@@ -270,6 +270,36 @@ describe("a call's candidates", () => {
     expect(callUsesTurn(callIceServers([], { GHOSTLY_STUN: "1" }))).toBe(false);
     expect(callUsesTurn(callIceServers([{ urls: "stun:stun.example.org" }], { GHOSTLY_STUN: "1" }))).toBe(false);
     expect(callUsesTurn(callIceServers([{ urls: "turn:turn.example.org", username: "u", credential: "p" }], { GHOSTLY_STUN: "0" }))).toBe(true);
+  });
+});
+
+describe("a call's track", () => {
+  it("drops the frame of a track that closes between isOpen and the send, and the next tick still sends", async () => {
+    const stack = await loadCallStack();
+    if (typeof stack === "string") throw new Error(stack);
+    // libdatachannel's own words when the connection fails while a frame goes out.
+    let closing = true;
+    const sent: Buffer[] = [];
+    const track = {
+      isOpen: () => true,
+      sendMessageBinary: (packet: Buffer) => {
+        if (closing) throw new Error("libdatachannel error while sending track message: Track is not open");
+        sent.push(packet);
+        return true;
+      },
+    };
+    const audio = new CallAudio({ rate: 48000, payloadType: 111, ssrc: 1, track: { send: trackSend(track), onPacket: () => {} }, encoder: stack.opus(48000), decoder: stack.opus(48000), onFrame: () => {} });
+    expect(() => audio.tick()).not.toThrow();
+    closing = false;
+    audio.tick();
+    expect(sent).toHaveLength(1);
+    audio.stop();
+  });
+
+  it("sends nothing on a track that is not open", () => {
+    const sendMessageBinary = vi.fn(() => true);
+    trackSend({ isOpen: () => false, sendMessageBinary })(Buffer.alloc(12));
+    expect(sendMessageBinary).not.toHaveBeenCalled();
   });
 });
 

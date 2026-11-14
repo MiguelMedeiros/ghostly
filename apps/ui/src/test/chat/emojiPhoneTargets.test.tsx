@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fireEvent, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { MessageInput } from "../../components/MessageInput";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
@@ -34,6 +35,22 @@ const open = () => {
 };
 
 describe("the emoji panel on a phone", () => {
+  it("keeps Tab and Shift+Tab in the sheet, never on the chat behind its backdrop", async () => {
+    const viewport = (width: number, height: number) => (window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height });
+    viewport(390, 844);
+    try {
+      const panel = open();
+      const user = userEvent.setup();
+      act(() => within(panel).getByTestId("expression-tab-emoji").focus());
+      for (const shift of [false, true]) {
+        for (let i = 0; i < 8; i++) {
+          await user.tab({ shift });
+          expect(panel).toContainElement(document.activeElement as HTMLElement);
+        }
+      }
+    } finally { viewport(1024, 768); }
+  });
+
   it("the skin tone and the Emoji / GIF switch are thumb-sized", () => {
     const panel = open();
     expect(within(panel).getByTestId("emoji-skin")).toHaveClass("tap-target");

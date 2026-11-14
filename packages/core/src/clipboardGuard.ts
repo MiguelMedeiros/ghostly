@@ -6,7 +6,10 @@
  * - `execCommand("copy")` and `execCommand("cut")` work only while one of the person's own inputs in that window is
  *   being dispatched (a trusted `pointerdown`, `pointerup`, `mousedown`, `mouseup`, `click`, `auxclick`, `dblclick`,
  *   `contextmenu`, `touchstart`, `touchend`, `keydown`, `keypress` or `keyup`; no script can fire one), or a trusted
- *   `submit` or `change` that began while such an input's window was open. That window opens as the input is
+ *   `submit` or `change` that began while such an input's window was open, and only within a second of that input
+ *   (from its own `timeStamp`, or from its dispatch where that is later or on another clock): Chromium lets a copy
+ *   write for seconds after a tap, and a page that spins in its own listener keeps the input being dispatched all
+ *   that time, while the person may copy something of their own in Ghostly. That window opens as the input is
  *   dispatched and closes at the first callback the guard queued at any input that runs (a message on a channel of
  *   its own, a `user-blocking` task where `scheduler.postTask` exists, an animation frame), so it holds the input's
  *   own dispatch and its default action: the submit of a click on a submit button or of Enter in a field, the change
@@ -112,6 +115,11 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
       const dispatching = (event, trusted) => {
         try { return apply(trusted, event, []) === true && apply(phase, event, []) !== 0; } catch (e) { return false; }
       };
+      const stamp = describe(w.Event.prototype, "timeStamp");
+      const clock = w.performance;
+      const tick = clock && clock.now;
+      const time = () => { try { return apply(tick, clock, []); } catch (e) { return NaN; } };
+      const recent = (at) => time() - at <= 1000;
       const shutters = [];
       try {
         const channel = new w.MessageChannel();
@@ -132,14 +140,21 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
       } catch (e) {}
       let tap = null;
       let trusted = null;
+      let tapped = NaN;
       let open = 0;
       let follows = null;
       const settle = () => { open = 0; follows = null; };
       const seen = (event) => {
         const found = trust(event);
         if (found === null) return;
+        let at = time();
+        try {
+          const given = apply(stamp.get, event, []);
+          if (given >= 0 && given < at) at = given;
+        } catch (e) {}
         tap = event;
         trusted = found;
+        tapped = at;
         if (shutters.length === 0) return;
         open = 1;
         for (let i = 0; i < shutters.length; i++) { try { shutters[i](); } catch (e) {} }
@@ -149,13 +164,13 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
       const followed = (event) => {
         if (open === 0) return;
         const found = trust(event);
-        if (found !== null) follows = { event: event, trusted: found, next: follows };
+        if (found !== null) follows = { event: event, trusted: found, at: tapped, next: follows };
       };
       apply(listen, w, ["submit", followed, true]);
       apply(listen, w, ["change", followed, true]);
       const tapping = () => {
-        if (tap !== null && dispatching(tap, trusted)) return true;
-        for (let f = follows; f !== null; f = f.next) if (dispatching(f.event, f.trusted)) return true;
+        if (tap !== null && dispatching(tap, trusted) && recent(tapped)) return true;
+        for (let f = follows; f !== null; f = f.next) if (dispatching(f.event, f.trusted) && recent(f.at)) return true;
         return false;
       };
       const guarded = function execCommand(command) {
@@ -259,4 +274,4 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
 })(window)`;
 
 /** `CLIPBOARD_GUARD_SCRIPT`'s hash, as a CSP source: the bridge's policy and a contact's own are given it. */
-export const CLIPBOARD_GUARD_HASH = "'sha256-VQmaFzhHMo1TP1ODnuXq72M52+6qthD/ZZHQsQiYAdY='";
+export const CLIPBOARD_GUARD_HASH = "'sha256-ay9kpYD2BIflB8W9w+iAbo1krsFBwIJunUmXTACfhao='";

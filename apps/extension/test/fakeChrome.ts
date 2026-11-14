@@ -5,6 +5,7 @@
  * - `runtime.sendMessage` reaches every `onMessage` listener; the first one to
  *   call `sendResponse` answers, a listener keeps the channel open only by
  *   returning `true`, and nobody answering rejects the way Chrome does.
+ *   `runtime.connect` with no `onConnect` listener disconnects the caller's end.
  * - Listeners remember which context registered them (`background`,
  *   `offscreen`, `page`), so a service-worker restart drops exactly the
  *   worker's listeners and in-memory state while `storage.session`, tabs and
@@ -420,6 +421,9 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
   };
   world.restartServiceWorker = () => {
     for (const e of world.events) e.dropContext("background");
+    // The ports the worker opened go with it: the other end hears it.
+    const worker = chromeApi.runtime.getURL("background.js");
+    for (const { caller, receiver } of world.ports) if (receiver.sender?.url === worker) caller.disconnect();
   };
   world.alarms = new Map();
   world.fireAlarm = (name) => {
@@ -437,7 +441,9 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
     mine.peer = theirs;
     theirs.peer = mine;
     world.ports.push({ caller: mine, receiver: theirs });
-    onConnect.dispatch(theirs as never);
+    // As Chrome: with no `onConnect` listener anywhere ("Receiving end does not exist"), the caller's end disconnects.
+    if (!onConnect.hasListeners()) theirs.disconnect();
+    else onConnect.dispatch(theirs as never);
     return mine;
   };
   world.sendMessageFrom = (sender, message) => {

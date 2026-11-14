@@ -24,7 +24,20 @@ afterAll(async () => {
   relay?.server.close();
 }, 30_000);
 
-const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+/** A zombie is not alive: it ended, and only waits for its new parent to reap it. */
+const alive = (pid: number) => {
+  try { process.kill(pid, 0); } catch { return false; }
+  try { return readFileSync(`/proc/${pid}/stat`, "utf8").split(") ").at(-1)?.[0] !== "Z"; } catch { return true; }
+};
+/**
+ * Gone within a moment. The hook's pid is its shell's, a grandchild of the listen (`sh -c` runs it in a shell of its
+ * own): the listen leaves once that `sh -c` exits, and the shell, killed with it, can still be dying, or a zombie the
+ * process it was handed to has not reaped yet. A hook left running on its own (`sleep 30`) is still there.
+ */
+const gone = async (pid: number, ms = 5_000) => {
+  for (const until = Date.now() + ms; Date.now() < until;) { if (!alive(pid)) return true; await new Promise((resolve) => setTimeout(resolve, 50)); }
+  return !alive(pid);
+};
 
 async function until<T>(read: () => T | undefined, ms: number, what: string): Promise<T> {
   const end = Date.now() + ms;
@@ -37,9 +50,16 @@ async function until<T>(read: () => T | undefined, ms: number, what: string): Pr
 }
 
 describe("listen --exec stopped while its hook runs", { timeout: 120_000 }, () => {
-  for (const withDaemon of [true, false]) {
-    it(`ends the hook and keeps the cursor before its event, ${withDaemon ? "following a daemon" : "running the profile itself"}`, async () => {
-      const dir = home(withDaemon ? "exec-stop-daemon" : "exec-stop-own");
+  // SIGHUP: the terminal or SSH session the listen ran in closed. Unhandled, it ended Node with no 'exit' event, so
+  // the hook (in a process group of its own) ran on, and the next listen ran its event again beside it.
+  const cases = [
+    { withDaemon: true, stopSignal: "SIGTERM" },
+    { withDaemon: true, stopSignal: "SIGHUP" },
+    { withDaemon: false, stopSignal: "SIGTERM" },
+  ] as const;
+  for (const { withDaemon, stopSignal } of cases) {
+    it(`ends the hook and keeps the cursor before its event on ${stopSignal}, ${withDaemon ? "following a daemon" : "running the profile itself"}`, async () => {
+      const dir = home(`exec-stop-${withDaemon ? "daemon" : "own"}-${stopSignal.toLowerCase()}`);
       ok(await ghostly(["--home", dir, "settings", "set", "relays", JSON.stringify([relay.url])], { env }));
       const log = join(dir, "hook.log"), cursor = join(dir, "cursor"), hook = join(dir, "hook.sh");
       // Only chat.created is slow; daemon.started passes at once (it tells the test the listen is up).
@@ -54,10 +74,10 @@ describe("listen --exec stopped while its hook runs", { timeout: 120_000 }, () =
         ok(await ghostly(["--home", dir, "invite", "create", "--label", "slow"], { env }));
         const [pid, seq] = await until(() => starts()[0], 30_000, "the hook's start");
         expect(alive(pid)).toBe(true);
-        listen.child.kill("SIGTERM");
+        listen.child.kill(stopSignal);
         await listen.exited(30_000);
         // No orphan: the hook is gone with the listen, and it never finished.
-        expect(alive(pid), `the hook ${pid} still runs after the listen stopped\n${listen.stderr}`).toBe(false);
+        expect(await gone(pid), `the hook ${pid} still runs after the listen stopped\n${listen.stderr}`).toBe(true);
         expect(Number(readFileSync(cursor, "utf8").trim())).toBeLessThan(seq);
         expect(listen.stderr).toContain(`ghostly: stopped while --exec ran on event ${seq} (chat.created): ended it, and the event is handed again at the next start`);
         // The restarted listen hands the event again, once, with no other hook of it running.
@@ -69,7 +89,7 @@ describe("listen --exec stopped while its hook runs", { timeout: 120_000 }, () =
         expect(readFileSync(log, "utf8")).not.toContain("done ");
         listen.child.kill("SIGTERM");
         await listen.exited(30_000);
-        expect(alive(again)).toBe(false);
+        expect(await gone(again), `the hook ${again} still runs after the listen stopped\n${listen.stderr}`).toBe(true);
       } finally {
         await listen.stop();
         if (withDaemon) await ghostly(["--home", dir, "daemon", "stop"], { env });

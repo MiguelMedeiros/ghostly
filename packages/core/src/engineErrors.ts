@@ -37,6 +37,7 @@ export const ENGINE_ERRORS = {
   // A mint that failed (a server error, a closed connection), not refused: nothing happened, and it may work later.
   mintFailedQuote: "{host} could not take this payment right now, and no sats left your wallet: try again later. The mint said: {reason}",
   mintFailedFaucet: "{host} could not give test coins right now: try again later. The mint said: {reason}",
+  mintFailedInvoice: "{host} could not create an invoice right now: try again later. The mint said: {reason}",
   // Lightning.
   lightningFeeTooHigh: "The Lightning fee ({fee} sats) is too high",
   lightningRefused: "The mint refused this Lightning payment, and no sats left your wallet: it is safe to try again. The mint said: {reason}",
@@ -87,6 +88,8 @@ export const ENGINE_ERRORS = {
   fedimintTestOnMainnet: "This federation is on {chain}, a test network: it belongs in a Testnet Fedimint wallet",
   walletAway: "{wallet} can't be used here. Use it on {device}.",
   walletAwayUnnamed: "{wallet} can't be used here: its home is another device.",
+  // Web apps shared with a contact.
+  serviceShareFull: "A contact can reach at most {max} of your apps: take one back from them before sharing another",
   // One profile on several devices (WISP 06).
   groupTurnUnconfirmed: "Can't check which device is active, so the group was not changed. Try again in a moment.",
 } as const;

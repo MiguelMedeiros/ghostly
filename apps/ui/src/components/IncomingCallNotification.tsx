@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef } from "react";
 import { useI18n } from "../contexts/I18nContext";
-import { useTabTrap } from "../hooks/useDismiss";
+import { useBackCloses, useTabTrap } from "../hooks/useDismiss";
 import { initial } from "../lib/initial";
 import { callWindowShown } from "../lib/serviceWindows";
 
@@ -60,6 +60,9 @@ export function IncomingCallNotification({
   // A call over everything: said at once, and the keys stay in it. The focus goes to the box, not to Accept, so an
   // Enter typed into the message a moment later does not answer; it goes back where it was once the ringing stops.
   useTabTrap(box);
+  // Back (Android's back gesture) answers nothing either: it would move the page hidden under the ringing, or leave the
+  // app. The call takes an entry again.
+  useBackCloses(() => {});
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null;
     box.current?.focus({ preventScroll: true });

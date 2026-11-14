@@ -39,7 +39,7 @@
   "shareTooLargeUnnamed": "大きすぎてここでは共有できません",
   "shareUnread": "読み込めませんでした: {{names}}",
   "shareUnreadNext": "元のアプリからもう一度共有するか、チャットを開いて + → 書類 から送ってください。",
-  "shareWaiting": "共有された内容を受け取っています...",
+  "shareWaiting": "共有された内容を受け取っています…",
   "stepsThen": "あとは新しいアイコンから Ghostly を開きます。",
   "storageFull": "ストレージがいっぱいです",
   "storageFullHint": "新しいメッセージはここに表示されます。再読み込み後も残すには、不要になったチャットやプロフィールを削除してください。",

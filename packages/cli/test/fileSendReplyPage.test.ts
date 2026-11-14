@@ -7,6 +7,7 @@ import type { EngineState, GroupView, LinkView } from "@ghostly/browser/shared/t
 import { callApi, type ApiContext } from "../src/api";
 import { NodeFileBytes } from "../src/runtime/fileBytes";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.files
 
 /**
@@ -29,6 +30,7 @@ beforeAll(async () => {
 
 function fake(page: { id: string }[], more: boolean, all: { id: string }[]) {
   const node = {
+    chatView: chatViewOf,
     getState: () => ({ links: [link], groups: [group], settings: {}, transport: {}, transfers: {} }) as unknown as EngineState,
     messagePage: vi.fn(async () => ({ messages: page, more })),
     getMessages: vi.fn(async () => all),

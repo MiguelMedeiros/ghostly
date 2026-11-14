@@ -82,6 +82,15 @@ describe("a wake-up from another of the person's devices", () => {
     expect(pushNotice({ token: DEVICE_TOKEN, kind: "device" }, undefined, null, options)).toBeNull();
     expect(pushNotice({ token: DEVICE_TOKEN, kind: "device" }, undefined, active, { ...options, appVisible: true })).toBeNull();
   });
+
+  it("shows nothing for a token that names what every object has, whatever the device set looks like", () => {
+    const inherited = Object.getOwnPropertyNames(Object.prototype).filter((name) => /^[A-Za-z0-9_-]{16,64}$/.test(name));
+    expect(inherited).toContain("__defineGetter__");
+    const view = pushDeviceView({ state: "standby", activeSlot: 0, ownSlot: 1, deviceSet: [{ key: "K".repeat(43), name: "MacBook" }], push: { own: { tokens: { ["K".repeat(43)]: DEVICE_TOKEN } } } })!;
+    for (const token of inherited) {
+      for (const device of [active, standby, view, { state: "removed", tokens: {} }]) expect(pushNotice({ token, kind: "device" }, undefined, device, options)).toBeNull();
+    }
+  });
 });
 
 describe("the worker's read of the device state", () => {

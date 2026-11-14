@@ -210,6 +210,9 @@ describe("Settings → Audio & video", () => {
     expect(devices.userMedia[0].constraints).toEqual({ audio: { deviceId: { exact: "mic-headset" } } });
     devices.userMedia[0].grant();
     expect(await screen.findByTestId("settings-microphone-level")).toHaveAttribute("role", "meter");
+    // Named for what it does next, never a toggle too: "Stop, pressed" read as stopped already.
+    expect(screen.getByTestId("settings-microphone-test")).toHaveAccessibleName("Stop");
+    expect(screen.getByTestId("settings-microphone-test")).not.toHaveAttribute("aria-pressed");
 
     await user.click(screen.getByTestId("settings-microphone-test"));
     expect(screen.queryByTestId("settings-microphone-level")).toBeNull();
@@ -223,6 +226,8 @@ describe("Settings → Audio & video", () => {
     expect(devices.userMedia[0].constraints).toEqual({ video: { deviceId: { exact: "cam-usb" } }, audio: false });
     devices.userMedia[0].grant();
     expect(await screen.findByTestId("settings-camera-video")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-camera-preview")).toHaveAccessibleName("Stop");
+    expect(screen.getByTestId("settings-camera-preview")).not.toHaveAttribute("aria-pressed");
   });
 
   it("says so when the device cannot be opened", async () => {
@@ -320,7 +325,13 @@ describe("Settings → Audio & video", () => {
       await user.click(await screen.findByTestId("settings-microphone-test"));
       expect(meter).toHaveBeenCalledWith("Mic A", expect.any(Function));
       act(() => level(0.42));
-      expect(await screen.findByTestId("settings-microphone-level")).toHaveAttribute("aria-valuenow", "42");
+      const meterShown = await screen.findByTestId("settings-microphone-level");
+      expect(meterShown).toHaveAttribute("aria-valuenow", "42");
+      // Each reading is drawn as it comes, not animated to: a 75 ms width transition after every reading was 60% of
+      // the shown meter's CPU on the Linux Desktop (WebKitGTK laid out and painted each of its frames).
+      const bar = meterShown.firstElementChild as HTMLElement;
+      expect(bar.style.width).toBe("42%");
+      expect(bar.className).not.toMatch(/\btransition/);
       expect(devices.getUserMedia, "the page's own microphone stays shut").not.toHaveBeenCalled();
 
       await user.click(screen.getByTestId("settings-microphone-test"));
@@ -333,7 +344,7 @@ describe("Settings → Audio & video", () => {
       const { user } = renderApp(<MediaSettings />);
       await user.click(await screen.findByTestId("settings-microphone-test"));
       expect(await screen.findByTestId("settings-microphone-failed")).toBeInTheDocument();
-      expect(screen.getByTestId("settings-microphone-test")).toHaveAttribute("aria-pressed", "false");
+      expect(screen.getByTestId("settings-microphone-test")).toHaveAccessibleName("Test");
     });
 
     it("plays the test sound on the chosen speaker there", async () => {

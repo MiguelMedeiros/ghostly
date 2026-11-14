@@ -514,7 +514,8 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     ok(await as(alice, "react", "bob", theirs.id, "--remove"));
     await listen.waitFor((l) => l.type === "message.reaction" && l.removed === true);
     expect((await shown()).reactions).toBeUndefined();
-    error(await as(alice, "react", "bob", theirs.id, "not an emoji"), "bad_request", 1);
+    // A usage error before the daemon is asked (the API answers bad_request only to socket callers).
+    error(await as(alice, "react", "bob", theirs.id, "not an emoji"), "usage", 2);
     error(await as(alice, "react", "bob", "no-such-message", "👍"), "not_found", 3);
     await listen.stop();
   });

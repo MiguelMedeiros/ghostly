@@ -3,7 +3,7 @@ import { removeFileBytes } from "@ghostly/browser/shared/fileBytes";
 import { forgetServicesOf, getBrowserHost, releaseUnusedLocalAccessOf } from "@ghostly/browser/host";
 import { engine } from "@ghostly/browser/platform/engine";
 import { forgetDevice } from "@ghostly/browser/devices/store";
-import { LEGACY_JOIN_PREFIX, getStorageProfile, ownsKey } from "./storage";
+import { LEGACY_JOIN_PREFIX, getStorageProfile, keyOwner } from "./storage";
 import { activeProfileId, registryKey } from "./profiles";
 import { profileDatabase } from "./profileData";
 import { linkedFilesDatabase } from "./apps/webFiles";
@@ -51,7 +51,7 @@ async function clearProfile(profileId: string): Promise<void> {
   ]);
   clearTimeout(timer);
   if (!stopped) await clearProfileStores().catch(() => {});
-  const keysToRemove: string[] = [];
+  const keysToRemove: string[] = [], ownsKey = keyOwner();
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
     if (!key || key === registryKey()) continue;

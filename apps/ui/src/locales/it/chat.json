@@ -14,6 +14,7 @@
     "messagesFrom": "{{count}} nuovi messaggi da {{name}}",
     "notSent": "Il tuo messaggio «{{text}}» non è stato inviato",
     "notSentCount": "{{count}} messaggi non inviati",
+    "paymentState": "{{payment}} · {{state}}",
     "pinMoved": "Spostata al posto {{place}} di {{count}} chat fissate",
     "rowMoved": "Ora al posto {{place}} di {{count}}",
     "waiting": "Il tuo messaggio «{{text}}» è in attesa che il tuo contatto sia online",
@@ -113,6 +114,7 @@
     "lookupLocal": "Verificato su questo dispositivo: la chiave è l'identificatore.",
     "lookupPubky": "La ricerca interroga i relay Pkarr di Pubky ({{relays}}), che vengono a sapere il tuo indirizzo IP e questa chiave.",
     "lookupWeb": "La ricerca chiede al tuo resolver DNS-over-HTTPS di {{host}} e scarica il suo did.json da lì: quel server viene a sapere il tuo indirizzo IP.",
+    "lookupWebHiddenIp": "Nascondi il mio IP è attivo, quindi {{host}}, un server scelto dal tuo contatto, non viene contattato.",
     "muted": "Nascosto dalla tua lista di silenziati Nostr.",
     "nip05": "(NIP-05, come l'ha scritto, non verificato)",
     "noDids": "Questa app non può risolvere i DID",
@@ -242,7 +244,6 @@
     "newOne": "1 nuovo messaggio, scorri in fondo"
   },
   "keyChanged": "Questa chat si è fermata: la chiave del tuo contatto è cambiata.",
-  "lastSeen": "Ultimo accesso {{time}}",
   "listTime": {
     "days": "{{count}} g",
     "hours": "{{count}} h",
@@ -315,7 +316,7 @@
   "online": "online",
   "options": "Opzioni",
   "payments": {
-    "needLive": "I pagamenti richiedono una connessione diretta",
+    "needLive": "Invia richiede che il tuo contatto sia online: l'ecash non resta mai in coda. Una richiesta può aspettare il suo ritorno.",
     "noWallet": "Il tuo contatto non ha ancora un portafoglio",
     "off": "Disattivato in questa chat: attiva un metodo in Accetta",
     "offOrOld": "Il tuo contatto ha disattivato i pagamenti in questa chat, o deve aggiornare Ghostly"
@@ -395,6 +396,8 @@
     "copyCode": "Copia codice",
     "hiddenChars": "Questo codice contiene caratteri nascosti o che cambiano la direzione del testo, mostrati come {{marker}}. Copia codice copia anche quelli.",
     "localTime": "{{time}} nel tuo fuso orario",
+    "notCopied": "Non copiato",
+    "notCopiedHint": "Non copiato. Seleziona il testo e copialo.",
     "showAll": "Mostra tutto",
     "showLess": "Mostra meno",
     "spoiler": "Testo nascosto. Tocca per mostrarlo",
@@ -484,7 +487,6 @@
     "showTranslation": "Mostra traduzione",
     "translate": "Traduci"
   },
-  "typeMessage": "Scrivi un messaggio...",
   "typing": "sta scrivendo…",
   "typingRecording": "sta registrando un audio…",
   "typingThinking": "sta pensando…",
@@ -503,6 +505,7 @@
     "tooLarge": "Troppo grande per riprodurlo qui. Scaricalo per guardarlo."
   },
   "voice": {
+    "callPaused": "Messaggio vocale in pausa per la chiamata",
     "cancelled": "Messaggio vocale annullato",
     "cantPlay": "Questo dispositivo non riproduce registrazioni {{format}}. Salvala per ascoltarla altrove.",
     "couldNotPlay": "Impossibile riprodurre questa registrazione.",
@@ -528,6 +531,7 @@
     "recordHint": "Tieni premuto per registrare, o clicca per le mani libere",
     "recorded": "Registrato {{time}}",
     "recording": "Registrazione in corso",
+    "resumeAfterCall": "Riprendi dopo la chiamata",
     "sent": "Messaggio vocale inviato",
     "slideCancel": "Scorri per annullare",
     "speed": "Velocità {{speed}}",

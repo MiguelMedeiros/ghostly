@@ -162,6 +162,22 @@ describe("several cards on one network", () => {
     expect(registry.views().map((v) => v.name)).toEqual(["Cashu", "Hub (NWC)", "Hub (NWC) 2"]);
   });
 
+  it("adding a card unseals no other card's secrets while those are connected: a 600,000-iteration key each was +320 ms per card", async () => {
+    const relay = "wss%3A%2F%2Frelay.example", secret = "cd".repeat(32);
+    const uri = (n: number) => `nostr+walletconnect://${n.toString(16).padStart(2, "0").repeat(32)}?relay=${relay}&secret=${secret}`;
+    const nwcFake: LightningProviderDescriptor = { ...nwc, create: async () => new FakeLightningProvider({ alias: "Hub via relay.example", settleMs: 600_000 }) };
+    const registry = new LightningCards("testnet", { descriptors: () => [cashuMint, nwcFake], host: () => ({ platform: "web" }), events: { changed: vi.fn(), received: vi.fn(), resolved: vi.fn() }, hasMints: () => true });
+    registries.push(registry);
+    await registry.start();
+    for (const n of [1, 2, 3]) await registry.add("nwc", { uri: uri(n) });
+    await registry.ensureReady();
+    const unsealed = vi.spyOn(crypto.subtle, "decrypt");
+    await registry.add("nwc", { uri: uri(4) });
+    await expect(registry.add("nwc", { uri: uri(2) })).rejects.toThrow("That wallet is already your card “Hub (NWC) 2”");
+    expect(unsealed.mock.calls.length, "secrets unsealed").toBe(0);
+    expect(registry.views().map((v) => v.name)).toEqual(["Cashu", "Hub (NWC)", "Hub (NWC) 2", "Hub (NWC) 3", "Hub (NWC) 4"]);
+  });
+
   it("names: the source's short name, a number when taken, renamable, unique", async () => {
     const { registry } = cards();
     await registry.start();
@@ -175,6 +191,22 @@ describe("several cards on one network", () => {
     await expect(registry.rename(a, "home lnd")).rejects.toThrow("Another card has that name");
     await expect(registry.rename(a, " ")).rejects.toThrow("Enter a name");
     await expect(registry.rename(a, "x".repeat(33))).rejects.toThrow("At most 32 characters");
+  });
+
+  it("names: invisible and direction characters from the wallet or typed in do not make a name that reads like another", async () => {
+    const { registry } = cards();
+    await registry.start();
+    const name = (card: string) => registry.views().find((v) => v.card === card)?.name;
+    const hub = await registry.add("fake-node", { alias: "Alby Hub" });
+    const twin = await registry.add("fake-node", { alias: "Alby\u200b Hub\ufeff" });
+    const flipped = await registry.add("fake-node", { alias: "\u202eHome\u2066" });
+    expect(name(hub)).toBe("Alby Hub (Fake node)");
+    expect(name(twin)).toBe("Alby Hub (Fake node) 2");
+    expect(name(flipped)).toBe("Home (Fake node)");
+    await expect(registry.rename(twin, "Alby\u200b Hub (Fake\u200d node)")).rejects.toThrow("Another card has that name");
+    await expect(registry.rename(twin, "\u200b\u202e\u200c")).rejects.toThrow("Enter a name");
+    await registry.rename(twin, "Office\u2067 LND\u061c");
+    expect(name(twin)).toBe("Office LND");
   });
 
   it("names: a long wallet name is cut after a whole word with …; only an NWC name loses its \" via \" part", async () => {

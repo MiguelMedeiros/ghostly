@@ -1,3 +1,4 @@
+import { existsSync, readdirSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { error, ghostly, home, ok } from "./support/cli";
 // covers: headless.cli
@@ -21,10 +22,29 @@ describe("settings set", () => {
     const dir = home("settings-own-names");
     const names = ["constructor", "toString", "hasOwnProperty"];
     for (const name of names) {
-      expect(error(await ghostly(["--home", dir, "settings", "set", name, "5"]), "bad_request", 1).message).toContain(`${name} is not a setting the CLI changes`);
+      expect(error(await ghostly(["--home", dir, "settings", "set", name, "5"]), "usage", 2).message).toContain(`${name} is not a setting the CLI changes`);
     }
     const shown = ok(await ghostly(["--home", dir, "settings", "get"]));
     for (const name of names) expect(Object.hasOwn(shown, name), name).toBe(false);
+  });
+
+  it("refuses an unknown key or a value of the wrong kind as a usage error, before the profile opens", { timeout: 60_000 }, async () => {
+    // Both opened the profile, asked the Pkarr relays, then answered bad_request (exit 1) with no "did you mean".
+    const dir = home("settings-usage");
+    const keys = "relays, irohRelays, hyperdhtRelay, iceServers, publicProfiles, online, shareProfile, sendTyping, nick, autoDownloads, serveFiles, daemonPresence";
+    const usage = (args: string[]) => ghostly(["--home", dir, "settings", "set", ...args]);
+    expect(error(await usage(["sendtyping", "false"]), "usage", 2).message).toBe(`sendtyping is not a setting the CLI changes (did you mean sendTyping?): ghostly settings set takes ${keys} (ghostly help settings set)`);
+    expect(error(await usage(["SENDTYPING", "false"]), "usage", 2).message).toContain("(did you mean sendTyping?)");
+    expect(error(await usage(["nothing", "false"]), "usage", 2).message).toBe(`nothing is not a setting the CLI changes: ghostly settings set takes ${keys} (ghostly help settings set)`);
+    // Before stdin is read: the key alone is wrong.
+    expect(error(await ghostly(["--home", dir, "settings", "set", "sendtyping", "-"], { input: "false\n" }), "usage", 2).message).toContain("did you mean sendTyping?");
+    const settings = "ghostly settings set <key> <json-value> [--force]";
+    expect(error(await usage(["online", "maybe"]), "usage", 2).message).toBe(`online takes true or false, not "maybe": ${settings}`);
+    expect(error(await usage(["online", "1"]), "usage", 2).message).toBe(`online takes true or false, not "1": ${settings}`);
+    expect(error(await usage(["relays", "wss://relay.example"]), "usage", 2).message).toBe(`relays takes a JSON list of strings: ${settings}`);
+    expect(error(await usage(["iceServers", "[1]"]), "usage", 2).message).toBe(`iceServers takes a JSON list of ICE servers: ${settings}`);
+    // Nothing was made of the home: the profile never opened.
+    expect(existsSync(dir) ? readdirSync(dir) : []).toEqual([]);
   });
 
   it("says a TURN server the CLI does not use on stderr: stdout holds the settings alone", { timeout: 60_000 }, async () => {

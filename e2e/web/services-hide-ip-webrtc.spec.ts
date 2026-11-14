@@ -1,6 +1,7 @@
 import { createSocket } from "node:dgram";
 import { createServer } from "node:http";
 import { guardViewerAnswer, utf8Encode, viewerServicePolicy, VIEWER_GUARD_HASH, VIEWER_GUARD_SCRIPT, type HeaderList } from "@ghostly/core";
+import { CHROMIUM_SANDBOX } from "../support/chromiumSandbox";
 import { expect, test } from "../support/fixtures";
 
 /**
@@ -18,12 +19,26 @@ import { expect, test } from "../support/fixtures";
 const PAGE_PORT = 6322;
 const STUN_PORT = 6323;
 
+test.use({
+  launchOptions: {
+    chromiumSandbox: CHROMIUM_SANDBOX,
+    args: [
+      "--disable-features=WebRtcHideLocalIpsWithMdns",
+      // Chromium gathers ICE only over this machine's other interfaces, never loopback: with none up at that moment (a
+      // network that drops for a second), a connection made then sends no packet, not even to 127.0.0.1.
+      "--allow-loopback-in-peer-connection",
+    ],
+  },
+});
+
 /** What the contact's pages use (`/try.js`): a connection with the constructor a page found, if it found one. */
 const TRY = `async function attempt(find) {
   let made = null;
   try { made = find(); } catch (e) {}
   if (typeof made !== "function") return;
   const connection = new made({ iceServers: [{ urls: "stun:127.0.0.1:${STUN_PORT}" }] });
+  // Kept until the tab closes: one nothing holds may be collected before its first binding request goes.
+  (self.keptConnections = self.keptConnections || []).push(connection);
   connection.createDataChannel("x");
   await connection.setLocalDescription();
 }
@@ -84,7 +99,23 @@ test("a contact's app makes no WebRTC connection of its own in the web app while
 }, async ({ browser }) => {
   let packets = 0;
   const stun = createSocket("udp4");
-  stun.on("message", () => { packets++; });
+  stun.on("message", (request, from) => {
+    packets++;
+    // Answered as a STUN server answers a binding request (RFC 8489, XOR-MAPPED-ADDRESS). Unanswered, Chromium sent
+    // each case's requests again for 40 s to a server it never heard from, and now and then a case's first request
+    // never came within 15 s.
+    if (request.length < 20 || request.readUInt16BE(0) !== 0x0001) return;
+    const answer = Buffer.alloc(32);
+    answer.writeUInt16BE(0x0101, 0);
+    answer.writeUInt16BE(12, 2);
+    request.copy(answer, 4, 4, 20);
+    answer.writeUInt16BE(0x0020, 20);
+    answer.writeUInt16BE(8, 22);
+    answer.writeUInt16BE(0x0001, 24);
+    answer.writeUInt16BE(from.port ^ 0x2112, 26);
+    answer.writeUInt32BE((from.address.split(".").reduce((word, byte) => word * 256 + Number(byte), 0) ^ 0x2112a442) >>> 0, 28);
+    stun.send(answer, from.port, from.address);
+  });
   await new Promise<void>((done) => stun.bind(STUN_PORT, "127.0.0.1", done));
   let relayOnly = false;
   // The contact's answer by path, before Ghostly touches it.

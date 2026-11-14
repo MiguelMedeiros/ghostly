@@ -234,6 +234,33 @@ describe("A QR screenshot pasted or dropped on Join", () => {
       });
     });
 
+    it("Paste from clipboard with a picture there and no text (a screenshot of the QR) reads it, as Ctrl+V does", async () => {
+      // On the real Linux app: "Clipboard is empty. Copy an invite, then press Ctrl+V below." while Ctrl+V on the
+      // dialog read the same picture and joined.
+      const { invite } = createLink();
+      qr.data = encodeInviteCode(invite);
+      fakeEngine.readClipboardText = vi.fn(async () => "");
+      const shot = held(null, PNG.length, "image/png");
+      fakeEngine.readClipboardFiles = vi.fn(async () => [shot]);
+      const onJoin = vi.fn();
+      const { unmount } = renderApp(<JoinDialog onJoin={onJoin} onClose={() => {}} />);
+      fireEvent.click(screen.getByRole("button", { name: "Paste from clipboard" }));
+      await waitFor(() => expect(onJoin).toHaveBeenCalledTimes(1));
+      expect(onJoin.mock.calls[0][0]).toMatchObject({ seedB64: invite.seedB64 });
+      expect(shot.done).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("alert")).toBeNull();
+      unmount();
+
+      // Nothing there at all: still said as an empty clipboard.
+      fakeEngine.readClipboardFiles = vi.fn(async () => []);
+      renderApp(<JoinDialog onJoin={onJoin} onClose={() => {}} />);
+      fireEvent.click(screen.getByRole("button", { name: "Paste from clipboard" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("Clipboard is empty. Copy an invite, then press Ctrl+V below.");
+      expect(fakeEngine.readClipboardFiles).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole("textbox", { name: "Invite code" })).toBeInTheDocument();
+      fakeEngine.readClipboardText = undefined;
+    });
+
     it("text never asks the app, and the web app has no such read", () => {
       renderApp(<JoinDialog onJoin={() => {}} onClose={() => {}} />);
       expect(fireEvent.paste(dialog(), { clipboardData: transfer({}) })).toBe(true);

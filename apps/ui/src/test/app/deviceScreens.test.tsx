@@ -11,11 +11,12 @@ import { DevicesSection } from "../../components/devices/DevicesSection";
 import { HandoffProgress } from "../../components/devices/Handoff";
 import { deviceLook } from "../../components/devices/DeviceGlyph";
 import { LimitedBanner, resetLimitedStart } from "../../components/devices/LimitedStart";
+import { RemoveHereDialog } from "../../components/devices/RemoveHereDialog";
 import { TakeoverDialog } from "../../components/devices/TakeoverDialog";
 import { Settings } from "../../pages/Settings";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
-import { createProfile, namespaceOf } from "../../lib/profiles";
+import { activeProfileId, createProfile, namespaceOf, renameProfile } from "../../lib/profiles";
 import { defaultDeviceName } from "../../lib/devices";
 import { loadLocale, translatorFor } from "../../locales";
 import { setPushPlatform, type PushPlatform } from "../../lib/wakePush";
@@ -360,6 +361,10 @@ describe("the handoff's progress", () => {
     expect(steps[1]).toHaveAttribute("aria-current", "step");
     expect(steps[1]).toHaveTextContent("Copying files · 120 MB of 480 MB");
     expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "25");
+    // In forced colors the backgrounds are the page's: the track keeps an edge and the fill a system colour of its own.
+    expect(screen.getByRole("progressbar").className).toContain("forced-colors:border-[color:CanvasText]");
+    expect(screen.getByRole("progressbar").className).toContain("forced-colors:forced-color-adjust-none");
+    expect((screen.getByRole("progressbar").firstElementChild as HTMLElement).className).toContain("forced-colors:bg-[color:Highlight]");
     expect(screen.getByTestId("handoff-cancel")).toHaveTextContent("Cancel");
     expect(screen.getByTestId("handoff-progress")).toHaveTextContent("Nothing changes until the last step.");
   });
@@ -814,5 +819,24 @@ describe("a device's name in a right-to-left language", () => {
     expect(names(dialog)).toEqual(["Pixel-of-a-very-", "Pixel-of-a-very-", "Pixel-of-a-very-"]);
     expect(dialog.querySelector("h2")).toHaveTextContent("تتولى الأمر بدون Pixel-of-a-very-؟");
     expect(screen.getByLabelText("اكتب Pixel-of-a-very- للتأكيد")).toBe(screen.getByTestId("takeover-name"));
+  });
+
+  it("keeps the profile's own direction in Remove this profile here's title and the name to type", () => {
+    renameProfile(activeProfileId(), "Work (2)");
+    renderApp(<RemoveHereDialog onClose={() => {}} />, { language: "ar" });
+    const dialog = screen.getByTestId("device-remove-here");
+    expect(names(dialog)).toEqual(["Work (2)", "Work (2)"]);
+    expect(dialog.querySelector("h2")).toHaveTextContent("إزالة Work (2) من هذا الجهاز؟");
+    expect(screen.getByLabelText("اكتب Work (2) للتأكيد")).toBe(screen.getByTestId("device-remove-here-name"));
+    expect(screen.getByTestId("device-remove-here-name")).toHaveAttribute("dir", "auto");
+  });
+
+  it("keeps the profile's own direction in the name to type to start a removed copy as its own profile", () => {
+    renameProfile(activeProfileId(), "Work (2)");
+    renderApp(<LimitedBanner />, { language: "ar" });
+    act(() => fakeEngine.setState({ limited: true, restoreCheck: "removed" }));
+    // An attribute has no <bdi>: the name sits between the isolate marks (FSI … PDI) instead.
+    expect(screen.getByTestId("restore-limited-name")).toHaveAttribute("placeholder", "اكتب \u2068Work (2)\u2069 لبدئه كملف مستقل");
+    expect(screen.getByTestId("restore-limited-name")).toHaveAttribute("aria-label", "اكتب \u2068Work (2)\u2069 لبدئه كملف مستقل");
   });
 });

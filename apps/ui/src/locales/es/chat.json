@@ -14,6 +14,7 @@
     "messagesFrom": "{{count}} mensajes nuevos de {{name}}",
     "notSent": "Tu mensaje «{{text}}» no se envió",
     "notSentCount": "{{count}} mensajes no enviados",
+    "paymentState": "{{payment}} · {{state}}",
     "pinMoved": "Movido al puesto {{place}} de {{count}} chats fijados",
     "rowMoved": "Ahora en el puesto {{place}} de {{count}}",
     "waiting": "Tu mensaje «{{text}}» está esperando a que tu contacto esté en línea",
@@ -113,6 +114,7 @@
     "lookupLocal": "Comprobado en este dispositivo: la clave es el identificador.",
     "lookupPubky": "Buscarlo pregunta a los relays Pkarr de Pubky ({{relays}}), que conocen así tu dirección IP y esta clave.",
     "lookupWeb": "Buscarlo pregunta a tu resolvedor DNS-over-HTTPS por {{host}} y descarga su did.json desde allí: ese servidor conoce así tu dirección IP.",
+    "lookupWebHiddenIp": "Ocultar mi IP está activado, así que {{host}}, un servidor que eligió tu contacto, no se contacta.",
     "muted": "Oculto por tu lista de silenciados de Nostr.",
     "nip05": "(NIP-05, tal como lo escribió, sin verificar)",
     "noDids": "Esta app no puede resolver DIDs",
@@ -241,7 +243,6 @@
     "newOne": "1 mensaje nuevo, desplazar al final"
   },
   "keyChanged": "Este chat se detuvo: la clave de tu contacto cambió.",
-  "lastSeen": "Última vez {{time}}",
   "listTime": {
     "days": "{{count}} d",
     "hours": "{{count}} h",
@@ -314,7 +315,7 @@
   "online": "en línea",
   "options": "Opciones",
   "payments": {
-    "needLive": "Los pagos necesitan una conexión directa",
+    "needLive": "Enviar necesita a tu contacto en línea: el ecash nunca espera en una cola. Una solicitud puede esperar a que vuelva.",
     "noWallet": "Tu contacto aún no tiene monedero",
     "off": "Desactivado en este chat: activa una forma en Aceptar",
     "offOrOld": "Tu contacto tiene los pagos desactivados en este chat o necesita actualizar Ghostly"
@@ -394,6 +395,8 @@
     "copyCode": "Copiar código",
     "hiddenChars": "Este código tiene caracteres ocultos o que cambian la dirección del texto, mostrados como {{marker}}. Copiar código también los copia.",
     "localTime": "{{time}} en tu hora",
+    "notCopied": "No copiado",
+    "notCopiedHint": "No copiado. Selecciona el texto y cópialo.",
     "showAll": "Mostrar todo",
     "showLess": "Mostrar menos",
     "spoiler": "Texto oculto. Toca para mostrarlo",
@@ -483,7 +486,6 @@
     "showTranslation": "Ver traducción",
     "translate": "Traducir"
   },
-  "typeMessage": "Escribe un mensaje...",
   "typing": "escribiendo…",
   "typingRecording": "grabando audio…",
   "typingThinking": "pensando…",
@@ -502,6 +504,7 @@
     "tooLarge": "Demasiado grande para reproducirlo aquí. Descárgalo para verlo."
   },
   "voice": {
+    "callPaused": "Mensaje de voz en pausa por la llamada",
     "cancelled": "Mensaje de voz cancelado",
     "cantPlay": "Este dispositivo no reproduce grabaciones {{format}}. Guárdala para oírla en otro lugar.",
     "couldNotPlay": "No se pudo reproducir esta grabación.",
@@ -527,6 +530,7 @@
     "recordHint": "Mantén pulsado para grabar o haz clic para grabar sin manos",
     "recorded": "Grabado {{time}}",
     "recording": "Grabando",
+    "resumeAfterCall": "Reanudar después de la llamada",
     "sent": "Mensaje de voz enviado",
     "slideCancel": "Desliza para cancelar",
     "speed": "Velocidad {{speed}}",

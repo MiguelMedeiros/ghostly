@@ -203,6 +203,11 @@ pub mod app_sandbox {
     }
 
     #[tauri::command]
+    pub fn app_post_bytes() -> Result<(), String> {
+        Err(NOT_HERE.into())
+    }
+
+    #[tauri::command]
     pub fn app_title() -> Result<(), String> {
         Err(NOT_HERE.into())
     }

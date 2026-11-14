@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 import { build, type Plugin } from "vite";
 import { VIEWER_GUARD_HASH } from "../../packages/core/src/viewerGuard";
 import { CLIPBOARD_GUARD_HASH } from "../../packages/core/src/clipboardGuard";
-import { BRIDGE_PAGE, BRIDGE_SCRIPT, CLEAR_COOKIES, WORKER_SCRIPT, parseServicesHost } from "./src/svc/protocol";
+import { BRIDGE_PAGE, BRIDGE_SCRIPT, CLEAR_COOKIES, WORKER_SCRIPT, parseAppOrigin, parseServicesHost } from "./src/svc/protocol";
 
 const WORKER_ENTRY = fileURLToPath(new URL("./src/svc/worker.ts", import.meta.url));
 const BRIDGE_ENTRY = fileURLToPath(new URL("./src/svc/bridge.ts", import.meta.url));
@@ -64,8 +64,10 @@ export function servicesBridge(): Plugin {
       const appOrigin = env.VITE_SERVICES_APP_ORIGIN ?? "";
       if (!host && !appOrigin) return;
       if (!parseServicesHost(host)) throw new Error(`VITE_SERVICES_HOST is not a services host (https://*.example): ${JSON.stringify(host)}`);
-      if (!/^https?:\/\/[a-z0-9.-]+(:\d+)?$/.test(appOrigin)) throw new Error(`VITE_SERVICES_APP_ORIGIN is not an origin: ${JSON.stringify(appOrigin)}`);
-      const define = { __SERVICES_HOST__: JSON.stringify(host), __SERVICES_APP_ORIGIN__: JSON.stringify(appOrigin) };
+      // In the browser's form (`https://app.example`, never `:443`): the bridge compares it with each message's origin.
+      const origin = parseAppOrigin(appOrigin);
+      if (!origin) throw new Error(`VITE_SERVICES_APP_ORIGIN is not an origin: ${JSON.stringify(appOrigin)}`);
+      const define = { __SERVICES_HOST__: JSON.stringify(host), __SERVICES_APP_ORIGIN__: JSON.stringify(origin) };
       this.emitFile({ type: "asset", fileName: WORKER_SCRIPT.slice(1), source: await script(WORKER_ENTRY, define) });
       this.emitFile({ type: "asset", fileName: BRIDGE_SCRIPT.slice(1), source: await script(BRIDGE_ENTRY, define) });
       this.emitFile({ type: "asset", fileName: BRIDGE_PAGE.slice(1), source: bridgeHtml() });

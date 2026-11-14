@@ -37,6 +37,18 @@ test("formatted text is sent as typed and shows formatted on both sides", {
   await expect(spoiler).toHaveAttribute("role", "button");
   await expect(spoiler).toHaveAccessibleName("Hidden text. Tap to show it");
   await expect(spoiler).toHaveCSS("color", "rgba(0, 0, 0, 0)");
+  // Forced colors (Windows Contrast themes) still cover it: its words transparent on a cover unlike the bubble around it.
+  await bob.page.emulateMedia({ forcedColors: "active" });
+  const forced = await spoiler.evaluate((node) => {
+    const around = (from: Element | null) => {
+      for (let n = from; n; n = n.parentElement) { const bg = getComputedStyle(n).backgroundColor; if (!bg.endsWith(", 0)") && bg !== "transparent") return bg; }
+      return "rgb(255, 255, 255)";
+    };
+    return { color: getComputedStyle(node).color, cover: getComputedStyle(node).backgroundColor, around: around(node.parentElement) };
+  });
+  expect(forced.color, "a spoiler's words in forced colors").toBe("rgba(0, 0, 0, 0)");
+  expect(forced.cover, "a spoiler's cover in forced colors").not.toBe(forced.around);
+  await bob.page.emulateMedia({ forcedColors: "none" });
   await spoiler.click();
   await expect(spoiler).toHaveAttribute("data-shown", "");
   await expect(spoiler).toHaveText("the ghost was the narrator");
@@ -85,7 +97,14 @@ test("formatted text is sent as typed and shows formatted on both sides", {
     const now = new Date();
     const at = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 14);
     const sameDay = new Date(at).toDateString() === now.toDateString();
-    return new Date(at).toLocaleString([], { ...(sameDay ? {} : { month: "short", day: "numeric" }), hour: "2-digit", minute: "2-digit", timeZoneName: "short" });
+    const format = new Intl.DateTimeFormat([], { ...(sameDay ? {} : { month: "short", day: "numeric" }), hour: "2-digit", minute: "2-digit", timeZoneName: "short" });
+    // The app keeps the day period on the time's line with a no-break space (#6320, lib/time.ts), where ICU may give a
+    // plain one: the same rule here (as the UI tests' heldTime.ts), not between "PM" and the zone.
+    const clock = new Set(["hour", "minute", "second", "fractionalSecond"]);
+    const parts = format.formatToParts(at);
+    const beside = (i: number) =>
+      (parts[i - 1]?.type === "dayPeriod" && clock.has(parts[i + 1]?.type ?? "")) || (parts[i + 1]?.type === "dayPeriod" && clock.has(parts[i - 1]?.type ?? ""));
+    return parts.map((p, i) => (p.type === "literal" && beside(i) ? p.value.replace(/ /g, "\u00a0") : p.value)).join("");
   });
   await expect(time.getByRole("button", { name: "14:00 UTC" })).toHaveAttribute("title", `${local} your time`);
   await time.getByRole("button", { name: "14:00 UTC" }).click();

@@ -23,20 +23,32 @@ const UNSPENT = "aa".repeat(32), SPENT = "bb".repeat(32);
 async function makeWallet(walletId: string) {
   const wallet = new IndexedDBWalletRepository(`ghostly-ark-${walletId}`), contracts = new IndexedDBContractRepository(`ghostly-ark-${walletId}`);
   await wallet.saveVtxos(address, [coin(UNSPENT, false), coin(SPENT, true)]);
-  await contracts.getContracts();
+  await contracts.getContractsPage(undefined, { limit: 1 });
   await wallet[Symbol.asyncDispose]();await contracts[Symbol.asyncDispose]();
 }
 async function openWallet(walletId: string) {
   const wallet = new IndexedDBWalletRepository(`ghostly-ark-${walletId}`);
-  try { return { all: await wallet.getVtxos(address), unspent: await wallet.getVtxosForScripts!([script], { unspentOnly: true }) }; } finally { await wallet[Symbol.asyncDispose](); }
+  try {
+    const all = (await wallet.getVtxosPage(address, { limit: 100 })).items, unspent = (await wallet.getVtxosForScriptPage!(script, { limit: 100 }, { unspentOnly: true })).items.map(s => s.vtxo);
+    return { all, unspent };
+  } finally { await wallet[Symbol.asyncDispose](); }
 }
 async function vtxoStore(walletId: string) {
   const db = await wrap(indexedDB.open(`ghostly-ark-${walletId}`));
   try { const s = db.transaction("vtxos").objectStore("vtxos"); return { version: db.version, indexes: Array.from(s.indexNames), rows: await wrap(s.getAll()) as Record<string, unknown>[] }; } finally { db.close(); }
 }
-/** What Ghostly 1.1.3 (SDK 0.4.76, database version 3) wrote: no scriptUnspent index, no `unspent` field. */
+/**
+ * What SDK 0.4.78-0.4.79 (database version 4) wrote: the legacy `contractsCollections` store, and none of the
+ * indexes SDK 0.5 added.
+ */
+function asVersion4(snapshot: ArkDatabaseSnapshot): ArkDatabaseSnapshot {
+  const later = new Set(["addressCreatedAt", "watchState", "typeWatchState"]);
+  const stores = snapshot.stores.map(s => ({ ...s, indexes: s.indexes.filter(i => !later.has(i.name)) }));
+  return { version: 4, stores: [...stores, { name: "contractsCollections", keyPath: "key", autoIncrement: false, indexes: [], keys: [], values: [] }] };
+}
+/** What Ghostly 1.1.3 (SDK 0.4.76, database version 3) wrote: version 4's, without the scriptUnspent index and `unspent` field. */
 function asVersion3(snapshot: ArkDatabaseSnapshot): ArkDatabaseSnapshot {
-  return { version: 3, stores: snapshot.stores.map(s => s.name !== "vtxos" ? s : {
+  return { version: 3, stores: asVersion4(snapshot).stores.map(s => s.name !== "vtxos" ? s : {
     ...s, indexes: s.indexes.filter(i => i.name !== "scriptUnspent"),
     values: s.values.map(v => { const { unspent: _drop, ...rest } = v as Record<string, unknown>; return rest; }),
   }) };
@@ -66,6 +78,20 @@ it("a backup made with the older database (1.1.3) restores, and the SDK upgrades
   expect(after.version).toBe(Math.max(...ARK_DB_VERSIONS));
   expect(after.indexes).toContain("scriptUnspent");
   expect(Object.fromEntries(after.rows.map(r => [r.txid, r.unspent]))).toEqual({ [UNSPENT]: 1, [SPENT]: undefined });
+});
+
+it("a backup made with SDK 0.4.79's database restores, and SDK 0.5 upgrades it on first open", async () => {
+  await makeWallet("v4-src");
+  await restoreArkDatabase("v4-copy", asVersion4(await snapshotArkDatabase("v4-src")));
+  expect((await vtxoStore("v4-copy")).version).toBe(4);
+  const { all, unspent } = await openWallet("v4-copy");
+  expect(all.map(v => v.txid).sort()).toEqual([UNSPENT, SPENT]);
+  expect(unspent.map(v => v.txid)).toEqual([UNSPENT]);
+  const db = await wrap(indexedDB.open("ghostly-ark-v4-copy"));
+  try {
+    expect(db.version).toBe(Math.max(...ARK_DB_VERSIONS));
+    expect(Array.from(db.transaction("contracts").objectStore("contracts").indexNames)).toEqual(expect.arrayContaining(["watchState", "typeWatchState"]));
+  } finally { db.close(); }
 });
 
 it("refuses a database version it does not know, older or newer", async () => {

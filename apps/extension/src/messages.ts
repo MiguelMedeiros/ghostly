@@ -1,5 +1,23 @@
+import type { AttachMark } from "@ghostly/browser/shared/rpc";
+
 /** Messages between the extension's own contexts: pages, service worker and the offscreen peer. */
 export const UI_PORT = "ui";
+
+/**
+ * A page's port, named with the mark the extension's pages last mirrored (`AttachMark`): the peer attaches the page as its
+ * port opens, and sends no chat unchanged since.
+ */
+export function uiPortName(since?: AttachMark): string {
+  return since ? `${UI_PORT} ${since.epoch} ${since.mark}` : UI_PORT;
+}
+
+/** A page's port by its name (`uiPortName`): with the mark it carries, if any. Null for any other port. */
+export function uiPortMark(name: string): { since?: AttachMark } | null {
+  if (name === UI_PORT) return {};
+  const [port, epoch, mark, ...rest] = name.split(" ");
+  if (port !== UI_PORT || !epoch || rest.length || !/^\d+$/.test(mark ?? "")) return null;
+  return { since: { epoch, mark: Number(mark) } };
+}
 /** One-shot messages, addressed by `target` because every context hears them. */
 export type RuntimeMessage =
   | { target: "background"; type: "ensure-engine" }
@@ -31,19 +49,36 @@ export type RuntimeMessage =
   /** The worker is about to close the peer's document, to start it again as another profile. */
   | { target: "engine"; type: "stop" }
   /** Chrome took back these host patterns (`permissions.onRemoved`): the apps at those hosts stop being shared. */
-  | { target: "engine"; type: "local-access-removed"; origins: string[] }
-  | {
-      target: "engine";
-      type: "http-request";
-      peerPubKeyZ32: string;
-      serviceId: string;
-      method: string;
-      path: string;
-      headers: [string, string][];
-      bodyB64: string | null;
-      /** The app's name when its tab opened (`ViewerPage.app`), for when the peer's state no longer lists it. */
-      app?: string;
-    };
+  | { target: "engine"; type: "local-access-removed"; origins: string[] };
+
+/**
+ * The worker's port to the peer, for the requests of a contact's app in its tab (background.ts `askPeer`). A one-shot
+ * message reaches every page of the extension too: each app tab got every request, its body included, only to drop it.
+ */
+export const VIEWER_PORT = "viewer";
+
+/** One request of a contact's app, `id` the worker's, for the reply that names it. */
+export interface ViewerAsk {
+  id: number;
+  request: HttpRequest;
+}
+
+/** `reply` null: no peer runs in this document any more (it stopped for good); the worker starts one and asks again. */
+export interface ViewerReply {
+  id: number;
+  reply: HttpRequestReply | null;
+}
+
+export interface HttpRequest {
+  peerPubKeyZ32: string;
+  serviceId: string;
+  method: string;
+  path: string;
+  headers: [string, string][];
+  bodyB64: string | null;
+  /** The app's name when its tab opened (`ViewerPage.app`), for when the peer's state no longer lists it. */
+  app?: string;
+}
 
 /**
  * What a viewer tab says when its contact's app cannot answer, in the profile's language. The worker has no settings
@@ -57,6 +92,11 @@ export interface ViewerPage {
   unreachable: string;
   /** Any other failure (`services.window.failed`); the engine's own words go to the console. */
   failed: string;
+  /**
+   * A request whose body has a file or a stream, which a viewer tab cannot send (`services.window.upload`): why, and
+   * where it does go. Absent from a page of an older build, which says `failed` instead.
+   */
+  upload?: string;
   /**
    * The app's name as the chat listed it when the tab opened: the peer's state no longer has it once the contact took
    * the app back, which is when the tab says so by name (`services.window.unshared`).

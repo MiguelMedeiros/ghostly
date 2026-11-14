@@ -105,7 +105,7 @@ describe("the host the app page runs on", () => {
     await extensionHost.openService!(PEER, SERVICE, TAG, false);
     const [tabId] = [...world.tabs.keys()];
     expect(world.session.get(`viewer:${tabId}`)).toMatchObject({
-      page: { lang: "ar", dir: "rtl", unreachable: servicesAr.window.unreachable, failed: servicesAr.window.failed },
+      page: { lang: "ar", dir: "rtl", unreachable: servicesAr.window.unreachable, failed: servicesAr.window.failed, upload: servicesAr.window.upload },
     });
   });
 

@@ -98,6 +98,36 @@ describe("Remove, on the active device", () => {
     expect(await screen.findByTestId("device-remove-error")).toHaveTextContent("Something else is changing your devices.");
   });
 
+  it("Remove keeps the keyboard focus while it goes, takes no second press, and keeps it when refused", async () => {
+    let refuse!: (error: Error) => void;
+    const { user, engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => activeSet());
+    engine.on("deviceRemove", () => new Promise((_, reject) => { refuse = reject; }));
+    await user.click((await screen.findAllByTestId("device-menu"))[0]);
+    await user.click(screen.getByTestId("device-remove-open"));
+    const go = screen.getByTestId("device-remove-go");
+    const lost = screen.getByTestId("device-remove-lost");
+    act(() => go.focus());
+    await user.keyboard("{Enter}");
+    expect(engine.callsTo("deviceRemove")).toHaveLength(1);
+    // Busy, not disabled: a disabled button would drop the focus to the page, and leave it there on a refusal.
+    expect(go).toHaveFocus();
+    expect(go).toBeEnabled();
+    expect(go).toHaveAttribute("aria-busy", "true");
+    expect(lost).toBeEnabled();
+    expect(lost).toHaveAttribute("aria-disabled", "true");
+    await user.keyboard("{Enter}");
+    await user.click(lost);
+    expect(engine.callsTo("deviceRemove")).toHaveLength(1);
+    expect(screen.queryByTestId("device-lost")).toBeNull();
+    act(() => go.focus());
+    await act(async () => { refuse(new Error("remove-busy: The profile is moving. Try again after it.")); });
+    expect(await screen.findByTestId("device-remove-error")).toHaveTextContent("Something else is changing your devices.");
+    expect(go).not.toHaveAttribute("aria-busy");
+    expect(lost).not.toHaveAttribute("aria-disabled");
+    expect(go).toHaveFocus();
+  });
+
   it("Lost or stolen shows the checklist first, then removes the device", async () => {
     const { user, engine } = renderApp(<DevicesSection />);
     engine.on("deviceSet", () => activeSet());
@@ -109,6 +139,35 @@ describe("Remove, on the active device", () => {
     expect(screen.getByTestId("device-lost-chats")).toHaveTextContent("Pair each chat again");
     await user.click(screen.getByTestId("device-lost-remove"));
     await waitFor(() => expect(engine.callsTo("deviceRemove")).toEqual([{ key: PHONE }]));
+  });
+
+  it("the checklist before a removal has Back to Remove, not a Done that ends with the device still in the set", async () => {
+    const { user, engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => activeSet());
+    await user.click((await screen.findAllByTestId("device-menu"))[0]);
+    await user.click(screen.getByTestId("device-remove-open"));
+    await user.click(screen.getByTestId("device-remove-lost"));
+    expect(screen.queryByTestId("device-lost-done")).toBeNull();
+    await user.click(screen.getByTestId("device-lost-back"));
+    expect(screen.getByTestId("device-remove")).toHaveTextContent("Remove Phone?");
+    expect(engine.callsTo("deviceRemove")).toEqual([]);
+  });
+
+  it("while Removing… runs, × and Escape do nothing, and a refusal is said in the dialog", async () => {
+    const { user, engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => activeSet());
+    let refuse!: () => void;
+    engine.on("deviceRemove", () => new Promise((_, reject) => { refuse = () => reject(new Error("remove-busy: The profile is moving. Try again after it.")); }));
+    await user.click((await screen.findAllByTestId("device-menu"))[0]);
+    await user.click(screen.getByTestId("device-remove-open"));
+    await user.click(screen.getByTestId("device-remove-go"));
+    await screen.findByTestId("device-remove-busy");
+    const dialog = screen.getByTestId("device-remove");
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    act(() => { dialog.dispatchEvent(new Event("cancel", { cancelable: true })); });
+    expect(screen.getByTestId("device-remove")).toBe(dialog);
+    act(() => refuse());
+    expect(await screen.findByTestId("device-remove-error")).toHaveTextContent("Something else is changing your devices.");
   });
 
   it("shows who has not taken the new secret yet, and makes a new device secret on request", async () => {

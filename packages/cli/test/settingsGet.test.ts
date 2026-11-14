@@ -24,7 +24,7 @@ describe("settings get", () => {
     const dir = home("settings-get-fresh");
     const shown = ok(await ghostly(["--home", dir, "settings", "get"]));
     expect(Object.keys(SETTABLE).filter((key) => !Object.hasOwn(shown, key))).toEqual([]);
-    expect(shown).toMatchObject({ sendTyping: true, autoDownloads: true, serveFiles: true, shareProfile: true, publicProfiles: true, hyperdhtRelay: "" });
+    expect(shown).toMatchObject({ sendTyping: true, autoDownloads: true, serveFiles: true, shareProfile: true, publicProfiles: true, daemonPresence: false, hyperdhtRelay: "" });
     expect(Array.isArray(shown.irohRelays) && shown.irohRelays.length > 0).toBe(true);
     expect(pretty(await ghostly(["--home", dir, "--pretty", "settings", "get"]))).toEqual(shown);
   });
@@ -38,6 +38,8 @@ describe("settings get", () => {
       ["iceServers", [{ urls: "stun:stun.example.org:3478" }]],
       ["nick", "Bot"],
       ...["publicProfiles", "online", "shareProfile", "sendTyping", "autoDownloads", "serveFiles"].flatMap((key) => [[key, false], [key, true]] as [string, boolean][]),
+      // Off by default: turned on, then back off.
+      ["daemonPresence", true], ["daemonPresence", false],
     ];
     // Each key of the table is set at least once.
     expect([...new Set(values.map(([key]) => key))].sort()).toEqual(Object.keys(SETTABLE).sort());

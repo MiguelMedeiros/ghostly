@@ -2,6 +2,7 @@ import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Amount, HttpResponseError, MintOperationError, OutputData, PaymentRequest, getEncodedToken, getTokenMetadata, type Proof, type SerializedSwapPreview, type SwapPreview } from "@cashu/cashu-ts";
 import { CashuWallet, SwapUnsettledError } from "../src/engine/wallet";
+import { CASHU_REQUEST_TIMEOUT_MS, SWAP_SETTLED_MS } from "../src/engine/paymentAdapters/cashu";
 import { isTestMint } from "../src/shared/mints";
 import { fakeInvoice } from "../src/engine/paymentAdapters/providers/testing";
 import { STORES, store, transact, wrap } from "../src/shared/idb";
@@ -52,8 +53,8 @@ vi.mock("@cashu/cashu-ts", async (importOriginal) => {
 const MINT = "https://mint.example";
 const KEYSET = "009a1f293253e41e";
 const C = `02${"ab".repeat(32)}`;
-/** As long as a request may still reach the mint (its longest life, 300 s, and the margin after it, 120 s), and a round more. */
-const SETTLED_MS = 300_000 + 120_000 + 30_000;
+/** As long as a request may still reach the mint (its longest life and the margin after it), and a round more. */
+const SETTLED_MS = CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS + 30_000;
 /** As long as a swap whose inputs were given back is still asked about. */
 const WATCH_MS = 3_600_000 + 600_000;
 const proof = (amount: number, secret: string): Proof => ({ id: KEYSET, amount: Amount.from(amount), secret, C }) as Proof;
@@ -705,6 +706,21 @@ describe("splitting ecash for a token", () => {
     expect(await balance(), "stored once").toBe(72 - 8);
   });
 
+  it("a second send that needs the sats the silent mint holds says the mint has not answered, not that the sats are missing", async () => {
+    mintApi.completeSwap.mockRejectedValue(lost());
+    mintApi.restore.mockRejectedValue(lost());
+    const { wallet } = setup();
+    await expect(wallet.createToken(40, undefined, undefined, outbox)).rejects.toBeInstanceOf(SwapUnsettledError);
+    const [held] = await swaps();
+    const again = await wallet.createToken(40, undefined, undefined, outbox).catch((error: unknown) => error);
+    expect(again).toBeInstanceOf(SwapUnsettledError);
+    expect((again as SwapUnsettledError).swap.id, "the swap that holds them").toBe(held.id);
+    expect(await swaps(), "no second swap").toHaveLength(1);
+    expect(mintApi.completeSwap).toHaveBeenCalledTimes(1);
+    // More than the wallet has, held or not: that is still not enough sats.
+    await expect(wallet.createToken(100, undefined, undefined, outbox)).rejects.toMatchObject({ engineCode: "notEnoughSats" });
+  });
+
   it("a mint that stops answering is asked about less and less often, every 10 min at most, and the swap is settled once it answers", async () => {
     mintApi.completeSwap.mockRejectedValue(lost());
     mintApi.restore.mockRejectedValue(lost());
@@ -713,7 +729,7 @@ describe("splitting ecash for a token", () => {
     await expect(wallet.createToken(40, undefined, undefined, outbox)).rejects.toBeInstanceOf(SwapUnsettledError);
     wallet.start();
     await pass(SETTLED_MS);
-    expect(mintApi.restore.mock.calls.length, "every 30 s while a request may still reach the mint").toBeGreaterThanOrEqual(10);
+    expect(mintApi.restore.mock.calls.length, "every 30 s while a request may still reach the mint").toBeGreaterThanOrEqual((CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS) / 30_000);
     const early = mintApi.restore.mock.calls.length;
     await pass(24 * 3_600_000);
     // At most every 10 min: 144 a day. Every 30 s, it was 2,880.
@@ -755,8 +771,8 @@ describe("splitting ecash for a token", () => {
     const { wallet, events } = await reopened();
     expect(await balance(), "not yet").toBe(8);
     expect(await wallet.view(), "held, and said to be").toMatchObject({ balance: 8, setAside: 64, openSwaps: 1 });
-    await pass(180_000);
-    expect(await balance(), "a request lives up to five minutes").toBe(8);
+    await pass(SWAP_SETTLED_MS - 30_000);
+    expect(await balance(), "the mint may still act on a request for a while").toBe(8);
     await pass(SETTLED_MS);
     expect(events.onSwapSettled).toHaveBeenCalledWith(expect.anything(), false);
     expect(await balance()).toBe(72);

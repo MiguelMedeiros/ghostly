@@ -213,6 +213,116 @@ describe("calling the peer", () => {
   });
 });
 
+describe("what the page said of itself, to a peer that started again", () => {
+  /** The calls a connection was sent, as method and params, answers left out. */
+  const said = (index: number) => scripted.connections[index].sent.map((r) => r.kind === "request" ? [r.method, r.params] : [r.kind]);
+  /** Answers every call sent on a connection so far, as the peer would. */
+  const answer = (index: number) => {
+    for (const r of scripted.connections[index].sent) if (r.kind === "request") scripted.connections[index].deliver({ kind: "response", id: r.id, result: null });
+  };
+
+  it("tells the new peer the chat on screen, the person's presence and a call on, once each", async () => {
+    vi.useFakeTimers();
+    void engine.call("setActiveLink", { linkId: "a" });
+    void engine.call("setPresence", { presence: "active" });
+    void engine.call("setCallOn", { on: true });
+    void engine.call("usdtRefresh");
+    await vi.advanceTimersByTimeAsync(0);
+    // The first peer hears each once, from its own call.
+    expect(said(0)).toEqual([["setActiveLink", { linkId: "a" }], ["setPresence", { presence: "active" }], ["setCallOn", { on: true }], ["usdtRefresh", undefined]]);
+    answer(0);
+
+    scripted.connections[0].drop();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(scripted.connections).toHaveLength(2);
+    // The new one hears the page's words again, and nothing else (a call that only acts is not said again).
+    expect(said(1)).toEqual([["setActiveLink", { linkId: "a" }], ["setPresence", { presence: "active" }], ["setCallOn", { on: true }]]);
+    // Their answers are nobody's: nothing breaks on them.
+    answer(1);
+    await vi.advanceTimersByTimeAsync(0);
+  });
+
+  it("says the newest word only, and nothing a new peer starts with", async () => {
+    vi.useFakeTimers();
+    await engine.connect();
+    void engine.call("setActiveLink", { linkId: "a" });
+    void engine.call("setActiveLink", { linkId: "group:g" });
+    void engine.call("setPresence", { presence: "active" });
+    void engine.call("setPresence", { presence: "idle" });
+    void engine.call("setCallOn", { on: true });
+    void engine.call("setCallOn", { on: false });
+    void engine.call("setFastPoll", { linkId: "a", fast: true });
+    void engine.call("setFastPoll", { linkId: "b", fast: true });
+    void engine.call("setFastPoll", { linkId: "a", fast: false });
+    await vi.advanceTimersByTimeAsync(0);
+    answer(0);
+
+    scripted.connections[0].drop();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(said(1)).toEqual([["setActiveLink", { linkId: "group:g" }], ["setPresence", { presence: "idle" }], ["setFastPoll", { linkId: "b", fast: true }]]);
+
+    // Nothing on screen any more: the next peer is told nothing of it.
+    void engine.call("setActiveLink", { linkId: null });
+    await vi.advanceTimersByTimeAsync(0);
+    answer(1);
+    scripted.connections[1].drop();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(said(2)).toEqual([["setPresence", { presence: "idle" }], ["setFastPoll", { linkId: "b", fast: true }]]);
+  });
+
+  it("leaves a word to the call that waits to send it, so it goes once and a newer one goes last", async () => {
+    vi.useFakeTimers();
+    await engine.connect();
+    void engine.call("setActiveLink", { linkId: "a" });
+    void engine.call("setPresence", { presence: "active" });
+    await vi.advanceTimersByTimeAsync(0);
+    answer(0);
+    scripted.refuseWith(new Error("down"));
+    scripted.connections[0].drop();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(engine.reconnecting).toBe(true);
+
+    // While the peer is away, the person opens another chat: that call waits for the connection.
+    scripted.refuseWith(null);
+    const opened = engine.call("setActiveLink", { linkId: "b" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(said(1)).toEqual([["setPresence", { presence: "active" }], ["setActiveLink", { linkId: "b" }]]);
+    answer(1);
+    await expect(opened).resolves.toBeNull();
+  });
+
+  it("tells a word whose call found no peer to the next one that runs", async () => {
+    vi.useFakeTimers();
+    scripted.refuseWith(new Error("The offscreen document did not start"));
+    await expect(engine.call("setActiveLink", { linkId: "a" })).rejects.toThrow("did not start");
+    scripted.refuseWith(null);
+    await engine.connect();
+    expect(said(0)).toEqual([["setActiveLink", { linkId: "a" }]]);
+  });
+
+  it("says idle, not active, when the last active word is older than the peer's idle wait", async () => {
+    vi.useFakeTimers();
+    await engine.connect();
+    void engine.call("setPresence", { presence: "active" });
+    await vi.advanceTimersByTimeAsync(0);
+    answer(0);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    scripted.connections[0].drop();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(said(1)).toEqual([["setPresence", { presence: "idle" }]]);
+  });
+
+  it("sends each word once on the first connection, and says nothing again while it lasts", async () => {
+    vi.useFakeTimers();
+    void engine.call("setActiveLink", { linkId: "a" });
+    void engine.call("setPresence", { presence: "active" });
+    await engine.connect();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(said(0)).toEqual([["setActiveLink", { linkId: "a" }], ["setPresence", { presence: "active" }]]);
+    expect(scripted.connections).toHaveLength(1);
+  });
+});
+
 describe("what the peer tells the page", () => {
   it("keeps the latest state and tells subscribers until they unsubscribe", async () => {
     await engine.connect();

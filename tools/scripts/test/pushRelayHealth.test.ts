@@ -24,7 +24,11 @@ describe("the push relay's health check (infra/services/push-relay)", () => {
     expect(await fresh.json()).toEqual({ ok: true });
     expect((await post("https://127.0.0.1/x")).status).toBe(502);
     expect((await post("https://example.com/x")).status).toBe(400);
-    expect((await fetch(`${url}/`)).status).toBe(405);
+    // Someone opening the relay's address in a browser reads what it is and what it takes, as on the HyperDHT relay.
+    const opened = await fetch(`${url}/`);
+    expect(opened.status).toBe(405);
+    expect(opened.headers.get("allow")).toBe("POST, OPTIONS");
+    expect(await opened.json()).toEqual({ error: "Ghostly push relay: POST a push to it" });
     expect((await fetch(`${url}/status`)).status).toBe(405);
     expect(await (await fetch(`${url}/healthz?probe=1`)).json()).toEqual({ ok: true });
     expect(relay.stats()).toEqual({ forwarded: 0, failed: 1, refused: 3, tracked: 1 });

@@ -17,8 +17,37 @@ import type { PairingCredentials, PairingState } from "../../src/pairedSession";
  * as leaveDhtOnly.test.ts's harness, for the first pairing rather than the way back from DHT-only.
  */
 
-const realSetTimeout = globalThis.setTimeout;
-export const yieldToLoop = () => new Promise<void>(resolve => realSetTimeout(resolve, 0));
+/**
+ * WebCrypto calls not settled yet. They run on Node's thread pool, in real time: a step of fake time waits for them,
+ * so where they fall in fake time does not hang on how fast the machine is.
+ */
+const pendingCrypto: Set<Promise<unknown>> = ((globalThis as { [k: symbol]: Set<Promise<unknown>> })[Symbol.for("ghostly.test.pendingCrypto")] ??= (() => {
+  const pending = new Set<Promise<unknown>>();
+  const subtle = globalThis.crypto.subtle as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+  for (const name of ["digest", "sign", "verify", "importKey", "exportKey", "generateKey", "encrypt", "decrypt", "deriveBits", "deriveKey", "wrapKey", "unwrapKey"]) {
+    const real = subtle[name].bind(subtle);
+    subtle[name] = (...args: unknown[]) => {
+      const call = real(...args);
+      pending.add(call);
+      void call.catch(() => {}).finally(() => pending.delete(call));
+      return call;
+    };
+  }
+  return pending;
+})());
+const realSetImmediate = globalThis.setImmediate;
+const turn = () => new Promise<void>(resolve => realSetImmediate(resolve));
+/**
+ * Lets what the last step of fake time started run: one turn of the event loop, and every WebCrypto call to its end.
+ * (A real `setTimeout(…, 0)` waited 1 ms each step: 100 ms steps over minutes of fake time took minutes of real time.)
+ */
+export async function yieldToLoop(): Promise<void> {
+  await turn();
+  while (pendingCrypto.size) {
+    await Promise.allSettled([...pendingCrypto]);
+    await turn();
+  }
+}
 const after = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
 export interface NetworkModel {

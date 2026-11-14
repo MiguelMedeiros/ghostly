@@ -182,6 +182,22 @@ describe("listen, events and chat history", () => {
     translator.close();
   });
 
+  it("listen --translate --turns translates only what becomes a turn: a contact's edits and a group's chatter are not", async () => {
+    const dir = fakeHome(), translator = open(dir), lines: string[] = [], asked: string[] = [];
+    const translate = (event: GhostlyEvent) => { asked.push(event.type); return translator.event(event); };
+    const handle = eventHandler({ types: [], turns: true, print: true, write: (line) => lines.push(line), translate });
+    const long = `Obrigado por tudo, até amanhã ${"x".repeat(16_000)}`;
+    for (let i = 0; i < 50; i++) handle(received(long, {}, "message.edited"));
+    for (let i = 0; i < 50; i++) handle({ ...received(long, { member: "member1" }, "group.message"), chat: undefined, group: "group1" });
+    handle(received("Chego aí em 10 minutos, tudo bem?"));
+    await handle.idle();
+    expect(asked).toEqual(["message.received"]);
+    const turns = lines.map((line) => JSON.parse(line));
+    expect(turns).toHaveLength(1);
+    expect(turns[0].untrusted.translation).toMatchObject({ from: "pt" });
+    translator.close();
+  });
+
   it("a join notice is the app's line: never translated", async () => {
     const dir = fakeHome(), translator = open(dir);
     const joined = received("👋 Ana entrou, tudo bem", {}, "chat.joined");

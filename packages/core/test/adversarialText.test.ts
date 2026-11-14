@@ -30,6 +30,11 @@ describe("closing brackets after a link", () => {
     quickly(() => parseLinkPreview({ u: "https://x.example/", t: "t" }, text));
   });
 
+  it("and emoji after a link are trimmed in linear time", () => {
+    const text = "https://x.example/a" + "🔥.)".repeat(SIZE / 4);
+    expect(quickly(() => linkEnd(text))).toBe("https://x.example/a");
+  });
+
   it("that the link opened stay, and the sentence's do not", () => {
     expect(linkEnd("https://en.wikipedia.org/wiki/Tor_(network))")).toBe("https://en.wikipedia.org/wiki/Tor_(network)");
     expect(linkEnd("https://x.example/a].")).toBe("https://x.example/a");

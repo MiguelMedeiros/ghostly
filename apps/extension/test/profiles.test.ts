@@ -208,7 +208,7 @@ describe("switching", () => {
 
   it("switches made one after another while each next peer starts: the page of the last profile gets that profile's peer", async () => {
     const reload = vi.fn();
-    Object.assign(globalThis, { location: { reload }, history: { replaceState: vi.fn() } });
+    Object.assign(globalThis, { window: new EventTarget(), location: { reload }, history: { replaceState: vi.fn() } });
     try {
       await ensure();
       /** The next peer to start takes a moment to open its database, until let go. */
@@ -248,6 +248,7 @@ describe("switching", () => {
       expect(servers.filter((s) => s.attached.length).map((s) => s.database)).not.toContain(`ghostly_${WORK}`);
       expect(world.locks).toEqual(new Map([["ghostly-peer", "offscreen"]]));
     } finally {
+      delete (globalThis as { window?: unknown }).window;
       delete (globalThis as { location?: unknown }).location;
       delete (globalThis as { history?: unknown }).history;
     }
@@ -350,9 +351,16 @@ describe("pages follow a switch made in another tab", () => {
 
 describe("a page that follows a switch starts again where the profile in use was left", () => {
   // This page showed a group of the profile before the switch: that id means nothing to the profile after it.
+  /** What the page went through: where it reloaded to, and the switch overlay it was told of before that. */
+  const overlays: { name: string; reloadsBefore: number }[] = [];
+  const session = new Map<string, string>();
   async function startAgain(): Promise<{ hash: string; reloads: number }> {
     const page = { hash: "#/group/AAAAAAAAAAAAAAAAAAAAAA", reloads: 0 };
+    const window = new EventTarget();
+    window.addEventListener("profile-switching", (e) => overlays.push({ name: (e as CustomEvent<{ name: string }>).detail.name, reloadsBefore: page.reloads }));
     Object.assign(globalThis, {
+      window,
+      sessionStorage: { getItem: (key: string) => session.get(key) ?? null, setItem: (key: string, value: string) => void session.set(key, value) },
       location: { get hash() { return page.hash; }, reload: () => page.reloads++ },
       history: { replaceState: (_state: unknown, _title: string, url: string) => (page.hash = url) },
     });
@@ -362,8 +370,9 @@ describe("a page that follows a switch starts again where the profile in use was
   }
 
   afterEach(() => {
-    delete (globalThis as { location?: unknown }).location;
-    delete (globalThis as { history?: unknown }).history;
+    for (const key of ["window", "sessionStorage", "location", "history"]) delete (globalThis as Record<string, unknown>)[key];
+    overlays.length = 0;
+    session.clear();
   });
 
   it("on the chat list, for a profile never left on a page", async () => {
@@ -375,6 +384,15 @@ describe("a page that follows a switch starts again where the profile in use was
     useProfile(world, WORK);
     world.storage.set(`ghostly_${WORK}_last_route`, "/chat/BBBBBBBBBBBBBBBBBBBBBB");
     expect(await startAgain()).toEqual({ hash: "#/chat/BBBBBBBBBBBBBBBBBBBBBB", reloads: 1 });
+  });
+
+  // Until its reload lands this page re-reads the registry: it showed the old profile's page under the new one's name.
+  it("under that profile's overlay, as the tab that switched shows it, kept for the page that loads next", async () => {
+    useProfile(world, WORK);
+    await startAgain();
+    const name = JSON.parse(world.storage.get("ghostly_profiles")!).profiles.find((p: { id: string }) => p.id === WORK).name;
+    expect(overlays).toEqual([{ name, reloadsBefore: 0 }]);
+    expect(JSON.parse(session.get("ghostly_switching")!)).toMatchObject({ id: WORK, name });
   });
 });
 
@@ -529,7 +547,7 @@ describe("a contact's app open as the profile before", () => {
 
   it("does not open from a page of the profile before a switch: that page starts again instead", async () => {
     const reload = vi.fn();
-    Object.assign(globalThis, { location: { reload }, history: { replaceState: vi.fn() } });
+    Object.assign(globalThis, { window: new EventTarget(), location: { reload }, history: { replaceState: vi.fn() } });
     try {
       await ensure();
       const { openPageProfile } = await world.load("page", () => import("../src/profile.ts"));
@@ -540,6 +558,7 @@ describe("a contact's app open as the profile before", () => {
       expect(reload).toHaveBeenCalledTimes(1);
       expect(world.callsTo("tabs.create")).toEqual([]);
     } finally {
+      delete (globalThis as { window?: unknown }).window;
       delete (globalThis as { location?: unknown }).location;
       delete (globalThis as { history?: unknown }).history;
     }
@@ -550,7 +569,7 @@ describe("a page of the profile before a switch", () => {
   it("does not reach the peer of the profile after it, and starts again instead", async () => {
     const reload = vi.fn();
     const replaceState = vi.fn();
-    Object.assign(globalThis, { location: { reload }, history: { replaceState } });
+    Object.assign(globalThis, { window: new EventTarget(), location: { reload }, history: { replaceState } });
     try {
       const { openPageProfile } = await world.load("page", () => import("../src/profile.ts"));
       const { extensionHost } = await world.load("page", () => import("../src/host.ts"));
@@ -565,6 +584,7 @@ describe("a page of the profile before a switch", () => {
       expect(world.callsTo("runtime.connect")).toHaveLength(1);
       expect(log()).toEqual(["start ghostly"]);
     } finally {
+      delete (globalThis as { window?: unknown }).window;
       delete (globalThis as { location?: unknown }).location;
       delete (globalThis as { history?: unknown }).history;
     }

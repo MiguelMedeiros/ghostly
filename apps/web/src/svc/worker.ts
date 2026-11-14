@@ -3,9 +3,10 @@
  * (`isServiceHostname`). Every request that origin's pages make, but the bridge's own files, is handed to the bridge
  * page with a port of its own, and answered with what comes back on it: the contact's answer, streamed. A navigation
  * goes only when it is a frame's this origin started (`startedHere`): at the top, the app says it opens inside Ghostly. Built on its
- * own into `/ghostly-services-sw.js` (apps/web/svcBuild.ts). It keeps nothing: no cache, no storage.
+ * own into `/ghostly-services-sw.js` (apps/web/svcBuild.ts). It keeps nothing: no cache, no storage, only a navigation
+ * it could not place for the few seconds its own page takes to go on with it (`goOn`).
  */
-import { BRIDGE_DIR, BRIDGE_PAGE, WORKER_SCRIPT, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, NULL_BODY, answerStatus, fromView, isServiceHostname, parseServicesHost, type ServiceReply, type ServiceRequestMessage } from "./protocol";
+import { BRIDGE_DIR, BRIDGE_PAGE, WORKER_SCRIPT, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, NULL_BODY, answerStatus, fromView, isServiceHostname, parseServicesHost, type ServiceRead, type ServiceReply, type ServiceRequestMessage } from "./protocol";
 
 declare const __SERVICES_HOST__: string;
 declare const __SERVICES_APP_ORIGIN__: string;
@@ -63,6 +64,16 @@ export function said(status: number, text: string, lang?: string, dir?: string):
   return new Response(html, { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": `${frameAncestors()}; default-src 'none'; style-src 'unsafe-inline'` } });
 }
 
+/**
+ * The app's error answer at a status a Response may carry, as the head's (`answerStatus`): one outside 200-599 is a
+ * 502, and one that takes no body (a 304, say) goes without the words.
+ */
+function failed(status: number, text: string, lang?: string, dir?: string): Response {
+  const kept = answerStatus(status);
+  if (NULL_BODY.has(kept)) return new Response(null, { status: kept, headers: { "cache-control": "no-store", "content-security-policy": frameAncestors() } });
+  return said(kept, text, lang, dir);
+}
+
 /** The bridge page open on this origin, among its pages: the one way to the app, and so to the contact. */
 function bridge(all: WindowClient[]): WindowClient | undefined {
   // Framed, as the app frames it: a bridge page opened on its own (by another site, say) has no way to the app.
@@ -73,18 +84,64 @@ function bridge(all: WindowClient[]): WindowClient | undefined {
  * Whether this origin started a navigation: a frame's (the bridge's first, a link in the app), with this origin's
  * referrer or, with none, from one of its own pages. Another site may navigate a window or a frame of its own here;
  * where this worker is in its partition (a services host on the app's own site), that would reach the contact as this
- * person, with the page's cookies.
+ * person, with the page's cookies. Undefined when nothing says: a frame's navigation with no referrer (the app's page
+ * sends none) and no client, as Firefox and WebKit hand every one.
  */
-function startedHere(event: FetchEvent, all: WindowClient[]): boolean {
+function startedHere(event: FetchEvent, all: WindowClient[]): boolean | undefined {
   const { destination, referrer } = event.request;
   if (destination !== "iframe" && destination !== "frame") return false;
   if (referrer) { try { return new URL(referrer).origin === worker.location.origin; } catch { return false; } }
-  return !!event.clientId && all.some((client) => client.id === event.clientId);
+  if (!event.clientId) return undefined;
+  return all.some((client) => client.id === event.clientId);
 }
 
-/** The request body, read up to the data link's limit: null past it. */
+/** A navigation `goOn` keeps until its page goes on with it: what goes to the contact then, in its place. */
+interface Kept { url: string; method: string; headers: Headers; body: ArrayBuffer | null; until: number }
+const kept = new Map<string, Kept>();
+const KEPT_MS = 30_000;
+const MAX_KEPT = 4;
+
+/** The query key the "go on" page puts its token under, on its own address: the next navigation's referrer. */
+export const GO_KEY = "ghostly-go";
+/** The "go on" page's one script: its token into its own address, then the same navigation again, with a referrer. */
+export const GO_SCRIPT = `(()=>{const to=location.href,at=new URL(to);at.searchParams.set("${GO_KEY}",document.currentScript.dataset.go);history.replaceState(null,"",at);location.replace(to)})()`;
+let goHash: Promise<string> | undefined;
+
+/**
+ * A frame's navigation nothing places (`startedHere`), answered with a page of this worker's own in place of the
+ * contact's: one that renders only inside Ghostly (`frame-ancestors`), so in another site's frame nothing runs and
+ * nothing reaches the contact. Inside Ghostly its script asks again, now with this origin's referrer and a token, and
+ * the request kept here goes as it was made (a form's POST and its body too). Kept once, for a little while.
+ */
+async function goOn(request: Request): Promise<Response> {
+  const body = await readBody(request);
+  if (body === "too-large") return plain(413, "The request body is too large.");
+  const now = Date.now();
+  for (const [token, one] of kept) if (one.until <= now || kept.size >= MAX_KEPT) kept.delete(token);
+  const token = crypto.randomUUID();
+  kept.set(token, { url: request.url, method: request.method, headers: new Headers(request.headers), body, until: now + KEPT_MS });
+  goHash ??= crypto.subtle.digest("SHA-256", new TextEncoder().encode(GO_SCRIPT))
+    .then((digest) => `'sha256-${btoa(String.fromCharCode(...new Uint8Array(digest)))}'`);
+  const html = `<!doctype html><meta charset="utf-8"><script data-go="${token}">${GO_SCRIPT}</script>`;
+  return new Response(html, { status: 200, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "referrer-policy": "same-origin", "content-security-policy": `${frameAncestors()}; default-src 'none'; script-src ${await goHash}` } });
+}
+
+/** The navigation a "go on" page asked for again (its token in the referrer, the same address): taken, once. */
+function takeKept(request: Request): Kept | undefined {
+  let token: string | null;
+  try { token = new URL(request.referrer).searchParams.get(GO_KEY); } catch { return undefined; }
+  const one = token ? kept.get(token) : undefined;
+  if (!one) return undefined;
+  kept.delete(token!);
+  return one.url === request.url && one.until > Date.now() ? one : undefined;
+}
+
+/** The request body, read up to the data link's limit: "too-large" past it, null when there is none. */
 async function readBody(request: Request): Promise<ArrayBuffer | null | "too-large"> {
-  if (["GET", "HEAD"].includes(request.method) || !request.body) return null;
+  if (["GET", "HEAD"].includes(request.method)) return null;
+  // Firefox has no `Request.body` (undefined, where null means no body): its body is read whole, within the limit.
+  if (request.body === undefined) return readWhole(request);
+  if (!request.body) return null;
   const reader = request.body.getReader();
   const parts: Uint8Array[] = [];
   let size = 0;
@@ -102,38 +159,77 @@ async function readBody(request: Request): Promise<ArrayBuffer | null | "too-lar
 }
 
 /**
+ * The body of a request with no stream to read it by (Firefox's): refused unread when its declared length is past the
+ * limit, and refused after reading when it turns out past it. An empty one is no body, as where the stream is null.
+ */
+async function readWhole(request: Request): Promise<ArrayBuffer | null | "too-large"> {
+  const declared = request.headers.get("content-length")?.trim();
+  if (declared && /^\d+$/.test(declared) && Number(declared) > MAX_REQUEST_BYTES) return "too-large";
+  const body = await request.arrayBuffer();
+  if (body.byteLength > MAX_REQUEST_BYTES) return "too-large";
+  return body.byteLength ? body : null;
+}
+
+/**
  * The contact's answer to one request. Headers the page's browser set go as they are (the engine drops the ones a
  * proxy must not pass on); cookies are the app's to keep, by the bridge's jar, as a worker never sees them.
  */
 async function forward(event: FetchEvent): Promise<Response> {
   const request = event.request;
   const all = await worker.clients.matchAll({ type: "window", includeUncontrolled: true });
-  if (request.mode === "navigate" && !startedHere(event, all)) return plain(403, "This app opens only inside Ghostly.");
+  let again: Kept | undefined;
+  if (request.mode === "navigate") {
+    const started = startedHere(event, all);
+    if (started === undefined) return goOn(request);
+    if (!started) return plain(403, "This app opens only inside Ghostly.");
+    again = takeKept(request);
+  }
   const to = bridge(all);
   if (!to) return plain(503, "This app is open only while Ghostly shows it.");
-  const body = await readBody(request);
+  const body = again ? again.body : await readBody(request);
   if (body === "too-large") return plain(413, "The request body is too large.");
   const url = new URL(request.url);
   const headers: [string, string][] = [];
-  request.headers.forEach((value, name) => { if (name !== "cookie") headers.push([name, value]); });
-  const message: ServiceRequestMessage = { type: "request", method: request.method, path: url.pathname + url.search, headers, body, destination: request.destination };
+  (again?.headers ?? request.headers).forEach((value, name) => { if (name !== "cookie") headers.push([name, value]); });
+  const message: ServiceRequestMessage = { type: "request", method: again?.method ?? request.method, path: url.pathname + url.search, headers, body, destination: request.destination, flow: true };
   const channel = new MessageChannel();
   const port = channel.port1;
-  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  // The answer's chunks wait here, not in the stream, until the frame reads: the page is told what it read, and sends
+  // only `ANSWER_AHEAD_BYTES` past that, so an answer the frame leaves unread stays on the link.
+  const waiting: Uint8Array[] = [];
+  let last: { error: Error } | "end" | null = null;
+  let read = 0;
+  let wanted: (() => void) | null = null;
+  const give = (c: ReadableStreamDefaultController<Uint8Array>): boolean => {
+    const bytes = waiting.shift();
+    if (bytes) {
+      c.enqueue(bytes);
+      read += bytes.byteLength;
+      port.postMessage({ type: "read", bytes: read } satisfies ServiceRead);
+    } else if (last === "end") c.close();
+    else if (last) c.error(last.error);
+    else return false;
+    return true;
+  };
+  const arrived = () => { wanted?.(); wanted = null; };
   const stream = new ReadableStream<Uint8Array>({
-    start(c) { controller = c; },
-    cancel() { port.postMessage({ type: "cancel" }); port.close(); },
-  });
+    pull(c) { if (!give(c)) return new Promise<void>((resolve) => { wanted = () => { give(c); resolve(); }; }); },
+    cancel() { waiting.length = 0; port.postMessage({ type: "cancel" }); port.close(); },
+  }, { highWaterMark: 0 });
   return new Promise<Response>((resolve) => {
     let answered = false;
     const timer = setTimeout(() => { if (!answered) { answered = true; port.close(); resolve(plain(504, "The app did not answer in time.")); } }, HEAD_TIMEOUT_MS);
     // The app's page gave up on it before any answer (its own abort): the page lets go of it too, body and all.
     request.signal.addEventListener("abort", () => { if (!answered) port.postMessage({ type: "cancel" }); }, { once: true });
+    /** The page's answer, once: a Response refused by the browser (a status it takes no body with) ends it as a 502. */
+    const settle = (make: () => Response): boolean => {
+      answered = true;
+      clearTimeout(timer);
+      try { resolve(make()); return true; } catch { resolve(plain(502, "The request failed.")); return false; }
+    };
     port.onmessage = (event: MessageEvent<ServiceReply>) => {
       const reply = event.data;
       if (reply?.type === "head" && !answered) {
-        answered = true;
-        clearTimeout(timer);
         const status = answerStatus(reply.status);
         // Framed by the bridge, under the app, and by nothing else: no other site, nor another contact's app. The
         // app's own X-Frame-Options would refuse the bridge, so this policy takes its place.
@@ -146,16 +242,19 @@ async function forward(event: FetchEvent): Promise<Response> {
           try { out.append(name, kept); } catch { /* not a header a Response takes */ }
         }
         out.append("content-security-policy", frameAncestors());
-        resolve(new Response(NULL_BODY.has(status) || request.method === "HEAD" ? null : stream, { status, headers: out }));
-        if (NULL_BODY.has(status) || request.method === "HEAD") port.close();
-      } else if (reply?.type === "chunk" && answered) {
-        try { controller.enqueue(reply.bytes); } catch { /* the page stopped reading */ }
+        const empty = NULL_BODY.has(status) || request.method === "HEAD";
+        if (!settle(() => new Response(empty ? null : stream, { status, headers: out }))) { port.postMessage({ type: "cancel" }); port.close(); }
+        else if (empty) port.close();
+      } else if (reply?.type === "chunk" && answered && !last) {
+        waiting.push(reply.bytes);
+        arrived();
       } else if (reply?.type === "end") {
-        try { controller.close(); } catch { /* already closed */ }
+        last ??= "end";
+        arrived();
         port.close();
       } else if (reply?.type === "error") {
-        if (!answered) { answered = true; clearTimeout(timer); resolve(said(reply.status, reply.text, reply.lang, reply.dir)); }
-        else { try { controller.error(new Error(reply.text)); } catch { /* already closed */ } }
+        if (!answered) settle(() => failed(reply.status, reply.text, reply.lang, reply.dir));
+        else { last ??= { error: new Error(reply.text) }; arrived(); }
         port.close();
       }
     };

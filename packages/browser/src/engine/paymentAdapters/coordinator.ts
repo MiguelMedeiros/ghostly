@@ -61,7 +61,22 @@ export class PaymentCoordinator {
     }
     await this.repository.put(saved); this.changed(saved.review); return saved.review;
   }); }
-  reconcile(id: string): Promise<PaymentReview> { return this.once(id,async () => {
+  /**
+   * A reconcile asked for while another call on the same payment is under way (the approval, or a status check) may
+   * bring news it started too early to see: the contact saying they took the ecash just after the mint was asked. It
+   * runs once more after that call, shared by every caller meanwhile, instead of taking that call's older answer: the
+   * payer's card waited for the next poll, up to 10 s after the contact had it.
+   */
+  reconcile(id: string): Promise<PaymentReview> {
+    const running=this.active.get(id);
+    if(!running)return this.reconcileNow(id);
+    let next=this.again.get(id);
+    if(!next){next=running.catch(()=>{}).then(()=>{this.again.delete(id);return this.reconcile(id);});this.again.set(id,next);}
+    return next;
+  }
+  /** The reconcile after the one under way, by payment (`reconcile`). */
+  private again = new Map<string, Promise<PaymentReview>>();
+  private reconcileNow(id: string): Promise<PaymentReview> { return this.once(id,async () => {
     const saved = await this.require(id);
     if (!["submitted","unknown"].includes(saved.review.state)) return saved.review;
     // Parked by a copy started from older state: its signed bytes are never sent again, and nothing is asked here.

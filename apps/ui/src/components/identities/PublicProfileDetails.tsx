@@ -16,7 +16,8 @@ const ASKED: Record<string, { network: string; host?: string }> = {
  * An identity's public profile, under its card (the Identities page's details) or on its back (a contact's card, the
  * chat's picker): name and handle, a short bio, followers and following where the network counts them, and where it
  * was loaded from, since asking tells that host this device's IP address. What the account says about itself is not
- * part of the proof, and says so. `tone`: "back" on a card's dark back, "panel" on the page. `compact` leaves the bio out.
+ * part of the proof, and says so. The account's own words are each in a <bdi>: in Arabic, "alice!" showed as "!alice".
+ * `tone`: "back" on a card's dark back, "panel" on the page. `compact` leaves the bio out.
  */
 export function PublicProfileDetails({ provider, profile, tone = "back", compact, testId = "public-profile" }: {
   provider: string; profile?: PublicProfileView; tone?: "back" | "panel"; compact?: boolean; testId?: string;
@@ -38,12 +39,12 @@ export function PublicProfileDetails({ provider, profile, tone = "back", compact
         <div className="public-profile-head">
           {profile.avatar?.startsWith("data:image/") && <img src={profile.avatar} alt="" className="public-profile-avatar" data-testid={`${testId}-avatar`} />}
           <span className="public-profile-who">
-            {profile.name && <span className="public-profile-name" data-testid={`${testId}-name`}>{profile.name}</span>}
-            {profile.handle && <span className="public-profile-handle" data-testid={`${testId}-handle`}>{profile.handle}</span>}
+            {profile.name && <span className="public-profile-name" data-testid={`${testId}-name`}><bdi>{profile.name}</bdi></span>}
+            {profile.handle && <span className="public-profile-handle" data-testid={`${testId}-handle`}><bdi>{profile.handle}</bdi></span>}
             {counts && <span className="public-profile-counts" data-testid={`${testId}-counts`}>{counts}</span>}
           </span>
         </div>
-        {!compact && profile.about && <p className="public-profile-about" data-testid={`${testId}-about`}>{profile.about}</p>}
+        {!compact && profile.about && <p className="public-profile-about" data-testid={`${testId}-about`}><bdi>{profile.about}</bdi></p>}
         {!profile.avatar && profile.avatarMiss && <p className="public-profile-note" data-testid={`${testId}-picture-miss`}>{t("identities.profile.pictureMiss", { reason: profile.avatarMiss })}</p>}
       </>}
       {read && <p className="public-profile-source" data-testid={`${testId}-source`}>

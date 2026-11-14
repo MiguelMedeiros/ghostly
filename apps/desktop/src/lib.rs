@@ -132,6 +132,7 @@ macro_rules! commands {
             app_sandbox::app_focused,
             app_sandbox::app_open,
             app_sandbox::app_post,
+            app_sandbox::app_post_bytes,
             app_sandbox::app_title,
             clipboard::copy_secret,
             clipboard::incoming_share_done,
@@ -542,29 +543,49 @@ fn depart<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> bool {
         return false;
     }
     let _ = page.eval("window.dispatchEvent(new Event('ghostly-departing'))");
-    part(app);
+    tauri::async_runtime::spawn(part(app));
     true
 }
 
 /// What the page left to be said for it on its sessions as the app goes (a call's hang-up), said now by the
 /// transports themselves: a logout or a shutdown signals WebKit's processes with the app, and the page's own goodbye
 /// then never runs. Said again by the page, it is one the contact already heard (`PairedCalls.parting`, in core).
-fn part<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
-    let Some(transports) = app.try_state::<paired_transport::TransportState>() else {
-        return;
-    };
-    let transports = transports.inner().clone();
+fn part<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> impl std::future::Future<Output = ()> + Send + 'static {
+    let transports = app
+        .try_state::<paired_transport::TransportState>()
+        .map(|state| state.inner().clone());
     #[cfg(desktop)]
     let hyperdht = app
         .try_state::<hyperdht::HyperState>()
         .map(|state| state.inner().clone());
-    tauri::async_runtime::spawn(async move {
+    async move {
+        let Some(transports) = transports else {
+            return;
+        };
         #[cfg(desktop)]
         if let Some(hyperdht) = hyperdht {
             hyperdht.part().await;
         }
         transports.part().await;
-    });
+    }
+}
+
+/// The app exits, whatever ended it: what the page left to be said goes first (`part`, within `DEPART_MS`), then the
+/// native connections close (within `CLOSE_MS`). Cmd+Q and `quit` on macOS end the app from
+/// `applicationWillTerminate`, with no `ExitRequested` and so no `depart`: a call's hang-up said only by `depart`
+/// was lost there, and the contact's call stayed up until its media gave up. After `depart` there is nothing left.
+async fn leave<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let parting = part(app);
+    let transports = app
+        .state::<paired_transport::TransportState>()
+        .inner()
+        .clone();
+    let _ = tokio::time::timeout(std::time::Duration::from_millis(DEPART_MS), parting).await;
+    transports
+        .shutdown(std::time::Duration::from_millis(CLOSE_MS))
+        .await;
 }
 
 /// A window asked to close. The Ghostly window on a Mac hides (`app_window`). On Linux and Windows its close ends the
@@ -666,8 +687,9 @@ fn exit_on_signals(quit: impl FnOnce() + Send + 'static) {
 /// - Any other exit the loop is asked for (`app.exit`): held for `DEPART_MS` while the page says goodbye, then let
 ///   through.
 /// - Every exit, those or a quit that nothing can hold (Cmd+Q and `quit` on macOS end the process
-///   from `applicationWillTerminate`): the native connections close, so each contact sees its close, and on Linux
-///   the app's notifications go from the desktop's list (`notifications::exit`).
+///   from `applicationWillTerminate`): a call's hang-up the page left is said, the native connections close, so each
+///   contact sees its close (`leave`), and on Linux the app's notifications go from the desktop's list
+///   (`notifications::exit`).
 fn on_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
     match event {
         tauri::RunEvent::ExitRequested { code, api, .. } => {
@@ -685,13 +707,7 @@ fn on_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
         #[cfg(target_os = "macos")]
         tauri::RunEvent::Reopen { .. } => app_window::show_main(app),
         tauri::RunEvent::Exit => {
-            let transports = app
-                .state::<paired_transport::TransportState>()
-                .inner()
-                .clone();
-            tauri::async_runtime::block_on(
-                transports.shutdown(std::time::Duration::from_millis(CLOSE_MS)),
-            );
+            tauri::async_runtime::block_on(leave(app));
             notifications::exit();
             // Ghostly launched again while this app was leaving: that launch starts now, a window of its own.
             #[cfg(target_os = "linux")]
@@ -937,6 +953,7 @@ mod tests {
         for command in [
             "app_open",
             "app_post",
+            "app_post_bytes",
             "app_focus",
             "app_focused",
             "app_title",
@@ -1014,6 +1031,62 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(error.contains("not allowed"), "{error}");
+    }
+
+    /// The Ghostly window's broker answers an app's read with the bytes as the request's raw body, the window and the
+    /// request it answers in its headers (`app_post_bytes`): through the real IPC path, as `apps/ui` desktopOpener sends it.
+    #[test]
+    fn the_ghostly_window_answers_an_app_with_raw_bytes() {
+        // covers: apps.desktop-sandbox
+        let app = app();
+        let request = serde_json::from_value(serde_json::json!({
+            "app": "ana/cinema", "title": "Cinema", "entry": "<p>cinema</p>",
+        }))
+        .unwrap();
+        let label = app_sandbox::open(app.handle(), request).unwrap();
+        let main = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let post = |body: InvokeBody, headers: &[(&'static str, &str)]| {
+            let mut map = tauri::http::HeaderMap::new();
+            for (name, value) in headers {
+                map.insert(*name, value.parse().unwrap());
+            }
+            get_ipc_response(
+                &main,
+                InvokeRequest {
+                    cmd: "app_post_bytes".into(),
+                    callback: CallbackFn(0),
+                    error: CallbackFn(1),
+                    url: "tauri://localhost".parse().unwrap(),
+                    body,
+                    headers: map,
+                    invoke_key: INVOKE_KEY.to_string(),
+                },
+            )
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+        };
+        // No request of that window waits for id 3: nobody to tell, as for `app_post`.
+        post(
+            InvokeBody::Raw(vec![0, 1, 2]),
+            &[("x-label", &label), ("x-id", "3")],
+        )
+        .unwrap();
+        let error = post(InvokeBody::Raw(vec![0]), &[("x-id", "3")]).unwrap_err();
+        assert!(error.contains("Missing x-label"), "{error}");
+        let error = post(
+            InvokeBody::Json(serde_json::json!({"label": label, "id": 3})),
+            &[("x-label", &label), ("x-id", "3")],
+        )
+        .unwrap_err();
+        assert!(error.contains("Expected raw bytes"), "{error}");
+        let error = post(
+            InvokeBody::Raw(vec![0]),
+            &[("x-label", "main"), ("x-id", "3")],
+        )
+        .unwrap_err();
+        assert!(error.contains("Not an app window"), "{error}");
     }
 
     #[test]

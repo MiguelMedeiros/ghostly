@@ -17,11 +17,18 @@ import type { RuntimeMessage } from "./messages";
 /** As AttentionFeedback: an event older than this is a replay, not news. */
 const LIVE_MS = 5000;
 
-/** Tells the person of an event no tab heard, when a tab would have shown a notification for it. */
-export async function noticeUnheard(event: AttentionEvent, links: readonly { id: string; peerPubKeyZ32: string }[]): Promise<void> {
+/**
+ * Tells the person of an event no tab heard, when a tab would have shown a notification for it. `links` builds the
+ * engine's whole state (every chat's and group's view): read only for a 1:1 chat's event that may be shown, not for each
+ * event the peer hears (a sound's cue, a coin, any message with notifications off, a group's).
+ */
+export async function noticeUnheard(event: AttentionEvent, links: () => readonly { id: string; peerPubKeyZ32: string }[]): Promise<void> {
   if (Date.now() - event.at > LIVE_MS) return;
-  const chat = chatOfLink(event.linkId, links);
-  if (!attentionOutcome(event.type, mutedFor(chat, !!event.mention), notificationSettings(), true).notice) return;
+  const settings = notificationSettings();
+  // Muted or not: nothing a muted chat shows is shown when it is not.
+  if (!attentionOutcome(event.type, false, settings, true).notice) return;
+  const chat = chatOfLink(event.linkId, event.linkId && !event.linkId.startsWith("group:") ? links() : []);
+  if (!attentionOutcome(event.type, mutedFor(chat, !!event.mention), settings, true).notice) return;
   const { t } = await profileWords();
   const body = event.type === "reaction" ? t("chat.reactions.notice") : t("settings.privateNotice");
   await chrome.runtime.sendMessage({ target: "background", type: "notify", body, ...(chat ? { chat } : {}) } satisfies RuntimeMessage);

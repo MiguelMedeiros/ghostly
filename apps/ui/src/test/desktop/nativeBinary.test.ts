@@ -86,9 +86,17 @@ describe("the Desktop's native channels and binary messages", () => {
     expect(channel.bufferedAmount).toBe(0);
   });
 
-  it("Iroh's carries text only: nothing binary is offered on it, and none is sent", async () => {
-    const { channel } = await incoming(createIrohEndpoint);
-    expect(channel.binary).toBeFalsy();
-    expect(() => channel.send(new Uint8Array([0x04, 1]))).toThrow();
+  it("Iroh's carries them too: a file between two Desktops goes as its bytes, not as base64 text a third larger", async () => {
+    const { channel, heard } = await incoming(createIrohEndpoint);
+    expect(channel.binary).toBe(true);
+    channel.send(new Uint8Array([0x04, 0, 255, 10]));
+    channel.send("{\"t\":\"ping\"}");
+    await vi.waitFor(() => expect(tauri.invoke.mock.calls.filter(([command]) => command === "paired_native_send").map(([, args]) => args)).toEqual([
+      { endpointId: 1, connectionId: 7, bytes: "BAD/Cg==" },
+      { endpointId: 1, connectionId: 7, text: "{\"t\":\"ping\"}" },
+    ]));
+    tauri.channels[0].onmessage!({ type: "frame", id: 7, bytes: "BAD/Cg==" });
+    tauri.channels[0].onmessage!({ type: "frame", id: 7, text: "hello" });
+    expect(heard).toEqual([new Uint8Array([0x04, 0, 255, 10]), "hello"]);
   });
 });

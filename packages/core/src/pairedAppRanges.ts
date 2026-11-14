@@ -36,6 +36,11 @@ export const APP_RANGE_LIMITS = {
    * are asked, so a cancelled one counts as the read it started. Twice the asking app's own budget (16 MiB a second).
    */
   bytesPerSecond: 32 * 1024 * 1024,
+  /**
+   * The least one ask counts in `bytesPerSecond`, however few bytes it asked or the file held from its offset: each is
+   * a read on this device, so a contact gets at most 512 a second.
+   */
+  askFloorBytes: 64 * 1024,
 } as const;
 
 /**
@@ -227,6 +232,8 @@ const slot = (app: string, request: number) => `${app}:${request}`;
  */
 export class AppRanges {
   private readonly serves = new Map<string, { app: string; file: string }>();
+  /** The same serves by app, then file: an app may serve 100,000 files, and walking `serves` for each was O(n²). */
+  private readonly servesByApp = new Map<string, Map<string, string>>();
   private readonly serving = new Map<string, Serving>();
   /**
    * Tasks cancelled, unserved, or stopped by the contact's close or a session's end, that this side is still reading or
@@ -254,10 +261,14 @@ export class AppRanges {
    */
   serve(app: string, file: string): string {
     if (!isChatAppId(app)) throw new Error("Not a chat app id");
-    for (const [served, serve] of this.serves) if (serve.app === app && serve.file === file) return served;
+    const files = this.servesByApp.get(app) ?? new Map<string, string>();
+    const served = files.get(file);
+    if (served !== undefined) return served;
     let id = this.newServeId();
     while (this.serves.has(id)) id = this.newServeId();
     this.serves.set(id, { app, file });
+    files.set(file, id);
+    this.servesByApp.set(app, files);
     return id;
   }
 
@@ -266,13 +277,16 @@ export class AppRanges {
     const serve = this.serves.get(serveId);
     if (!serve) return false;
     this.serves.delete(serveId);
+    const files = this.servesByApp.get(serve.app)!;
+    files.delete(serve.file);
+    if (!files.size) this.servesByApp.delete(serve.app);
     for (const task of this.serving.values()) if (task.serve === serveId) this.drop(task, true);
     return true;
   }
 
   /** The serve ids `app` has given out and not ended (what the panel's "Sharing with" line shows). */
   servesOf(app: string): string[] {
-    return [...this.serves].filter(([, serve]) => serve.app === app).map(([id]) => id);
+    return [...this.servesByApp.get(app)?.values() ?? []];
   }
 
   /** An `ar-get` from the contact: the task to read and send, or null when it was refused (the refusal is sent) or dropped. */
@@ -288,10 +302,11 @@ export class AppRanges {
     // Each ask is a read on this device, cancelled or not: past the bytes a second, nothing more is read.
     const at = this.now();
     while (this.taken.length && this.taken[0]!.at <= at - 1000) { const old = this.taken.shift()!; old.out = true; this.takenBytes -= old.bytes; }
-    if (this.takenBytes + frame.n > APP_RANGE_LIMITS.bytesPerSecond) { this.send(appRangeErrorFrame(app, request, "busy")); return null; }
-    const charge: Taken = { at, bytes: frame.n };
+    const bytes = Math.max(frame.n, APP_RANGE_LIMITS.askFloorBytes);
+    if (this.takenBytes + bytes > APP_RANGE_LIMITS.bytesPerSecond) { this.send(appRangeErrorFrame(app, request, "busy")); return null; }
+    const charge: Taken = { at, bytes };
     this.taken.push(charge);
-    this.takenBytes += frame.n;
+    this.takenBytes += bytes;
     const task: Serving = { app, request, serve: frame.s, file: serve.file, offset: frame.o, length: frame.n, live: true, charge };
     this.serving.set(slot(app, request), task);
     return task;
@@ -308,8 +323,8 @@ export class AppRanges {
     if (!this.take(task)) return;
     // Read and sent whole: it counts what the file held from its offset, not the length asked. An app reading small
     // files at remote.read's 1 MiB was refused `busy` from the 33rd read in a second, having moved ~1 MiB (agents#1766).
-    // A cancelled ask is never finished, and keeps counting the read it started.
-    const charge = (task as Serving).charge, sent = Math.max(0, Math.min(task.length, size - task.offset));
+    // A cancelled ask is never finished, and keeps counting the read it started. Never under `askFloorBytes`.
+    const charge = (task as Serving).charge, sent = Math.max(APP_RANGE_LIMITS.askFloorBytes, Math.min(task.length, size - task.offset));
     if (charge && !charge.out && charge.bytes > sent) { this.takenBytes -= charge.bytes - sent; charge.bytes = sent; }
     this.send(appRangeEndFrame(task.app, task.request, size));
   }
@@ -378,7 +393,8 @@ export class AppRanges {
    * them now.
    */
   closeApp(app: string, error: AppRangeReadError = "peer-closed", stopped = false): void {
-    for (const [id, serve] of this.serves) if (serve.app === app) this.serves.delete(id);
+    for (const id of this.servesByApp.get(app)?.values() ?? []) this.serves.delete(id);
+    this.servesByApp.delete(app);
     for (const key of [...this.sizes.keys()]) if (key.startsWith(`${app} `)) this.sizes.delete(key);
     this.endRequests(app, error, stopped);
   }
@@ -386,7 +402,7 @@ export class AppRanges {
   /** The session ended: no serve id lasts into the next, and every request fails with `offline`. Tasks still being read keep their places into the next. */
   reset(): void {
     this.sizes.clear();
-    for (const app of new Set([...this.serves.values()].map(serve => serve.app))) this.closeApp(app, "offline");
+    for (const app of [...this.servesByApp.keys()]) this.closeApp(app, "offline");
     this.suspend();
   }
 

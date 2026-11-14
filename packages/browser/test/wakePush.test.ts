@@ -511,6 +511,19 @@ describe("online notices: a contact whose app is closed hears that this one came
     expect(bodies(pushSend.mock.calls, secret, auth)).toEqual([{ wake: 1, k: target.token, o: 1 }]);
   });
 
+  it("none while the host says this run is not online to its contacts (a headless profile with no presence)", async () => {
+    const pushSend = vi.fn(async () => 201);
+    let says = false;
+    const node = engine({ pushSend, onlineNotices: () => says });
+    const { target, secret, auth } = asked();
+    await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: target });
+    node["sayOnline"]();
+    expect(pushSend).not.toHaveBeenCalled();
+    says = true;
+    node["sayOnline"]();
+    expect(bodies(pushSend.mock.calls, secret, auth)).toEqual([{ wake: 1, k: target.token, o: 1 }]);
+  });
+
   it("at most one per contact every 30 minutes, kept across a restart (a restart is what says it)", async () => {
     const pushSend = vi.fn(async () => 201);
     const node = engine({ pushSend });
@@ -653,6 +666,24 @@ describe("private groups: a mention wakes a member whose app is closed", () => {
     expect(framesOf(b).at(-1)!.w!.k).toBeTruthy();
     expect(framesOf(b).at(-1)!.w!.k).not.toBe(before);
     expect((await db.getSettings()).wakeMutedGroups).toBeUndefined();
+  });
+
+  it("a group left, removed or deleted takes its mute with it: joined again under the id, it is not muted", async () => {
+    const node = engine();
+    const b = edgeLink();
+    await addEdge(node, "g", memberKey(), b);
+    await addEdge(node, "other", memberKey(), edgeLink());
+    await node.setWakeSubscription({ subscription: browserSubscription().subscription });
+    await vi.waitFor(() => expect(framesOf(b)).toHaveLength(1));
+    await node.setWakeMuted({ linkId: "group:g", muted: true });
+    await node.setWakeMuted({ linkId: "group:other", muted: true });
+    const said = framesOf(b).length;
+    // Every way out of a group (leave, removed, deleted) tells the engine by this.
+    (node["groups"] as unknown as { host: { historyGone(groupId: string): void } }).host.historyGone("g");
+    expect(node["groupWakeView"]({ id: "g", profile: "mesh" } as never)).toEqual({});
+    await vi.waitFor(async () => expect((await db.getSettings()).wakeMutedGroups).toEqual(["other"]));
+    // A group just left hands its members no new token.
+    expect(framesOf(b)).toHaveLength(said);
   });
 
   it("an edge whose member held a token closes: replaced when the member is out of the group, not when a group on hubs only drops the edge", async () => {

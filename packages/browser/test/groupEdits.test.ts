@@ -123,6 +123,27 @@ describe("GroupEdits on its own", () => {
     expect(await edits.edit("g1", mine(2).id, "one more")).toMatchObject({ refused: true, error: expect.stringMatching(/100 times/) });
   });
 
+  it("refuses to edit or delete for everyone a text of mine written under the member key I had before I was removed and invited back", async () => {
+    vi.useFakeTimers();
+    // Invited back, I hold a new member key: the group knows my lines from before by the old one, and its session
+    // refuses their edits. Taken here, the edit showed as mine and was tried again until given up on, saying nothing.
+    const before = createIdentity().pubKeyZ32;
+    const old = (n: number, text = `old ${n}`): StoredMessage => ({ linkId: chat, id: `${before}:1:${n}`, text, sender: "me", member: before, timestamp: n + 1, via: "datalink" });
+    const removed: string[] = [];
+    const { edits, sent, messages, tick } = setup([old(0, "see you at 8"), old(1, "bring snacks"), mine(2)], [me, bob, carol], removed);
+    expect(await edits.edit("g1", old(0).id, "see you at 9")).toMatchObject({ refused: true, error: "Only your own text messages can be edited" });
+    expect(await edits.removeMine("g1", old(1).id)).toMatchObject({ refused: true, error: "Only your own messages can be deleted for everyone" });
+    tick(60_000); await vi.advanceTimersByTimeAsync(60_000);
+    expect(messages.map(m => m.text)).toEqual(["see you at 8", "bring snacks", "text 2"]);
+    expect(messages[0].edit).toBeUndefined();
+    expect(removed).toEqual([]);
+    expect(sent).toEqual([]);
+    // A text written under my key now is mine to edit and delete.
+    expect(await edits.edit("g1", mine(2).id, "text 2, edited")).toEqual({ error: null, messageId: mine(2).id });
+    expect(await edits.removeMine("g1", mine(2).id)).toMatchObject({ error: null });
+    edits.stop();
+  });
+
   it("says at most EDIT_SEND_LIMIT a window; the rest go when it has room, each at its latest text", async () => {
     vi.useFakeTimers();
     const messages = Array.from({ length: EDIT_SEND_LIMIT + 2 }, (_, n) => mine(n));
@@ -340,6 +361,19 @@ describe("GroupEdits on its own", () => {
   describe("an edge that opens", () => {
     const edited = (n: number, count: number) => Array.from({ length: count }, (_, i) => ({ ...mine(n + i), edit: { seq: 1, at: n + i, history: [] } }));
     const ids = (sent: { edit: GroupEdit }[]) => sent.map(s => s.edit.id);
+
+    it("hears no edit of mine under the member key I held before I was removed and invited back, so those since go at once", async () => {
+      vi.useFakeTimers();
+      // Before, my 40 old edits went first, oldest first: the group refused each, but each took its place in the pace,
+      // and the member heard my 3 edits since only two windows (22 s) later.
+      const before = createIdentity().pubKeyZ32;
+      const old = Array.from({ length: 40 }, (_, i): StoredMessage => ({ linkId: chat, id: `${before}:1:${i}`, text: `old ${i}`, sender: "me", member: before, timestamp: i + 1, via: "datalink", edit: { seq: 1, at: i, history: [] } }));
+      const since = edited(1_000, 3);
+      const { edits, sent } = setup([...old, ...since]);
+      await edits.resend("g1", carol);
+      expect(ids(sent)).toEqual(since.map(m => m.id));
+      edits.stop();
+    });
 
     it("hears every edit of mine it has not heard, oldest first, GROUP_EDIT_RESEND a window", async () => {
       vi.useFakeTimers();

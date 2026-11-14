@@ -38,12 +38,26 @@ export const fitGroupNameEdit = (before: string, after: string, caret: number | 
 const DRAWS_NOTHING = /[\p{Default_Ignorable_Code_Point}⠀]/gu;
 
 /**
- * A name as two are compared: told apart by neither case, width, spacing, what draws nothing (`DRAWS_NOTHING`) nor the
- * key's end a name already shows ("Alice (…3r69cg)", isolated as `withKeyEnd` shows it or not), so "alice ", "Ali‍ce"
- * and "Alice (…k1p0aa)" are all "Alice".
+ * The Cyrillic and Greek letters drawn as a Latin one (Unicode TR39's confusables among the three), each to that
+ * letter: capitals before a name's case is folded (Greek Η is H, its small η is n), small ones after.
  */
-const sameNameForm = (nick: string) =>
-  nick.normalize("NFKC").replace(DRAWS_NOTHING, "").replace(/\s*\(\s*\.\.\.[^()]*\)\s*$/u, "").replace(/\s+/gu, " ").trim().toLocaleLowerCase();
+const lookalikes = (pairs: string) => new Map([...pairs.matchAll(/(\S)(\S)/gu)].map(([, from, to]) => [from!, to!]));
+const LOOKALIKE_CAPITALS = lookalikes("АA ВB ЕE ЅS ІI ЈJ КK МM НH ОO РP СC ТT УY ХX ҮY ӀI ԚQ ԜW ΑA ΒB ΕE ΖZ ΗH ΙI ΚK ΜM ΝN ΟO ΡP ΤT ΥY ΧX ϹC");
+const LOOKALIKE_SMALL = lookalikes("аa еe оo рp сc уy хx ѕs іi јj һh ӏl үy ԁd ԛq ԝw αa γy ιi νv οo ρp υu ϲc ϳj");
+const foldLookalikes = (s: string, letters: Map<string, string>) => s.replace(/\p{L}/gu, c => letters.get(c) ?? c);
+/** `s` in small letters, each look-alike as its Latin letter, accents apart (NFD) so "Ё" is "Ë". */
+const lookalikeForm = (s: string) => foldLookalikes(foldLookalikes(s.normalize("NFD"), LOOKALIKE_CAPITALS).toLocaleLowerCase(), LOOKALIKE_SMALL);
+
+/**
+ * A name as two are compared: told apart by neither case, width, spacing, what draws nothing (`DRAWS_NOTHING`), a
+ * letter of another alphabet drawn the same (`lookalikeForm`) nor the key's end a name already shows ("Alice
+ * (…3r69cg)", isolated as `withKeyEnd` shows it or not), so "alice ", "Ali‍ce", "Аlice" (a Cyrillic А) and "Alice
+ * (…k1p0aa)" are all "Alice". Look-alikes are folded both before NFKC (which turns Greek Ϲ into Σ) and after it (which
+ * turns 𝚨 into Α). Only the comparison: the name is shown as chosen.
+ */
+const sameNameForm = (nick: string) => lookalikeForm(
+  lookalikeForm(nick).normalize("NFKC").replace(DRAWS_NOTHING, "").replace(/\s*\(\s*\.\.\.[^()]*\)\s*$/u, "").replace(/\s+/gu, " ").trim(),
+).normalize("NFC");
 
 /**
  * The app's own word for me in each language it speaks, which its lines about me start with ("You removed Bob",
@@ -85,11 +99,33 @@ export function sameNamed(members: readonly Pick<GroupMemberView, "key" | "me" |
   return keys;
 }
 
+/** What `DRAWS_NOTHING` holds that a name may need in its middle: the joiners and the selectors of an emoji or a script. */
+const NEEDED_UNSEEN = /^(?:\u200c|\u200d|\p{Variation_Selector}|[\u{e0020}-\u{e007f}])$/u;
+/** A name without what it may be padded with that `sameNameForm` drops (blank Braille, a filler), its spacing collapsed. */
+const withoutBlanks = (s: string) => s.replace(DRAWS_NOTHING, c => NEEDED_UNSEEN.test(c) ? c : "").replace(/\s+/gu, " ").trim();
+/** A key's end a name ends with, as `sameNameForm` reads one. */
+const KEY_END_FORM = /^\s*\(\s*\.\.\.[^()]*\)\s*$/u;
+
+/**
+ * A name as `withKeyEnd` shows it: without the key's end it ends with (in any form `sameNameForm` reads as one, "（…"
+ * too) and without the blanks it may be padded with (`withoutBlanks`). "Alice (…3r69cg)" padded with blank Braille to its
+ * last character pushed its own key's end out of the cut line, which then read as the real Alice's.
+ */
+function shownName(nick: string): string {
+  const name = withoutBlanks(nick), points = [...name];
+  for (let i = points.length - 1, tail = ""; i > 0; i--) {
+    tail = points[i] + tail;
+    if (KEY_END_FORM.test(tail.normalize("NFKC").replace(DRAWS_NOTHING, ""))) return withoutBlanks(points.slice(0, i).join("")) || name;
+  }
+  return name || nick;
+}
+
 /**
  * A name told apart by the end of its key, as "@" offers a member. The end is isolated left to right (LRI … PDI): in
- * an Arabic name's direction "محمد (…k1p0aa)" is laid out as "(k1p0aa…) محمد", the key's end read as its start.
+ * an Arabic name's direction "محمد (…k1p0aa)" is laid out as "(k1p0aa…) محمد", the key's end read as its start. The
+ * name is shown as `shownName` reads it, so the only key's end it shows is its own, right after the name.
  */
-const withKeyEnd = (nick: string, key: string) => `${nick} \u2066(…${key.slice(-6)})\u2069`;
+const withKeyEnd = (nick: string, key: string) => `${shownName(nick)} \u2066(…${key.slice(-6)})\u2069`;
 
 /** `sameNamed`: a member whose name another member shows too is told apart by the end of their key (`withKeyEnd`). */
 export const memberName = (m: { key: string; me: boolean; nick?: string }, t: Translate = english, sameNamed?: ReadonlySet<string>) =>

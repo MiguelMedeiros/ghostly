@@ -12,7 +12,9 @@ import { choose } from "../support/select";
  * the chat's data link to the bot's machine.
  *
  * Needs a build made with a services host: the suite's own sets one (`VITE_SERVICES_HOST`, e2e/playwright.config.ts),
- * `http://*.localhost:<port>`, which Chromium resolves to this machine.
+ * `http://*.localhost:<port>`, which Chromium and Firefox resolve to this machine. In Firefox
+ * (e2e/playwright.firefox.config.ts) the POST's body takes another way through the services worker: Firefox's
+ * `Request` has no body stream.
  */
 test.describe.configure({ timeout: 5 * 60_000 });
 
@@ -30,7 +32,7 @@ async function demoApp(local: number): Promise<{ server: Server; port: number; s
       seen.push({ method: request.method ?? "", path: request.url ?? "", cookie: request.headers.cookie });
       if (request.url === "/") {
         response.writeHead(200, { "content-type": "text/html; charset=utf-8", "set-cookie": "visit=1; Path=/; HttpOnly", "x-frame-options": "DENY" });
-        response.end(`<!doctype html><title>Demo</title><h1 id="title">Hello from the demo</h1><p id="out">…</p><p id="popup">…</p><p id="local">…</p><p id="worker">…</p><script src="/app.js"></script>`);
+        response.end(`<!doctype html><title>Demo</title><h1 id="title">Hello from the demo</h1><p id="out">…</p><p id="popup">…</p><p id="local">…</p><p id="worker">…</p><a id="docs" href="https://docs.example/guide" target="_blank">Docs</a> <a id="news" href="https://docs.example/news" target="_new">News</a> <a id="near" href="http://127.0.0.1:${local}/near" target="_blank">Near</a><script src="/app.js"></script>`);
       } else if (request.url === "/app.js") {
         response.writeHead(200, { "content-type": "text/javascript" });
         response.end(`document.getElementById("popup").textContent = window.open("/popup") ? "opened" : "refused";
@@ -112,6 +114,30 @@ test("a person on the web opens the web app a bot shares, on an origin of its ow
     expect(app.seen.map((r) => r.path)).not.toContain("/popup");
     // It talks to its own origin only, as on Desktop and in the extension: not to a service on this machine.
     await expect(demo.locator("#local")).toHaveText("refused");
+    // A link it opens in a new tab, tapped, opens in a tab of the browser's own with no opener, as Desktop opens it in
+    // the system browser: the view's sandbox alone dropped it with no word. One to this machine opens nowhere.
+    const context = person.page.context();
+    await context.route("https://docs.example/**", (route) => route.fulfill({ contentType: "text/html", body: "<title>Docs</title>docs" }));
+    // Past the 5 s the tap on Open keeps Ghostly's page active: a link asked for meanwhile is not one tapped in the app.
+    await person.page.waitForTimeout(5_500);
+    const tab = context.waitForEvent("page");
+    await demo.locator("#docs").click();
+    const docs = await tab;
+    await expect(docs).toHaveURL("https://docs.example/guide");
+    expect(await docs.evaluate(() => window.opener)).toBeNull();
+    await docs.close();
+    // Past the 2 s a view waits between two links. One to a name no window has (`_new`) opens a new one too.
+    await person.page.waitForTimeout(2_500);
+    const newsTab = context.waitForEvent("page");
+    await demo.locator("#news").click();
+    const news = await newsTab;
+    await expect(news).toHaveURL("https://docs.example/news");
+    await news.close();
+    const pages = context.pages().length;
+    await person.page.waitForTimeout(2_500);
+    await demo.locator("#near").click();
+    await person.page.waitForTimeout(2_000);
+    expect(context.pages()).toHaveLength(pages);
     expect(localSeen).toEqual([]);
     // The app's own storage is untouched by it, and the app still holds its chat.
     expect((await person.page.evaluate(() => Object.keys(localStorage))).filter((key) => !key.startsWith("ghostly-test-")).length).toBeGreaterThan(0);

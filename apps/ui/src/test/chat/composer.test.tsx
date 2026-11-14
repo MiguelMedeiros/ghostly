@@ -577,6 +577,34 @@ describe("the emoji/GIF panel", () => {
     expect(smiley()).toHaveFocus();
   });
 
+  // A browser focuses nothing `visibility: hidden` hides, and the panel is hidden for its first draw, until it is placed.
+  // Its search took the focus only while the emoji were still loading (the first open); every later one left it on the button.
+  it("gives its search the focus once it is placed, not while its first draw is still hidden", async () => {
+    const real = HTMLElement.prototype.focus;
+    const whileHidden: string[] = [];
+    const spy = vi.spyOn(HTMLElement.prototype, "focus").mockImplementation(function (this: HTMLElement, options?: FocusOptions) {
+      if (this.closest<HTMLElement>("[data-testid='expression-panel']")?.style.visibility === "hidden") whileHidden.push(this.getAttribute("placeholder") ?? this.tagName);
+      real.call(this, options);
+    });
+    try {
+      gifCities();
+      const { user } = composer();
+      for (const key of ["{Enter}", " "]) {
+        smiley().focus();
+        await user.keyboard(key);
+        expect(screen.getByPlaceholderText("Search emoji")).toHaveFocus();
+        await user.keyboard("{Escape}");
+      }
+      // The GIF tab's search takes the focus on every open.
+      localStorage.setItem("ghostly_composer_panel_tab", "gif");
+      await user.click(smiley());
+      expect(await screen.findByTestId("expression-panel")).toHaveAttribute("data-tab", "gif");
+      expect(whileHidden).toEqual([]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("the + and the panel take turns", async () => {
     const { user } = composer();
     await user.click(smiley());

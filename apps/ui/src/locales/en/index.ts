@@ -34,7 +34,6 @@ import saved from "./saved.json";
 import secretGuard from "./secretGuard.json";
 import services from "./services.json";
 import settings from "./settings.json";
-import share from "./share.json";
 import sidebar from "./sidebar.json";
 import status from "./status.json";
 import tabs from "./tabs.json";
@@ -76,7 +75,6 @@ export default {
   secretGuard,
   services,
   settings,
-  share,
   sidebar,
   status,
   tabs,

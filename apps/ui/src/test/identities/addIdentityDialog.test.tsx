@@ -372,6 +372,17 @@ describe("AddIdentityDialog", () => {
       expect(group).toHaveAttribute("data-value", "https://accounts.google.com");
     });
 
+    it("keep the chosen provider filled in forced colors, where its accent border and tint are gone", async () => {
+      restore = configureOidc();
+      const { user } = dialog();
+      await user.click(screen.getByTestId("add-identity-oidc"));
+      const radios = within(screen.getByRole("radiogroup", { name: "Provider" })).getAllByRole("radio");
+      const filled = () => radios.map((r) => r.classList.contains("forced-colors:bg-[color:Highlight]"));
+      expect(filled()).toEqual([true, false]);
+      await user.click(radios[1]);
+      expect(filled()).toEqual([false, true]);
+    });
+
     it("keep proofs short-lived and begin with the chosen issuer", async () => {
       restore = configureOidc();
       const { user, engine } = dialog();

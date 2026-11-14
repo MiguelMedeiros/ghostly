@@ -12,7 +12,7 @@
 import { runnerFor, startApp, type AppStopReason, type AppView, type RunningApp } from "./broker";
 import { appSlot, chatApp, setChatApp, updateChatApp } from "./running";
 import { runnerPolicy } from "./runnerCheck";
-import { CHAT_CLOSED, LOCKED, lockedSince, registerRunningApp, type AppOpener, type AppTakedown } from "./open";
+import { CHAT_CLOSED, LOCKED, lockedSince, registerRunningApp, takenDownSince, type AppOpener, type AppTakedown } from "./open";
 import type { AppsPlatform, LinkedFilesHost } from "../platform";
 import { openLayer } from "../layerHistory";
 
@@ -54,8 +54,14 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
     const engine = apps();
     if (!engine) throw new Error("Apps cannot run in this app");
     const host: AppsPlatform = linkedFiles ? { ...engine, linkedFiles } : engine;
+    // The same app still running in that chat (hidden by Back) is only shown again: no entry read, no runner asked, so
+    // it comes back offline too.
+    const already = linkId && options?.again === undefined && appSlot(linkId) ? chatApp(linkId) : undefined;
+    if (linkId && already?.ref === ref && !already.stopped) { updateChatApp(linkId, { shown: true }); return "shown"; }
     // The profile locking while it opens (its files downloading, the runner checked) stops nothing yet: it never starts.
     const locked = lockedSince();
+    // Taken down or uninstalled while it opens: not running yet, so the read that found it stops nothing of it.
+    const gone = takenDownSince();
     // A version a store removed runs only with "Run anyway"; a revoked one never (the engine checks both again).
     const entry = await host.entry(ref, options?.runAnyway === true);
     if (locked()) throw new Error(LOCKED);
@@ -66,6 +72,7 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
     if (policy === null) throw new Error("offline: the runner page could not be reached");
     if (!policy) throw new Error("runner: This server does not send the policy apps run under");
     if (locked()) throw new Error(LOCKED);
+    gone(ref, entry.digest, options?.runAnyway === true);
     replace?.();
 
     const launch = { ...entry, chat: linkId ? { linkId, name: nameIn(linkId) } : null };
@@ -141,8 +148,13 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
     close.textContent = closeLabel();
     const box = document.createElement("div");
     box.className = "relative flex-1 [&>iframe]:absolute [&>iframe]:inset-0 [&>iframe]:h-full [&>iframe]:w-full [&>iframe]:border-0";
+    // Why it stopped, said politely in a line that is there, empty, from the start, as a live region must be before
+    // what it says: the focus stays on Close, or goes there from the app's frame, and a line that came with its words
+    // was not read out.
+    const said = document.createElement("div");
+    said.setAttribute("role", "status");
     bar.append(title, close);
-    overlay.append(bar, box);
+    overlay.append(bar, box, said);
     // The app's shell (App.tsx), not the whole page: the lock screen, drawn above the app, must still take a password.
     const under = [...document.querySelectorAll<HTMLElement>(".two-pane, .app-shell")].filter((node) => !node.inert);
     document.body.appendChild(overlay);
@@ -176,11 +188,11 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
         if (!stopped) { dismiss(); return; }
         // Taken down, or stopped on its own: its place says why, under the same bar, until Close.
         const why = document.createElement("p");
-        why.setAttribute("role", "status");
         why.setAttribute("data-testid", "mini-app-stopped");
         why.className = "m-0 p-6 text-center text-sm text-text-secondary";
         why.textContent = stoppedLabel(entry.title, stopped);
-        box.replaceWith(why);
+        box.remove();
+        said.append(why);
         // Stopped by the watchdog: it may run fine once started again, and the person decides.
         if (stopped.why === "unresponsive" && openAgainLabel) {
           const again = document.createElement("button");
@@ -208,7 +220,7 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
               if (errorText) failed.textContent = errorText(error);
             });
           });
-          why.after(again, failed);
+          said.after(again, failed);
         }
         // The focus was in the app's frame, gone with it: Close has it, so Escape still closes.
         if (overlay.isConnected && !overlay.contains(document.activeElement)) close.focus({ preventScroll: true });

@@ -156,6 +156,7 @@ describe("the mini-app runner (WISP 1200, \"The runner's CSP\")", () => {
     const net = locations.find((l) => l.match === "= /app-frame-net.html");
     for (const location of locations.filter((l) => l !== runner && l !== net)) {
       if (/^\s*return\s/.test(location.body.trim())) continue; // a redirect, no page
+      if (location.match.startsWith("@")) continue; // a named one, no page: it sends the path on to one of these
       expect(location.body, location.match).toContain("include /etc/nginx/ghostly-headers.conf;");
     }
   });
@@ -168,7 +169,8 @@ describe("the web app's opener policy", () => {
   const nginx = read("apps/web/nginx.conf");
   const locations = [...nginx.matchAll(/location\s+([^{]+?)\s*\{([^}]*)\}/g)].map(([, match, body]) => ({ match: match!.trim(), body: body! }));
   const sent = (text: string) => [...text.matchAll(/^\s*add_header Cross-Origin-Opener-Policy "([^"]+)" always;$/gm)].map((m) => m[1]);
-  const pages = locations.filter((l) => !/^\s*return\s/.test(l.body.trim())); // a redirect, no page
+  // A redirect, no page; a named one (nginx's answer to headers over its limit) sends the path on to one of the others.
+  const pages = locations.filter((l) => !/^\s*return\s/.test(l.body.trim()) && !l.match.startsWith("@"));
 
   it("every location that answers with a file sends it, once, but the sign-in's return page", () => {
     expect(OPENER_POLICY).toBe("same-origin-allow-popups");

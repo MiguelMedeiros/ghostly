@@ -17,6 +17,12 @@
 
 Iroh is a native layer-1 candidate of the one chat ([400](400-chat.md), [100](100-transports.md#the-dht-floor-upgrade-and-downgrade-revision-02)). Its endpoint id is published in the layer-0 capability record ([03](03-capabilities.md#layer-0-capability-record)), so two desktops try Iroh without a WebRTC session first. The endpoint id is dialled through Iroh's own discovery; no address goes into the record. An Iroh attempt that fails leaves the chat `on-dht`, and a dropped Iroh session sends it there until a transport is back.
 
+## Frames (revision 2026-11-12)
+
+After the stream preface, a frame is UTF-8 text (a JSON frame of the session), unless the top bit of its 4-byte big-endian length word is set: then it is a binary message ([100](100-transports.md#text-and-binary-messages-revision-2026-10-12)) of the length in the other 31 bits, as on HyperDHT ([103](103-hyperdht.md#frames-revision-2026-10-12)). Either kind is at most 60 KiB and never empty, and the preface is text. An app before this revision reads a marked frame as one over 60 KiB and closes the stream, so binary messages go only where the session agreed a capability that needs them (`files/4`, [501](501-paired-files.md)), which such an app never lists. Where it carries them: the Desktop's native adapter. The browser build (web app, extension, CLI) reads text frames only and lists no such capability on Iroh.
+
+Measured (2026-11-12, two Linux Desktops on one machine): a 64 MiB file went to the other app as 89,988,866 bytes of text over Iroh before; as its 67,108,864 bytes after.
+
 ## Browser profile: relay only (revision 0.3)
 
 The web app and the extension run the same Iroh (1.3.0, the version the desktop pins) compiled for browsers (`native/transports/iroh-web`, shipped as `@ghostly/iroh-web`). A page cannot send UDP, so a browser endpoint has no direct address: every packet goes through an **Iroh relay** over a WebSocket. The QUIC/TLS session is still end to end between the two endpoints. The relay sees which endpoint ids talk, when, how much and from which IP; it never sees frames.

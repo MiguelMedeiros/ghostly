@@ -13,9 +13,10 @@ const button = "shrink-0 grid place-items-center w-8 h-8 max-md:w-11 max-md:h-11
  * chat by the id both sides know it by; a click scrolls to it and marks it, as a quote's tap does. ✕ unpins, where
  * this side may (`onUnpin`). The bar goes with the focus in it (its ✕ pressed from the keyboard, or the other side
  * unpinning while the focus is on its line or ⓘ): the focus then goes to `returnFocus` (the chat's ⋮), unless the
- * person moved it elsewhere meanwhile. Before, it fell to the page.
+ * person moved it elsewhere meanwhile. Before, it fell to the page. `appCards`: the chat draws an app card as a card
+ * (`appCardsShown`), so the bar reads it as one too.
  */
-export function PinnedBar({ pin, index, onUnpin, returnFocus }: { pin?: PinView; index: ReplyIndex; onUnpin?: () => void; returnFocus?: RefObject<HTMLElement | null> }) {
+export function PinnedBar({ pin, index, onUnpin, returnFocus, appCards = false }: { pin?: PinView; index: ReplyIndex; onUnpin?: () => void; returnFocus?: RefObject<HTMLElement | null>; appCards?: boolean }) {
   const { t } = useI18n();
   const [info, setInfo] = useState(false);
   const infoId = useId();
@@ -47,7 +48,7 @@ export function PinnedBar({ pin, index, onUnpin, returnFocus }: { pin?: PinView;
           <span className="shrink-0 text-accent"><PinIcon active size={15} /></span>
           <span className="min-w-0 flex-1">
             <span className="block text-[11px] font-medium text-accent">{t("chat.pinned.bar")}</span>
-            <span data-testid="pinned-snippet" dir="auto" className="block truncate text-sm text-text-secondary">{original ? messageSnippet(original, t) : t("chat.pinned.notHere")}</span>
+            <span data-testid="pinned-snippet" dir="auto" className="block truncate text-sm text-text-secondary">{original ? messageSnippet(original, t, appCards) : t("chat.pinned.notHere")}</span>
           </span>
         </button>
         <button type="button" data-testid="pinned-info" aria-expanded={info} aria-controls={infoId} aria-label={more} title={more} onClick={() => setInfo(!info)}

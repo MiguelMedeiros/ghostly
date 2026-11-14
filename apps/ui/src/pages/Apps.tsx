@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { AppStoreSummary, BuiltInAppOffer, InstalledAppView } from "@ghostly/browser/engine/apps";
@@ -13,8 +13,10 @@ import { useI18n, type Translate } from "../contexts/I18nContext";
 import { draftDirection } from "../lib/documentLanguage";
 import { AppIcon, Fingerprint } from "../components/apps/AppIcon";
 import { AppInstallDialog, InstalledAppDialog } from "../components/apps/AppInstallDialog";
+import { removedLine } from "../components/apps/removedLine";
 import { AddAppDialog } from "../components/apps/AddAppDialog";
 import { AppChatPicker } from "../components/apps/AppChatPicker";
+import { NAME, withName } from "../components/apps/aroundName";
 import { useAppsState } from "../lib/apps/flag";
 import { appStopped, refreshInstalledApps, useBuiltInApps, useInstalledApps, useInstalledAppsFailure } from "../lib/apps/installed";
 import { openApp, type OpenAppOptions } from "../lib/apps/open";
@@ -61,10 +63,22 @@ function InstalledRow({ app, onDetails, onOpen }: { app: InstalledAppView; onDet
   // Named with all it shows, in its order, then "details": "Chess 1.2.0 Stopped: details". A voice saying what is on
   // screen finds it (Label in Name), and a screen reader hears the line under the title (Stopped, an update that asks).
   const shown = [app.title, app.version, hint.lead && `${hint.lead} ·`, hint.text].filter(Boolean).join(" ");
+  // Open goes when the app stops (an update check found it revoked or removed): its focus would drop to the page. The
+  // ref's cleanup runs while the button is still there; the row's name, which now says why, takes the focus, never
+  // taken from where the person went meanwhile.
+  const details = useRef<HTMLButtonElement>(null);
+  const openHadFocus = useRef(false);
+  const openRef = useCallback((button: HTMLButtonElement) => () => { openHadFocus.current = document.activeElement === button; }, []);
+  useLayoutEffect(() => {
+    if (!openHadFocus.current) return;
+    openHadFocus.current = false;
+    const active = document.activeElement;
+    if (!active || active === document.body) details.current?.focus({ preventScroll: true });
+  });
   return (
     // Open goes under the name when both don't fit (a large text size on a phone), as in a built-in app's row.
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3" data-testid="installed-app" data-ref={app.ref}>
-      <button type="button" onClick={onDetails} className="flex items-center gap-3 min-w-0 flex-[1_1_12rem] text-start cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      <button ref={details} type="button" onClick={onDetails} className="flex items-center gap-3 min-w-0 flex-[1_1_12rem] text-start cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
         aria-label={t("apps.page.details", { title: shown })}>
         <AppIcon installed={app} />
         <span className="min-w-0">
@@ -80,7 +94,7 @@ function InstalledRow({ app, onDetails, onOpen }: { app: InstalledAppView; onDet
           <HintLine testId="installed-app-hint" className={color} lead={hint.lead} text={hint.text} />
         </span>
       </button>
-      {app.run.status === "ok" && <Button data-testid="installed-app-open" className="ms-auto" aria-label={t("apps.builtIn.openNamed", { title: app.title })} onClick={onOpen}>{t("apps.page.open")}</Button>}
+      {app.run.status === "ok" && <Button ref={openRef} data-testid="installed-app-open" className="ms-auto" aria-label={t("apps.builtIn.openNamed", { title: app.title })} onClick={onOpen}>{t("apps.page.open")}</Button>}
     </div>
   );
 }
@@ -120,7 +134,7 @@ function BuiltInRow({ app, busy, onOpen, onRemove }: { app: BuiltInAppOffer; bus
       {asking && (
         <div role="group" aria-labelledby={questionId} data-testid="built-in-app-remove-question" className="basis-full space-y-2"
           onKeyDown={(e) => { if (e.key === "Escape" && !busy) { e.stopPropagation(); setAsking(false); } }}>
-          <p id={questionId} dir="auto" className="text-sm text-text-primary [overflow-wrap:anywhere]">{t("apps.builtIn.removeTitle", { title: app.title })}</p>
+          <p id={questionId} dir="auto" className="text-sm text-text-primary [overflow-wrap:anywhere]">{withName(t("apps.builtIn.removeTitle", { title: NAME }), app.title)}</p>
           <p className="text-xs text-text-secondary">{t("apps.builtIn.removeText")}</p>
           <div className="flex flex-wrap justify-end gap-2">
             <Button ref={keep} disabled={busy} onClick={() => setAsking(false)}>{t("common.cancel")}</Button>
@@ -138,7 +152,7 @@ const LISTING_PAGE = 50;
 /** A store that lists this many apps or fewer shows them without being asked, beside other stores too. */
 const LISTING_FEW = 6;
 
-function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, onError, onProblem }: {
+function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, onError, onProblem, onRead }: {
   store: AppStoreSummary;
   /** The only store of the page. */
   alone: boolean;
@@ -150,6 +164,8 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
   onError: (e: unknown) => void;
   /** A Refresh read the store and that read failed: why, in the app's words. */
   onProblem: (text: string) => void;
+  /** A Refresh read the store: what it lists now. */
+  onRead: (text: string) => void;
 }) {
   const { t } = useI18n();
   // Its apps show from the start when it is the only store or lists a few: nothing told a person on a phone that the
@@ -204,10 +220,14 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
   const kind = store.kind === "indexed" ? t("apps.store.indexed") : store.kind === "curated" ? t("apps.store.curated") : null;
   const problem = appStoreProblemText(store, t);
   // A read never fails the call: one that failed again says so, else the same line under the store showed nothing new.
+  // One that worked says what it read: its count changing and its red line going were seen, never heard. A list past
+  // its date reads fine, and is not up to date: said as the line under the store says it.
   const refresh = async () => {
     const [now] = await engine.call("appStoreRefresh", { key: store.key });
     const failed = now?.problem ? appStoreProblemText(now, t) : null;
     if (failed) onProblem(failed);
+    else if (now?.expired) onProblem(t("apps.store.stale", { date: date(now.expires ?? 0, t.language) }));
+    else if (now) onRead(t("apps.store.readDone", { name: now.name ?? now.url, apps: t("apps.store.count", { count: now.apps.length }) }));
   };
   const toggle = () => {
     setChosen(!open);
@@ -236,7 +256,7 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
           </span>
           {!read && <span className="block text-xs text-text-muted">{t("apps.store.notRead")}</span>}
           {store.expired && store.fetchedAt !== undefined && <span data-testid="app-store-stale" className="block text-xs text-test-money-ink">{t("apps.store.stale", { date: date(store.expires ?? 0, t.language) })}</span>}
-          {problem && <span data-testid="app-store-problem" className="block text-xs text-danger">{problem}</span>}
+          {problem && <span data-testid="app-store-problem" className="block text-xs text-danger-ink">{problem}</span>}
         </button>
         {!asking && (
           <div className="flex flex-wrap items-center gap-2 ms-auto">
@@ -250,7 +270,7 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
         {asking && (
           <div role="group" aria-labelledby={questionId} data-testid="app-store-remove-question" className="basis-full space-y-2"
             onKeyDown={(e) => { if (e.key === "Escape" && !busy) { e.stopPropagation(); setAsking(false); } }}>
-            <p id={questionId} dir="auto" className="text-sm text-text-primary [overflow-wrap:anywhere]">{t("apps.store.removeTitle", { name: storeName })}</p>
+            <p id={questionId} dir="auto" className="text-sm text-text-primary [overflow-wrap:anywhere]">{withName(t("apps.store.removeTitle", { name: NAME }), storeName)}</p>
             <p className="text-xs text-text-secondary">
               {vouched.length ? t(vouched.length === 1 ? "apps.store.removeAppsOne" : "apps.store.removeApps", { titles: listText(vouched, t) }) : t("apps.store.removeNone")}
             </p>
@@ -285,7 +305,12 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
                   <AppIcon size={32} installed={app} />
                   <span className="min-w-0 flex-1">
                     <span dir="auto" className="text-match-parent block text-sm text-text-primary truncate">{listing.title}</span>
-                    <span dir="auto" className="text-match-parent block text-xs text-text-muted truncate">{removed ? t("apps.install.removed", { store: store.name ?? "", reason: removed.reason }) : listing.tagline}</span>
+                    {/* Why the store took it down is read whole: cut to one line, a phone showed only "Removed by <store>: It
+                        sent the b…", with nothing to open for the rest, and in Arabic the store's name was the part cut. The
+                        store's name and reason are isolated, each in its own direction, in a line in the page's (`removedLine`). */}
+                    {removed
+                      ? <span data-testid="app-listing-removed" className="block text-xs text-text-muted [overflow-wrap:anywhere]">{removedLine(store.name ?? "", removed.reason, t)}</span>
+                      : <span dir="auto" className="text-match-parent block text-xs text-text-muted truncate">{listing.tagline}</span>}
                   </span>
                 </span>
                 {app ? <span className="ms-auto text-xs text-text-muted">{t("apps.store.installed")}</span>
@@ -358,6 +383,20 @@ export function Apps() {
     if (active && active !== document.body && active.isConnected) return;
     document.querySelector<HTMLElement>("[data-testid=apps-add]")?.focus({ preventScroll: true });
   }, [gone, details, installed, builtIns, stores]);
+  // An app uninstalled elsewhere (another tab) while its screen is open here: the screen goes, so it is no longer chosen
+  // (it would open by itself once the app is installed again), and the focus goes to Add as for an uninstall here.
+  useEffect(() => {
+    if (!details || !installed || installed.some((a) => a.ref === details)) return;
+    setDetails(null);
+    setGone({ app: details });
+  }, [details, installed]);
+  // So does its question of which chat: a chat picked would go there to open an app no longer installed. Not on a read
+  // that failed: it keeps the list from before, without the app just installed (a built-in's Allow and open).
+  useEffect(() => {
+    if (!picking || !installed || installedFailure != null || installed.some((a) => a.ref === picking.app.ref)) return;
+    setPicking(null);
+    setGone({ app: picking.app.ref });
+  }, [picking, installed, installedFailure]);
   // Try again worked: its block went with the button that had the focus, so the focus goes to the section's first
   // control (what was read), else to Add. A read that fails again keeps its block, and Try again keeps the focus.
   const [retried, setRetried] = useState<"installed" | "stores" | null>(null);
@@ -372,6 +411,7 @@ export function Apps() {
   const notice = useToast();
   const { show } = notice;
   const fail = useCallback((e: unknown) => show(appErrorText(e, t)), [show, t]);
+  const said = useCallback((text: string) => show(text, { tone: "success" }), [show]);
 
   const reloadStores = useCallback(() => engine.call("appStoreList").then(
     (list) => { setStores(list); setStoresFailure(null); },
@@ -414,7 +454,7 @@ export function Apps() {
         {storesFailure != null && <ReadFailed error={storesFailure} testId="apps-stores-error" onRetry={() => { setRetried("stores"); void reloadStores(); }} />}
         {stores === null ? <Block><Notice>{t("apps.page.loading")}</Notice></Block>
           : stores.length === 0 ? storesFailure == null && <Block testId="apps-no-stores"><Notice>{t("apps.page.noStores")}</Notice></Block>
-            : stores.map((store) => <StoreBlock key={store.key} store={store} alone={stores.length === 1} installed={installed ?? []} onError={fail} onProblem={show} onRemoved={() => setGone({ store: store.key })}
+            : stores.map((store) => <StoreBlock key={store.key} store={store} alone={stores.length === 1} installed={installed ?? []} onError={fail} onProblem={show} onRead={said} onRemoved={() => setGone({ store: store.key })}
               onChanged={() => void Promise.all([reloadStores(), refreshInstalledApps()])} onInstall={(listing) => setInstalling({ store: store.key, listing })} />)}
       </Section>
       {/* A store added can remove, revoke or list an installed app, as one read again: both lists again (WISP 1200 § Takedowns). */}

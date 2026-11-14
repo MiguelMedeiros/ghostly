@@ -92,6 +92,7 @@ export * from './sshsig';
 export * from "./groupCrypto";
 export * from "./groupCommits";
 export * from "./groupSession";
+export * from "./catchUp";
 export * from "./groupMentions";
 export * from "./groupWake";
 export * from "./groupEdits";

@@ -101,6 +101,35 @@ describe("Menu: one line per row", () => {
     expect(menu.style.top).toBe(`${304 - 4 - room}px`);
   });
 
+  it("portal: with no room, it scrolls to its last rows, and keeps where it was scrolled when the list scrolls", async () => {
+    // A message's ⋮ in a short window: the menu, capped and scrolling, went back to its top at each scroll of its own
+    // (the wheel, its scrollbar, End): Delete message and Delete for everyone could not be reached.
+    viewport(800, 400);
+    let opener = { left: 700, right: 732, top: 304, bottom: 340 };
+    let scrolled = 0;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      // A layout of the menu without its cap has nothing to scroll: as the engines do, its scroll goes back to the top.
+      if (this.dataset.testid === "menu" && !this.style.maxHeight) scrolled = 0;
+      const box = this.dataset.testid === "menu" ? { left: 0, right: 192, top: 0, bottom: 380 } : this.dataset.testid === "anchor" ? opener : { left: 0, right: 0, top: 0, bottom: 0 };
+      return { ...box, x: box.left, y: box.top, width: box.right - box.left, height: box.bottom - box.top, toJSON: () => box } as DOMRect;
+    });
+    const { user } = renderApp(<Harness portal />);
+    await user.click(screen.getByRole("button", { name: "Options" }));
+    const menu = screen.getByTestId("menu");
+    Object.defineProperty(menu, "scrollTop", { configurable: true, get: () => scrolled, set: (value: number) => { scrolled = value; } });
+    expect(menu.style.maxHeight).toBe(`${304 - 4 - 8}px`);
+
+    menu.scrollTop = 88;
+    act(() => { menu.dispatchEvent(new Event("scroll")); });
+    expect(menu.scrollTop).toBe(88);
+
+    // The list under it scrolls: it follows its opener, scrolled as it was.
+    opener = { left: 700, right: 732, top: 300, bottom: 336 };
+    act(() => { window.dispatchEvent(new Event("scroll")); });
+    expect(menu.style.top).toBe(`${300 - 4 - (300 - 4 - 8)}px`);
+    expect(menu.scrollTop).toBe(88);
+  });
+
   it("portal: drawn over the page by its opener, kept in the window, and following it when the list scrolls", async () => {
     viewport(800, 300);
     let opener = { left: 760, right: 792, top: 240, bottom: 276 };

@@ -73,12 +73,37 @@ describe("app serve", () => {
     expect(servedApps(dir)).toEqual([]);
   });
 
+  it("refuses to grant files, which no bot is given, even when the manifest asks it", async () => {
+    const { dir, ctx, file } = profile();
+    const picks = vector("an app that asks for files");
+    expect(picks.read.manifest.permissions).toEqual(["chat", "files"]);
+    await expect(callApi(ctx, "app.serve", { bundle: file("picks", picks.bytes), grant: ["chat", "files"] })).rejects.toMatchObject({ code: "refused", message: expect.stringContaining("files cannot be granted") });
+    expect(servedApps(dir)).toEqual([]);
+    const { served } = await callApi(ctx, "app.serve", { bundle: file("picks", picks.bytes), grant: ["chat"] }) as { served: { granted: string[] } };
+    expect(served.granted).toEqual(["chat"]);
+  });
+
   it("refuses a card url with a query or fragment: a private file's read token would go to contacts", async () => {
     const { dir, ctx, file } = profile();
     const url = "https://raw.githubusercontent.com/ana/chess/main/app.ghostlyapp";
     for (const bad of [`${url}?token=GHSAT0AAAAAACPRIVATEREADTOKEN`, `${url}#top`])
       await expect(callApi(ctx, "app.serve", { bundle: file("plain", plain.bytes), grant: ["chat"], url: bad }), bad).rejects.toMatchObject({ code: "bad_request", message: expect.stringContaining("no query or fragment") });
     expect(servedApps(dir)).toEqual([]);
+  });
+
+  it("refuses a card url a contact's app cannot read the bundle from, and never puts one on the card", async () => {
+    const { dir, ctx, file } = profile();
+    const raw = "https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp";
+    for (const bad of ["https://example.org/app.ghostlyapp", "https://raw.githubusercontent.com:8443/ana/chess/HEAD/app.ghostlyapp", "https://raw.githubusercontent.com/ana/chess/HEAD/my app.ghostlyapp"])
+      await expect(callApi(ctx, "app.serve", { bundle: file("plain", plain.bytes), grant: ["chat"], url: bad }), bad).rejects.toMatchObject({ code: "bad_request", message: expect.stringContaining("raw.githubusercontent.com") });
+    expect(servedApps(dir)).toEqual([]);
+    expect(await callApi(ctx, "app.serve", { bundle: file("plain", plain.bytes), grant: ["chat"], url: raw })).toMatchObject({ served: { url: raw } });
+    // Without --url, the manifest's sources a contact's app cannot read from are not the card's link.
+    const far = vector("every bound at its limit");
+    expect(far.read.manifest.sources!.every((u) => new URL(u).hostname === "example.org")).toBe(true);
+    const other = profile();
+    const { served } = await callApi(other.ctx, "app.serve", { bundle: other.file("far", far.bytes), grant: ["chat"] }) as { served: Record<string, unknown> };
+    expect(served.url).toBeUndefined();
   });
 
   it("refuses a bundle a client would refuse, with the client's reason", async () => {

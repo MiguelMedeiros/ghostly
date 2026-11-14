@@ -62,6 +62,19 @@
 }
 .voice-wave:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3px; border-radius: 4px; }
 
+/*
+ * Forced colors (Windows Contrast themes) paint every background the page's colour, and the bars, the knob, the live
+ * bars and the recording dot were backgrounds alone: a voice message showed no shape and no place, a recording no
+ * level. There they keep the theme's own colours: bars in its text colour, what has played and the knob in Highlight.
+ */
+@media (forced-colors: active) {
+  .voice-wave-bars, .voice-wave-knob, .voice-live, .voice-bar-dot { forced-color-adjust: none; }
+  .voice-wave-base, .voice-live { color: CanvasText; }
+  .voice-wave-fill { color: Highlight; }
+  .voice-wave-knob { background: Highlight; box-shadow: 0 0 0 2px Canvas; }
+  .voice-bar-dot { background: CanvasText; }
+}
+
 /* The live waveform while recording: newest on the right, bars that grow in. */
 .voice-live {
   display: flex;

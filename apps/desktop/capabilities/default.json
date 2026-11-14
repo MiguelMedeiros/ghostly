@@ -21,6 +21,7 @@
     "allow-app-focused",
     "allow-app-open",
     "allow-app-post",
+    "allow-app-post-bytes",
     "allow-app-title",
     "allow-bitcoind-rpc",
     "allow-call-service",

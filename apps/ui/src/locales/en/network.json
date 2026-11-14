@@ -14,6 +14,7 @@
   "protocolDirect": "Reaches the {{dht}} directly (UDP) and {{pkarr}} relays (HTTP)",
   "protocolRelays": "Reaches the {{dht}} through {{pkarr}} relays (HTTP)",
   "pushRelay": "Push relay (optional)",
+  "pushRelayBusy": "The last wake-up through this relay was turned away: it was at its limit (HTTP {{http}}). It wakes contacts again once it has room.",
   "pushRelayHint": "For waking contacts from a browser. Empty: none.",
   "pushRelayInfo": "A browser cannot post to a push service; this relay does. It sees your IP address and when you wake someone, never the message.",
   "pushRelayRefused": "The last wake-up through this relay failed: it did not answer as a push relay (HTTP {{http}}). Contacts whose app is closed are not woken through it.",

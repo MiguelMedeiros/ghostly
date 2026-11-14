@@ -42,8 +42,10 @@ function Diagram({ source }: { source: string }) {
           {edges.map((edge, index) => (
             <li key={index}>
               <span>{labels.get(edge[1]) ?? edge[1]}</span>
-              <b aria-label={edge[3] || "connects to"}>
-                →{edge[3] && <small>{edge[3]}</small>}
+              {/* A label on a plain <b> is dropped by screen readers, so what the arrow says is text they read. */}
+              <b>
+                <span aria-hidden="true">→</span>
+                {edge[3] ? <small>{edge[3]}</small> : <span className="sr-only">connects to</span>}
               </b>
               <span>{labels.get(edge[4]) ?? edge[4]}</span>
             </li>

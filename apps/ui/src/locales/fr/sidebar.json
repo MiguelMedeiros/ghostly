@@ -53,9 +53,7 @@
     "groupHint": "Un lien que tout le monde peut ouvrir",
     "label": "Créer un groupe ou une discussion"
   },
-  "noChats": "Aucune discussion",
   "noResults": "Aucun résultat",
-  "pinned": "Épinglée",
   "quiet": "C'est calme ici...",
   "quietHint": "L'heure de hanter quelqu'un ! 👻",
   "rail": {
@@ -83,6 +81,5 @@
   "settings": "Réglages",
   "sharedIdentity": "A partagé une identité",
   "skipToContent": "Aller au contenu",
-  "startChat": "Nouvelle conversation",
-  "unread": "Messages non lus"
+  "startChat": "Nouvelle conversation"
 }

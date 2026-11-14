@@ -4,6 +4,7 @@ import { useI18n } from "../../contexts/I18nContext";
 import { removeProfileHere } from "../../lib/profileData";
 import { activeProfileId, baseProfileName, currentProfile } from "../../lib/profiles";
 import { DeviceDialog, dangerButton, field } from "./DeviceDialog";
+import { fillNames } from "../../lib/fillNodes";
 import { type Problem, problemText } from "../../lib/problemText";
 import { Notice } from "../ui/Notice";
 
@@ -36,13 +37,14 @@ export function RemoveHereDialog({ onClose }: { onClose(): void }) {
     window.location.reload();
   };
   return (
-    <DeviceDialog title={t("devices.standby.removeHere.title", { name })} onClose={onClose} testId="device-remove-here">
+    <DeviceDialog title={fillNames(t("devices.standby.removeHere.title"), { name })} onClose={onClose} testId="device-remove-here">
       <p className="text-text-secondary">{t("devices.standby.removeHere.hint")}</p>
       {!id && <p className="text-text-secondary">{t("devices.standby.removeHere.first")}</p>}
       <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); if (ready && !busy) void submit(); }}>
         <label className="block space-y-1">
-          <span className="text-text-secondary">{t("devices.standby.removeHere.confirm", { name })}</span>
-          <input type="text" autoFocus data-testid="device-remove-here-name" autoComplete="off" autoCapitalize="off" spellCheck={false} placeholder={name}
+          <span className="text-text-secondary">{fillNames(t("devices.standby.removeHere.confirm"), { name })}</span>
+          {/* `dir="auto"`: the name typed reads in its own direction, a Latin one in an Arabic dialog too. */}
+          <input type="text" dir="auto" autoFocus data-testid="device-remove-here-name" autoComplete="off" autoCapitalize="off" spellCheck={false} placeholder={name}
             value={typed} onChange={(event) => setTyped(event.target.value)} className={field} />
         </label>
         {error && <Notice problem={error} testId="device-remove-here-error" className="" />}

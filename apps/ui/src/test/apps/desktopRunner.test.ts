@@ -210,6 +210,35 @@ it("refuses a request over 66 KiB without sending it", async () => {
   expect(sent).toHaveLength(2);
 });
 
+// Tauri reads the IPC body with serde_json, which refuses half a surrogate pair ("unexpected end of hex escape"): sent, a
+// request holding one came back as Tauri's words, which the app reads as `failed`, where the web broker answers
+// `bad-request` (WISP 1200). The runner refuses it itself, as it refuses what is not JSON, and never sends it.
+it("refuses a request holding a lone surrogate as bad-request without sending it, as the web broker does", async () => {
+  const sent: unknown[] = [];
+  const half = "\u{1F600}".slice(0, 1);
+  const { window } = open((request) => {
+    // Tauri, played: JSON.stringify writes a lone surrogate as a `\u` escape, which serde_json refuses.
+    if (/\\ud[89a-f]/i.test(JSON.stringify(request))) throw new Error("unexpected end of hex escape");
+    return request.type === "start" ? `"<p>chess</p>"` : `{"id":${request.id},"ok":true,"value":null}`;
+  }, undefined, sent);
+  await settle();
+  sent.length = 0;
+  const chat = window.ghostly.chat as unknown as { send(value: unknown): Promise<unknown> };
+  // The app's values are made in its window: an object of another realm is not plain JSON there.
+  const parse = runInNewContext("(text) => JSON.parse(text)", window) as (text: string) => unknown;
+  for (const [key, value] of [[`k${half}`, "v"], ["k", `v${half}`], ["k", parse(String.raw`{"m\ud83d":1}`)], ["k", parse(String.raw`{"a":[{"b":"\ude00"}]}`)]] as const) {
+    await expect(window.ghostly.storage.set(key, value), JSON.stringify([key, value])).rejects.toThrow("bad-request");
+  }
+  await expect(window.ghostly.storage.get(`k${half}`)).rejects.toThrow("bad-request");
+  await expect(chat.send(parse(String.raw`{"text":"hi \ud83d"}`))).rejects.toThrow("bad-request");
+  expect(sent).toEqual([]);
+  // A whole emoji is a pair, which Tauri takes; a member left out (undefined) is not sent, so its name is not read.
+  await expect(window.ghostly.storage.set("\u{1F600}", parse(String.raw`{"\ud83d\ude00":["\ud83d\ude00"]}`))).resolves.toBeNull();
+  await expect(window.ghostly.storage.set("k", runInNewContext("(key) => ({ [key]: undefined, n: 1 })", window)(`m${half}`))).resolves.toBeNull();
+  await expect(chat.send("\u{1F600}")).resolves.toBeUndefined();
+  expect(sent).toHaveLength(3);
+});
+
 // A file's bytes come as base64 in the answer (`bytes_response`), up to 64 MiB: decoded a character at a time, 64 MiB
 // held the app window's thread for about 250 ms in WebKit; the engine's own decoder takes about 40 ms.
 describe("a file's bytes", () => {

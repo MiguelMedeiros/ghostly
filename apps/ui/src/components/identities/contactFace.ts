@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { hasVisible, stripHidden } from "@ghostly/core";
 import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/types";
-import { engine } from "@ghostly/browser/platform/engine";
+import { engine, linkOfPeer } from "@ghostly/browser/platform/engine";
 import { hasPublicProfile } from "@ghostly/browser/profiles/readers";
 import { badgeState, isGood } from "./contactBadges";
 import { providerLabel, useEngineValue } from "../../lib/identities";
@@ -145,8 +145,8 @@ export function shownContactName({ nickname, face, nick, fallback }: { nickname?
   return { name: fallback, from: "key" };
 }
 
-const receivedOf = (links: LinkView[] | undefined, peerKey: string | undefined) =>
-  peerKey ? links?.find(l => l.peerPubKeyZ32 === peerKey)?.identities?.received : undefined;
+// By the state's index of chats by contact key: each row of the chat list reads its contact's on every engine state.
+const receivedOf = (links: LinkView[] | undefined, peerKey: string | undefined) => linkOfPeer(links, peerKey)?.identities?.received;
 
 /**
  * The contact's face as chosen, redrawn when their identities or the choice change: not on every engine state, which

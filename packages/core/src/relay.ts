@@ -56,8 +56,14 @@ const staleTurn = (turn: { servedAt: number; askedAt: number }, now: number): bo
  * step, a clock that ran ahead fixed by hand), counts as of now: as just spent, not for as long as the clock went back.
  * Counted as they were, an hour's step back held every background read for 59 minutes, and a daemon with 50 contacts
  * away read 4 of them in the next 15 (bug hunt, 2026-11-07).
+ * `list` itself when every time is already so (the usual case): `heldFor` reads eight lists at each request the budget
+ * holds, and copying each twice was a third of the CPU of a daemon whose 200 contacts were away.
  */
-const within = (list: number[], now: number, ms: number): number[] => list.map((at) => Math.min(at, now)).filter((at) => now - at < ms);
+const within = (list: number[], now: number, ms: number): number[] => {
+  let kept = true;
+  for (const at of list) if (at > now || now - at >= ms) { kept = false; break; }
+  return kept ? list : list.map((at) => Math.min(at, now)).filter((at) => now - at < ms);
+};
 
 /**
  * Keys and when each was last set, those of the last minute: how many and the latest, without walking them all (the
@@ -802,6 +808,8 @@ export class RelayTransport implements PkarrTransport {
     if (!again && !elsewhere) {
       const held = this.publishWait(key, asker(options, true));
       if (held) throw new DiscoveryBudgetError(held.wait, `Publish held back on every relay: ${held.reasons.join("; ")}`);
+      const refused = this.refusedEverywhere(key, asker(options, true));
+      if (refused) throw refused;
     }
     const timestamp = this.nextTimestamp(key);
     let redated: Promise<boolean> | undefined;
@@ -867,6 +875,42 @@ export class RelayTransport implements PkarrTransport {
     // request frees, a chat's need of its reserve). Only now: a publish another relay takes leaves no write waiting.
     for (const relay of held) this.take(relay, who, pubKeyZ32);
     return { wait, reasons };
+  }
+
+  /**
+   * A publish that every relay would refuse now without being asked (its network cooling down, left alone after failing,
+   * its rate limit or this asker's budget), and not as a wait alone (`publishWait` says those): the failure `putEverywhere`
+   * would end in, in the same words, said before the packet is signed and dated. Null when some relay would be asked. With
+   * every relay out of reach on a page that is online, each chat signed a packet every few seconds that went nowhere: ~58
+   * a second at 300 chats (bug hunt, 2026-11-12).
+   */
+  private refusedEverywhere(pubKeyZ32: string, who: Asker): PublishFailedError | null {
+    const probe = this.breaker.allDownProbe(this.relays);
+    const now = Date.now();
+    const reasons: string[] = [], held: string[] = [];
+    for (const relay of this.relays) {
+      const refused = this.refusal(relay, relay === probe);
+      if (refused) { reasons.push(String(refused)); continue; }
+      if (this.heldFor(relay, who, now, pubKeyZ32) <= 0) return null;
+      held.push(relay);
+      reasons.push(String(new DiscoveryBudgetError(this.heldFor(relay, who))));
+    }
+    // Refused by its budget, as `put` would be: this write goes first once a request frees.
+    for (const relay of held) this.take(relay, who, pubKeyZ32);
+    return new PublishFailedError(`Publish failed on every relay: ${reasons.join("; ")}`, false);
+  }
+
+  /** What `put` refuses a request to this relay with before its budget is asked; null when it gets that far. */
+  private refusal(relay: string, probe: boolean): Error | null {
+    if (!probe && this.networkCoolingDown(relay, "PUT")) return new RelayNoAnswerError(`${relay} did not answer a moment ago; retry shortly`, false);
+    const limited = this.rateLimitedFor(relay);
+    if (limited > 0) return new DiscoveryBudgetError(limited, "Discovery relay is cooling down after a 429; retry shortly");
+    const blocked = probe ? 0 : this.breaker.blockedFor(relay);
+    if (blocked > 0) {
+      if (this.breaker.blockedKind(relay) === "throttled") return new DiscoveryBudgetError(blocked, "Discovery relay is throttling this address; retry shortly");
+      return new RelayLeftAloneError(`${relay} is left alone after failing; asked again in ${Math.max(1, Math.ceil(this.breaker.askedAgainIn(relay, this.relays) / 1000))} s`);
+    }
+    return null;
   }
 
   /** One relay's packet for a key, read now: its time, kept for `nextTimestamp`. Null when it has none or does not answer. */
@@ -1390,14 +1434,8 @@ export class RelayTransport implements PkarrTransport {
 
   /** `sent`: told, once the budget took the request, whether the relay takes the packet (a 2xx). */
   private async put(relay: string, pubKeyZ32: string, payload: Uint8Array, replaces: bigint | undefined, who: Asker, probe = false, sent?: (ok: Promise<boolean>) => void): Promise<Response> {
-    if (!probe && this.networkCoolingDown(relay, "PUT")) throw new RelayNoAnswerError(`${relay} did not answer a moment ago; retry shortly`, false);
-    const limited = this.rateLimitedFor(relay);
-    if (limited > 0) throw new DiscoveryBudgetError(limited, "Discovery relay is cooling down after a 429; retry shortly");
-    const blocked = probe ? 0 : this.breaker.blockedFor(relay);
-    if (blocked > 0) {
-      if (this.breaker.blockedKind(relay) === "throttled") throw new DiscoveryBudgetError(blocked, "Discovery relay is throttling this address; retry shortly");
-      throw new RelayLeftAloneError(`${relay} is left alone after failing; asked again in ${Math.max(1, Math.ceil(this.breaker.askedAgainIn(relay, this.relays) / 1000))} s`);
-    }
+    const refused = this.refusal(relay, probe);
+    if (refused) throw refused;
     if (!this.take(relay, who, pubKeyZ32)) throw new DiscoveryBudgetError(this.heldFor(relay, who));
     if (probe) this.breaker.beginAllDown(relay); else this.breaker.begin(relay);
     const request = this.request(`${relay}/${pubKeyZ32}`, {

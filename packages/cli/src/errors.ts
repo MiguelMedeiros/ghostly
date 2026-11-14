@@ -30,7 +30,7 @@ export function asCliError(error: unknown): CliError {
     && Object.hasOwn(EXIT, (error as { code: string }).code)) return new CliError((error as { code: ErrorCode }).code, String((error as { message: unknown }).message));
   // A contact the chat's link could not reach (its `GhostlyHttpError` "unreachable"): not there now, not the engine failing.
   if (error instanceof Error && (error as { code?: unknown }).code === "unreachable") return new CliError("unavailable", error.message);
-  const known = engineKnown(error);
+  const known = engineKnown(error) ?? contactNoRail(error);
   if (known) return known;
   const full = noRoomError(error);
   if (full) return full;
@@ -60,10 +60,11 @@ export function asCliError(error: unknown): CliError {
  * `details.reason`. Any other keeps `engine`. Read by its shape, as `profileOpenError`.
  */
 const ENGINE_CODES: Record<string, ErrorCode> = {
-  mintUnreachable: "unavailable", lnurlUnreachable: "unavailable", hostUnreachable: "unavailable", networkUnreachable: "unavailable", usdtRpcUnavailable: "unavailable",
+  mintUnreachable: "unavailable", lnurlUnreachable: "unavailable", hostUnreachable: "unavailable", networkUnreachable: "unavailable", usdtRpcUnavailable: "unavailable", mintFailedInvoice: "unavailable",
   hostTimedOut: "timeout", networkTimedOut: "timeout",
   invalidMintUrl: "bad_request", mintNotHttps: "bad_request", invalidMaxFee: "bad_request",
   notEnoughSats: "refused", notEnoughForFee: "refused", mintsNoAnyAmount: "refused", ecashAlreadySpent: "refused", ecashFeeTakesAll: "refused", lightningRefused: "refused", contactNoWallet: "refused", contactNoPayments: "refused",
+  serviceShareFull: "refused",
 };
 /** `details.reason` of an engine error a bot tells apart from others of its code. */
 const ENGINE_REASONS: Record<string, string> = { contactNoWallet: "contact_no_wallet", contactNoPayments: "contact_payments_off" };
@@ -78,6 +79,22 @@ function engineKnown(error: unknown): CliError | undefined {
   // The contact's next step, for a contact that is a bot too.
   if (engineCode === "contactNoWallet") return new CliError("refused", `${error.message} (on a CLI: ghostly wallet create cashu)`, details);
   return new CliError(ENGINE_CODES[engineCode], error.message, details);
+}
+
+/** The engine's names of the ways of paying (payments.ts `METHOD_NAME`), as `wallet create` takes them; Bark is the app's only. */
+const RAILS: Record<string, string | null> = { Cashu: "cashu", Lightning: "lightning", Ark: "arkade", USDT: "usdt", Bark: null, "on-chain Bitcoin": "bitcoin", Fedimint: "fedimint", Spark: "spark" };
+
+/**
+ * A contact with no wallet of the way of paying or the network asked (`chat request --method arkade`, a Mainnet `chat
+ * pay` to a contact with Testnet Cashu only): the engine says it in words alone. `refused` with `contact_no_wallet` and
+ * the contact's next step, as a contact with no wallet at all is said. Before, `engine`, which a bot may retry.
+ */
+function contactNoRail(error: unknown): CliError | undefined {
+  const said = error instanceof Error ? /^Your contact has no (Mainnet|Testnet) (.+) wallet$/.exec(error.message) : null;
+  if (!said || !Object.hasOwn(RAILS, said[2])) return undefined;
+  const type = RAILS[said[2]];
+  const step = type ? ` (on a CLI: ghostly wallet create ${type}${said[1] === "Mainnet" ? " --network mainnet" : ""})` : "";
+  return new CliError("refused", `${said[0]}${step}`, { reason: "contact_no_wallet" });
 }
 
 /**
@@ -123,8 +140,13 @@ export function localFileError(error: unknown, file?: string): CliError | undefi
   const { code, path } = error as { code?: unknown; path?: unknown };
   const where = typeof path === "string" ? path : file ?? "the path";
   if (code === "ENOENT" || code === "ENOTDIR") return new CliError("not_found", `No such file or folder: ${where}`);
+  // A symbolic link to itself (or a ring of them) leads nowhere: before, Node's raw "ELOOP: …, stat" as `engine`.
+  if (code === "ELOOP") return new CliError("not_found", `No such file or folder: ${where} (its symbolic links go round in a loop)`);
   if (code === "EACCES" || code === "EPERM" || code === "EROFS") return new CliError("refused", `Not allowed to write or read ${where}`);
   if (code === "EISDIR") return new CliError("bad_request", `${where} is a folder: name a file`);
+  // A file where a folder is to be made (`store sign --out`, `app publish --key`/`--out`): Node's "EEXIST: file already
+  // exists, mkdir '…'" was `engine`. Named as `file save --dir` names one.
+  if (code === "EEXIST" && (error as { syscall: string }).syscall === "mkdir") return new CliError("not_found", `${where} is a file, not a folder`);
   if (code === "ENAMETOOLONG") return new CliError("bad_request", `A name in ${where} is too long for this file system (at most 255 bytes)`);
   // A full disk (or a quota) answered Node's raw "ENOSPC: no space left on device, write" as `engine`, naming nothing
   // (agents#1710). `unavailable`: it works again once there is room, with nothing lost.

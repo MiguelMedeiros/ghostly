@@ -1,4 +1,4 @@
-import type { Locator } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { pasteInvite } from "../support/clipboard";
 import { chat, expect, expectConnected, test } from "../support/fixtures";
 import { HeadlessBot } from "../support/headless";
@@ -144,6 +144,7 @@ test("on a phone a chat's header keeps the contact's whole name beside the conne
  * contact's name takes). It had no rule to wrap or cut it, and ran from 19 to 381 px on a 320 px screen: past its
  * bubble, past the screen's edge and over the message's ⋮. It is one line cut with an ellipsis inside the bubble now,
  * the whole name in its tooltip; in a 1:1 chat (the name given to the contact) and in a group (a member's own name).
+ * In Arabic the Latin name is cut at its end too: its ellipsis was on its left, where it starts, and only its end showed.
  */
 test.describe("a received message's long one-word name on a 320px phone", () => {
   const LONG = "W".repeat(30);
@@ -157,8 +158,15 @@ test.describe("a received message's long one-word name on a 320px phone", () => 
       // In a group the name is a button (it opens who the member is) and the ellipsis is on it, inside the line.
       const cut = el.querySelector<HTMLElement>("[data-testid='message-nick-open']") ?? el;
       const line = el.getBoundingClientRect(), bubble = el.closest("[data-message-bubble]")!.getBoundingClientRect();
+      // The name's first letter, where it starts reading: inside the box that cuts it, the ellipsis at the other end.
+      const text = document.createTreeWalker(cut, NodeFilter.SHOW_TEXT).nextNode()!;
+      const first = document.createRange();
+      first.setStart(text, 0);
+      first.setEnd(text, 1);
+      const letter = first.getBoundingClientRect(), box = cut.getBoundingClientRect();
       return { left: line.left, right: line.right, bubbleLeft: bubble.left, bubbleRight: bubble.right, screen: window.innerWidth,
-        shown: cut.clientWidth, whole: cut.scrollWidth, page: document.documentElement.scrollWidth };
+        shown: cut.clientWidth, whole: cut.scrollWidth, page: document.documentElement.scrollWidth,
+        firstShown: letter.left >= box.left - 0.5 && letter.right <= box.right + 0.5 };
     });
     const seen = JSON.stringify(at);
     expect(at.left, seen).toBeGreaterThanOrEqual(at.bubbleLeft);
@@ -166,6 +174,15 @@ test.describe("a received message's long one-word name on a 320px phone", () => 
     expect(at.bubbleRight, seen).toBeLessThanOrEqual(at.screen);
     expect(at.page, seen).toBeLessThanOrEqual(at.screen);
     expect(at.whole, seen).toBeGreaterThan(at.shown);
+    expect(at.firstShown, seen).toBe(true);
+  }
+
+  /** The app in Arabic (right to left), the chat open again on the same message. */
+  async function inArabic(page: Page, row: Locator) {
+    await page.evaluate(() => localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}"), language: "ar" })));
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
+    await expect(row).toBeVisible({ timeout: 60_000 });
   }
 
   test("a contact's name of one long word stays inside their message's bubble", { tag: ["@feature:app.mobile-layout", "@feature:chats.list.rename"] }, async ({ peer, relay }) => {
@@ -190,6 +207,9 @@ test.describe("a received message's long one-word name on a 320px phone", () => 
       const row = chat(person).locator("[data-message-row]").filter({ hasText: "Build finished" });
       await insideItsBubble(row.getByTestId("message-nick"), LONG);
       await page.screenshot({ path: test.info().outputPath("long-name-1to1.png") });
+      await inArabic(page, row);
+      await insideItsBubble(row.getByTestId("message-nick"), LONG);
+      await page.screenshot({ path: test.info().outputPath("long-name-1to1-ar.png") });
     } finally {
       await bot.stop();
     }
@@ -221,6 +241,9 @@ test.describe("a received message's long one-word name on a 320px phone", () => 
       // Not a contact here: the name the member gave themselves, marked "~".
       await insideItsBubble(row.getByTestId("message-nick"), `~${LONG}`);
       await page.screenshot({ path: test.info().outputPath("long-name-group.png") });
+      await inArabic(page, row);
+      await insideItsBubble(row.getByTestId("message-nick"), `~${LONG}`);
+      await page.screenshot({ path: test.info().outputPath("long-name-group-ar.png") });
     } finally {
       await bot.stop();
     }

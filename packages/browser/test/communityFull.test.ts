@@ -48,4 +48,18 @@ describe("a full community's door", { timeout: 120_000 }, () => {
     await world.until(() => world.member(dave, id), 7 * 60_000);
     expect(world.view(dave, id)?.invitation).toBeUndefined();
   });
+
+  it("takes no answer whose numbers cannot be (more members than it holds, or past the cap)", async () => {
+    const world = new CommunityWorld();
+    const { id, link } = await full(world);
+    const said = [{ n: Number.MAX_SAFE_INTEGER, max: 1 }, { n: 4, max: 3 }, { n: 2, max: COMMUNITY_LIMITS.members + 1 }];
+    let told = 0;
+    world.drop = (_, to, frame) => { if (to.name === "dave" && frame.t === "group-full") Object.assign(frame, said[told++ % said.length]); return false; };
+    const dave = world.add("dave");
+    await dave.groups.joinByLink(link);
+    while (told < said.length) {
+      await world.run(30_000, 1_000);
+      expect(world.view(dave, id)?.invitation?.full).toBeUndefined();
+    }
+  });
 });

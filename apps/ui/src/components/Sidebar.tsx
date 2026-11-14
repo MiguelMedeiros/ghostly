@@ -130,7 +130,9 @@ export function Sidebar() {
   const { t, language } = useI18n();
   // New and Join keep their words while they fit beside the logo, in this language (French needs more room).
   const headerRef = useRef<HTMLDivElement>(null), brandRef = useRef<HTMLDivElement>(null), actionsRef = useRef<HTMLDivElement>(null);
-  const labelsFit = useLabelsFit(headerRef, brandRef, actionsRef, language);
+  // What the header gives up when it does not fit (a phone at a large text size): the buttons' words, then the wordmark
+  // (the ghost stays), then Join's share of New's width.
+  const givenUp = useLabelsFit(headerRef, brandRef, actionsRef, language, 8, 3);
   const isMobile = useIsMobile();
   const { settings: { chatListDensity: density, chatListCollapsed }, updateChatListCollapsed } = useSettings();
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -140,7 +142,7 @@ export function Sidebar() {
   // The rail has no search: it shows every chat. A phone turned on its side into a folded list keeps what was typed in
   // its search for the way back.
   const search = collapsed ? "" : typed;
-  const sidebarRef = useRef<HTMLDivElement>(null), toggleRef = useRef<HTMLButtonElement>(null);
+  const sidebarRef = useRef<HTMLElement>(null), toggleRef = useRef<HTMLButtonElement>(null);
   // The button that folded or unfolded the list goes with it: the focus goes to the one that takes its place (in the
   // header, or at the top of the rail). A shortcut pressed elsewhere (the message field) leaves the focus where it is.
   const refocus = useRef(false);
@@ -394,6 +396,7 @@ export function Sidebar() {
       <ChatRow
         key={session.id}
         chatId={session.id}
+        paired={session.profile === "paired-chat/1"}
         density={density}
         active={isActive}
         label={peerLabel}
@@ -441,9 +444,12 @@ export function Sidebar() {
   useKeptScroll(rowsRef);
   useOpenRowInView(rowsRef, { chat: activeSessionId, group: activeGroupId }, listReady);
 
+  // The whole list, folded or not, is the landmark "Chats": its New and Join, its search and its rows, which a screen
+  // reader's landmark keys reach as they reach the account bar and the open page.
   return (
-    <div
+    <nav
       ref={sidebarRef}
+      aria-label={t("sidebar.chats")}
       data-testid="sidebar"
       data-collapsed={collapsed || undefined}
       className={`relative flex flex-col bg-sidebar-bg ${isMobile ? "flex-1 min-w-0" : collapsed ? "border-e border-border shrink-0" : "sidebar-desktop border-e border-border shrink-0"}`}
@@ -469,22 +475,22 @@ export function Sidebar() {
           <SidebarTasks rail active={location.pathname === "/tasks"} onOpen={openTasks} />
           <SidebarSaved rail active={location.pathname === "/saved"} onOpen={openSaved} />
         </div>
-        <nav ref={rowsRef} aria-label={t("sidebar.chats")} data-testid="chat-rail" aria-busy={!listReady || undefined} className="flex flex-1 flex-col overflow-y-auto overflow-x-hidden py-1">
+        <div ref={rowsRef} data-testid="chat-rail" aria-busy={!listReady || undefined} className="flex flex-1 flex-col overflow-y-auto overflow-x-hidden py-1">
           {listReady && railRows.map(railItem)}
-        </nav>
+        </div>
       </> : <>
       {/* Header */}
-      <div ref={headerRef} data-labels={labelsFit ? undefined : "off"} className="sidebar-header h-14 header-safe shrink-0 flex items-center justify-between px-4 bg-panel-header">
+      <div ref={headerRef} data-labels={givenUp >= 1 ? "off" : undefined} data-wordmark={givenUp >= 2 ? "off" : undefined} data-join={givenUp >= 3 ? "own" : undefined} className="sidebar-header h-14 header-safe shrink-0 flex items-center justify-between px-4 bg-panel-header">
         <div ref={brandRef} className="flex shrink-0"><AppBrand onHome={() => nav.home()} /></div>
         <div ref={actionsRef} className="flex shrink-0 items-center gap-1">
         <div className="grid shrink-0 grid-cols-2 items-stretch gap-1 whitespace-nowrap" data-testid="sidebar-chat-actions">
           {/* New: one click is a chat, as always; the arrow beside it also offers a group. */}
           <div ref={newMenuRef} role="group" aria-label={t("sidebar.new")} data-testid="sidebar-new" className="sidebar-new-split relative flex min-w-0">
-            <button onClick={newChat} data-testid="sidebar-new-chat" aria-label={t("sidebar.startChat")} title={t("sidebar.newChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 max-md:min-h-11 max-md:min-w-11 flex-1 items-center justify-center gap-1 rounded-s-lg bg-accent p-2 text-sm font-semibold text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header"><ActionIcon d={NEW_CHAT_PATH} /><span className="sidebar-action-label">{t("sidebar.newChatShort")}</span></button>
+            <button onClick={newChat} data-testid="sidebar-new-chat" aria-label={t("sidebar.startChat")} title={t("sidebar.newChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 max-md:min-h-11 max-md:min-w-11 flex-1 items-center justify-center gap-1 rounded-s-lg bg-accent p-2 text-sm font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header"><ActionIcon d={NEW_CHAT_PATH} /><span className="sidebar-action-label">{t("sidebar.newChatShort")}</span></button>
             {/* On a phone 32px wide, and a thumb's 44px where a tap lands: that reaches past its end, over the gap and
                 Join's start, so New keeps all of its own and the words still fit beside the logo on a 375px phone. */}
             <button ref={newMoreRef} onClick={() => setNewMenuOpen(open => !open)} aria-haspopup="true" aria-expanded={!!newMenuOpen} aria-controls="sidebar-new-menu" aria-label={t("sidebar.newMenu.label")} title={t("sidebar.newMenu.label")} data-testid="sidebar-new-more"
-              className="relative inline-flex min-h-10 w-6 max-md:min-h-11 max-md:w-8 max-md:after:absolute max-md:after:inset-y-0 max-md:after:start-0 max-md:after:-end-3 max-md:after:content-[''] shrink-0 items-center justify-center rounded-e-lg border-s border-panel-header/25 bg-accent text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header">
+              className="relative inline-flex min-h-10 w-6 max-md:min-h-11 max-md:w-8 max-md:after:absolute max-md:after:inset-y-0 max-md:after:start-0 max-md:after:-end-3 max-md:after:content-[''] shrink-0 items-center justify-center rounded-e-lg border-s border-panel-header/25 bg-accent text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header">
               <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${newMenuOpen ? "rotate-180" : ""}`}><path d="m6 9 6 6 6-6"/></svg>
             </button>
             {newMenu()}
@@ -498,9 +504,9 @@ export function Sidebar() {
       <ListNotices />
       <InstallHint hasChats={sessions.length > 0 || groups.length > 0} />
 
-      {/* Search */}
+      {/* Search. Forced colors drop its fill and ring: there it gets a border instead, its padding 1px less to keep its size. */}
       <div className="px-3 py-2 bg-sidebar-bg">
-        <div className="flex items-center gap-3 bg-search-bg rounded-lg px-3 py-1.5 ring-1 ring-inset ring-field-border has-[input:focus-visible]:outline-2 has-[input:focus-visible]:-outline-offset-2 has-[input:focus-visible]:outline-focus-ring">
+        <div className="flex items-center gap-3 bg-search-bg rounded-lg px-3 py-1.5 ring-1 ring-inset ring-field-border forced-colors:border forced-colors:border-[color:CanvasText] forced-colors:px-[11px] forced-colors:py-[5px] has-[input:focus-visible]:outline-2 has-[input:focus-visible]:-outline-offset-2 has-[input:focus-visible]:outline-focus-ring">
           <svg
             width="16"
             height="16"
@@ -632,6 +638,6 @@ export function Sidebar() {
         onMouseDown={handleResizeStart}
         className="max-md:hidden absolute top-0 end-0 w-1 h-full cursor-col-resize z-10 hover:bg-accent/40 active:bg-accent/60 transition-colors"
       />}
-    </div>
+    </nav>
   );
 }

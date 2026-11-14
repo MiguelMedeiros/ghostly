@@ -8,6 +8,7 @@ import type { EngineState, LinkView, MessageFile } from "@ghostly/browser/shared
 import { callApi, type ApiContext } from "../src/api";
 import { NodeFileBytes } from "../src/runtime/fileBytes";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.files, files.image.meta
 
 /** `file send` of a picture: its size, read from its first bytes, goes with it to the engine and back in the answer. */
@@ -36,6 +37,7 @@ beforeAll(async () => {
 describe("file send of a picture", () => {
   const sent: MessageFile[] = [];
   const node = {
+    chatView: chatViewOf,
     getState: () => ({ links: [link], groups: [], settings: {}, transport: {}, transfers: {} }) as unknown as EngineState,
     getMessages: vi.fn(async () => []),
     getMessage: vi.fn(async () => undefined),

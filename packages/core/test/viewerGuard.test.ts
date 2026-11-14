@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   allowingViewerGuard,
+  concatBytes,
   guardViewerAnswer,
   utf8Decode,
   utf8Encode,
@@ -67,6 +68,9 @@ describe("the WebRTC guard of a contact's app (Hide my IP from contacts)", () =>
     expect(at("<!doc", false)).toBeNull();
     expect(at("<", false)).toBeNull();
     expect(at("", false)).toBeNull();
+    expect(at("ï", false)).toBeNull();
+    expect(at("ï»", false)).toBeNull();
+    expect(at("ï»")).toBe(0);
     // At the end of the page (or past the look), before what never ended.
     expect(at("<!-- not done")).toBe(0);
     expect(at("<!doctype html><!-- a")).toBe(15);
@@ -83,6 +87,43 @@ describe("the WebRTC guard of a contact's app (Hide my IP from contacts)", () =>
     expect(headers.map(([name]) => name)).not.toContain("content-length");
     expect(policies(headers)).toEqual([`script-src 'nonce-a' ${VIEWER_GUARD_HASH}`, VIEWER_GUARD_CSP]);
   });
+
+  it("goes after a byte order mark that comes split across chunks, as after a whole one", async () => {
+    const page = utf8Encode("\uFEFF<!doctype html><p>ação 日本</p>");
+    const guard = async (...parts: Uint8Array[]) => {
+      const { body } = await guardViewerAnswer([["content-type", "text/html"]], (async function* () { yield* parts; })(), "document");
+      const out: Uint8Array[] = [];
+      for await (const chunk of body) out.push(chunk);
+      return concatBytes(...out);
+    };
+    const whole = await guard(page);
+    expect(whole).toEqual(utf8Encode(`\uFEFF<!doctype html>${TAG}<p>ação 日本</p>`));
+    for (const cut of [1, 2]) expect(await guard(page.subarray(0, cut), page.subarray(cut))).toEqual(whole);
+  });
+
+  it("puts itself in the same place however the page is cut, and reads a head sent a byte at a time once", async () => {
+    const bytes = (text: string) => Uint8Array.from(text, (c) => c.charCodeAt(0));
+    const guarded = async (page: Uint8Array, size: number) => {
+      const out: number[] = [];
+      const parts = (async function* () { for (let i = 0; i < page.length; i += size) yield page.slice(i, i + size); })();
+      for await (const chunk of (await guardViewerAnswer([["content-type", "text/html"]], parts, "iframe")).body) for (const byte of chunk) out.push(byte);
+      return out;
+    };
+    const pages = [
+      "  <!DOCTYPE html>\n<html>", "<!-- a --><!--> <?xml x?><!doctype html><p>", "<!-- a -- b --!> <!---> \t<p>",
+      "<!-- > -> --> <!doctype x>", "<!x > <? y > <!doc", "  \n<", "<!-- never closed --", "<!d>ctype <p>",
+    ];
+    for (const page of pages) {
+      const whole = await guarded(bytes(page), page.length || 1);
+      for (const size of [1, 2, 3, 5]) expect(await guarded(bytes(page), size), `${JSON.stringify(page)} in ${size}`).toEqual(whole);
+    }
+    // A comment that never ends, past how far the guard looks, a byte at a time: once over its bytes, not once per byte
+    // (seconds of the page's time, before).
+    const comment = bytes(`<!--${"a".repeat(64 * 1024)}`);
+    const started = performance.now();
+    expect((await guarded(comment, 1)).length).toBe(comment.length + utf8Encode(TAG).length);
+    expect(performance.now() - started).toBeLessThan(3_000);
+  }, 60_000);
 
   it("guards a page whose destination the browser did not say, and an empty answer stays empty", async () => {
     expect(await read((await guardViewerAnswer([["content-type", "text/html"]], chunks("<p>hi"), null)).body)).toBe(`${TAG}<p>hi`);

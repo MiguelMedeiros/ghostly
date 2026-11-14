@@ -126,6 +126,23 @@ describe('OIDC sign-in answer', () => {
     await expect(signInForProof({ provider, platform: 'web', nonce: NONCE, reveal: [], window, signal: aborted.signal })).rejects.toThrow();
     expect(close).toHaveBeenCalledTimes(2);
   });
+
+  it('turns down a work account’s token whose organisation domain the person did not choose to share', async () => {
+    const key = await testKey('k1');
+    const window = (extra: Record<string, unknown>): OidcWindow => ({
+      redirectUri: REDIRECT, close: () => {},
+      async authorize(url) {
+        const u = new URL(url), now = Math.floor(Date.now() / 1000);
+        const token = await signToken(key, { iss: google.issuer, aud: 'google-web', sub: 'acct', iat: now, exp: now + 600, nonce: u.searchParams.get('nonce'), ...extra });
+        return `${REDIRECT}#id_token=${token}&state=${u.searchParams.get('state')}`;
+      },
+    });
+    const signIn = (reveal: ('email' | 'profile')[], extra: Record<string, unknown>) =>
+      signInForProof({ provider: google, platform: 'web', nonce: NONCE, reveal, window: window(extra), signal: new AbortController().signal });
+    await expect(signIn([], { hd: 'example.com' })).rejects.toThrow(/work or school Google account/);
+    await expect(signIn([], {})).resolves.toMatch(/\./);
+    await expect(signIn(['email'], { hd: 'example.com', email: 'ada@example.com' })).resolves.toMatch(/\./);
+  });
 });
 
 describe('OIDC callback page', () => {

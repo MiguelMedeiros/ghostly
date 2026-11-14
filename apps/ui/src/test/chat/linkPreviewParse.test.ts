@@ -81,6 +81,23 @@ describe("which link gets a preview", () => {
     // An invite link is a card of its own, made from the code: its page is never asked.
     expect(previewableLink(`join ${inviteLink(createChatInvite().inviteCode)}`)).toBeNull();
   });
+
+  it("only a link the bubble draws, for the address it opens", () => {
+    // Code is never read for links: the bubble draws none there, so no page is asked for one.
+    expect(previewableLink("look `https://news.example/secret` here")).toBeNull();
+    expect(previewableLink("```\nhttps://news.example/a\n```")).toBeNull();
+    expect(previewableLink("`https://news.example/a` then https://other.example/b")).toBe("https://other.example/b");
+    // The bubble's link ends before a closing "~~" or "||"; a card for the longer address would open another page.
+    expect(previewableLink("~~https://news.example/a~~")).toBeNull();
+    expect(previewableLink("|| https://news.example/a||")).toBeNull();
+    // A written link opens its whole address; a card for it without its last "." or "_" would be another page's.
+    expect(previewableLink("[DC](https://en.wikipedia.org/wiki/Washington,_D.C.)")).toBeNull();
+    expect(previewableLink("[x](https://news.example/a_)")).toBeNull();
+    // Links the bubble and the card read alike still get one.
+    expect(previewableLink("[the news](https://news.example/a)")).toBe("https://news.example/a");
+    expect(previewableLink("(see https://en.wikipedia.org/wiki/Foo_(bar))")).toBe("https://en.wikipedia.org/wiki/Foo_(bar)");
+    expect(previewableLink("**https://news.example/a**")).toBe("https://news.example/a");
+  });
 });
 
 describe("places in a message", () => {

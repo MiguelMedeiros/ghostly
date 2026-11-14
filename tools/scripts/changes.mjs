@@ -99,8 +99,11 @@ function groupSpelling(group) {
  * A fragment's section and bullets, or a list of what is wrong with it. `version` is the repository's (package.json):
  * before a guard's `from`, an entry about that flag must be held for its release.
  */
-export function parseFragment(name, text, version) {
+export function parseFragment(name, saved, version) {
   const problems = [];
+  // Read as written whatever the editor saved: Git for Windows checks files out with CRLF, and some editors start a
+  // file with a byte order mark. Either one made every fragment "start with" the front matter it starts with.
+  const text = saved.replace(/^\uFEFF/, "").replaceAll("\r\n", "\n");
   const match = text.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   if (!match) return { problems: [`${name}: starts with a front matter block (---, section: ..., ---)`] };
   const fields = {};
@@ -301,6 +304,13 @@ export function releaseChangelog(changelog, fragments, version) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const args = process.argv.slice(2);
+  const preview = args[0] === "--preview";
+  const version = preview ? args[1] : undefined;
+  if ((args.length && !preview) || args.length > 2 || (version !== undefined && !/^\d+\.\d+\.\d+$/.test(version))) {
+    console.error("usage: node tools/scripts/changes.mjs [--preview [<major.minor.patch>]]");
+    process.exit(2);
+  }
   const stray = strayFragments();
   if (stray.length) {
     console.error(`Changelog entries moved to ${CHANGES}/: move ${stray.join(", ")} there (git mv changes/*.md ${CHANGES}/).`);
@@ -313,12 +323,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     for (const p of problems) console.error(`  ${p}`);
     process.exit(1);
   }
-  const preview = process.argv.indexOf("--preview");
-  const version = preview < 0 ? undefined : process.argv[preview + 1];
-  if (version !== undefined && !/^\d+\.\d+\.\d+$/.test(version)) {
-    console.error("usage: node tools/scripts/changes.mjs [--preview [<major.minor.patch>]]");
-    process.exit(1);
-  }
   const { released, held } = version ? splitFragments(fragments, version) : { released: fragments, held: [] };
   let changelog;
   try {
@@ -327,7 +331,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     console.error(`✗ ${error.message}`);
     process.exit(1);
   }
-  if (preview >= 0) {
+  if (preview) {
     const from = changelog.indexOf("## Unreleased");
     const to = changelog.indexOf("\n## ", from + 1);
     console.log(changelog.slice(from, to < 0 ? undefined : to));

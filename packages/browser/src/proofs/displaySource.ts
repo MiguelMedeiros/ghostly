@@ -13,16 +13,21 @@ export const NOSTR_SIGNATURE_SOURCE = "Nostr signature (NIP-01, BIP-340)";
 
 export type OidcEmail = "verified" | "unverified";
 
-/** A sign-in provider's ID token: who signed it, and whether it says the email is checked. */
-export function oidcDisplaySource(provider: string, email?: OidcEmail): string {
-  return `Signed by ${provider}${email === "verified" ? `; email verified by ${provider}` : email === "unverified" ? `; email not verified by ${provider}` : ""}`;
+/**
+ * A sign-in provider's ID token: who signed it, whether it says the email is checked, and whether the name is one the
+ * account set for itself (`nameUnchecked`): a display name its holder (or any directory's admin) types, which the
+ * provider signs but never checks, so it carries that caveat as an OpenPGP user ID does.
+ */
+export function oidcDisplaySource(provider: string, email?: OidcEmail, nameUnchecked = false): string {
+  return `Signed by ${provider}${email === "verified" ? `; email verified by ${provider}` : email === "unverified" ? `; email not verified by ${provider}` : ""}${
+    nameUnchecked ? `; name set on the account, not checked by ${provider}` : ""}`;
 }
 
 export type DisplaySource =
   | { kind: "openpgp-user-id" }
   | { kind: "openpgp-keyserver" }
   | { kind: "nostr-signature" }
-  | { kind: "oidc"; provider: string; email?: OidcEmail };
+  | { kind: "oidc"; provider: string; email?: OidcEmail; nameUnchecked?: true };
 
 /** Which fixed source a proof of this provider has, or undefined for one shown as written. */
 export function displaySourceOf(provider: string, source: string): DisplaySource | undefined {
@@ -33,8 +38,8 @@ export function displaySourceOf(provider: string, source: string): DisplaySource
     return undefined;
   }
   if (provider !== "oidc") return undefined;
-  const oidc = /^Signed by (.+?)(?:; email (not )?verified by (.+))?$/.exec(source);
-  if (!oidc || (oidc[3] !== undefined && oidc[3] !== oidc[1])) return undefined;
-  const [, signer, not, also] = oidc;
-  return { kind: "oidc", provider: signer!, ...(also !== undefined ? { email: not ? "unverified" : "verified" } : {}) };
+  const oidc = /^Signed by (.+?)(?:; email (not )?verified by (.+?))?(?:; name set on the account, not checked by (.+))?$/.exec(source);
+  if (!oidc || [oidc[3], oidc[4]].some(by => by !== undefined && by !== oidc[1])) return undefined;
+  const [, signer, not, also, name] = oidc;
+  return { kind: "oidc", provider: signer!, ...(also !== undefined ? { email: not ? "unverified" : "verified" } : {}), ...(name !== undefined ? { nameUnchecked: true as const } : {}) };
 }

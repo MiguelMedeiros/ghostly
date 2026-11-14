@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { EngineState, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.services, headless.identities, headless.chat
 
 /**
@@ -17,7 +18,7 @@ function fake() {
     { linkId: "chat-one", id: "peer_1", text: "their words", sender: "peer", timestamp: 3, via: "datalink" },
   ];
   const node = {
-    getState: () => ({ links: [link], groups: [], settings: {}, transport: {},
+    chatView: chatViewOf, getState: () => ({ links: [link], groups: [], settings: {}, transport: {},
       services: [{ id: "svc-1", name: "Notes", target: "http://127.0.0.1:8080", enabled: true, sharedWith: [], requests: 0 }],
       identityProofs: [{ id: "proof-1", provider: "github", subject: "ana", verified: true, issuedAt: 1, expiresAt: 2, sharedWith: [] }],
       payments: { "pay-1": { id: "pay-1", linkId: "chat-one", kind: "request", direction: "in", state: "pending", amount: 21, createdAt: 1 } },

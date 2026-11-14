@@ -35,6 +35,28 @@ describe("a shared app whose address this browser has not allowed", () => {
     expect(within(card).queryByText("Ghostly needs your permission to reach that local address")).toBeNull();
   });
 
+  it("says so again once Chrome's site access was taken back and Share is turned on again", async () => {
+    fakeEngine.features = { ...fakeEngine.features, shareLocalServices: true };
+    const allowed = new Set(["http://localhost:9000"]);
+    fakeEngine.localAccessAllowed = async (origin) => allowed.has(origin);
+    const notes = { id: "notes", name: "Notes", target: "localhost:9000", enabled: true, requests: 0, createdAt: 1, sharedWith: ["p".repeat(52)] };
+    renderApp(<Services />, { route: "/services" });
+    fakeEngine.update({ services: [notes] });
+    const card = await screen.findByTestId("service-item");
+    expect(await within(card).findByText("Shared with 1 contact")).toBeTruthy();
+
+    // Site access turned off in chrome://extensions: the extension stops sharing the apps at that host.
+    allowed.clear();
+    fakeEngine.update({ services: [{ ...notes, enabled: false }] });
+    expect(await within(card).findByText("Stopped")).toBeTruthy();
+    // Share on again: contacts are refused until the person allows the address here.
+    fakeEngine.update({ services: [notes] });
+
+    expect(await within(card).findByText("Ghostly needs your permission to reach that local address")).toBeTruthy();
+    expect(within(card).getByTestId("service-allow")).toBeTruthy();
+    expect(within(card).queryByText("Shared with 1 contact")).toBeNull();
+  });
+
   it("shows nothing of it where the host does not ask (the web app, Desktop)", async () => {
     fakeEngine.features = { ...fakeEngine.features, shareLocalServices: true };
     renderApp(<Services />, { route: "/services" });

@@ -52,6 +52,14 @@ describe("changelog fragments", () => {
     expect(fragment("Fixed / Wallet", "- x").problems[0]).toMatch(/"Wallets", not "Wallet"/);
   });
 
+  it("reads a fragment saved with Windows line endings or a byte order mark as written", () => {
+    const text = "---\nsection: For users / Chat\n---\n- Forwards.\n- Replies.\n";
+    const bom = String.fromCharCode(0xfeff); // a byte order mark, as some editors save one
+    for (const saved of [text.replaceAll("\n", "\r\n"), bom + text, bom + text.replaceAll("\n", "\r\n")]) {
+      expect(parseFragment("docs/changelog/unreleased/x.md", saved)).toMatchObject({ heading: "For users", group: "Chat", body: "- Forwards.\n- Replies.", problems: [] });
+    }
+  });
+
   it("refuses a heading the release notes do not use, naming the ones they do", () => {
     const x = "docs/changelog/unreleased/x.md";
     for (const heading of ["Security", "For users", "Fixed", "For developers"]) expect(fragment(`${heading} / Chat`, "- x").problems, heading).toEqual([]);

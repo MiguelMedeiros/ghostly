@@ -1,6 +1,8 @@
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { BrowserHost } from "@ghostly/browser/host";
+import type { FoundUpdate } from "../../lib/updates";
 
 // covers: app.i18n
 
@@ -9,8 +11,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
  * replaced the files) is said on the Language row, and asked for again.
  */
 
-/** Settings on Appearance, in a fresh copy of the app whose Portuguese fails to load `failures` times. */
-async function appWhosePortugueseFails(failures: number) {
+/**
+ * Settings on Appearance, in a fresh copy of the app whose Portuguese fails to load `failures` times. `found`: the
+ * update the host's check answers (a deploy replaced this build), put in place by `install`.
+ */
+async function appWhosePortugueseFails(failures: number, found: FoundUpdate | null = null, install = vi.fn(() => Promise.resolve())) {
   // A fresh copy of the modules: the test setup loads every language into the shared one.
   vi.resetModules();
   const real = await vi.importActual<{ default: Record<string, unknown> }>("../../locales/pt/index.ts");
@@ -19,11 +24,15 @@ async function appWhosePortugueseFails(failures: number) {
     if (left-- > 0) throw new Error("Failed to fetch dynamically imported module");
     return real;
   });
-  const [{ renderApp }, { Settings }, { LockScreenProvider }, { UpdateProvider }, { installFakeEngine }] = await Promise.all([
+  const [{ renderApp }, { Settings }, { LockScreenProvider }, { UpdateProvider }, { installFakeEngine, fakeEngine }, { loadSettings, saveSettings }] = await Promise.all([
     import("../render"), import("../../pages/Settings"), import("../../contexts/LockScreenContext"), import("../../contexts/UpdateContext"),
-    import("../fakeEngine"),
+    import("../fakeEngine"), import("../../lib/settings"),
   ]);
   installFakeEngine();
+  if (found) {
+    (fakeEngine as BrowserHost).updates = { downloadUrl: "https://github.com/MiguelMedeiros/ghostly/releases", check: () => Promise.resolve(found), install };
+    saveSettings({ ...loadSettings(), checkForUpdates: true });
+  }
   return renderApp(
     <LockScreenProvider><UpdateProvider><Routes><Route path="/settings/:section?" element={<Settings />} /></Routes></UpdateProvider></LockScreenProvider>,
     { route: "/settings/appearance" },
@@ -74,6 +83,19 @@ describe("a language whose file does not load", () => {
 
     act(() => { document.dispatchEvent(new Event("visibilitychange")); });
     expect(await screen.findByRole("heading", { name: "Aparência" })).toBeInTheDocument();
+  });
+
+  it("after a deploy, offers the new version's Reload on the row: this build's file is gone, so Try again never brings it", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const install = vi.fn(() => Promise.resolve());
+    const { user } = await appWhosePortugueseFails(Infinity, { version: "1.2.0", build: "b2", apply: "reload" }, install);
+    await choosePortuguese(user);
+    const notice = await screen.findByTestId("settings-language-not-loaded");
+    await waitFor(() => expect(notice).toHaveTextContent("Português needs the new version of Ghostly. Updating ends your calls and connections."));
+    expect(within(notice).queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+
+    await user.click(within(notice).getByRole("button", { name: "Reload" }));
+    expect(install).toHaveBeenCalledOnce();
   });
 
   it("says nothing when the language loads", async () => {

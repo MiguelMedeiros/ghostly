@@ -173,18 +173,24 @@ export interface DnsResponse {
   answers: DnsAnswer[];
 }
 
+/**
+ * EDNS0 OPT record (RFC 6891) with one Client Subnet option of source prefix 0 (RFC 7871 §7.1.2): a resolver must
+ * not add this device's subnet to its queries to the name's servers, as Google Public DNS otherwise does.
+ */
+const NO_CLIENT_SUBNET = Uint8Array.of(0, 0, 41, 1232 >> 8, 1232 & 0xff, 0, 0, 0, 0, 0, 8, 0, 8, 0, 4, 0, 1, 0, 0);
+
 /** A recursive query for one name and type. ID 0, as RFC 8484 recommends for caching;
  * the AD bit asks the resolver to report DNSSEC validation (RFC 6840 §5.7). */
 export function encodeDnsQuery(name: string, type: DnsType): Uint8Array {
   const labels = name.replace(/\.$/, '').split('.');
-  const parts: Uint8Array[] = [Uint8Array.of(0, 0, 0x01, 0x20, 0, 1, 0, 0, 0, 0, 0, 0)];
+  const parts: Uint8Array[] = [Uint8Array.of(0, 0, 0x01, 0x20, 0, 1, 0, 0, 0, 0, 0, 1)];
   for (const label of labels) {
     const bytes = utf8Encode(label);
     if (!bytes.length || bytes.length > 63) throw new Error('Invalid DNS name');
     parts.push(Uint8Array.of(bytes.length), bytes);
   }
   const code = DNS_TYPE[type];
-  parts.push(Uint8Array.of(0, code >> 8, code & 0xff, 0, 1));
+  parts.push(Uint8Array.of(0, code >> 8, code & 0xff, 0, 1), NO_CLIENT_SUBNET);
   return concatBytes(...parts);
 }
 
