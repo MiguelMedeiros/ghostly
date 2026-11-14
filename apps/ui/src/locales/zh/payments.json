@@ -241,6 +241,7 @@
       "closed": "已关闭",
       "paid": "已支付",
       "paidBy": "由 {{name}} 支付",
+      "paidByMe": "由你支付",
       "saysPaid": "{{names}} 说已支付 · 等待 {{to}} 的钱包",
       "saysPaidToMe": "{{names}} 说已支付 · 等待你的钱包",
       "sent": "已发送 · 等待 {{name}}",
