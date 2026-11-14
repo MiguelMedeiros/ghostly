@@ -1040,6 +1040,52 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     });
   }
 
+  it("a receiver checking the digest, offered the file again on a new session, goes on checking: no pause, no Ask again", async () => {
+    const w = wire();
+    const disk = new Disk(false);
+    let release!: () => void;
+    disk.checking = new Promise<void>((resolve) => { release = resolve; });
+    w.b.disks.set("chk-0002", disk);
+    w.attach();
+    send(w, file("chk-0002", 50_000));
+    await until(() => state(w.b, "in", "chk-0002") === "verifying");
+    // The session drops and another opens: the old one's frames still wait on the check, the new one's offer comes now.
+    w.drop();
+    w.attach();
+    const offer = w.a.sent.filter((f) => f.t === "pf-offer").at(-1)!;
+    await w.b.files.handle({ ...offer });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(state(w.b, "in", "chk-0002")).toBe("verifying");
+    // Being checked, it can no longer be paused, and it is not stuck.
+    w.b.files.pause("in", "chk-0002");
+    expect(state(w.b, "in", "chk-0002")).toBe("verifying");
+    expect(transferStalled(w.b.files.get("in", "chk-0002")!, 0, true, Date.now())).toBe(false);
+    release();
+    await until(() => state(w.a, "out", "chk-0002") === "done" && state(w.b, "in", "chk-0002") === "done");
+  });
+
+  it("a receiver that stopped while it checked the digest checks it again when the file is offered after its restart", async () => {
+    const sent: Record<string, unknown>[] = [];
+    const records = new Map<string, FileTransferRecord>();
+    const info = file("chk-0003", 4);
+    const files = new ChatFiles({
+      send: (frame) => { sent.push(frame); return true; },
+      decide: async () => "accept",
+      openTarget: async () => ({ offset: 4, append: async () => {}, flush: async () => {}, verify: async () => true, discard: async () => {} }),
+      openSource: async () => { throw new Error("not sending"); },
+      changed: (record) => { records.set(record.id, record); },
+    });
+    // As it was kept: being checked when the app stopped.
+    files.restore([{ id: info.id, direction: "in", file: info, state: "verifying", confirmed: 4, since: 1_000, agreed: true }]);
+    files.attach();
+    const offer = { t: "pf-offer", id: info.id, name: info.name, mime: info.mime, size: info.size, ts: info.timestamp };
+    await files.handle(offer);
+    await until(() => sent.some((f) => f.t === "pf-accept"));
+    expect(sent).toContainEqual({ t: "pf-accept", id: info.id, offset: 4 });
+    await files.handle({ t: "pf-sum", id: info.id, size: 4, digest: "A".repeat(43) });
+    await until(() => records.get(info.id)?.state === "done");
+  });
+
   it("a digest that does not match deletes the file on arrival and says so on both sides", async () => {
     const w = wire();
     w.attach();

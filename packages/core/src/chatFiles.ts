@@ -1021,6 +1021,10 @@ export class ChatFiles {
           if (!(await this.retakeAgreed(existing))) return;
           break;
         case "asking": this.send({ t: "pf-wait", id, why: "consent" }); return;
+        // Being checked (a new session's offer, while the old one's still waits on it): the check answers, `pf-done` or
+        // `pf-refuse`. Taken up again, it read as arriving at 100% for the rest of the check, with Pause and Ask again.
+        // One that was being checked when the app stopped is taken up again: its check starts over.
+        case "verifying": if (existing.in?.verifying) return; break;
       }
       if (record.state === "paused" && record.pausedBy === "me") { this.send({ t: "pf-wait", id, why: "paused" }); return; }
       if (paused) {
