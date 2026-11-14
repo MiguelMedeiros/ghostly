@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { describe, expect, it, vi } from "vitest";
 import { CashuWallet } from "../src/engine/wallet";
-// covers: payments.cashu.mints
+// covers: wallet.cashu.mint.add
 
 const info = vi.hoisted(() => ({ name: undefined as string | undefined, motd: undefined as string | undefined }));
 vi.mock("@cashu/cashu-ts", async (importOriginal) => ({
