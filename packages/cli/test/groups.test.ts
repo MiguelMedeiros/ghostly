@@ -9,6 +9,7 @@ import { COMMANDS, TEXT_COMMANDS } from "../src/commands";
 import { EventHub, type GhostlyEvent } from "../src/events";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 import { pageOf } from "./support/messagePage";
+import { groupViewOf } from "./support/chatView";
 import { groupJson, groupMessageJson } from "../src/views";
 // covers: headless.groups, headless.group-admin, groups.rename
 
@@ -32,6 +33,7 @@ const message = (id: string, fields: Partial<StoredMessage> = {}): StoredMessage
 function fake(messages: StoredMessage[] = []) {
   const node = {
     getState: () => ({ links: [], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
+    groupView: groupViewOf,
     getSettings: () => ({}),
     groupMessages: vi.fn(async () => messages),
     messagePage: vi.fn(async (params: { limit?: number; before?: string | number }) => pageOf(messages, params)),

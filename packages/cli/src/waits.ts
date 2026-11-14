@@ -1,5 +1,5 @@
 import type { GroupView, StoredMessage } from "@ghostly/browser/shared/types";
-import { noMessage, nobodyJoinedChat, node, state, type ApiContext } from "./apiKit";
+import { groupById, noMessage, nobodyJoinedChat, node, type ApiContext } from "./apiKit";
 import { CliError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import { goesOn as goesOnIn } from "./waitNotice";
@@ -63,8 +63,8 @@ export async function waitForRemoval(ctx: ApiContext, chat: string, messageId: s
  */
 export const nobodyElseIn = (ctx: ApiContext, groupId: string): boolean => alone(groupIn(ctx, groupId));
 
-/** A group as the engine shows it: `getState()` builds the whole engine view, so a poll reads it once. */
-const groupIn = (ctx: ApiContext, groupId: string): GroupView | undefined => state(ctx).groups?.find((g) => g.id === groupId);
+/** A group as the engine shows it, built alone: `getState()` builds a view of every chat, once per poll. */
+const groupIn = (ctx: ApiContext, groupId: string): GroupView | undefined => groupById(ctx, groupId);
 
 const alone = (group: GroupView | undefined): boolean => group?.profile === "mesh" && !group.members.some((m) => !m.me);
 
