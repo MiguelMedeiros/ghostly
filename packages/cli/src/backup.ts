@@ -80,11 +80,14 @@ async function walk(root: string, dir = root, out: string[] = []): Promise<strin
   return out;
 }
 
-/** A file's first `size` bytes into the backup, a frame at a time. One that got shorter meanwhile stops the backup. */
-async function copyIn(writer: BackupWriter, path: string, size: number, opened?: FileHandle): Promise<void> {
+/**
+ * A file's first `size` bytes into the backup, a frame at a time. One that got shorter meanwhile stops the backup.
+ * `buffer` (`FRAME_BYTES`) is the backup's one for every file: a new one each zero-filled 1 MiB, for a 1 KB file too,
+ * and 50,000 small files took half a minute. The writer copies each frame before `bytes` returns.
+ */
+async function copyIn(writer: BackupWriter, buffer: Uint8Array, path: string, size: number, opened?: FileHandle): Promise<void> {
   const handle = opened ?? await open(path, "r");
   try {
-    const buffer = new Uint8Array(FRAME_BYTES);
     for (let at = 0; at < size;) {
       const { bytesRead } = await handle.read(buffer, 0, Math.min(FRAME_BYTES, size - at), at);
       if (!bytesRead) throw new CliError("unavailable", `${path} changed while it was backed up: try again`);
@@ -166,14 +169,15 @@ export const BACKUP_METHODS: Record<string, Method> = {
       const put = (record: BackupRecord) => writer.json(JSON.stringify(record));
       await put({ t: "profile", format: FORMAT, createdAt: Date.now(), files: files.length, bytes, ...(light && { light: { maxFileBytes: LIGHT_FILE_BYTES, maxVoiceBytes: LIGHT_VOICE_BYTES, files: leftOut.length, bytes: leftOutBytes, ids: leftOut.map((file) => basename(file.name)) } }) });
       await put({ t: "file", kind: "store", size: storeSize });
-      await copyIn(writer, store, storeSize);
+      const buffer = new Uint8Array(FRAME_BYTES);
+      await copyIn(writer, buffer, store, storeSize);
       // Each file opened before its record: one removed since the walk is left out, and the end counts what went in.
       let copied = 0, copiedBytes = 0;
       for (const file of files) {
         const path = join(paths.files, file.name), handle = await open(path, "r").catch(unlessGone);
         if (!handle) continue;
         await put({ t: "file", kind: "file", path: file.name.split(sep).join("/"), size: file.size });
-        await copyIn(writer, path, file.size, handle);
+        await copyIn(writer, buffer, path, file.size, handle);
         copied++;
         copiedBytes += file.size;
       }

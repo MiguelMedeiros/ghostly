@@ -100,6 +100,15 @@ function joined(ctx: ApiContext, params: Params, twin?: string): GroupView {
 /** The member `params.member` names in `group`, this profile's own name said to be it; by its key only for a grant. */
 const member = (ctx: ApiContext, group: GroupView, params: Params, grant = false) => findMember(group, str(params, "member", true), settingsOf(ctx).nick, grant);
 
+/** Where the app opens a group's link, as its Share gives it (WISP 903: `https://…/#/join/group2/…`). */
+export const GROUP_LINK_ORIGIN = "https://app.ghostly.tools";
+
+/**
+ * A group's link and the address that opens it in the app, as `invite create` answers `invite` and `link`. Only the
+ * token (`group2/…`) was given: pasted in a chat it is no link anyone can tap, and the app's own Share link is this one.
+ */
+export const withUrl = (group: string, link: string | null) => ({ group, link, ...(link && { url: `${GROUP_LINK_ORIGIN}/#/join/${link}` }) });
+
 const view = (ctx: ApiContext, id: string, params: Params) => groupJson(groupOf(ctx, { group: id }), bool(params, "showSecret"));
 
 export const GROUP_ADMIN_METHODS: Record<string, Method> = {
@@ -155,7 +164,7 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
       return { group: group.id, link: null };
     }
     const { link } = await node(ctx).enableGroupLink({ groupId: group.id, ...(reset ? { reset: true } : {}) });
-    return { group: group.id, link };
+    return withUrl(group.id, link);
   },
   async "group.picture"(ctx, params) {
     const group = joined(ctx, params);

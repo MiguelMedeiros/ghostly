@@ -507,7 +507,7 @@ export const queuedHead = (sticky) => sticky?.body?.match(HEAD)?.[1] ?? null;
 const newCommitsText = (what) =>
   `Merge train: this pull request got new commits after it was queued (${what}), so it left the line. Add \`queue\` again once this head is reviewed and green.`;
 
-/** The commit the train rebased a lone pull request to, from its position comment: { sha, baseSha, at, retried }. */
+/** The commit the train rebased a lone pull request to, from its position comment: { sha, baseSha, at, retried, from? }. */
 export const aloneMark = (sticky) => {
   try {
     const m = JSON.parse(sticky?.body?.match(ALONE)?.[1] ?? "null");
@@ -932,8 +932,9 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       say(`DROP #${p.number} (merges with a merge commit)`);
       done.dropped.push(p.number);
       await leave(p, null, `Merge train: \`${p.branch}\` merges into \`${base}\` with a merge commit, never squashed into a batch, so it left the line; it lands by hand with a merge commit when it is ready.`);
-    } else if (queuedHead(p.sticky) && queuedHead(p.sticky) !== p.sha && p.alone?.sha !== p.sha) {
-      // `queue` vouches for the head that was reviewed (or the train's own rebase of it): a later push needs a new review.
+    } else if (queuedHead(p.sticky) && queuedHead(p.sticky) !== p.sha && p.alone?.sha !== p.sha && p.alone?.from !== p.sha) {
+      // `queue` vouches for the head that was reviewed (or the train's own rebase of it, `from` the one before a push
+      // that did not happen): a later push needs a new review.
       say(`DROP #${p.number} (new head since it was queued)`);
       done.dropped.push(p.number);
       await leave(p, null, newCommitsText(`${queuedHead(p.sticky).slice(0, 12)} → ${p.sha.slice(0, 12)}`));
@@ -1270,8 +1271,10 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       return null;
     }
     // The mark goes first: a run that stops before the push leaves the reviewed head with a mark naming a commit it
-    // never got, which the next run reads as nothing in flight.
-    p.alone = { sha: built.sha, baseSha: built.baseSha, at: new Date(now).toISOString(), retried, ...(past ? { past } : {}) };
+    // never got, which the next run reads as nothing in flight. A branch already on the train's own rebase keeps it
+    // vouched for in `from`: else, stopped before the push, the next run read it as an author's push and dropped it.
+    const from = p.sha !== (queuedHead(p.sticky) ?? p.sha) && (p.alone?.sha === p.sha || p.alone?.from === p.sha) ? p.sha : null;
+    p.alone = { sha: built.sha, baseSha: built.baseSha, at: new Date(now).toISOString(), retried, ...(from ? { from } : {}), ...(past ? { past } : {}) };
     await setSticky(p, positionText(base, p, 0, 0, queuedHead(p.sticky) ?? p.sha, p.alone));
     say(`ALONE #${p.number}: rebased onto ${built.baseSha.slice(0, 12)} as ${built.sha.slice(0, 12)}${retried ? " (second run)" : ""}`);
     if (built.sha !== p.sha) {

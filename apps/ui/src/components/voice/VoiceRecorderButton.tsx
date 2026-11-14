@@ -122,6 +122,8 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
   const callOn = useSyncExternalStore(subscribeCalls, anyCallOn, () => false);
   /** A call went on under the recording and paused it: Resume waits for the call to end. */
   const [callPaused, setCallPaused] = useState(false);
+  /** A call went on since the microphone was asked for: read as it answers, before React shows `callPaused`. */
+  const callPausedRef = useRef(false);
   const callWasOn = useRef(callOn);
 
   const recorderRef = useRef<VoiceRecorder | null>(null);
@@ -211,6 +213,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     setModeBoth("idle");
     setPhase("starting");
     setMicEnded(false);
+    callPausedRef.current = false;
     setCallPaused(false);
     setElapsed(0);
     setLevels([]);
@@ -314,7 +317,8 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     if (modeRef.current === "hold" && asked) lock();
     setPhase("recording");
     // A call went on while the microphone was asked for: it is not taken in, the recording waits paused for its end.
-    if (anyCallOn() && !callBefore) pauseRecording();
+    // So does one that followed a call the recording was started in, ended while the microphone was asked for.
+    if (anyCallOn() && (!callBefore || callPausedRef.current)) pauseRecording();
   }, [disabled, unavailable, onError, reset, showHint, send, focusOutOfBar, lock, pauseRecording, t]);
 
   // A chat left mid-recording gives the microphone back, and the contact stops seeing "recording audio…".
@@ -406,7 +410,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
   useEffect(() => {
     const began = callOn && !callWasOn.current;
     callWasOn.current = callOn;
-    if (!callOn) { setCallPaused(false); return; }
+    if (!callOn) { callPausedRef.current = false; setCallPaused(false); return; }
     const recorder = recorderRef.current;
     if (!began || !recorder || recorder.ended || sendingRef.current) return;
     // The release of that finger, and the click after it, land on Send: they send nothing.
@@ -415,6 +419,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     focusOutOfBar();
     pauseRecording();
     confirmResumeRef.current = false;
+    callPausedRef.current = true;
     setCallPaused(true);
   }, [callOn, lock, focusOutOfBar, pauseRecording]);
 

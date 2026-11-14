@@ -189,8 +189,8 @@ describe("group link", () => {
     expect(await callApi(ctx, "group.link", { group: "Crew", on: false })).toEqual({ group: "g1", link: null });
     expect(await callApi(ctx, "group.link", { group: "Crew", on: null })).toEqual({ group: "g1", link: null });
     expect(disableGroupLink).toHaveBeenCalledTimes(2);
-    expect(await callApi(ctx, "group.link", { group: "Crew" })).toEqual({ group: "g1", link: LINK });
-    expect(await callApi(ctx, "group.link", { group: "Crew", on: true, reset: true })).toEqual({ group: "g1", link: LINK });
+    expect(await callApi(ctx, "group.link", { group: "Crew" })).toEqual({ group: "g1", link: LINK, url: expect.stringMatching(/#\/join\//) });
+    expect(await callApi(ctx, "group.link", { group: "Crew", on: true, reset: true })).toEqual({ group: "g1", link: LINK, url: expect.stringMatching(/#\/join\//) });
     expect(enableGroupLink.mock.calls).toEqual([[{ groupId: "g1" }], [{ groupId: "g1", reset: true }]]);
   });
 });

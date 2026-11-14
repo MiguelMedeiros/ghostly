@@ -117,8 +117,11 @@ describe("one-shot commands at once on one profile", { timeout: 120_000 }, () =>
     const paths = profilePaths(starting, "default");
     const daemon = new Running(["--home", starting, "daemon"], env);
     try {
+      // Its pid in the mark, not the file alone: stopped between the file's creation and its write, the daemon left an
+      // empty mark, and the run was told of a command holding the profile (a CI flake).
       const until = Date.now() + 30_000;
-      while (!existsSync(`${paths.dir}/daemon.starting`)) {
+      const marked = () => { try { return readFileSync(`${paths.dir}/daemon.starting`, "utf8") === String(daemon.child.pid); } catch { return false; } };
+      while (!marked()) {
         if (Date.now() > until) throw new Error(`the daemon never marked its start: ${daemon.stderr}`);
         await new Promise((r) => setTimeout(r, 2));
       }

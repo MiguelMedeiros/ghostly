@@ -20,7 +20,7 @@ import { STATUS_CARD_METHODS, secretIn } from "./statusCards";
 import { BUTTON_METHODS, buttonsCard, pressable } from "./buttons";
 import { forgetHold, HOLD_MAX_MINUTES, holdChat, holdOf, releaseHold } from "./holds";
 import { endTyping, keepOneShot, keepTyping, sayTyping } from "./typing";
-import { GROUP_ADMIN_METHODS, noMember } from "./groupAdmin";
+import { GROUP_ADMIN_METHODS, noMember, withUrl } from "./groupAdmin";
 import { withStoredIds } from "./turnRefs";
 import { IDENTITY_METHODS } from "./identities";
 import { X401_METHODS } from "./x401";
@@ -685,8 +685,9 @@ const METHODS: Record<string, Method> = {
     }
     // A group's message is deleted for everyone only (the apps forget none on one device): a group named without the
     // flag says so, with the command that takes it, not "No chat".
-    const ref = str(params, "message") ?? "<message>";
-    const link = chatNotGroup(ctx, params, "message delete", `${ref === "<message>" ? ref : shellWord(ref)} --everyone`);
+    // `message delete --everyone` takes a chat's name before a group's: `group:` stays in the command offered when given.
+    const ref = str(params, "message") ?? "<message>", typed = str(params, "chat", true);
+    const link = notAGroup(ctx, params, () => chatOf(ctx, params), (shown) => `ghostly message delete ${groupPrefixed(typed) === null ? shown : shellWord(typed)} ${ref === "<message>" ? ref : shellWord(ref)} --everyone`);
     const messageId = str(params, "message", true);
     const message = await node(ctx).getMessage(link.id, messageId);
     if (!message) throw noMessage(messageId, { group: false, ref: str(params, "chat", true) });
@@ -795,7 +796,7 @@ const METHODS: Record<string, Method> = {
     const { groupId } = await node(ctx).createGroup({ name, profile });
     let link: string | null = null;
     if (profile === "community") ({ link } = await node(ctx).enableGroupLink({ groupId }));
-    return { group: groupId, link };
+    return withUrl(groupId, link);
   },
   async "group.join"(ctx, params) {
     let groupId: string;
