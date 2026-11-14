@@ -11,6 +11,9 @@ import { expect, it } from "vitest";
  * its own manifest: they resolved to whatever copy core's pins hoisted, and the lock also holds older copies of the
  * same packages under nostr-tools, ethers and bip39. A change in core's pins, or in which copy npm hoists, changed what
  * browser's code got, and nothing recorded it. The website's deps-used test checks the other way round.
+ *
+ * The shared UI in apps/ui is no workspace: every app builds its `src/` from the root, so the root's package.json is
+ * its manifest. It imported highlight.js and hast through lowlight, the one the root declared.
  */
 const root = resolve(import.meta.dirname, "../../..");
 const json = (path: string) => JSON.parse(readFileSync(join(root, path), "utf8"));
@@ -43,8 +46,11 @@ const workspaces = (): string[] => {
     .map((path) => path.replace(/\/package\.json$/, ""));
 };
 
+/** Folders whose `src/` the root's package.json answers for: the shared UI every app builds. */
+const rootOwned = ["apps/ui"];
+
 const undeclared = (workspace: string): string[] => {
-  const manifest = json(`${workspace}/package.json`);
+  const manifest = json(rootOwned.includes(workspace) ? "package.json" : `${workspace}/package.json`);
   const declared = new Set([
     manifest.name,
     ...Object.keys(manifest.dependencies ?? {}),
@@ -60,6 +66,8 @@ const undeclared = (workspace: string): string[] => {
     for (const specifier of imports(readFileSync(join(root, file), "utf8"))) {
       const name = packageOf(specifier);
       if (specifier.startsWith("node:") || builtinModules.includes(name) || declared.has(name)) continue;
+      // A package imported only for its types (hast) has them in DefinitelyTyped's @types/<name>.
+      if (declared.has(`@types/${name}`)) continue;
       if (!missing.has(name)) missing.set(name, file);
     }
   }
@@ -70,4 +78,8 @@ it("every package a workspace's src imports is declared in its own package.json"
   const list = workspaces();
   expect(list).toContain("packages/browser");
   expect(list.flatMap(undeclared)).toEqual([]);
+});
+
+it("every package the shared UI's src imports is declared in the root's package.json", () => {
+  expect(rootOwned.flatMap(undeclared)).toEqual([]);
 });
