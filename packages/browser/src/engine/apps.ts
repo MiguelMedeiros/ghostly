@@ -875,9 +875,16 @@ export class Apps {
   private async builtInMarks(): Promise<BuiltInAppMarks> {
     return builtInMarks(await wrap((await store(STORES.settings, "readonly")).get(BUILT_IN_APPS_KEY)));
   }
-  /** The revocations of this app this profile verified and keeps (`APP_REVOCATIONS_KEY`), installed or not. */
-  private async keptRevocationsOf(ref: string): Promise<SignedAppRevocation[]> {
-    return keptRevocations(await wrap((await store(STORES.settings, "readonly")).get(APP_REVOCATIONS_KEY)), ref).mine;
+  /** The revocations this profile verified and keeps (`APP_REVOCATIONS_KEY`), as stored: up to 1024 of every app. */
+  private async keptValue(): Promise<unknown> {
+    return (await wrap((await store(STORES.settings, "readonly")).get(APP_REVOCATIONS_KEY))) ?? null;
+  }
+  /**
+   * The revocations of this app this profile verified and keeps (`APP_REVOCATIONS_KEY`), installed or not. `kept`: that
+   * value read already (the installed list reads it once for every app, not once per app).
+   */
+  private async keptRevocationsOf(ref: string, kept?: unknown): Promise<SignedAppRevocation[]> {
+    return keptRevocations(kept === undefined ? await this.keptValue() : kept, ref).mine;
   }
   /** Keeps on an installed app's record those of these revocations that stop one of its versions (as `keepStoreRevocations` does). */
   private async keepOnRecord(first: InstalledApp, revoked: readonly SignedAppRevocation[]): Promise<void> {
@@ -2272,10 +2279,10 @@ export class Apps {
 
   // ---------- running ----------
 
-  private async runCheckOf(app: InstalledApp, stores: AddedAppStore[]): Promise<AppRunStatus> {
+  private async runCheckOf(app: InstalledApp, stores: AddedAppStore[], kept?: unknown): Promise<AppRunStatus> {
     if (!(await this.hasBundle(app.bytes, app.digest, app.manifest))) return { status: "needs-files" };
     // The kept ones judge too: one kept before its install screen wrote it on the record (a profile from an older build).
-    return this.runStatus(app, this.storeViews(stores), [...(app.revocations ?? []), ...await this.keptRevocationsOf(app.ref)]);
+    return this.runStatus(app, this.storeViews(stores), [...(app.revocations ?? []), ...await this.keptRevocationsOf(app.ref, kept)]);
   }
 
   /** Before an app runs (WISP 1200 § Takedowns): revoked stops it, removed by a store of the person's warns. No request. */
@@ -2351,7 +2358,7 @@ export class Apps {
 
   // ---------- views ----------
 
-  private async view(app: InstalledApp, stores: AddedAppStore[]): Promise<InstalledAppView> {
+  private async view(app: InstalledApp, stores: AddedAppStore[], kept?: unknown): Promise<InstalledAppView> {
     const { manifest } = app;
     const listedBy = this.listedBy(app, stores, app.store);
     const stopped = this.startedBefore(app).map((v) => ({ digest: v.digest, run: this.runStatus(v, this.storeViews(stores), app.revocations) })).filter((v) => v.run.status !== "ok");
@@ -2361,7 +2368,7 @@ export class Apps {
       version: manifest.version, sequence: app.sequence, digest: app.digest, permissions: [...app.permissions], view: appViewOf(manifest),
       from: app.from, icon: manifest.files.some((f) => f.path === "icon.png"),
       installedAt: app.installedAt, updatedAt: app.updatedAt,
-      run: await this.runCheckOf(app, stores), listedBy, unknownPublisher: !listedBy.some((s) => s.kind === "curated"),
+      run: await this.runCheckOf(app, stores, kept), listedBy, unknownPublisher: !listedBy.some((s) => s.kind === "curated"),
       ...(this.builtIn(app.ref)?.digest === app.digest && { builtIn: true as const }),
       ...(app.pending && { pending: { sequence: app.pending.sequence, version: app.pending.manifest.version, added: [...app.pending.added] } }),
       ...(app.equivocation && { equivocation: { sequence: app.equivocation.sequence, at: app.equivocation.at } }),
@@ -2371,8 +2378,9 @@ export class Apps {
   }
 
   async list(): Promise<InstalledAppView[]> {
-    const [apps, stores] = await Promise.all([this.installed(), this.stores()]);
-    return Promise.all(apps.sort((a, b) => a.installedAt - b.installedAt).map((a) => this.view(a, stores)));
+    // The kept revocations are read once for all of them: up to 1024, each read whole at every visit of the Apps page.
+    const [apps, stores, kept] = await Promise.all([this.installed(), this.stores(), this.keptValue()]);
+    return Promise.all(apps.sort((a, b) => a.installedAt - b.installedAt).map((a) => this.view(a, stores, kept)));
   }
 
   // ---------- uninstall ----------
