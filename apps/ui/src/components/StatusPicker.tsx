@@ -8,6 +8,7 @@ import {
   AVAILABILITIES, AVAILABILITY_DOT, STATUS_EMOJI, STATUS_ENDS, STATUS_PICKER_EVENT, capStatusText, isolate, localDateTime,
   openStatusPicker, statusEnd, statusEndText, statusTextLength, type StatusEnd,
 } from "../lib/ownStatus";
+import { listText } from "../lib/listText";
 import { problemText, type Problem } from "../lib/problemText";
 import { touchOnly } from "../lib/touchOnly";
 import { EmojiTab } from "./composer/EmojiTab";
@@ -27,14 +28,14 @@ export function AvailabilityDot({ availability = "available", className = "w-2.5
   return <span aria-hidden="true" data-availability={availability} className={`inline-block shrink-0 rounded-full ${AVAILABILITY_DOT[availability]} ${className}`} />;
 }
 
-/** "Busy, 🍕 At lunch, until 11:00": a status in words, the person's text isolated. */
+/** "Busy, 🍕 At lunch, until 11:00": a status in words, the person's text isolated, listed the way the app's language lists. */
 function useStatusWords() {
   const { t, language } = useI18n();
-  return (status: PersonStatus) => [
+  return (status: PersonStatus) => listText([
     t(`status.availabilities.${status.availability ?? "available"}`),
     [status.emoji, status.text && isolate(status.text)].filter(Boolean).join(" "),
     status.until ? t("status.until", { time: statusEndText(status.until, language) }) : "",
-  ].filter(Boolean).join(", ");
+  ].filter(Boolean), t);
 }
 
 /** The account menu's row: the status as it stands (or "Set a status"), which opens the picker. */
