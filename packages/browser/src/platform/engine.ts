@@ -1,7 +1,7 @@
 import { getBrowserHost, type EngineConnection } from "../host";
 import { STATUS_IDLE_AFTER_MS, type AppFrameEvent } from "@ghostly/core";
 import type { AppRangeAsk, AttachMark, AttentionEvent, EngineApi, EngineMethod, KeptPictures, KeptViews, PostedEvent, PostedState } from "../shared/rpc";
-import type { EngineState, LinkView, StoredMessage } from "../shared/types";
+import type { EngineState, GroupView, LinkView, StoredMessage } from "../shared/types";
 import { applyMessageChanges, type MessageChanges } from "../shared/messageChanges";
 import { identityPicture, nostrPicture, picturesBack } from "../shared/keptPictures";
 import type { ProfileOpenFailure } from "../shared/idb";
@@ -539,8 +539,14 @@ function keptViews<S extends Pick<EngineState, "links" | "edges" | "groups">>(st
     const sent = new Map(list.map((view) => [view.id, view])), kept = new Map(had?.map((view) => [view.id, view]));
     return ids.flatMap((id) => sent.get(id) ?? kept.get(id) ?? []);
   };
+  // The groups sent without their member list (`members`): each keeps the one it had.
+  const withMembers = (list: GroupView[]): GroupView[] => {
+    if (!views.members?.length) return list;
+    const ids = new Set(views.members), had = new Map(before?.groups.map((group) => [group.id, group.members]));
+    return list.map((group) => (ids.has(group.id) && !group.members ? { ...group, members: had.get(group.id) ?? [] } : group));
+  };
   return {
-    ...state, links: back(state.links, views.links, before?.links), groups: back(state.groups, views.groups, before?.groups),
+    ...state, links: back(state.links, views.links, before?.links), groups: withMembers(back(state.groups, views.groups, before?.groups)),
     ...(state.edges && { edges: back(state.edges, views.edges, before?.edges) }),
   };
 }

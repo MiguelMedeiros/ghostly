@@ -162,6 +162,41 @@ describe("a chat's or group's view over the extension's port", () => {
     expect(engine.state!.links[1].peerAvatar).toBeUndefined();
   });
 
+  /**
+   * A message in a community changes its view (`lastMessageAt`) and nothing else: the group went whole, its 300 members
+   * with it, about 40 KB per tab for each message. Its member list, the one this tab was sent last, is left out.
+   */
+  it("sends a community that got a message without its member list, and its members once one changed", async () => {
+    update();
+    const messages: number[] = [];
+    for (let i = 1; i <= 20; i++) {
+      groups = groups.map((view, n) => ({ ...view, ...(n === 3 && { lastMessageAt: 1_700_000_200_000 + i }), members: view.members.map((m) => ({ ...m })) }));
+      update();
+      messages.push(posted.at(-1)!.bytes);
+      expect(posted.at(-1)!.state.groups).toHaveLength(1);
+      expect(shown()).toEqual(truth());
+    }
+    for (const bytes of messages) expect(bytes).toBeLessThan(5_000);
+    expect(engine.state!.groups[3].members).toHaveLength(300);
+    expect(engine.state!.groups[3].lastMessageAt).toBe(1_700_000_200_020);
+
+    // A member comes online: the list goes again, whole, and the page has it.
+    groups = groups.map((view, n) => (n === 3 ? { ...view, members: view.members.map((m, j) => (j === 7 ? { ...m, online: !m.online } : m)) } : view));
+    update();
+    expect(posted.at(-1)!.bytes).toBeGreaterThan(30_000);
+    expect(shown()).toEqual(truth());
+    // A member gone with a message: the list goes again too.
+    groups = groups.map((view, n) => (n === 3 ? { ...view, lastMessageAt: view.lastMessageAt + 1, members: view.members.slice(0, 299) } : view));
+    update();
+    expect(shown()).toEqual(truth());
+    expect(engine.state!.groups[3].members).toHaveLength(299);
+    groups = groups.map((view, n) => (n === 3 ? { ...view, lastMessageAt: view.lastMessageAt + 1 } : view));
+    update();
+    expect(posted.at(-1)!.bytes).toBeLessThan(5_000);
+    expect(shown()).toEqual(truth());
+    expect("keptViews" in engine.state!).toBe(false);
+  });
+
   it("gives a page connected again every chat and group whole, and that page keeps them after", async () => {
     update();
     update();

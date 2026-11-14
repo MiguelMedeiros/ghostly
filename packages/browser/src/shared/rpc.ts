@@ -765,9 +765,10 @@ export interface KeptPictures {
  * The chats (`links`), group edges (`edges`) and groups a posted state left out as the ones that client was sent last:
  * each list here is every id of the state's list, in its order, and the state's list holds only the views that changed
  * or are new. An id the state's list lacks is the page's view from the state before (its pictures with it); an id no
- * longer here is gone.
+ * longer here is gone. `members`: the groups the state's list holds without their member list, the one that client was
+ * sent last (a message in a community changes its view, not its members): the page keeps it from the state before.
  */
-export interface KeptViews { links?: string[]; edges?: string[]; groups?: string[] }
+export interface KeptViews { links?: string[]; edges?: string[]; groups?: string[]; members?: string[] }
 
 /**
  * A state as a client across a copying boundary gets it (`copyingSink`, the extension's port): `payments` and `wallet`
