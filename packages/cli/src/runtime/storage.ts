@@ -492,7 +492,7 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
    * `sync`: "now", synced before this returns; "shared", synced by the caller through `shareSync`; "lazy", a relaxed
    * transaction's entry. A sync blocks the whole process for milliseconds, and what such a transaction wrote can be
    * made again (the event set's note of a message it already reported): written, it outlives the process; a power cut
-   * may take its last second.
+   * may take its last second. Its sync, a second later, runs off the thread as a shared one does.
    */
   function writeEntry(entry: Buffer, sync: "now" | "shared" | "lazy" = "now"): boolean {
     const lazy = sync === "lazy";
@@ -512,7 +512,9 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
       if (journalFd !== null && whole >= 0) try { ftruncateSync(journalFd, whole); } catch { /* the snapshot at close makes it whole */ }
       throw error;
     }
-    if (lazy) relaxed ??= setTimeout(() => { try { syncNow(); } catch (error) { failed(error); } }, RELAXED_SYNC_MS).unref();
+    // Off the thread too: synced in place, the second's relaxed entries held the whole daemon for as long as a busy
+    // disk took to take them, 1 to 2 s at a time while a file came in, and texts, one-shots and the links waited.
+    if (lazy) relaxed ??= setTimeout(() => { relaxed = null; shareSync(() => {}); }, RELAXED_SYNC_MS).unref();
     holdsRatchet ||= entry.includes(RATCHET);
     if (statSync(journalPath).size > COMPACT_BYTES || ratchetDue() || deleteDue()) void enqueue(writeSnapshot);
     return true;
