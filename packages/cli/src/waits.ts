@@ -97,7 +97,7 @@ const alone = (group: GroupView | undefined): boolean => group?.profile === "mes
  * it is back, so what it sent in between is never taken, and from then on nothing goes. A community's `lost` is not
  * out: it asks to be let in again by itself.
  */
-const outOf = (group: GroupView | undefined): string | null =>
+export const outOf = (group: GroupView | undefined): string | null =>
   group?.status && group.status !== "active" && group.status !== "lost" ? group.statusReason ?? "You are not in this group" : null;
 
 /**
