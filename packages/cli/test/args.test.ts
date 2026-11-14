@@ -72,7 +72,19 @@ describe("the argument parser", () => {
     expect(parseArgs(["alice", "note.webm", "--voice", "4200"], options!).options).toEqual({ voice: 4200 });
     expect(parseArgs(["alice", "note.webm", "--voice=4200", "--name", "hi.webm"], options!).options).toEqual({ voice: 4200, name: "hi.webm" });
     expect(parseArgs(["alice", "note.webm", "--voice", "--name", "hi.webm"], options!).options).toEqual({ voice: true, name: "hi.webm" });
-    expect(() => parseArgs(["--voice=soon"], options!)).toThrow(/takes a number/);
+    expect(() => parseArgs(["--voice=soon"], options!)).toThrow(new CliError("usage", "--voice takes a length in milliseconds, not \"soon\""));
+  });
+
+  it("answers a length --voice did not take (2s) as its own, not as one argument too many", () => {
+    const send = COMMANDS["file send"]!;
+    const run = (argv: string[]) => { const parsed = parseArgs(argv, send.options!, idSlot(send)); return positionals(send, parsed.positionals); };
+    // Before, "Too many arguments: ghostly file send <chat|group> <path> …", which does not say --voice is the problem.
+    for (const [argv, typed] of [[["bob", "v.wav", "--voice", "2s"], "2s"], [["bob", "v.wav", "--voice", "1.5s"], "1.5s"], [["bob", "--voice", "2000ms", "v.wav"], "2000ms"], [["--voice", "2s", "bob", "v.wav"], "2s"]] as const) {
+      expect(() => run([...argv]), argv.join(" ")).toThrow(new CliError("usage", `--voice takes a length in milliseconds, not ${JSON.stringify(typed)}`));
+    }
+    // A word after a lone --voice that the line has room for is still a positional, and a word too many elsewhere is still that.
+    expect(run(["bob", "--voice", "v.wav"])).toEqual({ chat: "bob", path: "v.wav" });
+    expect(() => run(["bob", "v.wav", "extra", "--voice"])).toThrow(/^Too many arguments: ghostly file send /);
   });
 
   it("takes ids that start with a single dash where the command says ids come, never as text", () => {
