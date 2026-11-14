@@ -20,6 +20,11 @@ export function openPageProfile(): string {
   pageProfile = activeNamespace();
   return pageProfile;
 }
+/**
+ * The profile this page runs as. After another tab switched, a page that finishes a restore or a clear first still
+ * runs as its own: what it reads or writes for its profile (its local addresses) is not the other profile's.
+ */
+export const pageNamespace = (): string => pageProfile ?? activeNamespace();
 /** False once another page switched: this one must not reach the peer, which runs the other profile now. */
 export const pageProfileIsCurrent = (): boolean => pageProfile === null || pageProfile === activeNamespace();
 
