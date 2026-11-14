@@ -492,6 +492,29 @@ describe("the contact's edits", () => {
     expect(sweeps).toHaveBeenCalledTimes(2);
   }, 30_000);
 
+  it("purges of one chat at once share its reads for their quotes, and each answers with its quotes gone", async () => {
+    const t = await setup();
+    const originals: string[] = [], replies: string[] = [];
+    for (const n of [1, 2, 3, 4, 5, 6, 7, 8]) {
+      originals.push((await t.node.sendMessage({ linkId: t.id, text: `purge me ${n}` })).messageId!);
+      replies.push((await t.node.sendMessage({ linkId: t.id, text: `about ${n}`, replyTo: originals.at(-1)! })).messageId!);
+    }
+    const rows = await Promise.all(originals.map(id => t.row(id)));
+    const reads = vi.spyOn(t.node as unknown as { forgetQuotes(...args: unknown[]): Promise<string[]> }, "forgetQuotes");
+    // The first purge's read runs while the others come: they share the next.
+    const first = t.node.forgetQuotesOf(rows[0]);
+    await vi.waitFor(() => expect(reads).toHaveBeenCalledTimes(1), { interval: 1 });
+    await Promise.all([first, ...rows.slice(1).map(row => t.node.forgetQuotesOf(row))]);
+    expect(reads).toHaveBeenCalledTimes(2);
+    for (const id of replies) expect((await t.row(id)).replyTo).toMatchObject({ snippet: "" });
+    // Once those are done, a purge reads again: nothing it needs waits for a read that began before it.
+    expect(await t.node.sendMessage({ linkId: t.id, text: "about 1 again", replyTo: originals[0] })).toBeTruthy();
+    const again = (await t.messages()).find(m => m.text === "about 1 again")!;
+    await t.node.forgetQuotesOf(rows[0]);
+    expect(reads).toHaveBeenCalledTimes(3);
+    expect((await t.row(again.id)).replyTo).toMatchObject({ snippet: "" });
+  });
+
   it("a removal of a message already deleted here still leaves no line of it in the replies here that quote it", async () => {
     const t = await setup();
     expect(await t.contact.sendMessage("quote me", Date.now(), WIRE("Q"))).toBeNull();
