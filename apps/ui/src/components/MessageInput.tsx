@@ -7,6 +7,8 @@ import { VoiceRecorderButton } from "./voice/VoiceRecorderButton";
 import { canRecordVoice } from "../lib/voiceRecorder";
 import type { LinkPreview, TypingKind, VoiceMeta } from "@ghostly/core";
 import { useI18n } from "../contexts/I18nContext";
+import { NAME, withName } from "./apps/aroundName";
+import { isolate } from "../lib/ownStatus";
 import { useIsLocked } from "../contexts/LockScreenContext";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { ComposerMenu, type ComposerAction } from "./composer/ComposerMenu";
@@ -755,7 +757,7 @@ export function MessageInput({
         const err = await onSendFile(prepared.file).finally(done);
         // Said in the chat, or there when it is opened again: the chat may have been left meanwhile.
         if (err) { sayInChat(id, err); return false; }
-        if (prepared.asIs) sayInChat(id, t("composer.videoSentAsIs", { name: file.name }));
+        if (prepared.asIs) sayInChat(id, t("composer.videoSentAsIs", { name: isolate(file.name) }));
       }
       return true;
     } finally {
@@ -1071,10 +1073,11 @@ export function MessageInput({
     <div className="flex items-center gap-3 animate-fade-in">
       <p role="status" data-testid="file-preparing" className="m-0 flex min-w-0 items-center gap-2 text-[13px] text-text-secondary">
         <span aria-hidden="true" className="inline-block size-4 shrink-0 animate-spin rounded-full border-2 border-accent border-e-transparent motion-reduce:animate-none" />
+        {/* The file's name keeps its own direction in a line in the page's. */}
         <span className="min-w-0 truncate">
-          {shownProgress !== undefined
-            ? t("composer.videoConverting", { name: shown.name })
-            : t("composer.filePreparing", { name: shown.name })}
+          {withName(shownProgress !== undefined
+            ? t("composer.videoConverting", { name: NAME })
+            : t("composer.filePreparing", { name: NAME }), shown.name)}
         </span>
       </p>
       {/* Outside the status: a screen reader is told the conversion once, not each percent. */}

@@ -16,6 +16,7 @@ import { canPlayVideo, videoBox, videoFormat as formatOf } from "../../lib/video
 import { localPoster, posterUrl } from "../../lib/videoPoster";
 import { FORCED_EDGE, RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
 import { useT } from "../../contexts/I18nContext";
+import { NAME, withName } from "../apps/aroundName";
 import { problemLine, saveProblemLine } from "../../lib/problemText";
 
 type Phase = "poster" | "loading" | "playing";
@@ -418,7 +419,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
       </div>
       {offered && typeof transfer.room === "number" && (
         <p className={`chat-text-media-meta m-0 mt-1 px-1 ${noRoom ? "text-danger-ink" : "text-text-primary/75"}`} data-testid="video-room">
-          {noRoom ? t("chat.media.noRoom", { size: formatFileSize(transfer.room, t) }) : t("chat.media.wantsToSend", { name: peerName, size: formatFileSize(transfer.room, t) })}
+          {noRoom ? t("chat.media.noRoom", { size: formatFileSize(transfer.room, t) }) : withName(t("chat.media.wantsToSend", { name: NAME, size: formatFileSize(transfer.room, t) }), peerName)}
         </p>
       )}
       {(status || canRetry || stuck) && (!offered || reason) && (
