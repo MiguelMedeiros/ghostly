@@ -188,7 +188,9 @@ export interface FileTransferRecord {
   abortedBySender?: boolean;
   /**
    * In: taken, by the person or within the app's limits. An offer that expired unanswered never was, so offered again
-   * it is refused, never taken without asking.
+   * it is refused, never taken without asking. Out: the receiver took it (`pf-accept`), so the offer's week no longer
+   * ends it (`sweep`): a file paused or cut off for more than a week failed "Not delivered in time" when it went on,
+   * and its part there was deleted.
    */
   agreed?: boolean;
 }
@@ -727,6 +729,8 @@ export class ChatFiles {
     for (const entry of this.entries.values()) {
       const { record } = entry;
       if (!["queued", "offered", "asking"].includes(record.state) || record.since + FILE_LIMITS.offerTtlMs > now) continue;
+      // Taken there: what it waits for now is the receiver's to end (its own week to arrive, `pf-refuse`).
+      if (record.direction === "out" && record.agreed) continue;
       if (record.direction === "in" && record.state === "queued" && (entry.in?.starting || this.moved(entry) > 0)) continue;
       this.end(entry, "failed", record.direction === "in" ? "The offer expired" : record.state === "queued" ? "Not delivered in time" : "Not accepted in time");
       // Ended here, it ends there too: the receiver's week began when the offer arrived, later, and it still showed Accept.
@@ -1254,6 +1258,7 @@ export class ChatFiles {
         out.next = frame.offset;
         this.refill = 0;
         record.state = "active";
+        record.agreed = true;
         record.pausedBy = record.waitingFor = undefined;
         this.changed(outgoing);
         this.wakeHeld();
@@ -1272,7 +1277,12 @@ export class ChatFiles {
         out.block = undefined;
         clearTimeout(out.timer);
         if (frame.why === "paused") { record.state = "paused"; record.pausedBy = "peer"; }
-        else { record.state = "asking"; record.waitingFor = frame.why === "busy" ? "busy" : "consent"; }
+        else {
+          record.state = "asking";
+          record.waitingFor = frame.why === "busy" ? "busy" : "consent";
+          // Asked about again there (taken again after it ended): unanswered, it ends with the offer's week again.
+          if (record.waitingFor === "consent") record.agreed = undefined;
+        }
         this.changed(outgoing);
         this.wakeHeld();
         return;
@@ -1421,7 +1431,7 @@ export class ChatFiles {
     const entry = this.entry("out", id), { record } = entry;
     if (record.state !== "failed") return;
     // The digest is taken again from the source: the one sent last time may be what was wrong.
-    Object.assign(record, { state: "queued", confirmed: 0, error: undefined, digest: undefined, since: this.now() });
+    Object.assign(record, { state: "queued", confirmed: 0, error: undefined, digest: undefined, agreed: undefined, since: this.now() });
     clearTimeout(entry.out!.timer); clearTimeout(entry.out!.wake);
     entry.out = { next: 0, sent: 0, generation: entry.out!.generation + 1, sends: [] };
     this.changed(entry);
