@@ -553,6 +553,9 @@ describe("the argument parser", () => {
     expect(params("file save", ["f1", "--wait", "--timeout", "5"])).toMatchObject({ wait: true, timeout: 5 });
     expect(params("identity complete", ["d1", "--evidence-file", "proof.txt"])).toEqual({ draft: "d1", evidenceFile: resolve("proof.txt"), stdin: false });
     expect(params("identity complete", ["d1", "--stdin"])).toEqual({ draft: "d1", evidenceFile: undefined, stdin: true });
+    // `-` is stdin, as for --passphrase-file: not a file named "-" in the folder.
+    expect(params("identity complete", ["d1", "--evidence-file", "-"])).toEqual({ draft: "d1", evidenceFile: undefined, stdin: true });
+    expect(() => params("identity complete", ["d1", "--evidence-file", "-", "--stdin"])).toThrow("--evidence-file or --stdin, not both");
   });
 });
 
