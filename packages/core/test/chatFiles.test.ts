@@ -405,6 +405,12 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     w.attach();
     const size = 3 * 1024 * 1024, count = 32;
     const base = held();
+    // Under 4 MiB within a moment: a read of a file's next MiB under way when it paused or when the session went is let
+    // go once it comes back, and a slow runner measured one at that instant (4.4 MB). Read-ahead kept never goes under.
+    const settled = async (what: string) => {
+      await until(() => held() - base < 4 * 1024 * 1024, 5_000).catch(() => {});
+      expect(held() - base, what).toBeLessThan(4 * 1024 * 1024);
+    };
     for (let i = 0; i < count; i++) {
       const id = `ahead-${String(i).padStart(2, "0")}`;
       send(w, file(id, size));
@@ -412,12 +418,12 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
       (i % 2 ? w.a : w.b).files.pause(i % 2 ? "out" : "in", id);
       await until(() => state(w.a, "out", id) === "paused" && state(w.b, "in", id) === "paused");
     }
-    expect(held() - base, "held by the paused files").toBeLessThan(4 * 1024 * 1024);
+    await settled("held by the paused files");
     // Resumed, each reads again from where it stood, and arrives whole.
     for (let i = 0; i < 3; i++) { const id = `ahead-${String(i).padStart(2, "0")}`; (i % 2 ? w.a : w.b).files.resume(i % 2 ? "out" : "in", id); }
     await until(() => (w.b.transferred.get("in:ahead-02") ?? 0) > 1024 * 1024);
     w.drop();
-    expect(held() - base, "held once the session went").toBeLessThan(4 * 1024 * 1024);
+    await settled("held once the session went");
     w.attach();
     await until(() => [0, 1, 2].every((i) => state(w.a, "out", `ahead-0${i}`) === "done"));
     expect([0, 1, 2].map((i) => w.b.disks.get(`ahead-0${i}`)!.length)).toEqual([size, size, size]);
