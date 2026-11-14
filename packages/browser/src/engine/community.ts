@@ -1,6 +1,6 @@
 import {
   COMMUNITY_LIMITS, COMMUNITY_TOPOLOGY, CommunitySession, GROUP_READ_NOTE_COMMUNITY, KNOCK_TTL_MS, MAX_KNOCKS, MEMBER_KEY,
-  beaconKeys, beaconRecords, createIdentity, decodeCommunityLink, doorHubs, groupName, entryParams, publicKeyFromZ32, encodeCommunityLink, freshHubs, identityFromSeedB64, knockIdentity, knockRecords, lobbyKeys, lobbyRecords, mergeBeacon, newerHead, readBeaconHead, type CommunityHead,
+  beaconKeys, beaconRecords, createIdentity, decodeCommunityLink, doorHubs, groupName, entryParams, publicKeyFromZ32, encodeCommunityLink, freshHubs, identityFromSeedB64, knockIdentity, knockRecords, lobbyKeys, lobbyRecords, memberAdmissions, mergeBeacon, newerHead, readBeaconHead, type CommunityHead,
   mentionsMember, receivedTimestamp, mergeKnocks, mergeLobby, pickHubs, rankHubs, readBeacon, readKnocks, readLobby, rosterHas, routedCommunityFrame, shouldBeHub,
   GROUP_HAVE_FRAME, WATCH_PEER_MS, COMMUNITY_PIN_FRAME,
   type CommunityFrame, type CommunityLeaveFrame, type CommunityMessageFrame, type GroupEdit, type GroupFileMeta, type GroupMention, type WireReply, type StatusCard, type CommunityState, type GroupEntryLink, type GroupMeta, type GroupMetaChange, type Hub, type Knock, type Roster,
@@ -220,14 +220,8 @@ function admissionsHeld(s: CommunitySession): boolean {
   return !s.isAdmin && membersAtBound(s);
 }
 function membersAtBound(s: CommunitySession): boolean {
-  const admin = s.admin, chain = s.state.chain;
-  let n = 0;
-  for (let i = chain.length - 1; i >= 0; i--) {
-    const c = chain[i];
-    if (c.k === "create" || c.k === "role" || (c.by === admin && c.k !== "remove" && c.k !== "leave")) break;
-    if (c.k === "add") n++;
-  }
-  return n >= COMMUNITY_LIMITS.memberAdmissions;
+  const chain = s.state.chain;
+  return memberAdmissions(s.admin, (function* () { for (let i = chain.length - 1; i >= 0; i--) yield chain[i]; })()) >= COMMUNITY_LIMITS.memberAdmissions;
 }
 /**
  * Whether the admin's app is wanted at the door: the members signed all the admissions in a row they may, and only the
