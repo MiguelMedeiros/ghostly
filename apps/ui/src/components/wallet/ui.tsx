@@ -124,19 +124,24 @@ const ACTION_KEY = { receive: "wallet.ui.receive", send: "wallet.ui.send", histo
 /**
  * The two (or three) things a wallet is for, as big equal buttons. Three in a column under 28rem (a phone, a desktop's
  * narrowest page) put the icon above the label: beside it, "Historique" and "Cronologia" did not fit a 375px phone.
+ * Under 19rem (rem follows the browser's text size: that phone at 150 %) a third of the width is still too narrow for
+ * them, so each takes a row of its own, the icon back beside the label.
  */
 export function Actions({ value, onChange, actions = ["receive", "send"] }: { value: Action; onChange: (next: Action) => void; actions?: Action[] }) {
   const i18n = useOptionalI18n();
-  const stack = actions.length > 2 ? "@max-md/actions:flex-col @max-md/actions:gap-1" : "";
+  const three = actions.length > 2;
+  const stack = three ? "@min-[19rem]/actions:@max-md/actions:flex-col @min-[19rem]/actions:@max-md/actions:gap-1" : "";
   return (
-    <div className="@container/actions grid gap-2" style={{ gridTemplateColumns: `repeat(${actions.length}, minmax(0, 1fr))` }} role="tablist">
-      {actions.map((action) => (
-        <button key={action} type="button" role="tab" aria-selected={value === action} data-testid={`wallet-${action === "send" ? "send" : action}`} onClick={() => onChange(action)}
-          className={`flex items-center justify-center gap-2 ${stack} min-w-0 px-2 py-2.5 min-h-10 max-md:min-h-11 rounded-xl text-sm font-semibold transition-colors cursor-pointer border ${value === action ? "bg-accent text-on-accent border-accent" : "bg-surface text-text-secondary border-border hover:text-text-primary hover:border-border-bright"}`}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">{ACTION_ICON[action]}</svg>
-          <span className="truncate max-w-full">{i18n ? i18n.t(ACTION_KEY[action]) : ACTION_LABEL[action]}</span>
-        </button>
-      ))}
+    <div className="@container/actions">
+      <div className={`grid gap-2 grid-cols-[repeat(var(--actions),minmax(0,1fr))] ${three ? "@max-[19rem]/actions:grid-cols-1" : ""}`} style={{ "--actions": actions.length } as React.CSSProperties} role="tablist">
+        {actions.map((action) => (
+          <button key={action} type="button" role="tab" aria-selected={value === action} data-testid={`wallet-${action === "send" ? "send" : action}`} onClick={() => onChange(action)}
+            className={`flex items-center justify-center gap-2 ${stack} min-w-0 px-2 py-2.5 min-h-10 max-md:min-h-11 rounded-xl text-sm font-semibold transition-colors cursor-pointer border ${value === action ? "bg-accent text-on-accent border-accent" : "bg-surface text-text-secondary border-border hover:text-text-primary hover:border-border-bright"}`}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">{ACTION_ICON[action]}</svg>
+            <span className="truncate max-w-full">{i18n ? i18n.t(ACTION_KEY[action]) : ACTION_LABEL[action]}</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
