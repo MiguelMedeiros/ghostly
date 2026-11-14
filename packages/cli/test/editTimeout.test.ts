@@ -12,6 +12,7 @@ function fake(mode: "one-shot" | "daemon", links: unknown[] = [], groups?: unkno
   const node = {
     getMessage: vi.fn(async () => pending), groupTaken: vi.fn(() => 0), removalPending: vi.fn(() => true),
     chatUnconfirmed: vi.fn(() => ({ reactions: [1], pin: null })), chatView: chatViewOf, getState: () => ({ links, groups }),
+    groupView: vi.fn((id: string) => (groups as { id: string }[] | undefined)?.find((group) => group.id === id)),
   };
   return { runtime: { server: { node } }, mode } as unknown as ApiContext;
 }
@@ -138,11 +139,12 @@ describe("a group frame's wait", () => {
     expect(await timedOut(waitForGroupFrame(fake("daemon", [], groups), "g1", "mine:0:2", undefined, 30_000))).toMatchObject({ code: "timeout" });
   });
 
-  // The engine's whole state (every chat, group, payment) is built to find one group: each 250 ms poll built it twice.
-  it("builds the engine's state at most once per poll", async () => {
+  // The engine's whole state (every chat, group, payment) was built to find one group: each 250 ms poll built it twice,
+  // then once. Each poll reads that group alone.
+  it("builds no engine state, only the group's view once per poll", async () => {
     vi.useFakeTimers();
     const ctx = fake("daemon", [], crew("mesh", [me, ana]));
-    const node = (ctx as unknown as { runtime: { server: { node: { getState: () => unknown } } } }).runtime.server.node;
+    const node = (ctx as unknown as { runtime: { server: { node: { getState: () => unknown; groupView: { mock: { calls: unknown[] } } } } } }).runtime.server.node;
     const getState = vi.spyOn(node, "getState");
     let error: unknown;
     void waitForGroupFrame(ctx, "g1", "mine:0:2", undefined, 10_000).catch((caught: unknown) => { error = caught; });
@@ -150,6 +152,7 @@ describe("a group frame's wait", () => {
     expect(error).toMatchObject({ code: "timeout" });
     const polls = (node as unknown as { groupTaken: { mock: { calls: unknown[] } } }).groupTaken.mock.calls.length;
     expect(polls).toBeGreaterThan(30);
-    expect(getState.mock.calls.length).toBeLessThanOrEqual(polls);
+    expect(getState).not.toHaveBeenCalled();
+    expect(node.groupView.mock.calls.length).toBeLessThanOrEqual(polls);
   });
 });

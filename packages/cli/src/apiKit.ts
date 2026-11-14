@@ -480,6 +480,8 @@ export function chatOrGroup(ctx: ApiContext, ref: string, s?: EngineState): { id
  */
 export function groupOf(ctx: ApiContext, params: Params, twin?: string): GroupView {
   const ref = str(params, "group", true);
+  const byId = groupById(ctx, groupPrefixed(ref) ?? ref);
+  if (byId) return byId;
   const { links, groups } = state(ctx);
   try { return findGroup(groups, ref); } catch (error) {
     // `group:<ref>` names a group only: never a chat, as in `findChatOrGroup`.
@@ -490,6 +492,13 @@ export function groupOf(ctx: ApiContext, params: Params, twin?: string): GroupVi
     throw new CliError("not_found", `${JSON.stringify(ref)} is a chat, not a group${twin ? `: ghostly ${twin.replace("<chat>", shown)}` : " (ghostly group list)"}`, { chat: chat.id });
   }
 }
+
+/**
+ * The group whose id `id` is, built alone with its members' edges, as `byId` builds a chat: a group's own id names it
+ * before anything else does (`findGroup`), and a bot names a group by the id its events give. Undefined for any other
+ * ref, which the whole list is read for.
+ */
+export const groupById = (ctx: ApiContext, id: string): GroupView | undefined => node(ctx).groupView(id);
 
 /**
  * A message of a chat or a group (`group:<id>`) named by its id here, read as one row; only a name that is no such
