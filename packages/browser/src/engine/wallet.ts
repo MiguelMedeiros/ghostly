@@ -3,9 +3,12 @@ import type {
   MeltPreview,
   MeltProofsResponse,
   MeltQuoteBolt11Response,
+  NetworkError as CashuNetworkError,
   OutputData,
   Proof,
   ProofLike,
+  RequestFn,
+  RequestOptions,
   SerializedOutputData,
   SerializedSwapPreview,
   SwapPreview,
@@ -15,7 +18,7 @@ import { STORES, newestWalletTx, openDb, store, transact, wrap, committed } from
 import { openRow, openRows, proofKey, RowSeals, sealRow, sealedStore } from "./sealedRows";
 import { hasDataKey } from "./dataKey";
 import { LIMITS, PaymentPreflightError, decodeBolt11, engineError, engineText, stripHidden, type PaymentReview, type WalletNetwork } from "@ghostly/core";
-import { CASHU_REQUEST_TIMEOUT_MS, SWAP_SETTLED_MS, keysetRefused, mintFailed, mintRefused } from "./paymentAdapters/cashu";
+import { CASHU_REQUEST_TIMEOUT_MS, MELT_REQUEST_TIMEOUT_MS, SWAP_SETTLED_MS, keysetRefused, mintFailed, mintRefused } from "./paymentAdapters/cashu";
 import { AskBackoff } from "./askBackoff";
 import { INVOICE_PACE, nextInvoiceAsk } from "./invoicePace";
 import { BITCOIN_INVOICE_ON_TESTNET, fakesLightning, isTestMint, mintNetwork, mintUrlSpelling, paysItsOwnInvoices } from "../shared/mints";
@@ -331,6 +334,37 @@ function within<T>(ms: number, work: Promise<T>, mint: string): Promise<T> {
   return Promise.race([work, late]).finally(() => clearTimeout(timer));
 }
 
+/** A swap's request, and those that ask a mint where a swap stands (NUT-09 restore, NUT-07 states). */
+const SWAP_REQUESTS = ["/v1/swap", "/v1/restore", "/v1/checkstate"];
+
+/**
+ * Each of `SWAP_REQUESTS` ends within `CASHU_REQUEST_TIMEOUT_MS`, retries included. cashu-ts' `requestTimeout` is per
+ * try, and NUT-19 tries a cached endpoint again after a timeout, each try with a timeout of its own, for as long as the
+ * mint's `ttl` (endless when it gives none): one deadline for the whole request ends them all, and a caller's abort is
+ * never retried. Past it the request failed with no answer (`NetworkError`), as a try that timed out does. Every other
+ * request, melts among them, keeps cashu-ts' defaults. cashu-ts takes no options per call of a swap: its mint client's
+ * request function is wrapped.
+ */
+function boundSwapRequests(wallet: Wallet, NetworkError: typeof CashuNetworkError): void {
+  const client = wallet.mint as unknown as { _request: RequestFn };
+  const request = client._request;
+  client._request = async <T,>(options: RequestOptions): Promise<T> => {
+    const url = new URL(options.endpoint);
+    if (!SWAP_REQUESTS.some((path) => url.pathname.endsWith(path))) return request<T>(options);
+    const deadline = new AbortController();
+    const timer = setTimeout(() => deadline.abort(), CASHU_REQUEST_TIMEOUT_MS);
+    options.signal?.addEventListener("abort", () => deadline.abort(), { once: true });
+    try {
+      return await request<T>({ ...options, requestTimeout: CASHU_REQUEST_TIMEOUT_MS, signal: deadline.signal });
+    } catch (error) {
+      if (deadline.signal.aborted && !options.signal?.aborted) throw new NetworkError(`${url.host} did not answer within ${CASHU_REQUEST_TIMEOUT_MS / 1_000} s`, { cause: error });
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+}
+
 /**
  * How long a mint that could not be loaded stays so for the payment poll's reads, then twice as long after each failed
  * load up to `MINT_FAILED_CAP_MS`: the payments of one round at a gone mint share its failure, instead of each loading
@@ -451,7 +485,7 @@ export class CashuWallet {
 
   /** Whether no request of this melt can reach the mint any more: its one request is sent right after it is written down. */
   private meltOverdue(melt: PendingMelt): boolean {
-    return this.passed(melt.createdAt) >= CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS;
+    return this.passed(melt.createdAt) >= MELT_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS;
   }
 
   /** Whether no request of this swap can reach the mint any more: a request's longest life, and a margin after its last try. */
@@ -2066,7 +2100,9 @@ export class CashuWallet {
     if (this.failedLoads.has(mint) && !(recentFailure && !this.mintAsk.due(mint, Date.now()))) wallet = undefined;
     if (!wallet) {
       const loading = (async () => {
-        const instance = new (await loadCashu()).Wallet(mint, { unit: UNIT });
+        const cashu = await loadCashu();
+        const instance = new cashu.Wallet(mint, { unit: UNIT });
+        boundSwapRequests(instance, cashu.NetworkError);
         await within(MINT_TIMEOUT_MS, instance.loadMint(), mint);
         const info = instance.getMintInfo();
         if (info.isSupported(5).params.some(saysAmountlessBeside)) instance.loadMintFromCache(amountlessUnderOptions(info.cache), instance.keyChain.cache);
