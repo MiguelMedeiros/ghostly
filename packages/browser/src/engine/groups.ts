@@ -798,6 +798,8 @@ export class Groups {
   private readonly hubs: MeshHubs;
   /** Groups whose edges are being reconciled because their hubs changed: one at a time. */
   private readonly hubReconcile = new Set<string>();
+  /** Each private group's hubs as its view marks them, at the last tick (`hubsTick`): a change asks for its view again. */
+  private readonly hubsShown = new Map<string, string>();
   /** Groups a commit took me out of, and when: their edges close `REMOVED_LINGER_MS` later. */
   private readonly removedAt = new Map<string, number>();
   /** Who is typing in each private group, and this side's word there (WISP 902 · Group Mesh § Typing). */
@@ -1818,6 +1820,7 @@ export class Groups {
     this.lastHanded.delete(groupId);
     this.rewelcomed.delete(groupId);
     this.hubs.forget(groupId);
+    this.hubsShown.delete(groupId);
     this.removedAt.delete(groupId);
     this.lastGossip.delete(groupId);
     this.gapsAsked.delete(groupId);
@@ -2035,8 +2038,11 @@ export class Groups {
       const group = this.stored.get(groupId);
       // Taken out as a hub, my last act done: no edges held for it in the budget of the other groups (`room`).
       if (session.status !== "active" && !this.removedAt.has(groupId) && this.hubs.isHub(groupId)) this.hubs.forget(groupId);
-      if (!group || group.left || session.status !== "active" || !this.hubs.large(session)) continue;
+      if (!group || group.left || session.status !== "active" || !this.hubs.large(session)) { this.hubsShown.delete(groupId); continue; }
       await this.hubs.tick(groupId, session, group, now).catch(() => false);
+      // A beacon reading that adds a hub, or a hub aging out of it, names no other change: this group's view, built again.
+      const shown = this.hubs.active(groupId, session, now) ? `${this.hubs.isHub(groupId)} ${this.hubs.hubs(groupId, session, now).sort().join(" ")}` : "";
+      if (shown !== (this.hubsShown.get(groupId) ?? "")) { this.hubsShown.set(groupId, shown); this.host.emit(undefined, groupId); }
       if (this.hubReconcile.has(groupId)) continue;
       const wanted = this.edgesWanted(groupId, session, group, now);
       const edges = this.host.edges(groupId);
