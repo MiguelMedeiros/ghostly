@@ -4855,7 +4855,7 @@ export class GhostlyNode implements EngineImplementation {
     // goes, so the receipt gives it two ticks, as a text gets from its own (WISP 401).
     if (!error && message.sender === "me" && message.delivery !== "delivered") {
       const marked = await db.patchMessage(linkId, message.id, m => m.delivery === "delivered" ? null : { delivery: "delivered", deliveryError: undefined });
-      if (marked) { await this.messagesChanged(linkId, [message.id]); this.emitState(); }
+      if (marked) { await this.messagesChanged(linkId, [message.id]); this.chatChanged(linkId); }
     }
   }
 
@@ -4883,7 +4883,7 @@ export class GhostlyNode implements EngineImplementation {
     const message = await this.paymentMessage(linkId, paymentId);
     if (!message || message.delivery === "delivered") return;
     const marked = await db.patchMessage(linkId, message.id, m => m.delivery === "delivered" ? null : { delivery: "delivered", deliveryError: undefined });
-    if (marked) { await this.messagesChanged(linkId, [message.id]); this.emitState(); }
+    if (marked) { await this.messagesChanged(linkId, [message.id]); this.chatChanged(linkId); }
   }
 
   /** `everyone`: whether it is deleted for everyone, a waiting text the outbox already handed to the link; else only here. */
@@ -5524,7 +5524,8 @@ export class GhostlyNode implements EngineImplementation {
     const transfer = this.transfers.get(fileId);
     if (!transfer || transfer.state !== "transferring") return;
     transfer.transferred = transferred;
-    this.emitState(250);
+    // A file's progress is no chat's: every chat's view stays as it was.
+    this.scheduleState(250);
   }
 
   private fileSettled(fileId: string | undefined, error?: string, linkId?: string): void {
@@ -10442,7 +10443,8 @@ export class GhostlyNode implements EngineImplementation {
     }
     await this.messagesChanged(message.linkId, [message.id]);
     if (!kept()) return false;
-    this.emitState();
+    // A chat's message changes that chat's view only; a group's, the groups (built for every state).
+    if (live) this.chatChanged(message.linkId); else this.emitState();
     // Reactions that came before it are shown now, and a member's edit.
     await this.reactions.stored(message);
     await this.groupEdits.stored(message);
