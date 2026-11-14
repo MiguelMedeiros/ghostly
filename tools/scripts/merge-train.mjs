@@ -206,6 +206,19 @@ export function ciState(runs) {
 }
 
 /**
+ * The jobs that turned CI Success red, from the jobs of its run: each one that failed or timed out, but the gate itself,
+ * with its page. A rerun adds a job with the same name, so the newest of each name counts.
+ */
+export function failedJobs(jobs) {
+  const newest = new Map();
+  for (const j of jobs) {
+    const had = newest.get(j.name);
+    if (j.name !== "CI Success" && (!had || (j.id ?? 0) >= (had.id ?? 0))) newest.set(j.name, j);
+  }
+  return [...newest.values()].filter((j) => j.conclusion === "failure" || j.conclusion === "timed_out").map((j) => ({ name: j.name, url: j.html_url ?? null }));
+}
+
+/**
  * Whether one of CI's runs on a commit says nothing about it, so the run before it on the same commit speaks: the run
  * has ended (a run whose status is not given counts as ended) and its gate's state (`ciState`, or `draftState` for the
  * fast tier) is "none": cancelled, skipped, or never started. Leaving draft can make two pull request runs a second
@@ -554,6 +567,13 @@ const WORKFLOW_PUSH_REFUSED = /without `?workflows`? permission/;
 
 // A file name may hold any text, the train's marks too: `<` is escaped (as for titles in `batchBody`) so none forms.
 const escapeMark = (f) => f.replaceAll("<", "&lt;");
+// What a red pull request's author needs first: which jobs to open. The first few, each linked to its log.
+const SHOWN_FAILED = 5;
+const failedText = (failed) => {
+  if (!failed?.length) return "";
+  const shown = failed.slice(0, SHOWN_FAILED).map((j) => (j.url ? `[\`${escapeMark(j.name)}\`](${j.url})` : `\`${escapeMark(j.name)}\``));
+  return `; red: ${shown.join(", ")}${failed.length > SHOWN_FAILED ? ` and ${failed.length - SHOWN_FAILED} more` : ""}`;
+};
 // Several aboard whose files GitHub does not list, and a push refused for one workflow: any of them may change it.
 // They come back one at a time, in number order, each after the one before it (`after`): told the same thing, all of
 // them added `queue` again at once, boarded together and left together again, run after run.
@@ -693,6 +713,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     p.boardableAt = greenAt && Date.parse(greenAt) > Date.parse(p.queuedAt) ? greenAt : p.queuedAt;
     // When its CI Success turned red: a hold for the base's own red counts from the later of the two (`HOLD_HELP`).
     p.redAt = p.ci === "failure" ? gateDoneAt(jobs, "CI Success") : null;
+    p.failed = p.ci === "failure" ? failedJobs(jobs) : [];
     const said = await gh.comments(p.number);
     p.sticky = said.find((c) => isPosition(c, login));
     // GitHub lists both oldest first, and anyone may comment: past what the train reads, its own position comment (the
@@ -1168,7 +1189,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
         if (culprit) {
           say(`FAILED #${culprit.number}`);
           done.failed.push(culprit.number);
-          await leave(culprit, LABEL.failed, `Merge train: CI Success failed twice in a batch with only this pull request on \`${base}\` (last: #${batch.number}). Fix it, get it reviewed again, and add \`queue\` again.`);
+          await leave(culprit, LABEL.failed, `Merge train: CI Success failed twice in a batch with only this pull request on \`${base}\` (last: #${batch.number}${failedText(failedJobs(jobs))}). Fix it, get it reviewed again, and add \`queue\` again.`);
         } else {
           inFlight = await board(first, second, { waits });
         }
@@ -1323,7 +1344,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       if (!mark.retried) return goAlone(p, { retried: true, rerun: true, past });
       say(`FAILED #${p.number}`);
       done.failed.push(p.number);
-      await leave(p, LABEL.failed, `Merge train: CI Success failed twice with only this pull request on \`${base}\` (last: ${p.sha.slice(0, 12)}). Fix it, get it reviewed again, and add \`queue\` again.`);
+      await leave(p, LABEL.failed, `Merge train: CI Success failed twice with only this pull request on \`${base}\` (last: ${p.sha.slice(0, 12)}${failedText(p.failed)}). Fix it, get it reviewed again, and add \`queue\` again.`);
       return null;
     }
     if (p.ci === "success") {
