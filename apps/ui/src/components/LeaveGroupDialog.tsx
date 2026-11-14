@@ -80,7 +80,7 @@ export function LeaveGroupDialog({ group, onClose, onConfirm, returnFocus, forge
       <button ref={cancel} onClick={close} className="min-h-11 rounded-lg px-4 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("common.cancel")}</button>
       {/* While it leaves, a press does nothing; not disabled, which would drop the focus to the page (and keep it there if refused). */}
       <button disabled={blocked} aria-disabled={busy || undefined} onClick={() => void leave()} data-testid="group-leave-confirm"
-        className="min-h-11 rounded-lg bg-danger/15 px-4 text-sm text-danger-ink hover:bg-danger/25 focus-visible:ring-2 focus-visible:ring-danger disabled:opacity-40 aria-disabled:opacity-40">{forget ? t("group.menu.forget") : t("group.menu.leave")}</button>
+        className="min-h-11 rounded-lg bg-danger/15 px-4 text-sm text-danger-ink hover:bg-danger/25 forced-colors:border forced-colors:border-[color:ButtonText] focus-visible:ring-2 focus-visible:ring-danger disabled:opacity-40 aria-disabled:opacity-40">{forget ? t("group.menu.forget") : t("group.menu.leave")}</button>
     </div>
   </dialog>, document.body);
 }
