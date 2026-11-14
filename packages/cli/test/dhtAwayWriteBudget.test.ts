@@ -83,13 +83,14 @@ describe("background DHT writes of a daemon whose contacts are away", { timeout:
     // At the share, not starved: the minutes are used.
     expect(counts.reduce((a, b) => a + b, 0)).toBeGreaterThan(BOUND * 25 * 0.75);
     // Each key in its turn: none put at the old 4-minute pace (6 or more in 25 minutes), and every chat's heartbeat still
-    // put in the last quarter hour.
+    // put in the last 20 minutes. A turn comes every 10 to 12 minutes, up to 16 for the keys that wait through a minute
+    // whose share was not all used: a quarter hour would miss one whose turn straddles it.
     const late = new Map<string, number>();
     for (const p of puts) if (p.at - t0 >= 15 * MIN) late.set(p.key, (late.get(p.key) ?? 0) + 1);
     expect(Math.max(...late.values())).toBeLessThanOrEqual(4);
     expect(late.size).toBeGreaterThan(350);
-    const lastQuarter = new Set(puts.filter((p) => p.at - t0 >= 25 * MIN).map((p) => p.key));
-    expect(rows.filter((row) => !lastQuarter.has(identityFromSeedB64(row.seedB64).pubKeyZ32))).toEqual([]);
+    const lastTwenty = new Set(puts.filter((p) => p.at - t0 >= 20 * MIN).map((p) => p.key));
+    expect(rows.filter((row) => !lastTwenty.has(identityFromSeedB64(row.seedB64).pubKeyZ32))).toEqual([]);
   });
 });
 
