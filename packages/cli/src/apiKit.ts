@@ -34,7 +34,16 @@ export interface ApiContext {
 }
 
 export type Params = Record<string, unknown>;
-export type Method = (ctx: ApiContext, params: Params) => Promise<unknown>;
+/** What a call knows of who asked it. */
+export interface CallScope {
+  /**
+   * Aborted when the daemon's connection the call came on closes (Ctrl-C on the command, its process gone): nobody
+   * reads the answer any more. A call that leaves something behind for its answer (`profile.backup`) stops on it.
+   */
+  gone?: AbortSignal;
+}
+
+export type Method = (ctx: ApiContext, params: Params, call?: CallScope) => Promise<unknown>;
 
 export const node = (ctx: ApiContext): GhostlyNode => ctx.runtime.server.node;
 export const state = (ctx: ApiContext): EngineState => node(ctx).getState();
