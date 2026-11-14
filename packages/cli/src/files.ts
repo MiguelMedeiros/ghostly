@@ -13,6 +13,7 @@ import { childEnv } from "./childEnv";
 import { bool, chatOf, findChatOrGroup, keptForJoin, list, noFile, noMessage, node, num, oneOf, oneShotWaits, sentAt, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
 import { groupSendRefused } from "./api";
 import { CliError } from "./errors";
+import { jsonOut } from "./jsonOut";
 import { guardText } from "./secretGuard";
 import { endTyping } from "./typing";
 import { measureVoice } from "./voicePeaks";
@@ -264,11 +265,15 @@ export function saveName(name: string): string {
 }
 
 /**
- * A path as a hint offers it to be pasted into a shell: one word, single-quoted (a `'` in it escaped) unless it is plain.
- * Every "<name> (2)" the keep-both hint names has a `(` in it, a syntax error in bash and zsh unquoted.
+ * A path as a hint offers it to be pasted into a shell: one word, single-quoted unless it is plain. Every "<name> (2)"
+ * the keep-both hint names has a `(` in it, a syntax error in bash and zsh unquoted. The hint is read in the JSON answer,
+ * which prints a `"`, a backslash or a control escaped, so a path holding one, or a `'` (whose quoting takes a
+ * backslash), gets no word: the hint names it in `details` (as `app init`'s `next` does). Its sender names the file:
+ * `'\''` printed as `'\\''` ended the quote, and the rest of a name like `x'; touch y; 'z` ran when pasted.
  */
-function shellWord(path: string): string {
-  return /^[\w@%+=:,./-]+$/.test(path) ? path : `'${path.replaceAll("'", "'\\''")}'`;
+function shellWord(path: string, details: string): string {
+  if (/^[\w@%+=:,./-]+$/.test(path)) return path;
+  return path.includes("'") || jsonOut(path) !== `"${path}"` ? `<the one in details.${details}>` : `'${path}'`;
 }
 
 /**
@@ -514,7 +519,7 @@ export const FILE_METHODS: Record<string, Method> = {
     // downloads folder left a file named downloads. A folder that is there is answered below, as without the slash.
     const path = str(params, "path");
     if (path && (path.endsWith("/") || path.endsWith(sep)) && !(await stat(named).catch(() => undefined))?.isDirectory()) {
-      throw new CliError("bad_request", `${path} names a folder: name a file, or use --dir ${shellWord(named)} (dir over the socket)`, { dir: named });
+      throw new CliError("bad_request", `${path} names a folder: name a file, or use --dir ${shellWord(named, "dir")} (dir over the socket)`, { dir: named });
     }
     // A voice message's name is Ghostly's, down to the second its sender claims: two of one second took one name, and
     // the --force the confirm hinted at replaced the first recording with the other. In --dir it steps to a free
@@ -525,7 +530,7 @@ export const FILE_METHODS: Record<string, Method> = {
     const taken = async (target: string, code?: string): Promise<CliError | undefined> => {
       const there = await stat(target).catch(() => undefined);
       // A folder there is no file to replace: before, it asked for --force, and the --force then failed "is a folder".
-      if (there?.isDirectory()) return new CliError("bad_request", `${target} is a folder: name a file, or use --dir ${shellWord(target)} (dir over the socket)`, { dir: target });
+      if (there?.isDirectory()) return new CliError("bad_request", `${target} is a folder: name a file, or use --dir ${shellWord(target, "dir")} (dir over the socket)`, { dir: target });
       if (!((there && !force) || code === "EEXIST")) return;
       const replace = `${target} exists: pass --force (force: true over the socket) to replace it`;
       if (path) return new CliError("confirm", replace);
@@ -534,7 +539,7 @@ export const FILE_METHODS: Record<string, Method> = {
       let n = 2;
       while (n <= 1000 && (await stat(`${stem} (${n})${ext}`).catch(() => undefined))) n += 1;
       const other = `${stem} (${n})${ext}`;
-      return new CliError("confirm", `${replace}, or --path ${shellWord(other)} (path over the socket) to keep both`, { path: other });
+      return new CliError("confirm", `${replace}, or --path ${shellWord(other, "path")} (path over the socket) to keep both`, { path: other });
     };
     let target = named;
     for (let n = 2, refused = await taken(target); refused; n += 1, refused = await taken(target)) {

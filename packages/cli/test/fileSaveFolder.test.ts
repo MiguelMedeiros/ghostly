@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +10,7 @@ import { callApi, type ApiContext } from "../src/api";
 import { parseArgs } from "../src/args";
 import { COMMANDS, positionals } from "../src/commands";
 import { asCliError } from "../src/errors";
+import { jsonOut } from "../src/jsonOut";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 // covers: headless.files
 
@@ -171,24 +173,54 @@ describe("file save to a folder", () => {
     });
   });
 
-  it("the paths its hints suggest paste into a shell as one word: quoted, a ' in them escaped, raw in details", async () => {
+  it("the paths its hints suggest paste into a shell as one word: quoted, or in details alone when they hold a ', raw in details", async () => {
     // Before, "--path /x/report (2).txt" was a syntax error at "(" in bash and zsh, and a name with spaces two words.
     const folder = join(dir, "it's here");
     mkdirSync(folder);
     writeFileSync(join(folder, "report.txt"), "first");
-    const quoted = (path: string) => `'${path.replaceAll("'", "'\\''")}'`;
     await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", dir: folder })).rejects.toMatchObject({
       code: "confirm",
-      message: `${join(folder, "report.txt")} exists: pass --force (force: true over the socket) to replace it, or --path ${quoted(join(folder, "report (2).txt"))} (path over the socket) to keep both`,
+      message: `${join(folder, "report.txt")} exists: pass --force (force: true over the socket) to replace it, or --path <the one in details.path> (path over the socket) to keep both`,
       details: { path: join(folder, "report (2).txt") },
     });
     await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", path: folder })).rejects.toMatchObject({
-      code: "bad_request", message: `${folder} is a folder: name a file, or use --dir ${quoted(folder)} (dir over the socket)`, details: { dir: folder },
+      code: "bad_request", message: `${folder} is a folder: name a file, or use --dir <the one in details.dir> (dir over the socket)`, details: { dir: folder },
     });
     const missing = join(dir, "new folder");
     await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", path: `${missing}/` })).rejects.toMatchObject({
-      code: "bad_request", message: `${missing}/ names a folder: name a file, or use --dir ${quoted(missing)} (dir over the socket)`, details: { dir: missing },
+      code: "bad_request", message: `${missing}/ names a folder: name a file, or use --dir '${missing}' (dir over the socket)`, details: { dir: missing },
     });
+  });
+
+  it("a hint's path, copied from the answer as the terminal shows it, pastes as that one path or is not offered", async () => {
+    // The sender names the file. Its keep-both path was quoted as '…'\''…', which the JSON answer prints as '…'\\''…':
+    // pasted, the quote ended at the `'` and the rest of the name ran as commands.
+    const folder = join(dir, "pasted");
+    mkdirSync(folder);
+    const name = "x'; touch PWNED; 'y.txt";
+    await fileStore.put({
+      id: "chat-one-in-q", linkId: "chat-one", blob: new Blob(["q"]), createdAt: 1, direction: "in",
+      metadata: { name, size: 1, mime: "text/plain", timestamp: 1 }, transfer: { state: "done", transferred: 1, size: 1 },
+    } as never);
+    writeFileSync(join(folder, name), "first");
+    const pastes: { hint: string; printed: string; meant: string }[] = [];
+    const cases = [
+      [{ file: "chat-one-in-q", dir: folder }, "--path"],
+      [{ file: "chat-one-in-r", path: join(dir, "it's \"a\" \\folder") + "/" }, "--dir"],
+      [{ file: "chat-one-in-r", path: join(dir, "a (b) $HOME `id` folder") + "/" }, "--dir"],
+    ] as const;
+    for (const [params, flag] of cases) {
+      const failure = asCliError(await callApi(ctx, "file.save", params).then(() => { throw new Error("saved"); }, (error: unknown) => error));
+      // What the terminal shows is the JSON line, its escapes as printed: the word after the flag, up to "(… over the socket)".
+      const hint = new RegExp(`${flag} (.*) \\(\\w+ over the socket\\)`).exec(jsonOut({ error: failure.toJSON() }))![1]!;
+      expect(Object.values(failure.details!)).toHaveLength(1);
+      if (hint.startsWith("<")) continue; // no word to paste: the path is in details
+      const printed = spawnSync("bash", ["-c", `printf '%s\\n' ${hint}`], { cwd: folder, encoding: "utf8" }).stdout;
+      pastes.push({ hint, printed, meant: `${Object.values(failure.details!)[0]}\n` });
+    }
+    expect(readdirSync(folder)).toEqual([name]);
+    expect(pastes).toHaveLength(1);
+    for (const { hint, printed, meant } of pastes) expect(printed, hint).toBe(meant);
   });
 
   it("a voice message whose sender claims a time no date can hold is named from its row's time, never NaN", async () => {
