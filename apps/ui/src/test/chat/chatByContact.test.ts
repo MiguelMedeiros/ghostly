@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { chatOfLink } from "../../lib/chatMute";
 import { offerSession } from "../../lib/lockedRing";
-import { chatNamesForPeer, deleteSession, saveSession } from "../../lib/storage";
+import { chatNamesForPeer, deleteSession, listSessions, loadSession, saveSession, updateSessionLabel } from "../../lib/storage";
 import type { ChatSession } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
 
@@ -66,6 +66,25 @@ describe("finding a 1:1 chat by its contact", () => {
     expect(chatsParsed(() => {
       for (let i = 0; i < 20; i++) expect(chatNamesForPeer(key("a"))?.nick).toBe("Ana II");
     })).toBe(0);
+  });
+
+  it("reads a chat's name and its contact's as the engine keeps a chat's name, whatever the stored copy holds", () => {
+    // A copy written by a restored backup, an older app or another page: the names are read as one line of what shows.
+    saveSession(chat("f", { label: "Bank‮\nsupport​ " + "x".repeat(100), nick: "A⁧na\u0000" }));
+    const names = chatNamesForPeer(key("f"))!;
+    expect(names.label).toBe(`Bank support ${"x".repeat(35)}`);
+    expect(names.nick).toBe("Ana");
+    expect(loadSession("f")).toMatchObject({ label: names.label, nick: "Ana" });
+    expect(listSessions().find((s) => s.id === "f")).toMatchObject({ label: names.label, nick: "Ana" });
+    // A name with nothing that shows is none: the contact's own name is shown.
+    saveSession(chat("g", { label: "​‮ " }));
+    expect(chatNamesForPeer(key("g"))?.label).toBeUndefined();
+  });
+
+  it("keeps a chat's new name as the engine keeps it", () => {
+    saveSession(chat("h"));
+    updateSessionLabel("h", "Ana‮\tSilva​");
+    expect(loadSession("h")?.label).toBe("Ana Silva");
   });
 
   it("finds the chat a call offer rings in, parsing no chat again", () => {
