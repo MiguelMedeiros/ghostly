@@ -114,11 +114,24 @@ describe("a one-shot group join", () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it("stops at a replaced link, with no daemon's note: knocking again does not get in", async () => {
+  // Found in a bug hunt: at "replaced" it said nothing, exit 0, though knocking again does not get in: the next step is
+  // the current link, and no daemon helps.
+  it("stops at a replaced link, and says to ask for the current one", async () => {
     const { ctx, set } = oneShot();
     const answer = callApi(ctx, "group.join", { link: LINK });
     setTimeout(() => set([knocking("replaced")]), 5);
-    expect(await answer).toEqual({ group: "g9", joined: false, stage: "replaced" });
+    expect(await answer).toEqual({ group: "g9", joined: false, stage: "replaced",
+      warning: "This link was replaced or turned off: ask someone in the group for the current link, then ghostly group join <link>" });
+  });
+
+  it("at a full group, says how many members it holds of how many", async () => {
+    const { ctx, set } = oneShot();
+    const answer = callApi(ctx, "group.join", { link: LINK });
+    const full = knocking("full");
+    Object.assign(full.invitation!, { full: { n: 8, max: 8 } });
+    setTimeout(() => set([full]), 5);
+    expect(await answer).toEqual({ group: "g9", joined: false, stage: "full",
+      warning: "No room yet: the group is full (8 of 8 members). Your app goes on knocking only while this profile is running, and gets in when there is room: keep it running (ghostly daemon --detach), then ghostly group show g9" });
   });
 
   // Found in a bug hunt: at "full" or "blocked" it left at once with no note, as if the join were over, though the

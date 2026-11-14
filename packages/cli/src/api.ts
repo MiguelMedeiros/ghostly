@@ -285,10 +285,13 @@ async function letIn(ctx: ApiContext, groupId: string): Promise<Record<string, u
   const group = await waitForState(ctx, (s) => { const g = seen(s); return done(g) ? { g } : undefined; }, ONE_SHOT_JOIN_S * 1000, `group ${groupId} to let this profile in`)
     .then(({ g }) => g, (error: unknown) => { if (error instanceof CliError && error.code === "timeout") return seen(state(ctx)); throw error; });
   const joined = group?.status === "active", stage = group?.invitation?.stage ?? null;
-  if (joined || !group || stage === "replaced") return { group: groupId, joined, stage };
+  if (joined || !group) return { group: groupId, joined, stage };
+  // A replaced link never lets it in: the next step is a new link, not a daemon.
+  if (stage === "replaced") return { group: groupId, joined, stage, warning: "This link was replaced or turned off: ask someone in the group for the current link, then ghostly group join <link>" };
   const show = `keep it running (ghostly daemon --detach), then ghostly group show ${shellWord(groupId, groupId)}`;
+  const full = stage === "full" ? group.invitation?.full : undefined;
   const noRoom = stage ? NO_ROOM[stage] : undefined;
-  if (noRoom) return { group: groupId, joined, stage, warning: `${noRoom}. Your app goes on knocking only while this profile is running, and gets in when there is room: ${show}` };
+  if (noRoom) return { group: groupId, joined, stage, warning: `${noRoom}${full ? ` (${full.n} of ${full.max} members)` : ""}. Your app goes on knocking only while this profile is running, and gets in when there is room: ${show}` };
   if (stage === "admitted") return { group: groupId, joined, stage, warning: `Not in yet: a member's app let you in, and the group's welcome has not finished arriving. It arrives only while this profile is running: ${show}` };
   return { group: groupId, joined, stage, warning: `Not in yet: no member's app has let you in. A member's app lets you in only while this profile is running: ${show}` };
 }
