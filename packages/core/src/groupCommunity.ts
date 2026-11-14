@@ -95,6 +95,8 @@ export const COMMUNITY_LIMITS = {
   chainPiece: 100,
   /** Admissions members other than the admin may commit in a row while the admin is away (`memberAdmissions`). */
   memberAdmissions: 32,
+  /** Commits back in which a leave of a key a member let in counts against `memberAdmissions`, the admin there or not. */
+  memberLeaves: 256,
   pendingLeaves: 64,
   /** Leaves whose mark (`group-left`) is kept, and the epochs one names. */
   leftMarks: 64,
@@ -187,12 +189,21 @@ const ADMIN_ONLY: ReadonlySet<CommunityKind> = new Set(["remove", "role", "rotat
  * the admin clears keys let in would otherwise make room for as many more each time. An admission is a member's
  * right, and costs nothing: a key nobody holds is as good as anyone's, so without a bound one member could fill the
  * group to its cap in seconds. `COMMUNITY_LIMITS.memberAdmissions` in a row, then the admin's turn.
+ * A leave among the last `COMMUNITY_LIMITS.memberLeaves` commits that ends an admission a member other than the admin
+ * signed counts as one more, whether or not the admin was there since: the key leaves the roster as it was, and a
+ * member that lets in keys it made up and commits their own leaves would otherwise fill the history with two commits
+ * for each one the admin lets in at the door.
  */
-function memberAdmissions(admin: string | undefined, before: Iterable<CommunityCommit>): number {
-  let n = 0;
+export function memberAdmissions(admin: string | undefined, before: Iterable<CommunityCommit>): number {
+  let n = 0, run = true, seen = 0;
+  const leavers = new Set<string>();
   for (const c of before) {
-    if (c.k === "create" || c.k === "role" || (c.by === admin && c.k !== "remove" && c.k !== "leave")) break;
-    if (c.k === "add") n++;
+    if (run && (c.k === "create" || c.k === "role" || (c.by === admin && c.k !== "remove" && c.k !== "leave"))) run = false;
+    if (run && c.k === "add") n++;
+    const recent = ++seen <= COMMUNITY_LIMITS.memberLeaves;
+    if (c.k === "add" && c.s && leavers.delete(c.s) && c.by !== admin) n++;
+    if (recent && c.k === "leave" && c.s) leavers.add(c.s);
+    if (!run && !recent && !leavers.size) break;
   }
   return n;
 }
