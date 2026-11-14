@@ -1,8 +1,9 @@
 import "fake-indexeddb/auto";
+import { canonicalJsonBytes } from "@ghostly/core";
 import { beforeEach, describe, expect, it } from "vitest";
 import { APP_CHECK_TIMINGS } from "../src/engine/apps";
 import { fileBytes } from "../src/shared/fileBytes";
-import { BUNDLE_URL, FakeNet, NOW_MS, STORE_URL, apps, bundle, emptyProfile, listing, storeFiles } from "./appsSupport";
+import { BUNDLE_URL, FakeNet, NOW_MS, STORE_URL, apps, bundle, emptyProfile, listing, revocation, storeFiles } from "./appsSupport";
 // covers: apps.engine.installed
 
 /*
@@ -103,6 +104,44 @@ describe("an update whose whole read is refused", () => {
     }
     expect([whole(SOURCE), whole(MIRRORS[0]!)]).toEqual([1, 1]);
     expect((await store.list())[0]!.equivocation, "the mark is not rewritten").toEqual(marked);
+  });
+
+  /** v1 installed; a v2 that asks for a permission waits at SOURCE, another v2 at MIRRORS[0] marks the app; then the waiting one is revoked. */
+  const clashGone = async () => {
+    const net = new FakeNet();
+    now = NOW_MS;
+    const store = apps(net, { now: () => now });
+    const sources = [SOURCE, MIRRORS[0]!];
+    const v1 = await bundle({ sources });
+    net.put(BUNDLE_URL, v1.bytes);
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    const asking = await bundle({ sequence: 2, sources, permissions: ["chat", "name"], entry: "<p>a version 2 asking" });
+    const good = await bundle({ sequence: 2, sources, entry: "<p>another version 2" });
+    net.put(SOURCE, asking.bytes);
+    expect((await store.checkUpdates())[0]!.outcome).toBe("ask");
+    net.put(MIRRORS[0]!, good.bytes);
+    now += 60_000;
+    expect((await store.checkUpdates())[0]!.outcome).toBe("equivocation");
+    net.put("https://raw.githubusercontent.com/ana/chess/HEAD/dist/ghostly-revoke.json", canonicalJsonBytes([await revocation(asking.ref, [asking.digest])]));
+    now += 60_000;
+    return { store, good };
+  };
+
+  it("another version under the waiting update's number is taken once that update is revoked, not an hour later", async () => {
+    const { store, good } = await clashGone();
+    expect((await store.checkUpdates())[0]!.outcome).toBe("updated");
+    expect((await store.list())[0]!.digest).toBe(good.digest);
+  });
+
+  it("refused under the waiting update's number, then installed by hand, still brings its missing files back at Open", async () => {
+    const { store, good } = await clashGone();
+    await store.checkUpdates();
+    const shown = await store.preview({ url: MIRRORS[0]! });
+    await store.install({ stage: shown.stage, digest: good.digest, grant: ["chat"] });
+    await (await fileBytes()).remove(`app-${good.digest}`);
+    now += 60_000;
+    expect(await store.fetchFiles({ ref: good.ref })).toEqual({ status: "ok" });
   });
 
   // A restored profile (installed list, no files): each check fetches the installed version's files first.
