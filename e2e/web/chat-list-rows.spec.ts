@@ -122,7 +122,7 @@ test("a chat's row is two lines, the key in its tooltip, the pin and delete butt
   expect(cover.x).toBeLessThanOrEqual(m.x);
   expect(cover.x + cover.width).toBeGreaterThanOrEqual(t.x + t.width - 1);
   const unpin = actions.getByRole("button", { name: "Unpin chat", exact: true });
-  await expect(unpin).toHaveAttribute("aria-pressed", "true");
+  await expect(unpin).toHaveAttribute("data-pinned");
   await unpin.click();
   await expect(mark).toHaveCount(0);
 
@@ -139,10 +139,10 @@ test("a chat's row is two lines, the key in its tooltip, the pin and delete butt
   await expect(actions).toHaveCSS("opacity", "1");
   await bob.page.keyboard.press("Enter");
   await expect(mark).toBeVisible();
-  await expect(row.getByTestId("chat-row-pin")).toHaveAttribute("aria-pressed", "true");
+  await expect(row.getByTestId("chat-row-pin")).toHaveAttribute("data-pinned");
   await bob.page.keyboard.press("Enter");
   await expect(mark).toHaveCount(0);
-  await expect(row.getByTestId("chat-row-pin")).toHaveAttribute("aria-pressed", "false");
+  await expect(row.getByTestId("chat-row-pin")).not.toHaveAttribute("data-pinned");
   expect((await box(row)).height).toBe(height);
   await expect(bob.page).toHaveURL(/#\/settings$/);
 });
