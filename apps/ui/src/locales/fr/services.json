@@ -45,6 +45,7 @@
     "loading": "Ouverture de {{app}} sur la machine de votre contact…",
     "notAnswering": "{{app}} ne répond pas sur la machine de votre contact. Demandez-lui de vérifier qu’il tourne.",
     "offline": "Votre contact est hors ligne : {{app}} ne peut pas s’ouvrir pour l’instant. Il se rouvrira ici à son retour.",
+    "openLink": "Ouvrir {{site}}",
     "owner": "App de {{contact}}, qui tourne sur sa machine. Ce n'est pas Ghostly : ne tapez jamais ici vos mots de récupération ni vos mots de passe.",
     "reaching": "Tentative de joindre votre contact…",
     "retry": "Réessayer",

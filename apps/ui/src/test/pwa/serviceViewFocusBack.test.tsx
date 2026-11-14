@@ -18,7 +18,7 @@ import { renderApp } from "../render";
  * to the page's body (a keyboard or screen-reader user put back at the top of the page).
  */
 const host = parseServicesHost("https://*.svc.ghostly.example")!;
-const words = { unreachable: "Not reachable", failed: "Failed", close: "Close", callOn: "", tooSlow: "Too slow", offline: "Offline", retry: "Try again", blocked: "", unguarded: "", label: "Demo, shared by Ana", owner: "Ana's app", hostError: () => null };
+const words = { unreachable: "Not reachable", failed: "Failed", close: "Close", callOn: "", tooSlow: "Too slow", offline: "Offline", retry: "Try again", blocked: "", unguarded: "", label: "Demo, shared by Ana", owner: "Ana's app", openLink: (site: string) => `Open ${site}`, hostError: () => null };
 const ana: ChatSession = { id: "ana", profile: "paired-chat/1", mySeedB64: "seed-ana", peerPubKeyB64: "peer", encKeyB64: "enc", label: "Ana", messages: [], createdAt: 1 };
 const ready = { status: "ready", transport: "iroh/1" } as NonNullable<LinkView["pairing"]>;
 const link = (peerServices: LinkView["peerServices"]) => linkView({ profile: "paired-chat/1", pairing: ready, sessionOffers: { mine: ["services/1"], peer: ["services/1"] },

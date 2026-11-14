@@ -45,6 +45,7 @@
     "loading": "Abriendo {{app}} en el equipo de tu contacto…",
     "notAnswering": "{{app}} no responde en el equipo de tu contacto. Pídele que compruebe que está en marcha.",
     "offline": "Tu contacto está desconectado, así que {{app}} no puede abrirse ahora. Se abrirá de nuevo aquí cuando vuelva.",
+    "openLink": "Abrir {{site}}",
     "owner": "App de {{contact}}, que se ejecuta en su equipo. No es Ghostly: nunca escribas aquí tus palabras de recuperación ni contraseñas.",
     "reaching": "Intentando llegar a tu contacto…",
     "retry": "Reintentar",

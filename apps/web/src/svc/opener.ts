@@ -34,9 +34,10 @@ function ownsBuffer(chunk: Uint8Array): chunk is Uint8Array<ArrayBuffer> {
  * while the contact is offline; `reaching` while Try again asks the engine to reach them, and `stillOffline` once that
  * ended with them still offline (without these, `offline`). `blocked` and `unguarded`: the view's notice when the bridge shows no app
  * (`BRIDGE_REFUSED`). `label` and `owner`: whose app it is and that it is not Ghostly (`serviceFraming`), the view's
- * name and the line under the app's name.
+ * name and the line under the app's name. `openLink`: the bar's button for a link the app asked for that the view held
+ * back (`openOutside`), for its site.
  */
-export interface OpenerWords { unreachable: string; failed: string; close: string; callOn: string; tooSlow: string; offline: string; retry: string; loading?: string; reaching?: string; stillOffline?: string; blocked: string; unguarded: string; label: string; owner: string; hostError: (headers: readonly (readonly [string, string])[]) => string | null }
+export interface OpenerWords { unreachable: string; failed: string; close: string; callOn: string; tooSlow: string; offline: string; retry: string; loading?: string; reaching?: string; stillOffline?: string; blocked: string; unguarded: string; label: string; owner: string; openLink: (site: string) => string; hostError: (headers: readonly (readonly [string, string])[]) => string | null }
 
 /**
  * Whether the contact is offline now (`offline`), and a way to hear when that may have changed (`watch`, which returns
@@ -422,7 +423,18 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   const named = document.createElement("div");
   named.style.cssText = "display:flex;flex-direction:column;min-width:0";
   named.append(name, owner);
-  bar.append(close, named);
+  // A link the view held back (`openOutside`), offered on a button of Ghostly's own, as a browser does with a blocked
+  // pop-up: said as it comes, in the bar's own words, and one tap opens it.
+  const held = document.createElement("div");
+  held.setAttribute("role", "status");
+  held.style.cssText = "margin-inline-start:auto;flex-shrink:0;max-width:50%";
+  const offer = document.createElement("button");
+  offer.type = "button";
+  offer.dataset.testid = "service-view-link";
+  offer.hidden = true;
+  offer.style.cssText = "max-width:100%;min-height:40px;padding:0 12px;border:1px solid var(--color-border,#333);border-radius:8px;background:transparent;color:inherit;font:600 14px system-ui,sans-serif;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+  held.append(offer);
+  bar.append(close, named, held);
   const frame = document.createElement("iframe");
   frame.dataset.testid = "service-view-frame";
   frame.title = options.words.label;
@@ -544,16 +556,35 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
    * referrer, as Ghostly's own external links (`externalLinkProps`). Only within the person's own tap in the app, which
    * activates this page too and no script can: never one the app opens by itself. Not while a tap or a key on this page
    * still activates it (`OWN_INPUT_MS`): the bridge checks for a tap in the app, but it is on the app's origin, and the
-   * contact's page can run a script of its own there and ask as it does, right on the tap on Open.
+   * contact's page can run a script of its own there and ask as it does, right on the tap on Open. Such a link is not
+   * dropped unsaid: the person's own tap or key may have asked for it (the Tab into the app is a key on this page, and
+   * Enter on its first link comes right after), so the bar offers it, and only their tap there opens it.
    */
   const openOutside = (url: unknown) => {
     const link = outsideLink(url, options.host);
     const now = Date.now();
-    if (!link || !navigator.userActivation?.isActive || now - ownInput <= OWN_INPUT_MS || linksOpened >= LINKS_PER_VIEW || now - lastLink < LINK_SPACING_MS) return;
+    if (!link || !navigator.userActivation?.isActive || linksOpened >= LINKS_PER_VIEW) return;
+    if (now - ownInput <= OWN_INPUT_MS) { hold(link); return; }
+    if (now - lastLink < LINK_SPACING_MS) return;
+    openTab(link);
+  };
+  const openTab = (link: string) => {
     linksOpened++;
-    lastLink = now;
+    lastLink = Date.now();
+    offer.hidden = true;
+    offer.textContent = "";
+    offeredLink = null;
     window.open(link, "_blank", "noopener,noreferrer");
   };
+  let offeredLink: string | null = null;
+  const hold = (link: string) => {
+    offeredLink = link;
+    // Its site as the address bar shows it (a lookalike name in its punycode), in its own direction.
+    offer.textContent = options.words.openLink(`⁨${new URL(link).host}⁩`);
+    offer.title = link;
+    offer.hidden = false;
+  };
+  offer.addEventListener("click", () => { if (offeredLink && linksOpened < LINKS_PER_VIEW) openTab(offeredLink); });
   const onMessage = (event: MessageEvent) => {
     if (event.source !== frame.contentWindow || event.origin !== origin) return;
     const message = event.data as { type?: unknown; reason?: unknown; url?: unknown } | null;
