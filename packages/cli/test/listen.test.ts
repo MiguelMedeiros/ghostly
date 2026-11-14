@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { asCliError, CliError } from "../src/errors";
 import type { GhostlyEvent } from "../src/events";
 import { callApi, type ApiContext } from "../src/api";
-import { Allowlist, allowlist, checkCursor, checkTypes, checkWebhook, EVENT_FAMILIES, EVENT_TYPES, eventHandler, Feed, hookEnv, matches, MAX_BEHIND, readCursor, toTurn } from "../src/listen";
+import { Allowlist, allowlist, checkCursor, checkTypes, checkWebhook, EVENT_FAMILIES, EVENT_TYPES, eventHandler, Feed, hookEnv, matches, MAX_BEHIND, readCursor, startAt, toTurn } from "../src/listen";
 import { turnRef } from "../src/turnRefs";
 import { ghostly, Running } from "./support/cli";
 import { chatViewOf, groupViewOf } from "./support/chatView";
@@ -748,6 +748,30 @@ describe("listen with an allowlist and --turns", () => {
     expect(result.json).toEqual({ error: { code: "bad_request", message: `${join(dir, "garbage")} holds no event number ("abc"): fix or remove it, or give --since` } });
     expect(readdirSync(home)).toEqual([]);
     expect(readFileSync(join(dir, "garbage"), "utf8")).toBe("abc\n");
+  });
+
+  it("a cursor that holds a number wins over --since, which is where the first start begins", () => {
+    // `--since 0 --cursor f` in a unit ran every handled event's hook again at each restart: --since won, without a word.
+    const dir = mkdtempSync(join(tmpdir(), "ghostly-listen-"));
+    const said: string[] = [];
+    const say = (line: string) => said.push(line);
+    // A first start (no file yet): --since is the place.
+    expect(startAt(0, join(dir, "first"), say)).toBe(0);
+    expect(startAt(undefined, join(dir, "first"), say)).toBeUndefined();
+    expect(said).toEqual([]);
+    // A restart: the cursor's number, and stderr says --since was passed over.
+    writeFileSync(join(dir, "kept"), "41\n");
+    expect(startAt(0, join(dir, "kept"), say)).toBe(41);
+    expect(said).toEqual([`ghostly: ${join(dir, "kept")} holds event 41: starting after it, not after --since 0`]);
+    said.length = 0;
+    expect(startAt(41, join(dir, "kept"), say)).toBe(41);
+    expect(startAt(undefined, join(dir, "kept"), say)).toBe(41);
+    expect(startAt(7, undefined, say)).toBe(7);
+    expect(said).toEqual([]);
+    // A cursor that holds no number is refused, and --since still starts it (the refusal says so).
+    writeFileSync(join(dir, "garbage"), "abc\n");
+    expect(() => startAt(undefined, join(dir, "garbage"), say)).toThrow("holds no event number");
+    expect(startAt(3, join(dir, "garbage"), say)).toBe(3);
   });
 
   it("an output that wants a drain holds the next event until it drains; the events wait as `behind`", async () => {
