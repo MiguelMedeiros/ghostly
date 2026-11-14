@@ -194,7 +194,10 @@ describe("a one-shot about one group", { timeout: 300_000 }, () => {
 
   it("leaves the 1:1 chats unstarted only for what goes over the group's edges", () => {
     for (const method of ["group.send", "group.edit", "group.react", "group.typing"]) expect(oneGroupOnly(method), method).toBe(true);
-    // An invitation goes over the contact's 1:1 chat, and an answer to one over the chat it came by.
-    for (const method of ["group.invite", "group.accept", "group.decline", "group.join", "chat.send"]) expect(oneGroupOnly(method), method).toBe(false);
+    // The admin's name, picture, hubs and fresh secret go over the edges too (a commit or the group's metadata).
+    for (const method of ["group.rename", "group.picture", "group.hub", "group.rotate"]) expect(oneGroupOnly(method), method).toBe(true);
+    // An invitation goes over the contact's 1:1 chat, and an answer to one over the chat it came by. A removal tells the
+    // one removed over the chat that invited them, and a new admin takes back the invitations still out, over theirs.
+    for (const method of ["group.invite", "group.accept", "group.decline", "group.join", "group.remove", "group.admin", "chat.send"]) expect(oneGroupOnly(method), method).toBe(false);
   });
 });
