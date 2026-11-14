@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Amount, HttpResponseError, MintOperationError, NetworkError, getDecodedToken, type Proof } from "@cashu/cashu-ts";
 import { LIMITS } from "@ghostly/core";
 import { CashuWallet, MINT_TIMEOUT_MS } from "../src/engine/wallet";
-import { CASHU_REQUEST_TIMEOUT_MS, SWAP_SETTLED_MS } from "../src/engine/paymentAdapters/cashu";
+import { MELT_REQUEST_TIMEOUT_MS, SWAP_SETTLED_MS } from "../src/engine/paymentAdapters/cashu";
 import type { PendingMelt, StoredPayment, StoredProof, StoredQuote, WalletTx } from "../src/shared/types";
 import { bech32 } from "@scure/base";
 import { FakeWallet, failures, mint, resetDb, rows, seed } from "./fakes";
@@ -178,8 +178,8 @@ describe("Lightning out: melts", () => {
   };
   /** Asks about the pending payments once no request of theirs can reach the mint any more: that long really passed. */
   const pollWhenOverdue = async (wallet: CashuWallet) => {
-    const monotonic = vi.spyOn(performance, "now").mockReturnValue(performance.now() + CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS);
-    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS });
+    const monotonic = vi.spyOn(performance, "now").mockReturnValue(performance.now() + MELT_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS);
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + MELT_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS });
     try { await wallet["pollMelts"](); } finally { vi.useRealTimers(); monotonic.mockRestore(); }
   };
 
@@ -286,7 +286,7 @@ describe("Lightning out: melts", () => {
     expect(await pay(wallet)).toBe(false);
 
     // The clock set back an hour, and the window passed in fact: no request of it can land any more.
-    const monotonic = vi.spyOn(performance, "now").mockReturnValue(performance.now() + CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS);
+    const monotonic = vi.spyOn(performance, "now").mockReturnValue(performance.now() + MELT_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS);
     vi.useFakeTimers({ toFake: ["Date"], now: Date.now() - 60 * 60_000 });
     try { await wallet["pollMelts"](); } finally { vi.useRealTimers(); monotonic.mockRestore(); }
     expect(balance()).toBe(108);

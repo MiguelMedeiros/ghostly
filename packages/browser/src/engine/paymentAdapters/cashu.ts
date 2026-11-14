@@ -3,11 +3,14 @@ import { mintNetwork } from '../../shared/mints';
 import type { CashuWallet, CashuPrepared } from '../wallet';
 
 /**
- * How long one request to a mint may last: cashu-ts's default `requestTimeout` (5 min), which this wallet does not
- * change. Retries of a swap (NUT-19) run inside the same approval, and reconcile waits for it (the coordinator runs one
- * operation per payment at a time).
+ * How long one request of a swap to a mint may last, and one asking where a swap stands (NUT-09 restore, NUT-07 states):
+ * its retries (NUT-19) included, under one deadline (`boundSwapRequests`). A mint that takes the connection and never
+ * answers is given up on within it, and the payment says so, instead of after cashu-ts' 5 min. Retries run inside the
+ * same approval, and reconcile waits for it (the coordinator runs one operation per payment at a time).
  */
-export const CASHU_REQUEST_TIMEOUT_MS=300_000;
+export const CASHU_REQUEST_TIMEOUT_MS=30_000;
+/** How long a melt's request may last: cashu-ts's default `requestTimeout` (5 min), which this wallet does not change. */
+export const MELT_REQUEST_TIMEOUT_MS=300_000;
 /** The margin past that for a mint slow to act on a swap it did receive. */
 export const SWAP_SETTLED_MS=120_000;
 /**
