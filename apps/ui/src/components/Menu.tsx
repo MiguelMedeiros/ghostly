@@ -59,11 +59,16 @@ type MenuProps = {
    * an opener that is itself over everything (a call over a video filling the window).
    */
   stack?: string;
+  /**
+   * Where a popover over the whole page or a phone's sheet hangs: the page's body, or a modal window its opener is in
+   * (a whole-window call), which a screen reader reads alone. On the body, the menu was outside it, out of its reach.
+   */
+  host?: HTMLElement | null;
   className?: string;
   children: ReactNode;
 };
 
-function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", prefer: wanted = "down", focusFirst, label, portal, within, at, stack = "z-50", className = "", children }: MenuProps) {
+function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", prefer: wanted = "down", focusFirst, label, portal, within, at, stack = "z-50", host, className = "", children }: MenuProps) {
   const pointed = !!at && !!portal;
   const align = pointed ? "start" : edge, prefer = pointed ? "down" : wanted;
   const phone = useIsMobile();
@@ -198,14 +203,14 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
       <div aria-hidden="true" className="mx-auto mb-2 h-1 w-9 rounded-full bg-border-bright" />
       {children}
     </div>
-  </>, document.body);
+  </>, host ?? document.body);
 
   if (portal) return createPortal(
     <div ref={ref} id={id} data-testid={testId} data-menu="popover" role={label ? "group" : undefined} aria-label={label} onKeyDown={keys}
       style={{ left: fixed?.left ?? 0, top: fixed?.top ?? 0, maxHeight: fixed?.room }}
       className={`fixed ${stack} w-max min-w-44 max-w-[min(20rem,calc(100vw-1rem))] ${fixed?.room === undefined ? "" : "overflow-y-auto overscroll-contain"} rounded-lg border border-border bg-surface-alt py-1 shadow-lg animate-fade-in ${className}`}>
       {children}
-    </div>, document.body);
+    </div>, host ?? document.body);
 
   return (
     <div ref={ref} id={id} data-testid={testId} data-menu="popover" role={label ? "group" : undefined} aria-label={label} onKeyDown={keys}
