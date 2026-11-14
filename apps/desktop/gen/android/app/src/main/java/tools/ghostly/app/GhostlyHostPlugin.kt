@@ -645,11 +645,11 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun saveFile(invoke: Invoke) {
     val args = invoke.parseArgs(SaveArgs::class.java)
-    val opened = SavePicker.open(SavePicker.Save(args.path, args.name)) { save, result -> saveChosen(invoke, save, result) }
+    val opened = SavePicker.open(SaveState.Save(args.path, args.name)) { save, result -> saveChosen(invoke, save, result) }
     if (!opened) invoke.resolve(JSObject().put("saved", false))
   }
 
-  private fun saveChosen(invoke: Invoke, save: SavePicker.Save?, result: ActivityResult) {
+  private fun saveChosen(invoke: Invoke, save: SaveState.Save?, result: ActivityResult) {
     val target = result.data?.data
     if (result.resultCode != Activity.RESULT_OK || target == null || save == null) {
       invoke.resolve(JSObject().put("saved", false))
