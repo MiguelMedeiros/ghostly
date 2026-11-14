@@ -1,6 +1,6 @@
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { fromBase64Url, type BoundChannel, type FrameChannel, type NativeEndpoint } from "@ghostly/core";
-import { hyperdhtRelayProblem } from "../shared/hyperdhtRelay";
+import { hyperdhtRelayProblem, hyperdhtRelayUrl } from "../shared/hyperdhtRelay";
 
 export { hyperdhtRelayProblem as relayUrlProblem };
 
@@ -344,7 +344,7 @@ export async function createRelayedHyperEndpoint(seedB64: string, url: string, o
     clearTimeout(timer);
     relayClosed = null;
   }
-  const descriptor: RelayedHyperDescriptor = { publicKey: hex(keyPair.publicKey), relayed: true, relay: url };
+  const descriptor: RelayedHyperDescriptor = { publicKey: hex(keyPair.publicKey), relayed: true, relay: hyperdhtRelayUrl(url) };
   endpoint = {
     transport: "hyperdht/1", descriptor, onDescriptor: null, onUnavailable: null,
     get onConnection() { return handler; },
