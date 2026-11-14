@@ -9289,8 +9289,9 @@ export class GhostlyNode implements EngineImplementation {
         },
         // Waiting for a chosen transport (WISP 100): the header, the panel and the menu say so; the history keeps attempts.
         onTransportWait: () => { this.observeTransport(linkId); this.emitState(); },
-        // Why the chat is not live: what the last attempt tried (WISP 100), never a silent retry loop.
-        onLiveAttempt: () => this.emitState(),
+        // Why the chat is not live: what the last attempt tried (WISP 100), never a silent retry loop. A contact that looks
+        // online but is not reached ends one every 20 s to 3 min: its chat's view alone is built again (an edge: its group's).
+        onLiveAttempt: () => this.chatChanged(linkId),
         onRtt: ms => this.noteRtt(live, ms),
         // Said on every read (no error is `null`): the pages hear only of a change.
         onDiscoveryError: error => {

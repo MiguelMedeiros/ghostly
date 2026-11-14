@@ -1,5 +1,6 @@
 import { chat, expect, test } from "../support/fixtures";
 import { countCommits, openAndMeasure, seed, summary, type Open } from "../support/chatPerf";
+import { budget } from "../support/perfBudget";
 import type { Page } from "@playwright/test";
 
 /**
@@ -12,7 +13,8 @@ import type { Page } from "@playwright/test";
  *
  * prints the median of each number. Absolute times depend on the machine and its load: compare builds run by run
  * (interleaved), not against a number from another day. By itself the test only holds a generous bound: a chat 100
- * times longer may cost more to open, but not in proportion.
+ * times longer may cost more to open, but not in proportion. The two timed tests are @perf (the nightly E2E (perf) job);
+ * what they see besides, the last rows in the page and the view at the bottom, the others check on every run.
  */
 
 const RUNS = Number(process.env.PERF_RUNS) || 3;
@@ -24,7 +26,7 @@ const OPEN_ROWS = 100;
 // A trace's DOM snapshots and a video would be measured with the app.
 test.use({ trace: "off", video: "off" });
 
-test("a long chat opens without costing in proportion to its length", { tag: ["@feature:chat.scroll"] }, async ({ peer }) => {
+test("a long chat opens without costing in proportion to its length", { tag: ["@feature:chat.scroll", "@perf"] }, async ({ peer }) => {
   test.setTimeout(5 * 60_000);
   const bob = await peer("perf-bob");
   await bob.context.addInitScript(countCommits);
@@ -58,13 +60,13 @@ test("a long chat opens without costing in proportion to its length", { tag: ["@
   expect(long.offBottom).toBe(0);
   // Generous on purpose (a loaded CI runner). Before the window of rows, 5,000 messages took 6.5 s to settle here (every
   // row drawn above, 150 at a time), against ~100 ms after.
-  expect(long.settled).toBeLessThan(Math.max(1_500, short.settled * 5));
-  expect(long.paint).toBeLessThan(Math.max(400, short.paint * 5));
+  budget("chat of 5,000 opened, settled at its bottom", long.settled, Math.max(1_500, short.settled * 5));
+  budget("chat of 5,000 opened, first message painted", long.paint, Math.max(400, short.paint * 5));
   // Open and left alone, a long chat does no long work (each change of the page used to draw every bubble again).
-  expect(long.idleLong).toBeLessThan(150);
+  budget("chat of 5,000 open and idle, long tasks", long.idleLong, 150);
 });
 
-test("leaving a long chat costs what leaving a short one does", { tag: ["@feature:app.navigation"] }, async ({ peer }) => {
+test("leaving a long chat costs what leaving a short one does", { tag: ["@feature:app.navigation", "@perf"] }, async ({ peer }) => {
   test.setTimeout(5 * 60_000);
   const bob = await peer("switch-bob");
   await bob.context.addInitScript(countCommits);
@@ -94,7 +96,19 @@ test("leaving a long chat costs what leaving a short one does", { tag: ["@featur
   console.log(`chat-switch-perf, 4x slower (median of ${RUNS}): ${JSON.stringify({ long, short })}`);
   // Before, the move to the next chat was a transition: each change of the engine's state (a sync render, several a
   // second) started it over, and it waited behind the long chat's older rows (1.1 to 1.7 s here, against 0.3 s).
-  expect(long.paint).toBeLessThan(Math.max(700, short.paint * 2));
+  budget("chat of 600 left at 4x slower, next chat painted", long.paint, Math.max(700, short.paint * 2));
+});
+
+test("a long chat opens at its bottom with only its last rows in the page", { tag: ["@feature:chat.scroll"] }, async ({ peer }) => {
+  const bob = await peer("open-bob");
+  await bob.context.addInitScript(countCommits);
+  await seed(bob.page, [{ label: "Long chat", count: 5_000 }]);
+  await bob.page.reload();
+  await expect(bob.page.getByTestId("chat-row-name").filter({ hasText: "Long chat" })).toBeVisible();
+  const open = await bob.page.evaluate(openAndMeasure, "Long chat");
+  // Its last rows are in the page, never the whole history, and the view never left the bottom on the way.
+  expect(open.rows).toBe(OPEN_ROWS);
+  expect(open.offBottom).toBe(0);
 });
 
 test("the message list is a layer of its own, but not while a video in it plays full screen", { tag: ["@feature:chat.scroll"] }, async ({ peer }) => {
