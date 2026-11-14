@@ -3,6 +3,13 @@
   "private": true,
   "version": "1.11.3",
   "type": "module",
+  "sideEffects": [
+    "./src/engine/paymentAdapters/fedimintWorker.ts",
+    "./src/engine/paymentAdapters/providers/registry.ts",
+    "./src/platform/apps.ts",
+    "./src/proofs/registry.ts",
+    "./src/shared/fileBytesWorker.ts"
+  ],
   "description": "The Ghostly peer for browsers: engine, wallet and the platform layer under the shared UI. Used by the extension and the web app.",
   "exports": {
     "./*": "./src/*.ts"
