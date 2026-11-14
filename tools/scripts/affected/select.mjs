@@ -115,6 +115,8 @@ export const UNIT_PROJECTS = [
       ".github/security-allowlist.json": ["securityScanAllowlist"],
       "rust-toolchain.toml": ["rustToolchain"],
       "Cargo.toml": ["androidNativeWorkflow"],
+      // Its postinstall: matched even when its "scripts" alone changed (a change elsewhere in it runs everything).
+      "package.json": ["releaseInstallScripts", "webAppsTestFlag"],
       "{native/transports/Cargo.toml,native/transports/iroh-web/**,packages/iroh-web/pkg/**}": ["irohWebBuild"],
       "{packages/cli/vite.config.ts,packages/cli/vitest.config.ts,packages/cli/test/support/cli.ts}": ["affected"],
       "{packages/cli/vite.config.ts,e2e/fixtures/chess/**}": ["storeKeys"],
@@ -639,9 +641,9 @@ export function plan({ changed: all, inventory, e2eFiles, codeFiles, packages })
     // deleted (or renamed away: the diff has no renames) inside `sources`: vitest is given only files that exist.
     const outside = [...code.filter((c) => !c.exists || !match(p.sources, c.path)).map((c) => c.path), ...coreDependents.filter((f) => !match(p.sources, f))];
     const viaPath = outside.length && codeFiles ? testsReaching(outside, codeFiles, p.tests, packages).filter((f) => !direct.includes(f) && !viaCore.includes(f)) : [];
-    // A deleted file counts too: the test that reads it fails.
+    // A deleted file counts too: the test that reads it fails. So does a package.json whose "scripts" alone changed.
     const read = Object.entries(p.reads ?? {})
-      .filter(([glob]) => changed.some((c) => match([glob], c.path)))
+      .filter(([glob]) => all.some((c) => match([glob], c.path)))
       .flatMap(([, names]) => names.map((n) => `tools/scripts/test/${n}.test.ts`))
       .concat(p.reads ? [] : readers.filter((f) => match(p.tests, f)))
       .filter((f, i, all) => all.indexOf(f) === i && !direct.includes(f) && !viaCore.includes(f) && !viaPath.includes(f));
