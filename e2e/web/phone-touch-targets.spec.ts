@@ -617,6 +617,29 @@ test("on a phone the Share to… picker's chats and Cancel are 44 px targets", {
 });
 
 /**
+ * The banner that offers a new version shows only once the server serves one, so the screens above never reach it: its
+ * Later (×) took taps on 11 × 20 px and Reload on 29 px of height. At 375 and 320 px, in English and in Arabic.
+ */
+test("on a phone the new version banner's Reload and Later are 44 px targets", { tag: ["@feature:app.mobile-layout", "@feature:app.updates.web"] }, async ({ peer }, testInfo) => {
+  const alice = await peer("update-banner-targets", { mobile: true, viewport: { width: 375, height: 667 } });
+  const { page } = alice;
+  await page.route("**/version.json", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ version: "9.9.9", build: "newer" }) }));
+  const banner = page.getByTestId("update-banner");
+  const small: string[] = [];
+  for (const [language, dir] of [["en", "ltr"], ["ar", "rtl"]] as const) {
+    await speak(alice, language, dir);
+    await expect(banner).toBeVisible();
+    for (const width of [375, 320]) {
+      await page.setViewportSize({ width, height: 667 });
+      await expect(banner.getByRole("button")).toHaveCount(2);
+      for (const target of await smallTargets(page, 44, "[data-testid=update-banner] button")) small.push(`${language} at ${width} px: ${target.name} ${target.width}×${target.height} (${target.stops})`);
+      await page.screenshot({ path: testInfo.outputPath(`update-banner-${language}-${width}.png`) });
+    }
+  }
+  expect(small, "the new version banner's controls under 44 × 44 px on a phone").toEqual([]);
+});
+
+/**
  * The composer's emoji panel, a sheet on a phone: its category icons took taps on 45 × 40 px (38 × 40 at 320 px), the
  * skin tone on 36 × 36, Emoji and GIF on 57 × 32, and at 320 px each emoji on 43 × 40. In English and in Arabic, at 375
  * and 320 px, each in turn brought into view and measured; the grid still never scrolls sideways, seven emoji to a row
