@@ -1,6 +1,6 @@
 import { defineConfig } from "vitest/config";
-import { maxWorkers } from "../../tools/vitest.shared.ts";
+import { maxWorkers, reporters } from "../../tools/vitest.shared.ts";
 
 export default defineConfig({
-  test: { maxWorkers },
+  test: { maxWorkers, reporters },
 });
