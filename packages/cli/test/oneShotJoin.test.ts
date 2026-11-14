@@ -19,6 +19,15 @@ describe("one-shot invite join", () => {
     expect(await oneShotJoinWait(s, { chat: "c1" }, "Bob Smith")).toMatchObject({ answer: { chat: "c1", paired: false, stage: null }, note: expect.stringMatching(/chat wait c1 --until paired$/) });
   });
 
+  it("names the chat by its id when its label is one word a shell reads otherwise", async () => {
+    // Found in a bug hunt: only a space sent the note to the id, so `--label "O'Brien"` read `chat wait O'Brien`, which
+    // a shell holds for a closing quote, `$work` named no chat, and a backtick ran a command when pasted.
+    const s = session(async () => { throw new CliError("timeout", "t"); });
+    for (const label of ["O'Brien", "$work", "`id`", "a(b)", "bob&"]) {
+      expect((await oneShotJoinWait(s, { chat: "c1" }, label)).note).toMatch(/ghostly chat wait c1 --until paired$/);
+    }
+  });
+
   it("says a paired chat paired, without a note", async () => {
     const s = session(async () => ({ id: "c1", stage: "live" }));
     expect(await oneShotJoinWait(s, { chat: "c1" })).toEqual({ answer: { chat: "c1", paired: true, stage: "live" } });
