@@ -43,8 +43,13 @@ const workspaces = (): string[] => {
     .map((path) => path.replace(/\/package\.json$/, ""));
 };
 
-const undeclared = (workspace: string): string[] => {
-  const manifest = json(`${workspace}/package.json`);
+const gitFiles = (...paths: string[]) =>
+  execFileSync("git", ["ls-files", "--", ...paths], { cwd: root, encoding: "utf8" })
+    .split("\n")
+    .filter((file) => /\.[cm]?[jt]sx?$/.test(file) && !/\.d\.ts$/.test(file));
+
+/** The packages `files` import that `manifest` (at `owner`) does not declare, one line per package. */
+const undeclared = (owner: string, manifest: Record<string, Record<string, string>>, files: string[]): string[] => {
   const declared = new Set([
     manifest.name,
     ...Object.keys(manifest.dependencies ?? {}),
@@ -52,9 +57,6 @@ const undeclared = (workspace: string): string[] => {
     ...Object.keys(manifest.peerDependencies ?? {}),
     ...Object.keys(manifest.optionalDependencies ?? {}),
   ]);
-  const files = execFileSync("git", ["ls-files", "--", `${workspace}/src`], { cwd: root, encoding: "utf8" })
-    .split("\n")
-    .filter((file) => /\.[cm]?[jt]sx?$/.test(file) && !/\.d\.ts$/.test(file) && !isTest(file));
   const missing = new Map<string, string>();
   for (const file of files) {
     for (const specifier of imports(readFileSync(join(root, file), "utf8"))) {
@@ -63,11 +65,40 @@ const undeclared = (workspace: string): string[] => {
       if (!missing.has(name)) missing.set(name, file);
     }
   }
-  return [...missing].map(([name, file]) => `${workspace}: ${name} (e.g. ${file})`).sort();
+  return [...missing].map(([name, file]) => `${owner}: ${name} (e.g. ${file})`).sort();
 };
 
 it("every package a workspace's src imports is declared in its own package.json", () => {
   const list = workspaces();
   expect(list).toContain("packages/browser");
-  expect(list.flatMap(undeclared)).toEqual([]);
+  expect(
+    list.flatMap((workspace) =>
+      undeclared(
+        workspace,
+        json(`${workspace}/package.json`),
+        gitFiles(`${workspace}/src`).filter((file) => !isTest(file)),
+      ),
+    ),
+  ).toEqual([]);
+});
+
+/**
+ * The same for every file the root package.json owns (no nearer manifest: apps/ui, e2e, tools), tests included. Those
+ * imported fake-indexeddb, nostr-tools, hyperdht, ethers and more that only workspaces declared, so they ran against
+ * whatever copy a workspace's pins hoisted, and axe-core had no manifest behind it at all.
+ */
+it("every package a root-owned file imports is declared in the root package.json", () => {
+  const owners = execFileSync("git", ["ls-files", "--", "*/package.json"], { cwd: root, encoding: "utf8" })
+    .split("\n")
+    .filter(Boolean)
+    .map((path) => path.replace(/package\.json$/, ""));
+  const files = gitFiles(".").filter(
+    (file) =>
+      !owners.some((dir) => file.startsWith(dir)) &&
+      // Not the app's shipped src yet: its highlight.js and hast still come only through lowlight.
+      !(file.startsWith("apps/ui/src/") && !isTest(file)),
+  );
+  expect(files).toContain("e2e/playwright.config.ts");
+  expect(files).toContain("apps/ui/src/test/axe.ts");
+  expect(undeclared("root", json("package.json"), files)).toEqual([]);
 });
