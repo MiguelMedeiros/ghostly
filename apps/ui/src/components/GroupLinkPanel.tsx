@@ -12,6 +12,8 @@ import { useI18n } from "../contexts/I18nContext";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
 import { GroupLinkAskDialog } from "./GroupLinkAskDialog";
+import { NAME, withName } from "./apps/aroundName";
+import { isolate } from "../lib/ownStatus";
 
 function ShareIcon() {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 16V3m0 0L7 8m5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" /></svg>;
@@ -66,7 +68,8 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
   const share = async () => {
     setError(null);
     try {
-      const outcome = await shareLink(url, group.name ? t("group.link.shareTitle", { name: group.name }) : t("group.link.shareTitleUnnamed"), shareButton.current);
+      // The group's name isolated in the title the share sheet shows, a line in the app's direction.
+      const outcome = await shareLink(url, group.name ? t("group.link.shareTitle", { name: isolate(group.name) }) : t("group.link.shareTitleUnnamed"), shareButton.current);
       if (outcome !== "cancelled") flash(outcome);
     } catch { setError({ tone: "error", title: t("group.link.shareFailed") }); }
   };
@@ -173,7 +176,7 @@ export function GroupShareDialog({ group, created = false, onClose, returnFocus 
     className="m-auto w-[calc(100%_-_2rem)] max-w-sm max-h-[92dvh] overflow-y-auto scroll-pb-20 rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
     <div className="mb-4 text-center">
       <GroupAvatar picture={group.picture} size={64} testId="group-share-avatar" className="mx-auto mb-3 bg-accent/15" />
-      <h2 id={`${id}-title`} className="break-words text-lg font-semibold">{created ? (group.name ? t("group.share.ready", { name: group.name }) : t("group.share.readyUnnamed")) : (group.name ? t("group.share.title", { name: group.name }) : t("group.share.titleUnnamed"))}</h2>
+      <h2 id={`${id}-title`} className="break-words text-lg font-semibold">{created ? (group.name ? withName(t("group.share.ready", { name: NAME }), group.name) : t("group.share.readyUnnamed")) : (group.name ? withName(t("group.share.title", { name: NAME }), group.name) : t("group.share.titleUnnamed"))}</h2>
       <p className="mt-1 text-sm text-text-muted">{created ? t("group.share.createdHint") : t("group.share.hint")}</p>
     </div>
     <GroupLinkPanel group={group} large />
