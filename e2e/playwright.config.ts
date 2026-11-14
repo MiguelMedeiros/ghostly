@@ -18,10 +18,10 @@ const { CHROMIUM_SANDBOX } = await import("./support/chromiumSandbox");
  * set (support/mint.ts), so nothing here needs the network except the tests
  * tagged @network (public chain servers, Breez's regtest; see README.md).
  *
- *   npm run e2e                       # everything, against a fresh build of the web app
- *   npm run e2e -- --grep-invert @network
- *   E2E_WEB_URL=https://app.ghostly.tools npm run e2e -- --project web   # a deployed app
- *   npm run e2e:ui                    # watch and debug
+ *   npm run test:e2e                  # everything, against a fresh build of the web app
+ *   npm run test:e2e:offline          # without the @network tests
+ *   E2E_WEB_URL=https://app.ghostly.tools npm run test:e2e -- --project web   # a deployed app
+ *   npm run test:e2e:ui               # watch and debug
  *   npm run e2e:full                  # every gated suite too, against e2e/infra (see e2e/README.md)
  */
 const deployed = process.env.E2E_WEB_URL;
