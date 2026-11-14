@@ -1,6 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { Locator, Page } from "@playwright/test";
+import { APP_URL, STORE_URL, serveStore, testStore } from "../support/appStore";
 import { chat, connect, expect, link, say, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
 import { smallTargets } from "../support/touchTargets";
@@ -704,4 +705,35 @@ test("on a phone the emoji panel's categories, skin tone, Emoji / GIF switch and
   }
 
   expect(small, "the emoji panel's controls under 44 × 44 px on a phone").toEqual([]);
+});
+
+/**
+ * An app's or a store's own description, a few lines high until Show all, shows only when it is longer than that, so
+ * no walk above reaches it: its Show all took taps on 46 × 16 px. A store and an app with a twelve-line description,
+ * checked on Add, at 375 px in English and 320 px in Arabic.
+ */
+test("on a phone Show all under an app's or a store's description is a 44 px target", { tag: ["@feature:app.mobile-layout", "@feature:apps.page", "@feature:app.i18n"] }, async ({ peer }, testInfo) => {
+  const description = Array.from({ length: 12 }, (_, i) => `Line ${i + 1} of a description that says what this is for.`).join("\n");
+  const alice = await peer("description-targets", { mobile: true, viewport: { width: 375, height: 667 } });
+  const { page } = alice;
+  await serveStore(alice.context, await testStore({ description }));
+  const small: string[] = [];
+  for (const [language, dir, width] of [["en", "ltr", 375], ["ar", "rtl", 320]] as const) {
+    await page.setViewportSize({ width, height: 667 });
+    await page.goto("/#/apps");
+    await speak(alice, language, dir);
+    for (const [url, more] of [[STORE_URL, "apps-add-store-description-more"], [APP_URL, "app-description-more"]]) {
+      await page.getByTestId("apps-add").click();
+      await page.getByTestId("apps-add-url").fill(url);
+      await page.getByTestId("apps-add-check").click();
+      const button = page.getByTestId(more);
+      await expect(button).toBeVisible();
+      await button.evaluate((el) => { el.scrollIntoView({ block: "center" }); el.setAttribute("data-measured", ""); });
+      for (const target of await smallTargets(page, 44, "[data-measured]")) small.push(`${language} at ${width} px: ${target.name} ${target.width}×${target.height} (${target.stops})`);
+      await page.screenshot({ path: testInfo.outputPath(`${more}-${language}-${width}.png`) });
+      await page.keyboard.press("Escape");
+      await expect(button).toHaveCount(0);
+    }
+  }
+  expect(small, "Show all under a description under 44 × 44 px on a phone").toEqual([]);
 });
