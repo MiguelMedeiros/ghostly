@@ -2135,6 +2135,37 @@ describe("one pull request alone", () => {
     expect(repo.pulls.get(11)!.sha).toBe(repo.alone(11)!.sha);
   });
 
+  it("keeps a lone pull request in line when the push of a second rebase fails: the train's first rebase stays vouched for", async () => {
+    // Its mark named the second rebase, which the branch never got: the next run read the first one as an author's push.
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    await repo.run();
+    const first = repo.pulls.get(11)!.sha;
+    expect(first).not.toBe("h11");
+    repo.settle();
+    repo.tips.dev = "dev1";
+    const push = repo.git.pushHead;
+    repo.git.pushHead = async () => ({ ok: false, message: "fatal: unable to access 'https://github.com/…': Could not resolve host: github.com" });
+    const r = await repo.run();
+    expect(r.log.join("\n")).toMatch(/Could not push the rebase of #11/);
+    expect(repo.pulls.get(11)!.sha).toBe(first);
+    expect(repo.alone(11)!.sha).not.toBe(first);
+    repo.git.pushHead = push;
+    const again = await repo.run();
+    expect(again.dropped).toEqual([]);
+    expect(again.inFlight).toBe(11);
+    expect(repo.pulls.get(11)!.sha).toBe(repo.alone(11)!.sha);
+    expect(repo.pulls.get(11)!.labels).toContain(LABEL.queue);
+    // An author's push on top of it still leaves the line.
+    repo.git.pushHead = async () => ({ ok: false, message: "fatal: unable to access" });
+    repo.settle();
+    repo.tips.dev = "dev2";
+    await repo.run();
+    repo.pulls.get(11)!.sha = "h11b";
+    repo.runs.set("h11b", green);
+    expect((await repo.run()).dropped).toEqual([11]);
+  });
+
   it("takes a lone pull request that changes a workflow out of the line when GitHub refuses the push of its rebase", async () => {
     // Else every run rebased it, was refused and kept it in flight, and nothing on it said why.
     const repo = fakeRepo();
