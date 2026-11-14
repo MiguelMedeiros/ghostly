@@ -3083,6 +3083,12 @@ export class GhostlyNode implements EngineImplementation {
    */
   private readonly chatViews = new WeakMap<LiveLink, LinkView>();
   private changedChats: Set<string> | null = null;
+  /**
+   * The groups' views as the last state had them, and the community members payments go to: a state whose changes since
+   * named only 1:1 chats (a message, a delivery mark, the contact typing) keeps them, as nothing a group shows changed.
+   * Dropped by a contact's new name (`contactNamed`: a group's invitation shows it).
+   */
+  private groupViews: { groups: GroupView[]; pay: LinkView[] } | null = null;
 
   /** The state `emitState` sends: the views of the chats no change named since the last are the same objects. */
   private pushedState(): EngineState {
@@ -3093,8 +3099,14 @@ export class GhostlyNode implements EngineImplementation {
       if (!view) this.chatViews.set(live, view = this.viewOf(live));
       return view;
     };
-    const groups = this.groups.views();
-    const edges = this.edgesByMember(), wakeTokens = this.wakeTokensByGroup();
+    const chatsOnly = !!changed && [...changed].every(id => { const stored = this.links.get(id)?.stored; return !!stored && !stored.group; });
+    if (!chatsOnly || !this.groupViews) {
+      // Every member of every group walked again: 0.7 ms per state at 4 communities of 256, 6x a state's 200 chats.
+      const groups = this.groups.views();
+      const edges = this.edgesByMember(), wakeTokens = this.wakeTokensByGroup();
+      this.groupViews = { groups: groups.map(group => this.groupStateView(group, edges, wakeTokens)), pay: this.communityPayViews(groups) };
+    }
+    const { groups, pay } = this.groupViews;
     return {
       settings: this.settings,
       ...(this.limitedMode && { limited: true as const }),
@@ -3127,8 +3139,8 @@ export class GhostlyNode implements EngineImplementation {
       contactRequests: this.contactLinks.requests(),
       contactAsks: this.contactAsks.views(),
       nostr: this.nostrSocial.state(),
-      edges: [...[...this.links.values()].filter(live => live.stored.group && !live.stored.groupEntry).map(viewOf), ...this.communityPayViews(groups)],
-      groups: groups.map(group => this.groupStateView(group, edges, wakeTokens)),
+      edges: [...[...this.links.values()].filter(live => live.stored.group && !live.stored.groupEntry).map(viewOf), ...pay],
+      groups,
     };
   }
 
@@ -4063,7 +4075,7 @@ export class GhostlyNode implements EngineImplementation {
     const clean = sanitizeDisplayText(label.trim().replace(/\s+/gu, " "), 48)?.replace(/ {2,}/g, " ");
     live.stored = { ...live.stored, label: clean };
     void db.patchLink(linkId, { label: live.stored.label });
-    this.chatChanged(linkId);
+    this.contactNamed(linkId);
   }
 
   /** `linkId`: a chat's, or `group:<id>` for a group on screen, whose edges then take native listeners as a chat on screen does. */
@@ -9308,7 +9320,7 @@ export class GhostlyNode implements EngineImplementation {
           if ((nick ?? "") === live.stored.peerNick) return;
           live.stored = { ...live.stored, peerNick: nick ?? "" };
           void db.patchLink(linkId, { peerNick: nick ?? "" });
-          this.chatChanged(linkId);
+          this.contactNamed(linkId);
         },
         onPresence: (presence) => {
           // Every read of the contact's packet says its presence: one that finds it as before shows nothing new.
@@ -9323,6 +9335,7 @@ export class GhostlyNode implements EngineImplementation {
           if (!stored.profile && presence.nick && presence.nick !== live.stored.peerNick) {
             live.stored = { ...live.stored, peerNick: presence.nick };
             void db.patchLink(linkId, { peerNick: presence.nick });
+            this.groupViews = null;
             same = false;
           }
           if (!same) this.chatChanged(linkId);
@@ -10618,6 +10631,12 @@ export class GhostlyNode implements EngineImplementation {
   private chatChanged(linkId: string): void {
     this.changedChats?.add(linkId);
     this.scheduleState(50);
+  }
+
+  /** A chat's name or its contact's changed: a group's invitation or another group under its id shows it too. */
+  private contactNamed(linkId: string): void {
+    this.groupViews = null;
+    this.chatChanged(linkId);
   }
 
   private scheduleState(delayMs: number): void {
