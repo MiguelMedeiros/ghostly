@@ -30,7 +30,10 @@ export interface ListChanges extends MessageChanges {
   from: StoredMessage[];
 }
 
-/** A listener of a chat's messages: the whole list as it is now, and what changed since the last one it heard, if known. */
+/**
+ * A listener of a chat's messages: the whole list as it is now, and what changed since the last one it heard, if known.
+ * A group this page holds no list of (`engine.messages` has none) is told only what changed, with an empty list.
+ */
 export type MessagesListener = (linkId: string, messages: StoredMessage[], changes?: ListChanges) => void;
 
 /**
@@ -407,7 +410,15 @@ class EngineClient {
         // Only what changed, in a history the peer sent whole first: listeners still get the whole list, as it is now.
         // The list here is current at once; its listeners hear once per tick, of every change in it together.
         const history = this.messages.get(message.linkId);
-        if (!history) break;
+        if (!history) {
+          // A group this page has no list of (the peer sends a tab only its changes until it shows it): no list is made
+          // of them; its listeners hear what changed, with nothing as its list (`engine.messages` has none).
+          if (message.linkId.startsWith("group:")) {
+            const changes: ListChanges = { from: [], messages: message.messages, deleted: message.deleted };
+            for (const listener of this.messageListeners) listener(message.linkId, [], changes);
+          }
+          break;
+        }
         this.messages.set(message.linkId, applyMessageChanges(history, message));
         let since = this.changed.get(message.linkId);
         if (!since) this.changed.set(message.linkId, since = { from: history, rows: new Map(), deleted: new Set() });

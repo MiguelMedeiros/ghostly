@@ -552,7 +552,8 @@ export function GroupChat() {
     else if (!engine.messages.has(linkId) && !leftScrolledUp(groupId)) {
       void engine.call("messagePage", { linkId }).then(page => { if (current && !whole) setLoaded({ groupId, list: page.messages }); }).catch(() => {});
     }
-    const off = engine.onMessages((linkId, list) => { if (linkId === `group:${groupId}`) show(list); });
+    // Only a list the engine holds: a change of a group it holds none of is no list to show (the page above is read).
+    const off = engine.onMessages((linkId, list) => { if (linkId === `group:${groupId}` && engine.messages.has(linkId)) show(list); });
     // Its list stops following once this group is left: coming back, the engine's copy (with what came meanwhile) is shown.
     return () => { current = false; off(); setLoaded({ groupId: "", list: NO_MESSAGES }); };
   }, [groupId]);

@@ -801,4 +801,37 @@ describe("the way to the board, above the chat list", () => {
     await waitFor(() => expect(screen.getByTestId("sidebar-tasks")).toHaveAccessibleName("Tasks"));
     expect(reads()).toBe(2);
   });
+
+  it("reads the cards again for a card that comes in a group the tab holds no list of, from what changed only", async () => {
+    // The extension's peer sends a tab only what changes in a group it does not show, not the group's newest page.
+    const sent = row("group:g1", task({ id: "relay" }));
+    let rows = [sent];
+    fakeEngine.on("statusCardIndex", () => rows);
+    const { engine } = renderApp(<SidebarTasks active={false} onOpen={() => {}} />);
+    await screen.findByTestId("sidebar-tasks");
+    const reads = () => engine.callsTo("statusCardIndex").length;
+    const settled = () => act(() => new Promise((done) => setTimeout(done, 300)));
+    const text = (id: string) => ({ linkId: "group:g1", id, text: "hi", sender: "peer", timestamp: NOW, via: "datalink" }) as StoredMessage;
+    const changes = (messages: StoredMessage[], deleted: string[] = []) => act(() => engine.emit({ kind: "message-changes", linkId: "group:g1", messages, deleted }));
+    expect(reads()).toBe(1);
+
+    // Texts, and the card the index has as it is: nothing to read.
+    changes([text("t1")]);
+    changes([{ linkId: "group:g1", id: sent.id, text: "", sender: "peer", timestamp: sent.timestamp, via: "datalink", card: sent.card } as StoredMessage]);
+    changes([], ["t1"]);
+    await settled();
+    expect(reads()).toBe(1);
+
+    // A new card: read again, and shown.
+    const next = row("group:g1", task({ id: "second" }));
+    rows = [sent, next];
+    changes([{ linkId: "group:g1", id: next.id, text: "", sender: "peer", timestamp: next.timestamp, via: "datalink", card: next.card } as StoredMessage]);
+    await waitFor(() => expect(reads()).toBe(2));
+    await waitFor(() => expect(screen.getByTestId("sidebar-tasks")).toHaveAccessibleName("Tasks, 2 active"));
+
+    // The card deleted: read again.
+    rows = [next];
+    changes([], [sent.id]);
+    await waitFor(() => expect(reads()).toBe(3));
+  });
 });

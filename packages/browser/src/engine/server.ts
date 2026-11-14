@@ -25,7 +25,7 @@ export class EngineServer implements PeerServer {
   /**
    * Per client, the chats and groups whose whole history it was sent. It hears only what changes in those; one it
    * does not have yet is sent first (read once, when its first change comes), then what changes: whole, or as its newest
-   * page to a client that attached for those (`newest`).
+   * page to a client that attached for those (`newest`), which gets a group only as it changes until it asks for it.
    */
   private readonly histories = new WeakMap<EngineClientSink, Set<string>>();
   /** The clients that attached with `newest`, and how many rows of a chat they get before they ask for the rest. */
@@ -322,18 +322,25 @@ export class EngineServer implements PeerServer {
       this.post(client, { kind: "message-changes", linkId, ...changes });
     }
     if (!behind.length) return;
-    return this.catchUp(linkId, behind);
+    return this.catchUp(linkId, behind, changes);
   }
 
   /**
    * A chat or group these clients do not have, read now: it holds the changes that brought it here, and what changes next
    * follows it. A client that attached with `newest` gets that page, and asks for the rest when it shows the chat: a group
    * is in no attach, and the first message of each one went whole, as JSON, to every tab, whether or not one showed it.
+   * A group, to such a client, is not read: it gets only what changed, and reads the group when it shows it (its newest
+   * page, then its whole history). Its newest page, 400 rows, went to every tab after each reload, at each group's first
+   * message, though no tab showed the group.
    */
-  private async catchUp(linkId: string, behind: EngineClientSink[]): Promise<void> {
+  private async catchUp(linkId: string, behind: EngineClientSink[], changes: MessageChanges): Promise<void> {
     let whole: StoredMessage[] | undefined;
     for (const client of behind) {
       const newest = this.newest.get(client);
+      if (newest && linkId.startsWith("group:")) {
+        this.post(client, { kind: "message-changes", linkId, ...changes });
+        continue;
+      }
       const event = newest ? await this.newestOf(linkId, newest) : this.historyEvent(linkId, whole ??= await this.node.getMessages(linkId));
       if (this.clients.has(client) && this.post(client, event)) this.histories.get(client)?.add(linkId);
     }
