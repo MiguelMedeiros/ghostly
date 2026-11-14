@@ -397,9 +397,13 @@ const byId = (ctx: ApiContext, ref: string): LinkView | undefined => node(ctx).c
 /** A chat of mine whose invite nobody took yet: no contact's key, so nothing goes out until they join. */
 export const nobodyJoined = (link: LinkView): boolean => !!(link.profile && link.inviteCode && !link.peerParticipationKey);
 
-/** `nobodyJoined` by the chat's id: a group's (`group:<id>`) is never one. */
+/**
+ * `nobodyJoined` by the chat's id: a group's (`group:<id>`) is never one. That chat's view alone: every card send or
+ * update, `file send` and unconfirmed edit asks it, and built every chat for it (once in a daemon, up to three times
+ * in a one-shot `usage send`).
+ */
 export const nobodyJoinedChat = (ctx: ApiContext, chat: string): boolean => {
-  const link = state(ctx).links.find((l) => l.id === chat);
+  const link = byId(ctx, chat);
   return !!link && nobodyJoined(link);
 };
 
