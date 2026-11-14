@@ -129,6 +129,43 @@ describe("the bridge's frame of the contact's app", () => {
     }
   });
 
+  it("hands the app's page a link to a name no window has yet (target=\"_new\"), which a browser opens in a new window too", async () => {
+    vi.stubGlobal("__SERVICES_HOST__", "https://*.svc.ghostly.example");
+    vi.stubGlobal("__SERVICES_APP_ORIGIN__", APP_ORIGIN);
+    const { forwardLinks } = await import("../../../../web/src/svc/bridge");
+    const realOpen = window.open;
+    // As the view's sandbox: a name one of the page's frames has finds that frame, any other new window is refused.
+    const opened: unknown[][] = [];
+    window.open = ((...args: unknown[]) => {
+      opened.push(args);
+      return String(args[1]).toLowerCase() === "results" ? window : null;
+    }) as typeof window.open;
+    const asked: string[] = [];
+    try {
+      forwardLinks(window, (url) => asked.push(url));
+      const link = (attributes: Record<string, string>) => {
+        const a = document.createElement("a");
+        for (const [name, value] of Object.entries(attributes)) a.setAttribute(name, value);
+        a.textContent = "link";
+        document.body.append(a);
+        return a;
+      };
+      link({ href: "https://docs.example/new", target: "_new" }).click();
+      link({ href: "https://docs.example/help", target: "help" }).click();
+      // The page's own frame, and the page itself, keep theirs.
+      link({ href: "/search?q=1", target: "results" }).click();
+      link({ href: "#top", target: "_TOP" }).click();
+      expect(window.open("https://docs.example/popup", "popup", "width=400")).toBeNull();
+      expect(window.open("/search?q=2", "results")).toBe(window);
+      expect(window.open("/again", "_self")).toBeNull();
+      expect(asked).toEqual(["https://docs.example/new", "https://docs.example/help", "https://docs.example/popup"]);
+      // Looking a name up loads nothing in the window it finds.
+      expect(opened.filter((args) => args[0] === "")).toEqual([["", "_new"], ["", "help"], ["", "results"]]);
+    } finally {
+      window.open = realOpen;
+    }
+  });
+
   it("hands on a link only while the person uses the app: not on the tap on Ghostly's Open, nor one in Ghostly's page", async () => {
     // A tap or a key in the app's frame activates this page too, its parent; one in the app's page around it (another
     // origin) does not. The tap on Open does: the browser hands its activation to the frames it makes right after.

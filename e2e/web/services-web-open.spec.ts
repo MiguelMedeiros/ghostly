@@ -32,7 +32,7 @@ async function demoApp(local: number): Promise<{ server: Server; port: number; s
       seen.push({ method: request.method ?? "", path: request.url ?? "", cookie: request.headers.cookie });
       if (request.url === "/") {
         response.writeHead(200, { "content-type": "text/html; charset=utf-8", "set-cookie": "visit=1; Path=/; HttpOnly", "x-frame-options": "DENY" });
-        response.end(`<!doctype html><title>Demo</title><h1 id="title">Hello from the demo</h1><p id="out">…</p><p id="popup">…</p><p id="local">…</p><p id="worker">…</p><a id="docs" href="https://docs.example/guide" target="_blank">Docs</a> <a id="near" href="http://127.0.0.1:${local}/near" target="_blank">Near</a><script src="/app.js"></script>`);
+        response.end(`<!doctype html><title>Demo</title><h1 id="title">Hello from the demo</h1><p id="out">…</p><p id="popup">…</p><p id="local">…</p><p id="worker">…</p><a id="docs" href="https://docs.example/guide" target="_blank">Docs</a> <a id="news" href="https://docs.example/news" target="_new">News</a> <a id="near" href="http://127.0.0.1:${local}/near" target="_blank">Near</a><script src="/app.js"></script>`);
       } else if (request.url === "/app.js") {
         response.writeHead(200, { "content-type": "text/javascript" });
         response.end(`document.getElementById("popup").textContent = window.open("/popup") ? "opened" : "refused";
@@ -124,8 +124,14 @@ test("a person on the web opens the web app a bot shares, on an origin of its ow
     await expect(docs).toHaveURL("https://docs.example/guide");
     expect(await docs.evaluate(() => window.opener)).toBeNull();
     await docs.close();
+    // Past the 2 s a view waits between two links. One to a name no window has (`_new`) opens a new one too.
+    await person.page.waitForTimeout(2_500);
+    const newsTab = context.waitForEvent("page");
+    await demo.locator("#news").click();
+    const news = await newsTab;
+    await expect(news).toHaveURL("https://docs.example/news");
+    await news.close();
     const pages = context.pages().length;
-    // Past the 2 s a view waits between two links.
     await person.page.waitForTimeout(2_500);
     await demo.locator("#near").click();
     await person.page.waitForTimeout(2_000);
