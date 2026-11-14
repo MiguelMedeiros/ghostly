@@ -1092,6 +1092,16 @@ describe("the engine's known errors (@ghostly/core ENGINE_ERRORS)", () => {
     for (const language of LANGUAGES) for (const raw of [quote, faucet]) expect(errorText(raw, translators[language]), language).not.toContain("UND_ERR");
   });
 
+  it("a mint that failed Receive's invoice (a 503) is named with the next step, in the language; its own words go behind the ⓘ", () => {
+    const raw = engineText("mintFailedInvoice", { host: "127.0.0.1:4701", reason: "down" });
+    expect(problemText(new Error(raw), translators.pt)).toEqual({ tone: "error", title: "127.0.0.1:4701 não conseguiu criar uma fatura agora", next: "Tente de novo mais tarde.", detail: raw });
+    expect(problemText(new Error(raw), english)).toEqual({ tone: "error", title: "127.0.0.1:4701 couldn't create an invoice right now", next: "Try again later.", detail: raw });
+    for (const language of LANGUAGES) {
+      expect(errorText(raw, translators[language]), language).toContain("127.0.0.1:4701");
+      expect(errorText(raw, translators[language]), language).not.toContain("down");
+    }
+  });
+
   it("a mint that has not answered a payment's or a redeem's swap is named, with what comes back, in the language: not \"Something went wrong\"", () => {
     const pay = "testnut.cashu.space has not answered yet. The payment was not made. The sats set aside for it return to your wallet a few minutes after the mint answers.";
     const redeem = "testnut.cashu.space has not answered yet. The ecash is added to your wallet as soon as it does.";

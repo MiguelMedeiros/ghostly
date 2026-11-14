@@ -109,6 +109,8 @@
     "methodUnavailable": "طريقة الدفع هذه غير متاحة",
     "mintFailedFaucet": "تعذر على {{host}} منح عملات تجريبية الآن",
     "mintFailedFaucetNext": "حاول مرة أخرى لاحقًا.",
+    "mintFailedInvoice": "تعذر على {{host}} إنشاء فاتورة الآن",
+    "mintFailedInvoiceNext": "حاول مرة أخرى لاحقًا.",
     "mintFailedQuote": "تعذر على {{host}} قبول هذه الدفعة الآن",
     "mintFailedQuoteNext": "لم تخرج أي sats من محفظتك. حاول مرة أخرى لاحقًا.",
     "mintHoldsSats": "انقل الـ sats الخاصة بك من دار السك هذه قبل إزالتها",

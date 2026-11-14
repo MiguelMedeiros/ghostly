@@ -601,10 +601,14 @@ export class CashuWallet {
         created = { mint: candidate, response: await within(MINT_TIMEOUT_MS, mintInvoice(await this.wallet(candidate), amount, "Ghostly"), candidate) };
         break;
       } catch (error) {
-        lastError = error;
+        // A mint that failed ("internal error", a closed connection) is named, with what to do; its words kept last.
+        lastError = mintFailed(error) ? Object.assign(engineError("mintFailedInvoice", { host: new URL(candidate).host, reason: mintReason(error) }), { cause: error }) : error;
       }
     }
-    if (!created) throw new Error(`No mint could create an invoice: ${lastError instanceof Error ? lastError.message : lastError}`);
+    if (!created) {
+      if ((lastError as { engineCode?: unknown } | null)?.engineCode === "mintFailedInvoice") throw lastError;
+      throw new Error(`No mint could create an invoice: ${lastError instanceof Error ? lastError.message : lastError}`);
+    }
     const { mint, response } = created;
     const quote: StoredQuote = {
       quote: response.quote,

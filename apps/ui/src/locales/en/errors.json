@@ -109,6 +109,8 @@
     "methodUnavailable": "This payment method is unavailable",
     "mintFailedFaucet": "{{host}} couldn't give test coins right now",
     "mintFailedFaucetNext": "Try again later.",
+    "mintFailedInvoice": "{{host}} couldn't create an invoice right now",
+    "mintFailedInvoiceNext": "Try again later.",
     "mintFailedQuote": "{{host}} couldn't take this payment right now",
     "mintFailedQuoteNext": "No sats left your wallet. Try again later.",
     "mintHoldsSats": "Move your sats out of this mint before removing it",

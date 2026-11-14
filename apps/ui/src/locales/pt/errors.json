@@ -109,6 +109,8 @@
     "methodUnavailable": "Esta forma de pagamento não está disponível",
     "mintFailedFaucet": "{{host}} não conseguiu dar moedas de teste agora",
     "mintFailedFaucetNext": "Tente de novo mais tarde.",
+    "mintFailedInvoice": "{{host}} não conseguiu criar uma fatura agora",
+    "mintFailedInvoiceNext": "Tente de novo mais tarde.",
     "mintFailedQuote": "{{host}} não conseguiu aceitar este pagamento agora",
     "mintFailedQuoteNext": "Nenhum sat saiu da sua carteira. Tente de novo mais tarde.",
     "mintHoldsSats": "Tire seus sats deste mint antes de removê-lo",

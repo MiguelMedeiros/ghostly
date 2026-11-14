@@ -109,6 +109,8 @@
     "methodUnavailable": "Questo metodo di pagamento non è disponibile",
     "mintFailedFaucet": "{{host}} non è riuscito a dare monete di prova ora",
     "mintFailedFaucetNext": "Riprova più tardi.",
+    "mintFailedInvoice": "{{host}} non è riuscito a creare una fattura ora",
+    "mintFailedInvoiceNext": "Riprova più tardi.",
     "mintFailedQuote": "{{host}} non è riuscito ad accettare questo pagamento ora",
     "mintFailedQuoteNext": "Nessun sat è uscito dal tuo portafoglio. Riprova più tardi.",
     "mintHoldsSats": "Sposta i tuoi sats fuori da questo mint prima di rimuoverlo",
