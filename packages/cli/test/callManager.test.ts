@@ -27,25 +27,37 @@ afterAll(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
 });
 
+/** A fake engine on a state: one chat's view and the settings are read from it, as the node's are. */
+const engineOf = (state: () => EngineState, setCallSignal: CallEngine["setCallSignal"] = () => {}): CallEngine => ({
+  getState: state,
+  chatView: (id) => state().links.find((link) => link.id === id),
+  getSettings: () => state().settings,
+  setCallSignal,
+});
+
 type IceServers = { urls: string; username?: string; credential?: string }[];
-interface Side { calls: CallManager; events: { type: string; [k: string]: unknown }[]; signals: (string | null)[]; link: Partial<LinkView> }
+/** `builds`: the engine states the side's manager built whole (`getState`, a view of every chat). */
+interface Side { calls: CallManager; events: { type: string; [k: string]: unknown }[]; signals: (string | null)[]; link: Partial<LinkView>; builds: number }
 
 function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; b?: () => Promise<CallStack | string>; now?: () => number; nowB?: () => number; delay?: number; maxRedials?: number; stall?: { afterMs: number; endMs: number }; iceServersB?: IceServers; relayOnlyB?: boolean; earlyAnswerMs?: number; callPaceMs?: number; quickRedialMs?: number } = {}): { a: Side; b: Side } {
   // Each side's clock: the same one unless `nowB` gives the second side its own.
   const nowA = stacks.now ?? Date.now, nowB = stacks.nowB ?? nowA;
   const make = (chat: string): Side => {
-    const side = { events: [], signals: [], link: { id: chat, profile: "paired-chat/1", callsUnavailable: null, label: `to ${chat}` } } as unknown as Side;
+    const side = { events: [], signals: [], link: { id: chat, profile: "paired-chat/1", callsUnavailable: null, label: `to ${chat}` }, builds: 0 } as unknown as Side;
     return side;
   };
   const a = make("chat-ab"), b = make("chat-ba");
-  const engine = (me: Side, other: () => Side, heardAt: () => number, iceServers: IceServers = [], relayOnly = false): CallEngine => ({
-    getState: () => ({ links: [me.link], settings: { iceServers, ...(relayOnly ? { relayOnly } : {}) } }) as unknown as EngineState,
-    setCallSignal: async ({ signal }) => {
-      me.signals.push(signal);
-      // The chat session carries it to the contact, a moment later, and the contact's engine says when it heard it.
-      if (signal) setTimeout(() => other().calls.onSignal(other().link.id!, heardCallSignal(signal, heardAt())), stacks.delay ?? 5);
-    },
-  });
+  const engine = (me: Side, other: () => Side, heardAt: () => number, iceServers: IceServers = [], relayOnly = false): CallEngine => {
+    const state = () => ({ links: [me.link], settings: { iceServers, ...(relayOnly ? { relayOnly } : {}) } }) as unknown as EngineState;
+    return {
+      ...engineOf(state, async ({ signal }) => {
+        me.signals.push(signal);
+        // The chat session carries it to the contact, a moment later, and the contact's engine says when it heard it.
+        if (signal) setTimeout(() => other().calls.onSignal(other().link.id!, heardCallSignal(signal, heardAt())), stacks.delay ?? 5);
+      }),
+      getState: () => { me.builds++; return state(); },
+    };
+  };
   a.calls = new CallManager({ engine: engine(a, () => b, nowB), emit: (type, _id, fields) => a.events.push({ type, ...fields }), profileDir: tmp(), stack: stacks.a, now: stacks.now, maxRedials: stacks.maxRedials, stall: stacks.stall, callPaceMs: stacks.callPaceMs, quickRedialMs: stacks.quickRedialMs });
   b.calls = new CallManager({ engine: engine(b, () => a, nowA, stacks.iceServersB, stacks.relayOnlyB), emit: (type, _id, fields) => b.events.push({ type, ...fields }), profileDir: tmp(), stack: stacks.b, now: stacks.nowB ?? stacks.now, maxRedials: stacks.maxRedials, earlyAnswerMs: stacks.earlyAnswerMs, quickRedialMs: stacks.quickRedialMs });
   return { a, b };
@@ -340,7 +352,7 @@ describe("the audio socket", () => {
   });
 
   it("a daemon's manager removes the sockets a crashed one left, in either folder; a one-shot's leaves them", async () => {
-    const engine: CallEngine = { getState: () => ({ links: [] }) as unknown as EngineState, setCallSignal: () => {} };
+    const engine: CallEngine = engineOf(() => ({ links: [] }) as unknown as EngineState);
     for (const profileDir of [tmp(), join(tmp(), "x".repeat(120))]) {
       const left = audioSocketPath(profileDir, "0123456789ab");
       // The daemon that made it died during the call: its socket's file stays.
@@ -430,7 +442,7 @@ describe("the audio socket", () => {
 
   it("a daemon's manager with a shared folder refuses a wrong one at the start, clears it, and puts its calls' sockets there", async () => {
     const link = { id: "chat-ab", label: "bia", profile: "paired-chat/1", callsUnavailable: null } as unknown as LinkView;
-    const engine: CallEngine = { getState: () => ({ links: [link] }) as unknown as EngineState, setCallSignal: () => {} };
+    const engine: CallEngine = engineOf(() => ({ links: [link] }) as unknown as EngineState);
     const profileDir = tmp(), socketDir = join(tmp(), "calls");
     mkdirSync(socketDir, { mode: 0o770 });
     chmodSync(socketDir, 0o770);
@@ -451,7 +463,7 @@ describe("the audio socket", () => {
   });
 
   it("a daemon's start clears only a dead call's socket from a shared folder: another daemon's live call and the user's own sockets stay", async () => {
-    const engine: CallEngine = { getState: () => ({ links: [] }) as unknown as EngineState, setCallSignal: () => {} };
+    const engine: CallEngine = engineOf(() => ({ links: [] }) as unknown as EngineState);
     const shared = join(tmp(), "calls");
     mkdirSync(shared, { mode: 0o750 });
     chmodSync(shared, 0o750);
@@ -482,7 +494,7 @@ describe("the audio socket", () => {
 describe("a one-shot's call", () => {
   it("names the daemon it needs, before the chat's own not-live reason", async () => {
     const link = { id: "chat-ab", label: "bia", profile: "paired-chat/1", callsUnavailable: "Calls need a live connection" } as unknown as LinkView;
-    const engine: CallEngine = { getState: () => ({ links: [link] }) as unknown as EngineState, setCallSignal: () => {} };
+    const engine: CallEngine = engineOf(() => ({ links: [link] }) as unknown as EngineState);
     const calls = new CallManager({ engine, emit: () => {}, profileDir: tmp(), answers: false });
     const daemon = { code: "unavailable", message: "Calls need the daemon (a call outlives this command): start it with `ghostly daemon --detach`" };
     await expect(calls.start("bia", {})).rejects.toMatchObject(daemon);
@@ -497,7 +509,7 @@ describe("a call to a contact who is away", () => {
   it("says what comes next: wait for the chat to be live, then call again", async () => {
     const away = (label: string) => ({ id: "chat-ab", label, profile: "paired-chat/1", callsUnavailable: "Calls need a live connection" }) as unknown as LinkView;
     for (const [label, ref] of [["bia", "bia"], ["Bia Souza", "chat-ab"]]) {
-      const engine: CallEngine = { getState: () => ({ links: [away(label)] }) as unknown as EngineState, setCallSignal: () => {} };
+      const engine: CallEngine = engineOf(() => ({ links: [away(label)] }) as unknown as EngineState);
       const calls = new CallManager({ engine, emit: () => {}, profileDir: tmp(), answers: true });
       await expect(calls.start("chat-ab", {})).rejects.toMatchObject({
         code: "unavailable",
@@ -509,12 +521,12 @@ describe("a call to a contact who is away", () => {
 
   it("keeps the engine's own words for a chat that cannot call for another reason", async () => {
     const link = { id: "chat-ab", label: "bia", profile: "paired-chat/1", callsUnavailable: "Your contact's app cannot take calls" } as unknown as LinkView;
-    const engine: CallEngine = { getState: () => ({ links: [link] }) as unknown as EngineState, setCallSignal: () => {} };
+    const engine: CallEngine = engineOf(() => ({ links: [link] }) as unknown as EngineState);
     await expect(new CallManager({ engine, emit: () => {}, profileDir: tmp(), answers: true }).start("bia", {})).rejects.toMatchObject({ code: "unavailable", message: "Your contact's app cannot take calls" });
   });
 
   it("names the daemon it needs to answer or flush a call, not a call it cannot have", async () => {
-    const engine: CallEngine = { getState: () => ({ links: [] }) as unknown as EngineState, setCallSignal: () => {} };
+    const engine: CallEngine = engineOf(() => ({ links: [] }) as unknown as EngineState);
     const calls = new CallManager({ engine, emit: () => {}, profileDir: tmp(), answers: false });
     const daemon = { code: "unavailable", message: "Calls need the daemon (a call outlives this command): start it with `ghostly daemon --detach`" };
     // It said "No call is on" (exit 3) after 12 s online: a one-shot answers none and queues no audio.
@@ -599,6 +611,29 @@ describe("two call managers", { timeout: 60_000 }, () => {
     // Each heard the other's tone (see above: measured with no call left to hold up).
     expect(dominantHz(bobHeard, 16000)).toBeCloseTo(440, -1);
     expect(dominantHz(aliceHeard, 48000)).toBeCloseTo(660, -1);
+  });
+
+  // Found in a bug hunt: each engine state the manager read built a view of every chat (~15-20 µs a chat on the
+  // daemon's thread) to find one chat or read one setting: 5 for a call placed and hung up, 6 for one rung and answered.
+  it("a call placed, rung and answered by its chat's id builds no engine state; a call placed by a name builds it once", async () => {
+    const { a, b } = pairOfManagers();
+    b.calls.setAuto({ on: true, from: ["chat-ba"], rate: 16000 });
+    a.builds = b.builds = 0;
+    await a.calls.start("chat-ab", {});
+    await Promise.all([a, b].map((side) => until(() => side.events.find((e) => e.type === "call.connected"))));
+    await a.calls.hangup("chat-ab");
+    await until(() => b.events.find((e) => e.type === "call.ended"));
+    expect({ caller: a.builds, callee: b.builds }).toEqual({ caller: 0, callee: 0 });
+
+    b.calls.setAuto({ on: false });
+    a.builds = b.builds = 0;
+    await a.calls.start("to chat-ab", {});
+    await until(() => b.events.filter((e) => e.type === "call.incoming").length === 2);
+    await b.calls.answer(undefined, {});
+    await until(() => a.events.filter((e) => e.type === "call.connected").length === 2);
+    expect({ caller: a.builds, callee: b.builds }).toEqual({ caller: 1, callee: 0 });
+    await a.calls.stopAll();
+    await b.calls.stopAll();
   });
 
   it("a hang-up reaches the contact at once when the programs keep their sockets open after EOF", async () => {
@@ -1304,7 +1339,7 @@ describe("two call managers", { timeout: 60_000 }, () => {
     const lone = (chat: string, options: { stack?: () => Promise<CallStack | string>; now?: () => number; quickRedialMs?: number } = {}) => {
       const dir = tmp();
       const side = { events: [], signals: [], link: { id: chat, profile: "paired-chat/1", callsUnavailable: null, label: `to ${chat}` } } as unknown as Side;
-      const engine: CallEngine = { getState: () => ({ links: [side.link] }) as unknown as EngineState, setCallSignal: async ({ signal }) => { side.signals.push(signal); } };
+      const engine: CallEngine = engineOf(() => ({ links: [side.link] }) as unknown as EngineState, async ({ signal }) => { side.signals.push(signal); });
       side.calls = new CallManager({ engine, emit: (type, _id, fields) => side.events.push({ type, ...fields }), profileDir: dir, ...options });
       const folder = join(audioSocketPath(dir, "0".repeat(12)), "..");
       const files = () => existsSync(folder) ? readdirSync(folder) : [];
@@ -1644,7 +1679,7 @@ describe("auto-answer from the chats named", () => {
     { id: "chat-real-alice", label: "Alice", peerNick: "alice", peerPubKeyZ32: "o".repeat(51) + "y", profile: "paired-chat/1" },
     { id: "chat-mallory", label: null, peerNick: "Bob", peerPubKeyZ32: KEY, profile: "paired-chat/1" },
   ] as unknown as LinkView[];
-  const manager = () => new CallManager({ engine: { getState: () => ({ links, settings: {} }) as unknown as EngineState, setCallSignal: async () => {} }, emit: () => {}, profileDir: tmp() });
+  const manager = () => new CallManager({ engine: engineOf(() => ({ links, settings: {} }) as unknown as EngineState, async () => {}), emit: () => {}, profileDir: tmp() });
   const saved = (calls: CallManager) => (calls as unknown as { configPath: string }).configPath;
 
   it("takes a chat by its id, its contact's key or this side's label", () => {
