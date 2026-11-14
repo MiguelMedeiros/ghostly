@@ -119,6 +119,19 @@ describe("chats", () => {
     expect(calls.updateSettings).not.toHaveBeenCalled();
   });
 
+  it("a community's link comes with the address that opens it in the app, as the app's Share gives it", async () => {
+    // Found in a bug hunt: only the token (`group2/…`) was given, which nobody can tap in a chat; `invite create` gives both.
+    const { ctx, node } = fake();
+    const token = "group2/g2/entrykey";
+    Object.assign(node, { createGroup: vi.fn(async () => ({ groupId: "g2" })), enableGroupLink: vi.fn(async () => ({ link: token })), disableGroupLink: vi.fn(async () => undefined) });
+    const url = `https://app.ghostly.tools/#/join/${token}`;
+    expect(await callApi(ctx, "group.create", { name: "Club", profile: "community" })).toEqual({ group: "g2", link: token, url });
+    expect(await callApi(ctx, "group.link", { group: "g1" })).toEqual({ group: "g1", link: token, url });
+    expect(await callApi(ctx, "group.link", { group: "g1", reset: true })).toEqual({ group: "g1", link: token, url });
+    // No link, no address: a private group made without one, a link turned off.
+    expect(await callApi(ctx, "group.link", { group: "g1", on: false })).toEqual({ group: "g1", link: null });
+  });
+
   // A group's name has the same refusals: it said "1 to 64 characters on one line" to a name of two invisible ones.
   it("a group's name is cleaned first, then counted, and nothing that shows is refused as a chat's name is", async () => {
     const { ctx, node } = fake();
