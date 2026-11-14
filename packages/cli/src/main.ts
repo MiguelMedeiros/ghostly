@@ -548,6 +548,30 @@ export async function oneShotJoinWait(s: Pick<Session, "call">, result: Record<s
   return { answer, note: `Not paired yet: the inviter's app is offline. It pairs when both are online: keep this profile running (ghostly daemon --detach), then ghostly chat wait ${ref} --until paired` };
 }
 
+/** Stages of a link join that waiting does not change: the group is full, this key is kept out, or the link was replaced. */
+const JOIN_ENDED = new Set(["full", "blocked", "replaced"]);
+
+/**
+ * A one-shot `group join` waits up to `seconds` to be let in, as a one-shot invite join waits to pair: a member's app
+ * lets the joiner in only while the joiner's knocks go on, and they stop when the command leaves. It left at once with
+ * `{"group": id}` and exit 0, in 0.5 s, the admin online: the group stayed an invitation at "knocking" and nothing said
+ * a daemon had to run for the knock to be answered. Its answer says whether it is in and at what stage it waits.
+ */
+export async function oneShotGroupJoinWait(s: Pick<Session, "call">, result: Record<string, unknown>, seconds = 60, pollMs = 500): Promise<{ answer: Record<string, unknown>; note?: string }> {
+  const until = Date.now() + seconds * 1000;
+  for (;;) {
+    const view = await s.call("group.get", { group: result.group }).catch(() => null) as { status?: unknown; invitation?: { stage?: unknown } | null } | null;
+    const stage = view?.invitation?.stage ?? null;
+    if (view?.status === "active") return { answer: { ...result, joined: true, stage } };
+    if (!view || JOIN_ENDED.has(String(stage)) || Date.now() >= until) {
+      const answer = { ...result, joined: false, stage };
+      if (!view || JOIN_ENDED.has(String(stage))) return { answer };
+      return { answer, note: `Not in yet: no member's app has let you in. A member's app lets you in only while this profile is running: keep it running (ghostly daemon --detach), then ghostly group show ${shellWord(String(result.group))}` };
+    }
+    await new Promise((r) => setTimeout(r, pollMs));
+  }
+}
+
 /**
  * Stdin up to `INPUT_BYTES` (commands/shared.ts, as `readInput` reads it where a command reads it at once); more is refused as it comes. It was read to its end first: `send bob --stdin < big.log`
  * with 1 GiB took 3 GB and answered V8's "Cannot create a string longer than 0x1fffffe8 characters", 128 MiB to
@@ -1646,6 +1670,11 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
     // A one-shot join leaves once the contact can be reached: its answer has to be out first.
     if (command.method === "invite.join" && s.mode === "one-shot") {
       const joined = await oneShotJoinWait(s, result, typeof params.label === "string" ? params.label : undefined);
+      if (joined.note) process.stderr.write(`ghostly: ${joined.note}\n`);
+      return joined.answer;
+    }
+    if (command.method === "group.join" && s.mode === "one-shot") {
+      const joined = await oneShotGroupJoinWait(s, result);
       if (joined.note) process.stderr.write(`ghostly: ${joined.note}\n`);
       return joined.answer;
     }
