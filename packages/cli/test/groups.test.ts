@@ -91,13 +91,28 @@ describe("a one-shot group join", () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it("stops at a stage waiting does not change, with no daemon's note", async () => {
-    for (const stage of ["full", "blocked", "replaced"]) {
+  // Found in a bug hunt: it stopped there with `"joined":false` and nothing on stderr, exit 0. Full or waiting for
+  // updates, the knock goes on and gets in once there is room, only while the profile runs; a replaced link never does.
+  it("stops at a stage waiting a minute does not change, and says why and the next step", async () => {
+    const said = {
+      full: "This group is full (8 of 8 members). You get in once someone leaves, only while this profile is running: keep it running (ghostly daemon --detach), then ghostly group show g9",
+      blocked: "This group takes new members again once everyone in it has an updated Ghostly. You get in then, only while this profile is running: keep it running (ghostly daemon --detach), then ghostly group show g9",
+      replaced: "This link was replaced or turned off: ask someone in the group for the current link, then ghostly group join <link>",
+    };
+    for (const [stage, warning] of Object.entries(said)) {
       const { ctx, set } = oneShot();
       const answer = callApi(ctx, "group.join", { link: LINK });
-      setTimeout(() => set([knocking(stage)]), 5);
-      expect(await answer).toEqual({ group: "g9", joined: false, stage });
+      const g = knocking(stage) as GroupView & { invitation: object };
+      setTimeout(() => set([stage === "replaced" ? g : { ...g, invitation: { ...g.invitation, full: { n: 8, max: 8 } } }]), 5);
+      expect(await answer).toEqual({ group: "g9", joined: false, stage, warning });
     }
+  });
+
+  it("full with no numbers said, still says it is full", async () => {
+    const { ctx, set } = oneShot();
+    const answer = callApi(ctx, "group.join", { link: LINK });
+    setTimeout(() => set([knocking("full")]), 5);
+    expect((await answer as { warning?: string }).warning).toMatch(/^This group is full\. You get in once someone leaves/);
   });
 
   it("through a daemon, answers at once as before", async () => {
