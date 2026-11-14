@@ -48,6 +48,21 @@ describe.each(["raw", "button"] as const)("a %s button disabled by its own work"
     expect(go).not.toHaveAttribute("aria-disabled");
   });
 
+  it("stays held while the window or tab is away, as the focus comes back to it", async () => {
+    const work = vi.fn(() => new Promise<void>(() => undefined));
+    const { user } = renderApp(<Work as={as} work={work} />);
+    const go = screen.getByTestId("go");
+    go.focus();
+    await user.keyboard("{Enter}");
+    // Another tab or app comes in front: the page loses the focus, its button a blur. Natively disabled now, Chromium
+    // would move the focus to the page, and it would not come back.
+    const away = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    act(() => { go.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); });
+    expect(go).toBeEnabled();
+    expect(go).toHaveAttribute("aria-disabled", "true");
+    away.mockRestore();
+  });
+
   it("is plain disabled when it was disabled before it had the focus", () => {
     renderApp(as === "raw" ? <FocusSafeButton data-testid="go" disabled>Go</FocusSafeButton> : <Button data-testid="go" disabled>Go</Button>);
     expect(screen.getByTestId("go")).toBeDisabled();
