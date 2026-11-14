@@ -59,3 +59,17 @@ describe("The dependency scan's log", () => {
     expect(lines.filter((l) => l.startsWith("::"))).toEqual([]);
   });
 });
+
+describe("The dependency scan's requests to OSV", () => {
+  it("reads each advisory's detail once, however many package versions and lockfiles it hits", async () => {
+    const osv = fakeOsv({ semver: [SEMVER], lodash: ["GHSA-p6mc-m468-83gw"] });
+    const asked: string[] = [];
+    const findings = await findingsFor([...SEMVERS, pkg("lodash", "4.17.15", "package-lock.json")], (url: string, body?: { queries: { package: { name: string } }[] }) => {
+      if (!body) asked.push(url.slice(url.lastIndexOf("/") + 1));
+      return osv(url, body);
+    });
+    expect(findings).toHaveLength(8);
+    expect(findings.map((f: { id: string; summary: string }) => f.summary === `${f.id} summary`)).not.toContain(false);
+    expect(asked).toEqual([SEMVER, "GHSA-p6mc-m468-83gw"]);
+  });
+});
