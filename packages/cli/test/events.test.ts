@@ -237,6 +237,27 @@ describe("the event stream", () => {
     expect(new Set(events.map((e) => e.id)).size).toBe(events.length);
   });
 
+  it("says who joined and left a full community, without looking each member up in the other list (O(members²) a state)", async () => {
+    const { h, events } = await hub("group-members.jsonl");
+    const keys = Array.from({ length: 256 }, (_, i) => `member${String(i).padStart(3, "0")}`.padEnd(52, "x"));
+    const group = (members: string[]) => ({ id: "g1", status: "active", members: [...members].reverse().map((key) => ({ key })) });
+    const later = [...keys.slice(0, 100), ...keys.slice(102), "a-newcomer".padEnd(52, "x"), "zz-newcomer".padEnd(52, "x")];
+    h.baseline(state([], [group(keys)]), new Map());
+    // A full member list's lookups, counted: the `includes` diff made 512 of them each state.
+    const includes = vi.spyOn(Array.prototype, "includes");
+    try {
+      for (let i = 0; i < 20; i++) h.sink.post({ kind: "state", state: state([], [group(keys)]) });
+      h.sink.post({ kind: "state", state: state([], [group(later)]) });
+      h.sink.post({ kind: "state", state: state([], [group(later)]) });
+      expect(includes.mock.contexts.filter((list) => (list as unknown[]).length >= 256)).toHaveLength(0);
+    } finally {
+      includes.mockRestore();
+    }
+    expect(events.map(({ type, joined, left }) => ({ type, joined, left }))).toEqual([
+      { type: "group.members", joined: ["a-newcomer".padEnd(52, "x"), "zz-newcomer".padEnd(52, "x")], left: [keys[100], keys[101]] },
+    ]);
+  });
+
   it("typing is live only: a contact who keeps changing it pushes no other chat's events out of the journal", async () => {
     const { h, events } = await hub("typing-live.jsonl");
     const group = (typing?: unknown[]) => ({ id: "g1", status: "active", members: [{ key: "ana" }], ...(typing ? { typing } : {}) });
