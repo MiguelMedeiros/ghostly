@@ -440,6 +440,32 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
       await vi.waitFor(() => expect(linkOf().registerEndpoint).toHaveBeenCalledTimes(2));
     });
 
+    it("a listener started again with its seed already stored writes no link row", async () => {
+      // A CLI daemon with its Iroh relay out of reach (bug hunt, 2026-11-08): with 30 chats or more the failed starts'
+      // retries kept the queue busy, one every 10 s, and each wrote its chat's whole row back unchanged, a disk sync
+      // each: nearly every write of a daemon whose contacts were away.
+      const chat = row({ ...paired() });
+      await db.putLink(chat);
+      const iroh = vi.fn(async () => endpoint());
+      iroh.mockRejectedValueOnce(new Error("Iroh relay unreachable"));
+      const events = { onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() };
+      const node = new GhostlyNode(events, { automaticWallets: false, transport: fixture, nativeTransports: { "iroh/1": iroh } });
+      nodes.push(node);
+      await node.start();
+      await vi.waitFor(() => expect(node["nativeFailed"].has(chat.id)).toBe(true));
+      const seed = (await db.getLinks()).find((l) => l.id === chat.id)?.transportSeeds?.["iroh/1"];
+      expect(seed).toBeTruthy();
+      const patches = vi.spyOn(db, "patchLink");
+      onTestFinished(() => { patches.mockRestore(); });
+      iroh.mockRejectedValueOnce(new Error("Iroh relay unreachable"));
+      await node["ensureNativeEndpoints"](chat.id);
+      expect(iroh).toHaveBeenCalledTimes(2);
+      await node["ensureNativeEndpoints"](chat.id);
+      expect(iroh).toHaveBeenCalledTimes(3);
+      expect(iroh.mock.calls.map((call) => (call as unknown[])[0])).toEqual([seed, seed, seed]);
+      expect(patches.mock.calls.filter(([, patch]) => "transportSeeds" in patch)).toEqual([]);
+    });
+
     it("the chat live most recently takes one first, among chats live when the app quit", async () => {
       // Omarchy (2026-09-30): both apps restarted, and the chat they had just been live in got no listener on one side:
       // the chats stored before it took all eight. Its contact dialled it every 20 s for minutes, never answered.
