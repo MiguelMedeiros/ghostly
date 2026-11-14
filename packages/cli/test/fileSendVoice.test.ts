@@ -6,6 +6,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { registerFileBytes } from "@ghostly/browser/shared/fileBytes";
 import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
+import { mimeOf } from "../src/files";
 import { NodeFileBytes } from "../src/runtime/fileBytes";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 import { chatViewOf } from "./support/chatView";
@@ -37,7 +38,7 @@ function chat() {
     sendFile: vi.fn(async () => {}),
   };
   const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
-  return { node, send: (path: string, voice: number | true = true) => callApi(ctx, "file.send", { chat: "Alice", path, voice }) };
+  return { node, send: (path: string, voice: number | true = true) => callApi(ctx, "file.send", { chat: "Alice", path, voice }), sendFile: (path: string) => callApi(ctx, "file.send", { chat: "Alice", path }) };
 }
 
 function file(name: string, bytes: string | Buffer): string {
@@ -70,9 +71,26 @@ describe("file send --voice on a file that is not a voice note", () => {
 
   it("a text and a 20-minute WAV each say what is wrong: the type, the length", async () => {
     const { node, send } = chat();
-    await expect(send(file("notes.txt", "shopping list"))).rejects.toMatchObject({ code: "bad_request", message: "notes.txt is text/plain, not audio (webm, ogg, mp4, mpeg, aac, m4a or wav)" });
+    await expect(send(file("notes.txt", "shopping list"))).rejects.toMatchObject({ code: "bad_request", message: "notes.txt is text/plain, not audio (webm, ogg, opus, mp4, m4a, mpeg, aac, wav or flac)" });
     await expect(send(file("long.wav", longWav()))).rejects.toMatchObject({ code: "bad_request", message: "long.wav is longer than 15 minutes: a voice note is at most 15" });
     expect(node.sendFile).not.toHaveBeenCalled();
+  });
+
+  it("an AAC, a FLAC, an .oga, a .weba and an .mp4 go as the audio they are: a voice note, and a file the apps play", async () => {
+    vi.stubEnv("GHOSTLY_FFMPEG", "ghostly-no-such-ffmpeg");
+    const { node, send, sendFile } = chat();
+    const sent = () => (node.sendFile.mock.calls.at(-1) as unknown as [{ file: { mime: string; voice?: unknown } }])[0].file;
+    for (const [name, mime] of [["memo.aac", "audio/aac"], ["memo.flac", "audio/flac"], ["memo.oga", "audio/ogg"], ["memo.weba", "audio/webm"], ["memo.mp4", "audio/mp4"]] as const) {
+      const path = file(name, "sound, unread here");
+      expect(await send(path, 2000), name).toMatchObject({ file: { mime, voice: true } });
+      expect(sent(), name).toMatchObject({ mime, voice: { duration: 2000 } });
+    }
+    for (const [name, mime] of [["song.aac", "audio/aac"], ["song.flac", "audio/flac"]] as const) {
+      expect(await sendFile(file(name, "bytes")), name).toMatchObject({ file: { mime } });
+      expect(sent(), name).not.toHaveProperty("voice");
+    }
+    // Only a voice note's .mp4 is its sound: any other is a video.
+    expect(mimeOf("clip.mp4")).toBe("video/mp4");
   });
 
   it.skipIf(!hasFfmpeg)("bytes ffmpeg reads as no sound are refused as not audio: no --voice <ms> hint, no ffmpeg address, nothing sent with a length either", async () => {
