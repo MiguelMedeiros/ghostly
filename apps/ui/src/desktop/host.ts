@@ -22,6 +22,7 @@ import {
   type TurnSourcePut,
   setLinkTraceSink,
   viewerResponseHeaders,
+  viewerTag,
 } from "@ghostly/core";
 import type { EngineServer } from "@ghostly/browser/engine/server";
 import { createInPageHost } from "@ghostly/browser/inPageHost";
@@ -44,7 +45,7 @@ import { setSoundsRelease, type SoundsRelease } from "../lib/sounds";
 import { knownErrorText } from "../lib/errorText";
 import { english } from "../lib/english";
 import { loadSettings } from "../lib/settings";
-import { chatNamesForPeer } from "../lib/storage";
+import { chatNamesForPeer, getPrefix } from "../lib/storage";
 import { translatorFor } from "../locales";
 import type { Translate } from "../locales/translate";
 import { webkitGtkSoundsRelease } from "../lib/webkitGtk";
@@ -257,24 +258,50 @@ export async function answerServiceWindow(server: Pick<EngineServer, "ready" | "
   }
 }
 
-/** A contact's app this device opened in a viewer window, by what names its origin (`ghostly-svc://<service>.<peer>.<tag>`). */
-export interface OpenedServiceWindow extends Opened { service: string; peer: string }
+/**
+ * A contact's app this device opened in a viewer window, by what names its origin (`ghostly-svc://<service>.<peer>.<tag>`);
+ * with no service and no contact, a chat whose apps may have opened before this list was kept, and every origin of it.
+ */
+export interface OpenedServiceWindow extends Opened { service?: string; peer?: string }
 /** A service id or a key as `viewer.rs` takes them (`is_label_safe`); a tag is `viewerTag`'s 16 characters of z-base-32. */
 const SERVICE_LABEL = /^[A-Za-z0-9-]{1,64}$/;
 const TAG = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{16}$/;
 export const openedServiceWindows = openedServices<OpenedServiceWindow>(
-  (o) => typeof o.service === "string" && SERVICE_LABEL.test(o.service) && typeof o.peer === "string" && SERVICE_LABEL.test(o.peer) && TAG.test(o.tag as string),
+  (o) => TAG.test(o.tag as string) && (Object.keys(o).length === 2
+    || typeof o.service === "string" && SERVICE_LABEL.test(o.service) && typeof o.peer === "string" && SERVICE_LABEL.test(o.peer)),
   (a, b) => a.service === b.service && a.peer === b.peer && a.tag === b.tag,
 );
 
 /**
  * What the contacts' apps opened from one chat or by one profile kept on their origins, forgotten by Rust
  * (`forget_service_origins`): their windows close, and each origin cleared leaves the list. One Rust did not clear (it
- * failed, or this platform clears none yet) stays on it, for the next clear.
+ * failed, or this platform clears none yet) stays on it, for the next clear. A deleted chat goes whole too: an app it
+ * opened before the list was kept is on no list.
  */
 export function forgetServiceWindows(which: { tag: string } | { profile: string }): Promise<void> {
+  if ("tag" in which && TAG.test(which.tag) && !androidApp()) openedServiceWindows.note({ profile: activeProfileId(), tag: which.tag });
   return openedServiceWindows.forget(which, async ({ service, peer, tag }) =>
-    (await invoke<boolean[]>("forget_service_origins", { origins: [{ service, peer, tag }] }))[0] === true);
+    (await invoke<boolean[]>("forget_service_origins", { origins: [service === undefined ? { tag } : { service, peer, tag }] }))[0] === true);
+}
+
+/**
+ * Each chat the profile has, noted once (the profile's own mark says so): the apps its chats opened before the list
+ * was kept go with Delete chat, Clear all data and Delete profile, which by then no longer know its chats. Once the
+ * engine loaded them all (`transfersRestored`): a state it sends while it starts may list only some.
+ */
+function noteChatsOnce(): void {
+  const mark = () => `${getPrefix()}services_chats_noted`;
+  const stop = engine.subscribe(() => {
+    const state = engine.state;
+    if (!state?.transfersRestored) return;
+    stop();
+    try {
+      if (localStorage.getItem(mark())) return;
+      const profile = activeProfileId();
+      for (const link of [...state.links, ...(state.edges ?? [])]) openedServiceWindows.note({ profile, tag: viewerTag(link.myPubKeyZ32) });
+      localStorage.setItem(mark(), "1");
+    } catch { /* storage full: noted at the next start */ }
+  });
 }
 
 /** `t()` in the profile's language, as it is now. */
@@ -409,6 +436,8 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
   // the window and holds the files of its drop, which the page reads as a paste's (Linux; elsewhere it never says).
   const draggedOver = followPlatformDrags(async () => shelved(await invoke<ShelvedItem[]>("read_dropped_files")));
   void listen<boolean>("file-drag", ({ payload }) => draggedOver(payload === true)).catch(() => {});
+  // Android opens no contact's app (`viewer` is Desktop's).
+  if (!androidApp()) noteChatsOnce();
   const apps = desktopApps(appsPlatform());
   const node: NodeOptions = { nativeTransports: { "iroh/1": createIrohEndpoint, "hyperdht/1": createHyperEndpoint }, nativeIrohRelays: true, transport: createTauriTransport(), pollIntervals: DHT_POLL_INTERVALS, localFetch: tauriLocalFetch, platform: "desktop", invoke,
     // Wake-ups go from Rust: push services answer without CORS, which a WebView would enforce (WISP 401 § Wake-up push).
