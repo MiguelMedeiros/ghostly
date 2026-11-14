@@ -586,6 +586,9 @@ describe("errors", () => {
     const mint = { host: "testnut.cashu.space", reason: "internal error" };
     expect(asCliError(engineError("mintFailedQuote", mint)).toJSON()).toEqual({ code: "engine", message: "testnut.cashu.space could not take this payment right now, and no sats left your wallet: try again later. The mint said: internal error" });
     expect(asCliError(engineError("mintFailedFaucet", mint)).toJSON()).toEqual({ code: "engine", message: "testnut.cashu.space could not give test coins right now: try again later. The mint said: internal error" });
+    // `wallet receive` at a mint that failed (a 503) said "No mint could create an invoice: down" as `engine`: now the mint
+    // is named, with the next step, and it is `unavailable` (try again later), as a mint with no answer at all.
+    expect(asCliError(engineError("mintFailedInvoice", { host: "127.0.0.1:4701", reason: "down" })).toJSON()).toEqual({ code: "unavailable", message: "127.0.0.1:4701 could not create an invoice right now: try again later. The mint said: down" });
     // One the table does not name stays the engine's, in its words.
     expect(asCliError(engineError("outcomeUnknown")).toJSON()).toEqual({ code: "engine", message: "Outcome unknown. Check the existing payment; do not send another." });
   });

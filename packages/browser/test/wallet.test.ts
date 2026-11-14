@@ -150,6 +150,21 @@ describe("Lightning in: which mint issues the invoice", () => {
       vi.useRealTimers();
     }
   });
+
+  it("a mint that fails the invoice (a 503, a closed socket) is named, with the next step; its own words kept last", async () => {
+    const socket = "fetch failed (other side closed, UND_ERR_SOCKET) at https://mint.example";
+    for (const [failure, said] of [[new HttpResponseError("down", 503), "down"], [new NetworkError(socket), socket]] as const) {
+      mint.createMintQuoteBolt11.mockRejectedValueOnce(failure);
+      await expect(setup().wallet.receiveLightning(100)).rejects.toMatchObject({
+        engineCode: "mintFailedInvoice",
+        message: `mint.example could not create an invoice right now: try again later. The mint said: ${said}`,
+      });
+    }
+    // A refusal is the mint's word on this amount: said as it said it.
+    mint.createMintQuoteBolt11.mockRejectedValueOnce(new MintOperationError(20000, "Amount too large"));
+    await expect(setup().wallet.receiveLightning(100)).rejects.toThrow(/^No mint could create an invoice: Amount too large$/);
+    expect(rows("quotes")).toEqual([]);
+  });
 });
 
 describe("Lightning out: melts", () => {
