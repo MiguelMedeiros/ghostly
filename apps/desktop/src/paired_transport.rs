@@ -1289,6 +1289,41 @@ mod tests {
             .any(|e| e["type"] == "frame"));
     }
 
+    /// An exit nothing held for the page's goodbye (Cmd+Q on a Mac ends the app from `applicationWillTerminate`, and
+    /// only `RunEvent::Exit` runs): the call's hang-up the page left is still said, before the close, so the contact's
+    /// call ends at once instead of when its media gives up.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_exit_nothing_held_still_says_the_hang_up_before_the_close() {
+        let (leaving, staying) = (app(), app());
+        let (alice, _, _) = start(&leaving, 8).await;
+        let (_bob, bob_address, bob_seen) = start(&staying, 9).await;
+        let to_bob = connect(&leaving, alice, &bob_address).await.unwrap();
+        let from_alice = event(&bob_seen, kind("open")).await["id"].clone();
+        let hang_up = r#"{"t":"paired-call","s":"{\"t\":\"h\",\"ts\":1700000000002}"}"#;
+        paired_native_parting(leaving.state(), to_bob, Some(hang_up.into())).unwrap();
+
+        crate::leave(leaving.handle()).await;
+        event(&bob_seen, kind("closed")).await;
+        let frames: Vec<Value> = bob_seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|e| e["type"] == "frame")
+            .cloned()
+            .collect();
+        assert_eq!(
+            frames,
+            vec![serde_json::json!({"type": "frame", "id": from_alice, "text": hang_up})]
+        );
+        assert!(leaving
+            .state::<TransportState>()
+            .inner
+            .lock()
+            .unwrap()
+            .peers
+            .is_empty());
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn frames_travel_both_ways_over_a_connection_bound_to_its_handshake() {
         let app = app();
