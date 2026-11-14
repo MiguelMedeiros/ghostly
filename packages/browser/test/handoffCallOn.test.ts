@@ -47,6 +47,27 @@ it("refuses a handoff while a contact's offer waits in the engine with no page r
   expect((await engine.handoffBusy())?.why).not.toBe("call");
 });
 
+/**
+ * An offer a page kept as missed, with no ring (placed faster than a person redials, `useWebRTC`'s QUICK_REDIAL_MS), is
+ * no call waiting here: a contact redialling every two seconds kept every move refused for as long as it went on.
+ */
+it("lets a handoff go while a contact's fast redials are kept as missed, each one told by the page", async () => {
+  const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { automaticWallets: false });
+  const engine = node as unknown as Engine;
+  const now = Date.now();
+  for (let i = 0; i < 5; i++) {
+    const ts = now + i;
+    engine.callSignalHeard("chat-1", offer(ts));
+    expect(await engine.handoffBusy()).toEqual({ why: "call" });
+    node.callOfferHeld({ linkId: "chat-1", ts });
+    expect((await engine.handoffBusy())?.why).not.toBe("call");
+  }
+  // A page's word on an older offer leaves the newer one, which no page has heard yet, waiting.
+  engine.callSignalHeard("chat-1", offer(now + 10));
+  node.callOfferHeld({ linkId: "chat-1", ts: now + 4 });
+  expect(await engine.handoffBusy()).toEqual({ why: "call" });
+});
+
 /** The giver's last check runs before the freeze's awaits: a call that starts ringing during them keeps the profile here. */
 it("stops nothing at the freeze when a call came in after the giver's last check", async () => {
   const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { automaticWallets: false });

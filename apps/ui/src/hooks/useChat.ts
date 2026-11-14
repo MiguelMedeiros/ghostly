@@ -639,6 +639,8 @@ export function useChat(params: ChatParams | null) {
     // One page per peer here: no other page answers its calls.
     callHandledElsewhere: 0,
     setCallSignal,
+    // No engine here keeps the contact's offers for a handoff.
+    callOfferHeld: undefined as ((ts: number) => void) | undefined,
     setChatFastPoll,
     addSystemMessage,
     addMissedCallMessage,
