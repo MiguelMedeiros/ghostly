@@ -6558,6 +6558,15 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /**
+   * A page kept the contact's offer of `ts` as missed, with no ring (placed faster than a person redials): it is no call
+   * waiting here. A contact redialling like that every few seconds kept every move of the profile refused, "A call is on".
+   */
+  callOfferHeld({ linkId, ts }: { linkId: string; ts: number }): void {
+    const waiting = this.offersWaiting.get(linkId);
+    if (waiting !== undefined && parseCallSignal(waiting)?.ts === ts) this.offersWaiting.delete(linkId);
+  }
+
+  /**
    * WISP 401 § Typing: a `stop` always goes (when a `start` stands); a `start` only while the setting is on, with
    * its kind and status checked here (an unknown kind is plain typing, a status with a link is dropped).
    */

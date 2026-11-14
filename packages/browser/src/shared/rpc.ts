@@ -343,6 +343,8 @@ export interface EngineApi {
   setServiceShared(params: { serviceId: string; peerPubKeyZ32: string; shared: boolean }): void;
   updateSettings(params: { settings: SettingsPatch }): void;
   setCallSignal(params: { linkId: string; signal: string | null }): Promise<void>;
+  /** This page kept the contact's offer of `ts` as missed, with no ring (`useWebRTC`, QUICK_REDIAL_MS): a handoff need not wait for it. */
+  callOfferHeld(params: { linkId: string; ts: number }): void;
   /**
    * This side is typing in a paired chat (true), or stopped: cleared the text, sent it, left the chat (false). Said
    * on the live session only, throttled there; nothing is said while Settings `sendTyping` is off. `kind`: what this

@@ -237,6 +237,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     incomingCallSignal,
     callHandledElsewhere,
     setCallSignal,
+    callOfferHeld,
     setChatFastPoll,
     addSystemMessage,
     addMissedCallMessage,
@@ -318,6 +319,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     incomingCallSignal,
     callHandledElsewhere,
     publishCallSignal: setCallSignal,
+    offerHeld: callOfferHeld,
     setFastPoll: setChatFastPoll,
     addCallEventMessage,
     // Only a line of this side's own (a call that lost a glare): the contact never had it, so nothing goes out.
