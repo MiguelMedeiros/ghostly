@@ -245,9 +245,10 @@ const engineCode = (error: unknown) => error instanceof Error ? (error as { engi
 const NO_MINT = /^(No mint could create an invoice: No mint configured|You have no (Mainnet|Testnet) Cashu wallet: create one in Wallet → New)$/;
 function walletRefusal(error: unknown): unknown {
   if (!(error instanceof Error) || error instanceof CliError) return error;
-  // A mint asked for a swap that has not answered (the engine's `SwapUnsettledError`, by its name): nothing is known to
-  // have failed, try again later, as a mint that cannot be reached at all is `unavailable`.
-  if (error.name === "SwapUnsettledError") return new CliError("unavailable", error.message);
+  // A mint asked for a swap that has not answered (the engine's `SwapUnsettledError`, by its name, or a chat payment's
+  // error that carries it as `unsettled`): nothing is known to have failed, try again later, as a mint that cannot be
+  // reached at all is `unavailable`.
+  if (error.name === "SwapUnsettledError" || (error as { unsettled?: unknown }).unsettled === true) return new CliError("unavailable", error.message);
   const code = WALLET_REFUSALS.find(([pattern]) => pattern.test(error.message))?.[1];
   return code ? new CliError(code, error.message) : error;
 }

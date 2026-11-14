@@ -268,6 +268,8 @@ describe("wallets", () => {
       [() => node.payRequest.mockRejectedValueOnce(new Error("This request is no longer open")), "chat.payRequest", { chat: "Alice", payment: "test" }, "refused"],
       [() => node.walletPayQuote.mockRejectedValueOnce(new Error("This invoice is already paid")), "pay", { target: "lntbs10u1pxyz" }, "refused"],
       [() => node.sendPayment.mockRejectedValueOnce(unsettled), "chat.pay", { chat: "Alice", amount: 3 }, "unavailable", /^testnut\.cashu\.space has not answered yet\. The payment was not made\./],
+      // As the engine's payment desk throws it: its NoEcashError, a plain Error that says so with `unsettled`.
+      [() => node.sendPayment.mockRejectedValueOnce(Object.assign(new Error(unsettled.message), { unsettled: true })), "chat.pay", { chat: "Alice", amount: 3 }, "unavailable", /^testnut\.cashu\.space has not answered yet\./],
     ];
     const answered = [], wanted = [];
     for (const [arrange, method, params, code, message] of cases) {
