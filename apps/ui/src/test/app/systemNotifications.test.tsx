@@ -380,7 +380,8 @@ describe("Settings → System notifications", () => {
     };
     (globalThis as { chrome?: unknown }).chrome = chrome;
     const { user } = renderSettings();
-    await waitFor(() => expect(row()).toHaveTextContent("While Ghostly is open"));
+    // The extension's peer shows one with every Ghostly tab closed (apps/extension/src/attentionNotices.ts).
+    await waitFor(() => expect(row()).toHaveTextContent("While the browser is open, even with no Ghostly tab"));
     await user.click(toggle());
     await waitFor(() => expect(row()).toHaveTextContent("Not allowed. Turn the switch on to ask again."));
     expect(row()).not.toHaveTextContent(/browser settings/);

@@ -406,7 +406,9 @@ export class GroupEdits {
     this.keptMine.delete(key);
     if (this.stopped || edge === undefined || !membership || membership.community || !membership.members.has(to)) return;
     const mine = paced && kept?.edge === edge ? kept.mine : (await (this.host.history ? this.host.history(chat) : this.host.messages(chat)))
-      .filter(m => m.sender === "me" && m.edit && !m.edit.pending && canEditInGroup(m))
+      // Not those under a member key I held before I was removed and invited back: the group refuses them, and each
+      // took a place in the pace ahead of my edits since.
+      .filter(m => m.sender === "me" && m.edit && !m.edit.pending && canEditInGroup(m) && !underOldKey(m, membership))
       .sort((a, b) => a.edit!.at - b.edit!.at || (a.id < b.id ? -1 : 1));
     const last = this.heard.get(key);
     const after = (m: StoredMessage) => !last || m.edit!.at > last.at || (m.edit!.at === last.at && m.id > last.id);

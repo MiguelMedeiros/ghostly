@@ -95,6 +95,7 @@ async fn get(client: &reqwest::Client, url: reqwest::Url) -> Result<HoldResponse
             body_b64: String::new(),
         });
     }
+    // Word for word what apps/ui/src/desktop/holdFetch.ts answers as an item past the largest, for the engine to refuse.
     let too_large = || "The held item is too large".to_string();
     if response
         .content_length()

@@ -148,8 +148,9 @@ chrome.runtime.onInstalled.addListener((details) => {
   else void started.catch(() => {});
 });
 
-async function reopenAfterUpdate(): Promise<void> {
-  for (const url of await takePagesToReopen()) await chrome.tabs.create({ url });
+/** In the same line as the toolbar button: pressed while the new version starts, it finds the page opened again. */
+function reopenAfterUpdate(): Promise<void> {
+  return inTurn(async () => { for (const url of await takePagesToReopen()) await openTab(url); });
 }
 
 /**
@@ -166,16 +167,41 @@ chrome.action.onClicked.addListener(() => {
   void ensureEngine().catch(() => {}).then(() => showApp()).catch(() => {});
 });
 
-/** Brings the app's tab forward, or opens one; on `route` (`/chat/…`) when given. */
-async function showApp(route?: string): Promise<void> {
+let showing: Promise<void> = Promise.resolve();
+
+/**
+ * Brings the app's tab forward, or opens one; on `route` (`/chat/…`) when given. One at a time: the toolbar button
+ * pressed twice (a double-click) while the peer starts, or as a first install opens the app, asked both at once, and
+ * neither found the other's tab, so each opened one.
+ */
+function showApp(route?: string): Promise<void> {
+  return inTurn(() => showAppNow(route));
+}
+
+function inTurn(task: () => Promise<void>): Promise<void> {
+  const run = showing.catch(() => {}).then(task);
+  showing = run;
+  return run;
+}
+
+async function showAppNow(route?: string): Promise<void> {
   const url = chrome.runtime.getURL("app.html");
   const existing = await openAppTab(url);
   if (existing) {
     // Only the fragment changes: the page stays, and its router goes there.
     await chrome.tabs.update(existing.tabId, route ? { active: true, url: `${url}#${route}` } : { active: true });
     if (existing.windowId >= 0) await chrome.windows.update(existing.windowId, { focused: true });
-  } else {
-    await chrome.tabs.create({ url: route ? `${url}#${route}` : url });
+  } else await openTab(route ? `${url}#${route}` : url);
+}
+
+async function openTab(url: string): Promise<void> {
+  const tab = await chrome.tabs.create({ url });
+  // The new tab is among the extension's contexts only once its page loads (some 20-30 ms later): the next one
+  // waits for that, or it opens a second tab too.
+  for (let attempt = 0; attempt < 40 && tab.id !== undefined; attempt++) {
+    const contexts = await chrome.runtime.getContexts({ contextTypes: [chrome.runtime.ContextType.TAB] });
+    if (contexts.some((context) => context.tabId === tab.id)) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
   }
 }
 
@@ -605,6 +631,13 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
     return;
   }
 
+  // DevTools leaves `bytes` out of a piece it holds as a file or a stream (a FormData with a picked file, an XHR sending
+  // one; an empty piece is `bytes: ""`), and has no command that reads it: sent without it, the app would get the form
+  // with an empty file, or no body at all, as if it were the upload. The request fails instead.
+  if (paused.request.postDataEntries?.some((e) => typeof e.bytes !== "string")) {
+    await answerFailed(tabId, paused.requestId, binding.page, { ok: false, code: "error", message: "A file or stream in the request's body cannot be sent from a browser extension tab" });
+    return;
+  }
   let bodyB64: string | null = null;
   const entries = paused.request.postDataEntries?.filter((e) => e.bytes);
   if (entries?.length === 1) bodyB64 = entries[0].bytes!;
@@ -647,15 +680,18 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
     });
     return;
   }
+  await answerFailed(tabId, paused.requestId, binding.page, reply);
+}
 
+/** A request that got no answer from the app: its error page, in the words of the page that opened the tab. */
+async function answerFailed(tabId: number, requestId: string, page: ViewerPage, reply: Extract<HttpRequestReply, { ok: false }>): Promise<void> {
   const gone = UNREACHABLE_CODES.has(reply.code);
   // As on the Desktop: the person reads a sentence in their language, the engine's English goes to the console.
   if (!gone && !reply.shown) console.warn("Service request failed:", reply.code, reply.message);
-  const { page } = binding;
   // The contact's machine answered in place of their app: the peer said why, from this side (viewerWords.ts).
   const html = reply.shown ? errorPage(reply.shown, reply.shown.text) : errorPage(page, gone ? page.unreachable : page.failed);
   await devtools(tabId, "Fetch.fulfillRequest", {
-    requestId: paused.requestId,
+    requestId,
     responseCode: reply.status ?? (gone ? 503 : 502),
     responseHeaders: [
       { name: "content-type", value: "text/html; charset=utf-8" },

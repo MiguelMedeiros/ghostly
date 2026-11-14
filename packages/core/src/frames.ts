@@ -39,6 +39,24 @@ export const LIMITS = {
    */
   maxClientWaiting: 64,
   maxClientWaitingBodyBytes: 64 * 1024 * 1024,
+  /**
+   * Response-body bytes a client holds for one response before whatever reads it took them. Past it, a response its
+   * reader takes nothing of for `unreadStallMs` is reset: its reader stalled. Four times what a host keeps buffered on
+   * the link (`sendHighWaterMark`), so a reader that keeps up never reaches it.
+   */
+  maxUnreadResponseBytes: 4 * 1024 * 1024,
+  /**
+   * How long a reader past `maxUnreadResponseBytes` may take nothing before its response is reset. One that keeps
+   * reading, only slower than the link (a video playing as it arrives, a contact's app read through the web's services
+   * worker), is not cut: it holds up to the response's own bound.
+   */
+  unreadStallMs: 2_000,
+  /**
+   * Response-body bytes a client holds for all its responses before their readers took them. Past it, a response over
+   * `maxUnreadResponseBytes` is reset at once, its reader's pace aside: one slow reader keeps its whole response (as
+   * much as `maxResponseBodyBytes`), but many cannot add up (a contact's app reading each answer a chunk at a time).
+   */
+  maxClientUnreadResponseBytes: 64 * 1024 * 1024,
   maxChatMessageBytes: 16 * 1024,
   maxFileBytes: 100 * 1024 * 1024,
   /** Files a peer may be sending us at once. */

@@ -16,14 +16,14 @@ import { applyVoiceRate, claimPlayback, onVoiceRate, registerVoicePlayer, releas
 import { claimMediaSession, mediaSessionPosition, mediaSessionState, releaseMediaSession, type MediaSessionPlayer } from "../../lib/mediaSession";
 import { forgetPosition, holdPlayback, playingFrom, rememberPosition, rememberedPosition, takePlayback, usePlayingChat } from "../../lib/nowPlaying";
 import { Highlight } from "../chat/ChatSearch";
-import { ProgressRing, RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
+import { FORCED_EDGE, ProgressRing, RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
 import { SpeedPill } from "../voice/VoiceBubble";
 import { problemLine, saveProblemLine } from "../../lib/problemText";
 
 type PlayState = "idle" | "loading" | "playing" | "paused";
 type Problem = "unsupported" | "too-large" | "no-room" | "missing" | "left-out" | "not-yet";
 
-const pill = "text-xs px-2.5 py-0.5 rounded-full bg-black/20 hover:bg-black/30 border-none text-inherit cursor-pointer transition-colors";
+const pill = `text-xs px-2.5 py-0.5 rounded-full bg-black/20 hover:bg-black/30 border-none ${FORCED_EDGE} text-inherit cursor-pointer transition-colors`;
 
 /**
  * An audio file in the chat (an MP3, an M4A, a FLAC: sent as a file, not recorded as a voice message): its name, a
@@ -295,7 +295,8 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
           </span>
         )}
         <div className="flex-1 min-w-0">
-          <p dir="auto" className="chat-text-audio-name leading-tight truncate m-0" title={file.name} data-testid="audio-name"><Highlight text={file.name} term={highlight} /></p>
+          {/* Whole, wrapping anywhere: cut with … at its end, a long name hid its extension on a phone. */}
+          <p dir="auto" className="chat-text-audio-name leading-tight [overflow-wrap:anywhere] m-0" title={file.name} data-testid="audio-name"><Highlight text={file.name} term={highlight} /></p>
           <input
             type="range"
             data-testid="audio-seek"
@@ -332,7 +333,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
         <div className="mt-1.5 px-1" data-testid="audio-offer">
           <div className="flex items-center gap-2">
             <button type="button" data-testid="audio-accept" disabled={noRoom} onClick={() => act("accept")}
-              className="text-xs px-3 py-1 rounded-full bg-accent text-on-accent border-none cursor-pointer disabled:opacity-50 disabled:cursor-default">
+              className={`text-xs px-3 py-1 rounded-full bg-accent text-on-accent border-none ${FORCED_EDGE} cursor-pointer disabled:opacity-50 disabled:cursor-default`}>
               {t("chat.media.downloadSize", { size: formatFileSize(file.size, t) })}
             </button>
             {!group && <button type="button" data-testid="audio-decline" onClick={() => act("decline")} className={pill}>{t("chat.file.decline")}</button>}

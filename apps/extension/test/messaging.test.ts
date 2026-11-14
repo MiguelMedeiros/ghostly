@@ -202,13 +202,28 @@ describe("the page and the peer talk over the 'ui' port", () => {
     const { extensionHost } = await world.load("page", () => import("../src/host.ts"));
     const connection = await extensionHost.connect(() => {}, () => {});
     const server = engine();
-    expect(server.attachedWith).toEqual([[undefined, { newest: 400 }]]);
+    expect(server.attachedWith).toEqual([[undefined, { newest: 400, marks: true, since: undefined }]]);
 
     connection.send({ kind: "history", linkId: "chat-1" });
     await settle();
     expect(server.histories).toEqual([{ client: server.attached[0], linkId: "chat-1" }]);
     // Not an engine call.
     expect(server.handled).toEqual([]);
+  });
+
+  it("attaches a page with the mark its pages last mirrored, which its port's name carries", async () => {
+    // Each tab opened or reloaded got every chat's newest 400 rows again, though the stored chats had them all.
+    const { extensionHost } = await world.load("page", () => import("../src/host.ts"));
+    await extensionHost.connect(() => {}, () => {}, { epoch: "8f9c2c5e-4a51-4f43-9d6b-0a1c2b3d4e5f", mark: 1234 });
+    const server = engine();
+    expect(server.attachedWith).toEqual([[undefined, { newest: 400, marks: true, since: { epoch: "8f9c2c5e-4a51-4f43-9d6b-0a1c2b3d4e5f", mark: 1234 } }]]);
+  });
+
+  it.each(["ui ", "ui epoch", "ui epoch -1", "ui epoch 1 2", "uix epoch 1"])("ignores a port named %j", async (name) => {
+    await send({ target: "background", type: "ensure-engine" });
+    world.chrome.runtime.connect({ name });
+    await settle();
+    expect(engine().attached).toEqual([]);
   });
 
   it("detaches the page when its port closes", async () => {
@@ -480,9 +495,30 @@ describe("viewer tabs", () => {
     await pauseRequest(world, tabId, {
       url: `https://${SERVICE}.${PEER}.${TAG}.invalid/upload`,
       method: "PUT",
-      postDataEntries: [{ bytes: b64("part one, ") }, {}, { bytes: b64("part two") }],
+      // An empty piece comes as `bytes: ""` (an empty Blob in a FormData).
+      postDataEntries: [{ bytes: b64("part one, ") }, { bytes: "" }, { bytes: b64("part two") }],
     });
     expect(new TextDecoder().decode(engine().requests[0].init.body!)).toBe("part one, part two");
+  });
+
+  it("sends the app no body cut short: a picked file or a stream DevTools does not hand over fails the request", async () => {
+    // Chromium leaves `bytes` out of a body's piece it holds as a file or a stream (a FormData with a picked file,
+    // an XHR sending one): what came was the form's text with an empty file, or no body at all, as if uploaded.
+    const tabId = await openViewer(world);
+    const b64 = (s: string) => Buffer.from(s).toString("base64");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const url = `https://${SERVICE}.${PEER}.${TAG}.invalid/upload`;
+    for (const postDataEntries of [
+      [{ bytes: b64('--b\r\nContent-Disposition: form-data; name="file"; filename="photo.jpg"\r\n\r\n') }, {}, { bytes: b64("\r\n--b--\r\n") }],
+      [{}],
+    ]) {
+      const answer = await pauseRequest(world, tabId, { url, method: "POST", postDataEntries });
+      expect(answer.method).toBe("Fetch.fulfillRequest");
+      expect(answer.params).toMatchObject({ responseCode: 502 });
+      expect(bodyText(answer.params)).toContain("The request failed.");
+    }
+    expect(engine().requests).toEqual([]);
+    expect(warn).toHaveBeenCalledTimes(2);
   });
 
   it("refuses another contact's origin, another service, or anything else in the tab", async () => {
@@ -814,6 +850,56 @@ describe("the toolbar button", () => {
     expect(world.callsTo("tabs.create")).toHaveLength(1);
     expect(world.callsTo("tabs.update")).toEqual([[tab.id, { active: true }]]);
     expect(world.callsTo("windows.update")).toEqual([[tab.windowId, { focused: true }]]);
+  });
+
+  it("opens one tab when pressed again before the first one opened, or as a first install opens it", async () => {
+    // Pressed twice while the peer starts (nothing shows yet), and once more as the install opens the app.
+    fire(world.chrome.action.onClicked);
+    fire(world.chrome.action.onClicked);
+    fire(world.chrome.runtime.onInstalled, { reason: "install" });
+    await settle();
+    expect(world.callsTo("tabs.create")).toEqual([[world.chrome.runtime.getURL("app.html")]]);
+  });
+
+  it("opens one tab on a double-click, though Chrome lists a new tab only once its page loads", async () => {
+    await send({ target: "background", type: "ensure-engine" });
+    // As in Chrome: the tab is there when `tabs.create` answers, its page (what the worker sees) some 25 ms later.
+    const create = world.chrome.tabs.create.bind(world.chrome.tabs);
+    world.chrome.tabs.create = (async (props: { url: string }) => {
+      const tab = await create(props);
+      const opened = world.tabs.get(tab.id!)!;
+      world.tabs.delete(tab.id!);
+      setTimeout(() => world.tabs.set(opened.id, opened), 25);
+      return tab;
+    }) as typeof world.chrome.tabs.create;
+    fire(world.chrome.action.onClicked);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    fire(world.chrome.action.onClicked);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(world.callsTo("tabs.create")).toHaveLength(1);
+    expect(world.callsTo("tabs.update")).toEqual([[expect.any(Number), { active: true }]]);
+  });
+
+  it("opens no second tab when pressed while an update opens again the pages Update and restart closed", async () => {
+    const app = world.chrome.runtime.getURL("app.html");
+    world.tabs.clear();
+    world.local.set("ghostly_reopen_after_update", [`${app}#/chats`]);
+    world.calls.length = 0;
+    // As in Chrome: the tab is there when `tabs.create` answers, its page (what the worker sees) some 25 ms later.
+    const create = world.chrome.tabs.create.bind(world.chrome.tabs);
+    world.chrome.tabs.create = (async (props: { url: string }) => {
+      const tab = await create(props);
+      const opened = world.tabs.get(tab.id!)!;
+      world.tabs.delete(tab.id!);
+      setTimeout(() => world.tabs.set(opened.id, opened), 25);
+      return tab;
+    }) as typeof world.chrome.tabs.create;
+    // The tab "Update and restart" closed is gone, so the person presses the toolbar button as the new version starts.
+    fire(world.chrome.runtime.onInstalled, { reason: "update", previousVersion: "0.4.0" });
+    fire(world.chrome.action.onClicked);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(world.callsTo("tabs.create")).toEqual([[`${app}#/chats`]]);
+    expect(world.callsTo("tabs.update")).toEqual([[expect.any(Number), { active: true }]]);
   });
 
   it("opens the app even when the peer does not start, so the page can say why", async () => {

@@ -173,7 +173,7 @@ describe("a chat as the contact drives it", () => {
     const chat = row();
     const { node, linkOf } = await started(chat);
     const { events } = linkOf(chat.id).options;
-    const emits = vi.spyOn(node as never as { emitState(): void }, "emitState");
+    const emits = vi.spyOn(node as never as { scheduleState(): void }, "scheduleState");
     const read = (lastPacketAt: number) => events.onPresence({ online: true, lastPacketAt, seenAt: 5, nick: "Bob", services: [{ id: "web", type: "http" }] });
     read(10);
     expect(emits).toHaveBeenCalledTimes(1);
@@ -278,7 +278,7 @@ describe("a chat as the contact drives it", () => {
     const chat = row();
     const { node, linkOf } = await started(chat);
     const { events } = linkOf(chat.id).options;
-    const emit = vi.spyOn(node as unknown as { emitState(): void }, "emitState");
+    const emit = vi.spyOn(node as unknown as { scheduleState(): void }, "scheduleState");
     events.onPoll({ polling: true, nextInMs: 0 });
     expect(node.getState().links[0].poll.polling, "the first sync under way").toBe(true);
     events.onStatus("error");
@@ -438,6 +438,32 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
       node.wake({ network: true });
       node["retryNative"]();
       await vi.waitFor(() => expect(linkOf().registerEndpoint).toHaveBeenCalledTimes(2));
+    });
+
+    it("a listener started again with its seed already stored writes no link row", async () => {
+      // A CLI daemon with its Iroh relay out of reach (bug hunt, 2026-11-08): with 30 chats or more the failed starts'
+      // retries kept the queue busy, one every 10 s, and each wrote its chat's whole row back unchanged, a disk sync
+      // each: nearly every write of a daemon whose contacts were away.
+      const chat = row({ ...paired() });
+      await db.putLink(chat);
+      const iroh = vi.fn(async () => endpoint());
+      iroh.mockRejectedValueOnce(new Error("Iroh relay unreachable"));
+      const events = { onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() };
+      const node = new GhostlyNode(events, { automaticWallets: false, transport: fixture, nativeTransports: { "iroh/1": iroh } });
+      nodes.push(node);
+      await node.start();
+      await vi.waitFor(() => expect(node["nativeFailed"].has(chat.id)).toBe(true));
+      const seed = (await db.getLinks()).find((l) => l.id === chat.id)?.transportSeeds?.["iroh/1"];
+      expect(seed).toBeTruthy();
+      const patches = vi.spyOn(db, "patchLink");
+      onTestFinished(() => { patches.mockRestore(); });
+      iroh.mockRejectedValueOnce(new Error("Iroh relay unreachable"));
+      await node["ensureNativeEndpoints"](chat.id);
+      expect(iroh).toHaveBeenCalledTimes(2);
+      await node["ensureNativeEndpoints"](chat.id);
+      expect(iroh).toHaveBeenCalledTimes(3);
+      expect(iroh.mock.calls.map((call) => (call as unknown[])[0])).toEqual([seed, seed, seed]);
+      expect(patches.mock.calls.filter(([, patch]) => "transportSeeds" in patch)).toEqual([]);
     });
 
     it("the chat live most recently takes one first, among chats live when the app quit", async () => {
@@ -1571,6 +1597,20 @@ describe("text in a chat", () => {
     expect((await db.getMessages(chat.id))[0]).toMatchObject({ id: "me_9", via: "datalink" });
   });
 
+  it("a legacy chat's read mark never goes back: the contact's record still carrying an older acknowledgement leaves a delivered text delivered", async () => {
+    const chat = row({ profile: undefined, participationSeed: undefined });
+    const { node, linkOf } = await started(chat);
+    const link = linkOf(chat.id);
+    link.options.events.onPeerAck(1000);
+    link.isDataLinkOpen = true;
+    await node.sendMessage({ linkId: chat.id, text: "hi", timestamp: 5000 });
+    expect(node.getState().links[0].peerAck).toBe(5000);
+    link.options.events.onPeerAck(1000);
+    expect(node.getState().links[0].peerAck).toBe(5000);
+    link.options.events.onPeerAck(6000);
+    expect(node.getState().links[0].peerAck).toBe(6000);
+  });
+
   it("for an away contact that allows it, a text is held in storage, and never above the held-text limit", async () => {
     const chat = row();
     const { node, linkOf } = await started(chat);
@@ -1928,6 +1968,20 @@ describe("what arrives from held storage", () => {
     expect(stored!.blob).toBeUndefined();
     expect(stored!.bytes).toBe("idb");
     expect(await (await storedBlob(stored!, "text/plain"))!.text()).toBe("held");
+  });
+
+  it("a held file counts against the same per-contact budget as files taken live, files/3 ones included", async () => {
+    const chat = row();
+    const { node } = await started(chat);
+    const host = node["hold"]["host"] as { receiveFile(linkId: string, wire: object, bytes: Uint8Array, digest: string): Promise<string | null> };
+    const MiB = 1024 * 1024;
+    const wire = (wireId: string) => ({ wireId, name: "h.bin", size: 8 * MiB, mime: "application/octet-stream", timestamp: 5 });
+    // 495 MiB of files/3 files taken without asking: the file desk counts them, not the chat's received bytes.
+    const taken = vi.spyOn(node["fileDesk"], "autoTaken").mockReturnValue(495 * MiB);
+    expect(await host.receiveFile(chat.id, wire("over"), bytes("held"), "d")).toBe("no room for more files");
+    expect(await db.getMessages(chat.id)).toEqual([]);
+    taken.mockReturnValue(0);
+    expect(await host.receiveFile(chat.id, wire("room"), bytes("held"), "d")).toBeNull();
   });
 
   it("a held file, received or sent, says done in one state and then leaves the states: a device up for days carries none", async () => {

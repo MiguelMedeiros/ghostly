@@ -13,10 +13,10 @@ import { Select } from "./ui/Select";
 import { NetworkTag, satsIn } from "./NetworkTag";
 import { useI18n } from "../contexts/I18nContext";
 import { ConfirmRealMoney } from "./ConfirmRealMoney";
-import { paymentIsTest, paymentTitle, railLine, storedPaymentLine } from "./paymentWords";
+import { paymentIsTest, paymentStateLine, paymentTitle, railLine, storedPaymentLine } from "./paymentWords";
 import { formatAmount, formatTokenAmount } from "../lib/amount";
 import { useAmountText } from "../hooks/useAmountText";
-import { problemLine, problemText, type Problem } from "../lib/problemText";
+import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
 import { focusLost, working } from "../lib/focus";
 import { useFocusKept } from "../hooks/useFocusKept";
@@ -146,7 +146,6 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText, mine = fals
   const fedimint = payment.federation ?? payment.federations?.[0];
   const network = paymentIsTest(payment, wallet.getState()) ? "testnet" : "mainnet";
   const sats = satsIn(t, network);
-  const stateLabel = payment.kind === "payment" ? t(`payments.bubble.state.payment.${payment.state}`) : payment.state === "reclaimed" ? "" : t(`payments.bubble.state.request.${payment.state}`);
   /** The wallets of the payment's own network: only they pay it, quote its invoice or show its mints. */
   const onNet = wallet.forNetwork(network);
   const lightningPayer = payerOf(onNet, payment.amount, lnCard);
@@ -220,11 +219,8 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText, mine = fals
         className={`chat-text-pay-label m-0 mt-1 ${payment.state === "failed" ? "text-danger-ink" : payment.state === "settled" ? "text-accent-hover" : "text-text-primary/65"}`}
         data-testid="payment-state"
       >
-        {expired ? `${t("payments.bubble.state.request.expired")} · ${t(outgoing ? "payments.bubble.expiredNext.mine" : "payments.bubble.expiredNext.theirs")}`
-          : payment.lightningPending && payment.state === "pending" ? t("payments.bubble.state.lightningPending") : payment.kind === "payment" && payment.state === "pending" && payment.target?.method === "bitcoin" ? t("payments.bubble.state.waitingConfirmation")
-          // One the contact sent: their part is done, what is left is this wallet's own check of it.
-          : payment.kind === "payment" && payment.state === "pending" && !outgoing ? t("payments.bubble.state.checking") : payment.closed ? t("payments.bubble.state.closed") : stateLabel}
-        {payment.error && payment.state !== "settled" && !expired ? ` · ${problemLine(payment.error, t)}` : ""}
+        {/* Not live: a change of it is said once by the chat's announcer (MessageAnnouncer), not by each bubble. */}
+        {paymentStateLine(t, payment, expired)}
       </p>
 
       {/* An expired request offers nothing to pay it with, not even its dead invoice to another wallet. */}

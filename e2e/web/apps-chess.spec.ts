@@ -405,7 +405,7 @@ test("a version a store removed stays stopped until Run anyway", { tag: ["@featu
 
   await row.getByRole("button", { name: /^Chess .*: details$/ }).click();
   const details = ana.page.getByTestId("app-details");
-  await expect(details.getByTestId("app-run-line")).toHaveText(`Removed by ${STORE_NAME}: Sends your moves to a server`);
+  await expect(details.getByTestId("app-run-line")).toHaveText(`Removed by \u2068${STORE_NAME}\u2069: \u2068Sends your moves to a server\u2069`);
   await expect(details.getByTestId("app-open")).toHaveCount(0);
   await details.getByTestId("app-keep-stopped").click();
   await expect(miniApp(ana.page)).toBeHidden();
@@ -434,7 +434,8 @@ test("a version its publisher revoked never runs", { tag: ["@feature:apps.chess.
   await expect(row.getByTestId("installed-app-open")).toHaveCount(0);
   await row.getByRole("button", { name: /^Chess .*: details$/ }).click();
   const details = ana.page.getByTestId("app-details");
-  await expect(details.getByTestId("app-run-line")).toHaveText("Its publisher revoked this version.");
+  // With the publisher's reason, isolated in its own direction (U+2068 ... U+2069).
+  await expect(details.getByTestId("app-run-line")).toHaveText("Its publisher revoked this version: \u2068Leaked the game to the wrong chat\u2069");
   await expect(details.getByTestId("app-open")).toHaveCount(0);
   await expect(details.getByTestId("app-run-anyway")).toHaveCount(0);
   await expect(details.getByTestId("app-keep-stopped")).toBeVisible();

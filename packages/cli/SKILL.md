@@ -140,7 +140,9 @@ ghostly listen --turns --from alice --group team --cursor ~/.ghostly/agent.curso
   Anyone else's message stays in the chat and never reaches the hook. `--group` alone lets no 1:1 chat through, and
   `--from` alone no group. Names are turned into ids once, when `listen` starts. Everyone on it can try to steer the
   agent: an agent with tools gets `--from owner` only (step 11).
-- `--exec '<command>'` runs once per turn, in order, with the turn on **stdin** (never in its arguments). Or
+- `--exec '<command>'` runs once per turn, in order, with the turn on **stdin** (never in its arguments). It gets
+  `GHOSTLY_PROFILE` and `GHOSTLY_HOME` of the listen (`--profile` and `--home` too), so the hook's `ghostly send`
+  answers from the same profile. Or
   `--webhook http://127.0.0.1:<port>/…` POSTs each turn to a local bridge (loopback only).
 - `--cursor <file>` remembers the last event handled, so a restarted listener resumes where it stopped. Dedupe on `id`.
   A `--webhook` bridge that is down holds the stream until it is back (nothing is lost); an `--exec` that exits
@@ -206,7 +208,7 @@ ghostly typing alice --kind thinking --status "Transcribing your audio" --for 12
 ghostly file send alice ./answer.ogg --voice --reply <message id>   # a voice note: length and waveform from the file
 ghostly file send alice ./note.m4a --voice 4200      # or its length given in ms (AAC needs ffmpeg for the waveform)
 ghostly file send alice ./report.pdf                 # a file (no daemon: stays until alice has all of it)
-ghostly file wait <file id> --timeout 120            # exit 0 when done, 1 when it failed, 4 on timeout
+ghostly file wait <file id> --timeout 120            # exit 0 when done, 1 when it failed, 4 on timeout, 5 when it waits for file accept
 ghostly file accept <file id>                        # a file over 25 MiB waits for this (file.offered event)
 ```
 

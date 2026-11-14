@@ -304,12 +304,32 @@ describe("the argument parser", () => {
     expect(positionals(COMMANDS["chat transport"], ["bob", "iroh/1"])).toEqual({ chat: "bob", transport: "iroh/1" });
   });
 
+  it("react and group react refuse an <emoji> that is not one emoji as a usage error, before the profile opens", () => {
+    const params = (name: string, ...argv: string[]) => { const c = COMMANDS[name], parsed = parseArgs(argv, c.options ?? {}); return c.params!(parsed, positionals(c, parsed.positionals)); };
+    for (const [name, target] of [["react", "bob"], ["group react", "team"]]) {
+      // Before, a one-shot opened the profile and went online, then the engine answered "A reaction is one emoji" (exit 1).
+      for (const emoji of ["notanemoji", "ab", "1", "👍👍", "👍 👍", ":+1:"]) {
+        expect(() => params(name, target, "m1", ...emoji.split(" ")), `${name} ${emoji}`).toThrow(new CliError("usage", `<emoji> takes one emoji, not ${JSON.stringify(emoji)}`));
+      }
+      for (const argv of [[target, "m1"], [target, "m1", ""]]) expect(() => params(name, ...argv), `${name} ${JSON.stringify(argv)}`).toThrow(new CliError("usage", "Give one emoji, or --remove to take yours back"));
+      for (const emoji of ["👍", "❤", "👨‍👩‍👧", "🇧🇷"]) expect(params(name, target, "m1", emoji).emoji, `${name} ${emoji}`).toBe(emoji);
+      expect(params(name, target, "m1", "--remove").remove).toBe(true);
+    }
+  });
+
   it("a required positional given as \"\" is the usage error a missing one is, before the profile opens, in every command", () => {
     expect(() => positionals(COMMANDS["chat show"], [""])).toThrow(/^Missing <chat>: ghostly chat show <chat>/);
     expect(() => positionals(COMMANDS["file accept"], ["", "f"])).toThrow(/^Missing <chat>/);
     expect(() => positionals(COMMANDS["group create"], ["", ""])).toThrow(/^Missing <name>/);
     // `chat rename <chat> ""` gives the chat back the contact's name, by design.
     expect(positionals(COMMANDS["chat rename"], ["abc", ""])).toEqual({ chat: "abc", name: "" });
+    expect(positionals(COMMANDS["chat rename"], ["abc"])).toEqual({ chat: "abc", name: undefined });
+    // So the usage line shows a `name...?` that may be left out as optional: `chat rename <chat> <name...>` read as required.
+    const shownRequired = Object.entries({ ...COMMANDS, ...TEXT_COMMANDS }).flatMap(([name, command]) => {
+      const last = command.args?.at(-1);
+      return last?.endsWith("...?") && command.usage.split(/\s+/).includes(`<${last.slice(0, -1)}>`) ? [name] : [];
+    });
+    expect(shownRequired).toEqual([]);
     // Before: 63 commands opened the profile, then answered bad_request "<param> is required" (exit 1).
     const sweep = Object.entries({ ...COMMANDS, ...TEXT_COMMANDS }).flatMap(([name, command]) => {
       // Every positional but a leading optional one (`[<chat>] <file>`) gets a word.
@@ -477,9 +497,11 @@ describe("the argument parser", () => {
     usage("file send", ["alice", "a.wav", "--voice", "--peaks", ""], `${peaks} ""`);
     usage("file send", ["alice", "a.wav", "--voice", "--peaks", new Array(129).fill(1).join(",")], `${peaks} "${new Array(129).fill(1).join(",")}"`);
     usage("file send", ["alice", "a.wav", "--peaks", "1,2"], "--peaks is a voice note's waveform: not without --voice");
-    expect(params("file send", ["alice", "a.wav", "--voice"])).toMatchObject({ voice: true, peaks: undefined });
-    expect(params("file send", ["alice", "a.wav", "--voice", "900000", "--peaks", "0,40,255"])).toMatchObject({ voice: 900000, peaks: ["0", "40", "255"] });
-    expect(params("file send", ["alice", "a.wav"])).toMatchObject({ voice: undefined, peaks: undefined });
+    // A file that is there: `file send` looks at it before the profile opens.
+    const sound = import.meta.filename;
+    expect(params("file send", ["alice", sound, "--voice"])).toMatchObject({ voice: true, peaks: undefined });
+    expect(params("file send", ["alice", sound, "--voice", "900000", "--peaks", "0,40,255"])).toMatchObject({ voice: 900000, peaks: ["0", "40", "255"] });
+    expect(params("file send", ["alice", sound])).toMatchObject({ voice: undefined, peaks: undefined });
     // Each of the three is enough for an update, and a code is taken as typed.
     expect(params("button update", ["alice", "m1", "--chosen", "yes"])).toMatchObject({ chosen: "yes", close: false });
     expect(params("button update", ["alice", "m1", "--close"])).toMatchObject({ close: true });
@@ -566,6 +588,20 @@ describe("errors", () => {
     expect(asCliError(engineError("mintFailedFaucet", mint)).toJSON()).toEqual({ code: "engine", message: "testnut.cashu.space could not give test coins right now: try again later. The mint said: internal error" });
     // One the table does not name stays the engine's, in its words.
     expect(asCliError(engineError("outcomeUnknown")).toJSON()).toEqual({ code: "engine", message: "Outcome unknown. Check the existing payment; do not send another." });
+  });
+
+  // Found in a bug hunt: `chat request bob 100 --method arkade` to a contact with a Cashu wallet only was `engine`, "Your
+  // contact has no Testnet Ark wallet", while one with no wallet at all is `refused` with its reason and the next step.
+  it("say a contact with no wallet of the way or network asked as a contact with no wallet: refused, its next step", () => {
+    const noWallet = (message: string) => asCliError(new Error(message)).toJSON();
+    expect(noWallet("Your contact has no Testnet Ark wallet")).toEqual({ code: "refused", message: "Your contact has no Testnet Ark wallet (on a CLI: ghostly wallet create arkade)", details: { reason: "contact_no_wallet" } });
+    expect(noWallet("Your contact has no Testnet on-chain Bitcoin wallet")).toEqual({ code: "refused", message: "Your contact has no Testnet on-chain Bitcoin wallet (on a CLI: ghostly wallet create bitcoin)", details: { reason: "contact_no_wallet" } });
+    expect(noWallet("Your contact has no Mainnet Cashu wallet")).toEqual({ code: "refused", message: "Your contact has no Mainnet Cashu wallet (on a CLI: ghostly wallet create cashu --network mainnet)", details: { reason: "contact_no_wallet" } });
+    for (const rail of ["USDT", "Fedimint", "Spark", "Lightning"]) expect(noWallet(`Your contact has no Testnet ${rail} wallet`).message, rail).toBe(`Your contact has no Testnet ${rail} wallet (on a CLI: ghostly wallet create ${rail.toLowerCase()})`);
+    // Bark runs in the app only: no command to give, the reason still.
+    expect(noWallet("Your contact has no Testnet Bark wallet")).toEqual({ code: "refused", message: "Your contact has no Testnet Bark wallet", details: { reason: "contact_no_wallet" } });
+    // A way of paying the engine does not name keeps its words and code.
+    expect(noWallet("Your contact has no Testnet Gold wallet").code).toBe("engine");
   });
 
   it("say a local path could not be opened as the person's path, not as the engine refusing", async () => {

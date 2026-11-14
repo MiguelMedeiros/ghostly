@@ -107,9 +107,10 @@ describe("a one-shot about one chat", { timeout: 180_000 }, () => {
   });
 
   it("leaves every chat unstarted, its history unread, for a read that needs none", () => {
-    for (const method of ["status", "profile.get", "settings.get", "status.get", "chat.list"]) expect(readsNoHistory(method), method).toBe(true);
+    for (const method of ["status", "profile.get", "settings.get", "status.get", "chat.list", "group.list", "group.get", "group.history",
+      "call.list", "service.list", "identity.list", "x401.credential.list", "app.served"]) expect(readsNoHistory(method), method).toBe(true);
     // A chat's own read restores the chat it names (`startNamedChats`); a read across chats may need what their histories say.
-    for (const method of ["chat.history", "file.list", "payment.list", "events.replay", "chat.send"]) expect(readsNoHistory(method), method).toBe(false);
+    for (const method of ["chat.history", "file.list", "payment.list", "wallet.list", "wallet.history", "saved.list", "events.replay", "chat.send"]) expect(readsNoHistory(method), method).toBe(false);
   });
 });
 
@@ -117,7 +118,14 @@ describe("a one-shot about one chat", { timeout: 180_000 }, () => {
  * A one-shot about one group that goes over its edges only (`group send`, `group edit`, `group react`, `group typing`)
  * leaves the saved 1:1 chats unstarted. It started them all: with 12 invites saved their publishes took the relay's
  * whole minute, the group's edge never came up behind them, and `group send --wait sent` and `group react` each timed
- * out after 60 s, exit 4, with nothing said. Dave's requests come to a relay of his own, as Bob's above.
+ * out after 60 s, exit 4, with nothing said. Nor does it start the edges of the other groups saved: with six more
+ * groups shared with Erin, each put its records and read hers, and one `group send` asked the relay about three times
+ * what the group alone does. Dave's requests come to a relay of his own, as Bob's above.
+ *
+ * Erin's daemon has no relay budget (`GHOSTLY_TEST_RELAY_REQUESTS_PER_MINUTE`): only Dave's requests are measured. With
+ * it, her seven edges to Dave all watched him once his daemon stopped, their reads shared the watch share (2 in 10 s,
+ * the key read longest ago first), and the edge the send's goodbye had just read read Dave's next offer last: the
+ * `group react` waited 28 to 52 s for an edge on one busy core, and past its 60 s on CI (exit 4).
  */
 describe("a one-shot about one group", { timeout: 300_000 }, () => {
   let daveRelay: Awaited<ReturnType<typeof relays>>[number], erinRelay: typeof daveRelay;
@@ -131,26 +139,30 @@ describe("a one-shot about one group", { timeout: 300_000 }, () => {
     [daveRelay, erinRelay] = await relays(2);
     dht = await hyperdhtTestnet();
     daveEnv = { GHOSTLY_PKARR_RELAYS: daveRelay.url, GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap };
-    erinEnv = { GHOSTLY_PKARR_RELAYS: erinRelay.url, GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap };
+    erinEnv = { GHOSTLY_PKARR_RELAYS: erinRelay.url, GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap, GHOSTLY_TEST_RELAY_REQUESTS_PER_MINUTE: "Infinity" };
     const erinDaemon = new Running(["--home", erin, "daemon"], erinEnv);
     const daveDaemon = new Running(["--home", dave, "daemon"], daveEnv);
     running.push(erinDaemon, daveDaemon);
     await Promise.all([erinDaemon, daveDaemon].map((d) => d.waitFor((l) => l.daemon === "ready")));
-    // Dave joins Erin's private group through its link, then makes twelve invites nobody takes, and stops.
-    group = ok(await ghostly(["--home", erin, "group", "create", "Crew", "--mesh"], { env: erinEnv })).group as string;
-    const link = ok(await ghostly(["--home", erin, "group", "link", group], { env: erinEnv })).link as string;
-    ok(await ghostly(["--home", dave, "group", "join", link], { env: daveEnv }));
-    for (let i = 0; ; i++) {
-      const shown = ok(await ghostly(["--home", dave, "group", "show", group], { env: daveEnv }));
-      const members = shown.members as { online: boolean }[];
-      if (shown.status === "active" && members.length === 2 && members.every((m) => m.online)) break;
-      if (i > 90) throw new Error(`Dave not in the group: ${JSON.stringify(shown)}`);
-      await new Promise((r) => setTimeout(r, 1000));
+    // Dave joins Erin's private group and six more of hers through their links, then makes twelve invites nobody
+    // takes, and stops.
+    for (const name of ["Crew", "One", "Two", "Three", "Four", "Five", "Six"]) {
+      const made = ok(await ghostly(["--home", erin, "group", "create", name, "--mesh"], { env: erinEnv })).group as string;
+      const link = ok(await ghostly(["--home", erin, "group", "link", made], { env: erinEnv })).link as string;
+      ok(await ghostly(["--home", dave, "group", "join", link], { env: daveEnv }));
+      for (let i = 0; ; i++) {
+        const shown = ok(await ghostly(["--home", dave, "group", "show", made], { env: daveEnv }));
+        const members = shown.members as { online: boolean }[];
+        if (shown.status === "active" && members.length === 2 && members.every((m) => m.online)) break;
+        if (i > 90) throw new Error(`Dave not in ${name}: ${JSON.stringify(shown)}`);
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      group ||= made;
     }
     for (let i = 0; i < 12; i++) ok(await ghostly(["--home", dave, "invite", "create", "--label", `unused${i}`], { env: daveEnv }));
     ok(await ghostly(["--home", dave, "daemon", "stop"], { env: daveEnv }));
     await daveDaemon.exited(20_000);
-  }, 180_000);
+  }, 300_000);
   afterAll(async () => {
     await Promise.all(running.map((r) => r.stop()));
     await dht?.destroy();
@@ -169,7 +181,8 @@ describe("a one-shot about one group", { timeout: 300_000 }, () => {
     expect(sent).toMatchObject({ group, sent: true });
     const react = await counted(["group", "react", group, sent.messageId as string, "👍", "--timeout", "60"]);
     expect(ok(react.result)).toMatchObject({ group, sent: true });
-    // 13 chats started asked the relay its whole 30 a minute and more; the group alone asks it 3 to 16 times.
+    // 13 chats started asked the relay its whole 30 a minute and more, the six other groups' edges 31 to 47 times; the
+    // group alone asks it 3 to 17 times.
     for (const [name, requests] of [["group send", send.requests], ["group react", react.requests]] as const) expect(requests, name).toBeLessThan(24);
   });
 

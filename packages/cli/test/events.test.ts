@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { EngineState, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import { EventHub, JOURNAL_KEEP_BYTES, JOURNAL_MAX_BYTES, SEEN_KEEP_MS, type GhostlyEvent } from "../src/events";
-import { toTurn } from "../src/listen";
+import { Allowlist, toTurn } from "../src/listen";
 import { turnRef } from "../src/turnRefs";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 // covers: headless.events, headless.typing, headless.files
@@ -68,6 +68,8 @@ describe("the event stream", () => {
     ]);
     expect(events[0]).toMatchObject({ type: "message.received", chat: "c1", message: { id: "new", from: "peer", text: "t new" } });
     expect(events[5]).toMatchObject({ live: true, transport: "hyperdht/1" });
+    // The contact's key goes with the removal: `listen --from <key>` can no longer ask the daemon for a chat that is gone.
+    expect(events[8]).toMatchObject({ type: "chat.removed", chat: "c1", peer: "peerc1" });
   });
 
   // The same invite joined again gives the same chat id, a group joined again keeps its id: the second creation and
@@ -233,6 +235,27 @@ describe("the event stream", () => {
       { type: "group.typing.stopped", group: "g1", member: "bo", kind: undefined, status: undefined },
     ]);
     expect(new Set(events.map((e) => e.id)).size).toBe(events.length);
+  });
+
+  it("says who joined and left a full community, without looking each member up in the other list (O(members²) a state)", async () => {
+    const { h, events } = await hub("group-members.jsonl");
+    const keys = Array.from({ length: 256 }, (_, i) => `member${String(i).padStart(3, "0")}`.padEnd(52, "x"));
+    const group = (members: string[]) => ({ id: "g1", status: "active", members: [...members].reverse().map((key) => ({ key })) });
+    const later = [...keys.slice(0, 100), ...keys.slice(102), "a-newcomer".padEnd(52, "x"), "zz-newcomer".padEnd(52, "x")];
+    h.baseline(state([], [group(keys)]), new Map());
+    // A full member list's lookups, counted: the `includes` diff made 512 of them each state.
+    const includes = vi.spyOn(Array.prototype, "includes");
+    try {
+      for (let i = 0; i < 20; i++) h.sink.post({ kind: "state", state: state([], [group(keys)]) });
+      h.sink.post({ kind: "state", state: state([], [group(later)]) });
+      h.sink.post({ kind: "state", state: state([], [group(later)]) });
+      expect(includes.mock.contexts.filter((list) => (list as unknown[]).length >= 256)).toHaveLength(0);
+    } finally {
+      includes.mockRestore();
+    }
+    expect(events.map(({ type, joined, left }) => ({ type, joined, left }))).toEqual([
+      { type: "group.members", joined: ["a-newcomer".padEnd(52, "x"), "zz-newcomer".padEnd(52, "x")], left: [keys[100], keys[101]] },
+    ]);
   });
 
   it("typing is live only: a contact who keeps changing it pushes no other chat's events out of the journal", async () => {
@@ -407,6 +430,75 @@ describe("the event stream", () => {
     // Every row is back under its own chat and message: nothing is reported twice, a delivery change and a new message are.
     later.h.baseline(state([link("c1"), link("c2")]), new Map([["c1", history("c1")], ["c2", [...history("c2").slice(0, 1_999), message("c2", "m1999", { sender: "me", delivery: "failed" }), message("c2", "fresh")]]]));
     expect(later.events.map((e) => e.id)).toEqual(["message.delivery:c2:m1999:failed", "message.received:c2:fresh"]);
+  });
+
+  it("a one-shot that catches chats up one by one tells a rename and a transfer's step with no chat's notes read", async () => {
+    const files = (entries: Record<string, unknown>, label?: string) => ({ ...state([link("c1", label ? { label } : {})]), transfers: entries }) as unknown as EngineState;
+    const queued = { "c1-in-v": { state: "transferring", transferred: 0, size: 900, direction: "in", stage: "queued" } };
+    const known = [message("c1", "m1"), message("c1", "peer_v", { file: { id: "c1-in-v", name: "a", size: 900, mime: "text/plain" } })];
+    const first = await hub("unread.jsonl");
+    first.h.baseline(state([link("c1")]), new Map([["c1", known]]));
+    first.h.release();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const proto = Object.getPrototypeOf(first.h["db"].transaction("seen").objectStore("seen")) as IDBObjectStore;
+    const reads = vi.spyOn(proto, "getAll");
+    const h = new EventHub(join(dir, "unread.jsonl"), () => 1000, "unread.jsonl");
+    await h.open({ seen: false });
+    expect(await h.loadOwnNotes()).toBe(true);
+    const events: GhostlyEvent[] = [];
+    h.onEvent((e) => events.push(e));
+    const newest = vi.fn(async () => null);
+    h.perChat(files(queued), { newest, whole: async () => known, files: async () => known });
+    // A rename (a change of this device only), then a transfer that moves: each told, the file's message named from the
+    // history's file rows.
+    h.sink.post({ kind: "state", state: files(queued, "bot") });
+    h.sink.post({ kind: "state", state: files({ "c1-in-v": { ...queued["c1-in-v"], stage: "downloading" } }, "bot") });
+    await vi.waitFor(() => expect(events.map((e) => [e.type, e.file ?? e.name, e.messageId])).toEqual([["chat.renamed", "bot", undefined], ["file.stage", "c1-in-v", "peer_v"]]));
+    expect(reads.mock.calls.map(([range]) => String((range as IDBKeyRange).lower[0]))).toEqual(["format:", "files:", "said:"]);
+    expect(newest).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
+    h.release();
+  });
+
+  it("an online one-shot reads the notes of a chat only when its history's first event comes, and catches it up then", async () => {
+    const one = [message("c1", "m1"), message("c1", "m2")], two = [message("c2", "n1")];
+    const first = await hub("perchat.jsonl");
+    first.h.baseline(state([link("c1"), link("c2")]), new Map([["c1", one], ["c2", two]]));
+    first.h.release();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const proto = Object.getPrototypeOf(first.h["db"].transaction("seen").objectStore("seen")) as IDBObjectStore;
+    const reads = vi.spyOn(proto, "getAll");
+    // The chats whose notes were read: none for the whole set.
+    const read = () => reads.mock.calls.map(([range]) => (range ? String((range as IDBKeyRange).lower[0]) : "all"));
+    const h = new EventHub(join(dir, "perchat.jsonl"), () => 1000, "perchat.jsonl");
+    await h.open({ seen: false });
+    expect(await h.loadOwnNotes()).toBe(true);
+    const events: GhostlyEvent[] = [];
+    h.onEvent((e) => events.push(e));
+    const newest = vi.fn(async (chat: string) => (chat === "c1" ? { messages: one, more: true } : null));
+    const whole = vi.fn(async () => [...two, message("c2", "n2")]);
+    h.perChat(state([link("c1"), link("c2")]), { newest, whole, files: async () => [] });
+    expect(read()).toEqual(["format:", "files:", "said:"]);
+
+    // c1's page is in step: only what changes is told. c2 has no page (its history changed before): read whole, and what
+    // came while nothing ran is told before what comes now.
+    h.sink.post({ kind: "message-changes", linkId: "c1", messages: [message("c1", "m3")], deleted: ["m1"] });
+    h.sink.post({ kind: "message-changes", linkId: "c2", messages: [message("c2", "n3")], deleted: [] });
+    h.sink.post({ kind: "message-changes", linkId: "c1", messages: [message("c1", "m4")], deleted: [] });
+    expect(events).toEqual([]);
+    await h.caughtUp();
+    expect(events.map((e) => e.id)).toEqual(["message.received:c1:m3", "message.deleted:c1:m1", "message.received:c1:m4", "message.received:c2:n2", "message.received:c2:n3"]);
+    expect(read().slice(3).sort()).toEqual(["c1", "c2", "reactions:c1", "reactions:c2"]);
+    expect([newest.mock.calls.length, whole.mock.calls.length]).toEqual([2, 1]);
+    vi.restoreAllMocks();
+    h.release();
+
+    // What it noted is the next start's: nothing again.
+    const next = await hub("perchat.jsonl");
+    next.h.baseline(state([link("c1"), link("c2")]), new Map([["c1", [message("c1", "m2"), message("c1", "m3"), message("c1", "m4")]], ["c2", [...two, message("c2", "n2"), message("c2", "n3")]]]));
+    expect(next.events).toEqual([]);
   });
 
   it("says when the journal no longer holds what a listener asks for", async () => {
@@ -1000,6 +1092,37 @@ describe("the event stream", () => {
       vi.advanceTimersByTime(2_000);
       expect(events).toMatchObject([{ type: "file.offered", file: "c1-in-z", chat: "c1", messageId: null, room: 100 }]);
     });
+  });
+
+  // Found in a bug hunt: `listen --group` passed a request to the whole group (its record names the group) and dropped
+  // every payment that went over a member's edge or a community member's link: who paid it, a member's request to me.
+  it("a group's payment names its group, whichever link it went over, and so passes listen --group", async () => {
+    const { h, events } = await hub("group-payments.jsonl");
+    const mesh = "g1", community = "Cmty0123456789abcdefgh", bo = "b".repeat(52);
+    const groups = [{ id: mesh, members: [{ key: "mekey", me: true }, { key: "anakey", edge: { linkId: "edge-ana", state: "open" } }] }, { id: community, members: [] }];
+    h.baseline({ ...state([], groups), payments: {} } as unknown as EngineState, new Map());
+    const pay = (id: string, linkId: string, kind: string, direction: string, fields: Record<string, unknown> = {}) =>
+      ({ id, linkId, kind, direction, amount: 21, unit: "sat", state: "pending", createdAt: 5, ...fields });
+    const payments = {
+      // Mine, to the whole group; Ana paying it over her edge; Ana's request to the group as it came to me; Bo paying
+      // in the community; a plain chat's.
+      r1: pay("r1", `group:${mesh}`, "request", "out", { group: mesh }),
+      p1: pay("p1", "edge-ana", "payment", "in", { requestId: "r1", state: "settled" }),
+      r2: pay("r2", "edge-ana", "request", "in"),
+      p2: pay("p2", `cpay:${community}:${bo}`, "payment", "in", { state: "settled" }),
+      p3: pay("p3", "c1", "payment", "in", { state: "settled" }),
+    };
+    h.sink.post({ kind: "state", state: { ...state([], groups), payments } as unknown as EngineState });
+    const created = events.filter((e) => e.type === "payment.created");
+    expect(created.map((e) => [(e.payment as { id: string }).id, (e.payment as { group?: string }).group ?? null, e.chat]))
+      .toEqual([["r1", mesh, `group:${mesh}`], ["p1", mesh, "edge-ana"], ["r2", mesh, "edge-ana"], ["p2", community, `cpay:${community}:${bo}`], ["p3", null, "c1"]]);
+    const passes = async (groupIds: string[]) => {
+      const allow = new Allowlist(new Set(), new Set(), new Set(groupIds), async () => null), ids: string[] = [];
+      for (const e of created) if (await allow.allows(e)) ids.push((e.payment as { id: string }).id);
+      return ids;
+    };
+    expect(await passes([mesh])).toEqual(["r1", "p1", "r2"]);
+    expect(await passes([community])).toEqual(["p2"]);
   });
 });
 

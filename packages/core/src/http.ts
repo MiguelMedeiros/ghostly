@@ -91,12 +91,14 @@ export function resolveTargetUrl(target: LocalTarget, path: string): string | nu
   if (!path.startsWith("/") || path.startsWith("//")) return null;
   for (const char of path) {
     const code = char.codePointAt(0) ?? 0;
-    if (code <= 32 || code === 127 || char === "\\") return null;
+    if (code <= 32 || code === 127) return null;
   }
-  // Encoded separators survive URL normalization here but not in every server:
-  // one that decodes `%2f` before routing would take `/app/..%2fadmin` to `/admin`.
   const queryAt = path.indexOf("?");
   const pathPart = queryAt === -1 ? path : path.slice(0, queryAt);
+  // Some servers read `\` in the path as `/`. In the query a browser's fetch leaves it raw (`?path=C:\x`), so it passes.
+  if (pathPart.includes("\\")) return null;
+  // Encoded separators survive URL normalization here but not in every server:
+  // one that decodes `%2f` before routing would take `/app/..%2fadmin` to `/admin`.
   if (/%(2f|5c|2e)/i.test(pathPart)) return null;
   if (pathPart.split("/").some(climbsOut)) return null;
   let url: URL;
@@ -187,7 +189,8 @@ export function sanitizeRequestHeaders(headers: HeaderList): HeaderList {
   });
 }
 
-export function sanitizeResponseHeaders(headers: HeaderList, target: LocalTarget): HeaderList {
+/** `from`: the local URL of the request answered, the one a relative `Location` is read against. */
+export function sanitizeResponseHeaders(headers: HeaderList, target: LocalTarget, from?: string): HeaderList {
   const out: HeaderList = [];
   for (const [name, value] of headers) {
     const lower = name.toLowerCase();
@@ -195,7 +198,7 @@ export function sanitizeResponseHeaders(headers: HeaderList, target: LocalTarget
     if (HOP_BY_HOP.has(lower) || DROPPED_RESPONSE_HEADERS.has(lower)) continue;
     if (lower === "location" || lower === "content-location") {
       // Off-target locations are dropped, never disclosed.
-      const location = relativizeLocation(value, target);
+      const location = relativizeLocation(value, target, from);
       if (location !== null) out.push([name, location]);
     } else if (lower === "set-cookie") {
       // The cookie belongs to the virtual origin on the client, not to localhost.
@@ -314,12 +317,14 @@ export function withViewerPolicy(headers: HeaderList, relayOnly = false): Header
 /**
  * Turns `http://localhost:3400/base/x` into `/x` so the client never learns or
  * follows the local address. Null when the location is not on the target origin
- * and under its base path.
+ * and under its base path. A relative one (`edit`, `?page=2`, `../x`) is read
+ * against `from`, the local URL of the request it answers, as a browser reads it;
+ * without one, against the base path.
  */
-export function relativizeLocation(location: string, target: LocalTarget): string | null {
+export function relativizeLocation(location: string, target: LocalTarget, from?: string): string | null {
   let url: URL;
   try {
-    url = new URL(location, `${target.origin}${target.basePath}/`);
+    url = new URL(location, from ?? `${target.origin}${target.basePath}/`);
   } catch {
     return null;
   }
@@ -334,10 +339,10 @@ export function relativizeLocation(location: string, target: LocalTarget): strin
   return `${path}${url.search}${url.hash}`;
 }
 
-function isRedirectBlocked(response: LocalResponse, target: LocalTarget): boolean {
+function isRedirectBlocked(response: LocalResponse, target: LocalTarget, from: string): boolean {
   if (response.status < 300 || response.status > 399) return false;
   const location = response.headers.find(([name]) => name.toLowerCase() === "location");
-  return location !== undefined && relativizeLocation(location[1], target) === null;
+  return location !== undefined && relativizeLocation(location[1], target, from) === null;
 }
 
 // ---------------------------------------------------------------------------
@@ -347,6 +352,12 @@ function isRedirectBlocked(response: LocalResponse, target: LocalTarget): boolea
 export interface HostedHttpService {
   id: string;
   target: LocalTarget;
+  /**
+   * Aborts once this peer may no longer reach the service (stopped, removed,
+   * or the contact taken off its list): the requests still open are reset, not
+   * answered.
+   */
+  revoked?: AbortSignal;
 }
 
 export interface LocalRequest {
@@ -398,6 +409,8 @@ export class HttpHost {
   private readonly live = new Set<HostStream>();
   /** Body bytes of the streams in `live`: a peer cannot make the host hold more than `maxHostBodyBytesPerPeer`. */
   private heldBodyBytes = 0;
+  /** One listener per `revoked` signal of the open streams, not one per stream: a page opens dozens at once. */
+  private readonly revokedListeners = new Map<AbortSignal, () => void>();
 
   constructor(
     private readonly channel: FrameChannel,
@@ -414,7 +427,7 @@ export class HttpHost {
 
     const method = frame.m.toUpperCase();
     const service = this.getService(frame.s);
-    if (!service) return this.fail(frame.id, 404, "unknown-service", "This peer does not share that service.");
+    if (!service || service.revoked?.aborted) return this.fail(frame.id, 404, "unknown-service", "This peer does not share that service.");
     if (!ALLOWED_METHODS.has(method)) return this.fail(frame.id, 405, "method-not-allowed", "Method not allowed.");
     if (this.live.size >= LIMITS.maxConcurrentRequestsPerPeer) {
       return this.fail(frame.id, 503, "busy", "Too many concurrent requests.");
@@ -434,6 +447,7 @@ export class HttpHost {
     };
     this.streams.set(frame.id, stream);
     this.live.add(stream);
+    if (service.revoked) this.watchRevoked(service.revoked);
 
     if (frame.b && !BODYLESS_METHODS.has(method)) this.watchPace(stream);
     else void this.run(stream);
@@ -490,6 +504,31 @@ export class HttpHost {
     stream.abort.abort();
     if (this.isCurrent(stream)) this.streams.delete(stream.frame.id);
     if (!stream.started) this.release(stream);
+    const revoked = stream.service.revoked;
+    const listener = revoked && this.revokedListeners.get(revoked);
+    if (listener && ![...this.streams.values()].some((s) => s.service.revoked === revoked)) {
+      revoked.removeEventListener("abort", listener);
+      this.revokedListeners.delete(revoked);
+    }
+  }
+
+  /** An answer still on its way would reach someone the app is no longer shared with: those streams are reset. */
+  private watchRevoked(revoked: AbortSignal): void {
+    if (this.revokedListeners.has(revoked)) return;
+    const listener = () => {
+      this.revokedListeners.delete(revoked);
+      for (const stream of [...this.streams.values()]) {
+        if (stream.service.revoked !== revoked) continue;
+        this.end(stream);
+        try {
+          this.channel.send(encodeControl({ t: "rst", id: stream.frame.id, d: "s", e: "The app is no longer shared with you." }));
+        } catch {
+          // channel already closed
+        }
+      }
+    };
+    this.revokedListeners.set(revoked, listener);
+    revoked.addEventListener("abort", listener, { once: true });
   }
 
   /** The stream no longer counts toward the limits: its body is dropped, or its local fetch has settled. */
@@ -556,7 +595,7 @@ export class HttpHost {
       // Redirects reach the client as they are, with a relative Location, and
       // only when they stay on the target. Anything else is neither followed
       // nor disclosed.
-      if (isRedirectBlocked(response, service.target)) {
+      if (isRedirectBlocked(response, service.target, stream.url)) {
         this.end(stream);
         return this.fail(frame.id, 502, "redirect-blocked", "The service redirected outside of the shared target.");
       }
@@ -566,7 +605,7 @@ export class HttpHost {
         t: "res",
         id: frame.id,
         st: response.status,
-        h: sanitizeResponseHeaders(response.headers, service.target),
+        h: sanitizeResponseHeaders(response.headers, service.target, stream.url),
         b: hasBody,
       };
       this.channel.send(encodeControl(res));
@@ -684,6 +723,7 @@ interface ClientStream {
   reject: (error: Error) => void;
   headersTimer?: ReturnType<typeof setTimeout>;
   idleTimer?: ReturnType<typeof setTimeout>;
+  unreadCheck?: ReturnType<typeof setTimeout>;
   queue: BodyQueue | null;
   received: number;
   maxBytes: number;
@@ -694,9 +734,18 @@ class BodyQueue implements AsyncIterable<Uint8Array> {
   private done = false;
   private error: Error | null = null;
   private wake: (() => void) | null = null;
+  /** Bytes received and not yet read. */
+  held = 0;
+  /** Bytes read so far, all told. */
+  taken = 0;
+
+  /** `all`: what every queue of the same client holds, kept with this one's. */
+  constructor(private readonly all: { held: number }) {}
 
   push(chunk: Uint8Array): void {
     this.chunks.push(chunk);
+    this.held += chunk.length;
+    this.all.held += chunk.length;
     this.wake?.();
   }
 
@@ -707,9 +756,25 @@ class BodyQueue implements AsyncIterable<Uint8Array> {
     this.wake?.();
   }
 
+  /** Lets go of what was not read yet, ended or not: the reader gets `error` in its place. */
+  drop(error: Error): void {
+    this.chunks = [];
+    this.all.held -= this.held;
+    this.held = 0;
+    this.done = true;
+    this.error = error;
+    this.wake?.();
+  }
+
   async *[Symbol.asyncIterator](): AsyncIterator<Uint8Array> {
     for (;;) {
-      while (this.chunks.length > 0) yield this.chunks.shift()!;
+      while (this.chunks.length > 0) {
+        const chunk = this.chunks.shift()!;
+        this.held -= chunk.length;
+        this.all.held -= chunk.length;
+        this.taken += chunk.length;
+        yield chunk;
+      }
       if (this.error) throw this.error;
       if (this.done) return;
       await new Promise<void>((resolve) => (this.wake = resolve));
@@ -725,6 +790,8 @@ export class HttpClient {
   private waitingBytes = 0;
   private inFlight = 0;
   private closed = false;
+  /** Response-body bytes all this client's responses hold before their readers took them. */
+  private readonly unread = { held: 0 };
 
   constructor(private readonly channel: FrameChannel) {}
 
@@ -812,7 +879,7 @@ export class HttpClient {
     if (!stream || stream.queue) return;
     clearTimeout(stream.headersTimer);
 
-    const queue = new BodyQueue();
+    const queue = new BodyQueue(this.unread);
     stream.queue = queue;
     if (frame.b) this.armIdleTimer(frame.id, stream);
     else this.finish(frame.id);
@@ -838,8 +905,36 @@ export class HttpClient {
       return this.abort(chunk.id, new GhostlyHttpError("response-too-large", "Response body too large"));
     }
     if (chunk.payload.length > 0) stream.queue.push(chunk.payload.slice());
+    if (stream.queue.held > LIMITS.maxUnreadResponseBytes) {
+      // Many responses read slowly add up: past the client's bound, one over its own is let go without a turn.
+      if (this.unread.held > LIMITS.maxClientUnreadResponseBytes) return this.dropUnread(chunk.id, stream.queue);
+      this.checkUnread(chunk.id, stream, stream.queue);
+    }
     if (chunk.end) this.finish(chunk.id);
     else this.armIdleTimer(chunk.id, stream);
+  }
+
+  /**
+   * Nothing tells the peer to slow down, and its last chunk frees the slot: a reader that stalls (a contact's page that
+   * never reads what it fetched) would have the whole body held here, one per request it leaves unread. Past the bound
+   * the reader gets `unreadStallMs`, as a link that hands over many chunks at once leaves it no turn: one that took
+   * something in it is looked at again, one that took nothing has the response reset and what it held let go.
+   */
+  private checkUnread(id: number, stream: ClientStream, queue: BodyQueue): void {
+    if (stream.unreadCheck) return;
+    const taken = queue.taken;
+    stream.unreadCheck = setTimeout(() => {
+      stream.unreadCheck = undefined;
+      if (queue.held <= LIMITS.maxUnreadResponseBytes) return;
+      if (queue.taken > taken) return this.checkUnread(id, stream, queue);
+      this.dropUnread(id, queue);
+    }, LIMITS.unreadStallMs);
+  }
+
+  private dropUnread(id: number, queue: BodyQueue): void {
+    const error = new GhostlyHttpError("unread", "Response body not read in time");
+    queue.drop(error);
+    this.abort(id, error);
   }
 
   handleReset(frame: ResetFrame): void {

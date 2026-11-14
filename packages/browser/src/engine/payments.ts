@@ -1,5 +1,5 @@
 import type { UsdtWallet } from "./paymentAdapters/usdtWallet";
-import { EngineError, RateWindow, WALLET_NETWORKS, assertTokenUnits, decodeBolt11, engineError, formatPaymentAmount, fromBase64Url, sparkInvoiceDetails, validatePaymentTarget, walletNetworkOf, type SparkNetwork, type PaymentMethodName, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
+import { EngineError, RateWindow, WALLET_NETWORKS, assertTokenUnits, decodeBolt11, engineError, formatPaymentAmount, fromBase64Url, hasVisible, sparkInvoiceDetails, stripHidden, validatePaymentTarget, walletNetworkOf, type SparkNetwork, type PaymentMethodName, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { eachNetwork, perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
 import { assertConfirmedReal, crossNetwork, paymentNetwork } from "./paymentAdapters/walletInstances";
 import { paymentAlias, paymentWireId } from "../shared/paymentIds";
@@ -52,6 +52,25 @@ const PAYMENTS_PER_MINUTE = 10;
 const PAYMENTS_BUSY = "Too many payments at once: send it again in a minute";
 /** Refusal lines one chat gets in an hour; past it the contact is still told, and the chat stays as it is. */
 const REFUSAL_LINES_PER_HOUR = 5;
+
+/** The longest reason of a contact's kept: no wallet's reason is longer, and the app reads none past it (errorText `readable`). */
+const CONTACT_REASON_MAX = 120;
+/** An address in a reason: a link or URI ("https://…", "lightning:…"), a "www.", a host ("evil.example/…", any dot). */
+const ADDRESS = /[a-z][a-z0-9+.-]*:(?:\/\/|[a-z0-9])|\bwww[.．。｡]|[\p{L}\p{N}-][.．。｡]\p{L}{2,}/iu;
+/** The one reason of a wallet's that names a host: our own ecash's mint, which the contact does not take (wallet.ts). */
+const MINT_REFUSED = /^Ecash from [a-z0-9-]+(?:\.[a-z0-9-]+)+ is not accepted$/i;
+
+/**
+ * A contact's reason for a payment result (`pay-res` `err`), as this app keeps it; undefined for the app's own words.
+ * It is said after the app's words in the payment's state line and its chat line, so it gets a display text's check:
+ * invisible and direction characters out, and nothing that names an address (but a mint's host in `MINT_REFUSED`) or
+ * is longer than a wallet's reason.
+ */
+export function contactReason(error: string | undefined): string | undefined {
+  if (!error) return undefined;
+  const reason = stripHidden(error.replace(/\s+/g, " ")).replace(/ {2,}/g, " ").trim();
+  return hasVisible(reason) && reason.length <= CONTACT_REASON_MAX && (MINT_REFUSED.test(reason) || !ADDRESS.test(reason)) ? reason : undefined;
+}
 
 /**
  * "I paid your invoice" (`sayInvoicePaid`) that has not reached the contact's app yet, kept in `STORES.settings` under
@@ -343,15 +362,18 @@ export const RECEIPT_FRESH_MS = 7 * 86_400_000;
 /** What a contact reads about a request of ours closed for good (`close`), when it closes and each time their chat opens again. */
 const CLOSED_TOLD = "your contact removed the wallet it was paid to";
 /**
- * How often a wallet's own refresh asks about an open Ark request (at its server's indexer) or a contact's pending Ark
- * or USDT receipt (at the server or the chain) that has no answer yet (`AskBackoff`): at the wallet's pace while the
- * request is new (`INVOICE_PACE.fastForMs`) or the transaction is seen confirming, then twice as late after each ask
- * with nothing, up to `RECEIPT_ASK_CAP_MS`. Asked at every refresh, 5 open Ark requests cost 30 indexer reads a
- * minute and a receipt whose transaction never lands 3 RPC calls every 8 s, for as long as the app ran.
+ * How often a wallet's own refresh asks about an open Ark, Bark or Spark request (at its server's indexer, after a sync
+ * with its server or Spark's operators) or a contact's pending Ark or USDT receipt (at the server or the chain) that
+ * has no answer yet (`AskBackoff`): at the wallet's pace while the request is new (`INVOICE_PACE.fastForMs`) or the
+ * transaction is seen confirming, then twice as late after each ask with nothing, up to `RECEIPT_ASK_CAP_MS`. Asked at
+ * every refresh, 5 open Ark requests cost 30 indexer reads a minute, one open Bark or Spark request a server sync every
+ * 10 s, and a receipt whose transaction never lands 3 RPC calls every 8 s, for as long as the app ran.
  * A refresh that read new money asks about every one at once, as do a contact's receipt or check and a wallet's removal,
  * so money that lands late, an expired request's included, is still seen.
  */
 export const ARK_ASK_MS = 10_000;
+export const BARK_ASK_MS = 10_000;
+export const SPARK_ASK_MS = 10_000;
 export const USDT_ASK_MS = 8_000;
 export const RECEIPT_ASK_CAP_MS = INVOICE_PACE.missedCapMs;
 
@@ -374,9 +396,13 @@ export class PaymentDesk {
   /** Pending USDT receipts (by payment id) whose transaction the chain does not show settled yet. */
   private readonly usdtAsk=new AskBackoff(USDT_ASK_MS,RECEIPT_ASK_CAP_MS);
   private checkingBark=false;
+  /** Open Bark requests (by request id) asked with nothing found yet. */
+  private readonly barkAsk=new AskBackoff(BARK_ASK_MS,RECEIPT_ASK_CAP_MS);
   private checkingBitcoin=false;
   private readonly redeeming = new Map<string, Promise<void>>();
   private checkingSpark=false;
+  /** Open Spark requests (by request id) asked with nothing found yet. */
+  private readonly sparkAsk=new AskBackoff(SPARK_ASK_MS,RECEIPT_ASK_CAP_MS);
 
   /** Each network's wallets: a request, a payment and a receipt all go through the wallet of their own network. */
   private readonly ark?: PerNetwork<ArkWallet>;
@@ -644,6 +670,12 @@ export class PaymentDesk {
   /** This link may pay this request of ours: its own chat, or, for a request to a group, any edge of that group. */
   private owns(request: StoredPayment, linkId: string): boolean {
     return request.linkId === linkId || (!!request.group && this.host.groupOf?.(linkId) === request.group);
+  }
+
+  /** The request a contact's payment names, kept only when this link may pay it: ecash naming one of our requests from elsewhere is a plain payment. */
+  private paysRequest(requestId: string | undefined, linkId: string): string | undefined {
+    const request = requestId ? this.payments.get(requestId) : undefined;
+    return request?.kind === "request" && request.direction === "out" && !this.owns(request, linkId) ? undefined : requestId;
   }
 
   /**
@@ -1129,7 +1161,7 @@ export class PaymentDesk {
         state: "settled",
         createdAt: payment.timestamp,
         mint,
-        requestId: payment.requestId,
+        requestId: this.paysRequest(payment.requestId, linkId),
       });
       // Ecash from the public test mint is worthless and is taken in; a real mint the user did not pick is refused.
       const { amount, mint } = await this.wallet.receiveToken(token, "ecash-in", payment.memo, { addTestMint: true, payment: record });
@@ -1213,7 +1245,9 @@ export class PaymentDesk {
     await this.refusalLine(record.linkId, `peer_${record.createdAt}_refused`, refusedRow({ amount: record.amount, network: record.mint ? mintNetwork(record.mint) : undefined, reason }), record.createdAt);
   }
 
-  async onPaymentResult(linkId: string, result: PaymentResult): Promise<void> {
+  async onPaymentResult(linkId: string, said: PaymentResult): Promise<void> {
+    // The contact's reason, kept only as `contactReason` leaves it: without one the app's own words below are said.
+    const result: PaymentResult = { ...said, error: contactReason(said.error) };
     const payment = this.find(linkId, result.id);
     if (payment?.target?.method === "fedimint" && payment.linkId === linkId && payment.direction === "out" && payment.kind === "payment") {
       if (payment.state !== "pending") return;
@@ -1565,7 +1599,7 @@ export class PaymentDesk {
   private async receiveArk(linkId:string,payment:Payment):Promise<void> {
     if(isCheck(payment.endpoint[1])){await this.receiveCheck(linkId,payment);return;}
     const link=this.host.getLink(linkId),request=payment.requestId ? this.payments.get(payment.requestId) : undefined;
-    if(!link?.supportsArkPayments || !request?.target || request.linkId!==linkId || request.direction!=="out" || request.kind!=="request")return;
+    if(!link?.supportsArkPayments || request?.target?.method!=="arkade" || request.linkId!==linkId || request.direction!=="out" || request.kind!=="request")return;
     const existing=this.payments.get(payment.id);
     if(existing && (existing.linkId!==linkId || existing.direction!=="in" || existing.requestId!==request.id))return;
     // A receipt already recorded, sent again (under a new time): its first frame said it; a paid one is answered again.
@@ -1658,13 +1692,18 @@ export class PaymentDesk {
   /**
    * A Bark request is paid when this wallet received, on the address made for it, at least the amount asked,
    * after asking. It settles with or without the contact's receipt, and one receive pays one request.
+   * `paced` (a wallet refresh that read nothing new): only the requests whose turn came (`barkAsk`), and no sync at
+   * all when none did; otherwise every one now.
    */
-  async reconcileBarkReceipts():Promise<void> {
+  async reconcileBarkReceipts(paced=false):Promise<void> {
     if(this.checkingBark || !this.bark || !distinct(this.bark).some(w=>w.adapter))return;
     this.checkingBark=true;
     try {
-      const open=[...this.payments.values()].filter(r=>r.kind==="request" && r.direction==="out" && r.state==="pending" && r.target?.method==="bark");
-      const bark=this.bark;
+      const bark=this.bark,now=Date.now();
+      const all=[...this.payments.values()].filter(r=>r.kind==="request" && r.direction==="out" && r.state==="pending" && r.target?.method==="bark");
+      this.barkAsk.keepOnly(new Set(all.map(r=>r.id)));
+      // A request whose wallet cannot be asked (another server, none open) is not asked about, nor its wallet synced.
+      const open=all.filter(r=>{const adapter=bark[walletNetworkOf(r.target!.network)].adapter;return !!adapter && r.target!.provider===adapter.config.provider && r.target!.network===adapter.config.network && (!paced || this.barkAsk.due(r.id,now));});
       // Each wallet's history is read once for all its open requests, after one sync.
       const receipts=new Map<BarkAdapter,BarkReceipts|undefined>();
       for(const wallet of new Set(open.map(r=>bark[walletNetworkOf(r.target!.network)]))) {
@@ -1672,13 +1711,16 @@ export class PaymentDesk {
         await wallet.adapter.sync().catch(()=>{});
         receipts.set(wallet.adapter,await wallet.adapter.receipts().catch(()=>undefined));
       }
+      // Money that paid one request pays no other: every request's txid, read once for the pass.
+      const claimed=new Set([...this.payments.values()].filter(p=>p.target?.method==="bark" && p.kind==="request" && p.txid).map(p=>p.txid!));
       for(const request of open) {
         if(request.kind!=="request" || request.direction!=="out" || request.state!=="pending" || request.target?.method!=="bark")continue;
         const adapter=this.bark[walletNetworkOf(request.target.network)].adapter;
         if(!adapter || request.target.provider!==adapter.config.provider || request.target.network!==adapter.config.network)continue;
-        const claimed=new Set([...this.payments.values()].filter(p=>p.target?.method==="bark" && p.kind==="request" && p.txid).map(p=>p.txid!));
         const txid=receipts.get(adapter)?.(request.target.address,request.amount,request.createdAt,claimed);
-        if(!txid)continue;
+        if(!txid){this.barkAsk.missed(request.id,Date.now(),Date.now()<request.createdAt+INVOICE_PACE.fastForMs);continue;}
+        this.barkAsk.forget(request.id);
+        claimed.add(txid);
         await this.settleRequest(request,{txid});
         for(const payment of this.payments.values())if(payment.kind==="payment" && payment.direction==="in" && payment.requestId===request.id && payment.state==="pending")await this.save({...payment,state:"settled",txid});
       }
@@ -1819,7 +1861,7 @@ export class PaymentDesk {
     // Before anything is written down or the federation asked (reading the notes asks no one): not redeemed, the contact takes them back.
     if (!this.roomForPayment(linkId)) { link.sendPaymentResult({ id: payment.id, ok: false, error: PAYMENTS_BUSY }); return; }
     // The federation's network, read as the chat line reads it (unknown is test sats): every reader of the record says the same.
-    await this.save({ id: payment.id, linkId, kind: "payment", direction: "in", amount, unit: UNIT, memo: payment.memo, state: "pending", createdAt: payment.timestamp, requestId: payment.requestId, federation: found.federation, token: notes, notesDigest: digest, network: fedimintNetwork(network) });
+    await this.save({ id: payment.id, linkId, kind: "payment", direction: "in", amount, unit: UNIT, memo: payment.memo, state: "pending", createdAt: payment.timestamp, requestId: this.paysRequest(payment.requestId, linkId), federation: found.federation, token: notes, notesDigest: digest, network: fedimintNetwork(network) });
     await this.finishRedeem(this.payments.get(payment.id)!);
   }
 
@@ -1918,23 +1960,32 @@ export class PaymentDesk {
   /**
    * A Spark request is paid when this wallet completed a receive on the invoice made for it, of at least the amount
    * asked. It settles with or without the contact's receipt, and one transfer pays one request.
+   * `paced` (a wallet refresh that read nothing new): only the requests whose turn came (`sparkAsk`), and no sync at
+   * all when none did; otherwise every one now.
    */
-  async reconcileSparkReceipts():Promise<void> {
+  async reconcileSparkReceipts(paced=false):Promise<void> {
     const spark=this.spark;
     if(this.checkingSpark || !spark || !distinct(spark).some(s=>s.ready()))return;
     this.checkingSpark=true;
     try {
-      const open=[...this.payments.values()].filter(r=>r.kind==="request" && r.direction==="out" && r.state==="pending" && r.target?.method==="spark");
+      const now=Date.now();
+      const all=[...this.payments.values()].filter(r=>r.kind==="request" && r.direction==="out" && r.state==="pending" && r.target?.method==="spark");
+      this.sparkAsk.keepOnly(new Set(all.map(r=>r.id)));
+      // A request whose wallet is not ready is not asked about, nor its wallet synced.
+      const open=all.filter(r=>spark[walletNetworkOf(r.target!.network)].ready() && (!paced || this.sparkAsk.due(r.id,now)));
       const networks=new Set(open.map(r=>walletNetworkOf(r.target!.network)));
       for(const network of networks)if(spark[network].ready())await spark[network].sync().catch(()=>{});
+      // A transfer that paid one request pays no other: every request's transfer id, read once for the pass.
+      const claimed=new Set([...this.payments.values()].filter(p=>p.target?.method==="spark" && p.kind==="request" && p.txid).map(p=>p.txid!));
       for(const request of open) {
         const current=this.current(request);
         if(current.state!=="pending" || !current.target)continue;
         const wallet=spark[walletNetworkOf(current.target.network)];
         if(!wallet.ready())continue;
-        const claimed=new Set([...this.payments.values()].filter(p=>p.target?.method==="spark" && p.kind==="request" && p.txid).map(p=>p.txid!));
         const id=await wallet.received(current.target,current.amount,current.createdAt,claimed).catch(()=>undefined);
-        if(!id)continue;
+        if(!id){this.sparkAsk.missed(current.id,Date.now(),Date.now()<current.createdAt+INVOICE_PACE.fastForMs);continue;}
+        this.sparkAsk.forget(current.id);
+        claimed.add(id);
         await this.settleRequest(current,{txid:id});
         for(const payment of this.payments.values())if(payment.kind==="payment" && payment.direction==="in" && payment.requestId===current.id && payment.state==="pending")await this.save({...payment,state:"settled",txid:id});
       }

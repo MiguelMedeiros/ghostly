@@ -7,7 +7,7 @@ import type { PeerServer } from "@ghostly/browser/devices/linkOnly";
 import type { ClientMessage } from "@ghostly/browser/shared/rpc";
 import { setDatabaseName } from "@ghostly/browser/shared/idb";
 import { defaultWalletsAllowed } from "@ghostly/browser/platform/walletSetupSwitch";
-import { UI_PORT, type EngineStatus, type HttpRequestReply, type RuntimeMessage } from "./messages";
+import { uiPortMark, type EngineStatus, type HttpRequestReply, type RuntimeMessage } from "./messages";
 import { activeNamespace, databaseFor, peerLockFor } from "./profile";
 import { activeProfileId } from "../../ui/src/lib/profiles";
 import { fromOwnPage } from "./shared/sender";
@@ -89,7 +89,10 @@ server.catch(() => {});
 
 // Only the extension's own pages and its worker are heard, on a port or in a message (`fromOwnPage`).
 chrome.runtime.onConnect.addListener((port) => {
-  if (port.name !== UI_PORT) return;
+  // A page's port carries the mark its pages last mirrored (`uiPortName`): no chat unchanged since is sent again. Each tab
+  // opened or reloaded got every chat's newest 400 rows, 51 MiB of JSON at 300 chats, though it had them all.
+  const page = uiPortMark(port.name);
+  if (!page) return;
   if (!fromOwnPage(port.sender)) {
     port.disconnect();
     return;
@@ -101,7 +104,7 @@ chrome.runtime.onConnect.addListener((port) => {
   // Listeners go on at once, so nothing a page sends while the peer waits for its lock is lost.
   withPeer((s) => {
     const engine = engineOf(s);
-    if (engine) engine.attach(client, undefined, { newest: ATTACH_NEWEST });
+    if (engine) engine.attach(client, undefined, { newest: ATTACH_NEWEST, marks: true, since: page.since });
     else s.attach(client);
   });
   port.onDisconnect.addListener(() => withPeer((s) => s.detach(client)));

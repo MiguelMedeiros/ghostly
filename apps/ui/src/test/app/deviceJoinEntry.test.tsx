@@ -323,6 +323,14 @@ describe("a device code opened as a link (the QR code, by a phone's camera)", ()
     }
   });
 
+  it("a web+ghostly: link with the profile's name, opened while the app is open, names the profile without the scheme", () => {
+    const device = code();
+    // As the router's intake hands it over: the path, escaped (the installed app's `/#%s`) or as written, then the hash.
+    for (const named of [`#${encodeURIComponent(`web+ghostly:Work#${device}`)}`, `#web+ghostly:Work#${device}`, `#web+ghostly://Work#${device}`]) {
+      expect(readDeviceLink(named), named).toEqual({ code: device, profile: "Work" });
+    }
+  });
+
   it("leaves a chat invite and a route alone, for the router", () => {
     window.history.replaceState(null, "", "#/settings");
     takeDeviceLinkFromAddress();
@@ -449,6 +457,23 @@ describe("a profile made for a code", () => {
     expect(screen.queryByTestId("device-join-confirm")).toBeNull();
     expect(screen.getByTestId("device-join")).toHaveTextContent("Add this computer to “Miguel”");
     expect(sessionStorage.getItem(JOIN_REQUEST)).toBeNull();
+  });
+
+  it("a screen reader hears the digits once, one by one, from a line there before they come", async () => {
+    sessionStorage.setItem(JOIN_REQUEST, JSON.stringify({ id: activeProfileId(), code: code(), start: "go", name: "Pixel" }));
+    fakeEngine.on("deviceEnrollJoin", () => ({ role: "joiner", step: "connecting" }));
+    renderApp(<JoinHost />);
+    await screen.findByTestId("device-join-connecting");
+    // A live region is read out when its text changes, not when it comes with the step: the line is there, empty, first.
+    const spoken = screen.getByTestId("device-join-spoken");
+    expect(spoken).toHaveAttribute("role", "status");
+    expect(spoken).toHaveTextContent(/^$/);
+    fakeEngine.on("deviceEnrollView", () => ({ role: "joiner", step: "confirm", digits: "482913" }));
+    await waitFor(() => expect(spoken).toHaveTextContent("Check that your other device shows the same digits. 4 8 2 9 1 3"), { timeout: 3_000 });
+    expect(screen.getByTestId("device-join-spoken")).toBe(spoken);
+    // Said once: no other live region holds them.
+    const regions = screen.getAllByRole("status").filter((region) => /4\s*8\s*2/.test(region.textContent ?? ""));
+    expect(regions).toEqual([spoken]);
   });
 
   it("once added, opens the standby screen by itself, the lock handed over across that reload", async () => {

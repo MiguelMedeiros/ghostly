@@ -462,6 +462,7 @@ const RULES: readonly Rule[] = [
   exact("These notes are from a federation I have not joined", "errors.pay.notesUnknownFederation"),
   exact("These notes are worth less than a sat", "errors.pay.notesTooSmall"),
   exact("These notes were already redeemed", "errors.pay.notesRedeemed"),
+  exact("These notes were already received", "errors.pay.notesReceived"),
   exact("The server took too long to answer", "errors.lnurl.tooSlow"),
   exact("No way to reach the network here", "errors.lnurl.noNetwork"),
   { match: /^(?<host>[^\s:/]+\.[^\s:/]+(?::\d+)?) refused: (?<reason>[\s\S]+)$/, key: "errors.lnurl.refused", reason: "next" },
@@ -527,6 +528,8 @@ const RULES: readonly Rule[] = [
   exact("Only the admin can do that", "errors.group.adminOnly"),
   exact("Make someone else the admin before leaving", "errors.group.adminFirst"),
   exact("This member has left the group. Make someone else the admin.", "errors.group.heirLeft", "errors.group.heirLeftNext"),
+  // Hand over admin, Remove or a hub choice confirmed for a member whose leave or removal came in meanwhile (core groupSession/groupCommunity).
+  exact("Not a member", "errors.group.memberGone"),
   exact("Only the admin can change the group's picture", "errors.group.adminPicture"),
   exact("Only the admin can rename the group", "errors.group.adminRename"),
   exact("Only the admin can choose the group's hubs", "errors.group.adminHubs"),

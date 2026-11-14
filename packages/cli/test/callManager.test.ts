@@ -143,6 +143,32 @@ function deafStack(): (() => Promise<CallStack | string>) & { deaf: (on: boolean
   return Object.assign(stack, { deaf: (on: boolean) => { deaf = on; } });
 }
 
+/**
+ * The real media stack, but its connection fails where it would have connected (a path that never comes up: ICE that
+ * finds no pair, a DTLS handshake that does not finish): "failed" in place of the first "connected", and nothing after.
+ */
+function failingStack(): () => Promise<CallStack | string> {
+  return async () => {
+    const real = await loadCallStack();
+    if (typeof real === "string") return real;
+    const Real = real.ndc.PeerConnection;
+    function PeerConnection(...args: ConstructorParameters<typeof Real>) {
+      const pc = new Real(...args);
+      const listen = pc.onStateChange.bind(pc);
+      let failed = false;
+      Object.defineProperty(pc, "onStateChange", {
+        value: (cb: Parameters<typeof listen>[0]) => listen((state) => {
+          if (failed) return;
+          if (state === "connected") { failed = true; cb("failed"); return; }
+          cb(state);
+        }),
+      });
+      return pc;
+    }
+    return { ...real, ndc: { ...real.ndc, PeerConnection } as unknown as CallStack["ndc"] };
+  };
+}
+
 /** The real media stack, counting the connections it made and the ones still open (not closed), and the most open at once. */
 function countingStack(): (() => Promise<CallStack | string>) & { made: () => number; open: () => number; peak: () => number } {
   let made = 0, peak = 0;
@@ -339,7 +365,43 @@ describe("a one-shot's call", () => {
     const daemon = { code: "unavailable", message: "Calls need the daemon (a call outlives this command): start it with `ghostly daemon --detach`" };
     await expect(calls.start("bia", {})).rejects.toMatchObject(daemon);
     // A daemon still says why the chat cannot call.
-    await expect(new CallManager({ engine, emit: () => {}, profileDir: tmp(), answers: true }).start("bia", {})).rejects.toMatchObject({ code: "unavailable", message: "Calls need a live connection" });
+    await expect(new CallManager({ engine, emit: () => {}, profileDir: tmp(), answers: true }).start("bia", {})).rejects.toMatchObject({ code: "unavailable", message: expect.stringMatching(/^Calls need a live connection/) });
+  });
+});
+
+describe("a call to a contact who is away", () => {
+  // Found in a bug hunt: the daemon's `call start` to a contact whose app was closed answered only "Calls need a live
+  // connection", where `chat connect` and `send --wait` say what comes next.
+  it("says what comes next: wait for the chat to be live, then call again", async () => {
+    const away = (label: string) => ({ id: "chat-ab", label, profile: "paired-chat/1", callsUnavailable: "Calls need a live connection" }) as unknown as LinkView;
+    for (const [label, ref] of [["bia", "bia"], ["Bia Souza", "chat-ab"]]) {
+      const engine: CallEngine = { getState: () => ({ links: [away(label)] }) as unknown as EngineState, setCallSignal: () => {} };
+      const calls = new CallManager({ engine, emit: () => {}, profileDir: tmp(), answers: true });
+      await expect(calls.start("chat-ab", {})).rejects.toMatchObject({
+        code: "unavailable",
+        message: `Calls need a live connection, and your contact's app is not connected now: ghostly chat wait ${ref} --until live waits for it, then call again`,
+        details: { chat: "chat-ab" },
+      });
+    }
+  });
+
+  it("keeps the engine's own words for a chat that cannot call for another reason", async () => {
+    const link = { id: "chat-ab", label: "bia", profile: "paired-chat/1", callsUnavailable: "Your contact's app cannot take calls" } as unknown as LinkView;
+    const engine: CallEngine = { getState: () => ({ links: [link] }) as unknown as EngineState, setCallSignal: () => {} };
+    await expect(new CallManager({ engine, emit: () => {}, profileDir: tmp(), answers: true }).start("bia", {})).rejects.toMatchObject({ code: "unavailable", message: "Your contact's app cannot take calls" });
+  });
+
+  it("names the daemon it needs to answer or flush a call, not a call it cannot have", async () => {
+    const engine: CallEngine = { getState: () => ({ links: [] }) as unknown as EngineState, setCallSignal: () => {} };
+    const calls = new CallManager({ engine, emit: () => {}, profileDir: tmp(), answers: false });
+    const daemon = { code: "unavailable", message: "Calls need the daemon (a call outlives this command): start it with `ghostly daemon --detach`" };
+    // It said "No call is on" (exit 3) after 12 s online: a one-shot answers none and queues no audio.
+    await expect(calls.answer(undefined, {})).rejects.toMatchObject(daemon);
+    expect(() => calls.flush("bia")).toThrow(expect.objectContaining(daemon));
+    // A daemon with no call still says so.
+    const daemonCalls = new CallManager({ engine, emit: () => {}, profileDir: tmp(), answers: true });
+    await expect(daemonCalls.answer(undefined, {})).rejects.toMatchObject({ code: "not_found" });
+    expect(() => daemonCalls.flush(undefined)).toThrow(expect.objectContaining({ code: "not_found" }));
   });
 });
 
@@ -595,6 +657,20 @@ describe("two call managers", { timeout: 60_000 }, () => {
     await b.calls.stopAll();
   });
 
+  // It ended on its own with nothing said: the contact's app went on "Connecting..." (up to 45 s) or "Reconnecting...",
+  // where an app whose connection fails hangs up (WISP 601 "Couldn't connect").
+  it("a call whose connection fails ends as failed, and the contact is told", async () => {
+    const { a, b } = pairOfManagers({ b: failingStack() });
+    await a.calls.start("chat-ab", {});
+    await until(() => b.events.find((e) => e.type === "call.incoming"));
+    await b.calls.answer(undefined, {});
+    expect(await until(() => b.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "failed" });
+    expect(signalsOf(b, "h")).toHaveLength(1);
+    await until(() => a.events.find((e) => e.type === "call.ended"));
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
   it("an answer that cannot go out ends the call that rang with call.ended (failed), as the program waiting on it expects", async () => {
     const { a, b } = pairOfManagers();
     // The chat's connection goes as the answer is sent: the engine refuses it.
@@ -609,6 +685,45 @@ describe("two call managers", { timeout: 60_000 }, () => {
     await expect(b.calls.answer(undefined, {})).rejects.toThrow(/live connection/);
     expect(b.events.find((e) => e.type === "call.ended")).toMatchObject({ call: incoming.call, reason: "failed" });
     expect(b.calls.list()).toEqual([]);
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
+  it("an answer that fails tells the caller it could not connect: the caller's call ends as failed, not declined", async () => {
+    // A callee whose connections cannot be made (its early answer's either): its answer throws.
+    const broken = async (): Promise<CallStack | string> => {
+      const real = await loadCallStack();
+      if (typeof real === "string") return real;
+      const PeerConnection = function () { throw new Error("no connection here"); };
+      return { ...real, ndc: { ...real.ndc, PeerConnection } as unknown as CallStack["ndc"] };
+    };
+    const { a, b } = pairOfManagers({ b: broken });
+    await a.calls.start("chat-ab", {});
+    await until(() => b.events.find((e) => e.type === "call.incoming"));
+    await expect(b.calls.answer(undefined, {})).rejects.toThrow("no connection here");
+    // What an app sends when its answer could not use the microphone (useWebRTC, WISP 601 "Couldn't connect").
+    expect(signalsOf(b, "h").map((s) => JSON.parse(s!))).toEqual([expect.objectContaining({ t: "h", r: "u" })]);
+    expect(await until(() => a.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "failed" });
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
+  it("an answer that cannot go out hangs up saying it could not connect: the caller's call failed, it was not declined", async () => {
+    const { a, b } = pairOfManagers();
+    const engine = (b.calls as unknown as { host: { engine: CallEngine } }).host.engine;
+    const setCallSignal = engine.setCallSignal;
+    const sent: string[] = [];
+    engine.setCallSignal = async (input) => {
+      if (input.signal?.includes('"t":"a"')) throw new Error("Calls need a live connection");
+      if (input.signal) sent.push(input.signal);
+      return setCallSignal(input);
+    };
+    await a.calls.start("chat-ab", {});
+    await until(() => b.events.find((e) => e.type === "call.incoming"));
+    await expect(b.calls.answer(undefined, {})).rejects.toThrow(/live connection/);
+    // What an app sends when its answer fails (WISP 601 "Couldn't connect"): read as a decline, it was not one.
+    expect(sent.map((s) => JSON.parse(s))).toContainEqual(expect.objectContaining({ t: "h", r: "u" }));
+    expect(await until(() => a.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "failed" });
     await a.calls.stopAll();
     await b.calls.stopAll();
   });
@@ -1372,7 +1487,8 @@ describe("two call managers", { timeout: 60_000 }, () => {
     b.calls.setAuto({ on: true });
     await a.calls.start("chat-ab", {});
     expect(await until(() => a.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "failed" });
-    expect(await until(() => b.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "remote-hangup" });
+    // Told it could not connect (`r: "u"`): the contact's call never connected either.
+    expect(await until(() => b.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "failed" });
     expect(signalsOf(a, "o")).toHaveLength(MAX_REDIALS + 1);
     expect(signalsOf(b, "a")).toHaveLength(MAX_REDIALS + 1);
     expect(signalsOf(a, "h")).toHaveLength(1);

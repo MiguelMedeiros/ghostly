@@ -5,6 +5,9 @@ import { tabbables } from "../hooks/useDismiss";
 import { externalLinkProps } from "../lib/externalLink";
 import { updateFailure } from "../lib/updateFailure";
 
+/** Download, Reload or Restart. Drawn by its fill alone, it read as bare text in forced colors (Windows Contrast themes), where every fill is the page's. */
+const action = "shrink-0 px-3 py-1.5 max-md:min-h-11 bg-accent hover:bg-accent-hover text-on-accent rounded-lg text-xs font-semibold transition-colors forced-colors:border forced-colors:border-[color:ButtonText]";
+
 /**
  * A new version exists. Nothing happens until the user says so: applying one
  * ends every call and every connection this client holds, and on the web it
@@ -13,6 +16,7 @@ import { updateFailure } from "../lib/updateFailure";
  * an install can take long or fail.
  * Its lines wrap, never cut with an ellipsis: on a phone the warning beside Reload (or why an install failed) is what
  * the person reads before pressing it, and a cut one ended mid-word in most languages.
+ * On a phone its buttons take taps on 44 px, as every control there does: Later's × was 11 × 20 px.
  */
 export function UpdateBanner() {
   const { t } = useI18n();
@@ -71,7 +75,7 @@ export function UpdateBanner() {
           {update.apply === "manual" ? (
             <a
               {...externalLinkProps(downloadUrl)}
-              className="shrink-0 px-3 py-1.5 bg-accent hover:bg-accent-hover text-on-accent rounded-lg text-xs font-semibold transition-colors"
+              className={`${action} max-md:inline-flex max-md:items-center`}
             >
               {t("updates.download")}
             </a>
@@ -80,7 +84,7 @@ export function UpdateBanner() {
               onClick={() => { if (!busy) void install(); }}
               aria-disabled={busy}
               aria-busy={busy}
-              className="shrink-0 px-3 py-1.5 bg-accent hover:bg-accent-hover text-on-accent rounded-lg text-xs font-semibold transition-colors aria-disabled:opacity-60 aria-disabled:cursor-progress cursor-pointer"
+              className={`${action} aria-disabled:opacity-60 aria-disabled:cursor-progress cursor-pointer`}
             >
               {t(update.apply === "restart" ? "updates.restart" : "updates.reload")}
             </button>
@@ -90,7 +94,7 @@ export function UpdateBanner() {
             onClick={later}
             aria-disabled={busy}
             aria-label={t("updates.later")}
-            className="shrink-0 text-text-muted hover:text-text-primary transition-colors text-lg leading-none cursor-pointer aria-disabled:opacity-40 aria-disabled:cursor-not-allowed"
+            className="shrink-0 max-md:min-h-11 max-md:min-w-11 max-md:-me-3 grid place-items-center text-text-muted hover:text-text-primary transition-colors text-lg leading-none cursor-pointer aria-disabled:opacity-40 aria-disabled:cursor-not-allowed"
           >
             ×
           </button>

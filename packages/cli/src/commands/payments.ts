@@ -14,6 +14,16 @@ function networkList(value: string): string[] {
   return networks;
 }
 
+/**
+ * `chat request`'s amount: whole sats, or with --method usdt USDT as the app's composer reads it (5 is 5 USDT, 0.25 a
+ * quarter), passed on as its text for the API to turn into base units with the wallet's decimals.
+ */
+function requestAmount(value: string | undefined, method: unknown): number | string {
+  if (method !== "usdt") return sats(value);
+  if (!/^\d+(\.\d+)?$/.test(value ?? "") || !/[1-9]/.test(value!)) throw new CliError("usage", `<amount> with --method usdt takes USDT above 0 (5 or 0.25), not ${JSON.stringify(value)}`);
+  return value!;
+}
+
 /** Wallets and payments: one entry per command, in alphabetical order (test/commands.test.ts checks). */
 export const commands: Record<string, Command> = {
   "chat accept": {
@@ -37,9 +47,9 @@ export const commands: Record<string, Command> = {
     params: ({ options }, a) => ({ chat: a.chat, payment: a.payment, via: options.via, maxFee: options["max-fee"], card: options.card, confirmReal: options["confirm-real"] === true }),
   },
   "chat request": {
-    method: "chat.request", usage: "chat request <chat> <sats> [--memo t] [--method m] [--rail cashu|lightning] [--network testnet] [--card <id>] [--force]", summary: "Ask a contact to pay",
-    args: ["chat", "amount"], options: { memo, method: { type: "string", choices: PAY_METHODS, description: "cashu, arkade, usdt, bitcoin, spark, …" }, rail: { type: "string", choices: ["cashu", "lightning"], description: "cashu or lightning" }, network: net, card, force },
-    params: ({ options }, a) => ({ chat: a.chat, amount: sats(a.amount), memo: options.memo, method: options.method, rail: options.rail, network: options.network, card: options.card, force: options.force === true }),
+    method: "chat.request", usage: "chat request <chat> <sats> [--memo t] [--method m] [--rail cashu|lightning] [--network testnet] [--card <id>] [--force]", summary: "Ask a contact to pay (with --method usdt the amount is in USDT: 5 is 5 USDT)",
+    args: ["chat", "amount"], options: { memo, method: { type: "string", choices: PAY_METHODS, description: "cashu, arkade, usdt (amount in USDT), bitcoin, spark, …" }, rail: { type: "string", choices: ["cashu", "lightning"], description: "cashu or lightning" }, network: net, card, force },
+    params: ({ options }, a) => ({ chat: a.chat, amount: requestAmount(a.amount, options.method), memo: options.memo, method: options.method, rail: options.rail, network: options.network, card: options.card, force: options.force === true }),
   },
   "lightning default": { method: "lightning.default", usage: "lightning default <card> [--network testnet]", summary: "The Lightning card that receives by default", args: ["card"], options: { network: net }, params: ({ options }, { card: c }) => ({ card: c, network: options.network }) },
   "lightning rename": { method: "lightning.rename", usage: "lightning rename <card> <name...> [--network testnet]", summary: "Name a Lightning card", args: ["card", "name..."], options: { network: net }, params: ({ options }, a) => ({ card: a.card, name: a.name, network: options.network }) },

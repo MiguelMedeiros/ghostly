@@ -31,6 +31,8 @@ export interface ReactionsHost {
   keep?(chat: string, waiting: WaitingReaction[]): Promise<void>;
   /** Whether `by` is still someone this group takes reactions from, asked again for one that waited (absent: yes). */
   believed?(chat: string, by: string): boolean;
+  /** My member key in a private group's chat (none in a community or a 1:1 chat): a new one each time I am invited back. */
+  memberKey?(chat: string): string | undefined;
   now?(): number;
 }
 
@@ -82,12 +84,18 @@ export function noteIfStanding(current: ReactionNote, message: StoredMessage): R
  * the new one, and every member would show it twice.
  */
 export function groupReactionsToResend(messages: readonly StoredMessage[], limit: number): WireReaction[] {
-  let joinedAt = 0;
-  for (const m of messages) if (m.event === "joined" && !m.member) joinedAt = Math.max(joinedAt, m.timestamp);
+  const joinedAt = lastJoined(messages);
   return messages.flatMap(m => {
     const r = m.reactions?.me, id = replyRef(m, true);
     return r && id && r.at >= joinedAt ? [{ id, e: r.e, n: r.n }] : [];
   }).sort((a, b) => b.n - a.n).slice(0, limit);
+}
+
+/** When I last joined a group (its "You joined" line): my reactions from before went out under a member key I may hold no more. */
+export function lastJoined(messages: readonly StoredMessage[]): number {
+  let at = 0;
+  for (const m of messages) if (m.event === "joined" && !m.member) at = Math.max(at, m.timestamp);
+  return at;
 }
 
 /** This side's highest number in a chat's history: the next one goes past it. */
@@ -113,6 +121,8 @@ export class Reactions {
    * out. It only has to grow, so a row deleted since leaves it too high and nothing is wrong.
    */
   private readonly last = new Map<string, number>();
+  /** Per private group's chat: my member key and when I joined under it (`joinedAt`). */
+  private readonly joined = new Map<string, { key: string; at: number }>();
   /** Per 1:1 chat: when it was last read whole for a received reaction, and the read of those that waited meanwhile. */
   private readonly lookups = new Map<string, { at: number; timer?: ReturnType<typeof setTimeout> }>();
 
@@ -141,13 +151,33 @@ export class Reactions {
       if (!target || !id) return { error: `That message is not in this ${group ? "group" : "chat"}, or takes no reaction` };
       const current = target.reactions?.me;
       if (!e && !current?.e) return { error: "No reaction of yours to take back" };
-      let last = this.last.get(chat) ?? lastMine(await this.host.messages(chat));
+      let history: StoredMessage[] | undefined;
+      const read = async () => history ??= await this.host.messages(chat);
+      if (group && current?.e && current.at < await this.joinedAt(chat, read)) return { error: "Your reaction to this message went out before you were invited back, and stays as it is" };
+      let last = this.last.get(chat) ?? lastMine(await read());
       for (const p of pending) last = Math.max(last, p.n);
       const reaction: WireReaction = { id, e, n: nextReactionNumber(last, this.now()) };
       this.last.set(chat, reaction.n);
       const message = await this.write(chat, target, "me", reaction) ?? target;
       return { reaction, message };
     });
+  }
+
+  /**
+   * When I joined a private group under the member key I hold now: removed and invited back, I hold a new one, and the
+   * members keep a reaction of mine from before under the old one. Said again under the new key, a change or a take
+   * back left it standing for them, beside the new one. Read from the history once per key.
+   */
+  private async joinedAt(chat: string, read: () => Promise<StoredMessage[]>): Promise<number> {
+    const key = this.host.memberKey?.(chat);
+    if (!key) return 0;
+    const known = this.joined.get(chat);
+    if (known?.key === key) return known.at;
+    const messages = await read(), at = lastJoined(messages);
+    this.joined.set(chat, { key, at });
+    // Read whole already: my highest number in it is not read again.
+    if (!this.last.has(chat)) this.last.set(chat, lastMine(messages));
+    return at;
   }
 
   /**
@@ -344,6 +374,7 @@ export class Reactions {
     this.dropHeld(chat);
     this.waiting.delete(chat);
     this.last.delete(chat);
+    this.joined.delete(chat);
     clearTimeout(this.lookups.get(chat)?.timer);
     this.lookups.delete(chat);
   }

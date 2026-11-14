@@ -10,6 +10,7 @@ import { groupChat } from "../../lib/chatMute";
 import { incomingShare, receiveShare, resetIncomingShare, sendShareTo, sharePreview, shareText, takeShareFor, type IncomingShare } from "../../lib/incomingShare";
 import { saveSession, setSessionDraft } from "../../lib/storage";
 import type { ChatSession } from "../../lib/types";
+import type { Language } from "../../lib/settings";
 import { engineState, fakeEngine, groupView } from "../fakeEngine";
 import { renderApp } from "../render";
 
@@ -536,7 +537,7 @@ describe("the Share to… picker", () => {
     receiveShare(share({ files: [file("a.png")], leftOut: ["VID_1.mp4"] }));
     const { unmount } = picker();
     expect(screen.getByTestId("share-files")).toHaveTextContent("a.png");
-    expect(screen.getByTestId("share-left-out-title")).toHaveTextContent("Too large to share here: VID_1.mp4");
+    expect(screen.getByTestId("share-left-out-title")).toHaveTextContent("Too large to share here: \u2068VID_1.mp4\u2069");
     expect(screen.getByTestId("share-left-out-next")).toHaveTextContent("Open a chat and send it with + → Document.");
     expect(screen.getByTestId("share-chat")).toHaveTextContent("Ana");
     unmount();
@@ -546,7 +547,7 @@ describe("the Share to… picker", () => {
     receiveShare(share({ leftOut: ["VID_1.mp4", "VID_2.mp4"] }));
     picker();
     expect(screen.queryByTestId("share-none")).toBeNull();
-    expect(screen.getByTestId("share-left-out-title")).toHaveTextContent("Too large to share here: VID_1.mp4, VID_2.mp4");
+    expect(screen.getByTestId("share-left-out-title")).toHaveTextContent("Too large to share here: \u2068VID_1.mp4\u2069, \u2068VID_2.mp4\u2069");
     expect(screen.queryByTestId("share-summary")).toBeNull();
     expect(screen.queryByTestId("share-chat")).toBeNull();
     expect(screen.getByTestId("share-cancel")).toBeInTheDocument();
@@ -558,8 +559,8 @@ describe("the Share to… picker", () => {
     receiveShare(share({ unread: ["IMG_3.jpg"] }));
     picker();
     expect(screen.getByTestId("share-text")).toHaveTextContent("look");
-    expect(screen.getByTestId("share-left-out-title")).toHaveTextContent("Too large to share here: VID_1.mp4");
-    expect(screen.getByTestId("share-unread-title")).toHaveTextContent("Couldn't read: IMG_2.jpg, IMG_3.jpg");
+    expect(screen.getByTestId("share-left-out-title")).toHaveTextContent("Too large to share here: \u2068VID_1.mp4\u2069");
+    expect(screen.getByTestId("share-unread-title")).toHaveTextContent("Couldn't read: \u2068IMG_2.jpg\u2069, \u2068IMG_3.jpg\u2069");
     expect(screen.getByTestId("share-unread-next")).toHaveTextContent("Share it again from its app, or open a chat and send it with + → Document.");
     expect(screen.getByTestId("share-chat")).toHaveTextContent("Ana");
   });
@@ -569,7 +570,7 @@ describe("the Share to… picker", () => {
     receiveShare(share({ files, pastLimit: ["IMG_33.jpg", "IMG_34.jpg"] }));
     picker();
     expect(screen.getByTestId("share-files")).toHaveTextContent("32 files");
-    expect(screen.getByTestId("share-past-limit-title")).toHaveTextContent("Only the first 32 files came in. Left out: IMG_33.jpg, IMG_34.jpg");
+    expect(screen.getByTestId("share-past-limit-title")).toHaveTextContent("Only the first 32 files came in. Left out: \u2068IMG_33.jpg\u2069, \u2068IMG_34.jpg\u2069");
     expect(screen.getByTestId("share-past-limit-next")).toHaveTextContent("Share the rest again, or open a chat and send them with + → Document.");
     // Not said as too large: that is not why they were left out.
     expect(screen.queryByTestId("share-left-out")).toBeNull();
@@ -581,7 +582,7 @@ describe("the Share to… picker", () => {
     receiveShare(share({ pastLimit: ["IMG_33.jpg"] }));
     picker();
     expect(screen.getByTestId("share-text")).toHaveTextContent("look");
-    expect(screen.getByTestId("share-past-limit-title")).toHaveTextContent("Only the first 32 files came in. Left out: IMG_33.jpg");
+    expect(screen.getByTestId("share-past-limit-title")).toHaveTextContent("Only the first 32 files came in. Left out: \u2068IMG_33.jpg\u2069");
   });
 
   it("a share too large to read (the web app's, over 64 MB): says so without a name, and how to send it", () => {
@@ -604,9 +605,28 @@ describe("the Share to… picker", () => {
     receiveShare(share({ noRoom: ["VID_2.mp4"] }));
     picker();
     expect(screen.getByTestId("share-text")).toHaveTextContent("look");
-    expect(screen.getByTestId("share-no-room-title")).toHaveTextContent("No room on this device for: VID_1.mp4, VID_2.mp4");
+    expect(screen.getByTestId("share-no-room-title")).toHaveTextContent("No room on this device for: \u2068VID_1.mp4\u2069, \u2068VID_2.mp4\u2069");
     expect(screen.getByTestId("share-no-room-next")).toHaveTextContent("Free some space, then share it again.");
     expect(screen.queryByTestId("share-unread")).toBeNull();
+  });
+
+  it("lists the left-out files as the language does, each name isolated: Arabic keeps a name's own order, Japanese and Chinese join with 、", () => {
+    const isolated = (names: string[], join: string) => names.map((name) => `⁨${name}⁩`).join(join);
+    const cases: [Language, string, string, string, string][] = [
+      ["ar", " و", "تعذّرت قراءة: ", "أكبر من أن يُشارك هنا: ", "لا توجد مساحة على هذا الجهاز لـ: "],
+      ["ja", "、", "読み込めませんでした: ", "大きすぎてここでは共有できません: ", "この端末に空き容量がありません: "],
+      ["zh", "、", "无法读取:", "太大,无法在这里分享:", "此设备空间不足,无法保存:"],
+    ];
+    for (const [language, join, unread, tooLarge, noRoom] of cases) {
+      resetIncomingShare();
+      receiveShare(share({ text: "look", unread: ["صورة.jpg", "report.pdf"], leftOut: ["VID_1.mp4", "فيديو.mp4"], noRoom: ["ملف.txt", "a.txt"], pastLimit: ["IMG_33.jpg", "صورة.png"] }));
+      const { unmount } = renderApp(<SharePicker />, { route: "/shared", language });
+      expect(screen.getByTestId("share-unread-title").textContent).toBe(unread + isolated(["صورة.jpg", "report.pdf"], join));
+      expect(screen.getByTestId("share-left-out-title").textContent).toBe(tooLarge + isolated(["VID_1.mp4", "فيديو.mp4"], join));
+      expect(screen.getByTestId("share-no-room-title").textContent).toBe(noRoom + isolated(["ملف.txt", "a.txt"], join));
+      expect(screen.getByTestId("share-past-limit-title").textContent).toMatch(new RegExp(`${isolated(["IMG_33.jpg", "صورة.png"], join).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
+      unmount();
+    }
   });
 
   it("a share past the three that can wait is never dropped without a word: the share shown says how many were not kept", async () => {
@@ -636,9 +656,13 @@ describe("the Share to… picker", () => {
     vi.useFakeTimers();
     try {
       picker();
-      expect(screen.getByTestId("share-none")).toHaveTextContent("Getting what was shared...");
+      expect(screen.getByTestId("share-none")).toHaveTextContent("Getting what was shared…");
+      expect(screen.getByTestId("share-next")).toBeEmptyDOMElement();
       act(() => { vi.advanceTimersByTime(6000); });
       expect(screen.getByTestId("share-none")).toHaveTextContent("Nothing was shared, or it was already picked up.");
+      // Said to a screen reader too: the line changed on its own, with no press to bring anyone to it.
+      act(() => { vi.advanceTimersByTime(SEARCH_STATUS_SETTLE_MS); });
+      expect(screen.getByTestId("share-next")).toHaveTextContent("Nothing was shared, or it was already picked up.");
     } finally {
       vi.useRealTimers();
     }

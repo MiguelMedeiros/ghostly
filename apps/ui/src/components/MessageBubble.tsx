@@ -31,7 +31,8 @@ import { Notice } from "./ui/Notice";
 import { useDhtOnly, waitsForLive } from "../lib/delivery";
 import { useEngineValue } from "../lib/engineState";
 import { useFocusKept } from "../hooks/useFocusKept";
-import { useTransfer } from "../hooks/useServicesPlatform";
+import { useTransfer, useTransferValue } from "../hooks/useServicesPlatform";
+import { servicesPlatform } from "../lib/platform";
 import { holdRow } from "../hooks/useRowWindow";
 import type { ChatFile, ChatMessage } from "../lib/types";
 import { callEventText } from "../lib/callLines";
@@ -996,12 +997,14 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   // The original in place of the sent text, with its own mention places: the message's are the translation's.
   const original = sent && showingOriginal ? sent.original.trim() : undefined;
   const originalMarks = useMemo(() => original === undefined ? undefined : originalMentions(original, message.text, message.mentions), [original, message.text, message.mentions]);
-  const { platform, transfer } = useTransfer(isMe ? message.file?.id : undefined);
   // A file of mine whose bytes did not go has the red mark, not ticks beside its "Not sent". While they move, the
   // message keeps its own mark: the bytes' progress is the file's to show (held files travel by hold/1, not files/3).
   // One whose copy into this device failed never left it: the red mark too, but nothing to send again.
-  const fileRetry = !!message.file && canRetryFile(message.file, transfer, platform);
-  const fileUnsent = !!message.file && fileNeverSent(transfer);
+  // So only a transfer that failed is read here: read while it moved, each step of its progress drew the whole
+  // message again (its mark, reactions and menu), up to 20 a second.
+  const failedTransfer = useTransferValue(isMe ? message.file?.id : undefined, (transfer) => (transfer?.state === "failed" ? transfer : null));
+  const fileRetry = !!message.file && canRetryFile(message.file, failedTransfer, servicesPlatform);
+  const fileUnsent = !!message.file && fileNeverSent(failedTransfer);
   const fileFailed = fileRetry || fileUnsent;
   const shown = fileFailed ? "failed" as const : message.delivery;
   // A file waiting in a DHT-only chat waits for a live connection, not for the contact to be online.
@@ -1015,7 +1018,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
    */
   const retry = async () => {
     setRefused(null);
-    if (fileRetry) { await platform!.retryFile!(message.file!.id).catch(refuse(shown)); return; }
+    if (fileRetry) { await servicesPlatform!.retryFile!(message.file!.id).catch(refuse(shown)); return; }
     const link = engine.linkByPeer(peerPubKey);
     if (!link) return;
     await engine.call("retryMessage", { linkId: link.id, messageId: message.id }).catch((error: unknown) => {
@@ -1443,7 +1446,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
             {hiddenIp && <span data-testid="picture-hidden-ip" className="block text-[12px] text-text-secondary">{t("chat.pictureHiddenIp")}</span>}
             {/* No box of its own: with no card the time still floats beside the last line of text. */}
             <div dir={dir} className="contents">
-              <EntityCards text={message.text} mine={isMe} from={message.nick || peerNick || undefined} peerPubKey={peerPubKey} />
+              <EntityCards text={message.text} mine={isMe} forwarded={!!message.forwarded} from={message.nick || peerNick || undefined} peerPubKey={peerPubKey} />
               <MessageLinkCards text={message.text} preview={message.preview} />
             </div>
             {sent && <SentTranslationLine sent={sent} showing={showingOriginal} onToggle={toggleOriginal} />}

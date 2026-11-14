@@ -4,9 +4,10 @@
  * from this page, where the peer runs. Closing it ends the app, its requests and its cookies.
  */
 import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, GhostlyHttpError, WEBRTC_GUARD, guardViewerAnswer, viewerResponseHeaders, viewerServicePolicy, type ClientRequest, type ClientResponse, type PageGuard } from "@ghostly/core";
-import { BRIDGE_PAGE, BRIDGE_PORT, BRIDGE_READY, BRIDGE_REFUSED, HEAD_TIMEOUT_MS, MAX_RESPONSE_BYTES, SERVICE_FRAME_ALLOW, SERVICE_VIEW_CLOSE, SERVICE_VIEW_ID, closeServiceView, readRequest, serviceOrigin, type ServiceReply, type ServiceRequestMessage, type ServicesHost } from "./protocol";
+import { ANSWER_AHEAD_BYTES, BRIDGE_OPEN_LINK, BRIDGE_PAGE, BRIDGE_PORT, BRIDGE_READY, BRIDGE_REFUSED, HEAD_TIMEOUT_MS, MAX_RESPONSE_BYTES, SERVICE_FRAME_ALLOW, SERVICE_VIEW_CLOSE, SERVICE_VIEW_ID, closeServiceView, readRequest, serviceOrigin, type ServiceReply, type ServiceRequestMessage, type ServicesHost } from "./protocol";
 import { SERVICE_LOCKED, callWindowOn, serviceWindowsClosedSince } from "../../../ui/src/lib/serviceWindows";
 import { appInput } from "../../../ui/src/lib/apps/open";
+import { isLocalHost } from "../../../ui/src/lib/parse/linkPreview";
 
 const CLIPBOARD_GUARD: PageGuard = { script: CLIPBOARD_GUARD_SCRIPT, hash: CLIPBOARD_GUARD_HASH };
 
@@ -30,17 +31,19 @@ function ownsBuffer(chunk: Uint8Array): chunk is Uint8Array<ArrayBuffer> {
  * What the opener says when there is no answer: the profile's language, from the app. `hostError`: what it says for
  * an answer the contact's machine gave in place of their app (`hostErrorText`), null for the app's own. `tooSlow`: no
  * answer before the services worker would give up with words of its own. `offline` and `retry`: the view's notice
- * while the contact is offline. `blocked` and `unguarded`: the view's notice when the bridge shows no app
+ * while the contact is offline; `reaching` while Try again asks the engine to reach them, and `stillOffline` once that
+ * ended with them still offline (without these, `offline`). `blocked` and `unguarded`: the view's notice when the bridge shows no app
  * (`BRIDGE_REFUSED`). `label` and `owner`: whose app it is and that it is not Ghostly (`serviceFraming`), the view's
  * name and the line under the app's name.
  */
-export interface OpenerWords { unreachable: string; failed: string; close: string; callOn: string; tooSlow: string; offline: string; retry: string; blocked: string; unguarded: string; label: string; owner: string; hostError: (headers: readonly (readonly [string, string])[]) => string | null }
+export interface OpenerWords { unreachable: string; failed: string; close: string; callOn: string; tooSlow: string; offline: string; retry: string; reaching?: string; stillOffline?: string; blocked: string; unguarded: string; label: string; owner: string; hostError: (headers: readonly (readonly [string, string])[]) => string | null }
 
 /**
  * Whether the contact is offline now (`offline`), and a way to hear when that may have changed (`watch`, which returns
- * how to stop hearing it): the open view says so over the app, rather than leaving its last page up.
+ * how to stop hearing it): the open view says so over the app, rather than leaving its last page up. `connect`: asks
+ * the engine to reach the contact now (the chat's Reconnect), settled once that attempt ended; Try again runs it.
  */
-export interface ContactPresence { offline: () => boolean; watch: (changed: () => void) => () => void }
+export interface ContactPresence { offline: () => boolean; watch: (changed: () => void) => () => void; connect?: () => Promise<void> }
 
 /**
  * The page answers a request a little before the services worker gives up on it (`HEAD_TIMEOUT_MS`), so what the
@@ -215,7 +218,16 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
     return;
   }
   const stop = new AbortController();
-  port.onmessage = (event) => { if ((event.data as { type?: unknown } | null)?.type === "cancel") stop.abort(); };
+  // What the app's frame read of the answer, as the worker says (`flow`), and the wait for it to read on.
+  let read = 0;
+  let readOn: (() => void) | null = null;
+  const wake = () => { readOn?.(); readOn = null; };
+  stop.signal.addEventListener("abort", wake);
+  port.onmessage = (event) => {
+    const said = event.data as { type?: unknown; bytes?: unknown } | null;
+    if (said?.type === "cancel") stop.abort();
+    else if (said?.type === "read" && typeof said.bytes === "number" && said.bytes > read) { read = said.bytes; wake(); }
+  };
   const pageGone = () => stop.abort();
   if (view?.aborted) stop.abort();
   else view?.addEventListener("abort", pageGone);
@@ -261,10 +273,14 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
     clearTimeout(late);
     if (ended) return;
     post({ type: "head", status: answer.status, headers: out });
+    let sent = 0;
     for await (const chunk of body) {
       if (stop.signal.aborted) break;
       const bytes = ownsBuffer(chunk) ? chunk : chunk.slice();
+      sent += bytes.byteLength;
       post({ type: "chunk", bytes }, [bytes.buffer]);
+      // Not read on from the link until the frame takes what went ahead: left unread there, the engine lets it go.
+      while (request.flow && sent - read > ANSWER_AHEAD_BYTES && !stop.signal.aborted) await new Promise<void>((resolve) => { readOn = resolve; });
     }
     post({ type: "end" });
   } catch (error) {
@@ -285,6 +301,29 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
  */
 const INPUT_LOOK_MS = 1_000;
 
+/**
+ * Least time between two links an open view opens outside, and the most it opens in its life: as Desktop's viewer
+ * window (`viewer.rs`), so an app that asks on every tap does not fill the browser with tabs.
+ */
+const LINK_SPACING_MS = 2_000;
+const LINKS_PER_VIEW = 20;
+
+/**
+ * Where a link the contact's app opens in a new window goes outside it (`BRIDGE_OPEN_LINK`), as on Desktop
+ * (`external_target` in viewer.rs): a plain http(s) link to another site. Null for anything else, for a site on this
+ * machine or the local network (`isLocalHost`), whose request would carry the browser's cookies there, for an app's
+ * origin under the services host (a tab of its own there would outlive the view) and for Ghostly's own.
+ */
+export function outsideLink(url: unknown, host: ServicesHost): string | null {
+  if (typeof url !== "string" || url.length > 4096) return null;
+  let link: URL;
+  try { link = new URL(url); } catch { return null; }
+  if ((link.protocol !== "http:" && link.protocol !== "https:") || link.href.length > 4096) return null;
+  const name = link.hostname.toLowerCase().replace(/\.$/, "");
+  if (isLocalHost(name) || name === host.suffix || name.endsWith(`.${host.suffix}`) || name === location.hostname) return null;
+  return link.href;
+}
+
 /** What `openServiceView` puts over the app, so a test (or a second open, or the lock) can find and close it. */
 export const VIEW_ID = SERVICE_VIEW_ID;
 
@@ -296,6 +335,8 @@ const ENTRY = "ghostlyServiceView";
 const isViewEntry = (state: unknown) => !!state && typeof state === "object" && (state as Record<string, unknown>)[ENTRY] === true;
 /** Set while a second open closes the first: the new view keeps the entry. */
 let handingOver = false;
+/** Counts the opens: one overtaken by a later open while it waits draws nothing (the last one wins). */
+let opens = 0;
 
 /**
  * Back to the entry the view was opened on. Straight to it where the browser can (the Navigation API): the contact's
@@ -332,9 +373,12 @@ function watchDeadEntries(): void {
 export async function openServiceView(options: { host: ServicesHost; tag: string; peer: string; service: string; title: string; send: ServiceSend; words: OpenerWords; presence?: ContactPresence; relayOnly?: boolean }): Promise<void> {
   // The profile locking while it opens closes nothing yet: it is never drawn, behind the lock or over its screen.
   const locked = serviceWindowsClosedSince();
+  const open = ++opens;
   handingOver = true;
   try { closeServiceView(); } finally { handingOver = false; }
   const origin = serviceOrigin(options.host, await serviceLabel(options.tag, options.peer, options.service));
+  // Open tapped again, or another app opened, before this one was drawn: that one is shown, this one never is.
+  if (open !== opens) return;
   if (locked()) throw new Error(SERVICE_LOCKED);
   // Drawn over everything, a call's windows too: not over a call on screen (one that comes later closes it).
   if (callWindowOn()) throw new Error(options.words.callOn);
@@ -375,7 +419,8 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   frame.dataset.testid = "service-view-frame";
   frame.title = options.words.label;
   // Its own origin keeps it from the app's storage. The sandbox keeps it and every frame in it from navigating the
-  // app's tab away, and from opening a window: one would be a tab of its own on its origin, outliving the view. No
+  // app's tab away, and from opening a window: one would be a tab of its own on its origin, outliving the view (a link
+  // the app opens in a new window comes here from the bridge instead, `openOutside`). No
   // `allow-modals`: the browser's own alert or prompt over the view would be a Ghostly-looking dialog the app draws. No
   // `allow-downloads`: the contact's code saves no file on this device by itself, under a name it picks, as on Desktop.
   frame.setAttribute("sandbox", "allow-scripts allow-same-origin allow-forms");
@@ -403,12 +448,20 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   let refused: string | null = null;
   /** What the notice says now: null while the app is on screen. */
   let shown: string | null = null;
+  /** Try again is asking the engine to reach the contact; `tried`: it did, and they were still offline after. */
+  let reaching = false, tried = false;
   /**
    * The notice while the contact is offline, or while the bridge shows no app; once neither, the app again, loaded anew
    * (its last page may be stale).
    */
   const present = () => {
-    const text = options.presence?.offline() ? options.words.offline : refused;
+    const offline = options.presence?.offline() === true;
+    // Back: the next time they are offline is said as the first.
+    if (!offline) tried = false;
+    const text = offline ? (reaching && options.words.reaching) || (tried && options.words.stillOffline) || options.words.offline : refused;
+    // Still in reach of the focus while it tries (`disabled` would drop it to the page), and pressed again, it asks nothing more.
+    if (offline && reaching) { notice.setAttribute("aria-busy", "true"); retry.setAttribute("aria-disabled", "true"); }
+    else { notice.removeAttribute("aria-busy"); retry.removeAttribute("aria-disabled"); }
     if (text === shown) return;
     shown = text;
     if (text !== null) {
@@ -416,7 +469,8 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
       notice.hidden = false;
       notice.style.display = "flex";
       frame.style.display = "none";
-      if (view.contains(document.activeElement) && document.activeElement !== close) close.focus({ preventScroll: true });
+      // The focus in the hidden app goes to ✕; on Try again, whose words changed, it stays.
+      if (view.contains(document.activeElement) && document.activeElement !== close && !notice.contains(document.activeElement)) close.focus({ preventScroll: true });
     } else {
       // Try again had the focus: hidden under it, the browser drops it to the page's body. It goes to the app.
       const had = notice.contains(document.activeElement);
@@ -427,14 +481,48 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
       if (had) frame.focus({ preventScroll: true });
     }
   };
-  retry.addEventListener("click", () => { refused = null; present(); });
+  // While the contact is offline, it asks the engine to reach them now (rather than waiting on its own next try, minutes
+  // away for an older chat), says so meanwhile, and that they are still offline if the attempt did not bring them back.
+  retry.addEventListener("click", () => {
+    if (reaching) return;
+    refused = null;
+    const connect = options.presence?.offline() ? options.presence.connect : undefined;
+    if (connect) {
+      reaching = true;
+      void connect().catch(() => {}).finally(() => {
+        reaching = false;
+        tried = options.presence?.offline() === true;
+        if (view.isConnected) present();
+      });
+    }
+    present();
+  });
 
   const ports = new Set<MessagePort>();
   // The requests of the bridge now in the frame: aborted, still waiting on the contact or not, once it is gone.
   let bridge = new AbortController();
+  let linksOpened = 0;
+  let lastLink = -Infinity;
+  /**
+   * A link the app opens in a new window, which its sandbox drops: opened here in a new tab with no opener and no
+   * referrer, as Ghostly's own external links (`externalLinkProps`). Only within the person's own tap in the app, which
+   * activates this page too and no script can: never one the app opens by itself.
+   */
+  const openOutside = (url: unknown) => {
+    const link = outsideLink(url, options.host);
+    const now = Date.now();
+    if (!link || !navigator.userActivation?.isActive || linksOpened >= LINKS_PER_VIEW || now - lastLink < LINK_SPACING_MS) return;
+    linksOpened++;
+    lastLink = now;
+    window.open(link, "_blank", "noopener,noreferrer");
+  };
   const onMessage = (event: MessageEvent) => {
     if (event.source !== frame.contentWindow || event.origin !== origin) return;
-    const message = event.data as { type?: unknown; reason?: unknown } | null;
+    const message = event.data as { type?: unknown; reason?: unknown; url?: unknown } | null;
+    if (message?.type === BRIDGE_OPEN_LINK) {
+      openOutside(message.url);
+      return;
+    }
     if (message?.type === BRIDGE_REFUSED) {
       refused = message.reason === "blocked" ? options.words.blocked : options.words.unguarded;
       present();
@@ -456,6 +544,9 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   // A dialog over the whole app: the app under it is out of the keyboard's reach while it is open (Tab never lands on
   // the hidden chat), and closing it gives the focus back to what had it (the Open button), not to the page's body.
   const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  // The strip and the Services dialog drop the Open button once the contact goes offline or stops sharing the app: the
+  // focus then goes to the dialog it was in, or else to the chat's composer.
+  const holder = before?.parentElement?.closest<HTMLElement>("[role=dialog]") ?? null;
   const shut = [...document.body.children].filter((el) => !el.hasAttribute("inert"));
   let unwatch = () => {};
   // The person's taps and keys in the app go to its frame, never to this page, whose lock screen would lock them out
@@ -466,23 +557,32 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
     clearInterval(using);
     unwatch();
     removeEventListener("message", onMessage);
-    removeEventListener("keydown", onKey);
+    removeEventListener("keydown", onKey, true);
     removeEventListener("popstate", onPop);
     for (const port of ports) port.close();
     bridge.abort();
     view.remove();
     for (const el of shut) el.removeAttribute("inert");
     const active = document.activeElement;
-    if (before?.isConnected && (!active || active === document.body)) before.focus({ preventScroll: true });
+    if (!active || active === document.body) {
+      const composer = document.querySelector<HTMLElement>("[data-composer] textarea:not(:disabled)");
+      for (const el of [before, holder, composer]) {
+        if (!el?.isConnected) continue;
+        el.focus({ preventScroll: true });
+        if (document.activeElement === el) break;
+      }
+    }
     // Closed by ✕, Escape or the lock: its entry goes too, back to the one the app was on.
     if (!handingOver && isViewEntry(history.state)) leaveViewEntry();
   };
-  const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") end(); };
+  // Taken before the page's own listeners and spent here: a modal of the app under the view (the chat's Shared services
+  // dialog it was opened from) would close on the same Escape.
+  const onKey = (event: KeyboardEvent) => { if (event.key !== "Escape") return; event.preventDefault(); event.stopPropagation(); end(); };
   const onPop = () => { if (!isViewEntry(history.state)) end(); };
   watchDeadEntries();
   if (!isViewEntry(history.state)) history.pushState({ ...(history.state as Record<string, unknown> | null), [ENTRY]: true }, "");
   addEventListener("message", onMessage);
-  addEventListener("keydown", onKey);
+  addEventListener("keydown", onKey, true);
   addEventListener("popstate", onPop);
   close.addEventListener("click", end);
   view.addEventListener(SERVICE_VIEW_CLOSE, end);

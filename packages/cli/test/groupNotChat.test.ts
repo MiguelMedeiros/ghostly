@@ -6,6 +6,7 @@ import type { EngineState, GroupView, LinkView } from "@ghostly/browser/shared/t
 import { callApi, type ApiContext } from "../src/api";
 import { CallManager, type CallEngine } from "../src/calls/manager";
 import { allowlist } from "../src/listen";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.groups
 
 /**
@@ -22,10 +23,10 @@ const dirs: string[] = [];
 afterAll(() => { for (const dir of dirs) rmSync(dir, { recursive: true, force: true }); });
 
 function fake(): ApiContext {
-  const node = { getState: state, inviteToGroup: vi.fn(), shareIdentityProof: vi.fn(), setServiceShared: vi.fn(), renameLink: vi.fn() };
+  const node = { chatView: chatViewOf, getState: state, inviteToGroup: vi.fn(), shareIdentityProof: vi.fn(), setServiceShared: vi.fn(), renameLink: vi.fn() };
   const dir = mkdtempSync(join(tmpdir(), "gnc-"));
   dirs.push(dir);
-  const calls = new CallManager({ engine: { getState: state, setCallSignal: async () => {} } as unknown as CallEngine, emit: () => {}, profileDir: dir });
+  const calls = new CallManager({ engine: { chatView: chatViewOf, getState: state, setCallSignal: async () => {} } as unknown as CallEngine, emit: () => {}, profileDir: dir });
   return { runtime: { server: { node }, paths: { name: "default", dir }, callsUnavailable: null }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, calls, mode: "daemon", version: "test" } as unknown as ApiContext;
 }
 
@@ -143,8 +144,25 @@ describe("listen --from a group, --group a chat", () => {
       code: "not_found", message: '"Crew" is a group, not a chat: ghostly listen --group Crew', details: { group: "g1crew" },
     });
     await expect(allowlist([], ["Alice"], call, async () => null)).rejects.toMatchObject({
-      code: "not_found", message: '"Alice" is a chat, not a group: ghostly listen --from Alice', details: { chat: "chat-one" },
+      code: "not_found", message: '"Alice" is a chat, not a group: ghostly listen --from chat-one', details: { chat: "chat-one" },
     });
     await expect(allowlist(["Nobody"], [], call, async () => null)).rejects.toMatchObject(noChat("Nobody"));
+  });
+
+  it("--group a chat names it by its id, which --from takes, never by the name its contact chose or a prefix", async () => {
+    // Bob chose his own name; this side gave his chat no label. `--from Bob` or `--from chat-b` is refused.
+    const bob = { ...alice, id: "chat-bob", label: undefined, peerNick: "Bob", peerPubKeyZ32: "pbob" } as unknown as LinkView;
+    const withBob = (method: string, params: Record<string, unknown>) => {
+      const ctx = fake();
+      (ctx.runtime as unknown as { server: { node: { getState: () => EngineState } } }).server.node.getState = () => ({ ...state(), links: [alice, bob] }) as unknown as EngineState;
+      return callApi(ctx, method, params);
+    };
+    for (const ref of ["Bob", "chat-b"]) {
+      await expect(allowlist([], [ref], withBob, async () => null)).rejects.toMatchObject({
+        code: "not_found", message: `"${ref}" is a chat, not a group: ghostly listen --from chat-bob`, details: { chat: "chat-bob" },
+      });
+      await expect(allowlist([ref], [], withBob, async () => null)).rejects.toMatchObject({ details: { chat: "chat-bob" } });
+    }
+    expect(await allowlist(["chat-bob"], [], withBob, async () => null)).toBeDefined();
   });
 });

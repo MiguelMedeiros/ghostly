@@ -1062,11 +1062,6 @@ html[data-standalone="true"] {
   to { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes pulse-dot {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
-}
-
 .animate-fade-in {
   animation: fade-in 0.2s ease-out forwards;
 }
@@ -1187,10 +1182,6 @@ html .toast-place.toast-place-page[data-at="top"] {
   max-width: calc(100% - 2rem);
 }
 
-.animate-pulse-dot {
-  animation: pulse-dot 1.5s ease-in-out infinite;
-}
-
 /*
  * A call ringing in: its avatar pulses a few times, then rests fully shown. A pulse for the whole ring redrew the
  * window every frame (a core of the GPU process); the ring sound says it goes on.
@@ -1233,11 +1224,12 @@ html .toast-place.toast-place-page[data-at="top"] {
 /* Forced colors (Windows Contrast themes) replace a bubble's background with the page's, and it was all that drew the
    bubble: the wallpaper's pattern ran under the words, and the tail (an SVG fill, kept in the theme's colour) hung on
    its own. There the wallpaper is plain, the tail is not drawn and the bubble has an edge in the theme's text colour,
-   an outline inside its box so nothing moves. Message details' accent outline (`outline-2`) stays as it is. */
+   an outline inside its box so nothing moves. Message details' accent outline (`outline-2`) stays as it is. Settings'
+   Text size preview draws its messages the same way (`data-preview-bubble`). */
 @media (forced-colors: active) {
   .chat-wallpaper, [data-theme] .chat-wallpaper { background-image: none; }
   .bubble-tail { display: none; }
-  [data-message-bubble]:not([class~="outline-2"]) { outline: 1px solid CanvasText; outline-offset: -1px; }
+  [data-message-bubble]:not([class~="outline-2"]), [data-preview-bubble] { outline: 1px solid CanvasText; outline-offset: -1px; }
 }
 
 /*
@@ -1453,7 +1445,7 @@ html .toast-place.toast-place-page[data-at="top"] {
  * on when it is back. Only loops are listed: a finite animation (a bubble coming in) must finish, or it would leave
  * its element half shown. A new loop goes here too (test/idleMotion.test.ts checks the stylesheets).
  */
-:root[data-away] :is(.animate-spin, .animate-pulse, .animate-pulse-dot, .typing-dots > span, .profile-switch-badge,
+:root[data-away] :is(.animate-spin, .animate-pulse, .typing-dots > span, .profile-switch-badge,
   .voice-bar-dot, .voice-slide-arrow, .new-wallet-spinner, .pi-packet),
 :root[data-away] .new-wallet-shimmer::after { animation-play-state: paused !important; }
 
@@ -1495,13 +1487,6 @@ html .toast-place.toast-place-page[data-at="top"] {
   background-repeat: no-repeat;
   animation: sats-shine 0.9s ease-out 0.1s both;
 }
-
-@keyframes bolt-pop {
-  0% { transform: scale(0.4) rotate(-20deg); opacity: 0; }
-  60% { transform: scale(1.35) rotate(6deg); opacity: 1; }
-  100% { transform: none; }
-}
-.animate-bolt-pop { display: inline-block; animation: bolt-pop 0.5s cubic-bezier(0.3, 1.5, 0.5, 1) both; }
 
 @keyframes nudge {
   0%, 100% { transform: none; }

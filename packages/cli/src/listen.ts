@@ -41,6 +41,12 @@ export interface ListenOptions {
   /** `EXEC_SLOW_MS` and `EXEC_STOP_MS`, shorter in tests. */
   execSlowMs?: number;
   stopMs?: number;
+  /**
+   * The folder and profile the listen runs on, set as `GHOSTLY_HOME` and `GHOSTLY_PROFILE` in an --exec hook's
+   * environment: its own `ghostly send` answers from them. Before, a listen given `--profile` or `--home` ran its hook
+   * on the environment's, and the answer went to the current profile ("No chat …", or another identity's chat).
+   */
+  profile?: { home: string; name: string };
 }
 
 /** The cursor's own write failed, not the event's handling. */
@@ -62,11 +68,16 @@ export class Allowlist {
 
   async allows(event: GhostlyEvent): Promise<boolean> {
     if ("group" in event) return typeof event.group === "string" && this.groups.has(event.group);
+    // A group's payment names a link (`group:<id>`, a community's `cpay:…`, a member's), never the group: its group says.
+    const group = (event.payment as { group?: unknown } | undefined)?.group;
+    if (group !== undefined) return typeof group === "string" && this.groups.has(group);
     if (!("chat" in event)) return true;
     const chat = event.chat;
     if (typeof chat !== "string") return false;
     if (this.chats.has(chat)) return true;
     if (!this.keys.size) return false;
+    // A removal carries the key: the chat is gone, so its lookup fails, and a replay holds no earlier event of it.
+    if (event.type === "chat.removed" && typeof event.peer === "string") return this.keys.has(event.peer);
     // Kept once known: a chat's contact key does not change. One not paired yet is asked again next time.
     let key = this.peers.get(chat);
     if (!key) { key = (await this.peerOf(chat).catch(() => null)) || undefined; if (key) this.peers.set(chat, key); }
@@ -96,13 +107,15 @@ export async function allowlist(from: readonly string[], groups: readonly string
 
 /**
  * A `--from` that names a group, or a `--group` a chat: said with the flag that takes it. The lookup's own hint named
- * `ghostly group show` (or `chat show`), which lists nothing.
+ * `ghostly group show` (or `chat show`), which lists nothing. A chat is named by its id: `--from` refuses a prefix of it
+ * or the name its contact chose, which `--group`'s lookup took.
  */
 async function otherFlag(lookup: Promise<unknown>, ref: string, flag: "--from" | "--group"): Promise<unknown> {
   try { return await lookup; } catch (error) {
     const other = flag === "--from" ? "group" : "chat";
     if (!(error instanceof CliError) || error.code !== "not_found" || typeof error.details?.[other] !== "string") throw error;
-    const shown = /^[\w.:-]+$/.test(ref) ? ref : JSON.stringify(ref);
+    const named = other === "chat" ? error.details.chat as string : ref;
+    const shown = /^[\w.:-]+$/.test(named) ? named : JSON.stringify(named);
     throw new CliError("not_found", `${JSON.stringify(ref)} is a ${other}, not a ${flag === "--from" ? "chat" : "group"}: ghostly listen ${flag === "--from" ? "--group" : "--from"} ${shown}`, error.details);
   }
 }
@@ -305,14 +318,14 @@ interface Hook { event: GhostlyEvent; ended: Promise<HookEnd>; signal(name: Node
  * `toStderr` (with `--print`, whose stdout is the JSON stream): the hook's stdout is streamed to listen's stderr, so a
  * hook that echoes never puts a line that is not an event into the stream. Piped as it comes, never held in memory.
  */
-function runExec(command: string, event: GhostlyEvent, toStderr: boolean): Hook {
+function runExec(command: string, event: GhostlyEvent, toStderr: boolean, profile?: ListenOptions["profile"]): Hook {
   // Its own process group (not on Windows, where that opens a console), so a stop ends the hook and what it started.
   const group = process.platform !== "win32";
   const child = spawn(command, {
     shell: true,
     detached: group,
     stdio: ["pipe", toStderr ? "pipe" : "inherit", "inherit"],
-    env: { ...hookEnv(process.env), GHOSTLY_EVENT_TYPE: event.type, GHOSTLY_EVENT_ID: event.id, GHOSTLY_EVENT_SEQ: String(event.seq) },
+    env: { ...hookEnv(process.env), ...(profile ? { GHOSTLY_HOME: profile.home, GHOSTLY_PROFILE: profile.name } : {}), GHOSTLY_EVENT_TYPE: event.type, GHOSTLY_EVENT_ID: event.id, GHOSTLY_EVENT_SEQ: String(event.seq) },
   });
   const signal = (name: NodeJS.Signals) => {
     try { if (group && child.pid) process.kill(-child.pid, name); else child.kill(name); } catch { /* gone already */ }
@@ -346,7 +359,8 @@ function runExec(command: string, event: GhostlyEvent, toStderr: boolean): Hook 
 const RETRY_MAX_MS = 60_000;
 
 /**
- * Posts one event; resolves true once the bridge took it, or the status it refused it with (a 4xx or a redirect, three times).
+ * Posts one event; resolves true once the bridge took it, or the status it refused it with (a 4xx or a redirect, posted
+ * once: before, three times with backoff, three refusals in the bridge's log for an event stderr said was not tried again).
  * A bridge that is not there (refused connection, timeout, 5xx, 408, 429) has not handled the event: it is tried again,
  * waiting up to a minute between tries, for as long as it takes, so the cursor never moves past it. Before, three tries
  * in 3.5 s and the cursor moved on: a bridge restarting for longer lost every event of the time it was down, for good.
@@ -367,7 +381,7 @@ async function post(url: URL, event: GhostlyEvent, retryMs: number): Promise<tru
       status = response.status;
       down = status >= 500 || status === 408 || status === 429;
     } catch { /* not there: tried again */ }
-    if (!down && attempt >= 2) return status;
+    if (!down) return status;
     if (down && attempt >= 2 && !holding) {
       holding = true;
       process.stderr.write(`ghostly: the webhook at ${url.origin} is not answering: holding event ${event.seq} (${event.type}) until it does\n`);
@@ -445,7 +459,7 @@ export function eventHandler(options: ListenOptions): EventHandler {
       if (options.turns && !gap) event = toTurn(event)!;
       const full = options.print && options.write(jsonOut(event)) === false;
       if (options.exec) {
-        const hook = running = runExec(options.exec, event, options.print);
+        const hook = running = runExec(options.exec, event, options.print, options.profile);
         // Once, as the webhook's "not answering": a hook that never ends held every later event without a word.
         const slow = setTimeout(() => process.stderr.write(`ghostly: --exec still runs on event ${hook.event.seq} (${hook.event.type}) after ${Math.round(slowMs / 1000)} s: the events after it wait for it\n`), slowMs);
         const { code, signal } = await hook.ended.finally(() => { clearTimeout(slow); running = null; });

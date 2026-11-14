@@ -445,6 +445,7 @@
     "noWayHere": "此聊天中不允许任何方式支付此请求",
     "notBoth": "你们双方在这里都未允许 {{method}}",
     "notFromOtherWallet": "此请求无法用其他钱包支付",
+    "notesReceived": "这些票据已经收到过了",
     "notesRedeemed": "这些票据已经兑换过了",
     "notesTooSmall": "这些票据的价值不到 1 sat",
     "notesUnknownFederation": "这些票据来自一个我没有加入的联盟",

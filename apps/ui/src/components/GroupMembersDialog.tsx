@@ -6,6 +6,7 @@ import type { GroupMemberView, GroupView, LinkView } from "@ghostly/browser/shar
 import { useBackdropDismiss, useBackCloses } from "../hooks/useDismiss";
 import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
 import { edgeDot, edgeLabel, groupStatusText, memberName, memberPhoto, sameNamed } from "../lib/groups";
+import { reachDot } from "../lib/connection";
 import { useComposition } from "../hooks/useComposition";
 import { useGroupNameField } from "../hooks/useGroupNameField";
 import { useMinuteClock } from "../hooks/useMinuteClock";
@@ -171,7 +172,7 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
                 onChange={namingField.onChange} onCompositionStart={namingField.onCompositionStart} onCompositionEnd={e => { namingField.onCompositionEnd(e); namingKeys.inputProps.onCompositionEnd(e); }} onKeyDown={e => { if (namingKeys.composing(e)) return; if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); endNaming(); } }}
                 className="min-w-0 flex-1 rounded-md border border-border bg-surface-alt px-2 py-1 text-sm focus:border-accent focus:outline-none read-only:opacity-60 max-md:min-h-11" />
               <button type="submit" data-testid="group-rename-save" disabled={!groupName(naming)} aria-disabled={busy !== null || undefined}
-                className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40 aria-disabled:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.rename.save")}</button>
+                className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] disabled:opacity-40 aria-disabled:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.rename.save")}</button>
               <button type="button" data-testid="group-rename-cancel" onClick={endNaming} className="rounded text-xs text-text-muted hover:text-text-primary max-md:min-h-11 max-md:px-3">{t("group.rename.cancel")}</button>
             </form>}
           {/* Who sees the new name, in words while the field is open: it was a tooltip on Rename, which a phone never shows. */}
@@ -219,7 +220,7 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
             {pending ? <span className="text-xs text-text-muted">{t("group.members.invited")}</span>
               : !link.groups ? <span className="text-xs text-text-muted">{link.dataLink === "open" ? t("group.members.needsUpdate") : t("group.members.notConnected")}</span>
               : <button disabled={!can} aria-disabled={busy !== null || undefined} onClick={() => invite(link.id)} data-testid="group-invite"
-                className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40 aria-disabled:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.members.inviteAction")}</button>}
+                className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] disabled:opacity-40 aria-disabled:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.members.inviteAction")}</button>}
           </li>;
         })}
       </ul>
@@ -231,7 +232,8 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
       onConfirm={() => { const key = removing.key; setRemoving(null); void run(key, () => engine.call("removeGroupMember", { groupId: live.id, key })); }} />}
     {promoting && <MakeAdminDialog name={memberName(promoting, t, sameNamed(live.members))} linkEnds={!!live.entryLink && live.profile !== "community"} returnFocus={list} onClose={() => setPromoting(null)}
       onConfirm={() => { const key = promoting.key; setPromoting(null); void run(key, () => engine.call("makeGroupAdmin", { groupId: live.id, key })); }} />}
-    <p data-testid="group-read-note" className="mt-4 rounded-lg bg-surface-alt/80 p-3 text-xs leading-relaxed text-text-secondary">{live.profile === "community" ? t("group.readNoteCommunity", { count: COMMUNITY_LIMITS.store }) : t("group.readNote", { count: GROUP_LIMITS.relay })}</p>
+    {/* A community whose link is off says so here too: "anyone with the link can join" no longer holds, and a member has no link panel. */}
+    <p data-testid="group-read-note" className="mt-4 rounded-lg bg-surface-alt/80 p-3 text-xs leading-relaxed text-text-secondary">{live.profile === "community" ? t(live.status === "active" && !live.entryLink ? "group.readNoteCommunityOff" : "group.readNoteCommunity", { count: COMMUNITY_LIMITS.store }) : t("group.readNote", { count: GROUP_LIMITS.relay })}</p>
   </dialog>, document.body);
 }
 
@@ -277,8 +279,8 @@ const MemberRow = memo(function MemberRow({ member: m, focused, out, viaHub, pho
   return <li data-testid="group-member" data-key={m.key} data-role={m.role} data-focused={focused || undefined}
     className={`flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg px-2 py-1.5 hover:bg-surface-hover ${focused ? "bg-surface-hover ring-1 ring-accent/60" : ""}`}>
     {/* A community member my app holds no edge with is reached through the hubs: not "not reachable", and nothing says whether their app is open. */}
-    {out ? null : viaHub ? <span role="img" aria-label={t("group.member.viaHub")} className="h-2 w-2 shrink-0 rounded-full bg-text-muted/50" />
-      : <span role="img" aria-label={m.online ? t("group.members.reachable") : t("group.members.notReachable")} className={`h-2 w-2 shrink-0 rounded-full ${m.edge || m.me ? edgeDot(m) : m.online ? "bg-accent" : "bg-text-muted"}`} />}
+    {out ? null : viaHub ? <span role="img" aria-label={t("group.member.viaHub")} className={`h-2 w-2 shrink-0 rounded-full ${reachDot("bg-text-muted/50")}`} />
+      : <span role="img" aria-label={m.online ? t("group.members.reachable") : t("group.members.notReachable")} className={`h-2 w-2 shrink-0 rounded-full ${reachDot(m.edge || m.me ? edgeDot(m) : m.online ? "bg-accent" : "bg-text-muted")}`} />}
     <MemberAvatar src={photo} name={myNick || memberName(m, t)} />
     {/* The name keeps room for about 16 characters: the badges and an admin's buttons go under it when the row is narrower (a phone, a long word in another language). */}
     <span className="contact-row min-w-[8.5rem] flex-1">

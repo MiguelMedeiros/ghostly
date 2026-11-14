@@ -40,11 +40,19 @@ function normalizeLogin(forge: SshForge, input: string): string {
   return login;
 }
 
+/**
+ * The armored block, without what the terminal showed around it (ssh-keygen's "Signing data on standard input", a prompt);
+ * the last one when the command ran more than once there (Add started over, a run without -n ghostly).
+ */
+const ARMOR = /-----BEGIN SSH SIGNATURE-----[\s\S]*?-----END SSH SIGNATURE-----/g;
+const armorIn = (pasted: string) => pasted.length > 4 * SSHSIG_MAX_ARMOR ? pasted : pasted.match(ARMOR)?.pop() ?? pasted;
+
 /** The armor, re-wrapped canonically, so evidence is the same whatever the clipboard did to it. */
 function canonicalArmor(pasted: string): string {
-  const parsed = parseSshSignature(pasted);
+  const armor = armorIn(pasted);
+  const parsed = parseSshSignature(armor);
   if (parsed.namespace !== SSHSIG_NAMESPACE) throw new Error(`That signature is for "${parsed.namespace}", not "${SSHSIG_NAMESPACE}": run the command with -n ${SSHSIG_NAMESPACE}`);
-  const body = pasted.replace(/\r\n/g, "\n").trim().split("\n").map(l => l.trim()).slice(1, -1).join("");
+  const body = armor.replace(/\r\n/g, "\n").trim().split("\n").map(l => l.trim()).slice(1, -1).join("");
   return `-----BEGIN SSH SIGNATURE-----\n${body.match(/.{1,70}/g)!.join("\n")}\n-----END SSH SIGNATURE-----\n`;
 }
 

@@ -11,6 +11,7 @@ import { callApi, type ApiContext } from "../src/api";
 import { Allowlist, allowlist, checkCursor, checkTypes, checkWebhook, EVENT_FAMILIES, EVENT_TYPES, eventHandler, Feed, hookEnv, matches, MAX_BEHIND, readCursor, toTurn } from "../src/listen";
 import { turnRef } from "../src/turnRefs";
 import { ghostly, Running } from "./support/cli";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.hooks, headless.events
 
 /**
@@ -231,7 +232,7 @@ describe("hooks", () => {
       const event = received("c1", "m1", "the plan for tonight");
       eventHandler({ types: [], print: false, write: () => {}, webhook: `http://127.0.0.1:${port(hook)}/hook` })(event);
       await vi.waitFor(() => expect(stderr.mock.calls.map(([text]) => String(text)).join("")).toMatch(`answered 307: event ${event.seq} (message.received) passed, not taken`), { timeout: 8000 });
-      expect(asked).toBeGreaterThan(0);
+      expect(asked).toBe(1);
       expect(elsewhere).toEqual([]);
     } finally {
       stderr.mockRestore();
@@ -408,7 +409,7 @@ describe("hooks", () => {
     expect(asCliError(named).toJSON()).toEqual({ code: "unavailable", message: "No room left for /x/p.backup: free some space, then try again", details: { reason: "no_space", errno: "EDQUOT", path: "/x/p.backup" } });
   });
 
-  it("an event the webhook refuses (a 4xx) is passed: said on stderr, the cursor moves on", async () => {
+  it("an event the webhook refuses (a 4xx) is posted once and passed: said on stderr, the cursor moves on", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ghostly-hook-")), cursor = join(dir, "bridge.cursor");
     let asked = 0;
     const bridge = createServer((request, response) => { asked++; request.resume(); response.writeHead(400).end(); });
@@ -419,7 +420,8 @@ describe("hooks", () => {
       const event = received("c1", "p", "poison");
       handle(event);
       await handle.idle();
-      expect(asked).toBe(3);
+      // Once, as stderr says: before, three times with backoff, three 400s in the bridge's log for "not tried again".
+      expect(asked).toBe(1);
       // The bridge (its origin: a token in the path or query stays off stderr), what it answered, and that the event
       // will not come again: a wrong path or a missing token is seen by its status.
       const said = stderr.mock.calls.map(([text]) => String(text)).join("");
@@ -512,6 +514,27 @@ describe("the allowlist", () => {
     expect(peerOf.mock.calls.filter(([chat]) => chat === "c1")).toHaveLength(1);
   });
 
+  it("a contact key passes its chat's removal by the key it carries: the chat is gone, so its lookup fails", async () => {
+    const list = new Allowlist(new Set(), new Set([KEY]), new Set(), async () => { throw new CliError("not_found", "No chat c1"); });
+    expect(await list.allows(other("chat.removed", { chat: "c1", peer: KEY }))).toBe(true);
+    expect(await list.allows(other("chat.removed", { chat: "c2", peer: OTHER_KEY }))).toBe(false);
+    // Only a removal's: no other event names the chat's contact by it.
+    expect(await list.allows(other("chat.renamed", { chat: "c3", peer: KEY }))).toBe(false);
+  });
+
+  it("a group's payment passes its group, whichever link it names; a chat's payment its chat", async () => {
+    const payment = (chat: string, group?: string) => other("payment.created", { chat, payment: { id: "p", chat, kind: "request", ...(group ? { group } : {}) } });
+    const groups = new Allowlist(new Set(), new Set(), new Set(["g1"]), async () => null);
+    expect(await groups.allows(payment("group:g1", "g1"))).toBe(true);
+    expect(await groups.allows(payment("cpay:g1:m", "g1"))).toBe(true);
+    expect(await groups.allows(payment("c1", "g1"))).toBe(true);
+    expect(await groups.allows(payment("group:g2", "g2"))).toBe(false);
+    expect(await groups.allows(payment("c1"))).toBe(false);
+    const chats = new Allowlist(new Set(["c1"]), new Set(), new Set(), async () => null);
+    expect(await chats.allows(payment("c1"))).toBe(true);
+    expect(await chats.allows(payment("c1", "g1"))).toBe(false);
+  });
+
   it("resolves names to ids once at start; a contact key with no chat yet is kept as a key; anything else is an error", async () => {
     const call = vi.fn(async (method: string, params: Record<string, unknown>) => {
       if (method === "chat.get" && params.chat === "bob") return { id: "c1", label: "bob", peer: KEY };
@@ -593,7 +616,7 @@ describe("listen with an allowlist and --turns", () => {
     const chat = [{ id: "peer_older", sender: "peer", text: "old", timestamp: 1 }, { id: theirs, sender: "peer", text: "which?", timestamp: 2, card: { kind: "buttons", id: "ask", buttons: [{ id: "yes", label: "Yes" }] } }];
     const crew = [{ id: inGroup, sender: "peer", text: "@me hi", timestamp: 2 }];
     const node = {
-      getState: () => ({ links: [{ id: "c1", peerPubKeyZ32: KEY, label: "Alice", pairing: { status: "ready" } }], groups: [{ id: "g1", name: "Crew", members: [] }], settings: {}, transport: {} }),
+      chatView: chatViewOf, getState: () => ({ links: [{ id: "c1", peerPubKeyZ32: KEY, label: "Alice", pairing: { status: "ready" } }], groups: [{ id: "g1", name: "Crew", members: [] }], settings: {}, transport: {} }),
       // The newest page holds only the group's message and the chat's old one: the turn's is found in the whole history.
       messagePage: vi.fn(async ({ linkId }: { linkId: string }) => ({ messages: linkId === "c1" ? chat.slice(0, 1) : crew, more: linkId === "c1" })),
       getMessages: vi.fn(async () => chat), groupMessages: vi.fn(async () => crew),

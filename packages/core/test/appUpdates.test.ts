@@ -80,6 +80,35 @@ describe("removals and revocations before a run", () => {
     expect(checkAppBeforeRun(v(3), [view([removal], [one])]).status).toBe("revoked");
   });
 
+  it("walks a store's lists once, not at every call: an app's every storage call and frame is checked", async () => {
+    const { one } = await revocations();
+    // Lists at the store caps of other apps, each entry counting the reads of what the check looks at.
+    let walked = 0;
+    const counted = <T extends object>(entry: T, field: keyof T): T => {
+      const value = entry[field];
+      return Object.defineProperty({ ...entry }, field, { get: () => { walked++; return value; }, enumerable: true });
+    };
+    const others = Array.from({ length: 4096 }, (_, i) => appRef(appKey(`publisher ${i % 4}`), `app${i}`));
+    const revoked = others.map((app) => counted({ statement: { ghostlyRevoke: 1 as const, app, upTo: 9 }, signature: one.signature }, "statement"));
+    const removed = others.map((ref) => counted({ ref, digest: v(3).digest, reason: "Malware", at: 1 }, "ref"));
+    const views = [view(removed, revoked), view(removed, revoked, "Second")];
+    const kept = [counted(one, "statement")];
+    expect(checkAppBeforeRun(v(4), views, kept)).toEqual({ status: "ok" });
+    walked = 0;
+    for (let i = 0; i < 10; i++) expect(checkAppBeforeRun(v(4), views, kept)).toEqual({ status: "ok" });
+    // Only what names this app is read: its one kept revocation, once a call (16385 a call before).
+    expect(walked).toBe(10);
+    // The same lists still stop what they name, in the order the check reads them.
+    expect(checkAppBeforeRun(v(3), views, kept)).toEqual({ status: "revoked", revocation: kept[0] });
+    expect(checkAppBeforeRun({ ...v(3), ref: others[7]! }, views).status).toBe("removed");
+    // A list grown in place is read again, not answered from what it held.
+    const grown: SignedAppRevocation[] = [...revoked];
+    expect(checkAppBeforeRun(v(2), [view([], grown)])).toEqual({ status: "ok" });
+    const upTo = await signAppRevocation({ ghostlyRevoke: 1, app: REF, upTo: 2 }, publisher);
+    grown.push(upTo);
+    expect(checkAppBeforeRun(v(2), [view([], grown)])).toEqual({ status: "revoked", revocation: upTo });
+  });
+
   it("runs an app no store removed and no publisher revoked", async () => {
     const built = await buildAppBundle(DRAFT, [ENTRY], publisher);
     expect(checkAppBeforeRun({ ref: REF, sequence: built.manifest.sequence, digest: built.digest }, [view([])])).toEqual({ status: "ok" });

@@ -7,7 +7,7 @@ import { FILE_BYTES_STEP, fileBytes, fileBytesOf } from "@ghostly/browser/shared
 import { fileStore } from "@ghostly/browser/shared/idb";
 import { removeStored, waitingGroupFile } from "@ghostly/browser/shared/storedFiles";
 import { replyRef } from "@ghostly/browser/shared/replies";
-import type { FileTransferView, GroupView, MessageFile, StoredMessage } from "@ghostly/browser/shared/types";
+import type { EngineState, FileTransferView, GroupView, MessageFile, StoredMessage } from "@ghostly/browser/shared/types";
 import { groupFileId, groupOfFile } from "@ghostly/browser/engine/groupFiles";
 import { childEnv } from "./childEnv";
 import { bool, chatOf, findChatOrGroup, keptForJoin, list, noFile, noMessage, node, num, oneOf, oneShotWaits, sentAt, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
@@ -102,22 +102,23 @@ function withWaitingFor(transfer: FileTransferView | undefined): (FileTransferVi
 }
 
 /** The chat or the group a file command names (`findChatOrGroup`). */
-const chatOrGroupOf = (ctx: ApiContext, params: Params) => findChatOrGroup(state(ctx).links, state(ctx).groups, str(params, "chat", true));
+const chatOrGroupOf = (ctx: ApiContext, params: Params, { links, groups }: EngineState = state(ctx)) => findChatOrGroup(links, groups, str(params, "chat", true));
 
 /**
  * The chat or group a file belongs to: a file id starts with its chat's id (a group's file with `group-<id>-`), so it
  * may be left out; given, it must be the file's own. `where` is what the answer names it by.
  */
 function fileChat(ctx: ApiContext, params: Params, fileId: string): { linkId: string; where: { chat: string } | { group: string } } {
-  const groupId = groupOfFile(fileId, state(ctx).groups.map((g) => g.id));
+  const s = state(ctx);
+  const groupId = groupOfFile(fileId, s.groups.map((g) => g.id));
   if (groupId) {
-    const named = params.chat === undefined ? undefined : chatOrGroupOf(ctx, params);
+    const named = params.chat === undefined ? undefined : chatOrGroupOf(ctx, params, s);
     if (named && !("group" in named && named.group.id === groupId)) throw noFile(fileId, { group: "group" in named, ref: str(params, "chat", true) });
     return { linkId: `group:${groupId}`, where: { group: groupId } };
   }
   const link = params.chat === undefined
-    ? state(ctx).links.find((l) => fileId.startsWith(`${l.id}-in-`) || fileId.startsWith(`${l.id}-out-`))
-    : chatOf(ctx, params);
+    ? s.links.find((l) => fileId.startsWith(`${l.id}-in-`) || fileId.startsWith(`${l.id}-out-`))
+    : chatOf(ctx, params, s);
   if (!link) throw noFile(fileId);
   if (!fileId.startsWith(`${link.id}-`)) throw noFile(fileId, { group: false, ref: str(params, "chat", true) });
   return { linkId: link.id, where: { chat: link.id } };
@@ -313,11 +314,13 @@ async function waitForFile(ctx: ApiContext, params: Params, stopping?: AbortSign
     throw error;
   });
   if (transfer.state === "failed") throw new CliError("engine", transfer.error ?? "The transfer failed", { file: fileId, ...where, retry: !!transfer.retry });
-  if (transfer.state !== "done") {
-    const name = (stored ?? await fileStore.get(fileId).catch(() => undefined))?.metadata?.name ?? "The file";
-    throw new CliError("confirm", `${name} (${megabytes(transfer.size)}) waits for you to take it: ghostly file accept ${fileId} (or file decline)`, { file: fileId, ...where, size: transfer.size, stage: "asking" });
-  }
+  if (transfer.state !== "done") throw waitsForYou((stored ?? await fileStore.get(fileId).catch(() => undefined))?.metadata?.name, fileId, where, transfer.size);
   return { ...where, file: fileId, state: "done", size: transfer.size };
+}
+
+/** A received file that waits for this person's `file accept` (`file wait`, `file save`): said naming the command. */
+function waitsForYou(name: string | undefined, fileId: string, where: { chat: string } | { group: string } | undefined, size: number): CliError {
+  return new CliError("confirm", `${name ?? "The file"} (${megabytes(size)}) waits for you to take it: ghostly file accept ${fileId} (or file decline)`, { file: fileId, ...where, size, stage: "asking" });
 }
 
 export const FILE_METHODS: Record<string, Method> = {
@@ -456,6 +459,10 @@ export const FILE_METHODS: Record<string, Method> = {
     if ((action === "resume" || action === "request" || action === "resend") && view?.stage === "paused" && view.pausedBy === "peer") {
       throw new CliError("refused", "Paused by the contact: it goes on when they resume it");
     }
+    // Offered here and not taken yet: the engine takes these and does nothing, and it still waits for the answer.
+    if ((action === "pause" || action === "resume" || action === "request") && view?.stage === "asking" && view.direction === "in") {
+      throw new CliError("refused", "Not taken yet: it waits for you to take it (file accept, or file decline)");
+    }
     await node(ctx).fileAction({ linkId, fileId, action });
     return { ...where, file: fileId, action, transfer: state(ctx).transfers[fileId] ?? null };
   },
@@ -478,9 +485,17 @@ export const FILE_METHODS: Record<string, Method> = {
     if (!stored?.metadata) throw noFile(fileId);
     if (stored.leftOut) throw new CliError("not_found", "Not in this backup: the light backup this profile was restored from left the file out");
     // A sent file's bytes were staged whole at send: its transfer is the contact's download, not bytes missing here.
-    const transfer = stored.direction === "out" ? undefined : state(ctx).transfers[fileId] ?? stored.transfer;
+    // A group's file waiting for a Download has no transfer in the engine's state: its record says it waits.
+    const transfer = stored.direction === "out" ? undefined : state(ctx).transfers[fileId] ?? waitingGroupFile(stored) ?? stored.transfer;
     // One that ended will not come: its partial bytes were dropped, so "not all here yet" would have a script wait for good.
     if (transfer?.state === "failed") throw new CliError("refused", `It ended: ${transfer.error ?? "failed"}`);
+    // Nor will one that waits for `file accept`: said naming it, as --wait does. It answered "not all here yet (0 of N
+    // bytes)" before, and a script retried it for good.
+    if (transfer?.state === "transferring" && transfer.stage === "asking" && transfer.direction === "in") {
+      let where;
+      try { where = fileChat(ctx, params, fileId).where; } catch { /* a chat no longer here: the file's id names it */ }
+      throw waitsForYou(stored.metadata.name, fileId, where, transfer.size);
+    }
     if (transfer && transfer.state !== "done") throw new CliError("unavailable", `The file is not all here yet (${transfer.transferred} of ${transfer.size} bytes)`);
     const named = str(params, "path") ? resolve(str(params, "path", true)) : join(resolve(str(params, "dir") ?? "."), saveName(stored.metadata.voice ? voiceDownloadName(stored.metadata.mime, await voiceTime(ctx, stored)) : stored.metadata.name));
     const force = bool(params, "force");
@@ -500,7 +515,14 @@ export const FILE_METHODS: Record<string, Method> = {
       const there = await stat(target).catch(() => undefined);
       // A folder there is no file to replace: before, it asked for --force, and the --force then failed "is a folder".
       if (there?.isDirectory()) return new CliError("bad_request", `${target} is a folder: name a file, or use --dir ${target} (dir over the socket)`);
-      if ((there && !force) || code === "EEXIST") return new CliError("confirm", `${target} exists: pass --force (force: true over the socket) to replace it`);
+      if (!((there && !force) || code === "EEXIST")) return;
+      const replace = `${target} exists: pass --force (force: true over the socket) to replace it`;
+      if (path) return new CliError("confirm", replace);
+      // In --dir the name is its sender's: two files of one name are two files. Before, --force was the one way out
+      // named, and it replaced the other. The next free "<name> (2)" is offered, never taken unasked.
+      let n = 2;
+      while (n <= 1000 && (await stat(`${stem} (${n})${ext}`).catch(() => undefined))) n += 1;
+      return new CliError("confirm", `${replace}, or --path ${stem} (${n})${ext} (path over the socket) to keep both`);
     };
     let target = named;
     for (let n = 2, refused = await taken(target); refused; n += 1, refused = await taken(target)) {

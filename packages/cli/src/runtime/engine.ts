@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, readFileSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,6 +20,7 @@ import { RESTORED_MARK, type ProfilePaths } from "../profiles";
 import { servedApps } from "../appServe";
 import { envSwitch } from "../envSwitch";
 import { watchWake } from "./wakeWatch";
+import { rtcThreads } from "./rtcThreads";
 
 // Every chat's keys are derived again at each start, and a one-shot is a start: by Node's Ed25519, not noble's.
 setPublicKeyFastPath(nativePublicKey);
@@ -140,6 +141,7 @@ async function installWebRtc(): Promise<boolean> {
     for (const name of ["RTCPeerConnection", "RTCSessionDescription", "RTCIceCandidate", "RTCDataChannel", "RTCDataChannelEvent", "RTCPeerConnectionIceEvent", "RTCCertificate"] as const) {
       scope[name] ??= (polyfill as unknown as Record<string, unknown>)[name];
     }
+    countConnections(scope);
     refuseDataAnswers(scope);
     if (!publicStun()) leaveOutPublicStun(scope);
     return true;
@@ -147,6 +149,23 @@ async function installWebRtc(): Promise<boolean> {
     process.stderr.write(`ghostly: WebRTC is unavailable (${error instanceof Error ? error.message : String(error)}); chats use HyperDHT, Iroh or the DHT\n`);
     return false;
   }
+}
+
+/** Each connection the engine makes is counted until it is closed, so libdatachannel's threads go with the last (`rtcThreads`). */
+function countConnections(scope: Record<string, unknown>): void {
+  const Base = scope.RTCPeerConnection as typeof RTCPeerConnection;
+  scope.RTCPeerConnection = class extends Base {
+    readonly #closed: () => void;
+    constructor(config?: RTCConfiguration) {
+      super(config);
+      this.#closed = rtcThreads.opened();
+      // libdatachannel may close it by itself (the contact's side ended it): no `close()` comes then.
+      this.addEventListener("connectionstatechange", () => { if (this.connectionState === "closed") this.#closed(); });
+    }
+    override close(): void {
+      try { super.close(); } finally { this.#closed(); }
+    }
+  };
 }
 
 /**
@@ -216,7 +235,8 @@ function irohWasmBytes(): Buffer {
 
 /**
  * How a runtime starts: `deferGroups` leaves the groups' sessions unstarted (a one-shot for one chat); `deferChats` leaves
- * the saved chats unstarted until a call names one (a one-shot for one chat, or one that makes or joins one); `offline`
+ * the saved chats and the groups' edges unstarted until a call names one (a one-shot for one chat or one group, or one
+ * that makes or joins a chat); `offline`
  * starts no chat or group and publishes nothing (a one-shot that only reads); `logJoins` says the steps of a join
  * through a group's link on stderr (a daemon, whose log that is: `joinLog.ts`).
  */
@@ -263,6 +283,9 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
       if (said) process.stderr.write(said + "\n");
     });
   }
+  // The store a backup wrote for itself (`profile.backup`) and a killed process left: every message and key in the
+  // clear, past what was deleted since. This process holds the profile now, so no backup of it is running.
+  for (const name of existsSync(paths.db) ? readdirSync(paths.db) : []) if (/^backup-store-.*\.bin$/.test(name)) rmSync(join(paths.db, name), { force: true });
   const store = await openPersistentIndexedDb(paths.db);
   // A profile a restore made, started for the first time: its store is the backup's, as old as the backup. Its ecash
   // is checked with the mints and its unfinished payment attempts authorize nothing, as in the app's restore. Done

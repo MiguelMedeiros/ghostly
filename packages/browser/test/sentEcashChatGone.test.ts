@@ -98,7 +98,7 @@ function addChat(node: GhostlyNode, frames: Payment[], as?: StoredLink): StoredL
     isDataLinkOpen: true, supportsPayments: true,
     sendPayment: vi.fn(async (payment: Payment) => { frames.push(payment); }),
     sendPaymentRequest: vi.fn(async () => {}), sendPaymentAsk: vi.fn(async () => {}), sendPaymentResult: vi.fn(),
-    stop: vi.fn(async () => {}), depart: vi.fn(),
+    stop: vi.fn(async () => {}), depart: vi.fn(), setTyping: vi.fn(),
     // A group member's edge: no group frame goes over it here.
     supportsGroupVersion: vi.fn(() => false),
   };

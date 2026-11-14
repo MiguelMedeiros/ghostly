@@ -155,7 +155,10 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
   (`translation-runtime/<version>/` and `translation-models/<from>-<to>/` in the data folder). Without the runtime it
   says so once on stderr and prints messages as they are. See the CLI README's Translation section.
 - `--exec '<command>'` runs a shell command once per event, in order, with the event on **stdin** (never in its
-  arguments, so a contact's text cannot reach the shell). A command that exits non-zero, or that a signal kills
+  arguments, so a contact's text cannot reach the shell), and `GHOSTLY_EVENT_TYPE`, `GHOSTLY_EVENT_ID` and
+  `GHOSTLY_EVENT_SEQ` in its environment. It also gets `GHOSTLY_HOME` and `GHOSTLY_PROFILE` of the folder and profile
+  the listen runs on (given with `--home`, `--profile` or the environment), so a `ghostly send` in it answers from the
+  same profile. A command that exits non-zero, or that a signal kills
   ("--exec was killed by SIGKILL on event N"), is said on stderr and the cursor moves past its event: it is not run
   again. With `--print`, the command's own stdout goes to listen's stderr, so stdout carries the JSON events only;
   without `--print`, it is listen's stdout. One still running after a minute is said once on stderr (the events after

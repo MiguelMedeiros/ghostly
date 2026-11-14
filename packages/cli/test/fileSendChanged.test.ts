@@ -9,6 +9,7 @@ import { callApi, type ApiContext } from "../src/api";
 import { asCliError } from "../src/errors";
 import { NodeFileBytes } from "../src/runtime/fileBytes";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.files
 
 /**
@@ -37,6 +38,7 @@ afterEach(() => {
 
 function contextFor() {
   const node = {
+    chatView: chatViewOf,
     getState: () => ({ links: [link], groups: [group], settings: {}, transport: {}, transfers: {} }) as unknown as EngineState,
     getMessages: vi.fn(async () => []),
     getMessage: vi.fn(async () => undefined),

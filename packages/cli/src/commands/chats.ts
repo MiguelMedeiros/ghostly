@@ -1,7 +1,7 @@
 import { CliError } from "../errors";
 import type { OptionSpec } from "../args";
 import { TRANSPORT_NAMES } from "../words";
-import { type Command, CONNECT_SECONDS, force, groupWait, cursor, HOLD_MINUTES, inRange, LONG_WAIT_SECONDS, needs, pageLimit, prLinked, quota, refs, routineFields, routineOptions, runOf, secret, showInvite, taskFields, taskOptions, timeout, translate, typingFor, typingKind, usageFields, usageOptions, wait } from "./shared";
+import { type Command, CONNECT_SECONDS, force, groupWait, cursor, HOLD_MINUTES, inRange, LONG_WAIT_SECONDS, needs, pageLimit, prLinked, quota, reaction, refs, routineFields, routineOptions, runOf, secret, showInvite, taskFields, taskOptions, timeout, translate, typingFor, typingKind, usageFields, usageOptions, wait } from "./shared";
 
 /** `react` and `pin` in a 1:1 chat: until the contact confirmed it, by default without a daemon (the process leaves). */
 const confirmWait: Record<string, OptionSpec> = {
@@ -49,6 +49,8 @@ export const commands: Record<string, Command> = {
       timeout: groupWait.timeout,
     },
     params: ({ options }, a) => {
+      // Empty (an unset variable in a script), --close closed the buttons with no answer shown: a button not there is exit 3.
+      if (options.chosen === "") throw new CliError("usage", "--chosen needs a button id");
       if (!options.chosen && options.close !== true && !options.text) throw new CliError("usage", `Give --chosen, --close or --text: ghostly ${BUTTON_UPDATE}`);
       return { chat: a.chat, message: a.message, chosen: options.chosen, close: options.close === true, text: options.text, force: options.force === true, wait: options.wait, timeout: timeout(options) };
     },
@@ -75,7 +77,7 @@ export const commands: Record<string, Command> = {
     options: { yes: { type: "boolean", description: "Confirm" }, force: { type: "boolean", description: "Remove it even if a message you deleted for everyone has not reached the contact yet" } },
     params: ({ options }, { chat }) => ({ chat, yes: options.yes === true, force: options.force === true }),
   },
-  "chat rename": { method: "chat.rename", usage: "chat rename <chat> <name...>", summary: "Name a chat on this side (empty: the contact's name)", args: ["chat", "name...?"], params: (_, { chat, name }) => ({ chat, name: name ?? "" }) },
+  "chat rename": { method: "chat.rename", usage: "chat rename <chat> [name...]", summary: "Name a chat on this side (empty: the contact's name)", args: ["chat", "name...?"], params: (_, { chat, name }) => ({ chat, name: name ?? "" }) },
   "chat show": { method: "chat.get", usage: "chat show <chat> [--show-secret]", summary: "One chat and its connection (its pending invite code only with --show-secret)", args: ["chat"], options: showInvite, params: ({ options }, { chat }) => ({ chat, ...secret(options) }) },
   "chat transport": { method: "chat.transport", usage: "chat transport <chat> <auto|dht|webrtc|iroh|hyperdht>", summary: "Choose what carries a chat", args: ["chat", "transport"], words: { transport: Object.keys(TRANSPORT_NAMES) }, params: (_, a) => ({ chat: a.chat, transport: a.transport }) },
   "chat verify": {
@@ -150,7 +152,7 @@ export const commands: Record<string, Command> = {
   "react": {
     method: "chat.react", usage: "react <chat> <message> <emoji> [--remove] [--wait none|confirmed] [--timeout s]", summary: "React to a message with one emoji (it replaces yours); --remove takes yours back",
     args: ["chat", "message", "emoji...?"], options: { remove: { type: "boolean", description: "Take your reaction back" }, ...confirmWait },
-    params: ({ options }, a) => ({ chat: a.chat, message: a.message, emoji: a.emoji, remove: options.remove === true, wait: options.wait, timeout: timeout(options) }),
+    params: ({ options }, a) => ({ chat: a.chat, message: a.message, emoji: reaction(options, a.emoji), remove: options.remove === true, wait: options.wait, timeout: timeout(options) }),
   },
   "routine send": {
     method: "routine.send", usage: "routine send <chat|group> --name <name> --schedule \"every day 01:00\" [--cron \"0 1 * * *\"] [--state active|paused] [--next <time>] [--run ok|failed|skipped[:summary]] [--link url]... [--id id] [--text <text>] [--json json|-|file] [--force] [--wait none|sent|delivered] [--timeout s]",

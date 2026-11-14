@@ -10,6 +10,7 @@ import { fileSource, restoreHandoffBundle, writeProfileBackup, type FileSource }
 import { listDeviceRecords } from "@ghostly/browser/devices/store";
 import { databaseOfSpace, newSpace, pointProfile, profileOfDatabase, recoverProfilePointer } from "./profiles";
 import { dropWalletStorageOf, keyOfSpace } from "./profileData";
+import { linkedFilesDatabase } from "./apps/webFiles";
 
 /*
  * What the handoff needs of the app (WISP 06 § The handoff): a profile's storage as the app keeps it. The giver reads
@@ -417,6 +418,8 @@ const staging: HandoffStagingHost = {
     // staged state): never what a listed profile, this one's current state included, still names.
     await dropWalletStorageOf(database).catch(() => {});
     if (await databaseExists(database)) await dropDatabase(database);
+    // The folders and files its apps were given (linked files: handles, never copies): nothing names them once it goes.
+    if (await databaseExists(linkedFilesDatabase(database))) await dropDatabase(linkedFilesDatabase(database));
     const files = await dropFileSpace(database).then(() => null, (error: unknown) => error);
     dropKeys(ns);
     await dropNotes(ns);

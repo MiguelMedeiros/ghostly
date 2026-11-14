@@ -823,12 +823,14 @@
     "captionMine": "この ID を共有しました",
     "captionTheirs": "{{contact}} がこの ID を共有しました",
     "checking": "確認中",
+    "newerTheirs": "この連絡先のこの ID について、より新しい証明をすでに保存しています",
     "notChecked": "未確認",
     "notVerified": "確認できません",
     "revokedMine": "あなたの {{what}} は取り消されました",
     "revokedTheirs": "{{contact}} の {{what}} は取り消されました",
     "stoppedMine": "{{what}} の共有を停止しました",
     "stoppedTheirs": "{{contact}} が {{what}} の共有を停止しました",
+    "tooManyTheirs": "この連絡先の ID をすでに多く保存しすぎています",
     "waiting": "待機中"
   },
   "shared": {

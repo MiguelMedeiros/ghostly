@@ -445,6 +445,7 @@
     "noWayHere": "このチャットでは、このリクエストを支払う方法が許可されていません",
     "notBoth": "ここでは {{method}} が双方に許可されていません",
     "notFromOtherWallet": "このリクエストは別のウォレットから支払えません",
+    "notesReceived": "これらのノートはすでに受け取っています",
     "notesRedeemed": "これらのノートはすでに引き換えられています",
     "notesTooSmall": "これらのノートの価値は 1 sat 未満です",
     "notesUnknownFederation": "これらのノートは、参加していないフェデレーションのものです",

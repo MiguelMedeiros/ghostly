@@ -1,6 +1,7 @@
 import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it } from "vitest";
 import { APP_CHECK_TIMINGS } from "../src/engine/apps";
+import { fileBytes } from "../src/shared/fileBytes";
 import { BUNDLE_URL, FakeNet, NOW_MS, STORE_URL, apps, bundle, emptyProfile, listing, storeFiles } from "./appsSupport";
 // covers: apps.engine.installed
 
@@ -80,6 +81,43 @@ describe("an update whose whole read is refused", () => {
     await store.addStore({ url: STORE_URL });
     for (let visit = 0; visit < 3; visit++) expect((await store.checkUpdates())[0]!.outcome).toBe("none");
     expect(MIRRORS.map(whole)).toEqual([1, 1, 1, 1]);
+  });
+
+  it("another bundle under the installed number at each of two sources is read whole once from each, not at every check", async () => {
+    const net = new FakeNet();
+    now = NOW_MS;
+    const store = apps(net, { now: () => now });
+    const v1 = await bundle({ sources: [SOURCE, MIRRORS[0]!] });
+    net.put(BUNDLE_URL, v1.bytes);
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    const whole = (url: string) => net.fetch.mock.calls.filter(([at, init]) => String(at) === url && !((init?.headers ?? {}) as Record<string, string>).range).length;
+    // Its publisher rebuilt version 1 twice without raising the number: the mark took each in turn, both read whole.
+    net.put(SOURCE, (await bundle({ sources: [SOURCE, MIRRORS[0]!], entry: "<p>a second version 1" })).bytes);
+    net.put(MIRRORS[0]!, (await bundle({ sources: [SOURCE, MIRRORS[0]!], entry: "<p>a third version 1" })).bytes);
+    expect((await store.checkUpdates())[0]!.outcome).toBe("equivocation");
+    const marked = (await store.list())[0]!.equivocation;
+    for (let visit = 0; visit < 3; visit++) {
+      now += 60_000;
+      expect((await store.checkUpdates())[0]!.outcome).toBe("equivocation");
+    }
+    expect([whole(SOURCE), whole(MIRRORS[0]!)]).toEqual([1, 1]);
+    expect((await store.list())[0]!.equivocation, "the mark is not rewritten").toEqual(marked);
+  });
+
+  // A restored profile (installed list, no files): each check fetches the installed version's files first.
+  it("for the installed version's missing files is read whole once while its URL serves the same, again an hour later", async () => {
+    const { net, store, v1, whole } = await setup();
+    await (await fileBytes()).remove(`app-${v1.digest}`);
+    net.put(BUNDLE_URL, broken(v1.bytes));
+    for (let visit = 0; visit < 3; visit++) expect((await store.checkUpdates())[0]!.run).toEqual({ status: "needs-files" });
+    await expect(store.entry({ ref: v1.ref })).rejects.toThrow(/^needs-files/);
+    expect(whole(BUNDLE_URL), "read whole once, then only peeked").toBe(2);
+
+    net.put(BUNDLE_URL, v1.bytes);
+    now += APP_CHECK_TIMINGS.freshMs + 1;
+    expect((await store.checkUpdates())[0]!.run).toEqual({ status: "ok" });
+    expect(whole(BUNDLE_URL)).toBe(3);
   });
 
   it("is read again after a failed read that brought no bundle (the host down)", async () => {

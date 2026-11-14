@@ -89,8 +89,9 @@ export function Services() {
     if (!open) setLanding((was) => (was && "sharing" in was ? { shared: was.sharing } : { cancelled: true }));
   };
   const [error, setError] = useState("");
-  // Said as a notice: a refusal's why (Hide my IP's) is behind its ⓘ.
-  const [openError, setOpenError] = useState<Problem | null>(null);
+  // Said as a notice: a refusal's why (Hide my IP's) is behind its ⓘ. Kept by the contact and app it is about, and shown
+  // only while that app is listed: not once the contact went offline, or came back with another app.
+  const [openError, setOpenError] = useState<{ contact: string; id: string; problem: Problem } | null>(null);
   // Share waits on the host's permission (Chrome's prompt, Desktop's dialog): pressed again meanwhile, it added the app twice.
   const sharing = useRef(false);
   const [busy, setBusy] = useState(false);
@@ -176,8 +177,9 @@ export function Services() {
                   <Button key={app.id} variant="primary" data-testid="contact-service-open" title={t("services.open", { app: appName })}
                     className="flex items-center max-w-full min-w-0" onClick={() => {
                       setOpenError(null);
-                      if (!platform.features.openServices) { setOpenError({ tone: "error", title: t("services.openNeedsApp") }); return; }
-                      platform.openService(contact.key, app.id).catch((e) => setOpenError(problemText(e, t)));
+                      const failed = (problem: Problem) => setOpenError({ contact: contact.key, id: app.id, problem });
+                      if (!platform.features.openServices) { failed({ tone: "error", title: t("services.openNeedsApp") }); return; }
+                      platform.openService(contact.key, app.id).catch((e) => failed(problemText(e, t)));
                     }}>
                     {before && <span className="whitespace-pre">{before}</span>}
                     <span data-testid="contact-service-name" className="truncate" dir="auto">{appName}</span>
@@ -187,7 +189,8 @@ export function Services() {
               })}
             </Row>
           ))}
-        {openError && <Block><Notice problem={openError} /></Block>}
+        {openError && fromContacts.some((c) => c.key === openError.contact && c.apps.some((a) => a.id === openError.id))
+          && <Block><Notice problem={openError.problem} /></Block>}
       </Section>
     </Page>
   );
@@ -235,7 +238,7 @@ function ServiceCard({ service, online, contacts, onRemove }: { service: SharedS
         </span>}>
           {needsAccess && <Button variant="primary" data-testid="service-allow" onClick={() => void platform.allowLocalAccess?.(service.target).catch(() => {}).finally(() => setChecked((n) => n + 1))}>{t("settings.media.allow")}</Button>}
           <Button onClick={() => setShowPeople(!showPeople)} data-testid="service-people" aria-expanded={showPeople}>{showPeople ? t("services.peopleDone") : t("services.people")}</Button>
-          <Switch label={t("services.shareNamed", { app: service.name })} testId="service-sharing" checked={service.enabled} onChange={(on) => void platform.setServiceEnabled(service.id, on)} />
+          <Switch label={t("services.shareNamed", { app: service.name })} testId="service-sharing" checked={service.enabled} onChange={(on) => void platform.setServiceEnabled(service.id, on).catch(() => setChecked((n) => n + 1))} />
           {!asking && <button type="button" aria-label={t("services.removeNamed", { app: service.name })} title={t("services.remove")} autoFocus={asked} onClick={() => { setAsking(true); setAsked(true); }} className="grid place-items-center w-10 h-10 rounded-lg text-text-muted hover:text-danger hover:bg-surface-alt transition-colors cursor-pointer">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /></svg>
           </button>}

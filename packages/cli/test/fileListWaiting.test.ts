@@ -8,6 +8,7 @@ import type { EngineState, LinkView, MessageFile } from "@ghostly/browser/shared
 import { callApi, type ApiContext } from "../src/api";
 import { NodeFileBytes } from "../src/runtime/fileBytes";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.files
 
 /**
@@ -28,6 +29,7 @@ beforeAll(async () => {
 describe("file list of a file sent to a contact who is away", () => {
   const messages: { id: string; sender: string; timestamp: number; file: MessageFile }[] = [];
   const node = {
+    chatView: chatViewOf,
     getState: () => ({ links: [link], groups: [], settings: {}, transport: {}, transfers: {} }) as unknown as EngineState,
     getMessages: vi.fn(async () => messages),
     // `file list` reads the history's file rows only (the file index): here every message carries one.

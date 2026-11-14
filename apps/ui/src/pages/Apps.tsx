@@ -13,8 +13,10 @@ import { useI18n, type Translate } from "../contexts/I18nContext";
 import { draftDirection } from "../lib/documentLanguage";
 import { AppIcon, Fingerprint } from "../components/apps/AppIcon";
 import { AppInstallDialog, InstalledAppDialog } from "../components/apps/AppInstallDialog";
+import { removedLine } from "../components/apps/removedLine";
 import { AddAppDialog } from "../components/apps/AddAppDialog";
 import { AppChatPicker } from "../components/apps/AppChatPicker";
+import { NAME, withName } from "../components/apps/aroundName";
 import { useAppsState } from "../lib/apps/flag";
 import { appStopped, refreshInstalledApps, useBuiltInApps, useInstalledApps, useInstalledAppsFailure } from "../lib/apps/installed";
 import { openApp, type OpenAppOptions } from "../lib/apps/open";
@@ -132,7 +134,7 @@ function BuiltInRow({ app, busy, onOpen, onRemove }: { app: BuiltInAppOffer; bus
       {asking && (
         <div role="group" aria-labelledby={questionId} data-testid="built-in-app-remove-question" className="basis-full space-y-2"
           onKeyDown={(e) => { if (e.key === "Escape" && !busy) { e.stopPropagation(); setAsking(false); } }}>
-          <p id={questionId} dir="auto" className="text-sm text-text-primary [overflow-wrap:anywhere]">{t("apps.builtIn.removeTitle", { title: app.title })}</p>
+          <p id={questionId} dir="auto" className="text-sm text-text-primary [overflow-wrap:anywhere]">{withName(t("apps.builtIn.removeTitle", { title: NAME }), app.title)}</p>
           <p className="text-xs text-text-secondary">{t("apps.builtIn.removeText")}</p>
           <div className="flex flex-wrap justify-end gap-2">
             <Button ref={keep} disabled={busy} onClick={() => setAsking(false)}>{t("common.cancel")}</Button>
@@ -262,7 +264,7 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
         {asking && (
           <div role="group" aria-labelledby={questionId} data-testid="app-store-remove-question" className="basis-full space-y-2"
             onKeyDown={(e) => { if (e.key === "Escape" && !busy) { e.stopPropagation(); setAsking(false); } }}>
-            <p id={questionId} dir="auto" className="text-sm text-text-primary [overflow-wrap:anywhere]">{t("apps.store.removeTitle", { name: storeName })}</p>
+            <p id={questionId} dir="auto" className="text-sm text-text-primary [overflow-wrap:anywhere]">{withName(t("apps.store.removeTitle", { name: NAME }), storeName)}</p>
             <p className="text-xs text-text-secondary">
               {vouched.length ? t(vouched.length === 1 ? "apps.store.removeAppsOne" : "apps.store.removeApps", { titles: listText(vouched, t) }) : t("apps.store.removeNone")}
             </p>
@@ -298,9 +300,10 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
                   <span className="min-w-0 flex-1">
                     <span dir="auto" className="text-match-parent block text-sm text-text-primary truncate">{listing.title}</span>
                     {/* Why the store took it down is read whole: cut to one line, a phone showed only "Removed by <store>: It
-                        sent the b…", with nothing to open for the rest, and in Arabic the store's name was the part cut. */}
+                        sent the b…", with nothing to open for the rest, and in Arabic the store's name was the part cut. The
+                        store's name and reason are isolated, each in its own direction, in a line in the page's (`removedLine`). */}
                     {removed
-                      ? <span dir="auto" data-testid="app-listing-removed" className="text-match-parent block text-xs text-text-muted [overflow-wrap:anywhere]">{t("apps.install.removed", { store: store.name ?? "", reason: removed.reason })}</span>
+                      ? <span data-testid="app-listing-removed" className="block text-xs text-text-muted [overflow-wrap:anywhere]">{removedLine(store.name ?? "", removed.reason, t)}</span>
                       : <span dir="auto" className="text-match-parent block text-xs text-text-muted truncate">{listing.tagline}</span>}
                   </span>
                 </span>
@@ -374,6 +377,20 @@ export function Apps() {
     if (active && active !== document.body && active.isConnected) return;
     document.querySelector<HTMLElement>("[data-testid=apps-add]")?.focus({ preventScroll: true });
   }, [gone, details, installed, builtIns, stores]);
+  // An app uninstalled elsewhere (another tab) while its screen is open here: the screen goes, so it is no longer chosen
+  // (it would open by itself once the app is installed again), and the focus goes to Add as for an uninstall here.
+  useEffect(() => {
+    if (!details || !installed || installed.some((a) => a.ref === details)) return;
+    setDetails(null);
+    setGone({ app: details });
+  }, [details, installed]);
+  // So does its question of which chat: a chat picked would go there to open an app no longer installed. Not on a read
+  // that failed: it keeps the list from before, without the app just installed (a built-in's Allow and open).
+  useEffect(() => {
+    if (!picking || !installed || installedFailure != null || installed.some((a) => a.ref === picking.app.ref)) return;
+    setPicking(null);
+    setGone({ app: picking.app.ref });
+  }, [picking, installed, installedFailure]);
   // Try again worked: its block went with the button that had the focus, so the focus goes to the section's first
   // control (what was read), else to Add. A read that fails again keeps its block, and Try again keeps the focus.
   const [retried, setRetried] = useState<"installed" | "stores" | null>(null);

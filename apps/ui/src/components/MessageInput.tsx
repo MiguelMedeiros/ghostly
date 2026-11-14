@@ -22,6 +22,7 @@ import type { GroupMention } from "@ghostly/core";
 import { LinkPreviewDraftCard } from "./composer/LinkPreviewDraft";
 import { EditBar, ReplyBar } from "./chat/ReplyQuote";
 import { useLinkPreviewDraft } from "../hooks/useLinkPreviewDraft";
+import { useEngineValue } from "../lib/engineState";
 import { AttachmentSheet } from "./composer/AttachmentSheet";
 import { dragCarriesFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteKeepsFiles, pasteNamesFiles, pasteShowsNothing, platformDroppedFiles, platformPastedFiles } from "../lib/pastedFiles";
 import { keepEditWords, keptEditWords } from "../lib/keptEdits";
@@ -108,7 +109,7 @@ interface MessageInputProps {
   linkPreviews?: boolean;
   /**
    * Typing (a paired chat): true on a keystroke that leaves text, false when the text is cleared or sent; with
-   * `"recording"` while a voice note is recorded, false when it is sent or thrown away.
+   * `"recording"` while a voice note is recorded, false when it is paused, sent or thrown away.
    */
   onTyping?: (typing: boolean, kind?: TypingKind) => void;
   /**
@@ -119,8 +120,9 @@ interface MessageInputProps {
   /**
    * A message of mine being edited (WISP 400 § Edits): its text fills the field, the draft waits and comes back after.
    * Enter saves through `onSave`; ✕ or Escape leaves it. Either way `onClose` ends it. A new `key` edits another one.
+   * `preview`: the message's link preview, which goes with the edit while its link stays and is not removed.
    */
-  edit?: { key: string; text: string; snippet: string; onSave: (text: string, extra?: { preview?: LinkPreview; mentions?: GroupMention[] }) => Promise<string | null>; onClose: () => void };
+  edit?: { key: string; text: string; snippet: string; preview?: LinkPreview; onSave: (text: string, extra?: { preview?: LinkPreview; mentions?: GroupMention[] }) => Promise<string | null>; onClose: () => void };
   /** ↑ in an empty field: edit my last message, as in Slack and Telegram. */
   onEditLast?: () => void;
   /**
@@ -257,7 +259,10 @@ export function MessageInput({
   const picker = useMentionPicker({ mentions, text, setText, textareaRef, caretRef });
   // Translate what I send, this chat's choice on this device (the Translation sheet).
   const translatesSend = useTranslatesWhatISend(draftId);
-  const linkPreview = useLinkPreviewDraft(text, linkPreviews && !disabled);
+  // Hide my IP from contacts: reading a link's page tells its site this device's address, and a pasted link may be a
+  // contact's server. With it on no preview is made; the link goes as text (a picture link someone sent is not read either).
+  const relayOnly = useEngineValue((state) => state?.settings.relayOnly === true);
+  const linkPreview = useLinkPreviewDraft(text, linkPreviews && !disabled && !relayOnly, edit?.preview);
 
   // Ready to type when the chat opens, where that costs nothing: on a touch screen the keyboard would come up over
   // the chat before the person asked for it, so there the field waits for a tap (apps/ui/src/lib/touchOnly.ts).
@@ -1177,8 +1182,9 @@ export function MessageInput({
             unavailable={fileUnavailable}
             disabled={disabled}
             onError={showToast}
-            // Recording: the composer's pickers close, and the contact sees "recording audio…" until it ends.
-            onActiveChange={(active) => { setRecording(active); if (active) closeAll(); onTyping?.(active, "recording"); }}
+            // Recording: the composer's pickers close, and the contact sees "recording audio…" while sound is taken.
+            onActiveChange={(active) => { setRecording(active); if (active) closeAll(); }}
+            onRecordingChange={(taking) => onTyping?.(taking, "recording")}
           />
         ) : <button
           aria-label={sendsTranslated && translation?.language ? t("composer.translate.sendTranslated", { language: languageName(translation.language, language) }) : t("composer.sendMessage")}
@@ -1186,7 +1192,7 @@ export function MessageInput({
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => previewOpen ? submitTranslated() : handleSubmit()}
           disabled={disabled || !text.trim()}
-          className="composer-send w-11 h-11 max-md:w-12 max-md:h-12 flex items-center justify-center bg-accent rounded-full text-on-accent hover:bg-accent-hover transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shrink-0"
+          className="composer-send w-11 h-11 max-md:w-12 max-md:h-12 flex items-center justify-center bg-accent rounded-full text-on-accent hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shrink-0"
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
             <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />

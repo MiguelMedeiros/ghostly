@@ -9,7 +9,7 @@ import { findSecret, guardText, secretWords } from "./secretGuard";
 import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
 import { asCliError, CliError } from "./errors";
 import {
-  bool, chatOf, chatOrGroup, dhtOnly, findChat, findGroup, groupNameOf, groupOf, groupPrefixed, inviteTaken, keptForJoin, list, messageOf, noMessage, nobodyJoined, node, num, oneOf, oneShotWaits, shownName, sinceSeq, somebodyJoined, state, str, transportOffered, waitForState,
+  bool, chatOf, chatOrGroup, dhtOnly, findChat, findGroup, groupNameOf, groupOf, groupPrefixed, inviteTaken, keptForJoin, list, messageOf, noMessage, nobodyJoined, node, num, oneOf, oneShotWaits, settingsOf, shownName, sinceSeq, somebodyJoined, state, str, transportOffered, waitForState,
   type ApiContext, type Method, type Params, type RefPlace,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
@@ -234,6 +234,8 @@ const BAD_VALUE = /^Cannot (destructure|read properties of (undefined|null))|is 
 
 /** A one-shot's typing without `--for` (it opens the profile offline, `offlineCall`): said on no live session. */
 const ONE_SHOT_TYPING = "Typing is said on a live session only, and a one-shot has none: it reached nobody. Keep the profile online (`ghostly daemon --detach`), or give --for to wait until it is live";
+// A stop takes no --for, so only the daemon half holds.
+const ONE_SHOT_TYPING_STOP = "A stop is said on a live session only, and a one-shot has none: it reached nobody. Keep the profile online (`ghostly daemon --detach`)";
 
 // ---------- methods ----------
 
@@ -298,7 +300,7 @@ const METHODS: Record<string, Method> = {
   },
 
   async "profile.get"(ctx) {
-    const { settings } = state(ctx);
+    const settings = settingsOf(ctx);
     return { profile: ctx.runtime.paths.name, name: settings.nick || null, shareProfile: settings.shareProfile !== false, picture: !!settings.avatar, online: settings.online };
   },
   async "profile.set"(ctx, params) {
@@ -312,7 +314,7 @@ const METHODS: Record<string, Method> = {
   },
 
   async "settings.get"(ctx, params) {
-    return redactSettings(settingsInEffect(state(ctx).settings), bool(params, "showSecret"));
+    return redactSettings(settingsInEffect(settingsOf(ctx)), bool(params, "showSecret"));
   },
   async "settings.set"(ctx, params) {
     const patch: Record<string, unknown> = {};
@@ -349,7 +351,7 @@ const METHODS: Record<string, Method> = {
       patch[key] = value;
     }
     await node(ctx).updateSettings({ settings: patch }).catch((error: unknown) => { throw relayRefused(error, patch); });
-    return { ...redactSettings(settingsInEffect(state(ctx).settings)), ...(warning ? { warning } : {}) };
+    return { ...redactSettings(settingsInEffect(settingsOf(ctx))), ...(warning ? { warning } : {}) };
   },
 
   async "invite.create"(ctx, params) {
@@ -485,10 +487,11 @@ const METHODS: Record<string, Method> = {
     const kept = seconds ? keepTyping(ctx, { linkId: link.id }, seconds * 1000, word) : null;
     const open = (s: EngineState) => s.links.find((l) => l.id === link.id)?.dataLink === "open";
     if (kept && ctx.mode === "one-shot") await keepOneShot(ctx, { linkId: link.id }, kept, open);
+    const now = state(ctx);
     return {
       chat: link.id, typing, ...(typing ? { kind } : {}), ...(status ? { status } : {}),
-      live: open(state(ctx)), sendTyping: state(ctx).settings.sendTyping !== false, ...(until ? { until } : {}),
-      ...(!kept && ctx.mode === "one-shot" && { note: ONE_SHOT_TYPING }),
+      live: open(now), sendTyping: now.settings.sendTyping !== false, ...(until ? { until } : {}),
+      ...(!kept && ctx.mode === "one-shot" && { note: typing ? ONE_SHOT_TYPING : ONE_SHOT_TYPING_STOP }),
     };
   },
   /**
@@ -569,7 +572,8 @@ const METHODS: Record<string, Method> = {
    * took it), each file until its transfer is done. What a chat refused comes back per chat; any refusal fails the call.
    */
   async "chat.forward"(ctx, params) {
-    const from = chatOrGroup(ctx, str(params, "chat", true));
+    const s = state(ctx);
+    const from = chatOrGroup(ctx, str(params, "chat", true), s);
     // Each id once, and the engine's bounds before any row is read: one id given 50,000 times was read and guarded as
     // often (a minute of the daemon's thread) for the one message the engine forwarded.
     const messageIds = [...new Set(list(params, "messages"))];
@@ -578,7 +582,7 @@ const METHODS: Record<string, Method> = {
     // A chat or group named twice (by its name and its id too) is one of them, as the engine counts.
     const to: ReturnType<typeof chatOrGroup>[] = [];
     for (const ref of new Set(list(params, "to"))) {
-      const target = chatOrGroup(ctx, ref);
+      const target = chatOrGroup(ctx, ref, s);
       if (to.some((t) => t.linkId === target.linkId)) continue;
       if (to.length === FORWARD_TARGETS) throw new CliError("bad_request", `Forward to at most ${FORWARD_TARGETS} chats and groups at once`);
       to.push(target);
@@ -605,23 +609,35 @@ const METHODS: Record<string, Method> = {
     catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); }
     const out: { to: string; kind: "group" | "chat"; messageIds: string[]; sent: string[]; error: string | null; edges?: number }[] =
       results.map((result, i) => ({ to: to[i]!.id, kind: to[i]!.group ? "group" as const : "chat" as const, messageIds: result.messageIds, sent: result.sent, error: result.error }));
+    // A copy's wait that ends short (its time ran out, its delivery failed) ends the waits, not the answer: it threw
+    // alone with that copy's id, every target's result and another's refusal lost, and a bot that sent again sent twice.
+    let short: CliError | undefined;
+    const waited = async <T>(wait: () => Promise<T>, now: () => T): Promise<T> => {
+      if (short) return now();
+      try { return await wait(); } catch (error) { short = asCliError(error); return now(); }
+    };
     // A group's `edges`: how many took each of its copies so far (the fewest), as `group send` says it.
     for (const [i, result] of out.entries()) if (to[i]!.group) {
       let edges: number | undefined;
       for (const messageId of result.messageIds) {
-        const took = groupWait === "sent" ? await waitForGroupFrame(ctx, to[i]!.id, messageId, undefined, ms) : node(ctx).groupTaken({ groupId: to[i]!.id, messageId });
+        const taken = () => node(ctx).groupTaken({ groupId: to[i]!.id, messageId });
+        const took = groupWait === "sent" ? await waited(() => waitForGroupFrame(ctx, to[i]!.id, messageId, undefined, ms), taken) : taken();
         edges = Math.min(edges ?? took, took);
       }
       result.edges = edges ?? 0;
     }
     if (wait === "sent") for (const [i, result] of out.entries()) for (const messageId of result.messageIds) {
       if (to[i]!.group) continue;
-      const sent = await node(ctx).getMessage(to[i]!.id, messageId);
-      if (sent?.file) await FILE_METHODS["file.wait"](ctx, { chat: to[i]!.id, file: sent.file.id, timeout: ms / 1000 });
-      else await waitForMessage(ctx, to[i]!.id, messageId, "sent", ms);
+      await waited(async () => {
+        const sent = await node(ctx).getMessage(to[i]!.id, messageId);
+        if (sent?.file) await FILE_METHODS["file.wait"](ctx, { chat: to[i]!.id, file: sent.file.id, timeout: ms / 1000 });
+        else await waitForMessage(ctx, to[i]!.id, messageId, "sent", ms);
+      }, () => undefined);
     }
+    // A refusal first, then what ended a wait: each with every target's result.
     const failed = out.filter((r) => r.error);
     if (failed.length) throw new CliError(failed.length === out.length ? "refused" : "engine", failed.map((r) => `${r.to}: ${r.error}`).join("; "), { from: from.id, results: out });
+    if (short) throw new CliError(short.code, short.message, { ...short.details, from: from.id, results: out });
     return { from: from.id, results: out };
   },
   async "chat.retry"(ctx, params) {
@@ -899,10 +915,11 @@ const METHODS: Record<string, Method> = {
     const kept = seconds ? keepTyping(ctx, target, seconds * 1000, word) : null;
     const reached = (s: EngineState) => (s.groups.find((g) => g.id === group.id) ?? group).members.filter((m) => !m.me && m.online && !m.viaHub).length;
     if (kept && ctx.mode === "one-shot") await keepOneShot(ctx, target, kept, (s) => reached(s) > 0);
+    const now = state(ctx);
     return {
       group: group.id, typing, ...(typing ? { kind } : {}), ...(status ? { status } : {}),
-      reached: reached(state(ctx)), sendTyping: state(ctx).settings.sendTyping !== false, ...(until ? { until } : {}),
-      ...(!kept && ctx.mode === "one-shot" && { note: ONE_SHOT_TYPING }),
+      reached: reached(now), sendTyping: now.settings.sendTyping !== false, ...(until ? { until } : {}),
+      ...(!kept && ctx.mode === "one-shot" && { note: typing ? ONE_SHOT_TYPING : ONE_SHOT_TYPING_STOP }),
     };
   },
   async "group.leave"(ctx, params) {

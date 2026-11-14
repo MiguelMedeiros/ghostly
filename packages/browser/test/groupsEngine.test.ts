@@ -397,10 +397,12 @@ describe("group roster changes: only the admin, and someone removed reads nothin
     expect(view(bob, groupId).members.map(m => m.key)).toEqual([key(bob)]);
   });
 
-  it("forgetting an admin's group with members is allowed: everything of it goes, edges included", async () => {
+  it("forgetting an admin's group with members is allowed: everything of it goes, edges included, once the new admin heard the leave", async () => {
     const { world, alice, groupId } = await groupOf(["bob"]);
     await alice.forget(groupId);
     expect(alice.views()).toEqual([]);
+    // Left as Leave leaves: the edge to the new admin stays until its commit removing alice comes back.
+    await world.settle();
     expect(world.peers.get("alice")!.edges.size).toBe(0);
     expect(world.peers.get("alice")!.store.groups.size).toBe(0);
     expect(await alice.send(groupId, "anyone?")).toEqual({ error: "You are not in this group yet" });

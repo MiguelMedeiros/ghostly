@@ -867,6 +867,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const mediaNotice = webrtc.mediaProblem && (
     <CallMediaProblem key={webrtc.mediaProblemId} problem={webrtc.mediaProblem} of={webrtc.mediaProblemOf} />
   );
+  // While the call's window is up it covers the chat's column, whose notices stack only inside it (a container): the
+  // note hangs where the window does. Camera pressed in it, refused for good, said nothing anyone could see.
+  const callWindowUp = callState === "offering" || callState === "answering" || callState === "connecting" || callState === "connected";
+  const mediaNoticeInLayer = !visible || callWindowUp;
   /** The ⋮ menu's rarer rows: in it on a wide screen, in its More… sheet on a phone. `close` closes the menu they are in. */
   const rarerRows = (close: () => void) => <>
     <FolderMenuItem chat={sessionId} onChoose={() => { close(); setShowFolders(true); }} />
@@ -904,7 +908,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           {t("calls.noAnswer")}
         </div>
       )}
-      {visible && mediaNotice}
+      {!mediaNoticeInLayer && mediaNotice}
       {/* The system paused our microphone in a call (an iPhone's Home Screen app while the screen is locked): the
           contact hears nothing until Ghostly is back on screen, and the call is still on. */}
       {webrtc.micPaused && !webrtc.mediaProblem && (
@@ -1279,7 +1283,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         reply={replyBar}
         translation={composerTranslation}
         // Editing one of mine (WISP 400 § Edits): the new text shows here at once and reaches the contact when it can.
-        edit={editing && chatLink ? { key: editing.id, text: editing.text, snippet: replySnippet(editing.text), onClose: () => setEditing(null),
+        edit={editing && chatLink ? { key: editing.id, text: editing.text, snippet: replySnippet(editing.text), preview: editing.preview, onClose: () => setEditing(null),
           onSave: async (text, extra) => (await engine.call("editMessage", { linkId: chatLink.id, messageId: editing.id, text, ...(extra?.preview && { preview: extra.preview }) })
             .then(result => ({ error: result.error && problemLine(result.error, t) }), (e: unknown) => ({ error: e instanceof Error ? problemLine(e, t) : t("chat.editFailed") }))).error } : undefined}
         onEditLast={paired && chatLink ? () => {
@@ -1337,7 +1341,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       )}
 
       {!visible && wakeNotice && !locked && createPortal(wakeNotice, callLayer ?? document.body)}
-      {!visible && mediaNotice && !locked && createPortal(mediaNotice, callLayer ?? document.body)}
+      {mediaNoticeInLayer && mediaNotice && !locked && createPortal(mediaNotice, callLayer ?? document.body)}
 
       {/* How the call ended, said once (`callEndSaid`): where the call's window hangs, since this chat may be off screen. */}
       {!locked && createPortal(<p role="status" className="sr-only" data-testid="call-end-spoken">{callEndSaid}</p>, callLayer ?? document.body)}

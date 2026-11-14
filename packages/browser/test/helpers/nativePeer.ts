@@ -1,6 +1,14 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
+import { fileURLToPath } from "node:url";
 import type { BoundChannel, FrameChannel, NativeBinding, NativeEndpoint } from "@ghostly/core";
+
+/**
+ * The Desktop's Iroh as a process (`cargo build -p ghostly-transports --example iroh-peer`). From this file, not the
+ * working folder: Vitest run from the repository root (`--root packages/browser`, test:affected) looked for it beside
+ * the repository.
+ */
+export const IROH_PEER = fileURLToPath(new URL("../../../../target/debug/examples/iroh-peer", import.meta.url));
 
 /** `relays` homes the peer on those Iroh relays (so a browser peer can reach it); without it, loopback only. */
 export async function nativePeer(binary: string, seed: number, options: { relays?: string[] } = {}): Promise<NativeEndpoint & { dropReceipts: boolean }> {

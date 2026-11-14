@@ -3,7 +3,7 @@ import { ANSWER_BY_MS, CookieJar, MAX_PENDING_REQUESTS, MAX_WAITING_REQUESTS, op
 import { closeServiceWindows, hostErrorText, serviceFraming, setServiceWindowsCloser } from "../../lib/serviceWindows";
 import { loadLocale, translatorFor } from "../../locales";
 import { onAppInput } from "../../lib/apps/open";
-import { BRIDGE_READY, BRIDGE_REFUSED, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
+import { ANSWER_AHEAD_BYTES, BRIDGE_OPEN_LINK, BRIDGE_READY, BRIDGE_REFUSED, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
 import { createHash } from "node:crypto";
 import { CHUNK_KIND, CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, GhostlyHttpError, HttpClient, LIMITS, MAX_CHUNK_PAYLOAD_BYTES, VIEWER_GUARD_CSP, VIEWER_GUARD_HASH, VIEWER_GUARD_SCRIPT, VIEWER_SERVICE_CSP, VIEWER_SERVICE_CSP_RELAY_ONLY, decodeChunk, decodeControl, encodeChunk, type ClientRequest, type ClientResponse } from "@ghostly/core";
 
@@ -495,6 +495,71 @@ describe("a contact's answer on its way to the services worker", () => {
     expect(link.controls()).toContainEqual(expect.objectContaining({ t: "rst", id: 1 }));
     expect(closed()).toBe(true);
   });
+
+  /** A request the worker says what the frame read of (`flow`), its answer fed off the link by `feed`. */
+  async function flowing(reads: boolean) {
+    const link = linkClient();
+    const { port, replies, cancel } = workerPort();
+    const sent = port.postMessage.bind(port);
+    let taken = 0;
+    port.postMessage = ((reply: ServiceReply, transfer?: Transferable[]) => {
+      // Its length before it goes: the send moves its buffer.
+      const length = reply.type === "chunk" ? reply.bytes.byteLength : 0;
+      sent(reply, transfer as Transferable[]);
+      if (reads && reply.type === "chunk") {
+        taken += length;
+        const bytes = taken;
+        setTimeout(() => port.onmessage?.({ data: { type: "read", bytes } } as MessageEvent));
+      }
+    }) as typeof port.postMessage;
+    const done = serve(port, { type: "request", method: "GET", path: "/video.mp4", headers: [], body: null, flow: true }, (request) => link.client.request("app", request), new CookieJar(), words);
+    await vi.waitFor(() => expect(link.controls().some((f) => f.t === "req")).toBe(true));
+    link.client.handleResponse({ t: "res", id: 1, st: 200, h: [], b: true });
+    let fed = 0;
+    const feed = (bytes: number, end = false) => {
+      for (let left = bytes; left > 0; left -= MAX_CHUNK_PAYLOAD_BYTES) {
+        const n = Math.min(MAX_CHUNK_PAYLOAD_BYTES, left);
+        fed += n;
+        link.chunk(1, new Uint8Array(n), end && left <= MAX_CHUNK_PAYLOAD_BYTES);
+      }
+      return fed;
+    };
+    const worker = () => replies.reduce((n, r) => n + (r.type === "chunk" ? r.bytes.byteLength : 0), 0);
+    return { link, replies, cancel, done, feed, worker };
+  }
+
+  it("sends the worker no more than a MiB past what the app's frame read: an answer it leaves unread stays on the link, which lets it go", async () => {
+    const { link, cancel, done, feed, worker } = await flowing(false);
+    feed(16 * 1024 * 1024);
+    // The opener took the first MiB off the link within the first `unreadStallMs`: the link lets go at the end of the next.
+    await vi.waitFor(() => expect(link.controls()).toContainEqual(expect.objectContaining({ t: "rst", id: 1 })), { timeout: 3 * LIMITS.unreadStallMs });
+    expect(worker()).toBeGreaterThanOrEqual(ANSWER_AHEAD_BYTES);
+    expect(worker()).toBeLessThanOrEqual(ANSWER_AHEAD_BYTES + MAX_CHUNK_PAYLOAD_BYTES);
+    cancel();
+    await done;
+  });
+
+  it("sends the whole answer to a frame that reads it", async () => {
+    const { link, replies, done, feed, worker } = await flowing(true);
+    const step = 512 * 1024;
+    for (let i = 1; i <= 16; i++) {
+      const fed = feed(step, i === 16);
+      await vi.waitFor(() => expect(worker()).toBe(fed));
+    }
+    await done;
+    expect(worker()).toBe(16 * step);
+    expect(replies[replies.length - 1]).toEqual({ type: "end" });
+    expect(link.controls()).not.toContainEqual(expect.objectContaining({ t: "rst" }));
+  });
+
+  it("sends the whole answer to a frame that reads it, though the link hands it over faster than the frame reads", async () => {
+    const { link, replies, done, feed, worker } = await flowing(true);
+    feed(16 * 1024 * 1024, true);
+    await done;
+    expect(worker()).toBe(16 * 1024 * 1024);
+    expect(replies[replies.length - 1]).toEqual({ type: "end" });
+    expect(link.controls()).not.toContainEqual(expect.objectContaining({ t: "rst" }));
+  });
 });
 
 describe("a contact's app shown over the app", () => {
@@ -524,6 +589,7 @@ describe("a contact's app shown over the app", () => {
     // Try again while still offline: the notice stays.
     view.querySelector<HTMLButtonElement>("[data-testid=service-view-retry]")!.click();
     expect(notice.hidden).toBe(false);
+    expect(notice.textContent).toBe("Your contact is offlineTry again");
     frame.src = "about:blank";
     change(false);
     expect(notice.hidden).toBe(true);
@@ -532,6 +598,57 @@ describe("a contact's app shown over the app", () => {
     // Closed, it hears nothing more.
     view.querySelector<HTMLButtonElement>("[data-testid=service-view-close]")!.click();
     expect(listeners.size).toBe(0);
+  });
+
+  it("asks the engine to reach the contact on Try again while they are offline, says it is trying, then that they are still offline", async () => {
+    let offline = true;
+    const listeners = new Set<() => void>();
+    const dials: { done: () => void; refuse: () => void }[] = [];
+    const connect = () => new Promise<void>((resolve, reject) => { dials.push({ done: resolve, refuse: () => reject(new Error("Timed out connecting to the peer")) }); });
+    const presence = { offline: () => offline, watch: (changed: () => void) => { listeners.add(changed); return () => listeners.delete(changed); }, connect };
+    const change = (to: boolean) => { offline = to; for (const l of listeners) l(); };
+    const reaching = "Trying to reach your contact…", stillOffline = "Your contact is still offline";
+    await openServiceView({ host, tag: "ybndrfg8ejkmcpqx", peer: PEER, service: "demo", title: "Demo", send: async () => answer(200, [], []), words: { ...words, reaching, stillOffline }, presence });
+    const view = document.getElementById(SERVICE_VIEW_ID)!;
+    const notice = view.querySelector<HTMLElement>("[data-testid=service-view-offline]")!;
+    const frame = view.querySelector<HTMLIFrameElement>("[data-testid=service-view-frame]")!;
+    const retry = view.querySelector<HTMLButtonElement>("[data-testid=service-view-retry]")!;
+    const said = () => notice.querySelector("p")!.textContent;
+    expect(said()).toBe("Your contact is offline");
+    const first = frame.src;
+    retry.focus();
+    retry.click();
+    expect(dials, "the engine is asked to reach them").toHaveLength(1);
+    expect(said()).toBe(reaching);
+    expect(notice.getAttribute("aria-busy")).toBe("true");
+    // Kept in reach of the focus, not disabled under it; a second press while it tries asks nothing more.
+    expect(retry.disabled).toBe(false);
+    expect(retry.getAttribute("aria-disabled")).toBe("true");
+    retry.click();
+    expect(dials).toHaveLength(1);
+    // Something else the engine says meanwhile (the contact still offline) keeps it trying.
+    change(true);
+    expect(said()).toBe(reaching);
+    dials[0]!.refuse();
+    await vi.waitFor(() => expect(said()).toBe(stillOffline));
+    expect(notice.hasAttribute("aria-busy")).toBe(false);
+    expect(retry.hasAttribute("aria-disabled")).toBe(false);
+    expect(document.activeElement).toBe(retry);
+    // Tried again, and the contact's app answers: the app, loaded anew.
+    retry.click();
+    expect(dials).toHaveLength(2);
+    expect(said()).toBe(reaching);
+    frame.src = "about:blank";
+    change(false);
+    expect(notice.hidden).toBe(true);
+    expect(frame.src).toBe(first);
+    dials[1]!.done();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(notice.hidden).toBe(true);
+    // Offline again later: said as at first, not as after the last Try again.
+    change(true);
+    expect(said()).toBe("Your contact is offline");
+    closeServiceView();
   });
 
   it("counts the person's taps and keys in the app for the lock screen, as the browser's activation says, and only while it is open", async () => {
@@ -628,6 +745,18 @@ describe("a contact's app shown over the app", () => {
     expect([...document.getElementById(SERVICE_VIEW_ID)!.querySelectorAll("span")].map((el) => el.textContent)).toContain("two");
   });
 
+  it("is one at a time when two opens overlap (Open tapped twice before the first is drawn): the last one wins", async () => {
+    await Promise.all([open("one"), open("two")]);
+    const views = document.querySelectorAll(`#${SERVICE_VIEW_ID}`);
+    expect(views).toHaveLength(1);
+    expect([...views[0]!.querySelectorAll("span")].map((el) => el.textContent)).toContain("two");
+    expect(views[0]!.hasAttribute("inert")).toBe(false);
+    // One close leaves nothing drawn and the app's page in reach again.
+    closeServiceView();
+    expect(document.getElementById(SERVICE_VIEW_ID)).toBeNull();
+    expect(document.querySelectorAll("[inert]")).toHaveLength(0);
+  });
+
   it("says whose app it is and that it is not Ghostly, always on screen, never the contact's name for it alone", async () => {
     // The contact names their app freely: "Ghostly" is as easy as "Demo".
     await openServiceView({ host, tag: "ybndrfg8ejkmcpqx", peer: PEER, service: "demo", title: "Ghostly", send: async () => answer(200, [], []), words });
@@ -712,6 +841,51 @@ describe("a contact's app shown over the app", () => {
     const sandbox = document.querySelector("[data-testid=service-view-frame]")!.getAttribute("sandbox")!.split(" ");
     expect(sandbox).toContain("allow-scripts");
     expect(sandbox.filter((flag) => flag.startsWith("allow-popups") || flag.startsWith("allow-top-navigation"))).toEqual([]);
+  });
+
+  it("opens a link the app opens in a new window in a new tab of its own, on the person's tap, as Desktop sends it to the browser: never a local one, nor an app's or Ghostly's own", async () => {
+    // The view's sandbox drops the app's own new windows with no word: the bridge hands each one here.
+    const activation = { isActive: true };
+    Object.defineProperty(navigator, "userActivation", { configurable: true, value: activation });
+    const opened = vi.spyOn(window, "open").mockReturnValue(null);
+    vi.useFakeTimers();
+    try {
+      await open("demo");
+      const frame = document.querySelector<HTMLIFrameElement>("[data-testid=service-view-frame]")!;
+      const origin = new URL(frame.src).origin;
+      const inFrame = { postMessage: vi.fn() };
+      Object.defineProperty(frame, "contentWindow", { value: inFrame, configurable: true });
+      const asks = (url: unknown, from: { origin: string; source: unknown } = { origin, source: inFrame }) => {
+        dispatchEvent(new MessageEvent("message", { data: { type: BRIDGE_OPEN_LINK, url }, origin: from.origin, source: from.source as Window }));
+        vi.advanceTimersByTime(2_000);
+      };
+      asks("https://docs.example/guide?a=1#top");
+      expect(opened).toHaveBeenCalledTimes(1);
+      expect(opened).toHaveBeenLastCalledWith("https://docs.example/guide?a=1#top", "_blank", "noopener,noreferrer");
+      // Only the bridge in the view's frame is heard.
+      asks("https://docs.example/", { origin: "https://other.example", source: inFrame });
+      asks("https://docs.example/", { origin, source: window });
+      // Nothing but a plain web link to another public site: none on this machine or the local network, none on an
+      // app's origin (a tab of its own there would outlive the view), none on Ghostly's own.
+      for (const url of ["javascript:alert(1)", "data:text/html,hi", "file:///etc/passwd", "http://localhost:8080/", "http://192.168.1.1/", "http://[::1]/", "http://router/", "http://nas.local/",
+        `${origin}/popup`, "https://svc.ghostly.example/", `${location.origin}/`, `https://docs.example/${"a".repeat(4096)}`, 42, null]) asks(url);
+      expect(opened).toHaveBeenCalledTimes(1);
+      // Never one the app opens by itself: only within the person's own tap in it (it activates this page; no script can).
+      activation.isActive = false;
+      asks("https://docs.example/later");
+      expect(opened).toHaveBeenCalledTimes(1);
+      activation.isActive = true;
+      // One every 2 s at most, and 20 in a view's life, as on Desktop: an app opening tabs on every tap stops there.
+      dispatchEvent(new MessageEvent("message", { data: { type: BRIDGE_OPEN_LINK, url: "https://docs.example/1" }, origin, source: inFrame as unknown as Window }));
+      dispatchEvent(new MessageEvent("message", { data: { type: BRIDGE_OPEN_LINK, url: "https://docs.example/2" }, origin, source: inFrame as unknown as Window }));
+      expect(opened).toHaveBeenCalledTimes(2);
+      for (let i = 0; i < 30; i++) asks(`https://docs.example/${i}`);
+      expect(opened).toHaveBeenCalledTimes(20);
+    } finally {
+      vi.useRealTimers();
+      opened.mockRestore();
+      delete (navigator as { userActivation?: unknown }).userActivation;
+    }
   });
 
   it("keeps the view's bar on screen, and draws no dialog of the browser's over it: no full screen, no alert or prompt", async () => {

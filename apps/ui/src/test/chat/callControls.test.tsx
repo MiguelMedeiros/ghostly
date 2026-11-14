@@ -163,6 +163,19 @@ describe("sharing the screen from inside a call", () => {
     expect(screen.getByTitle("Turn camera on")).toBeInTheDocument();
   });
 
+  it("in forced colors, shows sharing with a Highlight fill: the accent fill was all that told on from off, and its icon is the same", () => {
+    const highlight = (e: HTMLElement) => e.classList.contains("forced-colors:bg-[color:Highlight]");
+    const { rerender } = overlay();
+    expect(highlight(screen.getByTestId("share-screen"))).toBe(false);
+    for (const mini of [false, true]) {
+      rerender(<CallOverlay callState="connected" localStream={null} remoteStream={null} isMuted={false} isVideoOff={false} canSendVideo canShareScreen isScreenSharing
+        remoteHasVideo={false} callStartedAt={Date.now()} peerName="Ana" onHangUp={vi.fn()} onToggleMute={vi.fn()} onToggleVideo={vi.fn()} onToggleScreenShare={vi.fn()} />);
+      if (mini) fireEvent.click(screen.getByTestId("call-minimize"));
+      expect(screen.getByTestId("call-window")).toHaveAttribute("data-mini", String(mini));
+      expect(highlight(screen.getByTestId("share-screen")), mini ? "small window" : "whole window").toBe(true);
+    }
+  });
+
   it("tells you when the other side is sharing theirs", () => {
     overlay({ remoteHasVideo: true, remoteIsScreenSharing: true });
     expect(screen.getByTestId("call-sharing")).toHaveTextContent("Ana is sharing their screen");

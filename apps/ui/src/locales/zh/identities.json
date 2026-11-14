@@ -823,12 +823,14 @@
     "captionMine": "你共享了此身份",
     "captionTheirs": "{{contact}} 共享了此身份",
     "checking": "检查中",
+    "newerTheirs": "你已保存此联系人这个身份的更新证明",
     "notChecked": "未检查",
     "notVerified": "未验证",
     "revokedMine": "你的 {{what}} 已被撤销",
     "revokedTheirs": "{{contact}} 的 {{what}} 已被撤销",
     "stoppedMine": "你已停止共享 {{what}}",
     "stoppedTheirs": "{{contact}} 已停止共享 {{what}}",
+    "tooManyTheirs": "你保存的此联系人的身份已经太多",
     "waiting": "等待中"
   },
   "shared": {

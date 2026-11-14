@@ -206,10 +206,12 @@ export const webHost = createInPageHost({
     await openServiceView({
       host: servicesHost, tag, peer: peerPubKeyZ32, service: serviceId, title, relayOnly,
       send: (request) => offline() ? Promise.reject(new GhostlyHttpError("offline", "Your contact is offline")) : node.request(peerPubKeyZ32, serviceId, request),
-      presence: { offline, watch: (changed) => engine.subscribe(changed) },
+      // Try again reaches the contact now, as the chat's Reconnect does.
+      presence: { offline, watch: (changed) => engine.subscribe(changed), connect: async () => { const link = engine.linkByPeer(peerPubKeyZ32); if (link) await engine.call("connect", { linkId: link.id }); } },
       words: {
         unreachable: t("services.window.unreachable"), failed: t("services.window.failed"), close: t("common.close"), callOn: t("services.window.callOn", { app: title }),
         tooSlow: t("services.window.tooSlow", { app: title }), offline: t("services.window.offline", { app: title }), retry: t("services.window.retry"),
+        reaching: t("services.window.reaching"), stillOffline: t("services.window.stillOffline", { app: title }),
         blocked: t("services.window.blocked", { app: title }), unguarded: t("services.window.unguarded", { app: title }),
         ...serviceFraming(title, chatNamesForPeer(peerPubKeyZ32), peerPubKeyZ32, t),
         hostError: (headers) => hostErrorText(headers, title, t),

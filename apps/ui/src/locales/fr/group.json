@@ -156,6 +156,7 @@
     "blockedNext": "Nommez un admin ou attendez un membre.",
     "body": "Le groupe et son historique quittent cet appareil. Vous ne lirez pas ce qui sera dit ensuite, et pour revenir quelqu'un devra vous faire entrer à nouveau.",
     "bodyCommunity": "Le groupe et son historique quittent cet appareil. Vous ne lirez pas ce qui sera dit ensuite, et pour revenir, ouvrez à nouveau le lien du groupe.",
+    "bodyLast": "Vous êtes le seul membre : le groupe et son historique s'arrêtent ici, et personne ne pourra plus le rejoindre.",
     "forgetBody": "Supprimer le groupe de cet appareil vous en fait aussi sortir.",
     "forgetTitle": "Supprimer {{name}} ?",
     "forgetTitleUnnamed": "Supprimer ce groupe ?",
@@ -263,6 +264,7 @@
   },
   "readNote": "Chaque membre du groupe peut lire tout ce qui est envoyé tant qu'il en fait partie. Une personne retirée garde ce qu'elle a déjà reçu et ne peut pas lire la suite ; une personne arrivée plus tard ne peut pas lire ce qui précède. Les messages vont à chaque membre ; qui était absent reçoit ce qu'il a manqué de n'importe quel membre qui l'a (les {{count}} derniers messages du groupe) quand ils se retrouvent.",
   "readNoteCommunity": "Toute personne ayant le lien du groupe peut le rejoindre, et n'importe quel membre peut faire entrer quelqu'un. Chaque membre peut lire tout ce qui est envoyé tant qu'il en fait partie ; une personne retirée ne peut pas lire la suite, une personne arrivée plus tard ne peut pas lire ce qui précède. Les membres absents reçoivent les {{count}} derniers messages de ceux qui sont là à leur retour.",
+  "readNoteCommunityOff": "Le lien est désactivé : personne ne peut rejoindre avec, et seul l'admin peut de nouveau faire entrer quelqu'un, avec un nouveau lien. Chaque membre peut lire tout ce qui est envoyé tant qu'il en fait partie ; une personne retirée ne peut pas lire la suite, une personne arrivée plus tard ne peut pas lire ce qui précède. Les membres absents reçoivent les {{count}} derniers messages de ceux qui sont là à leur retour.",
   "remove": {
     "body": "Cette personne ne recevra plus les nouveaux messages du groupe.",
     "linkHint": "Cette personne peut encore revenir avec le lien du groupe : un nouveau lien l'en empêche.",
