@@ -283,8 +283,8 @@ function GhostlyBack({ t, card, contact, others, busy, turning, done, error, act
         <div className="id-card-back-sees" data-testid="composer-identity-sees">
           {card.photo ? <img src={card.photo} alt="" className="h-10 w-10 shrink-0 rounded-xl object-cover" /> : <ProviderMark provider={GHOSTLY} />}
           <span className="id-card-back-who">
-            <span className="id-card-back-name">{card.label}{card.name ? ` · ${card.name}` : ""}</span>
-            <span className="id-card-back-subject" title={card.subject}>{card.short}</span>
+            <span className="id-card-back-name">{card.label}{card.name && <> · <bdi>{card.name}</bdi></>}</span>
+            <span className="id-card-back-subject" title={card.subject}><bdi dir="ltr">{card.short}</bdi></span>
             <span className="id-card-back-meta">{card.category} · {card.validity}</span>
           </span>
         </div>
@@ -346,8 +346,8 @@ function IdentityBack({ t, entry, contact, now, busy, turning, stopping, done, e
         <div className="id-card-back-sees" data-testid="composer-identity-sees">
           <ProviderMark provider={p.provider} subject={card.bound} />
           <span className="id-card-back-who">
-            <span className="id-card-back-name">{card.label}{card.name ? ` · ${card.name}` : ""}</span>
-            <span className="id-card-back-subject" title={card.subject}>{card.short}</span>
+            <span className="id-card-back-name">{card.label}{card.name && <> · <bdi>{card.name}</bdi></>}</span>
+            <span className="id-card-back-subject" title={card.subject}><bdi dir="ltr">{card.short}</bdi></span>
             <span className="id-card-back-meta">{card.category} · {card.validity}</span>
           </span>
         </div>
