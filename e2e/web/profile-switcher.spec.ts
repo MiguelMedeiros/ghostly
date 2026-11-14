@@ -16,7 +16,7 @@ const locked = (page: Page) => page.getByText("Ghostly is locked");
 const rows = (page: Page) => page.locator("div.group").filter({ has: page.getByTitle("Delete chat") });
 const unreadBadge = (page: Page) => rows(page).locator("span").filter({ hasText: /^(\d+|99\+)$/ });
 
-test("the account bar switches profiles in one tap, each one reopening where it was left", { tag: ["@feature:profiles.switcher", "@feature:profiles.switch", "@feature:profiles.create"] }, async ({ peer }) => {
+test("the account bar switches profiles in one tap, each one reopening where it was left", { tag: ["@journey", "@feature:profiles.switcher", "@feature:profiles.switch", "@feature:profiles.create"] }, async ({ peer }) => {
   const alice = await peer("switcher-alice");
   const bob = await peer("switcher-bob");
   const { page } = alice;
