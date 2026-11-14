@@ -206,8 +206,10 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
         <div className="flex items-center gap-0.5 shrink-0">
           {/* The chat's connection control, the same as in its header: on a phone held upright, 44 px to tap as there. */}
           <ChatConnection peerKey={peerKey} myKey={myKey} status={status} testIdPrefix="app-" callOn={callOn} phone={phoneHeader} />
+          {/* Named for what it does next ("Full width", "Show the chat"), so it is no toggle: "Show the chat, pressed" was
+              read with the chat hidden. */}
           {!withBack && (
-            <button type="button" data-testid="mini-app-wide" aria-pressed={wide} onClick={() => updateChatApp(linkId, { wide: !wide })}
+            <button type="button" data-testid="mini-app-wide" onClick={() => updateChatApp(linkId, { wide: !wide })}
               aria-label={t(wide ? "apps.view.beside" : "apps.view.full")} title={t(wide ? "apps.view.beside" : "apps.view.full")}
               className="p-2 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
               {wide
