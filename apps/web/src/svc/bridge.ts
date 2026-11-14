@@ -172,6 +172,21 @@ function start(): void {
     return;
   }
   let app: HTMLIFrameElement | null = null;
+  // The pages whose links are handed on already: the first one's from when it is shown parsed, before its `load`. By
+  // document, as the frame's window stays the same object from one page to the next.
+  const handing = new WeakSet<Document>();
+  const handOn = (frame: HTMLIFrameElement) => {
+    try {
+      const doc = documentOf ? apply(documentOf, frame, []) as Document | null : null;
+      const win = windowOf ? apply(windowOf, frame, []) as Window | null : null;
+      if (!doc || !win || handing.has(doc)) return;
+      handing.add(doc);
+      // Only one the person opens in the app (`watchUse`): the app's page checks its own activation too, which a tap
+      // on Ghostly's Open, or one in Ghostly's page, gives it for seconds while the app's page loads or runs.
+      const using = watchUse(win);
+      forwardLinks(win, (url) => { if (using()) window.parent.postMessage({ type: BRIDGE_OPEN_LINK, url }, __SERVICES_APP_ORIGIN__); });
+    } catch { /* a page that is not HTML: nothing to hand on */ }
+  };
   // Each page the app's frame loads is looked at before this page's guard goes over the frame (both listen on the
   // document, as no `load` reaches the window; this one, put there first, runs first): one without the guard of its
   // own is taken away.
@@ -179,15 +194,7 @@ function start(): void {
   document.addEventListener("load", (event) => {
     if (!app || event.target !== app) return;
     if (guardedPage(app)) {
-      const win = windowOf ? apply(windowOf, app, []) as Window | null : null;
-      try {
-        // Only one the person opens in the app (`watchUse`): the app's page checks its own activation too, which a tap
-        // on Ghostly's Open, or one in Ghostly's page, gives it for seconds while the app's page loads or runs.
-        if (win) {
-          const using = watchUse(win);
-          forwardLinks(win, (url) => { if (using()) window.parent.postMessage({ type: BRIDGE_OPEN_LINK, url }, __SERVICES_APP_ORIGIN__); });
-        }
-      } catch { /* a page that is not HTML: nothing to hand on */ }
+      handOn(app);
       // Not the frame's first empty page: the contact's own, or what Ghostly says in its place (too slow, unreachable).
       if (!shownBlank(app)) window.parent.postMessage({ type: BRIDGE_SHOWN }, __SERVICES_APP_ORIGIN__);
       return;
@@ -239,7 +246,12 @@ function start(): void {
         // opening until then, over the frame. Only the first: the app's page needs no more.
         const parsed = setInterval(() => {
           if (app !== frame) clearInterval(parsed);
-          else if (parsedPage(frame)) { clearInterval(parsed); window.parent.postMessage({ type: BRIDGE_SHOWN }, __SERVICES_APP_ORIGIN__); }
+          else if (parsedPage(frame)) {
+            clearInterval(parsed);
+            // The person can use it from now on: the links it opens are handed on before its `load`.
+            handOn(frame);
+            window.parent.postMessage({ type: BRIDGE_SHOWN }, __SERVICES_APP_ORIGIN__);
+          }
         }, PARSED_LOOK_MS);
       }, () => refuse("blocked", "This browser cannot open the app here."));
   });
