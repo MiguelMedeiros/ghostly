@@ -23,7 +23,8 @@
     "offscreen",
     "storage",
     "debugger",
-    "alarms"
+    "alarms",
+    "browsingData"
   ],
   "optional_permissions": ["notifications", "identity"],
   "optional_host_permissions": [
