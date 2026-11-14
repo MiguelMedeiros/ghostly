@@ -196,6 +196,9 @@ describe("the status picker in the account menu", () => {
     await waitFor(() => expect(row.querySelector("bdi")).toHaveTextContent("At lunch"));
     expect(row.querySelector("bdi")).toHaveAttribute("dir", "auto");
     expect(row.getAttribute("aria-label")).toContain("⁨At lunch⁩");
+    // Its parts listed the way Arabic lists them, not with an English comma.
+    expect(row.getAttribute("aria-label")).toContain("مشغول و🍕 ⁨At lunch⁩");
+    expect(row.getAttribute("aria-label")).not.toContain(",");
     await user.click(row);
     const dialog = await screen.findByRole("dialog", { name: "الحالة" });
     expect(within(dialog).getByRole("textbox")).toHaveAttribute("dir", "auto");

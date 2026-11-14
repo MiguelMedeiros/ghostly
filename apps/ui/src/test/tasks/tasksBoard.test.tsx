@@ -534,6 +534,31 @@ describe("a card a bot sent to several chats", () => {
     expect(screen.getByTestId("where")).toHaveAttribute("data-jump", "in-g2");
   });
 
+  it("in Arabic, lists its chats and tags the way Arabic lists them, not with an English comma", async () => {
+    const state = everywhere();
+    const tagged = { ...blocked, tags: ["core", "web"] };
+    const { user, engine } = renderApp(<Tasks />, { route: "/tasks", language: "ar" });
+    engine.on("statusCardIndex", () => [
+      row("link-1", tagged, { id: "in-chat", editedAt: NOW - 3 * 60_000 }),
+      row("group:g1", tagged, { id: "in-g1", member: "coord-in-g1", editedAt: NOW - 2 * 60_000 }),
+      row("group:g2", tagged, { id: "in-g2", member: "coord-in-g2", editedAt: NOW - 60_000 }),
+    ]).setState(state);
+    await loaded();
+    const card = screen.getByTestId("tasks-board").querySelector<HTMLElement>('[data-card-id="relay"]')!;
+    expect(within(card).getByTestId("board-card-chat")).toHaveAttribute("title", "Phone وSala de Máquinas");
+    const label = within(card).getByTestId("board-card-open").getAttribute("aria-label")!;
+    expect(label).toContain("Phone وSala de Máquinas");
+    expect(label).not.toContain(", ");
+    await user.click(within(card).getByTestId("board-card-details-toggle"));
+    // Each chat and tag in its own direction, the list's words between them in the page's.
+    const chats = within(card).getByTestId("board-card-chats");
+    expect(chats).toHaveTextContent("Phone وSala de Máquinas وCoordinator");
+    expect([...chats.querySelectorAll("bdi")].map((name) => name.textContent)).toEqual(["Phone", "Sala de Máquinas", "Coordinator"]);
+    const tags = within(card).getByTestId("board-card-tags");
+    expect(tags).toHaveTextContent("core وweb");
+    expect([...tags.querySelectorAll("bdi")].map((tag) => tag.textContent)).toEqual(["core", "web"]);
+  });
+
   it("is one bot's: a column for the bot, and a column for each chat it is in", async () => {
     const state = everywhere();
     const { user, engine } = renderApp(<Tasks />, { route: "/tasks" });
