@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { identityFromSeed, readTurnPacket, sign, signTurnPacket, signTurnRelease, toBase64Url, turnInstance, turnKeys, turnStatedVerifier, turnVerifierMark, TURN_SETTLE_MS, type Identity, type TurnRecord } from "@ghostly/core";
+import { identityFromSeed, readSetUpdate, readTurnPacket, seedSigner, sign, signTurnPacket, signTurnRelease, toBase64Url, turnInstance, turnKeys, turnStatedVerifier, turnVerifierMark, TURN_SETTLE_MS, type Identity, type TurnRecord } from "@ghostly/core";
 import { amend, firstRecord, transition, type DevicePatch, type DeviceRecord, type StoredDeviceState } from "../src/devices/state";
 import { TurnKeeper, takeoverTurn, type TurnStore } from "../src/devices/turn";
 import { TakeoverRefusal, canTakeOver, forceTakeover, takeoverTarget, verifierStands } from "../src/devices/takeover";
+import { planSetMove } from "../src/devices/remove";
 import { FakeTurnNetwork } from "./helpers/turnNetwork";
 // covers: devices.takeover, devices.turn.keeper
 
@@ -364,6 +365,36 @@ describe("what keeps a forced takeover from locking the owner out", () => {
     const outcome = await forceTakeover(ports(desktop.store, desktop.keeper), { password: PASSWORD, name: "Phone" });
     expect(outcome.kind).toBe("start");
     expect(opened(network.source("dht").held)).toMatchObject({ turn: N + 8, author: 0 });
+  });
+
+  it("a takeover's record that adds a key or swaps one in is not taken into the set: It wasn't me and Remove send the new secret to none of them", async () => {
+    // The phone holds `D` and its own key, and forces N + 1 with a key of its own in the free slot and another in place
+    // of the laptop's, under the laptop's name.
+    const added = identityFromSeed(new Uint8Array(32).fill(77)), swapped = identityFromSeed(new Uint8Array(32).fill(78));
+    const forged = [{ key: devices[0].publicKey, name: "Desktop" }, { key: devices[1].publicKey, name: "Phone" }, { key: swapped.publicKey, name: "Laptop" }, { key: added.publicKey, name: "Spare" }];
+    const intruder = await signTurnPacket(keys, { turn: N + 1, rev: 0, author: 1, active: 1, slots: forged, instance: new Uint8Array(8).fill(2) }, (bytes) => sign(bytes, devices[1].seed));
+    const desktop = await device(network, 0, "active");
+    network.seed(intruder);
+    expect(await desktop.keeper.check(false)).toMatchObject({ kind: "gated", state: "superseded" });
+    // The phone took the turn and is named as the device that did; the rest of the set is the one the desktop knew.
+    expect(desktop.store.record).toMatchObject({ activeSlot: 1, deviceSet: [...deviceSet(), null] });
+    expect(await forceTakeover(ports(desktop.store, desktop.keeper), { password: PASSWORD, name: "Phone" })).toMatchObject({ kind: "start" });
+    const written = opened(network.source("dht").held).slots.map((slot) => slot && toBase64Url(slot.key));
+    expect(written).toEqual([...deviceSet().map((slot) => slot.key), null]);
+    const { frame, patch } = await planSetMove(desktop.store.record, seedSigner(devices[0].seed), { remove: toBase64Url(devices[1].publicKey) });
+    const sentTo = patch.earlierSets!.at(-1)!.pending;
+    expect(sentTo).toEqual([toBase64Url(devices[2].publicKey)]);
+    expect(readSetUpdate(frame)!.set.map((slot) => slot && toBase64Url(slot.key))).toEqual([toBase64Url(devices[0].publicKey), null, toBase64Url(devices[2].publicKey)]);
+  });
+
+  it("a takeover by a key the set never listed (a restored copy) names that device, in its own slot only", async () => {
+    const restored = identityFromSeed(new Uint8Array(32).fill(79));
+    const listed = [{ key: devices[0].publicKey, name: "Desktop" }, { key: devices[1].publicKey, name: "Phone" }, { key: devices[2].publicKey, name: "Laptop" }, { key: restored.publicKey, name: "Tablet" }];
+    const taken = await signTurnPacket(keys, { turn: N + 1, rev: 0, author: 3, active: 3, slots: listed, instance: new Uint8Array(8).fill(4) }, (bytes) => sign(bytes, restored.seed));
+    const desktop = await device(network, 0, "active");
+    network.seed(taken);
+    expect(await desktop.keeper.check(false)).toMatchObject({ kind: "gated", state: "superseded" });
+    expect(desktop.store.record).toMatchObject({ activeSlot: 3, deviceSet: [...deviceSet(), { key: toBase64Url(restored.publicKey), name: "Tablet" }] });
   });
 
   it("It wasn't me after the record that replaced it expired takes the turn above the highest it saw, not inside it", async () => {
