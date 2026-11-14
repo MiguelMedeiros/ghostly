@@ -41,7 +41,7 @@ const iconProps = { width: 18, height: 18, viewBox: "0 0 24 24", fill: "none", s
  * person stays in the chat, as with a dialog or a sheet (lib/layerHistory.ts). Beside the chat it is part of the page,
  * and Back leaves the chat as usual.
  */
-export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey, status, callOn, identities }: {
+export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey, status, callOn }: {
   linkId: string;
   sessionId: string;
   contact: AppContact;
@@ -52,8 +52,6 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
   status?: string;
   /** A call is on in the chat: its connection control offers no DHT only meanwhile. */
   callOn?: boolean;
-  /** The contact's identities are open in the chat's page (ContactIdentitiesPanel): beside the chat, they leave it less room. */
-  identities?: boolean;
 }) {
   const { t } = useI18n();
   const phone = useIsMobile();
@@ -80,20 +78,16 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
   useEffect(() => {
     const pane = root.current?.parentElement;
     if (phone || !pane) { setChatAppNarrow(linkId, false); return; }
-    // 0: not laid out (a chat kept loaded off screen); measured again as it shows. The contact's identities beside the
-    // chat (from 900 px, contact-panel.css; over it below) take their width from the same page: with them, an app beside
-    // a 1366 px window's chat left it 189 px.
-    const measure = () => {
-      const aside = identities ? pane.querySelector<HTMLElement>(":scope > .contact-panel") : null;
-      const position = aside ? getComputedStyle(aside).position : "";
-      const taken = aside && position !== "absolute" && position !== "fixed" ? aside.offsetWidth : 0;
-      setChatAppNarrow(linkId, pane.clientWidth > 0 && pane.clientWidth - taken < BESIDE_MIN);
-    };
+    // 0: not laid out (a chat kept loaded off screen); measured again as it shows. The contact's identities take none of
+    // this page from an app beside the chat: they lie over the chat while one is there, wherever its 360 px would leave
+    // the chat less than 320 (contact-panel.css). Measured with them docked while the app was hidden, the app covered the
+    // chat when they opened first, and sat beside it when it opened first (bug hunt, 2026-11-14).
+    const measure = () => setChatAppNarrow(linkId, pane.clientWidth > 0 && pane.clientWidth < BESIDE_MIN);
     const observer = new ResizeObserver(measure);
     observer.observe(pane);
     measure();
     return () => { observer.disconnect(); setChatAppNarrow(linkId, false); };
-  }, [linkId, phone, identities]);
+  }, [linkId, phone]);
 
   const shown = !!app?.shown;
   const full = app?.view === "full";

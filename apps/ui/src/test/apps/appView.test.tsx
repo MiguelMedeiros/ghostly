@@ -316,30 +316,30 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     }
   });
 
-  it("with the contact's identities beside the chat, covers the chat once what they leave has no room for both", async () => {
-    // The chat's page at 1366 px beside the chat list: 946 px. With the identities' 360 px beside it (contact-panel.css,
-    // from 900 px), the app beside the chat left it 189 px (real Chromium, the real panel CSS).
+  it("opened with the contact's identities open, sits beside a chat with room for it, as when it opened first", async () => {
+    // The chat's page at 1366 px beside the chat list: 946 px. With an app beside the chat, the identities lie over it
+    // there (contact-panel.css), whichever opened first. Measured with the identities docked while the app was still
+    // hidden, the app covered the chat when they opened first, and sat beside it when it did (real Chromium, real CSS).
     windowIs(false);
     const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) { return this.classList.contains("chat-pane") ? 946 : 0; });
     const offset = vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function (this: HTMLElement) { return this.classList.contains("contact-panel") ? 360 : 0; });
     const page = (identities: boolean) => <div className="chat-pane">
       <div className="chat-column"><ChatAppResume linkId="link-1" /><textarea aria-label="Message" /></div>
-      <ChatAppPanel linkId="link-1" sessionId="s1" contact={{ name: "Ana", named: true }} peerKey="peer" identities={identities} />
+      <ChatAppPanel linkId="link-1" sessionId="s1" contact={{ name: "Ana", named: true }} peerKey="peer" />
       {identities && <aside className="contact-panel" />}
     </div>;
     try {
-      const view = renderApp(page(false));
+      // The identities first, then the app.
+      const view = renderApp(page(true));
       act(() => fakeEngine.update({ links: [ana(true)] }));
       await act(() => open(REF, "link-1"));
       const app = screen.getByTestId("mini-app");
-      // Room for both: beside the chat.
       expect(app).toHaveAttribute("data-place", "beside");
-      // The identities open beside the chat: the app covers it, with Back to it.
-      view.rerender(page(true));
-      expect(app).toHaveAttribute("data-place", "wide");
-      expect(within(app).getByTestId("mini-app-back")).toBeInTheDocument();
-      // And closed again: beside it again.
+      expect(within(app).queryByTestId("mini-app-back")).not.toBeInTheDocument();
+      // Closed and opened again beside it: still beside the chat.
       view.rerender(page(false));
+      expect(app).toHaveAttribute("data-place", "beside");
+      view.rerender(page(true));
       expect(app).toHaveAttribute("data-place", "beside");
     } finally {
       width.mockRestore();
