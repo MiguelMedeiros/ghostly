@@ -66,6 +66,12 @@ describe("a link preview in the composer", () => {
     for (const id of ["composer-link-preview-title", "composer-link-preview-description"]) {
       expect(within(card).getByTestId(id), id).toHaveAttribute("dir", "auto");
     }
+    // The site's name and the host share a line: each keeps its own direction there, the host left to right. Without it,
+    // an Arabic site name in English was drawn with its "!" before its first word, and in Arabic the host came first.
+    const line = within(card).getByTestId("composer-link-preview-site");
+    expect(line).toHaveTextContent("Example News · news.example");
+    expect([...line.querySelectorAll("bdi")].map(bdi => [bdi.textContent, bdi.getAttribute("dir")]))
+      .toEqual([["Example News", null], ["news.example", "ltr"]]);
   });
 
   it("can be removed: the link then goes as plain text, and is not read again in that draft", async () => {
