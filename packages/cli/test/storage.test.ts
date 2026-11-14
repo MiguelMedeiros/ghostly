@@ -73,8 +73,8 @@ function db(factory: IDBFactory, name = "ghostly", version = 1): Promise<IDBData
   });
 }
 
-function tx(d: IDBDatabase, stores: string[], work: (s: Record<string, IDBObjectStore>) => void): Promise<void> {
-  const t = d.transaction(stores, "readwrite");
+function tx(d: IDBDatabase, stores: string[], work: (s: Record<string, IDBObjectStore>) => void, options?: IDBTransactionOptions): Promise<void> {
+  const t = d.transaction(stores, "readwrite", options);
   work(Object.fromEntries(stores.map((n) => [n, t.objectStore(n)])));
   return new Promise((resolve, reject) => { t.oncomplete = () => resolve(); t.onabort = t.onerror = () => reject(t.error); });
 }
@@ -1437,20 +1437,23 @@ describe("messages kept in rows.db", () => {
     await tx(d, ["messages", "settings"], (s) => { for (let i = 0; i < 3000; i++) s.messages.put(message(i)); s.settings.put("before", "mark"); });
     const before = await all(store.factory);
     // The export's first read of rows.db: from then on, each turn of the event loop is one the export left to others,
-    // and the first of them writes both kinds of store (one kept in rows.db, one in memory).
+    // and the first of them writes both kinds of store (one kept in rows.db, one in memory). Relaxed: its `complete`
+    // says it is in the store, not that a disk sync is done; a slow runner's sync outlasted the export (CI on ARM64).
     const range = vi.spyOn(TreeFile.prototype, "range");
     let turns = 0, done = false, landed = false, wrote: Promise<void> | undefined;
     const spin = () => {
       if (done) return;
       if (range.mock.calls.length > 0) {
         turns++;
-        wrote ??= tx(d, ["messages", "settings"], (s) => { s.messages.put(message(3000)); s.messages.delete(["chat-0", "m000"]); s.settings.put("after", "mark"); }).then(() => { landed = true; });
+        wrote ??= tx(d, ["messages", "settings"], (s) => { s.messages.put(message(3000)); s.messages.delete(["chat-0", "m000"]); s.settings.put("after", "mark"); }, { durability: "relaxed" }).then(() => { landed = true; });
       }
       setImmediate(spin);
     };
     setImmediate(spin);
     const exported = join(folder(), "store.bin");
-    try { await store.exportSnapshot(exported); } finally { done = true; range.mockRestore(); }
+    // A disk that takes 100 ms to sync, as a slow runner's.
+    disk.syncMs = 100;
+    try { await store.exportSnapshot(exported); } finally { done = true; range.mockRestore(); disk.syncMs = 0; }
     const landedDuring = landed;
     await wrote;
     expect(turns).toBeGreaterThan(5);
