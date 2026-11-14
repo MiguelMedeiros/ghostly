@@ -686,7 +686,7 @@ const METHODS: Record<string, Method> = {
     // A group's message is deleted for everyone only (the apps forget none on one device): a group named without the
     // flag says so, with the command that takes it, not "No chat".
     const ref = str(params, "message") ?? "<message>";
-    const link = chatNotGroup(ctx, params, "message delete", `${ref === "<message>" ? ref : shellWord(ref)} --everyone`);
+    const link = chatNotGroup(ctx, params, "message delete", `${shellWord(ref, "<message>")} --everyone`);
     const messageId = str(params, "message", true);
     const message = await node(ctx).getMessage(link.id, messageId);
     if (!message) throw noMessage(messageId, { group: false, ref: str(params, "chat", true) });
@@ -1145,7 +1145,7 @@ function notAGroup<T>(ctx: ApiContext, params: Params, chat: () => T, hint: (sho
     const named = groupPrefixed(ref) ?? ref;
     let group: GroupView;
     try { group = findGroup(state(ctx).groups, named); } catch { throw error; }
-    const shown = shellWord(named);
+    const shown = shellWord(named, group.id);
     throw new CliError("not_found", `${JSON.stringify(ref)} is a group, not a chat: ${hint(shown)}`, { group: group.id });
   }
 }
