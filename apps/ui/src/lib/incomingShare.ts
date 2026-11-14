@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { link, linkEnd } from "./parse/links";
 
 /*
  * Something another app shared into Ghostly (the installed web app is a share target): text, a link, images,
@@ -212,6 +213,22 @@ export function keepShareFor(chat: string, share: IncomingShare): void {
   forChat.set(chat, [share, ...forChat.get(chat) ?? []]);
 }
 
+/** A web address as the browser reads it ("HTTPS://X.EXAMPLE" is "https://x.example/"), or nothing when it is none. */
+function sameUrl(url: string): string | null {
+  try { return new URL(url).href; } catch { return null; }
+}
+
+/**
+ * Whether a share's text already carries its link: one of the text's links is that same address, read as URLs (a
+ * site's root with or without its "/", the scheme and host in any case), not one that merely starts with it. A link
+ * that is no web address is looked for as typed.
+ */
+function carriesLink(text: string, url: string): boolean {
+  const href = /^https?:\/\//i.test(url) ? sameUrl(url) : null;
+  if (!href) return text.includes(url);
+  return [...text.matchAll(new RegExp(link.pattern))].some((match) => sameUrl(linkEnd(match[0])) === href);
+}
+
 /**
  * The text a share puts in the draft: its text, and its link where the text does not already carry it (apps
  * differ: some put the link in `text`, some in `url`, some in both). A title only when there is nothing else.
@@ -219,7 +236,7 @@ export function keepShareFor(chat: string, share: IncomingShare): void {
 export function shareText(share: Pick<IncomingShare, "title" | "text" | "url">): string {
   const text = share.text.trim();
   const url = share.url.trim();
-  const parts = [text, url && !text.includes(url) ? url : ""].filter(Boolean);
+  const parts = [text, url && !carriesLink(text, url) ? url : ""].filter(Boolean);
   if (!parts.length && share.title.trim()) parts.push(share.title.trim());
   return parts.join("\n");
 }
