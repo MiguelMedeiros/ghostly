@@ -1,6 +1,6 @@
 import { getBrowserHost, type EngineConnection } from "../host";
 import { STATUS_IDLE_AFTER_MS, type AppFrameEvent } from "@ghostly/core";
-import type { AppRangeAsk, AttentionEvent, EngineApi, EngineMethod, KeptPictures, KeptViews, PostedEvent, PostedState } from "../shared/rpc";
+import type { AppRangeAsk, AttachMark, AttentionEvent, EngineApi, EngineMethod, KeptPictures, KeptViews, PostedEvent, PostedState } from "../shared/rpc";
 import type { EngineState, LinkView, StoredMessage } from "../shared/types";
 import { applyMessageChanges, type MessageChanges } from "../shared/messageChanges";
 import { identityPicture, nostrPicture, picturesBack } from "../shared/keptPictures";
@@ -99,6 +99,15 @@ class EngineClient {
    * Offers expire by themselves (`parseCallSignal` refuses old ones).
    */
   private readonly offers = new Map<string, string>();
+  /**
+   * Where the page keeps the peer's marks (`mark` events): each connection attaches with the one read, so the peer sends
+   * no chat the stored chats have as it is now, and each one heard is kept once what came before it was told.
+   */
+  private marks: { read(): AttachMark | undefined; keep(mark: AttachMark): void } | null = null;
+
+  keepMarks(marks: { read(): AttachMark | undefined; keep(mark: AttachMark): void }): void {
+    this.marks = marks;
+  }
 
   subscribe(listener: () => void): () => void {
     this.stateListeners.add(listener);
@@ -287,6 +296,7 @@ class EngineClient {
           this.pending.clear();
           this.reconnect(500);
         },
+        this.marks?.read(),
       )
       .then((connection) => {
         this.connection = connection;
@@ -423,6 +433,22 @@ class EngineClient {
       case "apps-checked":
         for (const listener of this.appsCheckedListeners) listener();
         break;
+      case "mark": {
+        // A chat the peer did not send (the stored chats have it): its list here is not its whole history, which is asked
+        // for as a newest page's is. Its newest page comes with its first change.
+        for (const id of message.skipped ?? []) {
+          if (this.messages.has(id)) continue;
+          this.partial.add(id);
+          if (this.kept.has(id)) this.askWhole(id);
+        }
+        // What changed before the mark is told first: the mark is kept once the stored chats have it.
+        if (this.changesTimer) {
+          clearTimeout(this.changesTimer);
+          this.tellChanges();
+        }
+        this.marks?.keep({ epoch: message.epoch, mark: message.mark });
+        break;
+      }
       case "response": {
         const pending = this.pending.get(message.id);
         this.pending.delete(message.id);
