@@ -35,6 +35,18 @@ describe("the text a share puts in the draft", () => {
     expect(shareText(share())).toBe("");
   });
 
+  it("the link is the same one as the text's when only a root's '/' or the scheme and host's case differ; a longer link is another", () => {
+    expect(shareText(share({ text: "Check this https://x.example", url: "https://x.example/" }))).toBe("Check this https://x.example");
+    expect(shareText(share({ text: "Check this https://x.example/.", url: "https://x.example" }))).toBe("Check this https://x.example/.");
+    expect(shareText(share({ text: "HTTPS://X.EXAMPLE/a", url: "https://x.example/a" }))).toBe("HTTPS://X.EXAMPLE/a");
+    expect(shareText(share({ text: "Look https://x.example/ab", url: "https://x.example/a" }))).toBe("Look https://x.example/ab\nhttps://x.example/a");
+    expect(shareText(share({ text: "Look https://x.example/a/b", url: "https://x.example/a" }))).toBe("Look https://x.example/a/b\nhttps://x.example/a");
+    // The path's case is the page's own.
+    expect(shareText(share({ text: "Look https://x.example/A", url: "https://x.example/a" }))).toBe("Look https://x.example/A\nhttps://x.example/a");
+    // What is no web address is compared as typed.
+    expect(shareText(share({ text: "Code: ghost-42 here", url: "ghost-42" }))).toBe("Code: ghost-42 here");
+  });
+
   it("the picker previews the start of a long text, never half a character, and the draft gets it whole", () => {
     expect(sharePreview(share({ text: "Look", url: "https://a.example" }))).toBe("Look\nhttps://a.example");
     // A pair astride the preview's end is left out whole.
