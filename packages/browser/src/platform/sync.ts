@@ -493,7 +493,7 @@ async function reconcile(): Promise<void> {
     void engine.call("removeLink", { linkId: link.id }).catch(() => {});
     // An app still running in it (a Desktop app window) stops: the engine answers nothing more for this chat.
     stopAppsIn(link.id);
-    // What the contact's apps opened from this chat kept on this device goes with it (the web app's origins).
+    // What the contact's apps opened from this chat kept on this device goes with it (their origins).
     void forgetServicesOf({ tag: viewerTag(link.myPubKeyZ32) });
   }
   if (!later && !renamed) settled = { state, sessions };
