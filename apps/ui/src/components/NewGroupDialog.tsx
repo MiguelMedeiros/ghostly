@@ -68,7 +68,7 @@ export function NewGroupDialog({ onClose, onCreated, returnFocus }: { onClose():
     <p className="mt-1 text-sm text-text-muted">{t("group.create.hint")}</p>
     <form className="mt-4" onSubmit={e => { e.preventDefault(); void submit(); }}>
       <input ref={input} value={name} {...nameField} placeholder={t("group.rename.label")} aria-label={t("group.rename.label")} data-testid="new-group-name"
-        className="w-full rounded-lg bg-input-bg px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent" />
+        className="w-full rounded-lg bg-input-bg border border-field-border px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-accent focus:ring-2 focus:ring-focus-ring" />
       <div role="radiogroup" aria-label={t("group.create.kind")} className="mt-3 grid gap-2">
         {kinds(t).map(k => <label key={k.kind} data-testid={`new-group-kind-${k.kind}`}
           className={`flex cursor-pointer gap-3 rounded-lg border px-3 py-2.5 transition-colors ${kind === k.kind ? "border-accent bg-accent/10" : "border-border hover:bg-surface-hover"}`}>

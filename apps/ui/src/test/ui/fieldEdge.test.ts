@@ -8,7 +8,7 @@ import { escapeRegExp } from "../regExp";
 
 /**
  * A text field (the shared one of Profile and the wallets, Settings, Network, the Settings and chat searches, the
- * message composer, Profile's name, an attachment's caption, a group's Rename) has an edge
+ * message composer, Profile's name, an attachment's caption, a group's Rename, a new group's name) has an edge
  * at 3:1 or more on what is around it, in every colour theme (WCAG 1.4.11): its fill is the panel's or close to it, so
  * a pale border, or none, left a filled or empty field with no visible boundary.
  */
@@ -87,15 +87,17 @@ const FIELDS: { name: string; edge: (scheme: "dark" | "light") => string | null 
   { name: "the message composer", edge: composerEdge },
   { name: "the attachment sheet's caption", edge: () => restingEdge(classesWith("components/composer/AttachmentSheet.tsx", "w-full min-h-10 px-3 rounded-lg")) },
   { name: "a group's Rename field", edge: () => restingEdge(classesWith("components/GroupMembersDialog.tsx", "min-w-0 flex-1 rounded-md")) },
+  { name: "a new group's name", edge: () => restingEdge(classesWith("components/NewGroupDialog.tsx", "w-full rounded-lg bg-input-bg")) },
 ];
 
 /**
- * Fields whose focus once showed only as their edge turning from the muted ink to the accent, 1.1-1.3:1 apart: they
- * also draw a 2 px ring with the focus.
+ * Fields whose focus once showed only as their edge turning from the muted ink to the accent, 1.1-1.3:1 apart, or as
+ * a 1 px ring: they draw a 2 px ring with the focus.
  */
 const FOCUSED: { name: string; classes: () => string }[] = [
   { name: "the attachment sheet's caption", classes: () => classesWith("components/composer/AttachmentSheet.tsx", "w-full min-h-10 px-3 rounded-lg") },
   { name: "a group's Rename field", classes: () => classesWith("components/GroupMembersDialog.tsx", "min-w-0 flex-1 rounded-md") },
+  { name: "a new group's name", classes: () => classesWith("components/NewGroupDialog.tsx", "w-full rounded-lg bg-input-bg") },
 ];
 
 /** The colour of a 2 px focus ring in a class list (`focus:` or `focus-visible:`), null without one. */
