@@ -178,6 +178,28 @@ test("a phone at a doubled text size: the tab names and the identity card grow, 
   }
 });
 
+test("a phone at 200% text size: Profile's row buttons wrap their words inside the screen, and the page does not scroll sideways", { tag: ["@feature:app.accessibility", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+  // In Portuguese "Adicionar este dispositivo" ran from 7 to 389 px on a 375 px screen, and the page shifted 25 px.
+  const { page } = await peer("text-size-profile", { mobile: true, viewport: PHONE });
+  await page.goto("/#/profile");
+  await textSize(page, 32);
+  for (const language of ["pt", "it", "es", "fr", "ja"]) {
+    await useLanguage(page, language);
+    await expect(page.getByTestId("device-add-open")).toBeEnabled();
+    await expect(page.getByTestId("backup-open")).toBeVisible();
+    const out = await page.getByTestId("profile-page").locator("section button").evaluateAll((buttons) => buttons
+      .map((button) => ({ button, box: button.getBoundingClientRect() }))
+      .filter(({ box }) => box.width > 1 && box.height > 1)
+      .filter(({ box }) => box.left < 0 || box.right > window.innerWidth)
+      .map(({ button, box }) => `${button.textContent}: ${Math.round(box.left)}..${Math.round(box.right)}`));
+    expect(out, `${language}: buttons past the screen`).toEqual([]);
+    const sections = await page.getByTestId("profile-page").locator("section").evaluateAll((sections) =>
+      sections.map((section) => Math.round(section.getBoundingClientRect().left)).filter((left) => left < 0));
+    expect(sections, `${language}: sections pushed off the screen`).toEqual([]);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth), language).toBeLessThanOrEqual(0);
+  }
+});
+
 /** Each of the rows' names cut sideways, as "name: scrollWidth/clientWidth". */
 function cutNames(rows: ReturnType<Page["locator"]>, name: string): Promise<string[]> {
   return rows.evaluateAll((rows, name) => rows.map((row) => row.querySelector<HTMLElement>(name)!)
