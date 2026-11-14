@@ -2,6 +2,7 @@ import { useEffect, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { BuiltInAppOffer, InstalledAppView } from "@ghostly/browser/engine/apps";
 import { appCardId, appCardUrl, statusCardText, type AppCard } from "@ghostly/core";
+import { dropAppIconsExcept } from "./icons";
 import { appsRunning, openApp, readingApps, stopTakenDown, type OpenAppOptions } from "./open";
 
 /*
@@ -57,6 +58,7 @@ export function refreshInstalledApps(): Promise<void> {
     const offered = await builtIns;
     if (mine !== asked) return loading ?? undefined;
     offers = kept(offers, offered); apps = kept(apps, list); failed = null; tell(); stopTakenDown(list, at);
+    dropAppIconsExcept(list.map((a) => a.ref));
   }, (e: unknown) => { if (mine !== asked) return loading ?? undefined; apps ??= []; failed = e; tell(); }).finally(() => { if (loading === read) loading = null; });
   loading = read;
   return read;
