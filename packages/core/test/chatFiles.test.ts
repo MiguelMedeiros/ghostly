@@ -1086,6 +1086,23 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     await until(() => records.get(info.id)?.state === "done");
   });
 
+  it("a receiver checking a file's digest goes on handling the session's other frames: another file arrives meanwhile", async () => {
+    const w = wire();
+    const disk = new Disk(false);
+    let release!: () => void;
+    // A large file's check takes a while (a 4 GiB one about 20 s at 200 MiB/s); the session's frames come in one queue.
+    disk.checking = new Promise<void>((resolve) => { release = resolve; });
+    w.b.disks.set("chk-0004", disk);
+    w.attach();
+    send(w, file("chk-0004", 50_000));
+    await until(() => state(w.b, "in", "chk-0004") === "verifying");
+    send(w, file("next-0001", 50_000));
+    await until(() => state(w.b, "in", "next-0001") === "done" && state(w.a, "out", "next-0001") === "done", 2_000);
+    expect(state(w.b, "in", "chk-0004")).toBe("verifying");
+    release();
+    await until(() => state(w.a, "out", "chk-0004") === "done" && state(w.b, "in", "chk-0004") === "done");
+  });
+
   it("a digest that does not match deletes the file on arrival and says so on both sides", async () => {
     const w = wire();
     w.attach();

@@ -1190,10 +1190,15 @@ export class ChatFiles {
     if (record.state !== "active" || incoming.verifying || !incoming.target) return;
     if (frame.size !== record.file.size || typeof frame.digest !== "string" || !DIGEST.test(frame.digest)) return;
     const digest = frame.digest;
-    await incoming.writing;
-    if (transferEnded(record) || record.state !== "active") return;
-    if (incoming.stored < record.file.size) { this.send({ t: "pf-accept", id: record.id, offset: incoming.stored }); return; }
+    // Set before the writes are waited for: the check runs beside the session's frames (`handle`), and a second `pf-sum`
+    // meanwhile is not a second check.
     incoming.verifying = true;
+    await incoming.writing;
+    if (transferEnded(record) || record.state !== "active" || incoming.stored < record.file.size) {
+      incoming.verifying = false;
+      if (!transferEnded(record) && record.state === "active") this.send({ t: "pf-accept", id: record.id, offset: incoming.stored });
+      return;
+    }
     record.state = "verifying";
     this.changed(entry);
     let ok: boolean;
@@ -1234,7 +1239,10 @@ export class ChatFiles {
     if (frame.t === "pf-offer") return this.onOffer(frame);
     const incoming = this.entries.get(key("in", id)), outgoing = this.entries.get(key("out", id));
     if (frame.t === "pf-data") { if (incoming) this.onData(incoming, frame); return; }
-    if (frame.t === "pf-sum") { if (incoming) await this.onSum(incoming, frame); return; }
+    // Not waited for: the check reads the whole file again (a 4 GiB one about 20 s at 200 MiB/s), and the session's
+    // frames come in one queue. Waited for, every text, pong and other file of the chat waited behind it, and a check
+    // longer than the contact's three pings (45 s) had the session dropped as dead.
+    if (frame.t === "pf-sum") { if (incoming) void this.onSum(incoming, frame); return; }
     if (frame.t === "pf-abort") {
       if (incoming && !transferEnded(incoming.record)) {
         await this.discardStored(incoming);
