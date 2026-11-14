@@ -95,12 +95,18 @@ test("with the lock on, a tap on the app's covered half in split screen brings i
 });
 
 test("with the lock on, the page under the cover is hidden from accessibility services too, and back with the app", { tag: ["@feature:settings.lock.idle", "@gated"] }, async ({ app }) => {
+  const { page } = app;
   await lockOn(app);
   const PAGE_TEXT = "Send typing indicator";
+  // The compressed dump holds only what is on screen, and this row is below the lock's on a phone's height: each
+  // read brings it to the middle first, so what the read sees is the cover, not the screen's size.
+  const intoView = () => page.getByText(PAGE_TEXT, { exact: true }).first().evaluate((el) => el.scrollIntoView({ block: "center" }));
+  await intoView();
   // The WebView builds its tree only once a client asks for it: the page is in it first, in front.
   await expect.poll(() => accessibleTexts(app), { timeout: 20_000, message: "the page in the accessibility tree" }).toContain(PAGE_TEXT);
 
   await inSplitScreen(app, async () => {
+    await intoView();
     await sleep(1500);
     // TalkBack would read the hidden settings aloud and its double tap press them, as a tap did before the cover took it.
     expect(accessibleTexts(app), "the covered page in the accessibility tree").not.toContain(PAGE_TEXT);
@@ -108,6 +114,7 @@ test("with the lock on, the page under the cover is hidden from accessibility se
     // Back in front: the page is there for TalkBack again.
     app.adb.shell("am start -W -n tools.ghostly.app/.MainActivity");
     await expect.poll(() => focused(app), { timeout: 20_000, message: "the app has the focus" }).toContain(PKG);
+    await intoView();
     await expect.poll(() => accessibleTexts(app), { timeout: 20_000, message: "the page in the accessibility tree" }).toContain(PAGE_TEXT);
   });
 });
