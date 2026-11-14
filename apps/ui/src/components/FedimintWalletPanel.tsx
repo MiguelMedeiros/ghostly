@@ -7,6 +7,7 @@ import { useRun, downloadJson } from "./wallet/run";
 import { Select } from "./ui/Select";
 import { ConfirmRealMoney } from "./ConfirmRealMoney";
 import { useI18n, type Translate } from "../contexts/I18nContext";
+import { NAME, withName } from "./apps/aroundName";
 import { satsIn, unitFor } from "./NetworkTag";
 import { formatAmount } from "../lib/amount";
 import { fillNodes } from "../lib/fillNodes";
@@ -127,7 +128,7 @@ export function FedimintWalletPanel({ wallet, state, backupNow = false }: { wall
           <FederationFacts info={preview} testId="fedimint-preview-facts" />
           {!preview.modules.includes("ln") && <Notice tone="warning">{t("wallet.fedimint.noLightning")}</Notice>}
           <div className="flex gap-2">
-            <Button ref={joinButton} variant="primary" data-testid="fedimint-join" disabled={busy} loading={running === "join"} onClick={() => void run(async () => { const joined = await wallet.fedimintJoin(invite); setSelected(joined.id); setInvite(""); setPreview(null); }, "join")}>{running === "join" ? t("wallet.fedimint.joining") : preview.name ? t("wallet.fedimint.joinName", { name: preview.name }) : t("wallet.fedimint.joinThis")}</Button>
+            <Button ref={joinButton} variant="primary" data-testid="fedimint-join" disabled={busy} loading={running === "join"} onClick={() => void run(async () => { const joined = await wallet.fedimintJoin(invite); setSelected(joined.id); setInvite(""); setPreview(null); }, "join")}>{running === "join" ? t("wallet.fedimint.joining") : preview.name ? withName(t("wallet.fedimint.joinName", { name: NAME }), preview.name) : t("wallet.fedimint.joinThis")}</Button>
             <Button onClick={() => setPreview(null)}>{t("common.cancel")}</Button>
           </div>
         </div>}
