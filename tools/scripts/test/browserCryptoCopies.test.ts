@@ -1,6 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { Output as unbundledOutput } from "@bitcoinerlab/descriptors-scure";
 import { finalizeEvent as pinnedFinalize, getPublicKey as pinnedPublicKey, nip44 as pinnedNip44, verifyEvent as pinnedVerify } from "nostr-tools";
 import { build, type Plugin, type Rollup } from "vite";
 import { expect, it } from "vitest";
@@ -49,6 +50,37 @@ it("a browser build bundles nostr-tools on the app's own noble and scure librari
     const sealed = bundled.nip44.v2.encrypt("a message for Bob", key, nonce);
     expect(sealed).toBe(pinnedNip44.v2.encrypt("a message for Bob", key, nonce));
     expect(pinnedNip44.v2.decrypt(sealed, pinnedNip44.v2.utils.getConversationKey(bob, pinnedPublicKey(alice)))).toBe("a message for Bob");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}, 60_000);
+
+/**
+ * The Bitcoin descriptor libraries (the Ark wallet's) are CommonJS and `require()` noble's secp256k1. A `require()`
+ * keeps every export of the module it loads, so the shared secp256k1 chunk of the web app's first load carried
+ * noble's FROST threshold signing (about 28 KB) that nothing in Ghostly calls.
+ */
+it("a browser build keeps only the secp256k1 the descriptor libraries use, and their addresses are unchanged", async () => {
+  const dir = mkdtempSync(join(ROOT, "node_modules/.ghostly-crypto-copies-"));
+  try {
+    writeFileSync(join(dir, "entry.js"), [
+      `import { Output } from "@bitcoinerlab/descriptors-scure";`,
+      `import { secp256k1 } from "@noble/curves/secp256k1.js";`,
+      `export { Output, secp256k1 };`,
+    ].join("\n"));
+    const output = await build({
+      root: dir, configFile: false, logLevel: "silent", plugins: [ghostlyPlatformModules()],
+      build: { write: false, minify: false, lib: { entry: join(dir, "entry.js"), formats: ["es"], fileName: "bundle" } },
+    }) as Rollup.RollupOutput[];
+    const chunk = output[0].output.find((file) => file.type === "chunk") as Rollup.OutputChunk;
+    expect(chunk.code).not.toContain("FROST-secp256k1");
+    writeFileSync(join(dir, "bundle.mjs"), chunk.code);
+    const bundled = await import(pathToFileURL(join(dir, "bundle.mjs")).href);
+
+    const key = Buffer.from(bundled.secp256k1.getPublicKey(new Uint8Array(32).fill(3))).toString("hex");
+    for (const descriptor of [`wpkh(${key})`, `tr(${key.slice(2)})`, `wsh(and_v(v:pk(${key}),older(144)))`]) {
+      expect(new bundled.Output({ descriptor }).getAddress(), descriptor).toBe(new unbundledOutput({ descriptor }).getAddress());
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
