@@ -29,7 +29,7 @@ const MB = 1024 ** 2;
 const asking: FileTransferState = { state: "transferring", stage: "asking", direction: "in", transferred: 0, size: 40 * MB, room: 12 * 1024 * MB };
 const file = (patch: Partial<ChatFile> = {}): ChatFile => ({ id: "chat1-in-abc", name: "Club!", size: 40 * MB, mime: "application/zip", ...patch });
 /** The name between FSI and PDI, as a string with no room for a <bdi> holds it. */
-const iso = (name: string) => `⁨${name}⁩`;
+const iso = (name: string) => `\u2068${name}\u2069`;
 /** The <bdi>s holding exactly this name inside the element. */
 const isolated = (el: HTMLElement, name: string) => [...el.querySelectorAll("bdi")].filter(bdi => bdi.textContent === name).length;
 

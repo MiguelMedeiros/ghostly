@@ -111,7 +111,7 @@ export async function fileHeld(platform: Pick<ServicesPlatform, "fileHeld" | "sa
  */
 export function fileStatus(file: ChatFile, transfer: FileTransferState | null, named: string | undefined, missing: boolean | "left-out", tr: Translate = englishT): string {
   const size = statusSize(file.size, tr);
-  const peerName = named === undefined ? tr("chat.file.yourContact") : `⁨${named}⁩`;
+  const peerName = named === undefined ? tr("chat.file.yourContact") : `\u2068${named}\u2069`;
   if (!transfer || transfer.state === "done") return missing === "left-out" ? tr("chat.file.notInBackup") : missing ? tr("chat.file.gone") : size;
   if (transfer.state === "failed") return failedStatus(file, transfer, tr);
   const done = `${percent(transfer)}%`;

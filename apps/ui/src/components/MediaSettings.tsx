@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { voiceLevel } from "@ghostly/core";
 import { useI18n } from "../contexts/I18nContext";
+import { NAME, withName } from "./apps/aroundName";
 import { openAppSettings } from "../desktop/androidCameraRefusal";
 import { useMediaDevices } from "../hooks/useMediaDevices";
 import { applySpeaker, canPickSpeaker, captureCamera, chooseDevice, deviceSource, isMediaDenied, mediaDeniedText, resolveDevice, type DeviceKind, type DeviceList } from "../lib/mediaDevices";
@@ -113,7 +114,7 @@ function DeviceRow({ kind, list, choices, info, children, below }: {
   return (
     <div>
       <Row label={name} info={info} testId={`${TEST_ID[kind]}-row`}
-        hint={missing ? <span role="status" data-testid={`${TEST_ID[kind]}-missing`}>{t("settings.media.missing", { name: missing })}</span>
+        hint={missing ? <span role="status" data-testid={`${TEST_ID[kind]}-missing`}>{withName(t("settings.media.missing", { name: NAME }), missing)}</span>
           : failed ? <span role="alert" data-testid={`${TEST_ID[kind]}-failed`} data-failure={failed} className="text-danger">{t(failed === "denied" ? deniedText() : "settings.media.failed")}</span> : undefined}>
         <Select fit aria-label={name} data-testid={TEST_ID[kind]} value={id ?? ""} options={options} onChange={pick} />
         {children(id, setFailed)}
