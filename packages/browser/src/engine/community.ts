@@ -1369,8 +1369,9 @@ export class Communities {
     }
     // A text of mine an app killed mid-send saved but did not store or say (WISP 903 § Messages).
     await s.resume().catch(() => {});
-    // An answer over leaves the gaps it did not fill gone: the members view stops counting them (nothing else changed).
-    if (s.settleGaps()) this.host.emit();
+    // An answer over leaves the gaps it did not fill gone: this group's members view stops counting them (nothing else
+    // changed), so the state names this group alone and keeps every other group's view.
+    if (s.settleGaps()) this.host.emit(undefined, groupId);
     // Something I said with no edge up may be sealed under a commit I took for the newest: said again once caught up.
     await s.reseal().catch(() => {});
     await this.reconcile(groupId, live, now);
