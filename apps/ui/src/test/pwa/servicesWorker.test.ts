@@ -125,7 +125,7 @@ describe("an answer of the contact's app the worker passes on", () => {
   it("carries Ghostly's viewer policy after the app's own, Hide my IP on or off, whatever policy the app sends", async () => {
     const { CookieJar, serve } = await import("../../../../web/src/svc/opener");
     const { VIEWER_GUARD_CSP, VIEWER_SERVICE_CSP, VIEWER_SERVICE_CSP_RELAY_ONLY } = await import("@ghostly/core");
-    const words = { unreachable: "", failed: "", close: "", callOn: "", tooSlow: "", offline: "", retry: "", blocked: "", unguarded: "", label: "", owner: "", hostError: () => null };
+    const words = { unreachable: "", failed: "", close: "", callOn: "", tooSlow: "", offline: "", retry: "", blocked: "", unguarded: "", label: "", owner: "", openLink: () => "", hostError: () => null };
     for (const own of [null, "connect-src *"]) {
       for (const relayOnly of [false, true]) {
         // The bridge hands the request to the real `serve`, and the contact answers with or without a policy of its own.
