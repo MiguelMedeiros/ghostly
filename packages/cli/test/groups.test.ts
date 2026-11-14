@@ -193,6 +193,26 @@ describe("group link", () => {
     expect(await callApi(ctx, "group.link", { group: "Crew", on: true, reset: true })).toEqual({ group: "g1", link: LINK, url: expect.stringMatching(/#\/join\//) });
     expect(enableGroupLink.mock.calls).toEqual([[{ groupId: "g1" }], [{ groupId: "g1", reset: true }]]);
   });
+
+  it("is refused to a member removed from the group, as group send is, never the link it held when it was removed", async () => {
+    // Before: the old link with exit 0, while `group show` said removed and link null; it may have been reset since.
+    const { ctx, node } = fake();
+    const enableGroupLink = vi.fn(async () => ({ link: LINK })), disableGroupLink = vi.fn(async () => undefined);
+    Object.assign(node, { enableGroupLink, disableGroupLink });
+    const out = (status: string, statusReason?: string) => {
+      node.getState = () => ({ links: [], groups: [{ ...group, profile: "community", isAdmin: false, canSend: false, status, statusReason }], settings: {}, transport: {} }) as unknown as EngineState;
+    };
+    out("removed", "You were removed from this group");
+    for (const params of [{}, { reset: true }, { on: false }])
+      await expect(callApi(ctx, "group.link", { group: "Crew", ...params }), JSON.stringify(params)).rejects.toMatchObject({ code: "refused", message: "You were removed from this group" });
+    out("left");
+    await expect(callApi(ctx, "group.link", { group: "Crew" })).rejects.toMatchObject({ code: "refused", message: "You are not in this group" });
+    expect(enableGroupLink).not.toHaveBeenCalled();
+    expect(disableGroupLink).not.toHaveBeenCalled();
+    // A community member who lost its hubs is still in it: it asks to be let in again by itself.
+    out("lost");
+    expect(await callApi(ctx, "group.link", { group: "Crew" })).toEqual({ group: "g1", link: LINK });
+  });
 });
 
 describe("group remove", () => {
