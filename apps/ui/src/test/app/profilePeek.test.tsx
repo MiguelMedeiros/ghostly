@@ -124,6 +124,20 @@ describe("the switcher's New", () => {
     expect(within(familyItem).queryByTestId("profile-switcher-new")).not.toBeInTheDocument();
   });
 
+  it("in Japanese, says New and unread the way Japanese lists them, not with an English comma", async () => {
+    const work = createProfile("Work");
+    mergePeek(work.id, done([chat("a", { text: "t" })]));
+    // Three messages, one read: two unread.
+    localStorage.setItem(`${prefixOf(work.id)}c1`, JSON.stringify({ id: "c1", mySeedB64: "s", peerPubKeyB64: "p", encKeyB64: "e", createdAt: 0, messages: [{ id: "m0" }, { id: "m1" }, { id: "m2" }] }));
+    localStorage.setItem(`${prefixOf(work.id)}read_c1`, "1");
+    const { user } = renderApp(<Routes><Route path="*" element={<AccountBar />} /></Routes>, { language: "ja" });
+
+    expect(await screen.findByTestId("account-profile-others-new")).toBeInTheDocument();
+    await user.click(screen.getByTestId("account-profile"));
+    const [workItem] = within(screen.getByRole("menu")).getAllByTestId("profile-switcher-item");
+    expect(workItem).toHaveAccessibleName("Work に切り替え、新着メッセージ、未読 2 件");
+  });
+
   it("updates while open when a look finds something", async () => {
     const work = createProfile("Work");
     renderApp(<Routes><Route path="*" element={<AccountBar />} /></Routes>);
