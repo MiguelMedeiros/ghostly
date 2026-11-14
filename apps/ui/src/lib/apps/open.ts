@@ -45,13 +45,17 @@ export function useAppOpener(): AppOpener | null {
  */
 export type AppTakedown = { why: "revoked" } | { why: "removed"; store: string } | { why: "failed" } | { why: "unresponsive" } | { why: "offline" } | { why: "focus" };
 
-/** "Chess was stopped: its maker revoked this version", where the app ran. */
-export function takedownText(title: string, takedown: AppTakedown, t: Translate): string {
+/**
+ * "Chess was stopped: its maker revoked this version", where the app ran. The line takes the page's direction, so the
+ * app's title and the store's name are isolated in their own (as `removedLine` does).
+ */
+export function takedownText(name: string, takedown: AppTakedown, t: Translate): string {
+  const title = `\u2068${name}\u2069`;
   if (takedown.why === "failed") return t("apps.view.stoppedFailed", { title });
   if (takedown.why === "offline") return t("apps.view.stoppedOffline", { title });
   if (takedown.why === "unresponsive") return t("apps.view.stoppedUnresponsive", { title });
   if (takedown.why === "focus") return t("apps.view.stoppedFocus", { title });
-  return takedown.why === "revoked" ? t("apps.view.stoppedRevoked", { title }) : t("apps.view.stoppedRemoved", { title, store: takedown.store });
+  return takedown.why === "revoked" ? t("apps.view.stoppedRevoked", { title }) : t("apps.view.stoppedRemoved", { title, store: `\u2068${takedown.store}\u2069` });
 }
 
 /** An app running now, as its opener registered it: its ref, the version it runs, whether the person chose Run anyway, and how to stop it. */

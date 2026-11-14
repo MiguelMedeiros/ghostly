@@ -90,7 +90,7 @@ describe("an app running when its version is taken down", () => {
     expect(started[0]!.stop).toHaveBeenCalled();
     const app = screen.getByTestId("mini-app");
     expect(app).toBeVisible();
-    expect(within(app).getByTestId("mini-app-stopped")).toHaveTextContent("Chess was stopped: its publisher revoked this version");
+    expect(within(app).getByTestId("mini-app-stopped")).toHaveTextContent("\u2068Chess\u2069 was stopped: its publisher revoked this version");
     expect(within(app).queryByRole("iframe")).not.toBeInTheDocument();
     expect(started[0]!.frame.isConnected).toBe(false);
     await user.click(within(app).getByRole("button", { name: "Close" }));
@@ -109,7 +109,7 @@ describe("an app running when its version is taken down", () => {
     await act(() => open(REF, "link-1"));
     await checked(removed);
     expect(started[1]!.stop).toHaveBeenCalled();
-    expect(screen.getByTestId("mini-app-stopped")).toHaveTextContent("Chess was stopped: Ghostly removed this version");
+    expect(screen.getByTestId("mini-app-stopped")).toHaveTextContent("\u2068Chess\u2069 was stopped: \u2068Ghostly\u2069 removed this version");
   });
 
   it("a version still fine keeps running", async () => {
@@ -148,7 +148,7 @@ describe("an app running when its version is taken down", () => {
     updated([{ digest: "d", run: { status: "revoked" } }]);
     await checked({ status: "ok" });
     expect(started[0]!.stop).toHaveBeenCalled();
-    expect(screen.getByTestId("mini-app-stopped")).toHaveTextContent("Chess was stopped: its publisher revoked this version");
+    expect(screen.getByTestId("mini-app-stopped")).toHaveTextContent("\u2068Chess\u2069 was stopped: its publisher revoked this version");
   });
 
   it("alone: stops it and says why in its place", async () => {
@@ -156,7 +156,7 @@ describe("an app running when its version is taken down", () => {
     await checked({ status: "revoked" });
     expect(started[0]!.stop).toHaveBeenCalled();
     const app = await waitFor(() => screen.getByTestId("mini-app"));
-    expect(within(app).getByTestId("mini-app-stopped")).toHaveTextContent("Chess was stopped: its publisher revoked this version");
+    expect(within(app).getByTestId("mini-app-stopped")).toHaveTextContent("\u2068Chess\u2069 was stopped: its publisher revoked this version");
     within(app).getByRole("button", { name: "Close" }).click();
     expect(screen.queryByTestId("mini-app")).not.toBeInTheDocument();
   });
@@ -164,7 +164,7 @@ describe("an app running when its version is taken down", () => {
 
 // The runner (WISP 1200 § the runner, step 7): an app whose frame loads again is torn down, and its place says it stopped.
 describe("an app that stops on its own", () => {
-  const STOPPED = "Chess stopped working and was closed. If it keeps happening, tell its publisher.";
+  const STOPPED = "\u2068Chess\u2069 stopped working and was closed. If it keeps happening, tell its publisher.";
   beforeEach(() => { vi.spyOn(console, "warn").mockImplementation(() => {}); });
 
   it("in a chat: the panel stays, shown, and says it stopped until it is closed", async () => {
@@ -212,7 +212,7 @@ describe("an app that stops on its own", () => {
 // The watchdog (WISP 1200 § The runner and the broker): an app that held its thread past the bound was stopped by the
 // page. Its place says so, and it may be opened again.
 describe("an app the watchdog stopped", () => {
-  const UNRESPONSIVE = "Chess stopped responding and was closed, so your chats keep working. Open it again, or tell its publisher if it keeps happening.";
+  const UNRESPONSIVE = "\u2068Chess\u2069 stopped responding and was closed, so your chats keep working. Open it again, or tell its publisher if it keeps happening.";
   beforeEach(() => { vi.spyOn(console, "warn").mockImplementation(() => {}); });
   afterEach(() => { setAppOpener(null); });
 
@@ -347,7 +347,7 @@ describe("an app the watchdog stopped", () => {
 
 // An app that kept taking the keyboard by script was stopped by the page (`holdFocus`): its place says why in one line.
 describe("an app stopped for taking the keyboard", () => {
-  const FOCUS = "Chess was stopped: it kept taking the keyboard";
+  const FOCUS = "\u2068Chess\u2069 was stopped: it kept taking the keyboard";
   beforeEach(() => { vi.spyOn(console, "warn").mockImplementation(() => {}); });
   afterEach(() => { setAppOpener(null); });
 
@@ -459,7 +459,7 @@ describe("an app in a chat that stops while the focus is in it", () => {
       if (reason === "revoked") await checked({ status: "revoked" });
       else act(() => started[0]!.stop(reason));
       expect(within(app).getByRole("status")).toBe(said);
-      expect(said).toHaveTextContent(reason === "revoked" ? "Chess was stopped: its publisher revoked this version" : /^Chess stopped responding/);
+      expect(said).toHaveTextContent(reason === "revoked" ? "\u2068Chess\u2069 was stopped: its publisher revoked this version" : /^\u2068Chess\u2069 stopped responding/);
       expect(said).toHaveTextContent(within(app).getByTestId("mini-app-stopped").textContent!);
     });
   }
@@ -479,7 +479,7 @@ describe("an app opened alone that stops", () => {
       if (reason === "revoked") await checked({ status: "revoked" });
       else act(() => started[0]!.stop(reason));
       expect(within(app).getByRole("status")).toBe(said);
-      expect(said).toHaveTextContent(reason === "revoked" ? "Chess was stopped: its publisher revoked this version" : /^Chess stopped responding/);
+      expect(said).toHaveTextContent(reason === "revoked" ? "\u2068Chess\u2069 was stopped: its publisher revoked this version" : /^\u2068Chess\u2069 stopped responding/);
       expect(said).toHaveTextContent(within(app).getByTestId("mini-app-stopped").textContent!);
       expect(document.activeElement).toBe(within(app).getByRole("button", { name: "Close" }));
     });
@@ -537,7 +537,7 @@ describe("an app in a chat the person went Back from, that stops", () => {
           const back = within(app).getByTestId("mini-app-back");
           expect(document.activeElement).toBe(back);
           expect(back).toHaveAccessibleDescription(within(app).getByTestId("mini-app-stopped").textContent!);
-          expect(back).toHaveAccessibleDescription(reason === "revoked" ? "Chess was stopped: its publisher revoked this version" : /^Chess stopped responding/);
+          expect(back).toHaveAccessibleDescription(reason === "revoked" ? "\u2068Chess\u2069 was stopped: its publisher revoked this version" : /^\u2068Chess\u2069 stopped responding/);
         } finally {
           width.mockRestore();
         }
@@ -552,5 +552,16 @@ describe("an app in a chat the person went Back from, that stops", () => {
     await user.click(within(app).getByTestId("mini-app-back"));
     await user.click(screen.getByTestId("mini-app-resume"));
     expect(within(app).getByTestId("mini-app-back")).not.toHaveAttribute("aria-describedby");
+  });
+});
+
+// The line takes the page's direction: an app's title or a store's name not isolated drew its ending punctuation on its
+// other side in Arabic, and an Arabic title's number before the title in English. Isolated, as the Apps screens' lines are.
+describe("the stopped line's names", () => {
+  it.each([
+    ["ar", "C++", { why: "removed", store: "Hunt!" }, "تم إيقاف \u2068C++\u2069: أزال \u2068Hunt!\u2069 هذا الإصدار"],
+    ["en", "شطرنج 2", { why: "revoked" }, "\u2068شطرنج 2\u2069 was stopped: its publisher revoked this version"],
+  ] as const)("keeps the app's title and the store's name in their own direction (%s)", (lang, title, takedown, line) => {
+    expect(takedownText(title, takedown, translateWith(locales[lang], lang))).toBe(line);
   });
 });
