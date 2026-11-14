@@ -51,8 +51,11 @@ describe("the site's invite reader agrees with the app's", () => {
     const typo = inviteCode.slice(0, 20) + (inviteCode[20] === "q" ? "p" : "q") + inviteCode.slice(21);
     for (const code of [inviteCode, inviteCode.toUpperCase(), typo]) {
       for (const wrapped of [`${code}.`, `${code})`, `${code}).`, `${code}!`, `${code}…`, `<${code}>`, `«${code}»`, `"${code}",`, `Join me: ${code}`]) same(wrapped);
+      // A `/` the link ends with (typed, or added by a chat app's linkifier): the app reads past it, so the site does too.
+      for (const slashed of [`${code}/`, `${code}//`, `${code}/.`, `<${code}/>`]) same(slashed);
     }
     expect(checkInvite(`${inviteCode}).`)).toEqual({ ok: true, code: inviteCode });
+    expect(checkInvite(`${inviteCode}/`)).toEqual({ ok: true, code: inviteCode });
     expect(checkInvite(`${typo}.`)).toEqual({ ok: false, reason: "typo" });
     // Not a sentence's mark: still read as part of the code, in both.
     for (const tail of ["?utm_source=x", "&ref=x", "x"]) same(`${inviteCode}${tail}`);
