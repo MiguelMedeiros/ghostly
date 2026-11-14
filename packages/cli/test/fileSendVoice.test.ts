@@ -89,11 +89,11 @@ describe("file send --voice on a file that is not a voice note", () => {
     expect(node.sendFile).not.toHaveBeenCalled();
   });
 
-  it("without ffmpeg, a kind only ffmpeg reads could not be measured: the hint stays, and with a length it is sent flat", async () => {
+  it("with GHOSTLY_FFMPEG naming no ffmpeg, a kind only ffmpeg reads could not be measured: the setting is named, and with a length it is sent flat", async () => {
     vi.stubEnv("GHOSTLY_FFMPEG", "ghostly-no-such-ffmpeg");
     const { node, send } = chat();
     const path = file("note.m4a", "maybe AAC, unread here");
-    await expect(send(path)).rejects.toMatchObject({ code: "bad_request", message: expect.stringMatching(/^Could not measure the voice note \(.*install ffmpeg.*\): give its length as --voice <ms>$/) });
+    await expect(send(path)).rejects.toMatchObject({ code: "bad_request", message: expect.stringMatching(/^Could not measure the voice note \(.*GHOSTLY_FFMPEG \(ghostly-no-such-ffmpeg\) is not there: set it to ffmpeg's path, or unset it to use the one on the PATH.*\): give its length as --voice <ms>$/) });
     expect(await send(path, 2000)).toMatchObject({ file: { voice: true }, warning: expect.stringMatching(/^Sent without a waveform: could not read the sound/) });
     expect(node.sendFile).toHaveBeenCalledOnce();
   });

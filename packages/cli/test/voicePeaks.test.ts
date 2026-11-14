@@ -254,4 +254,17 @@ describe("a voice note's waveform, measured from its file", () => {
     const result = await measureVoice(path);
     expect(result).toEqual({ problem: expect.any(String), ...(hasFfmpeg ? { notSound: true } : {}) });
   });
+
+  it("names GHOSTLY_FFMPEG when the ffmpeg it names is not there, not ffmpeg as missing", async () => {
+    const path = join(dir, "setting.m4a");
+    writeFileSync(path, Buffer.from("maybe AAC"));
+    const missing = join(dir, "old-install", "ffmpeg");
+    vi.stubEnv("GHOSTLY_FFMPEG", missing);
+    try {
+      await expect(decodeWithFfmpeg(path)).rejects.toThrow(`GHOSTLY_FFMPEG (${missing}) is not there: set it to ffmpeg's path, or unset it to use the one on the PATH`);
+      expect(await measureVoice(path)).toEqual({ problem: expect.stringMatching(/GHOSTLY_FFMPEG \(.*\) is not there/) });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
 });
