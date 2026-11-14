@@ -4,7 +4,9 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import type { EngineState, GroupView, LinkView } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
+import { findChatOrGroup } from "../src/apiKit";
 import { CallManager, type CallEngine } from "../src/calls/manager";
+import { jsonOut } from "../src/jsonOut";
 import { allowlist } from "../src/listen";
 import { chatViewOf, groupViewOf } from "./support/chatView";
 import { pasted } from "./support/pasted";
@@ -183,9 +185,50 @@ describe("a hint naming a group a shell would expand", () => {
     return pasted(message.slice(message.indexOf(": ghostly ") + 2));
   };
 
-  it.each(["$5 lunch", "a`echo x`b", "it's", "x!y"])("%s: the command offered names the same group", async (name) => {
+  it.each(["$5 lunch", "a`echo x`b", "x!y"])("%s: the command offered names the same group", async (name) => {
     expect(await offered(call(name)("chat.send", { chat: name, text: "hi" }))).toEqual(["ghostly", "group", "send", name, "[text...]"]);
     expect(await offered(call(name)("chat.history", { chat: name }))).toEqual(["ghostly", "group", "history", name]);
     expect(await offered(allowlist([name], [], call(name), async () => null))).toEqual(["ghostly", "listen", "--group", name]);
+  });
+
+  /**
+   * The command line as the terminal shows it: the CLI prints every answer, a refusal too, as JSON, which shows the `\`
+   * of a `'\''` doubled. Pasted, the quote ended there and the rest of the name ran, a name its inviter chose.
+   */
+  const printed = async (refusal: Promise<unknown>) => {
+    const message = await refusal.then(() => "", (error: Error) => error.message);
+    const shown = jsonOut(message).slice(1, -1);
+    expect(shown).toContain(": ghostly ");
+    return pasted(shown.slice(shown.indexOf(": ghostly ") + 2).replace(/ (joins it|\[text\.\.\.\])$/, ""));
+  };
+
+  it.each(["it's", "a'; echo ran; 'b", "a\"b", "a\\b"])("%s: the command printed names the group by its id, pasted as one word", async (name) => {
+    expect(await printed(call(name)("chat.send", { chat: name, text: "hi" }))).toEqual(["ghostly", "group", "send", "g1crew"]);
+    expect(await printed(allowlist([name], [], call(name), async () => null))).toEqual(["ghostly", "listen", "--group", "g1crew"]);
+    expect(await printed(call(name)("chat.history", { chat: name }))).toEqual(["ghostly", "group", "history", "g1crew"]);
+    expect(await printed(call(name)("chat.delete", { chat: name, message: "m1" }))).toEqual(["ghostly", "message", "delete", "g1crew", "m1", "--everyone"]);
+    expect(await printed(call(name)("chat.delete", { chat: `group:${name}`, message: "m1" }))).toEqual(["ghostly", "message", "delete", "group:g1crew", "m1", "--everyone"]);
+  });
+
+  it("message delete group:<name> keeps group: in the command offered, which takes a chat's name first", async () => {
+    // A chat labelled "Crew" here beside the group Crew: `message delete Crew m1 --everyone` looked in the chat.
+    const ctx = fake();
+    const node = (ctx.runtime as unknown as { server: { node: { getState: () => EngineState } } }).server.node;
+    const both = { ...state(), links: [alice, { ...alice, id: "chat-crew", label: "Crew", peerPubKeyZ32: "pcrew" }] } as unknown as EngineState;
+    node.getState = () => both;
+    const words = await offered(callApi(ctx, "chat.delete", { chat: "group:Crew", message: "m1" }));
+    expect(words).toEqual(["ghostly", "message", "delete", "group:Crew", "m1", "--everyone"]);
+    expect(findChatOrGroup(both.links, both.groups, words[3])).toEqual({ group: crew });
+  });
+
+  it.each(["misunderstanding", "Misunderstanding"])("message delete %s: a group named like a chat's id is offered as group:<name>, which --everyone takes", async (name) => {
+    // 16 letters of a chat id's alphabet: `message delete misunderstanding m1 --everyone` read "No chat".
+    const offeredFor = await offered(call(name)("chat.delete", { chat: name, message: "m1" }));
+    expect(offeredFor).toEqual(["ghostly", "message", "delete", `group:${name}`, "m1", "--everyone"]);
+    expect(findChatOrGroup(state().links, [{ ...crew, name }], offeredFor[3])).toEqual({ group: { ...crew, name } });
+  });
+
+  it("message delete Crew keeps the name alone when --everyone takes it as the group", async () => {
+    expect(await offered(call("Crew")("chat.delete", { chat: "Crew", message: "m1" }))).toEqual(["ghostly", "message", "delete", "Crew", "m1", "--everyone"]);
   });
 });

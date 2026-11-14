@@ -34,6 +34,17 @@ export function isStoreFetchUrl(value: string): boolean {
   return url.protocol === "https:" && url.port === "" && !url.username && !url.password && (STORE_HOSTS as readonly string[]).includes(url.hostname.toLowerCase());
 }
 
+/**
+ * Whether Apps, Add reads this URL, pasted, as it is (packages/browser/src/engine/appFetch.ts `appPasteUrl`, apps.ts
+ * `refusePrivateLink`): no query or fragment, which it refuses as a private repository's link, and a last segment naming
+ * a `.ghostlyapp` or `.json` file, where it would read `app.ghostlyapp` inside a folder of that name.
+ */
+export function pastedAsIs(value: string): boolean {
+  if (!isStoreFetchUrl(value)) return false;
+  const url = new URL(value);
+  return !/[?#]/.test(url.href) && /\.(ghostlyapp|json)$/.test(url.pathname.split("/").pop() ?? "");
+}
+
 /** A file beside another, as the app names it (packages/browser/src/engine/appFetch.ts): `ghostly-revoke.json` beside a bundle. */
 export function besideUrl(url: string, name: string): string {
   const target = new URL(url);
@@ -81,8 +92,13 @@ export interface StoreApp {
   repo?: string;
   support?: string;
   releaseNotes?: string;
-  /** The URL the bundle verified from: what Apps, Add takes. */
+  /** The URL the bundle verified from. */
   url: string;
+  /**
+   * The first URL holding the listed version that Apps, Add reads as pasted (`pastedAsIs`), as the page offers it under
+   * "add it by its link"; none when every such URL has a query, a fragment or names no file.
+   */
+  link?: string;
   /** icon.png, a square PNG the bundle reader checked, when the bundle has one. */
   icon?: Uint8Array;
 }
@@ -168,16 +184,18 @@ function publisherRevoked(
  * has not reviewed. A URL that was not read, does not verify, or holds another version (the store's repository moved on
  * while the site was built) gives way to the next. Unlike an install from a card, a newer
  * version than the listing's is not shown: the store lists the version it reviewed, and an app from the store updates
- * only to that.
+ * only to that. `link` is the first URL in that order that holds the version and Apps, Add reads as pasted.
  */
 function listedBundle(
   listing: { ref: string; digest: string; sequence: number; urls: string[] },
   bundles: Record<string, Uint8Array>,
-): { ok: true; url: string; bundle: AppBundle } | { ok: false; reason: string } {
+): { ok: true; url: string; link?: string; bundle: AppBundle } | { ok: false; reason: string } {
   let reason = "not-fetched";
+  let found: { ok: true; url: string; link?: string; bundle: AppBundle } | undefined;
   const urls = listing.urls.slice(0, STORE_LIMITS.urls);
   const pinned = (u: string) => isStoreFetchUrl(u) && new URL(u).hostname.toLowerCase() === "cdn.jsdelivr.net";
   for (const url of [...urls.filter(pinned), ...urls.filter((u) => !pinned(u))]) {
+    if (found && !pastedAsIs(url)) continue;
     const bytes = isStoreFetchUrl(url) ? bundles[url] : undefined;
     if (bytes === undefined) continue;
     if (bytes.length > STORE_LIMITS.bundleBytes) {
@@ -193,9 +211,12 @@ function listedBundle(
     if (digest !== listing.digest) reason = "digest";
     else if (appRef(manifest.publisher, manifest.name) !== listing.ref) reason = "ref";
     else if (manifest.sequence !== listing.sequence) reason = "sequence";
-    else return { ok: true, url, bundle: read.bundle };
+    else {
+      found ??= { ok: true, url, bundle: read.bundle };
+      if (pastedAsIs(url)) return { ...found, link: url };
+    }
   }
-  return { ok: false, reason };
+  return found ?? { ok: false, reason };
 }
 
 /**
@@ -232,7 +253,7 @@ export function readStore(bytes: StoreBytes, now: number, key: string): StoreVie
       skip(found.reason);
       continue;
     }
-    const { url, bundle } = found;
+    const { url, link, bundle } = found;
     const { manifest, digest, files } = bundle;
     if (publisherRevoked(listing, manifest.sources, bytes.revocations ?? {}, revocationFiles, checkedRevocations)) {
       skip("revoked");
@@ -264,6 +285,7 @@ export function readStore(bytes: StoreBytes, now: number, key: string): StoreVie
       ...((listing.support ?? manifest.support) !== undefined && { support: listing.support ?? manifest.support }),
       ...(manifest.releaseNotes !== undefined && { releaseNotes: manifest.releaseNotes }),
       url,
+      ...(link !== undefined && { link }),
       ...(icon && { icon: icon.slice() }),
     });
   }

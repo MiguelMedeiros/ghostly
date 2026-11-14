@@ -26,7 +26,7 @@ import { useDeviceGate } from "./hooks/useDeviceGate";
 import { useViewportHeight } from "./hooks/useViewportHeight";
 import { JoinHost } from "./components/devices/JoinHost";
 import { isDeviceCode, offerDeviceLink, readDeviceLink, takeDeviceLinkFromAddress } from "./lib/devices";
-import { INVITE_REFUSAL_MESSAGE, chatPath, classifyInvite, decodePart, inviteRouteCode, protocolLinkCode, readInvite } from "./lib/url";
+import { INVITE_REFUSAL_MESSAGE, chatPath, classifyInvite, decodePart, inviteRouteCode, protocolLinkCode, readInvite, undoubledRoute } from "./lib/url";
 import { onJoinNotice, showJoinNotice, type JoinNoticeKey } from "./lib/joinNotice";
 import { onChatNotStored, reportChatNotStored } from "./lib/chatNotStored";
 import { LINK_GROUPS_WAITING, groupPath, linkGroupId, linkGroupsWaiting } from "./lib/groups";
@@ -243,6 +243,22 @@ function ChatNotStoredNotice() {
 }
 
 /**
+ * A link with a doubled `#` before it (`##ghostly1…`, `##/join/…`, or the app's own `#/` with a `#…` typed or pasted
+ * after it): the router reads it as home with the link as its hash, so no intake took it and it stayed in the address.
+ * It opens as the link it doubles, and the intakes take it from there.
+ */
+function DoubledHashLink() {
+  const { pathname, hash } = useLocation();
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (pathname !== "/" || !hash) return;
+    const route = undoubledRoute(hash);
+    if (linkInAddress(route) !== null || /^\/chat\/./.test(route)) navigate(route, { replace: true });
+  }, [pathname, hash, navigate]);
+  return null;
+}
+
+/**
  * A group's link opened in the app (`#/join/group1/…` or `#/join/group2/…`): it leaves the address at once, like an
  * invite; once the app is unlocked (again, when it locked after) the engine joins and the group opens, saying it waits
  * for the admin's app. A refusal is a notice as JoinDialog shows one (a title, what to do, the engine's English behind
@@ -321,7 +337,7 @@ function isIntake(pathname: string): boolean {
  */
 function dropLinksFromAddress(): () => void {
   const drop = () => {
-    const route = window.location.hash.replace(/^#/, "");
+    const route = undoubledRoute(window.location.hash.replace(/^#/, ""));
     if (linkInAddress(route) === null && !isIntake(route.split(/[?#]/)[0])) return;
     window.history.replaceState(null, "", "#/");
   };
@@ -412,6 +428,7 @@ export function Root() {
             {standby ? <LockGate><StandbyViewport /><DeviceStandby gate={standby} /></LockGate> : (
             <AppRouter>
               <ErrorBoundary>
+              <DoubledHashLink />
               <ChatLinkIntake />
               <JoinNotice />
               <ChatNotStoredNotice />

@@ -624,7 +624,7 @@ describe("the Share to… picker", () => {
       expect(screen.getByTestId("share-unread-title").textContent).toBe(unread + isolated(["صورة.jpg", "report.pdf"], join));
       expect(screen.getByTestId("share-left-out-title").textContent).toBe(tooLarge + isolated(["VID_1.mp4", "فيديو.mp4"], join));
       expect(screen.getByTestId("share-no-room-title").textContent).toBe(noRoom + isolated(["ملف.txt", "a.txt"], join));
-      expect(screen.getByTestId("share-past-limit-title").textContent).toMatch(new RegExp(`${isolated(["IMG_33.jpg", "صورة.png"], join).replace(/\./g, "\\.")}$`));
+      expect(screen.getByTestId("share-past-limit-title").textContent).toMatch(new RegExp(`${isolated(["IMG_33.jpg", "صورة.png"], join).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
       unmount();
     }
   });

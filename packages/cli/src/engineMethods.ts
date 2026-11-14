@@ -305,3 +305,18 @@ export const SECRET_RESULTS: ReadonlySet<string> = new Set([
   "usdtExportBackup", "arkExportBackup", "barkExportBackup", "sparkExportBackup", "fedimintExportBackup",
   "fedimintSpendNotes",
 ]);
+
+/**
+ * Calls whose answer holds one secret among what a script needs: the CLI prints it `<hidden>` unless `--show-secret`,
+ * as `wallet receive` leaves it out. A Cashu mint quote's id is not locked to a key: whoever holds it can mint the
+ * ecash its invoice pays for.
+ */
+const SECRET_FIELDS: Readonly<Record<string, readonly string[]>> = { walletReceiveLightning: ["quote"] };
+
+export function hideSecretFields(method: string, result: unknown, showSecret = false): unknown {
+  const fields = SECRET_FIELDS[method];
+  if (!fields || showSecret || !result || typeof result !== "object") return result;
+  const shown = { ...(result as Record<string, unknown>) };
+  for (const field of fields) if (shown[field] !== undefined) shown[field] = "<hidden>";
+  return shown;
+}

@@ -57,7 +57,9 @@ export async function profileSummary(id: string): Promise<ProfileSummary> {
   if (!db) return summary;
   try {
     const has = (name: string) => db.objectStoreNames.contains(name);
-    const tx = db.transaction(["proofs", "settings", "services"].filter(has), "readonly");
+    const tx = db.transaction(["proofs", "settings", "services", "groups"].filter(has), "readonly");
+    // Its groups are chats too, as the chat list shows them, and go with it.
+    if (has("groups")) summary.chats += await request(tx.objectStore("groups").count());
     if (has("proofs")) summary.cashuSats = (await request(tx.objectStore("proofs").getAll()) as { amount: number; reserved?: boolean }[]).reduce((sum, p) => sum + (p.reserved ? 0 : p.amount), 0);
     if (has("settings")) summary.wallets = walletsIn(await request(tx.objectStore("settings").getAllKeys()));
     if (has("services")) summary.services = (await request(tx.objectStore("services").count()));
@@ -353,16 +355,12 @@ async function dropProfile(id: string, owned: (key: string) => boolean): Promise
   retryUnsaved();
   // Its push subscription (WISP 401 § Wake-up push) ends with it: its worker goes, and contacts who kept it get 410.
   await pushPlatform()?.unsubscribe(id).catch(() => {});
-  // What the contacts' apps it opened kept on their own origins (the web app's).
+  // What the contacts' apps it opened kept on their own origins.
   await forgetServicesOf({ profile: id });
   // Each fork of it goes as "Discard this copy" takes it, with its linked files: no screen lists it once the record
   // is gone. Never a database a profile on the list runs on.
   const listed = new Set(listProfiles().map((p) => databaseOf(p.id)));
-  for (const fork of forks) {
-    if (listed.has(fork)) continue;
-    await handoffProfileHost()?.staging.drop(fork).catch(() => {});
-    if (await databaseExists(linkedFilesDatabase(fork))) await drop(linkedFilesDatabase(fork)).catch(() => {});
-  }
+  for (const fork of forks) if (!listed.has(fork)) await handoffProfileHost()?.staging.drop(fork).catch(() => {});
   if (staged && staged !== dbName && !listed.has(staged)) await handoffProfileHost()?.staging.drop(staged).catch(() => {});
   // Its device state goes with it (WISP 06): a profile made later under the same name must not inherit it.
   await forgetDevice(dbName).catch(() => {});

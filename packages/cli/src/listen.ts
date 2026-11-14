@@ -116,7 +116,7 @@ async function otherFlag(lookup: Promise<unknown>, ref: string, flag: "--from" |
     const other = flag === "--from" ? "group" : "chat";
     if (!(error instanceof CliError) || error.code !== "not_found" || typeof error.details?.[other] !== "string") throw error;
     const named = other === "chat" ? error.details.chat as string : ref;
-    const shown = shellWord(named);
+    const shown = shellWord(named, error.details[other] as string);
     throw new CliError("not_found", `${JSON.stringify(ref)} is a ${other}, not a ${flag === "--from" ? "chat" : "group"}: ghostly listen ${flag === "--from" ? "--group" : "--from"} ${shown}`, error.details);
   }
 }
@@ -218,6 +218,20 @@ export function readCursor(path: string | undefined): number | undefined {
   if (Number.isSafeInteger(value) && value >= 0 && /^\d+$/.test(trimmed)) return value;
   const shown = trimmed === "" ? "nothing" : JSON.stringify(trimmed.length > 32 ? `${trimmed.slice(0, 32)}…` : trimmed);
   throw new CliError("bad_request", `${path} holds no event number (${shown}): fix or remove it, or give --since`);
+}
+
+/**
+ * Where listen starts: after the event number the cursor file holds, else after `since` (--since: the first start's
+ * place). Before, --since won without a word, and a unit with `--since 0 --cursor f` ran every handled event's hook
+ * again at each restart. A cursor file that holds no number is refused unless --since is given, which starts it.
+ */
+export function startAt(since: number | undefined, cursor: string | undefined, say: (line: string) => void): number | undefined {
+  if (since === undefined) return readCursor(cursor);
+  let kept: number | undefined;
+  try { kept = readCursor(cursor); } catch { return since; }
+  if (kept === undefined) return since;
+  if (kept !== since) say(`ghostly: ${cursor} holds event ${kept}: starting after it, not after --since ${since}`);
+  return kept;
 }
 
 /**

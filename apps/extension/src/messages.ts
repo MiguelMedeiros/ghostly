@@ -28,6 +28,8 @@ export type RuntimeMessage =
    * page's profile (`EngineStatus.profile`); the tab opens only while the peer runs that one.
    */
   | { target: "background"; type: "open-service"; peerPubKeyZ32: string; serviceId: string; tag: string; profile: string; page?: ViewerPage; relayOnly?: boolean }
+  /** What a contact's app kept on its viewer origin goes (`forgetServices`): its tabs close, and Chrome clears the origin. */
+  | { target: "background"; type: "forget-service"; peerPubKeyZ32: string; serviceId: string; tag: string }
   /** The profile locked: every tab showing a contact's app closes (`closeServiceWindows`). */
   | { target: "background"; type: "close-services" }
   /** A `lightning:` or `bitcoin:` link, for a wallet on this device: the app page cannot open one itself. */

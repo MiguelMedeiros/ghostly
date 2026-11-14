@@ -1,6 +1,7 @@
 import { foldText } from "@ghostly/browser/shared/fold";
 import { englishT, type Translate } from "../locales/translate";
 import { parseMessage, type Block, type ListBlock, type MdLinkData, type Segment } from "./parse";
+import { markMentions, type MentionView } from "./parse/mentions";
 import type { ChatFile, ChatMessage } from "./types";
 
 /**
@@ -14,6 +15,8 @@ import type { ChatFile, ChatMessage } from "./types";
 /** A message as search reads it: its text already folded, once per search session rather than once per keystroke. */
 export interface Searchable {
   id: string;
+  /** What it offers search (`searchText`), as `folded` was folded from. */
+  text: string;
   folded: string;
 }
 
@@ -28,24 +31,27 @@ const MARKUP = /[*_~|`[]/;
  * words count (they show once tapped); a `[label](link)` is found by its label in place and by its address, after the
  * rest, so the address never runs into the words around the label.
  */
-function shownText(text: string): string {
-  if (!MARKUP.test(text)) return text;
-  let shown = shownCache.get(text);
+function shownText(text: string, mentions?: readonly MentionView[]): string {
+  if (!mentions?.length && !MARKUP.test(text)) return text;
+  // A group message's mentions read as its bubble shows them, "@" and the member's name now (parse/mentions).
+  const key = mentions?.length ? [text, ...mentions.map(m => `${m.o}:${m.l}:${m.name}`)].join("\u0000") : text;
+  let shown = shownCache.get(key);
   if (shown === undefined) {
     // An open search folds the chat again for each message that comes: a formatted text is parsed once, not each time.
     if (shownCache.size >= SHOWN_CACHE_MAX) shownCache.clear();
-    shown = parsedText(text);
-    shownCache.set(text, shown);
+    shown = parsedText(text, mentions);
+    shownCache.set(key, shown);
   }
   return shown;
 }
 const SHOWN_CACHE_MAX = 20_000;
 const shownCache = new Map<string, string>();
 
-function parsedText(text: string): string {
+function parsedText(text: string, mentions?: readonly MentionView[]): string {
   const links: string[] = [];
   const segments = (list: readonly Segment[]): string => list.map((segment) => {
     if (segment.type === "span") return segments(segment.children);
+    if (segment.type === "atom" && segment.kind === "member-mention") return `@${(segment.data as MentionView).name}`;
     if (segment.type !== "atom" || segment.kind !== "md-link") return segment.text;
     const data = segment.data as MdLinkData;
     links.push(data.url);
@@ -60,7 +66,8 @@ function parsedText(text: string): string {
       case "list": return list(part);
     }
   };
-  return [...parseMessage(text).map(block), ...links].join("\n");
+  const blocks = mentions?.length ? parseMessage(markMentions(text, mentions), { mentions }) : parseMessage(text);
+  return [...blocks.map(block), ...links].join("\n");
 }
 
 /** A file's kind in words, the same the app shows for it: a voice message, a video, a picture; none for other files. */
@@ -79,21 +86,30 @@ export type TranslatedText = (message: ChatMessage) => string | undefined;
 
 /**
  * What a message offers search: a file's name and its kind in `t`'s language and in English, a text's text as its
- * bubble shows it (`translated`, where it is shown translated); nothing for notices, call lines and payments.
+ * bubble shows it (`translated`, where it is shown translated; a group's mentions by the names they show); nothing for
+ * notices, call lines and payments.
  */
 export function searchText(message: ChatMessage, t: Translate = englishT, translated?: TranslatedText): string | undefined {
   if (message.sender === "system" || message.systemEvent || message.callEvent || message.paymentId) return undefined;
-  if (!message.file) return shownText(translated?.(message) ?? message.text);
+  if (!message.file) {
+    const translation = translated?.(message);
+    return translation !== undefined ? shownText(translation) : shownText(message.text, message.mentions);
+  }
   const words = new Set([fileKindWords(message.file, t), fileKindWords(message.file, englishT)]);
   return [message.file.name, ...words].filter(Boolean).join("\n");
 }
 
-/** The messages that can be found, in the timeline's order, folded. */
-export function searchable(messages: readonly ChatMessage[], t: Translate = englishT, translated?: TranslatedText): Searchable[] {
+/**
+ * The messages that can be found, in the timeline's order, folded. `before`: the same chat's, folded earlier; a text it
+ * holds is not folded again. An open search reads its chat again on every change (a message, a mark, a reaction), and
+ * folding every message each time took 140 ms for 5,000 of 2 KB.
+ */
+export function searchable(messages: readonly ChatMessage[], t: Translate = englishT, translated?: TranslatedText, before?: readonly Searchable[]): Searchable[] {
+  const known = before?.length ? new Map(before.map((item) => [item.text, item.folded])) : undefined;
   const out: Searchable[] = [];
   for (const message of messages) {
     const text = searchText(message, t, translated);
-    if (text) out.push({ id: message.id, folded: foldText(text) });
+    if (text) out.push({ id: message.id, text, folded: known?.get(text) ?? foldText(text) });
   }
   return out;
 }
@@ -107,6 +123,21 @@ export function searchMessages(items: readonly Searchable[], query: string): str
   return found;
 }
 
+const ASCII_RUN = /[\0-\x7f]+/y;
+
+/** One character folded (`foldText`), remembered: `matchRanges` folds what is not ASCII a character at a time. */
+function foldedCharacter(character: string): string {
+  let folded = characterFolds.get(character);
+  if (folded === undefined) {
+    if (characterFolds.size >= CHARACTER_FOLDS_MAX) characterFolds.clear();
+    folded = foldText(character);
+    characterFolds.set(character, folded);
+  }
+  return folded;
+}
+const CHARACTER_FOLDS_MAX = 10_000;
+const characterFolds = new Map<string, string>();
+
 /** Where `query` is in `text` as written, `[from, to)` each: for marking the matches in a bubble. */
 export function matchRanges(text: string, query: string): [number, number][] {
   const needle = foldText(query.trim());
@@ -115,8 +146,18 @@ export function matchRanges(text: string, query: string): [number, number][] {
   let folded = "";
   const from: number[] = [];
   for (let i = 0; i < text.length;) {
+    // A run of ASCII folds to its lower case, a unit for each: folded whole. Folding each of its characters took 1.8 ms
+    // for a 16 KB message, 180 ms for each new word with 100 such found on screen.
+    ASCII_RUN.lastIndex = i;
+    const run = ASCII_RUN.exec(text)?.[0];
+    if (run) {
+      folded += run.toLowerCase();
+      for (let j = 0; j < run.length; j++) from.push(i + j);
+      i += run.length;
+      continue;
+    }
     const size = (text.codePointAt(i) ?? 0) > 0xffff ? 2 : 1;
-    const part = foldText(text.slice(i, i + size));
+    const part = foldedCharacter(text.slice(i, i + size));
     folded += part;
     for (let j = 0; j < part.length; j++) from.push(i);
     i += size;
@@ -126,7 +167,7 @@ export function matchRanges(text: string, query: string): [number, number][] {
     const last = from[at + needle.length - 1];
     let end = last + ((text.codePointAt(last) ?? 0) > 0xffff ? 2 : 1);
     // A combining accent after the last letter goes with it.
-    while (end < text.length && foldText(text[end]) === "") end++;
+    while (end < text.length && foldedCharacter(text[end]) === "") end++;
     ranges.push([from[at], end]);
   }
   return ranges;

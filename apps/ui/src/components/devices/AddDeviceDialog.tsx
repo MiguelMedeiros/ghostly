@@ -195,7 +195,8 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
       {view?.role === "inviter" && view.step === "confirm" && <>
         <p data-testid="device-add-status" data-step="confirm" className="text-text-primary">{fillNames(t("devices.add.found"), { device: view.device })}</p>
         <Digits digits={view.digits} testId="device-add-digits" />
-        <div className="grid grid-cols-2 gap-3">
+        {/* Side by side while each word fits its half; stacked once a larger text size (or a long word) would cut one. */}
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,7rem),1fr))] gap-3">
           <FocusSafeButton type="button" data-testid="device-add-no-match" disabled={busy} onClick={() => void confirm(false)} className={quietButton}>{t("devices.add.noMatch")}</FocusSafeButton>
           <FocusSafeButton type="button" data-testid="device-add-match" disabled={busy} onClick={() => void confirm(true)} className={primaryButton}>{t("devices.add.match")}</FocusSafeButton>
         </div>

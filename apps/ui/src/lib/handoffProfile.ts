@@ -11,6 +11,7 @@ import { listDeviceRecords } from "@ghostly/browser/devices/store";
 import { databaseOfSpace, newSpace, pointProfile, profileOfDatabase, recoverProfilePointer } from "./profiles";
 import { dropWalletStorageOf, keysOfSpace } from "./profileData";
 import { MEDIA_DEVICES_SUFFIX } from "./mediaDevices";
+import { linkedFilesDatabase } from "./apps/webFiles";
 
 /*
  * What the handoff needs of the app (WISP 06 § The handoff): a profile's storage as the app keeps it. The giver reads
@@ -230,7 +231,9 @@ async function copyFrom(from: FileSource, to: FileBytes, file: HandoffFile): Pro
  * one is in file storage. A Blob whose record's checked digest is the file's is not copied (WISP 06 § Installing the
  * staged state: "Files `B` already held are linked into it, not copied"): `restore` puts that Blob on the staged record.
  * Copied, every file was written twice and read back once at each move back, the device's whole media history (bug hunt,
- * 2026-11-04). Resolves to whether it was left where it is.
+ * 2026-11-04). A larger one is linked where file storage can give it a second name (Desktop): the staged profile's
+ * name is a file of its own, and the frozen copy keeps its own, so a revert or a kept fork finds it as it was.
+ * Resolves to whether its Blob was left on the frozen copy's record.
  */
 async function copyHeldFile(db: IDBDatabase, id: string, to: FileBytes, file: HandoffFile): Promise<boolean> {
   const tx = db.transaction(["files", "fileState"], "readonly");
@@ -244,6 +247,15 @@ async function copyHeldFile(db: IDBDatabase, id: string, to: FileBytes, file: Ha
   }
   // An app's bundle has no record: it is in the frozen copy's file storage, where this device keeps new files.
   if (!stored && BUNDLE_ID.test(id)) { await copyFile(await spaceFiles(db.name), id, to, file); return false; }
+  // A plain file can change on disk under its record (a sync or backup tool, a bad disk): a linked one is kept only when
+  // its bytes still hash to the file's digest. `digest` reads them where they are stored (Desktop: in Rust), so nothing
+  // is written and no byte crosses into the page. A link that fails (a disk with no such names) or a file that is not
+  // the file any more is copied and checked below, which refuses the changed one.
+  if (stored && !stored.blob && stored.bytes === to.kind && to.link && checked && stored.digest === file.sha256) {
+    const same = async () => (await to.size(file.id)) === file.size && (await to.digest(file.id)) === file.sha256;
+    if (await to.link(db.name, id, file.id).then(same, () => false).catch(() => false)) return false;
+    await to.remove(file.id).catch(() => {});
+  }
   const source = stored ? await fileSource(stored, db.name, false, async () => db) : null;
   if (!source) throw new Error("The file is not on this device");
   await copyFrom(source, to, file);
@@ -488,6 +500,8 @@ const staging: HandoffStagingHost = {
     // staged state): never what a listed profile, this one's current state included, still names.
     await dropWalletStorageOf(database).catch(() => {});
     if (await databaseExists(database)) await dropDatabase(database);
+    // The folders and files its apps were given (linked files: handles, never copies): nothing names them once it goes.
+    if (await databaseExists(linkedFilesDatabase(database))) await dropDatabase(linkedFilesDatabase(database));
     const files = await dropFileSpace(database).then(() => null, (error: unknown) => error);
     dropKeys(ns);
     await dropNotes(ns);

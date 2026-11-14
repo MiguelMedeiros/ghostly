@@ -131,6 +131,26 @@ describe("detectableText", () => {
     expect(detectableText("lol no way 😂👍🏽❤️")).toBe("lol no way");
   });
 
+  it("drops a whole run that holds a digit, and keeps one that holds none, letters and digits of any script", () => {
+    expect(detectableText("ok abc.def-12.x/y fim")).toBe("ok fim");
+    expect(detectableText("ab٣12cd e a1٣ f")).toBe("ab cd e f");
+  });
+
+  it("reads a contact's long run of letters and dots with no digit in one pass", () => {
+    // A run with no digit was tried from each of its characters for one (`[…]*\d`): 48,000 characters, which fit in one
+    // message, held the page for seconds before the detector was even asked.
+    const timed = (size: number) => {
+      const text = `oi ${"a.".repeat(size / 2)} tchau`;
+      const start = performance.now();
+      expect(detectableText(text)).toBe(text);
+      return performance.now() - start;
+    };
+    timed(2_000);
+    // An eighth of it: one pass takes about 8 times as long, the square 64 times.
+    const eighth = timed(6_000), whole = timed(48_000);
+    expect(whole).toBeLessThan(20 * Math.max(eighth, 25));
+  });
+
   it(`hands the detector at most ${DETECT_CHARS} characters`, async () => {
     const { asked, options } = setup();
     await translateFrom(received("palavra ".repeat(2_000)), options);

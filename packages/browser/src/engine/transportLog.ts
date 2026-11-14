@@ -309,9 +309,9 @@ export class TransportLog {
   observe(next: TransportSnapshot, now: number): boolean {
     const prev = this.snapshot;
     this.snapshot = { ...next };
-    const last = this.entries[this.entries.length - 1] as TransportEntry | undefined;
     // DHT only (WISP 400): either side choosing it keeps both off the live link; each choice, and the way out, is a row.
-    const dhtBefore = prev ? prev.dhtOnly || !!prev.peerDhtOnly : last?.kind === "dht-only";
+    // After a start, its latest row says it: a choice made while on it (the contact's, from its record) comes after.
+    const dhtBefore = prev ? prev.dhtOnly || !!prev.peerDhtOnly : this.lastDhtRow()?.kind === "dht-only";
     const dhtNow = next.dhtOnly || !!next.peerDhtOnly;
     if (dhtNow) {
       const you = next.dhtOnly && !(prev ? prev.dhtOnly : dhtBefore);
@@ -502,6 +502,12 @@ export class TransportLog {
       if (e.transport) return e.transport;
       if (e.from) return e.from;
     }
+    return undefined;
+  }
+
+  /** The latest row that took the chat onto DHT only or off it. */
+  private lastDhtRow(): TransportEntry | undefined {
+    for (let i = this.entries.length - 1; i >= 0; i--) if (this.entries[i].kind === "dht-only" || this.entries[i].kind === "dht-left") return this.entries[i];
     return undefined;
   }
 

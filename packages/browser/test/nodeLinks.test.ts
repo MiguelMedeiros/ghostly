@@ -1970,6 +1970,20 @@ describe("what arrives from held storage", () => {
     expect(await (await storedBlob(stored!, "text/plain"))!.text()).toBe("held");
   });
 
+  it("a held file counts against the same per-contact budget as files taken live, files/3 ones included", async () => {
+    const chat = row();
+    const { node } = await started(chat);
+    const host = node["hold"]["host"] as { receiveFile(linkId: string, wire: object, bytes: Uint8Array, digest: string): Promise<string | null> };
+    const MiB = 1024 * 1024;
+    const wire = (wireId: string) => ({ wireId, name: "h.bin", size: 8 * MiB, mime: "application/octet-stream", timestamp: 5 });
+    // 495 MiB of files/3 files taken without asking: the file desk counts them, not the chat's received bytes.
+    const taken = vi.spyOn(node["fileDesk"], "autoTaken").mockReturnValue(495 * MiB);
+    expect(await host.receiveFile(chat.id, wire("over"), bytes("held"), "d")).toBe("no room for more files");
+    expect(await db.getMessages(chat.id)).toEqual([]);
+    taken.mockReturnValue(0);
+    expect(await host.receiveFile(chat.id, wire("room"), bytes("held"), "d")).toBeNull();
+  });
+
   it("a held file, received or sent, says done in one state and then leaves the states: a device up for days carries none", async () => {
     const chat = row();
     const { node, events } = await started(chat);

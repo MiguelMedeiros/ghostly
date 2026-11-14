@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { asCliError, CliError } from "../src/errors";
 import type { GhostlyEvent } from "../src/events";
 import { callApi, type ApiContext } from "../src/api";
-import { Allowlist, allowlist, checkCursor, checkTypes, checkWebhook, EVENT_FAMILIES, EVENT_TYPES, eventHandler, Feed, hookEnv, matches, MAX_BEHIND, readCursor, toTurn } from "../src/listen";
+import { Allowlist, allowlist, checkCursor, checkTypes, checkWebhook, EVENT_FAMILIES, EVENT_TYPES, eventHandler, Feed, hookEnv, matches, MAX_BEHIND, readCursor, startAt, toTurn } from "../src/listen";
 import { turnRef } from "../src/turnRefs";
 import { ghostly, Running } from "./support/cli";
 import { chatViewOf, groupViewOf } from "./support/chatView";
@@ -659,6 +659,37 @@ describe("listen with an allowlist and --turns", () => {
     await expect(callApi(ctx, "chat.delete", { chat: "c1", message: turnRef("c1", "gone") })).rejects.toMatchObject({ code: "not_found" });
   });
 
+  it("a turn's id older than the newest page reads the whole history once, not on every command that names it", async () => {
+    const history = Array.from({ length: 5000 }, (_, i) => ({ id: `peer_m${i}`, sender: "peer", text: `m${i}`, timestamp: i }));
+    const node = {
+      chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [{ id: "c1", peerPubKeyZ32: KEY, label: "Alice", pairing: { status: "ready" } }], groups: [], settings: {}, transport: {} }),
+      messagePage: vi.fn(async () => ({ messages: history.slice(-200), more: true })),
+      getMessages: vi.fn(async () => history),
+      getMessage: vi.fn(async (_linkId: string, id: string) => history.find((m) => m.id === id)),
+      sendMessage: vi.fn(async () => ({ error: null, messageId: "me_2" })),
+      react: vi.fn(async ({ messageId }: { messageId: string }) => ({ error: history.some((m) => m.id === messageId) ? null : "That message is not in this chat" })),
+      pinMessage: vi.fn(async () => ({ error: null })), chatUnconfirmed: () => ({ reactions: [], pin: null }),
+    };
+    const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
+    const old = turnRef("c1", "peer_m10"), gone = turnRef("c1", "gone");
+
+    // A message deleted for everyone before the agent answered: its turn names none, every time, from one read.
+    for (let i = 0; i < 3; i++) await expect(callApi(ctx, "chat.react", { chat: "c1", message: gone, emoji: "👍" })).rejects.toMatchObject({ code: "not_found", message: expect.stringContaining(gone) });
+    expect(node.getMessages).toHaveBeenCalledTimes(1);
+    // An old turn answered with a reaction, a reply and a pin: one read finds it for all three.
+    await callApi(ctx, "chat.react", { chat: "c1", message: old, emoji: "👍" });
+    await callApi(ctx, "chat.send", { chat: "c1", text: "yes", reply: old });
+    await callApi(ctx, "chat.pin", { chat: "c1", message: old });
+    expect(node.react).toHaveBeenLastCalledWith({ linkId: "c1", messageId: "peer_m10", emoji: "👍" });
+    expect(node.sendMessage).toHaveBeenLastCalledWith({ linkId: "c1", text: "yes", replyTo: "peer_m10" });
+    expect(node.pinMessage).toHaveBeenLastCalledWith({ linkId: "c1", messageId: "peer_m10", remove: false });
+    expect(node.getMessages).toHaveBeenCalledTimes(2);
+    // Once its message is deleted, the turn's id names none again, and the refusal names the turn's id, not the stored one.
+    history.splice(10, 1);
+    await expect(callApi(ctx, "chat.react", { chat: "c1", message: old, emoji: "👍" })).rejects.toMatchObject({ code: "not_found", message: expect.stringContaining(old) });
+    expect(node.getMessages).toHaveBeenCalledTimes(2);
+  });
+
   it("a cursor in a folder that is not there, or that takes no file, is refused before anything starts", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ghostly-listen-"));
     // Nothing to check without one; a folder that is there takes it, and the check leaves nothing behind.
@@ -717,6 +748,30 @@ describe("listen with an allowlist and --turns", () => {
     expect(result.json).toEqual({ error: { code: "bad_request", message: `${join(dir, "garbage")} holds no event number ("abc"): fix or remove it, or give --since` } });
     expect(readdirSync(home)).toEqual([]);
     expect(readFileSync(join(dir, "garbage"), "utf8")).toBe("abc\n");
+  });
+
+  it("a cursor that holds a number wins over --since, which is where the first start begins", () => {
+    // `--since 0 --cursor f` in a unit ran every handled event's hook again at each restart: --since won, without a word.
+    const dir = mkdtempSync(join(tmpdir(), "ghostly-listen-"));
+    const said: string[] = [];
+    const say = (line: string) => said.push(line);
+    // A first start (no file yet): --since is the place.
+    expect(startAt(0, join(dir, "first"), say)).toBe(0);
+    expect(startAt(undefined, join(dir, "first"), say)).toBeUndefined();
+    expect(said).toEqual([]);
+    // A restart: the cursor's number, and stderr says --since was passed over.
+    writeFileSync(join(dir, "kept"), "41\n");
+    expect(startAt(0, join(dir, "kept"), say)).toBe(41);
+    expect(said).toEqual([`ghostly: ${join(dir, "kept")} holds event 41: starting after it, not after --since 0`]);
+    said.length = 0;
+    expect(startAt(41, join(dir, "kept"), say)).toBe(41);
+    expect(startAt(undefined, join(dir, "kept"), say)).toBe(41);
+    expect(startAt(7, undefined, say)).toBe(7);
+    expect(said).toEqual([]);
+    // A cursor that holds no number is refused, and --since still starts it (the refusal says so).
+    writeFileSync(join(dir, "garbage"), "abc\n");
+    expect(() => startAt(undefined, join(dir, "garbage"), say)).toThrow("holds no event number");
+    expect(startAt(3, join(dir, "garbage"), say)).toBe(3);
   });
 
   it("an output that wants a drain holds the next event until it drains; the events wait as `behind`", async () => {

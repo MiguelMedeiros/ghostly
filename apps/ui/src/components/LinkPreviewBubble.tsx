@@ -55,8 +55,9 @@ export function LinkPreviewCard({ preview }: { preview: LinkPreview }) {
       <span className="block px-2.5 py-2">
         {site ? <span className="block chat-text-preview-site text-text-secondary truncate" data-testid="link-preview-site">{site}</span>
           : <HostLine host={hostOf(preview.u)} testId="link-preview-site" className="block chat-text-preview-site text-text-secondary" />}
-        {preview.t && <span className="block chat-text-preview-title font-semibold leading-snug line-clamp-2" data-testid="link-preview-title">{preview.t}</span>}
-        {preview.d && <span className="block chat-text-preview-description text-text-secondary leading-snug line-clamp-2 mt-0.5" data-testid="link-preview-description">{preview.d}</span>}
+        {/* Two lines at most, a long word broken inside the card: `line-clamp` makes them boxes, so no `block` (built after it, it won). */}
+        {preview.t && <span className="chat-text-preview-title font-semibold leading-snug line-clamp-2 [overflow-wrap:anywhere]" data-testid="link-preview-title">{preview.t}</span>}
+        {preview.d && <span className="chat-text-preview-description text-text-secondary leading-snug line-clamp-2 [overflow-wrap:anywhere] mt-0.5" data-testid="link-preview-description">{preview.d}</span>}
         <HostLine host={hostOf(preview.u)} testId="link-preview-url" className="block text-[11px] text-link mt-1" />
       </span>
     </a>

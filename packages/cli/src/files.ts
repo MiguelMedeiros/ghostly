@@ -504,35 +504,46 @@ export const FILE_METHODS: Record<string, Method> = {
     const named = str(params, "path") ? resolve(str(params, "path", true)) : join(resolve(str(params, "dir") ?? "."), saveName(stored.metadata.voice ? voiceDownloadName(stored.metadata.mime, await voiceTime(ctx, stored)) : stored.metadata.name));
     const force = bool(params, "force");
     // A --path that ends in a separator names a folder: resolve() dropped the slash, and "--path downloads/" with no
-    // downloads folder left a file named downloads. A folder that is there is answered below, as without the slash.
+    // downloads folder left a file named downloads. A folder that is there is answered below, as without the slash. One
+    // that is not hints no --dir: before, it hinted --dir <that folder>, and that failed "No such file or folder".
     const path = str(params, "path");
-    if (path && (path.endsWith("/") || path.endsWith(sep)) && !(await stat(named).catch(() => undefined))?.isDirectory()) {
-      throw new CliError("bad_request", `${path} names a folder: name a file, or use --dir ${shellWord(named)} (dir over the socket)`, { dir: named });
+    if (path && (path.endsWith("/") || path.endsWith(sep))) {
+      const there = await stat(named).catch(() => undefined);
+      if (!there) throw new CliError("not_found", `No such folder: ${named} (make it first, or name a file in a folder that is there)`);
+      if (!there.isDirectory()) throw new CliError("not_found", `${named} is a file, not a folder: name a file in a folder that is there`);
     }
     // A voice message's name is Ghostly's, down to the second its sender claims: two of one second took one name, and
     // the --force the confirm hinted at replaced the first recording with the other. In --dir it steps to a free
     // "<name> (2)", as a browser's Download does; a --path the user named is never renamed.
     const free = !force && !str(params, "path") && !!stored.metadata.voice;
     const ext = extname(named), stem = named.slice(0, named.length - ext.length);
+    // The next "<name> (n)" a voice message steps to.
+    let next = 2;
     // What is at `target` that the save may not go over, as the error that says so; nothing when it may.
     const taken = async (target: string, code?: string): Promise<CliError | undefined> => {
       const there = await stat(target).catch(() => undefined);
       // A folder there is no file to replace: before, it asked for --force, and the --force then failed "is a folder".
-      if (there?.isDirectory()) return new CliError("bad_request", `${target} is a folder: name a file, or use --dir ${shellWord(target)} (dir over the socket)`, { dir: target });
+      // A voice message in --dir steps past it as past a file: before, it stopped there and named that folder for --dir.
+      if (there?.isDirectory() && free && next <= 1000) return new CliError("confirm", `${target} is a folder`);
+      if (there?.isDirectory()) return new CliError("bad_request", `${target} is a folder: name a file, or use --dir ${shellWord(target, "<the one in details.dir>")} (dir over the socket)`, { dir: target });
       if (!((there && !force) || code === "EEXIST")) return;
       const replace = `${target} exists: pass --force (force: true over the socket) to replace it`;
       if (path) return new CliError("confirm", replace);
+      // A voice message steps on to the next name: no hint is shown. Before, each step looked for one from "(2)" anyway,
+      // ~k²/2 stats at k copies of its name (12-16 s at 999).
+      if (free && next <= 1000) return new CliError("confirm", replace);
       // In --dir the name is its sender's: two files of one name are two files. Before, --force was the one way out
       // named, and it replaced the other. The next free "<name> (2)" is offered, never taken unasked.
       let n = 2;
       while (n <= 1000 && (await stat(`${stem} (${n})${ext}`).catch(() => undefined))) n += 1;
       const other = `${stem} (${n})${ext}`;
-      return new CliError("confirm", `${replace}, or --path ${shellWord(other)} (path over the socket) to keep both`, { path: other });
+      return new CliError("confirm", `${replace}, or --path ${shellWord(other, "<the one in details.path>")} (path over the socket) to keep both`, { path: other });
     };
     let target = named;
-    for (let n = 2, refused = await taken(target); refused; n += 1, refused = await taken(target)) {
-      if (!free || refused.code !== "confirm" || n > 1000) throw refused;
-      target = `${stem} (${n})${ext}`;
+    for (let refused = await taken(target); refused; refused = await taken(target)) {
+      if (!free || refused.code !== "confirm" || next > 1000) throw refused;
+      target = `${stem} (${next})${ext}`;
+      next += 1;
     }
     // The bytes go beside it first and take its name only once whole: a save that fails (the bytes not on this device, a
     // full disk) leaves no file, and with --force the one it was to replace as it was. Before, --force emptied that file
@@ -581,10 +592,11 @@ export const FILE_METHODS: Record<string, Method> = {
       await out.close();
       out = null;
       // --force over what is there. Else never over a file that appeared meanwhile: a voice message steps on to a free name.
-      for (let n = 2; !complete; n += 1) try { await place(partial, target, force); complete = true; } catch (error) {
+      // It steps on from where the names above left it, never back to "(2)".
+      while (!complete) try { await place(partial, target, force); complete = true; } catch (error) {
         const code = (error as NodeJS.ErrnoException).code;
         const refused = code === "EEXIST" || code === "EISDIR" || code === "ENOTEMPTY" ? await taken(target, code) : undefined;
-        if (free && refused?.code === "confirm" && n <= 1000) { target = `${stem} (${n})${ext}`; continue; }
+        if (free && refused?.code === "confirm" && next <= 1000) { target = `${stem} (${next})${ext}`; next += 1; continue; }
         throw refused ?? error;
       }
       // A contact chose its bytes and its name (`.command`, `.lnk`): marked as downloaded. Every save is, as Desktop's:

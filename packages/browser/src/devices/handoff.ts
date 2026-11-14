@@ -220,9 +220,10 @@ export interface GiverPorts extends Common {
   staying?(taker: HandoffTakerFacts): Promise<HandoffStay[]>;
   /**
    * Pass 1 is done: freeze. Stops the engine without a word to any contact, writes `releasing` with `patch`, and
-   * reloads into the gate. Only while the engine runs (pass 1). The wallets follow their plan for `taker`.
+   * reloads into the gate. Only while the engine runs (pass 1). The wallets follow their plan for `taker`. Why it stopped
+   * nothing, when a reason came after the last `busy` (a call that started ringing): the device stays active.
    */
-  quiesce?(patch: DevicePatch, taker?: HandoffTakerFacts): Promise<void>;
+  quiesce?(patch: DevicePatch, taker?: HandoffTakerFacts): Promise<BusyReport | null | void>;
   /**
    * Deletes the Breez databases of the wallets that moved (WISP 06 § Wallets), once the release is written. Each is
    * named from its phrase, so a device that took the profile back later would reopen a stale one.
@@ -945,9 +946,11 @@ export class HandoffGiver {
     } else if (why) { this.out(handoffBusyFrame(wireWhy(why), 30)); this.reset(this.failWith(why)); return; }
     this.phase = "quiescing";
     this.changed();
-    await this.ports.quiesce({
+    const late = await this.ports.quiesce({
       handoff: { role: "releasing", step: "pass2", id: this.id!, peer: this.peer!, from: this.turn, secret: toBase64Url(this.secret!), at: this.now(), ...(this.newer ? { newer: true as const } : {}) },
     }, taker);
+    // A call came after the check above, while the engine got ready to stop: it stopped nothing, and the move waits.
+    if (late) { this.out(handoffBusyFrame(wireWhy(late), 30)); this.reset(this.failWith(late)); }
   }
 
   private async onVerified(from: string, frame: DeviceFrame): Promise<void> {

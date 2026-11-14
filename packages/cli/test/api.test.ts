@@ -13,7 +13,7 @@ import { chatDetailsJson, chatJson, isLive } from "../src/views";
 import { pageOf } from "./support/messagePage";
 import { ONE_SHOT_RECEIPT_MS } from "../src/waits";
 import { chatViewOf, groupViewOf } from "./support/chatView";
-// covers: headless.api, headless.engine-passthrough, headless.secret-guard, headless.typing, chat.order
+// covers: headless.api, headless.engine-passthrough, headless.secret-guard, headless.typing, chat.order, chat.paired.discovery-health
 
 /** The API over a fake engine: what it checks before the engine is asked, and what it makes of the answers. */
 const link = (id: string, fields: Partial<LinkView> = {}) => ({ id, peerPubKeyZ32: "p" + id, createdAt: 1, lastMessageAt: 0, profile: "paired-chat/1", textDelivery: "stream", ...fields }) as unknown as LinkView;
@@ -117,6 +117,19 @@ describe("chats", () => {
     }
     await expect(callApi(ctx, "profile.set", { name: "p".repeat(65) })).rejects.toMatchObject({ code: "bad_request", message: "name is up to 64 characters as stored (this one is 65)", details: { length: 65, max: 64 } });
     expect(calls.updateSettings).not.toHaveBeenCalled();
+  });
+
+  it("a community's link comes with the address that opens it in the app, as the app's Share gives it", async () => {
+    // Found in a bug hunt: only the token (`group2/…`) was given, which nobody can tap in a chat; `invite create` gives both.
+    const { ctx, node } = fake();
+    const token = "group2/g2/entrykey";
+    Object.assign(node, { createGroup: vi.fn(async () => ({ groupId: "g2" })), enableGroupLink: vi.fn(async () => ({ link: token })), disableGroupLink: vi.fn(async () => undefined) });
+    const url = `https://app.ghostly.tools/#/join/${token}`;
+    expect(await callApi(ctx, "group.create", { name: "Club", profile: "community" })).toEqual({ group: "g2", link: token, url });
+    expect(await callApi(ctx, "group.link", { group: "g1" })).toEqual({ group: "g1", link: token, url });
+    expect(await callApi(ctx, "group.link", { group: "g1", reset: true })).toEqual({ group: "g1", link: token, url });
+    // No link, no address: a private group made without one, a link turned off.
+    expect(await callApi(ctx, "group.link", { group: "g1", on: false })).toEqual({ group: "g1", link: null });
   });
 
   // A group's name has the same refusals: it said "1 to 64 characters on one line" to a name of two invisible ones.
@@ -1052,6 +1065,24 @@ describe("chat wait", () => {
     remove();
     await expect(waiting).rejects.toMatchObject({ code: "not_found", message: "Chat chat-one was removed" });
     expect(Date.now() - from).toBeLessThan(1000);
+  });
+});
+
+describe("status", () => {
+  // With every Pkarr relay down, a daemon's `status` read as with them all fine: the relays' URLs only, while the
+  // engine had each one's state (the apps' connection panel shows it) and read its contacts on the DHT in their place.
+  it("says how each relay of a daemon is doing, and where its last read went", async () => {
+    const { ctx, node } = fake();
+    const relays = [
+      { relay: "https://relay-one.test", state: "failing", until: 1_000_000, reason: "no answer" },
+      { relay: "https://relay-two.test", state: "failing", until: 1_000_000, reason: "no answer" },
+    ];
+    const was = node.getState;
+    node.getState = () => ({ ...was(), transport: { protocol: "p", relays: relays.map((r) => r.relay), discovery: { path: { via: "dht" }, relays } } }) as unknown as EngineState;
+    expect((await callApi(ctx, "status", {}) as { discovery: unknown }).discovery).toEqual({ protocol: "p", relays: relays.map((r) => r.relay), health: relays, via: "dht" });
+    // A one-shot asked no relay: nothing to say about them.
+    Object.assign(ctx, { mode: "one-shot" });
+    expect((await callApi(ctx, "status", {}) as { discovery: unknown }).discovery).toEqual({ protocol: "p", relays: relays.map((r) => r.relay) });
   });
 });
 
