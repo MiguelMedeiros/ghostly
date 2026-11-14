@@ -18,7 +18,7 @@ import { waitNotice, waitsFor, type WaitNotice } from "./waitNotice";
 import type { RuntimeOptions } from "./runtime/engine";
 import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, followDaemon, PAUSE_HOLD_MS, readCursor } from "./listen";
 import { format } from "node:util";
-import { completeWithPipedEvidence, credentialFromStdin, identityFields, identitySecretFields, secretsFromStdin, secretValuesWarning, settingValue, textFromStdin } from "./secretInput";
+import { completeWithPipedEvidence, credentialFromStdin, evidenceFromStdin, identityFields, identitySecretFields, secretsFromStdin, secretValuesWarning, settingValue, textFromStdin } from "./secretInput";
 import type { Translator } from "./translate";
 import {
   checkProfileName, checkShownNameOption, createProfile, currentProfile, currentProfileOrNone, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, noProfile, profileExists, profilePaths, selectProfile,
@@ -1609,7 +1609,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
     if (params.evidenceFile) {
       try { params.evidence = readInput(params.evidenceFile as string); } catch (error) { throw localFileError(error, params.evidenceFile as string) ?? error; }
     }
-    else if (params.stdin) params.evidence = await readStdin();
+    else if (params.stdin) params.evidence = await evidenceFromStdin(readStdin, String(params.draft), process.stdin.isTTY === true);
     delete params.evidenceFile; delete params.stdin;
   }
   if (command.method === "x401.credential.add") {
