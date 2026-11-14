@@ -2,7 +2,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { useState } from "react";
-import { act, screen } from "@testing-library/react";
+import { act, fireEvent, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { FocusSafeButton } from "../../components/ui/FocusSafeButton";
 import { Button } from "../../components/wallet/ui";
@@ -45,6 +45,26 @@ describe.each(["raw", "button"] as const)("a %s button disabled by its own work"
     // The focus leaves while it works: disabled as asked, out of the Tab order.
     await user.tab();
     expect(go).toBeDisabled();
+    expect(go).not.toHaveAttribute("aria-disabled");
+  });
+
+  it("stays held when another window takes the focus while it works (a save dialog, another app)", async () => {
+    let fail: (() => void) | undefined;
+    const work = vi.fn(() => new Promise<void>((_, refuse) => { fail = () => refuse(new Error("no")); }));
+    const { user } = renderApp(<Work as={as} work={work} />);
+    const go = screen.getByTestId("go");
+    go.focus();
+    await user.keyboard("{Enter}");
+    // Chromium fires focusout on the focused control when its window loses the focus, `document.hasFocus()` false;
+    // disabled then, it loses the focus to the page for good (measured with a second window).
+    const away = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    fireEvent.focusOut(go);
+    expect(go).toBeEnabled();
+    expect(go).toHaveAttribute("aria-disabled", "true");
+    away.mockRestore();
+    fireEvent.focusIn(go);
+    await act(async () => fail!());
+    expect(go).toBeEnabled();
     expect(go).not.toHaveAttribute("aria-disabled");
   });
 
