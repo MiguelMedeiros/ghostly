@@ -1720,6 +1720,8 @@ export class CashuWallet {
       if (!mints.length) throw new Error(BITCOIN_INVOICE_ON_TESTNET);
     }
     if (chosen !== undefined && mints.length) lastError = engineError("mintsNoAnyAmount");
+    /** The failure of a mint that holds enough for the invoice: said over a later mint's "Not enough sats". */
+    let failedHolding: unknown;
     for (const mint of mints) {
       try {
         const wallet = await this.wallet(mint);
@@ -1745,9 +1747,11 @@ export class CashuWallet {
       } catch (error) {
         // A mint that failed ("internal error", a closed connection) is named, with what to do; its words kept last.
         lastError = mintFailed(error) ? Object.assign(engineError("mintFailedQuote", { host: new URL(mint).host, reason: mintReason(error) }), { cause: error }) : error;
+        if (failedHolding === undefined && total(await this.proofsAt(mint)) >= expected) failedHolding = lastError;
       }
     }
-    throw lastError instanceof Error ? lastError : new Error(String(lastError));
+    const said = failedHolding ?? lastError;
+    throw said instanceof Error ? said : new Error(String(said));
   }
 
   /**
