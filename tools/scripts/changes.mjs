@@ -304,6 +304,13 @@ export function releaseChangelog(changelog, fragments, version) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const args = process.argv.slice(2);
+  const preview = args[0] === "--preview";
+  const version = preview ? args[1] : undefined;
+  if ((args.length && !preview) || args.length > 2 || (version !== undefined && !/^\d+\.\d+\.\d+$/.test(version))) {
+    console.error("usage: node tools/scripts/changes.mjs [--preview [<major.minor.patch>]]");
+    process.exit(2);
+  }
   const stray = strayFragments();
   if (stray.length) {
     console.error(`Changelog entries moved to ${CHANGES}/: move ${stray.join(", ")} there (git mv changes/*.md ${CHANGES}/).`);
@@ -316,12 +323,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     for (const p of problems) console.error(`  ${p}`);
     process.exit(1);
   }
-  const preview = process.argv.indexOf("--preview");
-  const version = preview < 0 ? undefined : process.argv[preview + 1];
-  if (version !== undefined && !/^\d+\.\d+\.\d+$/.test(version)) {
-    console.error("usage: node tools/scripts/changes.mjs [--preview [<major.minor.patch>]]");
-    process.exit(1);
-  }
   const { released, held } = version ? splitFragments(fragments, version) : { released: fragments, held: [] };
   let changelog;
   try {
@@ -330,7 +331,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     console.error(`✗ ${error.message}`);
     process.exit(1);
   }
-  if (preview >= 0) {
+  if (preview) {
     const from = changelog.indexOf("## Unreleased");
     const to = changelog.indexOf("\n## ", from + 1);
     console.log(changelog.slice(from, to < 0 ? undefined : to));

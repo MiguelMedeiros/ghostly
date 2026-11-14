@@ -35,6 +35,11 @@ const hasTests = (dir) => {
 };
 
 const only = process.argv.slice(2);
+const unknown = only.filter((name) => !TARGETS.some((t) => t.name === name));
+if (unknown.length) {
+  console.error(`usage: npm run coverage [-- <package>…]; no package ${unknown.map((n) => `"${n}"`).join(", ")}, the packages are ${TARGETS.map((t) => t.name).join(", ")}`);
+  process.exit(2);
+}
 const results = [];
 let failed = false;
 for (const t of TARGETS) {
