@@ -316,6 +316,37 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     }
   });
 
+  it("with the contact's identities beside the chat, covers the chat once what they leave has no room for both", async () => {
+    // The chat's page at 1366 px beside the chat list: 946 px. With the identities' 360 px beside it (contact-panel.css,
+    // from 900 px), the app beside the chat left it 189 px (real Chromium, the real panel CSS).
+    windowIs(false);
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) { return this.classList.contains("chat-pane") ? 946 : 0; });
+    const offset = vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function (this: HTMLElement) { return this.classList.contains("contact-panel") ? 360 : 0; });
+    const page = (identities: boolean) => <div className="chat-pane">
+      <div className="chat-column"><ChatAppResume linkId="link-1" /><textarea aria-label="Message" /></div>
+      <ChatAppPanel linkId="link-1" sessionId="s1" contact={{ name: "Ana", named: true }} peerKey="peer" identities={identities} />
+      {identities && <aside className="contact-panel" />}
+    </div>;
+    try {
+      const view = renderApp(page(false));
+      act(() => fakeEngine.update({ links: [ana(true)] }));
+      await act(() => open(REF, "link-1"));
+      const app = screen.getByTestId("mini-app");
+      // Room for both: beside the chat.
+      expect(app).toHaveAttribute("data-place", "beside");
+      // The identities open beside the chat: the app covers it, with Back to it.
+      view.rerender(page(true));
+      expect(app).toHaveAttribute("data-place", "wide");
+      expect(within(app).getByTestId("mini-app-back")).toBeInTheDocument();
+      // And closed again: beside it again.
+      view.rerender(page(false));
+      expect(app).toHaveAttribute("data-place", "beside");
+    } finally {
+      width.mockRestore();
+      offset.mockRestore();
+    }
+  });
+
   it("on a phone held upright, its Back, connection and Close are as big to tap as the chat header's (44 px)", async () => {
     const matchMedia = window.matchMedia.bind(window);
     vi.spyOn(window, "matchMedia").mockImplementation((query: string) => query === MOBILE_QUERY || query === PHONE_HEADER_QUERY
