@@ -34,6 +34,27 @@ describe("the argument parser", () => {
     }
   });
 
+  it("does not print a pasted private key, or a long word, as the unknown option's name", () => {
+    const body = Array.from({ length: 6 }, (_, i) => `b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW${i}`);
+    const openssh = ["-----BEGIN OPENSSH PRIVATE KEY-----", ...body, "-----END OPENSSH PRIVATE KEY-----"].join("\n");
+    const pgp = ["-----BEGIN PGP PRIVATE KEY BLOCK-----", "", ...body, "=Zx3a", "-----END PGP PRIVATE KEY BLOCK-----"].join("\n");
+    const long = `--${"x".repeat(410)}`;
+    const add = { signer: { type: "string" as const, description: "" } };
+    const send = TEXT_COMMANDS.send;
+    for (const [argv, spec, slot, command, shown] of [
+      [["ssh", openssh, "--signer", "ssh-keygen"], add, undefined, "identity add", /^Unknown option \(a private key\) for ghostly identity add/],
+      [["pgp", pgp], add, undefined, "identity add", /^Unknown option \(a private key\) for ghostly identity add/],
+      [["ssh", long], add, undefined, "identity add", /^Unknown option \(a 412-character word\) for ghostly identity add/],
+      [["alice", openssh], send.options, idSlot(send), "send", /^Unknown option \(a private key\) for ghostly send/],
+    ] as const) {
+      let message = "";
+      try { parseArgs(argv, spec, slot, { command, text: command === "send" }); } catch (error) { message = (error as Error).message; }
+      expect(message).toMatch(shown);
+      expect(message).toMatch(/never paste a private key|character word/);
+      for (const line of [...body, "x".repeat(40)]) expect(message).not.toContain(line);
+    }
+  });
+
   it("takes a draft that starts with a dash (identity complete, the #357 failure)", () => {
     const complete = COMMANDS["identity complete"];
     const parsed = parseArgs([HYPHEN_DRAFT, "--stdin"], complete.options!, idSlot(complete));
@@ -189,7 +210,7 @@ describe("the argument parser", () => {
   it("refuses a long word that starts with a dash as fast as a short one", () => {
     const send = TEXT_COMMANDS.send, long = `-${"a".repeat(100_000)}`;
     const started = performance.now();
-    expect(() => parseArgs(["bob", long], send.options, idSlot(send), { command: "send", text: true })).toThrow(/^Unknown option -a+ for ghostly send/);
+    expect(() => parseArgs(["bob", long], send.options, idSlot(send), { command: "send", text: true })).toThrow(/^Unknown option \(a 100001-character word\) for ghostly send/);
     expect(nearest(long.slice(1), Object.keys(COMMANDS))).toBeUndefined();
     expect(performance.now() - started).toBeLessThan(100);
     expect(nearest(`wait${"x".repeat(2)}`, ["wait", "wai"])).toBe("wait");
