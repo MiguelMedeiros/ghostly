@@ -89,6 +89,7 @@ const PROOF_REASONS: readonly (readonly [string, string, string?])[] = [
   ["Your contact's app cannot verify this kind of identity yet", `${CORE}/identityProofs.ts`],
   ["Your contact's app could not check it. Try again later.", `${CORE}/identityProofs.ts`],
   ["Your contact keeps too many identities from you already", `${CORE}/identityProofs.ts`],
+  ["Your contact keeps a newer proof of this identity from you", `${CORE}/identityProofs.ts`],
   ["That identity is no longer in your profile", `${CORE}/identityProofs.ts`],
   ["Your contact could not verify it", `${CORE}/identityProofs.ts`],
   ...PROOF_UNAVAILABLE,

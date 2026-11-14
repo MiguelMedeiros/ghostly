@@ -529,6 +529,7 @@
     "btcSingleKey": "Ghostly 只核验单密钥地址（bc1q…、bc1p…、3…、1…）的证明，不支持多签或脚本地址",
     "challenge": "证明密钥没有签署此聊天的挑战",
     "checkFailed": "无法验证此证明",
+    "contactNewer": "联系人已保存你此身份的更新证明",
     "contactRefused": "联系人无法验证它",
     "contactTooMany": "联系人保存的你的身份已经太多",
     "contactUnavailable": "联系人的应用无法验证它",

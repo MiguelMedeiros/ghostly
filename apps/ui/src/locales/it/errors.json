@@ -529,6 +529,7 @@
     "btcSingleKey": "Ghostly verifica solo prove di indirizzi a chiave singola (bc1q…, bc1p…, 3…, 1…), non multisig né di script",
     "challenge": "La chiave della prova non ha firmato la sfida di questa chat",
     "checkFailed": "Non è stato possibile verificare questa prova",
+    "contactNewer": "Il tuo contatto conserva già una prova più recente di questa tua identità",
     "contactRefused": "Il tuo contatto non è riuscito a verificarla",
     "contactTooMany": "Il tuo contatto conserva già troppe tue identità",
     "contactUnavailable": "L'app del tuo contatto non è riuscita a verificarla",
