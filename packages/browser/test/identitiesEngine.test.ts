@@ -961,6 +961,26 @@ describe("per chat", () => {
     } finally { vi.restoreAllMocks(); }
   });
 
+  it("a contact's proof is read through the host's fetch when it gives one (the CLI's, on public addresses only), never the global one", async () => {
+    const reads: IdentityProofProvider = { ...fakeKey,
+      verify: async (statement, evidence, ctx) => { await ctx.fetch("https://contact.example/proof.json"); return fakeKey.verify(statement, evidence as never, ctx); } } as IdentityProofProvider;
+    const global = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("{}", { status: 200 }));
+    const fetcher = vi.fn<typeof fetch>(async () => new Response("{}", { status: 200 }));
+    try {
+      const p = pair();
+      await clearStorage();
+      p.state.providers = { a: [reads], b: [reads] };
+      p.engines.b = new IdentityProofs({ ...p.host("b"), fetcher }, () => p.state.providers.b);
+      await p.engines.a.load(); await p.engines.b.load();
+      const own = await prove(p.engines.a);
+      global.mockClear();
+      await p.engines.a.share({ linkId: "chat", id: own.id });
+      await vi.waitFor(() => expect(p.ledgers.b.received.find(r => r.id === own.id)?.status).toBe("verified"));
+      expect(fetcher.mock.calls.map(([url]) => String(url))).toEqual(["https://contact.example/proof.json"]);
+      expect(global).not.toHaveBeenCalled();
+    } finally { vi.restoreAllMocks(); }
+  });
+
   it("the hosts a contact's proof is checked on with Hide my IP on are the ones this app names", async () => {
     const { fixedIdentityHosts } = await import("../src/proofs/fixedHosts");
     expect([...fixedIdentityHosts()]).toEqual(expect.arrayContaining(["dns.quad9.net", "cloudflare-dns.com", "dns.google", "plc.directory", "pkarr.pubky.org",
