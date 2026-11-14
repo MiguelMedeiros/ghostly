@@ -1431,7 +1431,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         never moves. */}
     {appHere && params && (
       <ChatAppPanel linkId={appHere} sessionId={sessionId} contact={{ name: shownName, named: !isAnonymous }}
-        peerKey={params.peerPubKeyB64} photo={face?.photo} myKey={techInfo?.myPubKey} status={statusLabel} callOn={callState !== "idle"} />
+        peerKey={params.peerPubKeyB64} photo={face?.photo} myKey={techInfo?.myPubKey} status={statusLabel} callOn={callState !== "idle"} identities={showIdentities} />
     )}
     {/* Why an app did not open here, over the app that covers the chat: over the whole window, above its panel. */}
     <Toast toast={appWhy} onDismiss={dismissAppWhy} testId="chat-app-why" />
