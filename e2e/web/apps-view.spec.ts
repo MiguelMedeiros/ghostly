@@ -3,6 +3,7 @@ import { pair } from "../support/paired";
 import { composerRow } from "../support/composer";
 import { choose } from "../support/select";
 import { iosKeyboard, keyboard } from "../support/keyboard";
+import { closeIdentities, openIdentities } from "../support/identities";
 import { STORE_URL, serveStore, testStore, type TestStore } from "../support/appStore";
 import type { AppViewMode } from "@ghostly/core";
 
@@ -124,6 +125,49 @@ test("on a wide screen the app sits beside the chat, which stays usable", { tag:
   await ana.page.keyboard.press("Escape");
   await expect(app).toBeHidden();
   await expect(input).toBeFocused();
+});
+
+test("on a laptop the contact's identities lie over the chat while an app sits beside it, and the chat keeps a phone's width", { tag: ["@feature:apps.view"] }, async ({ peer }) => {
+  const [ana] = await setUp(peer);
+  const page = ana.page;
+  const panel = page.getByTestId("chat-identities"), backdrop = page.locator(".contact-panel-backdrop");
+  const chatWidth = async () => (await page.locator(".chat-column").filter({ has: page.getByTestId("chat-name") }).boundingBox())!.width;
+  for (const width of [1366, 1440]) {
+    await page.setViewportSize({ width, height: 800 });
+    // Alone, the panel docks beside the chat.
+    await openIdentities(ana);
+    await expect(backdrop).toBeHidden();
+    await expect(panel).toHaveAttribute("role", "complementary");
+    await closeIdentities(ana);
+
+    // With Chess beside the chat, both docked left it 189-232 px and its message field 29-72: the panel lies over it.
+    await openChess(ana);
+    const app = page.getByTestId("mini-app");
+    await expect(app).toHaveAttribute("data-place", "beside");
+    await openIdentities(ana);
+    await expect(backdrop).toBeVisible();
+    await expect(panel).toHaveAttribute("role", "dialog");
+    expect(await chatWidth()).toBeGreaterThanOrEqual(320);
+    await page.keyboard.press("Escape");
+    await expect(panel).toHaveCount(0);
+    await app.getByRole("button", { name: "Close" }).click();
+    await expect(app).toBeHidden();
+
+    // Docked when the app opens: it goes over the chat, a dialog now, with the focus; Escape closes it, the app stays.
+    await openIdentities(ana);
+    await expect(panel).toHaveAttribute("role", "complementary");
+    await openChess(ana);
+    await expect(app).toHaveAttribute("data-place", "beside");
+    await expect(backdrop).toBeVisible();
+    await expect(panel).toHaveAttribute("role", "dialog");
+    await expect(panel).toBeFocused();
+    expect(await chatWidth()).toBeGreaterThanOrEqual(320);
+    await page.keyboard.press("Escape");
+    await expect(panel).toHaveCount(0);
+    await expect(app).toBeVisible();
+    await app.getByRole("button", { name: "Close" }).click();
+    await expect(app).toBeHidden();
+  }
 });
 
 test("on a phone the app covers the chat, and Back keeps it running", { tag: ["@feature:apps.view"] }, async ({ peer }) => {
