@@ -5,7 +5,7 @@ import type { HandoffProfileHost } from "@ghostly/browser/devices/handoffHost";
 import { memorySink } from "@ghostly/browser/backup/stream";
 import { databaseExists } from "@ghostly/browser/backup/database";
 import { databaseName, wrap, type StoredFile } from "@ghostly/browser/shared/idb";
-import { FILE_BYTES_STEP, SMALL_FILE_BYTES, digestText, dropFileSpace, fileBytes, type FileBytes } from "@ghostly/browser/shared/fileBytes";
+import { FILE_BYTES_STEP, SMALL_FILE_BYTES, digestText, dropFileSpace, fileBytes, fileBytesOf, type FileBytes, type FileBytesKind } from "@ghostly/browser/shared/fileBytes";
 import { fileSource, restoreHandoffBundle, writeProfileBackup, type FileSource } from "./profileBackup";
 import { listDeviceRecords } from "@ghostly/browser/devices/store";
 import { databaseOfSpace, newSpace, pointProfile, profileOfDatabase, recoverProfilePointer } from "./profiles";
@@ -28,6 +28,48 @@ import { MEDIA_DEVICES_SUFFIX } from "./mediaDevices";
  */
 
 const DIGEST = /^[A-Za-z0-9_-]{43}$/;
+/**
+ * An installed app's bundle: kept whole in file storage as `app-<digest>`, with no `files` row (the engine's `apps.ts`).
+ * Its record names where (`bytes`), for the version installed and the one waiting. A move hands it over by digest beside
+ * the chat files (WISP 1200 § Where installed apps live): left behind, every app on the new device needed its files and
+ * fetched them again, and one whose source no longer served that version did not open there at all (bug hunt, 2026-11-06).
+ */
+type AppRecord = { ref: string; digest?: unknown; bytes?: unknown; pending?: { digest?: unknown; bytes?: unknown } };
+const bundleId = (digest: string) => `app-${digest}`;
+const BUNDLE_ID = /^app-[A-Za-z0-9_-]{43}$/;
+const bundlesOf = (app: AppRecord): { id: string; kind: unknown }[] => [app, ...(app.pending ? [app.pending] : [])]
+  .filter((version): version is { digest: string; bytes?: unknown } => typeof version.digest === "string" && DIGEST.test(version.digest))
+  .map((version) => ({ id: bundleId(version.digest), kind: version.bytes }));
+const FILE_KINDS: readonly FileBytesKind[] = ["opfs", "native", "idb"];
+
+/** The installed apps' records of a profile's database, none where it has no store for them yet. */
+async function appRecords(db: IDBDatabase): Promise<AppRecord[]> {
+  if (!db.objectStoreNames.contains("apps")) return [];
+  return ((await wrap(db.transaction("apps", "readonly").objectStore("apps").getAll())) ?? []) as AppRecord[];
+}
+
+/**
+ * The staged files that are the restored apps' bundles stay in this device's file storage, whatever their size, and
+ * their records are pointed at it (the giver's says where it kept them: another kind on another platform). Resolves to
+ * the other files, the chat files `restore` points records at.
+ */
+async function pointBundles(database: string, staged: HandoffFile[], kind: FileBytesKind): Promise<HandoffFile[]> {
+  const db = await wrap(indexedDB.open(database));
+  try {
+    const apps = await appRecords(db);
+    const named = new Set(apps.flatMap(bundlesOf).map(({ id }) => id));
+    const bundles = new Set(staged.filter((file) => named.has(file.id)).map((file) => file.id));
+    if (!bundles.size) return staged;
+    const here = (version?: { digest?: unknown }) => typeof version?.digest === "string" && bundles.has(bundleId(version.digest));
+    const tx = db.transaction("apps", "readwrite"), records = tx.objectStore("apps");
+    for (const app of apps) {
+      if (!here(app) && !here(app.pending)) continue;
+      records.put({ ...app, ...(here(app) && { bytes: kind }), ...(app.pending && here(app.pending) && { pending: { ...app.pending, bytes: kind } }) });
+    }
+    await new Promise<void>((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onabort = tx.onerror = () => reject(tx.error ?? new Error("The apps' records could not be written")); });
+    return staged.filter((file) => !bundles.has(file.id));
+  } finally { db.close(); }
+}
 /** Where earlier builds kept the notes: one list under `ghostly-staging:<ns>`, then one key per file under it. */
 const stagingKey = (ns: string) => `ghostly-staging:${ns}`;
 /** A namespace and a file id hold no colon, so no key of one namespace begins as another's does. */
@@ -124,6 +166,17 @@ function profileSource(database: string): HandoffSource {
       digests.set(file.id, sha);
       found.set(file.id, { file: { id: file.id, size: source.size, sha256: sha }, source });
     }
+    // The apps' bundles, where their records say they are: one not here (it needs its files on this device too) is not.
+    for (const { id, kind } of (await appRecords(peer)).flatMap(bundlesOf)) {
+      if (found.has(id) || !FILE_KINDS.includes(kind as FileBytesKind)) continue;
+      const store = (await fileBytesOf(kind as FileBytesKind).catch(() => null))?.forSpace?.(database);
+      const size = store ? await store.size(id).catch(() => null) : null;
+      if (!store || !size) continue;
+      const sha = digests.get(id) ?? await store.digest(id).catch(() => undefined);
+      if (!sha) continue;
+      digests.set(id, sha);
+      found.set(id, { file: { id, size, sha256: sha }, source: { size, read: (offset, length) => store.read(id, offset, length) } });
+    }
     return found;
   }
   return {
@@ -189,6 +242,8 @@ async function copyHeldFile(db: IDBDatabase, id: string, to: FileBytes, file: Ha
     await to.remove(file.id).catch(() => {});
     return true;
   }
+  // An app's bundle has no record: it is in the frozen copy's file storage, where this device keeps new files.
+  if (!stored && BUNDLE_ID.test(id)) { await copyFile(await spaceFiles(db.name), id, to, file); return false; }
   const source = stored ? await fileSource(stored, db.name, false, async () => db) : null;
   if (!source) throw new Error("The file is not on this device");
   await copyFrom(source, to, file);
@@ -316,12 +371,13 @@ class Staging implements HandoffStaging {
     await this.note(file);
   }
 
-  async restore(bundle: Uint8Array, files: HandoffFile[]): Promise<void> {
+  async restore(bundle: Uint8Array, staged: HandoffFile[]): Promise<void> {
     await this.dropRest();
     await restoreHandoffBundle(bundle, this.ns);
     // Each file's record points at the bytes staged for it: a small one holds them whole, a large one in file storage.
     const store = await spaceFiles(this.database);
     const kind = (await fileBytes()).kind;
+    const files = await pointBundles(this.database, staged, kind);
     const db = await wrap(indexedDB.open(this.database));
     // The frozen copies files are left on as Blobs (`copyHeld`), opened as stored once each.
     const frozen = new Map<string, IDBDatabase>();
