@@ -347,6 +347,17 @@ export const SERVICE_METHODS: Record<string, Method> = {
     const service = str(params, "service", true);
     const key = `${link.peerPubKeyZ32}/${service}`;
     const port = num(params, "port", 0, { min: 0, max: 65535, whole: true });
+    // One the contact took back (or no longer live): before, one open here answered its old link with exit 0, a port
+    // where each request was a 404 until `service close`. It closes, and the answer is a first open's.
+    if (!link.peerServices?.some((s) => s.id === service)) {
+      const held = open.get(key);
+      if (held) {
+        open.delete(key);
+        const entry = await held.catch(() => undefined);
+        if (entry) await closeOpened(entry);
+      }
+      throw new CliError("not_found", `The contact shares no service ${service} (or is not live)`);
+    }
     // One still opening counts: before, two opens at once each made a server, and `service close` closed only the second.
     const already = await open.get(key)?.catch(() => undefined);
     if (already) {
@@ -355,7 +366,6 @@ export const SERVICE_METHODS: Record<string, Method> = {
       if (port && port !== on) throw new CliError("busy", `That service is open here on port ${on}: ghostly service close ${link.id} ${service} first, or leave out --port`);
       return { chat: link.id, service, url: already.url };
     }
-    if (!link.peerServices?.some((s) => s.id === service)) throw new CliError("not_found", `The contact shares no service ${service} (or is not live)`);
     const peer = link.peerPubKeyZ32;
     // Another open began while this one waited: it answers that one.
     if (open.has(key)) return SERVICE_METHODS["service.open"](ctx, params);
