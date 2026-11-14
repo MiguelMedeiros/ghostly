@@ -4,9 +4,10 @@
  * from this page, where the peer runs. Closing it ends the app, its requests and its cookies.
  */
 import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, GhostlyHttpError, WEBRTC_GUARD, guardViewerAnswer, viewerResponseHeaders, viewerServicePolicy, type ClientRequest, type ClientResponse, type PageGuard } from "@ghostly/core";
-import { ANSWER_AHEAD_BYTES, BRIDGE_PAGE, BRIDGE_PORT, BRIDGE_READY, BRIDGE_REFUSED, HEAD_TIMEOUT_MS, MAX_RESPONSE_BYTES, SERVICE_FRAME_ALLOW, SERVICE_VIEW_CLOSE, SERVICE_VIEW_ID, closeServiceView, readRequest, serviceOrigin, type ServiceReply, type ServiceRequestMessage, type ServicesHost } from "./protocol";
+import { ANSWER_AHEAD_BYTES, BRIDGE_OPEN_LINK, BRIDGE_PAGE, BRIDGE_PORT, BRIDGE_READY, BRIDGE_REFUSED, HEAD_TIMEOUT_MS, MAX_RESPONSE_BYTES, SERVICE_FRAME_ALLOW, SERVICE_VIEW_CLOSE, SERVICE_VIEW_ID, closeServiceView, readRequest, serviceOrigin, type ServiceReply, type ServiceRequestMessage, type ServicesHost } from "./protocol";
 import { SERVICE_LOCKED, callWindowOn, serviceWindowsClosedSince } from "../../../ui/src/lib/serviceWindows";
 import { appInput } from "../../../ui/src/lib/apps/open";
+import { isLocalHost } from "../../../ui/src/lib/parse/linkPreview";
 
 const CLIPBOARD_GUARD: PageGuard = { script: CLIPBOARD_GUARD_SCRIPT, hash: CLIPBOARD_GUARD_HASH };
 
@@ -298,6 +299,29 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
  */
 const INPUT_LOOK_MS = 1_000;
 
+/**
+ * Least time between two links an open view opens outside, and the most it opens in its life: as Desktop's viewer
+ * window (`viewer.rs`), so an app that asks on every tap does not fill the browser with tabs.
+ */
+const LINK_SPACING_MS = 2_000;
+const LINKS_PER_VIEW = 20;
+
+/**
+ * Where a link the contact's app opens in a new window goes outside it (`BRIDGE_OPEN_LINK`), as on Desktop
+ * (`external_target` in viewer.rs): a plain http(s) link to another site. Null for anything else, for a site on this
+ * machine or the local network (`isLocalHost`), whose request would carry the browser's cookies there, for an app's
+ * origin under the services host (a tab of its own there would outlive the view) and for Ghostly's own.
+ */
+export function outsideLink(url: unknown, host: ServicesHost): string | null {
+  if (typeof url !== "string" || url.length > 4096) return null;
+  let link: URL;
+  try { link = new URL(url); } catch { return null; }
+  if ((link.protocol !== "http:" && link.protocol !== "https:") || link.href.length > 4096) return null;
+  const name = link.hostname.toLowerCase().replace(/\.$/, "");
+  if (isLocalHost(name) || name === host.suffix || name.endsWith(`.${host.suffix}`) || name === location.hostname) return null;
+  return link.href;
+}
+
 /** What `openServiceView` puts over the app, so a test (or a second open, or the lock) can find and close it. */
 export const VIEW_ID = SERVICE_VIEW_ID;
 
@@ -393,7 +417,8 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   frame.dataset.testid = "service-view-frame";
   frame.title = options.words.label;
   // Its own origin keeps it from the app's storage. The sandbox keeps it and every frame in it from navigating the
-  // app's tab away, and from opening a window: one would be a tab of its own on its origin, outliving the view. No
+  // app's tab away, and from opening a window: one would be a tab of its own on its origin, outliving the view (a link
+  // the app opens in a new window comes here from the bridge instead, `openOutside`). No
   // `allow-modals`: the browser's own alert or prompt over the view would be a Ghostly-looking dialog the app draws. No
   // `allow-downloads`: the contact's code saves no file on this device by itself, under a name it picks, as on Desktop.
   frame.setAttribute("sandbox", "allow-scripts allow-same-origin allow-forms");
@@ -450,9 +475,28 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   const ports = new Set<MessagePort>();
   // The requests of the bridge now in the frame: aborted, still waiting on the contact or not, once it is gone.
   let bridge = new AbortController();
+  let linksOpened = 0;
+  let lastLink = -Infinity;
+  /**
+   * A link the app opens in a new window, which its sandbox drops: opened here in a new tab with no opener and no
+   * referrer, as Ghostly's own external links (`externalLinkProps`). Only within the person's own tap in the app, which
+   * activates this page too and no script can: never one the app opens by itself.
+   */
+  const openOutside = (url: unknown) => {
+    const link = outsideLink(url, options.host);
+    const now = Date.now();
+    if (!link || !navigator.userActivation?.isActive || linksOpened >= LINKS_PER_VIEW || now - lastLink < LINK_SPACING_MS) return;
+    linksOpened++;
+    lastLink = now;
+    window.open(link, "_blank", "noopener,noreferrer");
+  };
   const onMessage = (event: MessageEvent) => {
     if (event.source !== frame.contentWindow || event.origin !== origin) return;
-    const message = event.data as { type?: unknown; reason?: unknown } | null;
+    const message = event.data as { type?: unknown; reason?: unknown; url?: unknown } | null;
+    if (message?.type === BRIDGE_OPEN_LINK) {
+      openOutside(message.url);
+      return;
+    }
     if (message?.type === BRIDGE_REFUSED) {
       refused = message.reason === "blocked" ? options.words.blocked : options.words.unguarded;
       present();
