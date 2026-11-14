@@ -464,6 +464,10 @@ export function takeReplaceStep(): string | null {
   } catch { return null; }
 }
 
+let switching = false;
+/** Whether this page switched to another profile (`switchProfile`) and is about to start again as it. */
+export const switchUnderWay = (): boolean => switching;
+
 /**
  * Makes another profile the active one and restarts the app, so no peer, wallet or timer of the old
  * profile keeps running beside the new one. Contacts of the old profile see it go offline. The profile
@@ -476,6 +480,7 @@ export function switchProfile(id: string, options: { route?: string; avatar?: st
   if (!target) throw new Error("Unknown profile");
   // This page's own profile, not the registry's choice: another tab may have made that choice already.
   if (id === activeProfileId()) return;
+  switching = true;
   // A profile this device is on standby for keeps its place as it was: nothing is written into its copy (WISP 06).
   if (knownDeviceGate()?.full !== false) rememberRoute(activeProfileId());
   announceSwitch(id, options.avatar);
