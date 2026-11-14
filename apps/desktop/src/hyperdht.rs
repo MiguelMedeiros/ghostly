@@ -81,7 +81,12 @@ pub struct HyperState {
     partings: Arc<Mutex<HashMap<(u64, u64), String>>>,
     /// Node and the script, when a test brings its own.
     program: Option<(PathBuf, PathBuf)>,
+    /// How long a connect waits for its answer, when a test brings its own (`CONNECT_WAIT`).
+    connect_wait: Option<Duration>,
 }
+
+/// How long a connect waits for the runtime's answer: the sidecar's dial, made again when it stalls, may still be going.
+const CONNECT_WAIT: Duration = Duration::from_secs(25);
 #[derive(Serialize, Debug)]
 pub struct Started {
     id: u64,
@@ -222,6 +227,7 @@ async fn read(output: ChildStdout, routes: Routes, peers: Peers) {
             break;
         };
         let mut gone = false;
+        let mut unheld = None;
         {
             let mut routes = routes.lock().unwrap();
             // A late word about an endpoint that was already stopped.
@@ -236,7 +242,11 @@ async fn read(output: ChildStdout, routes: Routes, peers: Peers) {
                 }
                 Some("result") => {
                     if let Some(reply) = route.pending.take() {
-                        let _ = reply.send(Ok(value["id"].clone()));
+                        // The connect that asked gave up waiting: nobody holds this connection, and left open it kept
+                        // one of the endpoint's two places and the contact on a session nobody answers.
+                        if reply.send(Ok(value["id"].clone())).is_err() {
+                            unheld = value["id"].as_u64();
+                        }
                     }
                 }
                 // The connection's socket is full, or has room again: the page holds a file back meanwhile.
@@ -283,6 +293,11 @@ async fn read(output: ChildStdout, routes: Routes, peers: Peers) {
         // Its page is gone, or the runtime dropped it: stopped like any other.
         if gone {
             peers.lock().unwrap().remove(&id);
+        } else if let Some(connection) = unheld {
+            if let Some(peer) = peers.lock().unwrap().get(&id) {
+                let value = json!({"type":"close", "id":connection});
+                let _ = peer.tx.try_send(Request { value, reply: None });
+            }
         }
     }
 }
@@ -464,7 +479,7 @@ pub async fn paired_hyperdht_connect(
             reply: Some(reply),
         })
         .map_err(|_| "Native command queue full")?;
-    tokio::time::timeout(Duration::from_secs(25), result)
+    tokio::time::timeout(state.connect_wait.unwrap_or(CONNECT_WAIT), result)
         .await
         .map_err(|_| "HyperDHT connection timed out")?
         .map_err(|_| "Native runtime stopped")??
@@ -1228,6 +1243,61 @@ mod runtime_tests {
         let second = pid(&app).await.unwrap();
         assert_ne!(first, second);
         assert!(alive(second));
+    }
+
+    /// A connect that gave up waiting (the sidecar's dial, made again on a slow path, can outlast it): the connection
+    /// that comes after it is closed in the runtime, not left open to the contact with nobody holding it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_connection_that_comes_after_its_connect_gave_up_is_closed() {
+        use std::os::unix::fs::PermissionsExt;
+        let (node, script) = program();
+        let slow = script.with_file_name("slow-node.sh");
+        let wrapper = format!(
+            "#!/bin/sh\nFAKE_ENDPOINT_CONNECT_MS=1500 exec '{}' \"$@\"\n",
+            node.display()
+        );
+        std::fs::write(&slow, wrapper).unwrap();
+        std::fs::set_permissions(&slow, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let app = mock_builder()
+            .manage(HyperState {
+                program: Some((slow, script)),
+                connect_wait: Some(Duration::from_millis(300)),
+                ..HyperState::default()
+            })
+            .build(tauri::generate_context!(test = true))
+            .expect("app");
+        let (events_a, mut page_a) = page();
+        let (events_b, mut page_b) = page();
+        let a = paired_hyperdht_start(app.handle().clone(), app.state(), seed(1), events_a)
+            .await
+            .unwrap();
+        let b = paired_hyperdht_start(app.handle().clone(), app.state(), seed(2), events_b)
+            .await
+            .unwrap();
+        assert_eq!(
+            paired_hyperdht_connect(app.state(), a.id, b.descriptor.clone())
+                .await
+                .unwrap_err(),
+            "HyperDHT connection timed out"
+        );
+
+        let opened = next(&mut page_a).await;
+        assert_eq!(
+            (&opened["type"], &opened["incoming"]),
+            (&json!("open"), &json!(false))
+        );
+        let incoming = next(&mut page_b).await;
+        assert_eq!(incoming["incoming"], true);
+        let closed = next(&mut page_a).await;
+        assert_eq!(
+            (&closed["type"], &closed["id"]),
+            (&json!("closed"), &opened["id"])
+        );
+        let closed = next(&mut page_b).await;
+        assert_eq!(
+            (&closed["type"], &closed["id"]),
+            (&json!("closed"), &incoming["id"])
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
