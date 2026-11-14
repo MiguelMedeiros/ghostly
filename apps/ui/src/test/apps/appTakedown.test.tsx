@@ -412,6 +412,30 @@ describe("an app in a chat that stops while the focus is in it", () => {
     }
   }
 
+  // Past a phone's width with no room beside the chat (a tablet held upright), the app covers it with Back, as a
+  // full-screen app: once stopped, Escape closes it there too, as Back does.
+  for (const reason of ["unresponsive", "revoked"]) {
+    it(`with no room beside the chat, ${reason}: Escape closes it`, async () => {
+      const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) { return this.classList.contains("chat-pane") ? 604 : 0; });
+      try {
+        const { user } = chatPanel();
+        await act(() => open(REF, "link-1"));
+        const app = screen.getByTestId("mini-app");
+        expect(within(app).getByTestId("mini-app-back")).toBeVisible();
+        act(() => started[0]!.frame.focus());
+        if (reason === "revoked") await checked({ status: "revoked" });
+        else act(() => started[0]!.stop(reason));
+        expect(within(app).getByTestId("mini-app-stopped")).toBeVisible();
+        expect(app.contains(document.activeElement)).toBe(true);
+        await user.keyboard("{Escape}");
+        expect(app).not.toBeVisible();
+        expect(chatApp("link-1")).toBeUndefined();
+      } finally {
+        width.mockRestore();
+      }
+    });
+  }
+
   it("never taken from where the person went meanwhile", async () => {
     chatPanel();
     await act(() => open(REF, "link-1"));

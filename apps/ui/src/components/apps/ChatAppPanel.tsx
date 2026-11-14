@@ -168,7 +168,8 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
     if (e.key !== "Escape" || e.defaultPrevented || !app) return;
     e.preventDefault();
     if (withBack && !app.stopped) updateChatApp(linkId, { shown: false });
-    else if (wide && !full) updateChatApp(linkId, { wide: false });
+    // Back beside the chat only where it can be: a full-screen app, or one with no room beside it, closes.
+    else if (wide && !withBack) updateChatApp(linkId, { wide: false });
     else close();
   };
   return (
