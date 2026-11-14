@@ -1833,3 +1833,35 @@ describe("while it runs (WISP 1200 § Takedowns: the app is stopped)", () => {
     expect(checked).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("the record keeps the hash of each bundle's whole file, as written (a device move hands the file over by it)", () => {
+  const hashOf = (bytes: Uint8Array) => toBase64Url(sha256(bytes));
+  type Row = { sha256?: string; pending?: { sha256?: string } };
+  const row = async () => (await appRows())[0] as Row;
+
+  it("at install, for an update waiting and once accepted, and when a restored app's files are fetched again", async () => {
+    const v1 = await bundle();
+    net.put(BUNDLE_URL, v1.bytes);
+    const store = apps(net);
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    expect((await row()).sha256).toBe(hashOf(v1.bytes));
+
+    const v2 = await bundle({ sequence: 2, permissions: ["chat", "name"] });
+    net.put(PINNED_URL, v2.bytes);
+    await net.putStore(await storeFiles({ apps: [listing(v2, [PINNED_URL])] }));
+    await store.addStore({ url: STORE_URL });
+    expect((await store.checkUpdates())[0]!.outcome).toBe("ask");
+    expect(await row()).toMatchObject({ sha256: hashOf(v1.bytes), pending: { sha256: hashOf(v2.bytes) } });
+
+    await store.acceptUpdate({ ref: v1.ref });
+    expect((await row()).sha256).toBe(hashOf(v2.bytes));
+
+    // A record from before the hash was kept, its files gone (a restored profile): fetched again, it keeps it.
+    const { sha256: _kept, ...older } = await row();
+    await wrap((await openDb()).transaction(STORES.apps, "readwrite").objectStore(STORES.apps).put(older));
+    await (await fileBytes()).remove(`app-${v2.digest}`);
+    expect(await apps(net).fetchFiles({ ref: v1.ref })).toEqual({ status: "ok" });
+    expect((await row()).sha256).toBe(hashOf(v2.bytes));
+  });
+});

@@ -34,12 +34,14 @@ const DIGEST = /^[A-Za-z0-9_-]{43}$/;
  * the chat files (WISP 1200 § Where installed apps live): left behind, every app on the new device needed its files and
  * fetched them again, and one whose source no longer served that version did not open there at all (bug hunt, 2026-11-06).
  */
-type AppRecord = { ref: string; digest?: unknown; bytes?: unknown; pending?: { digest?: unknown; bytes?: unknown } };
+type AppVersion = { digest?: unknown; bytes?: unknown; sha256?: unknown };
+type AppRecord = AppVersion & { ref: string; pending?: AppVersion };
 const bundleId = (digest: string) => `app-${digest}`;
 const BUNDLE_ID = /^app-[A-Za-z0-9_-]{43}$/;
-const bundlesOf = (app: AppRecord): { id: string; kind: unknown }[] => [app, ...(app.pending ? [app.pending] : [])]
-  .filter((version): version is { digest: string; bytes?: unknown } => typeof version.digest === "string" && DIGEST.test(version.digest))
-  .map((version) => ({ id: bundleId(version.digest), kind: version.bytes }));
+/** Each bundle a record names, with its whole file's hash where the record kept it when the file was written. */
+const bundlesOf = (app: AppRecord): { id: string; kind: unknown; sha256?: string }[] => [app, ...(app.pending ? [app.pending] : [])]
+  .filter((version): version is AppVersion & { digest: string } => typeof version.digest === "string" && DIGEST.test(version.digest))
+  .map((version) => ({ id: bundleId(version.digest), kind: version.bytes, ...(typeof version.sha256 === "string" && DIGEST.test(version.sha256) && { sha256: version.sha256 }) }));
 const FILE_KINDS: readonly FileBytesKind[] = ["opfs", "native", "idb"];
 
 /** The installed apps' records of a profile's database, none where it has no store for them yet. */
@@ -167,12 +169,14 @@ function profileSource(database: string): HandoffSource {
       found.set(file.id, { file: { id: file.id, size: source.size, sha256: sha }, source });
     }
     // The apps' bundles, where their records say they are: one not here (it needs its files on this device too) is not.
-    for (const { id, kind } of (await appRecords(peer)).flatMap(bundlesOf)) {
+    // Its hash is the one its record kept when the engine wrote and checked it (else read and hashed once): read whole
+    // here, 20 bundles of 16 MiB held the offer back 1.8 s, at every Move and again after a reload (bug hunt, 2026-11-14).
+    for (const { id, kind, sha256: kept } of (await appRecords(peer)).flatMap(bundlesOf)) {
       if (found.has(id) || !FILE_KINDS.includes(kind as FileBytesKind)) continue;
       const store = (await fileBytesOf(kind as FileBytesKind).catch(() => null))?.forSpace?.(database);
       const size = store ? await store.size(id).catch(() => null) : null;
       if (!store || !size) continue;
-      const sha = digests.get(id) ?? await store.digest(id).catch(() => undefined);
+      const sha = digests.get(id) ?? kept ?? await store.digest(id).catch(() => undefined);
       if (!sha) continue;
       digests.set(id, sha);
       found.set(id, { file: { id, size, sha256: sha }, source: { size, read: (offset, length) => store.read(id, offset, length) } });

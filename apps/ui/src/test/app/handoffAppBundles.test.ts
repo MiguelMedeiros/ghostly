@@ -141,6 +141,31 @@ describe("a move hands over the installed apps' bundles", () => {
     expect(await source.read(`app-${installed.digest}`, 10, 5)).toEqual(installed.bytes.slice(10, 15));
   });
 
+  it("the giver takes a bundle's hash from its app's record, kept when it was written, and does not read the file whole again", async () => {
+    const [installed, waiting, older] = [bundle(11), bundle(12), bundle(13)];
+    const giver = GIVER, space = opfs.store.forSpace!(giver);
+    for (const held of [installed, waiting, older]) await space.append(`app-${held.digest}`, 0, held.bytes);
+    const chess = app("chess", installed.digest, "opfs", { digest: waiting.digest, bytes: "opfs" });
+    await profileDatabase(giver, [], [
+      { ...chess, sha256: installed.sha256, pending: { ...chess.pending, sha256: waiting.sha256 } },
+      // A record from before the hash was kept: its file is read and hashed, as before.
+      app("notes", older.digest, "opfs"),
+    ]);
+    const hashed: string[] = [];
+    const digest = opfs.store.forSpace!(giver).digest;
+    const forSpace = opfs.store.forSpace!;
+    vi.spyOn(opfs.store, "forSpace").mockImplementation((other: string) => ({ ...forSpace(other), digest: async (id: string) => { hashed.push(id); return digest(id); } }));
+
+    const files = await handoffProfileHost("1.10.2", "web").source(giver).files();
+
+    expect(files).toEqual(expect.arrayContaining([
+      { id: `app-${installed.digest}`, size: installed.bytes.length, sha256: installed.sha256 },
+      { id: `app-${waiting.digest}`, size: waiting.bytes.length, sha256: waiting.sha256 },
+      { id: `app-${older.digest}`, size: older.bytes.length, sha256: older.sha256 },
+    ]));
+    expect(hashed).toEqual([`app-${older.digest}`]);
+  });
+
   it("a taker whose frozen copy holds a bundle copies it from its file storage", async () => {
     const held = bundle(4);
     await opfs.store.append(`app-${held.digest}`, 0, held.bytes);
