@@ -8,7 +8,7 @@ import { escapeRegExp } from "../regExp";
 
 /**
  * A text field (the shared one of Profile and the wallets, Settings, Network, the Settings and chat searches, the
- * message composer, Profile's name) has an edge
+ * message composer, Profile's name, an attachment's caption, a group's Rename) has an edge
  * at 3:1 or more on what is around it, in every colour theme (WCAG 1.4.11): its fill is the panel's or close to it, so
  * a pale border, or none, left a filled or empty field with no visible boundary.
  */
@@ -85,7 +85,29 @@ const FIELDS: { name: string; edge: (scheme: "dark" | "light") => string | null 
   { name: "Search chats", edge: () => restingEdge(classesWith("components/Sidebar.tsx", "bg-search-bg rounded-lg px-3 py-1.5")) },
   { name: "Profile's name", edge: () => restingEdge(classesWith("pages/Profile.tsx", "bg-transparent text-xl font-semibold")) },
   { name: "the message composer", edge: composerEdge },
+  { name: "the attachment sheet's caption", edge: () => restingEdge(classesWith("components/composer/AttachmentSheet.tsx", "w-full min-h-10 px-3 rounded-lg")) },
+  { name: "a group's Rename field", edge: () => restingEdge(classesWith("components/GroupMembersDialog.tsx", "min-w-0 flex-1 rounded-md")) },
 ];
+
+/**
+ * Fields whose focus once showed only as their edge turning from the muted ink to the accent, 1.1-1.3:1 apart: they
+ * also draw a 2 px ring with the focus.
+ */
+const FOCUSED: { name: string; classes: () => string }[] = [
+  { name: "the attachment sheet's caption", classes: () => classesWith("components/composer/AttachmentSheet.tsx", "w-full min-h-10 px-3 rounded-lg") },
+  { name: "a group's Rename field", classes: () => classesWith("components/GroupMembersDialog.tsx", "min-w-0 flex-1 rounded-md") },
+];
+
+/** The colour of a 2 px focus ring in a class list (`focus:` or `focus-visible:`), null without one. */
+function focusRing(classes: string): string | null {
+  const list = classes.split(/\s+/);
+  if (!list.some(cls => /^focus(?:-visible)?:ring-2$/.test(cls))) return null;
+  for (const cls of list) {
+    const ring = cls.match(/^focus(?:-visible)?:ring-([a-z][\w-]*)$/);
+    if (ring && !["inset", "offset"].includes(ring[1])) return ring[1];
+  }
+  return null;
+}
 
 /** Every surface a field is drawn on or filled with: the panels, the cards, the page, the chat, a field's own fill. */
 const SURFACES = ["app-bg", "sidebar-bg", "chat-bg", "panel-header", "surface", "surface-alt", "input-bg", "search-bg"];
@@ -102,6 +124,19 @@ describe("a text field's edge", () => {
       return SURFACES.map(surface => {
         const ratio = contrast(color, vars[`theme-${surface}`]);
         return ratio < 3 ? `${field.name}, ${name}: ${token} ${color} on ${surface} is ${ratio.toFixed(2)}:1` : null;
+      });
+    })).filter(Boolean);
+    expect(failures).toEqual([]);
+  });
+
+  it("shows the focus with a 2 px ring at 3:1 or more on every surface around it, in every colour theme", () => {
+    const failures = FOCUSED.flatMap(field => list.flatMap(({ name, vars }) => {
+      const token = focusRing(field.classes());
+      const color = token ? resolve(token, vars) : null;
+      if (!color) return [`${field.name}, ${name}: no focus ring (${token ?? "none"})`];
+      return SURFACES.map(surface => {
+        const ratio = contrast(color, vars[`theme-${surface}`]);
+        return ratio < 3 ? `${field.name}, ${name}: focus ${token} ${color} on ${surface} is ${ratio.toFixed(2)}:1` : null;
       });
     })).filter(Boolean);
     expect(failures).toEqual([]);
