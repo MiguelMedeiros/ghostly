@@ -2201,7 +2201,9 @@ export class Apps {
       if (this.readRefused(url, app.digest, false)) continue;
       let fetched: { bundle: AppBundle; bytes: Uint8Array };
       try { fetched = await this.fetchBundle(url); } catch (error) { this.refuseFailedRead(url, app.digest, error); continue; }
-      if (fetched.bundle.digest !== app.digest) continue;
+      // Another bundle whole than its peek showed (a host answering the range and the whole read apart): not read whole
+      // again for that peek for an hour, as at the update check.
+      if (fetched.bundle.digest !== app.digest) { this.refuseRead(url, app.digest); continue; }
       return this.filesBack(app, fetched.bytes, stores);
     }
     return { status: "needs-files" };
