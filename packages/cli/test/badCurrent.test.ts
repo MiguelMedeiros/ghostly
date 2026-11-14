@@ -37,3 +37,25 @@ describe("a bad name in <home>/current", { timeout: 60_000 }, () => {
     expect(readFileSync(file, "utf8").trim()).toBe("third");
   });
 });
+
+/**
+ * GHOSTLY_PROFILE set to a name no profile can have (`my work`, a path) is refused naming the variable and the way out.
+ * Before, every command, `profile list` and `use` too, answered `Not a profile name: "my work"`, the words of a
+ * `--profile` typed on that line, which nobody had typed.
+ */
+describe("a bad name in GHOSTLY_PROFILE", { timeout: 60_000 }, () => {
+  it("is refused naming the variable, and --profile still wins", async () => {
+    const dir = home("bad-env-profile");
+    ok(await ghostly(["--home", dir, "profile", "create", "bot"]));
+    for (const value of ["my work", "../bot"]) {
+      for (const args of [["status"], ["profile", "list"], ["profile", "use", "bot"]]) {
+        const refused = error(await ghostly(["--home", dir, ...args], { env: { GHOSTLY_PROFILE: value } }), "usage", 2);
+        expect(refused.message, `${value}: ${args.join(" ")}`).toContain("GHOSTLY_PROFILE");
+        expect(refused.message, `${value}: ${args.join(" ")}`).toContain("unset it");
+      }
+    }
+    expect(ok(await ghostly(["--home", dir, "-p", "bot", "profile", "show"], { env: { GHOSTLY_PROFILE: "my work" } })).profile).toBeDefined();
+    // A --profile typed on the line keeps its own words.
+    expect(error(await ghostly(["--home", dir, "-p", "my work", "status"]), "usage", 2).message).toContain("Not a profile name");
+  });
+});

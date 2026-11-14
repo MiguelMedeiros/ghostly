@@ -237,6 +237,7 @@
       "claimedPaid": "{{names}} paid · waiting for {{to}}'s wallet",
       "claimedPaidByMe": "You paid · waiting for {{to}}'s wallet",
       "claimedPaidToMe": "{{names}} paid · waiting for your wallet",
+      "claimedPaidWithMe": "You and {{names}} paid · waiting for {{to}}'s wallet",
       "closed": "Closed",
       "paid": "Paid",
       "paidBy": "Paid by {{name}}",

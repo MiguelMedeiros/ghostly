@@ -150,9 +150,10 @@ export function Profile() {
         </label>
         {/* Enter saves in place: blurring it dropped the keyboard's focus to the page. */}
         {/* Left empty, it shows the saved name again, which an empty name does not replace (as the nickname field does). */}
+        {/* With the focus, a ring as the other fields have: its border's turn to the accent alone was 1.1-1.3:1 from the muted one. */}
         <input data-testid="profile-name" aria-label={t("profile.nameLabel")} value={name} {...nameField} onBlur={() => { if (name.trim()) saveName(); else setName(plain); }}
           onCompositionEnd={(e) => { nameComposition.inputProps.onCompositionEnd(e); nameField.onCompositionEnd(e); }} onKeyDown={(e) => { if (!nameComposition.composing(e) && e.key === "Enter") saveName(); }}
-          className="min-w-0 flex-[1_1_8rem] bg-transparent text-xl font-semibold text-text-primary rounded-lg px-2 -mx-2 py-1 border border-field-border focus:border-accent focus:outline-none" />
+          className="min-w-0 flex-[1_1_8rem] bg-transparent text-xl font-semibold text-text-primary rounded-lg px-2 -mx-2 py-1 border border-field-border focus:border-accent focus:outline-2 focus:outline-offset-1 focus:outline-focus-ring" />
         {current.restored && (
           <span data-testid="profile-restored-tag" title={t("profile.restoredTagHint")} className="inline-flex items-center gap-0.5 shrink-0 whitespace-nowrap rounded-full border border-border bg-surface-alt ps-2.5 pe-0.5 text-xs text-text-muted">
             {t("profile.restoredTag")}

@@ -234,9 +234,10 @@
     "listSeparator": "، ",
     "sendUnavailable": "يدفع الطلب إلى المجموعة عضو واحد؛ لتدفع لشخص، اختره بدلًا من ذلك",
     "status": {
-      "claimedPaid": "{{names}} دفع · بانتظار محفظة {{to}}",
+      "claimedPaid": "{{names}} دفعوا · بانتظار محفظة {{to}}",
       "claimedPaidByMe": "دفعتَ · بانتظار محفظة {{to}}",
       "claimedPaidToMe": "{{names}} دفعوا · بانتظار محفظتك",
+      "claimedPaidWithMe": "أنت و{{names}} دفعتم · بانتظار محفظة {{to}}",
       "closed": "مغلق",
       "paid": "مدفوع",
       "paidBy": "دفعه {{name}}",
