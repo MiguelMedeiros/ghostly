@@ -200,4 +200,15 @@ describe("a hint naming a group a shell would expand", () => {
     expect(words).toEqual(["ghostly", "message", "delete", "group:Crew", "m1", "--everyone"]);
     expect(findChatOrGroup(both.links, both.groups, words[3])).toEqual({ group: crew });
   });
+
+  it.each(["misunderstanding", "Misunderstanding"])("message delete %s: a group named like a chat's id is offered as group:<name>, which --everyone takes", async (name) => {
+    // 16 letters of a chat id's alphabet: `message delete misunderstanding m1 --everyone` read "No chat".
+    const offeredFor = await offered(call(name)("chat.delete", { chat: name, message: "m1" }));
+    expect(offeredFor).toEqual(["ghostly", "message", "delete", `group:${name}`, "m1", "--everyone"]);
+    expect(findChatOrGroup(state().links, [{ ...crew, name }], offeredFor[3])).toEqual({ group: { ...crew, name } });
+  });
+
+  it("message delete Crew keeps the name alone when --everyone takes it as the group", async () => {
+    expect(await offered(call("Crew")("chat.delete", { chat: "Crew", message: "m1" }))).toEqual(["ghostly", "message", "delete", "Crew", "m1", "--everyone"]);
+  });
 });
