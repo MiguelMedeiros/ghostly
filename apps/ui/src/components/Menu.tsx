@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useOutsideDismiss, useTabTrap } from "../hooks/useDismiss";
+import { safeAreaInsets } from "../hooks/useFloatingBox";
 import { useIsMobile } from "../hooks/useIsMobile";
 import type { MenuPoint } from "../lib/contextMenu";
 
@@ -223,10 +224,15 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
 
 type Rect = { left: number; right: number; top: number; bottom: number };
 
-/** The window, or the part of it the opener's `within` ancestor covers. */
+/**
+ * The window's safe area, or the part of it the opener's `within` ancestor covers. On a phone on its side the notch's
+ * side, the rounded corners and the home indicator are off limits: with larger text a menu kept to the window's edges
+ * reached into them.
+ */
 function bounds(anchor: HTMLElement, within?: string): Rect {
   const width = document.documentElement.clientWidth || window.innerWidth, height = window.innerHeight;
-  const box = { left: 0, top: 0, right: width, bottom: height };
+  const safe = safeAreaInsets();
+  const box = { left: safe.left, top: safe.top, right: width - safe.right, bottom: height - safe.bottom };
   const area = within ? anchor.closest(within)?.getBoundingClientRect() : undefined;
   // An ancestor with no size (not laid out) bounds nothing.
   if (!area?.width || !area.height) return box;
