@@ -476,6 +476,31 @@ describe("withoutVideoMetadata", () => {
     expect(jumps.seen.bytes).toBe(32 * VIDEO_METADATA_LIMITS.readAhead);
   });
 
+  it("a fragmented video is sent as a Blob of a few parts, not a slice of the file and a part per fragment", async () => {
+    // Chromium builds a Blob a part at a time and slices a File through its blob registry: 37,500 frame-sized fragments
+    // froze the page 6.6 s before their bubble showed, and reading the copy back took as long again.
+    const u32 = (n: number) => Buffer.from([n >>> 24, (n >> 16) & 255, (n >> 8) & 255, n & 255]);
+    const head = box("ftyp", Buffer.from("isom\0\0\0\0isom", "latin1"));
+    const moov = box("moov", box("mvhd", Buffer.alloc(100)), metadataTrack(0, 4, "soun"), box("mvex", box("trex", u32(0), u32(1), u32(1), u32(0), u32(6), u32(0))));
+    const prft = box("prft", u32(0), u32(1), Buffer.alloc(8), u32(0));
+    const moof = (n: number, sample: number, offset: number) => box("moof", box("mfhd", u32(0), u32(n)), box("traf", box("tfhd", u32(0x20010), u32(1), u32(sample)), box("trun", u32(1), u32(2), u32(offset))));
+    // A frame per fragment, 1,000 of them, a `prft` (emptied) before each; then one fragment of 6 MB, read as it is.
+    const fragment = (i: number, sample: number) => [prft, moof(i + 1, sample, moof(0, 0, 0).length + 8), box("mdat", Buffer.alloc(sample * 2, (i * 7) & 255))];
+    const file = Buffer.concat([head, moov, ...Array.from({ length: 1_000 }, (_, i) => fragment(i, 600)).flat(), ...fragment(1_000, 3_000_000)]);
+    const blob = new Blob([file]);
+    let slices = 0;
+    const source = { size: blob.size, type: blob.type, slice: (start?: number, end?: number) => { slices++; return blob.slice(start, end); } } as Blob;
+    const out = Buffer.from(await bytesOf((await withoutVideoMetadata(source, "video/mp4"))!));
+    // What it sends: the file with each patch put where it goes.
+    const patches = (await videoMetadataPatches({ size: file.length, read: async (offset, length) => Uint8Array.from(file.subarray(offset, offset + length)) }, "video/mp4"))!;
+    const expected = Buffer.from(file);
+    for (const { start, end, bytes } of patches) if (bytes) expected.set(bytes, start); else expected.fill(0, start, end);
+    expect(out.equals(expected)).toBe(true);
+    expect(out.includes(Buffer.from("prft", "latin1"))).toBe(false);
+    // The reads of the walk (a window each, under 100 for 1,000 such fragments) and a few parts: 2,000 more before.
+    expect(slices).toBeLessThan(150);
+  });
+
   it("a video with nothing left to remove goes the same: the fixture's encoder tag (udta/meta/ilst) went the first time", async () => {
     const once = await bytesOf((await withoutVideoMetadata(new Blob([H264_MP4]), "video/mp4"))!);
     expect(Buffer.from(once).includes(Buffer.from("ilst", "latin1"))).toBe(false);
