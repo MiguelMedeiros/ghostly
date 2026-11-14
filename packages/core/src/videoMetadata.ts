@@ -30,6 +30,10 @@ export const VIDEO_METADATA_LIMITS = {
   readAhead: 64 * 1024,
   /** The most a walk going on from its window reads at once (an Ogg's pages, a live WebM's blocks: the whole file). */
   readAheadMax: 4 * 1024 * 1024,
+  /** The most bytes between two parts replaced that are read and sent with them as one part of the stripped video. */
+  joinGap: 64 * 1024,
+  /** The most bytes of such a part. */
+  joinedBytes: 4 * 1024 * 1024,
 } as const;
 
 /** Why a video is refused: its metadata could not be removed, so it does not go at all. */
@@ -466,11 +470,26 @@ export async function withoutVideoMetadata(source: Blob, mime: string): Promise<
   if (!patches) return undefined;
   const parts: BlobPart[] = [];
   let at = 0;
-  for (const patch of patches) {
+  for (let i = 0; i < patches.length;) {
+    const patch = patches[i]!;
+    // Parts replaced close together (a fragmented video's `moof`s, the frames between them) are read with the bytes
+    // between them and go as one part: Chromium slices a File and builds a Blob a part at a time, so a part per
+    // fragment held the page for seconds before the file was even in the chat.
+    let last = i;
+    while (last + 1 < patches.length && patches[last + 1]!.start - patches[last]!.end <= VIDEO_METADATA_LIMITS.joinGap
+      && patches[last + 1]!.end - patch.start <= VIDEO_METADATA_LIMITS.joinedBytes) last++;
     if (patch.start > at) parts.push(source.slice(at, patch.start));
-    if (patch.bytes) parts.push(patch.bytes as BlobPart);
+    if (last > i) {
+      const joined = new Uint8Array(await source.slice(patch.start, patches[last]!.end).arrayBuffer());
+      for (const { start, end, bytes } of patches.slice(i, last + 1)) {
+        if (bytes) joined.set(bytes, start - patch.start);
+        else joined.fill(0, start - patch.start, end - patch.start);
+      }
+      parts.push(joined as BlobPart);
+    } else if (patch.bytes) parts.push(patch.bytes as BlobPart);
     else for (let left = patch.end - patch.start; left > 0; left -= ZEROS.size) parts.push(ZEROS.slice(0, Math.min(left, ZEROS.size)));
-    at = patch.end;
+    at = patches[last]!.end;
+    i = last + 1;
   }
   if (at < source.size) parts.push(source.slice(at));
   return new Blob(parts, { type: mime });
