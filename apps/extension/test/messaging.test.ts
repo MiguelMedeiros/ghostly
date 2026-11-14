@@ -203,13 +203,28 @@ describe("the page and the peer talk over the 'ui' port", () => {
     const { extensionHost } = await world.load("page", () => import("../src/host.ts"));
     const connection = await extensionHost.connect(() => {}, () => {});
     const server = engine();
-    expect(server.attachedWith).toEqual([[undefined, { newest: 400 }]]);
+    expect(server.attachedWith).toEqual([[undefined, { newest: 400, marks: true, since: undefined }]]);
 
     connection.send({ kind: "history", linkId: "chat-1" });
     await settle();
     expect(server.histories).toEqual([{ client: server.attached[0], linkId: "chat-1" }]);
     // Not an engine call.
     expect(server.handled).toEqual([]);
+  });
+
+  it("attaches a page with the mark its pages last mirrored, which its port's name carries", async () => {
+    // Each tab opened or reloaded got every chat's newest 400 rows again, though the stored chats had them all.
+    const { extensionHost } = await world.load("page", () => import("../src/host.ts"));
+    await extensionHost.connect(() => {}, () => {}, { epoch: "8f9c2c5e-4a51-4f43-9d6b-0a1c2b3d4e5f", mark: 1234 });
+    const server = engine();
+    expect(server.attachedWith).toEqual([[undefined, { newest: 400, marks: true, since: { epoch: "8f9c2c5e-4a51-4f43-9d6b-0a1c2b3d4e5f", mark: 1234 } }]]);
+  });
+
+  it.each(["ui ", "ui epoch", "ui epoch -1", "ui epoch 1 2", "uix epoch 1"])("ignores a port named %j", async (name) => {
+    await send({ target: "background", type: "ensure-engine" });
+    world.chrome.runtime.connect({ name });
+    await settle();
+    expect(engine().attached).toEqual([]);
   });
 
   it("detaches the page when its port closes", async () => {
