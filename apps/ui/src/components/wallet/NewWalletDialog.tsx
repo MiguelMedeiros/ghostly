@@ -107,6 +107,20 @@ export function NewWalletDialog({ wallet, offers, setupFailed = [], initialNetwo
   const close = () => { if (phase?.state === "done" && phase.made) finish(phase.made); else if (!busy) onClose(); };
   useDialogFocus(dialog, close, () => !finished.current);
   const backdrop = useBackdropDismiss(close);
+  // A kind's button gives way to its form, and Back to the kinds: the focus on the button gone would fall to the page.
+  // It goes to the form's first field (the invite and the API key take it themselves), or back to the kind just left.
+  const shown = useRef<WalletType | null>(null);
+  useEffect(() => {
+    const left = shown.current;
+    shown.current = chosen;
+    const root = dialog.current;
+    if (!root || root.contains(document.activeElement)) return;
+    const step = "[data-testid=new-wallet-step]";
+    const target = chosen
+      ? root.querySelector<HTMLElement>(`${step} input:not([type=hidden]), ${step} select, ${step} textarea, ${step} [role=combobox]`) ?? root.querySelector<HTMLElement>("[data-testid=new-wallet-back]")
+      : left && root.querySelector<HTMLElement>(`[data-testid=new-wallet-type-${left}]`);
+    target?.focus();
+  }, [chosen]);
   const offer = (type: WalletType) => offers.find((o) => o.type === type && o.network === network);
   const setupFailure = (type: WalletType) => setupFailed.find((f) => f.type === type && f.network === network)?.reason;
 

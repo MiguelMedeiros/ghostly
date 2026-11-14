@@ -341,6 +341,27 @@ describe("New, in the header", () => {
     expect(await within(form).findByTestId("provider-form-nwc")).toBeInTheDocument();
     expect(engine.callsTo("walletCreate")).toHaveLength(1);
   });
+
+  it("with the keys: a kind with a form puts the focus on its first field, and Back on the kind just left", async () => {
+    const { user, engine } = renderApp(<Wallet />);
+    engine.update({ wallet: walletView({ mints: [mint(REAL_MINT, 10)], balance: 10, offers: offers() }) });
+    await user.click(await screen.findByTestId("wallet-add"));
+    for (const [network, kinds] of [["testnet", ["lightning", "bitcoin", "fedimint"]], ["mainnet", ["lightning", "spark", "fedimint"]]] as const) {
+      await user.click(screen.getByTestId(`new-wallet-network-${network}`));
+      for (const kind of kinds) {
+        screen.getByTestId(`new-wallet-type-${kind}`).focus();
+        await user.keyboard("{Enter}");
+        const step = await screen.findByTestId("new-wallet-step");
+        const first = step.querySelector<HTMLElement>("input, select, textarea, [role=combobox]");
+        expect(first, `${network} ${kind}: a field`).not.toBeNull();
+        await waitFor(() => expect(first, `${network} ${kind}: its first field`).toHaveFocus());
+        screen.getByTestId("new-wallet-back").focus();
+        await user.keyboard("{Enter}");
+        await waitFor(() => expect(screen.getByTestId(`new-wallet-type-${kind}`), `${network} ${kind}: back on the kind`).toHaveFocus());
+      }
+    }
+    expect(engine.callsTo("walletCreate")).toEqual([]);
+  });
 });
 
 describe("a wallet connected with New", () => {
