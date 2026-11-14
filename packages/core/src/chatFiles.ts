@@ -493,6 +493,7 @@ interface Outgoing {
    * an older generation, and does not keep the next session's pump from starting.
    */
   pumping?: number;
+  /** The file read ahead (a MiB), while it sends: one paused or cut off holds none (32 paused held 32 MiB). */
   block?: { start: number; bytes: Uint8Array };
   timer?: ReturnType<typeof setTimeout>;
   /** A pump that paused on a refused frame starts again. */
@@ -710,7 +711,7 @@ export class ChatFiles {
     this.moving.clear(); this.held.clear();
     this.host.uplink?.leave(this);
     for (const entry of this.entries.values()) {
-      if (entry.out) { entry.out.generation++; clearTimeout(entry.out.timer); clearTimeout(entry.out.wake); entry.out.next = entry.record.confirmed; }
+      if (entry.out) { entry.out.generation++; clearTimeout(entry.out.timer); clearTimeout(entry.out.wake); entry.out.next = entry.record.confirmed; entry.out.block = undefined; }
       if (entry.in) { clearTimeout(entry.in.timer); clearTimeout(entry.in.ackTimer); entry.in.ackTimer = undefined; }
       if (entry.in && !transferEnded(entry.record)) void this.checkpoint(entry);
     }
@@ -788,17 +789,19 @@ export class ChatFiles {
     return out.source;
   }
 
-  private async chunkAt(entry: Entry, offset: number): Promise<Uint8Array> {
+  private async chunkAt(entry: Entry, offset: number, generation: number): Promise<Uint8Array> {
     const out = entry.out!, size = entry.record.file.size;
     const length = Math.min(FILE_LIMITS.chunkBytes, size - offset);
-    const block = out.block;
+    let block = out.block;
     if (!block || offset < block.start || offset + length > block.start + block.bytes.length) {
       const bytes = await (await this.source(entry)).read(offset, Math.min(FILE_LIMITS.readBytes, size - offset));
       if (!bytes.length) throw new Error("The file is shorter than it says");
-      out.block = { start: offset, bytes };
+      block = { start: offset, bytes };
+      // Kept only while it still sends: a read that ends after a pause would hold its MiB until the file ended.
+      if (generation === out.generation) out.block = block;
     }
-    const at = offset - out.block!.start;
-    return out.block!.bytes.subarray(at, at + length);
+    const at = offset - block.start;
+    return block.bytes.subarray(at, at + length);
   }
 
   /** Whether this file's own window lets it send more. */
@@ -846,7 +849,7 @@ export class ChatFiles {
     try {
       while (this.shouldPump(entry) && generation === out.generation) {
         const offset = out.next;
-        const chunk = await this.chunkAt(entry, offset);
+        const chunk = await this.chunkAt(entry, offset, generation);
         const room = this.host.writable?.();
         if (room) await room;
         if (generation !== out.generation || !this.shouldPump(entry) || out.next !== offset) break;
@@ -1266,6 +1269,7 @@ export class ChatFiles {
           : record.state === "asking" && record.waitingFor === (frame.why === "busy" ? "busy" : "consent")) return;
         out.generation++;
         out.next = record.confirmed;
+        out.block = undefined;
         clearTimeout(out.timer);
         if (frame.why === "paused") { record.state = "paused"; record.pausedBy = "peer"; }
         else { record.state = "asking"; record.waitingFor = frame.why === "busy" ? "busy" : "consent"; }
@@ -1381,7 +1385,7 @@ export class ChatFiles {
     if (sentWhole(record)) return;
     record.state = "paused";
     record.pausedBy = "me";
-    if (entry.out) { entry.out.generation++; entry.out.next = record.confirmed; clearTimeout(entry.out.timer); this.send(this.offerFrame(record, true)); }
+    if (entry.out) { entry.out.generation++; entry.out.next = record.confirmed; entry.out.block = undefined; clearTimeout(entry.out.timer); this.send(this.offerFrame(record, true)); }
     else { this.send({ t: "pf-wait", id, why: "paused" }); void this.checkpoint(entry); this.startNext(); }
     this.changed(entry);
     if (entry.out) this.wakeHeld();

@@ -68,7 +68,7 @@ import { composerServices } from "../components/composer/servicesRow";
 import { CallButtons } from "../components/CallButtons";
 import { CallOverlay } from "../components/CallOverlay";
 import { IncomingCallNotification } from "../components/IncomingCallNotification";
-import { useIsLocked, useRingOnLockScreen } from "../contexts/LockScreenContext";
+import { useIsLocked, useRingOnLockScreen, useSayOnLockScreen } from "../contexts/LockScreenContext";
 import { handOverCall, ringingCall, takeHandedCall } from "../lib/lockedRing";
 import { contactStatus } from "../lib/contactStatus";
 import { othersName } from "../lib/groups";
@@ -713,6 +713,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const pageShown = usePageShown();
   // (Under the lock a ringing call would only hold the keys here too: the lock screen shows the call instead.)
   const locked = useIsLocked();
+  // Under the lock, the call's end is said by the lock screen: the region below is outside its modal dialog.
+  useSayOnLockScreen(callEndSaid, locked);
   const seen = visible && pageShown && !locked;
   useEffect(() => {
     seenRef.current = seen;
