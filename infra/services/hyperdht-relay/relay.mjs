@@ -152,12 +152,18 @@ async function holdsKey(keyPair, options, onLeave) {
  * have its node send UDP to any public host and port, from the relay's address. The public addresses a far server names
  * are dropped from its reply to a dial here, so HyperDHT connects to the address the DHT node that relayed the handshake
  * saw it at (an open server names that one itself). Its private ones stay: HyperDHT tries them only on a LAN, by a ping.
- * Every other way a dial connects follows a packet from the far peer.
+ * Every other way a dial connects follows a packet from the far peer. The relays a far server names go too: HyperDHT
+ * keeps them for the next dial to that key and sends its handshake and lookup there first, wherever they are; without
+ * them it keeps the DHT nodes it reached the far server through itself.
  */
 const { isBogon } = hyperdht('bogon')
 const NoiseWrap = hyperdht('./lib/noise-wrap.js')
 const noiseWrap = (keyPair, remotePublicKey) => new NoiseWrap(keyPair, remotePublicKey)
-const reached = payload => payload?.addresses4?.length ? { ...payload, addresses4: payload.addresses4.filter(address => isBogon(address.host)) } : payload
+const reached = payload => payload && {
+  ...payload,
+  ...(payload.addresses4?.length && { addresses4: payload.addresses4.filter(address => isBogon(address.host)) }),
+  relayAddresses: null
+}
 const reachedOnly = create => (...args) => {
   const handshake = create(...args)
   const recv = handshake.recv.bind(handshake)
