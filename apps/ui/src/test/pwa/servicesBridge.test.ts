@@ -250,4 +250,57 @@ describe("the bridge's frame of the contact's app", () => {
       delete (Navigator.prototype as { userActivation?: unknown }).userActivation;
     }
   });
+
+  it("hands on the links of a page shown before its load, while its pictures are on their way, and of each page after it", async () => {
+    class FakeActivation { get isActive() { return true; } }
+    vi.stubGlobal("UserActivation", FakeActivation);
+    const activation = new FakeActivation();
+    Object.defineProperty(Navigator.prototype, "userActivation", { get: () => activation, configurable: true });
+    // The app's pages in the frame, as the bridge reads them (a browser's `Document.prototype` getters, which happy-dom
+    // has not): ones that run no script, parsed, a picture of each still on its way, so no `load` ever.
+    const own = ["URL", "contentType", "readyState"].map((name) => [name, Object.getOwnPropertyDescriptor(Document.prototype, name)] as const);
+    for (const [name, value] of [["URL", `https://${LABEL}.svc.ghostly.example/`], ["contentType", "text/plain"], ["readyState", "interactive"]]) {
+      Object.defineProperty(Document.prototype, name, { get: () => value, configurable: true });
+    }
+    const page = () => {
+      const doc = document.implementation.createHTMLDocument();
+      return { doc, win: Object.assign(new EventTarget(), { open: () => null, document: doc }) as unknown as Window };
+    };
+    let shown = page();
+    const framed = [
+      vi.spyOn(HTMLIFrameElement.prototype, "contentWindow", "get").mockImplementation(() => shown.win),
+      vi.spyOn(HTMLIFrameElement.prototype, "contentDocument", "get").mockImplementation(() => shown.doc),
+    ];
+    const tap = (win: Window) => win.dispatchEvent(Object.defineProperty(new Event("pointerdown"), "isTrusted", { value: true }));
+    try {
+      await bridgeFrame();
+      const parent = window.parent as unknown as { postMessage: ReturnType<typeof vi.fn> };
+      const handed = () => parent.postMessage.mock.calls.filter(([data]) => (data as { type?: unknown }).type === BRIDGE_OPEN_LINK).map(([data]) => (data as { url: string }).url);
+      // A tap on its link: handed on, though the page never loaded. It was dropped by the view's sandbox with no word.
+      await vi.waitFor(() => {
+        tap(shown.win);
+        shown.win.open("https://docs.example/first");
+        expect(handed()).toContain("https://docs.example/first");
+      });
+      // The app goes on to its next page: hooked too, once.
+      shown = page();
+      await vi.waitFor(() => {
+        tap(shown.win);
+        shown.win.open("https://docs.example/second");
+        expect(handed()).toContain("https://docs.example/second");
+      });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      parent.postMessage.mockClear();
+      tap(shown.win);
+      shown.win.open("https://docs.example/once");
+      expect(handed()).toEqual(["https://docs.example/once"]);
+    } finally {
+      for (const spy of framed) spy.mockRestore();
+      for (const [name, descriptor] of own) {
+        if (descriptor) Object.defineProperty(Document.prototype, name, descriptor);
+        else delete (Document.prototype as unknown as Record<string, unknown>)[name];
+      }
+      delete (Navigator.prototype as { userActivation?: unknown }).userActivation;
+    }
+  });
 });
