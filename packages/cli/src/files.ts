@@ -507,7 +507,7 @@ export const FILE_METHODS: Record<string, Method> = {
     // downloads folder left a file named downloads. A folder that is there is answered below, as without the slash.
     const path = str(params, "path");
     if (path && (path.endsWith("/") || path.endsWith(sep)) && !(await stat(named).catch(() => undefined))?.isDirectory()) {
-      throw new CliError("bad_request", `${path} names a folder: name a file, or use --dir ${shellWord(named)} (dir over the socket)`, { dir: named });
+      throw new CliError("bad_request", `${path} names a folder: name a file, or use --dir ${shellWord(named, "<the one in details.dir>")} (dir over the socket)`, { dir: named });
     }
     // A voice message's name is Ghostly's, down to the second its sender claims: two of one second took one name, and
     // the --force the confirm hinted at replaced the first recording with the other. In --dir it steps to a free
@@ -522,7 +522,7 @@ export const FILE_METHODS: Record<string, Method> = {
       // A folder there is no file to replace: before, it asked for --force, and the --force then failed "is a folder".
       // A voice message in --dir steps past it as past a file: before, it stopped there and named that folder for --dir.
       if (there?.isDirectory() && free && next <= 1000) return new CliError("confirm", `${target} is a folder`);
-      if (there?.isDirectory()) return new CliError("bad_request", `${target} is a folder: name a file, or use --dir ${shellWord(target)} (dir over the socket)`, { dir: target });
+      if (there?.isDirectory()) return new CliError("bad_request", `${target} is a folder: name a file, or use --dir ${shellWord(target, "<the one in details.dir>")} (dir over the socket)`, { dir: target });
       if (!((there && !force) || code === "EEXIST")) return;
       const replace = `${target} exists: pass --force (force: true over the socket) to replace it`;
       if (path) return new CliError("confirm", replace);
@@ -534,7 +534,7 @@ export const FILE_METHODS: Record<string, Method> = {
       let n = 2;
       while (n <= 1000 && (await stat(`${stem} (${n})${ext}`).catch(() => undefined))) n += 1;
       const other = `${stem} (${n})${ext}`;
-      return new CliError("confirm", `${replace}, or --path ${shellWord(other)} (path over the socket) to keep both`, { path: other });
+      return new CliError("confirm", `${replace}, or --path ${shellWord(other, "<the one in details.path>")} (path over the socket) to keep both`, { path: other });
     };
     let target = named;
     for (let refused = await taken(target); refused; refused = await taken(target)) {
