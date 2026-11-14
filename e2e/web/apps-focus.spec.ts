@@ -105,7 +105,7 @@ for (const { name, mode, pointer } of TAKEOVERS) {
       for (const ch of TEXT) await key(page, ch);
     }
 
-    await expect(app.getByTestId("mini-app-stopped")).toHaveText("Notes was stopped: it kept taking the keyboard");
+    await expect(app.getByTestId("mini-app-stopped")).toHaveText("\u2068Notes\u2069 was stopped: it kept taking the keyboard");
     await expect(app.locator("iframe")).toHaveCount(0);
     await expect(app.getByTestId("mini-app-open-again")).toHaveCount(0);
     const typed = await field.inputValue();
