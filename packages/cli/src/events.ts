@@ -674,7 +674,10 @@ export class EventHub {
     // A chat's id comes back when its invite is joined again, and a group's when it is joined again: each creation and
     // removal carries its time in its id, or a listener that dedupes on it dropped the second.
     const links = new Map(state.links.map((link) => [link.id, link]));
+    // A chat whose view is the object the last state had did not change (the engine keeps an unchanged chat's view).
+    const last = new Map(this.state?.links.map((link) => [link.id, link]));
     for (const [id, link] of links) {
+      if (last.get(id) === link && this.chats.has(id)) continue;
       const shape = chatShape(link), before = this.chats.get(id);
       this.chats.set(id, shape);
       if (quiet) continue;
@@ -757,6 +760,7 @@ export class EventHub {
       else this.emit("payment.updated", `payment.updated:${id}:${payment.state}:${this.now()}`, { chat: payment.linkId, payment: json });
     }
     for (const link of state.links) {
+      if (last.get(link.id) === link) continue;
       for (const identity of link.identities?.received ?? []) {
         const key = `${link.id}:${identity.id}`, shape = identity.status, before = this.received.get(key);
         this.received.set(key, shape);
