@@ -1296,10 +1296,15 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     return { number: p.number, members: [p], alone: true };
   };
 
-  /** A lone pull request the train rebased and waits on: its head is the commit its mark names. */
+  /**
+   * A lone pull request the train rebased and waits on: its head is the commit its mark names, or the train's rebase
+   * before it (`from`) when the push of that one never happened.
+   */
   const flyAlone = async (p, past = null) => {
     const mark = p.alone;
     const stay = { number: p.number, members: [p], alone: true };
+    // The push failed: the rebase it promised is pushed again, a second run too (its head's red is the first run's).
+    if (p.sha !== mark.sha) return goAlone(p, { retried: mark.retried, rerun: mark.retried, past });
     const tip = await gh.branchSha(base);
     say(`ALONE #${p.number} at ${p.sha.slice(0, 12)} CI ${p.ci}`);
     // Turned into a draft since: GitHub merges no draft, so it waits in line like any draft and keeps its place. Put
@@ -1356,7 +1361,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   const refused = (p) => p.unread || (p.ci !== "success" && p.ci !== "failure" && (p.shared?.length || p.crowded));
   if (!inFlight) {
     // One that flew past a hold (`past` below) is not this: with no hold it is back in line like the rest.
-    const lone = line().find((p) => p.alone?.sha === p.sha && !p.alone.past && canGoAlone(p) && !refused(p));
+    const lone = line().find((p) => (p.alone?.sha === p.sha || p.alone?.from === p.sha) && !p.alone.past && canGoAlone(p) && !refused(p));
     if (lone) inFlight = await flyAlone(lone);
   }
   // Held for CI Success red on the base itself, a batch or lone pull request stays in flight until the base moves, and
