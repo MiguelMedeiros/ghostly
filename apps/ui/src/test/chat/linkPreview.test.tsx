@@ -6,6 +6,7 @@ import { MessageBubble } from "../../components/MessageBubble";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { forgetLinkPreviews } from "../../lib/linkPreviewFetch";
 import { renderApp } from "../render";
+import { fakeEngine } from "../fakeEngine";
 
 // covers: chat.link-preview.compose, chat.link-preview.render, chat.location.card
 
@@ -91,6 +92,20 @@ describe("a link preview in the composer", () => {
     await waitFor(() => expect(screen.queryByTestId("composer-link-preview")).toBeNull());
     send();
     await waitFor(() => expect(onSend).toHaveBeenCalledWith("https://closed.example/page"));
+  });
+
+  // Hide my IP from contacts: the site a link names learns this device's address when it is read, as a picture link
+  // someone sent would (MessageBubble). A pasted link may be a contact's, so with it on nothing is read; it goes as text.
+  it("asks nothing with Hide my IP on: the link goes as plain text", async () => {
+    fakeEngine.update({ settings: { relayOnly: true } });
+    const fetch = sites();
+    composer();
+    type("look https://their-server.example/page");
+    await new Promise(resolve => setTimeout(resolve, 800));
+    expect(screen.queryByTestId("composer-link-preview")).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+    send();
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("look https://their-server.example/page"));
   });
 
   it("of a message being edited goes with the edit while its link stays: saved at once, or the site failing now", async () => {
