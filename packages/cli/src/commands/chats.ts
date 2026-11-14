@@ -143,8 +143,9 @@ export const commands: Record<string, Command> = {
       timeout: groupWait.timeout,
     },
     params: ({ options }, a) => {
-      // --remove names no message: the chat has one pin. One given beside it is taken as before, and not read.
-      if (a.message === undefined && options.remove !== true) throw new CliError("usage", "Missing <message>: ghostly pin <chat|group> <message> | --remove");
+      // --remove names no message: the chat has one pin. One given beside it is taken as before, and not read. One given
+      // as "" (an unset variable in a script) is missing too, as for `react`: before, a one-shot went online to refuse it.
+      if (!a.message && options.remove !== true) throw new CliError("usage", "Missing <message>: ghostly pin <chat|group> <message> | --remove");
       if (a.message?.includes(" ")) throw new CliError("usage", "Too many arguments: ghostly pin <chat|group> <message> | --remove");
       return { chat: a.chat, message: a.message, remove: options.remove === true, wait: options.wait, timeout: timeout(options) };
     },
