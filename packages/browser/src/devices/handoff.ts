@@ -142,8 +142,8 @@ export interface HandoffStaging {
   readonly database: string;
   /** The files this staging holds whole and checked. */
   held(): Promise<HandoffFile[]>;
-  /** A file is about to be written from its start. */
-  begin(id: string): Promise<void>;
+  /** Files about to be written from their start: all of a pass's at once, not one round trip each. */
+  begin(ids: readonly string[]): Promise<void>;
   append(id: string, offset: number, bytes: Uint8Array): Promise<void>;
   /** A file is whole and its digest checked: kept, and listed by `held`. */
   finish(file: HandoffFile): Promise<void>;
@@ -1527,6 +1527,7 @@ export class HandoffTaker {
     }
     // This device said it held part of a bundle, and the giver made another: it is sending that one from the wrong byte.
     let saidOtherBundle = false;
+    const fresh: InPart[] = [];
     for (const [partName, size, digest] of parts) {
       const known = this.incoming.get(partName);
       if (known && known.size === size && known.sha256 === digest && !known.done) continue;
@@ -1534,10 +1535,14 @@ export class HandoffTaker {
       const fileDigest = filePartDigest(partName);
       const id = fileDigest ? ids[fileDigest]?.[0] : undefined;
       if (fileDigest && !id) { this.out(handoffCancelFrame("damaged")); await this.giveUp("damaged"); return; }
-      const part: InPart = { name: partName, size, sha256: digest, got: 0, hash: sha256.create(), ...(id ? { id } : { chunks: [] }) };
-      if (id) await this.staging!.begin(id);
-      this.incoming.set(partName, part);
-      if (size === 0) await this.partDone(part);
+      fresh.push({ name: partName, size, sha256: digest, got: 0, hash: sha256.create(), ...(id ? { id } : { chunks: [] }) });
+    }
+    // Every file of the pass begins at once: one at a time, 3,000 small files waited 1.6 to 2.6 s here (bug hunt, 2026-11-13).
+    const begun = fresh.flatMap((part) => (part.id ? [part.id] : []));
+    if (begun.length) await this.staging!.begin(begun);
+    for (const part of fresh) {
+      this.incoming.set(part.name, part);
+      if (part.size === 0) await this.partDone(part);
     }
     this.totals = { bytes: 0, total };
     this.changed();
@@ -1628,7 +1633,7 @@ export class HandoffTaker {
     if (part.retried) { this.out(handoffCancelFrame("damaged")); await this.giveUp("damaged"); return; }
     if (part.id) await this.staging!.discard(part.id).catch(() => {});
     this.incoming.set(part.name, { ...part, got: 0, hash: sha256.create(), retried: true, done: false, ...(part.id ? {} : { chunks: [] }) });
-    if (part.id) await this.staging!.begin(part.id);
+    if (part.id) await this.staging!.begin([part.id]);
     this.totals.bytes -= part.got;
     await this.sendHave();
   }

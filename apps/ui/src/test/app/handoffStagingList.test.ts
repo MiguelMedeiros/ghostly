@@ -1,6 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { registerFileBytes, resetFileBytes, type FileBytes } from "@ghostly/browser/shared/fileBytes";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { digestText, registerFileBytes, resetFileBytes, type FileBytes } from "@ghostly/browser/shared/fileBytes";
 import { setDatabaseName } from "@ghostly/browser/shared/idb";
 import type { HandoffFile } from "@ghostly/browser/devices/handoff";
 import { handoffProfileHost } from "../../lib/handoffProfile";
@@ -26,6 +27,7 @@ function folders(): FileBytes {
     flush: async () => {},
     close: async () => {},
     size: async (id: string) => files.get(`${space}/${id}`)?.length ?? null,
+    digest: async (id: string) => digestText(sha256(files.get(`${space}/${id}`)!)),
     remove: async (id: string) => { files.delete(`${space}/${id}`); },
     removeWhere: async () => {},
     forSpace: (other: string) => view(other),
@@ -33,8 +35,9 @@ function folders(): FileBytes {
   return view("ghostly");
 }
 
-const fileOf = (n: number): HandoffFile => ({ id: `chat${n % 40}-in-${String(n).padStart(6, "0")}-photo`, size: 3, sha256: String(n).padStart(43, "A") });
 const bytes = new Uint8Array(3);
+// The bytes' own digest: a page that reopens the staging checks the small files against it.
+const fileOf = (n: number): HandoffFile => ({ id: `chat${n % 40}-in-${String(n).padStart(6, "0")}-photo`, size: 3, sha256: digestText(sha256(bytes)) });
 const legacyKey = (database: string) => `ghostly-staging:${database.replace(/^ghostly_/, "")}`;
 const byId = (a: HandoffFile, b: HandoffFile) => (a.id < b.id ? -1 : 1);
 const stagingKeys = () => Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((key): key is string => !!key?.startsWith("ghostly-staging:"));
@@ -59,7 +62,7 @@ describe("the note of the files a taker's staging holds", () => {
     const staging = await handoffProfileHost("1.1.7", "web").staging.open();
     // As one list: 473,421 characters for the first 50 files, 11,006,010 for the 550th to the 600th.
     const puts = vi.spyOn(IDBObjectStore.prototype, "put"), lists = vi.spyOn(IDBObjectStore.prototype, "getAll");
-    for (let n = 0; n < 600; n++) { const file = fileOf(n); await staging.begin(file.id); await staging.append(file.id, 0, bytes); await staging.finish(file); }
+    for (let n = 0; n < 600; n++) { const file = fileOf(n); await staging.begin([file.id]); await staging.append(file.id, 0, bytes); await staging.finish(file); }
 
     // A file that finishes writes its own note once, and nothing reads the others'.
     expect(puts).toHaveBeenCalledTimes(600);
@@ -75,7 +78,7 @@ describe("the note of the files a taker's staging holds", () => {
     const writes = vi.spyOn(localStorage, "setItem").mockImplementation(() => { throw new DOMException("The quota has been exceeded.", "QuotaExceededError"); });
     const files = Array.from({ length: 50 }, (_, n) => fileOf(n));
     try {
-      for (const file of files) { await staging.begin(file.id); await staging.append(file.id, 0, bytes); await staging.finish(file); }
+      for (const file of files) { await staging.begin([file.id]); await staging.append(file.id, 0, bytes); await staging.finish(file); }
       expect((await staging.held()).sort(byId)).toEqual(files.sort(byId));
       expect(writes).not.toHaveBeenCalled();
     } finally { writes.mockRestore(); }
@@ -84,11 +87,11 @@ describe("the note of the files a taker's staging holds", () => {
   it("lists what was finished, and no longer a file that began again or was discarded", async () => {
     const staging = await handoffProfileHost("1.1.7", "web").staging.open();
     const [a, b, c] = [fileOf(1), fileOf(2), fileOf(3)];
-    for (const file of [a, b, c]) { await staging.begin(file.id); await staging.append(file.id, 0, bytes); await staging.finish(file); }
+    for (const file of [a, b, c]) { await staging.begin([file.id]); await staging.append(file.id, 0, bytes); await staging.finish(file); }
     expect((await staging.held()).sort(byId)).toEqual([a, b, c]);
 
     await staging.discard(b.id);
-    await staging.begin(c.id);
+    await staging.begin([c.id]);
     expect(await staging.held()).toEqual([a]);
 
     // The same namespace opened again (the page reloaded): the note is on the device, not in the page.
@@ -104,7 +107,7 @@ describe("the note of the files a taker's staging holds", () => {
 
     expect((await staging.held()).sort(byId)).toEqual([a, b]);
     await staging.discard(a.id);
-    await staging.begin(c.id); await staging.append(c.id, 0, bytes); await staging.finish(c);
+    await staging.begin([c.id]); await staging.append(c.id, 0, bytes); await staging.finish(c);
     expect((await staging.held()).sort(byId)).toEqual([b, c]);
 
     await host.staging.drop(staging.database);
@@ -132,8 +135,8 @@ describe("the note of the files a taker's staging holds", () => {
     const host = handoffProfileHost("1.1.7", "web");
     const one = await host.staging.open("ghostly_stage"), other = await host.staging.open("ghostly_stage.2");
     const [a, b] = [fileOf(1), fileOf(2)];
-    await one.begin(a.id); await one.append(a.id, 0, bytes); await one.finish(a);
-    await other.begin(b.id); await other.append(b.id, 0, bytes); await other.finish(b);
+    await one.begin([a.id]); await one.append(a.id, 0, bytes); await one.finish(a);
+    await other.begin([b.id]); await other.append(b.id, 0, bytes); await other.finish(b);
 
     expect(await one.held()).toEqual([a]);
     expect(await other.held()).toEqual([b]);
@@ -145,8 +148,8 @@ describe("the note of the files a taker's staging holds", () => {
     localStorage.setItem(registryKey(), JSON.stringify({ version: 1, active: "", profiles: [{ id: "", name: "Personal", createdAt: 0 }] }));
     const host = handoffProfileHost("1.1.7", "web");
     const staging = await host.staging.open(), unfinished = await host.staging.open("ghostly_stage");
-    for (let n = 0; n < 1_000; n++) { const file = fileOf(n); await staging.begin(file.id); await staging.append(file.id, 0, bytes); await staging.finish(file); }
-    await unfinished.begin(fileOf(1).id); await unfinished.append(fileOf(1).id, 0, bytes); await unfinished.finish(fileOf(1));
+    for (let n = 0; n < 1_000; n++) { const file = fileOf(n); await staging.begin([file.id]); await staging.append(file.id, 0, bytes); await staging.finish(file); }
+    await unfinished.begin([fileOf(1).id]); await unfinished.append(fileOf(1).id, 0, bytes); await unfinished.finish(fileOf(1));
 
     // The install, then the take drops the old namespace (bug hunt, 2026-11-04: 1,000 keys, 125,690 characters left).
     await host.staging.install("ghostly", staging.database);

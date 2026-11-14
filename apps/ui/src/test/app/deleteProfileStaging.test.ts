@@ -59,9 +59,9 @@ async function stoppedPull(step: "stopped" | "verified") {
   const host = handoffProfileHost("1.1.7", "web");
   setHandoffProfileHost(host);
   const staging = await host.staging.open();
-  for (let n = 0; n < 3; n++) { const file = fileOf(n); await staging.begin(file.id); await staging.append(file.id, 0, new Uint8Array(3)); await staging.finish(file); }
+  for (let n = 0; n < 3; n++) { const file = fileOf(n); await staging.begin([file.id]); await staging.append(file.id, 0, new Uint8Array(3)); await staging.finish(file); }
   // An installed app's bundle, which a move hands over beside the chat files.
-  await staging.begin(BUNDLE.id); await staging.append(BUNDLE.id, 0, new Uint8Array(3)); await staging.finish(BUNDLE);
+  await staging.begin([BUNDLE.id]); await staging.append(BUNDLE.id, 0, new Uint8Array(3)); await staging.finish(BUNDLE);
   const ns = space(staging.database);
   // A note an earlier build kept, one key per file (v1.10.1).
   localStorage.setItem(`ghostly-staging:${ns}:chat1-in-9-photo`, JSON.stringify({ size: 3, sha256: "9".padStart(43, "A") }));

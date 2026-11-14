@@ -21,7 +21,8 @@ export type WorkerRequest = { n: number; space: string } & (
   | { op: "probe" }
   | { op: "stage"; id: string; source: Blob }
   | { op: "append"; id: string; offset: number; bytes: Uint8Array }
-  | { op: "flush" | "close" | "size" | "digest" | "remove"; id: string }
+  | { op: "flush" | "size" | "digest" | "remove"; id: string }
+  | { op: "close"; id: string; flush?: boolean }
   | { op: "truncate"; id: string; size: number }
   | { op: "read"; id: string; offset: number; length: number }
   | { op: "removeWhere"; prefix: string }
@@ -71,12 +72,12 @@ async function handle(space: string, id: string, create = true): Promise<SyncHan
   return opened;
 }
 
-function release(space: string, id: string): void {
+function release(space: string, id: string, flush = true): void {
   const key = `${space}/${id}`;
   const held = open.get(key);
   if (!held) return;
   open.delete(key);
-  try { held.flush(); } finally { held.close(); }
+  try { if (flush) held.flush(); } finally { held.close(); }
 }
 
 function readAt(sync: SyncHandle, offset: number, length: number): Uint8Array {
@@ -189,7 +190,7 @@ async function runRequest(request: WorkerRequest): Promise<{ value?: unknown; tr
       return {};
     }
     case "flush": open.get(`${space}/${request.id}`)?.flush(); return {};
-    case "close": release(space, request.id); return {};
+    case "close": release(space, request.id, request.flush !== false); return {};
     case "size": {
       const held = open.get(`${space}/${request.id}`);
       if (held) return { value: held.getSize() };
