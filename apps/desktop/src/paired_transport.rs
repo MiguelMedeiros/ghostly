@@ -963,6 +963,105 @@ mod tests {
         serving.abort();
     }
 
+    /// A DNS that answers one name's TXT records, and nothing else: no lookup leaves this machine.
+    #[derive(Debug, Clone)]
+    struct Txt(String, Vec<String>);
+    impl Resolver for Txt {
+        fn lookup_ipv4(&self, _host: String) -> Lookup<std::net::Ipv4Addr> {
+            Box::pin(async { Ok(Box::new(std::iter::empty()) as BoxIter<std::net::Ipv4Addr>) })
+        }
+        fn lookup_ipv6(&self, _host: String) -> Lookup<std::net::Ipv6Addr> {
+            Box::pin(async { Ok(Box::new(std::iter::empty()) as BoxIter<std::net::Ipv6Addr>) })
+        }
+        fn lookup_txt(&self, host: String) -> Lookup<TxtRecordData> {
+            let found: Vec<TxtRecordData> = if host.trim_end_matches('.') == self.0 {
+                vec![TxtRecordData::from(self.1.clone())]
+            } else {
+                vec![]
+            };
+            Box::pin(async move { Ok(Box::new(found.into_iter()) as BoxIter<TxtRecordData>) })
+        }
+        fn clear_cache(&self) {}
+        fn reset(&self) -> Box<dyn Resolver> {
+            Box::new(self.clone())
+        }
+    }
+
+    /// A contact dialled by its id alone, with no relay and no address: the endpoint with no relays set never looks it
+    /// up elsewhere and dials the relay its own record there names, this machine. A local TCP service counts what
+    /// reaches it; the same dial from an endpoint with n0's address lookups does reach it, so the count would see one.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_contact_with_no_relay_is_not_looked_up_and_dialled_where_its_own_record_says() {
+        let service = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = service.local_addr().unwrap().port();
+        let reached = Arc::new(AtomicU64::new(0));
+        let count = reached.clone();
+        let serving = tokio::spawn(async move {
+            while let Ok((socket, _)) = service.accept().await {
+                count.fetch_add(1, Ordering::SeqCst);
+                drop(socket);
+            }
+        });
+        let key = iroh::SecretKey::from_bytes(&[53; 32]).public();
+        let record = || {
+            DnsResolver::custom(Txt(
+                format!("_iroh.{}.dns.iroh.link", key.to_z32()),
+                vec![format!("relay=http://127.0.0.1:{port}/")],
+            ))
+        };
+        let own: Vec<String> = wire::default_relays()
+            .urls::<Vec<_>>()
+            .into_iter()
+            .map(|url| url.to_string())
+            .collect();
+        let contact = wire::Address {
+            id: key.to_string(),
+            relay: None,
+            addresses: vec![],
+        };
+        assert!(dialable_relay(contact.relay.as_deref(), &own));
+        let dial = |endpoint: iroh::Endpoint| {
+            let contact = contact.clone();
+            async move {
+                for _ in 0..2 {
+                    let _ = tokio::time::timeout(
+                        Duration::from_secs(3),
+                        wire::connect(&endpoint, &contact),
+                    )
+                    .await;
+                }
+                endpoint.close().await;
+            }
+        };
+        dial(
+            wire::endpoint([54; 32], false, Some(relay_dns(&own, record())))
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(
+            reached.load(Ordering::SeqCst),
+            0,
+            "connected to this machine"
+        );
+        dial(
+            iroh::Endpoint::builder(iroh::endpoint::presets::N0)
+                .relay_mode(iroh::RelayMode::Custom(wire::default_relays()))
+                .dns_resolver(relay_dns(&own, record()))
+                .secret_key(iroh::SecretKey::from_bytes(&[55; 32]))
+                .alpns(vec![wire::ALPN.to_vec()])
+                .bind()
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert!(
+            reached.load(Ordering::SeqCst) > 0,
+            "the dial is seen when it happens"
+        );
+        serving.abort();
+    }
+
     #[test]
     fn iroh_relays_are_the_persons_then_the_environment_then_none() {
         let mine = Some(vec![
