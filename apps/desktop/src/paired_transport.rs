@@ -50,9 +50,48 @@ pub enum Event {
 }
 /// A frame for the stream (its bytes, and whether it is a binary message), and who hears once it is written there.
 type Outgoing = (Vec<u8>, bool, oneshot::Sender<()>);
+
+/// Bytes of a connection's frames the page may have been handed and not taken yet (`paired_native_took`). Past it the
+/// connection is read no further: a contact faster than the page waits on QUIC's flow control, not in the WebView's
+/// queue, which a channel's `send` fills without ever waiting.
+const RECEIVE_CREDIT: u32 = 512 * 1024;
+
+/// What the page may still be handed on a connection, and the size of each frame it was handed and not taken, oldest
+/// first.
+struct Credit {
+    room: tokio::sync::Semaphore,
+    handed: Mutex<std::collections::VecDeque<u32>>,
+}
+impl Credit {
+    fn new() -> Self {
+        Credit {
+            room: tokio::sync::Semaphore::new(RECEIVE_CREDIT as usize),
+            handed: Mutex::default(),
+        }
+    }
+    /// Waits for room for a frame of `size` bytes, and counts it as handed.
+    async fn hand(&self, size: u32) -> Result<(), String> {
+        self.room
+            .acquire_many(size)
+            .await
+            .map_err(|_| "Native UI unavailable")?
+            .forget();
+        self.handed.lock().unwrap().push_back(size);
+        Ok(())
+    }
+    /// The page took the oldest `frames` it was handed (more than it was handed counts as all of them).
+    fn took(&self, frames: usize) {
+        let mut handed = self.handed.lock().unwrap();
+        let frames = frames.min(handed.len());
+        let bytes: u32 = handed.drain(..frames).sum();
+        self.room.add_permits(bytes as usize);
+    }
+}
+
 struct Socket {
     connection: Connection,
     tx: mpsc::Sender<Outgoing>,
+    credit: Arc<Credit>,
     /// The page's word for the app's exit on this connection (`paired_native_parting`), sent by `part`.
     parting: Option<String>,
 }
@@ -170,6 +209,7 @@ impl TransportState {
         .map_err(|_| "Native stream timed out")??;
         let id = self.next();
         let (tx, mut rx) = mpsc::channel::<Outgoing>(32);
+        let credit = Arc::new(Credit::new());
         {
             let mut inner = self.inner.lock().unwrap();
             if !inner.peers.contains_key(&peer)
@@ -185,6 +225,7 @@ impl TransportState {
                     Socket {
                         connection: connection.clone(),
                         tx,
+                        credit: credit.clone(),
                         parting: None,
                     },
                 ),
@@ -205,13 +246,26 @@ impl TransportState {
         tokio::spawn(async move {
             tokio::select! {
                 _ = async { while let Some((frame, binary, written)) = rx.recv().await { wire::write_message(&mut send, &frame, binary).await?; let _ = written.send(()); } Ok::<(), String>(()) } => {},
-                _ = async { loop { let (frame, binary) = wire::read_message(&mut recv).await?; let event = if binary { Event::Binary { id, bytes: base64::engine::general_purpose::STANDARD.encode(frame) } } else { Event::Frame { id, text: String::from_utf8(frame).map_err(|_| "Non-text paired frame")? } }; events.send(event).map_err(|_| "Native UI unavailable")?; } #[allow(unreachable_code)] Ok::<(), String>(()) } => {},
+                _ = async { loop { let (frame, binary) = wire::read_message(&mut recv).await?; credit.hand(frame.len() as u32).await?; let event = if binary { Event::Binary { id, bytes: base64::engine::general_purpose::STANDARD.encode(frame) } } else { Event::Frame { id, text: String::from_utf8(frame).map_err(|_| "Non-text paired frame")? } }; events.send(event).map_err(|_| "Native UI unavailable")?; } #[allow(unreachable_code)] Ok::<(), String>(()) } => {},
                 _ = connection.closed() => {},
             }
             state.close(id);
             let _ = events.send(Event::Closed { id });
         });
         Ok(id)
+    }
+    /// The page took the oldest `frames` it was handed on connection `id`: as many more bytes may come from it.
+    fn took(&self, id: u64, frames: usize) {
+        let credit = self
+            .inner
+            .lock()
+            .unwrap()
+            .sockets
+            .get(&id)
+            .map(|(_, socket)| socket.credit.clone());
+        if let Some(credit) = credit {
+            credit.took(frames);
+        }
     }
     fn close(&self, id: u64) {
         if let Some((_, socket)) = self.inner.lock().unwrap().sockets.remove(&id) {
@@ -698,6 +752,11 @@ pub fn paired_native_parting(
         .ok_or("Connection closed")?;
     socket.parting = text;
     Ok(())
+}
+/// The page took `frames` more of the connection's frames (`RECEIVE_CREDIT`).
+#[tauri::command]
+pub fn paired_native_took(state: State<'_, TransportState>, connection_id: u64, frames: u32) {
+    state.took(connection_id, frames as usize);
 }
 #[tauri::command]
 pub fn paired_native_close(state: State<'_, TransportState>, connection_id: u64) {
@@ -1517,8 +1576,9 @@ mod tests {
             .any(|e| e["type"] == "closed"));
     }
 
-    /// A channel whose page takes no frame while `stalled` holds: a contact on a link slower than this side writes.
-    fn slow_channel(stalled: Arc<AtomicBool>) -> (Channel<Event>, Seen) {
+    /// A channel whose page takes no frame while `stalled` holds: a contact on a link slower than this side writes. Each
+    /// frame it takes it tells `state` of, as the page does.
+    fn slow_channel(stalled: Arc<AtomicBool>, state: TransportState) -> (Channel<Event>, Seen) {
         let seen: Seen = Arc::default();
         let log = seen.clone();
         let channel = Channel::new(move |body| {
@@ -1526,6 +1586,9 @@ mod tests {
                 let event: Value = serde_json::from_str(&json).unwrap();
                 while event["type"] == "frame" && stalled.load(Ordering::SeqCst) {
                     std::thread::sleep(Duration::from_millis(10));
+                }
+                if event["type"] == "frame" {
+                    state.took(event["id"].as_u64().unwrap(), 1);
                 }
                 log.lock().unwrap().push(event);
             }
@@ -1550,7 +1613,10 @@ mod tests {
         let app = app();
         let (alice, _, alice_seen) = start(&app, 60).await;
         let stalled = Arc::new(AtomicBool::new(true));
-        let (events, bob_seen) = slow_channel(stalled.clone());
+        let (events, bob_seen) = slow_channel(
+            stalled.clone(),
+            app.state::<TransportState>().inner().clone(),
+        );
         let bob = app
             .state::<TransportState>()
             .start([61; 32], events, true, &[])
@@ -1606,6 +1672,82 @@ mod tests {
             .unwrap()
             .iter()
             .any(|e| e["type"] == "closed"));
+    }
+
+    /// A contact that writes faster than the page takes its frames: what Rust handed the page and the page did not take
+    /// stays within the connection's credit, and Rust reads no further meanwhile (the contact waits on QUIC's window).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn the_page_is_handed_no_more_than_it_took_and_its_credit() {
+        let app = app();
+        let (alice, _, _) = start(&app, 62).await;
+        let (events, bob_seen) = channel();
+        let bob = app
+            .state::<TransportState>()
+            .start([63; 32], events, true, &[])
+            .await
+            .unwrap();
+        let outgoing = connect(&app, alice, &bob.descriptor).await.unwrap();
+        let incoming = event(&bob_seen, kind("open")).await["id"].as_u64().unwrap();
+
+        // More than QUIC's stream window (`STREAM_WINDOW`) holds besides the credit: the contact has to wait.
+        let frames = 128;
+        let handle = app.handle().clone();
+        let sending = tokio::spawn(async move {
+            for i in 0..frames {
+                let text = format!("{i:05}{}", "x".repeat(wire::MAX_FRAME - 5));
+                send(&handle, outgoing, text).await?;
+            }
+            Ok::<(), String>(())
+        });
+        let handed = || {
+            bob_seen
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|e| e["type"] == "frame")
+                .map(|e| e["text"].as_str().unwrap().len())
+                .sum::<usize>()
+        };
+        let count = || {
+            bob_seen
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|e| e["type"] == "frame")
+                .count()
+        };
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        assert!(
+            handed() <= RECEIVE_CREDIT as usize,
+            "the page was handed {} bytes it never took",
+            handed()
+        );
+        assert!(!sending.is_finished(), "the contact waits for the page");
+
+        // The page takes them, a few at a time: the rest comes, in order, and the contact's sends all go.
+        let state = app.state::<TransportState>();
+        let mut told = 0;
+        for _ in 0..400 {
+            let taken = count();
+            paired_native_took(state.clone(), incoming, (taken - told) as u32);
+            told = taken;
+            if taken == frames {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        sending.await.unwrap().unwrap();
+        let order: Vec<String> = bob_seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|e| e["type"] == "frame")
+            .map(|e| e["text"].as_str().unwrap()[..5].to_string())
+            .collect();
+        assert_eq!(
+            order,
+            (0..frames).map(|i| format!("{i:05}")).collect::<Vec<_>>()
+        );
     }
 
     #[tokio::test]
