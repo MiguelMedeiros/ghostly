@@ -4099,6 +4099,7 @@ export class GhostlyNode implements EngineImplementation {
     if (filesEnded) setTimeout(() => void live.link?.stop(true), FILES_END_MS);
     else void live.link?.stop(true);
     void live.caps?.stop();
+    this.unshareServicesOf(live.stored.peerPubKeyZ32);
     this.identities.forget(linkId);
     this.nostrSocial.forgetLink(linkId);
     this.hold.forgetLink(linkId);
@@ -7577,6 +7578,20 @@ export class GhostlyNode implements EngineImplementation {
     service.sharedWith = [...granted];
     void db.putService(service);
     this.servicesChanged();
+  }
+
+  /**
+   * A deleted chat's contact loses the services shared with it, unless another chat with the same key is left. Kept,
+   * the grant had no chat to be turned off from, and the same invite joined again (the same key) was served again.
+   */
+  private unshareServicesOf(peerPubKeyZ32: string): void {
+    if (!peerPubKeyZ32 || [...this.links.values()].some(({ stored }) => !stored.group && stored.peerPubKeyZ32 === peerPubKeyZ32)) return;
+    const granted = this.services.filter((s) => s.sharedWith?.includes(peerPubKeyZ32));
+    for (const service of granted) {
+      service.sharedWith = service.sharedWith!.filter((k) => k !== peerPubKeyZ32);
+      void db.putService(service);
+    }
+    if (granted.length) this.servicesChanged();
   }
 
   setServiceEnabled({ serviceId, enabled }: { serviceId: string; enabled: boolean }): void {
