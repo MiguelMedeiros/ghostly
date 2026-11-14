@@ -4,6 +4,7 @@ import { MAX_AVATAR_LENGTH, MAX_AVATAR_SIDE, NO_PICTURE_METADATA, sanitizeAvatar
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { bool, contactKeyOf, groupById, groupNameOf, groupOf, node, ownChatOf, settingsOf, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError, localFileError } from "./errors";
+import { shellWord } from "./shellWord";
 import { guardText } from "./secretGuard";
 import { groupJson } from "./views";
 
@@ -90,7 +91,7 @@ async function picture(params: Params): Promise<string | null> {
 function joined(ctx: ApiContext, params: Params, twin?: string): GroupView {
   const group = groupOf(ctx, params, twin);
   if (group.status || !group.invitation) return group;
-  const ref = str(params, "group", true), shown = /^[\w.:-]+$/.test(ref) ? ref : JSON.stringify(ref);
+  const shown = shellWord(str(params, "group", true));
   throw new CliError("refused", group.invitation.accepted
     ? `You are not in ${group.name} yet: you accepted its invitation, and its admin has not let you in`
     : `You are not in ${group.name} yet: ghostly group accept ${shown} joins it`);

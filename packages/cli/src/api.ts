@@ -8,6 +8,7 @@ import { FORWARD_MESSAGES, FORWARD_TARGETS } from "@ghostly/browser/engine/forwa
 import { findSecret, guardText, secretWords } from "./secretGuard";
 import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
 import { asCliError, CliError } from "./errors";
+import { shellWord } from "./shellWord";
 import {
   bool, chatOf, chatOrGroup, dhtOnly, findChat, findGroup, groupById, groupNameOf, groupOf, groupPrefixed, inviteTaken, keptForJoin, list, messageOf, noMessage, nobodyJoined, node, num, oneOf, oneShotWaits, settingsOf, shownName, sinceSeq, somebodyJoined, state, str, transportOffered, waitForState,
   type ApiContext, type Method, type Params, type RefPlace,
@@ -685,7 +686,7 @@ const METHODS: Record<string, Method> = {
     // A group's message is deleted for everyone only (the apps forget none on one device): a group named without the
     // flag says so, with the command that takes it, not "No chat".
     const ref = str(params, "message") ?? "<message>";
-    const link = chatNotGroup(ctx, params, "message delete", `${/^[\w.:<>-]+$/.test(ref) ? ref : JSON.stringify(ref)} --everyone`);
+    const link = chatNotGroup(ctx, params, "message delete", `${ref === "<message>" ? ref : shellWord(ref)} --everyone`);
     const messageId = str(params, "message", true);
     if (!(await node(ctx).getMessage(link.id, messageId))) throw noMessage(messageId, { group: false, ref: str(params, "chat", true) });
     // A waiting text of mine is cancelled; one the outbox already handed to the link may be out, so the engine deletes it
@@ -1143,7 +1144,7 @@ function notAGroup<T>(ctx: ApiContext, params: Params, chat: () => T, hint: (sho
     const named = groupPrefixed(ref) ?? ref;
     let group: GroupView;
     try { group = findGroup(state(ctx).groups, named); } catch { throw error; }
-    const shown = /^[\w.:-]+$/.test(named) ? named : JSON.stringify(named);
+    const shown = shellWord(named);
     throw new CliError("not_found", `${JSON.stringify(ref)} is a group, not a chat: ${hint(shown)}`, { group: group.id });
   }
 }

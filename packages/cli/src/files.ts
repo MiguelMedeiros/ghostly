@@ -13,6 +13,7 @@ import { childEnv } from "./childEnv";
 import { bool, chatOf, findChatOrGroup, keptForJoin, list, noFile, noMessage, node, num, oneOf, oneShotWaits, sentAt, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
 import { groupSendRefused } from "./api";
 import { CliError } from "./errors";
+import { shellWord } from "./shellWord";
 import { guardText } from "./secretGuard";
 import { endTyping } from "./typing";
 import { measureVoice } from "./voicePeaks";
@@ -261,14 +262,6 @@ export function fitName(name: string): string {
 export function saveName(name: string): string {
   const clean = sanitizeFileName(name);
   return fitName(clean.startsWith("-") ? `_${clean}` : clean);
-}
-
-/**
- * A path as a hint offers it to be pasted into a shell: one word, single-quoted (a `'` in it escaped) unless it is plain.
- * Every "<name> (2)" the keep-both hint names has a `(` in it, a syntax error in bash and zsh unquoted.
- */
-function shellWord(path: string): string {
-  return /^[\w@%+=:,./-]+$/.test(path) ? path : `'${path.replaceAll("'", "'\\''")}'`;
 }
 
 /**
