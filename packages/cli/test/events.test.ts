@@ -41,6 +41,18 @@ describe("the event stream", () => {
     expect(JSON.stringify(events)).not.toContain("ghostly1secret");
   });
 
+  it("reads no chat whose view is the same object as in the last state", async () => {
+    const { h, events } = await hub("same-view.jsonl");
+    let reads = 0;
+    const kept = link("c1");
+    Object.defineProperty(kept, "label", { get: () => { reads++; return "kept"; }, enumerable: true });
+    h.baseline(state([kept, link("c2")]), new Map());
+    const before = reads;
+    h.sink.post({ kind: "state", state: state([kept, link("c2", { label: "bot" })]) });
+    expect(reads).toBe(before);
+    expect(events.map((e) => e.id)).toEqual(["chat.renamed:c2:1000"]);
+  });
+
   it("reports messages, delivery changes, deletions, and chat changes once each", async () => {
     const { h, events } = await hub("a.jsonl");
     h.baseline(state([link("c1")]), new Map([["c1", [message("c1", "old")]]]));
