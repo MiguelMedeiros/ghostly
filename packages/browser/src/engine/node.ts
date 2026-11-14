@@ -3122,11 +3122,25 @@ export class GhostlyNode implements EngineImplementation {
       contactAsks: this.contactAsks.views(),
       nostr: this.nostrSocial.state(),
       edges: [...[...this.links.values()].filter(live => live.stored.group && !live.stored.groupEntry).map(viewOf), ...this.communityPayViews(groups)],
-      groups: groups.map(group => ({ ...group, ...(this.groupAdminOff.has(group.id) && { adminOff: true as const }), ...(this.reactionNotes.has(`group:${group.id}`) && { lastReaction: this.reactionNotes.get(`group:${group.id}`) }), ...this.groupWakeView(group), members: group.members.map(member => {
-        const edge = member.me ? undefined : this.edgeView(group.id, member.key, edges);
-        return edge ? { ...member, edge } : member;
-      }) })),
+      groups: groups.map(group => this.groupStateView(group, edges)),
     };
+  }
+
+  /**
+   * One group's view as `getState().groups` has it (its members' edges too), without building every chat's: a bot names
+   * a group by the id its events give, and the whole state was built twice per group send (23 ms at 2,000 chats).
+   */
+  groupView(groupId: string): GroupView | undefined {
+    const group = this.groups.view(groupId);
+    return group && this.groupStateView(group, this.edgesByMember(groupId));
+  }
+
+  /** A group's view with what the engine adds to it: its members' edges, its admin switch, wake-up tokens, last reaction. */
+  private groupStateView(group: GroupView, edges: Map<string, Map<string, LiveLink>>): GroupView {
+    return { ...group, ...(this.groupAdminOff.has(group.id) && { adminOff: true as const }), ...(this.reactionNotes.has(`group:${group.id}`) && { lastReaction: this.reactionNotes.get(`group:${group.id}`) }), ...this.groupWakeView(group), members: group.members.map(member => {
+      const edge = member.me ? undefined : this.edgeView(group.id, member.key, edges);
+      return edge ? { ...member, edge } : member;
+    }) };
   }
 
   /** A private group's wake-up tokens (the push worker's table) and its mute, as its edges have them. */
@@ -3166,11 +3180,11 @@ export class GhostlyNode implements EngineImplementation {
    * The groups' edges by group, then member: one pass over the links per state, not one per member of every group
    * (communities' members, who have no edge, included).
    */
-  private edgesByMember(): Map<string, Map<string, LiveLink>> {
+  private edgesByMember(only?: string): Map<string, Map<string, LiveLink>> {
     const edges = new Map<string, Map<string, LiveLink>>();
     for (const live of this.links.values()) {
       const { group, groupPeer, groupEntry } = live.stored;
-      if (!group || !groupPeer || groupEntry) continue;
+      if (!group || !groupPeer || groupEntry || (only !== undefined && group !== only)) continue;
       const members = edges.get(group) ?? new Map<string, LiveLink>();
       if (!members.has(groupPeer)) members.set(groupPeer, live);
       edges.set(group, members);

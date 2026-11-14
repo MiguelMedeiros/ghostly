@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chatOrGroup, findGroup, node, state, type ApiContext, type Params } from "./apiKit";
+import { chatOrGroup, groupOf, node, type ApiContext, type Params } from "./apiKit";
 
 /**
  * The id an agent turn names its message by (docs/CLI.md § Agent turns). A message is stored under an id its sender
@@ -24,7 +24,7 @@ export async function withStoredIds(ctx: ApiContext, params: Params): Promise<Pa
   if (!wanted.size) return params;
   let target: { id: string; linkId: string; group: boolean } | null = null;
   try {
-    if (typeof params.group === "string") { const group = findGroup(state(ctx).groups, params.group); target = { id: group.id, linkId: `group:${group.id}`, group: true }; }
+    if (typeof params.group === "string") { const group = groupOf(ctx, { group: params.group }); target = { id: group.id, linkId: `group:${group.id}`, group: true }; }
     else if (typeof params.chat === "string") target = chatOrGroup(ctx, params.chat);
   } catch { /* the command says what is wrong with its chat or group */ }
   if (!target) return params;

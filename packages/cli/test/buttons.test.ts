@@ -14,7 +14,7 @@ import { EventHub, type GhostlyEvent } from "../src/events";
 import { toTurn } from "../src/listen";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 import { messageJson } from "../src/views";
-import { chatViewOf } from "./support/chatView";
+import { chatViewOf, groupViewOf } from "./support/chatView";
 // covers: headless.buttons
 
 /** `send --button`, `group send --button` and `button update` (WISP 406 · Message Buttons), and `button.pressed`. */
@@ -33,7 +33,7 @@ function fake(links: LinkView[] = [link("chat-one", { label: "Alice", sessionOff
     return id;
   };
   const node = {
-    chatView: chatViewOf, getState: () => ({ links, groups: [group()], settings: {}, transport: {} }) as unknown as EngineState,
+    chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links, groups: [group()], settings: {}, transport: {} }) as unknown as EngineState,
     getMessages: vi.fn(async (linkId: string) => of(linkId).map((m) => ({ ...m }))),
     getMessage: vi.fn(async (linkId: string, id: string) => { const m = of(linkId).find((x) => x.id === id); return m && { ...m }; }),
     groupMessages: vi.fn(async ({ groupId }: { groupId: string }) => of(`group:${groupId}`).map((m) => ({ ...m }))),

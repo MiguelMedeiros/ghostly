@@ -11,7 +11,7 @@ import { callApi, type ApiContext } from "../src/api";
 import { Allowlist, allowlist, checkCursor, checkTypes, checkWebhook, EVENT_FAMILIES, EVENT_TYPES, eventHandler, Feed, hookEnv, matches, MAX_BEHIND, readCursor, toTurn } from "../src/listen";
 import { turnRef } from "../src/turnRefs";
 import { ghostly, Running } from "./support/cli";
-import { chatViewOf } from "./support/chatView";
+import { chatViewOf, groupViewOf } from "./support/chatView";
 // covers: headless.hooks, headless.events
 
 /**
@@ -616,7 +616,7 @@ describe("listen with an allowlist and --turns", () => {
     const chat = [{ id: "peer_older", sender: "peer", text: "old", timestamp: 1 }, { id: theirs, sender: "peer", text: "which?", timestamp: 2, card: { kind: "buttons", id: "ask", buttons: [{ id: "yes", label: "Yes" }] } }];
     const crew = [{ id: inGroup, sender: "peer", text: "@me hi", timestamp: 2 }];
     const node = {
-      chatView: chatViewOf, getState: () => ({ links: [{ id: "c1", peerPubKeyZ32: KEY, label: "Alice", pairing: { status: "ready" } }], groups: [{ id: "g1", name: "Crew", members: [] }], settings: {}, transport: {} }),
+      chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [{ id: "c1", peerPubKeyZ32: KEY, label: "Alice", pairing: { status: "ready" } }], groups: [{ id: "g1", name: "Crew", members: [] }], settings: {}, transport: {} }),
       // The newest page holds only the group's message and the chat's old one: the turn's is found in the whole history.
       messagePage: vi.fn(async ({ linkId }: { linkId: string }) => ({ messages: linkId === "c1" ? chat.slice(0, 1) : crew, more: linkId === "c1" })),
       getMessages: vi.fn(async () => chat), groupMessages: vi.fn(async () => crew),
