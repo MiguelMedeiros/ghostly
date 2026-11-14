@@ -412,7 +412,10 @@ costs and where the audio goes: [Talk to an AI by voice](VOICE-AGENT.md).
 The audio contract, one Unix socket per call:
 
 - **Token.** A program's first bytes are the call's `audio.token` and a line feed. Required on Windows (a named
-  pipe there): before it, a connection hears nothing and replaces no program.
+  pipe there) and in a shared folder: before it, a connection hears nothing and replaces no program.
+- **Shared folder.** `GHOSTLY_CALL_SOCKET_DIR=<folder>` on the daemon puts the sockets there, 0660, for a program of
+  another user (a Ghostly OS node's assistant). Make it first, of the daemon's user, `chmod 2750` with that user's
+  group; the daemon refuses one others may write or enter (details in the [CLI README](../packages/cli/README.md)).
 - **Format.** Raw PCM, no framing: s16le, mono, at the call's rate (48000 by default; 24000, 16000, 12000 or 8000
   with `--rate`).
 - **From the call.** The contact's voice in 20 ms frames, as they are decoded.
