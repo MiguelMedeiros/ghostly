@@ -1,4 +1,6 @@
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
+import { setClipboard } from "../support/clipboard";
+import { DEVICE_SET_PASSWORD } from "../support/devices";
 import { expect, test } from "../support/fixtures";
 
 /**
@@ -184,6 +186,53 @@ function cutNames(rows: ReturnType<Page["locator"]>, name: string): Promise<stri
     .filter((label) => label.scrollWidth > label.clientWidth)
     .map((label) => `${label.textContent}: ${label.scrollWidth}/${label.clientWidth}`), name);
 }
+
+/** The dialog's buttons whose words run past their edges, or past the dialog's, as "words: scrollWidth/clientWidth". */
+function cutButtons(dialog: Locator): Promise<string[]> {
+  return dialog.evaluate((dialog) => {
+    const edge = dialog.getBoundingClientRect();
+    const cut = [...dialog.querySelectorAll<HTMLElement>("button, label")].filter((button) => {
+      const box = button.getBoundingClientRect();
+      return box.width > 1 && (button.scrollWidth > button.clientWidth || box.left < edge.left || box.right > edge.right);
+    }).map((button) => `${button.textContent!.trim()}: ${button.scrollWidth}/${button.clientWidth}`);
+    return dialog.scrollWidth > dialog.clientWidth ? [...cut, `the dialog: ${dialog.scrollWidth}/${dialog.clientWidth}`] : cut;
+  });
+}
+
+test("a phone at 150% and 200% text size: adding a device, the new device's first buttons and the check's two keep their words inside them, in Italian", { tag: ["@feature:app.accessibility", "@feature:app.mobile-layout", "@feature:devices.screens"] }, async ({ peer }) => {
+  // At 24px "Corrispondono" ran 14px past its button and "Scansiona QR" 6px past its own; at 32px the dialog scrolled sideways.
+  const [active, added] = await Promise.all([peer("text-size-active", { mobile: true, viewport: PHONE }), peer("text-size-added", { mobile: true, viewport: PHONE })]);
+  await useLanguage(active.page, "it");
+  await useLanguage(added.page, "it");
+
+  // The new device: I already use Ghostly, Add this device to my profile.
+  await added.page.getByTestId("sidebar-already").click();
+  await added.page.getByTestId("device-join-add").click();
+  const join = added.page.getByRole("dialog");
+  await expect(join.getByRole("button", { name: "Scansiona QR" })).toBeVisible();
+  for (const px of [24, 32]) {
+    await textSize(added.page, px);
+    expect.soft(await cutButtons(join), `the new device's first screen at ${px}px`).toEqual([]);
+  }
+  await textSize(added.page, 16);
+
+  await active.page.goto("/#/profile");
+  await active.page.getByTestId("device-add-open").click();
+  const add = active.page.getByTestId("device-add");
+  await add.getByTestId("device-add-password").fill(DEVICE_SET_PASSWORD);
+  await add.getByTestId("device-add-password-again").fill(DEVICE_SET_PASSWORD);
+  await add.getByTestId("device-add-next").click();
+  const code = (await add.getByTestId("device-add-code").getAttribute("data-code"))!;
+  await setClipboard(added.page, code);
+  await join.getByRole("button", { name: "Incolla dagli appunti" }).click();
+  await added.page.getByTestId("device-join-name").fill("Phone");
+  await added.page.getByTestId("device-join-next").click();
+  await expect(add.getByTestId("device-add-digits")).toBeVisible();
+  for (const px of [24, 32]) {
+    await textSize(active.page, px);
+    expect.soft(await cutButtons(add), `the check at ${px}px`).toEqual([]);
+  }
+});
 
 test("a phone at a larger text size: Settings' sections, its search results and the identity kinds wrap their names instead of cutting them", { tag: ["@feature:app.accessibility", "@feature:app.mobile-layout", "@feature:settings.sections"] }, async ({ peer }) => {
   const { page } = await peer("text-size-names", { mobile: true, viewport: PHONE });
