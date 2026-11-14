@@ -50,7 +50,7 @@ function fileRecords(peer: Peer): Promise<{ id: string; bytes?: string; blob: bo
   }));
 }
 
-test("a file over 16 MiB goes through file storage on both sides and arrives intact", { tag: ["@feature:files.storage", "@feature:files.paired.send"] }, async ({ peer }, testInfo) => {
+test("a file over 16 MiB goes through file storage on both sides and arrives intact", { tag: ["@journey", "@feature:files.storage", "@feature:files.paired.send"] }, async ({ peer }, testInfo) => {
   test.setTimeout(180_000);
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   await link(alice, bob);
