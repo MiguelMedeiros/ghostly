@@ -196,6 +196,20 @@ describe("a chat as the contact drives it", () => {
     expect(emits).toHaveBeenCalledTimes(2);
   });
 
+  it("an attempt to go live that ended names its chat, and builds no other chat's view", async () => {
+    const a = row(), b = row();
+    const { node, linkOf } = await started(a, b);
+    const unnamed = vi.spyOn(node as never as { emitState(): void }, "emitState");
+    const named = vi.spyOn(node as never as { chatChanged(linkId: string): void }, "chatChanged");
+    // A contact that looks online but is not reached: each dial that ends says so, every 20 s to 3 min.
+    const attempt = { at: Date.now(), side: "dialled" as const, failed: [{ transport: "iroh/1" as const, error: "unreachable" }], retryAt: Date.now() + 20_000 };
+    (linkOf(b.id) as never as { liveAttempt: unknown }).liveAttempt = attempt;
+    linkOf(b.id).options.events.onLiveAttempt!(attempt);
+    expect(unnamed).not.toHaveBeenCalled();
+    expect(named.mock.calls).toEqual([[b.id]]);
+    expect(node.getState().links.find((link) => link.id === b.id)!.liveAttempt).toEqual(attempt);
+  });
+
   it("an acknowledgement moves a legacy chat's read mark, never a paired one's", async () => {
     const legacy = row({ profile: undefined, participationSeed: undefined }), paired = row();
     const { node, linkOf } = await started(legacy, paired);
