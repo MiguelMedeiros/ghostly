@@ -177,3 +177,33 @@ test("a phone at a doubled text size: the tab names and the identity card grow, 
     await page.goBack();
   }
 });
+
+/** Each of the rows' names cut sideways, as "name: scrollWidth/clientWidth". */
+function cutNames(rows: ReturnType<Page["locator"]>, name: string): Promise<string[]> {
+  return rows.evaluateAll((rows, name) => rows.map((row) => row.querySelector<HTMLElement>(name)!)
+    .filter((label) => label.scrollWidth > label.clientWidth)
+    .map((label) => `${label.textContent}: ${label.scrollWidth}/${label.clientWidth}`), name);
+}
+
+test("a phone at a larger text size: Settings' sections, its search results and the identity kinds wrap their names instead of cutting them", { tag: ["@feature:app.accessibility", "@feature:app.mobile-layout", "@feature:settings.sections"] }, async ({ peer }) => {
+  const { page } = await peer("text-size-names", { mobile: true, viewport: PHONE });
+  await textSize(page, 24);
+  for (const language of ["fr", "ja", "ar"]) {
+    await useLanguage(page, language);
+    await page.getByTestId("mobile-tab-settings").click();
+    const sections = page.locator('[data-testid^="settings-open-"]');
+    await expect(sections.first()).toBeVisible();
+    expect(await cutNames(sections, ":scope > span.flex-1 > span:first-child"), `${language}: Settings' sections`).toEqual([]);
+    await page.getByTestId("settings-search").fill(language === "ja" ? "プ" : language === "ar" ? "ال" : "e");
+    const results = page.getByTestId("settings-search-result");
+    await expect(results.first()).toBeVisible();
+    expect(await cutNames(results, ":scope > span.flex-1 > span:first-child"), `${language}: Settings' search results`).toEqual([]);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth), language).toBeLessThanOrEqual(0);
+
+    await page.getByTestId("mobile-tab-identities").click();
+    await page.getByTestId("identities-new").click();
+    const kinds = page.getByTestId("add-identity").locator('[data-testid^="add-identity-card-"]');
+    await expect(kinds.first()).toBeVisible();
+    expect(await cutNames(kinds, 'span[dir="auto"]'), `${language}: the identity kinds`).toEqual([]);
+  }
+});
