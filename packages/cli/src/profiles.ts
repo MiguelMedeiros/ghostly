@@ -78,7 +78,12 @@ export function checkShownNameOption(name: string): string {
 export function currentProfile(home: string, option?: string): string {
   if (option === "") throw new CliError("usage", "--profile needs a profile name");
   if (option !== undefined) return checkProfileName(option);
-  if (process.env.GHOSTLY_PROFILE) return checkProfileName(process.env.GHOSTLY_PROFILE);
+  const env = process.env.GHOSTLY_PROFILE;
+  // Nobody typed it on this line: refused naming the variable and the way out, not as a `--profile` given here.
+  if (env && !isProfileName(env)) {
+    throw new CliError("usage", `GHOSTLY_PROFILE names no profile (${JSON.stringify(env)}): set it to a profile's name (letters, digits, ".", "_" and "-", up to 64), or unset it`);
+  }
+  if (env) return env;
   const file = join(home, "current");
   if (existsSync(file)) {
     const name = readFileSync(file, "utf8").trim();
