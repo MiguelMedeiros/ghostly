@@ -520,6 +520,8 @@ export const FILE_METHODS: Record<string, Method> = {
     const taken = async (target: string, code?: string): Promise<CliError | undefined> => {
       const there = await stat(target).catch(() => undefined);
       // A folder there is no file to replace: before, it asked for --force, and the --force then failed "is a folder".
+      // A voice message in --dir steps past it as past a file: before, it stopped there and named that folder for --dir.
+      if (there?.isDirectory() && free && next <= 1000) return new CliError("confirm", `${target} is a folder`);
       if (there?.isDirectory()) return new CliError("bad_request", `${target} is a folder: name a file, or use --dir ${shellWord(target)} (dir over the socket)`, { dir: target });
       if (!((there && !force) || code === "EEXIST")) return;
       const replace = `${target} exists: pass --force (force: true over the socket) to replace it`;
