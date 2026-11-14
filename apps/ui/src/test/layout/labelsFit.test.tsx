@@ -11,6 +11,7 @@ import { useLabelsFit } from "../../hooks/useLabelsFit";
  */
 const sizes = { header: 375, logo: 121, mark: 36, words: 243, bare: 84, own: 70 };
 let resized: (() => void) | undefined;
+let observed = new Set<Element>();
 
 function Header({ language, steps }: { language: string; steps?: number }) {
   const header = useRef<HTMLDivElement>(null), logo = useRef<HTMLDivElement>(null), buttons = useRef<HTMLDivElement>(null);
@@ -32,7 +33,8 @@ function lay() {
     if (this.dataset.mark !== undefined) return this.dataset.mark === "true" ? sizes.mark : sizes.logo;
     return this.dataset.testid === "header" ? sizes.header : sizes.logo;
   });
-  vi.stubGlobal("ResizeObserver", class { constructor(callback: () => void) { resized = callback; } observe() {} disconnect() {} });
+  observed = new Set();
+  vi.stubGlobal("ResizeObserver", class { constructor(callback: () => void) { resized = callback; } observe(element: Element) { observed.add(element); } disconnect() { observed.clear(); } });
 }
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); document.documentElement.style.fontSize = ""; });
@@ -109,5 +111,29 @@ describe("useLabelsFit", () => {
     act(() => resized?.());
     expect(header.dataset.given).toBe("0");
     expect(container.querySelector("[data-words]")?.getAttribute("data-words")).toBe("true");
+  });
+
+  it("on Android, the phone's font size changed while the app runs (the WebView's text zoom grows the words, not the header's box) still gives up the words, and brings them back", () => {
+    lay();
+    // A 412px phone, as measured on the emulator: at 1.0 the ghost and GHOSTLY 115, New and Join with words 196.
+    Object.assign(sizes, { header: 412, logo: 115, words: 196, bare: 156 });
+    const { container } = render(<Header language="en" steps={3} />);
+    const header = screen.getByTestId("header");
+    expect(header.dataset.given).toBe("0");
+    // Only what holds words changes size; the header stays 412 x 56, so a callback for it alone never comes.
+    const grew = (...elements: (Element | null)[]) => act(() => { if (elements.some((element) => element && observed.has(element))) resized?.(); });
+    const logo = container.querySelector("[data-mark]"), buttons = container.querySelector("[data-words]");
+
+    // Font size 200%: 189 + 251 + 8 > 380, which Join was pushed past the screen's edge by; 189 + 156 + 8 fits.
+    document.documentElement.style.fontSize = "32px";
+    Object.assign(sizes, { logo: 189, words: 251 });
+    grew(logo, buttons);
+    expect(header.dataset.given).toBe("1");
+
+    // Back to 100%, the same 412px: the words come back.
+    document.documentElement.style.fontSize = "16px";
+    Object.assign(sizes, { logo: 115, bare: 120 });
+    grew(logo, buttons);
+    expect(header.dataset.given).toBe("0");
   });
 });
