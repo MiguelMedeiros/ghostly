@@ -529,6 +529,7 @@
     "btcSingleKey": "Ghostly が確認できるのは単一鍵のアドレス（bc1q…、bc1p…、3…、1…）の証明だけで、マルチシグやスクリプトのアドレスは対象外です",
     "challenge": "証明の鍵はこのチャットのチャレンジに署名していません",
     "checkFailed": "この証明を確認できませんでした",
+    "contactNewer": "連絡先はすでにこの ID のより新しい証明を保存しています",
     "contactRefused": "連絡先は確認できませんでした",
     "contactTooMany": "連絡先はすでにあなたの ID を多く保存しすぎています",
     "contactUnavailable": "連絡先のアプリは確認できませんでした",

@@ -692,6 +692,7 @@ const RULES: readonly Rule[] = [
   exact("Your contact's app cannot verify this kind of identity yet", "errors.proof.contactUnsupported"),
   exact("Your contact's app could not check it. Try again later.", "errors.proof.contactUnavailable", "errors.proof.laterNext"),
   exact("Your contact keeps too many identities from you already", "errors.proof.contactTooMany"),
+  exact("Your contact keeps a newer proof of this identity from you", "errors.proof.contactNewer"),
   exact("That identity is no longer in your profile", "errors.proof.notInProfile"),
   exact("Your contact could not verify it", "errors.proof.contactRefused"),
   // A check that could not run (IdentityCheckUnavailable: sshForges.ts, providers/atproto.ts, atproto/resolve.ts, pubky.ts,
