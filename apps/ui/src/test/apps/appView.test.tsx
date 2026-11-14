@@ -213,13 +213,16 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     expect(app).toHaveAttribute("data-place", "beside");
     expect(within(app).queryByTestId("mini-app-back")).not.toBeInTheDocument();
     const wide = within(app).getByTestId("mini-app-wide");
+    // Named for what it does next, never a toggle too: "Show the chat, pressed" was said with the chat hidden.
     expect(wide).toHaveAccessibleName("Full width");
+    expect(wide).not.toHaveAttribute("aria-pressed");
     await user.click(wide);
     expect(app).toHaveAttribute("data-place", "wide");
-    expect(wide).toHaveAttribute("aria-pressed", "true");
     expect(wide).toHaveAccessibleName("Show the chat");
+    expect(wide).not.toHaveAttribute("aria-pressed");
     await user.click(wide);
     expect(app).toHaveAttribute("data-place", "beside");
+    expect(wide).toHaveAccessibleName("Full width");
     // Layout changes never moved the frame.
     expect(started[0]!.frame.isConnected).toBe(true);
 
