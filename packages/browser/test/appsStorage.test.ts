@@ -255,6 +255,28 @@ describe("storage", () => {
     expect(await storageRows(), "the rows and their count are gone").toEqual([]);
   });
 
+  it("a key with U+FFFD that is not there reads only the keys that could be it kept with a lone surrogate, not every key of the scope", async () => {
+    const { store, app } = await installed();
+    const { ref } = app;
+    const half = "\u{1F600}".slice(0, 1), listed = String.fromCodePoint(0xfffd);
+    // The lone surrogate after a real U+FFFD: the first U+FFFD of the listed form is not where it was cut.
+    await store.storageSet({ ref, scope: "chat-1", key: `m${listed}x${half}`, value: "kept" });
+    await seed(ref, "chat-1", { big: 0, small: 2_000 });
+    const again = apps(net);
+    const keys = vi.spyOn(IDBObjectStore.prototype, "getAllKeys");
+    /** Keys of the app's storage read whole: 2,000 a call read every key of the scope (380 ms at 25,000 in Chromium). */
+    const read = () => keys.mock.contexts.flatMap((c, i) => (c as IDBObjectStore).name === STORES.appStorage ? [(keys.mock.results[i]!.value as IDBRequest<unknown[]>).result.length] : []);
+    try {
+      expect(await again.storageGet({ ref, scope: "chat-1", key: `k${listed}` })).toBeNull();
+      await again.storageSet({ ref, scope: "chat-1", key: `n${listed}`, value: 1 });
+      await again.storageDelete({ ref, scope: "chat-1", key: `k0001${listed}` });
+      expect(await again.storageGet({ ref, scope: "chat-1", key: `m${listed}x${listed}` }), "still found by its listed form").toEqual({ value: "kept" });
+      expect(read()).toEqual([0, 0, 0, 1]);
+    } finally {
+      keys.mockRestore();
+    }
+  }, 30_000);
+
   it("a scope filled under an older count takes no new key, and still rewrites and deletes the ones it has", async () => {
     const { app } = await installed();
     const { ref } = app;
