@@ -152,6 +152,21 @@ describe("file save to a folder", () => {
     await expect(callApi(ctx, "file.save", { file: "chat-one-in-vb", path: join(folder, name) })).rejects.toMatchObject({ code: "confirm" });
   });
 
+  it("a voice message steps past a folder of its name in --dir as past a file; a --path folder is still refused", async () => {
+    const folder = join(dir, "voice-folders");
+    mkdirSync(folder);
+    const name = voiceDownloadName("audio/webm", 1_700_000_005_000), stem = name.slice(0, -".webm".length);
+    // A folder at its name and at its next one, a file at the one after.
+    mkdirSync(join(folder, name));
+    mkdirSync(join(folder, `${stem} (2).webm`));
+    writeFileSync(join(folder, `${stem} (3).webm`), "other");
+    // Before, it stopped at the first folder: "is a folder: use --dir <that folder>".
+    expect(await callApi(ctx, "file.save", { file: "chat-one-in-v", dir: folder })).toMatchObject({ path: join(folder, `${stem} (4).webm`) });
+    expect(readFileSync(join(folder, `${stem} (4).webm`), "utf8")).toBe("MZ");
+    expect(readFileSync(join(folder, `${stem} (3).webm`), "utf8")).toBe("other");
+    await expect(callApi(ctx, "file.save", { file: "chat-one-in-v", path: join(folder, name) })).rejects.toMatchObject({ code: "bad_request", details: { dir: join(folder, name) } });
+  });
+
   it("a second file of one name in --dir is a confirm that names both ways out: --force replaces, --path keeps both", async () => {
     const folder = join(dir, "same-name");
     mkdirSync(folder);
