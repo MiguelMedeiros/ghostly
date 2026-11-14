@@ -176,9 +176,249 @@ const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
   } catch (e) {}
 })(window)"#;
 
-/// Sent with the guard: frames only from the app's own origin (a `data:` or `blob:` frame would run before
-/// the guard where the WebView does not run it there), and Trusted Types, which hands each `javascript:` URL
-/// to the guard's policy before it runs. `VIEWER_GUARD_CSP` in `packages/core/src/viewerGuard.ts`.
+/// No policy keeps the app off `document.execCommand("copy")`, which WebView2 lets write the system clipboard for
+/// seconds after a tap in the page (from a timer too), and WebKit for a while after one: the app could swap what the
+/// person copies in Ghostly for text of its own. This runs first in every frame of the window, whatever the setting:
+/// a copy or cut only while the person's own input in it is being dispatched, never a paste. The same text as
+/// `CLIPBOARD_GUARD_SCRIPT` in `packages/core/src/clipboardGuard.ts`, which says what it allows.
+const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
+  "use strict";
+  try {
+    const apply = w.Reflect.apply;
+    const describe = w.Object.getOwnPropertyDescriptor;
+    const define = w.Object.defineProperty;
+    const proto = w.Document.prototype;
+    const home = w.document;
+    const exec = describe(proto, "execCommand");
+    const fresh = !!exec && exec.configurable === true && typeof exec.value === "function";
+    const watched = !!describe(home, "ghostlyClipboardGuard");
+    if (!fresh && watched) return;
+    if (!watched) define(home, "ghostlyClipboardGuard", { value: true });
+    const own = "<script>(" + noClipboardWrites + ")(window)<" + "/script>";
+    const close = "<" + "/script>";
+    const webRtc = "<script>(function noWebRtc(";
+    const text = w.String;
+    const lower = text.prototype.toLowerCase;
+    const slice = text.prototype.slice;
+    const index = text.prototype.indexOf;
+    const listen = w.EventTarget.prototype.addEventListener;
+    const shut = (inner) => {
+      try { if (inner && inner !== w) noClipboardWrites(inner); } catch (e) {}
+    };
+    const count = describe(w, "length").get;
+    const view = describe(proto, "defaultView").get;
+    const sweep = () => {
+      try { for (let i = apply(count, w, []); i-- > 0;) shut(w[i]); } catch (e) {}
+    };
+    const elements = w.Element.prototype;
+    const getAttribute = elements.getAttribute;
+    const setAttribute = elements.setAttribute;
+    const removeAttribute = elements.removeAttribute;
+    const attachShadow = elements.attachShadow;
+    const size = describe(w.NodeList.prototype, "length").get;
+    let passing = false;
+    const first = (frame) => {
+      const doc = apply(getAttribute, frame, ["srcdoc"]);
+      if (doc === null) return;
+      let at = 0;
+      if (apply(slice, doc, [0, webRtc.length]) === webRtc) {
+        const end = apply(index, doc, [close]);
+        if (end >= 0) at = end + close.length;
+      }
+      if (apply(slice, doc, [at, at + own.length]) === own) return;
+      passing = true;
+      try { apply(setAttribute, frame, ["srcdoc", own + doc]); } catch (e) { apply(removeAttribute, frame, ["srcdoc"]); }
+      passing = false;
+    };
+    const Observer = w.MutationObserver;
+    const observe = Observer.prototype.observe;
+    const watch = (root, all) => {
+      const scan = () => {
+        try {
+          const frames = apply(all, root, ["iframe[srcdoc]"]);
+          for (let i = apply(size, frames, []); i-- > 0;) first(frames[i]);
+        } catch (e) {}
+        sweep();
+      };
+      apply(observe, new Observer(scan), [root, { subtree: true, childList: true, attributes: true, attributeFilter: ["srcdoc"] }]);
+      apply(listen, root, ["load", sweep, true]);
+      scan();
+      return root;
+    };
+    if (fresh) {
+      const run = exec.value;
+      const phase = describe(w.Event.prototype, "eventPhase").get;
+      const trust = (event) => {
+        try {
+          const found = describe(event, "isTrusted");
+          if (found && found.get && apply(found.get, event, []) === true) return found.get;
+        } catch (e) {}
+        return null;
+      };
+      const dispatching = (event, trusted) => {
+        try { return apply(trusted, event, []) === true && apply(phase, event, []) !== 0; } catch (e) { return false; }
+      };
+      const stamp = describe(w.Event.prototype, "timeStamp");
+      const clock = w.performance;
+      const tick = clock && clock.now;
+      const time = () => { try { return apply(tick, clock, []); } catch (e) { return NaN; } };
+      const recent = (at) => time() - at <= 1000;
+      const shutters = [];
+      try {
+        const channel = new w.MessageChannel();
+        const post = w.MessagePort.prototype.postMessage;
+        const out = channel.port2;
+        channel.port1.onmessage = () => settle();
+        shutters[0] = () => apply(post, out, [0]);
+      } catch (e) {}
+      try {
+        const tasks = w.scheduler;
+        const postTask = tasks && tasks.postTask;
+        const urgent = { __proto__: null, priority: "user-blocking" };
+        if (typeof postTask === "function") shutters[shutters.length] = () => { apply(postTask, tasks, [settle, urgent]); };
+      } catch (e) {}
+      try {
+        const frame = w.requestAnimationFrame;
+        if (typeof frame === "function") shutters[shutters.length] = () => { apply(frame, w, [settle]); };
+      } catch (e) {}
+      let tap = null;
+      let trusted = null;
+      let tapped = NaN;
+      let open = 0;
+      let follows = null;
+      const settle = () => { open = 0; follows = null; };
+      const seen = (event) => {
+        const found = trust(event);
+        if (found === null) return;
+        let at = time();
+        try {
+          const given = apply(stamp.get, event, []);
+          if (given >= 0 && given < at) at = given;
+        } catch (e) {}
+        tap = event;
+        trusted = found;
+        tapped = at;
+        if (shutters.length === 0) return;
+        open = 1;
+        for (let i = 0; i < shutters.length; i++) { try { shutters[i](); } catch (e) {} }
+      };
+      const taps = ["pointerdown", "pointerup", "mousedown", "mouseup", "click", "auxclick", "dblclick", "contextmenu", "touchstart", "touchend", "keydown", "keypress", "keyup"];
+      for (let i = 0; i < taps.length; i++) apply(listen, w, [taps[i], seen, true]);
+      const followed = (event) => {
+        if (open === 0) return;
+        const found = trust(event);
+        if (found !== null) follows = { event: event, trusted: found, at: tapped, next: follows };
+      };
+      apply(listen, w, ["submit", followed, true]);
+      apply(listen, w, ["change", followed, true]);
+      const tapping = () => {
+        if (tap !== null && dispatching(tap, trusted) && recent(tapped)) return true;
+        for (let f = follows; f !== null; f = f.next) if (dispatching(f.event, f.trusted) && recent(f.at)) return true;
+        return false;
+      };
+      const guarded = function execCommand(command) {
+        const name = apply(lower, text(command), []);
+        if (name === "paste" || ((name === "copy" || name === "cut") && !tapping())) return false;
+        const args = [name];
+        for (let i = 1; i < arguments.length; i++) args[i] = arguments[i];
+        return apply(run, this, args);
+      };
+      define(proto, "execCommand", { value: guarded, writable: false, enumerable: exec.enumerable, configurable: false });
+      const types = w.trustedTypes;
+      if (types && !types.defaultPolicy) {
+        try {
+          let rules = null;
+          const rule = (kind) => (input, type, sink) => {
+            if (kind === "createScript" && sink === "Location href") return null;
+            if (passing || rules === null) return input;
+            return rules[kind] ? apply(rules[kind], undefined, [input, type, sink]) : null;
+          };
+          const members = ["createHTML", "createScript", "createScriptURL"];
+          const create = types.createPolicy;
+          const policy = apply(create, types, ["default", { createHTML: rule(members[0]), createScript: rule(members[1]), createScriptURL: rule(members[2]) }]);
+          const Mistyped = w.TypeError;
+          w.Object.getPrototypeOf(types).createPolicy = function createPolicy(name, options) {
+            if (this !== types || rules !== null || text(name) !== "default") return apply(create, this, arguments);
+            const given = { createHTML: null, createScript: null, createScriptURL: null };
+            for (let i = 0; i < members.length; i++) {
+              const found = options ? options[members[i]] : undefined;
+              if (found === undefined || found === null) continue;
+              if (typeof found !== "function") throw new Mistyped("The policy's " + members[i] + " is not a function");
+              given[members[i]] = found;
+            }
+            rules = given;
+            return policy;
+          };
+        } catch (e) {}
+      }
+      const reopen = proto.open;
+      proto.open = function () {
+        const got = apply(reopen, this, arguments);
+        try { if (apply(view, this, []) === w) apply(listen, this, ["load", sweep, true]); } catch (e) {}
+        return got;
+      };
+      const shadowed = (html) => apply(index, apply(lower, html, []), ["shadowrootmode"]) >= 0;
+      const Refused = w.TypeError;
+      const refuse = () => { throw new Refused("A declarative shadow root is not allowed here"); };
+      const parsers = [[elements, "setHTMLUnsafe"], [w.ShadowRoot && w.ShadowRoot.prototype, "setHTMLUnsafe"], [w.Document, "parseHTMLUnsafe"]];
+      for (let i = 0; i < parsers.length; i++) {
+        const owner = parsers[i][0];
+        const name = parsers[i][1];
+        const real = owner && owner[name];
+        if (typeof real !== "function") continue;
+        owner[name] = function (html) {
+          const checked = text(html);
+          if (shadowed(checked)) refuse();
+          return apply(real, this, arguments.length > 1 ? [checked, arguments[1]] : [checked]);
+        };
+      }
+      let tail = "";
+      const writes = ["write", "writeln"];
+      for (let i = 0; i < writes.length; i++) {
+        const real = proto[writes[i]];
+        if (typeof real !== "function") continue;
+        proto[writes[i]] = function () {
+          let checked = "";
+          for (let j = 0; j < arguments.length; j++) checked += text(arguments[j]);
+          if (shadowed(tail + checked)) refuse();
+          tail = apply(slice, tail + checked, [-16]);
+          return apply(real, this, [checked]);
+        };
+      }
+      const kinds = ["HTMLIFrameElement", "HTMLFrameElement", "HTMLObjectElement", "HTMLEmbedElement"];
+      const reads = ["contentWindow", "contentDocument", "getSVGDocument"];
+      for (let k = 0; k < kinds.length; k++) {
+        const owner = w[kinds[k]] && w[kinds[k]].prototype;
+        for (let r = 0; r < reads.length; r++) {
+          const name = reads[r];
+          const found = owner && describe(owner, name);
+          const key = found && found.get ? "get" : "value";
+          if (!found || typeof found[key] !== "function") continue;
+          const read = found[key];
+          found[key] = function () {
+            const got = apply(read, this, arguments);
+            try { shut(name === "contentWindow" ? got : apply(view, got, [])); } catch (e) {}
+            return got;
+          };
+          try { define(owner, name, found); } catch (e) {}
+        }
+      }
+      const inShadow = w.DocumentFragment.prototype.querySelectorAll;
+      if (attachShadow) {
+        elements.attachShadow = function () {
+          const root = apply(attachShadow, this, arguments);
+          try { watch(root, inShadow); } catch (e) {}
+          return root;
+        };
+      }
+    }
+    if (!watched) watch(home, proto.querySelectorAll);
+  } catch (e) {}
+})(window)"#;
+
+/// Sent with the guards, with every answer: frames only from the app's own origin (a `data:` or `blob:` frame
+/// would run before the guards where the WebView does not run them there), and Trusted Types, which hands each
+/// `javascript:` URL to the guards' policy before it runs. `VIEWER_GUARD_CSP` in `packages/core/src/viewerGuard.ts`.
 const SERVICE_GUARD_CSP: &str =
     "frame-src 'self'; object-src 'self'; require-trusted-types-for 'script'";
 
@@ -475,9 +715,8 @@ pub fn open<R: tauri::Runtime>(
     if let Some(folder) = crate::forget_origins::app_folder(app, &format!("{service}.{site}")) {
         builder = builder.data_directory(folder);
     }
-    // Hide my IP from contacts: the app's every frame runs the WebRTC guard before its own code.
-    if relay_only {
-        builder = builder.initialization_script_for_all_frames(SERVICE_GUARD);
+    for guard in frame_guards(relay_only) {
+        builder = builder.initialization_script_for_all_frames(guard);
     }
     let window = builder
         .title(format!("{} — Ghostly", title))
@@ -523,6 +762,16 @@ pub fn open<R: tauri::Runtime>(
         }
     }
     Ok(())
+}
+
+/// The scripts the app's every frame runs before its own code, in this order: the clipboard guard always, then the
+/// WebRTC guard with Hide my IP from contacts on (the web runner's order).
+fn frame_guards(relay_only: bool) -> Vec<&'static str> {
+    if relay_only {
+        vec![CLIPBOARD_GUARD, SERVICE_GUARD]
+    } else {
+        vec![CLIPBOARD_GUARD]
+    }
 }
 
 /// No element full screen, before the page has a click to ask for it. On macOS wry turns it on as it builds the
@@ -718,9 +967,8 @@ pub async fn handle<R: tauri::Runtime>(
             response = response.header(name.as_str(), value.as_str());
         }
     }
-    if relay_only {
-        policies.push(SERVICE_GUARD_CSP.to_string());
-    }
+    // The guards' own, whatever the setting: the clipboard guard runs in every frame.
+    policies.push(SERVICE_GUARD_CSP.to_string());
     policies.push(
         if relay_only {
             SERVICE_CSP_RELAY_ONLY
@@ -1288,7 +1536,9 @@ mod routing_tests {
             .collect();
         assert_eq!(
             policies,
-            [format!("default-src *, img-src *, {SERVICE_CSP}")]
+            [format!(
+                "default-src *, img-src *, {SERVICE_GUARD_CSP}, {SERVICE_CSP}"
+            )]
         );
         assert_eq!(response.body(), b"created");
         assert!(app
@@ -1364,7 +1614,8 @@ mod routing_tests {
         }
         assert_eq!(
             response.headers()["content-security-policy"],
-            format!("default-src 'self'; img-src *, script-src 'self', {SERVICE_CSP}").as_str()
+            format!("default-src 'self'; img-src *, script-src 'self', {SERVICE_GUARD_CSP}, {SERVICE_CSP}")
+                .as_str()
         );
         // What can read an answer or post goes to the contact's own origin only: https: also names
         // this machine and the local network.
@@ -1482,7 +1733,7 @@ mod routing_tests {
             let ours = if relay_only {
                 format!("{SERVICE_GUARD_CSP}, {SERVICE_CSP_RELAY_ONLY}")
             } else {
-                SERVICE_CSP.to_string()
+                format!("{SERVICE_GUARD_CSP}, {SERVICE_CSP}")
             };
             assert_eq!(
                 response.headers()["content-security-policy"],
@@ -1509,6 +1760,24 @@ mod routing_tests {
             "export const VIEWER_GUARD_CSP = \"{SERVICE_GUARD_CSP}\";"
         )));
         assert!(SERVICE_GUARD.starts_with("(function noWebRtc(w) {"));
+    }
+
+    /// Every frame of the window runs the clipboard guard first, whatever the setting, and the WebRTC guard
+    /// after it with Hide my IP on: the order the web runner puts them in a page.
+    #[test]
+    fn every_frame_runs_the_clipboard_guard_first() {
+        assert_eq!(frame_guards(false), vec![CLIPBOARD_GUARD]);
+        assert_eq!(frame_guards(true), vec![CLIPBOARD_GUARD, SERVICE_GUARD]);
+    }
+
+    /// The clipboard guard is the web runner's, word for word.
+    #[test]
+    fn the_clipboard_guard_is_the_one_the_web_runs() {
+        let core = include_str!("../../../packages/core/src/clipboardGuard.ts");
+        assert!(core.contains(&format!(
+            "export const CLIPBOARD_GUARD_SCRIPT = `{CLIPBOARD_GUARD}`;"
+        )));
+        assert!(CLIPBOARD_GUARD.starts_with("(function noClipboardWrites(w) {"));
     }
 
     #[test]
