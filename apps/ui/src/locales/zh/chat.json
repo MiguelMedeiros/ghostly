@@ -504,6 +504,7 @@
     "tooLarge": "文件太大，无法在此播放。请下载后观看。"
   },
   "voice": {
+    "callPaused": "语音消息已因通话暂停",
     "cancelled": "语音消息已取消",
     "cantPlay": "此设备无法播放 {{format}} 录音。保存后在别处播放。",
     "couldNotPlay": "无法播放此录音。",
@@ -529,6 +530,7 @@
     "recordHint": "按住录音，或点击免手持录音",
     "recorded": "已录制 {{time}}",
     "recording": "正在录音",
+    "resumeAfterCall": "通话结束后继续",
     "sent": "语音消息已发送",
     "slideCancel": "滑动取消",
     "speed": "播放速度 {{speed}}",
