@@ -331,6 +331,25 @@ describe("Nostr cards", () => {
     expect(within(card).getByTestId("entity-nostr-source")).toHaveTextContent("From relay.one.example");
   });
 
+  it("draws what the person wrote in its own direction: their name, about and note", async () => {
+    const pubkey = hex(), id = hex();
+    const profile = bubble(`nostr:${npubEncode(pubkey)}`, { language: "ar" });
+    profile.engine.on("nostrLookup", () => ({ fetchedAt: 0, relays: ["wss://relay.one.example"], found: true, profile: { name: "Alice (dev)", about: "مرحبا بكم!", hasPicture: false, eventAt: 0, eventId: "e" } }));
+    await profile.user.click(screen.getByTestId("entity-nostr-load"));
+    // In the app's direction, "Alice (dev)" in Arabic was drawn "(Alice (dev", an Arabic about in English with its "!" at the far end.
+    const title = (await screen.findByTestId("entity-nostr-title")).closest("p")!;
+    expect(title).toHaveAttribute("dir", "auto");
+    // Beside its mark and label, as the app lines them up: it wraps, so nothing is cut.
+    expect(title.className).toMatch(/\btext-match-parent\b/);
+    expect(screen.getByTestId("entity-nostr-about")).toHaveAttribute("dir", "auto");
+    profile.unmount();
+
+    const note = bubble(neventEncode({ id, author: pubkey }), { language: "ar" });
+    note.engine.on("nostrLookup", () => ({ fetchedAt: 0, relays: ["wss://relay.one.example"], found: true, note: { id, author: pubkey, createdAt: 0, reply: false, content: "Hello world!", muted: false } }));
+    await note.user.click(screen.getByTestId("entity-nostr-load"));
+    expect(await screen.findByTestId("entity-nostr-note")).toHaveAttribute("dir", "auto");
+  });
+
   it("looks a note up by id and author, never by the code's relay hints, and hides what the mute list hides", async () => {
     const id = hex(), author = hex();
     const { user, engine } = bubble(neventEncode({ id, author, relays: ["wss://somebody-elses.example"] }));

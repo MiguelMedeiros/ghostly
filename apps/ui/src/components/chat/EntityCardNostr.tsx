@@ -58,12 +58,13 @@ export function NostrEntityCard({ code, pointer }: { code: string; pointer: Nost
       {result && !result.found && <p className="m-0" data-testid="entity-nostr-none">{profile ? t("chat.entity.noProfile") : t("chat.entity.noNote")}</p>}
       {p && <>
         {p.avatar && <img src={p.avatar} alt="" data-testid="entity-nostr-avatar" className="h-10 w-10 rounded-full object-cover" />}
-        {p.about && <p data-testid="entity-nostr-about" className="m-0 line-clamp-4 whitespace-pre-wrap break-words text-text-primary">{p.about}</p>}
+        {/* What the person wrote, in its own direction as a message's text (lined up with the app, a clamped line lost its "…"). */}
+        {p.about && <p dir="auto" data-testid="entity-nostr-about" className="m-0 line-clamp-4 whitespace-pre-wrap break-words text-text-primary">{p.about}</p>}
         {p.nip05 && <p className="m-0"><span className="break-all">{p.nip05}</span> <span className="text-text-primary/65">{t("chat.entity.nip05")}</span></p>}
       </>}
       {note && (note.muted
         ? <p className="m-0" data-testid="entity-nostr-muted">{t("chat.entity.muted")}</p>
-        : <p data-testid="entity-nostr-note" className="m-0 line-clamp-6 whitespace-pre-wrap break-words text-text-primary">{note.content}</p>)}
+        : <p dir="auto" data-testid="entity-nostr-note" className="m-0 line-clamp-6 whitespace-pre-wrap break-words text-text-primary">{note.content}</p>)}
       {note && <p className="m-0 text-text-primary/65" data-testid="entity-nostr-age">{ago(note.createdAt)}{note.reply ? ` · ${t("chat.entity.aReply")}` : ""}</p>}
       {result
         ? <p className="m-0 chat-text-card-label text-text-primary/65" data-testid="entity-nostr-source">{t("chat.entity.nostrSource", { relays: relayNames(result.relays), when: ago(result.fetchedAt) })}</p>
