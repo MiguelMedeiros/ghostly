@@ -208,6 +208,20 @@ describe("GroupMembersDialog", () => {
     expect(screen.getByTestId("group-member-list")).toHaveFocus();
   });
 
+  it("no longer says, under a community's link turned off, that anyone with the link can join: to the admin nor to a member", () => {
+    const link = encodeCommunityLink({ g: "AbCdEfGhIjKlMnOpQrStUv", host: createIdentity().pubKeyZ32 });
+    for (const isAdmin of [true, false]) {
+      const group = groupView({ status: "active", isAdmin, profile: "community", entryLink: link, members: [member({ key: ME, me: true, online: true, role: isAdmin ? "admin" : "member" }), member({ key: ALICE, nick: "Alice", role: isAdmin ? "member" : "admin" })] });
+      const { unmount } = members_(group);
+      const note = screen.getByTestId("group-read-note");
+      expect(note, `link on, admin ${isAdmin}`).toHaveTextContent(/^Anyone with the group's link can join, and any member can let people in\./);
+      act(() => fakeEngine.update({ groups: [{ ...group, entryLink: undefined }] }));
+      expect(note, `link off, admin ${isAdmin}`).toHaveTextContent(/^The link is off: nobody can join with it, and only the admin can let people in again, with a new link\. Everyone in the group can read/);
+      expect(note).not.toHaveTextContent("Anyone with the group's link can join");
+      unmount();
+    }
+  });
+
   it("says, while the group's link works, that whoever is removed can join again with it until a new link", async () => {
     for (const profile of ["mesh", "community"] as const) {
       const { user, unmount } = members_(groupView({ status: "active", isAdmin: true, profile, members, entryLink: "https://app.ghostly.tools/#/join/group2/g/k" }));

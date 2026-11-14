@@ -6,6 +6,12 @@ import type { Language } from "../../lib/settings";
 import { fakeEngine, paymentView } from "../fakeEngine";
 import { TEST_MINT } from "../payments/fixtures";
 import { renderApp } from "../render";
+import * as paymentWords from "../../components/paymentWords";
+
+vi.mock("../../components/paymentWords", async (actual) => {
+  const words = await actual<typeof paymentWords>();
+  return { ...words, paymentStateLine: vi.fn(words.paymentStateLine) };
+});
 
 // covers: app.accessibility, payments.chat.refused, groups.payments.notes
 
@@ -104,6 +110,21 @@ describe("a payment's state that changes while the chat is open, read out to a s
     expect(heard).toEqual([]);
   });
 
+  // Every engine state (a contact typing, a file's progress) looked at each payment of the chat again: 8 ms per state
+  // with 2,000 of them. One the state brings back as it was is not looked at again.
+  it("an engine state that changes no payment does not work out any payment's line again", async () => {
+    const list = Array.from({ length: 50 }, (_, i) => request("pending", { id: `pay-${i}` }));
+    payments(...list);
+    setup(list.map((p, i) => ({ id: `m${i}`, sender: "me", text: "⚡", paymentId: p.id })));
+    const lines = vi.mocked(paymentWords.paymentStateLine);
+    lines.mockClear();
+    for (let k = 0; k < 20; k++) act(() => { fakeEngine.update({ settings: { ...fakeEngine.state.settings } }); });
+    expect(lines.mock.calls.length).toBe(0);
+    payments(...list.map((p, i) => (i === 7 ? request("settled", { id: p.id }) : p)));
+    await wait(ANNOUNCE_CLEAR_MS + 200);
+    expect(heard).toEqual(["⚡ You requested 1,000 test sats · Paid"]);
+  });
+
   it("is said in the person's language", async () => {
     payments(request("pending"), sent("pending"));
     setup(PAYMENTS, "pt");
@@ -136,6 +157,14 @@ describe("a group's payment note that changes where it stands", () => {
     draw(note({ state: "paid", claims: ["bob"], by: "bob" }), view);
     await wait(ANNOUNCE_CLEAR_MS + 200);
     expect(heard).toEqual(["sent bob", "paid bob by bob"]);
+  });
+
+  it("a note that arrives is said in the group's words, not the engine's English line", async () => {
+    const view = renderApp(<MessageAnnouncer chat="g" messages={HISTORY} nameOf={nameOf} noteLine={noteLine} />);
+    listen();
+    view.rerender(<MessageAnnouncer chat="g" messages={[...HISTORY, { id: "g1", sender: "peer", text: "⚡ Requested 21 test sats", member: "alice", groupPay: note({ amount: "21" }) }]} nameOf={nameOf} noteLine={noteLine} />);
+    await wait(ANNOUNCE_WINDOW_MS + ANNOUNCE_CLEAR_MS + 200);
+    expect(heard).toEqual(["Alice: open"]);
   });
 
   it("a note already paid as the group opens is not said", async () => {

@@ -118,6 +118,7 @@
   "noticesMisplaced": "Mova o Ghostly para Aplicativos para permitir",
   "noticesOpenSettings": "Abrir ajustes",
   "noticesRunning": "Enquanto o Ghostly estiver aberto",
+  "noticesRunningExtension": "Enquanto o navegador estiver aberto, mesmo sem nenhuma aba do Ghostly",
   "noticesUnavailable": "Indisponível aqui",
   "notificationSounds": "Sons",
   "notificationSoundsDescription": "Mensagens, chamadas e pagamentos confirmados",

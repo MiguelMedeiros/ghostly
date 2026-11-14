@@ -8,6 +8,7 @@ import { announceJoins } from "./announce";
 import { reportAppFrames } from "./appEvents";
 import { callApi, type ApiContext } from "./api";
 import { sinceSeq, type Params } from "./apiKit";
+import { callSocketDir } from "./calls/audioSocket";
 import { CallManager } from "./calls/manager";
 import { MAX_LINE } from "./client";
 import { greeting, HELLO, newDaemonSecret, proof, removeDaemonSecret } from "./daemonProof";
@@ -49,6 +50,8 @@ export interface Host {
 export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], version: string, options: RuntimeOptions = {}): Promise<Host> {
   // Before the lock, the store and the events journal are written there (WISP 1100 § Profiles and files).
   ownProfile(paths.dir);
+  // GHOSTLY_CALL_SOCKET_DIR: a wrong one is refused before the engine starts (the folder itself with the calls).
+  const socketDir = mode === "daemon" ? callSocketDir() : undefined;
   const locked = acquireLock(paths);
   // A daemon says it is starting until its socket listens (`serve`): a command that finds the profile held tells it
   // from a one-shot command (`startingDaemon`). Without it, `daemon status` said no daemon ran and `daemon stop` missed it.
@@ -71,30 +74,54 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
   const hub = new EventHub(paths.events);
   let calls!: CallManager;
   try {
-    await hub.open();
-    const node = runtime.server.node;
-    const now = node.getState();
-    // The histories read here are the attach's too: one that changes before the hub is attached is read again then.
-    const mark = runtime.server.historyMark;
-    const histories = new Map<string, readonly StoredMessage[]>(), newest = new Map<string, readonly StoredMessage[]>();
-    const whole = (id: string) => (id.startsWith("group:") ? node.groupMessages({ groupId: id.slice(6) }) : node.getMessages(id));
+    const { server, store } = runtime, node = server.node;
     // A store that was closed holds every note the hub made, and a history the engine has not touched since is as it
     // was closed: its newest messages say whether the hub is in step with it. Otherwise the whole history is read.
     // Those newest messages come from the whole histories the engine's start read, where it kept them unwritten since.
-    const closed = !runtime.store.recovered;
-    const kept = runtime.server.takeStartNewest();
-    for (const id of [...now.links.map((link) => link.id), ...now.groups.map((group) => `group:${group.id}`)]) {
-      const page = closed && !runtime.server.historyChanged(id) ? kept.get(id) ?? await node.messagePage({ linkId: id, limit: BASELINE_NEWEST }) : null;
-      if (page && !page.more) histories.set(id, page.messages);
-      else if (page && hub.inStep(id, page.messages)) newest.set(id, page.messages);
-      else histories.set(id, await whole(id));
-    }
-    hub.baseline(now, histories, { newest, files: (id) => node.fileMessages(id) });
-    // A transfer that ended while the last run stopped has no transfer in the engine any more: its record tells its end.
-    await hub.ended((id) => fileStore.get(id));
-    announceJoins(hub, node);
+    const closed = !store.recovered;
+    // A one-shot hears a few chats at most (an offline one, only the ones it changes itself): each one's notes are read,
+    // and it is caught up, when its history's first event comes (`EventHub.perChat`). Not after a crash, which reads
+    // every history whole.
+    const oneByOne = mode === "one-shot" && closed;
+    await hub.open({ seen: !oneByOne });
+    const perChat = oneByOne && await hub.loadOwnNotes();
+    if (oneByOne && !perChat) await hub.loadSeen();
+    const kept = server.takeStartNewest();
+    const whole = (id: string) => (id.startsWith("group:") ? node.groupMessages({ groupId: id.slice(6) }) : node.getMessages(id));
+    const baseline = async () => {
+      const now = node.getState();
+      // The histories read here are the attach's too: one that changes before the hub is attached is read again then.
+      const mark = server.historyMark;
+      const histories = new Map<string, readonly StoredMessage[]>(), newest = new Map<string, readonly StoredMessage[]>();
+      for (const id of [...now.links.map((link) => link.id), ...now.groups.map((group) => `group:${group.id}`)]) {
+        const page = closed && !server.historyChanged(id) ? kept.get(id) ?? await node.messagePage({ linkId: id, limit: BASELINE_NEWEST }) : null;
+        if (page && !page.more) histories.set(id, page.messages);
+        else if (page && hub.inStep(id, page.messages)) newest.set(id, page.messages);
+        else histories.set(id, await whole(id));
+      }
+      hub.baseline(now, histories, { newest, files: (id) => node.fileMessages(id) });
+      // A transfer that ended while the last run stopped has no transfer in the engine any more: its record tells its end.
+      await hub.ended((id) => fileStore.get(id));
+      announceJoins(hub, node);
+      return { mark, ids: [...histories.keys(), ...newest.keys()] };
+    };
+    let read: { mark: number; ids: string[] };
+    if (perChat) {
+      const now = node.getState();
+      const ids = [...now.links.map((link) => link.id), ...now.groups.map((group) => `group:${group.id}`)];
+      // Each history read when it is caught up, from the attach on: one changed before it is read whole then.
+      read = { mark: server.historyMark, ids };
+      const untouched = new Set(ids.filter((id) => !server.historyChanged(id)));
+      hub.perChat(now, {
+        newest: async (id) => (untouched.has(id) ? kept.get(id) ?? await node.messagePage({ linkId: id, limit: BASELINE_NEWEST }) : null),
+        whole,
+        files: (id) => node.fileMessages(id),
+      });
+      await hub.ended((id) => fileStore.get(id));
+      announceJoins(hub, node);
+    } else read = await baseline();
     // Calls (WISP 1100 § Calls): only a daemon answers and places them; a one-shot still reports one that rings.
-    calls = new CallManager({ engine: node, emit: (type, id, fields) => hub.emit(type, id, fields), profileDir: paths.dir, answers: mode === "daemon" });
+    calls = new CallManager({ engine: node, emit: (type, id, fields) => hub.emit(type, id, fields), profileDir: paths.dir, socketDir, answers: mode === "daemon" });
     const manager = calls;
     hub.onCallSignal((chat, signal) => manager.onSignal(chat, signal));
     reportAppFrames(hub, node, paths.dir);
@@ -102,7 +129,7 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
     const joiner = new GroupAutoJoin({ engine: node, profileDir: paths.dir, joins: mode === "daemon" });
     groupAuto = joiner;
     hub.onState((s) => joiner.check(s));
-    runtime.server.attach(hub.sink, { mark, ids: [...histories.keys(), ...newest.keys()] });
+    server.attach(hub.sink, read);
     joiner.check(node.getState());
     // Presence (`settings set daemonPresence true`): only a daemon says it, while it runs.
     if (mode === "daemon") {
@@ -131,6 +158,8 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
       hub.sink.post({ kind: "state", state: runtime.server.node.getState() });
       presence?.stop();
       runtime.server.detach(hub.sink);
+      // The chats still being caught up (`EventHub.perChat`) read their histories: before the engine closes.
+      await hub.caughtUp();
       // The seqs reserved past the last event go back, so the next start numbers on from it (`EventHub.release`).
       hub.release();
       await runtime.close().catch(() => {});
@@ -186,9 +215,12 @@ export async function serve(host: Host): Promise<Served> {
   return {
     server,
     close: () => (closing ??= new Promise<void>((resolve) => {
-      // First: a greeting copied from this daemon proves nothing once it has stopped.
-      removeDaemonSecret(ctx.runtime.paths.dir);
+      // The socket first (its file goes at once), then the secret: a greeting copied from this daemon proves nothing once
+      // it has stopped. The other way round, a client that found the secret gone in between (a read whose hello's
+      // answer came just before) asked again on the socket still listening, and the close ended that connection as well:
+      // "The daemon went away before it answered chat.list, twice".
       server.close(() => resolve());
+      removeDaemonSecret(ctx.runtime.paths.dir);
       // The waits still open answer with what they know (`waits.ts`) before their connections end: a `send --wait`
       // ended by a restart has its `messageId`, and its message goes on, where it failed as "The daemon went away".
       stopping.abort();

@@ -65,7 +65,64 @@ describe("several Lightning cards on a network", () => {
     // The default one shows its switch on, and it cannot be turned off (another card is made the default instead).
     await user.click(screen.getByTestId("wallet-card-lightning-testnet-home"));
     expect(await screen.findByTestId("lightning-card-default")).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByTestId("lightning-card-default")).toBeDisabled();
+    expect(screen.getByTestId("lightning-card-default")).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("Default for receiving and Rename keep the keys while they work, after it and after a refusal; the other waits", async () => {
+    const later = () => { let answer!: () => void, refuse!: (e: Error) => void; const promise = new Promise<void>((resolve, reject) => { answer = resolve; refuse = reject; }); return { promise, answer, refuse }; };
+    const made = later();
+    let renamed = later();
+    const { user, engine } = renderApp(<Wallet />);
+    engine.update({ wallet: withCards(home(), office()) });
+    engine.on("lightningSetReceive", () => made.promise).on("lightningRename", () => renamed.promise);
+    await user.click(await screen.findByTestId("wallet-card-lightning-testnet-ln-0ff1ce00"));
+    const toggle = await screen.findByTestId("lightning-card-default"), rename = screen.getByTestId("lightning-card-rename"), name = screen.getByTestId("lightning-card-name");
+
+    // The switch, from the keys: busy while it works, then on and unavailable (another card takes it back), still focused.
+    toggle.focus();
+    await user.keyboard(" ");
+    expect(toggle).toHaveAttribute("aria-busy", "true");
+    expect(toggle).toBeEnabled();
+    expect(toggle).toHaveFocus();
+    expect(rename).toBeDisabled();
+    made.answer();
+    engine.update({ wallet: withCards({ ...home(), receive: false }, { ...office(), receive: true }) });
+    await waitFor(() => expect(toggle).not.toHaveAttribute("aria-busy"));
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    expect(toggle).toHaveAttribute("aria-disabled", "true");
+    expect(toggle).toBeEnabled();
+    expect(toggle).toHaveFocus();
+    await user.keyboard(" ");
+    expect(engine.callsTo("lightningSetReceive")).toHaveLength(1);
+
+    // Rename, unchanged: focusable, its press ignored. Refused: it keeps the focus. Done: unchanged again, still focused.
+    rename.focus();
+    expect(rename).toHaveAttribute("aria-disabled", "true");
+    await user.keyboard("{Enter}");
+    expect(engine.callsTo("lightningRename")).toHaveLength(0);
+    await user.clear(name);
+    await user.type(name, "Office wallet");
+    expect(rename).not.toHaveAttribute("aria-disabled");
+    rename.focus();
+    await user.keyboard("{Enter}");
+    expect(rename).toHaveAttribute("aria-busy", "true");
+    expect(rename).toBeEnabled();
+    expect(rename).toHaveFocus();
+    expect(toggle).toBeDisabled();
+    renamed.refuse(new Error("That name is taken"));
+    expect(await screen.findByTestId("lightning-card-error")).toBeInTheDocument();
+    expect(rename).not.toHaveAttribute("aria-busy");
+    expect(rename).toHaveFocus();
+    renamed = later();
+    await user.keyboard("{Enter}");
+    expect(rename).toHaveFocus();
+    renamed.answer();
+    engine.update({ wallet: withCards({ ...home(), receive: false }, { ...office(), name: "Office wallet", receive: true }) });
+    await waitFor(() => expect(rename).toHaveAttribute("aria-disabled", "true"));
+    expect(rename).not.toHaveAttribute("aria-busy");
+    expect(rename).toBeEnabled();
+    expect(rename).toHaveFocus();
+    expect(engine.callsTo("lightningRename")).toHaveLength(2);
   });
 
   it("New adds another Lightning card, and brings it to the front, selected", async () => {

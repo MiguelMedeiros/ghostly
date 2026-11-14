@@ -1492,6 +1492,25 @@ describe("when the prompt is refused or there is no device", () => {
       expect(devices.liveTracks()).toEqual([]);
       expect(call.result.current.callState).toBe("idle");
     });
+
+    it("a call that ends while the camera is asked for lets the microphone go at once, and the camera once allowed", async () => {
+      const call = eachAlone();
+      call.receive(remote.offer(Date.now(), true));
+      act(() => { void call.result.current.acceptCall(true); });
+      devices.userMedia[0].grant();
+      await settle();
+      // The caller gives up while Android's camera dialog is still up: no call is left to hold the microphone for.
+      call.receive(remote.hangUp(Date.now() + 1));
+      await settle();
+
+      expect(call.result.current.callState).toBe("idle");
+      expect(devices.liveTracks()).toEqual([]);
+
+      devices.userMedia[1].grant();
+      await settle();
+      expect(devices.liveTracks()).toEqual([]);
+      expect(call.result.current.localStream).toBeNull();
+    });
   });
 
   it("an answer the connection refuses reports the error and closes everything", async () => {

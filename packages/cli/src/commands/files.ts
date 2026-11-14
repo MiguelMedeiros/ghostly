@@ -65,13 +65,15 @@ export const commands: Record<string, Command> = {
     method: "file.send", usage: "file send <chat|group> <path> [--name n] [--mime t] [--voice [ms] [--peaks 0,40,…]] [--reply <message>] [--force] [--wait none|sent] [--timeout s]", summary: `Send a file (or, with --voice, a voice note), as a reply with --reply; to a group, every member's app fetches it (up to ${GROUP_FILE_LIMITS.maxBytes / 1024 / 1024} MiB)`,
     args: ["chat", "path"],
     options: {
-      name: { type: "string", description: "The name the contact (or the group) sees" }, mime: { type: "string", description: "Its type (default: from the extension)" }, voice: { type: "number", optionalValue: true, description: "A voice note; its length in milliseconds (default: measured from the sound)" }, peaks: { type: "string", description: "Loudness bars 0-255, comma-separated (default: measured from the sound)" }, reply,
+      name: { type: "string", description: "The name the contact (or the group) sees" }, mime: { type: "string", description: "Its type (default: from the extension)" }, voice: { type: "number", optionalValue: true, takes: "a length in milliseconds", description: "A voice note; its length in milliseconds (default: measured from the sound)" }, peaks: { type: "string", description: "Loudness bars 0-255, comma-separated (default: measured from the sound)" }, reply,
       wait: { type: "string", choices: ["none", "sent"], description: "none or sent: until the contact has the whole file, in a 1:1 chat (default: none with a daemon, sent without; a group: none)" },
       timeout: { type: "number", description: "Seconds --wait sent waits (default 300)" },
       force: { type: "boolean", description: "Send even if --name looks like a seed, a key or ecash" },
     },
     // The flags first: a usage error (exit 2) is said before the file is looked at.
     params: ({ options }, a) => {
+      // Empty (an unset variable in a script), it sent the file as no reply: an id the chat lacks is exit 3.
+      if (options.reply === "") throw new CliError("usage", "--reply needs a message id");
       const voice = voiceOf(options), seconds = timeout(options, LONG_WAIT_SECONDS);
       return { chat: a.chat, path: sendable(here(a.path)!), name: options.name, mime: options.mime, ...voice, reply: options.reply, force: options.force === true, wait: options.wait, timeout: seconds };
     },

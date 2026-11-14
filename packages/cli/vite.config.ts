@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { basename, dirname, join, posix } from "node:path";
 import { defineConfig, type Plugin } from "vite";
+import { appsTestGuard } from "../../apps/web/appsTestFlag";
 
 // OpenPGP.js publishes its lightweight build under a "browser" condition only; it runs on Node too
 // (as in packages/browser's tests), so the CLI ships the very code the apps do.
@@ -159,7 +160,8 @@ export default defineConfig({
       { find: /^hyperdht\/(.*)$/, replacement: `${HYPERDHT}/$1` },
     ],
   },
-  plugins: [walletSdksOnNode(), hyperdhtPatched()],
+  // The e2e suite's switch (VITE_APPS_TEST) never goes into the CLI: npm gets what this builds.
+  plugins: [appsTestGuard("cli"), walletSdksOnNode(), hyperdhtPatched()],
   build: {
     ssr: "src/bin.ts",
     target: "node22",

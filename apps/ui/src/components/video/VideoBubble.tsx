@@ -14,14 +14,14 @@ import { claimPlayback, registerVoicePlayer, releasePlayback } from "../../lib/v
 import { openStoredMedia, type StoredMedia } from "../../lib/storedMedia";
 import { canPlayVideo, videoBox, videoFormat as formatOf } from "../../lib/videoPlayer";
 import { localPoster, posterUrl } from "../../lib/videoPoster";
-import { RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
+import { FORCED_EDGE, RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
 import { useT } from "../../contexts/I18nContext";
 import { problemLine, saveProblemLine } from "../../lib/problemText";
 
 type Phase = "poster" | "loading" | "playing";
 type Problem = "unsupported" | "too-large" | "no-room" | "missing" | "left-out" | "not-yet";
 
-const linkButton = "text-xs px-2.5 py-0.5 max-md:min-h-11 max-md:px-4 rounded-full bg-black/20 hover:bg-black/30 border-none text-inherit cursor-pointer transition-colors";
+const linkButton = `text-xs px-2.5 py-0.5 max-md:min-h-11 max-md:px-4 rounded-full bg-black/20 hover:bg-black/30 border-none ${FORCED_EDGE} text-inherit cursor-pointer transition-colors`;
 
 /** How long a playing video may be out of view before it stops: longer than a rotation's new layout takes to settle. */
 const OUT_OF_VIEW_MS = 1500;
@@ -344,8 +344,8 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
                 type="button"
                 data-testid="video-fullscreen"
                 aria-label={theater ? t("chat.video.exitFullScreen") : t("chat.video.fullScreen")}
+                // Named for what it does next, so it is no toggle: "Exit full screen, pressed" read as left already.
                 title={theater ? t("chat.video.exitFullScreen") : t("chat.video.fullScreen")}
-                aria-pressed={theater}
                 onClick={() => setTheater(!theater)}
                 className="absolute top-[6px] end-[6px] w-8 h-8 rounded-full bg-black/50 hover:bg-black/70 text-white flex items-center justify-center border-none cursor-pointer"
               >
@@ -372,7 +372,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
                     data-testid="video-accept"
                     disabled={noRoom}
                     onClick={() => act("accept")}
-                    className="flex items-center gap-2 max-w-[calc(100%-8px)] px-3 py-2 rounded-full bg-black/60 hover:bg-black/75 text-white text-[14px] font-medium border-none cursor-pointer disabled:opacity-50 disabled:cursor-default"
+                    className={`flex items-center gap-2 max-w-[calc(100%-8px)] px-3 py-2 rounded-full bg-black/60 hover:bg-black/75 text-white text-[14px] font-medium border-none ${FORCED_EDGE} cursor-pointer disabled:opacity-50 disabled:cursor-default`}
                   >
                     <DownloadIcon size={18} />
                     {t("chat.media.downloadSize", { size: statusSize(file.size, t) })}

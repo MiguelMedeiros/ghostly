@@ -128,11 +128,15 @@ const refusedByFetch = error => error instanceof TypeError && (!('cause' in erro
  * client's to write). With none configured, the header is ignored.
  */
 export function clientAddress (req, proxies = 0) {
-  const socket = req.socket.remoteAddress ?? ''
-  if (!proxies) return socket
+  return forwardedAddress(req, proxies) ?? req.socket.remoteAddress ?? ''
+}
+
+/** The client's address from `X-Forwarded-For` behind `proxies` proxies (see clientAddress), or null without that entry. */
+export function forwardedAddress (req, proxies = 0) {
+  if (!proxies) return null
   const header = req.headers['x-forwarded-for']
   const hops = (Array.isArray(header) ? header.join(',') : header ?? '').split(',').map(item => item.trim()).filter(Boolean)
-  return hops.length >= proxies ? hops[hops.length - proxies] : socket
+  return hops.length >= proxies ? hops[hops.length - proxies] : null
 }
 
 /**
@@ -247,7 +251,8 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
   let forwarding = 0
   const pruning = setInterval(() => { prune(monotonicNow()); flush() }, 60_000)
   pruning.unref?.()
-  // Once per start: a proxy in front the relay was not told about makes every client count as that proxy.
+  // Once per start: a proxy in front the relay was not told about, or one it was told about that does not write the
+  // header, makes every client count as that proxy.
   let hinted = false
   // Compared as a browser writes them: `https://app.example/` in the settings still lets https://app.example in.
   const allowed = new Set(origins.map(origin => originOf(origin) ?? origin))
@@ -278,10 +283,14 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
     // A refusal of kind `origin`, its first line in a minute naming the origin so a misspelt GHOSTLY_RELAY_ORIGINS shows.
     if (refused) return refuse('origin', 403, { error: 'Origin not allowed' }, originShown(origin))
 
-    const ip = rateKey(clientAddress(req, proxies))
+    const forwarded = forwardedAddress(req, proxies)
+    const ip = rateKey(forwarded ?? req.socket.remoteAddress ?? '')
     if (!proxies && !hinted && req.headers['x-forwarded-for'] !== undefined) {
       hinted = true
       log('requests carry X-Forwarded-For but GHOSTLY_RELAY_PROXIES is not set: every client counts as the proxy')
+    } else if (proxies && !hinted && forwarded === null) {
+      hinted = true
+      log('requests arrive without X-Forwarded-For though GHOSTLY_RELAY_PROXIES is set: each counts as the proxy, so have the proxy write it or leave the setting out')
     }
     if (!addresses.take(ip, monotonicNow())) return refuse('rate', 429, { error: 'Too many' })
 

@@ -1,4 +1,5 @@
-import { sha256 } from "@noble/hashes/sha2.js";
+import { hmac } from "@noble/hashes/hmac.js";
+import { sha256, sha512 } from "@noble/hashes/sha2.js";
 import { createBase58check } from "@scure/base";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { MONERO_WORDS } from "./monero-words";
@@ -47,6 +48,8 @@ function lazyIndex(list: readonly string[], spell: (word: string) => string): ()
 }
 
 const MNEMONIC_LENGTHS = [12, 15, 18, 21, 24];
+/** BIP39's checksum, or Electrum's: its seeds are 12 words of the same list with a version where the checksum is. */
+const englishChecksumHolds = (indices: number[]) => bip39ChecksumHolds(indices) || electrumVersionHolds(indices);
 const BIP39: SeedWords = {
   index: lazyIndex(wordlist, (word) => word),
   words: englishWords,
@@ -56,8 +59,13 @@ const BIP39: SeedWords = {
    * checksum of its own, which BIP39's caught only by chance, about 3 in 10).
    */
   wholeMessage: [...MNEMONIC_LENGTHS, 16],
-  checksumHolds: bip39ChecksumHolds,
+  checksumHolds: englishChecksumHolds,
 };
+/**
+ * The English list by each word's first four letters, as a metal backup stamps it and Trezor and Coldcard take it
+ * ("aban abil …"): no two words start with the same four. A longer word is not read here, so prose still breaks a run.
+ */
+const BIP39_SHORT: SeedWords = { ...BIP39, index: lazyIndex(wordlist, (word) => word.slice(0, 4)) };
 /** Monero's classic seed (Monero GUI, monero-wallet-cli): 25 words of its own list, or MyMonero's 13. */
 const MONERO: SeedWords = {
   index: lazyIndex(MONERO_WORDS, (word) => word),
@@ -66,7 +74,7 @@ const MONERO: SeedWords = {
   wholeMessage: [25, 13],
   checksumHolds: moneroChecksum(MONERO_WORDS, 3),
 };
-let seeds = [BIP39, MONERO];
+let seeds = [BIP39, BIP39_SHORT, MONERO];
 
 /**
  * BIP39's own lists in the app's other languages, which a wallet set to one of them shows its seed in: the same
@@ -75,7 +83,7 @@ let seeds = [BIP39, MONERO];
  * first download) and the CLI with the guard.
  */
 export function addSeedLists(lists: readonly (readonly string[])[], moneroLists: readonly [list: readonly string[], prefix: number][] = []): void {
-  seeds = [BIP39, MONERO, ...lists.map((list): SeedWords => ({
+  seeds = [BIP39, BIP39_SHORT, MONERO, ...lists.map((list): SeedWords => ({
     index: lazyIndex(list, fold),
     words: foldedWords,
     lengths: MNEMONIC_LENGTHS,
@@ -134,9 +142,17 @@ export function findSecret(text: string): SecretFinding | null {
   if (readings.some((reading) => {
     // A text's words are read once per way of reading them, not once per list: the other languages' 13 lists share one.
     const words = new Map<SeedWords["words"], string[] | null>();
+    const listed = numbered(reading);
+    const listedWords = new Map<SeedWords["words"], string[] | null>();
     return seeds.some((seed) => {
       if (!words.has(seed.words)) words.set(seed.words, seed.words(reading));
-      return hasMnemonic(words.get(seed.words)!, seed);
+      if (hasMnemonic(words.get(seed.words)!, seed)) return true;
+      if (!listed) return false;
+      if (!listedWords.has(seed.words)) {
+        const read = seed.words(listed.words.join(" "));
+        listedWords.set(seed.words, read?.length === listed.words.length ? read : null);
+      }
+      return hasMnemonic(inOrder(listed.numbers, listedWords.get(seed.words)!, seed), seed);
     });
   })) return { kind: "mnemonic" };
   if (readings.some((reading) => NSEC.test(reading))) return { kind: "nsec" };
@@ -191,6 +207,45 @@ function hasMnemonic(tokens: string[] | null, seed: SeedWords): boolean {
     else if (check()) return true;
   }
   return check();
+}
+
+/**
+ * A seed written as a numbered list: "1. abandon", "Word 2: ability", "3) able", one word to a number and nothing else
+ * before the next number or the line's end. Read in the numbers' order, so a header above it ("Recovery phrase"), the
+ * word "word" in its labels and a list in two columns ("1. … 13. …") still make one run.
+ */
+const NUMBERED = /(?<![\p{L}\p{N}.,])(?:word\s*)?#?(\d{1,2})\s*[.:)-]?\s*(\p{L}+)(?=[^\S\r\n]*[,;]?[^\S\r\n]*(?:$|\r?\n|(?:word\s*)?#?\d))/gimu;
+
+function numbered(text: string): { numbers: number[]; words: string[] } | null {
+  const pairs = [...text.matchAll(NUMBERED)];
+  return pairs.length < 12 ? null : { numbers: pairs.map((pair) => Number(pair[1])), words: pairs.map((pair) => pair[2]) };
+}
+
+/**
+ * The words of `seed`'s list put at their numbers, when they are numbered 1 to n with none missing or twice; what is
+ * not on the list is left out ("Here are your 24 words").
+ */
+function inOrder(numbers: number[], words: string[] | null, seed: SeedWords): string[] | null {
+  if (!words) return null;
+  const index = seed.index(), placed: string[] = [];
+  let count = 0;
+  for (let i = 0; i < words.length; i++) {
+    if (!index.has(words[i])) continue;
+    if (numbers[i] < 1 || placed[numbers[i] - 1] !== undefined) return null;
+    placed[numbers[i] - 1] = words[i];
+    count++;
+  }
+  return count === placed.length ? placed : null;
+}
+
+/**
+ * Electrum (electrum/mnemonic.py): a seed's HMAC-SHA512 under "Seed version" starts with its version in hex, "01"
+ * standard, "100" segwit, "101" and "102" two-factor. Its seeds are 12 words; a random 12 pass one time in 200.
+ */
+function electrumVersionHolds(indices: number[]): boolean {
+  if (indices.length !== 12) return false;
+  const mac = hmac(sha512, utf8.encode("Seed version"), utf8.encode(indices.map((index) => wordlist[index]).join(" ")));
+  return mac[0] === 0x01 || (mac[0] === 0x10 && mac[1] >> 4 <= 2);
 }
 
 /** BIP39: the words' 11-bit indices are the entropy followed by the first bits of its SHA-256. */

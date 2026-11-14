@@ -3,6 +3,7 @@ import { pair } from "../support/paired";
 import { composerRow } from "../support/composer";
 import { choose } from "../support/select";
 import { iosKeyboard, keyboard } from "../support/keyboard";
+import { closeIdentities, openIdentities } from "../support/identities";
 import { STORE_URL, serveStore, testStore, type TestStore } from "../support/appStore";
 import type { AppViewMode } from "@ghostly/core";
 
@@ -124,6 +125,75 @@ test("on a wide screen the app sits beside the chat, which stays usable", { tag:
   await ana.page.keyboard.press("Escape");
   await expect(app).toBeHidden();
   await expect(input).toBeFocused();
+});
+
+test("on a laptop the contact's identities lie over the chat while an app sits beside it, and the chat keeps a phone's width", { tag: ["@feature:apps.view"] }, async ({ peer }) => {
+  const [ana] = await setUp(peer);
+  const page = ana.page;
+  const panel = page.getByTestId("chat-identities"), backdrop = page.locator(".contact-panel-backdrop");
+  const chatWidth = async () => (await page.locator(".chat-column").filter({ has: page.getByTestId("chat-name") }).boundingBox())!.width;
+  for (const width of [1366, 1440]) {
+    await page.setViewportSize({ width, height: 800 });
+    // Alone, the panel docks beside the chat.
+    await openIdentities(ana);
+    await expect(backdrop).toBeHidden();
+    await expect(panel).toHaveAttribute("role", "complementary");
+    await closeIdentities(ana);
+
+    // With Chess beside the chat, both docked left it 189-232 px and its message field 29-72: the panel lies over it.
+    await openChess(ana);
+    const app = page.getByTestId("mini-app");
+    await expect(app).toHaveAttribute("data-place", "beside");
+    await openIdentities(ana);
+    await expect(backdrop).toBeVisible();
+    await expect(panel).toHaveAttribute("role", "dialog");
+    expect(await chatWidth()).toBeGreaterThanOrEqual(320);
+    await page.keyboard.press("Escape");
+    await expect(panel).toHaveCount(0);
+    await app.getByRole("button", { name: "Close" }).click();
+    await expect(app).toBeHidden();
+
+    // Docked when the app opens: it goes over the chat, a dialog now, with the focus; Escape closes it, the app stays.
+    await openIdentities(ana);
+    await expect(panel).toHaveAttribute("role", "complementary");
+    await openChess(ana);
+    await expect(app).toHaveAttribute("data-place", "beside");
+    await expect(backdrop).toBeVisible();
+    await expect(panel).toHaveAttribute("role", "dialog");
+    await expect(panel).toBeFocused();
+    expect(await chatWidth()).toBeGreaterThanOrEqual(320);
+    await page.keyboard.press("Escape");
+    await expect(panel).toHaveCount(0);
+    await expect(app).toBeVisible();
+    await app.getByRole("button", { name: "Close" }).click();
+    await expect(app).toBeHidden();
+  }
+});
+
+test("on a tablet held upright, with no room beside the chat, the app covers it with Back to it instead of squeezing it", { tag: ["@feature:apps.view"] }, async ({ peer }) => {
+  // Beside the chat list, an iPad's 820 px left the chat 40 px beside the app (768 px: none, 1024 px: its name gone).
+  const [ana] = await setUp(peer);
+  await ana.page.setViewportSize({ width: 820, height: 1180 });
+  await openChess(ana);
+  const app = ana.page.getByTestId("mini-app");
+  await expect(app).toBeVisible();
+  await expect(app).toHaveAttribute("data-place", "wide");
+  await expect(ana.page.getByTestId("chat-name")).toBeHidden();
+  const pane = (await ana.page.locator(".chat-pane").boundingBox())!, box = (await app.boundingBox())!;
+  expect(Math.round(box.width)).toBe(Math.round(pane.width));
+  // No way to put it beside the chat; Back goes to the chat, the app one tap away.
+  await expect(app.getByTestId("mini-app-wide")).toHaveCount(0);
+  await app.getByTestId("mini-app-back").click();
+  await expect(app).toBeHidden();
+  await expect(ana.page.getByTestId("chat-name")).toBeVisible();
+  await expect(ana.page.getByTestId("mini-app-resume")).toHaveText("Back to Chess");
+
+  // Wide enough again (the phone turned, the window widened): beside the chat, which keeps a phone's width.
+  await ana.page.setViewportSize({ width: 1280, height: 800 });
+  await ana.page.getByTestId("mini-app-resume").click();
+  await expect(app).toHaveAttribute("data-place", "beside");
+  await expect(ana.page.getByTestId("chat-name")).toBeVisible();
+  expect((await ana.page.locator(".chat-column").boundingBox())!.width).toBeGreaterThanOrEqual(320);
 });
 
 test("on a phone the app covers the chat, and Back keeps it running", { tag: ["@feature:apps.view"] }, async ({ peer }) => {

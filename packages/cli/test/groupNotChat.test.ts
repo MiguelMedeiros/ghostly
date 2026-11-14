@@ -4,8 +4,11 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import type { EngineState, GroupView, LinkView } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
+import { findChatOrGroup } from "../src/apiKit";
 import { CallManager, type CallEngine } from "../src/calls/manager";
 import { allowlist } from "../src/listen";
+import { chatViewOf, groupViewOf } from "./support/chatView";
+import { pasted } from "./support/pasted";
 // covers: headless.groups
 
 /**
@@ -22,10 +25,10 @@ const dirs: string[] = [];
 afterAll(() => { for (const dir of dirs) rmSync(dir, { recursive: true, force: true }); });
 
 function fake(): ApiContext {
-  const node = { getState: state, inviteToGroup: vi.fn(), shareIdentityProof: vi.fn(), setServiceShared: vi.fn(), renameLink: vi.fn() };
+  const node = { chatView: chatViewOf, groupView: groupViewOf, getState: state, inviteToGroup: vi.fn(), shareIdentityProof: vi.fn(), setServiceShared: vi.fn(), renameLink: vi.fn() };
   const dir = mkdtempSync(join(tmpdir(), "gnc-"));
   dirs.push(dir);
-  const calls = new CallManager({ engine: { getState: state, setCallSignal: async () => {} } as unknown as CallEngine, emit: () => {}, profileDir: dir });
+  const calls = new CallManager({ engine: { chatView: chatViewOf, groupView: groupViewOf, getState: state, setCallSignal: async () => {} } as unknown as CallEngine, emit: () => {}, profileDir: dir });
   return { runtime: { server: { node }, paths: { name: "default", dir }, callsUnavailable: null }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, calls, mode: "daemon", version: "test" } as unknown as ApiContext;
 }
 
@@ -163,5 +166,49 @@ describe("listen --from a group, --group a chat", () => {
       await expect(allowlist([ref], [], withBob, async () => null)).rejects.toMatchObject({ details: { chat: "chat-bob" } });
     }
     expect(await allowlist(["chat-bob"], [], withBob, async () => null)).toBeDefined();
+  });
+});
+
+describe("a hint naming a group a shell would expand", () => {
+  // `"$5 lunch"` pasted into a shell named ` lunch`; a backtick in the name ran a command.
+  const call = (name: string) => (method: string, params: Record<string, unknown>) => {
+    const ctx = fake();
+    const node = (ctx.runtime as unknown as { server: { node: { getState: () => EngineState } } }).server.node;
+    node.getState = () => ({ ...state(), groups: [{ ...crew, name }] }) as unknown as EngineState;
+    return callApi(ctx, method, params);
+  };
+  /** The command line the refusal offers, as a shell reads it pasted. */
+  const offered = async (refusal: Promise<unknown>) => {
+    const message = await refusal.then(() => "", (error: Error) => error.message);
+    expect(message).toContain(": ghostly ");
+    return pasted(message.slice(message.indexOf(": ghostly ") + 2));
+  };
+
+  it.each(["$5 lunch", "a`echo x`b", "it's", "x!y"])("%s: the command offered names the same group", async (name) => {
+    expect(await offered(call(name)("chat.send", { chat: name, text: "hi" }))).toEqual(["ghostly", "group", "send", name, "[text...]"]);
+    expect(await offered(call(name)("chat.history", { chat: name }))).toEqual(["ghostly", "group", "history", name]);
+    expect(await offered(allowlist([name], [], call(name), async () => null))).toEqual(["ghostly", "listen", "--group", name]);
+  });
+
+  it("message delete group:<name> keeps group: in the command offered, which takes a chat's name first", async () => {
+    // A chat labelled "Crew" here beside the group Crew: `message delete Crew m1 --everyone` looked in the chat.
+    const ctx = fake();
+    const node = (ctx.runtime as unknown as { server: { node: { getState: () => EngineState } } }).server.node;
+    const both = { ...state(), links: [alice, { ...alice, id: "chat-crew", label: "Crew", peerPubKeyZ32: "pcrew" }] } as unknown as EngineState;
+    node.getState = () => both;
+    const words = await offered(callApi(ctx, "chat.delete", { chat: "group:Crew", message: "m1" }));
+    expect(words).toEqual(["ghostly", "message", "delete", "group:Crew", "m1", "--everyone"]);
+    expect(findChatOrGroup(both.links, both.groups, words[3])).toEqual({ group: crew });
+  });
+
+  it.each(["misunderstanding", "Misunderstanding"])("message delete %s: a group named like a chat's id is offered as group:<name>, which --everyone takes", async (name) => {
+    // 16 letters of a chat id's alphabet: `message delete misunderstanding m1 --everyone` read "No chat".
+    const offeredFor = await offered(call(name)("chat.delete", { chat: name, message: "m1" }));
+    expect(offeredFor).toEqual(["ghostly", "message", "delete", `group:${name}`, "m1", "--everyone"]);
+    expect(findChatOrGroup(state().links, [{ ...crew, name }], offeredFor[3])).toEqual({ group: { ...crew, name } });
+  });
+
+  it("message delete Crew keeps the name alone when --everyone takes it as the group", async () => {
+    expect(await offered(call("Crew")("chat.delete", { chat: "Crew", message: "m1" }))).toEqual(["ghostly", "message", "delete", "Crew", "m1", "--everyone"]);
   });
 });

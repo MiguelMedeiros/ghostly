@@ -4,15 +4,16 @@ import type { WalletView } from "@ghostly/browser/shared/types";
 import { MessageBubble } from "../../components/MessageBubble";
 import { satsIn } from "../../components/NetworkTag";
 import { CashuWallet } from "../../components/wallet/CashuWallet";
+import { LightningAddressPay } from "../../components/wallet/LightningAddressPay";
 import { networkState } from "../../components/walletCardData";
-import { servicesPlatform, type WalletState } from "../../lib/platform";
+import { servicesPlatform, type LightningAddressInfo, type WalletState } from "../../lib/platform";
 import { translateWith } from "../../locales/translate";
 import { fakeEngine, linkView, walletView } from "../fakeEngine";
 import { LANGUAGES, LOCALES } from "../i18n/locales";
 import { renderApp } from "../render";
 import { lightningSource, liveMainnetInvoice, mint, REAL_MINT, TEST_MINT } from "./fixtures";
 
-// covers: payments.lightning.invoice-card, payments.mainnet-confirm, wallet.cashu.test-sats, wallet.lightning.card
+// covers: payments.lightning.invoice-card, payments.mainnet-confirm, wallet.cashu.test-sats, wallet.lightning.card, wallet.cashu.pay-invoice, payments.lnurl.card
 
 /**
  * A pasted invoice's Pay ("Pay 2,000 + up to 5 fee"), its real-money step's fee and a history row's fee ("fee 2") said
@@ -69,13 +70,42 @@ describe("a wallet's history", () => {
   });
 });
 
+describe("the Wallets page's real-money step", () => {
+  const quote = { quote: "melt-1", mint: REAL_MINT, amount: 2_100, feeReserve: 1 };
+
+  it("a pasted invoice on the Cashu card says the fee's unit, singular for one", async () => {
+    const state = walletView({ mode: "mainnet", mints: [mint(REAL_MINT, 5_000)], balance: 5_000 }) as WalletState;
+    const { user, engine } = renderApp(<CashuWallet wallet={servicesPlatform!.wallet} state={state} rail="cashu" onOpenCashu={() => {}} />);
+    engine.on("walletQuoteInvoice", () => quote);
+    await user.click(screen.getByTestId("wallet-send"));
+    await user.type(screen.getByTestId("wallet-pay-input"), liveMainnetInvoice(2_100));
+    await user.click(screen.getByRole("button", { name: /^Pay 2,100 sats$/ }));
+    await user.click(await screen.findByTestId("wallet-pay-confirm"));
+    expect(screen.getByTestId("review-mainnet-confirm")).toHaveTextContent("This sends 2,100 sats (plus a fee of up to 1 sat) that cannot be taken back");
+  });
+
+  it("a Lightning address says the fee's unit", async () => {
+    const info = { id: "addr-1", kind: "address", text: "alice@example.com", domain: "example.com", callbackDomain: "example.com", minSat: 1, maxSat: 100_000, description: "Alice", commentAllowed: 0 } as LightningAddressInfo;
+    fakeEngine.setState({ wallet: walletView({ mints: [mint(REAL_MINT, 5_000), mint(TEST_MINT, 5_000)] }) });
+    const { user, engine } = renderApp(<LightningAddressPay wallet={servicesPlatform!.wallet.forNetwork("mainnet")} text="alice@example.com" />);
+    engine.on("lnurlResolve", () => info).on("lnurlInvoice", () => ({ invoice: "lnbc-invoice", note: "Paid alice@example.com" })).on("walletQuoteInvoice", () => ({ ...quote, feeReserve: 3 }));
+    await user.click(screen.getByTestId("lnurl-lookup"));
+    await user.type(await screen.findByTestId("lnurl-amount"), "2100");
+    await user.click(screen.getByTestId("lnurl-invoice"));
+    await user.click(await screen.findByTestId("lnurl-pay"));
+    expect(screen.getByTestId("review-mainnet-confirm")).toHaveTextContent("This sends 2,100 sats (plus a fee of up to 3 sats) that cannot be taken back");
+  });
+});
+
 describe("in every language", () => {
   it.each(LANGUAGES)("in %s, each fee string writes the unit", (language) => {
     const t = translateWith(LOCALES[language], language);
     const unit = satsIn(t, "testnet");
     expect(t("payments.invoice.payWithFee", { amount: "2", fee: "5", unit })).toContain(unit);
     expect(t("wallet.cashu.history.fee", { amount: "2", unit })).toContain(unit);
-    const real = t("payments.invoice.confirmWhat", { amount: "5", fee: "5", unit: satsIn(t, "mainnet"), feeUnit: satsIn(t, "mainnet", 5) });
-    expect(real.split(satsIn(t, "mainnet", 5)).length - 1).toBe(2);
+    for (const key of ["payments.invoice.confirmWhat", "wallet.lightning.confirmWhat"] as const) {
+      const real = t(key, { amount: "5", fee: "5", unit: satsIn(t, "mainnet"), feeUnit: satsIn(t, "mainnet", 5) });
+      expect(real.split(satsIn(t, "mainnet", 5)).length - 1, key).toBe(2);
+    }
   });
 });

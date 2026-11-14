@@ -30,6 +30,8 @@ describe("a chat search's marks in one bubble", () => {
     list: Array.from({ length: 200 }, () => `- ${WORDS}`).join("\n"),
     code: "```\n" + `${WORDS}\n`.repeat(200) + "```",
     mixed: Array.from({ length: 30 }, (_, i) => (i % 3 === 0 ? "```ts\n" + `const the = "${WORDS}";\n`.repeat(5) + "```" : i % 3 === 1 ? `- **the** ${WORDS}\n- ${WORDS}` : WORDS.repeat(5))).join("\n\n"),
+    // A link whose text names another host shows its address, marked where that holds the words.
+    "links showing their address": Array.from({ length: 3 }, () => `[paypal.com](https://x.example/${"the-".repeat(150)})`).join(" "),
   };
 
   for (const [name, text] of Object.entries(long)) it(`are bounded in a long message: ${name}`, () => {

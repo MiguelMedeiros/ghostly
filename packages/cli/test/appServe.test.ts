@@ -73,6 +73,16 @@ describe("app serve", () => {
     expect(servedApps(dir)).toEqual([]);
   });
 
+  it("refuses to grant files, which no bot is given, even when the manifest asks it", async () => {
+    const { dir, ctx, file } = profile();
+    const picks = vector("an app that asks for files");
+    expect(picks.read.manifest.permissions).toEqual(["chat", "files"]);
+    await expect(callApi(ctx, "app.serve", { bundle: file("picks", picks.bytes), grant: ["chat", "files"] })).rejects.toMatchObject({ code: "refused", message: expect.stringContaining("files cannot be granted") });
+    expect(servedApps(dir)).toEqual([]);
+    const { served } = await callApi(ctx, "app.serve", { bundle: file("picks", picks.bytes), grant: ["chat"] }) as { served: { granted: string[] } };
+    expect(served.granted).toEqual(["chat"]);
+  });
+
   it("refuses a card url with a query or fragment: a private file's read token would go to contacts", async () => {
     const { dir, ctx, file } = profile();
     const url = "https://raw.githubusercontent.com/ana/chess/main/app.ghostlyapp";

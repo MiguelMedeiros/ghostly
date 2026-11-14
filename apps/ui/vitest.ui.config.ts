@@ -45,6 +45,9 @@ export default defineConfig({
   test: {
     name: "ui",
     environment: "happy-dom",
+    // A link the app opens in a new tab (every link in a message) loads no page when a test clicks it: happy-dom asked
+    // its server, so messageLinks.test.tsx reached github.com on every run.
+    environmentOptions: { happyDOM: { settings: { navigation: { disableChildPageNavigation: true } } } },
     include: ["apps/ui/src/**/*.test.{ts,tsx}", "packages/react/test/**/*.test.{ts,tsx}"],
     setupFiles: ["apps/ui/src/test/setup.ts"],
     css: false,

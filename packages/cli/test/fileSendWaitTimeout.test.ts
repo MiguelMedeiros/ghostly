@@ -8,6 +8,7 @@ import { callApi, type ApiContext } from "../src/api";
 import { CliError } from "../src/errors";
 import { NodeFileBytes } from "../src/runtime/fileBytes";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.files
 
 /**
@@ -28,6 +29,7 @@ beforeAll(async () => {
 function contextFor(mode: "daemon" | "one-shot", transfers: Record<string, unknown> = {}) {
   const sent: number[] = [];
   const node = {
+    chatView: chatViewOf,
     getState: () => ({ links: [link], groups: [], settings: {}, transport: {}, transfers }) as unknown as EngineState,
     getMessages: vi.fn(async () => []),
     getMessage: vi.fn(async () => undefined),

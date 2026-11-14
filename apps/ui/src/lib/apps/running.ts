@@ -111,22 +111,41 @@ export function useChatApp(linkId: string | undefined): ChatApp | undefined {
   return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
-/** Whether the app in the chat `linkId` covers the chat (over its whole width, or a `full` one): all its page needs. */
+/**
+ * The chats whose page is too narrow for an app beside a chat that still works, on a screen wider than a phone (a
+ * tablet held upright, a narrow window): an app there covers the chat, as a `full` one does. Beside it, at 768 px with
+ * the chat list open, the chat was 0 px wide, and at 1024 px its name was gone and the message field 84 px.
+ */
+const narrow = new Set<string>();
+
+/** The chat `linkId`'s page is too narrow for an app beside it, or no longer (its panel measures it, ChatAppPanel.tsx). */
+export function setChatAppNarrow(linkId: string, on: boolean): void {
+  if (narrow.has(linkId) === on) return;
+  if (on) narrow.add(linkId); else narrow.delete(linkId);
+  changed();
+}
+
+/** Whether an app in the chat `linkId` covers the chat, with Back to it, whatever it is: its page is too narrow. */
+export function useChatAppNarrow(linkId: string | undefined): boolean {
+  const snapshot = () => !!linkId && narrow.has(linkId);
+  return useSyncExternalStore(subscribe, snapshot, snapshot);
+}
+
+const covers = (linkId: string, app: ChatApp | undefined) => !!app?.shown && (app.wide || app.view === "full" || narrow.has(linkId));
+
+/** Whether the app in the chat `linkId` covers the chat (over its whole width, a `full` one, or no room beside it): all its page needs. */
 export function useChatAppCovers(linkId: string | undefined): boolean {
-  const snapshot = () => {
-    const app = linkId ? apps.get(linkId) : undefined;
-    return !!app?.shown && (app.wide || app.view === "full");
-  };
+  const snapshot = () => !!linkId && covers(linkId, apps.get(linkId));
   return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
 /**
  * Whether the app in the chat `linkId` is shown over the chat now, the chat's own dialogs (+ → Apps) out of sight under
- * it: over its whole width or a `full` one, and any on a phone.
+ * it: over its whole width, a `full` one or one with no room beside it, and any on a phone.
  */
 export function chatAppOver(linkId: string): boolean {
   const app = apps.get(linkId);
-  return !!app?.shown && (app.wide || app.view === "full" || window.matchMedia(MOBILE_QUERY).matches);
+  return covers(linkId, app) || (!!app?.shown && window.matchMedia(MOBILE_QUERY).matches);
 }
 
 /** The chats an app runs in, by session: App.tsx keeps them loaded. */

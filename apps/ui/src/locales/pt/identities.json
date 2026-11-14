@@ -823,12 +823,14 @@
     "captionMine": "Você compartilhou esta identidade",
     "captionTheirs": "{{contact}} compartilhou esta identidade",
     "checking": "Verificando",
+    "newerTheirs": "Você já guarda uma prova mais nova desta identidade deste contato",
     "notChecked": "Não verificada",
     "notVerified": "Não verificada",
     "revokedMine": "Seu {{what}} foi revogado",
     "revokedTheirs": "O {{what}} de {{contact}} foi revogado",
     "stoppedMine": "Você parou de compartilhar {{what}}",
     "stoppedTheirs": "{{contact}} parou de compartilhar {{what}}",
+    "tooManyTheirs": "Você já guarda identidades demais deste contato",
     "waiting": "Aguardando"
   },
   "shared": {

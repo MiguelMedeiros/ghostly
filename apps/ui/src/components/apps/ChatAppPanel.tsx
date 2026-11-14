@@ -1,4 +1,4 @@
-import { useContext, useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
+import { useContext, useEffect, useId, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import { useIsMobile } from "../../hooks/useIsMobile";
 import { usePhoneHeader } from "../../hooks/usePhoneHeader";
@@ -6,12 +6,18 @@ import { useBackCloses, useTabTrap } from "../../hooks/useDismiss";
 import { takedownText, useAppOpener } from "../../lib/apps/open";
 import { appErrorText } from "../../lib/apps/errors";
 import { ChatOnScreen } from "../../lib/chatOnScreen";
-import { chatApp, registerAppSlot, setChatApp, updateChatApp, useChatApp, type AppContact } from "../../lib/apps/running";
+import { chatApp, registerAppSlot, setChatApp, setChatAppNarrow, updateChatApp, useChatApp, useChatAppNarrow, type AppContact } from "../../lib/apps/running";
 import { PeerAvatar } from "../Avatar";
 import { ChatConnection } from "../ChatConnection";
 import { AppGlyph } from "./AppIcon";
 import { NAME, aroundName } from "./aroundName";
 import "./chat-app-panel.css";
+
+/**
+ * The chat's page narrower than this has no room for the app beside a chat that still works: the panel's least width
+ * (360 px, chat-app-panel.css) and a phone's width for the chat (320 px, as the chat list leaves the page).
+ */
+const BESIDE_MIN = 680;
 
 const iconProps = { width: 18, height: 18, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true } as const;
 
@@ -20,7 +26,8 @@ const iconProps = { width: 18, height: 18, viewBox: "0 0 24 24", fill: "none", s
  * the chat's own look in its header: the app's name, "with" the contact and their picture, and the chat's connection
  * control. Wide: Close, and the whole chat's width or back beside it. Phone: Back to the chat (the app keeps running;
  * `ChatAppResume` or opening it again brings it back) and Close. A full-screen app (its manifest's `view` is `full`)
- * never sits beside the chat: it covers the whole chat at every width, with Back to it and Close.
+ * never sits beside the chat: it covers the whole chat at every width, with Back to it and Close. So does any app where
+ * the chat's page has no room for both (`BESIDE_MIN`: a tablet held upright, a narrow window).
  *
  * The frame box is always here while the chat is, hidden when no app shows: a frame that moved would reload. The
  * header is drawn only while the app shows.
@@ -56,6 +63,7 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
   const root = useRef<HTMLElement>(null);
   const back = useRef<HTMLButtonElement>(null);
   const opener = useRef<HTMLElement | null>(null);
+  const stoppedId = useId();
   const { name, named } = contact;
   // Open again under a stopped app: busy while it opens, and why it failed, for that stopped app only.
   const [again, setAgain] = useState<{ of: unknown; busy?: boolean; error?: string } | null>(null);
@@ -66,11 +74,27 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
   // The chat closed: the app in it stops.
   useEffect(() => () => registerAppSlot(linkId, null), [linkId]);
 
+  // No room beside the chat (a tablet held upright, a narrow window): the app covers it, as a full-screen app does.
+  const narrow = useChatAppNarrow(linkId);
+  useEffect(() => {
+    const pane = root.current?.parentElement;
+    if (phone || !pane) { setChatAppNarrow(linkId, false); return; }
+    // 0: not laid out (a chat kept loaded off screen); measured again as it shows. The contact's identities take none of
+    // this page from an app beside the chat: they lie over the chat while one is there, wherever its 360 px would leave
+    // the chat less than 320 (contact-panel.css). Measured with them docked while the app was hidden, the app covered the
+    // chat when they opened first, and sat beside it when it opened first (bug hunt, 2026-11-14).
+    const measure = () => setChatAppNarrow(linkId, pane.clientWidth > 0 && pane.clientWidth < BESIDE_MIN);
+    const observer = new ResizeObserver(measure);
+    observer.observe(pane);
+    measure();
+    return () => { observer.disconnect(); setChatAppNarrow(linkId, false); };
+  }, [linkId, phone]);
+
   const shown = !!app?.shown;
   const full = app?.view === "full";
-  // Back to the chat: on a phone, and for a full-screen app at every width.
-  const withBack = phone || full;
-  const wide = !phone && (full || !!app?.wide);
+  // Back to the chat: on a phone, and for a full-screen app or one with no room beside the chat at every width.
+  const withBack = phone || full || narrow;
+  const wide = !phone && (full || narrow || !!app?.wide);
   const title = app?.title ?? "";
   const modal = shown && phone;
 
@@ -148,7 +172,8 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
     if (e.key !== "Escape" || e.defaultPrevented || !app) return;
     e.preventDefault();
     if (withBack && !app.stopped) updateChatApp(linkId, { shown: false });
-    else if (wide && !full) updateChatApp(linkId, { wide: false });
+    // Back beside the chat only where it can be: a full-screen app, or one with no room beside it, closes.
+    else if (wide && !withBack) updateChatApp(linkId, { wide: false });
     else close();
   };
   return (
@@ -160,7 +185,7 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
       {shown && <div className="chat-app-head h-14 header-safe flex items-center gap-2 max-md:gap-1 px-3 max-md:ps-1 max-md:pe-1 bg-panel-header border-b border-border shrink-0">
         {withBack && (
           <button ref={back} type="button" data-testid="mini-app-back" onClick={goBack}
-            aria-label={t("apps.view.back")} title={t("apps.view.back")}
+            aria-label={t("apps.view.back")} title={t("apps.view.back")} aria-describedby={app?.stopped ? stoppedId : undefined}
             className={`${phoneHeader ? "w-11 max-[340px]:w-9 tap-target" : "w-9"} h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0`}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="rtl:-scale-x-100"><path d="M15 19l-7-7 7-7" /></svg>
           </button>
@@ -182,8 +207,10 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
         <div className="flex items-center gap-0.5 shrink-0">
           {/* The chat's connection control, the same as in its header: on a phone held upright, 44 px to tap as there. */}
           <ChatConnection peerKey={peerKey} myKey={myKey} status={status} testIdPrefix="app-" callOn={callOn} phone={phoneHeader} />
+          {/* Named for what it does next ("Full width", "Show the chat"), so it is no toggle: "Show the chat, pressed" was
+              read with the chat hidden. */}
           {!withBack && (
-            <button type="button" data-testid="mini-app-wide" aria-pressed={wide} onClick={() => updateChatApp(linkId, { wide: !wide })}
+            <button type="button" data-testid="mini-app-wide" onClick={() => updateChatApp(linkId, { wide: !wide })}
               aria-label={t(wide ? "apps.view.beside" : "apps.view.full")} title={t(wide ? "apps.view.beside" : "apps.view.full")}
               className="p-2 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
               {wide
@@ -197,10 +224,15 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
           </button>
         </div>
       </div>}
-      {/* Stopped by the client (a takedown): why, in the app's place, until Close. */}
-      {shown && app?.stopped && <p role="status" data-testid="mini-app-stopped" className="m-0 p-6 text-center text-sm text-text-secondary">
-        {takedownText(title, app.stopped, t)}
-      </p>}
+      {/* Stopped by the client (a takedown): why, in the app's place, until Close. Said politely in a line that is always
+          there, as a live region must be before what it says: the focus stays in the chat beside it, or goes to a bare
+          "Open again", and a line that came with its words was not read out. Shown again already stopped, it comes with
+          its words: Back, where the focus goes then, is described by it. */}
+      <div role="status">
+        {shown && app?.stopped && <p id={stoppedId} data-testid="mini-app-stopped" className="m-0 p-6 text-center text-sm text-text-secondary">
+          {takedownText(title, app.stopped, t)}
+        </p>}
+      </div>
       {/* Stopped by the watchdog: it may run fine once started again, and the person decides. */}
       {shown && app?.stopped?.why === "unresponsive" && appOpener && (
         <button type="button" data-testid="mini-app-open-again" onClick={openAgain}

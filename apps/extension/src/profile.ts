@@ -1,4 +1,4 @@
-import { activeProfileId, announceSwitch, lastRouteOf, namespaceOf, registryKey } from "../../ui/src/lib/profiles";
+import { activeProfileId, announceSwitch, lastRouteOf, namespaceOf, registryKey, switchUnderWay } from "../../ui/src/lib/profiles";
 
 /**
  * Local profiles in the extension (WISP 04). Every extension page and the offscreen document share one
@@ -48,8 +48,8 @@ export function followEngineRestart(onRestart: () => void): () => void {
 
 let unfinished: () => Promise<unknown> | null = () => null;
 /**
- * What this page finishes before it starts again for a switch (ui/main.tsx: a "Clear all data" in progress). Cut short,
- * most of the profile's data would stay after the page said it was cleared.
+ * What this page finishes before it starts again for a switch (ui/main.tsx: a "Clear all data" or a restore in progress).
+ * Cut short, most of the profile's data would stay after the page said it was cleared, and a restore would be gone.
  */
 export function finishBeforeSwitching(work: () => Promise<unknown> | null): void {
   unfinished = work;
@@ -61,13 +61,16 @@ export function finishBeforeSwitching(work: () => Promise<unknown> | null): void
  * own reads as gone from this device in the other one. Once what it has to finish is over.
  * Under the profile's overlay, as on the tab that switched: until the reload lands, this page re-reads the registry and
  * showed the old profile's page under the new one's name and picture.
+ * A restore that ends here opens its copy (`switchProfile`), which the other tabs then follow: this page goes with it.
  */
 export function startAsProfileInUse(): void {
   const work = unfinished();
   if (work) {
-    void work.catch(() => {}).then(startAsProfileInUse);
+    // A task later: what the page does once the work is over (a restore's switch to its copy) has run by then.
+    void work.catch(() => {}).then(() => setTimeout(startAsProfileInUse));
     return;
   }
+  if (switchUnderWay()) return;
   announceSwitch(activeProfileId());
   history.replaceState(null, "", `#${lastRouteOf(activeProfileId())}`);
   location.reload();

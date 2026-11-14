@@ -26,10 +26,10 @@ export function TextSizeSetting() {
         </div>
         {/* What a chat looks like at this size: a contact's message and an answer. */}
         <div data-testid="settings-text-size-preview" aria-hidden="true" className="flex flex-col gap-1.5 rounded-lg bg-chat-bg p-3">
-          <p dir="auto" className="m-0 max-w-[85%] self-start rounded-lg rounded-ss-none bg-received-bg px-2.5 py-1.5 chat-text-message text-text-primary wrap-break-word">
+          <p data-preview-bubble dir="auto" className="m-0 max-w-[85%] self-start rounded-lg rounded-ss-none bg-received-bg px-2.5 py-1.5 chat-text-message text-text-primary wrap-break-word">
             {t("settings.textSizePreview")}
           </p>
-          <p dir="auto" className="m-0 max-w-[85%] self-end rounded-lg rounded-se-none bg-sent-bg px-2.5 py-1.5 chat-text-message text-text-primary wrap-break-word">
+          <p data-preview-bubble dir="auto" className="m-0 max-w-[85%] self-end rounded-lg rounded-se-none bg-sent-bg px-2.5 py-1.5 chat-text-message text-text-primary wrap-break-word">
             {t("settings.textSizePreviewReply")}
           </p>
         </div>

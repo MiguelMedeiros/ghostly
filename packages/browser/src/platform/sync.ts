@@ -9,11 +9,14 @@ import {
   forgetInviteCode,
   forgetShownSession,
   getInviteCode,
+  getPrefix,
   getUnreadCount,
+  holdsUnsaved,
   isSessionKey,
   listShownSessions,
   loadSession,
   loadShownSession,
+  onUnsavedChange,
   peerDisplayName,
   sessionIdForPeer,
   sessionLinkParams,
@@ -25,6 +28,7 @@ import {
 import { clearChatNotification } from "../../../../apps/ui/src/lib/notifications";
 import { stopAppsIn } from "../../../../apps/ui/src/lib/apps/open";
 import type { ChatMessage, ChatSession } from "../../../../apps/ui/src/lib/types";
+import type { AttachMark } from "../shared/rpc";
 import type { EngineState, LinkView, ReactionNote, StoredMessage } from "../shared/types";
 import { engine, type ListChanges } from "./engine";
 import { forgetServicesOf } from "../host";
@@ -493,11 +497,45 @@ async function reconcile(): Promise<void> {
   if (!later && !renamed) settled = { state, sessions };
 }
 
+/**
+ * The peer's mark the stored chats were last mirrored to (the extension's pages share them): a page that connects with it
+ * is sent only the chats that changed since, not each chat's newest 400 rows again at every tab opened or reloaded.
+ */
+const markKey = () => `${getPrefix()}engine_mark`;
+
+function readMark(): AttachMark | undefined {
+  try {
+    const mark = JSON.parse(localStorage.getItem(markKey()) ?? "null") as Partial<AttachMark> | null;
+    return typeof mark?.epoch === "string" && typeof mark.mark === "number" ? { epoch: mark.epoch, mark: mark.mark } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Kept only while every write of the mirror went in: one localStorage refused (full) is in this page alone, and the next
+ * page must be sent those chats again to have it.
+ */
+function keepMark(mark: AttachMark): void {
+  if (holdsUnsaved()) return forgetMark();
+  try {
+    localStorage.setItem(markKey(), JSON.stringify(mark));
+  } catch {
+    forgetMark();
+  }
+}
+
+function forgetMark(): void {
+  localStorage.removeItem(markKey());
+}
+
 let started = false;
 
 export function startSessionSync(): void {
   if (started) return;
   started = true;
+  engine.keepMarks({ read: readMark, keep: keepMark });
+  onUnsavedChange(() => { if (holdsUnsaved()) forgetMark(); });
   engine.start();
   engine.onMessages(mirrorNew);
   engine.subscribe(() => {

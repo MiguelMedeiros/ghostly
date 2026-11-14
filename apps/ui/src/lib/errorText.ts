@@ -462,6 +462,7 @@ const RULES: readonly Rule[] = [
   exact("These notes are from a federation I have not joined", "errors.pay.notesUnknownFederation"),
   exact("These notes are worth less than a sat", "errors.pay.notesTooSmall"),
   exact("These notes were already redeemed", "errors.pay.notesRedeemed"),
+  exact("These notes were already received", "errors.pay.notesReceived"),
   exact("The server took too long to answer", "errors.lnurl.tooSlow"),
   exact("No way to reach the network here", "errors.lnurl.noNetwork"),
   { match: /^(?<host>[^\s:/]+\.[^\s:/]+(?::\d+)?) refused: (?<reason>[\s\S]+)$/, key: "errors.lnurl.refused", reason: "next" },
@@ -691,6 +692,7 @@ const RULES: readonly Rule[] = [
   exact("Your contact's app cannot verify this kind of identity yet", "errors.proof.contactUnsupported"),
   exact("Your contact's app could not check it. Try again later.", "errors.proof.contactUnavailable", "errors.proof.laterNext"),
   exact("Your contact keeps too many identities from you already", "errors.proof.contactTooMany"),
+  exact("Your contact keeps a newer proof of this identity from you", "errors.proof.contactNewer"),
   exact("That identity is no longer in your profile", "errors.proof.notInProfile"),
   exact("Your contact could not verify it", "errors.proof.contactRefused"),
   // A check that could not run (IdentityCheckUnavailable: sshForges.ts, providers/atproto.ts, atproto/resolve.ts, pubky.ts,
@@ -792,6 +794,7 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   mintHoldsSats: "errors.engine.mintHoldsSats",
   mintFailedQuote: "errors.engine.mintFailedQuote",
   mintFailedFaucet: "errors.engine.mintFailedFaucet",
+  mintFailedInvoice: "errors.engine.mintFailedInvoice",
   lastMint: "errors.engine.lastMint",
   noSharedMint: "errors.engine.noSharedMint",
   reviewedSatsGone: "errors.engine.reviewedSatsGone",
@@ -838,6 +841,7 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   walletAway: "errors.engine.walletAway",
   walletAwayUnnamed: "errors.engine.walletAwayUnnamed",
   groupTurnUnconfirmed: "errors.engine.groupTurnUnconfirmed",
+  serviceShareFull: "errors.engine.serviceShareFull",
   // As the chat's payment line says them (Chat.tsx).
   contactNoWallet: "chat.payments.noWallet",
   contactNoPayments: "chat.payments.offOrOld",
@@ -853,16 +857,18 @@ const ENGINE_NEXT: Partial<Record<EngineErrorCode, TranslationKey>> = {
   lightningRefused: "errors.engine.lightningRefusedNext",
   lnurlUnreachable: "errors.engine.lnurlUnreachableNext",
   mintFailedFaucet: "errors.engine.mintFailedFaucetNext",
+  mintFailedInvoice: "errors.engine.mintFailedInvoiceNext",
   mintFailedQuote: "errors.engine.mintFailedQuoteNext",
   parkedSigned: "errors.engine.parkedSignedNext",
   requestNotAwaiting: "errors.engine.requestNotAwaitingNext",
   reviewedEcashSpent: "errors.engine.reviewedEcashSpentNext",
   reviewedSatsGone: "errors.engine.reviewedSatsGoneNext",
   sentAfterReview: "errors.engine.sentAfterReviewNext",
+  serviceShareFull: "errors.engine.serviceShareFullNext",
   testMintOnMainnet: "errors.engine.testMintOnMainnetNext",
 };
 /** The engine errors whose English goes behind the ⓘ too: a server's own reason in it is not said in the line. */
-const ENGINE_DETAIL: ReadonlySet<EngineErrorCode> = new Set(["lightningRefused", "mintFailedQuote", "mintFailedFaucet"]);
+const ENGINE_DETAIL: ReadonlySet<EngineErrorCode> = new Set(["lightningRefused", "mintFailedQuote", "mintFailedFaucet", "mintFailedInvoice"]);
 /** The values that are amounts: written again the app's way (the engine wrote them its own way). */
 const AMOUNTS = new Set(["amount", "fee", "min", "max"]);
 

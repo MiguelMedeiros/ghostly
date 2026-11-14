@@ -20,6 +20,7 @@ import { problemText, type Problem } from "../../lib/problemText";
 import { said } from "../../lib/notices";
 import { fillNames } from "../../lib/fillNodes";
 import { keepFocusIn } from "../../lib/focus";
+import { FocusSafeButton } from "../ui/FocusSafeButton";
 
 /** How long a profile whose wallets are still loading is asked again before the join gives up and says why. */
 const LOADING_WAIT_MS = 60_000;
@@ -195,8 +196,13 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
   const title = step === "choose" ? t("devices.join.already")
     : step === "home" ? t("devices.join.homeTitle")
       : profile ? t(titles.named, { profile }) : t(titles.yours);
+  // The digits to check are plain lines: a screen reader hears them, one by one, from a line that is there from the
+  // dialog's start and changes its text (one that comes with its step is often not read).
+  const spoken = view?.role === "joiner" && view.step === "confirm"
+    ? <>{t("devices.join.check")} <span dir="ltr">{view.digits.split("").join(" ")}</span></> : "";
   return (
     <DeviceDialog title={title} onClose={close} testId="device-join">
+      <p role="status" className="sr-only" data-testid="device-join-spoken">{spoken}</p>
       {step === "choose" && <>
         {tab ? <HomeScreenSteps code={false} />
           : <button type="button" data-testid="device-join-add" onClick={() => { fromChoose.current = true; setStep("scan"); }} className={primaryButton}>{t("devices.join.addThis")}</button>}
@@ -211,7 +217,7 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
           </label>
           {place === "new" && <InfoLine testId="device-join-new-profile" info={t("devices.join.newProfileInfo")}>{t("devices.join.newProfile")}</InfoLine>}
           {error && <Notice problem={error} testId="device-join-error" />}
-          <button type="submit" autoFocus data-testid="device-join-next" disabled={!name.trim() || busy} className={primaryButton}>{t("devices.join.add")}</button>
+          <FocusSafeButton type="submit" autoFocus data-testid="device-join-next" disabled={!name.trim() || busy} className={primaryButton}>{t("devices.join.add")}</FocusSafeButton>
         </form>
       )}
       {/* What the enroll step shows; it takes the focus when Add goes away under it. */}

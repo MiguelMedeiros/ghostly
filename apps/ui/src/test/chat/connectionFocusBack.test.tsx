@@ -63,9 +63,10 @@ describe("the connection panel, while a choice or button works", () => {
     const confirm = screen.getByTestId("pair-verify-confirm");
     confirm.focus();
     await user.keyboard("{Enter}");
-    expect(confirm).toBeDisabled();
+    // Off while it works, by aria-disabled: it keeps the focus, so there is nothing for Chromium to drop.
+    expect(confirm).toHaveAttribute("aria-disabled", "true");
     dropFocusIfDisabled();
-    expect(document.body).toHaveFocus();
+    expect(confirm).toHaveFocus();
     await finish();
     expect(screen.getByTestId("pair-verify-error")).toBeInTheDocument();
     expect(confirm).toHaveFocus();

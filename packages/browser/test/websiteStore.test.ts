@@ -180,7 +180,7 @@ describe("the site reads a store as the app does", () => {
     expect(guard?.from).toBe(APPS_RELEASE);
   });
 
-  it("tries a listing's URLs in order, and shows only the version it lists", async () => {
+  it("tries a listing's URLs as the app does, a jsDelivr copy first, and shows only the version it lists", async () => {
     const a = signerOf("publisher a");
     const listed = await buildAppBundle({ ...base("tries", "Tries App"), version: "1.0.1", sequence: 2 }, [page("Tries App")], a);
     const newer = await buildAppBundle({ ...base("tries", "Tries App"), version: "1.1.0", sequence: 3 }, [page("Tries App")], a);
@@ -202,6 +202,9 @@ describe("the site reads a store as the app does", () => {
     // A first URL that was not read gives way too.
     const secondOnly = view({ [second]: listed.bytes });
     expect(secondOnly.ok && secondOnly.apps[0]?.url).toBe(second);
+    // Both hold it: the page offers the jsDelivr copy, as the app reads it first, never the raw HEAD that moves on.
+    const same = view({ [first]: listed.bytes, [second]: listed.bytes });
+    expect(same.ok && same.apps[0]?.url).toBe(second);
   });
 
   it("keeps every permission the manifest asks for, files too, and the release its runtime.host needs", async () => {

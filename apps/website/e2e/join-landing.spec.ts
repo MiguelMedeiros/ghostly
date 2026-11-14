@@ -102,9 +102,23 @@ test.describe("join page", () => {
     await page.goto(`/#${CODE}`);
     await page.getByTestId("join-desktop").click();
     await expect(page.getByRole("status")).toHaveText("Invite copied. In Ghostly, choose Join, then Paste.");
+    await expect(page.getByRole("status")).toHaveCSS("color", "rgb(74, 222, 128)");
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(CODE);
     await expect(page.getByTestId("join-going")).toHaveCount(0);
     expect(await page.evaluate(() => localStorage.getItem("ghostly.join.open"))).toBe("app");
+  });
+
+  test("the Ghostly app where the clipboard is refused: the code is shown, and the line does not read as a success", async ({ page }) => {
+    await page.addInitScript(() => {
+      navigator.clipboard.writeText = () => Promise.reject(new DOMException("refused", "NotAllowedError"));
+    });
+    await page.goto(`/#${CODE}`);
+    await page.getByTestId("join-desktop").click();
+    const failed = page.getByRole("status");
+    await expect(failed).toContainText("Could not copy. Copy this invite, then choose Join in Ghostly:");
+    await expect(failed.locator("code")).toHaveText(CODE);
+    // --amber, the site's warning (site.css), not the --mint "Invite copied" is drawn in.
+    await expect(failed).toHaveCSS("color", "rgb(251, 191, 36)");
   });
 
   test("a device that chose the Ghostly app: no countdown, the app first", async ({ page }) => {

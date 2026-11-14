@@ -92,6 +92,20 @@ describe("sharing a local web app", () => {
     expect(engine.calls).toEqual([]);
   });
 
+  // The extension turns an app's Share off when the person takes Chrome's site access to its host back: turned on
+  // again without asking, its contacts were refused until a second click on Allow.
+  it("turning an app's Share on again asks for its address first, as sharing it did; turning it off asks nothing", async () => {
+    const stopped = (id: string, target: string) => ({ id, name: id, target, enabled: false, createdAt: 0 });
+    engine.state = { services: [stopped("db", "http://127.0.0.1:5432"), stopped("notes", "http://localhost:3400")] } as unknown as EngineState;
+    await services.setServiceEnabled("db", true);
+    expect(access).toEqual(["http://127.0.0.1/*"]);
+    expect(asked).toEqual(["http://127.0.0.1:5432"]);
+    await expect(services.setServiceEnabled("notes", true)).rejects.toThrow("needs your permission");
+    await services.setServiceEnabled("notes", false);
+    expect(asked).toEqual(["http://127.0.0.1:5432", "http://localhost:3400"]);
+    expect(engine.calls).toEqual([["setServiceEnabled", { serviceId: "db", enabled: true }], ["setServiceEnabled", { serviceId: "notes", enabled: false }]]);
+  });
+
   it("refuses a target off this machine before asking for any access", async () => {
     await expect(services.shareService("Bank", "https://bank.example")).rejects.toThrow("Only services on this machine");
     await expect(services.shareService("Creds", "http://user:pw@localhost:1")).rejects.toThrow("Credentials");

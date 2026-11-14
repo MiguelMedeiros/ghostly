@@ -43,6 +43,8 @@ export interface IdentityLinkHost {
   /** Settings → Hide my IP from contacts: a contact's proof is then checked only on hosts this app names (`fixedIdentityHosts`). */
   relayOnly?(): boolean;
   emit(): void;
+  /** One chat's view is to be built again: a contact's proof it shows expired, or its re-check fell due, by the time alone. */
+  redraw?(linkId: string): void;
   /** The public profile kept for an identity (PUBLIC-PROFILES.md), shown only while its proof is current and verified. */
   publicProfile?(provider: string, subject: string): PublicProfileView | undefined;
   /** Pkarr (the Ghost DHT or its relays): publish records under a key, read a key's latest records. */
@@ -59,6 +61,8 @@ const REVOCATIONS_ROUND = "identityRevocationsRound";
 interface LookupRound { startedAt: number; done: string[] }
 /** Relays and the DHT forget a record within hours: republish revocations this often while the app runs. */
 const REPUBLISH_MS = 60 * 60_000;
+/** The longest a timer waits; a redraw further off waits again from there. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
 /**
  * A revocation is kept (with its sealed seed) this long past its expiry by this device's clock, which may be the one that
  * is wrong: the contacts decide expiry by theirs. Only a clock ahead by more than the longest a proof may last (400 days)
@@ -175,6 +179,8 @@ export class IdentityProofs {
   private recheckBackoff = new Map<string, { failures: number; until: number }>();
   /** When the automatic re-check asked each provider with a `recheck.perHour` (ms), this last hour, by provider id. */
   private recheckedAt = new Map<string, number[]>();
+  /** Each chat's next change of its view by the time alone (s), and the timer that has it built again then: `linkView`. */
+  private redrawTimers = new Map<string, { at: number; timer: ReturnType<typeof setTimeout> }>();
   private readonly fetch: ReturnType<typeof boundedIdentityFetch>;
 
   constructor(private host: IdentityLinkHost, private providers: () => readonly IdentityProofProvider[] = loadedIdentityProviders) {
@@ -243,6 +249,8 @@ export class IdentityProofs {
     this.stops++;
     for (const t of this.timers) clearTimeout(t);
     this.timers = [];
+    for (const { timer } of this.redrawTimers.values()) clearTimeout(timer);
+    this.redrawTimers.clear();
     this.lookupTimer = undefined;
     // The lookup under way ends here: what it read since its last write is kept for the next start.
     this.saveRound();
@@ -719,6 +727,22 @@ export class IdentityProofs {
     this.exchanges.get(linkId)?.stop();
     this.exchanges.delete(linkId);
     this.errors.delete(linkId);
+    this.redrawAt(linkId, undefined);
+  }
+
+  /** Has the chat's view built again at `at` (s): nothing stored changes when a proof expires, so nothing else would. */
+  private redrawAt(linkId: string, at: number | undefined): void {
+    const armed = this.redrawTimers.get(linkId);
+    if (armed?.at === at) return;
+    if (armed) clearTimeout(armed.timer);
+    this.redrawTimers.delete(linkId);
+    if (at === undefined || !this.host.redraw) return;
+    const timer = setTimeout(() => {
+      this.redrawTimers.delete(linkId);
+      if (at * 1000 > Date.now()) this.redrawAt(linkId, at);
+      else this.host.redraw?.(linkId);
+    }, Math.min(at * 1000 - Date.now(), MAX_TIMER_MS));
+    this.redrawTimers.set(linkId, { at, timer });
   }
 
   linkView(linkId: string, supported: boolean): LinkIdentitiesView | undefined {
@@ -726,13 +750,19 @@ export class IdentityProofs {
     if (!ledger) return undefined;
     const { mine, theirs } = this.host.keys(linkId);
     const t = now();
-    return {
+    // The soonest a proof shown expires or its re-check falls due: the view is built again then.
+    let next = Infinity;
+    const view: LinkIdentitiesView = {
       support: supported,
       contactProviders: supported ? this.exchanges.get(linkId)?.contactProviders?.slice() : undefined,
       shared: ledger.shared.map(ownRefusal),
       received: ledger.received.map(r => {
         const provider = this.providers().find(p => p.id === r.binding.provider);
         const status = receivedIdentityStatus(r, theirs, mine, t);
+        const ends = Math.min(r.binding.expiresAt, r.verified.expiresAt ?? Infinity);
+        if ((status === "verified" || status === "unconfirmed") && ends > t) next = Math.min(next, ends);
+        const due = provider?.recheck && r.checkedAt <= t ? r.checkedAt + provider.recheck.afterSeconds : Infinity;
+        if (due > t) next = Math.min(next, due);
         const publicProfile = status === "verified" ? this.host.publicProfile?.(r.binding.provider, r.verified.subject) : undefined;
         // A check stored while this device's clock ran ahead reads as done now, not at that future date.
         return { id: r.id, provider: r.binding.provider, subject: r.verified.subject, verified: r.verified, display: r.display,
@@ -743,5 +773,7 @@ export class IdentityProofs {
       }),
       error: this.errors.get(linkId),
     };
+    this.redrawAt(linkId, next === Infinity ? undefined : next);
+    return view;
   }
 }

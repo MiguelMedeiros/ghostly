@@ -41,8 +41,10 @@ export function userPath(path: string, home = false): string {
   return resolve(path);
 }
 
+const isProfileName = (name: string): boolean => NAME.test(name) && !name.includes("..");
+
 export function checkProfileName(name: string): string {
-  if (!NAME.test(name) || name.includes("..")) throw new CliError("usage", `Not a profile name: ${JSON.stringify(name)} (letters, digits, ".", "_" and "-", up to 64)`);
+  if (!isProfileName(name)) throw new CliError("usage", `Not a profile name: ${JSON.stringify(name)} (letters, digits, ".", "_" and "-", up to 64)`);
   return name;
 }
 
@@ -76,13 +78,35 @@ export function checkShownNameOption(name: string): string {
 export function currentProfile(home: string, option?: string): string {
   if (option === "") throw new CliError("usage", "--profile needs a profile name");
   if (option !== undefined) return checkProfileName(option);
-  if (process.env.GHOSTLY_PROFILE) return checkProfileName(process.env.GHOSTLY_PROFILE);
+  const env = process.env.GHOSTLY_PROFILE;
+  // Nobody typed it on this line: refused naming the variable and the way out, not as a `--profile` given here.
+  if (env && !isProfileName(env)) {
+    throw new CliError("usage", `GHOSTLY_PROFILE names no profile (${JSON.stringify(env)}): set it to a profile's name (letters, digits, ".", "_" and "-", up to 64), or unset it`);
+  }
+  if (env) return env;
   const file = join(home, "current");
   if (existsSync(file)) {
     const name = readFileSync(file, "utf8").trim();
-    if (name) return checkProfileName(name);
+    // Nobody typed it: refused naming the file and the way out, not a usage error of a name the command never had.
+    if (name && !isProfileName(name)) {
+      throw new CliError("refused", `${file} names no profile (${JSON.stringify(name)}): ghostly profile use <name> or ghostly profile create <name> --use replaces it, or delete the file`, { file });
+    }
+    if (name) return name;
   }
   return DEFAULT_PROFILE;
+}
+
+/**
+ * The current profile, or null when `<home>/current` names none: for the commands that list profiles or replace that
+ * file (`profile list`, `use`, `create`, `restore`), which a bad name there would otherwise block.
+ */
+export function currentProfileOrNone(home: string, option?: string): string | null {
+  try {
+    return currentProfile(home, option);
+  } catch (error) {
+    if (error instanceof CliError && error.details?.file) return null;
+    throw error;
+  }
 }
 
 export function profileDir(home: string, name: string): string {

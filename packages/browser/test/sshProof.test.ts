@@ -128,6 +128,15 @@ describe("SSH identity proofs", () => {
     await expect(Promise.resolve().then(() => signer(ssh).parse(`Signing data on standard input\n${signature.split("\n").slice(0, -2).join("\n")}`, s))).rejects.toThrow(/whole signature/);
   });
 
+  it("takes the newest signature when the terminal copy holds an earlier run too", async () => {
+    // Add started over (a new statement), or the first run lacked -n ghostly: the command ran again in the same terminal.
+    const s = statementFor(ssh, fingerprint), signature = mine.sign(s.text);
+    for (const before of [mine.sign(statementFor(ssh, fingerprint).text), mine.sign(s.text, "file")]) {
+      const evidence = await signer(ssh).parse(`Signing data on standard input\n${before}$ ssh-keygen …\nSigning data on standard input\n${signature}$ `, s);
+      expect(await verify(ssh, s, evidence)).toMatchObject({ subject: fingerprint });
+    }
+  });
+
   it("links a GitHub account only while it publishes the signing key, asking api.github.com alone", async () => {
     const net = forges({ "github:octo-cat": [mine.publicKey] });
     const s = statementFor(sshGithub, "octo-cat"), evidence = await proveWith(sshGithub)(s);

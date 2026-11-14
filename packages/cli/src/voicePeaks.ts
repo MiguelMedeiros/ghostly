@@ -620,7 +620,12 @@ export function streamFfmpeg(path: string, sink: SoundSink, command = process.en
     child.stderr.on("data", (chunk: Buffer) => { if (errors.length < 2000) errors += chunk.toString(); });
     child.on("error", (error: NodeJS.ErrnoException) => {
       clearTimeout(timer);
-      reject(new Error(error.code === "ENOENT" ? "no decoder here for this kind of audio (install ffmpeg to read it)" : `ffmpeg: ${error.message}`));
+      // The ffmpeg GHOSTLY_FFMPEG names not being there is the setting's fault: installing ffmpeg would not change it.
+      const setting = process.env.GHOSTLY_FFMPEG;
+      const missing = setting && command === setting
+        ? `GHOSTLY_FFMPEG (${setting}) is not there: set it to ffmpeg's path, or unset it to use the one on the PATH`
+        : "no decoder here for this kind of audio (install ffmpeg to read it)";
+      reject(new Error(error.code === "ENOENT" ? missing : `ffmpeg: ${error.message}`));
     });
     child.on("close", (code) => {
       clearTimeout(timer);

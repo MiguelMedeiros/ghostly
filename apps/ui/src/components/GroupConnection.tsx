@@ -3,7 +3,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupEdgeView, GroupView } from "@ghostly/browser/shared/types";
 import { useOutsideDismiss } from "../hooks/useDismiss";
 import { edgeDot, edgeLabel, edgeReconnects, edgeWaits, groupTransports, memberName, sameNamed } from "../lib/groups";
-import { dots, focus, type ConnectionKind } from "../lib/connection";
+import { dots, focus, reachDot, type ConnectionKind } from "../lib/connection";
 import { ConnectionIcon } from "./ConnectionIcon";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { agoIn } from "../lib/relativeTime";
@@ -104,7 +104,7 @@ export function GroupConnection({ group }: { group: GroupView }) {
         <span className={`flex ${pulsing ? "motion-safe:animate-pulse" : ""}`} data-testid="group-connection-icon">
           <ConnectionIcon kind={iconKind} transport={carried?.transport} size={18} weight={2} />
         </span>
-        {dot && <span aria-hidden="true" data-testid="group-connection-dot" className={`pointer-events-none absolute end-1 top-1 h-2 w-2 rounded-full ring-2 ring-panel-header max-md:end-2 max-md:top-2 ${dot} ${kind === "waiting" && (connecting || peerLost) || pulsing ?"motion-safe:animate-pulse" : ""}`} />}
+        {dot && <span aria-hidden="true" data-testid="group-connection-dot" className={`pointer-events-none absolute end-1 top-1 h-2 w-2 rounded-full ring-2 ring-panel-header forced-colors:ring-[color:Canvas] max-md:end-2 max-md:top-2 ${reachDot(dot)} ${kind === "waiting" && (connecting || peerLost) || pulsing ? "motion-safe:animate-pulse" : ""}`} />}
       </button>
       {menuOpen && <div role="dialog" id={`${id}-popover`} aria-label={t("group.connection.label")} className="absolute end-0 top-full max-md:fixed max-md:inset-x-2 max-md:top-[calc(3.5rem_+_env(safe-area-inset-top))] max-md:w-auto z-40 mt-2 w-[min(21rem,calc(100vw-1rem))] max-h-[70dvh] overflow-y-auto rounded-xl border border-border bg-panel-header p-4 text-xs leading-5 text-text-muted shadow-xl">
         <div className="flex items-center gap-2 font-medium text-text-primary" data-testid="group-connection-state">
@@ -121,7 +121,7 @@ export function GroupConnection({ group }: { group: GroupView }) {
             return <li key={m.key} data-testid="group-connection-member" data-key={m.key} data-state={m.edge?.state ?? "none"} tabIndex={-1}
               className={`rounded-lg bg-surface-hover px-2.5 py-1.5 focus:outline-none ${focus}`}>
               <div className="flex min-h-8 items-center gap-2">
-                <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${edgeDot(m)}`} />
+                <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${reachDot(edgeDot(m))}`} />
                 <span className="min-w-0 flex-1">
                   {/* The name a member typed, in its own direction: in Arabic a long English one is cut at its end, not its start. */}
                   <span dir="auto" className="block truncate text-text-primary">{memberName(m, t, sameNamed(group.members))}</span>

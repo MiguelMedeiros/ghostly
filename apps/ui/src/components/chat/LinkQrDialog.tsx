@@ -67,7 +67,7 @@ export function LinkQrDialog({ title, url, qr, onClose }: { title: string; url: 
           className="mt-4 w-full min-w-0 rounded-lg bg-input-bg px-3 py-2.5 font-mono text-xs text-text-secondary focus:outline-none focus:ring-1 focus:ring-accent" />
         <div className="mt-3 flex gap-2">
           <button type="button" data-testid="link-qr-copy" onClick={() => void copy()}
-            className="min-h-11 flex-1 rounded-lg bg-accent px-4 text-sm font-semibold text-on-accent cursor-pointer hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header">
+            className="min-h-11 flex-1 rounded-lg bg-accent px-4 text-sm font-semibold text-on-accent cursor-pointer hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header">
             {copied ? t("common.copied") : t("common.copy")}
           </button>
           <CopiedStatus copied={copied} />

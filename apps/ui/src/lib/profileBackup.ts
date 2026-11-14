@@ -609,7 +609,21 @@ function register(id: string, ns: string, { profile, storage }: ProfileHead): Pr
 }
 
 /** `restoreProfileBackup` of a bundle already opened (after `sameIdentityProfiles` was asked, say). */
-export async function restoreOpenedBackup(opened: OpenedProfileBackup, run: BackupRun = {}, beforeRegister?: (database: string) => Promise<void>): Promise<ProfileEntry> {
+export function restoreOpenedBackup(opened: OpenedProfileBackup, run: BackupRun = {}, beforeRegister?: (database: string) => Promise<void>): Promise<ProfileEntry> {
+  const restore = restoreInto(opened, run, beforeRegister);
+  const held: Promise<void> = restore.then(() => {}, () => {}).then(() => { if (restoring === held) restoring = null; });
+  restoring = held;
+  return restore;
+}
+
+/**
+ * The restore this page runs, if one does: a page that starts again for a switch in another tab waits for it. Cut by
+ * that reload, the restore was gone with nothing said, the copy taken back at the next start.
+ */
+export const restoreInProgress = (): Promise<void> | null => restoring;
+let restoring: Promise<void> | null = null;
+
+async function restoreInto(opened: OpenedProfileBackup, run: BackupRun, beforeRegister?: (database: string) => Promise<void>): Promise<ProfileEntry> {
   // What an earlier restore left when its tab was closed half way goes first.
   await sweepInterruptedRestores();
   const id = newProfileId(), ns = namespaceOf(id);

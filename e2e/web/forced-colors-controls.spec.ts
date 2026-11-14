@@ -1,6 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import { pasteInvite } from "../support/clipboard";
-import { expect, test } from "../support/fixtures";
+import { expect, openProfilePage, test } from "../support/fixtures";
 import { HeadlessBot } from "../support/headless";
 import { pair } from "../support/paired";
 
@@ -156,11 +156,58 @@ test("forced colors keep an edge on New group's Create and an invitation's Accep
   const row = bob.page.getByTestId("group-row").filter({ hasText: "Ghosts" });
   await expect(row.getByTestId("group-accept")).toBeVisible({ timeout: 60_000 });
   await keepsAnEdge(bob.page, row.getByTestId("group-accept"), "the chat list row's Accept");
-  await row.getByTestId("group-row-open").click();
+  // The row opens it: its `group-row-open` is a focus target that takes no pointer (ChatRow.tsx `RowOpen`).
+  await row.getByTestId("group-row-avatar").click();
   const invitation = bob.page.getByTestId("group-invitation");
   await keepsAnEdge(bob.page, invitation.getByTestId("group-accept"), "the invitation page's Accept");
   await bob.page.emulateMedia({ forcedColors: "active", colorScheme: "dark" });
   await bob.page.screenshot({ path: test.info().outputPath("forced-group-invitation.png") });
+});
+
+/**
+ * A first visit's main buttons, filled with the accent alone: the chat list's New and its arrow, the invite's Copy
+ * invite, the install hint's Install and the New in Wallets' and Identities' headers read as bare bold text in forced
+ * colors, dark and light. Each keeps an edge there, as Home's New chat does, and has its old size in normal colours.
+ */
+test("forced colors keep an edge on the chat list's New, Copy invite, Install and a page's New", { tag: ["@feature:app.accessibility", "@feature:app.theme", "@feature:invite.copy", "@feature:app.pwa.install"] }, async ({ peer }) => {
+  const { page } = await peer("first-run-edges");
+  await page.setViewportSize({ width: 1280, height: 800 });
+  async function keepsAnEdge(button: Locator, name: string): Promise<void> {
+    await expect(button, name).toBeVisible();
+    await page.emulateMedia({ forcedColors: "none", colorScheme: "dark" });
+    const box = (await button.boundingBox())!;
+    expect((await look(button)).border, `${name} in normal colours`).toBe(0);
+    for (const colorScheme of ["dark", "light"] as const) {
+      await page.emulateMedia({ forcedColors: "active", colorScheme });
+      const forced = await look(button);
+      expect.soft(forced.border, `${name}, ${colorScheme}: border in forced colors`).toBeGreaterThanOrEqual(1);
+      expect.soft(forced.borderColor, `${name}, ${colorScheme}: border against what it sits on`).not.toBe(forced.around);
+    }
+    await page.emulateMedia({ forcedColors: "none", colorScheme: "dark" });
+    const back = (await button.boundingBox())!;
+    expect({ width: back.width, height: back.height }, `${name}: its size in normal colours`).toEqual({ width: box.width, height: box.height });
+  }
+
+  await still(page);
+  await keepsAnEdge(page.getByTestId("sidebar-new-chat"), "the chat list's New");
+  await page.getByTitle("New Chat").first().click();
+  await keepsAnEdge(page.getByTestId("invite-card").getByRole("button", { name: "Copy invite", exact: true }), "Copy invite");
+
+  // The browser offers to install it, and there is a chat now: the hint.
+  await page.evaluate(() => dispatchEvent(Object.assign(new Event("beforeinstallprompt", { cancelable: true }), {
+    prompt: () => Promise.resolve(), userChoice: Promise.resolve({ outcome: "dismissed" as const }),
+  })));
+  await page.goto("/#/");
+  await still(page);
+  await keepsAnEdge(page.getByTestId("install-hint-install"), "the install hint's Install");
+
+  for (const [hash, id, name] of [["/#/wallet", "wallet-add", "Wallets' New"], ["/#/identities", "identities-new", "Identities' New"]] as const) {
+    await page.goto(hash);
+    await still(page);
+    await keepsAnEdge(page.getByTestId(id), name);
+  }
+  await page.emulateMedia({ forcedColors: "active", colorScheme: "dark" });
+  await page.screenshot({ path: test.info().outputPath("forced-identities-new.png") });
 });
 
 /**
@@ -402,6 +449,78 @@ test("forced colors keep the connection panel's Fallback switch drawn, on and of
 });
 
 /**
+ * A private group's reach dots (the members panel, the header's connection button, its panel's rows) were drawn by
+ * their fill alone and took the page's colour: reachable and not reachable looked the same. In forced colors a member
+ * reached is a filled dot, one who is not a ring, and the header's dot a thicker ring while only some are reached.
+ */
+test("forced colors keep a group's reach dots drawn, a member reached unlike one who is not", { tag: ["@feature:app.accessibility", "@feature:app.theme", "@feature:groups.connection"] }, async ({ peer }) => {
+  test.setTimeout(6 * 60_000);
+  const [alice, bob, carol] = await Promise.all([peer("alice"), peer("bob"), peer("carol")]);
+  for (const [p, name] of [[alice, "Alice"], [bob, "Bob"], [carol, "Carol"]] as const) {
+    await openProfilePage(p.page);
+    await p.page.getByTestId("account-nickname").fill(name);
+    await expect(p.page.getByTestId("account-nickname")).toHaveValue(name);
+    await p.page.goBack();
+  }
+  const { page } = alice;
+  await page.getByTestId("sidebar-new-more").click();
+  await page.getByTestId("new-group").click();
+  await page.getByTestId("new-group-name").fill("Mesh");
+  await page.getByTestId("new-group-kind-mesh").click();
+  await page.getByTestId("new-group-create").click();
+  const url = await page.getByTestId("group-share-dialog").getByTestId("group-link-url").inputValue();
+  await page.getByTestId("group-share-done").click();
+  for (const p of [bob, carol]) {
+    await p.page.goto(url);
+    await expect(p.page.getByTestId("group-chat")).toHaveAttribute("data-status", "active", { timeout: 120_000 });
+  }
+  const trigger = page.getByTestId("group-connection-options");
+  await expect(trigger).toHaveAttribute("data-state", "connected", { timeout: 120_000 });
+  // Carol's app closes: Bob reached, Carol not, and the header's dot says only some are.
+  await carol.page.close();
+  await expect(trigger).toHaveAttribute("data-state", "partial", { timeout: 120_000 });
+  await still(page);
+
+  // Normal colours: the dots are what they were, with no border.
+  const headerDot = page.getByTestId("group-connection-dot");
+  const normalBox = await headerDot.boundingBox();
+  expect((await drawn(headerDot)).border, "the header's dot in normal colours").toBe(0);
+
+  await page.emulateMedia({ forcedColors: "active", colorScheme: "dark" });
+  expect(await headerDot.boundingBox(), "the header's dot does not move in forced colors").toEqual(normalBox);
+  const header = await drawn(headerDot);
+  expect.soft(header.border, `the header's dot (some reached) is a ring ${JSON.stringify(header)}`).toBeGreaterThanOrEqual(2);
+  expect.soft(header.borderColor, "the header's ring against the header").not.toBe(header.around);
+
+  /** A reached dot is filled against what it sits on; one not reached is a ring that shows there, and unlike it. */
+  const differ = (name: string, reached: Awaited<ReturnType<typeof drawn>>, not: Awaited<ReturnType<typeof drawn>>) => {
+    expect.soft(reached.bg, `${name}: the reached dot ${JSON.stringify(reached)} against what it sits on`).not.toBe(reached.around);
+    expect.soft(not.border, `${name}: the dot not reached is a ring ${JSON.stringify(not)}`).toBeGreaterThanOrEqual(1);
+    expect.soft(not.borderColor, `${name}: its ring against what it sits on`).not.toBe(not.around);
+    expect.soft(not.bg, `${name}: reached and not reached look alike`).not.toBe(reached.bg);
+  };
+
+  // The connection panel's rows.
+  await trigger.click();
+  const panelDot = (name: string) => page.getByTestId("group-connection-member").filter({ hasText: name }).locator(".rounded-full").first();
+  await expect(page.getByTestId("group-connection-member").filter({ hasText: "Carol" })).not.toHaveAttribute("data-state", "open");
+  differ("the connection panel", await drawn(panelDot("Bob")), await drawn(panelDot("Carol")));
+  await page.screenshot({ path: test.info().outputPath("forced-group-connection.png") });
+  await page.keyboard.press("Escape");
+
+  // The members panel: my own row and Bob's filled, Carol's a ring.
+  await page.getByTestId("group-members").click();
+  const memberDot = (name: string) => page.getByTestId("group-member").filter({ hasText: name }).getByRole("img").first();
+  await expect(memberDot("Carol")).toHaveAttribute("aria-label", "not reachable");
+  await expect(memberDot("Bob")).toHaveAttribute("aria-label", "reachable");
+  differ("the members panel", await drawn(memberDot("Bob")), await drawn(memberDot("Carol")));
+  // The rows come in the members' order, not mine first: my own is the one named "You".
+  const mine = await drawn(page.getByTestId("group-member").filter({ has: page.getByText("You", { exact: true }) }).getByRole("img").first());
+  expect.soft(mine.bg, "my own row's dot").not.toBe(mine.around);
+  await page.screenshot({ path: test.info().outputPath("forced-group-members.png") });
+});
+
+/**
  * A group with something unread has a dot on its row and, with the list folded, on the rail: a background alone, which
  * forced colors replaced with the page's, so the group looked read. The dot shows in forced colors, dark and light,
  * muted (grey) or not, and its normal colours are what they were.
@@ -470,5 +589,31 @@ test("forced colors keep a group's unread dot drawn, in the list and on the rail
     await page.screenshot({ path: test.info().outputPath("forced-rail-unread.png") });
   } finally {
     await bot.stop();
+  }
+});
+
+/**
+ * The chat list's search was framed by its fill and an inset ring (a box-shadow), both dropped by forced colors: only the
+ * magnifier and the placeholder were left, a loose line over the list. There it has a border that shows against what it
+ * sits on, on a computer (dark) and a phone (light); its size is the same in both modes, and normal colours draw no border.
+ */
+test("forced colors keep the chat list's search framed", { tag: ["@feature:app.accessibility", "@feature:app.theme"] }, async ({ peer }) => {
+  const [computer, phone] = await Promise.all([peer("alice"), peer("bob", { mobile: true })]);
+  for (const { page, width, height, colorScheme } of [{ page: computer.page, width: 1280, height: 800, colorScheme: "dark" }, { page: phone.page, width: 375, height: 812, colorScheme: "light" }] as const) {
+    await page.setViewportSize({ width, height });
+    await still(page);
+    const frame = page.getByRole("searchbox", { name: "Search chats" }).locator("..");
+    await page.emulateMedia({ forcedColors: "none", colorScheme });
+    await expect(frame).toBeVisible();
+    const normal = (await frame.boundingBox())!;
+    expect((await look(frame)).border, `${width} ${colorScheme}: no border in normal colours`).toBe(0);
+
+    await page.emulateMedia({ forcedColors: "active", colorScheme });
+    const forced = await look(frame);
+    expect.soft(forced.border, `${width} ${colorScheme}: border in forced colors`).toBeGreaterThanOrEqual(1);
+    expect.soft(forced.borderColor, `${width} ${colorScheme}: border against the list`).not.toBe(forced.around);
+    const box = (await frame.boundingBox())!;
+    expect.soft({ width: box.width, height: box.height }, `${width} ${colorScheme}: same size`).toEqual({ width: normal.width, height: normal.height });
+    await page.screenshot({ path: test.info().outputPath(`forced-chat-search-${width}-${colorScheme}.png`) });
   }
 });

@@ -63,8 +63,8 @@ export class ChessPublisher {
   /** `ghostly app revoke`: the publisher's revocation of `app`'s digest, published beside it as ghostly-revoke.json. */
   revoke(app: Published, reason: string): void {
     const bundle = join(this.dir, "bundles", `${app.sequence}.ghostlyapp`);
-    ghostly("app", "revoke", join(this.dir, "app"), "--key", join(this.dir, "publisher.key"), "--bundle", bundle, "--digest", app.digest, "--reason", reason);
-    this.files.set(new URL("ghostly-revoke.json", app.url).href, new Uint8Array(readFileSync(join(this.dir, "app", "ghostly-revoke.json"))));
+    const made = ghostly("app", "revoke", join(this.dir, "app"), "--key", join(this.dir, "publisher.key"), "--bundle", bundle, "--digest", app.digest, "--reason", reason);
+    this.files.set(new URL("ghostly-revoke.json", app.url).href, new Uint8Array(readFileSync(made.file as string)));
   }
 
   /** `ghostly store sign`: the store's next index, listing `apps` and removing `removed`. */

@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { link, mkdir, open, readdir, readFile, rename, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { open as openEnvelope } from "@ghostly/browser/backup/envelope";
@@ -60,6 +60,13 @@ function parseHolds(text: string | undefined): Record<string, unknown> {
  */
 const unlessGone = (error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return null; throw error; };
 
+/**
+ * The files a backup under way writes (the store in the clear, the backup not complete yet), removed if the process
+ * leaves before the backup's own cleanup: Ctrl-C on a one-shot exits once the profile closed, the backup still running.
+ */
+const leftOnExit = new Set<string>();
+process.on("exit", () => { for (const path of leftOnExit) rmSync(path, { force: true }); });
+
 async function walk(root: string, dir = root, out: string[] = []): Promise<string[]> {
   let names: string[];
   try { names = await readdir(dir); } catch { return out; }
@@ -73,11 +80,14 @@ async function walk(root: string, dir = root, out: string[] = []): Promise<strin
   return out;
 }
 
-/** A file's first `size` bytes into the backup, a frame at a time. One that got shorter meanwhile stops the backup. */
-async function copyIn(writer: BackupWriter, path: string, size: number, opened?: FileHandle): Promise<void> {
+/**
+ * A file's first `size` bytes into the backup, a frame at a time. One that got shorter meanwhile stops the backup.
+ * `buffer` (`FRAME_BYTES`) is the backup's one for every file: a new one each zero-filled 1 MiB, for a 1 KB file too,
+ * and 50,000 small files took half a minute. The writer copies each frame before `bytes` returns.
+ */
+async function copyIn(writer: BackupWriter, buffer: Uint8Array, path: string, size: number, opened?: FileHandle): Promise<void> {
   const handle = opened ?? await open(path, "r");
   try {
-    const buffer = new Uint8Array(FRAME_BYTES);
     for (let at = 0; at < size;) {
       const { bytesRead } = await handle.read(buffer, 0, Math.min(FRAME_BYTES, size - at), at);
       if (!bytesRead) throw new CliError("unavailable", `${path} changed while it was backed up: try again`);
@@ -123,30 +133,35 @@ export const BACKUP_METHODS: Record<string, Method> = {
       const text = await readSetting(paths.dir, name);
       if (text !== null) settings.push({ name, text });
     }
-    await ctx.runtime.store.exportSnapshot(store);
-    const holds = settings.find((setting) => setting.name === HOLDS), after = await readSetting(paths.dir, HOLDS);
-    if (after !== null && after !== holds?.text) {
-      const text = JSON.stringify({ ...parseHolds(holds?.text), ...parseHolds(after) }) + "\n";
-      if (holds) holds.text = text; else settings.push({ name: HOLDS, text });
-    }
-    const light = bool(params, "light");
-    const found = await Promise.all((await walk(paths.files)).map(async (name) => {
-      const file = await stat(join(paths.files, name)).catch(unlessGone);
-      return file && { name, size: file.size };
-    }));
-    const all = found.filter((file) => file !== null);
-    // A file's name is its id: only one that could be a voice message under its larger cut is looked up.
-    const kept = async (file: { name: string; size: number }) => keptInLight(file.size, false) || (file.size <= LIGHT_VOICE_BYTES && !!(await fileStore.get(basename(file.name)).catch(() => undefined))?.metadata?.voice);
-    const files: typeof all = [], leftOut: typeof all = [];
-    for (const file of all) (!light || (await kept(file)) ? files : leftOut).push(file);
-    const storeSize = (await stat(store)).size, bytes = files.reduce((sum, file) => sum + file.size, 0);
-    const leftOutBytes = leftOut.reduce((sum, file) => sum + file.size, 0);
-
     // Its own name too: two backups to one path in one daemon shared `<path>.partial-<pid>`, the second removed the
     // first's half-written file as one left by a stopped backup, and the first gave the path the second's file.
     const partial = `${path}.partial-${process.pid}-${randomBytes(6).toString("hex")}`;
-    let out: FileHandle | null = null;
+    let out: FileHandle | null = null, writing = false;
+    // From its export on, the store (every message and key in the clear) goes however the backup ends: an export cut
+    // short, a failure before the backup is written, and a process that leaves first (Ctrl-C on a one-shot), the
+    // half-written backup with it. One a killed process left goes at the profile's next start (`startRuntime`).
+    leftOnExit.add(store).add(partial);
     try {
+      await ctx.runtime.store.exportSnapshot(store);
+      const holds = settings.find((setting) => setting.name === HOLDS), after = await readSetting(paths.dir, HOLDS);
+      if (after !== null && after !== holds?.text) {
+        const text = JSON.stringify({ ...parseHolds(holds?.text), ...parseHolds(after) }) + "\n";
+        if (holds) holds.text = text; else settings.push({ name: HOLDS, text });
+      }
+      const light = bool(params, "light");
+      const found = await Promise.all((await walk(paths.files)).map(async (name) => {
+        const file = await stat(join(paths.files, name)).catch(unlessGone);
+        return file && { name, size: file.size };
+      }));
+      const all = found.filter((file) => file !== null);
+      // A file's name is its id: only one that could be a voice message under its larger cut is looked up.
+      const kept = async (file: { name: string; size: number }) => keptInLight(file.size, false) || (file.size <= LIGHT_VOICE_BYTES && !!(await fileStore.get(basename(file.name)).catch(() => undefined))?.metadata?.voice);
+      const files: typeof all = [], leftOut: typeof all = [];
+      for (const file of all) (!light || (await kept(file)) ? files : leftOut).push(file);
+      const storeSize = (await stat(store)).size, bytes = files.reduce((sum, file) => sum + file.size, 0);
+      const leftOutBytes = leftOut.reduce((sum, file) => sum + file.size, 0);
+
+      writing = true;
       out = await open(partial, "wx", 0o600);
       const handle = out;
       let writer: BackupWriter;
@@ -154,14 +169,15 @@ export const BACKUP_METHODS: Record<string, Method> = {
       const put = (record: BackupRecord) => writer.json(JSON.stringify(record));
       await put({ t: "profile", format: FORMAT, createdAt: Date.now(), files: files.length, bytes, ...(light && { light: { maxFileBytes: LIGHT_FILE_BYTES, maxVoiceBytes: LIGHT_VOICE_BYTES, files: leftOut.length, bytes: leftOutBytes, ids: leftOut.map((file) => basename(file.name)) } }) });
       await put({ t: "file", kind: "store", size: storeSize });
-      await copyIn(writer, store, storeSize);
+      const buffer = new Uint8Array(FRAME_BYTES);
+      await copyIn(writer, buffer, store, storeSize);
       // Each file opened before its record: one removed since the walk is left out, and the end counts what went in.
       let copied = 0, copiedBytes = 0;
       for (const file of files) {
         const path = join(paths.files, file.name), handle = await open(path, "r").catch(unlessGone);
         if (!handle) continue;
         await put({ t: "file", kind: "file", path: file.name.split(sep).join("/"), size: file.size });
-        await copyIn(writer, path, file.size, handle);
+        await copyIn(writer, buffer, path, file.size, handle);
         copied++;
         copiedBytes += file.size;
       }
@@ -175,13 +191,17 @@ export const BACKUP_METHODS: Record<string, Method> = {
       try { await link(partial, path); } catch (error) { throw (error as NodeJS.ErrnoException).code === "EEXIST" ? new CliError("refused", `${path} exists: choose another name`) : error; }
       return { path, bytes: written, files: copied, protection: unsealed ? "none" : "passphrase", ...(light && { light: true, leftOut: leftOut.length, leftOutBytes }) };
     } catch (error) {
-      // A write into the backup that found its disk full names the backup, not Node's bare "write".
-      if ((error as NodeJS.ErrnoException)?.code === "ENOSPC" || (error as NodeJS.ErrnoException)?.code === "EDQUOT") throw localFileError(error, path) ?? error;
+      // A write into the backup that found its disk full names the backup, not Node's bare "write". The store's export
+      // writes into the profile, maybe on another disk: not named as the backup.
+      const code = (error as NodeJS.ErrnoException)?.code;
+      if (writing && (code === "ENOSPC" || code === "EDQUOT")) throw localFileError(error, path) ?? error;
       throw error;
     } finally {
       await out?.close().catch(() => {});
       await rm(partial, { force: true });
       await rm(store, { force: true });
+      leftOnExit.delete(store);
+      leftOnExit.delete(partial);
     }
   },
 };

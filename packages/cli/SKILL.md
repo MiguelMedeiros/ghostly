@@ -140,7 +140,9 @@ ghostly listen --turns --from alice --group team --cursor ~/.ghostly/agent.curso
   Anyone else's message stays in the chat and never reaches the hook. `--group` alone lets no 1:1 chat through, and
   `--from` alone no group. Names are turned into ids once, when `listen` starts. Everyone on it can try to steer the
   agent: an agent with tools gets `--from owner` only (step 11).
-- `--exec '<command>'` runs once per turn, in order, with the turn on **stdin** (never in its arguments). Or
+- `--exec '<command>'` runs once per turn, in order, with the turn on **stdin** (never in its arguments). It gets
+  `GHOSTLY_PROFILE` and `GHOSTLY_HOME` of the listen (`--profile` and `--home` too), so the hook's `ghostly send`
+  answers from the same profile. Or
   `--webhook http://127.0.0.1:<port>/…` POSTs each turn to a local bridge (loopback only).
 - `--cursor <file>` remembers the last event handled, so a restarted listener resumes where it stopped. Dedupe on `id`.
   A `--webhook` bridge that is down holds the stream until it is back (nothing is lost); an `--exec` that exits

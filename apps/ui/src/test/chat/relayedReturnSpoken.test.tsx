@@ -64,4 +64,12 @@ describe("a chat back on Automatic over Iroh's relay, on its way to WebRTC", () 
       unmount();
     }
   });
+
+  it("says it at once on a network that blocks direct connections: no move to WebRTC comes there", () => {
+    const { engine } = renderApp(<ChatConnection peerKey="peer" />);
+    const transport = { protocol: "Pkarr relays (HTTP) → Mainline DHT (BEP44)", relays: ["https://pkarr.pubky.org"], directBlocked: true as const };
+    act(() => engine.update({ transport, links: [onDht] }));
+    act(() => engine.update({ transport, links: [onIroh] }));
+    expect(document.querySelector(".sr-only[aria-live=polite]")).toHaveTextContent("Connected · Iroh (relayed)");
+  });
 });

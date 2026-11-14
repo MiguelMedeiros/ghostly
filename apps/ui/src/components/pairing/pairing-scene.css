@@ -182,6 +182,17 @@
 .ps-steps li[data-state="current"] .ps-step-dot { background: var(--ps-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ps-accent) 30%, transparent); }
 .ps-step-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ps[data-stage="failed"] .ps-steps { opacity: 0.6; }
+/* Forced colors (Windows Contrast) drop backgrounds and shadows, all that drew the dots and the line: a CanvasText ring
+   for a step to come, a Highlight dot for one done, and a Highlight ring around it for the current one; the line in
+   CanvasText, Highlight up to the current step. Kept as drawn, as the progress bars are (index.css `progress-fill`). */
+@media (forced-colors: active) {
+  .ps-steps li + li::before, .ps-step-dot { forced-color-adjust: none; }
+  .ps-steps li + li::before { background: CanvasText; }
+  .ps-steps li[data-state="done"]::before, .ps-steps li[data-state="current"]::before { background: Highlight; }
+  .ps-step-dot { box-sizing: border-box; border: 1.5px solid CanvasText; background: Canvas; box-shadow: none; }
+  .ps-steps li[data-state="done"] .ps-step-dot { border-color: Highlight; background: Highlight; }
+  .ps-steps li[data-state="current"] .ps-step-dot { border-color: Highlight; background: Highlight; box-shadow: none; outline: 1.5px solid Highlight; outline-offset: 1.5px; }
+}
 
 /* Narrow chats: the step names give way to dots, except the current one's, which the label above says. */
 @container pairing-scene (max-width: 250px) {

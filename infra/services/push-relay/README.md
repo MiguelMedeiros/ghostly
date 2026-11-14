@@ -36,7 +36,10 @@ this machine or no name at all, stop the start with one line that names the sett
 Put it behind HTTPS (a tunnel or a reverse proxy) and enter its address in Settings. Behind a proxy, set
 `GHOSTLY_RELAY_PROXIES` to the number of proxies in front of it (`1` for one tunnel), so the limit counts each
 client's address from `X-Forwarded-For` rather than the proxy's; without it the header is ignored, and the first request
-that carries one logs `requests carry X-Forwarded-For but GHOSTLY_RELAY_PROXIES is not set`. With proxies set,
+that carries one logs `requests carry X-Forwarded-For but GHOSTLY_RELAY_PROXIES is not set`. With it set, the first
+request without that entry (a proxy that does not write the header, such as nginx without `proxy_set_header
+X-Forwarded-For $proxy_add_x_forwarded_for`) logs `requests arrive without X-Forwarded-For though
+GHOSTLY_RELAY_PROXIES is set`: it counts as the proxy, as every other one would. With proxies set,
 the relay listens on 127.0.0.1 unless `HOST` says otherwise: only the proxy should reach it, since anyone else could
 write that header. Ghostly runs none for you: no relay is set by default.
 

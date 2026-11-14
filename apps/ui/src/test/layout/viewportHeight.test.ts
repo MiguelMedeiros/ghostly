@@ -236,6 +236,31 @@ describe("the app's height and the keyboard", () => {
     }
   });
 
+  it("on a touch laptop, a window made shorter while a field has the focus is not a keyboard once the field loses it", () => {
+    // A 2-in-1 or a Chromebook with its keyboard: a touch screen, the touchpad the primary pointer.
+    touchPoints = 10;
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) =>
+      ({ matches: query === "(pointer: fine)", media: query, addEventListener: () => {}, removeEventListener: () => {} }) as unknown as MediaQueryList);
+    viewport.width = 700;
+    viewport.height = 900;
+    inner = 900;
+    renderHook(() => useViewportHeight());
+    const field = document.body.appendChild(document.createElement("input"));
+    try {
+      act(() => field.focus());
+      resize(600, 600);
+      expect(appHeight()).toBe("600px");
+      expect(keyboard()).toBe("false");
+      // The field loses the focus, nothing resizes: the tab bar was left hidden until the next resize.
+      act(() => field.blur());
+      expect(appHeight()).toBe("600px");
+      expect(keyboard()).toBe("false");
+    } finally {
+      field.remove();
+      vi.restoreAllMocks();
+    }
+  });
+
   it("a browser toolbar that slides away is not a keyboard", () => {
     renderHook(() => useViewportHeight());
     resize(800, 800);

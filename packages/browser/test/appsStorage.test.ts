@@ -255,6 +255,41 @@ describe("storage", () => {
     expect(await storageRows(), "the rows and their count are gone").toEqual([]);
   });
 
+  it("keys with U+FFFD read the scope's keys once, not at every call: a scope of keys that start with an emoji is not read again", async () => {
+    const { store, app } = await installed();
+    const { ref } = app;
+    const half = "\u{1F600}".slice(0, 1), listed = String.fromCodePoint(0xfffd);
+    // The lone surrogate after a real U+FFFD: the first U+FFFD of the listed form is not where it was cut.
+    await store.storageSet({ ref, scope: "chat-1", key: `m${listed}x${half}`, value: "kept" });
+    await store.storageSet({ ref, scope: "chat-1", key: `${half}gone`, value: "old" });
+    // 2,000 keys that start with an emoji: a surrogate pair, in the range from a lone surrogate on.
+    const tx = (await openDb()).transaction(STORES.appStorage, "readwrite");
+    for (let i = 0; i < 2_000; i++) tx.objectStore(STORES.appStorage).put({ ref, scope: "chat-1", key: `\u{1F600}${String(i).padStart(4, "0")}`, value: "1", size: 7 });
+    await new Promise<void>((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); });
+    const again = apps(net);
+    const keys = vi.spyOn(IDBObjectStore.prototype, "getAllKeys");
+    /** Keys of the app's storage read whole: each call with U+FFFD read the 2,000 (58 ms at 24,000 in fake-indexeddb). */
+    const read = () => keys.mock.contexts.flatMap((c, i) => (c as IDBObjectStore).name === STORES.appStorage ? [(keys.mock.results[i]!.value as IDBRequest<unknown[]>).result.length] : []);
+    try {
+      expect(await again.storageGet({ ref, scope: "chat-1", key: "nothere" })).toBeNull();
+      expect(read(), "a key with no U+FFFD reads no other key").toEqual([]);
+      expect(await again.storageGet({ ref, scope: "chat-1", key: listed })).toBeNull();
+      for (let i = 0; i < 5; i++) await again.storageSet({ ref, scope: "chat-1", key: `${listed}${i}`, value: i });
+      await again.storageDelete({ ref, scope: "chat-1", key: `\u{1F600}0001${listed}` });
+      expect(await again.storageGet({ ref, scope: "chat-1", key: `m${listed}x${listed}` }), "still found by its listed form").toEqual({ value: "kept" });
+      await again.storageDelete({ ref, scope: "chat-1", key: `${listed}gone` });
+      expect(await again.storageGet({ ref, scope: "chat-1", key: `${listed}gone` }), "a kept key deleted is gone from what was read").toBeNull();
+      // A key with a lone surrogate written here (the broker refuses one; the tests write them) is found after the read.
+      await again.storageSet({ ref, scope: "chat-1", key: `${half}new`, value: "new" });
+      expect(await again.storageGet({ ref, scope: "chat-1", key: `${listed}new` })).toEqual({ value: "new" });
+      expect(read(), "the scope's keys read once").toEqual([2_002]);
+    } finally {
+      keys.mockRestore();
+    }
+    // Another engine, after a restart, reads them once again.
+    expect(await apps(net).storageGet({ ref, scope: "chat-1", key: `${listed}new` })).toEqual({ value: "new" });
+  }, 30_000);
+
   it("a scope filled under an older count takes no new key, and still rewrites and deletes the ones it has", async () => {
     const { app } = await installed();
     const { ref } = app;
@@ -465,6 +500,39 @@ describe("uninstall", () => {
       expect(await store.storageKeys({ ref, scope: "chat-1" })).toEqual([]);
       await store.storageSet({ ref, scope: "chat-1", key: "big", value: "x".repeat(APP_STORAGE_LIMITS.valueBytes - 2) });
     }
+  });
+
+  it("a chat deleted while its app deletes a key keeps no count of its rows: the same chat joined again starts empty", async () => {
+    const chats = new Set(["chat-1"]);
+    const app = await bundle();
+    net.put(BUNDLE_URL, app.bytes);
+    const store = apps(net, { isChat: (scope) => chats.has(scope) });
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: app.digest, grant: ["chat"] });
+    const { ref } = app;
+    const big = "x".repeat(APP_STORAGE_LIMITS.valueBytes - 2);
+    for (let i = 0; i < 75; i++) await store.storageSet({ ref, scope: "chat-1", key: `k${i}`, value: big });
+    // As the engine's `removeLink`, done between the delete's read of its row and its write: the chat is no longer one,
+    // its rows go, then its counts.
+    let removed: Promise<void> | undefined;
+    const get = IDBObjectStore.prototype.get;
+    const spy = vi.spyOn(IDBObjectStore.prototype, "get").mockImplementation(function (this: IDBObjectStore, query: IDBValidKey | IDBKeyRange) {
+      const request = get.call(this, query);
+      if (removed || !Array.isArray(query) || query[2] !== "k0") return request;
+      chats.delete("chat-1");
+      removed = db.deleteLink("chat-1").finally(() => store.forgetScope("chat-1"));
+      const read = new Promise<void>((resolve) => { request.onsuccess = () => resolve(); });
+      const held = { get result() { return request.result; }, set onsuccess(on: () => void) { void Promise.all([read, removed]).then(on); }, onerror: null };
+      return held as unknown as IDBRequest;
+    });
+    const deleted = await store.storageDelete({ ref, scope: "chat-1", key: "k0" }).then(() => "ok", (e: Error) => e.message.split(":")[0]);
+    spy.mockRestore();
+    expect(deleted).toBe("bad-scope");
+    expect(await storageRows()).toEqual([]);
+    // The same invite joined again: as many full values fit as before.
+    chats.add("chat-1");
+    expect(await store.storageKeys({ ref, scope: "chat-1" })).toEqual([]);
+    for (let i = 0; i < 75; i++) await store.storageSet({ ref, scope: "chat-1", key: `k${i}`, value: big });
   });
 
   it("a deleted chat's messages and app rows go by range, one delete per app, not one per row", async () => {

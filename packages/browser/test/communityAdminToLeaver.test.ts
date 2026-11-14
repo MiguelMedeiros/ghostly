@@ -150,6 +150,20 @@ describe("a community's admin role handed to a member whose leave is on its way"
       });
     }
 
+    // The one commit that carried the role to the leaver was lost: nobody sends a commit again unasked, and its app, which
+    // only took what came, never learnt it was the admin. The group kept a departed admin for good.
+    it(`seed ${seed}: the commit that makes the leaving member the admin is lost on its way to it`, async () => {
+      const { world, id, peers, carol, key } = await group(seed, ["carol", "bob", "dave", "erin", "fay"]);
+      const bob = peers[1];
+      const lost: unknown[] = [];
+      world.drop = (_from, to, frame) => to === bob && frame.t === "group-commit" && !lost.length && !!lost.push((frame.commit as { k: unknown }).k);
+      await Promise.allSettled([carol.groups.makeAdmin(id, key(bob)), bob.groups.leave(id)]);
+      await world.run(2_000);
+      expect(lost).toEqual(["role"]);
+      world.drop = null;
+      await converged(world, id, peers.filter(p => p !== bob), key);
+    });
+
     it(`seed ${seed}: control, the member leaves a second after the role reached it`, async () => {
       const { world, id, peers, carol, key } = await group(seed);
       const bob = peers[1];

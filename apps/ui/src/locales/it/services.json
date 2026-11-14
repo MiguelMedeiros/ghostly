@@ -42,14 +42,19 @@
     "elsewhere": "{{app}} ha provato a mandarti altrove, fuori da ciò che il tuo contatto condivide.",
     "failed": "La richiesta non è riuscita.",
     "label": "{{app}}, condivisa da {{contact}}",
+    "loading": "Apertura di {{app}} sul computer del tuo contatto…",
     "notAnswering": "{{app}} non risponde sul computer del tuo contatto. Chiedi al tuo contatto di controllare che sia in esecuzione.",
     "offline": "Il tuo contatto è offline, quindi {{app}} non può aprirsi ora. Si riaprirà qui quando tornerà.",
+    "openLink": "Apri {{site}}",
     "owner": "App di {{contact}}, in esecuzione sul suo computer. Non è Ghostly: non digitare mai qui le tue parole di recupero o le password.",
+    "reaching": "Tentativo di raggiungere il tuo contatto…",
     "retry": "Riprova",
+    "stillOffline": "Il tuo contatto è ancora offline, quindi {{app}} non può aprirsi ora. Si riaprirà qui quando tornerà.",
     "tooSlow": "{{app}} non ha risposto in tempo sul computer del tuo contatto. Riprova tra un momento.",
     "unguarded": "Questa pagina di {{app}} non può essere mostrata qui: impedisce alle protezioni di Ghostly di funzionare al suo interno. Chiedi al tuo contatto di controllare.",
     "unreachable": "Questo servizio non è raggiungibile. I servizi esistono finché il loro fantasma è online.",
-    "unshared": "{{app}} non è più condiviso con te."
+    "unshared": "{{app}} non è più condiviso con te.",
+    "upload": "L’app di un contatto non può ricevere file dall’estensione del browser. Per inviare questo, apri l’app in Ghostly sul web o sul computer."
   },
   "yourApps": "Le tue app"
 }

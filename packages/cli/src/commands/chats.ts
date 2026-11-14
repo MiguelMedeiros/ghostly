@@ -49,6 +49,8 @@ export const commands: Record<string, Command> = {
       timeout: groupWait.timeout,
     },
     params: ({ options }, a) => {
+      // Empty (an unset variable in a script), --close closed the buttons with no answer shown: a button not there is exit 3.
+      if (options.chosen === "") throw new CliError("usage", "--chosen needs a button id");
       if (!options.chosen && options.close !== true && !options.text) throw new CliError("usage", `Give --chosen, --close or --text: ghostly ${BUTTON_UPDATE}`);
       return { chat: a.chat, message: a.message, chosen: options.chosen, close: options.close === true, text: options.text, force: options.force === true, wait: options.wait, timeout: timeout(options) };
     },
@@ -75,7 +77,7 @@ export const commands: Record<string, Command> = {
     options: { yes: { type: "boolean", description: "Confirm" }, force: { type: "boolean", description: "Remove it even if a message you deleted for everyone has not reached the contact yet" } },
     params: ({ options }, { chat }) => ({ chat, yes: options.yes === true, force: options.force === true }),
   },
-  "chat rename": { method: "chat.rename", usage: "chat rename <chat> <name...>", summary: "Name a chat on this side (empty: the contact's name)", args: ["chat", "name...?"], params: (_, { chat, name }) => ({ chat, name: name ?? "" }) },
+  "chat rename": { method: "chat.rename", usage: "chat rename <chat> [name...]", summary: "Name a chat on this side (empty: the contact's name)", args: ["chat", "name...?"], params: (_, { chat, name }) => ({ chat, name: name ?? "" }) },
   "chat show": { method: "chat.get", usage: "chat show <chat> [--show-secret]", summary: "One chat and its connection (its pending invite code only with --show-secret)", args: ["chat"], options: showInvite, params: ({ options }, { chat }) => ({ chat, ...secret(options) }) },
   "chat transport": { method: "chat.transport", usage: "chat transport <chat> <auto|dht|webrtc|iroh|hyperdht>", summary: "Choose what carries a chat", args: ["chat", "transport"], words: { transport: Object.keys(TRANSPORT_NAMES) }, params: (_, a) => ({ chat: a.chat, transport: a.transport }) },
   "chat verify": {
@@ -117,17 +119,18 @@ export const commands: Record<string, Command> = {
     params: ({ options }, { invite }) => ({ invite, label: options.label }),
   },
   "message delete": {
-    method: "chat.delete", usage: "message delete <chat|group> <message> [--everyone [--wait none|confirmed|sent] [--timeout s]]",
+    method: "chat.delete", usage: "message delete <chat|group> <message> [--everyone [--wait none|confirmed|sent] [--timeout s]] [--purge]",
     summary: "Forget a message on this device (the contact keeps theirs; a waiting text of yours is cancelled, or deleted for everyone if a relay may have it); --everyone deletes one of yours, in a chat or a group, from every member's device",
     args: ["chat", "message"],
     options: {
       everyone: { type: "boolean", description: "Delete a message of yours for everyone (a chat or a group)" },
       wait: { type: "string", choices: ["none", "confirmed", "sent"], description: "With --everyone: in a chat none or confirmed, until the contact has it; in a group none or sent, until a member's edge took it (default: none with a daemon, confirmed or sent without)" },
       timeout: wait.timeout,
+      purge: { type: "boolean", description: "Take what it said out of the profile's folder now (the store folds at once), not within the hour: for a secret pasted into a chat" },
     },
     params: ({ options }, a) => {
       for (const flag of ["wait", "timeout"]) if (options[flag] !== undefined && options.everyone !== true) throw new CliError("usage", `--${flag} goes with --everyone`);
-      return { chat: a.chat, message: a.message, everyone: options.everyone === true, wait: options.wait, timeout: timeout(options) };
+      return { chat: a.chat, message: a.message, everyone: options.everyone === true, wait: options.wait, timeout: timeout(options), ...(options.purge === true && { purge: true }) };
     },
   },
   "message details": { method: "chat.details", usage: "message details <chat|group> <message>", summary: "How a message travelled", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },
@@ -141,8 +144,9 @@ export const commands: Record<string, Command> = {
       timeout: groupWait.timeout,
     },
     params: ({ options }, a) => {
-      // --remove names no message: the chat has one pin. One given beside it is taken as before, and not read.
-      if (a.message === undefined && options.remove !== true) throw new CliError("usage", "Missing <message>: ghostly pin <chat|group> <message> | --remove");
+      // --remove names no message: the chat has one pin. One given beside it is taken as before, and not read. One given
+      // as "" (an unset variable in a script) is missing too, as for `react`: before, a one-shot went online to refuse it.
+      if (!a.message && options.remove !== true) throw new CliError("usage", "Missing <message>: ghostly pin <chat|group> <message> | --remove");
       if (a.message?.includes(" ")) throw new CliError("usage", "Too many arguments: ghostly pin <chat|group> <message> | --remove");
       return { chat: a.chat, message: a.message, remove: options.remove === true, wait: options.wait, timeout: timeout(options) };
     },

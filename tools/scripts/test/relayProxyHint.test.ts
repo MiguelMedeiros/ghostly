@@ -51,4 +51,56 @@ describe("the relays' hint that proxy headers arrive untrusted (infra/services)"
     expect(await run({ proxies: 1 }, [...forwarded, ...cloudflare])).toEqual([]);
     expect(await run({ cloudflare: true }, [...forwarded, ...cloudflare])).toEqual([]);
   }, 60_000);
+
+  // A proxy that writes no header (nginx without `proxy_set_header X-Forwarded-For`, a TCP pass-through): every client
+  // reaches the relay from the proxy's address, so they share one address's limits, and the log only said `refused address`.
+  const missing = (header: string, setting: string) => `requests arrive without ${header} though ${setting} is set: each counts as the proxy, so have the proxy write it or leave the setting out`;
+
+  it("the push relay told of a proxy says once per start that requests arrive without the X-Forwarded-For entry it counts by", async () => {
+    const run = async (proxies: number, sent: Record<string, string>[]) => {
+      const lines: string[] = [];
+      const relay = await startPushRelay({ proxies, log: (...words: unknown[]) => lines.push(words.join(" ")) });
+      try {
+        for (const headers of sent) await fetch(`http://127.0.0.1:${relay.port}/`, { method: "POST", headers, body: "{}" });
+      } finally {
+        await relay.close();
+      }
+      return lines.filter((line) => line.startsWith("requests arrive"));
+    };
+    expect(await run(1, [{}, {}, {}])).toEqual([missing("X-Forwarded-For", "GHOSTLY_RELAY_PROXIES")]);
+    // Fewer entries than proxies counts by the socket too.
+    expect(await run(2, [{ "X-Forwarded-For": "198.51.100.1" }])).toEqual([missing("X-Forwarded-For", "GHOSTLY_RELAY_PROXIES")]);
+    expect(await run(1, [{ "X-Forwarded-For": "198.51.100.1" }, { "X-Forwarded-For": "198.51.100.2" }])).toEqual([]);
+    expect(await run(0, [{}, {}])).toEqual([]);
+  });
+
+  it("the HyperDHT relay told of a proxy or Cloudflare says once per start that requests arrive without the header it counts by", async () => {
+    const run = async (options: Record<string, unknown>, headers: Record<string, string>[]) => {
+      const lines: string[] = [];
+      const relay = await startHyperdhtRelay({ testnet: 3, ...options, log: (...words: unknown[]) => lines.push(words.join(" ")) });
+      const sockets: WebSocket[] = [];
+      try {
+        for (const sent of headers) {
+          await new Promise<void>((resolve) => {
+            const ws = new WebSocket(relay.url, { headers: sent });
+            sockets.push(ws);
+            ws.once("open", () => resolve());
+            ws.once("unexpected-response", () => resolve());
+            ws.once("error", () => resolve());
+          });
+        }
+      } finally {
+        for (const ws of sockets) ws.terminate();
+        await relay.close();
+      }
+      return lines.filter((line) => line.startsWith("requests arrive"));
+    };
+    expect(await run({ proxies: 1 }, [{}, {}])).toEqual([missing("X-Forwarded-For", "GHOSTLY_RELAY_PROXIES")]);
+    expect(await run({ proxies: 2 }, [{ "x-forwarded-for": "198.51.100.1" }])).toEqual([missing("X-Forwarded-For", "GHOSTLY_RELAY_PROXIES")]);
+    expect(await run({ cloudflare: true }, [{}, { "x-forwarded-for": "198.51.100.1" }])).toEqual([missing("CF-Connecting-IP", "GHOSTLY_RELAY_CLOUDFLARE")]);
+    // Cloudflare's header missing but the proxies' entry there: the client still counts by its own address.
+    expect(await run({ cloudflare: true, proxies: 1 }, [{ "x-forwarded-for": "198.51.100.1" }])).toEqual([]);
+    expect(await run({ proxies: 1 }, [{ "x-forwarded-for": "198.51.100.1" }])).toEqual([]);
+    expect(await run({}, [{}, {}])).toEqual([]);
+  }, 60_000);
 });

@@ -12,6 +12,7 @@ import { allowlist } from "../src/listen";
 import { chatDetailsJson, chatJson, isLive } from "../src/views";
 import { pageOf } from "./support/messagePage";
 import { ONE_SHOT_RECEIPT_MS } from "../src/waits";
+import { chatViewOf, groupViewOf } from "./support/chatView";
 // covers: headless.api, headless.engine-passthrough, headless.secret-guard, headless.typing, chat.order
 
 /** The API over a fake engine: what it checks before the engine is asked, and what it makes of the answers. */
@@ -28,7 +29,8 @@ const group: GroupView = {
 function fake(messages: StoredMessage[] = []) {
   const listeners = new Set<(e: GhostlyEvent) => void>();
   const node = {
-    getState: () => ({ links: [link("chat-one", { label: "Alice" }), link("chat-two", { peerNick: "Bob" })], groups: [group], settings: { online: true, nick: "Bot", relays: ["r"], holdStorage: { s3: { accessKeyId: "AK", secretAccessKey: "SK" } }, avatar: "data:x" } as unknown as Settings, transport: { protocol: "p", relays: [] } }) as unknown as EngineState,
+    chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [link("chat-one", { label: "Alice" }), link("chat-two", { peerNick: "Bob" })], groups: [group], settings: { online: true, nick: "Bot", relays: ["r"], holdStorage: { s3: { accessKeyId: "AK", secretAccessKey: "SK" } }, avatar: "data:x" } as unknown as Settings, transport: { protocol: "p", relays: [] } }) as unknown as EngineState,
+    getSettings: (): Settings => node.getState().settings,
     getMessages: vi.fn(async () => messages),
     getMessage: vi.fn(async (_linkId: string, id: string) => messages.find((m) => m.id === id)),
     messagePage: vi.fn(async (params: { limit?: number; before?: string | number }) => pageOf(messages, params)),
@@ -115,6 +117,19 @@ describe("chats", () => {
     }
     await expect(callApi(ctx, "profile.set", { name: "p".repeat(65) })).rejects.toMatchObject({ code: "bad_request", message: "name is up to 64 characters as stored (this one is 65)", details: { length: 65, max: 64 } });
     expect(calls.updateSettings).not.toHaveBeenCalled();
+  });
+
+  it("a community's link comes with the address that opens it in the app, as the app's Share gives it", async () => {
+    // Found in a bug hunt: only the token (`group2/…`) was given, which nobody can tap in a chat; `invite create` gives both.
+    const { ctx, node } = fake();
+    const token = "group2/g2/entrykey";
+    Object.assign(node, { createGroup: vi.fn(async () => ({ groupId: "g2" })), enableGroupLink: vi.fn(async () => ({ link: token })), disableGroupLink: vi.fn(async () => undefined) });
+    const url = `https://app.ghostly.tools/#/join/${token}`;
+    expect(await callApi(ctx, "group.create", { name: "Club", profile: "community" })).toEqual({ group: "g2", link: token, url });
+    expect(await callApi(ctx, "group.link", { group: "g1" })).toEqual({ group: "g1", link: token, url });
+    expect(await callApi(ctx, "group.link", { group: "g1", reset: true })).toEqual({ group: "g1", link: token, url });
+    // No link, no address: a private group made without one, a link turned off.
+    expect(await callApi(ctx, "group.link", { group: "g1", on: false })).toEqual({ group: "g1", link: null });
   });
 
   // A group's name has the same refusals: it said "1 to 64 characters on one line" to a name of two invisible ones.
@@ -257,7 +272,7 @@ describe("chats", () => {
     expect(refused([asPrefix], "gggg")).toMatchObject({ code: "bad_request", details: { chat: "chatPrefixName", groups: [GROUP] } });
     expect(findChatOrGroup([asId], [room], GROUP)).toEqual({ group: room });
     // What a command makes of it: never the contact's chat.
-    const ctx = { runtime: { server: { node: { getState: () => ({ links: [asName, asId], groups: [room] }) } } } } as unknown as ApiContext;
+    const ctx = { runtime: { server: { node: { chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [asName, asId], groups: [room] }) } } } } as unknown as ApiContext;
     expect(() => chatOrGroup(ctx, "Team Room")).toThrow(/and a group/);
     expect(chatOrGroup(ctx, GROUP)).toEqual({ id: GROUP, linkId: `group:${GROUP}`, group: true });
     expect(chatOrGroup(ctx, `group:${GROUP}`)).toEqual({ id: GROUP, linkId: `group:${GROUP}`, group: true });
@@ -329,7 +344,7 @@ describe("chats", () => {
     expect(() => findGroup([theirs, team], "team")).toThrow(expect.objectContaining({ code: "bad_request", details: { matches: [theirs.id, team.id] } }));
     expect(findGroup([theirs, team], "teamx").id).toBe(theirs.id);
     // listen --from bob: the allowlist holds Bob's chat, never the one whose id starts with "bob"; --group team is refused.
-    const ctx = { runtime: { server: { node: { getState: () => ({ links: [mallory, bob], groups: [team, theirs] }) } } } } as unknown as ApiContext;
+    const ctx = { runtime: { server: { node: { chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [mallory, bob], groups: [team, theirs] }) } } } } as unknown as ApiContext;
     await expect(allowlist(["bob"], ["team"], (method, params) => callApi(ctx, method, params), async () => null)).rejects.toMatchObject({ code: "bad_request" });
     const list = await allowlist(["bob"], [team.id], (method, params) => callApi(ctx, method, params), async () => null);
     const event = (chat: string) => ({ seq: 1, id: "e", type: "message.received", at: 1, chat, message: { id: "m", text: "hi", timestamp: 1 } }) as GhostlyEvent;
@@ -352,14 +367,14 @@ describe("chats", () => {
     expect(findGroup([team, theirs], "Tm4q9Zk").id).toBe(team.id);
     expect(findGroup([team, { ...theirs, name: "Book club" } as unknown as GroupView], "Tm4q9Z").id).toBe(team.id);
     // listen --group Tm4q9Z: refused, never Mallory's group in the allowlist.
-    const ctx = { runtime: { server: { node: { getState: () => ({ links: [], groups: [team, theirs] }) } } } } as unknown as ApiContext;
+    const ctx = { runtime: { server: { node: { chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [], groups: [team, theirs] }) } } } } as unknown as ApiContext;
     await expect(allowlist([], ["Tm4q9Z"], (method, params) => callApi(ctx, method, params), async () => null)).rejects.toMatchObject(both);
   });
 
   it("listen --from takes a chat only by its id, its contact's key or a label given here, as call auto on --from", async () => {
     // No chat is labelled "owner" here; Mallory calls herself that. Her chat never wakes the agent.
     const owner = link("chatOwnerxxxxxxx", { peerNick: "Miguel" }), mallory = link("chatMalloryxxxxx", { peerNick: "owner" });
-    const ctx = { runtime: { server: { node: { getState: () => ({ links: [owner, mallory], groups: [] }) } } } } as unknown as ApiContext;
+    const ctx = { runtime: { server: { node: { chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [owner, mallory], groups: [] }) } } } } as unknown as ApiContext;
     const call = (method: string, params: Record<string, unknown>) => callApi(ctx, method, params);
     await expect(allowlist(["owner"], [], call, async () => null)).rejects.toMatchObject({ code: "bad_request", message: expect.stringMatching(/ghostly chat rename/), details: { chat: mallory.id, name: "owner", contact: mallory.peerPubKeyZ32 } });
     await expect(allowlist(["chatMallory"], [], call, async () => null)).rejects.toMatchObject({ code: "bad_request", details: { chat: mallory.id } });
@@ -367,7 +382,7 @@ describe("chats", () => {
     const event = (chat: string) => ({ seq: 1, id: "e", type: "message.received", at: 1, chat, message: { id: "m", text: "hi", timestamp: 1 } }) as GhostlyEvent;
     expect(await (await allowlist([owner.id], [], call, async () => null)).allows(event(owner.id))).toBe(true);
     const labelled = link(owner.id, { peerNick: "Miguel", label: "Owner" });
-    const named = { runtime: { server: { node: { getState: () => ({ links: [labelled, mallory], groups: [] }) } } } } as unknown as ApiContext;
+    const named = { runtime: { server: { node: { chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [labelled, mallory], groups: [] }) } } } } as unknown as ApiContext;
     const list = await allowlist(["owner"], [], (method, params) => callApi(named, method, params), async () => null);
     expect(await list.allows(event(owner.id))).toBe(true);
     expect(await list.allows(event(mallory.id))).toBe(false);
@@ -377,7 +392,7 @@ describe("chats", () => {
     // Stored as `chat rename` stores them: a tab as a space, in NFC. The contact chose no name; Mallory calls herself "owner".
     const ops = link("chatOpsxxxxxxxxx", { label: "ops bot" }), cafe = link("chatCafexxxxxxxx", { label: "Café" }), mallory = link("chatMalloryxxxxx", { peerNick: "owner" });
     const links = [ops, cafe, mallory];
-    const ctx = { runtime: { server: { node: { getState: () => ({ links, groups: [] }) } } } } as unknown as ApiContext;
+    const ctx = { runtime: { server: { node: { chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links, groups: [] }) } } } } as unknown as ApiContext;
     const call = (method: string, params: Record<string, unknown>) => callApi(ctx, method, params);
     const event = (chat: string) => ({ seq: 1, id: "e", type: "message.received", at: 1, chat, message: { id: "m", text: "hi", timestamp: 1 } }) as GhostlyEvent;
     for (const [ref, chat] of [["ops\tbot", ops], ["Café ", cafe], ["café", cafe]] as const) {
@@ -407,7 +422,7 @@ describe("chats", () => {
     expect(findGroup(groups, "k3x9q2a").id).toBe(mine.id);
     expect(findGroup(groups, "team").id).toBe(mine.id);
     // What a command makes of it: group send (group.get, as every group command), send, listen --group.
-    const node = { getState: () => ({ links: [], groups }), sendGroupMessage: vi.fn(), sendMessage: vi.fn() };
+    const node = { chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [], groups }), sendGroupMessage: vi.fn(), sendMessage: vi.fn() };
     const ctx = { runtime: { server: { node } } } as unknown as ApiContext;
     const call = (method: string, params: Record<string, unknown>) => callApi(ctx, method, params);
     await expect(call("group.get", { group: "k3x9q2" })).rejects.toMatchObject(refusal);
@@ -430,7 +445,7 @@ describe("chats", () => {
     }
     expect(() => findChatOrGroup([bob], [crew], "group:")).toThrow(expect.objectContaining({ code: "bad_request", message: "\"group:\" names no group" }));
     // What a daemon's caller (the API, not the command line) gets: forward never reaches the only chat or group.
-    const node = { getState: () => ({ links: [bob], groups: [crew] }), getMessage: vi.fn(async () => msg("m1", 1)), sendMessage: vi.fn(), sendGroupMessage: vi.fn() };
+    const node = { chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [bob], groups: [crew] }), getMessage: vi.fn(async () => msg("m1", 1)), sendMessage: vi.fn(), sendGroupMessage: vi.fn() };
     const ctx = { runtime: { server: { node } }, mode: "daemon" } as unknown as ApiContext;
     for (const to of [[""], ["group:"]]) await expect(callApi(ctx, "chat.forward", { chat: bob.id, messages: ["m1"], to })).rejects.toMatchObject({ code: "bad_request" });
     expect(node.sendMessage).not.toHaveBeenCalled();
@@ -441,7 +456,7 @@ describe("chats", () => {
     const team = { ...group, id: "k3x9q2abcdefghijklmnop", name: "Team", status: "active" } as unknown as GroupView;
     const other = { ...group, id: "z".repeat(22), name: "k3x9q2", status: "active" } as unknown as GroupView;
     const chat = link("chatTeamChat", { label: "Desk" });
-    const node = { getState: () => ({ links: [chat], groups: [team, other] }), sendGroupMessage: vi.fn(async () => ({ error: null, messageId: "gm1" })), groupTaken: () => 0, setGroupTyping: vi.fn() };
+    const node = { chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [chat], groups: [team, other] }), sendGroupMessage: vi.fn(async () => ({ error: null, messageId: "gm1" })), groupTaken: () => 0, setGroupTyping: vi.fn() };
     const ctx = { runtime: { server: { node } }, mode: "daemon" } as unknown as ApiContext;
     const call = (method: string, params: Record<string, unknown>) => callApi(ctx, method, params);
     // Its id, a prefix only it fits and its name (any case), each as is and after group:, as findChatOrGroup reads them.
@@ -592,14 +607,14 @@ describe("chats", () => {
   // whole time and said it goes when an edge opens.
   it("group send in a private group with nobody else in it answers at once and says nobody gets it", async () => {
     const alone = { ...group, profile: "mesh", members: [group.members[0]] } as GroupView;
-    const node = { getState: () => ({ links: [], groups: [alone] }), sendGroupMessage: vi.fn(async () => ({ error: null, messageId: "mekey:0:0" })), groupTaken: () => 0, setGroupTyping: vi.fn() };
+    const node = { chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [], groups: [alone] }), sendGroupMessage: vi.fn(async () => ({ error: null, messageId: "mekey:0:0" })), groupTaken: () => 0, setGroupTyping: vi.fn() };
     const ctx = { runtime: { server: { node } }, mode: "one-shot" } as unknown as ApiContext;
     const note = "Nobody else is in this group: nobody gets this message, not even someone who joins later";
     await expect(callApi(ctx, "group.send", { group: "Crew", text: "hi", wait: "sent", timeout: 1 })).resolves.toEqual({ group: "g1", messageId: "mekey:0:0", sent: false, edges: 0, note });
     await expect(callApi(ctx, "group.send", { group: "Crew", text: "hi" })).resolves.toMatchObject({ sent: false, edges: 0, note });
     // Another member: no note, whether an edge took it yet or not.
     const crew = { ...alone, members: group.members } as GroupView;
-    Object.assign(node, { getState: () => ({ links: [], groups: [crew] }) });
+    Object.assign(node, { chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [], groups: [crew] }) });
     expect(await callApi(ctx, "group.send", { group: "Crew", text: "hi" })).not.toHaveProperty("note");
   });
 
@@ -957,7 +972,7 @@ describe("chat wait", () => {
     const listeners = new Set<(s: EngineState) => void>();
     const stateOf = () => ({ links, groups: [], settings: { online: true } as unknown as Settings, transport: { protocol: "p", relays: [] } }) as unknown as EngineState;
     const ctx = {
-      runtime: { server: { node: { getState: stateOf } }, paths: { name: "default" } },
+      runtime: { server: { node: { chatView: chatViewOf, groupView: groupViewOf, getState: stateOf } }, paths: { name: "default" } },
       hub: { onEvent: () => () => {}, onState: (l: (s: EngineState) => void) => { listeners.add(l); return () => listeners.delete(l); }, lastSeq: 0, replay: () => [] },
       mode: "daemon", version: "test",
     } as unknown as ApiContext;
@@ -1059,7 +1074,7 @@ describe("invite create", () => {
     let current = { role: "inviter", since: 0, startedAt: 0, attempt: 1, ...progress } as PairingProgress;
     const listeners = new Set<(s: EngineState) => void>();
     const stateOf = () => ({ links: [link("inv1", { pairingProgress: current })], groups: [] }) as unknown as EngineState;
-    const node = { getState: stateOf, createLink: vi.fn(async () => ({ linkId: "inv1", inviteCode: "ghostly1abc" })), setActiveLink: vi.fn() };
+    const node = { chatView: chatViewOf, groupView: groupViewOf, getState: stateOf, createLink: vi.fn(async () => ({ linkId: "inv1", inviteCode: "ghostly1abc" })), setActiveLink: vi.fn() };
     const ctx = {
       runtime: { server: { node }, paths: { name: "default" } },
       hub: { onEvent: () => () => {}, onState: (l: (s: EngineState) => void) => { listeners.add(l); return () => listeners.delete(l); }, lastSeq: 0, replay: () => [] },
@@ -1131,7 +1146,7 @@ describe("the chat on screen of a daemon", () => {
     const push = () => { for (const l of [...listeners]) l(stateOf()); };
     let n = 0;
     const node = {
-      getState: stateOf, setActiveLink: vi.fn(), renameLink: vi.fn(),
+      chatView: chatViewOf, groupView: groupViewOf, getState: stateOf, setActiveLink: vi.fn(), renameLink: vi.fn(),
       createLink: vi.fn(async () => { const linkId = `inv${++n}`; links = [...links, link(linkId, { pairingProgress: { stage: "waiting" } } as Partial<LinkView>)]; return { linkId, inviteCode: "ghostly1" + linkId }; }),
       joinLink: vi.fn(async () => { links = [...links, link("join")]; return { linkId: "join" }; }),
     };

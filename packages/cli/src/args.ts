@@ -5,6 +5,8 @@ export interface OptionSpec {
   type: OptionType; short?: string; description: string;
   /** A number option that may stand alone (then `true`): it takes the next word only when that is a number. */
   optionalValue?: boolean;
+  /** What a number option takes, as its refusal says it (`a length in milliseconds`); default "a number". */
+  takes?: string;
   /** A boolean the command takes only as `--no-<name>`: help shows it so. */
   negatedOnly?: boolean;
   /** A boolean whose usage shows `[--<name> | --no-<name>]`: both ways on one line are a usage error, not the last. */
@@ -22,6 +24,18 @@ export interface Parsed { positionals: string[]; options: Record<string, string 
  * `Number()` alone read `1e3` as 1,000, `0x10` as 16 and `" 21"` as 21: `chat pay bob 2e3`, a typo of 23, paid 2,000.
  */
 export const decimalNumber = (value: string): number => /^-?\d+(\.\d+)?$/.test(value) ? Number(value) : NaN;
+const notANumber = (name: string, option: OptionSpec, value: string) => new CliError("usage", `--${name} takes ${option.takes ?? "a number"}, not ${JSON.stringify(value)}`);
+
+/**
+ * The word right after an option that stood alone because it was no number (`--voice 2s`), by the positionals a parse
+ * returned: should the line have one too many, that word was the option's value, and `strayValue` says so.
+ */
+const lonelyValues = new WeakMap<readonly string[], { index: number; word: string; refusal: CliError }[]>();
+
+/** The refusal of an option's value that was taken as a positional (`--voice 2s`), else undefined. */
+export function strayValue(values: readonly string[]): CliError | undefined {
+  return lonelyValues.get(values)?.find(({ index, word }) => values[index] === word)?.refusal;
+}
 /**
  * The command a line is parsed for, as its unknown options name it: `send`, whether text comes on its line, and which
  * positionals take a number (`<sats>`): there a word like `-5` is that number, refused as one, not an unknown option.
@@ -61,6 +75,7 @@ export function parseArgs(argv: readonly string[], spec: Record<string, OptionSp
     return Object.hasOwn(all, name) || (name.startsWith("no-") && all[name.slice(3)]?.type === "boolean");
   };
   const positionals: string[] = [];
+  const lonely: { index: number; word: string; refusal: CliError }[] = [];
   const options: Parsed["options"] = {};
   const setBoolean = (name: string, value: boolean) => {
     if (all[name].eitherWay && options[name] !== undefined && options[name] !== value) throw new CliError("usage", `--${name} or --no-${name}, not both`);
@@ -96,8 +111,12 @@ export function parseArgs(argv: readonly string[], spec: Record<string, OptionSp
         continue;
       }
       let value = inline;
-      if (value === undefined && option.optionalValue && !(i + 1 < argv.length && argv[i + 1] !== "" && Number.isFinite(Number(argv[i + 1])))) {
+      // An empty word after it is its value, refused below: `--voice "$MS"` with MS unset, not a positional ("Too many
+      // arguments", or "Missing <path>" with the path given). Number("") is 0, so it is taken here.
+      if (value === undefined && option.optionalValue && !(i + 1 < argv.length && Number.isFinite(Number(argv[i + 1])))) {
         options[name] = true;
+        const next = argv[i + 1];
+        if (next && !next.startsWith("-")) lonely.push({ index: positionals.length, word: next, refusal: notANumber(name, option, next) });
         continue;
       }
       if (value === undefined) {
@@ -107,7 +126,7 @@ export function parseArgs(argv: readonly string[], spec: Record<string, OptionSp
       if (option.type === "number") {
         // Number("") and Number(" ") are 0: an unset variable must not read as 0 and be acted on.
         const number = decimalNumber(value);
-        if (!Number.isFinite(number)) throw new CliError("usage", `--${name} takes a number, not ${JSON.stringify(value)}`);
+        if (!Number.isFinite(number)) throw notANumber(name, option, value);
         options[name] = number;
       } else if (option.type === "list") {
         options[name] = [...((options[name] as string[] | undefined) ?? []), value];
@@ -120,6 +139,7 @@ export function parseArgs(argv: readonly string[], spec: Record<string, OptionSp
     if (arg.startsWith("-") && arg !== "-") throw unknownOption(arg, all, parsing);
     positionals.push(arg);
   }
+  if (lonely.length) lonelyValues.set(positionals, lonely);
   return { positionals, options };
 }
 
@@ -174,6 +194,30 @@ function distance(a: string, b: string): number {
     }
   }
   return d[a.length][b.length];
+}
+
+/** The kind of value each key `settings set` takes has (api.ts `SETTABLE`). */
+export type SettingKind = "strings" | "string" | "boolean" | "ice";
+const SETTINGS_SET = "ghostly settings set <key> <json-value> [--force]";
+
+/**
+ * A key `settings set` does not take is a usage error that names the nearest one (whatever its case: `sendtyping`)
+ * and lists them, before stdin is read and the profile opens. Before, the API answered it once a one-shot was online
+ * (bad_request, exit 1), with no "did you mean". The API keeps its own check for a socket's callers.
+ */
+export function checkSettingKey(key: string, kinds: Record<string, SettingKind>): SettingKind {
+  if (Object.hasOwn(kinds, key)) return kinds[key];
+  const byLower = new Map(Object.keys(kinds).map((name) => [name.toLowerCase(), name]));
+  const near = byLower.get(nearest(key.toLowerCase(), byLower.keys()) ?? "");
+  throw new CliError("usage", `${key} is not a setting the CLI changes${near ? ` (did you mean ${near}?)` : ""}: ghostly settings set takes ${Object.keys(kinds).join(", ")} (ghostly help settings set)`);
+}
+
+/** A value of another kind than its key takes (`online maybe`): a usage error too, before the profile opens. */
+export function checkSettingValue(key: string, kind: SettingKind, value: unknown, typed: string): void {
+  if (kind === "boolean" && typeof value !== "boolean") throw new CliError("usage", `${key} takes true or false, not ${JSON.stringify(typed)}: ${SETTINGS_SET}`);
+  // Not echoed: a TURN password may be in it.
+  if (kind === "strings" && !(Array.isArray(value) && value.every((v) => typeof v === "string"))) throw new CliError("usage", `${key} takes a JSON list of strings: ${SETTINGS_SET}`);
+  if (kind === "ice" && !(Array.isArray(value) && value.every((v) => v && typeof v === "object"))) throw new CliError("usage", `${key} takes a JSON list of ICE servers: ${SETTINGS_SET}`);
 }
 
 /** Words as a sentence lists them: "a", "a or b", "a, b or c". */

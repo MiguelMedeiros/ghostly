@@ -89,6 +89,7 @@ const PROOF_REASONS: readonly (readonly [string, string, string?])[] = [
   ["Your contact's app cannot verify this kind of identity yet", `${CORE}/identityProofs.ts`],
   ["Your contact's app could not check it. Try again later.", `${CORE}/identityProofs.ts`],
   ["Your contact keeps too many identities from you already", `${CORE}/identityProofs.ts`],
+  ["Your contact keeps a newer proof of this identity from you", `${CORE}/identityProofs.ts`],
   ["That identity is no longer in your profile", `${CORE}/identityProofs.ts`],
   ["Your contact could not verify it", `${CORE}/identityProofs.ts`],
   ...PROOF_UNAVAILABLE,
@@ -487,6 +488,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["These notes are from a federation I have not joined", `${BROWSER}/engine/payments.ts`],
   ["These notes are worth less than a sat", `${BROWSER}/engine/payments.ts`],
   ["These notes were already redeemed", `${BROWSER}/engine/payments.ts`],
+  // The same notes again under another id, while the first payment of them is still being redeemed or is in.
+  ["These notes were already received", `${BROWSER}/engine/payments.ts`],
   ["The server took too long to answer", `${CORE}/lnurl.ts`],
   ["No way to reach the network here", `${CORE}/lnurl.ts`],
   ["shop.example refused: amount too small", `${CORE}/lnurl.ts`, " refused: "],
@@ -979,8 +982,9 @@ describe("errors in the app's language", () => {
       "Cashu chat recipient missing", "Cashu outbox does not match the reviewed payment", "Fedimint ecash goes to a contact in a chat",
       "The Fedimint payment is not in the journal", "Unsupported payment method", "Removed here", "Choose one member to pay",
     ]);
+    // Also a ternary's other line after a first one (`error: a ? "…" : "…"`).
     const said = ["payments.ts", "communityPay.ts"].flatMap((file) => [...source(`${BROWSER}/engine/${file}`)
-      .matchAll(/(?:throw new \w+\(|refuse\(|error: ?|reason: ?|return |const [A-Z_]+ = )(["'])([A-Z](?:(?!\1)[^\\])* (?:(?!\1)[^\\])+)\1/g)].map((m) => m[2]!));
+      .matchAll(/(?:throw new \w+\(|refuse\(|error: ?|reason: ?|return |const [A-Z_]+ = |["'] : )(["'])([A-Z](?:(?!\1)[^\\])* (?:(?!\1)[^\\])+)\1/g)].map((m) => m[2]!));
     expect(said.length).toBeGreaterThan(40);
     expect([...new Set(said)].filter((raw) => !INTERNAL.has(raw) && knownErrorText(raw, t) === null)).toEqual([]);
   });
@@ -1086,6 +1090,16 @@ describe("the engine's known errors (@ghostly/core ENGINE_ERRORS)", () => {
     expect(problemText(new Error(quote), translators.pt)).toEqual({ tone: "error", title: "testnut.cashu.space não conseguiu aceitar este pagamento agora", next: "Nenhum sat saiu da sua carteira. Tente de novo mais tarde.", detail: quote });
     expect(problemText(new Error(faucet), english)).toEqual({ tone: "error", title: "testnut.cashu.space couldn't give test coins right now", next: "Try again later.", detail: faucet });
     for (const language of LANGUAGES) for (const raw of [quote, faucet]) expect(errorText(raw, translators[language]), language).not.toContain("UND_ERR");
+  });
+
+  it("a mint that failed Receive's invoice (a 503) is named with the next step, in the language; its own words go behind the ⓘ", () => {
+    const raw = engineText("mintFailedInvoice", { host: "127.0.0.1:4701", reason: "down" });
+    expect(problemText(new Error(raw), translators.pt)).toEqual({ tone: "error", title: "127.0.0.1:4701 não conseguiu criar uma fatura agora", next: "Tente de novo mais tarde.", detail: raw });
+    expect(problemText(new Error(raw), english)).toEqual({ tone: "error", title: "127.0.0.1:4701 couldn't create an invoice right now", next: "Try again later.", detail: raw });
+    for (const language of LANGUAGES) {
+      expect(errorText(raw, translators[language]), language).toContain("127.0.0.1:4701");
+      expect(errorText(raw, translators[language]), language).not.toContain("down");
+    }
   });
 
   it("a mint that has not answered a payment's or a redeem's swap is named, with what comes back, in the language: not \"Something went wrong\"", () => {

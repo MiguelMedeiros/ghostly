@@ -27,6 +27,14 @@ export interface MainlineOptions {
 
 const SIGNATURE = 64, TIMESTAMP = 8;
 const verify = (sig: Uint8Array, message: Uint8Array, key: Uint8Array) => { try { return ed25519.verify(sig, message, key); } catch { return false; } };
+/**
+ * What a `get` takes from the nodes that answer: a record signed without salt (Pkarr has none). bittorrent-dht reads a
+ * reply's `salt` (`Buffer.concat` with the key) only once it is verified, and a number there threw in its socket handler:
+ * any node a lookup asked, signing with its own key, raised an error nobody caught. Signed data is `4:salt…` with a salt.
+ */
+const SALTED = Buffer.from("4:salt");
+const verifyUnsalted = (sig: Uint8Array, message: Uint8Array, key: Uint8Array) =>
+  !Buffer.from(message.buffer, message.byteOffset, Math.min(message.length, SALTED.length)).equals(SALTED) && verify(sig, message, key);
 
 /** Queries the node answers, a second: from each address (as libtorrent's default), and from all of them together. */
 const QUERY_LIMITS = { perAddress: 5, perAddressBurst: 20, total: 50, totalBurst: 200 };
@@ -72,7 +80,7 @@ export class DhtQueryLimit {
   }
 }
 
-type Query = { q?: Buffer | string; a?: { k?: unknown; sig?: unknown; salt?: unknown; target?: unknown; info_hash?: unknown } };
+type Query = { q?: Buffer | string; a?: { k?: unknown; v?: unknown; seq?: unknown; sig?: unknown; salt?: unknown; target?: unknown; info_hash?: unknown } };
 type QueryPeer = { address: string; port: number };
 /** The parts of bittorrent-dht's node (no API for them) through which it answers queries. */
 interface DhtInternals { _onquery(query: Query, peer: QueryPeer): void; _rpc: { error(peer: QueryPeer, query: Query, error: [number, string]): void } }
@@ -84,14 +92,18 @@ interface DhtInternals { _onquery(query: Query, peer: QueryPeer): void; _rpc: { 
  */
 const LOOPBACK = /^(127\.|::1$|::ffff:127\.)/;
 const bytes = (value: unknown, length: number): boolean => Buffer.isBuffer(value) && value.length === length;
+/** BEP44's bound on an item's value, which bittorrent-dht checks only on what has a `length` (not a dictionary). */
+const VALUE_MAX = 1_000;
 
 /**
  * What the node answers strangers: queries at `DhtQueryLimit`'s rate, ping, find_node and get/get_peers as BEP5/BEP44
  * say, and puts of signed mutable items only, which is what Pkarr packets are (the testnet's nodes and the public DHT
  * keep each other's that way). It refuses what the app has no use for and bittorrent-dht kept for anyone and served to
- * anyone: immutable items and peers announced for torrents. A query whose hash, key, signature or salt is not the
- * string BEP5/BEP44 say (a put signed without a key, a number for a target) threw out of the socket handler: an error
- * nobody caught, one per datagram. It is refused before bittorrent-dht reads it.
+ * anyone: immutable items and peers announced for torrents. A put's value is a string of at most 1000 bytes and its seq
+ * a non-negative integer, as every Pkarr packet's: bittorrent-dht bounds only a value with a `length`, so a dictionary
+ * of 60 KB was kept and served whole to every get. A query whose hash, key, signature or salt is not the string
+ * BEP5/BEP44 say (a put signed without a key, a number for a target) threw out of the socket handler: an error nobody
+ * caught, one per datagram. It is refused before bittorrent-dht reads it.
  */
 function answerBounded(dht: DHT, limit = new DhtQueryLimit()): void {
   const node = dht as unknown as DhtInternals;
@@ -101,7 +113,9 @@ function answerBounded(dht: DHT, limit = new DhtQueryLimit()): void {
     const q = query.q?.toString(), a = query.a ?? {};
     if (q === "announce_peer") return node._rpc.error(peer, query, [204, "announce_peer is not served here"]);
     if (q === "put" && (!bytes(a.k, 32) || !bytes(a.sig, SIGNATURE))) return node._rpc.error(peer, query, [203, "only signed mutable items are stored here"]);
+    if (q === "put" && !(Buffer.isBuffer(a.v) && a.v.length <= VALUE_MAX)) return node._rpc.error(peer, query, [205, "only values of at most 1000 bytes are stored here"]);
     const malformed = ((q === "get" || q === "find_node") && !bytes(a.target, 20)) || (q === "get_peers" && !bytes(a.info_hash, 20))
+      || (q === "put" && !(Number.isSafeInteger(a.seq) && (a.seq as number) >= 0))
       || (q === "put" && a.salt !== undefined && !(Buffer.isBuffer(a.salt) && a.salt.length <= 64));
     if (malformed) return node._rpc.error(peer, query, [203, "malformed query"]);
     try { answer(query, peer); } catch { /* a query bittorrent-dht could not read goes unanswered */ }
@@ -178,14 +192,18 @@ export class Mainline {
     // A mutable item without salt is found under the SHA-1 of its public key (BEP44).
     const target = createHash("sha1").update(k).digest();
     return this.bounded(new Promise((resolve, reject) => {
-      this.dht.get(target, { cache: false }, (error, found) => {
+      this.dht.get(target, { cache: false, verify: verifyUnsalted }, (error, found) => {
         if (error) return reject(error);
-        if (!found?.v || !found.sig) return resolve(null);
-        const timestamp = new Uint8Array(TIMESTAMP);
-        new DataView(timestamp.buffer).setBigUint64(0, BigInt(found.seq));
-        const payload = new Uint8Array(SIGNATURE + TIMESTAMP + found.v.length);
-        payload.set(found.sig, 0); payload.set(timestamp, SIGNATURE); payload.set(found.v, SIGNATURE + TIMESTAMP);
-        try { resolve(parseRelayPayload(pubKeyZ32, payload)); } catch { resolve(null); }
+        // A record is what its node sent, checked only by its signature: one signed with no `seq` (bittorrent-dht signs
+        // `seq || 0`) or with a dictionary for `v` threw here, out of the socket's handler.
+        if (!found || !Buffer.isBuffer(found.v) || !Buffer.isBuffer(found.sig) || !Number.isSafeInteger(found.seq) || found.seq < 0) return resolve(null);
+        try {
+          const timestamp = new Uint8Array(TIMESTAMP);
+          new DataView(timestamp.buffer).setBigUint64(0, BigInt(found.seq));
+          const payload = new Uint8Array(SIGNATURE + TIMESTAMP + found.v.length);
+          payload.set(found.sig, 0); payload.set(timestamp, SIGNATURE); payload.set(found.v, SIGNATURE + TIMESTAMP);
+          resolve(parseRelayPayload(pubKeyZ32, payload));
+        } catch { resolve(null); }
       });
     }));
   }
@@ -215,6 +233,8 @@ const MISSING_KEPT = 256;
 
 /** How long a key that asked for a background DHT read counts among those that share the budget (`DhtBackgroundBudget`). */
 const ASKERS_WINDOW_MS = 2 * 60_000;
+/** The same for a background DHT write: past a chat's 4-minute upkeep, with room for its turn (a control envelope's life). */
+const WRITERS_WINDOW_MS = 10 * 60_000;
 const MINUTE_MS = 60_000;
 
 /**
@@ -234,7 +254,8 @@ export class DhtBackgroundBudget {
   /** The time of the last `take`: none of the above is dated after it. */
   private latest = -Infinity;
 
-  constructor(private readonly perMinute: () => number) {}
+  /** `askersWindowMs`: how long a key counts among those sharing the budget since it last asked (`ASKERS_WINDOW_MS`). */
+  constructor(private readonly perMinute: () => number, private readonly askersWindowMs = ASKERS_WINDOW_MS) {}
 
   /** 0: the lookup goes now (counted). Otherwise how long until this key's turn, in ms; nothing is counted. */
   take(pubKeyZ32: string, now = Date.now()): number {
@@ -248,7 +269,7 @@ export class DhtBackgroundBudget {
     this.askedAt.delete(pubKeyZ32);
     this.askedAt.set(pubKeyZ32, now);
     for (const [key, at] of this.askedAt) {
-      if (now - at < ASKERS_WINDOW_MS) break;
+      if (now - at < this.askersWindowMs) break;
       this.askedAt.delete(key);
       this.lookedAt.delete(key);
     }
@@ -275,7 +296,7 @@ const waitable = (options: PkarrRequestOptions): boolean =>
  * packet also goes to the DHT, and a read goes there when every relay is failing, the read failed, or this app's own
  * request budget held it back (the DHT has no budget), or every relay rate limits this address (429). A background read
  * this app's budget holds waits for it. Background reads the DHT answers in the relays' place keep to the relays'
- * background share (`DhtBackgroundBudget`).
+ * background share (`DhtBackgroundBudget`), and so do background writes on the DHT: one past it goes to the relays alone.
  *
  * `pinned`: the relays given are the only ones (`GHOSTLY_PKARR_RELAYS`, a private network): the profile's `relays`
  * setting does not replace them. With no DHT (`dht` null), the relays alone carry every packet.
@@ -290,6 +311,17 @@ export class RelaysAndDht implements PkarrTransport {
   private readonly missing = new Set<string>();
   /** Background reads on the DHT in the relays' place, at their background share (`DhtBackgroundBudget`). */
   private readonly dhtBackground = new DhtBackgroundBudget(() => BACKGROUND_REQUESTS_PER_MINUTE * this.relays.describe().relays.length);
+  /**
+   * Background writes on the DHT (upkeep nobody waits on: a chat's heartbeat and keep-alive while its contact is away)
+   * at the same share. Without it, every chat put two packets there every 4 minutes for as long as the daemon ran,
+   * whatever the relays' budget held of the same: ~104 puts a minute at 200 chats, each a whole iterative lookup.
+   * A key counts among those sharing it for longer than a read's (`WRITERS_WINDOW_MS`): one that went asks again only
+   * at the next upkeep, 4 minutes on, and forgotten by then it came back as new, without its turn: some chats were put
+   * every 4 minutes and others not once in 25.
+   * `writeTurns`: keys whose write `publishHeld` let go, not counted again when the publish comes.
+   */
+  private readonly dhtBackgroundWrites = new DhtBackgroundBudget(() => BACKGROUND_REQUESTS_PER_MINUTE * this.relays.describe().relays.length, WRITERS_WINDOW_MS);
+  private readonly writeTurns = new Set<string>();
 
   /** Off while the profile keeps to the relays (Hide my IP from contacts, `configure`'s `dhtDirect: false`). */
   private direct = true;
@@ -305,23 +337,39 @@ export class RelaysAndDht implements PkarrTransport {
     // BEP44 sequence numbers must strictly increase, on the relays and on the DHT alike: one payload for both, dated
     // past every packet put or read under the key (`RelayTransport.publishDated`), whichever clock dated those.
     // With the DHT, the packet goes there whatever the relays' budgets say: signed every time. Without it (a private
-    // network's relays only), a publish none of them takes now is not signed at all.
-    await this.relays.publishDated(identity, records, (key, payload, timestamp, conflict) => this.putBoth(key, payload, options, conflict, timestamp), options, false, this.dht !== null);
+    // network's relays only), a publish none of them takes now is not signed at all. A background write the DHT's
+    // share holds goes to the relays alone, as without the DHT.
+    const toDht = this.dht !== null && this.dhtWriteWait(identity.pubKeyZ32, options) === 0;
+    await this.relays.publishDated(identity, records, (key, payload, timestamp, conflict) => this.putBoth(key, payload, options, conflict, timestamp, toDht), options, false, toDht);
   }
 
   publishPayload(pubKeyZ32: string, payload: Uint8Array, options: PkarrRequestOptions = {}): Promise<void> {
-    return this.putBoth(pubKeyZ32, payload, options);
+    return this.putBoth(pubKeyZ32, payload, options, undefined, undefined, this.dhtWriteWait(pubKeyZ32, options) === 0);
+  }
+
+  /**
+   * 0: this write goes to the DHT now (a background one counted in its share, unless `publishHeld` already let it go).
+   * Otherwise how long until its turn there. Writes someone waits on never wait for it, nor count; with no relay set at
+   * all the DHT is the only way.
+   */
+  private dhtWriteWait(pubKeyZ32: string, options: PkarrRequestOptions, ahead = false): number {
+    if (!this.dht || !waitable(options) || this.relays.describe().relays.length === 0) return 0;
+    if (this.writeTurns.delete(pubKeyZ32)) return 0;
+    const wait = this.dhtBackgroundWrites.take(pubKeyZ32);
+    if (ahead && wait === 0) this.writeTurns.add(pubKeyZ32);
+    return wait;
   }
 
   /**
    * `timestamp`: the payload was just signed here (`publish`), dated so; its signature is not checked again on the way
    * to the relays. Without it (`publishPayload`, signed elsewhere) the relays' side checks it to read its date.
+   * `toDht` false: the relays alone (a background write the DHT's share holds).
    */
-  private async putBoth(pubKeyZ32: string, payload: Uint8Array, options: PkarrRequestOptions, conflict?: (relay: string, read?: () => Promise<bigint | null>) => void, timestamp?: bigint): Promise<void> {
+  private async putBoth(pubKeyZ32: string, payload: Uint8Array, options: PkarrRequestOptions, conflict?: (relay: string, read?: () => Promise<bigint | null>) => void, timestamp?: bigint, toDht = true): Promise<void> {
     const toRelays = () => timestamp === undefined
       ? this.relays.publishPayload(pubKeyZ32, payload, options, conflict)
       : this.relays.putSigned(pubKeyZ32, payload, timestamp, options, conflict);
-    if (!this.dht) return toRelays();
+    if (!this.dht || !toDht) return toRelays();
     const onDht = this.dht.put(pubKeyZ32, payload);
     onDht.catch(() => {});
     const onRelays = toRelays();
@@ -471,8 +519,14 @@ export class RelaysAndDht implements PkarrTransport {
   /** A relay's answer only: a packet the DHT hands back when the relays are down may be older than one already read. */
   readAnsweredAt(pubKeyZ32: string): number | undefined { return this.relays.readAnsweredAt(pubKeyZ32); }
   readHeldBackFor(pubKeyZ32: string): number | undefined { return this.relays.readHeldBackFor(pubKeyZ32); }
-  /** With the DHT every packet goes there too, whatever the relays' budgets say: nothing is held. */
-  publishHeld(pubKeyZ32: string, options?: PkarrRequestOptions): DiscoveryBudgetError | null { return this.dht ? null : this.relays.publishHeld(pubKeyZ32, options); }
+  /**
+   * With the DHT a packet goes there too, whatever the relays' budgets say: nothing is held, but a background write past
+   * the DHT's share (`dhtBackgroundWrites`), which goes to the relays alone and is held as they say.
+   */
+  publishHeld(pubKeyZ32: string, options: PkarrRequestOptions = {}): DiscoveryBudgetError | null {
+    if (!this.dht) return this.relays.publishHeld(pubKeyZ32, options);
+    return this.dhtWriteWait(pubKeyZ32, options, true) > 0 ? this.relays.publishHeld(pubKeyZ32, options) : null;
+  }
   onServerTime(listener: Parameters<RelayTransport["onServerTime"]>[0]): () => void { return this.relays.onServerTime(listener); }
   /**
    * `dhtDirect: false` (Hide my IP from contacts): no packet is put on or read from the DHT, and its node is closed, so
@@ -485,8 +539,12 @@ export class RelaysAndDht implements PkarrTransport {
     if (!dhtDirect) this.mainline?.stop().catch(() => {});
   }
   /**
-   * The relays' side only: the DHT side keeps nothing per key it puts. What it keeps per key it reads is bounded
-   * (`missing`, `MISSING_KEPT`; the background budget's two-minute window).
+   * The relays' side, and a write's turn `publishHeld` gave that no publish took (`writeTurns`). What the DHT side keeps
+   * per key otherwise is bounded (`missing`, `MISSING_KEPT`; the background budgets' windows).
    */
-  forget(keys: Iterable<string>): void { this.relays.forget(keys); }
+  forget(keys: Iterable<string>): void {
+    const gone = [...keys];
+    for (const key of gone) this.writeTurns.delete(key);
+    this.relays.forget(gone);
+  }
 }

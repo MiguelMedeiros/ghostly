@@ -225,7 +225,7 @@ describe("an app the watchdog stopped", () => {
     expect(within(app).getByRole("status")).toHaveTextContent(UNRESPONSIVE);
     await user.click(within(app).getByRole("button", { name: "Open again" }));
     await waitFor(() => expect(started).toHaveLength(2));
-    expect(within(app).queryByRole("status")).not.toBeInTheDocument();
+    expect(within(app).getByRole("status")).toBeEmptyDOMElement();
     expect(within(app).queryByRole("button", { name: "Open again" })).not.toBeInTheDocument();
     expect(app).toContainElement(started[1]!.frame);
     expect(chatApp("link-1")?.stopped).toBeUndefined();
@@ -412,6 +412,30 @@ describe("an app in a chat that stops while the focus is in it", () => {
     }
   }
 
+  // Past a phone's width with no room beside the chat (a tablet held upright), the app covers it with Back, as a
+  // full-screen app: once stopped, Escape closes it there too, as Back does.
+  for (const reason of ["unresponsive", "revoked"]) {
+    it(`with no room beside the chat, ${reason}: Escape closes it`, async () => {
+      const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) { return this.classList.contains("chat-pane") ? 604 : 0; });
+      try {
+        const { user } = chatPanel();
+        await act(() => open(REF, "link-1"));
+        const app = screen.getByTestId("mini-app");
+        expect(within(app).getByTestId("mini-app-back")).toBeVisible();
+        act(() => started[0]!.frame.focus());
+        if (reason === "revoked") await checked({ status: "revoked" });
+        else act(() => started[0]!.stop(reason));
+        expect(within(app).getByTestId("mini-app-stopped")).toBeVisible();
+        expect(app.contains(document.activeElement)).toBe(true);
+        await user.keyboard("{Escape}");
+        expect(app).not.toBeVisible();
+        expect(chatApp("link-1")).toBeUndefined();
+      } finally {
+        width.mockRestore();
+      }
+    });
+  }
+
   it("never taken from where the person went meanwhile", async () => {
     chatPanel();
     await act(() => open(REF, "link-1"));
@@ -421,6 +445,45 @@ describe("an app in a chat that stops while the focus is in it", () => {
     expect(screen.getByTestId("mini-app-stopped")).toBeVisible();
     expect(document.activeElement).toBe(field);
   });
+
+  // The focus stays where the person is (the message field beside it), or goes to a bare "Open again": only a live
+  // region that was there, empty, before the app stopped tells a screen reader that it did, and why.
+  for (const reason of ["unresponsive", "revoked"]) {
+    it(`${reason}: why is said in a status line that was there, empty, before it stopped`, async () => {
+      chatPanel();
+      await act(() => open(REF, "link-1"));
+      const app = screen.getByTestId("mini-app");
+      const said = within(app).getByRole("status");
+      expect(said).toBeEmptyDOMElement();
+      act(() => screen.getByRole("textbox", { name: "Message" }).focus());
+      if (reason === "revoked") await checked({ status: "revoked" });
+      else act(() => started[0]!.stop(reason));
+      expect(within(app).getByRole("status")).toBe(said);
+      expect(said).toHaveTextContent(reason === "revoked" ? "Chess was stopped: its publisher revoked this version" : /^Chess stopped responding/);
+      expect(said).toHaveTextContent(within(app).getByTestId("mini-app-stopped").textContent!);
+    });
+  }
+});
+
+// Opened alone the focus is on Close, or goes there from the app's frame: only a live region that was there, empty,
+// before the app stopped tells a screen reader that it did, and why.
+describe("an app opened alone that stops", () => {
+  beforeEach(() => { vi.spyOn(console, "warn").mockImplementation(() => {}); });
+
+  for (const reason of ["unresponsive", "revoked"]) {
+    it(`${reason}: why is said in a status line that was there, empty, before it stopped`, async () => {
+      await open(REF, null);
+      const app = screen.getByTestId("mini-app");
+      const said = within(app).getByRole("status");
+      expect(said).toBeEmptyDOMElement();
+      if (reason === "revoked") await checked({ status: "revoked" });
+      else act(() => started[0]!.stop(reason));
+      expect(within(app).getByRole("status")).toBe(said);
+      expect(said).toHaveTextContent(reason === "revoked" ? "Chess was stopped: its publisher revoked this version" : /^Chess stopped responding/);
+      expect(said).toHaveTextContent(within(app).getByTestId("mini-app-stopped").textContent!);
+      expect(document.activeElement).toBe(within(app).getByRole("button", { name: "Close" }));
+    });
+  }
 });
 
 // On a phone the person went Back to the chat and types there: an app that stops meanwhile stays behind Back. Its way
@@ -456,4 +519,38 @@ describe("an app in a chat the person went Back from, that stops", () => {
       expect(screen.queryByTestId("mini-app-resume")).not.toBeInTheDocument();
     });
   }
+
+  // Shown again already stopped, the line comes with its words, which a live region does not read: the focus goes to
+  // Back, and Back is described by why, on a phone and with no room beside the chat.
+  for (const where of ["phone", "narrow"]) {
+    for (const reason of ["revoked", "unresponsive"]) {
+      it(`${where}, ${reason}: going back to it, why is read with Back as the focus lands there`, async () => {
+        const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) { return where === "narrow" && this.classList.contains("chat-pane") ? 604 : 0; });
+        try {
+          const { user } = chatPanel(where === "phone");
+          await act(() => open(REF, "link-1"));
+          const app = screen.getByTestId("mini-app");
+          await user.click(within(app).getByTestId("mini-app-back"));
+          if (reason === "revoked") await checked({ status: "revoked" });
+          else act(() => started[0]!.stop(reason));
+          await user.click(screen.getByTestId("mini-app-resume"));
+          const back = within(app).getByTestId("mini-app-back");
+          expect(document.activeElement).toBe(back);
+          expect(back).toHaveAccessibleDescription(within(app).getByTestId("mini-app-stopped").textContent!);
+          expect(back).toHaveAccessibleDescription(reason === "revoked" ? "Chess was stopped: its publisher revoked this version" : /^Chess stopped responding/);
+        } finally {
+          width.mockRestore();
+        }
+      });
+    }
+  }
+
+  it("running, Back is described by nothing", async () => {
+    const { user } = chatPanel(true);
+    await act(() => open(REF, "link-1"));
+    const app = screen.getByTestId("mini-app");
+    await user.click(within(app).getByTestId("mini-app-back"));
+    await user.click(screen.getByTestId("mini-app-resume"));
+    expect(within(app).getByTestId("mini-app-back")).not.toHaveAttribute("aria-describedby");
+  });
 });

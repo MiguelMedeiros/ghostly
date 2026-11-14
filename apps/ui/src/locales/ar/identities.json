@@ -908,12 +908,14 @@
     "captionMine": "شاركت هذه الهوية",
     "captionTheirs": "شارك {{contact}} هذه الهوية",
     "checking": "جارٍ التحقق",
+    "newerTheirs": "تحتفظ بالفعل بإثبات أحدث لهذه الهوية من جهة الاتصال هذه",
     "notChecked": "لم يُتحقق منها",
     "notVerified": "لم يتم التحقق",
     "revokedMine": "أُلغي {{what}} الخاص بك",
     "revokedTheirs": "أُلغي {{what}} الخاص بـ {{contact}}",
     "stoppedMine": "أوقفت مشاركة {{what}}",
     "stoppedTheirs": "أوقف {{contact}} مشاركة {{what}}",
+    "tooManyTheirs": "تحتفظ بالفعل بالكثير من هويات جهة الاتصال هذه",
     "waiting": "في الانتظار"
   },
   "shared": {

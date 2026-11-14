@@ -383,7 +383,7 @@
     "cashuMints": "i mint Cashu",
     "cashuSettings": "Opzioni Cashu",
     "commentFor": "Un commento per {{to}} (facoltativo)",
-    "confirmWhat": "{{amount}} sats (più una commissione fino a {{fee}})",
+    "confirmWhat": "{{amount}} {{unit}} (più una commissione fino a {{fee}} {{feeUnit}})",
     "connecting": "Connessione alla sorgente…",
     "domainLine": "{{answered}} {{limits}}",
     "done": "Fatto",

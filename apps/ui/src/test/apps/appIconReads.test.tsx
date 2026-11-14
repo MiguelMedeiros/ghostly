@@ -129,4 +129,24 @@ describe("an installed app's icon", () => {
     await settle();
     expect(pictures()).toEqual(Array.from({ length: 20 }, () => "blob:icon-0"));
   });
+
+  // The same files fetched by a card's own Open (the engine's entry gets them first): no update check tells the pages,
+  // so the card reads the list again, as the chat's Apps does. Its icon showed at no later visit until the Apps page.
+  it("of an app whose files a card's Open fetched shows then", async () => {
+    installed = { ...app(DIGEST), run: { status: "needs-files" } } as InstalledAppView;
+    let files = false;
+    fakeEngine.on("appFile", () => {
+      if (!files) throw new Error("needs-files: This app's files are not on this device yet");
+      return new Uint8Array([137, 80, 78, 71, installed.sequence]);
+    });
+    setAppOpener(vi.fn(async () => { files = true; installed = app(DIGEST); }));
+    await refreshInstalledApps();
+    renderApp(cards());
+    await screen.findAllByTestId("app-icon", {}, { timeout: 3000 });
+    await settle();
+    expect(pictures()).toEqual(Array.from({ length: 20 }, () => undefined));
+    fireEvent.click(screen.getAllByTestId("app-card-open")[0]!);
+    await settle();
+    expect(pictures()).toEqual(Array.from({ length: 20 }, () => "blob:icon-0"));
+  });
 });

@@ -428,8 +428,19 @@ export class FileDesk {
     if (!again && !said && await this.deps.messageExists?.(linkId, `peer_${file.id}`)) return { refuse: "invalid" };
     const room = await (await fileBytes()).room().catch(() => null);
     if (room !== null && file.size > room) return { refuse: "no-room", room };
+    // Beside what the files already taken still need: one that fits only without them is asked about.
+    if (room !== null && file.size + this.stillComing() > room) return "ask";
     const taken = this.deps.receivedBytes(linkId) + this.autoTaken(linkId);
     return file.size <= FILE_LIMITS.askAboveBytes && taken + file.size <= FILE_LIMITS.autoAcceptBytesPerPeer ? "accept" : "ask";
+  }
+
+  /** Bytes still to come of the files taken here (every chat's, not ended): the room they will take. */
+  private stillComing(): number {
+    let due = 0;
+    for (const chat of this.chats.values()) {
+      for (const r of chat.files.records()) if (r.direction === "in" && r.state !== "asking" && !transferEnded(r)) due += Math.max(0, r.file.size - r.confirmed);
+    }
+    return due;
   }
 
   /** files/3 files this contact sent that were taken without asking and are kept (or on their way). */

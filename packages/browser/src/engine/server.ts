@@ -1,6 +1,6 @@
 import { parseCallSignal } from "@ghostly/core";
 import type { MessageChanges } from "../shared/messageChanges";
-import type { AttentionEvent, EngineEvent, RpcRequest, RpcResponse } from "../shared/rpc";
+import type { AttachMark, AttentionEvent, EngineEvent, RpcRequest, RpcResponse } from "../shared/rpc";
 import type { MessagePage, StoredMessage } from "../shared/types";
 import { db } from "./db";
 import { errorLine, profileOpenFailure } from "../shared/idb";
@@ -51,6 +51,12 @@ export class EngineServer implements PeerServer {
   /** How many history changes the engine told; per chat or group, the count at its last one (`historyMark`). */
   private changes = 0;
   private readonly changedAt = new Map<string, number>();
+  /** This engine among the ones a page's mark (`AttachMark`) may come from: another counts its changes from nothing. */
+  readonly epoch: string = crypto.randomUUID();
+  /** The clients that attached for marks, once their attach was sent, and the last mark each was told. */
+  private readonly marking = new Map<EngineClientSink, number>();
+  /** A mark is on its way to them: it waits for what changed to be sent. */
+  private markDue = false;
   /**
    * An attention event while no client is attached to hear it: the host tells the person itself. The extension's peer
    * runs with no tab open, and a message that came then showed nothing until Ghostly was opened.
@@ -115,14 +121,19 @@ export class EngineServer implements PeerServer {
    * not changed since is not read and sent again: the client hears only what changes in it from now on.
    * `newest`: each chat's newest rows that many (`messagePage`), not its whole history, which the client asks for when
    * it needs it (`HistoryRequest`). What changes in the chat goes to it on top of that page.
+   * `marks`: the client is told a `mark` once its attach was sent, and again as changes settle. With `since`, a mark of
+   * this engine's it was told, a chat that has not changed since is not sent: it has it (the extension's pages mirror
+   * every chat into the stored chats they share). Its newest page goes with its first change, as a chat's the client
+   * does not have.
    */
-  attach(client: EngineClientSink, read?: { mark: number; ids: Iterable<string> }, scope: { newest?: number } = {}): void {
+  attach(client: EngineClientSink, read?: { mark: number; ids: Iterable<string> }, scope: { newest?: number; marks?: boolean; since?: AttachMark } = {}): void {
     this.clients.add(client);
     const sent = new Set<string>();
     if (read) for (const id of read.ids) if ((this.changedAt.get(id) ?? 0) <= read.mark) sent.add(id);
     this.histories.set(client, sent);
     if (scope.newest) this.newest.set(client, scope.newest);
     else this.newest.delete(client);
+    const since = scope.since?.epoch === this.epoch && typeof scope.since.mark === "number" ? scope.since.mark : undefined;
     void this.ready.then(async () => {
       if (!this.clients.has(client)) return;
       client.post({ kind: "state", state: this.node.getState() });
@@ -131,14 +142,24 @@ export class EngineServer implements PeerServer {
         if (parseCallSignal(signal)?.t === "o") client.post({ kind: "call-signal", linkId, signal });
         else this.offers.delete(linkId);
       }
+      const skipped: string[] = [];
       for (const link of this.node.getState().links) {
         if (sent.has(link.id)) continue;
+        if (since !== undefined && (this.changedAt.get(link.id) ?? 0) <= since) {
+          skipped.push(link.id);
+          continue;
+        }
         await this.inOrder(link.id, async () => {
           if (!this.clients.has(client)) return;
           client.post(scope.newest ? await this.newestOf(link.id, scope.newest) : this.historyEvent(link.id, await this.node.getMessages(link.id)));
           this.histories.get(client)?.add(link.id);
         });
       }
+      if (!scope.marks && !scope.since) return;
+      const mark = await this.settledMark();
+      if (!this.clients.has(client)) return;
+      this.marking.set(client, mark);
+      client.post({ kind: "mark", epoch: this.epoch, mark, ...(since !== undefined && { skipped }) });
     }, (error: unknown) => {
       // The peer never started (the profile's database did not open): the client is told why, so the app says so
       // instead of showing a chat list that looks alive. Before, this was dropped here and nothing was said.
@@ -156,6 +177,7 @@ export class EngineServer implements PeerServer {
   detach(client: EngineClientSink): void {
     this.clients.delete(client);
     this.histories.delete(client);
+    this.marking.delete(client);
     if (this.clients.size === 0) {
       this.node.setActiveLink({ linkId: null });
       // Apps run in the pages: with none left, none runs, and the contacts hear so.
@@ -248,6 +270,28 @@ export class EngineServer implements PeerServer {
 
   private changed(linkId: string): void {
     this.changedAt.set(linkId, ++this.changes);
+    if (!this.marking.size || this.markDue) return;
+    this.markDue = true;
+    void this.settledMark().then((mark) => {
+      this.markDue = false;
+      for (const [client, told] of [...this.marking]) {
+        if (told >= mark) continue;
+        this.marking.set(client, mark);
+        this.post(client, { kind: "mark", epoch: this.epoch, mark });
+      }
+    });
+  }
+
+  /**
+   * The mark once nothing is left being sent: every change up to it went to each client, as a change or in a chat's page
+   * read for it (`inOrder`). A change that comes meanwhile is waited for too.
+   */
+  private async settledMark(): Promise<number> {
+    for (;;) {
+      const mark = this.changes;
+      await Promise.all(this.sending.values());
+      if (mark === this.changes && !this.sending.size) return mark;
+    }
   }
 
   private track(linkId: string, running: Promise<void>): Promise<void> {

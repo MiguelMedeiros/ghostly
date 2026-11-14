@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Amount, HttpResponseError, MintOperationError, NetworkError, getDecodedToken, type Proof } from "@cashu/cashu-ts";
 import { LIMITS } from "@ghostly/core";
 import { CashuWallet, MINT_TIMEOUT_MS } from "../src/engine/wallet";
-import { CASHU_REQUEST_TIMEOUT_MS, SWAP_SETTLED_MS } from "../src/engine/paymentAdapters/cashu";
+import { MELT_REQUEST_TIMEOUT_MS, SWAP_SETTLED_MS } from "../src/engine/paymentAdapters/cashu";
 import type { PendingMelt, StoredPayment, StoredProof, StoredQuote, WalletTx } from "../src/shared/types";
 import { bech32 } from "@scure/base";
 import { FakeWallet, failures, mint, resetDb, rows, seed } from "./fakes";
@@ -150,6 +150,21 @@ describe("Lightning in: which mint issues the invoice", () => {
       vi.useRealTimers();
     }
   });
+
+  it("a mint that fails the invoice (a 503, a closed socket) is named, with the next step; its own words kept last", async () => {
+    const socket = "fetch failed (other side closed, UND_ERR_SOCKET) at https://mint.example";
+    for (const [failure, said] of [[new HttpResponseError("down", 503), "down"], [new NetworkError(socket), socket]] as const) {
+      mint.createMintQuoteBolt11.mockRejectedValueOnce(failure);
+      await expect(setup().wallet.receiveLightning(100)).rejects.toMatchObject({
+        engineCode: "mintFailedInvoice",
+        message: `mint.example could not create an invoice right now: try again later. The mint said: ${said}`,
+      });
+    }
+    // A refusal is the mint's word on this amount: said as it said it.
+    mint.createMintQuoteBolt11.mockRejectedValueOnce(new MintOperationError(20000, "Amount too large"));
+    await expect(setup().wallet.receiveLightning(100)).rejects.toThrow(/^No mint could create an invoice: Amount too large$/);
+    expect(rows("quotes")).toEqual([]);
+  });
 });
 
 describe("Lightning out: melts", () => {
@@ -178,8 +193,8 @@ describe("Lightning out: melts", () => {
   };
   /** Asks about the pending payments once no request of theirs can reach the mint any more: that long really passed. */
   const pollWhenOverdue = async (wallet: CashuWallet) => {
-    const monotonic = vi.spyOn(performance, "now").mockReturnValue(performance.now() + CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS);
-    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS });
+    const monotonic = vi.spyOn(performance, "now").mockReturnValue(performance.now() + MELT_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS);
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + MELT_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS });
     try { await wallet["pollMelts"](); } finally { vi.useRealTimers(); monotonic.mockRestore(); }
   };
 
@@ -286,7 +301,7 @@ describe("Lightning out: melts", () => {
     expect(await pay(wallet)).toBe(false);
 
     // The clock set back an hour, and the window passed in fact: no request of it can land any more.
-    const monotonic = vi.spyOn(performance, "now").mockReturnValue(performance.now() + CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS);
+    const monotonic = vi.spyOn(performance, "now").mockReturnValue(performance.now() + MELT_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS);
     vi.useFakeTimers({ toFake: ["Date"], now: Date.now() - 60 * 60_000 });
     try { await wallet["pollMelts"](); } finally { vi.useRealTimers(); monotonic.mockRestore(); }
     expect(balance()).toBe(108);
@@ -407,6 +422,17 @@ describe("Lightning out: melts", () => {
     // A refusal is the mint's word on this invoice: said as it said it.
     mint.createMeltQuoteBolt11.mockRejectedValueOnce(new MintOperationError(20000, "Amount too large"));
     await expect(setup().wallet.quoteInvoice(INVOICE)).rejects.toThrow(/^Amount too large$/);
+    expect(balance()).toBe(108);
+  });
+
+  it("the mint holding the sats that fails the quote is named, not a later mint with none as \"Not enough sats\"", async () => {
+    mint.createMeltQuoteBolt11.mockImplementation((url: string) => url === MINT ? Promise.reject(new HttpResponseError("down", 503)) : Promise.resolve(meltQuote("UNPAID")));
+    const wallet = new CashuWallet(() => [MINT, "https://empty.example"], { onChange: vi.fn(), onTestMintNeeded: vi.fn(), onQuotePaid: vi.fn(), onMeltResolved: vi.fn() });
+    await expect(wallet.quoteInvoice(INVOICE)).rejects.toMatchObject({
+      engineCode: "mintFailedQuote",
+      message: "mint.example could not take this payment right now, and no sats left your wallet: try again later. The mint said: down",
+    });
+    expect(mint.createMeltQuoteBolt11).toHaveBeenCalledWith("https://empty.example", INVOICE);
     expect(balance()).toBe(108);
   });
 

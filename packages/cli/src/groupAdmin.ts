@@ -2,8 +2,9 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { MAX_AVATAR_LENGTH, MAX_AVATAR_SIDE, NO_PICTURE_METADATA, sanitizeAvatar, stripPictureMetadata } from "@ghostly/core";
 import type { GroupView } from "@ghostly/browser/shared/types";
-import { bool, contactKeyOf, findOwnNamedChat, groupNameOf, groupOf, node, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, contactKeyOf, groupById, groupNameOf, groupOf, node, ownChatOf, settingsOf, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError, localFileError } from "./errors";
+import { shellWord } from "./shellWord";
 import { guardText } from "./secretGuard";
 import { groupJson } from "./views";
 
@@ -90,22 +91,31 @@ async function picture(params: Params): Promise<string | null> {
 function joined(ctx: ApiContext, params: Params, twin?: string): GroupView {
   const group = groupOf(ctx, params, twin);
   if (group.status || !group.invitation) return group;
-  const ref = str(params, "group", true), shown = /^[\w.:-]+$/.test(ref) ? ref : JSON.stringify(ref);
+  const shown = shellWord(str(params, "group", true));
   throw new CliError("refused", group.invitation.accepted
     ? `You are not in ${group.name} yet: you accepted its invitation, and its admin has not let you in`
     : `You are not in ${group.name} yet: ghostly group accept ${shown} joins it`);
 }
 
 /** The member `params.member` names in `group`, this profile's own name said to be it; by its key only for a grant. */
-const member = (ctx: ApiContext, group: GroupView, params: Params, grant = false) => findMember(group, str(params, "member", true), state(ctx).settings.nick, grant);
+const member = (ctx: ApiContext, group: GroupView, params: Params, grant = false) => findMember(group, str(params, "member", true), settingsOf(ctx).nick, grant);
 
-const view = (ctx: ApiContext, id: string, params: Params) => groupJson(state(ctx).groups.find((g) => g.id === id) ?? groupOf(ctx, { group: id }), bool(params, "showSecret"));
+/** Where the app opens a group's link, as its Share gives it (WISP 903: `https://…/#/join/group2/…`). */
+export const GROUP_LINK_ORIGIN = "https://app.ghostly.tools";
+
+/**
+ * A group's link and the address that opens it in the app, as `invite create` answers `invite` and `link`. Only the
+ * token (`group2/…`) was given: pasted in a chat it is no link anyone can tap, and the app's own Share link is this one.
+ */
+export const withUrl = (group: string, link: string | null) => ({ group, link, ...(link && { url: `${GROUP_LINK_ORIGIN}/#/join/${link}` }) });
+
+const view = (ctx: ApiContext, id: string, params: Params) => groupJson(groupOf(ctx, { group: id }), bool(params, "showSecret"));
 
 export const GROUP_ADMIN_METHODS: Record<string, Method> = {
   async "group.invite"(ctx, params) {
     const group = joined(ctx, params);
     // The one invited reads the group from then on: a contact's own name or a prefix of its id never names it.
-    const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
+    const link = ownChatOf(ctx, params);
     await node(ctx).inviteToGroup({ groupId: group.id, linkId: link.id });
     return view(ctx, group.id, params);
   },
@@ -115,7 +125,7 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
     await node(ctx).removeGroupMember({ groupId: group.id, key: removed.key });
     // While the link is on, whoever holds it joins (WISP 902 § Entry link), the member just removed too: said as the
     // app's Remove dialog says it.
-    const linkOn = !!(state(ctx).groups.find((g) => g.id === group.id) ?? group).entryLink;
+    const linkOn = !!(groupById(ctx, group.id) ?? group).entryLink;
     return { ...view(ctx, group.id, params),
       ...(linkOn && { warning: `${removed.nick ?? "They"} can still join again with the group's link: ghostly group link ${group.id} --reset gives it a new one and keeps them out` }) };
   },
@@ -146,12 +156,15 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
   },
   async "group.link"(ctx, params) {
     const group = joined(ctx, params);
-    if (params.on === false) {
+    // On unless `on` says otherwise; an `on` that is no boolean ("false", 0) is refused, never read as on.
+    const on = params.on === undefined || bool(params, "on"), reset = bool(params, "reset");
+    if (!on && reset) throw new CliError("bad_request", "on: false turns the link off: not with reset");
+    if (!on) {
       await node(ctx).disableGroupLink({ groupId: group.id });
       return { group: group.id, link: null };
     }
-    const { link } = await node(ctx).enableGroupLink({ groupId: group.id, ...(bool(params, "reset") ? { reset: true } : {}) });
-    return { group: group.id, link };
+    const { link } = await node(ctx).enableGroupLink({ groupId: group.id, ...(reset ? { reset: true } : {}) });
+    return withUrl(group.id, link);
   },
   async "group.picture"(ctx, params) {
     const group = joined(ctx, params);

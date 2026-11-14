@@ -47,3 +47,19 @@ for (const [path, selector] of [
     assert.match(body, /text-decoration:\s*underline/);
   });
 }
+
+// The chosen one among siblings (a preset, a scenario, a stage, the installer guessed for this machine) was marked by a
+// fill, a tint, a halo or a colour alone, all of which forced colors replace: each needs a mark that survives.
+for (const [path, selector, mark] of [
+  ["app/developers.css", '.preset[aria-checked="true"]', /forced-color-adjust:\s*none[\s\S]*background:\s*Highlight/],
+  ["app/negotiation.css", '.ng-tab[aria-pressed="true"]', /forced-color-adjust:\s*none[\s\S]*background:\s*Highlight/],
+  ["app/developers.css", '.stage-node[data-passed="true"] .stage-dot', /forced-color-adjust:\s*none[\s\S]*background:\s*CanvasText/],
+  ["app/developers.css", '.stage-node[aria-checked="true"] .stage-dot', /outline:\s*2px solid CanvasText/],
+  ["app/finale.css", '.fin-dl[aria-current="true"]', /text-decoration:\s*underline/],
+]) {
+  test(`${selector} keeps its mark in forced colors`, () => {
+    const body = forced(path).get(selector);
+    assert.ok(body, `${selector} has a forced-colors rule`);
+    assert.match(body, mark);
+  });
+}

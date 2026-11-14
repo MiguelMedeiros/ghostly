@@ -4,7 +4,7 @@ import { parseProofBunker } from "@ghostly/browser/proofs/nostr";
 import type { IdentityProofProvider, IdentitySigner, SignerField, SignerInstructions } from "@ghostly/browser/proofs/contract";
 import type { IdentityProofView } from "@ghostly/browser/shared/types";
 import { IDENTITY_DRAFT_TTL_MS, IDENTITY_MAX_DRAFTS } from "@ghostly/browser/engine/identities";
-import { chatOf, findOwnNamedChat, node, num, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { chatOf, node, num, ownChatOf, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError } from "./errors";
 
 /**
@@ -221,16 +221,17 @@ export const IDENTITY_METHODS: Record<string, Method> = {
 
   async "identity.share"(ctx, params) {
     // The contact keeps the proof: a contact's own name or a prefix of its id never names the chat.
-    const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
+    const s = state(ctx);
+    const link = ownChatOf(ctx, params, s);
     const id = str(params, "id", true);
-    if (!state(ctx).identityProofs.some((p) => p.id === id)) throw new CliError("not_found", `No identity proof ${JSON.stringify(id)} (ghostly identity list)`);
+    if (!s.identityProofs.some((p) => p.id === id)) throw new CliError("not_found", `No identity proof ${JSON.stringify(id)} (ghostly identity list)`);
     await node(ctx).shareIdentityProof({ linkId: link.id, id });
     return { chat: link.id, shared: id };
   },
 
   async "identity.withdraw"(ctx, params) {
     // As `identity.share`: a contact's own name or a prefix of its id never names the chat.
-    const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
+    const link = ownChatOf(ctx, params);
     const id = str(params, "id", true);
     if (!link.identities?.shared.some((s) => s.id === id)) throw new CliError("not_found", `No identity proof ${JSON.stringify(id)} shared in this chat (ghostly identity contact ${link.id})`);
     await node(ctx).withdrawIdentityProof({ linkId: link.id, id });

@@ -171,6 +171,9 @@ export class GroupPairInbox {
     const f = readGroupPair(raw);
     if (!f || f.g !== source.group || f.to !== this.me.pubKeyZ32 || !fresh(f.ts, this.now())) return null;
     if (f.h ? !source.member(f.from) : f.from !== source.edge) return null;
+    // A replay, or a frame with no room, is refused before the open costs an X25519: `n` and `from` are in the clear,
+    // and only a frame that opens takes its nonce, so a forged box carrying another's nonce blocks nothing.
+    if (this.seen.has(f.n) || !this.seen.fits(f.from)) return null;
     const plain = openPair(this.me.seed, this.me.pubKeyZ32, f.from, f, pairAad(f.g, f.from, f.to, f.ts));
     if (!plain || !this.seen.add(f.n, f.from)) return null;
     try {

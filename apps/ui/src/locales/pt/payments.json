@@ -234,12 +234,18 @@
     "listSeparator": ", ",
     "sendUnavailable": "Um pedido ao grupo é pago por um membro; para pagar alguém, escolha essa pessoa",
     "status": {
-      "claimedPaid": "{{names}} pagou · aguardando a carteira de {{to}}",
+      "claimedPaid": "{{names}} pagaram · aguardando a carteira de {{to}}",
+      "claimedPaidByMe": "Você pagou · aguardando a carteira de {{to}}",
+      "claimedPaidToMe": "{{names}} pagaram · aguardando sua carteira",
+      "claimedPaidWithMe": "Você e {{names}} pagaram · aguardando a carteira de {{to}}",
       "closed": "Fechado",
       "paid": "Pago",
       "paidBy": "Pago por {{name}}",
+      "paidByMe": "Pago por você",
       "saysPaid": "{{names}} diz que pagou · aguardando a carteira de {{to}}",
+      "saysPaidToMe": "{{names}} diz que pagou · aguardando sua carteira",
       "sent": "Enviado · aguardando {{name}}",
+      "sentToMe": "Enviado · aguardando sua carteira",
       "takenBack": "Devolvido",
       "waiting": "Aguardando pagamento"
     },
@@ -247,9 +253,16 @@
     "theGroup": "o grupo",
     "title": {
       "asked": "{{to}} pediu a {{from}}",
+      "askedByMe": "Você pediu a {{from}}",
       "askedGroup": "{{to}} pediu ao grupo",
+      "askedGroupByMe": "Você pediu ao grupo",
+      "askedMe": "{{to}} pediu a você",
       "paying": "{{from}} está pagando {{to}}",
-      "sent": "{{from}} enviou para {{to}}"
+      "payingByMe": "Você está pagando {{to}}",
+      "payingMe": "{{from}} está pagando você",
+      "sent": "{{from}} enviou para {{to}}",
+      "sentByMe": "Você enviou para {{to}}",
+      "sentToMe": "{{from}} enviou para você"
     },
     "why": {
       "noPayments": "O app dessa pessoa não aceita pagamentos em grupos (precisa de atualização), ou ela desativou todas as formas",

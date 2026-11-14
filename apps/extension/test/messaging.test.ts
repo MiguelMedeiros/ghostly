@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fire, settle, type FakeWorld } from "./fakeChrome";
 import { engineControl, okResponse, resetEngine } from "./fakeEngine";
-import { OTHER_PEER, OTHER_TAG, PEER, SERVICE, TAG, bodyText, bootExtension, endBootPeer, engine, openViewer, pauseRequest } from "./extension";
+import { OTHER_PEER, OTHER_TAG, PEER, SERVICE, TAG, askPeer, bodyText, bootExtension, endBootPeer, engine, openViewer, pauseRequest } from "./extension";
+import servicesEn from "../../ui/src/locales/en/services.json";
 
 // covers: extension.engine, services.open, payments.external
 
@@ -202,13 +203,28 @@ describe("the page and the peer talk over the 'ui' port", () => {
     const { extensionHost } = await world.load("page", () => import("../src/host.ts"));
     const connection = await extensionHost.connect(() => {}, () => {});
     const server = engine();
-    expect(server.attachedWith).toEqual([[undefined, { newest: 400 }]]);
+    expect(server.attachedWith).toEqual([[undefined, { newest: 400, marks: true, since: undefined }]]);
 
     connection.send({ kind: "history", linkId: "chat-1" });
     await settle();
     expect(server.histories).toEqual([{ client: server.attached[0], linkId: "chat-1" }]);
     // Not an engine call.
     expect(server.handled).toEqual([]);
+  });
+
+  it("attaches a page with the mark its pages last mirrored, which its port's name carries", async () => {
+    // Each tab opened or reloaded got every chat's newest 400 rows again, though the stored chats had them all.
+    const { extensionHost } = await world.load("page", () => import("../src/host.ts"));
+    await extensionHost.connect(() => {}, () => {}, { epoch: "8f9c2c5e-4a51-4f43-9d6b-0a1c2b3d4e5f", mark: 1234 });
+    const server = engine();
+    expect(server.attachedWith).toEqual([[undefined, { newest: 400, marks: true, since: { epoch: "8f9c2c5e-4a51-4f43-9d6b-0a1c2b3d4e5f", mark: 1234 } }]]);
+  });
+
+  it.each(["ui ", "ui epoch", "ui epoch -1", "ui epoch 1 2", "uix epoch 1"])("ignores a port named %j", async (name) => {
+    await send({ target: "background", type: "ensure-engine" });
+    world.chrome.runtime.connect({ name });
+    await settle();
+    expect(engine().attached).toEqual([]);
   });
 
   it("detaches the page when its port closes", async () => {
@@ -500,10 +516,22 @@ describe("viewer tabs", () => {
       const answer = await pauseRequest(world, tabId, { url, method: "POST", postDataEntries });
       expect(answer.method).toBe("Fetch.fulfillRequest");
       expect(answer.params).toMatchObject({ responseCode: 502 });
-      expect(bodyText(answer.params)).toContain("The request failed.");
+      // Why, and where the file does go: not a bare "The request failed." with nothing to do next.
+      expect(bodyText(answer.params)).toContain(servicesEn.window.upload);
     }
     expect(engine().requests).toEqual([]);
     expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it("says why an upload failed in the words of the page that opened the tab, and its plain failure from an older page", async () => {
+    const file = (tag: string) => ({ url: `https://${SERVICE}.${PEER}.${tag}.invalid/upload`, method: "POST", postDataEntries: [{}] });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const said = await pauseRequest(world, await openViewer(world, PEER, SERVICE, TAG, { lang: "ar", dir: "rtl", unreachable: "a", failed: "b", upload: "ملف" }), file(TAG));
+    expect(bodyText(said.params)).toContain('<html lang="ar" dir="rtl">');
+    expect(bodyText(said.params)).toContain("ملف");
+    // A page from the build before: its own failure line, in its language.
+    const older = await pauseRequest(world, await openViewer(world, PEER, SERVICE, OTHER_TAG, { lang: "ar", dir: "rtl", unreachable: "a", failed: "فشل" }), file(OTHER_TAG));
+    expect(bodyText(older.params)).toContain("فشل");
   });
 
   it("refuses another contact's origin, another service, or anything else in the tab", async () => {
@@ -786,8 +814,8 @@ describe("the offscreen peer hears only the extension", () => {
   it.each(strangers)("answers no message from %s", async (_, sender) => {
     await send({ target: "background", type: "ensure-engine" });
     const before = engine().shutdowns;
+    expect(await askPeer(world, {}, sender)).toBeUndefined();
     for (const message of [
-      { target: "engine", type: "http-request", peerPubKeyZ32: PEER, serviceId: SERVICE, method: "GET", path: "/", headers: [], bodyB64: null },
       { target: "engine", type: "ping" },
       { target: "engine", type: "stop" },
     ]) {
@@ -916,17 +944,7 @@ describe("the offscreen peer", () => {
     engineControl().respond = async () => {
       throw tooLarge;
     };
-    const reply = await send({
-      target: "engine",
-      type: "http-request",
-      peerPubKeyZ32: PEER,
-      serviceId: SERVICE,
-      method: "GET",
-      path: "/",
-      headers: [],
-      bodyB64: null,
-    });
-    expect(reply).toEqual({ ok: false, code: "too-large", message: "Response too large" });
+    expect(await askPeer(world)).toEqual({ ok: false, code: "too-large", message: "Response too large" });
     expect(engine().requests[0].init.body).toBeNull();
   });
 });

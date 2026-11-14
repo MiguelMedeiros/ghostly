@@ -8,6 +8,9 @@ import { useI18n, type Translate, type TranslationKey } from "../../contexts/I18
 import { Button } from "../wallet/ui";
 import { InfoButton } from "../layout";
 import { AppIcon, Fingerprint } from "./AppIcon";
+import { AppDescription } from "./AppDescription";
+import { NAME, withName } from "./aroundName";
+import { removedLine } from "./removedLine";
 import { appErrorCode, appErrorText, appErrorView, appUpdateErrorView, type AppErrorView } from "../../lib/apps/errors";
 import { refreshInstalledApps } from "../../lib/apps/installed";
 import { saveAppData } from "../../lib/apps/exportData";
@@ -38,12 +41,13 @@ function hostOf(url: string): string {
 }
 
 /** Where the app stands with the person's stores: "In <store>", "Found by <index>", "Not in any of your stores". */
-function storeLines(listedBy: readonly AppListedBy[], t: Translate, builtIn?: BuiltIn): string[] {
+function storeLines(listedBy: readonly AppListedBy[], t: Translate, builtIn?: BuiltIn): { key: string; line: ReactNode }[] {
+  const named = (key: TranslationKey) => (s: AppListedBy) => ({ key: s.key, line: withName(t(key, { name: NAME }), s.name) });
   const curated = listedBy.filter((s) => s.kind === "curated");
-  if (curated.length) return curated.map((s) => t("apps.install.inStore", { name: s.name }));
-  const found = listedBy.map((s) => t("apps.install.foundBy", { name: s.name }));
-  if (builtIn) return builtIn === "installed" ? [...found, t("apps.builtIn.hint")] : found;
-  return [...found, t("apps.install.notListed")];
+  if (curated.length) return curated.map(named("apps.install.inStore"));
+  const found = listedBy.map(named("apps.install.foundBy"));
+  const last = builtIn ? builtIn === "installed" && t("apps.builtIn.hint") : t("apps.install.notListed");
+  return last ? [...found, { key: last, line: last }] : found;
 }
 
 /**
@@ -52,11 +56,15 @@ function storeLines(listedBy: readonly AppListedBy[], t: Translate, builtIn?: Bu
  */
 type BuiltIn = "carried" | "installed";
 
-/** Why it cannot run, if it cannot: revoked by its publisher, removed by a store, its files gone. */
+/**
+ * Why it cannot run, if it cannot: revoked by its publisher, removed by a store, its files gone. The publisher's reason
+ * (one line of at most 200 characters, signed, read by appStatements) is its own text: isolated, so its direction or
+ * marks cannot reorder the words around it.
+ */
 function runLine(run: AppRunStatus, t: Translate): ReactNode {
-  if (run.status === "revoked") return t("apps.install.revoked");
-  // A store's own words, one line each, in their own direction (an Arabic reason in an English app), as on the listing.
-  if (run.status === "removed") return run.by.length > 0 && run.by.map((b) => <span key={b.store} dir="auto" className="text-match-parent block">{t("apps.install.removed", { store: b.name, reason: b.reason })}</span>);
+  if (run.status === "revoked") return run.reason ? t("apps.install.revokedReason", { reason: `⁨${run.reason}⁩` }) : t("apps.install.revoked");
+  // A store's own words, one line each, as on the listing.
+  if (run.status === "removed") return run.by.length > 0 && run.by.map((b) => <span key={b.store} className="block">{removedLine(b.name, b.reason, t)}</span>);
   if (run.status === "needs-files") return t("apps.app.needsFiles");
   return null;
 }
@@ -84,8 +92,8 @@ function Publisher({ fingerprint, unknown: unlisted, listedBy, sentBy, builtIn }
         <span className="ms-auto"><Fingerprint value={fingerprint} /></span>
       </div>
       {unknown && open && <p id={id} className="text-xs text-text-secondary">{t("apps.install.unknownPublisherInfo")}</p>}
-      {storeLines(listedBy, t, builtIn).map((line) => <Line key={line} testId="app-store-line">{line}</Line>)}
-      {sentBy && <Line testId="app-sent-by">{t("apps.install.sentBy", { name: sentBy })}</Line>}
+      {storeLines(listedBy, t, builtIn).map(({ key, line }) => <Line key={key} testId="app-store-line">{line}</Line>)}
+      {sentBy && <Line testId="app-sent-by">{withName(t("apps.install.sentBy", { name: NAME }), sentBy)}</Line>}
     </div>
   );
 }
@@ -328,10 +336,10 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
       {preview && (
         <>
           <Publisher fingerprint={preview.fingerprint} unknown={preview.unknownPublisher} listedBy={preview.listedBy} sentBy={sentBy} builtIn={preview.carried && "carried"} />
-          {preview.manifest.description && <p dir="auto" className="text-sm text-text-secondary whitespace-pre-line [overflow-wrap:anywhere]">{preview.manifest.description}</p>}
           {!blocked && (preview.install === "new" || preview.asks.length > 0) && <Permissions asks={preview.asks} update={preview.install === "update"} />}
           {why && <Line tone="danger" testId="app-install-blocked">{why}</Line>}
           <Privacy from={preview.from} internet={(preview.manifest.permissions as readonly string[]).includes("internet")} carried={preview.carried} />
+          {preview.manifest.description && <AppDescription text={preview.manifest.description} from="publisher" testId="app-description" />}
         </>
       )}
       {error && <ErrorLine error={error} testId="app-install-error" />}
@@ -407,6 +415,17 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
     const active = document.activeElement;
     if (!active || active === document.body) (open.current ?? box.current)?.focus({ preventScroll: true });
   }, [lacks, busy]);
+  // A check while the screen is open stops the app (revoked, removed by a store) or lets it run again: Open, or Run anyway
+  // and Keep stopped, go with the focus one of them had. The screen takes it, as when the update's section goes. Files
+  // fetched again hand it on above, once Fetch files ends.
+  const status = app.run.status, ran = useRef(status);
+  useEffect(() => {
+    const was = ran.current;
+    ran.current = status;
+    if (was === status || was === "needs-files") return;
+    const active = document.activeElement;
+    if (!active || active === document.body) box.current?.focus({ preventScroll: true });
+  }, [status]);
   const focusBack = useFocusBack(busy);
   const act = async (work: () => Promise<unknown>, close = false, which: string | null = null, view = appErrorView) => {
     focusBack();
@@ -428,7 +447,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
   if (removing) {
     return (
       <Shell titleId={titleId} onClose={keepIt} testId="app-uninstall">
-        <h2 id={titleId} className="text-lg font-medium text-text-primary [overflow-wrap:anywhere]">{t("apps.app.uninstallTitle", { title: app.title })}</h2>
+        <h2 id={titleId} className="text-lg font-medium text-text-primary [overflow-wrap:anywhere]">{withName(t("apps.app.uninstallTitle", { title: NAME }), app.title)}</h2>
         <p className="text-sm text-text-secondary">{t("apps.app.uninstallText")}</p>
         {error && <ErrorLine error={error} />}
         <div className="flex flex-wrap justify-end gap-2">
@@ -443,7 +462,6 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
     <Shell titleId={titleId} onClose={close} testId="app-details" box={box}>
       <Head titleId={titleId} title={app.title} version={app.version} tagline={app.tagline} installed={app} />
       <Publisher fingerprint={app.fingerprint} unknown={app.unknownPublisher} listedBy={app.listedBy} builtIn={app.builtIn && "installed"} />
-      {app.description && <p dir="auto" className="text-sm text-text-secondary whitespace-pre-line [overflow-wrap:anywhere]">{app.description}</p>}
       {why && <Line tone={app.run.status === "needs-files" ? "warning" : "danger"} testId="app-run-line">{why}</Line>}
       {/* The version's internal `sequence` is never shown: the person knows it by the version in the header. */}
       {app.equivocation && <Line tone="warning" testId="app-equivocation">{t("apps.install.equivocation")}</Line>}
@@ -461,6 +479,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
         </div>
       )}
       <Privacy internet={(app.permissions as readonly string[]).includes("internet")} />
+      {app.description && <AppDescription text={app.description} from="publisher" testId="app-description" />}
       {error && <ErrorLine error={error} testId="app-details-error" />}
       <div className="flex flex-wrap justify-end gap-2">
         {/* While an Update (or Fetch files) runs, nothing here leaves the screen, as Escape doesn't: opening the app mid-update

@@ -670,6 +670,15 @@ export interface HistoryRequest {
 /** What a client sends the server. */
 export type ClientMessage = RpcRequest | HistoryRequest;
 
+/**
+ * A point in one engine's history changes (`EngineServer.historyMark`), as a `mark` event told it: `epoch` names the
+ * engine, since another one (the extension's offscreen document, replaced) counts from nothing again.
+ */
+export interface AttachMark {
+  epoch: string;
+  mark: number;
+}
+
 export interface RpcResponse {
   kind: "response";
   id: number;
@@ -723,6 +732,12 @@ export type EngineEvent =
   | { kind: "app-range"; linkId: string; range: AppRangeAsk }
   /** An update check of the installed mini-apps ran (WISP 1200 § Updates, § Takedowns): read them again. */
   | { kind: "apps-checked" }
+  /**
+   * To a client that attached for marks: every history change up to `mark` was sent to it, after its attach and as
+   * changes settle. `skipped`, once after its attach: the chats it was sent nothing of, as unchanged since its `since`; each
+   * one's newest page comes with its first change.
+   */
+  | ({ kind: "mark"; skipped?: string[] } & AttachMark)
   /**
    * The peer did not start: the profile's database did not open (`shared/idb.ts`). Sent to every client in place of
    * its first state; no state follows, and every call fails with the same words.

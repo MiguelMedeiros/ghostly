@@ -128,13 +128,15 @@ function revokedBy(revocations: SignedAppRevocation[], ref: string, digest: stri
  * with core's `readAppRevocations`, as the app reads it: one entry that does not verify refuses the whole file, and a
  * file that is missing, refused or over the app's bound revokes nothing. `files` keeps each file's answer for the read,
  * by its URL and by the SHA-256 of its bytes as the app keeps them: the same file at many URLs (a signature check per
- * entry, up to 4096) is checked once, not once per URL that serves it.
+ * entry, up to 4096) is checked once, not once per URL that serves it. `checked` holds each revocation that verified, so
+ * the same entries in another order (other bytes) are not checked again either.
  */
 function publisherRevoked(
   listing: { ref: string; digest: string; sequence: number; urls: string[] },
   sources: readonly string[] | undefined,
   revocations: Record<string, Uint8Array>,
   files: Map<string, SignedAppRevocation[]>,
+  checked: Set<string>,
 ): boolean {
   const urls = [...listing.urls.slice(0, STORE_LIMITS.urls), ...(sources ?? [])].filter(isStoreFetchUrl);
   for (const url of new Set(urls.map((u) => besideUrl(u, "ghostly-revoke.json")))) {
@@ -147,7 +149,7 @@ function publisherRevoked(
         const known = files.get(id);
         if (known !== undefined) held = known;
         else {
-          const read = readAppRevocations(bytes);
+          const read = readAppRevocations(bytes, checked);
           if (read.ok) held = read.revocations;
           files.set(id, held);
         }
@@ -161,8 +163,10 @@ function publisherRevoked(
 
 /**
  * The bundle of the very version a listing names (reference, digest, sequence), from the first of its URLs that holds
- * it, tried in order as the app tries them: a URL that was not read, does not verify, or holds another version (the
- * store's repository moved on while the site was built) gives way to the next. Unlike an install from a card, a newer
+ * it, tried in the order the app tries them (`listingUrls` in packages/browser/src/engine/apps.ts): a jsDelivr copy
+ * first, as it names a commit, where a raw `HEAD` the page would offer to add by its link moves on to versions the store
+ * has not reviewed. A URL that was not read, does not verify, or holds another version (the store's repository moved on
+ * while the site was built) gives way to the next. Unlike an install from a card, a newer
  * version than the listing's is not shown: the store lists the version it reviewed, and an app from the store updates
  * only to that.
  */
@@ -171,7 +175,9 @@ function listedBundle(
   bundles: Record<string, Uint8Array>,
 ): { ok: true; url: string; bundle: AppBundle } | { ok: false; reason: string } {
   let reason = "not-fetched";
-  for (const url of listing.urls.slice(0, STORE_LIMITS.urls)) {
+  const urls = listing.urls.slice(0, STORE_LIMITS.urls);
+  const pinned = (u: string) => isStoreFetchUrl(u) && new URL(u).hostname.toLowerCase() === "cdn.jsdelivr.net";
+  for (const url of [...urls.filter(pinned), ...urls.filter((u) => !pinned(u))]) {
     const bytes = isStoreFetchUrl(url) ? bundles[url] : undefined;
     if (bytes === undefined) continue;
     if (bytes.length > STORE_LIMITS.bundleBytes) {
@@ -206,6 +212,7 @@ export function readStore(bytes: StoreBytes, now: number, key: string): StoreVie
   const apps: StoreApp[] = [];
   const skipped: { ref: string; reason: string }[] = [];
   const revocationFiles = new Map<string, SignedAppRevocation[]>();
+  const checkedRevocations = new Set<string>();
   for (const listing of index.apps) {
     const skip = (reason: string) => skipped.push({ ref: listing.ref, reason });
     if (apps.length >= STORE_LIMITS.apps) {
@@ -227,7 +234,7 @@ export function readStore(bytes: StoreBytes, now: number, key: string): StoreVie
     }
     const { url, bundle } = found;
     const { manifest, digest, files } = bundle;
-    if (publisherRevoked(listing, manifest.sources, bytes.revocations ?? {}, revocationFiles)) {
+    if (publisherRevoked(listing, manifest.sources, bytes.revocations ?? {}, revocationFiles, checkedRevocations)) {
       skip("revoked");
       continue;
     }

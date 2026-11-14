@@ -1,0 +1,1 @@
+§ Event stream: an offline one-shot now reads the seen set as an online one does (revision 2026-11-13, online one-shots): its own notes at start, and a chat's or group's notes once that history changes. A history or transfer change no longer makes it read the whole set and every history's baseline, and a transfer's step is reported as it comes.

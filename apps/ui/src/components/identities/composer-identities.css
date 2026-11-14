@@ -14,7 +14,8 @@
 .id-card-back-body{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;padding:12px 14px 6px}
 .id-card-back-sees{display:flex;align-items:center;gap:10px;min-width:0}
 .id-card-back-who{display:grid;min-width:0}
-.id-card-back-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px;font-weight:700;line-height:1.2}
+/* Whole as well: a sign-in proof's name and email follow the provider's name, and a phone's card face leaves them out. */
+.id-card-back-name{overflow-wrap:anywhere;font-size:15px;font-weight:700;line-height:1.2}
 .id-card-back-subject{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;letter-spacing:.02em;color:rgb(var(--card-rgb,36,211,194))}
 /* The whole of a long name (a domain), broken where it must: a cut would hide either its start or its end. */
 .id-card-back-subject-whole{overflow:visible;white-space:normal;overflow-wrap:anywhere;text-overflow:clip}

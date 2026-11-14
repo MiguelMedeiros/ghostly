@@ -276,6 +276,15 @@ class MainActivity : TauriActivity() {
       view.findViewById<TextView>(R.id.lock_cover_line).setTextColor(if (dark) 0xDEFFFFFF.toInt() else 0xDE000000.toInt())
       view.bringToFront()
     }
+    // The page under it goes out of the accessibility tree with it (the cover itself is out of it, noHideDescendants):
+    // TalkBack would read the page it hides, and its double tap press a button there as a tap did.
+    val content = findViewById<ViewGroup>(android.R.id.content)
+    for (i in 0 until content.childCount) {
+      val child = content.getChildAt(i)
+      if (child !== view) {
+        child.importantForAccessibility = if (show) View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS else View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+      }
+    }
     view.visibility = if (show) View.VISIBLE else View.GONE
   }
 

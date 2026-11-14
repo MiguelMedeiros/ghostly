@@ -293,15 +293,22 @@ jobs:
           if-no-files-found: ignore
 
   # A draft's unit tests: only the ones its change can reach (tools/scripts/test-affected.mjs, what sessions run before
-  # they push), on one runner instead of the five above. `vitest related` per project; a project's config, setup or the
-  # lock file runs that project whole. Lint and types are frontend-checks' (whole), Rust is tauri's, the e2e is no
-  # pull request's. Leaving draft runs the full suites above instead.
+  # they push), on four runners instead of the five above. `vitest related` per project; a project's config, setup or
+  # the lock file runs that project whole. ui, browser and cli each get a runner (a core change reaches most of each,
+  # minutes apiece, and one after another they passed the 20 minutes), the fourth takes every other project
+  # (affected/select.mjs UNIT_ALONE). Lint and types are frontend-checks' (whole), Rust is tauri's, the e2e is no pull
+  # request's. Leaving draft runs the full suites above instead.
   affected-tests:
-    name: Affected unit tests (draft)
+    name: Affected unit tests (draft ${{ matrix.group }}/4)
     needs: changes
     if: needs.changes.outputs.affected == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # The 4 below and in the name must match this list.
+        group: [1, 2, 3, 4]
     steps:
       # The pull request's merge commit and its first parent, the base it is merged onto: their difference is the change.
       - name: Checkout
@@ -321,7 +328,7 @@ jobs:
       - name: Unit tests the change reaches
         env:
           JOBS: "4"
-        run: node tools/scripts/test-affected.mjs --base HEAD^1 --no-e2e --no-rust --no-lint --no-typecheck
+        run: node tools/scripts/test-affected.mjs --base HEAD^1 --no-e2e --no-rust --no-lint --no-typecheck --unit-group ${{ matrix.group }}/4
 
   # ============================================
   # The headless CLI on Linux ARM64 (Graviton, Ampere, Hetzner ARM, a Raspberry Pi)

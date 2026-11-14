@@ -213,24 +213,36 @@ export function freshHubs(hubs: Hub[], now = Date.now()): Hub[] {
   return hubs.filter(h => now - h.ts < COMMUNITY_TOPOLOGY.beaconFreshMs && h.ts <= now + 60_000);
 }
 
+const rankHash = (subject: string, hubKey: string): Uint8Array => sha256(concatBytes(utf8Encode("ghostly-group-community/1 rank"), publicKeyFromZ32(subject), publicKeyFromZ32(hubKey)));
 /** Rendezvous hashing: how strongly a hub is responsible for someone (a knock, a member). Highest first. */
 export function hubRank(subject: string, hubKey: string): string {
-  return toBase64Url(sha256(concatBytes(utf8Encode("ghostly-group-community/1 rank"), publicKeyFromZ32(subject), publicKeyFromZ32(hubKey))));
+  return toBase64Url(rankHash(subject, hubKey));
 }
 export function rankHubs(subject: string, hubs: string[]): string[] {
   return [...hubs].sort((a, b) => { const ra = hubRank(subject, a), rb = hubRank(subject, b); return ra < rb ? 1 : ra > rb ? -1 : 0; });
 }
 
 /**
- * The hubs a member asks for edges: the least loaded fresh ones with room, ties broken by rank
- * for this member (so members spread out), at most `hubsPerMember`.
+ * The hubs a member asks for edges: fresh ones with room, at most `hubsPerMember`, by rendezvous hashing weighted by
+ * the room each has left, so the members picking at once spread over the hubs in proportion to it. The members a
+ * closing hub carried all pick in the same second: each took the least loaded hub, all of them the same one, which
+ * opened their 12 or 16 edges at once on its relays' budget and brought none up for minutes, then the next hub did the
+ * same, and 6 of them stepped up as hubs with nobody on them (36 members, bug hunt, 2026-11-11).
  */
 export function pickHubs(me: string, hubs: Hub[], now = Date.now(), avoid: ReadonlySet<string> = new Set()): string[] {
-  // A hub that republished lately first (one whose app closed stays listed a while), then the least loaded.
+  // A hub that republished lately first (one whose app closed stays listed a while).
   const lately = (h: Hub) => now - h.ts < COMMUNITY_TOPOLOGY.beaconEveryMs * 1.5 ? 0 : 1;
   const open = freshHubs(hubs, now).filter(h => h.key !== me && !avoid.has(h.key) && h.load < COMMUNITY_TOPOLOGY.hubCapacity)
-    .sort((a, b) => lately(a) - lately(b) || a.load - b.load || (hubRank(me, a.key) < hubRank(me, b.key) ? 1 : -1));
+    .map(h => ({ key: h.key, lately: lately(h), score: spreadScore(me, h) }))
+    .sort((a, b) => a.lately - b.lately || b.score - a.score);
   return open.slice(0, COMMUNITY_TOPOLOGY.hubsPerMember).map(h => h.key);
+}
+
+/** Weighted rendezvous hashing: room / -ln(u), u in (0, 1) from this member's rank of the hub; the highest is picked. */
+function spreadScore(me: string, hub: Hub): number {
+  const r = rankHash(me, hub.key);
+  const u = (r[0] * 65_536 + r[1] * 256 + r[2] + 0.5) / 16_777_216;
+  return (COMMUNITY_TOPOLOGY.hubCapacity - hub.load) / -Math.log(u);
 }
 
 /** Should this member be a hub? Too few fresh hubs, or all full, and room in the beacon. */

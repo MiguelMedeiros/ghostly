@@ -123,7 +123,7 @@ export function checkAppListing(value: unknown, options: AppFormatOptions = {}):
  * The first object key `text` writes twice in one object, as JSON.parse reads it (`"title"` is `title`), or null.
  * `text` is JSON that JSON.parse already took: one pass, each string read to its closing quote.
  */
-function repeatedJsonKey(text: string): string | null {
+export function repeatedJsonKey(text: string): string | null {
   /** Each open object's keys so far; null for an array. */
   const open: (Set<string> | null)[] = [];
   let keyNext = false;

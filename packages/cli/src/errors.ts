@@ -60,10 +60,11 @@ export function asCliError(error: unknown): CliError {
  * `details.reason`. Any other keeps `engine`. Read by its shape, as `profileOpenError`.
  */
 const ENGINE_CODES: Record<string, ErrorCode> = {
-  mintUnreachable: "unavailable", lnurlUnreachable: "unavailable", hostUnreachable: "unavailable", networkUnreachable: "unavailable", usdtRpcUnavailable: "unavailable",
+  mintUnreachable: "unavailable", lnurlUnreachable: "unavailable", hostUnreachable: "unavailable", networkUnreachable: "unavailable", usdtRpcUnavailable: "unavailable", mintFailedInvoice: "unavailable",
   hostTimedOut: "timeout", networkTimedOut: "timeout",
   invalidMintUrl: "bad_request", mintNotHttps: "bad_request", invalidMaxFee: "bad_request",
   notEnoughSats: "refused", notEnoughForFee: "refused", mintsNoAnyAmount: "refused", ecashAlreadySpent: "refused", ecashFeeTakesAll: "refused", lightningRefused: "refused", contactNoWallet: "refused", contactNoPayments: "refused",
+  serviceShareFull: "refused",
 };
 /** `details.reason` of an engine error a bot tells apart from others of its code. */
 const ENGINE_REASONS: Record<string, string> = { contactNoWallet: "contact_no_wallet", contactNoPayments: "contact_payments_off" };
@@ -139,8 +140,13 @@ export function localFileError(error: unknown, file?: string): CliError | undefi
   const { code, path } = error as { code?: unknown; path?: unknown };
   const where = typeof path === "string" ? path : file ?? "the path";
   if (code === "ENOENT" || code === "ENOTDIR") return new CliError("not_found", `No such file or folder: ${where}`);
+  // A symbolic link to itself (or a ring of them) leads nowhere: before, Node's raw "ELOOP: …, stat" as `engine`.
+  if (code === "ELOOP") return new CliError("not_found", `No such file or folder: ${where} (its symbolic links go round in a loop)`);
   if (code === "EACCES" || code === "EPERM" || code === "EROFS") return new CliError("refused", `Not allowed to write or read ${where}`);
   if (code === "EISDIR") return new CliError("bad_request", `${where} is a folder: name a file`);
+  // A file where a folder is to be made (`store sign --out`, `app publish --key`/`--out`): Node's "EEXIST: file already
+  // exists, mkdir '…'" was `engine`. Named as `file save --dir` names one.
+  if (code === "EEXIST" && (error as { syscall: string }).syscall === "mkdir") return new CliError("not_found", `${where} is a file, not a folder`);
   if (code === "ENAMETOOLONG") return new CliError("bad_request", `A name in ${where} is too long for this file system (at most 255 bytes)`);
   // A full disk (or a quota) answered Node's raw "ENOSPC: no space left on device, write" as `engine`, naming nothing
   // (agents#1710). `unavailable`: it works again once there is room, with nothing lost.

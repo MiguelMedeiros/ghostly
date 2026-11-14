@@ -106,6 +106,27 @@ describe("the read lane of one chat", () => {
     expect(ana.servesOf(CHESS)).toEqual([chess]);
   });
 
+  // Each serve walked every serve held to find the file's: an app serving 50,000 files one by one took seconds.
+  it("serves, serves again and ends 50,000 files of one app without walking the others", () => {
+    const ana = new AppRanges(() => {});
+    const files = Array.from({ length: 50_000 }, (_, i) => `file-${i}`);
+    const started = performance.now();
+    const serves = files.map(file => ana.serve(CINEMA, file));
+    expect(files.map(file => ana.serve(CINEMA, file))).toEqual(serves);
+    const chess = ana.serve(CHESS, files[0]!);
+    expect(ana.servesOf(CINEMA)).toEqual(serves);
+    for (const serve of serves.slice(0, 25_000)) expect(ana.unserve(serve)).toBe(true);
+    expect(ana.servesOf(CINEMA)).toEqual(serves.slice(25_000));
+    // Ended, a file served again is a new id, last among the app's.
+    const again = ana.serve(CINEMA, files[0]!);
+    expect(serves).not.toContain(again);
+    expect(ana.servesOf(CINEMA).at(-1)).toBe(again);
+    ana.closeApp(CINEMA);
+    expect(ana.servesOf(CINEMA)).toEqual([]);
+    expect(ana.servesOf(CHESS)).toEqual([chess]);
+    expect(performance.now() - started).toBeLessThan(3_000);
+  });
+
   it("says changed or gone as the file under a serve does", async () => {
     const { ana, bob, flush } = pair({ serveFile: file => file === "moved" ? "gone" : "changed" });
     const moved = bob.read(CINEMA, ana.serve(CINEMA, "moved"), 0, 1), edited = bob.read(CINEMA, ana.serve(CINEMA, "edited"), 0, 1);

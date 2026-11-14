@@ -1,4 +1,5 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
+import { Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it } from "vitest";
 import type { GroupEdgeView, GroupMemberView, LinkView } from "@ghostly/browser/shared/types";
 import { engine } from "@ghostly/browser/platform/engine";
@@ -6,6 +7,7 @@ import { ChatConnection } from "../../components/ChatConnection";
 import { GroupConnection } from "../../components/GroupConnection";
 import { PeerAvatar } from "../../components/Avatar";
 import { PeerPresenceLine } from "../../components/PresenceMarks";
+import { GroupChat } from "../../pages/GroupChat";
 import { fakeEngine, groupView, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 // covers: extension.reconnecting
@@ -98,5 +100,26 @@ describe("the header while the tab lost its peer", () => {
     await back();
     expect(trigger).toHaveAttribute("data-state", "connected");
     expect(trigger).toHaveAttribute("aria-label", "Group connection: 1 of 1 reachable");
+  });
+
+  // The line under the group's name said "3 members · 2 of 2 reachable" (a community "· your app relays for others")
+  // beside the icon's Connecting… (bug hunt, 2026-11-13).
+  for (const [kind, patch, said] of [
+    ["private group", {}, "3 members · 2 of 2 reachable"],
+    ["community hub", { profile: "community", community: { hub: true, hubs: 1, connected: 2 } }, "3 members · your app relays for others"],
+  ] as const) it(`says under a ${kind}'s name that it is connecting, not who is reachable`, async () => {
+    const member = (key: string, nick: string): GroupMemberView => ({ key: key.padEnd(52, "y"), nick, role: "member", me: false, online: true, missing: 0 });
+    const group = groupView({ status: "active", epoch: 1, members: [{ ...member("me", ""), me: true }, member("alice", "Alice"), member("bob", "Bob")], ...patch });
+    fakeEngine.on("groupMessages", () => []).on("updateSettings", () => undefined);
+    fakeEngine.update({ groups: [group] });
+    renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1" });
+    expect(await screen.findByTestId("group-members")).toHaveTextContent(said);
+
+    await losePeer();
+    expect(screen.getByTestId("group-members")).toHaveTextContent("3 members · connecting…");
+    expect(screen.getByTestId("group-members")).not.toHaveTextContent(said);
+
+    await back();
+    expect(screen.getByTestId("group-members")).toHaveTextContent(said);
   });
 });

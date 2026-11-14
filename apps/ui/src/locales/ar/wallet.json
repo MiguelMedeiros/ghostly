@@ -413,7 +413,7 @@
     "cashuMints": "دور السك في Cashu",
     "cashuSettings": "إعدادات Cashu",
     "commentFor": "تعليق إلى {{to}} (اختياري)",
-    "confirmWhat": "{{amount}} sats (مع رسوم تصل إلى {{fee}})",
+    "confirmWhat": "{{amount}} {{unit}} (مع رسوم تصل إلى {{fee}} {{feeUnit}})",
     "connecting": "جارٍ الاتصال بالمصدر…",
     "domainLine": "{{answered}} {{limits}}",
     "done": "تم",
