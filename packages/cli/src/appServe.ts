@@ -1,7 +1,7 @@
 import { readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { appCardUrl, appRef, isAppRef, isAppUrl, type AppPermission } from "@ghostly/core";
-import { list, str, type ApiContext, type Method } from "./apiKit";
+import { list, node, str, type ApiContext, type Method } from "./apiKit";
 import { isAppFetchUrl } from "@ghostly/browser/engine/appFetch";
 import { checkedBundle } from "./apps";
 import { CliError } from "./errors";
@@ -128,6 +128,8 @@ export const APP_SERVE_METHODS: Record<string, Method> = {
     const app = servedApp(apps, ref);
     const next = apps.filter((a) => a !== app);
     writeServed(ctx.runtime.paths.dir, next);
+    // Open in a chat, it stops there too: `app close` no longer names it, and the contact's frames would still come.
+    if (ctx.mode === "daemon") node(ctx).appsCloseOf(app.ref);
     return { unserved: app.ref, apps: next.length, ...offered(ctx, next) };
   },
 };

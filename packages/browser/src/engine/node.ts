@@ -6378,8 +6378,8 @@ export class GhostlyNode implements EngineImplementation {
     for (const key of this.appTurns.keys()) this.appTurns.set(key, ++this.nextAppTurn);
   }
 
-  /** An app that went (uninstalled) is closed in every chat it was open in, as `appClose` does. */
-  private appsCloseOf(ref: string): void {
+  /** An app that went (uninstalled, or a bot no longer serves it) is closed in every chat it was open in, as `appClose` does. */
+  appsCloseOf(ref: string): void {
     for (const [linkId, live] of this.links) {
       if (!live.appsOpen?.size) continue;
       const { app } = this.appChat(linkId, ref);
