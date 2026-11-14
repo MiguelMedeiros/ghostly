@@ -273,7 +273,7 @@ describe("group link", () => {
     expect(disableGroupLink).not.toHaveBeenCalled();
     // A community member who lost its hubs is still in it: it asks to be let in again by itself.
     out("lost");
-    expect(await callApi(ctx, "group.link", { group: "Crew" })).toEqual({ group: "g1", link: LINK });
+    expect(await callApi(ctx, "group.link", { group: "Crew" })).toEqual({ group: "g1", link: LINK, url: expect.stringMatching(/#\/join\//) });
   });
 });
 
