@@ -37,7 +37,8 @@ export function IdCardMark({ provider, subject }: { provider?: string; subject?:
  * with that contact wears a check seal (`shared`): on the photo's corner, and beside the mark on the trailing edge.
  * The profile's own Ghostly identity is one of these too (idCard.ts `ghostlyCard`): the profile's picture, or the
  * name's initial, in the photo slot, and "Default" for a status. An identity with a public profile (a Nostr, Pubky or
- * Bluesky account) asks for it once its card is on screen, and wears its picture and name.
+ * Bluesky account) asks for it once its card is on screen, and wears its picture and name. The name, the account's own
+ * words, is in a <bdi> (as on the card's back): in Arabic, "alice!" showed as "!alice".
  */
 export function IdCardFace({ card, after, shared }: { card: IdCardContent; after?: boolean; shared?: boolean }) {
   const ref = useRef<HTMLSpanElement>(null);
@@ -60,7 +61,7 @@ export function IdCardFace({ card, after, shared }: { card: IdCardContent; after
       </span>
       <span className="id-card-fields">
         <span className="id-card-provider">{card.label}</span>
-        {card.name && <span className="id-card-name" data-testid="id-card-name">{card.name}</span>}
+        {card.name && <span className="id-card-name" data-testid="id-card-name"><bdi>{card.name}</bdi></span>}
         <span className="id-card-subject" data-testid="identity-proof-subject" data-words={card.subjectWords ? "" : undefined} title={card.subject}><bdi dir="ltr">{card.short}</bdi></span>
         <span className="id-card-field id-card-field-category">{card.category}</span>
         <span className="id-card-field id-card-field-validity">{card.validity}</span>
