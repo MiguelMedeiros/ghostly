@@ -68,3 +68,14 @@ it("reads a network's newest 100 movements, not the whole history, and shows eac
   expect(testnet.result.history[0].id).toBe("test-4999");
   expect(testnet.result.history[99].id).toBe("test-4900");
 });
+
+it("reads as many of a network's newest movements as asked, past the view's 100, and only those", async () => {
+  // Found in a performance hunt: `wallet history --limit 500` sliced the view's 100 and printed 100, with no word.
+  const wallet = new CashuWallet((network) => (network === "testnet" ? [TEST_MINT] : [MINT]), { onChange: () => {}, onTestMintNeeded: async () => {}, onQuotePaid: () => {}, onMeltResolved: () => {} }, () => [MINT, TEST_MINT]);
+  const testnet = await reads(() => wallet.history("testnet", 500));
+  expect(testnet.result).toHaveLength(500);
+  expect(testnet.result[0].id).toBe("test-4999");
+  expect(testnet.result[499].id).toBe("test-4500");
+  expect(testnet.read, "500 of 5,000").toBeLessThan(510);
+  expect((await wallet.history("mainnet", 500)).map((t) => t.id)).toEqual(["real-2", "real-1", "real-0"]);
+});
