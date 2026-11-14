@@ -15,6 +15,8 @@ import { unwrapPasted } from "../src/text";
 const PASTES = [
   "X", "X.", "X,", "(X)", "X!", "(X).", "X?", "X;", "X:", "<X>", "\"X\"", "“X”", "« X »", "«X»", "X…", "[X]", "`X`",
   "code: X", "Join our group: X.", "Here: <X>.", "  X  \n", "Link → X !",
+  // A `/` a link ends with, typed or added by a chat app's linkifier: `inviteRouteCode` drops it from an invite's route.
+  "X/", "X//", "<X/>.",
 ];
 const NOW = Math.floor(Date.now() / 1000);
 const web = (code: string) => `https://ghostly.tools/#${code}`;
@@ -73,5 +75,7 @@ describe("a token pasted with the words around it", () => {
     expect(unwrapPasted("« ghostly1abc »")).toBe("ghostly1abc");
     expect(unwrapPasted("code: `ghostly1abc`?")).toBe("ghostly1abc");
     expect(unwrapPasted("ghostly1abc")).toBe("ghostly1abc");
+    expect(unwrapPasted("https://a.b/#/join/group2/x/y/")).toBe("https://a.b/#/join/group2/x/y");
+    expect(unwrapPasted("See https://ghostly.tools/.")).toBe("https://ghostly.tools/");
   });
 });
