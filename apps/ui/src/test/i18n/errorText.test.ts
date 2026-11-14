@@ -623,6 +623,10 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["That did:jwk does not hold a JSON Web Key", `${CORE}/did.ts`],
   ["That did:jwk contains a private key. Never share it: make a new key", `${CORE}/did.ts`],
   ["That did:jwk is not an Ed25519, secp256k1 or P-256 key", `${CORE}/did.ts`],
+  // A DID's lookup that found no document it can use: a DID card in a message, the Add dialog's preview.
+  ["No DID document at https://example.org/.well-known/did.json", `${BROWSER}/proofs/did.ts`, "`No DID document at ${documentUrl}`"],
+  ["https://example.org/.well-known/did.json is not JSON", `${BROWSER}/proofs/did.ts`, "`${documentUrl} is not JSON`"],
+  ["This DID lists no Ed25519, secp256k1 or P-256 key for authentication or assertionMethod, so it cannot sign", `${BROWSER}/proofs/providers/did.ts`],
   ["Enter at least one relay address (https://…)", `${BROWSER}/engine/node.ts`],
   ["Enter at least one relay address (wss://…)", `${BROWSER}/nostr/relay.ts`],
   ["Add a TURN server first", `${BROWSER}/engine/node.ts`],
