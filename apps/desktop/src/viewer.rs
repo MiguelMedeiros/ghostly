@@ -264,6 +264,13 @@ const DROPPED_HEADERS: [&str; 5] = [
     "link",
 ];
 
+/// The page's features, Ghostly's alone: the contact's `Permissions-Policy` (or the older `Feature-Policy`) could
+/// allow them, so it takes their place. `VIEWER_PERMISSIONS_POLICY` in `packages/core/src/http.ts`.
+const PERMISSIONS_POLICY: &str = "camera=(), microphone=(), display-capture=(), geolocation=(), midi=(), usb=(), serial=(), hid=(), clipboard-read=(), idle-detection=(), local-fonts=(), window-management=(), storage-access=(), publickey-credentials-create=()";
+
+/// A contact's headers that would set the page's features (`PERMISSIONS_POLICY`).
+const FEATURE_HEADERS: [&str; 2] = ["permissions-policy", "feature-policy"];
+
 /// The directives of a contact's policy that send reports to a URL it names,
 /// dropped from it. The same list as `OPENED_SERVICE_DROPPED_DIRECTIVES`.
 const DROPPED_DIRECTIVES: [&str; 2] = ["report-uri", "report-to"];
@@ -560,6 +567,9 @@ pub fn open<R: tauri::Runtime>(
         })
         // The app never saves a file by itself.
         .on_download(|_, event| may_download(&event))
+        // Never the microphone, the camera, the screen or the location, as in an app window: without an answer of
+        // ours macOS grants the first two with no question.
+        .on_permission_request(|_, kind| crate::app_sandbox::capture_answer(kind))
         .inner_size(1100.0, 760.0)
         .build()
         .map_err(|e| format!("Window: {}", e))?;
@@ -762,6 +772,12 @@ pub async fn handle<R: tauri::Runtime>(
         {
             continue;
         }
+        if FEATURE_HEADERS
+            .iter()
+            .any(|feature| feature.eq_ignore_ascii_case(name))
+        {
+            continue;
+        }
         if name.eq_ignore_ascii_case("content-security-policy") {
             let policy = without_reports(value);
             if !policy.is_empty() {
@@ -799,6 +815,7 @@ pub async fn handle<R: tauri::Runtime>(
         .to_string(),
     );
     response = response.header("content-security-policy", policies.join(", "));
+    response = response.header("permissions-policy", PERMISSIONS_POLICY);
     response
         .body(STANDARD.decode(answer.body_b64).unwrap_or_default())
         .unwrap_or_else(|_| {
@@ -1437,6 +1454,79 @@ mod routing_tests {
         // What can read an answer or post goes to the contact's own origin only: https: also names
         // this machine and the local network.
         assert!(SERVICE_CSP.ends_with("; connect-src 'self'; form-action 'self'"));
+    }
+
+    /// No microphone, camera, screen or location for a contact's app, as for an installed one: without a handler wry
+    /// grants a capture on macOS with no question, so the window carries the one that refuses, and its pages are
+    /// served Ghostly's permissions policy in place of the contact's.
+    #[test]
+    fn a_contacts_app_never_captures() {
+        let source = include_str!("viewer.rs");
+        let start = source.find("pub fn open<").unwrap();
+        let body = &source[start..start + source[start..].find("\n}\n").unwrap()];
+        assert!(
+            body.contains(
+                ".on_permission_request(|_, kind| crate::app_sandbox::capture_answer(kind))"
+            ),
+            "open"
+        );
+        let app = app();
+        bind(&app, "svc-1");
+        let asked = requests(&app);
+        let pending = tauri::async_runtime::spawn(handle(
+            app.handle().clone(),
+            "svc-1".into(),
+            request("GET", &format!("{SCHEME}://atlas.{PEER}.{TAG}/"), b""),
+        ));
+        let carried = asked.recv_timeout(Duration::from_secs(5)).unwrap();
+        respond(
+            app.handle(),
+            carried["id"].as_u64().unwrap(),
+            ServiceResponse {
+                status: 200,
+                headers: vec![
+                    ("Permissions-Policy".into(), "camera=*, microphone=*".into()),
+                    ("Feature-Policy".into(), "camera *; microphone *".into()),
+                    ("x-served-by".into(), "atlas".into()),
+                ],
+                body_b64: STANDARD.encode(b"hi"),
+            },
+        );
+        let response = tauri::async_runtime::block_on(pending).unwrap();
+        assert_eq!(response.headers()["x-served-by"], "atlas");
+        assert!(response.headers().get("feature-policy").is_none());
+        let policies: Vec<_> = response
+            .headers()
+            .get_all("permissions-policy")
+            .iter()
+            .collect();
+        assert_eq!(policies.len(), 1);
+        for feature in ["camera", "microphone", "display-capture", "geolocation"] {
+            assert!(
+                policies[0]
+                    .to_str()
+                    .unwrap()
+                    .contains(&format!("{feature}=()")),
+                "{feature}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_permissions_policy_is_the_one_the_other_viewers_serve() {
+        let core = include_str!("../../../packages/core/src/http.ts");
+        let start = core
+            .find("export const VIEWER_PERMISSIONS_POLICY = [")
+            .unwrap();
+        let list = &core[start..start + core[start..].find("]").unwrap()];
+        let features: Vec<_> = list
+            .split('"')
+            .skip(1)
+            .step_by(2)
+            .map(|feature| format!("{feature}=()"))
+            .collect();
+        assert!(features.len() > 4);
+        assert_eq!(PERMISSIONS_POLICY, features.join(", "));
     }
 
     /// With Hide my IP from contacts on when the window opened, its pages load nothing but their own origin: a

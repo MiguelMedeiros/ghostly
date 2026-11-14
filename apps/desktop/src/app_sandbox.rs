@@ -644,8 +644,11 @@ fn window_title(title: &str) -> String {
 }
 
 /// The window, with every layer that does not depend on the platform.
-/// An app window's answer to a permission request: never the microphone, the camera, the screen or the location.
-fn capture_answer(kind: tauri::webview::PermissionKind) -> tauri::webview::PermissionResponse {
+/// An app window's answer to a permission request (a contact's service window's too, `viewer::open`): never the
+/// microphone, the camera, the screen or the location.
+pub(crate) fn capture_answer(
+    kind: tauri::webview::PermissionKind,
+) -> tauri::webview::PermissionResponse {
     use tauri::webview::{PermissionKind, PermissionResponse};
     match kind {
         PermissionKind::Microphone
