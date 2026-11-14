@@ -2,7 +2,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { useState } from "react";
-import { act, screen } from "@testing-library/react";
+import { act, fireEvent, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { FocusSafeButton } from "../../components/ui/FocusSafeButton";
 import { Button } from "../../components/wallet/ui";
@@ -45,6 +45,24 @@ describe.each(["raw", "button"] as const)("a %s button disabled by its own work"
     // The focus leaves while it works: disabled as asked, out of the Tab order.
     await user.tab();
     expect(go).toBeDisabled();
+    expect(go).not.toHaveAttribute("aria-disabled");
+  });
+
+  it("keeps the focus while the window is away during its work: the window's blur leaves the focus on it", async () => {
+    let fail: (() => void) | undefined;
+    const { user } = renderApp(<Work as={as} work={() => new Promise<void>((_, refuse) => { fail = () => refuse(new Error("no")); })} />);
+    const go = screen.getByTestId("go");
+    go.focus();
+    await user.keyboard("{Enter}");
+    // Another window (or app) comes forward: the button gets a blur but stays the page's focused element. Disabled
+    // then, Chromium drops it to the page, which still has it when the window comes back and the work fails.
+    fireEvent.blur(go);
+    expect(document.activeElement).toBe(go);
+    expect(go).toBeEnabled();
+    expect(go).toHaveAttribute("aria-disabled", "true");
+    fireEvent.focus(go);
+    await act(async () => fail!());
+    expect(go).toBeEnabled();
     expect(go).not.toHaveAttribute("aria-disabled");
   });
 
