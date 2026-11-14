@@ -3,6 +3,7 @@ import type { GroupView } from "@ghostly/browser/shared/types";
 import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { focusLost } from "../lib/focus";
+import { forgetGroupLocal } from "../lib/groups";
 import { DeleteChatDialog } from "./DeleteChatDialog";
 
 type Other = NonNullable<GroupView["others"]>[number];
@@ -11,7 +12,8 @@ type Other = NonNullable<GroupView["others"]>[number];
  * Another group came under this one's id (a contact's invitation, or a link opened): a private group's id names no
  * genesis, so anyone who knows it can make a group of their own under it. Only one of them is kept on this device:
  * the band says so and lets the person pick. Keep this one turns the others down (their inviters are told); Switch
- * takes the other in its place, as Delete takes this one, and so is asked first as Delete is: the dialog names the other
+ * takes the other in its place, as Delete takes this one (what this device kept of it beside the engine goes too,
+ * `forgetGroupLocal`), and so is asked first as Delete is: the dialog names the other
  * picked, Cancel has the focus, and closed it gives the focus back to that Switch. `act`: the page's runner, which says
  * why one did not go. Answered, the band goes with the button pressed and the focus would fall to the page: it goes to
  * `focusAfter` (the group's name) instead, unless it went elsewhere meanwhile.
@@ -57,7 +59,9 @@ export function GroupOthers({ group, act, focusAfter }: { group: GroupView; act:
         const to = "link" in asking ? asking.link : asking.linkId;
         setAsking(null);
         answered.current = true;
-        void act(() => engine.call("switchGroup", { groupId: group.id, to }));
+        // What this device kept of the group switched away from goes with it, as on Delete: the other group, under
+        // the same id, starts with no draft, mute, read mark or folder of this one's.
+        void act(async () => { await engine.call("switchGroup", { groupId: group.id, to }); forgetGroupLocal(group.id); });
       }} />}
   </div>;
 }
