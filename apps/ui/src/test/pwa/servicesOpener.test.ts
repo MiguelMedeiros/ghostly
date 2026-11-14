@@ -851,6 +851,8 @@ describe("a contact's app shown over the app", () => {
     vi.useFakeTimers();
     try {
       await open("demo");
+      // Past the tap on Open, which activates this page too (the next case).
+      vi.advanceTimersByTime(5_100);
       const frame = document.querySelector<HTMLIFrameElement>("[data-testid=service-view-frame]")!;
       const origin = new URL(frame.src).origin;
       const inFrame = { postMessage: vi.fn() };
@@ -881,6 +883,47 @@ describe("a contact's app shown over the app", () => {
       expect(opened).toHaveBeenCalledTimes(2);
       for (let i = 0; i < 30; i++) asks(`https://docs.example/${i}`);
       expect(opened).toHaveBeenCalledTimes(20);
+    } finally {
+      vi.useRealTimers();
+      opened.mockRestore();
+      delete (navigator as { userActivation?: unknown }).userActivation;
+    }
+  });
+
+  it("opens no link the app asks for while the tap on Open, or one on Ghostly's page, still activates it: the app's page posts as the bridge, past its check", async () => {
+    // The bridge is on the app's origin: the contact's page runs a script of its own in it and asks as the bridge does,
+    // right after Open, while that tap still activates this page. Only a tap in the app, after the last one here, counts.
+    const activation = { isActive: true };
+    Object.defineProperty(navigator, "userActivation", { configurable: true, value: activation });
+    const opened = vi.spyOn(window, "open").mockReturnValue(null);
+    vi.useFakeTimers();
+    try {
+      await open("demo");
+      const frame = document.querySelector<HTMLIFrameElement>("[data-testid=service-view-frame]")!;
+      const origin = new URL(frame.src).origin;
+      const inFrame = { postMessage: vi.fn() };
+      Object.defineProperty(frame, "contentWindow", { value: inFrame, configurable: true });
+      const asks = (url: string) => dispatchEvent(new MessageEvent("message", { data: { type: BRIDGE_OPEN_LINK, url }, origin, source: inFrame as unknown as Window }));
+      asks("https://phish.example/on-open");
+      vi.advanceTimersByTime(4_900);
+      asks("https://phish.example/still-on-open");
+      expect(opened).not.toHaveBeenCalled();
+      // Past the tap on Open, a tap in the app (it activates this page again) opens one.
+      vi.advanceTimersByTime(200);
+      asks("https://docs.example/tapped");
+      expect(opened).toHaveBeenCalledTimes(1);
+      // A tap or a key on Ghostly's page (the view's bar) activates it too: not a tap in the app.
+      vi.advanceTimersByTime(3_000);
+      document.querySelector("[data-testid=service-view-owner]")!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+      asks("https://phish.example/on-bar");
+      vi.advanceTimersByTime(3_000);
+      dispatchEvent(new KeyboardEvent("keydown", { key: "Tab" }));
+      asks("https://phish.example/on-key");
+      expect(opened).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(5_100);
+      asks("https://docs.example/tapped-again");
+      expect(opened).toHaveBeenCalledTimes(2);
+      expect(opened.mock.calls.map(([url]) => url)).toEqual(["https://docs.example/tapped", "https://docs.example/tapped-again"]);
     } finally {
       vi.useRealTimers();
       opened.mockRestore();
