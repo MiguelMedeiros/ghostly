@@ -89,6 +89,58 @@ describe("a voice recording when a call goes on", () => {
     expect(screen.getByTestId("voice-bar")).toHaveAttribute("data-phase", "paused");
   });
 
+  it("keeps a recording asking \"Discard?\" paused: Keep during the call does not record the call", async () => {
+    await recordHandsFree();
+    await wait(5_000);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.getByTestId("voice-confirm")).toBeInTheDocument();
+
+    act(() => setCallOn(call, () => {}));
+    await wait(0);
+    fireEvent.click(screen.getByTestId("voice-confirm-keep"));
+    await wait(20 * 60_000);
+
+    expect(screen.getByTestId("voice-bar")).toHaveAttribute("data-phase", "paused");
+    expect(media.recorders[0].state).toBe("paused");
+    expect(screen.getByTestId("voice-pause")).toBeDisabled();
+    expect(onSendFile).not.toHaveBeenCalled();
+  });
+
+  it("keeps a recording paused by hand paused until the call ends", async () => {
+    await recordHandsFree();
+    await wait(5_000);
+    fireEvent.click(screen.getByTestId("voice-pause"));
+    expect(screen.getByTestId("voice-bar")).toHaveAttribute("data-phase", "paused");
+
+    act(() => setCallOn(call, () => {}));
+    await wait(0);
+    expect(screen.getByTestId("voice-pause")).toBeDisabled();
+
+    act(() => setCallOn(call, null));
+    await wait(0);
+    expect(screen.getByTestId("voice-pause")).toBeEnabled();
+  });
+
+  it("pauses one whose microphone answers after the call went on", async () => {
+    let answer!: () => void;
+    const microphone = media.getUserMedia.getMockImplementation()!;
+    media.getUserMedia.mockImplementationOnce((constraints) => new Promise((resolve) => { answer = () => resolve(microphone(constraints)); }));
+    renderApp(<MessageInput onSend={onSend} onSendFile={onSendFile} />);
+    fireEvent.click(screen.getByTestId("voice-record"));
+    await wait(0);
+    expect(screen.getByTestId("voice-bar")).toHaveAttribute("data-phase", "starting");
+
+    act(() => setCallOn(call, () => {}));
+    await wait(0);
+    answer();
+    await wait(20 * 60_000);
+
+    expect(screen.getByTestId("voice-bar")).toHaveAttribute("data-phase", "paused");
+    expect(media.recorders[0].state).toBe("paused");
+    expect(screen.getByTestId("voice-pause")).toBeDisabled();
+    expect(onSendFile).not.toHaveBeenCalled();
+  });
+
   it("records one started during a call: that one is asked for", async () => {
     act(() => setCallOn(call, () => {}));
     await recordHandsFree();

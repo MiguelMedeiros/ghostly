@@ -258,6 +258,16 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     buttonRef.current?.focus();
   }, [t]);
 
+  const pauseRecording = useCallback(() => {
+    const recorder = recorderRef.current;
+    if (!recorder?.recording) return;
+    recorder.pause();
+    setPhase("paused");
+    setElapsed(recorder.elapsed());
+    // Fewer bars than a message: the bar beside it has buttons on both sides.
+    setPreview({ peaks: recorder.peaks(PREVIEW_BARS), playing: false });
+  }, []);
+
   const begin = useCallback(async (next: Exclude<Mode, "idle">) => {
     if (disabled || recorderRef.current) return;
     if (unavailable) { onError(unavailable); return; }
@@ -282,6 +292,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     askingRef.current = undefined;
     const pressedAt = performance.now();
     if (next === "hold") void microphoneAsks().then((asks) => { if (recorderRef.current === recorder) askingRef.current = asks; });
+    const callBefore = anyCallOn();
     try {
       await recorder.start();
     } catch (error) {
@@ -302,7 +313,9 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     // heard. It records hands-free, to send with a tap, rather than running on with nothing to let go of.
     if (modeRef.current === "hold" && asked) lock();
     setPhase("recording");
-  }, [disabled, unavailable, onError, reset, showHint, send, focusOutOfBar, lock, t]);
+    // A call went on while the microphone was asked for: it is not taken in, the recording waits paused for its end.
+    if (anyCallOn() && !callBefore) pauseRecording();
+  }, [disabled, unavailable, onError, reset, showHint, send, focusOutOfBar, lock, pauseRecording, t]);
 
   // A chat left mid-recording gives the microphone back, and the contact stops seeing "recording audio…".
   useEffect(() => () => {
@@ -321,16 +334,6 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     const timer = setInterval(() => setElapsed(recorderRef.current?.elapsed() ?? 0), 200);
     return () => clearInterval(timer);
   }, [mode]);
-
-  const pauseRecording = useCallback(() => {
-    const recorder = recorderRef.current;
-    if (!recorder?.recording) return;
-    recorder.pause();
-    setPhase("paused");
-    setElapsed(recorder.elapsed());
-    // Fewer bars than a message: the bar beside it has buttons on both sides.
-    setPreview({ peaks: recorder.peaks(PREVIEW_BARS), playing: false });
-  }, []);
 
   const resumeRecording = useCallback(() => {
     const recorder = recorderRef.current;
@@ -398,17 +401,20 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
 
   // A call going on (placed or answered, in any chat) pauses the recording: the microphone would take in the call, and
   // at the limit the note would send itself to this chat. A held one turns hands-free, since the finger is on the call
-  // now. It waits, paused, to be sent or discarded; one started during a call is recorded as asked.
+  // now. It waits, paused, to be sent or discarded; one started during a call is recorded as asked. So does one already
+  // paused (by hand, asking "Discard?", whose Keep then keeps it paused) or whose microphone is still being asked for.
   useEffect(() => {
     const began = callOn && !callWasOn.current;
     callWasOn.current = callOn;
     if (!callOn) { setCallPaused(false); return; }
-    if (!began || !recorderRef.current?.recording) return;
+    const recorder = recorderRef.current;
+    if (!began || !recorder || recorder.ended || sendingRef.current) return;
     // The release of that finger, and the click after it, land on Send: they send nothing.
     if (modeRef.current === "hold") { suppressClickRef.current = true; lock(); }
     // Resume turns disabled under the focus.
     focusOutOfBar();
     pauseRecording();
+    confirmResumeRef.current = false;
     setCallPaused(true);
   }, [callOn, lock, focusOutOfBar, pauseRecording]);
 
