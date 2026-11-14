@@ -221,6 +221,20 @@ export function readCursor(path: string | undefined): number | undefined {
 }
 
 /**
+ * Where listen starts: after the event number the cursor file holds, else after `since` (--since: the first start's
+ * place). Before, --since won without a word, and a unit with `--since 0 --cursor f` ran every handled event's hook
+ * again at each restart. A cursor file that holds no number is refused unless --since is given, which starts it.
+ */
+export function startAt(since: number | undefined, cursor: string | undefined, say: (line: string) => void): number | undefined {
+  if (since === undefined) return readCursor(cursor);
+  let kept: number | undefined;
+  try { kept = readCursor(cursor); } catch { return since; }
+  if (kept === undefined) return since;
+  if (kept !== since) say(`ghostly: ${cursor} holds event ${kept}: starting after it, not after --since ${since}`);
+  return kept;
+}
+
+/**
  * Whether a cursor can be kept at `path`, asked before anything starts: its folder is there and takes a file. Before, a
  * folder that was not there was found at the first event: the listener ran, said "event N failed: ENOENT" for each one
  * and never wrote the cursor, so the next start began at the journal's end and skipped what came while it was down.
