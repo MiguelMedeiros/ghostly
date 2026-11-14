@@ -30,6 +30,20 @@ export interface IdentityFetchOptions { headers?: Record<string, string>; maxByt
 export interface IdentityFetchResponse { status: number; contentType: string; text: string; bytes: Uint8Array }
 export type IdentityFetch = (url: string, options?: IdentityFetchOptions) => Promise<IdentityFetchResponse>;
 
+/**
+ * How a provider says a line it works out when it runs (a step naming the person's domain, a progress line) in the
+ * app's language: `key` names the line within the provider, `english` is the line itself with `{{name}}` for each of
+ * `values`. The UI reads a built-in provider's line under `identities.providers.<provider id>.<key>`, with `english`
+ * when its language has none; a provider written outside the app (a plugin) always gets its `english` back, filled in.
+ * Its fixed words (`label`, `summary`, a signer's `description`…) need no call: the UI reads them by the same rule,
+ * under their own path (`subject.help`, `signers.<signer id>.label`, `signers.<signer id>.fields.<name>.help`).
+ */
+export type ProviderSay = (key: string, english: string, values?: Readonly<Record<string, string | number>>) => string;
+
+/** `english` with its `{{name}}`s filled in: what `ProviderSay` returns where no app language is at hand (the CLI, tests). */
+export const englishSay: ProviderSay = (_key, english, values) =>
+  values ? english.replace(/\{\{(\w+)\}\}/g, (all, name: string) => (name in values ? String(values[name]) : all)) : english;
+
 export interface VerifyContext {
   /** Seconds. Use this, never `Date.now()`, so tests and re-checks agree on time. */
   now: number;
@@ -54,7 +68,7 @@ export interface SubjectSpec {
    * method, its keys and its domain. Runs in the UI on the person's input; may reach the network (the
    * person's own identity). Throw a message they can act on.
    */
-  preview?(subject: string, options: { signal: AbortSignal }): Promise<SubjectPreview>;
+  preview?(subject: string, options: { signal: AbortSignal; say?: ProviderSay }): Promise<SubjectPreview>;
 }
 
 export interface SubjectPreview {
@@ -96,6 +110,8 @@ export interface SignerContext {
   onProgress(message: string): void;
   /** The signer waits for an approval elsewhere (`null`: it no longer does). The UI renders it; see `ApprovalRequest`. */
   onApproval?(request: ApprovalRequest | null): void;
+  /** Says the signer's progress lines and approval words in the app's language; `englishSay` when absent. */
+  say?: ProviderSay;
 }
 
 export interface SignerSession<E> {
@@ -139,7 +155,8 @@ export interface InAppSigner<E> extends SignerBase {
 /** The person runs a tool (ssh-keygen, gpg, a Bitcoin wallet) on the statement and pastes the output back. */
 export interface ExternalToolSigner<E> extends SignerBase {
   kind: "external-tool";
-  instructions(statement: IdentityStatement): SignerInstructions;
+  /** `say`: the steps in the app's language (`englishSay` when absent). */
+  instructions(statement: IdentityStatement, say?: ProviderSay): SignerInstructions;
   /** What was pasted, as evidence. Throw a message the person can act on ("That is not an SSH signature"). */
   parse(pasted: string, statement: IdentityStatement): E | Promise<E>;
 }
@@ -153,7 +170,8 @@ export interface RedirectSigner<E> extends SignerBase {
 /** The person publishes something the verifier fetches (a DNS TXT record, a /.well-known file). */
 export interface PublishSigner<E> extends SignerBase {
   kind: "publish";
-  instructions(statement: IdentityStatement): SignerInstructions;
+  /** `say`: the steps in the app's language (`englishSay` when absent). */
+  instructions(statement: IdentityStatement, say?: ProviderSay): SignerInstructions;
   /** Usually small or empty: the verifier looks the record up itself. */
   evidence(statement: IdentityStatement): E | Promise<E>;
 }
@@ -188,9 +206,11 @@ export interface IdentityProofProvider<E = unknown> {
   /**
    * When a verifier's check can go stale (the DNS record may be removed later): the contact's app offers
    * "Check again" after this many seconds and shows the last check time. Omit when the evidence is a
-   * signature that stays valid until expiry.
+   * signature that stays valid until expiry. `perHour`: the most checks the app runs on its own in an hour, for a
+   * server that limits lookups per IP (the rest wait for later); well under that limit, so a check a person starts
+   * (a new contact's proof, "Check again") still gets an answer.
    */
-  recheck?: { afterSeconds: number };
+  recheck?: { afterSeconds: number; perHour?: number };
   /** One sentence for people: what `verify` contacts and who learns what. "Nothing: checked on this device." */
   privacy: string;
   /** Mark providers whose flows are not proven against real-world tools yet. */

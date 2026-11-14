@@ -4,10 +4,10 @@ import type { NostrPointer } from "@ghostly/browser/nostr/social";
 import { shortNpub } from "@ghostly/browser/nostr/social";
 import type { NostrLookupResult } from "@ghostly/browser/nostr/types";
 import { useEngineValue } from "../../lib/engineState";
-import { ago } from "../../lib/nostr";
+import { agoIn } from "../../lib/relativeTime";
 import { ProviderMark } from "../identities/ProviderMark";
 import { EntityCardFrame, cardQuiet } from "./EntityCardFrame";
-import { useT } from "../../contexts/I18nContext";
+import { useI18n } from "../../contexts/I18nContext";
 import { problemLine } from "../../lib/problemText";
 
 const shortCode = (code: string) => (code.length > 24 ? `${code.slice(0, 14)}…${code.slice(-6)}` : code);
@@ -25,7 +25,8 @@ const relayNames = (relays: readonly string[]) => relays.map(r => r.replace(/^ws
  */
 export function NostrEntityCard({ code, pointer }: { code: string; pointer: NostrPointer }) {
   const relays = useEngineValue(state => state?.nostr.settings.relays ?? []);
-  const t = useT();
+  const { t, language } = useI18n();
+  const ago = agoIn(language);
   const [result, setResult] = useState(() => loaded.get(keyOf(pointer)));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -63,10 +64,10 @@ export function NostrEntityCard({ code, pointer }: { code: string; pointer: Nost
       {note && (note.muted
         ? <p className="m-0" data-testid="entity-nostr-muted">{t("chat.entity.muted")}</p>
         : <p data-testid="entity-nostr-note" className="m-0 line-clamp-6 whitespace-pre-wrap break-words text-text-primary">{note.content}</p>)}
-      {note && <p className="m-0 text-text-primary/65">{ago(note.createdAt)}{note.reply ? ` · ${t("chat.entity.aReply")}` : ""}</p>}
+      {note && <p className="m-0 text-text-primary/65" data-testid="entity-nostr-age">{ago(note.createdAt)}{note.reply ? ` · ${t("chat.entity.aReply")}` : ""}</p>}
       {result
-        ? <p className="m-0 text-[11px] text-text-primary/65" data-testid="entity-nostr-source">{t("chat.entity.nostrSource", { relays: relayNames(result.relays), when: ago(result.fetchedAt) })}</p>
-        : <p className="m-0 text-[11px] text-text-primary/65" data-testid="entity-nostr-where">
+        ? <p className="m-0 chat-text-card-label text-text-primary/65" data-testid="entity-nostr-source">{t("chat.entity.nostrSource", { relays: relayNames(result.relays), when: ago(result.fetchedAt) })}</p>
+        : <p className="m-0 chat-text-card-label text-text-primary/65" data-testid="entity-nostr-where">
           {profile ? t("chat.entity.loadKeyHint", { relays: relayNames(relays) }) : t("chat.entity.loadNoteHint", { relays: relayNames(relays) })}
           {pointer.relays.length > 0 && ` ${t("chat.entity.codeRelays")}`}
         </p>}

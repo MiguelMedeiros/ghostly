@@ -24,6 +24,12 @@ export interface BundleDevices {
   set: (DeviceSlot | null)[];
   turn: number;
   takeovers: number;
+  /**
+   * The slot that was active when the bundle was made, as the device that made it knew it (itself, when it was the
+   * active one). Optional: a bundle from an app before it says nothing of it, and an app before it ignores it. Read it
+   * through `bundleActiveSlot`, which takes anything that names no device of `set` as not said.
+   */
+  active?: number;
 }
 
 export function isBundleDevices(value: unknown): value is BundleDevices {
@@ -32,6 +38,15 @@ export function isBundleDevices(value: unknown): value is BundleDevices {
   if (!Array.isArray(v.set) || v.set.length > MAX_DEVICES) return false;
   if (!v.set.every((slot) => slot === null || (!!slot && typeof slot.key === "string" && /^[A-Za-z0-9_-]{43}$/.test(slot.key) && typeof slot.name === "string" && slot.name.length <= 64))) return false;
   return Number.isSafeInteger(v.turn) && v.turn! >= 0 && v.turn! <= 2 ** 32 - 1 && Number.isSafeInteger(v.takeovers) && v.takeovers! >= 0;
+}
+
+/**
+ * The slot a bundle names active, or undefined when it names none: a bundle from before the field, or a value that is
+ * not the index of a device in its set (a damaged copy names no device rather than a wrong one).
+ */
+export function bundleActiveSlot(devices: BundleDevices | undefined): number | undefined {
+  const at = devices?.active;
+  return typeof at === "number" && Number.isSafeInteger(at) && at >= 0 && at < MAX_DEVICES && !!devices!.set[at] ? at : undefined;
 }
 
 /** What a read of the turn at a bundle's address says, as the page may know it: names, never a key's secret. */
@@ -77,11 +92,15 @@ export function restoreCase(devices: BundleDevices | undefined, peek: TurnPeek |
   }
 }
 
-/** The name of the device the copy would stop, from the record or, when it expired, from the bundle's set. */
+/**
+ * The name of the device the copy would stop, from the record or, when it expired, the device the bundle names active.
+ * A bundle that names none (made by an app from before) names no device: its first slot may be a device on standby.
+ */
 export function activeName(devices: BundleDevices | undefined, peek: TurnPeek | null): string | undefined {
   const record = peek?.record;
   if (record && record.active < MAX_DEVICES) return record.slots[record.active]?.name;
-  return devices?.set.find((slot) => slot)?.name;
+  const at = bundleActiveSlot(devices);
+  return at === undefined ? undefined : devices!.set[at]?.name;
 }
 
 /**
@@ -94,7 +113,8 @@ export function restoredStandby(devices: BundleDevices | undefined, didSeed: Uin
   if (!d) throw new Error("This backup leads to no device set");
   const listed = peek?.record?.slots ?? devices?.set ?? [];
   const set: (DeviceSlot | null)[] = Array.from({ length: MAX_DEVICES }, (_, i) => listed[i] ?? null);
-  const active = peek?.record && peek.record.active < MAX_DEVICES ? peek.record.active : set.findIndex((slot) => slot);
+  // With no record, the slot the bundle names active; with none named either, no device is marked active.
+  const active = peek?.record && peek.record.active < MAX_DEVICES ? peek.record.active : bundleActiveSlot(devices) ?? -1;
   let own = set.findIndex((slot) => !slot);
   if (own < 0) own = active >= 0 ? active : 0;
   set[own] = { key: toBase64Url(ownKey), name };

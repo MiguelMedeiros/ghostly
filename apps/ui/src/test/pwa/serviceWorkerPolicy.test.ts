@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { MAX_PAST_LIMIT_NAMES, MAX_SHARED_FILES, MAX_SHARE_BYTES, SHARE_TARGET_PATH, assetAnswer, classify, desktopOnlyFiles, installList, optionalFiles, precacheList, serviceWorkerFiles, pushScope, pushScopeProfile, readShare, readShareBody, wakeNotice } from "../../../../web/src/sw/policy";
+import { MAX_PAST_LIMIT_NAMES, MAX_SHARED_FILES, MAX_SHARE_BYTES, SHARE_TARGET_PATH, assetAnswer, classify, desktopOnlyFiles, installList, optionalFiles, precacheList, pushNotice, serviceWorkerFiles, pushScope, pushScopeProfile, readShare, readShareBody, wakeNotice } from "../../../../web/src/sw/policy";
 
-// covers: app.pwa.offline, app.pwa.share-target, push.wake.notify, push.wake.mute, push.wake.group
+// covers: app.pwa.offline, app.pwa.share-target, push.wake.notify, push.wake.mute, push.wake.group, push.wake.online
 
 /**
  * What the web app's service worker answers, and what it keeps: the build's own files only. These are the rules
@@ -145,6 +145,12 @@ describe("what the build precaches", () => {
     expect(precache).toEqual(["/", "/assets/cashu-ts-abc.js", "/assets/Chat-abc.js", "/assets/handoff-abc.js", "/assets/index-abc.css", "/assets/index-abc.js",
       "/assets/sodium-abc.js", "/assets/vendor-abc.js", "/assets/Wallet-abc.js", "/manifest.json"]);
     expect(languages).toEqual({ fr: ["/assets/fr-abc.js"], ja: ["/assets/ja-abc.js"] });
+  });
+
+  it("names the build's other hashed files, kept on their first use: an older cache that holds one passes it on at a deploy", () => {
+    const bundle = [...BUNDLE, { type: "asset", fileName: "assets/wallet-abc.wasm" }, { type: "asset", fileName: "assets/index-abc.js.map" }];
+    expect(serviceWorkerFiles(["manifest.json", "version.json"], bundle).lazy).toEqual(["/assets/arkade-abc.js", "/assets/dist-abc.js", "/assets/esm-abc.js",
+      "/assets/ethers-abc.js", "/assets/keet-identity-key-abc.js", "/assets/pubky-abc.js", "/assets/usdt-abc.js", "/assets/wallet-abc.wasm", "/assets/zod-abc.js"]);
   });
 
   it("an online-only module another screen imports as it loads stays: the path to it is not the online flow's", () => {
@@ -332,6 +338,37 @@ describe("what a wake-up shows", () => {
       .toMatchObject({ body: "New message", tag: "wake::/group/g1", call: false });
     expect(show({ path: "/group/g1", mutedUntil: "forever" })).toBeNull();
     expect(show({ path: "/group/g1", mutedUntil: now + 1000 })).toBeNull();
+  });
+
+  it("an online notice names the contact only when the table knows the name, under a tag of its own; never for a group or a muted chat", () => {
+    const words = { ...text, online: "{name} está online", onlineUnnamed: "Um contato está online" };
+    const online = (entry: { path: string; name?: string; mutedUntil?: number | "forever" }, appVisible = false, t: typeof text = words) =>
+      wakeNotice({ entry, text: t }, { now, appVisible, profile: "", kind: "online" });
+    expect(online({ path: "/chat/abc", name: "Ana" })).toEqual({ title: "Ghostly", body: "Ana está online", tag: "wake-online::/chat/abc", call: false, data: { path: "/chat/abc", profile: "" } });
+    expect(online({ path: "/chat/abc" })).toMatchObject({ body: "Um contato está online" });
+    // No words from a page yet: English, still naming nobody it does not know.
+    expect(online({ path: "/chat/abc" }, false, text)).toMatchObject({ body: "A contact is online" });
+    expect(online({ path: "/chat/abc", name: "Ana" }, false, text)).toMatchObject({ body: "Ana is online" });
+    expect(online({ path: "/chat/abc", name: "Ana" }, true)).toBeNull();
+    expect(online({ path: "/chat/abc", name: "Ana", mutedUntil: "forever" })).toBeNull();
+    expect(online({ path: "/group/g1", name: "Team" })).toBeNull();
+  });
+
+  it("with \"Notify me when a contact comes online\" off here, an online push has no notice of its own, whatever a contact still sends; messages and calls show as before", () => {
+    const off = { ...text, online: "{name} is online", onlineUnnamed: "A contact is online", call: "Incoming call", onlineOff: true as const };
+    const kinds = (t: typeof off | typeof text, kind: "message" | "call" | "online", name?: string) =>
+      wakeNotice({ entry: { path: "/chat/abc", ...(name && { name }) }, text: t }, { now, appVisible: false, profile: "", kind });
+    // The worker shows its quiet notice for this, as for a token it does not know.
+    expect(kinds(off, "online", "Ana")).toBeNull();
+    expect(kinds(off, "online")).toBeNull();
+    expect(pushNotice({ token: "tok", kind: "online" }, { entry: { path: "/chat/abc", name: "Ana" }, text: off }, null, { now, appVisible: false, profile: "" })).toBeNull();
+    expect(kinds(off, "message")).toMatchObject({ body: "New message", tag: "wake::/chat/abc" });
+    expect(kinds(off, "call")).toMatchObject({ body: "Incoming call", call: true });
+    // On (no flag in the table): as before.
+    const { onlineOff: _, ...on } = off;
+    expect(kinds(on, "online", "Ana")).toMatchObject({ body: "Ana is online", tag: "wake-online::/chat/abc" });
+    expect(pushNotice({ token: "tok", kind: "online" }, { entry: { path: "/chat/abc", name: "Ana" }, text: on }, null, { now, appVisible: false, profile: "" }))
+      .toMatchObject({ body: "Ana is online" });
   });
 
   it("nothing for a token it no longer knows, while the app is on screen, or for a route that is not a chat", () => {

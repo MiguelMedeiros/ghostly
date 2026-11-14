@@ -8,7 +8,7 @@ import {chatPath} from "../lib/url";
 import {groupPath} from "../lib/groups";
 import {loadSettings} from "../lib/settings";
 import {attentionOutcome,chatOfLink,mutedFor} from "../lib/chatMute";
-import {eventSound,firstMentionNoticeOfBurst,firstMentionOfBurst,firstNoticeOfBurst,firstOfBurst,firstReactionNoticeOfBurst,playCue} from "../lib/cues";
+import {eventSound,firstSight,firstMentionNoticeOfBurst,firstMentionOfBurst,firstNoticeOfBurst,firstOfBurst,firstReactionNoticeOfBurst,playCue} from "../lib/cues";
 import {setDeckSwitchSound} from "./deck/motion";
 import {useI18n} from "../contexts/I18nContext";
 import {switchProfile} from "../lib/profiles";
@@ -16,7 +16,6 @@ import {PROFILE_NOTICE} from "../lib/profilePeek";
 import {claimFeedback} from "../lib/feedbackClaims";
 import {appAway} from "../lib/appInSight";
 
-const seen=new Set<string>();
 /** The engine sends live facts separately from replayed snapshots. */
 export function AttentionFeedback(){
   const {t}=useI18n();
@@ -29,8 +28,7 @@ export function AttentionFeedback(){
   useEffect(()=>installAudioGestures(),[]);
   useEffect(()=>{setDeckSwitchSound(()=>playCue("slide"));return ()=>setDeckSwitchSound(undefined);},[]);
   useEffect(()=>engine.onAttention((event:AttentionEvent)=>{
-    if(Date.now()-event.at>5000 || seen.has(event.id)) return;
-    seen.add(event.id);
+    if(!firstSight(event.id,event.at)) return;
     const run=async()=>{
       // Extension pages may share one engine. Claim one presentation per event.
       if(!claimFeedback(event.id,Date.now())) return;

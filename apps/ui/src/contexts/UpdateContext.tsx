@@ -32,6 +32,8 @@ interface UpdateContextValue {
   /** 0 to 1 while an install that reports progress runs. */
   progress: number;
   error: string | null;
+  /** What failed with `error`: a check (the update found before, if any, still stands) or the install of one. */
+  failed: "check" | "install" | null;
   lastCheckedAt: number | null;
   /** Whether the user put this version aside. Settings still shows it. */
   dismissed: boolean;
@@ -65,6 +67,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
   const [stage, setStage] = useState<"idle" | "checking" | "installing">("idle");
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [failed, setFailed] = useState<"check" | "install" | null>(null);
   const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
   const [dismissedVersion, setDismissedVersion] = useState<string | null>(readDismissed);
   // A check in flight must not be started again by the interval or a tab coming back.
@@ -74,6 +77,9 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
   // The platform said this build is gone while a check was in flight. That check asked before the file went, so it
   // finds nothing; one more runs once it settles, or the word is lost until the next scheduled check, hours away.
   const goneWhileChecking = useRef(false);
+  // A check was wanted while the device said it had no network (skipped, or failed out there): the next `online` runs
+  // it, however recent the last answer is. Otherwise a deploy or a "build gone" waits for the next scheduled check.
+  const missedOffline = useRef(false);
 
   const check = useCallback(async () => {
     if (!updatePlatform || checking.current) return;
@@ -84,12 +90,17 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
       do {
         goneWhileChecking.current = false;
         setError(null);
+        setFailed(null);
         try {
           setUpdate(await updatePlatform.check());
           lastCheckedRef.current = Date.now();
+          missedOffline.current = false;
           setLastCheckedAt(lastCheckedRef.current);
         } catch (e) {
+          // Failed with no network (the device went off mid-way): as good as skipped, so coming back online asks again.
+          if (navigator.onLine === false) missedOffline.current = true;
           setError(errorText(e, tRef.current));
+          setFailed("check");
         }
       } while (goneWhileChecking.current);
     } finally {
@@ -103,11 +114,13 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
     setStage("installing");
     setProgress(0);
     setError(null);
+    setFailed(null);
     try {
       // On the way out: this either reloads the page or restarts the app.
       await updatePlatform.install(update, setProgress);
     } catch (e) {
       setError(errorText(e, tRef.current));
+      setFailed("install");
       setStage("idle");
     }
   }, [update]);
@@ -128,19 +141,36 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
     if (!allowed) return;
     let cancelled = false;
     const run = () => {
-      if (cancelled || !navigator.onLine) return;
+      if (cancelled) return;
+      // Only "no" is trusted, as `useOnline` does: a browser that doesn't say still checks.
+      if (navigator.onLine === false) {
+        missedOffline.current = true;
+        return;
+      }
       void check();
+    };
+    const stale = () => {
+      const last = lastCheckedRef.current;
+      return !last || Date.now() - last >= STALE_MS;
     };
 
     run();
     const interval = setInterval(run, CHECK_EVERY_MS);
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
-      const last = lastCheckedRef.current;
-      if (last && Date.now() - last < STALE_MS) return;
+      if (!stale()) return;
       run();
     };
     document.addEventListener("visibilitychange", onVisible);
+    // Back online: look again if a check was skipped (or failed) while offline, the "build gone" one included, or the
+    // last answer is old. A network that flaps starts no second check while one is out (`check` refuses), and once
+    // one has answered, the next `online` finds it fresh.
+    const onOnline = () => {
+      if (checking.current) return;
+      if (!missedOffline.current && !stale()) return;
+      run();
+    };
+    window.addEventListener("online", onOnline);
     // The platform found a file of this build gone from the server: a deploy replaced it, and the wallet or the
     // connection that asked for the file has already failed, so look at once, past the "checked recently" guard, and
     // the banner offers Reload now instead of hours later. A check already in flight asked before the file went:
@@ -156,6 +186,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
       goneWhileChecking.current = false;
       clearInterval(interval);
       document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("online", onOnline);
       stopBuildGone?.();
     };
   }, [allowed, check]);
@@ -168,6 +199,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
         stage,
         progress,
         error,
+        failed,
         lastCheckedAt,
         dismissed: !!update && identify(update) === dismissedVersion,
         downloadUrl: update?.downloadUrl ?? updatePlatform?.downloadUrl ?? "",

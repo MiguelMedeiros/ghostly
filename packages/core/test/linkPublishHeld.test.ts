@@ -89,6 +89,86 @@ describe("a chat's publish the relays' budget holds back", () => {
     await link.stop();
   });
 
+  it("an answer held back after an earlier attempt's went out, its take-back held too, is not out: it is once it goes", async () => {
+    const transport = relays();
+    transport.held = false;
+    const link = chat(transport);
+    link.start();
+    await vi.advanceTimersByTimeAsync(0);
+    void link.setRtcSignal("answer-1");
+    await vi.advanceTimersByTimeAsync(0);
+    const out = transport.publish.mock.calls.length;
+    expect(link.rtcSignalPublished).toBe(true);
+
+    // Attempt 1 ends and attempt 2 answers, both while the relays' budget holds every write back.
+    transport.held = true;
+    void link.setRtcSignal(null);
+    void link.setRtcSignal("answer-2");
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(transport.publish).toHaveBeenCalledTimes(out);
+    // On dev it read true: the packet out still carried attempt 1's answer.
+    expect(link.rtcSignalPublished).toBe(false);
+
+    transport.held = false;
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(transport.publish.mock.calls.length).toBeGreaterThan(out);
+    expect(link.rtcSignalPublished).toBe(true);
+    await link.stop();
+  });
+
+  it("an answer made again in the same attempt and held back: the earlier one of that attempt went out", async () => {
+    const transport = relays();
+    transport.held = false;
+    const link = chat(transport);
+    link.start();
+    await vi.advanceTimersByTimeAsync(0);
+    void link.setRtcSignal("answer-1");
+    await vi.advanceTimersByTimeAsync(0);
+    transport.held = true;
+    void link.setRtcSignal("answer-1b");
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(link.rtcSignalPublished).toBe(true);
+    await link.stop();
+  });
+
+  it("an answer whose publish was still in flight when the attempt ended does not count for the next attempt", async () => {
+    const transport = relays();
+    transport.held = false;
+    const link = chat(transport);
+    link.start();
+    await vi.advanceTimersByTimeAsync(0);
+    let land!: () => void;
+    transport.publish.mockImplementationOnce(() => new Promise<void>(resolve => { land = resolve; }));
+    void link.setRtcSignal("answer-1");
+    await vi.advanceTimersByTimeAsync(0);
+    transport.held = true;
+    void link.setRtcSignal(null);
+    void link.setRtcSignal("answer-2");
+    land();
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(link.rtcSignalPublished).toBe(false);
+    await link.stop();
+  });
+
+  // An edge to a member who left, beside members who stayed: each try of a packet the relays' budget held was sealed and
+  // signed anew and handed to two members who could not pass it on, every few seconds (35 KB a minute on an idle web app).
+  it("a group edge that is down hands members its packet once while the relays' budget holds it back, not at every try", async () => {
+    const { inner, carry, link } = downEdge(() => true);
+    carry.mockImplementation(() => ({ taken: 2, sure: false }));
+    link.start();
+    await vi.advanceTimersByTimeAsync(25_000);
+    const tries = inner.publish.mock.calls.length;
+    expect(tries).toBeGreaterThan(2);
+    expect(carry).toHaveBeenCalledTimes(1);
+    // Every try put the same records to the relays: they were sealed once.
+    expect(new Set(inner.publish.mock.calls.map(([, records]) => JSON.stringify(records))).size).toBe(1);
+    // Once it went, the next packet is sealed anew.
+    inner.held = false;
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(inner.publish.mock.calls.length).toBe(tries + 1);
+    await link.stop();
+  });
+
   it("a member that can carry it comes up meanwhile: it is handed the newest packet, signed then", async () => {
     let reachable = false;
     const { inner, edge, link } = downEdge(() => reachable);

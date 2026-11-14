@@ -22,6 +22,11 @@
     "unreadCount": "{{count}} غير مقروءة في {{name}}",
     "unreadOne": "1 غير مقروءة في {{name}}"
   },
+  "foundCount": "وُجدت {{count}} محادثات",
+  "foundCount_many": "وُجدت {{count}} محادثة",
+  "foundCount_other": "وُجدت {{count}} محادثة",
+  "foundCount_two": "وُجدت محادثتان",
+  "foundOne": "وُجدت محادثة واحدة",
   "group": {
     "adminAnswered": "أجاب تطبيق المشرف…",
     "answerFailed": "لم ينجح ذلك. حاول مرة أخرى.",
@@ -31,6 +36,7 @@
     "inviterAwayUnknown": "جهة الاتصال التي دعتك غير متصلة بعد. حاول مرة أخرى بعد لحظة.",
     "letting": "أحد الأعضاء يسمح لك بالدخول…",
     "linkUnanswered": "لم يستجب الرابط",
+    "others": "مجموعة أخرى تحمل هذا المعرّف: اختر واحدة",
     "takenBack": "سُحبت الدعوة",
     "unanswered": "لم يردّ تطبيق من دعاك. اقبل مرة أخرى، أو ارفض.",
     "waitingAdmin": "في انتظار تطبيق المشرف…",
@@ -50,9 +56,7 @@
     "groupHint": "رابط يمكن لأي شخص فتحه",
     "label": "إنشاء مجموعة أو محادثة"
   },
-  "noChats": "لا توجد محادثات",
   "noResults": "لا توجد نتائج",
-  "pinned": "مثبّتة",
   "quiet": "الهدوء يعم هنا...",
   "quietHint": "حان وقت إخافة أحدهم! 👻",
   "rail": {
@@ -79,10 +83,10 @@
     "unread_two": "رسالتان غير مقروءتين",
     "unread_zero": "لا رسائل غير مقروءة"
   },
+  "searchLabel": "البحث في المحادثات",
   "searchPlaceholder": "بحث في المحادثات...",
   "settings": "الإعدادات",
   "sharedIdentity": "شارك هوية",
   "skipToContent": "انتقل إلى المحتوى",
-  "startChat": "محادثة جديدة",
-  "unread": "رسائل غير مقروءة"
+  "startChat": "محادثة جديدة"
 }

@@ -2,7 +2,7 @@ import {
   parseSshPublicKey, parseSshSignature, sshSignCommand, SshSigError, SSHSIG_MAX_ARMOR, SSHSIG_NAMESPACE, utf8Encode, verifySshSignature,
   type IdentityStatement, type SshSignatureCheck,
 } from "@ghostly/core";
-import type { ExternalToolSigner, IdentityProofProvider, VerifyContext } from "../contract";
+import { englishSay, type ExternalToolSigner, type IdentityProofProvider, type VerifyContext } from "../contract";
 import { checkSshForge, SSH_FORGE_HOST, SSH_FORGE_LABEL, validForgeLogin, type SshForge } from "../sshForges";
 
 /**
@@ -18,10 +18,14 @@ import { checkSshForge, SSH_FORGE_HOST, SSH_FORGE_LABEL, validForgeLogin, type S
 export interface SshEvidence { signature: string }
 
 const FINGERPRINT = /^SHA256:[A-Za-z0-9+/]{43}$/;
+/** The line `ssh-keygen -l -f key.pub` prints: bits, fingerprint, comment, type ("256 SHA256:… me@laptop (ED25519)"). */
+const KEYGEN_LIST_LINE = /^\d+ (SHA256:[A-Za-z0-9+/]{43}) .* \([A-Z0-9-]+\)$/;
 
 function normalizeKeySubject(input: string): string {
   const value = input.trim();
   if (FINGERPRINT.test(value)) return value;
+  const listed = KEYGEN_LIST_LINE.exec(value);
+  if (listed) return listed[1];
   try { return parseSshPublicKey(value).fingerprint; }
   catch (e) {
     // Say why a real key is refused (a DSA key, a small RSA key); anything else gets the instruction.
@@ -36,23 +40,31 @@ function normalizeLogin(forge: SshForge, input: string): string {
   return login;
 }
 
+/**
+ * The armored block, without what the terminal showed around it (ssh-keygen's "Signing data on standard input", a prompt);
+ * the last one when the command ran more than once there (Add started over, a run without -n ghostly).
+ */
+const ARMOR = /-----BEGIN SSH SIGNATURE-----[\s\S]*?-----END SSH SIGNATURE-----/g;
+const armorIn = (pasted: string) => pasted.length > 4 * SSHSIG_MAX_ARMOR ? pasted : pasted.match(ARMOR)?.pop() ?? pasted;
+
 /** The armor, re-wrapped canonically, so evidence is the same whatever the clipboard did to it. */
 function canonicalArmor(pasted: string): string {
-  const parsed = parseSshSignature(pasted);
+  const armor = armorIn(pasted);
+  const parsed = parseSshSignature(armor);
   if (parsed.namespace !== SSHSIG_NAMESPACE) throw new Error(`That signature is for "${parsed.namespace}", not "${SSHSIG_NAMESPACE}": run the command with -n ${SSHSIG_NAMESPACE}`);
-  const body = pasted.replace(/\r\n/g, "\n").trim().split("\n").map(l => l.trim()).slice(1, -1).join("");
+  const body = armor.replace(/\r\n/g, "\n").trim().split("\n").map(l => l.trim()).slice(1, -1).join("");
   return `-----BEGIN SSH SIGNATURE-----\n${body.match(/.{1,70}/g)!.join("\n")}\n-----END SSH SIGNATURE-----\n`;
 }
 
-/** Exactly the statement; or with one trailing newline, which an editor adds when the statement is
- * saved to a file and signed there (the Windows route). Nothing else is accepted. */
+/** Exactly the statement; or with one trailing newline ("\r\n" on Windows), which an editor adds when the
+ * statement is saved to a file and signed there (the Windows route). Nothing else is accepted. */
 async function verifyStatementSignature(statement: IdentityStatement, evidence: SshEvidence): Promise<SshSignatureCheck> {
-  try { return await verifySshSignature(evidence.signature, statement.bytes); }
-  catch (e) {
-    if (!(e instanceof SshSigError) || !/does not match this statement/.test(e.message)) throw e;
-    try { return await verifySshSignature(evidence.signature, utf8Encode(`${statement.text}\n`)); }
-    catch (again) { throw Object.assign(new Error("The signature is not over this statement: copy the command again and sign exactly what it shows"), { cause: again }); }
+  let last: unknown;
+  for (const bytes of [statement.bytes, utf8Encode(`${statement.text}\n`), utf8Encode(`${statement.text}\r\n`)]) {
+    try { return await verifySshSignature(evidence.signature, bytes); }
+    catch (e) { if (!(e instanceof SshSigError) || !/does not match this statement/.test(e.message)) throw e; last = e; }
   }
+  throw Object.assign(new Error("The signature is not over this statement: copy the command again and sign exactly what it shows"), { cause: last });
 }
 
 const keyKind = (c: SshSignatureCheck) => c.securityKey
@@ -65,16 +77,19 @@ function sshKeygenSigner(forAccount?: SshForge): ExternalToolSigner<SshEvidence>
     description: forAccount
       ? `Sign with an SSH key that your ${SSH_FORGE_LABEL[forAccount]} account lists (Settings → SSH keys).`
       : "Sign with OpenSSH's ssh-keygen (8.1 or later): a key file, ssh-agent, or a FIDO security key.",
-    instructions: statement => {
+    instructions: (statement, say = englishSay) => {
       let command: string | undefined;
       try { command = sshSignCommand(statement.text); } catch { command = undefined; }
+      const sign = { namespace: SSHSIG_NAMESPACE };
       return {
         steps: [
-          ...(command ? [{ text: "Run this in a terminal (macOS, Linux, or Git Bash/WSL on Windows). If your key is not ~/.ssh/id_ed25519, change the path after -f; a .pub path works when the private key is in ssh-agent or on a security key.", copy: command }] : []),
-          { text: `${command ? "Or save" : "Save"} this statement to a file, run ssh-keygen -Y sign -n ${SSHSIG_NAMESPACE} -f <your key> <file>, and paste the <file>.sig it writes.`, copy: statement.text },
-          { text: "Paste the whole signature it prints, from -----BEGIN SSH SIGNATURE----- to -----END SSH SIGNATURE-----. Your private key never leaves your computer." },
+          ...(command ? [{ text: say("steps.run", "Run this in a terminal (macOS, Linux, or Git Bash/WSL on Windows). If your key is not ~/.ssh/id_ed25519, change the path after -f; a .pub path works when the private key is in ssh-agent or on a security key."), copy: command }] : []),
+          { text: command
+            ? say("steps.orSave", "Or save this statement to a file, run ssh-keygen -Y sign -n {{namespace}} -f <your key> <file>, and paste the <file>.sig it writes.", sign)
+            : say("steps.save", "Save this statement to a file, run ssh-keygen -Y sign -n {{namespace}} -f <your key> <file>, and paste the <file>.sig it writes.", sign), copy: statement.text },
+          { text: say("steps.paste", "Paste the whole signature it prints, from -----BEGIN SSH SIGNATURE----- to -----END SSH SIGNATURE-----. Your private key never leaves your computer.") },
         ],
-        paste: { label: "SSH signature", placeholder: "-----BEGIN SSH SIGNATURE-----", multiline: true },
+        paste: { label: say("paste.label", "SSH signature"), placeholder: "-----BEGIN SSH SIGNATURE-----", multiline: true },
       };
     },
     parse(pasted, statement) {
@@ -133,8 +148,9 @@ function forgeProvider(forge: SshForge): IdentityProofProvider<SshEvidence> {
     subject: { label: `${label} username`, placeholder: forge === "github" ? "octocat" : "username", normalize: input => normalizeLogin(forge, input) },
     publicUri: login => `https://${forge === "github" ? "github.com" : "gitlab.com"}/${login}`,
     validity: { defaultDays: 90, maxDays: 365 },
-    // Keys get removed from accounts; the contact's app offers "Check again" after this.
-    recheck: { afterSeconds: 600 },
+    // Keys get removed from accounts; the contact's app offers "Check again" after this. GitHub answers 60 lookups an
+    // hour per IP without a login: the automatic re-check spends at most half of them.
+    recheck: { afterSeconds: 600, ...forge === "github" && { perHour: 30 } },
     privacy: `Your contact's app asks ${host} for this account's public SSH keys, when you share it and on each re-check: ${label} learns the account was looked up, and from which IP address. So does this app when you add it.`,
     signers: [sshKeygenSigner(forge)],
     parseEvidence: parseSshEvidence,

@@ -7,6 +7,7 @@ import { InfoButton } from "../layout/Section";
 import { SCREEN_BUTTON, SCREEN_QUIET } from "./DeviceDialog";
 import { type Problem, problemText } from "../../lib/problemText";
 import { Notice } from "../ui/Notice";
+import { FocusSafeButton } from "../ui/FocusSafeButton";
 
 /*
  * Limited mode (WISP 06 § When a device checks): the active device of a device set could not read which device is
@@ -126,9 +127,10 @@ function RestoreBanner({ check }: { check: "checking" | "removed" }) {
       {open && <p id={`${id}-info`} data-testid="restore-limited-text" className="m-0 rounded-lg bg-surface-hover px-3 py-2 text-xs leading-5 text-text-secondary">{t("devices.limited.restoreInfo")}</p>}
       {check === "removed" && name && (
         <div className="flex flex-col gap-2 sm:flex-row">
+          {/* The name between isolate marks (an attribute has no <bdi>): "Work (2)" keeps its bracket in an Arabic sentence. */}
           <input data-testid="restore-limited-name" className="min-h-11 min-w-0 flex-1 rounded-lg border border-border bg-chat-bg px-3 text-sm text-text-primary" autoComplete="off" spellCheck={false}
-            placeholder={t("devices.restore.tombstoneConfirm", { name })} aria-label={t("devices.restore.tombstoneConfirm", { name })} value={typed} onChange={(e) => setTyped(e.target.value)} />
-          <button type="button" data-testid="restore-limited-own" disabled={busy || typed.trim() !== name.trim()} onClick={startOwn} className={SCREEN_QUIET}>{t("devices.restore.tombstoneGo")}</button>
+            placeholder={t("devices.restore.tombstoneConfirm", { name: `\u2068${name}\u2069` })} aria-label={t("devices.restore.tombstoneConfirm", { name: `\u2068${name}\u2069` })} value={typed} onChange={(e) => setTyped(e.target.value)} />
+          <FocusSafeButton type="button" data-testid="restore-limited-own" disabled={busy || typed.trim() !== name.trim()} onClick={startOwn} className={SCREEN_QUIET}>{t("devices.restore.tombstoneGo")}</FocusSafeButton>
         </div>
       )}
       {error && <Notice problem={error} testId="restore-limited-error" />}

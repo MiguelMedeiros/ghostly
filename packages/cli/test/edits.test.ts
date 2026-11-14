@@ -9,6 +9,7 @@ import { idSlot, TEXT_COMMANDS } from "../src/commands";
 import { EventHub, type GhostlyEvent } from "../src/events";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 import { messageJson } from "../src/views";
+import { chatViewOf, groupViewOf } from "./support/chatView";
 // covers: headless.edit, groups.edit
 
 /** `ghostly edit`, and what the stream and the history say about an edited message (WISP 400 § Edits). */
@@ -17,7 +18,7 @@ const row = (fields: Partial<StoredMessage> = {}): StoredMessage => ({ linkId: "
 
 function fake(result: { error: string | null; refused?: boolean; messageId?: string } = { error: null, messageId: "me_w" }, messages: StoredMessage[] = [row({ text: "Done", edit: { seq: 1, at: 5, history: [{ at: 1, text: "Working" }] } })]) {
   const node = {
-    getState: () => ({ links: [link("chat-one", { label: "Alice" })], groups: [], settings: {}, transport: {} }) as unknown as EngineState,
+    chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [link("chat-one", { label: "Alice" })], groups: [], settings: {}, transport: {} }) as unknown as EngineState,
     getMessages: vi.fn(async () => messages),
     getMessage: vi.fn(async (_linkId: string, id: string) => messages.find((m) => m.id === id)),
     editMessage: vi.fn(async () => result),
@@ -46,7 +47,7 @@ describe("ghostly edit", () => {
     const refused = fake({ error: "Only your own text messages can be edited", refused: true }, [row(), row({ id: "peer_x", sender: "peer" })]);
     await expect(callApi(refused.ctx, "chat.edit", { chat: "Alice", message: "peer_x", text: "x" })).rejects.toMatchObject({ code: "refused" });
     // A message that is not in the chat at all: not found (exit 3), naming what to give, never "your own messages".
-    await expect(callApi(refused.ctx, "chat.edit", { chat: "Alice", message: "me_typo", text: "x" })).rejects.toMatchObject({ code: "not_found", message: 'No message "me_typo" in this chat: give the messageId send printed' });
+    await expect(callApi(refused.ctx, "chat.edit", { chat: "Alice", message: "me_typo", text: "x" })).rejects.toMatchObject({ code: "not_found", message: 'No message "me_typo" in this chat (ghostly chat history Alice)' });
     // Its wire id names it too.
     await expect(callApi(refused.ctx, "chat.edit", { chat: "Alice", message: "W".repeat(22), text: "x" })).rejects.toMatchObject({ code: "refused" });
     // The secret guard, as on send.
@@ -117,7 +118,7 @@ describe("ghostly group edit", () => {
   const groupRow = (fields: Partial<StoredMessage> = {}): StoredMessage => ({ linkId: "group:g1", id: "mekey:1:0", text: "Deploy: done", sender: "me", member: "mekey", timestamp: 1, via: "datalink", ...fields });
   function groupFake(result: { error: string | null; refused?: boolean } = { error: null }, messages = [groupRow({ edit: { seq: 2, at: 5, history: [] } })]) {
     const node = {
-      getState: () => ({ links: [], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
+      chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
       groupMessages: vi.fn(async () => messages),
       getMessage: vi.fn(async (_linkId: string, id: string) => messages.find((m) => m.id === id)),
       editMessage: vi.fn(async () => result),
@@ -148,7 +149,7 @@ describe("ghostly group edit", () => {
     expect(await callApi(away.ctx, "group.edit", { group: "Crew", message: "mekey:1:0", text: "x" })).toEqual({ group: "g1", messageId: "mekey:1:0", edits: 3, sent: false, edges: 0 });
     const theirs = groupFake({ error: "Only your own text messages can be edited", refused: true }, [groupRow(), groupRow({ id: "bobkey:1:0", sender: "peer", member: "bobkey" })]);
     await expect(callApi(theirs.ctx, "group.edit", { group: "Crew", message: "bobkey:1:0", text: "x" })).rejects.toMatchObject({ code: "refused" });
-    await expect(callApi(theirs.ctx, "group.edit", { group: "Crew", message: "mekey:9:9", text: "x" })).rejects.toMatchObject({ code: "not_found", message: 'No message "mekey:9:9" in this group: give the messageId group send printed' });
+    await expect(callApi(theirs.ctx, "group.edit", { group: "Crew", message: "mekey:9:9", text: "x" })).rejects.toMatchObject({ code: "not_found", message: 'No message "mekey:9:9" in this group (ghostly group history Crew)' });
     // --wait sent: until an edge took this edit number.
     const nobody = groupFake(undefined, [groupRow({ edit: { seq: 4, at: 5, history: [], pending: true } })]);
     nobody.node.groupTaken.mockImplementation(() => 0);

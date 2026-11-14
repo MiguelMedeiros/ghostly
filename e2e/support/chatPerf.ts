@@ -98,9 +98,21 @@ export function history(count: number, start: number, lean = false) {
   });
 }
 
+/**
+ * When a seeded history starts: 30 days ago, at `hours` past local midnight (the page's time zone is this process's).
+ * Its messages are 45 s apart, so where its days change among the rows depends on this time of day: fixed, a test sees
+ * the same day lines at the same rows whenever it runs.
+ */
+export function seedStart(hours = 12): number {
+  const day = new Date();
+  day.setDate(day.getDate() - 30);
+  day.setHours(0, 0, 0, 0);
+  return day.setMinutes(hours * 60);
+}
+
 /** Stores the chats and returns their ids: the chat list shows them by their labels. */
 export async function seed(page: Page, chats: { label: string; count: number; lean?: boolean }[]): Promise<string[]> {
-  const start = Date.now() - 30 * 86_400_000;
+  const start = seedStart();
   const stored = chats.map(({ label, count, lean }) => {
     const keys = createLink().mine;
     return { label, keys, messages: history(count, start, lean) };
@@ -123,7 +135,7 @@ export async function seed(page: Page, chats: { label: string; count: number; le
  * The chat's link must come (the page asks the engine for it once the chat is stored): this waits for it.
  */
 export async function engineHistory(page: Page, label: string, count: number): Promise<void> {
-  const rows = history(count, Date.now() - 30 * 86_400_000).map(({ ref: _ref, ...m }) => ({ ...m, via: "datalink" }));
+  const rows = history(count, seedStart()).map(({ ref: _ref, ...m }) => ({ ...m, via: "datalink" }));
   await page.evaluate(async ({ label, rows }) => {
     const session = Object.keys(localStorage).map(k => { try { return JSON.parse(localStorage.getItem(k)!); } catch { return null; } }).find(s => s?.label === label);
     const open = () => new Promise<IDBDatabase>((ok, ko) => { const r = indexedDB.open("ghostly"); r.onsuccess = () => ok(r.result); r.onerror = () => ko(r.error); });

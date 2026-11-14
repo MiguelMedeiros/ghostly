@@ -113,6 +113,43 @@ describe("a voice recording when the app locks", () => {
     expect(screen.getByTestId("voice-bar")).toHaveAttribute("data-mode", "locked");
     dialog.remove();
   });
+
+  // Message details, the connection panel and most of the app's panels are a `role="dialog"` box, not a `<dialog>`; a
+  // message's ⋮ menu is a group of buttons.
+  it.each([
+    ["a modal panel", { role: "dialog", "aria-modal": "true" }],
+    ["a popover panel", { role: "dialog" }],
+    ["a message's menu", { role: "group", "data-menu": "popover" }],
+  ])("does not take an Enter or an Escape typed inside %s it is not in", async (_name, attributes) => {
+    renderApp(<LockScreenProvider><App /></LockScreenProvider>);
+    await recordHandsFree();
+    // Long enough to send, and for an Escape to ask first.
+    await wait(4_000);
+    const panel = document.body.appendChild(document.createElement("div"));
+    for (const [name, value] of Object.entries(attributes)) panel.setAttribute(name, value);
+    const button = panel.appendChild(document.createElement("button"));
+    fireEvent.keyDown(button, { key: "Enter" });
+    fireEvent.keyDown(button, { key: "Escape" });
+    await wait(0);
+    expect(onSendFile).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("voice-confirm")).toBeNull();
+    expect(screen.getByTestId("voice-bar")).toHaveAttribute("data-mode", "locked");
+    panel.remove();
+  });
+
+  it("still answers Escape on its own discard question, where the focus is", async () => {
+    renderApp(<LockScreenProvider><App /></LockScreenProvider>);
+    await recordHandsFree();
+    await wait(4_000);
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    await wait(0);
+    const keep = screen.getByTestId("voice-confirm-keep");
+    expect(keep).toHaveFocus();
+    fireEvent.keyDown(keep, { key: "Escape" });
+    await wait(0);
+    expect(screen.queryByTestId("voice-confirm")).toBeNull();
+    expect(screen.getByTestId("voice-bar")).toHaveAttribute("data-mode", "locked");
+  });
 });
 
 describe("Ctrl/Cmd+F while the app is locked", () => {

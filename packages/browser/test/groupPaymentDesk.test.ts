@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ENDPOINT, type GhostLink, type Payment, type PaymentRequest, type PaymentResult } from "@ghostly/core";
+import { authoredNote } from "../src/engine/groupPayments";
 import { PaymentDesk, type DeskLightning } from "../src/engine/payments";
 import type { CashuWallet } from "../src/engine/wallet";
 import type { StoredMessage } from "../src/shared/types";
@@ -40,6 +41,8 @@ interface Member {
 class World {
   readonly members = new Map<string, Member>();
   readonly down = new Set<string>();
+  /** Edges that are not the group's: a 1:1 chat, another group's edge. */
+  readonly outside = new Set<string>();
   private queue: (() => Promise<unknown>)[] = [];
 
   add(name: string): Member {
@@ -73,7 +76,7 @@ class World {
     const messages: StoredMessage[] = [];
     const desk = new PaymentDesk(wallet as unknown as CashuWallet, {
       getLink: linkId => edges.has(linkId) ? link(linkId) as unknown as GhostLink : null,
-      groupOf: linkId => edges.has(linkId) ? "g" : undefined,
+      groupOf: linkId => edges.has(linkId) && !this.outside.has(linkId) ? "g" : undefined,
       groupLinks: group => group === "g" ? [...edges.keys()] : [],
       storeMessage: async message => { messages.push(message); },
       onChange: () => {},
@@ -184,6 +187,26 @@ describe("a request to the whole group", () => {
     expect(view(a, paymentId).state).toBe("pending");
   });
 
+  it("ecash naming it from outside the group is not its payment: the note names the member who paid it", async () => {
+    const { world, members: [a, b] } = await group("A", "B", "C");
+    // M shares another chat with A: its edge is not the group's.
+    const m = world.add("M");
+    await m.desk.start();
+    a.edges.set("AM", "M"); m.edges.set("MA", "A");
+    world.outside.add("AM"); world.outside.add("MA");
+    const { paymentId } = await a.desk.requestFromGroup({ groupId: "g", amount: 100, timestamp: 1, rail: "cashu" });
+    await world.settle();
+    await a.desk.onPayment("AM", { id: "p-outside", timestamp: 2, requestId: paymentId, amount: { value: "1", asset: "sat" }, endpoint: [ENDPOINT.cashu, `cashu|${MINT}|1|m`] });
+    expect(view(a, "p-outside")).toMatchObject({ kind: "payment", direction: "in", state: "settled", linkId: "AM" });
+    expect(view(a, "p-outside").requestId).toBeUndefined();
+    expect(view(a, paymentId).state).toBe("pending");
+    await b.desk.payRequest({ linkId: "BA", paymentId });
+    await world.settle();
+    expect(view(a, paymentId).state).toBe("settled");
+    const note = authoredNote(view(a, paymentId), { groupId: "g", me: "A" }, Object.values(a.desk.views()), undefined, linkId => a.edges.get(linkId));
+    expect(note).toMatchObject({ st: "paid", by: "B" });
+  });
+
   it("on Lightning: one invoice for everyone; paid once, it closes on every member and nobody can pay it again", async () => {
     const { world, members: [a, b, c] } = await group("A", "B", "C");
     const { paymentId } = await a.desk.requestFromGroup({ groupId: "g", amount: 100, timestamp: 1, rail: "lightning" });
@@ -204,7 +227,7 @@ describe("a request to the whole group", () => {
   it("a member whose edge was down gets the request when it opens, and a request already paid is closed on their side instead", async () => {
     const { world, members: [a, b, c] } = await group("A", "B", "C");
     world.down.add("AC");
-    const { paymentId } = await a.desk.requestFromGroup({ groupId: "g", amount: 100, timestamp: 1, rail: "cashu" });
+    const { paymentId } = await a.desk.requestFromGroup({ groupId: "g", amount: 100, timestamp: Date.now(), rail: "cashu" });
     await world.settle();
     expect(view(c, paymentId)).toBeUndefined();
     world.down.delete("AC");
@@ -220,6 +243,46 @@ describe("a request to the whole group", () => {
     await a.desk.replay("AC");
     await world.settle();
     expect(view(c, paymentId).state).toBe("settled");
+  });
+
+  it("a member away when the request closed (its wallet removed) has it closed when their edge opens, not left to pay", async () => {
+    const { world, members: [a, b, c] } = await group("A", "B", "C");
+    const { paymentId } = await a.desk.requestFromGroup({ groupId: "g", amount: 100, timestamp: Date.now(), rail: "cashu" });
+    await world.settle();
+    world.down.add("AC");
+    expect(await a.desk.close(paymentId, "you removed the Testnet Cashu wallet it was paid to")).toBe(true);
+    await world.settle();
+    expect(view(b, paymentId)).toMatchObject({ state: "failed", closed: true });
+    expect(view(c, paymentId).state).toBe("pending");
+
+    world.down.delete("AC");
+    await a.desk.replay("AC");
+    await world.settle();
+    expect(view(c, paymentId)).toMatchObject({ state: "failed", closed: true, error: "your contact removed the wallet it was paid to" });
+    await expect(c.desk.payRequest({ linkId: "CA", paymentId })).rejects.toThrow("no longer open");
+    expect(a.sent.filter(s => s.kind === "req" && s.linkId === "AC")).toHaveLength(1);
+  });
+
+  it("an edge opening says paid again only the requests under a week old, not the group's whole history", async () => {
+    const names = Array.from({ length: 30 }, (_, i) => `M${i}`);
+    const { world, members: [a] } = await group(...names);
+    for (const linkId of a.edges.keys()) world.down.add(linkId);
+    // 200 settled requests from months ago, 100 from the last days.
+    const old: string[] = [], recent: string[] = [];
+    for (let i = 0; i < 300; i++) {
+      const timestamp = i < 200 ? Date.now() - 90 * 86_400_000 + i : Date.now() - 86_400_000 + i;
+      const { paymentId } = await a.desk.requestFromGroup({ groupId: "g", amount: 100, timestamp, rail: "cashu" });
+      await a.desk.onLightningPaid({ paymentId });
+      (i < 200 ? old : recent).push(paymentId);
+    }
+    for (const linkId of a.edges.keys()) world.down.delete(linkId);
+    const before = a.sent.length;
+    for (const linkId of a.edges.keys()) await a.desk.replay(linkId);
+    const said = a.sent.slice(before);
+    // 29 edges × 100 recent requests, every one said paid; none of the 200 old ones.
+    expect(said.length).toBe(29 * 100);
+    expect(said.every(s => s.kind === "res" && s.frame.ok === true && recent.includes(s.frame.id as string))).toBe(true);
+    expect(said.filter(s => s.linkId === "M0M1").map(s => s.frame.id).sort()).toEqual([...recent].sort());
   });
 
   it("wants Cashu or Lightning, a mint for Cashu, and a whole amount", async () => {

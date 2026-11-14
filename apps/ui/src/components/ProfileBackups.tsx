@@ -17,6 +17,7 @@ import { Select } from "./ui/Select";
 import { ButtonGroup, Field, FieldGrid, InputGroup, Truncate } from "./layout";
 import { said } from "../lib/notices";
 import { fillNames } from "../lib/fillNodes";
+import { listText } from "../lib/listText";
 import { exactText } from "../lib/exactText";
 
 const EMPTY_S3: S3Config = { endpoint: "", region: "us-east-1", bucket: "", prefix: "ghostly", accessKeyId: "", secretAccessKey: "" };
@@ -66,6 +67,8 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
   const [restorePass, setRestorePass] = useState("");
   // A backup of a profile still on this device (WISP 05 § Restoring on the same device) waits here for the person's choice.
   const [sameDevice, setSameDevice] = useState<{ opened: OpenedProfileBackup; originals: ProfileEntry[] } | null>(null);
+  // Which answer is at work: that button is busy (it keeps the keyboard's focus to take back), the other waits.
+  const [chose, setChose] = useState<"replace" | "copy" | null>(null);
   // A bundle whose profile may be active on another device (WISP 06 § A backup restored where a device set exists).
   const [guarded, setGuarded] = useState<{ opened: OpenedProfileBackup; guard: RestoreGuard } | null>(null);
   const [ownName, setOwnName] = useState("");
@@ -212,7 +215,7 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
         <Block>
           {s3 && <Segmented label={t("profile.backups.restoreFrom")} value={from} onChange={(next) => { setFrom(next); setError(""); }} options={[{ value: "file", label: t("profile.backups.fromFile") }, { value: "s3", label: "S3" }]} />}
           {from === "file" || !s3 ? (
-            <input data-testid="restore-file" type="file" accept=".ghostly-backup,application/json,application/octet-stream" className={input} onChange={(e) => { const f = e.target.files?.[0]; if (f) void pickFile(f); }} />
+            <input data-testid="restore-file" type="file" aria-label={t("profile.backups.toRestore")} accept=".ghostly-backup,application/json,application/octet-stream" className={input} onChange={(e) => { const f = e.target.files?.[0]; if (f) void pickFile(f); }} />
           ) : (
             <InputGroup>
               {listing?.length ? (
@@ -238,15 +241,15 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
           {guarded.guard.case === "active" && (
             <ButtonGroup>
               <Button data-testid="restore-add-instead" disabled={busy} onClick={() => { setGuarded(null); setDone(t("devices.restore.addInsteadHint", { device: guarded.guard.device ?? t("devices.join.otherDevice") })); }}>{t("devices.restore.addInstead")}</Button>
-              <Button variant="primary" data-testid="restore-take-over" disabled={busy} onClick={() => void takeOver(guarded)}>{t("devices.restore.takeOver")}</Button>
+              <Button variant="primary" data-testid="restore-take-over" loading={busy} onClick={() => void takeOver(guarded)}>{t("devices.restore.takeOver")}</Button>
               <Button data-testid="restore-guard-cancel" disabled={busy} onClick={() => setGuarded(null)}>{t("common.cancel")}</Button>
             </ButtonGroup>
           )}
           {guarded.guard.case === "tombstone" && (
             <InputGroup>
-              <input data-testid="restore-own-name" className={input} autoComplete="off" spellCheck={false} placeholder={t("devices.restore.tombstoneConfirm", { name: guarded.opened.name })}
-                aria-label={t("devices.restore.tombstoneConfirm", { name: guarded.opened.name })} value={ownName} onChange={(e) => setOwnName(e.target.value)} />
-              <Button variant="primary" data-testid="restore-own-go" disabled={busy || ownName.trim() !== guarded.opened.name.trim()} onClick={() => void underProgress("restore", true, (watch) => afterGuard(guarded.opened, watch))}>{t("devices.restore.tombstoneGo")}</Button>
+              <input data-testid="restore-own-name" className={input} autoComplete="off" spellCheck={false} placeholder={t("devices.restore.tombstoneConfirm", { name: `\u2068${guarded.opened.name}\u2069` })}
+                aria-label={t("devices.restore.tombstoneConfirm", { name: `\u2068${guarded.opened.name}\u2069` })} value={ownName} onChange={(e) => setOwnName(e.target.value)} />
+              <Button variant="primary" data-testid="restore-own-go" loading={busy} disabled={ownName.trim() !== guarded.opened.name.trim()} onClick={() => void underProgress("restore", true, (watch) => afterGuard(guarded.opened, watch))}>{t("devices.restore.tombstoneGo")}</Button>
               <Button data-testid="restore-guard-cancel" disabled={busy} onClick={() => setGuarded(null)}>{t("common.cancel")}</Button>
             </InputGroup>
           )}
@@ -260,12 +263,12 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
       )}
       {open === "restore" && sameDevice && (
         // The original is on this device: both would answer contacts as the same person. The person chooses.
-        <Field testId="restore-same-device" label={<span className="font-semibold">{t("profile.backups.sameDevice.title", { names: sameDevice.originals.map((entry) => `“${entry.name}”`).join(", ") })}</span>}
+        <Field testId="restore-same-device" label={<span className="font-semibold">{t("profile.backups.sameDevice.title", { names: listText(sameDevice.originals.map((entry) => `“${entry.name}”`), t) })}</span>}
           hint={t("profile.backups.sameDevice.hint")} info={t("profile.backups.sameDevice.info")}>
           {firstOnly && <Notice>{t("profile.backups.sameDevice.firstProfile")}</Notice>}
           <ButtonGroup>
-            {replaceable && <Button variant="primary" data-testid="restore-replace" disabled={busy} onClick={() => void underProgress("restore", true, (watch) => finish(sameDevice.opened, replaceable, watch))}>{t("profile.backups.sameDevice.replace")}</Button>}
-            <Button data-testid="restore-copy" disabled={busy} onClick={() => void underProgress("restore", true, (watch) => finish(sameDevice.opened, undefined, watch))}>{t("profile.backups.sameDevice.copy")}</Button>
+            {replaceable && <Button variant="primary" data-testid="restore-replace" disabled={busy} loading={busy && chose === "replace"} onClick={() => { setChose("replace"); void underProgress("restore", true, (watch) => finish(sameDevice.opened, replaceable, watch)); }}>{t("profile.backups.sameDevice.replace")}</Button>}
+            <Button data-testid="restore-copy" disabled={busy} loading={busy && chose === "copy"} onClick={() => { setChose("copy"); void underProgress("restore", true, (watch) => finish(sameDevice.opened, undefined, watch)); }}>{t("profile.backups.sameDevice.copy")}</Button>
             <Button data-testid="restore-cancel" disabled={busy} onClick={() => setSameDevice(null)}>{t("common.cancel")}</Button>
           </ButtonGroup>
         </Field>
@@ -281,7 +284,7 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
             ))}
           </FieldGrid>
           <ButtonGroup>
-            <Button variant="primary" data-testid="s3-save" disabled={busy} onClick={() => void run(async () => { const store = new S3Store(draft); await store.test(space()); updateBackupStorage({ backupS3: draft }); setOpen("none"); setDone(t("profile.backups.connected", { store: store.description.replace(/^S3 · /, "") })); })}>{busy ? t("profile.backups.s3.testing") : t("profile.backups.s3.testAndSave")}</Button>
+            <Button variant="primary" data-testid="s3-save" loading={busy} onClick={() => void run(async () => { const store = new S3Store(draft); await store.test(space()); updateBackupStorage({ backupS3: draft }); setOpen("none"); setDone(t("profile.backups.connected", { store: store.description.replace(/^S3 · /, "") })); })}>{busy ? t("profile.backups.s3.testing") : t("profile.backups.s3.testAndSave")}</Button>
             {s3 && <Button variant="danger" onClick={() => { updateBackupStorage({ backupS3: null }); setOpen("none"); }}>{t("profile.backups.s3.remove")}</Button>}
           </ButtonGroup>
           <Notice>{t("profile.backups.s3.note")}</Notice>

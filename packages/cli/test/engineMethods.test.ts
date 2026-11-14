@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { expect, it } from "vitest";
-import { ENGINE_METHODS, ENGINE_PARAMS, SECRET_RESULTS, engineParamsProblem } from "../src/engineMethods";
+import { ENGINE_METHODS, ENGINE_PARAMS, SECRET_RESULTS, engineParamsProblem, hideSecretFields } from "../src/engineMethods";
 import { ghostly, home, ok } from "./support/cli";
 // covers: headless.engine-passthrough
 
@@ -11,6 +11,15 @@ it("passes through exactly the app's EngineApi, and marks only its calls as secr
   const api = [...body.slice(0, body.indexOf("\n}\n")).matchAll(/^ {2}([a-zA-Z0-9]+)\(/gm)].map((m) => m[1]);
   expect([...ENGINE_METHODS].sort()).toEqual(api.sort());
   for (const method of SECRET_RESULTS) expect(api).toContain(method);
+});
+
+it("prints a new invoice without its mint quote id, which could mint the ecash it pays for, unless --show-secret", () => {
+  const invoice = { quote: "mint-quote-id", invoice: "lntbs1...", expiresAt: 1, source: "cashu" };
+  expect(hideSecretFields("walletReceiveLightning", invoice)).toEqual({ ...invoice, quote: "<hidden>" });
+  expect(hideSecretFields("walletReceiveLightning", invoice, true)).toEqual(invoice);
+  // A payment's quote is the mint's offer to pay out the user's own ecash: nothing to take.
+  const melt = { quote: "melt-quote-id", amount: 1, feeReserve: 0, mint: "m" };
+  expect(hideSecretFields("walletQuoteInvoice", melt)).toEqual(melt);
 });
 
 it("says what each call takes as rpc.ts types it", () => {

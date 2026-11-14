@@ -1,7 +1,8 @@
 import { forwardRef, memo, useCallback, useRef, type ReactNode } from "react";
-import type { GroupView } from "@ghostly/browser/shared/types";
+import type { ListedGroup } from "./ChatRow";
 import { PeerAvatar } from "./Avatar";
 import { GroupAvatar } from "./GroupAvatar";
+import { unreadDot } from "./unreadDot";
 import { invitationStatus, invitationWaitsForMe } from "./GroupInvitation";
 import { useI18n } from "../contexts/I18nContext";
 import { groupChat, mentionsNotify, useChatMute } from "../lib/chatMute";
@@ -51,7 +52,7 @@ export function RailAction({ testId, label, title = label, accent, active, count
 }) {
   return (
     <button type="button" data-testid={testId} onClick={onClick} title={title} aria-label={label} aria-current={active ? "page" : undefined}
-      className="group flex h-12 w-full shrink-0 items-center justify-center cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
+      className="current-mark group relative flex h-12 w-full shrink-0 items-center justify-center cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
       <span className={`relative flex h-10 w-10 items-center justify-center rounded-lg transition-colors ${accent ? "bg-accent text-panel-header group-hover:bg-accent-hover"
         : active ? "bg-surface-hover text-text-primary" : "text-text-secondary group-hover:bg-surface-hover group-hover:text-text-primary"}`}>
         {children}
@@ -67,9 +68,10 @@ function RailItem({ testId, id, name, label, active, onOpen, mark, children }: {
 }) {
   return (
     <button type="button" data-testid={testId} data-chat={id} onClick={onOpen} title={name} aria-label={label} aria-current={active ? "page" : undefined}
-      className="group relative flex h-14 w-full shrink-0 items-center justify-center cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
-      {/* The open chat: a bar at the list's edge, as the row's own colour says it in the list. */}
-      {active && <span aria-hidden="true" data-testid="chat-rail-active" className="absolute inset-y-2 start-0 w-1 rounded-e-full bg-accent" />}
+      className="current-mark group relative flex h-14 w-full shrink-0 items-center justify-center cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
+      {/* The open chat: a bar at the list's edge, as the row's own colour says it in the list. Forced colors would fill it
+          with the page's colour, over the same bar in Highlight (`current-mark`, index.css): gone there. */}
+      {active && <span aria-hidden="true" data-testid="chat-rail-active" className="absolute inset-y-2 start-0 w-1 rounded-e-full bg-accent forced-colors:hidden" />}
       <span className={`relative flex shrink-0 items-center justify-center rounded-full transition-colors ${active ? "bg-surface-alt ring-2 ring-accent" : "bg-surface-hover group-hover:ring-2 group-hover:ring-text-primary/15"}`} style={{ width: AVATAR, height: AVATAR }}>
         {children}
         {mark && <span className="absolute -top-1 -end-1 z-10 flex">{mark}</span>}
@@ -112,7 +114,7 @@ const SameRailChat = memo(function SameRailChat({ chatId, name, named, peerPubKe
 }, sameValue);
 
 /** A group on the rail, drawn again only when what it shows changes (`GroupRow`): when it was read is taken here, at each draw of the rail. */
-export function RailGroup({ group, active, onOpen }: { group: GroupView; active: boolean; onOpen(): void }) {
+export function RailGroup({ group, active, onOpen }: { group: ListedGroup; active: boolean; onOpen(): void }) {
   return <SameRailGroup group={group} active={active} readAt={groupReadAt(group.id)} onOpen={useLatestOpen(onOpen)} />;
 }
 
@@ -121,7 +123,7 @@ export function RailGroup({ group, active, onOpen }: { group: GroupView; active:
  * a muted group only when the mute keeps mentions quiet too (`GroupRow`). An invitation has its own mark, in the accent
  * while its row waits for my answer, and its label says what it waits for, as the row's line does.
  */
-const SameRailGroup = memo(function SameRailGroup({ group, active, readAt, onOpen }: { group: GroupView; active: boolean; readAt: number; onOpen(): void }) {
+const SameRailGroup = memo(function SameRailGroup({ group, active, readAt, onOpen }: { group: ListedGroup; active: boolean; readAt: number; onOpen(): void }) {
   const { t } = useI18n();
   const muted = useChatMute(groupChat(group.id)) !== undefined;
   const name = group.name || t("group.chat.unnamed");
@@ -136,7 +138,7 @@ const SameRailGroup = memo(function SameRailGroup({ group, active, readAt, onOpe
       className={`h-5 w-5 inline-flex items-center justify-center rounded-full ${badge(!!waiting)}`}><EnvelopeIcon /></span>
     : mention ? <span aria-hidden="true" data-testid="chat-rail-mention" data-muted={mentionQuiet || undefined}
       className={`h-5 w-5 inline-flex items-center justify-center rounded-full text-[12px] font-bold leading-none ${badge(mentionQuiet)}`}>@</span>
-    : unread && <span aria-hidden="true" data-testid="chat-rail-unread" data-muted={muted || undefined} className={`h-3 w-3 rounded-full ${badge(muted)}`} />;
+    : unread && <span aria-hidden="true" data-testid="chat-rail-unread" data-muted={muted || undefined} className={`h-3 w-3 ring-2 ring-sidebar-bg forced-colors:ring-[color:Canvas] ${unreadDot(muted)}`} />;
   return (
     <RailItem testId="chat-rail-group" id={groupChat(group.id)} name={name} label={label} active={active} onOpen={onOpen} mark={mark}>
       <GroupAvatar picture={group.picture} size={AVATAR} testId="chat-rail-avatar" className={active ? "bg-surface-alt" : "bg-surface-hover"} />

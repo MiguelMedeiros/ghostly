@@ -1,5 +1,6 @@
 import { engineError, engineText } from "@ghostly/core";
 import { STORES, openDb, store, transact, wrap } from "../../shared/idb";
+import { openRow, openRows, sealRow } from "../sealedRows";
 import type { IntentRepository, SavedIntent } from "./coordinator";
 /**
  * A USDT payment is one transaction at one account nonce. Another payment from the same account and chain that is
@@ -13,10 +14,14 @@ function nonceTaken(review:SavedIntent["review"],intents:SavedIntent[]):boolean 
   return intents.some(({review:other})=>other.id!==review.id && other.method==="usdt" && other.chainId===review.chainId && other.evm?.from?.toLowerCase()===from && ["submitted","unknown"].includes(other.state)
     && !(typeof nonce==="number" && typeof other.evm?.nonce==="number" && nonce>other.evm.nonce));
 }
+/**
+ * A Cashu review's swap and token are sealed when the profile is encrypted (sealedRows): they are read here opened.
+ * `claim` and `cancel` change only the review, so they put back the row as it was read, sealed fields and all.
+ */
 export const intentRepository: IntentRepository = {
-  async get(id) { return wrap<SavedIntent | undefined>((await store(STORES.intents,"readonly")).get(id)); },
-  async list() { return wrap<SavedIntent[]>((await store(STORES.intents,"readonly")).getAll()); },
-  async put(intent) { await transact([STORES.intents],s=>{s[STORES.intents].put(intent);}); },
+  async get(id) { return openRow(STORES.intents,await wrap<SavedIntent | undefined>((await store(STORES.intents,"readonly")).get(id))); },
+  async list() { return openRows(STORES.intents,await wrap<SavedIntent[]>((await store(STORES.intents,"readonly")).getAll())); },
+  async put(intent) { const row=await sealRow(STORES.intents,intent); await transact([STORES.intents],s=>{s[STORES.intents].put(row);}); },
   async claim(id) {
     const tx=(await openDb()).transaction(STORES.intents,"readwrite");
     return new Promise<SavedIntent>((resolve,reject)=>{
@@ -33,7 +38,7 @@ export const intentRepository: IntentRepository = {
         saved.review={...saved.review,state:"submitted",error:undefined,submittedAt:Date.now()};
         tx.objectStore(STORES.intents).put(saved);
       };
-      tx.oncomplete=()=>resolve(saved);
+      tx.oncomplete=()=>resolve(openRow(STORES.intents,saved));
       tx.onabort=tx.onerror=()=>reject(new Error(reason));
     });
   },
@@ -48,7 +53,7 @@ export const intentRepository: IntentRepository = {
         saved.review={...saved.review,state:"cancelled"};
         tx.objectStore(STORES.intents).put(saved);
       };
-      tx.oncomplete=()=>resolve(saved);
+      tx.oncomplete=()=>resolve(openRow(STORES.intents,saved));
       tx.onabort=tx.onerror=()=>reject(engineError("cannotCancelSubmitted"));
     });
   },

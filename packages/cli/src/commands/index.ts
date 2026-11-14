@@ -9,7 +9,7 @@ import { commands as identities } from "./identities";
 import { commands as payments } from "./payments";
 import { commands as services } from "./services";
 import { type Command, wait, groupWait, force, reply, buttonOptions, listed } from "./shared";
-import type { OptionSpec } from "../args";
+import { strayValue, type OptionSpec } from "../args";
 
 export type { Command };
 
@@ -80,6 +80,17 @@ export function idSlot(command: { args?: string[] }): (index: number) => boolean
   return (index) => at(index) && (shift === 0 || index + shift >= names.length || at(index + shift));
 }
 
+/** Positionals that take a number (`<sats>`): there `-5` is that number, refused as one, not an unknown option. */
+const NUMBER_ARGS = new Set(["amount"]);
+
+/** Which of a command's positionals take a number, by index; a leading `name?` shifts them as it does in `idSlot`. */
+export function numberSlot(command: { args?: string[] }): (index: number) => boolean {
+  const names = (command.args ?? []).map((name) => name.replace(/\?$/, ""));
+  const shift = leadingOptionals(command.args ?? []).length;
+  const at = (index: number) => NUMBER_ARGS.has(names[index] ?? "");
+  return (index) => at(index) && (shift === 0 || index + shift >= names.length || at(index + shift));
+}
+
 /** Whether a command's last positional takes the rest of the line as words, not ids: a text, a name, a path, emoji. */
 export function takesText(command: { args?: string[] }): boolean {
   const last = command.args?.at(-1)?.replace(/\?$/, "");
@@ -142,7 +153,10 @@ export function positionals(command: { usage: string; args?: string[]; words?: R
   return out;
 }
 
-/** Words past a usage's arguments are refused, never dropped: `profile use my bot` would select `my`. */
+/**
+ * Words past a usage's arguments are refused, never dropped: `profile use my bot` would select `my`. One of them right
+ * after an option that stood alone (`file send bob v.wav --voice 2s`) is refused as that option's value.
+ */
 export function noMoreThan(count: number, values: readonly string[], usage: string): void {
-  if (values.length > count) throw new CliError("usage", `Too many arguments: ghostly ${usage}`);
+  if (values.length > count) throw strayValue(values) ?? new CliError("usage", `Too many arguments: ghostly ${usage}`);
 }

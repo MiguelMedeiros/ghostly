@@ -215,6 +215,51 @@ describe("who is speaking in a call", () => {
     expect(you).not.toHaveAttribute("data-speaking");
   });
 
+  it("listens to neither side while the page is hidden (the app out of sight in a call), and again once it shows", () => {
+    // Every analyser the rings open, and how often they are read.
+    interface Analyser { getFloatTimeDomainData(samples: Float32Array): void }
+    const Base = globalThis.AudioContext as unknown as new () => { closed: boolean; createAnalyser(): Analyser };
+    const made: { closed: boolean }[] = [];
+    let reads = 0;
+    vi.stubGlobal("AudioContext", class extends Base {
+      constructor() {
+        super();
+        made.push(this);
+      }
+      createAnalyser(): Analyser {
+        const analyser = super.createAnalyser();
+        return { ...analyser, getFloatTimeDomainData: (samples) => { reads += 1; analyser.getFloatTimeDomainData(samples); } };
+      }
+    });
+    const hide = (hidden: boolean) => act(() => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (hidden ? "hidden" : "visible") });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    try {
+      call({ localStream: voice() });
+      const you = screen.getByTestId("call-self-avatar");
+      hear(0.1);
+      expect(avatar()).toHaveAttribute("data-speaking", "true");
+      expect(made.filter((context) => !context.closed)).toHaveLength(2);
+
+      hide(true);
+      expect(made.filter((context) => !context.closed)).toHaveLength(0);
+      const before = reads;
+      hear(0.1, 60_000);
+      expect(reads).toBe(before);
+      expect(avatar()).not.toHaveAttribute("data-speaking");
+      expect(you).not.toHaveAttribute("data-speaking");
+
+      hide(false);
+      hear(0.1);
+      expect(avatar()).toHaveAttribute("data-speaking", "true");
+      expect(you).toHaveAttribute("data-speaking", "true");
+      expect(made.filter((context) => !context.closed)).toHaveLength(2);
+    } finally {
+      Reflect.deleteProperty(document, "visibilityState");
+    }
+  });
+
   it("leaves your avatar out where your picture shows, and before the call connects", () => {
     const { rerender } = call({ localStream: voice(), isVideoOff: false });
     expect(screen.queryByTestId("call-self-avatar")).toBeNull();

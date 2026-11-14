@@ -191,7 +191,7 @@ describe("any member catches up the others", { timeout: 60_000 }, () => {
     const { mesh, alice, bob, carol } = await three();
     away(mesh, bob, [alice, carol]);
     // Carol alone writes the longest texts: a bot's reports, an announcer's paragraphs.
-    for (let i = 0; i < GROUP_LIMITS.relay; i++) await carol.sendText(`${i} ${"x".repeat(GROUP_LIMITS.textBytes - 4)}`, 1_000 + i);
+    for (let i = 0; i < GROUP_LIMITS.relay; i++) { mesh.tick(2_000); await carol.sendText(`${i} ${"x".repeat(GROUP_LIMITS.textBytes - 4)}`, 1_000 + i); }
     await mesh.settle();
     expect(alice.state.relay).toHaveLength(GROUP_LIMITS.relay);
     away(mesh, carol, [alice]);
@@ -202,13 +202,13 @@ describe("any member catches up the others", { timeout: 60_000 }, () => {
 
   it("keeps what it hands on bounded, by count and by bytes, and without fields its author added", async () => {
     const { mesh, alice, bob } = await three();
-    for (let i = 0; i < GROUP_LIMITS.relay + 10; i++) await bob.sendText(`b${i}`);
+    for (let i = 0; i < GROUP_LIMITS.relay + 10; i++) { mesh.tick(400); await bob.sendText(`b${i}`); }
     await mesh.settle();
     expect(alice.state.relay).toHaveLength(GROUP_LIMITS.relay);
     expect(alice.state.relay![0].n).toBe(10);
     // The longest texts, each with a card of its own: fewer than 256 fit in the bytes.
     const big = "x".repeat(GROUP_LIMITS.textBytes), card = { kind: "task", id: "t", title: "y".repeat(STATUS_CARD_LIMITS.bytes - 64) } as unknown as StatusCard;
-    for (let i = 0; i < GROUP_LIMITS.relay; i++) await bob.sendText(big, undefined, [], undefined, undefined, card);
+    for (let i = 0; i < GROUP_LIMITS.relay; i++) { mesh.tick(3_000); await bob.sendText(big, undefined, [], undefined, undefined, card); }
     await mesh.settle();
     expect(alice.state.relay!.length).toBeLessThan(GROUP_LIMITS.relay);
     const bytes = alice.state.relay!.reduce((s, f) => s + frameBytes(f), 0);

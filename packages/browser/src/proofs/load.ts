@@ -25,6 +25,9 @@ export const identityProvidersLoaded = (): boolean => !!registry;
 /** The providers (built in, from plugins, the test ones when asked for), once loaded; none before. */
 export const loadedIdentityProviders = (): readonly IdentityProofProvider[] => registry?.identityProviders() ?? [];
 
+/** Whether `provider` is built into Ghostly (its words are in the app's locales), not a plugin's or a test one. */
+export const builtInIdentityProvider = (provider: IdentityProofProvider): boolean => !!registry?.IDENTITY_PROVIDERS.includes(provider);
+
 /** Called once they are loaded. Returns the unsubscribe. */
 export function onIdentityProvidersLoaded(listener: () => void): () => void {
   listeners.add(listener);

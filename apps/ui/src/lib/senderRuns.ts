@@ -8,6 +8,8 @@ export interface MessageAuthor {
   /** Their name, for the initial when they have no picture ("" for one the group knows by key only). */
   name: string;
   picture?: string;
+  /** The group's admin: their name is marked so, as no name a member picks can be (anyone can take the admin's). */
+  admin?: true;
   /** The first message of a run of theirs: their name goes above it, and above none of the others. */
   first: boolean;
   /** The last message of a run of theirs: the picture sits beside it; the others keep its room empty. */
@@ -71,7 +73,7 @@ function authorsOn(
     if (!author) {
       const member = group.members.find(m => m.key === key);
       const picture = pictureOf(key);
-      author = { key, name: member?.nick || group.formerNames?.[key] || "", ...(picture && { picture }) };
+      author = { key, name: member?.nick || group.formerNames?.[key] || "", ...(picture && { picture }), ...(member?.role === "admin" && { admin: true as const }) };
       byKey.set(key, author);
     }
     return author;
@@ -116,7 +118,7 @@ export function authorsMemo() {
     hiddenNotes: ReadonlySet<string>, pictureOf: (key: string) => string | undefined,
   ): ReadonlyMap<string, MessageAuthor> => {
     const hidden = [...hiddenNotes].sort().join("\n");
-    const names = JSON.stringify([group.members.map(m => [m.key, m.nick ?? ""]), group.formerNames ?? {}]);
+    const names = JSON.stringify([group.members.map(m => [m.key, m.nick ?? "", m.role]), group.formerNames ?? {}]);
     const same = !!last && last.hidden === hidden && last.names === names
       && [...last.pictures].every(([key, picture]) => pictureOf(key) === picture);
     if (same && last!.rows === rows && last!.folded === folded) return last!.authors;

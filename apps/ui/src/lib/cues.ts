@@ -98,6 +98,31 @@ export function playCue(cue: CueName, { chat, mention = false, key }: { chat?: s
   return true;
 }
 
+/** How old an attention event may be and still play or show: older ones are a replay, not news (AttentionFeedback). */
+export const ATTENTION_FRESH_MS = 5_000;
+/** The events this page took, by id, with their time: kept only while fresh, past that their time refuses them. */
+const sightAt = new Map<string, number>();
+/** When the events too old to take were last dropped: once a second at most, so a burst does not walk them each time. */
+let sweptAt = 0;
+
+/**
+ * Whether this page takes an attention event: fresh and not taken yet, marked taken when so. The events taken are
+ * forgotten once too old to be taken again, so a page open for days keeps a few seconds of them, not one per message,
+ * reaction and cue it ever saw.
+ */
+export function firstSight(id: string, at: number, now = Date.now()): boolean {
+  if (now - at > ATTENTION_FRESH_MS || sightAt.has(id)) return false;
+  if (Math.abs(now - sweptAt) >= 1_000) {
+    sweptAt = now;
+    for (const [old, when] of sightAt) if (now - when > ATTENTION_FRESH_MS) sightAt.delete(old);
+  }
+  sightAt.set(id, at);
+  return true;
+}
+
+/** How many events the page keeps for `firstSight` (tests). */
+export const sightsKept = () => sightAt.size;
+
 /**
  * Messages that come together (a catch-up, a bot's answer in pieces) are one sound: after a message sound, the next one
  * from that chat, and from any other chat (the app restarts and every chat catches up at once), plays no sooner than this.

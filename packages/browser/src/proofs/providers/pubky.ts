@@ -1,7 +1,7 @@
 import {
   isPubkyKey, isPubkyProofFolder, newPubkyProofFolder, normalizePubkyKey, pubkyProofCapability, pubkyProofFile, pubkyProofPath,
 } from "@ghostly/core";
-import type { IdentityPlatform, IdentityProofProvider, InAppSigner } from "../contract";
+import { englishSay, type IdentityPlatform, type IdentityProofProvider, type InAppSigner } from "../contract";
 import { readPubkyFile, withPubkyApproval, type PubkyApprovalOptions } from "../pubky";
 
 /**
@@ -33,7 +33,7 @@ export interface PubkyIdentityOptions {
 export function createPubkyIdentityProvider(options: PubkyIdentityOptions = {}): IdentityProofProvider<PubkyEvidence> {
   const approve = <T>(capability: `/pub/${string}/:w`, ctx: Parameters<InAppSigner<PubkyEvidence>["run"]>[0], work: Parameters<typeof withPubkyApproval<T>>[1]) => {
     if (!ctx.onApproval) throw new Error("This screen cannot show a Pubky request");
-    return withPubkyApproval({ ...options.approval, capability, signal: ctx.signal, onApproval: ctx.onApproval, onProgress: ctx.onProgress }, work);
+    return withPubkyApproval({ ...options.approval, capability, signal: ctx.signal, onApproval: ctx.onApproval, onProgress: ctx.onProgress, say: ctx.say }, work);
   };
 
   const signer: InAppSigner<PubkyEvidence> = {
@@ -50,7 +50,7 @@ export function createPubkyIdentityProvider(options: PubkyIdentityOptions = {}):
             subject: async () => session.key,
             async sign(statement) {
               if (statement.binding.subject !== session.key) throw new Error("That is another Pubky identity");
-              ctx.onProgress("Writing the proof to your homeserver…");
+              ctx.onProgress((ctx.say ?? englishSay)("progress.writing", "Writing the proof to your homeserver…"));
               const path = pubkyProofPath(folder, statement.id);
               await session.put(path, pubkyProofFile(statement));
               written = path;
@@ -105,7 +105,7 @@ export function createPubkyIdentityProvider(options: PubkyIdentityOptions = {}):
         const path = pubkyProofPath(folder, id);
         return approve(pubkyProofCapability(folder), ctx, async session => {
           if (session.key !== subject) throw new Error("That is another Pubky identity: approve with the one this proof is for");
-          ctx.onProgress("Deleting the proof file from your homeserver…");
+          ctx.onProgress((ctx.say ?? englishSay)("progress.deleting", "Deleting the proof file from your homeserver…"));
           await session.delete(path);
         });
       },

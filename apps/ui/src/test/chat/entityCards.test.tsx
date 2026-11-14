@@ -6,8 +6,10 @@ import { neventEncode, npubEncode } from "nostr-tools/nip19";
 import { MessageBubble } from "../../components/MessageBubble";
 import { ensureSession, listSessions, updateSessionLabel } from "../../lib/storage";
 import { groupView, linkView } from "../fakeEngine";
+import { lookup } from "../i18n/locales";
 import { receivedView } from "../identities/views";
 import { renderApp } from "../render";
+import type { Language } from "../../lib/settings";
 
 // covers: chat.cards.invite, chat.cards.group, chat.cards.nostr, chat.cards.identity, invite.own, invite.rejoin
 
@@ -24,11 +26,11 @@ const DID_KEY = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
 function Where() { return <p data-testid="where">{useLocation().pathname}</p>; }
 
 /** A message from the contact Alice (or from this profile, `mine`), rendered in a chat with her. */
-function bubble(text: string, { mine = false } = {}) {
+function bubble(text: string, { mine = false, forwarded, language }: { mine?: boolean; forwarded?: number; language?: Language } = {}) {
   return renderApp(<>
-    <MessageBubble message={{ id: "m1", text, sender: mine ? "me" : "peer", timestamp: 1_700_000_000_000 }} peerNick="Alice" peerPubKey="peer" />
+    <MessageBubble message={{ id: "m1", text, sender: mine ? "me" : "peer", timestamp: 1_700_000_000_000, forwarded }} peerNick="Alice" peerPubKey="peer" />
     <Where />
-  </>);
+  </>, { language });
 }
 
 describe("invite cards", () => {
@@ -150,6 +152,19 @@ describe("invite cards", () => {
     const { inviteCode } = createChatInvite();
     bubble(`${inviteCode.slice(0, -1)}${inviteCode.endsWith("q") ? "p" : "q"}`);
     expect(screen.queryByTestId("entity-cards")).toBeNull();
+  });
+
+  it("shows no card for an invite or a Nostr code the text holds only inside a spoiler, and one for what shows outside it", () => {
+    const { inviteCode } = createChatInvite();
+    const npub = npubEncode(hex());
+    for (const text of [`guess who: ||${inviteLink(inviteCode)}||`, `||${npub}||`, `> ||here: ${inviteCode}||`, `[||tap||](${inviteLink(inviteCode)})`]) {
+      const view = bubble(text);
+      expect(screen.queryByTestId("entity-cards"), text).toBeNull();
+      view.unmount();
+    }
+    bubble(`${npub} and ||${inviteLink(inviteCode)}||`);
+    expect(screen.getByTestId("entity-nostr")).toBeInTheDocument();
+    expect(screen.queryByTestId("entity-invite")).toBeNull();
   });
 });
 
@@ -327,6 +342,27 @@ describe("Nostr cards", () => {
     expect(await within(card).findByTestId("entity-nostr-muted")).toBeVisible();
   });
 
+  it("says a note's age and when it was fetched in the app's language", async () => {
+    const id = hex(), author = hex();
+    const now = Math.floor(Date.now() / 1000);
+    for (const [language, from, minutes, hours] of [
+      ["pt", "De relay.one.example", "há 3 min.", "há 2 h · uma resposta"],
+      ["ar", "من relay.one.example", "قبل 3 دقائق", "قبل ساعتين"],
+      ["ja", "relay.one.example から", "3 分前", "2 時間前"],
+    ] as const) {
+      const { user, engine, unmount } = bubble(neventEncode({ id, author }), { language });
+      engine.on("nostrLookup", () => ({ fetchedAt: now - 180, relays: ["wss://relay.one.example"], found: true, note: { id, author, createdAt: now - 7200, reply: true, content: "hi", muted: false } }));
+      const card = screen.getByTestId("entity-nostr");
+      await user.click(within(card).getByTestId("entity-nostr-load"));
+      const source = await within(card).findByTestId("entity-nostr-source");
+      await waitFor(() => expect(source).toHaveTextContent(from));
+      expect(source).toHaveTextContent(minutes);
+      expect(within(card).getByTestId("entity-nostr-age")).toHaveTextContent(hours);
+      expect(card).not.toHaveTextContent(/ago|just now/);
+      unmount();
+    }
+  });
+
   it("says when the relays could not be asked", async () => {
     const { user, engine } = bubble(npubEncode(hex()));
     engine.on("nostrLookup", () => { throw new Error("Offline: turn the network on first"); });
@@ -370,6 +406,16 @@ describe("identity cards", () => {
     expect(within(card).getByTestId("entity-identity-badge")).toHaveTextContent("Not proved in your chats");
     expect(await within(card).findByTestId("entity-identity-facts")).toHaveTextContent("did:key, the key is the identifier");
     expect(card).toHaveTextContent("Checked on this device");
+  });
+
+  it("says what it resolved in the app's language, as the Identities page does", async () => {
+    bubble(DID_KEY, { language: "ar" });
+    const ar = (key: string) => lookup("ar", `identities.providers.did.preview.${key}`)!;
+    const facts = await within(screen.getByTestId("entity-identity")).findByTestId("entity-identity-facts");
+    await waitFor(() => expect(facts).toHaveTextContent(ar("method")));
+    expect(facts).toHaveTextContent(ar("keyIsIdentifier").replace("{{method}}", "did:key"));
+    expect(facts).toHaveTextContent(ar("key"));
+    expect(facts).not.toHaveTextContent(/Method|the key is the identifier|Key/);
   });
 
   it("carries the badge of the contact who proved it", async () => {
@@ -420,5 +466,24 @@ describe("identity cards", () => {
     expect(await within(card).findByTestId("entity-identity-error")).toHaveTextContent("Could not resolve it");
     expect(asked.length).toBeGreaterThan(0);
     expect(asked.every(url => /^https:\/\/pkarr\.pubky\.(org|app)\//.test(url))).toBe(true);
+  });
+
+  it("with Hide my IP on, offers no lookup of a did:web someone else chose, and asks its server nothing", async () => {
+    const asked: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async input => { asked.push(String(input)); throw new TypeError("offline in tests"); });
+    // A contact's, and a copy of one I forwarded: a server someone else chose.
+    for (const shown of [{}, { mine: true, forwarded: 1 }]) {
+      const { engine, unmount } = bubble("did:web:contact.example.com", shown);
+      act(() => engine.update({ settings: { ...engine.state.settings, relayOnly: true } }));
+      const card = screen.getByTestId("entity-identity");
+      expect(within(card).queryByTestId("entity-identity-resolve")).toBeNull();
+      expect(within(card).getByTestId("entity-identity-where")).toHaveTextContent("Hide my IP is on, so contact.example.com, a server your contact chose, isn't contacted.");
+      unmount();
+    }
+    expect(asked).toEqual([]);
+    // My own did:web, written here: Look it up stays, as my own picture links load.
+    const { engine } = bubble("did:web:mine.example.com", { mine: true });
+    act(() => engine.update({ settings: { ...engine.state.settings, relayOnly: true } }));
+    expect(within(screen.getByTestId("entity-identity")).getByTestId("entity-identity-resolve")).toBeInTheDocument();
   });
 });

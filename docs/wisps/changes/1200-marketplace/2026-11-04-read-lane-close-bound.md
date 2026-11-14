@@ -1,0 +1,1 @@
+Read lane limits: a request stopped by the contact's close of its app, or by a session's end, keeps its place among the app's 4 in flight until the serving side has stopped reading and sending it, as a cancelled one does, so closing and opening the app again meets `busy` past 4. Only this side's own close of the app frees them at once.

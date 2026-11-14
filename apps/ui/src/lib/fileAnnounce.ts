@@ -23,7 +23,7 @@ export function fileMoment(transfer: FileTransferState | null): FileMoment | nul
 /** An offer of a 1:1 file waiting for this person's Accept or Decline: its arrival says so. */
 export function fileOfferLine(file: ChatFile, transfer: FileTransferState | null, name: string, t: Translate): string | null {
   if (isGroupFile(file) || transfer?.state !== "transferring" || transfer.stage !== "asking" || transfer.direction === "out") return null;
-  return t("chat.announce.fileOffer", { name, file: file.name, size: formatFileSize(file.size) });
+  return t("chat.announce.fileOffer", { name, file: file.name, size: formatFileSize(file.size, t) });
 }
 
 /**

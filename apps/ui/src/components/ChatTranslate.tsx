@@ -80,7 +80,7 @@ function OpenTranslateMenu({ chat, open, onClose, anchorRef, onChosen, language 
         <span className="block">{t("chatTranslate.note")}</span>
       </div>
       {TRANSLATE_CHOICES.map(each => (
-        <MenuItem key={each} testId={`translate-${each}`} checked={each === choice}
+        <MenuItem key={each} testId={`translate-${each}`} radio checked={each === choice}
           icon={<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{each === choice && <polyline points="20 6 9 17 4 12" />}</svg>}
           onClick={() => { setChatTranslate(chat, each); onClose(); onChosen(each); }}>
           {choiceText(each)}

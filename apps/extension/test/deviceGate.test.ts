@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fire, type FakeWorld } from "./fakeChrome";
 import { engineControl, resetEngine } from "./fakeEngine";
-import { PEER, SERVICE, bootExtension, useProfile } from "./extension";
+import { askPeer, bootExtension, useProfile } from "./extension";
 import { putDeviceRecord } from "../../../packages/browser/test/helpers/deviceRecord";
 
 // covers: devices.gate, extension.engine
@@ -43,7 +43,7 @@ describe("a profile with no device set", () => {
     expect(await ensure()).toEqual({ ok: true });
     expect(world.callsTo("offscreen.createDocument")).toHaveLength(1);
     expect(log()).toEqual(["start ghostly"]);
-    expect(engineControl().servers[0].options).toEqual({ platform: "extension", irohWeb: true, apps: false, defaultWallets: expect.any(Function) });
+    expect(engineControl().servers[0].options).toEqual({ platform: "extension", irohWeb: true, apps: false, defaultWallets: expect.any(Function), localFetch: expect.any(Function) });
   });
 });
 
@@ -92,8 +92,7 @@ describe.each(["standby", "superseded", "removed"] as const)("a device that is %
     await putState("ghostly", state);
     world = await bootExtension();
     expect(await ensure()).toEqual({ ok: true });
-    const reply = await world.chrome.runtime.sendMessage({ target: "engine", type: "http-request", peerPubKeyZ32: PEER, serviceId: SERVICE, method: "GET", path: "/", headers: [], bodyB64: null });
-    expect(reply).toEqual({ ok: false, code: "offline", message: "This profile is not active on this device" });
+    expect(await askPeer(world)).toEqual({ ok: false, code: "offline", message: "This profile is not active on this device" });
     expect(await world.chrome.runtime.sendMessage({ target: "engine", type: "stop" })).toBe(true);
     expect(log()).toEqual([]);
   });

@@ -105,6 +105,7 @@ describe("the secret guard", () => {
     ["an nsec", "nsec1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqstywftw", "Send a Nostr private key?"],
     ["a WIF key", "KwFfNUhSDaASSAwtG7ssQM1uVX8RgX5GHWnnLfhfiQDigjioWXHH", "Send a private key?"],
     ["a hex key with its label", `private key: ${"01".repeat(32)}`, "Send a private key?"],
+    ["a bitcoind cookie", `__cookie__:${"01".repeat(32)}`, "Send a login to your node?"],
   ])("words the question for %s", async (_, text, title) => {
     const { user } = composer();
     await write(user, text);

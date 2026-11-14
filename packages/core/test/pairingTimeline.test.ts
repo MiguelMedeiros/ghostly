@@ -139,6 +139,23 @@ describe("a first pairing, at desktop pace", () => {
     expect(pkarr.reads - reads).toBeLessThanOrEqual(pace === "web" ? 6 : 10);
   }, 60_000);
 
+  /**
+   * On a busy page the channel opens before the answer's `setRemoteDescription` resolves, and the knocker's data link goes
+   * from offering straight to open: its stage went knocking → live, with no `connecting` while the session came up
+   * (the e2e loop's pairing-timing check, under load: joiner knocking@2520 live@4540, the inviter connecting@3515).
+   */
+  it("the knocker whose channel opens before its answer is applied says connecting all the same", async () => {
+    rtc.answerAppliedAfterMs = 2_000;
+    const pkarr = new MemoryPkarr(DESKTOP_NETWORK);
+    const made = invitationWhere("joiner");
+    const inviter = open(made.inviter, pkarr);
+    await run(10_000);
+    const joiner = open(made.joiner, pkarr);
+    expect(await untilLive(inviter, joiner, 30_000)).toBeLessThanOrEqual(LIVE_WITHIN_MS);
+    expect(stagesOf(joiner)).toEqual(["resolving", "knocking", "connecting", "live"]);
+    expect(stagesOf(inviter)).toEqual(["waiting", "answering", "connecting", "live"]);
+  }, 30_000);
+
   it("a joiner whose first look finds no inviter drops the offer it gathered, says nothing of it, and dials once the inviter shows", async () => {
     const pkarr = new MemoryPkarr(DESKTOP_NETWORK);
     const made = invitationWhere("joiner");

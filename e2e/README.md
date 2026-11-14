@@ -442,7 +442,9 @@ E2E_COMPAT_LATEST=v1.7.2 npm run test:e2e:compat               # that release as
   with `dpkg-deb -x` (or, where there is none, as on Arch, with `tar` on the package's `data.tar.*`) into
   `~/.cache/ghostly/compat/desktop-<tag>` (same cache and `E2E_COMPAT_CACHE`) and prints `usr/bin/ghostly`. `--tag newest`
   takes the newest release tag, leaving out the commit under test, whose `SHA256SUMS.txt` is public and lists the
-  package (a draft's answers 404). The spec opens that binary (`binary` in `openDesktop` and `desktopPerson`). It needs the same
+  package (a draft's answers 404). With a GitHub token (`GH_TOKEN`, `GITHUB_TOKEN`, else `gh auth token`) it downloads
+  through the API's asset endpoint, signed in, since GitHub may answer anonymous release downloads with 504s for hours;
+  without one, anonymously. The spec opens that binary (`binary` in `openDesktop` and `desktopPerson`). It needs the same
   system libraries as the current Desktop (WebKitGTK 4.1, GStreamer). A machine where no tool unpacks the package skips
   the spec with the reason.
 - **The config.** `playwright.compat.config.ts` starts five servers (the current build, with mini-apps on as in the

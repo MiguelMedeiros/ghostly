@@ -72,7 +72,7 @@ export class FedimintLightning implements LightningProvider {
       const fee = await this.estimateFee(invoice, amount);
       if (fee > maxFee) throw new Error(`The gateway's fee (${fee} sats) is above your maximum`);
       const balance = Math.floor(await this.client().balance() / 1000);
-      if (balance < amount + fee) throw new Error(`Not enough in this federation (${balance.toLocaleString()} sats; ${(amount + fee).toLocaleString()} needed)`);
+      if (balance < amount + fee) throw new Error(`Not enough in this federation (${balance.toLocaleString("en-US")} sats; ${(amount + fee).toLocaleString("en-US")} needed)`);
     } catch (error) { throw isNothingSpentError(error) ? error : new NothingSpentError(message(error)); }
     try {
       paid = await this.client().payInvoice(invoice, note?.slice(0, 64) ?? "lightning");

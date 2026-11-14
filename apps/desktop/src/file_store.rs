@@ -85,7 +85,8 @@ impl FileStore {
     /// profile's folder. The page removes its copy once the save command answers (`saveStaged` in
     /// packages/browser/src/platform/services.ts), but a save dialog that never answers (on Linux GTK's can open
     /// out of sight, and waits with no timeout) keeps the command waiting, and closing the app or reloading the page
-    /// then leaves the copy behind. Nothing is being saved yet here. Best effort.
+    /// then leaves the copy behind. Nothing is being saved yet here. The hidden copies `own` makes (`.<id>.own`) that
+    /// a kill left before their rename go too: nothing is written yet either. Best effort.
     pub fn remove_staged_saves(&self) {
         let Ok(spaces) = fs::read_dir(&self.base) else {
             return;
@@ -97,6 +98,13 @@ impl FileStore {
             };
             if check_space(name).is_ok() && space.path().is_dir() {
                 let _ = self.remove_where(name, STAGED_SAVE_PREFIX);
+                for entry in fs::read_dir(space.path()).into_iter().flatten().flatten() {
+                    let file = entry.file_name();
+                    let file = file.to_string_lossy();
+                    if file.starts_with('.') && file.ends_with(".own") && entry.path().is_file() {
+                        let _ = fs::remove_file(entry.path());
+                    }
+                }
             }
         }
     }
@@ -207,6 +215,14 @@ impl FileStore {
         let to = self.path(space, id)?;
         #[cfg(unix)]
         {
+            use std::os::unix::fs::MetadataExt;
+            // Already that file (a retry, or a name a case-insensitive disk folds to the same one): removing `to` first
+            // would remove the only name it has.
+            if let (Ok(a), Ok(b)) = (fs::metadata(&from), fs::metadata(&to)) {
+                if a.dev() == b.dev() && a.ino() == b.ino() {
+                    return Ok(());
+                }
+            }
             private_folder(to.parent().unwrap()).map_err(io_text)?;
             self.remove(space, id)?;
             fs::hard_link(&from, &to).map_err(io_text)
@@ -261,14 +277,13 @@ impl FileStore {
             let Ok(meta) = entry.metadata() else {
                 continue;
             };
-            if !meta.is_file() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            // A hidden name is never a file of the page's (`check_id`): an `own` copy a kill left behind.
+            if !meta.is_file() || name.starts_with('.') {
                 continue;
             }
-            if entry
-                .file_name()
-                .to_string_lossy()
-                .starts_with(STAGED_SAVE_PREFIX)
-            {
+            if name.starts_with(STAGED_SAVE_PREFIX) {
                 usage.staged += meta.len();
             } else {
                 usage.files += meta.len();
@@ -898,6 +913,13 @@ mod tests {
             }
         );
         assert!(files.usage("../p").is_err(), "a space is never a path");
+        // A hidden copy a kill left behind in `own` is not one of the profile's files, and goes at start.
+        fs::write(dir.join("p").join(".chat-in-a.own"), [6; 4000]).unwrap();
+        assert_eq!(files.usage("p").unwrap().files, 1024);
+        assert_eq!(files.usage("p").unwrap().count, 2);
+        files.remove_staged_saves();
+        assert!(!dir.join("p").join(".chat-in-a.own").exists());
+        assert_eq!(files.size("p", "chat-in-a").unwrap(), Some(1000));
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -978,6 +1000,24 @@ mod tests {
         assert_eq!(
             files.read("ghostly_staged", "chat-in-w", 0, 100).unwrap(),
             b"video bytes more"
+        );
+        // A link onto the same file (a retry, or a name the disk folds to the same one) leaves it where it is.
+        files
+            .link("ghostly", "chat-in-v", "ghostly", "chat-in-v")
+            .unwrap();
+        assert_eq!(
+            files.read("ghostly", "chat-in-v", 0, 100).unwrap(),
+            b"video bytes"
+        );
+        files
+            .link("ghostly", "chat-in-v", "ghostly_staged", "chat-in-w")
+            .unwrap();
+        files
+            .link("ghostly", "chat-in-v", "ghostly_staged", "chat-in-w")
+            .unwrap();
+        assert_eq!(
+            files.read("ghostly_staged", "chat-in-w", 0, 100).unwrap(),
+            b"video bytes"
         );
         // No hidden copy is left beside them, and a name is never a path.
         assert_eq!(fs::read_dir(dir.join("ghostly_staged")).unwrap().count(), 2);

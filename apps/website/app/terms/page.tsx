@@ -25,7 +25,7 @@ export const metadata: Metadata = {
   },
 };
 
-const LAST_UPDATED = "September 28, 2026";
+const LAST_UPDATED = "November 5, 2026";
 
 export default function TermsPage() {
   return (
@@ -77,7 +77,7 @@ export default function TermsPage() {
       </Section>
 
       <Section title="What we run, and what we do not">
-        <p>We run two websites, and nothing else that Ghostly depends on:</p>
+        <p>We run two websites and two relays:</p>
         <ul className="list-disc pl-6 space-y-3">
           <li>
             <Term>ghostly.tools</Term> serves this website. It also serves two small public files: the number of the
@@ -88,10 +88,16 @@ export default function TermsPage() {
             <Term>app.ghostly.tools</Term> serves the files of the web app. Once loaded, the app runs in your browser
             tab. The site never receives your messages, keys, contacts or money.
           </li>
+          <li>
+            <Term>pkarr.miguelmedeiros.dev</Term> and <Term>iroh.miguelmedeiros.dev</Term> are a Pkarr relay and an
+            Iroh relay, among the defaults next to public ones. Like any relay, they see your IP address, the keys you
+            publish or look up, when you connect and how much you send, never the content. You can set your own relays
+            in Settings.
+          </li>
         </ul>
         <p>
-          We do not run any relay, DHT node, STUN or TURN server, push service, Cashu mint, Fedimint federation,
-          Lightning node, Ark server or storage service. The installers are published on GitHub, and the extension on
+          We do not run any other relay, nor any DHT node, STUN or TURN server, push service, Cashu mint, Fedimint
+          federation, Lightning node, Ark server or storage service. The installers are published on GitHub, and the extension on
           the Chrome Web Store.
         </p>
         <p>

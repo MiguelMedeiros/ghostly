@@ -362,3 +362,23 @@ it("reads a handful of the contact's policies a minute: a flood of policy, ready
   expect(coordinator.pending?.remote.descriptors["iroh/1"]).toEqual(node(50));
   coordinator.stop();
 });
+it("reads the contact's policy said again as a moved session begins for free, once per session: a repeat flood still spends the window", () => {
+  vi.useFakeTimers();
+  const peer = vi.fn();
+  const own = { preferred: "webrtc/1" as const, fallback: true, available: ["webrtc/1", "iroh/1"] as TransportPolicy["available"], descriptors: {} };
+  const side = new TransportSwitch({ key: "1", peerKey: "0", policy: () => own, send: () => {}, peer, state: vi.fn(), prepare: vi.fn(), cancel: vi.fn(), timeoutMs: 100 });
+  const policy = { revision: 1, intent: 1, preferred: "iroh/1", fallback: true, available: ["webrtc/1", "iroh/1"], descriptors: {} };
+  const say = (context: string) => side.handle({ t: "paired-policy", context, replaces: true, policy });
+  side.begin("session-1", "webrtc/1");
+  say("session-1");
+  // On one session: the first repeat is free, the others spend the window (9 left), the rest wait.
+  for (let i = 0; i < 20; i++) say("session-1");
+  expect(peer).toHaveBeenCalledTimes(11);
+  // The move's new session: the contact says it again as it begins, read though the window is spent.
+  side.begin("session-2", "iroh/1", true);
+  say("session-2");
+  expect(peer).toHaveBeenCalledTimes(12);
+  say("session-2");
+  expect(peer).toHaveBeenCalledTimes(12);
+  side.stop();
+});

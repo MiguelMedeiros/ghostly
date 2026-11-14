@@ -1,5 +1,6 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createLink, encodeInviteCode } from "@ghostly/core";
 import type { BrowserHost } from "@ghostly/browser/host";
 import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import type { HandoffView } from "@ghostly/browser/devices/handoff";
@@ -10,11 +11,12 @@ import { DevicesSection } from "../../components/devices/DevicesSection";
 import { HandoffProgress } from "../../components/devices/Handoff";
 import { deviceLook } from "../../components/devices/DeviceGlyph";
 import { LimitedBanner, resetLimitedStart } from "../../components/devices/LimitedStart";
+import { RemoveHereDialog } from "../../components/devices/RemoveHereDialog";
 import { TakeoverDialog } from "../../components/devices/TakeoverDialog";
 import { Settings } from "../../pages/Settings";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
-import { createProfile, namespaceOf } from "../../lib/profiles";
+import { activeProfileId, createProfile, namespaceOf, renameProfile } from "../../lib/profiles";
 import { defaultDeviceName } from "../../lib/devices";
 import { loadLocale, translatorFor } from "../../locales";
 import { setPushPlatform, type PushPlatform } from "../../lib/wakePush";
@@ -176,9 +178,23 @@ describe("Profile, Devices", () => {
     const { engine } = renderApp(<DevicesSection />);
     // The handoff view keeps the name the device had when the move failed; the set has its new one.
     engine.on("deviceSet", () => set({ devices: set().devices.map((device) => (device.key === PHONE ? { ...device, name: "Pixel" } : device)) }));
-    engine.on("deviceHandoffView", () => ({ role: "giver", device: "iPhone", key: PHONE, step: "failed", bytes: 0, total: 0, failure: "password" }) satisfies HandoffView);
+    engine.on("deviceHandoffView", () => ({ role: "giver", device: "iPhone", key: PHONE, step: "failed", bytes: 0, total: 0, failure: "password", refused: true }) satisfies HandoffView);
     const row = await screen.findByTestId("handoff-wrong-password");
     await waitFor(() => expect(row).toHaveTextContent("Pixel tried to move this profile with a wrong password." + "Let Pixel try again"));
+  });
+
+  it("a wrong password before the device is refused: the row says so, with no Let <device> try again (WISP 06: only at 15)", async () => {
+    // At 1 and at 5 (locked out for an hour) the giver's view carries no `refused`: pressing it then would start the count again.
+    const { engine } = renderApp(<DevicesSection />);
+    let view: HandoffView = { role: "giver", device: "iPhone", key: PHONE, step: "failed", bytes: 0, total: 0, failure: "password" };
+    engine.on("deviceSet", () => set());
+    engine.on("deviceHandoffView", () => view);
+    const row = await screen.findByTestId("handoff-wrong-password");
+    expect(row).toHaveTextContent("iPhone tried to move this profile with a wrong password.");
+    expect(screen.queryByTestId("handoff-allow")).toBeNull();
+    // The fifteenth: refused until the person lets it try again.
+    view = { ...view, refused: true };
+    expect(await screen.findByTestId("handoff-allow", {}, { timeout: 3_000 })).toHaveTextContent("Let iPhone try again");
   });
 
   it("a move under way whose dialog was closed: its steps and Cancel stay in the section, and no second Move to is offered", async () => {
@@ -275,6 +291,30 @@ describe("Profile, Devices", () => {
     expect(screen.getByTestId("device-remove-open")).toBeInTheDocument();
   });
 
+  it("a move under way: neither Add a device nor a new device secret is offered, which the engine refuses as busy, until the move is cancelled", async () => {
+    const { user, engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => set());
+    let handoff: HandoffView | null = { role: "giver", device: "iPhone", key: PHONE, step: "connecting", bytes: 0, total: 0 };
+    engine.on("deviceHandoffView", () => handoff);
+    engine.on("deviceHandoffCancel", () => { handoff = null; });
+    const running = await screen.findByTestId("handoff-running");
+    // Pressed, Add a device would ask for the lock password and only then say "Something else is changing your devices".
+    const add = screen.getByTestId("device-add-open"), secret = screen.getByTestId("device-secret-new");
+    expect(add).toHaveAttribute("aria-disabled", "true");
+    expect(secret).toHaveAttribute("aria-disabled", "true");
+    await user.click(add);
+    await user.click(secret);
+    expect(screen.queryByTestId("device-add")).toBeNull();
+    expect(engine.callsTo("deviceNewSecret")).toHaveLength(0);
+    // Off, not disabled: the keyboard focus stays on it (a move the other device starts would otherwise drop it).
+    expect(secret).toHaveFocus();
+    await user.click(within(running).getByTestId("handoff-cancel"));
+    await waitFor(() => expect(screen.queryByTestId("handoff-running")).toBeNull(), { timeout: 3_000 });
+    expect(add).not.toHaveAttribute("aria-disabled");
+    await user.click(add);
+    expect(await screen.findByTestId("device-add")).toBeInTheDocument();
+  });
+
   it("on a standby the section shows no move: its screen does", async () => {
     const { engine } = renderApp(<DevicesSection />);
     engine.on("deviceSet", () => set({ state: "standby", devices: set().devices.map((device) => ({ ...device, active: device.key === PHONE, self: device.key === TABLET })) }));
@@ -321,6 +361,10 @@ describe("the handoff's progress", () => {
     expect(steps[1]).toHaveAttribute("aria-current", "step");
     expect(steps[1]).toHaveTextContent("Copying files · 120 MB of 480 MB");
     expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "25");
+    // In forced colors the backgrounds are the page's: the track keeps an edge and the fill a system colour of its own.
+    expect(screen.getByRole("progressbar").className).toContain("forced-colors:border-[color:CanvasText]");
+    expect(screen.getByRole("progressbar").className).toContain("forced-colors:forced-color-adjust-none");
+    expect((screen.getByRole("progressbar").firstElementChild as HTMLElement).className).toContain("forced-colors:bg-[color:Highlight]");
     expect(screen.getByTestId("handoff-cancel")).toHaveTextContent("Cancel");
     expect(screen.getByTestId("handoff-progress")).toHaveTextContent("Nothing changes until the last step.");
   });
@@ -622,6 +666,24 @@ describe("a limited start (WISP 06 § When a device checks)", () => {
     } finally { delete (fakeEngine as BrowserHost).restartEngine; }
   });
 
+  it("an invite link opened while it asks makes no chat until Start anyway: the copy may turn out to be a standby", async () => {
+    fakeEngine.setState({ limited: true });
+    window.location.hash = `#/chat/${encodeInviteCode(createLink().invite)}`;
+    const chats = () => Object.values(localStorage).filter((value) => value.includes("\"mySeedB64\""));
+    try {
+      render(<Root />);
+      expect(await screen.findByTestId("limited-start")).toBeInTheDocument();
+      // The keys leave the address at once, as under the lock, but no chat is written while the question shows.
+      await waitFor(() => expect(window.location.hash).not.toContain("/chat/pair"));
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+      expect(chats()).toEqual([]);
+      // Start anyway: the profile offline, where an invite makes its chat as it does offline.
+      act(() => screen.getByTestId("limited-start-go-on").click());
+      await waitFor(() => expect(chats()).toHaveLength(1));
+      expect(chats()[0]).toContain("\"viaLink\":true");
+    } finally { window.location.hash = ""; }
+  });
+
   it("a check while going online is not a limited start: no question, and the line only once it lasts", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout"] });
     renderApp(<LimitedBanner />);
@@ -644,7 +706,7 @@ describe("a limited start (WISP 06 § When a device checks)", () => {
     expect(await screen.findByTestId("sidebar")).toBeInTheDocument();
     expect(screen.queryByTestId("limited-start")).toBeNull();
     expect(screen.queryByTestId("limited-banner")).toBeNull();
-    const typing = screen.getAllByRole("textbox")[0];
+    const typing = screen.getByRole("searchbox", { name: "Search chats" });
     act(() => typing.focus());
     // No source answered: a limited start, but the person is already using the app, so it is not taken away.
     act(() => fakeEngine.setState({ limited: true }));
@@ -757,5 +819,24 @@ describe("a device's name in a right-to-left language", () => {
     expect(names(dialog)).toEqual(["Pixel-of-a-very-", "Pixel-of-a-very-", "Pixel-of-a-very-"]);
     expect(dialog.querySelector("h2")).toHaveTextContent("تتولى الأمر بدون Pixel-of-a-very-؟");
     expect(screen.getByLabelText("اكتب Pixel-of-a-very- للتأكيد")).toBe(screen.getByTestId("takeover-name"));
+  });
+
+  it("keeps the profile's own direction in Remove this profile here's title and the name to type", () => {
+    renameProfile(activeProfileId(), "Work (2)");
+    renderApp(<RemoveHereDialog onClose={() => {}} />, { language: "ar" });
+    const dialog = screen.getByTestId("device-remove-here");
+    expect(names(dialog)).toEqual(["Work (2)", "Work (2)"]);
+    expect(dialog.querySelector("h2")).toHaveTextContent("إزالة Work (2) من هذا الجهاز؟");
+    expect(screen.getByLabelText("اكتب Work (2) للتأكيد")).toBe(screen.getByTestId("device-remove-here-name"));
+    expect(screen.getByTestId("device-remove-here-name")).toHaveAttribute("dir", "auto");
+  });
+
+  it("keeps the profile's own direction in the name to type to start a removed copy as its own profile", () => {
+    renameProfile(activeProfileId(), "Work (2)");
+    renderApp(<LimitedBanner />, { language: "ar" });
+    act(() => fakeEngine.setState({ limited: true, restoreCheck: "removed" }));
+    // An attribute has no <bdi>: the name sits between the isolate marks (FSI … PDI) instead.
+    expect(screen.getByTestId("restore-limited-name")).toHaveAttribute("placeholder", "اكتب \u2068Work (2)\u2069 لبدئه كملف مستقل");
+    expect(screen.getByTestId("restore-limited-name")).toHaveAttribute("aria-label", "اكتب \u2068Work (2)\u2069 لبدئه كملف مستقل");
   });
 });

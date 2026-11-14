@@ -1,9 +1,10 @@
 import { identityStatement, type IdentityBinding, type IdentityStatement } from "@ghostly/core";
 import { IDENTITY_PROVIDERS } from "@ghostly/browser/proofs/registry";
-import type { IdentityProofProvider, IdentitySigner, SignerInstructions } from "@ghostly/browser/proofs/contract";
+import { parseProofBunker } from "@ghostly/browser/proofs/nostr";
+import type { IdentityProofProvider, IdentitySigner, SignerField, SignerInstructions } from "@ghostly/browser/proofs/contract";
 import type { IdentityProofView } from "@ghostly/browser/shared/types";
 import { IDENTITY_DRAFT_TTL_MS, IDENTITY_MAX_DRAFTS } from "@ghostly/browser/engine/identities";
-import { chatOf, node, num, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { chatOf, node, num, ownChatOf, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError } from "./errors";
 
 /**
@@ -47,7 +48,7 @@ function headless(s: IdentitySigner<unknown>): boolean {
 function signerOf(p: IdentityProofProvider, id?: string): IdentitySigner<unknown> {
   const usable = p.signers.filter(headless);
   const found = id ? p.signers.find((s) => s.id === id) : usable[0];
-  if (!found) throw new CliError(id ? "not_found" : "unavailable", id ? `${p.label} has no signer ${id}` : `${p.label} proofs need a browser window: make them in the app`);
+  if (!found) throw new CliError(id ? "not_found" : "unavailable", id ? `${p.label} has no signer ${id}` : `${p.label}: this kind of proof needs a browser window, make it in the app`);
   if (!headless(found)) {
     const instead = usable.length ? ` (here: --signer ${usable.map((s) => s.id).join(" or ")})` : "";
     throw new CliError("unavailable", `${found.label} needs a browser window: make this proof in the app${instead}`);
@@ -55,8 +56,28 @@ function signerOf(p: IdentityProofProvider, id?: string): IdentitySigner<unknown
   return found as IdentitySigner<unknown>;
 }
 
-function instructionsJson(i: SignerInstructions) {
-  return { steps: i.steps.map((s) => ({ text: s.text, ...(s.copy ? { copy: s.copy } : {}) })), ...(i.paste ? { paste: i.paste.label } : {}) };
+const keep = (verb: string) => (verb[0] === verb[0].toUpperCase() ? "Keep" : "keep");
+/**
+ * The app's words for its own Check button and paste field, in the CLI's: what was pasted is kept for the last step,
+ * `identity complete`. The steps stay the app's otherwise (a wallet's "paste the statement" is the wallet's field).
+ */
+const APP_WORDS: [RegExp, (...m: string[]) => string][] = [
+  [/press Check/g, () => "finish it with the last step"],
+  [/\b(paste|copy) (it|the [\w ]+?) into Ghostly/gi, (_, verb, what) => `${keep(verb)} ${what} for the last step`],
+  [/\b(paste) (?=what it prints|the whole signature it prints|the <file>\.sig it writes)/gi, (_, verb) => `${keep(verb)} `],
+];
+const inCliWords = (text: string) => APP_WORDS.reduce((t, [pattern, words]) => t.replace(pattern, words), text);
+
+/** The signer's steps, then the CLI's own last one: `identity complete` with this draft, then `identity share`. */
+function instructionsJson(signer: IdentitySigner<unknown>, i: SignerInstructions, draftId: string) {
+  const share = "It answers the proof; show it to a contact with ghostly identity share <chat> <id>.";
+  const last = signer.kind === "publish"
+    ? { text: `Once it is published, check it from here: the engine looks it up. ${share}`, copy: `ghostly identity complete ${draftId}` }
+    : { text: `Then finish it with what you kept${i.paste ? ` (${i.paste.label})` : ""}, from a file or piped to it (… | ghostly identity complete ${draftId}). ${share}`, copy: `ghostly identity complete ${draftId} --evidence-file <file>` };
+  return {
+    steps: [...i.steps.map((s) => ({ text: inCliWords(s.text), ...(s.copy ? { copy: s.copy } : {}) })), last],
+    ...(i.paste ? { paste: i.paste.label } : {}),
+  };
 }
 
 export function proofJson(p: IdentityProofView) {
@@ -64,6 +85,12 @@ export function proofJson(p: IdentityProofView) {
     id: p.id, provider: p.provider, subject: p.subject, verified: p.verified, issuedAt: p.issuedAt, expiresAt: p.expiresAt,
     sharedWith: p.sharedWith, ...(p.publicUri ? { publicUri: p.publicUri } : {}),
   };
+}
+
+/** Where the CLI takes a signer's field: a secret (a bunker:// link) on stdin first, kept out of ps and the shell's history. */
+function howToGive(field: SignerField): string {
+  const stdin = `on stdin (--stdin, a ${field.name}=... line)`, flag = `--field ${field.name}=...`;
+  return field.kind === "secret" ? `give it ${stdin}, or ${flag}` : `give it with ${flag}, or ${stdin}`;
 }
 
 function pruneDrafts(now = Date.now()) {
@@ -103,7 +130,14 @@ export const IDENTITY_METHODS: Record<string, Method> = {
     if (signer.kind === "in-app") {
       const values = (params.fields ?? {}) as Record<string, string>;
       if (typeof values !== "object" || Array.isArray(values) || Object.values(values).some((v) => typeof v !== "string")) throw new CliError("bad_request", "fields must be an object of strings");
-      for (const field of signer.fields ?? []) if (!field.optional && !values[field.name]) throw new CliError("bad_request", `${signer.label} needs ${field.name} (${field.label})`);
+      for (const field of signer.fields ?? []) if (!field.optional && !values[field.name]) throw new CliError("usage", `${signer.label} needs ${field.name} (${field.label}): ${howToGive(field)}`);
+      // A NIP-46 link read as the signer will read it: one it refuses is the user's input, not an engine failure.
+      const bunker = signer.fields?.find((f) => f.name === "bunker");
+      if (bunker && values.bunker) {
+        try { parseProofBunker(values.bunker); } catch (error) {
+          throw new CliError("bad_request", `${bunker.name} (${bunker.label}): ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
       const seconds = num(params, "timeout", 300, { min: 5, max: 3600 });
       const signal = AbortSignal.timeout(seconds * 1000);
       const proof = await signer.run({
@@ -140,7 +174,7 @@ export const IDENTITY_METHODS: Record<string, Method> = {
     const statement = identityStatement(binding);
     while (drafts.size >= IDENTITY_MAX_DRAFTS) drafts.delete(drafts.keys().next().value!);
     drafts.set(draftId, { draftId, provider: p.id, signer: signer.id, binding, createdAt: Date.now() });
-    return { done: false, draft: draftId, provider: p.id, signer: signer.id, statement: statement.text, instructions: instructionsJson(signer.instructions(statement)), expiresInSeconds: IDENTITY_DRAFT_TTL_MS / 1000 };
+    return { done: false, draft: draftId, provider: p.id, signer: signer.id, statement: statement.text, instructions: instructionsJson(signer, signer.instructions(statement), draftId),expiresInSeconds: IDENTITY_DRAFT_TTL_MS / 1000 };
   },
 
   /** Finishes a two-step proof: what the tool printed (external-tool), or nothing (publish: the engine looks it up). */
@@ -186,15 +220,18 @@ export const IDENTITY_METHODS: Record<string, Method> = {
   },
 
   async "identity.share"(ctx, params) {
-    const link = chatOf(ctx, params);
+    // The contact keeps the proof: a contact's own name or a prefix of its id never names the chat.
+    const s = state(ctx);
+    const link = ownChatOf(ctx, params, s);
     const id = str(params, "id", true);
-    if (!state(ctx).identityProofs.some((p) => p.id === id)) throw new CliError("not_found", `No identity proof ${JSON.stringify(id)} (ghostly identity list)`);
+    if (!s.identityProofs.some((p) => p.id === id)) throw new CliError("not_found", `No identity proof ${JSON.stringify(id)} (ghostly identity list)`);
     await node(ctx).shareIdentityProof({ linkId: link.id, id });
     return { chat: link.id, shared: id };
   },
 
   async "identity.withdraw"(ctx, params) {
-    const link = chatOf(ctx, params);
+    // As `identity.share`: a contact's own name or a prefix of its id never names the chat.
+    const link = ownChatOf(ctx, params);
     const id = str(params, "id", true);
     if (!link.identities?.shared.some((s) => s.id === id)) throw new CliError("not_found", `No identity proof ${JSON.stringify(id)} shared in this chat (ghostly identity contact ${link.id})`);
     await node(ctx).withdrawIdentityProof({ linkId: link.id, id });

@@ -19,7 +19,7 @@ import { renderApp } from "../render";
 HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) { this.open = true; };
 
 const KEY = "A".repeat(43);
-const bundleDevices = { d: toBase64Url(new Uint8Array(32).fill(5)), set: [{ key: KEY, name: "MacBook" }, null], turn: 500, takeovers: 0 };
+const bundleDevices: { d: string; set: ({ key: string; name: string } | null)[]; turn: number; takeovers: number; active?: number } = { d: toBase64Url(new Uint8Array(32).fill(5)), set: [{ key: KEY, name: "MacBook" }, null], turn: 500, takeovers: 0, active: 0 };
 
 vi.mock("../../lib/profileBackup", async (original) => ({
   ...(await original<typeof import("../../lib/profileBackup")>()),
@@ -69,6 +69,25 @@ describe("restoring a backup where a device set exists (WISP 06)", () => {
     await user.click(screen.getByTestId("restore-guard-cancel"));
     expect(screen.queryByTestId("restore-guard")).toBeNull();
     expect(restoreOpenedBackup).not.toHaveBeenCalled();
+  });
+
+  it("with the record expired, names the device the bundle says was active, not the device in the first slot", async () => {
+    const PHONE = "B".repeat(43);
+    const { user, engine } = await pickBackup({ ...bundleDevices, set: [{ key: KEY, name: "Desktop" }, { key: PHONE, name: "Phone" }], active: 1 });
+    engine.on("deviceTurnPeek", () => ({ result: "none" }));
+    await user.click(screen.getByTestId("restore-go"));
+    expect(await screen.findByTestId("restore-guard-title")).toHaveTextContent("This profile is active on Phone");
+  });
+
+  it("with the record expired, a bundle from before it said which device was active names none", async () => {
+    const { active: _active, ...old } = bundleDevices;
+    const { user, engine } = await pickBackup({ ...old, set: [{ key: KEY, name: "Desktop" }, { key: "B".repeat(43), name: "Phone" }] });
+    engine.on("deviceTurnPeek", () => ({ result: "none" }));
+    await user.click(screen.getByTestId("restore-go"));
+    expect(await screen.findByTestId("restore-guard-title")).toHaveTextContent("This profile is active on another device");
+    expect(screen.getByTestId("restore-guard-title")).not.toHaveTextContent("Desktop");
+    await user.click(screen.getByTestId("restore-add-instead"));
+    expect(await screen.findByText(/On your other device, open Profile, then Add a device/)).toBeInTheDocument();
   });
 
   it("Add this device instead says where to start, and restores nothing", async () => {

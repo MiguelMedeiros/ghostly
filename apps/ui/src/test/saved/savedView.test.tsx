@@ -7,6 +7,7 @@ import { saveSession } from "../../lib/storage";
 import { Saved } from "../../pages/Saved";
 import { groupView, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
+import { hideApps, showApps } from "../apps/showApps";
 
 // covers: chat.saved
 
@@ -84,9 +85,22 @@ describe("the Saved view", () => {
 
   it("says an app card as the card names it, in the app's language, not its English fallback with the bundle's link", async () => {
     const url = "https://raw.githubusercontent.com/ana/chess/HEAD/chess.ghostlyapp";
-    profile([saved(message("link-1", "peer_1", { text: `🧩 Opened Chess 1.2.0 in this chat (Ghostly app)\n${url}`,
-      card: { kind: "app", id: "a".repeat(22), ref: "r".repeat(52), digest: "d".repeat(43), sequence: 1, title: "Chess", version: "1.2.0", url, opened: true } }))], undefined, "zh");
-    await waitFor(() => expect(texts()).toEqual(["🧩 应用：Chess 1.2.0"]));
+    // A 1:1 chat where Apps shows: its bubble draws the card (elsewhere both say its text, appCardLineWhereShown.test.tsx).
+    showApps();
+    try {
+      profile([saved(message("link-1", "peer_1", { text: `🧩 Opened Chess 1.2.0 in this chat (Ghostly app)\n${url}`,
+        card: { kind: "app", id: "a".repeat(22), ref: "r".repeat(52), digest: "d".repeat(43), sequence: 1, title: "Chess", version: "1.2.0", url, opened: true } }))], undefined, "zh");
+      await waitFor(() => expect(texts()).toEqual(["🧩 应用：Chess 1.2.0"]));
+    } finally { hideApps(); }
+  });
+
+  it("breaks a long unbroken text (a link) inside the word, so it wraps to two lines and ends in …, not cut at the row's edge", async () => {
+    const link = `https://example.com/${"releaseplan".repeat(16)}`;
+    profile([saved(message("link-1", "peer_1", { text: link }))]);
+    await waitFor(() => expect(texts()).toEqual([link]));
+    const text = screen.getByTestId("saved-text");
+    expect(text).toHaveClass("line-clamp-2");
+    expect(text.className).toContain("[overflow-wrap:anywhere]");
   });
 
   it("opens a message's chat on the message", async () => {

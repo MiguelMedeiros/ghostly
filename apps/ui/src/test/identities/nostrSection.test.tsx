@@ -46,7 +46,8 @@ describe("Identities → Nostr relays", () => {
 
     pushAgain({ relays: [TEST_RELAY] });
     expect(relays).toHaveValue(TEST_RELAY);
-    expect(screen.getByTestId("nostr-relays-save")).toBeDisabled();
+    // Nothing left to save: off, by aria-disabled while it still has the focus the click gave it.
+    expect(screen.getByTestId("nostr-relays-save")).toHaveAttribute("aria-disabled", "true");
     // The draft is gone: the field follows the engine again.
     pushAgain({ relays: ["wss://nos.lol"] });
     expect(relays).toHaveValue("wss://nos.lol");

@@ -570,6 +570,17 @@ export function decodeFileData(message: Uint8Array): { id: string; offset: numbe
   return { id, offset: high * 2 ** 32 + view.getUint32(head + 4), data: message.subarray(body) };
 }
 
+/**
+ * Why a received file could not be stored, as its record says it. A storage with no room left is told by the error's
+ * name, `QuotaExceededError` (IndexedDB's, the OPFS worker's, the CLI's), never by its words: each storage words it
+ * its own way, and Chromium's own has no message at all. The app reads that name as "no room here" (errorText.ts).
+ */
+function storeFailure(error: unknown): string {
+  const message = (error instanceof Error ? error.message : String(error)).trim();
+  const quota = (error as { name?: unknown } | null)?.name === "QuotaExceededError" && !message.startsWith("QuotaExceededError");
+  return `Could not store the file: ${quota ? `QuotaExceededError${message ? `: ${message}` : ""}` : message}`;
+}
+
 /** What a refusal means to the sender's person. */
 export function refusalText(why: string, room?: number): { state: TransferState; error: string } {
   switch (why) {
@@ -589,6 +600,12 @@ export class ChatFiles {
   private readonly moving = new Set<Entry>();
   /** Files that stopped sending for the chat's window alone: they go on once another's bytes are confirmed. */
   private readonly held = new Set<Entry>();
+  /**
+   * Files this side cancelled while no session carried the cancel (`pf-abort`), said on the next one. The session also
+   * goes for a moment when a move swaps it (its capabilities are agreed again): unsaid, the receiver showed the file
+   * moving, its bytes kept, until its idle nudge asked 30 s later.
+   */
+  private readonly unsaid = new Set<string>();
   private attached = false;
   private peerRoomValue: number | null = null;
   /** What the chat's files may have in flight, sized by the path. */
@@ -668,6 +685,7 @@ export class ChatFiles {
     this.refill = 0;
     this.host.uplink?.join(this);
     void this.sayRoom();
+    for (const id of this.unsaid) if (this.send({ t: "pf-abort", id })) this.unsaid.delete(id);
     this.sweep();
     for (const entry of this.entries.values()) {
       if (transferEnded(entry.record)) continue;
@@ -941,7 +959,7 @@ export class ChatFiles {
       this.armNudge(entry);
     }, (error) => {
       incoming.starting = false;
-      this.end(entry, "failed", `Could not store the file: ${error instanceof Error ? error.message : String(error)}`);
+      this.end(entry, "failed", storeFailure(error));
       this.send({ t: "pf-refuse", id: entry.record.id, why: "no-room" });
       this.startNext();
     });
@@ -1093,7 +1111,7 @@ export class ChatFiles {
       if (incoming.stored - incoming.checkpointed >= FILE_LIMITS.checkpointBytes) await this.checkpointNow(entry);
     }).catch((error) => {
       if (transferEnded(record)) return;
-      this.end(entry, "failed", `Could not store the file: ${error instanceof Error ? error.message : String(error)}`);
+      this.end(entry, "failed", storeFailure(error));
       void target.then((t) => t.discard()).catch(() => {});
       this.send({ t: "pf-refuse", id: record.id, why: "no-room" });
       this.startNext();
@@ -1336,6 +1354,25 @@ export class ChatFiles {
     this.startNext();
   }
 
+  /**
+   * An offer taken here whose record or message the host could not store: refused, so its sender does not count it
+   * delivered and keeps its Retry, and forgotten, so that retry is a new offer here. Nothing of it is reported changed
+   * (there is nothing to write it to); what was stored of it is removed.
+   */
+  refuse(id: string, why: RefuseReason): void {
+    const entry = this.entries.get(key("in", id));
+    if (!entry || transferEnded(entry.record)) return;
+    this.entries.delete(key("in", id));
+    const incoming = entry.in!;
+    entry.record.state = "failed";
+    clearTimeout(incoming.timer);
+    clearTimeout(incoming.ackTimer);
+    incoming.dropped = true;
+    void incoming.writing.then(() => incoming.target?.then((t) => t.discard())).catch(() => {});
+    this.send({ t: "pf-refuse", id, why });
+    this.startNext();
+  }
+
   pause(direction: "in" | "out", id: string): void {
     const entry = this.entry(direction, id), { record } = entry;
     if (transferEnded(record) || record.state === "verifying" || (record.state === "paused" && record.pausedBy === "me")) return;
@@ -1365,7 +1402,7 @@ export class ChatFiles {
     const entry = this.entry(direction, id);
     if (transferEnded(entry.record)) return;
     if (direction === "out") {
-      this.send({ t: "pf-abort", id });
+      if (!this.send({ t: "pf-abort", id })) this.unsaid.add(id);
       this.end(entry, "cancelled", "You cancelled it");
     } else {
       void this.discardStored(entry);

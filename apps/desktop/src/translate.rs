@@ -41,6 +41,8 @@ pub const FAILED: &str = "Translation failed";
 /// The most texts, and the longest request line, the runtime reads (`protocol.mjs`'s `MAX_TEXTS` and `MAX_LINE`).
 const MAX_TEXTS: usize = 64;
 const MAX_LINE: usize = 1024 * 1024;
+/// The models it keeps loaded at once (`protocol.mjs`'s `MAX_MODELS`), the least recently used unloaded for another.
+const MAX_MODELS: usize = 2;
 /// The longest answer read: a translation may be longer than its text.
 const MAX_ANSWER: u64 = 4 * MAX_LINE as u64;
 
@@ -79,6 +81,11 @@ struct Runtime {
     child: Child,
     input: ChildStdin,
     output: BufReader<ChildStdout>,
+    /// The pairs it translated with lately, least recently first: the models it has loaded.
+    loaded: Vec<String>,
+    /// The last request written whole, and how many written are not answered yet.
+    sent: u64,
+    owed: u64,
 }
 
 /// Asked to leave (its input closed: it unloads its models and exits), then made to.
@@ -92,8 +99,9 @@ async fn stop(mut runtime: Runtime) {
     }
 }
 
-/// One request's answer: the line with its id. Anything else (the runtime gone, a line too long or not JSON, an answer
-/// to another request) means it is out of step.
+/// One request's answer: the line with its id, after the late answers to the requests given up on while a model
+/// loaded. Anything else (the runtime gone, a line too long or not JSON, an answer to another request) means it is out
+/// of step.
 async fn ask(runtime: &mut Runtime, id: u64, line: String) -> Result<Value, ()> {
     runtime
         .input
@@ -101,20 +109,29 @@ async fn ask(runtime: &mut Runtime, id: u64, line: String) -> Result<Value, ()> 
         .await
         .map_err(drop)?;
     runtime.input.flush().await.map_err(drop)?;
-    let mut answer = Vec::new();
-    (&mut runtime.output)
-        .take(MAX_ANSWER + 1)
-        .read_until(b'\n', &mut answer)
-        .await
-        .map_err(drop)?;
-    if answer.last() != Some(&b'\n') {
+    runtime.sent = id;
+    runtime.owed += 1;
+    loop {
+        let mut answer = Vec::new();
+        (&mut runtime.output)
+            .take(MAX_ANSWER + 1)
+            .read_until(b'\n', &mut answer)
+            .await
+            .map_err(drop)?;
+        if answer.last() != Some(&b'\n') {
+            return Err(());
+        }
+        let value: Value = serde_json::from_slice(&answer).map_err(drop)?;
+        if value["id"] == json!(id) {
+            runtime.owed -= 1;
+            return Ok(value);
+        }
+        if runtime.owed > 1 && value["id"].as_u64().is_some_and(|late| late < id) {
+            runtime.owed -= 1;
+            continue;
+        }
         return Err(());
     }
-    let value: Value = serde_json::from_slice(&answer).map_err(drop)?;
-    if value["id"] != json!(id) {
-        return Err(());
-    }
-    Ok(value)
 }
 
 /// The texts of an answer, as many as were asked; or the runtime's error, when it is one the page knows. Nothing else
@@ -143,6 +160,9 @@ pub struct TranslateState {
     /// How long the runtime stays without a request (the design's 5 minutes), and how long one request may take.
     idle: Duration,
     patience: Duration,
+    /// How long a request may take when a model loads first. A fresh runtime's first load took 97-109 s on CI's
+    /// Intel Macs (29-45 s on Apple silicon, under 1 s on Linux and Windows).
+    load_patience: Duration,
     /// The app's data folder, when a test brings its own.
     data: Option<PathBuf>,
 }
@@ -155,6 +175,7 @@ impl Default for TranslateState {
             spawned: Default::default(),
             idle: Duration::from_secs(5 * 60),
             patience: Duration::from_secs(60),
+            load_patience: Duration::from_secs(5 * 60),
             data: None,
         }
     }
@@ -206,6 +227,9 @@ impl TranslateState {
             child,
             input,
             output,
+            loaded: Vec::new(),
+            sent: 0,
+            owed: 0,
         })
     }
 
@@ -257,8 +281,27 @@ impl TranslateState {
             *slot = Some(self.spawn(&installed(data)?)?);
         }
         let runtime = slot.as_mut().expect("runtime");
-        match tokio::time::timeout(self.patience, ask(runtime, id, line)).await {
-            Ok(Ok(value)) => answer(value, count),
+        // Its pair's model to load first, or another's it was still loading when a request gave up on it.
+        let loading = runtime.owed > 0 || !runtime.loaded.iter().any(|loaded| loaded == pair);
+        let patience = if loading {
+            self.load_patience
+        } else {
+            self.patience
+        };
+        match tokio::time::timeout(patience, ask(runtime, id, line)).await {
+            Ok(Ok(value)) => {
+                if value["texts"].is_array() {
+                    runtime.loaded.retain(|loaded| loaded != pair);
+                    runtime.loaded.push(pair.to_string());
+                    if runtime.loaded.len() > MAX_MODELS {
+                        runtime.loaded.remove(0);
+                    }
+                }
+                answer(value, count)
+            }
+            // A model slower to load still: left loading rather than started over (and as slow again). The next
+            // request skips this one's answer.
+            Err(_) if loading && runtime.sent == id => Err(FAILED.into()),
             // Out of step, or stuck: stopped at once. The next request starts another.
             _ => {
                 if let Some(mut runtime) = slot.take() {
@@ -350,7 +393,11 @@ mod runtime_tests {
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRuntime, lineReader } from './protocol.mjs'
-const open = async ({ from, to }) => ({
+const open = async ({ from, to, files }) => {
+  // A `load-ms` file beside the model: its load takes that long.
+  const slow = path.join(path.dirname(files.model), 'load-ms')
+  if (exists(slow)) await new Promise(done => setTimeout(done, Number(fs.readFileSync(slow, 'utf8'))))
+  return {
   async translate(texts) {
     if (texts.includes('crash')) process.exit(3)
     if (texts.includes('hang')) return new Promise(() => {})
@@ -358,7 +405,8 @@ const open = async ({ from, to }) => ({
     return texts.map(text => `[${from}>${to}] ${text}`)
   },
   async close() {},
-})
+  }
+}
 const exists = file => { try { return fs.statSync(file).isFile() } catch { return false } }
 const runtime = createRuntime({ root: process.argv[2], open, exists, join: path.join })
 const write = answer => { process.stdout.write(JSON.stringify(answer) + '\n') }
@@ -400,11 +448,21 @@ process.stdin.on('end', () => { runtime.close().finally(() => process.exit(0)) }
     }
 
     fn app(data: PathBuf, idle: Duration, patience: Duration) -> tauri::App<MockRuntime> {
+        app_loading(data, idle, patience, LONG)
+    }
+
+    fn app_loading(
+        data: PathBuf,
+        idle: Duration,
+        patience: Duration,
+        load_patience: Duration,
+    ) -> tauri::App<MockRuntime> {
         mock_builder()
             .manage(TranslateState {
                 data: Some(data),
                 idle,
                 patience,
+                load_patience,
                 ..TranslateState::default()
             })
             .build(tauri::generate_context!(test = true))
@@ -635,6 +693,61 @@ process.stdin.on('end', () => { runtime.close().finally(() => process.exit(0)) }
         assert_eq!(spawned(&app), 2);
     }
 
+    fn slow_load(data: &Path, millis: u64) {
+        std::fs::write(
+            data.join(MODELS_DIR).join("pt-en").join("load-ms"),
+            millis.to_string(),
+        )
+        .unwrap();
+    }
+
+    /// A pair's first request waits for its model to load, longer than a request on a loaded model may take; once
+    /// loaded, a stuck request is given up on as soon as before.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_model_loading_gets_its_own_patience_and_a_loaded_one_the_usual() {
+        let data = data("loading");
+        slow_load(&data, 2000);
+        let app = app_loading(data, LONG, Duration::from_secs(1), LONG);
+        assert_eq!(
+            translate(&app, "pt-en", &["um"]).await,
+            Ok(vec!["[pt>en] um".to_string()])
+        );
+        let first = pid(&app).await.unwrap();
+        let started = std::time::Instant::now();
+        assert_eq!(
+            translate(&app, "pt-en", &["hang"]).await,
+            Err(FAILED.into())
+        );
+        assert!(started.elapsed() < Duration::from_secs(5));
+        until("the hung runtime stopped", || !alive(first)).await;
+        assert_eq!(spawned(&app), 1);
+    }
+
+    /// A load slower still is not started over: the runtime goes on loading, and the next request has the model.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_load_slower_than_its_patience_goes_on_rather_than_starting_over() {
+        let data = data("slower");
+        slow_load(&data, 3000);
+        let app = app_loading(
+            data,
+            LONG,
+            Duration::from_millis(500),
+            Duration::from_secs(2),
+        );
+        assert_eq!(translate(&app, "pt-en", &["um"]).await, Err(FAILED.into()));
+        let first = pid(&app).await.expect("still loading");
+        assert_eq!(
+            translate(&app, "pt-en", &["dois"]).await,
+            Ok(vec!["[pt>en] dois".to_string()])
+        );
+        assert_eq!(
+            translate(&app, "pt-en", &["três"]).await,
+            Ok(vec!["[pt>en] três".to_string()])
+        );
+        assert_eq!(pid(&app).await, Some(first));
+        assert_eq!(spawned(&app), 1);
+    }
+
     /// The archive `tools/scripts/prepare-translation-runtime.mjs` built on this host, checked against its `.sha256`
     /// and unpacked where the app looks, on Mozilla's pt-en model (cached by `translationRuntime.test.ts`). Passes
     /// without checking anything where neither was built: CI builds no runtime for the unit tests.
@@ -687,7 +800,13 @@ process.stdin.on('end', () => { runtime.close().finally(() => process.exit(0)) }
             std::fs::copy(file.path(), pair.join(file.file_name())).unwrap();
         }
 
-        let app = app(data.clone(), Duration::from_secs(2), LONG);
+        // The app's own patience for the model's load: on an Intel Mac it took longer than a request may.
+        let app = app_loading(
+            data.clone(),
+            Duration::from_secs(2),
+            LONG,
+            TranslateState::default().load_patience,
+        );
         let started = std::time::Instant::now();
         let texts = translate(
             &app,

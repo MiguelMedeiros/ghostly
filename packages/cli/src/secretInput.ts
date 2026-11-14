@@ -49,6 +49,7 @@ export async function secretsFromStdin(method: string, params: Record<string, un
     // `secretValuesWarning` once the source's form is known.
     const onLine = params.apiKey !== undefined;
     if (params.stdin === true) {
+      if (tty) throw new CliError("usage", "--stdin takes the values as name=value lines piped to it (… | ghostly wallet create <type> --stdin), not a terminal");
       const values = { ...(params.values as Record<string, string> | undefined) };
       for (const line of (await read()).split(/\r?\n/)) {
         if (!line.trim()) continue;
@@ -67,12 +68,33 @@ export async function secretsFromStdin(method: string, params: Record<string, un
 }
 
 /**
+ * `x401 credential add -`: the SD-JWT VC from stdin. Nothing there, or a terminal (a read that would wait on the
+ * keyboard without a word), is the usage error a join gives.
+ */
+export async function credentialFromStdin(read: StdinRead, tty = false): Promise<string> {
+  const missing = () => new CliError("usage", "Missing <file|->: give the SD-JWT VC on stdin (… | ghostly x401 credential add -) or as a file");
+  if (tty) throw missing();
+  const credential = await read();
+  if (!credential) throw missing();
+  return credential;
+}
+
+/**
  * `send`, `edit`, `group send` and `group edit` with no text words read it from stdin the same way: `command` is the
  * command line as given (`send bob`). `asked`: `--stdin`, which waits as long as it takes.
  */
 export async function textFromStdin(read: StdinRead, command: string, asked: boolean, note: (text: string) => void): Promise<string> {
   const text = asked ? await read() : await readUnasked(read, note, { what: "the text", missing: "No text", command, as: "arguments" });
   return text.replace(/\n$/, "");
+}
+
+/**
+ * `identity complete <draft> --stdin` (or `--evidence-file -`): what the tool printed, from stdin. A terminal (a read
+ * that would wait on the keyboard without a word) is a usage error, as identity add --stdin's is.
+ */
+export async function evidenceFromStdin(read: StdinRead, draft: string, tty = false): Promise<string> {
+  if (tty) throw new CliError("usage", `Missing what the tool printed: stdin is a terminal; pipe it in (… | ghostly identity complete ${draft}) or give --evidence-file f`);
+  return read();
 }
 
 /**
@@ -95,7 +117,7 @@ export async function completeWithPipedEvidence(call: (params: Record<string, un
  */
 export async function settingValue(key: string, value: string | undefined, read: StdinRead, tty = false, note: (text: string) => void = () => {}): Promise<{ value: string; warning?: string }> {
   // No value at all: the usage error every command gives (reason, then the usage line); an empty stdin after `-` says how.
-  const usage = "Missing <json-value>: ghostly settings set <key> <json-value>";
+  const usage = "Missing <json-value>: ghostly settings set <key> <json-value> [--force]";
   if (value !== undefined && value !== "-") return { value, ...(key === "iceServers" && hasCredential(value) && { warning: `A TURN password on the command line shows in ps and the shell's history: give it on stdin instead (… | ghostly settings set ${key} -)` }) };
   if (value === undefined && tty) throw new CliError("usage", usage);
   const text = (value === "-" ? await read() : await readUnasked(read, note, { what: "the value", missing: "Missing <json-value>", command: `settings set ${key}`, as: "an argument" })).replace(/\r?\n$/, "");

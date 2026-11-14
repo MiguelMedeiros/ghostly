@@ -30,10 +30,13 @@ const seedAt = (linkKeyZ32: string) => ({ store: STORES.settings, key: linkKeyZ3
 interface StoredRequest extends ContactRequest {
   key: string;
   receivedAt: number;
+  /** The link it came through: a request kept past a new link still names the old one, which its asker's proof signs. */
+  link?: string;
 }
 
 interface StoredContactLinks {
-  current?: StoredLink & { inbox: InboxState; published?: number; requests?: StoredRequest[] };
+  /** `polled`: when the knock slots were last read, kept so a one-shot that lists requests in a loop keeps the pace too. */
+  current?: StoredLink & { inbox: InboxState; published?: number; polled?: number; requests?: StoredRequest[] };
   /** Links turned off, still saying so. */
   retired: Array<StoredLink & { offAt: number; said?: number }>;
 }
@@ -47,8 +50,11 @@ export interface ContactLinkHost {
   resolve(pubKeyZ32: string): Promise<GhostRecord[] | null>;
   /** Whether a chat invite is one this profile made or already joined: a request carrying one is no request. */
   ownInvite(code: string): boolean;
-  /** Joins a request's invite as a chat named and opened as the request says; the chat's id. */
-  accept(request: ContactRequest & { key: string; receivedAt: number }): Promise<string>;
+  /**
+   * Joins a request's invite as a chat named and opened as the request says; the chat's id. Its text shows as not
+   * confirmed until the requester's app proves, in the chat, that it holds `key` (asked through `link`).
+   */
+  accept(request: ContactRequest & { key: string; receivedAt: number; link: string }): Promise<string>;
 }
 
 export const CONTACT_LINKS_KEY = "contactLinks";
@@ -104,7 +110,7 @@ export class ContactLinks {
    */
   shown(): void {
     this.shownAt = Date.now();
-    this.schedulePoll(0);
+    this.schedulePoll(this.pollDue());
   }
 
   /** Whether a link key is one of this profile's, current or turned off. */
@@ -123,10 +129,13 @@ export class ContactLinks {
    */
   accept(id: string): Promise<{ linkId: string }> {
     return this.serial(async () => {
-      const request = this.stored.current?.requests?.find(r => r.key === id);
-      if (!request) throw new Error("This request is no longer waiting");
+      const current = this.stored.current;
+      const request = current?.requests?.find(r => r.key === id);
+      if (!current || !request) throw new Error("This request is no longer waiting");
       if (request.expires <= Date.now()) throw new Error("This request expired");
-      const linkId = await this.host.accept(request);
+      // Taken before requests kept their link: the current one. Had it come through an older one, no proof holds and
+      // its text stays not confirmed, which is the safe side.
+      const linkId = await this.host.accept({ ...request, link: request.link ?? current.linkKeyZ32 });
       await this.settle(id);
       return { linkId };
     });
@@ -137,9 +146,18 @@ export class ContactLinks {
     return this.serial(() => this.settle(id));
   }
 
-  /** Reads the knock slots once and takes what is new into Requests. */
+  /**
+   * Reads the knock slots once and takes what is new into Requests. Never faster than the link's fastest pace: within
+   * `POLL_SHOWN_MS` of the last read, what that read took is the answer.
+   */
   poll(): Promise<void> {
-    return this.serial(() => this.take());
+    return this.serial(async () => { if (this.pollDue() === 0) await this.take(); });
+  }
+
+  /** How long until the knock slots may be read again. */
+  private pollDue(): number {
+    const since = Date.now() - (this.stored.current?.polled ?? -Infinity);
+    return since >= 0 && since < POLL_SHOWN_MS ? POLL_SHOWN_MS - since : 0;
   }
 
   /** Undefined while the profile has no link. */
@@ -246,7 +264,7 @@ export class ContactLinks {
         const request = records ? openRequest(seedB64, key, records, now) : null;
         if (!request || this.host.ownInvite(request.invite)) continue;
         inbox = takeRequest(linkKey, inbox, key, request.expires, now);
-        taken.push({ ...request, key, receivedAt: now });
+        taken.push({ ...request, key, receivedAt: now, link: linkKey });
       }
     }
     // A publish that went out meanwhile marked the link: keep its mark. Requests are only ever changed in this queue.
@@ -254,7 +272,7 @@ export class ContactLinks {
     if (!latest || latest.linkKeyZ32 !== linkKey) return;
     const requests = [...current.requests ?? [], ...taken].filter(r => inbox.waiting.some(w => w.key === r.key));
     const changed = plan.publish || taken.length > 0 || inbox.state !== current.inbox.state || inbox.bits !== current.inbox.bits;
-    await this.save({ ...this.stored, current: { ...latest, inbox, requests } });
+    await this.save({ ...this.stored, current: { ...latest, inbox, requests, polled: now } });
     this.host.emit();
     if (changed) await this.publishNow();
   }

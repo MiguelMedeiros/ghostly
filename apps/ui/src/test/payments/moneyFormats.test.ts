@@ -118,6 +118,24 @@ describe("BIP 21 links", () => {
     expect(findMoney(`bitcoin:?ark=${ark}&req-amount=0.00005`)).toMatchObject({ type: "ark" });
   });
 
+  it("reads a known parameter written as required as that parameter, never as missing", () => {
+    const uriOf = (text: string) => (findMoney(text) as { request: { uri?: string } }).request.uri;
+    const ark = arkadeAddress("tark");
+    expect(findMoney(`bitcoin:?ark=${ark}&req-amount=0.00005`)).toMatchObject({ type: "ark", request: { amountSat: 5000 } });
+    expect(findMoney(`bitcoin:${BC1Q}?req-amount=0.0025&req-label=Rent`)).toMatchObject({ type: "onchain", request: { amountSat: 250_000, label: "Rent" } });
+    expect(uriOf(`bitcoin:${BC1Q}?req-amount=0.0025`)).toBe(`bitcoin:${BC1Q}?amount=0.0025`);
+    // An amount it cannot read is not turned into "any amount", written as required or not.
+    expect(findMoney(`bitcoin:${BC1Q}?req-amount=1e3`)).toMatchObject({ type: "onchain", request: { unsupported: ["amount"] } });
+    expect(findMoney(`bitcoin:?ark=${ark}&req-amount=1e3`)).toBeNull();
+    // The same parameter twice, once required, with two values: which one is meant is not guessed, the link is not paid.
+    expect(findMoney(`bitcoin:${BC1Q}?amount=0.001&req-amount=0.5`)).toMatchObject({ type: "onchain", request: { unsupported: ["req-amount"] } });
+    expect(uriOf(`bitcoin:${BC1Q}?amount=0.001&req-amount=0.5`)).toBe(`bitcoin:${BC1Q}?amount=0.001&req-amount=0.5`);
+    expect(findMoney(`bitcoin:?ark=${ark}&amount=0.00005&req-amount=0.5`)).toBeNull();
+    // Twice with the same value is the same link.
+    expect(findMoney(`bitcoin:${BC1Q}?amount=0.001&req-amount=0.001`)).toMatchObject({ type: "onchain", request: { amountSat: 100_000 } });
+    expect((findMoney(`bitcoin:${BC1Q}?amount=0.001&req-amount=0.001`) as { request: { unsupported?: string[] } }).request.unsupported).toBeUndefined();
+  });
+
   it("reads nothing as money in a link it cannot read: too long, an address it does not know", () => {
     const padded = `bitcoin:${bcrt1q()}?amount=0.0025&req-somethingnew=1&label=${"x".repeat(4100)}&lightning=${REGTEST_INVOICE}`;
     expect(findMoney(padded)).toBeNull();
@@ -261,6 +279,20 @@ describe("USDT addresses", () => {
 
   it.each([["1500000", 1_500_000n], ["1.5e6", 1_500_000n], ["2e0", 2n], ["1.25e1", null], ["-1", null]])("reads the EIP-681 number %s", (text, value) => {
     expect(eip681Number(text)).toBe(value);
+  });
+
+  it("reads a fraction's zeros in one pass: a contact's long run of them costs its length, not its square", () => {
+    expect(eip681Number(`2.5${"0".repeat(50)}e1`)).toBe(25n);
+    // Each bubble reads its link's amount (up to 4 KiB of it) as it is drawn, 100 at a chat's open.
+    const cost = (n: number) => {
+      const text = `1.${"0".repeat(n)}1e3`;
+      const start = performance.now();
+      expect(eip681Number(text)).toBeNull();
+      return performance.now() - start;
+    };
+    cost(1_000);
+    const quarter = cost(8_000), whole = cost(32_000);
+    expect(whole).toBeLessThan(10 * Math.max(quarter, 25));
   });
 
   it("reads a transfer link: the token, the chain (network), the recipient and the amount", () => {

@@ -2,7 +2,7 @@ import { englishT, type Translate } from "../locales/translate";
 import { languageTag } from "./documentLanguage";
 
 /** The units a size is said in. */
-export type SizeUnit = "b" | "kb" | "mb" | "gb";
+export type SizeUnit = "b" | "kb" | "mb" | "gb" | "tb";
 
 const formats = new Map<string, Intl.NumberFormat>();
 

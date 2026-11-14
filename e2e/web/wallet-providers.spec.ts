@@ -324,12 +324,13 @@ test("USDT: in, a Send from the wallet, a Send in the chat and a Request paid in
   await composer(alice, "usdt", "1");
   await alice.page.getByTestId("payment-request").click();
   // The chat Send above left the request Alice's app made for it; this is the new one, for 1.
-  const request = chat(bob).getByTestId("payment-bubble").filter({ hasText: "Requests" }).filter({ hasText: /(?<![\d.])1\s*TEST-USDT/ });
+  // Each USDT request asks a little more than typed (under a thousandth): its own amount.
+  const request = chat(bob).getByTestId("payment-bubble").filter({ hasText: "Requests" }).filter({ hasText: /(?<![\d.])1\.000\d*\s*TEST-USDT/ });
   await request.getByTestId("payment-pay").click();
   await request.getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
   await expect(request.getByTestId("payment-state")).toHaveText("Paid", { timeout: 60_000 });
   await openWallet(alice, "usdt-testnet");
-  await expect(tokens(alice), "10 in, 2 out, 0.5 in, 1 in").toHaveText("9.5 TEST-USDT", { timeout: 30_000 });
+  await expect(tokens(alice), "10 in, 2 out, 0.5 in, 1 in").toHaveText(/^9\.50[0-1]\d* TEST-USDT$/, { timeout: 30_000 });
   await openWallet(bob, "usdt-testnet");
-  await expect(tokens(bob), "2 in, 0.5 out, 1 out").toHaveText("0.5 TEST-USDT", { timeout: 30_000 });
+  await expect(tokens(bob), "2 in, 0.5 out, 1 out").toHaveText(/^0\.49[89]\d* TEST-USDT$/, { timeout: 30_000 });
 });

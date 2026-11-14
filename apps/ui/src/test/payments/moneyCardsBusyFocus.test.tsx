@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { PaymentReview as Review } from "@ghostly/core";
 import type { NetworkWalletsView } from "@ghostly/browser/shared/types";
@@ -8,7 +8,7 @@ import { PaymentReview } from "../../components/PaymentReview";
 import { servicesPlatform, type WalletPlatform } from "../../lib/platform";
 import { fakeEngine, linkView, paymentView } from "../fakeEngine";
 import { renderApp } from "../render";
-import { lightningSource, liveMainnetInvoice, mint, REAL_MINT, REGTEST_INVOICE, reviewOf, TEST_MINT } from "./fixtures";
+import { lightningSource, liveMainnetInvoice, liveRegtestInvoice, mint, REAL_MINT, reviewOf, TEST_MINT } from "./fixtures";
 import { bcrt1q } from "./moneyFormatFixtures";
 
 // covers: payments.lightning.invoice-card, payments.cashu.token-card, payments.chat.review, payments.lightning.request, payments.cashu.reclaim, payments.money.onchain-card
@@ -125,7 +125,7 @@ describe("a request in the chat", () => {
   });
 
   it("over Lightning: the review takes the keys, Approve is busy where pressed and keeps them after a refusal, Cancel hands them back", async () => {
-    const { user, engine } = show({ kind: "request", direction: "in", amount: 250_000, invoice: REGTEST_INVOICE }, { lightning: lightningSource({ mode: "testnet", providerId: "fake-lightning" }) });
+    const { user, engine } = show({ kind: "request", direction: "in", amount: 250_000, invoice: liveRegtestInvoice(250_000) }, { lightning: lightningSource({ mode: "testnet", providerId: "fake-lightning" }) });
     const paid = later<void>();
     engine.on("walletQuoteInvoice", () => ({ quote: "q-1", mint: "", amount: 250_000, feeReserve: 5, source: "fake-lightning" })).on("payRequest", () => paid.promise);
     await press(user, reviewButton());
@@ -151,6 +151,51 @@ describe("a request in the chat", () => {
     taken.refuse(new Error("Already redeemed"));
     await done(back);
     expect(back).toHaveFocus();
+  });
+
+  // The bubble draws again on its own (its review, the wallet's state), not with its message's row: what its own press
+  // took out of the page is the bubble's to replace, or the keys fall to the page and Tab starts from the top.
+  it("Close on its review hands the keys back to Review payment", async () => {
+    const { user, engine } = show({ kind: "request", direction: "in", mints: [REAL_MINT] }, { mints: [mint(REAL_MINT, 900)] });
+    engine.on("preparePayment", (params) => reviewOf(params)).on("cancelPayment", () => ({ ...reviewOf(engine.callsTo("preparePayment")[0]), state: "cancelled" }));
+    await press(user, reviewButton());
+    await press(user, await screen.findByRole("button", { name: "Cancel" }));
+    await press(user, await screen.findByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByTestId("payment-review")).not.toBeInTheDocument());
+    expect(reviewButton()).toHaveFocus();
+  });
+
+  it("Close on the review of a request it paid leaves the keys on the bubble", async () => {
+    const { user, engine } = show({ kind: "request", direction: "in", mints: [TEST_MINT] }, { mints: [mint(TEST_MINT, 900)] });
+    engine.on("preparePayment", (params) => reviewOf(params)).on("approvePayment", () => {
+      const paid: Review = { ...reviewOf(engine.callsTo("preparePayment")[0]), state: "settled" };
+      engine.update({ wallet: { mints: [mint(TEST_MINT, 870)], intents: [paid] }, payments: { "pay-1": paymentView({ kind: "request", direction: "in", mints: [TEST_MINT], state: "settled" }) } });
+      return paid;
+    });
+    await press(user, reviewButton());
+    await press(user, await screen.findByTestId("review-approve"));
+    await press(user, await screen.findByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByTestId("payment-review")).not.toBeInTheDocument());
+    expect(screen.getByTestId("payment-bubble")).toHaveFocus();
+  });
+
+  it("Take it back that took it back leaves the keys on the bubble", async () => {
+    const { user, engine } = show({ kind: "payment", direction: "out", state: "pending" }, { mints: [mint(REAL_MINT, 0)] });
+    engine.on("reclaimPayment", () => { engine.update({ payments: { "pay-1": paymentView({ kind: "payment", direction: "out", state: "reclaimed" }) } }); });
+    await press(user, screen.getByRole("button", { name: "Take it back" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Take it back" })).not.toBeInTheDocument());
+    expect(screen.getByTestId("payment-bubble")).toHaveFocus();
+  });
+
+  it("keeps the keys as well when the payment was said in words first, before the wallet knew it", async () => {
+    fakeEngine.setState({ links: [linkView()], wallet: { mints: [mint(REAL_MINT, 0)] } });
+    const { user, engine } = renderApp(<PaymentBubble paymentId="pay-1" peerPubKey="peer" fallbackText="[a payment]" />);
+    expect(screen.getByText("[a payment]")).toBeInTheDocument();
+    act(() => engine.update({ payments: { "pay-1": paymentView({ kind: "payment", direction: "out", state: "pending" }) } }));
+    engine.on("reclaimPayment", () => { engine.update({ payments: { "pay-1": paymentView({ kind: "payment", direction: "out", state: "reclaimed" }) } }); });
+    await press(user, await screen.findByRole("button", { name: "Take it back" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Take it back" })).not.toBeInTheDocument());
+    expect(screen.getByTestId("payment-bubble")).toHaveFocus();
   });
 });
 

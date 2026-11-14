@@ -25,7 +25,7 @@ import { MAX_DEVICES, MAX_EARLIER_SETS, type DevicePatch, type DeviceRecord, typ
  *
  * A device that was off across two moves still gets the newest set: the frames of earlier sets this device signed and
  * still waiting for it are signed again with the newest `D'`, over the same old tombstone. One another device signed
- * goes on unchanged, and the next set's frame takes the device on from there.
+ * goes on unchanged; the device that takes it believes that signer, so it is added again from the next set on.
  */
 
 /** Why a removal or a new secret was refused before anything was written. Its message starts with `remove-<reason>:`. */
@@ -95,33 +95,31 @@ export async function planSetMove(record: DeviceRecord | null, signer: Signer, o
   const turn = record.turn;
   const packet = await signTurnPacket(newKeys, { turn, rev: FIRST_REV, author: record.ownSlot, active: record.ownSlot, slots: turnSlots, instance: turnInstance(turnVerifierMark(record.verifier ?? null), random) }, sign);
   const update = { d, set: turnSlots, turn, rev: FIRST_REV };
-  // The frame carries this device's last record at the old address: a device that stays and did not see the turn handed
-  // to this device reads there only the tombstone now, and checks the release in this record instead (`setUpdate.ts`).
-  const rec = record.turnPacket ? fromBase64Url(record.turnPacket) : undefined;
-  const frame = await setUpdateFrame(oldKeys.address, { ...update, tomb, ...(rec ? { rec } : {}) }, signer);
+  // No record of the old address rides along (`rec`): a device that stays believes only the device its stored record
+  // names active (`setUpdate.ts`), so one that did not see the turn handed to this device is added again.
+  const frame = await setUpdateFrame(oldKeys.address, { ...update, tomb }, signer);
   const staying = (keys: readonly string[]) => keys.filter((key) => key !== own.key && slots.some((slot) => slot?.key === key));
   // Frames of earlier sets still waiting for a device that stays: signed again with the newest secret, over their own
   // tombstone, when this device signed them. A device still at that older address believes whoever signed it there;
-  // another device's frame (this one took it, or the profile handed over brought it) goes on as it was signed, and the
-  // device that takes it reaches the newer set through the next set's frame, whose record shows the release.
+  // another device's frame (this one took it, or the profile handed over brought it) goes on as it was signed. The device
+  // that takes it believes that signer in the next set, not this device: there it finds this device's tombstone, and
+  // is added again.
   const earlier: EarlierDeviceSet[] = [];
   for (const set of record.earlierSets) {
     const pending = staying(set.pending);
     let by: Uint8Array | undefined;
     try { by = readSetUpdate(JSON.parse(set.setUpdate) as DeviceFrame)?.by; } catch { /* none */ }
-    if (!by || !bytesEqual(by, signer.publicKey)) { earlier.push({ ...set, pending }); continue; }
-    // Its record at that older address stays what the first frame carried.
-    let oldRec: Uint8Array | undefined;
-    try { const was = JSON.parse(set.setUpdate) as { rec?: unknown }; if (typeof was.rec === "string") oldRec = fromBase64Url(was.rec); } catch { /* none */ }
+    if (!by || !bytesEqual(by, signer.publicKey)) { earlier.push(withDelivered({ ...set, pending }, [])); continue; }
     // Only the devices its tombstone keeps, in their slots: a device added since is in none, and a frame that names it is
     // refused (`setUpdate.ts`). The device learns of it from the turn record it reads at the new address.
     const setKeys = turnKeys(fromBase64Url(set.d)), tombBytes = fromBase64Url(set.tombstone);
     const oldTomb = readTurnPacket(setKeys, tombBytes);
     const kept = oldTomb.kind === "valid" ? turnSlots.map((slot, i) => { const was = oldTomb.record.slots[i]; return slot && was && bytesEqual(was.key, slot.key) ? slot : null; }) : turnSlots;
     const setUpdate = pending.length
-      ? JSON.stringify(await setUpdateFrame(setKeys.address, { ...update, set: kept, tomb: tombBytes, ...(oldRec ? { rec: oldRec } : {}) }, signer))
+      ? JSON.stringify(await setUpdateFrame(setKeys.address, { ...update, set: kept, tomb: tombBytes }, signer))
       : set.setUpdate;
-    earlier.push({ ...set, pending, setUpdate });
+    // A device it went to already may hold the secret it named then, whatever it names now: `delivered` stays.
+    earlier.push(withDelivered({ ...set, pending, setUpdate }, []));
   }
   earlier.push({ d: record.d, tombstone: toBase64Url(tomb), setUpdate: JSON.stringify(frame), pending: staying(slots.flatMap((slot) => (slot ? [slot.key] : []))), ...(removed ? { removed: removed.key } : {}) });
   return {
@@ -236,5 +234,25 @@ export function pendingFrames(record: DeviceRecord | null): { d: string; key: st
  */
 export function acknowledged(record: DeviceRecord | null, key: string, d?: string): DevicePatch | null {
   if (!record?.earlierSets.some((set) => (d === undefined || set.d === d) && set.pending.includes(key))) return null;
-  return { earlierSets: record.earlierSets.map((set) => ((d === undefined || set.d === d) ? { ...set, pending: set.pending.filter((k) => k !== key) } : set)) };
+  return { earlierSets: record.earlierSets.map((set) => ((d === undefined || set.d === d) ? withDelivered({ ...set, pending: set.pending.filter((k) => k !== key) }, []) : set)) };
+}
+
+/**
+ * The record once the frame of the set under `d` went to `key` over a live link (`EarlierDeviceSet.delivered`): the
+ * device may hold the secret that frame names, and keep it if its `set-ack` is lost. Null when that is noted already.
+ */
+export function delivered(record: DeviceRecord | null, key: string, d: string): DevicePatch | null {
+  const set = record?.earlierSets.find((s) => s.d === d && s.pending.includes(key));
+  let named: string | undefined;
+  try { const update = set && readSetUpdate(JSON.parse(set.setUpdate) as DeviceFrame); if (update) named = toBase64Url(update.d); } catch { /* none */ }
+  if (!record || !set || named === undefined || set.delivered?.some((e) => e.key === key && e.d === named)) return null;
+  const kept = new Set([record.d, ...record.earlierSets.map((s) => s.d)]);
+  return { earlierSets: record.earlierSets.map((s) => (s === set ? withDelivered(s, [{ key, d: named }], kept) : s)) };
+}
+
+/** `set` with `more` delivered, and only entries of devices still pending under a secret the record keeps (`kept`). */
+function withDelivered(set: EarlierDeviceSet, more: { key: string; d: string }[], kept?: Set<string | undefined>): EarlierDeviceSet {
+  const { delivered: was, ...rest } = set;
+  const entries = [...(was ?? []), ...more].filter((e) => set.pending.includes(e.key) && (!kept || kept.has(e.d)));
+  return entries.length ? { ...rest, delivered: entries } : rest;
 }

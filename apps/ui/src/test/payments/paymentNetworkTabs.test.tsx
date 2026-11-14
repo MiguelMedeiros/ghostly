@@ -83,14 +83,14 @@ describe("the tabs filter both decks", () => {
     expect(arrows).toHaveLength(2);
     for (const arrow of arrows) expect(arrow).toHaveClass("max-md:min-h-11", "max-md:min-w-11");
     await user.click(screen.getByTestId("payment-card-lightning-mainnet"));
-    expect(screen.getByRole("button", { name: "Back to the cards" })).toHaveClass("max-md:min-h-11");
+    expect(screen.getByRole("button", { name: "Cards" })).toHaveClass("max-md:min-h-11");
   });
 
   it("pays a card of the tab on its own network, and goes back to that tab from the card", async () => {
     const { user, onRequest } = open();
     await user.click(tab("testnet"));
     await user.click(screen.getByTestId("payment-card-lightning-testnet"));
-    await user.click(screen.getByRole("button", { name: "Back to the cards" }));
+    await user.click(screen.getByRole("button", { name: "Cards" }));
     await screen.findByRole("radiogroup", { name: "Pay with" });
     expect(shownTab()).toBe("testnet");
     await user.click(screen.getByTestId("payment-card-lightning-testnet"));

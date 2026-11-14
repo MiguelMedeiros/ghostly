@@ -77,7 +77,11 @@ export async function sweepInterruptedRestores(): Promise<void> {
     if (!NS.test(ns) || listed.has(ns) || !Array.isArray(databases)) { noteRestore(ns, null); continue; }
     await manager.request(lockName(ns), { ifAvailable: true }, async (lock) => {
       if (!lock) return;
-      await undoRestore(ns, databases.filter(ownDatabase(ns)), true);
+      // Read again under the lock: a restore that finished while this sweep took back an earlier one has listed its
+      // profile and dropped its note since, and nothing of it may be touched.
+      const noted = read()[ns];
+      if (!Array.isArray(noted) || listProfiles().some((entry) => namespaceOf(entry.id) === ns)) return;
+      await undoRestore(ns, noted.filter(ownDatabase(ns)), true);
       noteRestore(ns, null);
     }).catch(() => {});
   }

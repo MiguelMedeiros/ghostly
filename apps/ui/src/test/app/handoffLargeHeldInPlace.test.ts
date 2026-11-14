@@ -39,8 +39,17 @@ vi.mock("../../lib/profileBackup", async (actual) => ({
 function storage(kind: FileBytesKind, linking: boolean) {
   /** Each file as the steps it was written in: a file is one list, a second name of it the same list. */
   const files = new Map<string, Uint8Array[]>();
-  const calls = { written: 0, read: 0, linked: 0, failing: false };
+  /** `hashed`: bytes `digest` read where they are stored (Desktop: in Rust), so none crossed into the page. */
+  const calls = { written: 0, read: 0, hashed: 0, linked: 0, failing: false };
   const sizeOf = (parts: Uint8Array[]) => parts.reduce((sum, part) => sum + part.length, 0);
+  /** The digest of what is stored under `space/id`, or null when nothing is. */
+  const digestAt = (key: string) => {
+    const held = files.get(key);
+    if (!held) return null;
+    const hash = sha256.create();
+    for (const part of held) hash.update(part);
+    return digestText(hash.digest());
+  };
   const view = (space: string): FileBytes => ({
     kind,
     append: async (id: string, offset: number, bytes: Uint8Array) => {
@@ -67,6 +76,12 @@ function storage(kind: FileBytesKind, linking: boolean) {
       calls.read += part.length;
       return part;
     },
+    digest: async (id: string) => {
+      const key = `${space}/${id}`, held = files.get(key);
+      if (!held) throw new Error("No such file");
+      calls.hashed += sizeOf(held);
+      return digestAt(key);
+    },
     remove: async (id: string) => { files.delete(`${space}/${id}`); },
     removeWhere: async () => {},
     dropSpace: async (other: string) => { for (const key of [...files.keys()]) if (key.startsWith(`${other}/`)) files.delete(key); },
@@ -80,14 +95,6 @@ function storage(kind: FileBytesKind, linking: boolean) {
       },
     } : {}),
   } as unknown as FileBytes);
-  /** The digest of what is stored under `space/id`, or null when nothing is. */
-  const digestAt = (key: string) => {
-    const held = files.get(key);
-    if (!held) return null;
-    const hash = sha256.create();
-    for (const part of held) hash.update(part);
-    return digestText(hash.digest());
-  };
   return { store: view("ghostly"), files, calls, digestAt };
 }
 
@@ -153,7 +160,8 @@ describe("a move back keeps the files over 16 MiB the frozen copy holds where th
     expect(await staging.held()).toEqual(list);
     await staging.restore(new Uint8Array(), list);
 
-    expect(files.calls).toMatchObject({ written: 0, read: 0, linked: 3 });
+    // Each linked file is hashed where it is stored (in Rust on Desktop): nothing written, no byte read into the page.
+    expect(files.calls).toMatchObject({ written: 0, read: 0, linked: 3, hashed: held.reduce((sum, file) => sum + file.bytes.length, 0) });
     const rows = new Map((await rowsOf(staging.database)).map((value) => [value.id as string, value]));
     expect(held.map((file) => [rows.get(file.id)?.bytes, rows.get(file.id)?.digest])).toEqual(held.map((file) => ["native", file.digest]));
     const space = staging.database;
@@ -176,6 +184,20 @@ describe("a move back keeps the files over 16 MiB the frozen copy holds where th
     expect(await staging.held()).toEqual(list);
     expect(files.calls.written).toBe(held.reduce((sum, file) => sum + file.bytes.length, 0));
     expect(held.map((file) => files.digestAt(`${staging.database}/${file.id}`))).toEqual(held.map((file) => file.digest));
+  });
+
+  it("a frozen file changed on disk to other bytes of the same size is not reused, and not noted as staged", async () => {
+    use("native", true);
+    const { held, files: list } = await videos(files, "native");
+    // A sync tool, a backup restore or the disk changed it while the profile was away: its record still names the old digest.
+    files.files.set(`ghostly/${held[0].id}`, [new Uint8Array(held[0].bytes.length).fill(9)]);
+    const staging = await handoffProfileHost("1.9.0", "desktop").staging.open();
+
+    await staging.copyHeld(list.map((file) => ({ fromId: file.id, file })));
+
+    expect((await staging.held()).map((file) => file.id)).toEqual(list.slice(1).map((file) => file.id));
+    expect(files.digestAt(`${staging.database}/${held[0].id}`)).toBeNull();
+    expect(held.slice(1).map((file) => files.digestAt(`${staging.database}/${file.id}`))).toEqual(held.slice(1).map((file) => file.digest));
   });
 
   it("a record that names another digest than the file's is not linked: copied and checked as before", async () => {

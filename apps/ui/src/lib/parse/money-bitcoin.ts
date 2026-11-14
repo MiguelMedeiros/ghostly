@@ -125,6 +125,15 @@ export function findBip21(text: string): Bip21[] {
         if (!params.has(name)) params.set(name, value);
       }
     }
+    // A parameter this app reads, written as required (`req-amount`), is read as that parameter: a value left unread
+    // would make a link for an amount one for any amount. Given both ways with two values, the `req-` one stays, so
+    // the link is not paid.
+    for (const [name, value] of [...params]) {
+      const known = name.slice(4);
+      if (!name.startsWith("req-") || !KNOWN.has(known)) continue;
+      if (!params.has(known)) params.set(known, value);
+      if (params.get(known) === value) params.delete(name);
+    }
     found.push({ uri, address, params, index: match.index! });
   }
   return found;
@@ -136,12 +145,15 @@ export function hasLongBip21(text: string): boolean {
   return false;
 }
 
-/** Parameters this app reads; any other `req-` one makes the link one it must not pay (BIP 21). */
+/** Parameters this app reads, also written as required (`findBip21` reads `req-amount` as `amount`). */
 const KNOWN = new Set(["amount", "label", "message", "lightning", "lno", "ark"]);
 
-/** The `req-` parameters of a link this app does not understand: with any, no leg of the link is paid. */
+/**
+ * The `req-` parameters of a link this app does not understand (BIP 21), or a known one given twice with two values:
+ * with any, no leg of the link is paid.
+ */
 export function unknownRequired(link: Bip21): string[] {
-  return [...link.params.keys()].filter((name) => name.startsWith("req-") && !KNOWN.has(name.slice(4)));
+  return [...link.params.keys()].filter((name) => name.startsWith("req-"));
 }
 
 /**
@@ -169,7 +181,7 @@ export function onchainFromBip21(link: Bip21): OnchainRequest | null {
   // the link names one), is not the same payment: left out. So is the fallback of a link that must not be paid.
   const samePayment = !!decoded && (decoded.network === "bitcoin") === (network === "mainnet") && (decoded.amountSat ?? undefined) === request.amountSat;
   if (decoded && samePayment && !request.unsupported && !unknownRequired(link).length) request.lightning = decoded;
-  const unknown = [...link.params.keys()].filter((name) => name.startsWith("req-") && !KNOWN.has(name.slice(4)));
+  const unknown = unknownRequired(link);
   if (unknown.length) request.unsupported = [...(request.unsupported ?? []), ...unknown];
   // Rebuilt, not the contact's text: a leg left out above (`lno=`, `ark=`, a fallback on another network) or a
   // repeated parameter must not reach a wallet that reads the link its own way.

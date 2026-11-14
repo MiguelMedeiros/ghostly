@@ -22,6 +22,8 @@
     "unreadCount": "{{count}} não lidas em {{name}}",
     "unreadOne": "1 não lida em {{name}}"
   },
+  "foundCount": "{{count}} conversas encontradas",
+  "foundOne": "1 conversa encontrada",
   "group": {
     "adminAnswered": "O app do admin respondeu…",
     "answerFailed": "Não deu certo. Tente de novo.",
@@ -31,6 +33,7 @@
     "inviterAwayUnknown": "O contato que convidou você ainda não está conectado. Tente de novo em instantes.",
     "letting": "Um membro está deixando você entrar…",
     "linkUnanswered": "O link não respondeu",
+    "others": "Outro grupo tem este id: escolha um",
     "takenBack": "Convite retirado",
     "unanswered": "O app de quem convidou não respondeu. Aceite de novo, ou recuse.",
     "waitingAdmin": "Aguardando o app do admin…",
@@ -50,9 +53,7 @@
     "groupHint": "Um link que qualquer pessoa pode abrir",
     "label": "Criar um grupo ou uma conversa"
   },
-  "noChats": "Nenhuma conversa",
   "noResults": "Nenhum resultado",
-  "pinned": "Fixada",
   "quiet": "Está quieto por aqui...",
   "quietHint": "Hora de assombrar alguém! 👻",
   "rail": {
@@ -75,10 +76,10 @@
     "unread_one": "{{count}} mensagem não lida",
     "unread_other": "{{count}} mensagens não lidas"
   },
+  "searchLabel": "Buscar conversas",
   "searchPlaceholder": "Buscar conversas...",
   "settings": "Ajustes",
   "sharedIdentity": "Compartilhou uma identidade",
   "skipToContent": "Pular para o conteúdo",
-  "startChat": "Nova conversa",
-  "unread": "Mensagens não lidas"
+  "startChat": "Nova conversa"
 }

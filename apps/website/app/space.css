@@ -304,6 +304,13 @@
 .sp-deck .wallet-deck-card-balance {
   font-size: max(12px, min(13px, calc(var(--card-w) * 0.036)));
 }
+/* Forced colors (Windows high contrast) drop a face's gradient, the only thing that paints it, and the card behind
+   showed through: its name over the chosen one's. A face of the system's Canvas hides it again. */
+@media (forced-colors: active) {
+  .sp-deck [data-deck="face"] {
+    background-color: Canvas;
+  }
+}
 
 /* ── Identity band: the same deck and the same card face, one card per identity proof ── */
 .sp-band--ids {

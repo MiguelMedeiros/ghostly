@@ -21,7 +21,7 @@ function open(): Promise<IDBDatabase> {
 }
 
 /** Checks and records in one transaction, so two pushes handled at once cannot both show. */
-async function takeFromDb(key: string, call: boolean, now: number): Promise<boolean> {
+async function takeFromDb(key: string, call: boolean | "online", now: number): Promise<boolean> {
   const db = await open();
   try {
     return await new Promise<boolean>((resolve, reject) => {
@@ -43,18 +43,18 @@ async function takeFromDb(key: string, call: boolean, now: number): Promise<bool
   }
 }
 
-function takeFromMemory(key: string, call: boolean, now: number): boolean {
+function takeFromMemory(key: string, call: boolean | "online", now: number): boolean {
   if (!wakeNoticeDue(memory.get(key), call, now)) return false;
   memory.set(key, now);
   return true;
 }
 
 /**
- * Whether this token's wake-up may show a notice now, recording it when it may. A call and a message are counted
- * apart (`WAKE_NOTICE_GAP_MS`).
+ * Whether this token's wake-up may show a notice now, recording it when it may. A call (true), a message (false) and
+ * an online notice ("online") are counted apart (`WAKE_NOTICE_GAP_MS`).
  */
-export async function takeWakeSlot(profile: string, token: string, call: boolean, now = Date.now()): Promise<boolean> {
-  const key = `${profile}|${token}|${call ? "call" : "message"}`;
+export async function takeWakeSlot(profile: string, token: string, call: boolean | "online", now = Date.now()): Promise<boolean> {
+  const key = `${profile}|${token}|${call === "online" ? "online" : call ? "call" : "message"}`;
   try {
     if (typeof indexedDB === "undefined") throw new Error("no IndexedDB");
     return await takeFromDb(key, call, now);

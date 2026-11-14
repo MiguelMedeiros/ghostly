@@ -1,0 +1,1 @@
+Calls, Hide my IP from contacts: while `relayOnly` is on, `call start` and `call answer` are refused (`unavailable`) and no connection is made ahead while a call rings, because libdatachannel's relay policy still checks from the machine's own sockets. A call still rings and `call hangup` declines it.

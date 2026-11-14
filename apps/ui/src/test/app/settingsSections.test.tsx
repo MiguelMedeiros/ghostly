@@ -189,6 +189,19 @@ describe("Settings on a phone", () => {
     await user.type(screen.getByTestId("settings-search"), "nothing like this");
     expect(screen.getByTestId("settings-search-empty")).toHaveTextContent("No settings match");
   });
+
+  it("finds Hide my IP from contacts in Network", async () => {
+    windowIs(true);
+    const { user } = renderSettings();
+    await user.click(screen.getByRole("button", { name: "Settings tab" }));
+    await user.type(screen.getByTestId("settings-search"), "my IP");
+    const results = screen.getAllByTestId("settings-search-result");
+    expect(results).toHaveLength(1);
+    expect(results[0]).toHaveTextContent("Hide my IP from contacts");
+    expect(results[0]).toHaveTextContent("Network");
+    await user.click(results[0]);
+    expect(where()).toBe("/settings/network");
+  });
 });
 
 describe("Password found by the search", () => {

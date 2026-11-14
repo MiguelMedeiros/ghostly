@@ -22,12 +22,15 @@ export const CARD_RESTORE_GAP_MS = 2 * EDIT_RATE_WINDOW_MS / EDIT_SEND_LIMIT;
 /** What makes a card the same card across messages: a new message may reuse a card's id, and the newest stands for it. */
 const cardKey = (message: StoredMessage) => message.card && `${message.card.kind}\n${message.card.id}`;
 
+/** A row of mine with an edit (or a removal) on its way to the contact. */
+const waits = (m: StoredMessage) => m.sender === "me" && !!m.edit?.pending;
+
 export interface EditQueueDeps {
   read(): Promise<StoredMessage[]>;
   /**
    * Rows by their ids, in the order asked, in one read (`db.getMessagesById`). With it the queue reads the chat's whole
-   * history once per run to learn which rows have an edit on its way, and from then on those rows alone: an edit costs
-   * what it does in a short chat, however long this one is.
+   * history once per run (none when given a read already made, `learn`) to learn which rows have an edit on its way,
+   * and from then on those rows alone: an edit costs what it does in a short chat, however long this one is.
    */
   rows?(ids: string[]): Promise<(StoredMessage | undefined)[]>;
   /** Says one edit of this message: an error when it could not go now (it is tried again later). */
@@ -96,6 +99,20 @@ export class EditQueue {
     this.sent.clear();
   }
 
+  /**
+   * The chat's whole history as read elsewhere in this run (the start reads each chat once): the rows with an edit on
+   * their way are known from it, so the first look reads those rows alone instead of the history again. Only with rows
+   * read by their id; without, every look reads the history anyway. An edit made since that read is told (`edited`).
+   */
+  learn(history: readonly StoredMessage[]): void {
+    if (!this.deps.rows) return;
+    for (const m of history) if (waits(m)) {
+      if (!this.known.has(m.id)) this.known.set(m.id, this.tick);
+      if (m.wireId) this.wires.set(m.id, m.wireId);
+    }
+    this.learnt = true;
+  }
+
   /** This row has an edit to send (it was just written so): the next look reads it. */
   edited(id: string): void {
     this.known.set(id, ++this.tick);
@@ -107,7 +124,6 @@ export class EditQueue {
    * alone, in one read, and one that waits no more is forgotten, unless it was told again while it was read.
    */
   private async pending(only?: string[]): Promise<{ rows: StoredMessage[]; all?: StoredMessage[] }> {
-    const waits = (m: StoredMessage) => m.sender === "me" && !!m.edit?.pending;
     const read = this.deps.rows;
     if (!read || !this.learnt) {
       const all = await this.deps.read(), rows = all.filter(waits);

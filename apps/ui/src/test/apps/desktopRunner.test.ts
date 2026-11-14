@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { runInNewContext } from "node:vm";
-import { expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 // covers: apps.desktop-sandbox
 
@@ -15,34 +15,71 @@ const runner = /const RUNNER: &str = r#"[\s\S]*?<script>\n([\s\S]*?)<\/script>/.
 
 type Json = Record<string, unknown>;
 type Window = Json & {
-  ghostly: { chat: { on(event: string, listener: (data: Json) => void): void }; storage: { get(key: string): Promise<Json> } };
+  ghostly: {
+    chat: { on(event: string, listener: (data: Json) => void): void };
+    storage: { get(key: string): Promise<Json>; set(key: string, value: unknown): Promise<unknown> };
+  };
   __ghostlyEvent(text: unknown): void;
 };
 
-/** The runner in a window of its own; `answer` is the JSON text of Rust's answer to a request. */
-function open(answer: (request: { type: string; id?: number }) => string, clock = { t: 1_000 }) {
+/** The window's `Document`: its `execCommand` edits, as a browser's does (the runner keeps it for every other command). */
+class Document {
+  execCommand(): boolean { return true; }
+  open(): void {}
+  write(): void {}
+  writeln(): void {}
+}
+
+/**
+ * The runner in a window of its own; `answer` is the JSON text of Rust's answer to a request. `globals` adds to (or
+ * stands in for) the window's own.
+ */
+function open(answer: (request: { type: string; id?: number }) => string, clock = { t: 1_000 }, sent: unknown[] = [], globals: Json = {}) {
   const written: string[] = [];
+  /** The window's events, a class per window: `stopImmediatePropagation` marks the event, so a test sees it was called. */
+  class Event {
+    stopped = false;
+    stopImmediatePropagation(): void { this.stopped = true; }
+  }
   /** The window's listeners, by event: the runner's own are the only ones here. */
   const listeners: Record<string, (event: { isTrusted: boolean }) => void> = {};
+  /** Whether each was added for the capture phase. */
+  const capture: Record<string, unknown> = {};
+  const addEventListener = (type: string, listener: (event: { isTrusted: boolean }) => void, options?: unknown) => {
+    listeners[type] = listener;
+    capture[type] = options;
+  };
   const window = {
     origin: "null",
     atob,
+    // A window's navigator, its async Clipboard API already gone (the runner checks that none is left).
+    navigator: {},
     setTimeout,
     Date: { now: () => clock.t },
-    addEventListener: (type: string, listener: (event: { isTrusted: boolean }) => void) => { listeners[type] = listener; },
-    document: { documentElement: { setAttribute() {}, textContent: "" }, open() {}, write: (html: string) => written.push(html), close() {} },
+    addEventListener,
+    EventTarget: { prototype: { addEventListener } },
+    Event,
+    TextEncoder,
+    // A document of its own class, as WebKit's is: the runner wraps `Document.prototype.execCommand` before any app code.
+    Document,
+    document: Object.assign(Object.create(Document.prototype) as object, {
+      documentElement: { setAttribute() {}, textContent: "" }, open() {}, write: (html: string) => written.push(html), close() {},
+    }),
     __TAURI_INTERNALS__: {
       metadata: { currentWindow: { label: "app-1" } },
       // Rust sends the answer's JSON text as a JSON string (`json_response`), which Tauri evaluates into the window
       // (`runCallback(id, <body>)`): the call gets that text.
-      invoke: async (_command: string, { request }: { request: { type: string; id?: number } }): Promise<unknown> =>
-        runInNewContext(`(${JSON.stringify(answer(request))})`, window),
+      invoke: async (_command: string, { request }: { request: { type: string; id?: number } }): Promise<unknown> => {
+        sent.push(request);
+        return runInNewContext(`(${JSON.stringify(answer(request))})`, window);
+      },
     },
+    ...globals,
   } as unknown as Window;
   window.window = window;
   window.self = window;
   runInNewContext(runner, window);
-  return { window, written, listeners };
+  return { window, written, listeners, capture, Event };
 }
 
 const settle = () => new Promise((done) => setTimeout(done, 0));
@@ -90,6 +127,57 @@ it("says `activity` for the person's taps and keys, at most every 5 seconds, and
   expect(said()).toBe(2);
 });
 
+// A document opened again (`document.open` with no close, or a write once the page is parsed) erases the window's
+// listeners, and the app runs on: the runner's taps-and-keys listener goes back on as it opens, through what the runner
+// took before the app's code ran, so the lock screen still counts the person's input in the app.
+it("listens for the person's taps and keys again whenever the app opens its document again", async () => {
+  const clock = { t: 1_000 };
+  const asked: string[] = [];
+  const { window, listeners, capture } = open((request) => {
+    asked.push(request.type);
+    return request.type === "start" ? `"<p>chess</p>"` : `{"id":${request.id},"ok":true}`;
+  }, clock);
+  await settle();
+  const said = () => asked.filter((type) => type === "activity").length;
+  runInNewContext("addEventListener = function () {}; Reflect.apply = function () {};", window);
+  for (const name of ["open", "write", "writeln"]) {
+    delete listeners.pointerdown;
+    delete listeners.keydown;
+    runInNewContext(`Document.prototype.${name}.call(document)`, window);
+    expect([name, capture.pointerdown, capture.keydown, typeof listeners.pointerdown, typeof listeners.keydown]).toEqual([name, true, true, "function", "function"]);
+    const before = said();
+    clock.t += 5_000;
+    listeners.pointerdown!({ isTrusted: true });
+    expect(said(), name).toBe(before + 1);
+  }
+});
+
+// The person's copy or cut in the app window puts on the clipboard what they selected: the app's own listeners, which
+// could set other text in its place, never hear it. The runner's capture listener on the window runs before any of the
+// app's and stops the event there, through what it took before the app's code ran.
+it("stops the person's copy and cut before any of the app's listeners, whatever the app changed", async () => {
+  const { window, listeners, capture, Event } = open((request) => (request.type === "start" ? `"<p>bc1qREALADDRESS</p>"` : `{"id":${request.id},"ok":true}`));
+  await settle();
+  runInNewContext("Event.prototype.stopImmediatePropagation = function () {}; Reflect.apply = function () {};", window);
+  for (const type of ["copy", "cut"]) {
+    expect(capture[type], type).toBe(true);
+    const person = Object.assign(new Event(), { isTrusted: true });
+    listeners[type]!(person);
+    expect(person.stopped, type).toBe(true);
+    // One the app made puts nothing on the clipboard: it goes on to the app's listeners.
+    const made = Object.assign(new Event(), { isTrusted: false });
+    listeners[type]!(made);
+    expect(made.stopped, type).toBe(false);
+  }
+  // A document opened again erases the window's listeners: the runner's go back on as it opens.
+  for (const name of ["open", "write", "writeln"]) {
+    delete listeners.copy;
+    delete listeners.cut;
+    runInNewContext(`Document.prototype.${name}.call(document)`, window);
+    expect([name, capture.copy, capture.cut, typeof listeners.copy, typeof listeners.cut]).toEqual([name, true, true, "function", "function"]);
+  }
+});
+
 it("gives the app an answer with a __proto__ member as a key", async () => {
   const { window } = open((request) =>
     request.type === "start" ? `"<p>chess</p>"` : `{"id":${request.id},"ok":true,"value":{"__proto__":{"admin":true},"board":"e4"}}`,
@@ -99,4 +187,91 @@ it("gives the app an answer with a __proto__ member as a key", async () => {
   expect(Object.keys(value).sort()).toEqual(["__proto__", "board"]);
   expect(value.admin).toBeUndefined();
   expect(Object.getOwnPropertyDescriptor(value, "__proto__")!.value).toEqual({ admin: true });
+});
+
+// Tauri drops an app window's message far over the broker's 66 KiB unread (`message_limit`), so the runner refuses a
+// request over 66 KiB itself: the app gets "too-large", and the request never leaves the window.
+it("refuses a request over 66 KiB without sending it", async () => {
+  const sent: unknown[] = [];
+  const { window } = open((request) => (request.type === "start" ? `"<p>chess</p>"` : `{"id":${request.id},"ok":true,"value":null}`), undefined, sent);
+  await settle();
+  sent.length = 0;
+  // The request as JSON, {"id":2,"type":"storage.set","args":["k","x…"]}, is 66 KiB and then a byte more; "é" is two
+  // bytes in UTF-8.
+  const around = JSON.stringify({ id: 2, type: "storage.set", args: ["k", ""] }).length;
+  await expect(window.ghostly.storage.set("k", "x".repeat(66 * 1024 - around))).resolves.toBeNull();
+  expect(sent).toHaveLength(1);
+  await expect(window.ghostly.storage.set("k", "x".repeat(66 * 1024 - around + 1))).rejects.toThrow("too-large");
+  // A stored value's 64 KiB under the longest key (256 control characters, six bytes each in JSON) is sent.
+  await expect(window.ghostly.storage.set("\u0001".repeat(256), "x".repeat(64 * 1024 - 2))).resolves.toBeNull();
+  expect(sent).toHaveLength(2);
+  await expect(window.ghostly.storage.set("k", "é".repeat(33 * 1024))).rejects.toThrow("too-large");
+  await expect(window.ghostly.storage.set("k", new Array(8 * 1024 * 1024).fill(0))).rejects.toThrow("too-large");
+  expect(sent).toHaveLength(2);
+});
+
+// Tauri reads the IPC body with serde_json, which refuses half a surrogate pair ("unexpected end of hex escape"): sent, a
+// request holding one came back as Tauri's words, which the app reads as `failed`, where the web broker answers
+// `bad-request` (WISP 1200). The runner refuses it itself, as it refuses what is not JSON, and never sends it.
+it("refuses a request holding a lone surrogate as bad-request without sending it, as the web broker does", async () => {
+  const sent: unknown[] = [];
+  const half = "\u{1F600}".slice(0, 1);
+  const { window } = open((request) => {
+    // Tauri, played: JSON.stringify writes a lone surrogate as a `\u` escape, which serde_json refuses.
+    if (/\\ud[89a-f]/i.test(JSON.stringify(request))) throw new Error("unexpected end of hex escape");
+    return request.type === "start" ? `"<p>chess</p>"` : `{"id":${request.id},"ok":true,"value":null}`;
+  }, undefined, sent);
+  await settle();
+  sent.length = 0;
+  const chat = window.ghostly.chat as unknown as { send(value: unknown): Promise<unknown> };
+  // The app's values are made in its window: an object of another realm is not plain JSON there.
+  const parse = runInNewContext("(text) => JSON.parse(text)", window) as (text: string) => unknown;
+  for (const [key, value] of [[`k${half}`, "v"], ["k", `v${half}`], ["k", parse(String.raw`{"m\ud83d":1}`)], ["k", parse(String.raw`{"a":[{"b":"\ude00"}]}`)]] as const) {
+    await expect(window.ghostly.storage.set(key, value), JSON.stringify([key, value])).rejects.toThrow("bad-request");
+  }
+  await expect(window.ghostly.storage.get(`k${half}`)).rejects.toThrow("bad-request");
+  await expect(chat.send(parse(String.raw`{"text":"hi \ud83d"}`))).rejects.toThrow("bad-request");
+  expect(sent).toEqual([]);
+  // A whole emoji is a pair, which Tauri takes; a member left out (undefined) is not sent, so its name is not read.
+  await expect(window.ghostly.storage.set("\u{1F600}", parse(String.raw`{"\ud83d\ude00":["\ud83d\ude00"]}`))).resolves.toBeNull();
+  await expect(window.ghostly.storage.set("k", runInNewContext("(key) => ({ [key]: undefined, n: 1 })", window)(`m${half}`))).resolves.toBeNull();
+  await expect(chat.send("\u{1F600}")).resolves.toBeUndefined();
+  expect(sent).toHaveLength(3);
+});
+
+// A file's bytes come as base64 in the answer (`bytes_response`), up to 64 MiB: decoded a character at a time, 64 MiB
+// held the app window's thread for about 250 ms in WebKit; the engine's own decoder takes about 40 ms.
+describe("a file's bytes", () => {
+  const file = new Uint8Array(1024).map((_, i) => (i * 37) & 0xff);
+  const answer = (request: { type: string; id?: number }) =>
+    request.type === "start" ? `"<p>chess</p>"`
+      : request.type === "file" ? `{"id":${request.id},"ok":true,"bytes":"${Buffer.from(file).toString("base64")}"}`
+      : `{"id":${request.id},"ok":true,"value":null}`;
+
+  it("are decoded by the engine's own decoder, not a character at a time", async () => {
+    // The engine's decoder, played (Node before 25 has none): WebKit's, Chromium's, Firefox's.
+    const decoded: string[] = [], native: string[] = [];
+    const { window } = open(answer, undefined, undefined, {
+      Uint8Array: Object.defineProperty(class extends Uint8Array {}, "fromBase64", { value: (text: string) => { native.push(text); return Uint8Array.from(Buffer.from(text, "base64")); } }),
+      atob: (text: string) => { decoded.push(text); return atob(text); },
+    });
+    await settle();
+    const bytes = await (window.ghostly as unknown as { file(path: string): Promise<ArrayBuffer> }).file("board.png");
+    expect(new Uint8Array(bytes)).toEqual(file);
+    expect(native, "Uint8Array.fromBase64").toHaveLength(1);
+    expect(decoded, "atob").toEqual([]);
+  });
+
+  it("are decoded a character at a time where the engine has no decoder", async () => {
+    // A Uint8Array without `fromBase64`, as an older WebKit has it.
+    const decoded: string[] = [];
+    const { window } = open(answer, undefined, undefined, {
+      Uint8Array: Object.defineProperty(class extends Uint8Array {}, "fromBase64", { value: undefined }),
+      atob: (text: string) => { decoded.push(text); return atob(text); },
+    });
+    await settle();
+    const bytes = await (window.ghostly as unknown as { file(path: string): Promise<ArrayBuffer> }).file("board.png");
+    expect(new Uint8Array(bytes)).toEqual(file);
+    expect(decoded, "atob").toHaveLength(1);
+  });
 });

@@ -50,8 +50,12 @@ test("the profile's did:dht is published and resolved by @web5/dids, with a Nost
     const npub = `nostr:${npubEncode(pubkey)}`;
     await expect(section.getByTestId("did-identity")).toContainText(npub);
 
-    await listed.click();
+    await listed.focus();
+    await page.keyboard.press("Space");
     await expect(listed).toHaveAttribute("aria-checked", "true");
+    // Busy while it worked, not disabled: the focus is still on it, so a keyboard's next Tab goes on from here.
+    await expect(listed).not.toHaveAttribute("aria-busy");
+    await expect(listed).toBeFocused();
     await expect.poll(async () => (await resolve()).alsoKnownAs, { timeout: 30_000 }).toEqual([npub]);
     await expect(section.getByTestId("did-published")).toHaveText("Published");
 

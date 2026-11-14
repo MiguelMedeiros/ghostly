@@ -21,6 +21,7 @@ export function Home() {
   const fresh = listSessions().length === 0;
 
   const handleCreate = async () => {
+    if (isCreating) return;
     setIsCreating(true);
     try {
       nav.conversation(chatPath(await createPairedChat()));
@@ -48,7 +49,7 @@ export function Home() {
           {t("home.description")}
         </p>
         </div>
-          <ul className="mx-auto flex w-fit max-w-full flex-col gap-2 text-left text-text-muted text-xs leading-relaxed">
+          <ul className="mx-auto flex w-fit max-w-full flex-col gap-2 text-start text-text-muted text-xs leading-relaxed">
             <li className="flex items-center gap-2.5">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0 text-accent">
                 <rect x="5" y="10" width="14" height="11" rx="2" />
@@ -72,26 +73,24 @@ export function Home() {
             </li>
           </ul>
         <div className="grid grid-cols-2 items-stretch gap-3" data-testid="home-chat-actions">
+        {/* Busy while it works, not disabled: that would drop a keyboard's focus to the page, and leave it there when the
+            chat is not stored. A press while it works does nothing. */}
         <button
           onClick={handleCreate}
-          disabled={isCreating}
-          className="inline-flex min-h-11 min-w-0 items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-chat-bg disabled:opacity-50 forced-colors:border forced-colors:border-[color:ButtonText]"
+          aria-disabled={isCreating || undefined}
+          aria-busy={isCreating || undefined}
+          className="inline-flex min-h-11 min-w-0 items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-chat-bg aria-disabled:opacity-50 aria-disabled:cursor-progress forced-colors:border forced-colors:border-[color:ButtonText]"
         >
           {isCreating ? (
-            <>
-              <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
-                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeDasharray="31.4 31.4" strokeLinecap="round" />
-              </svg>
-              {t("common.loading")}
-            </>
+            <svg className="animate-spin w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeDasharray="31.4 31.4" strokeLinecap="round" />
+            </svg>
           ) : (
-            <>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
-                <path d="M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5 M18 14v8 M14 18h8"/>
-              </svg>
-              {t("sidebar.newChat")}
-            </>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
+              <path d="M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5 M18 14v8 M14 18h8"/>
+            </svg>
           )}
+          {t("sidebar.newChat")}
         </button>
         <button onClick={() => setJoining(true)} className="inline-flex min-h-11 min-w-0 items-center justify-center gap-2 rounded-lg border border-border px-3 py-2.5 text-sm font-semibold text-accent hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"><svg aria-hidden="true" width="18" height="18" className="shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M14 3h5a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-5 M3 12h12 M10 7l5 5-5 5"/></svg>{t("sidebar.join")}</button>
         </div>

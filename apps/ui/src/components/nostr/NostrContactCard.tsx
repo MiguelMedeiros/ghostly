@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { NostrContactView, NostrDraftRequest, NostrNoteView } from "@ghostly/browser/nostr/types";
-import { useEngineState } from "../../lib/engineState";
+import { useEngineValue } from "../../lib/engineState";
 import { agoIn } from "../../lib/relativeTime";
 import { useI18n } from "../../contexts/I18nContext";
 import { Button, Notice } from "../wallet/ui";
@@ -22,9 +22,10 @@ import { initial } from "../../lib/initial";
 export function NostrContactCard({ linkId, view, name, compact = false, turning = false }: { linkId: string; view: NostrContactView; name: string; compact?: boolean; turning?: boolean }) {
   const { t, language } = useI18n();
   const ago = agoIn(language);
-  const state = useEngineState();
-  const settings = state?.nostr.settings;
-  const own = state?.nostr.own ?? [];
+  // Only the Nostr part of the engine's state (the relays asked, the person's own keys): not every state.
+  const nostr = useEngineValue(state => state?.nostr);
+  const settings = nostr?.settings;
+  const own = nostr?.own ?? [];
   const [error, setError] = useState("");
   const [publish, setPublish] = useState<NostrDraftRequest | null>(null);
   const busy = view.loading;

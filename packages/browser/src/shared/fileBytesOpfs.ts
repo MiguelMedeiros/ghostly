@@ -93,10 +93,8 @@ export class OpfsFileBytes implements FileBytes {
 
   room(): Promise<number | null> { return storageRoom(); }
 
-  async dropSpace(space: string): Promise<void> {
-    try {
-      const root = await (await navigator.storage.getDirectory()).getDirectoryHandle("ghostly-files");
-      await root.removeEntry(space, { recursive: true });
-    } catch (error) { if ((error as { name?: string })?.name !== "NotFoundError") throw error; }
+  /** In the worker, which closes the handles it holds open there first: an open file cannot be removed. */
+  dropSpace(space: string): Promise<void> {
+    return this.forSpace(space).call({ op: "dropSpace" });
   }
 }

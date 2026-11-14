@@ -19,6 +19,7 @@ on:
       - "native/translation/**"
       - "tools/scripts/prepare-translation-runtime.mjs"
       - "tools/scripts/native-runtime-files.mjs"
+      - "tools/scripts/tar-gz.mjs"
       - "tools/scripts/test/translationRuntime.test.ts"
       - ".github/workflows/translation-runtime.yml"
   workflow_dispatch:

@@ -5,6 +5,13 @@ const R = 16.5;
 const AROUND = 2 * Math.PI * R;
 
 /**
+ * A media bubble's pill button (Accept, Download <size>, Pause, the speed) is drawn by its fill alone, and in forced
+ * colors (Windows Contrast themes) every fill is the page's: there it keeps a ButtonText edge. Solid, since the pills'
+ * `border-none` leaves the border style at none, under which a width alone draws nothing.
+ */
+export const FORCED_EDGE = "forced-colors:border forced-colors:border-solid forced-colors:border-[color:ButtonText]";
+
+/**
  * A ring around a round 36 px control: how much of a file has gone (`fraction`), or a turning arc while an action
  * waits for its answer (`busy`). Drawn in the text's colour, which reads on both bubbles in every theme.
  */
@@ -29,7 +36,8 @@ const retryGlyph = (
 /**
  * The ↻ that takes the place of a voice message's play button or a file's icon when it did not go (`danger`: a
  * red ring) or stopped moving (a quiet one). While its action runs (`busy`) the ring turns, and a press does nothing;
- * it is not disabled, which would drop a keyboard's focus to the page (as the play button there keeps it).
+ * it is not disabled, which would drop a keyboard's focus to the page (as the play button there keeps it). On a phone a
+ * tap lands on 44 × 44 px around it (`.tap-target`), as on that play button.
  */
 export function RoundRetry({ danger = false, busy = false, label, hint, testId, onClick }: {
   danger?: boolean;
@@ -43,7 +51,7 @@ export function RoundRetry({ danger = false, busy = false, label, hint, testId, 
   return (
     <button type="button" data-testid={testId} aria-label={label} title={hint ?? label} aria-busy={busy || undefined} aria-disabled={busy || undefined} onClick={() => { if (!busy) onClick(); }}
       data-tone={danger ? "danger" : "neutral"}
-      className={`relative w-9 h-9 shrink-0 grid place-items-center rounded-full border-none bg-black/20 hover:bg-black/30 cursor-pointer aria-disabled:cursor-default transition-colors ${danger ? "text-danger-ink" : "text-text-primary/90"}`}>
+      className={`tap-target relative w-9 h-9 shrink-0 grid place-items-center rounded-full border-none bg-black/20 hover:bg-black/30 cursor-pointer aria-disabled:cursor-default transition-colors ${danger ? "text-danger-ink" : "text-text-primary/90"}`}>
       <ProgressRing fraction={1} busy={busy} className={danger ? "text-danger-ink" : "text-text-primary/65"} />
       {retryGlyph}
     </button>
@@ -58,7 +66,7 @@ export function WhyButton({ open, onToggle, controls, testId, danger = false }: 
   const more = useOptionalI18n()?.t("common.moreInfo") ?? "More info";
   return (
     <button type="button" data-testid={testId} aria-expanded={open} aria-controls={controls} aria-label={more} title={more} onClick={onToggle}
-      className={`relative shrink-0 inline-grid place-items-center w-4 h-4 rounded-full border-none bg-transparent p-0 cursor-pointer before:absolute before:-inset-2 before:content-[''] ${danger ? "text-danger-ink" : "text-text-primary/65"} hover:opacity-80`}>
+      className={`relative shrink-0 inline-grid place-items-center w-4 h-4 rounded-full border-none bg-transparent p-0 cursor-pointer before:absolute before:-inset-2 max-md:before:-inset-3.5 before:content-[''] ${danger ? "text-danger-ink" : "text-text-primary/65"} hover:opacity-80`}>
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5" /><path d="M12 11v5.5M12 7.5v.01" /></svg>
     </button>
   );

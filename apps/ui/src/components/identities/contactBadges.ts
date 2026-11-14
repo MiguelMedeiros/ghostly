@@ -1,4 +1,5 @@
 import type { ReceivedIdentityView } from "@ghostly/browser/shared/types";
+import { linkOfPeer } from "@ghostly/browser/platform/engine";
 import { providerIcon } from "./ProviderIcons";
 import { currentStatus, expiringSoon, providerLabel, shortSubject, useEngineValue } from "../../lib/identities";
 import { english } from "../../lib/english";
@@ -120,4 +121,4 @@ export const BADGE_LIMITS = { row: 2, rowNarrow: 1, header: 3, headerNarrow: 2, 
  * when they change, not on every engine state: each row of the chat list reads its own.
  */
 export const useReceived = (peerKey: string | undefined) =>
-  useEngineValue(state => state?.links.find(l => l.peerPubKeyZ32 === peerKey)?.identities?.received);
+  useEngineValue(state => linkOfPeer(state?.links, peerKey)?.identities?.received);

@@ -1,4 +1,4 @@
-import type { BitcoinNetwork } from "@ghostly/core";
+import { stripHidden, type BitcoinNetwork } from "@ghostly/core";
 
 /**
  * The part of the Fedimint web SDK (`@fedimint/core`, WebAssembly client in a worker) Ghostly uses, behind an
@@ -67,6 +67,7 @@ export interface FedimintClient {
   /** The latest state within `waitMs` (it returns early on a final one). Undefined: the client knows no such operation. */
   spendState(operationId: string, waitMs: number): Promise<SpendState | undefined>;
   redeem(notes: string, ghostly: string): Promise<string>;
+  /** Rejects when the client could not say (its error is not the reissue's `Failed`). */
   redeemState(operationId: string, waitMs: number): Promise<RedeemState | undefined>;
   createInvoice(amountMsats: number, description: string, expirySecs: number, ghostly: string): Promise<{ operationId: string; invoice: string }>;
   receiveState(operationId: string, waitMs: number): Promise<ReceiveState | undefined>;
@@ -148,6 +149,8 @@ async function browserTransport() {
 }
 
 const text = (value: unknown, max = 200) => typeof value === "string" ? value.slice(0, max) : undefined;
+/** A federation's or a guardian's name: without the characters that hide text or reorder it, so it reads as what it is. */
+const name = (value: unknown, max: number) => typeof value === "string" ? text(stripHidden(value).replace(/\s+/g, " ").trim(), max) : undefined;
 const errorText = (error: unknown) => error instanceof Error ? error.message : typeof error === "string" ? error : JSON.stringify(error);
 
 export function federationInfo(federationId: string, config: unknown): FederationInfo {
@@ -159,8 +162,8 @@ export function federationInfo(federationId: string, config: unknown): Federatio
   const version = c?.global?.consensus_version;
   return {
     federationId,
-    name: text(c?.global?.meta?.federation_name, 80),
-    guardians: endpoints.slice(0, 64).map(([peer, e]) => ({ name: text(e?.name, 80) || `Guardian ${peer}`, url: text(e?.url, 300) ?? "" })),
+    name: name(c?.global?.meta?.federation_name, 80) || undefined,
+    guardians: endpoints.slice(0, 64).map(([peer, e]) => ({ name: name(e?.name, 80) || `Guardian ${peer}`, url: text(e?.url, 300) ?? "" })),
     consensusVersion: `${Number(version?.major ?? 0)}.${Number(version?.minor ?? 0)}`,
     network,
     modules: [...new Set(modules.map((m) => (typeof m?.kind === "string" ? m.kind.slice(0, 32) : "")).filter(Boolean))],
@@ -202,8 +205,12 @@ class RealClient implements FedimintClient {
     return watch<SpendState>((ok, fail) => this.wallet.mint.subscribeSpendNotes(operationId, (s: string) => ok(SPEND[s] ?? "created"), fail), spendFinal, waitMs);
   }
   redeem(notes: string, ghostly: string): Promise<string> { return this.wallet.mint.reissueExternalNotes(notes, { ghostly }); }
-  redeemState(operationId: string, waitMs: number) {
-    return watch<RedeemState>((ok, fail) => this.wallet.mint.subscribeReissueExternalNotes(operationId, (s: unknown) => ok(typeof s === "string" ? REDEEM[s] ?? "created" : s && typeof s === "object" && "Failed" in s ? "failed" : "created"), (error: string) => { ok("failed"); fail(error); }), (s) => s === "done" || s === "failed", waitMs);
+  async redeemState(operationId: string, waitMs: number) {
+    let error: unknown;
+    const state = await watch<RedeemState>((ok, fail) => this.wallet.mint.subscribeReissueExternalNotes(operationId, (s: unknown) => ok(typeof s === "string" ? REDEEM[s] ?? "created" : s && typeof s === "object" && "Failed" in s ? "failed" : "created"), (e: string) => { error ??= e; fail(e); }), (s) => s === "done" || s === "failed", waitMs);
+    // Only the reissue's own `Failed` is failed: an error of the client or its subscription says nothing of the notes.
+    if (error !== undefined && state !== "done" && state !== "failed") throw new Error(`The Fedimint client could not say how the redeem stands: ${errorText(error)}`);
+    return state;
   }
   async createInvoice(amountMsats: number, description: string, expirySecs: number, ghostly: string) {
     const { operation_id, invoice } = await this.wallet.lightning.createInvoice(amountMsats, description, expirySecs, undefined, { ghostly });

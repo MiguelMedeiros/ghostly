@@ -72,13 +72,11 @@ export async function renameDevice(options: RenameOptions): Promise<boolean> {
   if (!record || record.state !== "active") throw new RenameRefusal("state", "Only the active device renames a device.");
   const at = record.deviceSet.findIndex((slot) => slot?.key === options.key);
   if (at < 0) throw new RenameRefusal("device", "That device is not in this profile.");
-  const old = record.deviceSet[at]!.name;
   const slots: (DeviceSlot | null)[] = Array.from({ length: MAX_DEVICES }, (_, i) => {
     const slot = record.deviceSet[i] ?? null;
     return slot && i === at ? { ...slot, name } : slot;
   });
-  // A takeover's offer names the device it stopped, and the Devices section finds that device by its name.
-  const offer = record.secretOffer?.device === old ? { secretOffer: { ...record.secretOffer, device: name } } : {};
-  await options.keeper.write(turn.conditions, { slots, patch: offer });
+  // A takeover's offer keeps the device it stopped by its key, and shows the name its slot holds: nothing to change there.
+  await options.keeper.write(turn.conditions, { slots });
   return true;
 }

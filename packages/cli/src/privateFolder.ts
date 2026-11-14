@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
-import { chmodSync, lstatSync, mkdirSync, statSync } from "node:fs";
+import { chmodSync, lstatSync, mkdirSync, readdirSync, statSync, type Stats } from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
+import { CliError } from "./errors";
 
 /**
  * Where a socket goes when its path in the profile is longer than a Unix socket may be: `<base>/<prefix>-<hash of the
@@ -30,13 +31,14 @@ function usersAlone(path: string): boolean {
 
 /**
  * A folder for a socket outside the profile (when the profile's path is too long for one): made owner-only, and
- * refused when it is a link, someone else made it, or anyone else may enter it.
+ * refused when it is a link, someone else made it, or anyone else may enter it: `refused`, as the profile's own checks
+ * (`ownProfile`), with the way out. It holds only sockets, so removing it loses nothing; it is made again.
  */
 export function privateFolder(path: string, what: string): void {
   mkdirSync(path, { recursive: true, mode: 0o700 });
   const info = lstatSync(path);
   if (!info.isDirectory() || (process.getuid && info.uid !== process.getuid()) || (info.mode & 0o077) !== 0) {
-    throw new Error(`${path} is not a folder of this user's alone: ${what}`);
+    throw new CliError("refused", `${path} is not a folder of this user's alone: ${what}. Run \`rm -r ${path}\` (ghostly makes it again), or if it is this user's folder, \`chmod 700 ${path}\`, then try again`);
   }
 }
 
@@ -46,8 +48,46 @@ export function privateFolder(path: string, what: string): void {
  */
 export function ownFolder(path: string, what: string): void {
   const info = lstatSync(path);
-  if (!info.isDirectory() || (process.getuid && info.uid !== process.getuid())) throw new Error(`${path} is not a folder of this user's: ${what}`);
+  if (!info.isDirectory() || (process.getuid && info.uid !== process.getuid())) throw new CliError("refused", `${path} is not a folder of this user's: ${what}`);
   if ((info.mode & 0o077) !== 0) chmodSync(path, 0o700);
+}
+
+/**
+ * A profile's folders and files, checked before a command (a one-shot as much as the daemon) takes its lock or opens
+ * its store, which append to the files in place and follow a link: the home and its `profiles/` must be this user's
+ * (a link to a folder of this user's is one); the home is closed to others' writes, `profiles/` to 0700. The profile's
+ * folder and its `db/` must be this user's and not links, and are closed to 0700; what is in them must be this user's
+ * and not a link, and a file is closed to 0600. A home, profile or journal opened up by hand, or made by another
+ * account in a folder it could write, was used as it was: the events journal (message texts) stayed readable by others.
+ */
+export function ownProfile(dir: string): void {
+  if (process.platform === "win32") return;
+  const what = "ghostly will not open the profile there";
+  const profiles = dirname(dir), home = dirname(profiles);
+  const mine = (info: Stats) => !process.getuid || info.uid === process.getuid();
+  for (const folder of [home, profiles]) {
+    const info = statSync(folder);
+    if (!info.isDirectory() || !mine(info)) throw new CliError("refused", `${folder} is not a folder of this user's: ${what}`);
+    const open = folder === home ? 0o022 : 0o077;
+    if ((info.mode & open) !== 0) chmodSync(folder, info.mode & 0o777 & ~open);
+  }
+  const db = join(dir, "db");
+  for (const folder of [dir, db]) {
+    let info;
+    try { info = lstatSync(folder); } catch (error) { if (folder === db && (error as NodeJS.ErrnoException).code === "ENOENT") continue; throw error; }
+    if (!info.isDirectory() || !mine(info)) throw new CliError("refused", `${folder} is not a folder of this user's: ${what}`);
+    if ((info.mode & 0o077) !== 0) chmodSync(folder, 0o700);
+    for (const name of readdirSync(folder)) {
+      // Another command at once on the profile removes its lock's draft, start and stale files as it goes: one gone
+      // since the listing is passed over, not the command's error.
+      const path = join(folder, name), entry = lstatSync(path, { throwIfNoEntry: false });
+      if (!entry) continue;
+      if (entry.isSymbolicLink() || !mine(entry)) throw new CliError("refused", `${path} is a link or another user's: ${what}`);
+      if (entry.isFile() && (entry.mode & 0o077) !== 0) {
+        try { chmodSync(path, 0o600); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+      }
+    }
+  }
 }
 
 /** False when `path` is there but is not a socket of this user's: nothing to connect to. */

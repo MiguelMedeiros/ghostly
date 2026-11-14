@@ -1,7 +1,9 @@
-import { chat, expect, test, type Peer } from "../support/fixtures";
+import { chat, expect, test, type Peer, type PeerOptions } from "../support/fixtures";
 import { pair } from "../support/paired";
 import { composerRow } from "../support/composer";
 import { choose } from "../support/select";
+import { iosKeyboard, keyboard } from "../support/keyboard";
+import { closeIdentities, openIdentities } from "../support/identities";
 import { STORE_URL, serveStore, testStore, type TestStore } from "../support/appStore";
 import type { AppViewMode } from "@ghostly/core";
 
@@ -38,7 +40,7 @@ async function install(peer: Peer, store: TestStore): Promise<void> {
 }
 
 /** Ana and Bob, named, paired, with Chess (or a full-screen app) installed on Ana's side. */
-async function setUp(peer: (name: string) => Promise<Peer>, options: { view?: AppViewMode; title?: string; tagline?: string } = {}): Promise<[Peer, Peer]> {
+async function setUp(peer: (name: string) => Promise<Peer>, options: { view?: AppViewMode; title?: string; tagline?: string; entry?: string } = {}): Promise<[Peer, Peer]> {
   const store = await testStore(options);
   const [ana, bob] = await Promise.all([peer("ana"), peer("bob")]);
   await serveStore(ana.context, store);
@@ -123,6 +125,75 @@ test("on a wide screen the app sits beside the chat, which stays usable", { tag:
   await ana.page.keyboard.press("Escape");
   await expect(app).toBeHidden();
   await expect(input).toBeFocused();
+});
+
+test("on a laptop the contact's identities lie over the chat while an app sits beside it, and the chat keeps a phone's width", { tag: ["@feature:apps.view"] }, async ({ peer }) => {
+  const [ana] = await setUp(peer);
+  const page = ana.page;
+  const panel = page.getByTestId("chat-identities"), backdrop = page.locator(".contact-panel-backdrop");
+  const chatWidth = async () => (await page.locator(".chat-column").filter({ has: page.getByTestId("chat-name") }).boundingBox())!.width;
+  for (const width of [1366, 1440]) {
+    await page.setViewportSize({ width, height: 800 });
+    // Alone, the panel docks beside the chat.
+    await openIdentities(ana);
+    await expect(backdrop).toBeHidden();
+    await expect(panel).toHaveAttribute("role", "complementary");
+    await closeIdentities(ana);
+
+    // With Chess beside the chat, both docked left it 189-232 px and its message field 29-72: the panel lies over it.
+    await openChess(ana);
+    const app = page.getByTestId("mini-app");
+    await expect(app).toHaveAttribute("data-place", "beside");
+    await openIdentities(ana);
+    await expect(backdrop).toBeVisible();
+    await expect(panel).toHaveAttribute("role", "dialog");
+    expect(await chatWidth()).toBeGreaterThanOrEqual(320);
+    await page.keyboard.press("Escape");
+    await expect(panel).toHaveCount(0);
+    await app.getByRole("button", { name: "Close" }).click();
+    await expect(app).toBeHidden();
+
+    // Docked when the app opens: it goes over the chat, a dialog now, with the focus; Escape closes it, the app stays.
+    await openIdentities(ana);
+    await expect(panel).toHaveAttribute("role", "complementary");
+    await openChess(ana);
+    await expect(app).toHaveAttribute("data-place", "beside");
+    await expect(backdrop).toBeVisible();
+    await expect(panel).toHaveAttribute("role", "dialog");
+    await expect(panel).toBeFocused();
+    expect(await chatWidth()).toBeGreaterThanOrEqual(320);
+    await page.keyboard.press("Escape");
+    await expect(panel).toHaveCount(0);
+    await expect(app).toBeVisible();
+    await app.getByRole("button", { name: "Close" }).click();
+    await expect(app).toBeHidden();
+  }
+});
+
+test("on a tablet held upright, with no room beside the chat, the app covers it with Back to it instead of squeezing it", { tag: ["@feature:apps.view"] }, async ({ peer }) => {
+  // Beside the chat list, an iPad's 820 px left the chat 40 px beside the app (768 px: none, 1024 px: its name gone).
+  const [ana] = await setUp(peer);
+  await ana.page.setViewportSize({ width: 820, height: 1180 });
+  await openChess(ana);
+  const app = ana.page.getByTestId("mini-app");
+  await expect(app).toBeVisible();
+  await expect(app).toHaveAttribute("data-place", "wide");
+  await expect(ana.page.getByTestId("chat-name")).toBeHidden();
+  const pane = (await ana.page.locator(".chat-pane").boundingBox())!, box = (await app.boundingBox())!;
+  expect(Math.round(box.width)).toBe(Math.round(pane.width));
+  // No way to put it beside the chat; Back goes to the chat, the app one tap away.
+  await expect(app.getByTestId("mini-app-wide")).toHaveCount(0);
+  await app.getByTestId("mini-app-back").click();
+  await expect(app).toBeHidden();
+  await expect(ana.page.getByTestId("chat-name")).toBeVisible();
+  await expect(ana.page.getByTestId("mini-app-resume")).toHaveText("Back to Chess");
+
+  // Wide enough again (the phone turned, the window widened): beside the chat, which keeps a phone's width.
+  await ana.page.setViewportSize({ width: 1280, height: 800 });
+  await ana.page.getByTestId("mini-app-resume").click();
+  await expect(app).toHaveAttribute("data-place", "beside");
+  await expect(ana.page.getByTestId("chat-name")).toBeVisible();
+  expect((await ana.page.locator(".chat-column").boundingBox())!.width).toBeGreaterThanOrEqual(320);
 });
 
 test("on a phone the app covers the chat, and Back keeps it running", { tag: ["@feature:apps.view"] }, async ({ peer }) => {
@@ -217,6 +288,49 @@ test("on a phone the browser's Back with the app over the chat goes back to the 
   await expect(ana.page).not.toHaveURL(/#\/chat\//);
 });
 
+for (const [language, words] of [["ar", "العودة إلى"], ["ja", "に戻る"]] as const) {
+  test(`in ${language} on a phone, "Back to" a long app title shows the title's first letters and its words whole`, { tag: ["@feature:apps.view", "@feature:app.i18n"] }, async ({ peer }) => {
+    // The bar was one line cut as a whole: in Arabic a Latin title lost its first letters ("achturnier… Pro"), and in
+    // Japanese ("<title> に戻る") a long title pushed out the words that say what the bar does.
+    const title = "Schachturnierorganisationsverwaltung Pro";
+    const [ana] = await setUp(peer, { title });
+    await ana.page.evaluate((language) => localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}"), language })), language);
+    await ana.page.reload();
+    await ana.page.setViewportSize({ width: 320, height: 640 });
+    await openChess(ana);
+    const app = ana.page.getByTestId("mini-app");
+    await expect(app).toBeVisible();
+    await app.getByTestId("mini-app-back").click();
+    const resume = ana.page.getByTestId("mini-app-resume");
+    await expect(resume).toBeVisible();
+
+    // Whether `text` (from `start`, `length` characters) is drawn whole: inside every box that clips it, up to the bar.
+    const whole = (text: string, start: number, length: number) => resume.evaluate((bar, [text, start, length]) => {
+      const walker = document.createTreeWalker(bar, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const at = node.textContent!.indexOf(text);
+        if (at < 0) continue;
+        const range = document.createRange();
+        range.setStart(node, at + start);
+        range.setEnd(node, at + start + length);
+        const drawn = range.getBoundingClientRect();
+        let left = drawn.left, right = drawn.right;
+        for (let box = node.parentElement; box && bar.contains(box); box = box.parentElement) {
+          if (getComputedStyle(box).overflowX === "visible") continue;
+          const clip = box.getBoundingClientRect();
+          left = Math.max(left, clip.left); right = Math.min(right, clip.right);
+        }
+        return right - left >= drawn.width - 1;
+      }
+      return null;
+    }, [text, start, length] as const);
+    // The title is cut, at its end: its first letter is drawn whole, its last is not. The words are drawn whole.
+    expect(await whole(title, 0, 1)).toBe(true);
+    expect(await whole(title, title.length - 1, 1)).toBe(false);
+    expect(await whole(words, 0, words.length)).toBe(true);
+  });
+}
+
 test("a chat app's Open on the Apps page asks which chat, and opens it there, never alone", { tag: ["@feature:apps.view"] }, async ({ peer }) => {
   const [ana, bob] = await setUp(peer);
   await ana.page.setViewportSize({ width: 1280, height: 800 });
@@ -241,6 +355,37 @@ test("a chat app's Open on the Apps page asks which chat, and opens it there, ne
   await expect(chat(bob).getByTestId("app-card")).toContainText("Ana opened it here");
 });
 
+/*
+ * The Apps dialogs end with their buttons, inside their 20 px padding. Their `pb-safe` (only the phone's safe area)
+ * replaced the bottom one, so Close, Cancel and Install sat on the dialog's bottom edge, on a phone and a computer.
+ */
+test("+ → Apps, the which-chat picker and an app's screen keep their padding under their last buttons", { tag: ["@feature:apps.view", "@feature:apps.page"] }, async ({ peer }) => {
+  const [ana] = await setUp(peer);
+  /** From the last button's bottom to the dialog's: at least the dialog's 20 px padding (2 px before the fix). */
+  const under = async (dialog: string, button: string) => {
+    const box = (await ana.page.getByTestId(dialog).boundingBox())!;
+    const last = (await ana.page.getByTestId(dialog).getByRole("button", { name: button, exact: true }).boundingBox())!;
+    return Math.round(box.y + box.height - (last.y + last.height));
+  };
+  for (const viewport of [{ width: 1280, height: 800 }, { width: 375, height: 700 }]) {
+    await ana.page.setViewportSize(viewport);
+    await (await composerRow(ana.page, "composer-apps")).click();
+    expect(await under("chat-apps", "Close"), `+ → Apps at ${viewport.width} px`).toBeGreaterThanOrEqual(20);
+    await ana.page.keyboard.press("Escape");
+    await expect(ana.page.getByTestId("chat-apps")).toHaveCount(0);
+
+    await ana.page.goto("/#/apps");
+    await ana.page.getByTestId("installed-app").getByTestId("installed-app-open").click();
+    expect(await under("app-chat-picker", "Cancel"), `the picker at ${viewport.width} px`).toBeGreaterThanOrEqual(20);
+    await ana.page.keyboard.press("Escape");
+    await ana.page.getByTestId("installed-app").getByRole("button", { name: /^Chess .*: details$/ }).click();
+    expect(await under("app-details", "Open"), `the app's screen at ${viewport.width} px`).toBeGreaterThanOrEqual(20);
+    await ana.page.keyboard.press("Escape");
+    await ana.page.goto("/#/");
+    await ana.page.getByTestId("chat-row").first().click();
+  }
+});
+
 test("a full-screen app opens alone from the Apps page: modal, Close has the focus, Escape closes it", { tag: ["@feature:apps.view"] }, async ({ peer }) => {
   const store = await testStore({ view: "full", title: "Browser", tagline: "Look up Pkarr records" });
   const ana = await peer("ana");
@@ -262,6 +407,60 @@ test("a full-screen app opens alone from the Apps page: modal, Close has the foc
   await ana.page.keyboard.press("Escape");
   await expect(app).toHaveCount(0);
   await expect(open).toBeFocused();
+});
+
+/*
+ * On an iPhone, iOS keeps the page's height under the keyboard (support/keyboard.ts). An app full screen, alone or in a
+ * chat, stayed the whole screen tall, so the app's own field at its bottom, the one the person typed in, was under it.
+ */
+const IPHONE = { width: 390, height: 844 }, KEYBOARD = 336;
+const NOTES_AT_BOTTOM = "<!doctype html><meta charset=utf-8><title>Notes</title><body style=margin:0>"
+  + "<textarea data-testid=notes style='position:fixed;bottom:0;left:0;width:100%;height:48px;box-sizing:border-box'></textarea>";
+
+/** Ana on an iPhone with its keyboard, the store's app installed from the Apps page (no account menu on a phone). */
+async function onIphone(peer: (name: string, options?: PeerOptions) => Promise<Peer>, store: TestStore): Promise<Peer> {
+  const ana = await peer("ana", { mobile: true, viewport: IPHONE });
+  await serveStore(ana.context, store);
+  await iosKeyboard(ana.page);
+  await ana.page.goto("/#/apps");
+  await ana.page.getByTestId("apps-add").click();
+  await ana.page.getByTestId("apps-add-url").fill(STORE_URL);
+  await ana.page.getByTestId("apps-add-check").click();
+  await ana.page.getByTestId("apps-add-store-confirm").click();
+  await ana.page.getByTestId("app-store").filter({ hasText: store.storeName }).getByTestId("app-listing-install").click();
+  await ana.page.getByTestId("app-install").getByTestId("app-install-confirm").click();
+  await expect(ana.page.getByTestId("installed-app")).toContainText(store.title);
+  return ana;
+}
+
+/** Typing in the app's bottom field: above the keyboard while it is up, back at the screen's bottom once it goes. */
+async function typesAboveKeyboard(ana: Peer): Promise<void> {
+  const notes = ana.page.getByTestId("mini-app").frameLocator("iframe").getByTestId("notes");
+  await notes.click();
+  const bottom = async () => { const box = (await notes.boundingBox())!; return Math.round(box.y + box.height); };
+  await keyboard(ana.page, KEYBOARD);
+  await expect.poll(bottom).toBeLessThanOrEqual(IPHONE.height - KEYBOARD);
+  await notes.pressSequentially("e4");
+  await expect(notes).toHaveValue("e4");
+  await keyboard(ana.page, 0);
+  await expect.poll(bottom).toBe(IPHONE.height);
+}
+
+test("on an iPhone, a full-screen app opened alone ends where the keyboard starts: a field at its bottom stays above it", { tag: ["@feature:apps.view", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+  const ana = await onIphone(peer, await testStore({ view: "full", title: "Notes", tagline: "A page to write on", entry: NOTES_AT_BOTTOM }));
+  await ana.page.getByTestId("installed-app").getByTestId("installed-app-open").click();
+  await expect(ana.page.getByTestId("mini-app")).toHaveAttribute("data-place", "alone");
+  await typesAboveKeyboard(ana);
+});
+
+test("on an iPhone, an app in a chat ends where the keyboard starts: a field at its bottom stays above it", { tag: ["@feature:apps.view", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+  const ana = await onIphone(peer, await testStore({ title: "Notes", tagline: "A page to write on", entry: NOTES_AT_BOTTOM }));
+  const bob = await peer("bob");
+  await ana.page.goto("/#/");
+  await pair(ana, bob);
+  await openChess(ana);
+  await expect(ana.page.getByTestId("mini-app")).toHaveAttribute("data-place", "phone");
+  await typesAboveKeyboard(ana);
 });
 
 test("a full-screen app opened from a chat covers the whole chat on a wide screen, with Back to it, never beside it", { tag: ["@feature:apps.view"] }, async ({ peer }) => {
@@ -401,4 +600,88 @@ test("an app that says `activity` by itself does not keep the lock away once the
   await ana.page.waitForTimeout(75_000);
   await expect(ana.page.getByText("Ghostly is locked")).toBeVisible({ timeout: 1000 });
   await expect(app).toHaveCount(0);
+});
+
+// The watchdog closed an app that held its thread; Open again is what the person has left. Offline it cannot open: the
+// place says why and stays, and once it opens again in a chat the keyboard focus is still in the app's panel.
+test.describe("Open again after an app stopped responding", () => {
+  // Answers at first, then holds its thread past the watchdog's bound.
+  const HANGS = "<!doctype html><meta charset=utf-8><title>Chess</title><body><h1>Chess</h1><script>setTimeout(() => { const end = Date.now() + 15000; while (Date.now() < end); }, 1500);</script>";
+
+  test("in a chat: offline it says why under Open again and the panel stays; online, the focus stays in the panel", { tag: ["@feature:apps.view", "@feature:apps.takedown"] }, async ({ peer }) => {
+    test.setTimeout(180_000);
+    const [ana] = await setUp(peer, { entry: HANGS });
+    await ana.page.setViewportSize({ width: 1280, height: 800 });
+    await openChess(ana);
+    const app = ana.page.getByTestId("mini-app");
+    const again = app.getByTestId("mini-app-open-again");
+    await expect(again).toBeVisible({ timeout: 60_000 });
+
+    await ana.context.setOffline(true);
+    await again.click();
+    await expect(app.getByRole("alert")).toHaveText("You are offline.");
+    await expect(app.getByTestId("mini-app-stopped")).toBeVisible();
+    await expect(again).not.toHaveAttribute("aria-busy", "true");
+
+    await ana.context.setOffline(false);
+    await again.focus();
+    await ana.page.keyboard.press("Enter");
+    await expect(again).toHaveCount(0);
+    await expect(app.getByRole("alert")).toHaveCount(0);
+    expect(await app.evaluate((panel) => panel.contains(document.activeElement))).toBe(true);
+  });
+
+  test("on a phone after Back: the chat keeps the message field, and the way back says it stopped", { tag: ["@feature:apps.view", "@feature:apps.takedown"] }, async ({ peer }) => {
+    test.setTimeout(180_000);
+    // Hangs once Ana is back in the chat.
+    const [ana] = await setUp(peer, { entry: HANGS.replace("1500", "4000") });
+    await ana.page.setViewportSize({ width: 375, height: 812 });
+    await openChess(ana);
+    const app = ana.page.getByTestId("mini-app");
+    await expect.poll(() => appHeading(ana)).toBe("Chess");
+    await app.getByTestId("mini-app-back").click();
+    await expect(app).toBeHidden();
+    const input = ana.page.getByPlaceholder("Message…");
+    await input.click();
+
+    const resume = ana.page.getByTestId("mini-app-resume");
+    await expect(resume.getByTestId("mini-app-resume-stopped")).toContainText("Stopped", { timeout: 60_000 });
+    await expect(app).toBeHidden();
+    await expect(input).toBeFocused();
+    await ana.page.keyboard.type("Still here");
+    await expect(input).toHaveValue("Still here");
+
+    // Back to it: why it stopped, and Open again.
+    await resume.click();
+    await expect(app).toBeVisible();
+    await expect(app.getByTestId("mini-app-stopped")).toBeVisible();
+    await expect(app.getByTestId("mini-app-open-again")).toBeVisible();
+  });
+
+  test("alone: offline the layer stays and says why under Open again",{ tag: ["@feature:apps.view", "@feature:apps.takedown"] }, async ({ peer }) => {
+    test.setTimeout(180_000);
+    const store = await testStore({ view: "full", title: "Chess", entry: HANGS });
+    const ana = await peer("ana");
+    await serveStore(ana.context, store);
+    await install(ana, store);
+    await ana.page.getByTestId("account-apps").click();
+    await ana.page.getByTestId("installed-app").getByTestId("installed-app-open").click();
+    const app = ana.page.getByTestId("mini-app");
+    await expect(app).toHaveAttribute("data-place", "alone");
+    const again = app.getByTestId("mini-app-open-again");
+    await expect(again).toBeVisible({ timeout: 60_000 });
+
+    await ana.context.setOffline(true);
+    await again.click();
+    await expect(app.getByRole("alert")).toHaveText("You are offline.");
+    await expect(app).toHaveAttribute("data-place", "alone");
+    await expect(app.getByTestId("mini-app-stopped")).toBeVisible();
+
+    // Online, it opens again in a layer of its own, and only one.
+    await ana.context.setOffline(false);
+    await again.click();
+    await expect(ana.page.locator("[data-place=alone]")).toHaveCount(1);
+    await expect(ana.page.getByTestId("mini-app-open-again")).toHaveCount(0);
+    await expect(ana.page.getByTestId("mini-app").getByRole("alert")).toHaveCount(0);
+  });
 });

@@ -50,6 +50,8 @@ export interface CallDevices {
   notice: DeviceNotice | null;
   dismiss: () => void;
   switchBack: () => void;
+  /** The keyboard focus or the pointer is on the notice (true) or left it (false): its time stops, then starts over. */
+  hold: (held: boolean) => void;
 }
 
 /** How long a notice stays. */
@@ -71,12 +73,26 @@ export function useCallDevices(webrtc: CallMediaControls): CallDevices | null {
   const [speaker, setSpeaker] = useState<string | undefined>();
   const [notice, setNoticeState] = useState<DeviceNotice | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const noticeUp = useRef(false);
+  /** The focus or the pointer is on the notice: it does not run out under someone reading it or about to Switch back. */
+  const held = useRef(false);
 
-  const setNotice = useCallback((next: DeviceNotice | null) => {
+  const startTimer = useCallback(() => {
     clearTimeout(timer.current);
-    setNoticeState(next);
-    if (next) timer.current = setTimeout(() => setNoticeState(null), DEVICE_NOTICE_MS);
+    if (noticeUp.current && !held.current) timer.current = setTimeout(() => {
+      noticeUp.current = false;
+      setNoticeState(null);
+    }, DEVICE_NOTICE_MS);
   }, []);
+  const setNotice = useCallback((next: DeviceNotice | null) => {
+    noticeUp.current = !!next;
+    setNoticeState(next);
+    startTimer();
+  }, [startTimer]);
+  const hold = useCallback((on: boolean) => {
+    held.current = on;
+    startTimer();
+  }, [startTimer]);
   useEffect(() => () => clearTimeout(timer.current), []);
 
   const audioTrack = webrtc.localStream?.getAudioTracks()[0];
@@ -120,40 +136,39 @@ export function useCallDevices(webrtc: CallMediaControls): CallDevices | null {
       offered.current.add(`${kind}:missing`);
       setNotice({ kind, type: "lost", name });
     };
-    /** The default takes over from a device that went; when it cannot be opened (it was the only one), that is said instead. */
-    const fallBack = (kind: DeviceKind, name: string, to: () => Promise<void>) => {
-      lost(kind, name);
-      return run(async () => {
-        try {
-          await to();
-        } catch (error) {
-          setNotice({ kind, type: "gone", name });
-          throw error;
-        }
-      });
-    };
-
-    if (audio && gone("audioinput", mic, audio)) {
-      await fallBack("audioinput", audio.label, () => call.switchMicrophone(null));
-      return;
-    }
-    if (showing && video && gone("videoinput", camera, video)) {
-      await fallBack("videoinput", video.label, () => call.switchCamera(null));
-      return;
-    }
-    if (sink && !next.audiooutput.some((d) => d.id === sink)) {
+    // Devices that went together (a webcam's camera and microphone, a headset's microphone and speaker) all fall back
+    // in this one check: the next one, while the first switches, would find it busy, and a gone device says no more.
+    // The notice names the first; when the default cannot be opened (it was the only one), that is said instead.
+    const falls: { kind: DeviceKind; name: string; to: () => Promise<void> }[] = [];
+    if (audio && gone("audioinput", mic, audio)) falls.push({ kind: "audioinput", name: audio.label, to: () => call.switchMicrophone(null) });
+    if (showing && video && gone("videoinput", camera, video)) falls.push({ kind: "videoinput", name: video.label, to: () => call.switchCamera(null) });
+    const sinkGone = !!sink && !next.audiooutput.some((d) => d.id === sink);
+    if (sinkGone) {
       // The chosen speaker under the id it was saved with, which the browser no longer uses: found by its name, it
       // is still there, and the call plays on it with nothing to tell.
       const chosen = loadDeviceChoices().audiooutput;
       const found = chosen?.id === sink ? resolveDevice("audiooutput", next).id : undefined;
-      if (found && found !== sink) {
-        setSpeaker(found);
-        return;
+      if (found && found !== sink) setSpeaker(found);
+      else {
+        lost("audiooutput", chosen?.label ?? "");
+        setSpeaker(undefined);
       }
-      lost("audiooutput", chosen?.label ?? "");
-      setSpeaker(undefined);
-      return;
     }
+    for (const fall of [...falls].reverse()) lost(fall.kind, fall.name);
+    if (falls.length) {
+      let failed = false;
+      await run(async () => {
+        for (const fall of falls) {
+          try {
+            await fall.to();
+          } catch {
+            if (!failed) setNotice({ kind: fall.kind, type: "gone", name: fall.name });
+            failed = true;
+          }
+        }
+      });
+    }
+    if (sinkGone || falls.length) return;
 
     const choices = loadDeviceChoices();
     // The chosen device was not there when the call started: it began on the default, and says so once.
@@ -309,5 +324,6 @@ export function useCallDevices(webrtc: CallMediaControls): CallDevices | null {
     notice,
     dismiss: () => setNotice(null),
     switchBack,
+    hold,
   };
 }

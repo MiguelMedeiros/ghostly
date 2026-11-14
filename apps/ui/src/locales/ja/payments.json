@@ -35,6 +35,10 @@
       "amountMismatch": "インボイスが請求額と一致しません",
       "feeAbove": "Lightning の手数料（最大 {{fee}} {{unit}}）が上限を超えています"
     },
+    "expiredNext": {
+      "mine": "新しいリクエストでもう一度依頼してください",
+      "theirs": "連絡先に新しいリクエストを依頼してください"
+    },
     "externalNote": {
       "ark": "どの Ark ウォレットからでも支払えます。相手のウォレットは入金を確認すると支払い済みにします。",
       "bitcoin": "どの Bitcoin ウォレットからでも支払えます。相手のウォレットは入金を確認すると、1 回の承認後に支払い済みにします。",
@@ -58,6 +62,7 @@
     "preparing": "準備中…",
     "review": "支払いを確認",
     "state": {
+      "checking": "支払いを確認しています…",
       "closed": "終了",
       "lightningPending": "Lightning の支払いを処理中…",
       "payment": {
@@ -67,6 +72,7 @@
         "settled": "受け取り済み"
       },
       "request": {
+        "expired": "期限切れ",
         "failed": "失敗",
         "pending": "支払いを待っています",
         "settled": "支払い済み"
@@ -229,11 +235,17 @@
     "sendUnavailable": "グループへの請求は 1 人のメンバーが支払います。誰かに支払うには、その人を選んでください",
     "status": {
       "claimedPaid": "{{names}} が支払い済み · {{to}} のウォレット待ち",
+      "claimedPaidByMe": "あなたが支払い済み · {{to}} のウォレット待ち",
+      "claimedPaidToMe": "{{names}} が支払い済み · あなたのウォレット待ち",
+      "claimedPaidWithMe": "あなたと {{names}} が支払い済み · {{to}} のウォレット待ち",
       "closed": "終了",
       "paid": "支払い済み",
       "paidBy": "{{name}} が支払い済み",
+      "paidByMe": "あなたが支払い済み",
       "saysPaid": "{{names}} が支払ったと言っています · {{to}} のウォレット待ち",
+      "saysPaidToMe": "{{names}} が支払ったと言っています · あなたのウォレット待ち",
       "sent": "送信済み · {{name}} を待っています",
+      "sentToMe": "送信済み · あなたのウォレット待ち",
       "takenBack": "取り消し済み",
       "waiting": "支払い待ち"
     },
@@ -241,9 +253,16 @@
     "theGroup": "グループ",
     "title": {
       "asked": "{{to}} が {{from}} に請求",
+      "askedByMe": "あなたが {{from}} に請求",
       "askedGroup": "{{to}} がグループに請求",
+      "askedGroupByMe": "あなたがグループに請求",
+      "askedMe": "{{to}} があなたに請求",
       "paying": "{{from}} が {{to}} に支払い中",
-      "sent": "{{from}} が {{to}} に送金"
+      "payingByMe": "あなたが {{to}} に支払い中",
+      "payingMe": "{{from}} があなたに支払い中",
+      "sent": "{{from}} が {{to}} に送金",
+      "sentByMe": "あなたが {{to}} に送金",
+      "sentToMe": "{{from}} があなたに送金"
     },
     "why": {
       "noPayments": "相手のアプリはグループでの支払いに対応していないか（更新が必要）、すべての方法をオフにしています",
@@ -257,7 +276,7 @@
     "alreadySpent": "使用済み",
     "anyAmount": "金額自由",
     "checking": "確認中…",
-    "confirmWhat": "{{amount}} sats（手数料は最大 {{fee}}）",
+    "confirmWhat": "{{amount}} {{unit}}（手数料は最大 {{fee}} {{feeUnit}}）",
     "copied": "コピーしました",
     "ecashRequest": "ecash の支払い請求",
     "ecashToken": "ecash トークン",
@@ -286,9 +305,11 @@
     "otherUnitToken": "{{unit}} のトークン",
     "paid": "支払い済み ✓",
     "pay": "支払う",
-    "payWithFee": "{{amount}} + 手数料最大 {{fee}} を支払う",
+    "payWithFee": "{{amount}} {{unit}} + 手数料最大 {{fee}} を支払う",
     "paying": "支払い中…",
     "paysThrough": "{{domain}} 経由で支払い",
+    "pending": "支払いを処理中…",
+    "pendingAtCard": "{{card}}で支払いを処理中…",
     "pendingAtMint": "ミントで支払いを処理中…",
     "qrTooLong": "QR コードには長すぎます。コピーしてください。",
     "redeem": "受け取る",

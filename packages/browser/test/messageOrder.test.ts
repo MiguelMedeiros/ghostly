@@ -114,6 +114,22 @@ describe("a live conversation with a contact whose clock is off", () => {
     }
   });
 
+  it("texts a bot sends one after the other in one millisecond keep the order they were sent in", async () => {
+    // The CLI and bots give no time: the engine picks it. Each awaited, all within one millisecond, on the DHT floor.
+    const { node, store } = await started();
+    const { linkId } = await node.ensureLink({ ...createLink().mine, profile: "paired-chat/1", deliveryMode: "dht" });
+    const sent = ["h1", "h2", "h3", "h4", "h5"];
+    for (const text of sent) expect((await node.sendMessage({ linkId, text })).error).toBeNull();
+    const history = await db.getMessages(linkId);
+    // Each one past the one before: the order rests on the time, not on a random id.
+    const times = history.map((m) => m.timestamp);
+    expect(times).toEqual(times.map((_, i) => times[0] + i));
+    expect(texts(history)).toEqual(sent);
+    // And what comes next still goes below them.
+    await store({ ...theirs("answer", 0), linkId });
+    expect(texts(await db.getMessages(linkId))).toEqual([...sent, "answer"]);
+  });
+
   it("a message that comes in the millisecond I sent one goes below it", async () => {
     const { store } = await started();
     await store(mine("ping"));
@@ -264,6 +280,8 @@ describe("messages that arrive late keep their order and land where they arrive"
     expect(texts(rows)).toEqual(["Bo joined", "Cy is no longer a member", "hi all"]);
     expect(rows[0].timestamp).toBe(yesterday);
     expect(rows[1].timestamp).toBe(yesterday + MINUTE);
+    // And when they came here: the event stream judges them by it (a line read a month late is still news).
+    expect([rows[0].heardAt, rows[1].heardAt]).toEqual([now, now]);
   });
 
   it("the list of groups and unread follow when a message came, never a member's clock", () => {

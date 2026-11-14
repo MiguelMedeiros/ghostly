@@ -64,6 +64,13 @@ describe("a line written while behind on a private group's chain", { timeout: 60
     const copies = writer.state.sent.filter(f => f.o);
     expect(copies.map(f => [f.e, f.o, f.ts])).toEqual([[4, { e: 3, n: 0 }, 11_000]]);
     expect(writer.messageIdOf(copies[0])).toBe(firstId);
+    // Who could read it, as a holder of its file judges: the writer by the epochs it said it under; a member by the epoch
+    // the line reached it under. Yann, let in after it, by neither.
+    expect(writer.couldRead(xena!.myKey, firstId)).toBe(true);
+    expect(writer.couldRead(yann!.myKey, firstId)).toBe(false);
+    expect(alice.couldRead(xena!.myKey, firstId)).toBe(false);
+    expect(alice.couldRead(xena!.myKey, firstId, 4)).toBe(true);
+    expect(alice.couldRead(yann!.myKey, firstId, 4)).toBe(false);
     // Looked at once: later ticks say nothing more.
     const mark = mesh.sentFrames.length;
     mesh.clock! += 60_000;

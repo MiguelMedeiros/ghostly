@@ -173,6 +173,13 @@
 .reader-all a[aria-current="page"] .mono {
   color: var(--cyan);
 }
+/* Forced colors replace the background and the cyan: the WISP that is open keeps an underline. */
+@media (forced-colors: active) {
+  .reader-all a[aria-current="page"] {
+    text-decoration: underline 2px;
+    text-underline-offset: 4px;
+  }
+}
 
 .reader-main {
   min-width: 0;
