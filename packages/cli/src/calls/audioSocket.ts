@@ -38,6 +38,8 @@ export function callSocketDir(value = process.env.GHOSTLY_CALL_SOCKET_DIR): stri
  * The shared folder (`callSocketDir`), checked before a socket goes in it: the machine made it, so it is not made here.
  * Refused when it is missing, a link, someone else's, or when anyone else may write it (and so replace a socket) or
  * anyone outside its group may enter it: 0750, its group the other user's (setgid, so the sockets take that group).
+ * Refused too on Linux when its group is not this user's own and it is not setgid: a socket there takes this user's
+ * group, not the folder's, and the other user's program could never open one.
  */
 export function sharedFolder(path: string): void {
   const what = "calls will not put their audio there";
@@ -45,6 +47,7 @@ export function sharedFolder(path: string): void {
   try { info = lstatSync(path); } catch { throw new CliError("refused", `${path} (GHOSTLY_CALL_SOCKET_DIR) is not there: ${what}. Make it a folder of this user's, 0750 with the group that reads the audio (chmod 2750)`); }
   if (!info.isDirectory() || (process.getuid && info.uid !== process.getuid())) throw new CliError("refused", `${path} (GHOSTLY_CALL_SOCKET_DIR) is not a folder of this user's: ${what}`);
   if ((info.mode & 0o027) !== 0) throw new CliError("refused", `${path} (GHOSTLY_CALL_SOCKET_DIR) may be written by others or entered by anyone outside its group: ${what}. Run \`chmod 2750 ${path}\`, then try again`);
+  if (process.platform === "linux" && process.getegid && info.gid !== process.getegid() && (info.mode & 0o2000) === 0) throw new CliError("refused", `${path} (GHOSTLY_CALL_SOCKET_DIR) is not setgid: a call's socket there would take this user's group, not the folder's, and its group could not open it. Run \`chmod 2750 ${path}\`, then try again`);
 }
 
 /** A call's socket's name: its call id, 12 hex digits. */

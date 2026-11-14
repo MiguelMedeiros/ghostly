@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, symlinkSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, chownSync, existsSync, mkdirSync, symlinkSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createSocket } from "node:dgram";
 import { connect, Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
@@ -410,6 +410,22 @@ describe("the audio socket", () => {
     mkdirSync(real, { mode: 0o750 });
     symlinkSync(real, shared);
     await expect(open()).rejects.toThrow(/not a folder of this user's/);
+  });
+
+  // Linux gives a new file the process's group, not the folder's, unless the folder is setgid. Needs a second group.
+  const otherGroup = process.platform === "linux" ? process.getgroups?.().find((gid) => gid !== process.getegid?.()) : undefined;
+  it.skipIf(otherGroup === undefined)("refuses a shared folder of another group with no setgid: its sockets would take this user's group", async () => {
+    const shared = join(tmp(), "calls");
+    mkdirSync(shared);
+    chownSync(shared, process.getuid!(), otherGroup!);
+    chmodSync(shared, 0o750);
+    const open = () => AudioSocket.open(join(shared, "abc.sock"), 16000, { onAudio: () => {} }, { shared: true });
+    await expect(open()).rejects.toThrow(/chmod 2750/);
+    expect(readdirSync(shared)).toEqual([]);
+    chmodSync(shared, 0o2750);
+    const socket = await open();
+    expect(statSync(socket.path).gid).toBe(otherGroup);
+    await socket.close();
   });
 
   it("a daemon's manager with a shared folder refuses a wrong one at the start, clears it, and puts its calls' sockets there", async () => {
