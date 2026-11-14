@@ -2166,6 +2166,31 @@ describe("one pull request alone", () => {
     expect((await repo.run()).dropped).toEqual([11]);
   });
 
+  it("pushes the second run again when the push of a red lone pull request's second rebase failed, and blames it only after that run", async () => {
+    // Its head stayed on the train's first rebase, red: not in flight (the mark names the second one) and not boardable
+    // (red), it sat in line under "CI Success is red" with no second run and no `queue:failed`.
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    await repo.run();
+    const first = repo.pulls.get(11)!.sha;
+    repo.settle([11]);
+    const push = repo.git.pushHead;
+    repo.git.pushHead = async () => ({ ok: false, message: "fatal: unable to access 'https://github.com/…': Could not resolve host: github.com" });
+    await repo.run();
+    expect(repo.pulls.get(11)!.sha).toBe(first);
+    expect(repo.alone(11)).toMatchObject({ retried: true, from: first });
+    repo.git.pushHead = push;
+    const again = await repo.run();
+    expect(again.inFlight).toBe(11);
+    const second = repo.pulls.get(11)!.sha;
+    expect(second).not.toBe(first);
+    expect(repo.alone(11)).toMatchObject({ sha: second, retried: true });
+    expect(repo.pulls.get(11)!.labels).toContain(LABEL.queue);
+    repo.settle([11]);
+    expect((await repo.run()).failed).toEqual([11]);
+    expect(repo.pulls.get(11)!.labels).toEqual([LABEL.failed]);
+  });
+
   it("takes a lone pull request that changes a workflow out of the line when GitHub refuses the push of its rebase", async () => {
     // Else every run rebased it, was refused and kept it in flight, and nothing on it said why.
     const repo = fakeRepo();
