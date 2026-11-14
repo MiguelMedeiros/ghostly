@@ -163,8 +163,10 @@ function publisherRevoked(
 
 /**
  * The bundle of the very version a listing names (reference, digest, sequence), from the first of its URLs that holds
- * it, tried in order as the app tries them: a URL that was not read, does not verify, or holds another version (the
- * store's repository moved on while the site was built) gives way to the next. Unlike an install from a card, a newer
+ * it, tried in the order the app tries them (`listingUrls` in packages/browser/src/engine/apps.ts): a jsDelivr copy
+ * first, as it names a commit, where a raw `HEAD` the page would offer to add by its link moves on to versions the store
+ * has not reviewed. A URL that was not read, does not verify, or holds another version (the store's repository moved on
+ * while the site was built) gives way to the next. Unlike an install from a card, a newer
  * version than the listing's is not shown: the store lists the version it reviewed, and an app from the store updates
  * only to that.
  */
@@ -173,7 +175,9 @@ function listedBundle(
   bundles: Record<string, Uint8Array>,
 ): { ok: true; url: string; bundle: AppBundle } | { ok: false; reason: string } {
   let reason = "not-fetched";
-  for (const url of listing.urls.slice(0, STORE_LIMITS.urls)) {
+  const urls = listing.urls.slice(0, STORE_LIMITS.urls);
+  const pinned = (u: string) => isStoreFetchUrl(u) && new URL(u).hostname.toLowerCase() === "cdn.jsdelivr.net";
+  for (const url of [...urls.filter(pinned), ...urls.filter((u) => !pinned(u))]) {
     const bytes = isStoreFetchUrl(url) ? bundles[url] : undefined;
     if (bytes === undefined) continue;
     if (bytes.length > STORE_LIMITS.bundleBytes) {
