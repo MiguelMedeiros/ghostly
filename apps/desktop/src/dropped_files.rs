@@ -15,7 +15,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::Manager;
 
-use crate::clipboard::{pasted_files, shelve_files, PasteShelf, PastedItem};
+use crate::clipboard::{pasted_files, regular_files, shelve_files, PasteShelf, PastedItem};
 
 /// The event the page hears while another app's drag of files is over the window (true), and when it left (false).
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
@@ -148,7 +148,7 @@ pub async fn read_dropped_files<R: tauri::Runtime>(
     Ok(shelve_files(&shelf, files))
 }
 
-/// The files of the drop the page just took, picked on its own file input (regular files only, as a paste's): the page
+/// The files of the drop the page just took, picked on its own file input (regular files only, all of them): the page
 /// gets Files WebKit reads from the disk as they are sent, as + → Document's, of any size, where a read by token
 /// (`read_dropped_files`) brings every byte into the page first. How many are picked: 0, and nothing is clicked, when
 /// the drop brought no file to send. `READ_INSTEAD` when one of its files has a path the chooser can't take: the drop
@@ -167,7 +167,7 @@ pub async fn choose_dropped_files<R: tauri::Runtime>(
         return Ok(0);
     };
     let (files, paths) =
-        tauri::async_runtime::spawn_blocking(move || (pasted_files(paths.clone()), paths))
+        tauri::async_runtime::spawn_blocking(move || (regular_files(paths.clone()), paths))
             .await
             .map_err(|e| e.to_string())?;
     if files.is_empty() {
@@ -522,6 +522,32 @@ mod tests {
         );
         assert!(include_str!("../../ui/src/lib/pastedFiles.ts")
             .contains(&format!("DROP_INPUT_ACCEPT = \"{DROP_CHOOSER}\"")));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Every file of a drop on a chat is picked, as + → Document picks any number: none of them is read into the page,
+    /// so a paste's limit on how many it reads ([`MAX_PASTED_FILES`]) left the rest out of the sheet without a word.
+    #[test]
+    fn a_drop_of_more_files_than_a_paste_reads_is_picked_whole() {
+        let dir = std::env::temp_dir().join(format!("ghostly-many-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let many: Vec<PathBuf> = (0..crate::clipboard::MAX_PASTED_FILES + 8)
+            .map(|n| dir.join(format!("photo {n:02}.jpg")))
+            .collect();
+        for path in &many {
+            std::fs::write(path, b"jpg").unwrap();
+        }
+        let app = app();
+        let main = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let dropped = app.state::<DroppedFiles>();
+        dropped.put(many.clone(), Instant::now());
+        assert_eq!(
+            tauri::async_runtime::block_on(choose_dropped_files(main.clone())),
+            Ok(many.len())
+        );
+        assert_eq!(dropped.take_chosen(), many);
         std::fs::remove_dir_all(dir).unwrap();
     }
 
