@@ -253,7 +253,10 @@ function noRemovalOnItsWay(ctx: ApiContext, linkIds: readonly string[], clearing
   throw new CliError("confirm", `${one ? "A message you deleted for everyone has" : `${n} messages you deleted for everyone have`} not reached the contact yet: ${now} now leaves ${one ? "it" : "them"} on their device. Keep this profile online until the contact is reachable (ghostly daemon --detach) and ${then}, or pass --force (force: true over the socket) to ${go} now`, { messages: pending });
 }
 
-/** Stages of a link join that waiting does not change: the group is full, this key is kept out, or the link was replaced. */
+/**
+ * Stages of a link join that a minute's wait does not change: the group is full or waits for its members' updates (the
+ * knock goes on and lets the joiner in later, while the profile runs), or the link was replaced.
+ */
 const JOIN_ENDED = new Set(["full", "blocked", "replaced"]);
 /** How long a one-shot `group join` waits to be let in: as long as a one-shot `invite join` waits to pair. */
 const ONE_SHOT_JOIN_S = 60;
@@ -270,8 +273,21 @@ async function letIn(ctx: ApiContext, groupId: string): Promise<Record<string, u
   const group = await waitForState(ctx, (s) => { const g = seen(s); return done(g) ? { g } : undefined; }, ONE_SHOT_JOIN_S * 1000, `group ${groupId} to let this profile in`)
     .then(({ g }) => g, (error: unknown) => { if (error instanceof CliError && error.code === "timeout") return seen(state(ctx)); throw error; });
   const joined = group?.status === "active", stage = group?.invitation?.stage ?? null;
-  if (joined || !group || JOIN_ENDED.has(stage ?? "")) return { group: groupId, joined, stage };
-  return { group: groupId, joined, stage, warning: `Not in yet: no member's app has let you in. A member's app lets you in only while this profile is running: keep it running (ghostly daemon --detach), then ghostly group show ${shellWord(groupId)}` };
+  if (joined || !group) return { group: groupId, joined, stage };
+  return { group: groupId, joined, stage, warning: notInYet(group, groupId) };
+}
+
+/**
+ * What a one-shot join not in yet says, by the stage it stopped at, as the app's page for that stage does. A full group,
+ * or one waiting for updates, lets the joiner in later only while its knock goes on: it stopped there with no word, exit 0.
+ */
+function notInYet(group: GroupView, groupId: string): string {
+  const keep = `keep it running (ghostly daemon --detach), then ghostly group show ${shellWord(groupId)}`;
+  const invitation = group.invitation;
+  if (invitation?.stage === "replaced") return "This link was replaced or turned off. Ask someone in the group for the current link, then ghostly group join <link>";
+  if (invitation?.stage === "full") return `This group is full${invitation.full ? ` (${invitation.full.n} of ${invitation.full.max} members)` : ""}. You get in once someone leaves, while this profile is running: ${keep}`;
+  if (invitation?.stage === "blocked") return `This group is waiting for updates: it takes new members again once everyone in it has an updated Ghostly. You get in then, while this profile is running: ${keep}`;
+  return `Not in yet: no member's app has let you in. A member's app lets you in only while this profile is running: ${keep}`;
 }
 
 const METHODS: Record<string, Method> = {

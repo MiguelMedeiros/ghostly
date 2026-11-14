@@ -91,12 +91,21 @@ describe("a one-shot group join", () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it("stops at a stage waiting does not change, with no daemon's note", async () => {
+  // Found in a bug hunt: it stopped at "full", "blocked" and "replaced" with no word for a person, exit 0. A full group
+  // (or one waiting for updates) lets the joiner in later, but only while its knock goes on, as the app's page says.
+  it("stops at a stage waiting a minute does not change, and says that stage's next step", async () => {
+    const said: Record<string, string> = {
+      full: "This group is full (8 of 8 members). You get in once someone leaves, while this profile is running: keep it running (ghostly daemon --detach), then ghostly group show g9",
+      blocked: "This group is waiting for updates: it takes new members again once everyone in it has an updated Ghostly. You get in then, while this profile is running: keep it running (ghostly daemon --detach), then ghostly group show g9",
+      replaced: "This link was replaced or turned off. Ask someone in the group for the current link, then ghostly group join <link>",
+    };
     for (const stage of ["full", "blocked", "replaced"]) {
       const { ctx, set } = oneShot();
       const answer = callApi(ctx, "group.join", { link: LINK });
-      setTimeout(() => set([knocking(stage)]), 5);
-      expect(await answer).toEqual({ group: "g9", joined: false, stage });
+      const g = knocking(stage);
+      if (stage === "full") Object.assign(g.invitation!, { full: { n: 8, max: 8 } });
+      setTimeout(() => set([g]), 5);
+      expect(await answer).toEqual({ group: "g9", joined: false, stage, warning: said[stage] });
     }
   });
 
