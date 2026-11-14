@@ -97,7 +97,7 @@ it("--out naming a folder is refused in words that say so, and leaves no file of
   expect(ok(await ghostly(["--home", dir, "profile", "backup", "--out", join(folder, "bot.ghostly-backup")], { env: PASS }))).toMatchObject({ path: join(folder, "bot.ghostly-backup") });
 });
 
-it("a passphrase on the command line is refused in the same words however it comes, for backup and restore, and never echoed", async () => {
+it("a passphrase on the command line is refused in the same words however it comes (a typo of the flag too), for backup and restore, and never echoed", async () => {
   const dir = home("backup-passphrase-line");
   const file = join(dir, "bot.ghostly-backup");
   const secret = "a secret on the line";
@@ -111,6 +111,10 @@ it("a passphrase on the command line is refused in the same words however it com
     ["restore --passphrase", ["profile", "restore", file, "copy", "--passphrase"]],
     ["restore --passphrase <secret>", ["profile", "restore", file, "copy", "--passphrase", secret]],
     ["restore --passphrase=<secret>", ["profile", "restore", file, "copy", `--passphrase=${secret}`]],
+    // A typo of it: before, "Unknown option --pasphrase (did you mean --passphrase?)", the one form refused here.
+    ["backup --pasphrase=<secret>", ["profile", "backup", "--out", file, `--pasphrase=${secret}`]],
+    ["backup --passprase <secret>", ["profile", "backup", "--out", file, "--passprase", secret]],
+    ["restore --pasphrase=<secret>", ["profile", "restore", file, "copy", `--pasphrase=${secret}`]],
   ] as const) {
     const run = await ghostly(["--home", dir, ...line], { env: NO_PASS });
     const failure = run.json.error as { code?: string; message?: string } | undefined;
