@@ -1499,6 +1499,7 @@ export class GhostlyNode implements EngineImplementation {
     online: () => this.networkOn,
     relayOnly: () => this.settings.relayOnly === true,
     emit: () => { this.emitState(); this.did.changed(); void this.publicProfiles.prune().catch(() => {}); this.publicActivity.prune(); },
+    redraw: linkId => this.chatChanged(linkId),
     publicProfile: (provider, subject) => this.publicProfiles.view({ provider, subject }),
     publish: (seed, records) => this.transport.publish(identityFromSeed(seed), records),
     // Revocation lookups of the contacts' proofs are never what a chat waits on: they give way to the chats' reads.
