@@ -1202,7 +1202,7 @@ export class Groups {
     if (!group || !other) throw new Error("No other group under this id");
     const others = group.others!;
     group.others = others.filter(o => o !== other);
-    try { await this.forget(groupId); } catch (error) { group.others = others; throw error; }
+    try { await this.forget(groupId, true, true); } catch (error) { group.others = others; throw error; }
     if ("link" in other) { await this.joinByLink(other.link); return; }
     const declined = this.stored.get(groupId)?.declined;
     const invitation: StoredGroup = { id: groupId, createdAt: Date.now(), invitation: { name: other.name, admin: other.admin, linkId: other.linkId, e: other.e, n: other.n, pieces: [] },
@@ -1751,15 +1751,23 @@ export class Groups {
     await this.session(groupId).rename(name);
   }
 
-  /** `answer`: false when an invitation goes because its inviter took it back, so no decline is said for it. */
-  async forget(groupId: string, answer = true): Promise<void> {
+  /**
+   * `answer`: false when an invitation goes because its inviter took it back, so no decline is said for it. `wipe`: an
+   * active group goes with its tombstone too (another group takes its id).
+   */
+  async forget(groupId: string, answer = true, wipe = false): Promise<void> {
     // A community I am active in is left first (the request to the hubs, an admin's role handed on), or the others keep
     // me as a member, and as their admin, for good. With nothing connected to carry it, only an admin is refused.
     if (this.isCommunity(groupId)) return this.communities.deleteHere(groupId);
     const session = this.sessions.get(groupId);
     // Deleting an active group leaves it. An admin with members who cannot hand the role on is refused, as Leave is:
     // gone with the role, the group would have no admin for good. Anyone else's failed goodbye does not keep it here.
-    if (session?.status === "active") { try { await this.leave(groupId); } catch (e) { if (session.isAdmin && session.others.length) throw e; } }
+    if (session?.status === "active") {
+      try { await this.leave(groupId); } catch (e) { if (session.isAdmin && session.others.length) throw e; }
+      // Left as Leave leaves: the history and the row are gone already, and the tombstone stays to say the leave to an
+      // admin who is away, until its commit removing me comes back or the week ends (`leaveConfirmed`, `tick`).
+      if (this.stored.get(groupId)?.left && !wipe) return;
+    }
     // An invitation a contact sent goes with a decline, answered or not, or its inviter counts me as invited for good.
     const gone = this.stored.get(groupId), invitation = answer && gone?.invitation && !gone.invitation.entry && !gone.invitation.takenBack ? gone.invitation : undefined;
     const owed = invitation && this.sayDecline(groupId, invitation.linkId);
