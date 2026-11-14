@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useLockScreen } from "../contexts/LockScreenContext";
+import { useCallOnSync } from "../hooks/useCallOnSync";
 import { offerSession } from "../lib/lockedRing";
 import { Chat } from "../pages/Chat";
 import { useLimited } from "./devices/LimitedStart";
@@ -28,6 +29,8 @@ export function PreUnlockRing() {
 }
 
 function RingingChats() {
+  // A call ringing here keeps the profile on this device, as one ringing unlocked does (App's own `useCallOnSync`).
+  useCallOnSync();
   const [held, setHeld] = useState<readonly string[]>([]);
   const rang = useRef(new Set<string>());
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
