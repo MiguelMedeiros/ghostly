@@ -162,6 +162,9 @@ export async function createHyperEndpoint(seed, options = {}) {
         const header = Buffer.alloc(4); header.writeUInt32BE((binary ? BINARY : 0) + payload.length)
         socket.write(Buffer.concat([header, payload]))
       },
+      // No frame comes from the contact while paused: secret-stream then pauses the UDX stream under it.
+      pause() { socket.pause() },
+      resume() { socket.resume() },
       drained() {
         if (this.bufferedAmount <= DRAINED_AT) return Promise.resolve()
         if (closed) return Promise.reject(new Error('Native channel closed'))

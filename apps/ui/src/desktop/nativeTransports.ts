@@ -16,6 +16,10 @@ type Event = { type: "open"; id: number; binding: NativeBinding; incoming: boole
   /** Iroh: the endpoint is connected to its home relay again after it lost it (a phone back from Doze). */
   | { type: "relayBack" };
 
+/** Rust hears the frames the page took every this many, or this soon after the last (its credit is several frames). */
+const TOLD_EVERY = 4;
+const TOLD_WITHIN_MS = 20;
+
 /**
  * Ordered IPC writes and bounded buffering before the session installs its reader. A frame counts against the send
  * budget until Rust answered (HyperDHT: once it queued it for the runtime). While HyperDHT's runtime says the
@@ -33,6 +37,9 @@ class NativeChannel implements FrameChannel {
   private waiting: (() => void)[] = [];
   /** The frame Rust holds for this connection's exit (`parting`). */
   private last: string | null = null;
+  /** Frames taken that Rust has not heard of yet (`took`), and the timer that tells it. */
+  private taken = 0;
+  private telling: ReturnType<typeof setTimeout> | null = null;
   bufferedAmount = 0;
   readonly sendBudget = 120 * 1024;
   /**
@@ -49,6 +56,7 @@ class NativeChannel implements FrameChannel {
   }
   receive(data: string | Uint8Array) {
     if (this.closed) return;
+    this.took();
     if (this.reader) this.reader(data);
     else if (this.buffered.length < 64) this.buffered.push(data);
     else this.close();
@@ -82,6 +90,23 @@ class NativeChannel implements FrameChannel {
       if (!this.closed) await invoke(command, { endpointId: this.endpointId(), connectionId: this.id, text: frame });
     }).catch(() => {});
   }
+  /**
+   * Rust hands the page a connection's frames within a credit, and reads no further from the contact until the page
+   * says it took them (`paired_native_took`): a contact faster than the page waits on its own transport, not in memory
+   * here. Told every few frames, or soon after the last one.
+   */
+  private took() {
+    if (++this.taken >= TOLD_EVERY) this.tell();
+    else this.telling ??= setTimeout(() => this.tell(), TOLD_WITHIN_MS);
+  }
+  private tell() {
+    if (this.telling) clearTimeout(this.telling);
+    this.telling = null;
+    const frames = this.taken;
+    this.taken = 0;
+    if (this.closed || !frames) return;
+    void invoke(this.kind === "iroh" ? "paired_native_took" : "paired_hyperdht_took", { endpointId: this.endpointId(), connectionId: this.id, frames }).catch(() => {});
+  }
   /** HyperDHT: the runtime's socket for this connection is full (`true`) or has room again. */
   held(full: boolean) {
     if (this.closed || full === this.full) return;
@@ -101,6 +126,7 @@ class NativeChannel implements FrameChannel {
   close() {
     if (this.closed) return;
     this.closed = true; this.buffered = [];
+    if (this.telling) { clearTimeout(this.telling); this.telling = null; }
     if (this.full) { this.full = false; this.bufferedAmount -= this.sendBudget / 4; }
     for (const resolve of this.waiting.splice(0)) resolve();
     void invoke(this.kind === "iroh" ? "paired_native_close" : "paired_hyperdht_close", { endpointId: this.endpointId(), connectionId: this.id }).catch(() => {});

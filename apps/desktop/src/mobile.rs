@@ -49,6 +49,9 @@ pub mod hyperdht {
 
     #[tauri::command]
     pub fn paired_hyperdht_stop() {}
+
+    #[tauri::command]
+    pub fn paired_hyperdht_took() {}
 }
 
 pub mod keep_awake {
