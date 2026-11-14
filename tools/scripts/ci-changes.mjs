@@ -41,6 +41,8 @@ export const RUST_INPUTS = [
   "packages/cli/src/services.ts",
   // viewer.rs: a test keeps its WebRTC guard the same as the web runner's.
   "packages/core/src/viewerGuard.ts",
+  // dropped_files.rs: tests keep the drop input and the read-by-token answer the same as the page's.
+  "apps/ui/src/lib/pastedFiles.ts",
 ];
 
 /**
