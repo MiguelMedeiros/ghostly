@@ -1497,6 +1497,8 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
   if (!target || (spec.message && !message)) throw new CliError("usage", `Missing <${target ? "message" : spec.target}>: ghostly ${spec.usage}`);
   // Before stdin is read and the profile opens: the API's own check answered once a one-shot was online (exit 1).
   timeout(parsed.options);
+  // Empty (an unset variable in a script), it sent a plain message: an id the chat lacks is exit 3.
+  if (parsed.options.reply === "") throw new CliError("usage", "--reply needs a message id");
   // Stdin only when no text word was given at all: `send bob "$line"` with an empty line is no text, not the rest of stdin.
   let text = words.join(" ");
   if (parsed.options.text !== undefined) {

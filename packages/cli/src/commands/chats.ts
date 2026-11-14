@@ -49,6 +49,8 @@ export const commands: Record<string, Command> = {
       timeout: groupWait.timeout,
     },
     params: ({ options }, a) => {
+      // Empty (an unset variable in a script), --close closed the buttons with no answer shown: a button not there is exit 3.
+      if (options.chosen === "") throw new CliError("usage", "--chosen needs a button id");
       if (!options.chosen && options.close !== true && !options.text) throw new CliError("usage", `Give --chosen, --close or --text: ghostly ${BUTTON_UPDATE}`);
       return { chat: a.chat, message: a.message, chosen: options.chosen, close: options.close === true, text: options.text, force: options.force === true, wait: options.wait, timeout: timeout(options) };
     },
