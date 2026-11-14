@@ -188,16 +188,32 @@ export function precacheList(files: readonly string[], leaveOut: readonly string
 }
 
 /**
- * What the worker is built with, from the public folder's files and the bundle: the precache, and each language's files
- * (but English's, in the entry), which the install takes for the person's language only (`installList`).
+ * What the worker is built with, from the public folder's files and the bundle: the precache, each language's files
+ * (but English's, in the entry), which the install takes for the person's language only (`installList`), and the
+ * build's other hashed files (`lazy`: the WebAssembly, the online-only chunks), kept on their first use (`asset`).
  */
-export function serviceWorkerFiles(publicFiles: readonly string[], bundle: readonly (BundleFile & { moduleIds?: readonly string[] })[]): { precache: string[]; languages: Record<string, string[]> } {
+export function serviceWorkerFiles(publicFiles: readonly string[], bundle: readonly (BundleFile & { moduleIds?: readonly string[] })[]): { precache: string[]; languages: Record<string, string[]>; lazy: string[] } {
   const { onlineOnly, languages } = optionalFiles(bundle);
   const leaveOut = [...desktopOnlyFiles(bundle), ...onlineOnly, ...Object.values(languages).flat()];
-  return {
-    precache: precacheList([...publicFiles, ...bundle.map((file) => file.fileName)], leaveOut),
-    languages: Object.fromEntries(Object.entries(languages).map(([language, files]) => [language, files.map((file) => "/" + file.replace(/^\/+/, ""))])),
-  };
+  const precache = precacheList([...publicFiles, ...bundle.map((file) => file.fileName)], leaveOut);
+  const byLanguage = Object.fromEntries(Object.entries(languages).map(([language, files]) => [language, files.map((file) => "/" + file.replace(/^\/+/, ""))]));
+  const installed = new Set([...precache, ...Object.values(byLanguage).flat()]);
+  const lazy = [...new Set(bundle.map((file) => "/" + file.fileName.replace(/^\/+/, "")))]
+    .filter((path) => path.startsWith("/assets/") && !path.endsWith(".map") && !installed.has(path))
+    .sort();
+  return { precache, languages: byLanguage, lazy };
+}
+
+/**
+ * The files the install takes from the caches of earlier builds (`held`, path → cache) instead of the network: a hashed
+ * file has a digest of its content in its name, so the copy an older cache holds is the file. The browser's HTTP cache
+ * may have let it go: the worker answered from its own cache since, so nothing read it, and clearing the browser's
+ * cached files empties it but not the worker's. Those it needs (`wanted`), and those it keeps on first use (`lazy`) that
+ * an earlier build kept: the next use of a wallet does not download its WebAssembly again. Never the files whose
+ * names stay from one deploy to the next (`precacheMode`).
+ */
+export function carriedOver(wanted: readonly string[], lazy: readonly string[], held: ReadonlyMap<string, string>): string[] {
+  return [...new Set([...wanted, ...lazy])].filter((path) => precacheMode(path) === "default" && held.has(path));
 }
 
 /**
