@@ -48,13 +48,13 @@ describe("GroupChat: what the header says", () => {
 
   it("makes the members line under the name a 24 px tap target on a phone", () => {
     openGroup(active());
-    expect(screen.getByTestId("group-members").className.split(/\s+/)).toContain("max-md:min-h-6");
+    expect(screen.getByTestId("group-members").className.split(/\s+/)).toContain("max-md:min-h-[24px]");
   });
 
   it("makes ⋮ and the connection button 44 px on a phone, as the chat header's and the group's own Back", () => {
     // They were 38 px (`max-md:p-2.5` around an 18 px icon) beside the 44 px Back.
     openGroup(active());
-    for (const id of ["group-options", "group-connection-options"]) expect(screen.getByTestId(id)).toHaveClass("max-md:h-11", "max-md:w-11", "max-md:p-0");
+    for (const id of ["group-options", "group-connection-options"]) expect(screen.getByTestId(id)).toHaveClass("max-md:h-[44px]", "max-md:w-[44px]", "max-md:p-0");
   });
 
   it("names a group that has no name", () => {
