@@ -365,7 +365,7 @@ export class CallMedia {
       track.onMessage((packet) => { for (const listener of listeners) listener(packet); });
       const audio = new CallAudio({
         rate: options.rate, payloadType: conn.payloadType, ssrc: conn.ssrc,
-        track: { send: (packet) => { if (track.isOpen()) track.sendMessageBinary(packet); }, onPacket: (listener) => listeners.push(listener) },
+        track: { send: trackSend(track), onPacket: (listener) => listeners.push(listener) },
         encoder: stack.opus(options.rate), decoder: stack.opus(options.rate), onFrame: options.onFrame, queue: options.queue,
       });
       const media = new CallMedia(conn, audio);
@@ -423,6 +423,18 @@ function mdnsNote(signal: CallSignal, log: (line: string) => void): void {
     if (!host?.endsWith(".local")) continue;
     log(`${host}: an mDNS name, not resolved here: the call connects only if the contact's checks reach this side`);
   }
+}
+
+/**
+ * Sends a call's packets on its track, while it is open. A track can close between `isOpen` and the send (the
+ * connection failing), and libdatachannel then throws "Track is not open" from the audio's timer, where nothing catches
+ * it: that frame is dropped, as one sent while the track is closed is.
+ */
+export function trackSend(track: Pick<Track, "isOpen" | "sendMessageBinary">): (packet: Buffer) => void {
+  return (packet) => {
+    if (!track.isOpen()) return;
+    try { track.sendMessageBinary(packet); } catch { /* closed meanwhile */ }
+  };
 }
 
 /** Whether a call's ICE servers (`callIceServers`) have a TURN server: its relay candidate is then the one waited for. */
