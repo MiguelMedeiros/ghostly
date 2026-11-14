@@ -77,12 +77,36 @@ describe("a group payment's status where I am the payer or payee", () => {
     expect(mine.map(patch => groupPayStatus(note(patch), group, t).text)).toEqual(lines[language]);
   });
 
-  it("names me in a list of members who say they paid as I am named mid-sentence", () => {
-    expect(groupPayStatus(note({ from: "*", claims: [BOB, ME] }), group).text).toBe("Bob, you paid · waiting for Alice's wallet");
-  });
-
   it("between two other members, names both", () => {
     expect(groupPayStatus(note({ claims: [BOB] }), group).text).toBe("Bob says they paid · waiting for Alice's wallet");
     expect(groupPayStatus(note({ kind: "payment", state: "sent" }), group).text).toBe("Sent · waiting for Alice");
+  });
+});
+
+/**
+ * Several members who say they paid a request to the group are the subject of a plural verb, me among them too: the
+ * line read "Bob, Carol pagó", "Bob, Carol a payé" and "Bob, ti pagó" or "Bob, te ha pagato" with me in the list.
+ */
+describe("a group payment's status when several members say they paid", () => {
+  const CAROL = "carol".padEnd(52, "y");
+  const four = groupView({ ...group, members: [...group.members, member({ key: CAROL, nick: "Carol" })] });
+  const claims: Partial<GroupPayNote>[] = [
+    { from: "*", claims: [BOB, CAROL] }, // two other members
+    { from: "*", claims: [BOB, ME] }, // another member and I
+  ];
+  const lines: Record<Language, string[]> = {
+    en: ["Bob, Carol paid · waiting for Alice's wallet", "You and Bob paid · waiting for Alice's wallet"],
+    pt: ["Bob, Carol pagaram · aguardando a carteira de Alice", "Você e Bob pagaram · aguardando a carteira de Alice"],
+    es: ["Bob, Carol pagaron · esperando la billetera de Alice", "Tú y Bob pagaron · esperando la billetera de Alice"],
+    fr: ["Bob, Carol ont payé · en attente du portefeuille de Alice", "Vous et Bob avez payé · en attente du portefeuille de Alice"],
+    it: ["Bob, Carol hanno pagato · in attesa del portafoglio di Alice", "Tu e Bob avete pagato · in attesa del portafoglio di Alice"],
+    ar: ["Bob، Carol دفعوا · بانتظار محفظة Alice", "أنت وBob دفعتم · بانتظار محفظة Alice"],
+    ja: ["Bob、Carol が支払い済み · Alice のウォレット待ち", "あなたと Bob が支払い済み · Alice のウォレット待ち"],
+    zh: ["Bob、Carol 已支付 · 等待 Alice 的钱包", "你和 Bob 已支付 · 等待 Alice 的钱包"],
+  };
+  it.each(Object.keys(lines) as Language[])("in %s", async (language) => {
+    await loadLocale(language);
+    const t = translatorFor(language);
+    expect(claims.map(patch => groupPayStatus(note(patch), four, t).text)).toEqual(lines[language]);
   });
 });

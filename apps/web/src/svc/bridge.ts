@@ -22,6 +22,38 @@ const documentOf = describe(HTMLIFrameElement.prototype, "contentDocument")?.get
 const windowOf = describe(HTMLIFrameElement.prototype, "contentWindow")?.get;
 const typeOf = describe(Document.prototype, "contentType")?.get;
 const urlOf = describe(Document.prototype, "URL")?.get;
+const ownNavigator = navigator;
+const activationOf = describe(Navigator.prototype, "userActivation")?.get;
+const activeOf = typeof UserActivation === "undefined" ? undefined : describe(UserActivation.prototype, "isActive")?.get;
+const clock = Date.now;
+
+/**
+ * How long a tap or a key in the app's page counts as the person's (a browser's activation lasts about 5 s): a link the
+ * app opens later is not opened for them.
+ */
+const INPUT_COUNTS_MS = 5_000;
+
+/**
+ * Whether the person is using the app's page in `win` now: they pressed or tapped in it in the last few seconds, and
+ * that activates this page too, as its parent. Not a tap or a key in Ghostly's page around it (another origin), which
+ * activates neither; nor the tap on Open that started the app, whose activation the browser also hands the frames it
+ * makes right after, this one and the app's: no input of the app's page came with it. False where the browser cannot
+ * say. The app's page can stop its own inputs reaching here, which only makes it open nothing.
+ */
+export function watchUse(win: Window): () => boolean {
+  let input = -Infinity;
+  const seen = (event: Event) => { if (event.isTrusted) input = clock(); };
+  for (const type of ["pointerdown", "keydown", "touchend"]) win.addEventListener(type, seen, true);
+  return () => {
+    if (clock() - input > INPUT_COUNTS_MS) return false;
+    try {
+      const activation = activationOf ? apply(activationOf, ownNavigator, []) as UserActivation | undefined : undefined;
+      return !!activation && !!activeOf && apply(activeOf, activation, []) === true;
+    } catch {
+      return false;
+    }
+  };
+}
 
 /**
  * Whether the page in the app's frame may be shown: one the clipboard guard ran first in (`CLIPBOARD_GUARD_SCRIPT`
@@ -113,7 +145,12 @@ function start(): void {
     if (guardedPage(app)) {
       const win = windowOf ? apply(windowOf, app, []) as Window | null : null;
       try {
-        if (win) forwardLinks(win, (url) => window.parent.postMessage({ type: BRIDGE_OPEN_LINK, url }, __SERVICES_APP_ORIGIN__));
+        // Only one the person opens in the app (`watchUse`): the app's page checks its own activation too, which a tap
+        // on Ghostly's Open, or one in Ghostly's page, gives it for seconds while the app's page loads or runs.
+        if (win) {
+          const using = watchUse(win);
+          forwardLinks(win, (url) => { if (using()) window.parent.postMessage({ type: BRIDGE_OPEN_LINK, url }, __SERVICES_APP_ORIGIN__); });
+        }
       } catch { /* a page that is not HTML: nothing to hand on */ }
       return;
     }

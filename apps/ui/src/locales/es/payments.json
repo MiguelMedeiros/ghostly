@@ -234,9 +234,10 @@
     "listSeparator": ", ",
     "sendUnavailable": "Una solicitud al grupo la paga un miembro; para pagar a alguien, elígelo",
     "status": {
-      "claimedPaid": "{{names}} pagó · esperando la billetera de {{to}}",
+      "claimedPaid": "{{names}} pagaron · esperando la billetera de {{to}}",
       "claimedPaidByMe": "Pagaste · esperando la billetera de {{to}}",
       "claimedPaidToMe": "{{names}} pagaron · esperando tu billetera",
+      "claimedPaidWithMe": "Tú y {{names}} pagaron · esperando la billetera de {{to}}",
       "closed": "Cerrado",
       "paid": "Pagado",
       "paidBy": "Pagado por {{name}}",

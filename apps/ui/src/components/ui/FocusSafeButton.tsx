@@ -5,8 +5,8 @@ import { useState } from "react";
  * it starts (or a field it saved, now unchanged) disables it, and a browser drops the focus of a disabled control to
  * the page, where it stays when the work fails. Until the focus leaves it, it is `aria-disabled` instead (said as
  * unavailable, its press and a form's Enter on it ignored); then natively disabled as asked. A button disabled before
- * it had the focus is plain `disabled`, out of the Tab order as before. The window losing the focus (another tab, a save
- * dialog its work opened) blurs it but leaves it the page's focus, which the window's return gives back: it keeps it.
+ * it had the focus is plain `disabled`, out of the Tab order as before. A blur that leaves it the page's focus is the
+ * window going away (another tab or app while the work runs), not the focus leaving: it stays held for its return.
  */
 export function FocusSafeButton({ disabled, onClick, onFocus, onBlur, ...props }: React.ComponentPropsWithRef<"button">) {
   const [focused, setFocused] = useState(false);

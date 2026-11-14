@@ -237,6 +237,7 @@
       "claimedPaid": "{{names}} が支払い済み · {{to}} のウォレット待ち",
       "claimedPaidByMe": "あなたが支払い済み · {{to}} のウォレット待ち",
       "claimedPaidToMe": "{{names}} が支払い済み · あなたのウォレット待ち",
+      "claimedPaidWithMe": "あなたと {{names}} が支払い済み · {{to}} のウォレット待ち",
       "closed": "終了",
       "paid": "支払い済み",
       "paidBy": "{{name}} が支払い済み",

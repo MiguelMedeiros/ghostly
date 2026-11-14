@@ -48,29 +48,27 @@ describe.each(["raw", "button"] as const)("a %s button disabled by its own work"
     expect(go).not.toHaveAttribute("aria-disabled");
   });
 
+  it("keeps the focus while the window is away during its work: another tab or app blurs it but leaves it the page's focus", async () => {
+    const work = vi.fn(() => new Promise<void>(() => undefined));
+    const { user } = renderApp(<Work as={as} work={work} />);
+    const go = screen.getByTestId("go");
+    go.focus();
+    await user.keyboard("{Enter}");
+    // What Chromium does when the tab or window goes to the back: blur on the button, which stays document.activeElement
+    // (natively disabled there, Chromium moves the focus to the page, and it is on the page when the window is back).
+    act(() => { go.dispatchEvent(new FocusEvent("blur")); go.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); });
+    expect(document.activeElement).toBe(go);
+    expect(go).toBeEnabled();
+    expect(go).toHaveAttribute("aria-disabled", "true");
+    await user.tab();
+    expect(go).toBeDisabled();
+  });
+
   it("is plain disabled when it was disabled before it had the focus", () => {
     renderApp(as === "raw" ? <FocusSafeButton data-testid="go" disabled>Go</FocusSafeButton> : <Button data-testid="go" disabled>Go</Button>);
     expect(screen.getByTestId("go")).toBeDisabled();
     expect(screen.getByTestId("go")).not.toHaveAttribute("aria-disabled");
   });
-});
-
-it("a held button keeps the focus while the window is away (a tab switch, a save dialog its work opened)", async () => {
-  const work = vi.fn(() => new Promise<void>(() => {}));
-  const { user } = renderApp(<Work as="raw" work={work} />);
-  const go = screen.getByTestId("go");
-  go.focus();
-  await user.keyboard("{Enter}");
-  expect(go).toHaveAttribute("aria-disabled", "true");
-  // As Chromium says the window lost the focus: blur and focusout on the focused button, which stays the active one.
-  // Natively disabled now, Chromium would drop it to the page, where the window's return finds it.
-  act(() => { go.dispatchEvent(new FocusEvent("blur")); go.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); });
-  expect(document.activeElement).toBe(go);
-  expect(go).toBeEnabled();
-  expect(go).toHaveAttribute("aria-disabled", "true");
-  act(() => { go.dispatchEvent(new FocusEvent("focus")); go.dispatchEvent(new FocusEvent("focusin", { bubbles: true })); });
-  await user.tab();
-  expect(go).toBeDisabled();
 });
 
 it("a held submit button sends no form on Enter", async () => {

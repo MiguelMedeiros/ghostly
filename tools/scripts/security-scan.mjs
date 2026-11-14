@@ -117,9 +117,12 @@ export async function findingsFor(packages, ask = osv) {
     });
   }
 
+  // An advisory hits each version and lockfile that carries the package (semver: 7 hits), its detail is the same for all.
+  const details = new Map();
   const findings = [];
   for (const hit of hits) {
-    const detail = await ask(`https://api.osv.dev/v1/vulns/${hit.id}`);
+    if (!details.has(hit.id)) details.set(hit.id, await ask(`https://api.osv.dev/v1/vulns/${hit.id}`));
+    const detail = details.get(hit.id);
     if (detail.withdrawn) continue;
     const fixed = (detail.affected ?? [])
       .flatMap((a) => a.ranges ?? [])
