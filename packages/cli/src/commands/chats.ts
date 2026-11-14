@@ -77,7 +77,7 @@ export const commands: Record<string, Command> = {
     options: { yes: { type: "boolean", description: "Confirm" }, force: { type: "boolean", description: "Remove it even if a message you deleted for everyone has not reached the contact yet" } },
     params: ({ options }, { chat }) => ({ chat, yes: options.yes === true, force: options.force === true }),
   },
-  "chat rename": { method: "chat.rename", usage: "chat rename <chat> <name...>", summary: "Name a chat on this side (empty: the contact's name)", args: ["chat", "name...?"], params: (_, { chat, name }) => ({ chat, name: name ?? "" }) },
+  "chat rename": { method: "chat.rename", usage: "chat rename <chat> [name...]", summary: "Name a chat on this side (empty: the contact's name)", args: ["chat", "name...?"], params: (_, { chat, name }) => ({ chat, name: name ?? "" }) },
   "chat show": { method: "chat.get", usage: "chat show <chat> [--show-secret]", summary: "One chat and its connection (its pending invite code only with --show-secret)", args: ["chat"], options: showInvite, params: ({ options }, { chat }) => ({ chat, ...secret(options) }) },
   "chat transport": { method: "chat.transport", usage: "chat transport <chat> <auto|dht|webrtc|iroh|hyperdht>", summary: "Choose what carries a chat", args: ["chat", "transport"], words: { transport: Object.keys(TRANSPORT_NAMES) }, params: (_, a) => ({ chat: a.chat, transport: a.transport }) },
   "chat verify": {
