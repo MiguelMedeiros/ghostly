@@ -88,24 +88,33 @@ export function guardedDocument(doc: Document | null): boolean {
 
 /**
  * Hands `ask` each link the page in `win` opens in a new window (a click on a `target="_blank"` link the page left
- * alone, `window.open` with no target or `_blank`), which the view's sandbox would drop with no word: the app's page
- * opens one to another site in a new tab (`outsideLink` in opener.ts). Not a guard: the page can skip it, or ask for
- * any link, and the app's page decides what opens.
+ * alone, `window.open` with no target or `_blank`; one to a name no window or frame has yet, such as `_new`, which a
+ * browser opens in a new window too), which the view's sandbox would drop with no word: the app's page opens one to
+ * another site in a new tab (`outsideLink` in opener.ts). A name one of the page's frames has stays that frame's. Not
+ * a guard: the page can skip it, or ask for any link, and the app's page decides what opens.
  */
 export function forwardLinks(win: Window, ask: (url: string) => void): void {
   const blank = (target: unknown) => typeof target === "string" && target.toLowerCase() === "_blank";
+  // This page or a frame around it, never a new window.
+  const here = (target: string) => ["_self", "_parent", "_top"].includes(target.toLowerCase());
+  const open = win.open;
+  // The browser finds the window a name points to: with no address it loads nothing there, and the sandbox refuses
+  // the new window a name nobody has would open (null), which leaves the person's tap in place.
+  const named = (target: string) => apply(open, win, ["", target]) !== null;
   win.addEventListener("click", (event) => {
     if (event.defaultPrevented || event.button !== 0) return;
     const link = event.composedPath().find((node) => ["a", "area"].includes((node as Element).localName)) as HTMLAnchorElement | undefined;
     if (!link?.href) return;
     const target = link.getAttribute("target") ?? win.document.querySelector("base[target]")?.getAttribute("target");
-    if (!blank(target)) return;
+    if (!target || here(target) || (!blank(target) && named(target))) return;
     event.preventDefault();
     ask(link.href);
   });
-  const open = win.open;
   win.open = function (url?: string | URL, target?: string, features?: string) {
-    if (target !== undefined && target !== "" && !blank(target)) return apply(open, win, [url, target, features]) as Window | null;
+    if (target && !blank(target)) {
+      const found = apply(open, win, [url, target, features]) as Window | null;
+      if (found || here(target)) return found;
+    }
     try { ask(new URL(String(url ?? ""), win.document.baseURI).href); } catch { /* not a URL: nothing opens */ }
     return null;
   };
