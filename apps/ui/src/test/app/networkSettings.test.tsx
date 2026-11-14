@@ -308,13 +308,15 @@ describe("Settings, Network: Hide my IP from contacts", () => {
   // Every connection to a contact goes through the TURN server then, and the engine keeps it: it is not optional.
   for (const language of LANGUAGES) {
     it(`${language}: while it is on, the TURN server's hint says it is required, not optional`, () => {
+      // toHaveTextContent reads the page's no-break spaces (French's before ":") as plain ones.
+      const said = (key: string) => lookup(language, key)!.replace(/\s+/g, " ");
       const { engine } = renderApp(<NetworkSettings />, { language });
       act(() => engine.update({ transport, settings: { relays: RELAYS, iceServers: [TURN], relayOnly: true } }));
       const field = screen.getByTestId("network-turn-field");
-      expect(field).not.toHaveTextContent(lookup(language, "network.turnHint")!);
-      expect(field).toHaveTextContent(lookup(language, "network.turnHintRelayOnly")!);
+      expect(field).not.toHaveTextContent(said("network.turnHint"));
+      expect(field).toHaveTextContent(said("network.turnHintRelayOnly"));
       act(() => engine.update({ settings: { relays: RELAYS, iceServers: [TURN] } }));
-      expect(screen.getByTestId("network-turn-field")).toHaveTextContent(lookup(language, "network.turnHint")!);
+      expect(screen.getByTestId("network-turn-field")).toHaveTextContent(said("network.turnHint"));
     });
   }
 
