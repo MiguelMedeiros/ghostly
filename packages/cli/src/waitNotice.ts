@@ -4,6 +4,8 @@
  * for a command a daemon answers.
  */
 
+import { basename } from "node:path";
+
 /** What happens next to what a wait was waiting on: a daemon goes on, a one-shot's profile closes now. */
 export const goesOn = (mode: "daemon" | "one-shot"): string => mode === "one-shot"
   ? "goes with this profile's next command, or keep it online with `ghostly daemon --detach`"
@@ -81,6 +83,13 @@ export function waitNotice(method: string, given: Record<string, unknown>, mode:
     ? { waiting: "waiting for a member's app to let this profile in (up to 60 s; Ctrl-C stops waiting)", stopped: "not let in yet: the knock goes on while this profile is running (ghostly daemon --detach)" }
     : null;
   const params = waitOf(method, given, mode);
+  // A daemon's file send answers once it has copied the file into the profile (files.ts `stage`): 6-30 s for 1 GiB, said
+  // nothing, and read as a hung daemon. Ctrl-C leaves the daemon to finish it.
+  if (method === "file.send" && mode === "daemon" && params.wait !== "sent") {
+    const file = word(params.name) ?? (word(params.path) ? basename(params.path as string) : "the file");
+    const chatRef = word(params.chat) ?? "the chat", chat = chatRef.startsWith("group:") ? `group ${chatRef.slice("group:".length)}` : chatRef;
+    return { waiting: `copying ${file} into the profile before it goes to ${chat} (Ctrl-C stops waiting, it still goes)`, stopped: `the daemon copies ${file} in and sends it to ${chat}` };
+  }
   const waits = waitsFor(method, params);
   if (waits === undefined) return null;
   const seconds = typeof params.timeout === "number" ? params.timeout : waits;

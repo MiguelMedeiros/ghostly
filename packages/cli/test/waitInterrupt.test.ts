@@ -132,8 +132,18 @@ describe("what a wait says", () => {
     expect(waitNotice("chat.send", { chat: "bob", text: "hi" }, "one-shot")?.waiting).toBe("waiting for it to go out to bob (up to 30 s; Ctrl-C stops waiting, it still goes)");
     // Asked not to wait, or through a daemon (it answers at once), or a call that never waits: nothing.
     expect(waitNotice("file.send", { chat: "bob", path: "/f", wait: "none" }, "one-shot")).toBeNull();
-    expect(waitNotice("file.send", { chat: "bob", path: "/f" }, "daemon")).toBeNull();
     expect(waitNotice("chat.delete", { chat: "bob", message: "m" }, "one-shot")).toBeNull();
     expect(waitNotice("chat.send", { chat: "bob", text: "hi" }, "daemon")).toBeNull();
+  });
+
+  it("through a daemon, a file send that is still copying the file in says so, and that Ctrl-C does not stop it", () => {
+    // It said nothing while the daemon copied it in (6-30 s for 1 GiB): a slow copy read as a hung daemon.
+    expect(waitNotice("file.send", { chat: "bob", path: "/home/me/big.iso" }, "daemon")).toEqual({
+      waiting: "copying big.iso into the profile before it goes to bob (Ctrl-C stops waiting, it still goes)",
+      stopped: "the daemon copies big.iso in and sends it to bob",
+    });
+    expect(waitNotice("file.send", { chat: "group:crew", path: "/f", name: "notes.txt", wait: "none" }, "daemon")?.waiting).toBe("copying notes.txt into the profile before it goes to group crew (Ctrl-C stops waiting, it still goes)");
+    // One that waits for the contact says that wait, as before.
+    expect(waitNotice("file.send", { chat: "bob", path: "/f", wait: "sent" }, "daemon")?.waiting).toBe("waiting for it to go out to bob (up to 300 s; Ctrl-C stops waiting, it still goes)");
   });
 });
