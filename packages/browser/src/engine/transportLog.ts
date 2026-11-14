@@ -120,6 +120,11 @@ export interface TransportSnapshot {
 export const QUIET_DROP_MS = 5 * 60_000;
 /** A choice explains a switch that lands this soon after it. */
 export const CHOICE_TTL_MS = 2 * 60_000;
+/**
+ * The chat moves on by itself this soon after it came back: where it came back was a step on the way (Automatic comes
+ * back over Iroh's relay, then moves to WebRTC; WISP 100, revision 2026-11-08), and the row says where it went.
+ */
+export const RETURN_STEP_MS = 2 * 60_000;
 /** Rows kept per chat. */
 export const TRANSPORT_LOG_MAX = 50;
 /** History events kept per chat. */
@@ -203,6 +208,11 @@ export class TransportLog {
     waiting?: { transport: PairedTransport; by?: "you" | "contact" } } | null = null;
   /** A fresh "back to automatic" row: the automatic move it causes is told on that row. */
   private autoRow: { id: string; at: number } | null = null;
+  /**
+   * The row the chat's last way back wrote (`cameBack`) on a relayed path, which Automatic moves off as soon as a direct
+   * one connects (`upgrade/1`): that move, soon after, is told on this row.
+   */
+  private returnRow: { id: string; at: number } | null = null;
   /** Since when the current transport carries the chat, in this run of the app. */
   private liveSince?: number;
   private seenLive = false;
@@ -428,12 +438,31 @@ export class TransportLog {
     if (!before) { this.add({ kind: "connected", at: now, transport }); return true; }
     if (gap !== undefined && gap > QUIET_DROP_MS) {
       const fallback = down?.text;
-      this.add({ kind: "back", at: now, transport, downMs: gap, ...(before !== transport ? { from: before } : {}), ...(fallback ? { fallback } : {}) });
+      const row = this.add({ kind: "back", at: now, transport, downMs: gap, ...(before !== transport ? { from: before } : {}), ...(fallback ? { fallback } : {}) });
+      this.returnRow = row.relayed ? { id: row.id, at: now } : null;
       return true;
     }
     // A short drop, or this app starting: news only if the chat is on another transport than its last row says.
     if (before === transport) return true;
-    this.add({ kind: "switched", at: now, from: before, transport, cause: gap === undefined ? "automatic" : "dropped" });
+    const row = this.add({ kind: "switched", at: now, from: before, transport, cause: gap === undefined ? "automatic" : "dropped" });
+    this.returnRow = row.relayed ? { id: row.id, at: now } : null;
+    return true;
+  }
+
+  /**
+   * The chat moved by itself soon after its way back wrote a row (`returnRow`): that row says where it went, and none
+   * is added. Back where its last row before had it, it is no news at all: the row goes. False when this is not that move.
+   */
+  private returnStep(transport: PairedTransport, now: number): boolean {
+    const last = this.entries[this.entries.length - 1] as TransportEntry | undefined, step = this.returnRow;
+    this.returnRow = null;
+    if (!last || step?.id !== last.id || now - step.at > RETURN_STEP_MS) return false;
+    if (last.kind === "switched" && last.from === transport) { this.entries.pop(); return true; }
+    last.transport = transport;
+    if (last.from === transport) delete last.from;
+    if (this.snapshot?.relayed) last.relayed = true; else delete last.relayed;
+    // Measured on where it came back.
+    delete last.rttMs;
     return true;
   }
 
@@ -479,6 +508,7 @@ export class TransportLog {
     const auto = !!last && this.autoRow?.id === last.id && now - this.autoRow.at <= CHOICE_TTL_MS;
     const cause = this.cause(transport, now) ?? (auto ? undefined : waited) ?? "automatic";
     this.event({ at: now, kind: "switched", from, transport, cause });
+    if (cause === "automatic" && this.returnStep(transport, now)) return true;
     // The row of the choice becomes the switch it caused, or the automatic row says where it landed.
     if (last && (cause === "you" || cause === "contact") && last.kind === "chose" && last.target === transport) {
       Object.assign(last, { kind: "switched", from, transport, at: now });
