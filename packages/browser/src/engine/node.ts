@@ -8857,7 +8857,8 @@ export class GhostlyNode implements EngineImplementation {
               void this.shareGroupWake(linkId).catch(() => {});
             }
           }
-          this.emitState();
+          // The edge's own change: its group's view alone is built again (`pushedState`), not every chat's and group's.
+          this.chatChanged(linkId);
         },
         // The member's packet says what its app runs here: one with no WebRTC is reached over a native transport, and
         // this side starts its endpoints for it (and says how to dial them in its own packet). Kept for the next start.
@@ -8880,7 +8881,7 @@ export class GhostlyNode implements EngineImplementation {
           live.peerSaidAt = undefined;
           void db.patchLink(linkId, patch).catch(() => {});
           if (!this.keepsGroupNative(live.stored)) this.groupNativeWaiting.delete(linkId);
-          this.emitState();
+          this.chatChanged(linkId);
         },
         ...(entry ? {} : {
           onPaymentRequest: (request: PaymentRequest) => member() ? this.desk.onPaymentRequest(linkId, request) : undefined,
@@ -8902,8 +8903,9 @@ export class GhostlyNode implements EngineImplementation {
           // name, and taking that would drop the member's name and set it again on every drop and reopen.
           if (!entry && presence.nick && !live.link?.isDataLinkOpen) this.groups.edgeNick(group, peer, presence.nick);
           if (!entry) this.edgeRtcPresence(linkId, presence);
-          if (!same) this.emitState(); },
-        onPairingState: state => { live.pairing = state; this.emitState(); },
+          // Every member's packet, read again at each of its republishes: only its own group's view is built again.
+          if (!same) this.chatChanged(linkId); },
+        onPairingState: state => { live.pairing = state; this.chatChanged(linkId); },
         onDirectEvidence: evidence => {
           this.directPath.note(peer, evidence);
           if (evidence !== "open" && evidence !== "closed") void this.edgeWithoutRtc(linkId);
@@ -8934,11 +8936,11 @@ export class GhostlyNode implements EngineImplementation {
           // the joiner again (its packet still looks online), spending an offer and fast polls on nobody.
           if (entry && state !== "open" && live.entryDone) void this.closeGroupLink(linkId).catch(() => {});
           if (state !== "open" && live.pairing?.status !== "error") live.pairing = { status: "connecting" };
-          this.emitState();
+          this.chatChanged(linkId);
         },
         // Said on every read: the pages hear only of a change.
-        onStatus: status => { if (status !== live.status) { live.status = status; this.emitState(); } },
-        onDiscoveryError: error => { if ((error ?? undefined) !== live.discoveryError) { live.discoveryError = error ?? undefined; this.emitState(); } },
+        onStatus: status => { if (status !== live.status) { live.status = status; this.chatChanged(linkId); } },
+        onDiscoveryError: error => { if ((error ?? undefined) !== live.discoveryError) { live.discoveryError = error ?? undefined; this.chatChanged(linkId); } },
       },
     });
     traceJoin(group, "link.start", { role });
