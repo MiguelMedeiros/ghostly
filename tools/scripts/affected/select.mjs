@@ -81,6 +81,9 @@ export const UNIT_PROJECTS = [
     sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/**", "apps/ui/src/**"],
     whole: ["apps/ui/vitest.ui.config.ts", "apps/ui/src/test/setup.ts", "packages/browser/vite-plugin.ts", "packages/core/src/index.ts", "tools/vitest.shared.ts"],
     tests: ["apps/ui/src/**", "packages/react/test/**"],
+    // Its config reads the locale files from disk (localesAtOnce), so they are in no import graph: a changed area file
+    // runs the tests of the code that names its keys, and the tests that load the locales themselves (usingStrings).
+    strings: { files: "apps/ui/src/locales/*/*.json", in: ["apps/ui/src/**", "packages/react/**"], readers: ["apps/ui/src/locales{,/index}", "apps/ui/src/locales/??{,/index}", "apps/ui/src/test/i18n/locales"] },
   },
   {
     name: "matrix", cwd: ".", args: ["-c", "e2e/matrix/vitest.config.ts"],
@@ -463,6 +466,34 @@ export function testsReading(changed, files) {
   return out.sort();
 }
 
+// ---------- locale strings ----------
+
+/**
+ * The files that use a changed locale file's strings: those in `strings.in` naming a key of its area (`"chat.…"`,
+ * `` `chat.${x}` `` for apps/ui/src/locales/<language>/chat.json, in any language: some tests render another), and the
+ * tests importing one of `strings.readers` (a locale whole: key parity, placeholders, plurals). vitest runs those
+ * tests, and the ones importing the others.
+ *
+ * @param {string[]} changed  changed files (deleted ones too: their keys go missing)
+ * @param {Record<string, string>} files  path → text of the files to look in
+ * @param {{files: string, in: string[], readers: string[]}} strings
+ * @returns {string[]} those files, sorted
+ */
+export function usingStrings(changed, files, strings) {
+  const locale = globToRegExp(strings.files);
+  const areas = [...new Set(changed.filter((p) => locale.test(p)).map((p) => p.split("/").pop().slice(0, -".json".length)))];
+  if (!areas.length) return [];
+  const key = new RegExp(`["'\`](?:${areas.map((a) => a.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})\\.[\\w$]`);
+  const within = strings.in.map(globToRegExp);
+  const readers = strings.readers.map(globToRegExp);
+  const out = [];
+  for (const [path, text] of Object.entries(files)) {
+    if (!within.some((re) => re.test(path))) continue;
+    if (key.test(text) || (isTest(path) && relativeImports(path, text).some((d) => readers.some((re) => re.test(d))))) out.push(path);
+  }
+  return out.sort();
+}
+
 // ---------- what a bundle is built from ----------
 
 /**
@@ -614,7 +645,8 @@ export function plan({ changed: all, inventory, e2eFiles, codeFiles, packages })
       .flatMap(([, names]) => names.map((n) => `tools/scripts/test/${n}.test.ts`))
       .concat(p.reads ? [] : readers.filter((f) => match(p.tests, f)))
       .filter((f, i, all) => all.indexOf(f) === i && !direct.includes(f) && !viaCore.includes(f) && !viaPath.includes(f));
-    const files = [...direct, ...viaCore, ...viaPath, ...read];
+    const strings = p.strings && codeFiles ? usingStrings(changed.map((c) => c.path), codeFiles, p.strings).filter((f) => ![...direct, ...viaCore, ...viaPath, ...read].includes(f)) : [];
+    const files = [...direct, ...viaCore, ...viaPath, ...read, ...strings];
     const reach = p.bundle && codeFiles ? bundleReaches(p.bundle.entry, codeFiles, packages) : null;
     const bundled = p.bundle ? code.filter((c) => (reach ? reach.has(stripExt(c.path)) : match(p.bundle.sources, c.path))) : [];
     if (bundled.length && !files.includes(p.bundle.runner)) files.push(p.bundle.runner);
@@ -625,6 +657,7 @@ export function plan({ changed: all, inventory, e2eFiles, codeFiles, packages })
     if (viaCore.length) parts.push(`${viaCore.length} importer(s) of the changed core code`);
     if (viaPath.length) parts.push(`${viaPath.length} test file(s) importing the change by relative path`);
     if (read.length) parts.push(`${read.length} test file(s) reading a changed file from disk`);
+    if (strings.length) parts.push(`${strings.length} file(s) using a changed locale file's strings`);
     if (bundled.length) parts.push(`the tests of the built CLI (${bundled.length} changed file(s) it is built from)`);
     return { ...p, mode: "related", files, reason: `vitest related over ${parts.join(" + ")}${tests ? ` (${tests} test file(s) among them)` : ""}` };
   });
