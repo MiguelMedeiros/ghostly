@@ -33,6 +33,20 @@ it("an invite with more after a doubled `#` is refused, and leaves the address",
   expect(listSessions()).toHaveLength(0);
 }, 60_000);
 
+/*
+ * One with an extra `/` after the doubled `#` (`##//x#ghostly1…`) was read as another site's address, which the router
+ * refuses: the app opened on "Something went wrong", again at each reload. It goes home, as `#//…` does.
+ */
+it.each(["##//x#{code}", "#/#//x#{code}", "#/#/\\x#{code}", "##//{code}", "##//join/group2/abc", "##//chat/abc"])("%s goes home, and leaves the address", async (form) => {
+  const code = createChatInvite().inviteCode;
+  window.history.replaceState(null, "", form.replace("{code}", code));
+  render(<Root />);
+  expect(await screen.findByTestId("sidebar")).toBeInTheDocument();
+  await waitFor(() => expect(window.location.hash).toBe("#/"));
+  expect(screen.queryByText("Something went wrong")).toBeNull();
+  expect(listSessions()).toHaveLength(0);
+}, 60_000);
+
 it.each(["##{code}", "#/#{code}"])("a device code given to the open app as %s goes to the join host, and leaves the address", async (form) => {
   render(<Root />);
   const code = createDeviceInvite(new Uint8Array(32).fill(7)).code;
