@@ -452,9 +452,19 @@ describe("fallbacks", () => {
   it('a package.json whose "scripts" alone changed installs nothing new: it is left out', () => {
     const p = plan({ changed: [{ path: "package.json", exists: true, scriptsOnly: true }], inventory, e2eFiles });
     expect(p.scriptsOnly).toEqual(["package.json"]);
-    expect(p.unit.every((u) => u.mode === "skip")).toBe(true);
+    expect(p.unit.filter((u) => u.name !== "scripts").every((u) => u.mode === "skip")).toBe(true);
     expect(p.lint.mode).toBe("skip");
     expect(p.e2e.mode).toBe("skip");
+  });
+
+  it("the root package.json's scripts alone still run the scripts tests that read its postinstall", () => {
+    const p = plan({ changed: [{ path: "package.json", exists: true, scriptsOnly: true }], inventory, e2eFiles });
+    const scripts = byName(p.unit).scripts;
+    expect(scripts.mode).toBe("related");
+    expect(scripts.files).toEqual(["tools/scripts/test/releaseInstallScripts.test.ts", "tools/scripts/test/webAppsTestFlag.test.ts"]);
+    // A workspace's package.json is not the root's.
+    const site = byName(plan({ changed: [{ path: "apps/website/package.json", exists: true, scriptsOnly: true }], inventory, e2eFiles }).unit).scripts;
+    expect(site.mode).toBe("skip");
   });
 
   it("core's index.ts runs every project that imports core whole, and every spec", () => {
