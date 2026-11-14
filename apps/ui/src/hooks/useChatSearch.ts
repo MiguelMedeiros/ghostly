@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { isLetterKey } from "../lib/appCommands";
-import { searchable, searchMessages } from "../lib/chatSearch";
+import { searchable, searchMessages, type Searchable } from "../lib/chatSearch";
 import { jumpToMessage } from "../lib/replies";
 import type { Translate } from "../locales/translate";
 import type { ChatMessage } from "../lib/types";
@@ -104,8 +104,10 @@ export function useChatSearch({ messages, chat, active, t, returnFocus }: { mess
   // Folded once while the search is open, not on each key; a closed search costs nothing. `t`: a voice message, a video
   // or a picture is found by its kind in the profile's language too. `translated`: a received text shown translated is
   // found by the words shown (folded again when a translation comes or Show original is pressed).
+  // A change of the chat folds only the texts it brings (`searchable`'s `before`).
   const translated = useShownTranslations(chat, open);
-  const items = useMemo(() => (open ? searchable(messages, t, translated) : []), [open, messages, t, translated]);
+  const folded = useRef<Searchable[]>([]);
+  const items = useMemo(() => (folded.current = open ? searchable(messages, t, translated, folded.current) : []), [open, messages, t, translated]);
   const results = useMemo(() => searchMessages(items, term), [items, term]);
   const found = useMemo(() => new Set(results), [results]);
   const latest = useRef(results);

@@ -15,6 +15,8 @@ import type { ChatFile, ChatMessage } from "./types";
 /** A message as search reads it: its text already folded, once per search session rather than once per keystroke. */
 export interface Searchable {
   id: string;
+  /** What it offers search (`searchText`), as `folded` was folded from. */
+  text: string;
   folded: string;
 }
 
@@ -97,12 +99,17 @@ export function searchText(message: ChatMessage, t: Translate = englishT, transl
   return [message.file.name, ...words].filter(Boolean).join("\n");
 }
 
-/** The messages that can be found, in the timeline's order, folded. */
-export function searchable(messages: readonly ChatMessage[], t: Translate = englishT, translated?: TranslatedText): Searchable[] {
+/**
+ * The messages that can be found, in the timeline's order, folded. `before`: the same chat's, folded earlier; a text it
+ * holds is not folded again. An open search reads its chat again on every change (a message, a mark, a reaction), and
+ * folding every message each time took 140 ms for 5,000 of 2 KB.
+ */
+export function searchable(messages: readonly ChatMessage[], t: Translate = englishT, translated?: TranslatedText, before?: readonly Searchable[]): Searchable[] {
+  const known = before?.length ? new Map(before.map((item) => [item.text, item.folded])) : undefined;
   const out: Searchable[] = [];
   for (const message of messages) {
     const text = searchText(message, t, translated);
-    if (text) out.push({ id: message.id, folded: foldText(text) });
+    if (text) out.push({ id: message.id, text, folded: known?.get(text) ?? foldText(text) });
   }
   return out;
 }
