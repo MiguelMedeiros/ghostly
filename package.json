@@ -28,6 +28,7 @@
     "build:extension": "npm run build -w @ghostly/extension",
     "test:e2e": "npm run build:extension && playwright test -c e2e/playwright.config.ts",
     "test:e2e:offline": "npm run test:e2e -- --grep-invert @network",
+    "test:e2e:journeys": "playwright test -c e2e/playwright.config.ts --project=web --grep @journey",
     "test:e2e:ui": "npm run build:extension && playwright test -c e2e/playwright.config.ts --ui",
     "test:e2e:report": "playwright show-report",
     "test:e2e:desktop": "playwright test -c e2e/playwright.desktop.config.ts",
