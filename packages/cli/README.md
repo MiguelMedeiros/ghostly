@@ -550,7 +550,8 @@ answering), so the folder may hold other files, and several profiles' daemons ma
 buttons of the contact's app say why when not); an offer that is older than 120 s does not ring. `call auto` is
 kept in the profile's `calls.json`. The media is libdatachannel (node-datachannel, as for chats) and libopus built to
 WebAssembly (`opusscript`); `status` says `calls: false` and `call list` says why where they cannot run.
-`GHOSTLY_CALL_BIND=127.0.0.1` binds the call's media to one address (the tests use loopback).
+`GHOSTLY_CALL_BIND=127.0.0.1` binds the call's media to one address (the tests use loopback); a name such as
+`localhost` is no address, and turns calls off with that reason.
 
 **When a call does not connect** (it stays `connecting`, then ends `failed`): the daemon's log has a line per call for
 the candidates each side offered, every ICE state, and the pair it connected over; `call list` shows the ICE state
