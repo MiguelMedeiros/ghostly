@@ -70,6 +70,8 @@ interface Props {
   onError(message: string, action?: { label: string; run: () => void }): void;
   /** Recording or not: the composer hides its pickers meanwhile. */
   onActiveChange?(active: boolean): void;
+  /** The microphone is taking sound (or about to): false while the recording is paused, its bar still open. */
+  onRecordingChange?(recording: boolean): void;
 }
 
 const MicIcon = ({ size = 22, color = "currentColor" }: { size?: number; color?: string }) => (
@@ -99,7 +101,7 @@ const PauseIcon = ({ size = 18 }: { size?: number }) => (
  * resume. Enter sends (on one of those buttons reached from the keyboard, it presses that button);
  * Esc discards, asking first once there is more than a few seconds to lose.
  */
-export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, onActiveChange }: Props) {
+export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, onActiveChange, onRecordingChange }: Props) {
   const t = useT();
   const isLocked = useIsLocked();
   const lockedRef = useRef(isLocked);
@@ -164,6 +166,17 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
   const activeChange = useRef(onActiveChange);
   activeChange.current = onActiveChange;
   useEffect(() => { activeChange.current?.(mode !== "idle"); }, [mode]);
+  // Paused (Pause, "Discard?", out of sight, the microphone ended) or sending, nothing is recorded: the contact stops
+  // seeing "recording audio…" until it resumes.
+  const taking = mode !== "idle" && (phase === "starting" || phase === "recording");
+  const recordingChange = useRef(onRecordingChange);
+  recordingChange.current = onRecordingChange;
+  const takingRef = useRef(false);
+  useEffect(() => {
+    if (takingRef.current === taking) return;
+    takingRef.current = taking;
+    recordingChange.current?.(taking);
+  }, [taking]);
 
   const showHint = useCallback((text: string) => {
     if (hintTimer.current) clearTimeout(hintTimer.current);
@@ -293,6 +306,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
   useEffect(() => () => {
     recorderRef.current?.cancel();
     if (modeRef.current !== "idle") activeChange.current?.(false);
+    if (takingRef.current) recordingChange.current?.(false);
     clearInterval(previewStep.current);
     if (previewAudio.current) URL.revokeObjectURL(previewAudio.current.url);
     if (hintTimer.current) clearTimeout(hintTimer.current);
