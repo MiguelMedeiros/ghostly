@@ -1,6 +1,6 @@
 import {
   addMessages,
-  deleteMessage,
+  deleteMessages,
   saveSession,
   setEngineMessages,
   STORED_MESSAGES,
@@ -204,7 +204,7 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
     // Out of the session held here, not one read again (a parse and a merge of a chat of thousands), and as the list
     // last mirrored left it but for these rows: what changes next is still all the mirror below looks at.
     const kept = untouched(linkId, shown.id);
-    for (const id of gone) shown = deleteMessage(shown.id, id, shown) ?? shown;
+    shown = deleteMessages(shown.id, gone, shown) ?? shown;
     forget(shown.id);
     if (kept) mirrored.set(linkId, { ...mirrored.get(linkId)!, stored: storedSession(shown.id) });
     notifySessionsChanged();

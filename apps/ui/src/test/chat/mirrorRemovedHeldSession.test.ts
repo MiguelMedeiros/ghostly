@@ -99,5 +99,19 @@ describe("a message deleted for everyone in a long chat", () => {
     const after = loadSession(id)!.messages;
     expect(after).toHaveLength(N - 2);
     expect(after[after.length - 1].text).toBe(`message ${N}`);
+
+    // Several removals told in one tick (a few deleted at once) leave the chat with one write, not one each.
+    const together = [N - 20, N - 25, N - 30].map((i) => `peer_${i}`);
+    const batch = await counted("seed-r", async () => {
+      for (const gone of together) fakeEngine.emit({ kind: "message-changes", linkId, messages: [], deleted: [gone] });
+      await tick();
+    });
+    expect(batch).toEqual({ reads: 1, saves: 1, writes: 1 });
+    const left = loadSession(id)!;
+    expect(left.messages).toHaveLength(N - 5);
+    expect(left.messages.some((m) => together.includes(m.id))).toBe(false);
+    expect(left.deletedIds).toEqual(expect.arrayContaining([...removed, ...together]));
+    // The three were read, the newest arrival is not: the read count moves down by three.
+    expect(getLastReadCount(id)).toBe(N - 6);
   });
 });

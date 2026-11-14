@@ -517,22 +517,36 @@ export function deleteMessage(
    */
   held?: ChatSession,
 ): ChatSession | null {
+  return deleteMessages(sessionId, [messageId], held);
+}
+
+/**
+ * Forgets several messages on this device at once (`deleteMessage`), the chat written once: removals the engine told in
+ * one tick. Null when none of them is in the chat.
+ */
+export function deleteMessages(sessionId: string, messageIds: readonly string[], held?: ChatSession): ChatSession | null {
   const shown = held ?? loadShownSession(sessionId);
   if (!shown) return null;
 
-  const index = shown.messages.findIndex((m) => m.id === messageId);
-  if (index === -1) return null;
-
-  const session = { ...shown, messages: shown.messages.slice() };
-  session.messages.splice(index, 1);
-  session.deletedIds = [...(session.deletedIds ?? []), messageId].slice(-MAX_DELETED_IDS);
-  saveSession(session);
-
+  const ids = new Set(messageIds);
   // Unread is "messages since the last read one": a read message that goes
   // takes its place in that count with it, or every later one reads as unread.
   const lastRead = getLastReadCount(sessionId);
-  const older = session.older ?? 0;
-  setReadCount(sessionId, Math.min(older + index < lastRead ? lastRead - 1 : lastRead, older + session.messages.length));
+  const older = shown.older ?? 0;
+  const removed: string[] = [];
+  let readGone = 0;
+  const messages = shown.messages.filter((m, i) => {
+    if (!ids.has(m.id)) return true;
+    removed.push(m.id);
+    if (older + i < lastRead) readGone++;
+    return false;
+  });
+  if (!removed.length) return null;
+
+  const session = { ...shown, messages };
+  session.deletedIds = [...(session.deletedIds ?? []), ...removed].slice(-MAX_DELETED_IDS);
+  saveSession(session);
+  setReadCount(sessionId, Math.min(lastRead - readGone, (session.older ?? 0) + session.messages.length));
   return session;
 }
 
