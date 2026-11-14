@@ -527,7 +527,7 @@ mod tests {
 
     /// A file in a folder whose name is not UTF-8 can't be picked on the page's input (WebKit takes UTF-8 paths): such a
     /// drop is left to be read by token, as before, and the page is told so, never left waiting for a pick.
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     #[test]
     fn a_drop_the_chooser_cant_name_is_read_by_token() {
         use std::os::unix::ffi::OsStrExt;
@@ -536,14 +536,15 @@ mod tests {
             .join(std::ffi::OsStr::from_bytes(b"dir-\xff"));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("report.txt"), b"boo").unwrap();
-        std::fs::write(dir.join("../plain.txt"), b"hi").unwrap();
+        let plain = dir.parent().unwrap().join("plain.txt");
+        std::fs::write(&plain, b"hi").unwrap();
         let app = app();
         let main = WebviewWindowBuilder::new(&app, "main", Default::default())
             .build()
             .unwrap();
         let dropped = app.state::<DroppedFiles>();
         dropped.put(
-            vec![dir.join("../plain.txt"), dir.join("report.txt")],
+            vec![plain, dir.join("report.txt")],
             Instant::now(),
         );
         assert_eq!(
