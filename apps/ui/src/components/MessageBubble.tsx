@@ -359,7 +359,8 @@ function SentTranslationLine({ sent, showing, onToggle }: { sent: SentOriginal; 
     <div dir={dir} data-testid="message-sent-translation" className="mt-[2px] chat-text-note text-text-primary/65 italic">
       <span>{t("chat.sentTranslation.line", { language: languageName(sent.to, language) })}</span>
       <span aria-hidden="true"> · </span>
-      <button type="button" data-testid="message-show-original" aria-pressed={showing} onClick={onToggle} className="italic cursor-pointer hover:underline">
+      {/* Named for what it does next, so it is no toggle: "Show translation, pressed" read with the original shown. */}
+      <button type="button" data-testid="message-show-original" onClick={onToggle} className="italic cursor-pointer hover:underline">
         {t(showing ? "chat.translated.showTranslation" : "chat.translated.showOriginal")}
       </button>
     </div>
