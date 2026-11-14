@@ -73,12 +73,21 @@ function lightningCard(ctx: ApiContext, params: Params): void {
 }
 
 /**
+ * The card a payment, a request or a wallet command names. "" (an unset variable in a script: `--card "$CARD"`) is a
+ * usage error: taken as not given, it moved money through, or removed, the network's default card or the whole wallet.
+ */
+function cardParam(params: Params): string | undefined {
+  if (params.card === "") throw new CliError("usage", "--card needs a Lightning card id (ghostly wallet list)");
+  return str(params, "card");
+}
+
+/**
  * The Lightning card `card` names, checked before the engine is asked: given with another type of wallet it is a usage
  * error, and one not on the network is not_found. Before, the engine dropped it for every type but Lightning, so a card
  * that named nothing removed the whole wallet of that type and the answer echoed the card as removed.
  */
 function cardOf(ctx: ApiContext, params: Params, type: WalletType): string | undefined {
-  const card = str(params, "card");
+  const card = cardParam(params);
   if (card === undefined) return undefined;
   if (type !== "lightning") throw new CliError("usage", `--card names a Lightning card: not with ${type}`);
   lightningCard(ctx, params);
@@ -370,7 +379,7 @@ const WALLETS: Record<string, Method> = {
     // A Lightning address's comment reaches its owner as a memo reaches a contact (agents#1624).
     const comment = memoOf(params, "pay", "comment");
     const text = str(params, "target", true).trim();
-    const card = str(params, "card");
+    const card = cardParam(params);
     let invoice = text.replace(/^lightning:/i, "");
     let n: WalletNetwork;
     let note: string | undefined;
@@ -430,6 +439,7 @@ const WALLETS: Record<string, Method> = {
    */
   async "chat.request"(ctx, params) {
     const memo = memoOf(params, "request");
+    const card = cardParam(params);
     const link = chatOf(ctx, params);
     const method = params.method === undefined ? undefined : oneOf(params, "method", PAY_METHODS, "cashu");
     const n = network(params);
@@ -439,7 +449,7 @@ const WALLETS: Record<string, Method> = {
     await federationsOpen(ctx);
     const { paymentId } = await node(ctx).requestPayment({
       linkId: link.id, amount, timestamp: sentAt(), network: n,
-      ...(memo ? { memo } : {}), ...(method ? { method } : {}), ...(rail ? { rail } : {}), ...(str(params, "card") ? { card: str(params, "card") } : {}),
+      ...(memo ? { memo } : {}), ...(method ? { method } : {}), ...(rail ? { rail } : {}), ...(card ? { card } : {}),
     }).catch((error: unknown) => { throw (!method || method === "cashu") && error instanceof Error && NO_MINT.test(error.message) ? noWalletOf(ctx, n, error) : error; });
     const asked = state(ctx).payments[paymentId];
     return { chat: link.id, paymentId, ...(asked ? { amount: asked.amount, unit: asked.unit, ...tokenDecimals(asked) } : {}) };
@@ -451,6 +461,7 @@ const WALLETS: Record<string, Method> = {
     const s = state(ctx);
     const link = ownChatOf(ctx, params, s);
     const paymentId = str(params, "payment", true);
+    const card = cardParam(params);
     const request = s.payments[paymentId];
     if (!request || request.linkId !== link.id || request.kind !== "request") throw new CliError("not_found", `No request ${paymentId} in this chat`);
     // One I made is the contact's to pay: the engine knew it only as "Unknown payment request" (engine, exit 1).
@@ -460,7 +471,7 @@ const WALLETS: Record<string, Method> = {
     if (n === "mainnet" && !bool(params, "confirmReal")) throw new CliError("confirm", "This request is for real money (Mainnet): pass --confirm-real to confirm this payment", { network: n });
     const via = params.via === undefined ? undefined : oneOf(params, "via", ["lightning"] as const, "lightning");
     await federationsOpen(ctx);
-    await node(ctx).payRequest({ linkId: link.id, paymentId, network: n, ...(via ? { via } : {}), ...(params.maxFee !== undefined ? { maxFee: num(params, "maxFee", 0) } : {}), ...(str(params, "card") ? { card: str(params, "card") } : {}), ...real(params) });
+    await node(ctx).payRequest({ linkId: link.id, paymentId, network: n, ...(via ? { via } : {}), ...(params.maxFee !== undefined ? { maxFee: num(params, "maxFee", 0) } : {}), ...(card ? { card } : {}), ...real(params) });
     return paymentJson(state(ctx).payments[paymentId] ?? request);
   },
 
