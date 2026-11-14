@@ -1123,11 +1123,10 @@ export class GhostlyNode implements EngineImplementation {
   private readonly groupWakeLimiter = new GroupWakeLimiter();
   /** `group-wake` frames read per edge, a handful a minute. */
   private readonly groupWakeReceived = new Map<string, RateWindow>();
+  /** A request only moves a counter: the counts go out with the next state, at most once a `REQUEST_COUNTS_MS`. */
   private readonly requestCounts = new Map<string, number>();
   /** One per service and contact that was served: aborted once that contact may no longer reach it (`servicesChanged`). */
   private readonly serviceGrants = new Map<string, { serviceId: string; peerPubKeyZ32: string; revoke: AbortController }>();
-  /** A request only moves a counter: the counts go out with the next state, at most once a `REQUEST_COUNTS_MS`. */
-  private requestCountsTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly transfers = new Map<string, FileTransferView>();
   /**
    * Views that go in the next state sent, and then away (`GroupFilesHost.brief`): dropped once a state carried them,
@@ -2959,7 +2958,6 @@ export class GhostlyNode implements EngineImplementation {
     if(this.paymentTimer)clearTimeout(this.paymentTimer);
     clearTimeout(this.awaitingTimer);
     clearTimeout(this.walletChangeTimer);
-    clearTimeout(this.requestCountsTimer);
     clearInterval(this.staleReviewTimer);
     if (this.spareTimer) clearTimeout(this.spareTimer);
     for (const timer of this.reactionTimers.values()) clearTimeout(timer);
@@ -8649,7 +8647,8 @@ export class GhostlyNode implements EngineImplementation {
       const target = parseLocalTarget(service.target);
       this.requestCounts.set(id, (this.requestCounts.get(id) ?? 0) + 1);
       // A page loading its assets asks many times a second: one state a second carries the counts, not one per request.
-      this.requestCountsTimer ??= setTimeout(() => { this.requestCountsTimer = undefined; this.emitState(); }, REQUEST_COUNTS_MS);
+      // The counts are no chat's nor group's (`services`, read fresh in every state): every view stays as it was.
+      this.scheduleState(REQUEST_COUNTS_MS);
       const key = `${id} ${peerPubKeyZ32}`;
       let grant = this.serviceGrants.get(key);
       if (!grant) this.serviceGrants.set(key, grant = { serviceId: id, peerPubKeyZ32, revoke: new AbortController() });
