@@ -234,6 +234,26 @@ describe("transport log: the timeline says what matters", () => {
     expect(reopened.liveNow()).toBeUndefined();
   });
 
+  it("does not repeat a DHT-only row after a restart when a choice came after it", () => {
+    // The contact is on DHT only and this side picks a transport (or the contact's record names one): the chat stays
+    // on DHT only, and a restart still knows it.
+    const first = new TransportLog();
+    first.observe(live("webrtc/1"), 0);
+    first.observe(down({ peerDhtOnly: true, text: "dht" }), 10);
+    first.chose("you", "iroh/1", 20);
+    const reopened = new TransportLog(first.entries, first.history);
+    expect(reopened.observe(down({ peerDhtOnly: true, text: "dht" }), 100)).toBe(false);
+    expect(kinds(reopened)).toEqual(["connected", "dht-only", "chose"]);
+    // The same on this side's DHT only, with the contact's choice heard from its record.
+    const mine = new TransportLog();
+    mine.observe(live("webrtc/1"), 0);
+    mine.observe(down({ dhtOnly: true, text: "dht" }), 10);
+    mine.chose("contact", "hyperdht/1", 20);
+    const again = new TransportLog(mine.entries, mine.history);
+    expect(again.observe(down({ dhtOnly: true, text: "dht" }), 100)).toBe(false);
+    expect(kinds(again)).toEqual(["connected", "dht-only", "chose"]);
+  });
+
   it("says a switch that failed, once, and keeps the transport it stayed on", () => {
     const log = new TransportLog();
     log.observe(live("webrtc/1"), 0);
