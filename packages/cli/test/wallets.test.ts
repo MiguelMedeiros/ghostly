@@ -266,6 +266,7 @@ describe("wallets", () => {
       [() => {}, "payment.check", { chat: "Alice", payment: "sent" }, "bad_request", /^"sent" is a payment you sent: payment check is for a request the contact made of you$/],
       [() => {}, "payment.check", { chat: "Alice", payment: "asked" }, "bad_request", /^"asked" is your own request: /],
       [() => node.payRequest.mockRejectedValueOnce(new Error("This request is no longer open")), "chat.payRequest", { chat: "Alice", payment: "test" }, "refused"],
+      [() => {}, "chat.payRequest", { chat: "Alice", payment: "asked" }, "bad_request", /^"asked" is your own request: the contact pays it$/],
       [() => node.walletPayQuote.mockRejectedValueOnce(new Error("This invoice is already paid")), "pay", { target: "lntbs10u1pxyz" }, "refused"],
       [() => node.sendPayment.mockRejectedValueOnce(unsettled), "chat.pay", { chat: "Alice", amount: 3 }, "unavailable", /^testnut\.cashu\.space has not answered yet\. The payment was not made\./],
     ];
