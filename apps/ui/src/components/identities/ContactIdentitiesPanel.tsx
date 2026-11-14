@@ -70,6 +70,10 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
   const beside = useBeside(backdrop);
   const besideNow = useRef(beside); besideNow.current = beside;
   useDialogFocus(ref, onClose, undefined, undefined, () => besideNow.current);
+  // Over the chat now (an app opened beside it): a dialog, so it has the focus, as when it opens over the chat.
+  useEffect(() => {
+    if (!beside && ref.current && !ref.current.contains(document.activeElement)) ref.current.focus({ preventScroll: true });
+  }, [beside]);
   const face = useContactFace(peerKey), sent = usePeerAvatar(peerKey);
   const photo = face?.photo ?? sent;
   const now = Math.floor(Date.now() / 1000);
@@ -122,7 +126,8 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
 
 /**
  * Whether the panel sits beside the chat rather than over it: its backdrop is shown only over it (contact-panel.css,
- * by the chat's column width and the screen's), so this follows the column as it is resized.
+ * by the chat's column width and the screen's, and whether an app sits beside the chat), so this follows the column as
+ * it is resized, and the chat's column as an app beside it opens or closes (the page keeps its size then).
  */
 function useBeside(backdrop: RefObject<HTMLElement | null>) {
   const [beside, setBeside] = useState(false);
@@ -134,6 +139,8 @@ function useBeside(backdrop: RefObject<HTMLElement | null>) {
     if (typeof ResizeObserver !== "function") return;
     const observer = new ResizeObserver(check);
     observer.observe(pane);
+    const column = pane.querySelector(":scope > .chat-column");
+    if (column) observer.observe(column);
     return () => observer.disconnect();
   }, [backdrop]);
   return beside;
