@@ -465,6 +465,27 @@ describe("an app in a chat that stops while the focus is in it", () => {
   }
 });
 
+// Opened alone the focus is on Close, or goes there from the app's frame: only a live region that was there, empty,
+// before the app stopped tells a screen reader that it did, and why.
+describe("an app opened alone that stops", () => {
+  beforeEach(() => { vi.spyOn(console, "warn").mockImplementation(() => {}); });
+
+  for (const reason of ["unresponsive", "revoked"]) {
+    it(`${reason}: why is said in a status line that was there, empty, before it stopped`, async () => {
+      await open(REF, null);
+      const app = screen.getByTestId("mini-app");
+      const said = within(app).getByRole("status");
+      expect(said).toBeEmptyDOMElement();
+      if (reason === "revoked") await checked({ status: "revoked" });
+      else act(() => started[0]!.stop(reason));
+      expect(within(app).getByRole("status")).toBe(said);
+      expect(said).toHaveTextContent(reason === "revoked" ? "Chess was stopped: its publisher revoked this version" : /^Chess stopped responding/);
+      expect(said).toHaveTextContent(within(app).getByTestId("mini-app-stopped").textContent!);
+      expect(document.activeElement).toBe(within(app).getByRole("button", { name: "Close" }));
+    });
+  }
+});
+
 // On a phone the person went Back to the chat and types there: an app that stops meanwhile stays behind Back. Its way
 // back says it stopped, and the panel says why once the person goes back to it.
 describe("an app in a chat the person went Back from, that stops", () => {
