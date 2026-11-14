@@ -10,9 +10,9 @@
   "chatsDeleted": "Toutes les discussions ont été supprimées",
   "clear": "Effacer",
   "clearAllData": "Effacer toutes les données",
-  "clearAllDataConfirm": "Ceci efface pour de bon :",
+  "clearAllDataConfirm": "Ceci efface pour de bon :",
   "clearAllDataDescription": "Discussions, identités et réglages de ce profil. Les portefeuilles restent.",
-  "clearAllDataInfo": "Avant, Ghostly retire ce qu'il peut : éléments gardés pour vos contacts, votre DID, vos preuves et le réveil. Les preuves publiées sur d'autres sites y restent.",
+  "clearAllDataInfo": "Avant, Ghostly retire ce qu'il peut : éléments gardés pour vos contacts, votre DID, vos preuves et le réveil. Les preuves publiées sur d'autres sites y restent.",
   "clearAllDataItems": {
     "appsData": "Apps installées et leurs données",
     "chats": "Discussions, messages et fichiers",
@@ -23,7 +23,7 @@
     "settings": "Réglages, écran de verrouillage et réseau",
     "storage": "Réglages S3 et réveil, app fermée"
   },
-  "clearAllDataKeeps": "Restent : vos portefeuilles, vos sauvegardes et les autres profils.",
+  "clearAllDataKeeps": "Restent : vos portefeuilles, vos sauvegardes et les autres profils.",
   "colorScheme": "Mode",
   "colorSchemes": {
     "dark": "Sombre",
@@ -57,8 +57,8 @@
   "defaultNickname": "Nom dans les discussions",
   "defaultNicknameHint": "Utilisé quand vous démarrez une discussion",
   "deleteAllChatsCallOn": "Un appel est en cours dans une discussion. Raccrochez d’abord, puis supprimez toutes les discussions.",
-  "deleteAllChatsConfirm": "Supprimer les {{count}} discussions ?",
-  "deleteAllChatsConfirm_one": "Supprimer {{count}} discussion ?",
+  "deleteAllChatsConfirm": "Supprimer les {{count}} discussions ?",
+  "deleteAllChatsConfirm_one": "Supprimer {{count}} discussion ?",
   "deleteAllChatsHint": "Messages et fichiers partent. Réglages et portefeuilles restent.",
   "groupDownloads": {
     "always": "Toujours",
@@ -76,7 +76,7 @@
   "license": "Licence",
   "linkPreviews": "Aperçus de liens",
   "linkPreviewsHint": "Envoie un titre et une image avec les liens que vous partagez",
-  "linkPreviewsInfo": "Cet appareil lit la page et envoie l'aperçu avec le message : l'app de votre contact ne contacte jamais le site. Désactivé : les liens partent en texte brut.",
+  "linkPreviewsInfo": "Cet appareil lit la page et envoie l'aperçu avec le message : l'app de votre contact ne contacte jamais le site. Désactivé : les liens partent en texte brut.",
   "lockNow": "Verrouiller maintenant",
   "lockScreen": "Écran de verrouillage",
   "lockScreenDescription": "Demande un mot de passe après inactivité. Ne chiffre pas les discussions stockées.",
@@ -145,7 +145,7 @@
   "profilePeekNotifyHint": "Une notification système quand l'un reçoit un message",
   "publicProfiles": "Charger les profils publics",
   "publicProfilesHint": "Photos et bios sur les cartes d'identité. Ces serveurs voient votre IP.",
-  "publicProfilesInfo": "Depuis vos relais Nostr, nexus.pubky.app et public.api.bsky.app, qui voient quelle identité vous consultez. Désactivé : les cartes ne montrent que la preuve ; ce qui a été chargé est supprimé.",
+  "publicProfilesInfo": "Depuis vos relais Nostr, nexus.pubky.app et public.api.bsky.app, qui voient quelle identité vous consultez. Désactivé : les cartes ne montrent que la preuve ; ce qui a été chargé est supprimé.",
   "randomizeName": "Générer un nom aléatoire",
   "reduceMotion": "Réduire les animations",
   "reduceMotionHint": "Moins d'animations. Le réglage du système s'applique toujours.",
@@ -188,7 +188,7 @@
   "sharePresence": "Montrer quand je suis en ligne",
   "sharePresenceHint": "Vos contacts voient un point pendant que vous utilisez Ghostly. Un statut défini s'affiche dans tous les cas.",
   "shareProfile": "Partager mon nom et ma photo avec mes contacts",
-  "shareProfileHint": "Vos contacts voient le nom et la photo de ce profil. Désactivé, ils voient « Contact » et un motif à la place.",
+  "shareProfileHint": "Vos contacts voient le nom et la photo de ce profil. Désactivé, ils voient « Contact » et un motif à la place.",
   "stayConnected": "Rester connecté en arrière-plan",
   "stayConnectedHint": "Les discussions et les groupes restent connectés quand Ghostly n'est pas à l'écran, avec une notification discrète. Consomme plus de batterie.",
   "stayConnectedStopped": "Android a arrêté Ghostly en arrière-plan",
@@ -207,10 +207,10 @@
   },
   "storageOf": "{{used}} sur {{quota}}",
   "storageParts": {
-    "app": "Messages et données de l'app : {{size}}",
-    "files": "Fichiers ({{count}}) : {{size}}",
-    "local": "Réglages : {{size}}",
-    "staged": "Copies en cours d'enregistrement : {{size}}"
+    "app": "Messages et données de l'app : {{size}}",
+    "files": "Fichiers ({{count}}) : {{size}}",
+    "local": "Réglages : {{size}}",
+    "staged": "Copies en cours d'enregistrement : {{size}}"
   },
   "storagePartsNote": "Les messages et données de l'app comptent tous les profils de cet appareil. Les fichiers sont ceux de ce profil.",
   "storageProtect": "Protéger",
@@ -223,7 +223,7 @@
   "systemNotifications": "Notifications système",
   "textSize": "Taille du texte",
   "textSizeHint": "Messages, champ de message et liste des discussions, sur cet appareil",
-  "textSizePreview": "Salut ! C’est facile à lire ?",
+  "textSizePreview": "Salut ! C’est facile à lire ?",
   "textSizePreviewReply": "Oui, bien mieux 👍",
   "textSizes": {
     "default": "Par défaut",
