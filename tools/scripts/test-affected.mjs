@@ -49,6 +49,13 @@ if (unknown.length) {
   console.error(`test:affected does not take ${unknown.join(" ")}\n\n${usage()}`);
   process.exit(2);
 }
+// `npm run test:affected --list`, without the `--`: npm keeps the flag for itself (npm_config_list=true, `--no-e2e` as
+// npm_config_e2e="") and passes none, so the full run would start. An option's value still arrives, refused above.
+const kept = FLAGS.filter((f) => process.env[`npm_config_${f.replace(/^--(no-)?/, "").replaceAll("-", "_")}`] !== undefined);
+if (kept.length) {
+  console.error(`npm kept ${kept.join(" ")} for itself: put a -- before the script's arguments (npm run test:affected -- ${kept.join(" ")})`);
+  process.exit(2);
+}
 
 const JOBS = Math.max(1, Number(process.env.JOBS) || 2);
 const E2E_WORKERS = Math.max(1, Number(process.env.E2E_WORKERS) || 2);
