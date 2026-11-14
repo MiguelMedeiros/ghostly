@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { createSocket } from "node:dgram";
 import { createRequire } from "node:module";
 import { isIP } from "node:net";
 import type { IceServer, PeerConnection, Track } from "node-datachannel";
@@ -6,6 +7,7 @@ import { buildSdpFromSignal, callRtcConfig, extractParamsFromSdp, PAIRED_CALL_CA
 import { CallAudio, type OpusCodec } from "./audio";
 import type { CallRate, PlaybackQueue } from "./pcm";
 import { envSwitch } from "../envSwitch";
+import { CliError } from "../errors";
 import { rtcThreads } from "../runtime/rtcThreads";
 
 /**
@@ -209,6 +211,29 @@ interface Connection {
   released: () => void;
 }
 
+/** Not echoed: the address may be one of this network's. */
+const CALL_BIND_GONE = "Calls can't start: GHOSTLY_CALL_BIND is not an address of this machine now (a typo, or a network that changed). Set it to one of this machine's addresses, such as 127.0.0.1, or unset it, then restart the daemon";
+
+/**
+ * Whether a socket can be bound on `address` now. On an address that is not this machine's (a typo, a network that
+ * changed since the daemon started), libdatachannel gathers no candidate and throws from an offer's description where
+ * node-datachannel catches nothing: the whole daemon aborted, every chat with it.
+ */
+export async function bindable(address: string): Promise<boolean> {
+  const socket = createSocket(isIP(address) === 6 ? "udp6" : "udp4");
+  try {
+    await new Promise<void>((bound, failed) => {
+      socket.once("error", failed);
+      socket.bind(0, address, () => bound());
+    });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    try { socket.close(); } catch { /* not bound */ }
+  }
+}
+
 /**
  * A connection and its description, with its candidates. An early answer's (`held`) takes the contact's offer
  * without its candidates: with none, this side sends the contact no check, so nothing connects, and no audio is sent
@@ -217,6 +242,7 @@ interface Connection {
 async function openConnection(stack: CallStack, options: ConnectionOptions, offer: CallSignal | null, held = false): Promise<Connection> {
   const { ndc } = stack;
   const bind = process.env.GHOSTLY_CALL_BIND;
+  if (bind && !(await bindable(bind))) throw new CliError("unavailable", CALL_BIND_GONE);
   const iceServers = callIceServers(options.iceServers);
   const pc = new ndc.PeerConnection("ghostly-call", { iceServers, ...(bind ? { bindAddress: bind } : {}) });
   const released = rtcThreads.opened();
