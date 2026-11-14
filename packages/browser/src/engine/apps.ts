@@ -601,6 +601,8 @@ const keysOf = (ref: string, scope: string) => IDBKeyRange.bound([ref, scope, CO
 const REPLACEMENT = String.fromCodePoint(0xfffd);
 /** A key as the broker lists it to an app: each lone surrogate (half an emoji, cut by `slice`) as U+FFFD. */
 const asListed = (key: string) => key.replace(/\p{Cs}/gu, REPLACEMENT);
+/** Whether a key holds a lone surrogate. */
+const isLone = (key: string) => /\p{Cs}/u.test(key);
 
 /** A scope's counter row (`COUNT_KEY`). */
 const counterRow = (ref: string, scope: string, count: AppScopeCount): AppStorageRow => ({ ref, scope, key: COUNT_KEY, value: JSON.stringify(count), size: 0 });
@@ -682,6 +684,11 @@ export class Apps {
   private readonly queues = new Map<string, Promise<unknown>>();
   /** The keys read of each `ref\0scope` running, and the one every call made while it runs shares after it. */
   private readonly keyReads = new Map<string, { running: Promise<string[]>; next?: Promise<string[]> }>();
+  /**
+   * The keys of each `ref\0scope` kept with a lone surrogate, read once (`loneKeysOf`): the broker takes no new one, so
+   * they only go, kept in step by the writes here.
+   */
+  private readonly loneKeys = new Map<string, { keys: Set<string>; read: Promise<Set<string>> }>();
   /** Uninstalls begun per reference, for this engine's life: a storage write that waited its turn across one is refused. */
   private readonly uninstalls = new Map<string, number>();
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -2347,6 +2354,7 @@ export class Apps {
     if (builtIn) markBuiltIns(tx.objectStore(STORES.settings), (marks) => { marks.removed[ref] ??= this.now(); });
     try { await done(tx); } finally { this.held.delete(ref); }
     for (const key of [...this.usage.keys()]) if (key.startsWith(`${ref}\0`)) this.usage.delete(key);
+    for (const key of [...this.loneKeys.keys()]) if (key.startsWith(`${ref}\0`)) this.loneKeys.delete(key);
     this.started.delete(ref);
     for (const key of [...this.anyway]) if (key.startsWith(`${ref} `)) this.anyway.delete(key);
     if (!app) return;
@@ -2415,6 +2423,7 @@ export class Apps {
     const of = (id: string) => id.slice(id.indexOf("\0") + 1) === scope;
     for (const id of [...this.usage.keys()]) if (of(id)) this.usage.delete(id);
     for (const id of [...this.keyReads.keys()]) if (of(id)) this.keyReads.delete(id);
+    for (const id of [...this.loneKeys.keys()]) if (of(id)) this.loneKeys.delete(id);
   }
 
   async storageGet({ ref, scope, key, digest }: { ref: string; scope: string; key: string; digest?: string }): Promise<{ value: JsonValue } | null> {
@@ -2426,18 +2435,35 @@ export class Apps {
   /**
    * The row an app's key names: its own, or else one kept under a key with a lone surrogate that the broker lists with
    * U+FFFD in its place. Such keys were kept before the broker refused them; without this, what `storage.keys` listed
-   * could be neither read nor deleted, and its bytes stayed counted against the scope. Only the keys that could be it are
-   * read: the same up to the first U+FFFD, then a surrogate or U+FFFD (every key of a full scope took 380 ms in Chromium,
-   * at each read, write and delete of a new key with U+FFFD).
+   * could be neither read nor deleted, and its bytes stayed counted against the scope. Those keys are looked up among
+   * the scope's kept ones (`loneKeysOf`), not read from the store: the keys from a surrogate on hold every key that
+   * starts with an emoji, and reading them took 58 ms at 24,000 keys at each read, write and delete of a key with U+FFFD.
    */
   private async rowOf(ref: string, scope: string, key: string): Promise<AppStorageRow | undefined> {
     const row = await wrap<AppStorageRow | undefined>((await store(STORES.appStorage, "readonly")).get([ref, scope, key]));
     if (row || !key.includes(REPLACEMENT)) return row;
-    const same = key.slice(0, key.indexOf(REPLACEMENT));
-    const near = IDBKeyRange.bound([ref, scope, `${same}\uD800`], [ref, scope, `${same}￾`], false, true);
-    const keys = await wrap((await store(STORES.appStorage, "readonly")).getAllKeys(near)) as [string, string, string][];
-    const kept = keys.find((k) => k[2] !== key && asListed(k[2]) === key);
-    return kept ? wrap<AppStorageRow | undefined>((await store(STORES.appStorage, "readonly")).get(kept)) : undefined;
+    const kept = [...await this.loneKeysOf(ref, scope)].find((k) => asListed(k) === key);
+    return kept === undefined ? undefined : wrap<AppStorageRow | undefined>((await store(STORES.appStorage, "readonly")).get([ref, scope, kept]));
+  }
+
+  /**
+   * A scope's keys kept with a lone surrogate, from one read of its keys. A write that commits after the read began
+   * changes the set after it is filled (a write waits for the read's transaction), so `storageSet` and `storageDelete`
+   * keep it in step. A failed read is tried again at the next call.
+   */
+  private loneKeysOf(ref: string, scope: string): Promise<Set<string>> {
+    const id = `${ref}\0${scope}`;
+    const held = this.loneKeys.get(id);
+    if (held) return held.read;
+    const keys = new Set<string>();
+    const read = (async () => {
+      const all = await wrap((await store(STORES.appStorage, "readonly")).getAllKeys(keysOf(ref, scope))) as [string, string, string][];
+      for (const k of all) if (isLone(k[2])) keys.add(k[2]);
+      return keys;
+    })();
+    this.loneKeys.set(id, { keys, read });
+    void read.catch(() => { if (this.loneKeys.get(id)?.read === read) this.loneKeys.delete(id); });
+    return read;
   }
 
   /**
@@ -2479,6 +2505,9 @@ export class Apps {
       writing.put({ ref: app.ref, scope: where, key: name, value: text, size } satisfies AppStorageRow);
       await committed(writing.put(counterRow(app.ref, where, next)));
       this.usage.set(`${app.ref}\0${where}`, next);
+      const lone = this.loneKeys.get(`${app.ref}\0${where}`)?.keys;
+      if (old) lone?.delete(old.key);
+      if (isLone(name)) lone?.add(name);
     });
   }
 
@@ -2505,6 +2534,7 @@ export class Apps {
       writing.delete([app.ref, where, old.key]);
       await (next.rows ? committed(writing.put(counterRow(app.ref, where, next))) : committed(writing.delete([app.ref, where, COUNT_KEY])));
       this.usage.set(`${app.ref}\0${where}`, next);
+      this.loneKeys.get(`${app.ref}\0${where}`)?.keys.delete(old.key);
     });
   }
 
