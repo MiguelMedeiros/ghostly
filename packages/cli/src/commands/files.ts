@@ -72,6 +72,8 @@ export const commands: Record<string, Command> = {
     },
     // The flags first: a usage error (exit 2) is said before the file is looked at.
     params: ({ options }, a) => {
+      // Empty (an unset variable in a script), it sent the file as no reply: an id the chat lacks is exit 3.
+      if (options.reply === "") throw new CliError("usage", "--reply needs a message id");
       const voice = voiceOf(options), seconds = timeout(options, LONG_WAIT_SECONDS);
       return { chat: a.chat, path: sendable(here(a.path)!), name: options.name, mime: options.mime, ...voice, reply: options.reply, force: options.force === true, wait: options.wait, timeout: seconds };
     },
