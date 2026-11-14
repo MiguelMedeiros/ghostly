@@ -302,11 +302,14 @@ const METHODS: Record<string, Method> = {
 
   async status(ctx) {
     const s = state(ctx);
+    // A daemon's: how each relay is doing and where its last read went, as the apps' connection panel says. With every
+    // relay down, its status read as with them all fine. A one-shot asked none of them.
+    const seen = ctx.mode === "daemon" ? s.transport.discovery : undefined;
     return {
       version: ctx.version, profile: ctx.runtime.paths.name, mode: ctx.mode, pid: process.pid,
       online: s.settings.online, name: s.settings.nick || null, webrtc: ctx.runtime.webrtc, calls: ctx.runtime.callsUnavailable === null,
       chats: s.links.length, live: s.links.filter(isLive).length, groups: s.groups.length,
-      discovery: { protocol: s.transport.protocol, relays: s.transport.relays },
+      discovery: { protocol: s.transport.protocol, relays: s.transport.relays, ...(seen && { health: seen.relays, via: seen.path?.via ?? null }) },
       events: { lastSeq: ctx.hub.lastSeq },
       // A listen running the profile: `daemon stop` and `restart` end it too, as their answers say.
       ...(ctx.listen && { listen: true }),
