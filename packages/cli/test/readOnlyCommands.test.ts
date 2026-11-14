@@ -32,7 +32,7 @@ const LIVE_ONLY = ["group typing", "typing"];
  * Done only by a daemon: a one-shot refuses them whatever the network says ("start `ghostly daemon --detach`"), so it
  * opens offline. Online it waited for the relays first: 10 s to say so with a relay that does not answer.
  */
-const DAEMON_ONLY = ["app close", "app open", "app send", "call start", "service open"];
+const DAEMON_ONLY = ["app close", "app open", "app send", "call answer", "call flush", "call start", "service close", "service open"];
 const ONLINE = [
   "profile picture",
   "button press", "button update", "chat connect", "chat disconnect", "chat transport", "chat verify", "chat wait",
@@ -44,9 +44,9 @@ const ONLINE = [
   "chat pay", "chat pay-request", "chat request", "lightning default", "lightning rename", "pay", "payment check", "payment reclaim",
   "wallet add-mint", "wallet address", "wallet create", "wallet faucet", "wallet receive", "wallet redeem", "wallet remove",
   "identity complete", "identity recheck", "identity remove", "identity share", "identity withdraw",
-  "service close", "service enable", "service remove", "service share",
+  "service enable", "service remove", "service share",
   // A one-shot online may see a call ring, and decline it.
-  "call answer", "call flush", "call hangup",
+  "call hangup",
 ];
 
 describe("which one-shots open the profile offline", () => {

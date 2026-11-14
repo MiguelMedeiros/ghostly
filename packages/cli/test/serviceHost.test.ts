@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GhostlyHttpError, LIMITS, type ClientRequest, type ClientResponse } from "@ghostly/core";
 import { keepServing } from "../src/host";
 import type { ApiContext } from "../src/api";
-import { hostOnlyCookie, OPEN_COOKIE, OPENED_SERVICE_CSP, OPENED_SERVICE_CSP_RELAY_ONLY, openServiceServer, ownCookies, SERVICE_METHODS, SERVICE_OPEN_OFF_RELAY_ONLY, setCookieName, type OpenedService, type ServiceSend } from "../src/services";
+import { hostOnlyCookie, OPEN_COOKIE, OPENED_SERVICE_CSP, OPENED_SERVICE_CSP_RELAY_ONLY, openServiceServer, ownCookies, SERVICE_METHODS, SERVICE_NEEDS_DAEMON, SERVICE_OPEN_OFF_RELAY_ONLY, setCookieName, type OpenedService, type ServiceSend } from "../src/services";
 import { chatViewOf } from "./support/chatView";
 // covers: headless.services
 
@@ -259,6 +259,9 @@ describe("an opened service's host and link", () => {
     // Nothing listens and the contact is not asked: closing finds none open.
     await expect(SERVICE_METHODS["service.close"](context(true), params)).rejects.toMatchObject({ code: "not_found" });
     expect(asked).toBe(0);
+    // A one-shot has none open to close (they live in the daemon): it says so, not "not open here".
+    const oneShot = { ...context(false), mode: "one-shot" } as unknown as ApiContext;
+    await expect(SERVICE_METHODS["service.close"](oneShot, params)).rejects.toMatchObject({ code: "unavailable", message: SERVICE_NEEDS_DAEMON });
     // Off (or never set): as before, with the policy of an app that may load from https sites.
     for (const relayOnly of [false, undefined]) {
       const ctx = context(relayOnly);

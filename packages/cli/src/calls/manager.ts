@@ -471,6 +471,8 @@ export class CallManager {
   }
 
   async answer(ref: string | undefined, options: { rate?: unknown }): Promise<Record<string, unknown>> {
+    // A one-shot answers no call: it said "No call is on" instead when none rang.
+    if (this.host.answers === false) throw new CliError("unavailable", CALLS_NEED_DAEMON);
     const call = this.find(ref, (c) => c.direction === "in" && c.state === "ringing");
     if (call.direction !== "in" || call.state !== "ringing") throw new CliError("refused", "That call is not ringing here");
     this.callable(call.chat);
@@ -521,6 +523,8 @@ export class CallManager {
 
   /** Drops the audio the program queued and the call has not sent yet (barge-in). */
   flush(ref: string | undefined): Record<string, unknown> {
+    // Only the daemon's calls queue audio.
+    if (this.host.answers === false) throw new CliError("unavailable", CALLS_NEED_DAEMON);
     const call = this.find(ref);
     const flushedMs = call.queue?.flush() ?? 0;
     return { call: call.id, chat: call.chat, flushedMs };

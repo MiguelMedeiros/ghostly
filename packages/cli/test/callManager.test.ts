@@ -390,6 +390,19 @@ describe("a call to a contact who is away", () => {
     const engine: CallEngine = { getState: () => ({ links: [link] }) as unknown as EngineState, setCallSignal: () => {} };
     await expect(new CallManager({ engine, emit: () => {}, profileDir: tmp(), answers: true }).start("bia", {})).rejects.toMatchObject({ code: "unavailable", message: "Your contact's app cannot take calls" });
   });
+
+  it("names the daemon it needs to answer or flush a call, not a call it cannot have", async () => {
+    const engine: CallEngine = { getState: () => ({ links: [] }) as unknown as EngineState, setCallSignal: () => {} };
+    const calls = new CallManager({ engine, emit: () => {}, profileDir: tmp(), answers: false });
+    const daemon = { code: "unavailable", message: "Calls need the daemon (a call outlives this command): start it with `ghostly daemon --detach`" };
+    // It said "No call is on" (exit 3) after 12 s online: a one-shot answers none and queues no audio.
+    await expect(calls.answer(undefined, {})).rejects.toMatchObject(daemon);
+    expect(() => calls.flush("bia")).toThrow(expect.objectContaining(daemon));
+    // A daemon with no call still says so.
+    const daemonCalls = new CallManager({ engine, emit: () => {}, profileDir: tmp(), answers: true });
+    await expect(daemonCalls.answer(undefined, {})).rejects.toMatchObject({ code: "not_found" });
+    expect(() => daemonCalls.flush(undefined)).toThrow(expect.objectContaining({ code: "not_found" }));
+  });
 });
 
 describe("two call managers", { timeout: 60_000 }, () => {
