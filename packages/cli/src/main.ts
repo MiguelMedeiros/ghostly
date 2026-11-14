@@ -268,13 +268,13 @@ export function readOnly(method: string, params: Record<string, unknown>): boole
 /**
  * Calls whose change stays on this device: a chat's name here, a chat removed (nothing goes to the contact), auto-answer
  * (calls.json), auto-join (groups.json: a one-shot accepts nothing itself, the daemon does), a proof dropped, a web app added (shared with no one yet), a message saved or unsaved, an x401 key or credential (WISP 3xx: never
- * shared with a contact). Opened online, each put the profile's records on the relays and waited for them (6 PUT + 4
+ * shared with a contact), an app served or unserved (served.json: an engine reads it as it starts). Opened online, each put the profile's records on the relays and waited for them (6 PUT + 4
  * GET, 3.3 s with a relay that takes 1.5 s), and the contacts' apps saw this device come online. `message delete` stays
  * online: it settles a file offer already on the DHT.
  */
 const LOCAL_WRITES: ReadonlySet<string> = new Set([
   "chat.rename", "chat.remove", "call.auto", "group.auto", "identity.cancel", "service.add", "x401.key.new", "x401.credential.add", "x401.credential.remove",
-  "saved.add", "saved.remove",
+  "saved.add", "saved.remove", "app.serve", "app.unserve",
   // This profile's status: kept here, and said only on a live session (WISP 401 § Presence and status), never on a
   // relay. A one-shot waits for no session, so online it would only show this device to the contacts for a moment; the
   // daemon says it at once, and any process that runs the profile online says it on each chat's next session.
