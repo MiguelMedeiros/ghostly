@@ -60,7 +60,8 @@ export class GroupTypings {
 
   private board(groupId: string): GroupTypingBoard {
     let board = this.boards.get(groupId);
-    if (!board) this.boards.set(groupId, (board = new GroupTypingBoard(() => this.host.emit(), this.now)));
+    // Who types shows in this group's view alone.
+    if (!board) this.boards.set(groupId, (board = new GroupTypingBoard(() => this.host.emit(undefined, groupId), this.now)));
     return board;
   }
 }

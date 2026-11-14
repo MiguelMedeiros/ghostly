@@ -83,6 +83,28 @@ describe("the state a change of one chat pushes", () => {
     expect(view(third, b.id)).toBe(view(second, b.id));
   });
 
+  it("builds only the chat a files/3 transfer moves in for its progress, and no group", async () => {
+    const { node, next } = engine();
+    const a = await addChat(node, "Alice"), b = await addChat(node, "Bob");
+    let built = 0;
+    node["groups"].views = () => { built++; return []; };
+    node["emitState"]();
+    await next();
+    built = 0;
+    const record = { id: "w1", direction: "out", state: "active", confirmed: 0, file: { name: "x.bin", size: 1_000, mime: "application/octet-stream", timestamp: 1_000 } } as never;
+    // A send going on, then its progress (the receiver's acks): 4 states a second for as long as it moves.
+    node["fileDesk"]["changed"](b.id, record, 0, false);
+    const second = await next();
+    built = 0;
+    node["fileDesk"]["changed"](b.id, record, 500, true);
+    const third = await next();
+    expect(Object.values(third.transfers).map(t => t.transferred)).toEqual([500]);
+    expect(view(third, a.id)).toBe(view(second, a.id));
+    // Its own chat's view is built again: it shows the room the contact said it has for files (`peerFileRoom`).
+    expect(view(third, b.id)).not.toBe(view(second, b.id));
+    expect(built).toBe(0);
+  });
+
   it("keeps every group's view for a change of a 1:1 chat's own, and builds them again for a contact's name or a group's change", async () => {
     const { node, next } = engine();
     const a = await addChat(node, "Alice");
@@ -110,6 +132,47 @@ describe("the state a change of one chat pushes", () => {
     // And getState reads them fresh.
     node.getState();
     expect(built).toBe(3);
+  });
+
+  it("builds again only the group a change names (a message, a member typing, an edge), and keeps the same object for every other group's view", async () => {
+    const { node, next } = engine();
+    const edge = await addChat(node, "edge");
+    const live = node["links"].get(edge.id)!;
+    live.stored = { ...live.stored, group: "g1", groupPeer: "bob" };
+    const at: Record<string, number> = { g1: 10, g2: 20 };
+    const group = (id: string) => ({ id, profile: "mesh", name: id, createdAt: 1, lastMessageAt: at[id], isAdmin: true, canSend: true, invited: [], memberLinks: {},
+      members: [{ key: "me", role: "admin", me: true }, { key: "bob", role: "member", nick: "Bob" }] }) as unknown as GroupView;
+    let all = 0;
+    const one: string[] = [];
+    node["groups"].views = () => { all++; return [group("g2"), group("g1")]; };
+    node["groups"].view = id => { one.push(id); return group(id); };
+    node["emitState"]();
+    const first = await next();
+    all = 0;
+    // A member's message in g1: g1's view built again, and first in the list now; g2's kept.
+    at.g1 = 30;
+    await node["storeMessage"]({ linkId: "group:g1", id: "m1", text: "hi", sender: "peer", member: "bob", timestamp: 1_000, via: "datalink" });
+    const second = await next();
+    expect(all).toBe(0);
+    expect(one).toEqual(["g1"]);
+    expect(second.groups.map(g => g.id)).toEqual(["g1", "g2"]);
+    expect(second.groups[1]).toBe(first.groups[0]);
+    expect(second.groups[0]!.lastMessageAt).toBe(30);
+    // A member typing in g2 (the group's word to the engine): g2 alone.
+    node["groups"]["host"].emit(undefined, "g2");
+    const third = await next();
+    expect(one).toEqual(["g1", "g2"]);
+    expect(third.groups[0]).toBe(second.groups[0]);
+    expect(third.groups[1]).not.toBe(second.groups[1]);
+    // An edge of g1's changed (it came up): g1 alone.
+    node["chatChanged"](edge.id);
+    const fourth = await next();
+    expect(one).toEqual(["g1", "g2", "g1"]);
+    expect(fourth.groups[1]).toBe(third.groups[1]);
+    // A change that names no group builds them all, as before.
+    node["emitState"]();
+    await next();
+    expect(all).toBe(1);
   });
 
   it("is read fresh by getState, whatever the last push kept", async () => {

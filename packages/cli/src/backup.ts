@@ -305,6 +305,34 @@ async function finishRestore(home: string, name: string, work: ProfilePaths, lef
  * copy: its engine, the first time it starts, treats the money in it as a restore does (`RESTORED_MARK`).
  */
 export async function restoreProfile(home: string, name: string, file: string, passphrase?: string): Promise<ProfilePaths> {
+  if (passphrase === undefined) return await restoreWith(home, name, file);
+  let first: unknown;
+  for (const form of passphraseForms(passphrase)) {
+    try { return await restoreWith(home, name, file, form); } catch (error) {
+      if (!(error instanceof CliError && error.code === "refused" && error.message.startsWith("Wrong passphrase"))) throw error;
+      first ??= error;
+    }
+  }
+  throw first;
+}
+
+/**
+ * The passphrase as given, then the forms the same passphrase may have been sealed with. An older CLI left out only
+ * one line break at the end of a passphrase file and took the environment as given: a backup sealed from a file with a
+ * byte order mark, a second line break, a lone carriage return or UTF-16 bytes opened with that file only, and one
+ * sealed from the environment did not open with a CRLF or BOM file. Each form is one more key derivation on a wrong
+ * passphrase, so the list stays short.
+ */
+export function passphraseForms(given: string): string[] {
+  // UTF-16 read as UTF-8: its byte order mark is two replacement characters and every ASCII character is followed by a NUL.
+  const core = (given.includes("\0") ? given.replace(/\uFFFD|\0/g, "") : given).trim();
+  if (!core) return [given];
+  const asUtf16 = Buffer.from(`\uFEFF${core}\r\n`, "utf16le").toString("utf8");
+  return [...new Set([given, core, `\uFEFF${core}`, `${core}\n`, `${core}\r`, asUtf16])];
+}
+
+/** One restore with one passphrase (none for a backup made without one). */
+async function restoreWith(home: string, name: string, file: string, passphrase?: string): Promise<ProfilePaths> {
   if (profileExists(home, name)) throw new CliError("refused", `Profile ${name} exists: restore into a new name`);
   const source = await fileSource(file);
   let work: ProfilePaths | null = null;

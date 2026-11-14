@@ -26,7 +26,8 @@ const SCRIPT_SRC = process.env.NODE_ENV === "production" ? "script-src 'self' 'u
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  // No `X-Powered-By: Next.js` on any answer: it tells a scanner which framework's advisories to try, and no reader.
+  // No `X-Powered-By: Next.js` on any answer: no reader needs it. Next's x-nextjs-* headers, its RSC Vary and the /_next/
+  // paths in every page still show the framework.
   poweredByHeader: false,
   turbopack: {
     root: __dirname,

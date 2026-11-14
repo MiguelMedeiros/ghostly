@@ -1,5 +1,6 @@
 import { screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
+import { engineError } from "@ghostly/core";
 import { ChatServicesDialog } from "../../components/ChatServicesDialog";
 import { saveSession } from "../../lib/storage";
 import type { ChatSession } from "../../lib/types";
@@ -65,6 +66,44 @@ describe("Services → Your apps, in Arabic", () => {
       expect(within(grant).getByText("My very long local web application name")).toHaveAttribute("dir", "auto");
       expect(within(grant).getByText("localhost:3400/a/long/path")).toHaveAttribute("dir", "auto");
       expect(within(screen.getByTestId("chat-service-from")).getByText(name)).toHaveAttribute("dir", "auto");
+    } finally {
+      fakeEngine.features = { ...fakeEngine.features, shareLocalServices: false };
+    }
+  });
+});
+
+// A contact keeps only the first 16 services of what it is told (chat, voice and video first): the engine refuses a
+// grant past them. The switches dropped that refusal, and an app the contact never saw read as shared.
+describe("Sharing an app with a contact who already has as many as it can see", () => {
+  const full = () => { throw engineError("serviceShareFull", { max: 13 }); };
+
+  it.each(["en", "pt"] as const)("the chat's Services dialog says why under the app's switch (%s)", async (language) => {
+    fakeEngine.features = { ...fakeEngine.features, shareLocalServices: true };
+    try {
+      fakeEngine.on("setServiceShared", full);
+      fakeEngine.update({ services: [{ id: "mine", name: "Notes", target: "http://localhost:3400", enabled: true, requests: 0, createdAt: 1 }] });
+      const { user } = renderApp(<ChatServicesDialog peerPubKey="peer" name="Ana" onClose={() => {}} />, { language });
+      const grant = await screen.findByTestId("chat-service-grant");
+      await user.click(within(grant).getByTestId("chat-service-toggle"));
+      const problem = await within(grant).findByTestId("chat-service-grant-problem");
+      expect(problem).toHaveTextContent(language === "en" ? "A contact can reach at most 13 of your apps" : "Um contato pode acessar no máximo 13 dos seus apps");
+      expect(problem).toHaveTextContent(language === "en" ? "Take one back from them before sharing another." : "Retire o acesso a um deles antes de compartilhar outro.");
+    } finally {
+      fakeEngine.features = { ...fakeEngine.features, shareLocalServices: false };
+    }
+  });
+
+  it("Services → People says why under that contact's switch", async () => {
+    fakeEngine.features = { ...fakeEngine.features, shareLocalServices: true };
+    try {
+      fakeEngine.on("setServiceShared", full);
+      fakeEngine.update({ services: [{ id: "mine", name: "Notes", target: "http://localhost:3400", enabled: true, requests: 0, createdAt: 1 }] });
+      const { user } = renderApp(<Services />);
+      const card = await screen.findByTestId("service-item");
+      await user.click(within(card).getByTestId("service-people"));
+      const grant = within(card).getByTestId("service-grant");
+      await user.click(within(grant).getByRole("switch"));
+      expect(await within(grant).findByTestId("service-grant-problem")).toHaveTextContent("A contact can reach at most 13 of your apps");
     } finally {
       fakeEngine.features = { ...fakeEngine.features, shareLocalServices: false };
     }

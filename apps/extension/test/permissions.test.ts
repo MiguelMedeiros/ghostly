@@ -25,7 +25,8 @@ afterEach(() => {
 describe("what the extension may do, as the manifest declares it", () => {
   it("asks only for what the peer needs up front", () => {
     // `alarms` wakes the worker to bring the peer back (background.ts); Chrome shows no warning for it.
-    expect(manifest.permissions).toEqual(["offscreen", "storage", "debugger", "alarms"]);
+    // `browsingData`: what a contact's app kept on its viewer origin goes with its chat or the profile (`forgetServices`).
+    expect(manifest.permissions).toEqual(["offscreen", "storage", "debugger", "alarms", "browsingData"]);
     expect(manifest.optional_permissions).toEqual(["notifications", "identity"]);
     expect(manifest).not.toHaveProperty("host_permissions");
   });

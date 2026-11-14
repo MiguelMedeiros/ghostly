@@ -1,9 +1,9 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { releasesNewestFirst } from "../compat-latest-release.mjs";
+import { releasesNewestFirst, remoteReleases } from "../compat-latest-release.mjs";
 import { get, newestPublished, releaseFiles, tokenOf } from "../fetch-compat-desktop.mjs";
 
 /** A release's SHA256SUMS.txt with its Linux package. */
@@ -32,6 +32,40 @@ describe("the newest release the Desktop compatibility e2e fetches", () => {
 
   it("is nothing when no release publishes its package", async () => {
     expect(await newestPublished(["v1.7.3"], served({}))).toBeNull();
+  });
+
+  it("takes a tag whose package is in the cache already with no request", async () => {
+    const sums = vi.fn(served({}));
+    expect(await newestPublished(["v1.7.3", "v1.7.2"], sums, () => {}, (tag) => tag === "v1.7.3")).toEqual({ tag: "v1.7.3", sums: null });
+    expect(sums).not.toHaveBeenCalled();
+  });
+
+  it("stops a `git ls-remote` that gets no answer and asks again", async () => {
+    const lsRemote = "a\trefs/tags/v1.7.3\n";
+    const calls: { args: string[]; timeout?: number }[] = [];
+    let timedOut = false;
+    const run = (args: string[], options?: { timeout?: number }) => {
+      calls.push({ args, timeout: options?.timeout });
+      if (args[0] === "rev-parse") return "head\n";
+      if (!timedOut) { timedOut = true; throw Object.assign(new Error("spawnSync git ETIMEDOUT"), { code: "ETIMEDOUT" }); }
+      return lsRemote;
+    };
+    const log: string[] = [];
+    const waits: number[] = [];
+    expect(await remoteReleases({ run, sleep: async (ms: number) => { waits.push(ms); }, log: (line: string) => log.push(line) })).toEqual(["v1.7.3"]);
+    expect(calls.filter(({ args }) => args[0] === "ls-remote").map(({ timeout }) => timeout)).toEqual([20_000, 20_000]);
+    expect(log).toEqual(["git ls-remote origin: no answer in 20 s, trying again"]);
+    expect(waits).toEqual([2000]);
+  });
+
+  it("gives up on `git ls-remote` after 4 attempts, saying why", async () => {
+    const run = (args: string[]) => {
+      if (args[0] === "rev-parse") return "head\n";
+      throw Object.assign(new Error("spawnSync git ETIMEDOUT"), { code: "ETIMEDOUT" });
+    };
+    const waits: number[] = [];
+    await expect(remoteReleases({ run, sleep: async (ms: number) => { waits.push(ms); } })).rejects.toThrow("git ls-remote origin: no answer in 20 s (4 attempts)");
+    expect(waits).toEqual([2000, 4000, 8000]);
   });
 
   it("walks the tags newest first, leaving out the commit under test", () => {
@@ -105,6 +139,34 @@ describe("a request of the Desktop compatibility fetch", () => {
       expect(result.stderr).not.toMatch(/triggerUncaughtException|\n\s+at /);
     } finally {
       rmSync(cache, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it("takes the newest release it fetched last time, from the cache, when origin's tags cannot be read", () => {
+    const stub = `globalThis.fetch = async () => { throw new Error("no network in this test"); };
+      const setTimeout = globalThis.setTimeout; globalThis.setTimeout = (done, ms, ...rest) => setTimeout(done, ms >= 1000 ? 0 : ms, ...rest);`;
+    const dir = mkdtempSync(join(tmpdir(), "compat-fetch-"));
+    try {
+      // A repository whose origin is not there: `git ls-remote` fails, as it does when github.com does not answer.
+      const repo = join(dir, "repo");
+      for (const args of [["init", "-q", repo], ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "t"], ["-C", repo, "remote", "add", "origin", join(dir, "gone")]]) {
+        expect(spawnSync("git", args).status).toBe(0);
+      }
+      const cache = join(dir, "cache");
+      const binary = join(cache, "desktop-v9.9.8", "usr", "bin", "ghostly");
+      mkdirSync(dirname(binary), { recursive: true });
+      writeFileSync(binary, "");
+      writeFileSync(join(cache, "desktop-v9.9.8", ".fetched"), "v9.9.8 abc123\n");
+      writeFileSync(join(cache, "newest"), "v9.9.8\n");
+      const result = spawnSync(process.execPath, ["--import", `data:text/javascript,${encodeURIComponent(stub)}`, resolve(import.meta.dirname, "../fetch-compat-desktop.mjs"), "--tag", "newest"], {
+        cwd: repo, env: { ...process.env, E2E_COMPAT_CACHE: cache, GH_TOKEN: "", GITHUB_TOKEN: "", GIT_DIR: join(repo, ".git") }, encoding: "utf8",
+      });
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout.trim()).toBe(binary);
+      expect(result.stderr.match(/^git ls-remote origin: .+, trying again$/gm)).toHaveLength(3);
+      expect(result.stderr).toMatch(/origin's release tags could not be read \(git ls-remote origin: .+ \(4 attempts\)\): v9\.9\.8, the newest release fetched before, from the cache/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   }, 30_000);
 });

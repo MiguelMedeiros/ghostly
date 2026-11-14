@@ -338,13 +338,30 @@ export class RelaysAndDht implements PkarrTransport {
     // past every packet put or read under the key (`RelayTransport.publishDated`), whichever clock dated those.
     // With the DHT, the packet goes there whatever the relays' budgets say: signed every time. Without it (a private
     // network's relays only), a publish none of them takes now is not signed at all. A background write the DHT's
-    // share holds goes to the relays alone, as without the DHT.
-    const toDht = this.dht !== null && this.dhtWriteWait(identity.pubKeyZ32, options) === 0;
+    // share holds goes to the relays alone, as without the DHT, or waits its turn there while every relay fails.
+    const toDht = this.dht !== null && this.dhtWriteTurn(identity.pubKeyZ32, options);
     await this.relays.publishDated(identity, records, (key, payload, timestamp, conflict) => this.putBoth(key, payload, options, conflict, timestamp, toDht), options, false, toDht);
   }
 
-  publishPayload(pubKeyZ32: string, payload: Uint8Array, options: PkarrRequestOptions = {}): Promise<void> {
-    return this.putBoth(pubKeyZ32, payload, options, undefined, undefined, this.dhtWriteWait(pubKeyZ32, options) === 0);
+  async publishPayload(pubKeyZ32: string, payload: Uint8Array, options: PkarrRequestOptions = {}): Promise<void> {
+    return this.putBoth(pubKeyZ32, payload, options, undefined, undefined, this.dhtWriteTurn(pubKeyZ32, options));
+  }
+
+  /** Every relay is left alone for failing: what goes to them alone goes nowhere. */
+  private relaysDown(): boolean {
+    return this.relays.discovery().relays.every((relay) => relay.state === "failing");
+  }
+
+  /**
+   * Whether this write goes to the DHT too (`dhtWriteWait`). One the DHT's share holds while every relay fails is held
+   * back until its turn there (a `DiscoveryBudgetError`), as a background read is: tried on the relays alone, it failed,
+   * and the link tried it again every 4 s until that turn came, 15 packets built a minute per chat whose contact was
+   * away (~2,300 a minute at 200 chats, twice the CPU of the daemon before the share, bug hunt 2026-11-14).
+   */
+  private dhtWriteTurn(pubKeyZ32: string, options: PkarrRequestOptions): boolean {
+    const wait = this.dhtWriteWait(pubKeyZ32, options);
+    if (wait > 0 && this.relaysDown()) throw new DiscoveryBudgetError(wait, "Background DHT writes in the relays' place are at their share; retry shortly");
+    return wait === 0;
   }
 
   /**
@@ -521,11 +538,14 @@ export class RelaysAndDht implements PkarrTransport {
   readHeldBackFor(pubKeyZ32: string): number | undefined { return this.relays.readHeldBackFor(pubKeyZ32); }
   /**
    * With the DHT a packet goes there too, whatever the relays' budgets say: nothing is held, but a background write past
-   * the DHT's share (`dhtBackgroundWrites`), which goes to the relays alone and is held as they say.
+   * the DHT's share (`dhtBackgroundWrites`), which goes to the relays alone and is held as they say, or until its turn
+   * on the DHT while every relay fails (`dhtWriteTurn`).
    */
   publishHeld(pubKeyZ32: string, options: PkarrRequestOptions = {}): DiscoveryBudgetError | null {
     if (!this.dht) return this.relays.publishHeld(pubKeyZ32, options);
-    return this.dhtWriteWait(pubKeyZ32, options, true) > 0 ? this.relays.publishHeld(pubKeyZ32, options) : null;
+    const wait = this.dhtWriteWait(pubKeyZ32, options, true);
+    if (wait === 0) return null;
+    return this.relaysDown() ? new DiscoveryBudgetError(wait, "Background DHT writes in the relays' place are at their share; retry shortly") : this.relays.publishHeld(pubKeyZ32, options);
   }
   onServerTime(listener: Parameters<RelayTransport["onServerTime"]>[0]): () => void { return this.relays.onServerTime(listener); }
   /**
