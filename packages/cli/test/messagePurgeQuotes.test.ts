@@ -1,9 +1,13 @@
 import type { Server } from "node:http";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { deserialize } from "node:v8";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ghostly, home, hyperdhtTestnet, localRelay, ok, Running, type Result } from "./support/cli";
 // covers: headless.chat
+
+/** The profile's rows.db, under its home. */
+const ROWS = "profiles/default/db/rows.db";
 
 /**
  * `message delete --purge` answered `purged: true` while a reply to the message (mine or the contact's) still held a
@@ -34,6 +38,23 @@ describe("message delete --purge and the replies that quote it", { timeout: 240_
     };
     walk(join(dir, "profiles"));
     return out;
+  };
+  /**
+   * Which rows of the profile's rows.db hold `secret` (their store, id and the fields that hold it), said when a find
+   * fails the test: a row the purge left or one written back after it, or none (a page's free space).
+   */
+  const rowsHolding = async (dir: string, secret: string): Promise<string> => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const file = new DatabaseSync(join(dir, ROWS), { readOnly: true });
+    try {
+      const rows = file.prepare("SELECT t.store, t.idx, e.key, e.value FROM entries e JOIN trees t ON e.tree = t.id").all() as { store: string; idx: string; key: Uint8Array; value: Uint8Array }[];
+      const found = rows.filter((row) => Buffer.from(row.value).includes(secret)).map((row) => {
+        const value = deserialize(row.value) as Record<string, unknown>;
+        const fields = Object.entries(value).filter(([, field]) => JSON.stringify(field)?.includes(secret));
+        return `${row.store}${row.idx && `/${row.idx}`} ${JSON.stringify(deserialize(row.key))} (delivery ${String(value.delivery)}): ${fields.map(([name, field]) => `${name} ${JSON.stringify(field)}`).join(", ")}`;
+      });
+      return found.length ? `rows.db rows holding it: ${found.join("; ")}` : "no row of rows.db holds it: it is in a page's free space";
+    } finally { file.close(); }
   };
   const quotes = async (dir: string, chat: string) => (ok(await as(dir, "chat", "history", chat)).messages as { replyTo?: { snippet: string } }[]).filter((m) => m.replyTo).map((m) => m.replyTo!.snippet);
 
@@ -78,6 +99,9 @@ describe("message delete --purge and the replies that quote it", { timeout: 240_
       ids.push(id);
     }
     for (const id of ids) expect(ok(await as(alice, "message", "delete", "bob", id, "--everyone", "--wait", "confirmed", "--purge"))).toMatchObject({ deleted: id, purged: true });
-    for (const secret of secrets) expect(holding(alice, secret)).toEqual([]);
+    for (const secret of secrets) {
+      const files = holding(alice, secret);
+      expect(files, files.includes(`/${ROWS}`) ? await rowsHolding(alice, secret) : undefined).toEqual([]);
+    }
   });
 });
