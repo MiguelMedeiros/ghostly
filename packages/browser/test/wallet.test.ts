@@ -410,6 +410,17 @@ describe("Lightning out: melts", () => {
     expect(balance()).toBe(108);
   });
 
+  it("the mint holding the sats that fails the quote is named, not a later mint with none as \"Not enough sats\"", async () => {
+    mint.createMeltQuoteBolt11.mockImplementation((url: string) => url === MINT ? Promise.reject(new HttpResponseError("down", 503)) : Promise.resolve(meltQuote("UNPAID")));
+    const wallet = new CashuWallet(() => [MINT, "https://empty.example"], { onChange: vi.fn(), onTestMintNeeded: vi.fn(), onQuotePaid: vi.fn(), onMeltResolved: vi.fn() });
+    await expect(wallet.quoteInvoice(INVOICE)).rejects.toMatchObject({
+      engineCode: "mintFailedQuote",
+      message: "mint.example could not take this payment right now, and no sats left your wallet: try again later. The mint said: down",
+    });
+    expect(mint.createMeltQuoteBolt11).toHaveBeenCalledWith("https://empty.example", INVOICE);
+    expect(balance()).toBe(108);
+  });
+
   describe("pays only the invoice and amount shown", () => {
     const nothingSpent = () => {
       expect(mint.send).not.toHaveBeenCalled();
