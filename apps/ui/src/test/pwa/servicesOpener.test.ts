@@ -141,7 +141,7 @@ function answer(status: number, headers: [string, string][], chunks: string[]): 
   };
 }
 
-const words = { unreachable: "Not reachable", failed: "Failed", close: "Close", callOn: "End the call to open it.", tooSlow: "Too slow", offline: "Your contact is offline", retry: "Try again", blocked: "This browser blocks Demo here", unguarded: "This page of Demo cannot be shown here", label: "Demo, shared by Demo bot", owner: "Demo bot's app, running on their machine. Not Ghostly.", hostError: () => null };
+const words = { unreachable: "Not reachable", failed: "Failed", close: "Close", callOn: "End the call to open it.", tooSlow: "Too slow", offline: "Your contact is offline", retry: "Try again", blocked: "This browser blocks Demo here", unguarded: "This page of Demo cannot be shown here", label: "Demo, shared by Demo bot", owner: "Demo bot's app, running on their machine. Not Ghostly.", openLink: (site: string) => `Open ${site}`, hostError: () => null };
 
 describe("one request from the app, over the contact's link", () => {
   it("goes with the page's headers and the app's cookies, and its answer streams back: cookies kept here, never handed to the page", async () => {
@@ -983,6 +983,54 @@ describe("a contact's app shown over the app", () => {
       asks("https://docs.example/tapped-again");
       expect(opened).toHaveBeenCalledTimes(2);
       expect(opened.mock.calls.map(([url]) => url)).toEqual(["https://docs.example/tapped", "https://docs.example/tapped-again"]);
+    } finally {
+      vi.useRealTimers();
+      opened.mockRestore();
+      delete (navigator as { userActivation?: unknown }).userActivation;
+    }
+  });
+
+  it("offers a link it held back on a button in the view's bar, so the keyboard's Enter on the app's link right after the Tab into it is not lost: only a tap there opens it", async () => {
+    // The Tab from ✕ into the app is a key on Ghostly's page: Enter on the app's first link comes within its 5 s.
+    const activation = { isActive: true };
+    Object.defineProperty(navigator, "userActivation", { configurable: true, value: activation });
+    const opened = vi.spyOn(window, "open").mockReturnValue(null);
+    vi.useFakeTimers();
+    try {
+      await open("demo");
+      const frame = document.querySelector<HTMLIFrameElement>("[data-testid=service-view-frame]")!;
+      const origin = new URL(frame.src).origin;
+      const inFrame = { postMessage: vi.fn() };
+      Object.defineProperty(frame, "contentWindow", { value: inFrame, configurable: true });
+      const asks = (url: string) => dispatchEvent(new MessageEvent("message", { data: { type: BRIDGE_OPEN_LINK, url }, origin, source: inFrame as unknown as Window }));
+      const offer = document.querySelector<HTMLButtonElement>("[data-testid=service-view-link]")!;
+      expect(offer.hidden).toBe(true);
+      vi.advanceTimersByTime(6_000);
+      dispatchEvent(new KeyboardEvent("keydown", { key: "Tab" }));
+      vi.advanceTimersByTime(800);
+      asks("https://docs.example/guide");
+      expect(opened).not.toHaveBeenCalled();
+      // Said, in the bar's live region, with the link's site: the app's next ask takes its place.
+      asks("https://xn--80ak6aa92e.com/other");
+      expect(offer.hidden).toBe(false);
+      expect(offer.closest("[role=status]")).not.toBeNull();
+      expect(offer.textContent).toBe("Open ⁨xn--80ak6aa92e.com⁩");
+      asks("https://docs.example/guide");
+      expect(offer.textContent).toBe("Open ⁨docs.example⁩");
+      // Nothing held for a link the app asks for by itself, nor for one that is never opened outside.
+      activation.isActive = false;
+      asks("https://phish.example/by-itself");
+      activation.isActive = true;
+      asks("http://localhost:8080/");
+      expect(offer.textContent).toBe("Open ⁨docs.example⁩");
+      expect(opened).not.toHaveBeenCalled();
+      // The person's tap on Ghostly's own button opens it, once.
+      offer.click();
+      expect(opened).toHaveBeenCalledTimes(1);
+      expect(opened).toHaveBeenLastCalledWith("https://docs.example/guide", "_blank", "noopener,noreferrer");
+      expect(offer.hidden).toBe(true);
+      offer.click();
+      expect(opened).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
       opened.mockRestore();

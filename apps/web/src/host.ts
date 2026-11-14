@@ -214,6 +214,7 @@ export const webHost = createInPageHost({
         loading: t("services.window.loading", { app: title }),
         reaching: t("services.window.reaching"), stillOffline: t("services.window.stillOffline", { app: title }),
         blocked: t("services.window.blocked", { app: title }), unguarded: t("services.window.unguarded", { app: title }),
+        openLink: (site) => t("services.window.openLink", { site }),
         ...serviceFraming(title, chatNamesForPeer(peerPubKeyZ32), peerPubKeyZ32, t),
         hostError: (headers) => hostErrorText(headers, title, t),
       },
