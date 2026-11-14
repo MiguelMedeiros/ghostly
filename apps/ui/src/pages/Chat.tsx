@@ -228,6 +228,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
 
   const {
     messages,
+    loaded,
     status,
     sendMessage,
     techInfo,
@@ -897,7 +898,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     <NowPlayingChat.Provider value={playingChat}>
     <div className="chat-pane flex-1 h-full">
     {/* A message that comes while the chat is open, read out once to a screen reader. */}
-    <MessageAnnouncer chat={sessionId} linkId={paired ? chatLink?.id : undefined} messages={messages} nameOf={() => shownName} active={visible} />
+    <MessageAnnouncer chat={sessionId} linkId={paired ? chatLink?.id : undefined} messages={messages} nameOf={() => shownName} active={visible} ready={loaded} />
     {/* Files dropped anywhere on the column go to the composer (`data-file-drop`). */}
     <div data-file-drop className={`chat-column relative flex-1 ${appCovers ? "hidden" : "flex"} flex-col h-full min-w-0 bg-chat-bg`}>
       {visible && wakeNotice}
