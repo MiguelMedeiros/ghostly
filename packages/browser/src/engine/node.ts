@@ -26,6 +26,7 @@ import type { ProviderHost, ProviderPlatform } from "./paymentAdapters/providers
 import type { EngineApi } from "../shared/rpc";
 import { APPS_ENABLED, EXTERNAL_IDENTITIES_ENABLED, testBuild, testSwitch } from '../shared/features';
 import { RATCHET_CAPABILITY, RatchetBox, emptyRatchetState } from "@ghostly/core";
+import { parseCallSignal } from "@ghostly/core";
 import { APP_RANGE_LIMITS, chatAppId, isAppRef, isAppVersion, isServeId, publicKeyFromZ32, type AppFrameEvent, type AppRangeTask, type AppSendError } from "@ghostly/core";
 import { FILE_LIMITS, GROUP_FILE_LIMITS, formatFileSize, groupFileFallback, readGroupFileMeta } from "@ghostly/core";
 import { IdentityProofs } from './identities';
@@ -6512,6 +6513,8 @@ export class GhostlyNode implements EngineImplementation {
 
   /** Rejects when the signal cannot go now (no live session): it is kept and goes on the next one while fresh. */
   async setCallSignal({ linkId, signal }: { linkId: string; signal: string | null }): Promise<void> {
+    // A page answered, declined or called in that chat: the contact's offer is not one waiting to ring any more.
+    if (signal !== null) this.offersWaiting.delete(linkId);
     await this.links.get(linkId)?.link?.setCallSignal(signal);
   }
 
@@ -8199,6 +8202,27 @@ export class GhostlyNode implements EngineImplementation {
     this.callOn = on === true;
   }
 
+  /**
+   * Per chat, the contact's call offer nothing here answered yet. A page rings it only once it heard it (a page that is
+   * opening, a ring not drawn yet), and tells `setCallOn` after that: a handoff in between moved the profile, and the
+   * call was lost with no Missed call line.
+   */
+  private readonly offersWaiting = new Map<string, string>();
+
+  private callSignalHeard(linkId: string, signal: string): void {
+    if (parseCallSignal(signal)?.t === "o") this.offersWaiting.set(linkId, signal);
+    else this.offersWaiting.delete(linkId);
+  }
+
+  /** A call on in a page, or a contact's offer still fresh enough to ring (one too old is forgotten). */
+  private callHere(): boolean {
+    if (this.callOn) return true;    for (const [linkId, signal] of this.offersWaiting) {
+      if (parseCallSignal(signal)?.t === "o") return true;
+      this.offersWaiting.delete(linkId);
+    }
+    return false;
+  }
+
   private async startHandoff(): Promise<void> {
     const host = handoffProfileHost(), links = this.deviceLinks;
     if (!host || !links || this.handoffGiver || this.options.singleDevice) return;
@@ -8312,7 +8336,7 @@ export class GhostlyNode implements EngineImplementation {
    */
   private async handoffBusy(taker?: HandoffTakerFacts): Promise<BusyReport | null> {
     // A call is on here: moving the profile would cut it (WISP 06 § States and events, "A request while a call is on").
-    if (this.callOn) return { why: "call" };
+    if (this.callHere()) return { why: "call" };
     // Limited mode opened no wallet, and wallets not started yet say nothing: what they hold is not known.
     if (this.limitedMode || !this.walletsStarted) return { why: "loading" };
     // Read now, not the view of the last change: a wallet that changed since is counted as it is.
@@ -8347,7 +8371,7 @@ export class GhostlyNode implements EngineImplementation {
    * away, and the new active device dials them as a restarted one does), `releasing` is written with the handoff's
    * note, and the pages start again into the gate, where pass 2 reads the frozen database.
    */
-  private async quiesceForHandoff(patch: Parameters<typeof moveDevice>[2], taker?: HandoffTakerFacts): Promise<void> {
+  private async quiesceForHandoff(patch: Parameters<typeof moveDevice>[2], taker?: HandoffTakerFacts): Promise<BusyReport | null> {
     const profile = databaseName();
     // Reviews not yet approved are cancelled, and what they reserved goes back (WISP 06 § Shape, step 4): nothing
     // `pending` moves, and an on-chain review, signed when it was made, never reaches a frozen copy.
@@ -8361,6 +8385,9 @@ export class GhostlyNode implements EngineImplementation {
       const spark = await this.sparkWallets[network].breezDatabase().catch(() => undefined);
       if (spark) breez.set(`spark:${network}`, spark);
     }
+    // The giver's last check was before the awaits above: a call that started ringing meanwhile keeps the profile here,
+    // and nothing is stopped (WISP 06 § States and events).
+    if (this.callHere()) return { why: "call" };
     this.gatedOut = true;
     await this.shutdown({ quiet: true });
     // The plan once more, now that nothing can arrive any more: Mainnet ecash that landed between the last look and the
@@ -8384,6 +8411,7 @@ export class GhostlyNode implements EngineImplementation {
     const verifier = await this.handoffVerifier().then((value) => ({ verifier: value ?? undefined }), () => ({}));
     await moveDevice(profile, "releasing", { ...patch, ...verifier, breezDatabases: breezDatabases.length ? breezDatabases : undefined });
     this.events.onDeviceGate?.({ state: "releasing", reload: true });
+    return null;
   }
 
   /** Cancels every review not yet approved, as Cancel does (its reserved coins go back). */
@@ -9367,7 +9395,7 @@ export class GhostlyNode implements EngineImplementation {
             ...(stored.profile && message.card && { card: message.card }),
           });
         },
-        onCallSignal: (signal) => this.events.onCallSignal(linkId, signal),
+        onCallSignal: (signal) => { this.callSignalHeard(linkId, signal); this.events.onCallSignal(linkId, signal); },
         // Presence, not a message: only the state shows it, nothing is stored or counted.
         onPeerTyping: () => this.chatChanged(linkId),
         // So are presence and a set status; a status that ends leaves the view when it does.
