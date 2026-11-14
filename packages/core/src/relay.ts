@@ -56,8 +56,14 @@ const staleTurn = (turn: { servedAt: number; askedAt: number }, now: number): bo
  * step, a clock that ran ahead fixed by hand), counts as of now: as just spent, not for as long as the clock went back.
  * Counted as they were, an hour's step back held every background read for 59 minutes, and a daemon with 50 contacts
  * away read 4 of them in the next 15 (bug hunt, 2026-11-07).
+ * `list` itself when every time is already so (the usual case): `heldFor` reads eight lists at each request the budget
+ * holds, and copying each twice was a third of the CPU of a daemon whose 200 contacts were away.
  */
-const within = (list: number[], now: number, ms: number): number[] => list.map((at) => Math.min(at, now)).filter((at) => now - at < ms);
+const within = (list: number[], now: number, ms: number): number[] => {
+  let kept = true;
+  for (const at of list) if (at > now || now - at >= ms) { kept = false; break; }
+  return kept ? list : list.map((at) => Math.min(at, now)).filter((at) => now - at < ms);
+};
 
 /**
  * Keys and when each was last set, those of the last minute: how many and the latest, without walking them all (the
