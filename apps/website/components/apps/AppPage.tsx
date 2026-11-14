@@ -99,10 +99,15 @@ export function AppPage({ app, store }: { app: StoreApp; store: string }) {
                 {t.install.open}
               </a>
             </p>
-            <p className="note">{t.install.link}</p>
-            <pre className="ap-code" tabIndex={0}>
-              <code>{app.url}</code>
-            </pre>
+            {/* Only a link Apps, Add reads as pasted (lib/storeRead.ts `link`); with none, the button above is the way in. */}
+            {app.link && (
+              <>
+                <p className="note">{t.install.link}</p>
+                <pre className="ap-code" tabIndex={0}>
+                  <code>{app.link}</code>
+                </pre>
+              </>
+            )}
           </section>
         </div>
 

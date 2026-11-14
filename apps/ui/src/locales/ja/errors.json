@@ -135,6 +135,8 @@
     "reviewedSatsGoneNext": "何も送られていません。もう一度確認してください。",
     "sentAfterReview": "確認の後、このウォレットから別の支払いが出ました",
     "sentAfterReviewNext": "新しい確認を作成してください。",
+    "serviceShareFull": "1人の連絡先が使えるアプリは最大{{max}}個です",
+    "serviceShareFullNext": "別のアプリを共有する前に、どれかの共有を取り消してください。",
     "testMintOnMainnet": "これはテスト用ミントで、その sats に価値はありません",
     "testMintOnMainnetNext": "Testnet の Cashu ウォレットに追加してください。",
     "unknownPaymentIntent": "不明な支払いです",

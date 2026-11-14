@@ -135,6 +135,8 @@
     "reviewedSatsGoneNext": "没有发送任何款项。请重新审核。",
     "sentAfterReview": "审核之后，这个钱包又发出了一笔付款",
     "sentAfterReviewNext": "请创建新的审核。",
+    "serviceShareFull": "一个联系人最多可以访问你的 {{max}} 个应用",
+    "serviceShareFullNext": "先收回其中一个，再共享另一个。",
     "testMintOnMainnet": "这是一个测试铸币厂：它的 sats 毫无价值",
     "testMintOnMainnetNext": "请把它添加到 Testnet Cashu 钱包。",
     "unknownPaymentIntent": "未知的付款",

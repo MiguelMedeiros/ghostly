@@ -1022,6 +1022,18 @@ export class Communities {
     this.lineOrder.tick(now);
     const active = [...this.live.values()].filter(l => l.session.status === "active");
     this.sharing = { groups: Math.max(1, active.length), hubs: Math.max(1, active.filter(l => l.hub).length) };
+    // Whether this app relays for the others is on the group's view ("your app relays for others"): a state names each
+    // group where it stepped up or down in this tick, as the engine builds a group's view again only for one that does.
+    const wasHub = new Map([...this.live].map(([id, l]) => [id, l.hub]));
+    try { await this.tickGroups(now); } finally {
+      for (const [id, l] of this.live) if (wasHub.has(id) && wasHub.get(id) !== l.hub) this.host.emit(undefined, id);
+    }
+    for (const [key, until] of this.refused) if (until <= now) this.refused.delete(key);
+    for (const groupId of [...this.leftBehind.keys()]) await this.leftMoved(groupId, now);
+  }
+
+  /** `tick`'s turn through each group: its knocks while it joins, a lost race or a removal, and its topology. */
+  private async tickGroups(now: number): Promise<void> {
     for (const group of [...this.stored.values()]) {
       const live = this.live.get(group.id);
       if (group.joining?.check && live && live.session.status !== "active" && await this.checkTurnedKnock(group, live.session, now)) continue;
@@ -1071,8 +1083,6 @@ export class Communities {
       }
       await this.topology(group.id, live, now).catch(() => {});
     }
-    for (const [key, until] of this.refused) if (until <= now) this.refused.delete(key);
-    for (const groupId of [...this.leftBehind.keys()]) await this.leftMoved(groupId, now);
   }
 
   private async topology(groupId: string, live: Live, now: number): Promise<void> {
@@ -2428,6 +2438,8 @@ export class Communities {
         const came = m.sender === session.myKey ? timestamp : cameAt(timestamp, stored, arrivalNow(this.now()));
         markCame(this.marks, id, m.id, came, m.sender !== session.myKey, mentioned);
         noteCame(this.stored.get(id), came, m.sender !== session.myKey, mentioned);
+        // A new row's marks (the list's order, unread) moved after its state was asked for: this group's view, named again.
+        if (stored !== false) this.host.emit(undefined, id);
         // On its row now. A copy I had already changes no row: the state keeps its frame.
         return stored !== false;
       },

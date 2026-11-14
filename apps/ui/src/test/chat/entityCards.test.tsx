@@ -6,6 +6,7 @@ import { neventEncode, npubEncode } from "nostr-tools/nip19";
 import { MessageBubble } from "../../components/MessageBubble";
 import { ensureSession, listSessions, updateSessionLabel } from "../../lib/storage";
 import { groupView, linkView } from "../fakeEngine";
+import { lookup } from "../i18n/locales";
 import { receivedView } from "../identities/views";
 import { renderApp } from "../render";
 import type { Language } from "../../lib/settings";
@@ -405,6 +406,16 @@ describe("identity cards", () => {
     expect(within(card).getByTestId("entity-identity-badge")).toHaveTextContent("Not proved in your chats");
     expect(await within(card).findByTestId("entity-identity-facts")).toHaveTextContent("did:key, the key is the identifier");
     expect(card).toHaveTextContent("Checked on this device");
+  });
+
+  it("says what it resolved in the app's language, as the Identities page does", async () => {
+    bubble(DID_KEY, { language: "ar" });
+    const ar = (key: string) => lookup("ar", `identities.providers.did.preview.${key}`)!;
+    const facts = await within(screen.getByTestId("entity-identity")).findByTestId("entity-identity-facts");
+    await waitFor(() => expect(facts).toHaveTextContent(ar("method")));
+    expect(facts).toHaveTextContent(ar("keyIsIdentifier").replace("{{method}}", "did:key"));
+    expect(facts).toHaveTextContent(ar("key"));
+    expect(facts).not.toHaveTextContent(/Method|the key is the identifier|Key/);
   });
 
   it("carries the badge of the contact who proved it", async () => {

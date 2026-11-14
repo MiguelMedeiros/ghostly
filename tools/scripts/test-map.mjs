@@ -40,6 +40,11 @@ const ID = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\.[a-z0-9]+(?:-[a-z0-9]+)*)+$/;
 const SKIP_DIRS = new Set(["node_modules", "dist", "target", ".git", ".claude", "coverage", "website", "notes-local", "gen", "test-results", "playwright-report"]);
 
 const args = new Set(process.argv.slice(2));
+const FLAGS = ["--matrix", "--warnings", "--write", "--summary", "--fix"];
+if ([...args].some((arg) => !FLAGS.includes(arg))) {
+  console.error(`usage: npm run test:map [-- ${FLAGS.map((f) => `[${f}]`).join(" ")}]`);
+  process.exit(2);
+}
 const errors = [];
 const warnings = [];
 const read = (path) => readFileSync(join(ROOT, path), "utf8");

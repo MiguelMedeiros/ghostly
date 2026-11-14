@@ -110,4 +110,19 @@ describe("a store's last read that failed", () => {
     expect(region).toHaveTextContent("Store off is up to date: 5 apps");
     expect(screen.getByTestId("toast")).toHaveAttribute("data-tone", "success");
   });
+
+  // Its host still serves a list past its date: the read works, and the store is not up to date.
+  it("says a Refresh that read a list past its date is out of date, not up to date", async () => {
+    const old = store({ expires: Math.floor(SEEN / 1000), expired: true });
+    fakeEngine.on("appStoreRefresh", () => [old]).on("appStoreList", () => [old]);
+    renderApp(<Apps />, { route: "/apps" });
+    const stale = await screen.findByTestId("app-store-stale");
+    await userEvent.click(within(screen.getByTestId("app-store")).getByTestId("app-store-refresh"));
+    await waitFor(() => expect(fakeEngine.callsTo("appStoreRefresh")).toHaveLength(1));
+    await act(async () => {});
+    const said = await screen.findByTestId("toast-text");
+    expect(said).not.toHaveTextContent("up to date");
+    expect(said).toHaveTextContent(stale.textContent!);
+    expect(screen.getByTestId("toast")).not.toHaveAttribute("data-tone", "success");
+  });
 });

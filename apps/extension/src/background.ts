@@ -356,6 +356,13 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
     );
     return true;
   }
+  if (message.type === "forget-service") {
+    void forgetViewer(message.peerPubKeyZ32, message.serviceId, message.tag).then(
+      () => sendResponse({ ok: true }),
+      (error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }),
+    );
+    return true;
+  }
   if (message.type === "local-access-allowed") {
     if (typeof message.profile !== "string" || typeof message.origin !== "string") { sendResponse(false); return false; }
     void localOriginAllowed(message.profile, message.origin).then((allowed) => sendResponse(allowed === true), () => sendResponse(false));
@@ -519,13 +526,18 @@ void closeLeftoverViewers();
 
 /**
  * Closes every viewer tab, as Desktop closes a contact's app windows (`close_service_windows`): on a profile switch,
- * a new peer, or the lock screen. Its binding goes first, so nothing it still asks for is served.
+ * a new peer, or the lock screen. Its binding goes first, so nothing it still asks for is served. `which`: only the tabs
+ * of the viewers it picks.
  */
-async function closeViewers(): Promise<void> {
+async function closeViewers(which: (binding: ViewerBinding) => boolean = () => true): Promise<void> {
+  // A tab at a viewer origin with no binding (its debugger cancelled) closes too: the app in it would write again.
   await closeLeftoverViewers();
   // The bindings, read at once: not one read per tab the browser has open (hundreds, at each lock and switch).
   const kept = await chrome.storage.session.get(null);
-  const viewers = Object.keys(kept).map(boundTab).filter((id): id is number => id !== null);
+  const viewers = Object.entries(kept).flatMap(([key, binding]) => {
+    const id = boundTab(key);
+    return id !== null && which(binding as ViewerBinding) ? [id] : [];
+  });
   await Promise.all(
     viewers.map(async (id) => {
       await forget(id);
@@ -589,6 +601,22 @@ async function openViewer(peerPubKeyZ32: string, serviceId: string, tag: string,
     return;
   }
   await chrome.tabs.update(tab.id, { url });
+}
+
+/**
+ * Clears what a contact's app kept on its viewer origin, as the web and Desktop clear theirs (`forgetServices`): a tab
+ * still showing it closes first, or the app would write it again. Cookies go for the chat's whole site
+ * (`<tag>.invalid`), Chrome's unit for them: only ever cleared with the chat or the profile, which take all of it.
+ */
+async function forgetViewer(peerPubKeyZ32: string, serviceId: string, tag: string): Promise<void> {
+  const url = viewerUrl(peerPubKeyZ32, serviceId, tag);
+  const parsed = parseViewerUrl(url);
+  if (!parsed || parsed.serviceId !== serviceId || parsed.peerPubKeyZ32 !== peerPubKeyZ32 || parsed.tag !== tag) throw new Error("Invalid service");
+  await closeViewers((binding) => binding.peerPubKeyZ32 === peerPubKeyZ32 && binding.serviceId === serviceId && binding.tag === tag);
+  await chrome.browsingData.remove(
+    { origins: [new URL(url).origin] },
+    { cookies: true, localStorage: true, indexedDB: true, cacheStorage: true, serviceWorkers: true, fileSystems: true, cache: true },
+  );
 }
 
 function errorPage(page: Pick<ViewerPage, "lang" | "dir">, text: string): string {
