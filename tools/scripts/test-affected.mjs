@@ -30,9 +30,24 @@ const option = (name) => {
   const i = argv.indexOf(name);
   return i >= 0 ? argv[i + 1] : undefined;
 };
+const usage = () => readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1, 17).map((l) => l.replace(/^\/\/ ?/, "")).join("\n");
 if (flag("--help") || flag("-h")) {
-  console.log(readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1, 17).map((l) => l.replace(/^\/\/ ?/, "")).join("\n"));
+  console.log(usage());
   process.exit(0);
+}
+// An argument it does not take is refused before anything runs: a mistyped --list or --no-e2e, or a path without
+// --files, would otherwise be dropped and start the full run.
+const FLAGS = ["--list", "--no-e2e", "--no-rust", "--no-lint", "--no-typecheck", "--no-stack"];
+const OPTIONS = ["--base", "--port", "--unit-group"];
+const unknown = [];
+for (let i = 0; i < argv.length; i++) {
+  if (OPTIONS.includes(argv[i])) i++;
+  else if (argv[i] === "--files") while (i + 1 < argv.length && !argv[i + 1].startsWith("--")) i++;
+  else if (!FLAGS.includes(argv[i])) unknown.push(argv[i]);
+}
+if (unknown.length) {
+  console.error(`test:affected does not take ${unknown.join(" ")}\n\n${usage()}`);
+  process.exit(2);
 }
 
 const JOBS = Math.max(1, Number(process.env.JOBS) || 2);
