@@ -24,11 +24,12 @@ export const working = (busy: boolean) => (busy ? ({ "aria-disabled": true, "ari
 
 /**
  * The focus is on the page, or on a control that was just disabled (Chromium drops it to the page from there right
- * after): a step that took that control's place takes it.
+ * after), or on one that is only keeping it because it was disabled while it had it (FocusSafeButton): a step that
+ * took that control's place takes it.
  */
 export function focusLost(): boolean {
   const active = document.activeElement;
-  return !active || active === document.body || (active as HTMLButtonElement).disabled === true;
+  return !active || active === document.body || (active as HTMLButtonElement).disabled === true || active.hasAttribute("data-held");
 }
 
 /**

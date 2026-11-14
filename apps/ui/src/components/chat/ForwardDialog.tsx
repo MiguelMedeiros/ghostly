@@ -15,6 +15,7 @@ import { listParts, listText } from "../../lib/listText";
 import type { Translate } from "../../locales/translate";
 import { useBackCloses } from "../../hooks/useDismiss";
 import { SearchStatus } from "../ui/SearchStatus";
+import { FocusSafeButton } from "../ui/FocusSafeButton";
 
 /**
  * "Forward to…" (WISP 400 § Forwards): the chats and groups to send messages on to, most recent first, found by name,
@@ -155,8 +156,8 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
           {full ? t("chat.forward.limit", { count: String(FORWARD_MAX_TARGETS) }) : ""}
         </p>
       </div>
-      <button type="button" data-testid="forward-cancel" onClick={onClose} disabled={busy}
-        className="min-h-10 rounded-lg px-3 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent cursor-pointer">{t("common.cancel")}</button>
+      <FocusSafeButton type="button" data-testid="forward-cancel" onClick={onClose} disabled={busy}
+        className="min-h-10 rounded-lg px-3 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent cursor-pointer">{t("common.cancel")}</FocusSafeButton>
       {/* Not disabled while it runs: a focused button that turns disabled drops the focus to the page, and a refusal
           left Enter doing nothing. A press then is ignored by `send`. */}
       <button type="button" data-testid="forward-send" onClick={() => void send()} disabled={!chosen.length}

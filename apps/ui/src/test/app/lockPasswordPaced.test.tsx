@@ -78,7 +78,8 @@ describe("every check of a profile's lock password is paced, per profile", () =>
       await user.click(screen.getByTestId("delete-profile-go"));
     }
     expect(await screen.findByRole("alert")).toHaveTextContent("Too many attempts. Try again in 1 s");
-    expect(screen.getByTestId("delete-profile-go")).toBeDisabled();
+    // Pressed, it keeps the focus through the wait: off by aria-disabled.
+    expect(screen.getByTestId("delete-profile-go")).toHaveAttribute("aria-disabled", "true");
     await user.click(screen.getByRole("button", { name: "Download a backup first" }));
     await user.type(screen.getByLabelText("Backup passphrase"), "a long backup passphrase");
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
