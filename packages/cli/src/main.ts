@@ -246,10 +246,21 @@ const NO_HISTORY_READS: ReadonlySet<string> = new Set([
   "payment.list", "identity.providers",
 ]);
 
-/** Whether a one-shot for this call leaves every saved chat unstarted, its history unread (`NO_HISTORY_READS`). */
+/**
+ * Changes kept outside any chat (this profile's status, which each chat says on its next session; x401 keys and
+ * credentials; a service; a draft; a served app), and `call answer` and `call flush`, which a one-shot refuses whatever
+ * the chats say: a one-shot for one leaves every saved chat unstarted too. Each read every 1:1 chat whole first: with
+ * 30,000 messages in the profile, about 0.95 s and 200 MB instead of 0.45 s and 140 MB.
+ */
+const NO_HISTORY_WRITES: ReadonlySet<string> = new Set([
+  "status.set", "status.clear", "x401.key.new", "x401.credential.add", "x401.credential.remove", "service.add", "identity.cancel",
+  "app.serve", "app.unserve", "call.answer", "call.flush",
+]);
+
+/** Whether a one-shot for this call leaves every saved chat unstarted, its history unread (`NO_HISTORY_READS`, `NO_HISTORY_WRITES`). */
 export function readsNoHistory(method: string, params: Record<string, unknown> = {}): boolean {
   if (method === "call.auto" || method === "group.auto") return params.on === undefined;
-  return NO_HISTORY_READS.has(method);
+  return NO_HISTORY_READS.has(method) || NO_HISTORY_WRITES.has(method);
 }
 
 /**
