@@ -395,6 +395,34 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     expect(state(w.b, "in", "pause-01")).toBe("done");
   });
 
+  it("a sent file that stops mid-way (paused on either side, or the session gone) holds none of its read-ahead", async () => {
+    // Each file sending reads its next MiB ahead. One paused kept it until it ended: 32 files the contact paused held
+    // 32 MiB of the sender's memory, and a session gone left every file under way holding its own.
+    setFlagsFromString("--expose-gc");
+    const gc = runInNewContext("gc") as () => void;
+    const held = () => { gc(); return process.memoryUsage().arrayBuffers; };
+    const w = wire();
+    w.attach();
+    const size = 3 * 1024 * 1024, count = 32;
+    const base = held();
+    for (let i = 0; i < count; i++) {
+      const id = `ahead-${String(i).padStart(2, "0")}`;
+      send(w, file(id, size));
+      await until(() => (w.b.transferred.get(`in:${id}`) ?? 0) > 0);
+      (i % 2 ? w.a : w.b).files.pause(i % 2 ? "out" : "in", id);
+      await until(() => state(w.a, "out", id) === "paused" && state(w.b, "in", id) === "paused");
+    }
+    expect(held() - base, "held by the paused files").toBeLessThan(4 * 1024 * 1024);
+    // Resumed, each reads again from where it stood, and arrives whole.
+    for (let i = 0; i < 3; i++) { const id = `ahead-${String(i).padStart(2, "0")}`; (i % 2 ? w.a : w.b).files.resume(i % 2 ? "out" : "in", id); }
+    await until(() => (w.b.transferred.get("in:ahead-02") ?? 0) > 1024 * 1024);
+    w.drop();
+    expect(held() - base, "held once the session went").toBeLessThan(4 * 1024 * 1024);
+    w.attach();
+    await until(() => [0, 1, 2].every((i) => state(w.a, "out", `ahead-0${i}`) === "done"));
+    expect([0, 1, 2].map((i) => w.b.disks.get(`ahead-0${i}`)!.length)).toEqual([size, size, size]);
+  });
+
   it("the sender pauses before the person there answers: it stays paused when they accept, and goes on resume", async () => {
     const w = wire();
     w.b.decide = async () => "ask";

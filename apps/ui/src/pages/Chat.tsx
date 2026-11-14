@@ -68,7 +68,7 @@ import { composerServices } from "../components/composer/servicesRow";
 import { CallButtons } from "../components/CallButtons";
 import { CallOverlay } from "../components/CallOverlay";
 import { IncomingCallNotification } from "../components/IncomingCallNotification";
-import { useIsLocked, useRingOnLockScreen } from "../contexts/LockScreenContext";
+import { useIsLocked, useRingOnLockScreen, useSayOnLockScreen } from "../contexts/LockScreenContext";
 import { handOverCall, ringingCall, takeHandedCall } from "../lib/lockedRing";
 import { contactStatus } from "../lib/contactStatus";
 import { othersName } from "../lib/groups";
@@ -530,12 +530,15 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
 
   /**
    * Deletes a message of mine for everyone: the engine sends its removal, and the chat's copy goes once it took it. One
-   * refused (limited mode) rejects, and the bubble says why under it.
+   * refused (limited mode) rejects, and the bubble says why under it. The engine told of the row gone before it answered:
+   * the mirror takes it out now, from what changed only, and the delete here finds it gone (no read or write of a long
+   * chat again). One written here first would have the mirror walk the whole history after it.
    */
   const removeForEveryone = useHandler(async (messageId: string): Promise<void> => {
     if (!chatLink) return;
     const result = await engine.call("removeMessage", { linkId: chatLink.id, messageId });
     if (result.error) throw new Error(result.error);
+    engine.tellChangesNow();
     deleteMessage(messageId);
     forgetSentOriginal(sessionId, messageId);
   });
@@ -713,6 +716,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const pageShown = usePageShown();
   // (Under the lock a ringing call would only hold the keys here too: the lock screen shows the call instead.)
   const locked = useIsLocked();
+  // Under the lock, the call's end is said by the lock screen: the region below is outside its modal dialog.
+  useSayOnLockScreen(callEndSaid, locked);
   const seen = visible && pageShown && !locked;
   useEffect(() => {
     seenRef.current = seen;
@@ -872,6 +877,16 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // note hangs where the window does. Camera pressed in it, refused for good, said nothing anyone could see.
   const callWindowUp = callState === "offering" || callState === "answering" || callState === "connecting" || callState === "connected";
   const mediaNoticeInLayer = !visible || callWindowUp;
+  // The system paused our microphone in a call (an iPhone's Home Screen app while the screen is locked): the contact
+  // hears nothing until Ghostly is back on screen, and the call is still on. Only ever said while the call's window is up.
+  const micPausedNotice = webrtc.micPaused && !webrtc.mediaProblem && (
+    <div role="status" data-testid="call-mic-paused"
+      className="top-notice rounded-lg border border-border bg-panel-header px-4 py-2 text-center text-sm text-text-primary shadow-xl">
+      {t("calls.micPaused")}
+    </div>
+  );
+  // Both go in the call's window, which a screen reader reads alone while it fills the screen: beside it, they went unsaid.
+  const callNotices = !locked && (mediaNotice || micPausedNotice) ? <>{mediaNotice}{micPausedNotice}</> : null;
   /** The ⋮ menu's rarer rows: in it on a wide screen, in its More… sheet on a phone. `close` closes the menu they are in. */
   const rarerRows = (close: () => void) => <>
     <FolderMenuItem chat={sessionId} onChoose={() => { close(); setShowFolders(true); }} />
@@ -910,25 +925,18 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         </div>
       )}
       {!mediaNoticeInLayer && mediaNotice}
-      {/* The system paused our microphone in a call (an iPhone's Home Screen app while the screen is locked): the
-          contact hears nothing until Ghostly is back on screen, and the call is still on. */}
-      {webrtc.micPaused && !webrtc.mediaProblem && (
-        <div role="status" data-testid="call-mic-paused"
-          className="top-notice rounded-lg border border-border bg-panel-header px-4 py-2 text-center text-sm text-text-primary shadow-xl">
-          {t("calls.micPaused")}
-        </div>
-      )}
       {/* Chat Header. On a phone held upright (`phoneHeader`) it is the back button, the avatar, the name with the room
           it needs, the connection, a voice call and ⋮, and one quiet line under the name; the video call, a bot's Tasks
           and the contact's identities are in the ⋮ menu. Wider (a phone on its side, a narrow window), every button is
           in the row, a little narrower than on a desktop. On the narrowest phone (320px) the back button gives 8px to
           the name, so "Cérebro (Mac)" and a bot's status under it still fit beside three buttons; its tap still lands on
-          44 × 44 px (`.tap-target`). */}
+          44 × 44 px (`.tap-target`). Its buttons and the avatar are sized in px, as the name is: in rem they grew with the
+          browser's text size and left the name 33px at 150%. */}
       <div className="h-14 header-safe flex items-center justify-between px-4 max-md:ps-1 max-md:pe-1 bg-panel-header border-b border-border shrink-0">
         <div className="flex items-center gap-3 max-md:gap-1 min-w-0">
           <button
             onClick={nav.up}
-            className={`md:hidden ${phoneHeader ? "w-11 max-[340px]:w-9 tap-target" : "w-9"} h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0`}
+            className={`md:hidden ${phoneHeader ? "w-[44px] max-[340px]:w-[36px] h-[44px] tap-target" : "w-9 h-11"} flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0`}
             title={t("common.back")}
             data-testid="chat-back"
           >
@@ -938,7 +946,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           </button>
           {/* With a picture, a click opens it large (AvatarViewer.tsx). */}
           <AvatarOpener src={face?.photo ?? peerAvatar} name={shownName} testId="chat-avatar-open"
-            className="relative w-10 h-10 max-md:w-9 max-md:h-9 rounded-full bg-surface-hover flex items-center justify-center shrink-0 [--ring:var(--theme-panel-header)]">
+            className="relative w-10 h-10 max-md:w-[36px] max-md:h-[36px] rounded-full bg-surface-hover flex items-center justify-center shrink-0 [--ring:var(--theme-panel-header)]">
             <PeerAvatar peerPubKey={params?.peerPubKeyB64} label={shownName} named={!isAnonymous} photo={face?.photo} testId="chat-avatar" presence={paired} />
             {face && <FaceCorner face={face} />}
             {inviteCode && !pairedReady && (
@@ -1047,7 +1055,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
               ref={optionsRef}
               onClick={() => setMenuOpen(!menuOpen)}
               onKeyDown={openOnArrow(() => setMenuOpen(true))}
-              className={`relative ${phoneHeader ? "w-11 h-11 flex items-center justify-center" : "p-2 max-md:px-1.5 max-md:py-2.5"} text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer`}
+              className={`relative ${phoneHeader ? "w-[44px] h-[44px] flex items-center justify-center" : "p-2 max-md:px-1.5 max-md:py-2.5"} text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer`}
               title={t("chat.options")}
               aria-haspopup="true"
               aria-expanded={menuOpen}
@@ -1342,7 +1350,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       )}
 
       {!visible && wakeNotice && !locked && createPortal(wakeNotice, callLayer ?? document.body)}
-      {mediaNoticeInLayer && mediaNotice && !locked && createPortal(mediaNotice, callLayer ?? document.body)}
+      {!callWindowUp && mediaNoticeInLayer && mediaNotice && !locked && createPortal(mediaNotice, callLayer ?? document.body)}
 
       {/* How the call ended, said once (`callEndSaid`): where the call's window hangs, since this chat may be off screen. */}
       {!locked && createPortal(<p role="status" className="sr-only" data-testid="call-end-spoken">{callEndSaid}</p>, callLayer ?? document.body)}
@@ -1376,6 +1384,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           onToggleVideo={webrtc.toggleVideo}
           onToggleScreenShare={webrtc.toggleScreenShare}
           devices={callDevices}
+          notices={callNotices}
         />
       )}
 

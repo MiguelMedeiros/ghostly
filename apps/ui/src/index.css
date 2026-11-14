@@ -568,6 +568,14 @@ html[data-standalone="true"] {
   text-shadow: 0 1px 3px rgb(0 0 0 / 0.8);
 }
 
+/* Over the contact's picture, the state line (the clock, "Reconnecting...") is white with a shadow, as the buttons
+   there are. In the theme's muted grey it was dark in a light theme (#5a6a74): 1.1:1 on a green picture, under 2:1 on
+   a dim room. */
+.call-top p[data-over-picture] {
+  color: #fff;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.8);
+}
+
 .call-mini .call-top p > span {
   min-width: 0;
   max-width: 100%;

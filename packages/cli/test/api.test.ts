@@ -13,7 +13,7 @@ import { chatDetailsJson, chatJson, isLive } from "../src/views";
 import { pageOf } from "./support/messagePage";
 import { ONE_SHOT_RECEIPT_MS } from "../src/waits";
 import { chatViewOf, groupViewOf } from "./support/chatView";
-// covers: headless.api, headless.engine-passthrough, headless.secret-guard, headless.typing, chat.order
+// covers: headless.api, headless.engine-passthrough, headless.secret-guard, headless.typing, chat.order, chat.paired.discovery-health
 
 /** The API over a fake engine: what it checks before the engine is asked, and what it makes of the answers. */
 const link = (id: string, fields: Partial<LinkView> = {}) => ({ id, peerPubKeyZ32: "p" + id, createdAt: 1, lastMessageAt: 0, profile: "paired-chat/1", textDelivery: "stream", ...fields }) as unknown as LinkView;
@@ -1065,6 +1065,24 @@ describe("chat wait", () => {
     remove();
     await expect(waiting).rejects.toMatchObject({ code: "not_found", message: "Chat chat-one was removed" });
     expect(Date.now() - from).toBeLessThan(1000);
+  });
+});
+
+describe("status", () => {
+  // With every Pkarr relay down, a daemon's `status` read as with them all fine: the relays' URLs only, while the
+  // engine had each one's state (the apps' connection panel shows it) and read its contacts on the DHT in their place.
+  it("says how each relay of a daemon is doing, and where its last read went", async () => {
+    const { ctx, node } = fake();
+    const relays = [
+      { relay: "https://relay-one.test", state: "failing", until: 1_000_000, reason: "no answer" },
+      { relay: "https://relay-two.test", state: "failing", until: 1_000_000, reason: "no answer" },
+    ];
+    const was = node.getState;
+    node.getState = () => ({ ...was(), transport: { protocol: "p", relays: relays.map((r) => r.relay), discovery: { path: { via: "dht" }, relays } } }) as unknown as EngineState;
+    expect((await callApi(ctx, "status", {}) as { discovery: unknown }).discovery).toEqual({ protocol: "p", relays: relays.map((r) => r.relay), health: relays, via: "dht" });
+    // A one-shot asked no relay: nothing to say about them.
+    Object.assign(ctx, { mode: "one-shot" });
+    expect((await callApi(ctx, "status", {}) as { discovery: unknown }).discovery).toEqual({ protocol: "p", relays: relays.map((r) => r.relay) });
   });
 });
 

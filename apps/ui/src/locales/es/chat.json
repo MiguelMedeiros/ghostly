@@ -504,6 +504,7 @@
     "tooLarge": "Demasiado grande para reproducirlo aquí. Descárgalo para verlo."
   },
   "voice": {
+    "callPaused": "Mensaje de voz en pausa por la llamada",
     "cancelled": "Mensaje de voz cancelado",
     "cantPlay": "Este dispositivo no reproduce grabaciones {{format}}. Guárdala para oírla en otro lugar.",
     "couldNotPlay": "No se pudo reproducir esta grabación.",
@@ -529,6 +530,7 @@
     "recordHint": "Mantén pulsado para grabar o haz clic para grabar sin manos",
     "recorded": "Grabado {{time}}",
     "recording": "Grabando",
+    "resumeAfterCall": "Reanudar después de la llamada",
     "sent": "Mensaje de voz enviado",
     "slideCancel": "Desliza para cancelar",
     "speed": "Velocidad {{speed}}",

@@ -510,22 +510,43 @@ function dropOldCallLines(session: ChatSession): void {
 export function deleteMessage(
   sessionId: string,
   messageId: string,
+  /**
+   * The session as it is stored now, read already (the mirror's, `platform/sync.ts`), as `addMessages` takes it. Without
+   * it, the chat as the page's cache holds it (`loadShownSession`): one gone already (the mirror took it out when the
+   * engine told of its removal) costs no parse and merge of a chat of thousands. Neither is changed in place.
+   */
+  held?: ChatSession,
 ): ChatSession | null {
-  const session = loadSession(sessionId);
-  if (!session) return null;
+  return deleteMessages(sessionId, [messageId], held);
+}
 
-  const index = session.messages.findIndex((m) => m.id === messageId);
-  if (index === -1) return null;
+/**
+ * Forgets several messages on this device at once (`deleteMessage`), the chat written once: removals the engine told in
+ * one tick. Null when none of them is in the chat.
+ */
+export function deleteMessages(sessionId: string, messageIds: readonly string[], held?: ChatSession): ChatSession | null {
+  const shown = held ?? loadShownSession(sessionId);
+  if (!shown) return null;
 
-  session.messages.splice(index, 1);
-  session.deletedIds = [...(session.deletedIds ?? []), messageId].slice(-MAX_DELETED_IDS);
-  saveSession(session);
-
+  const ids = new Set(messageIds);
   // Unread is "messages since the last read one": a read message that goes
   // takes its place in that count with it, or every later one reads as unread.
   const lastRead = getLastReadCount(sessionId);
-  const older = session.older ?? 0;
-  setReadCount(sessionId, Math.min(older + index < lastRead ? lastRead - 1 : lastRead, older + session.messages.length));
+  const older = shown.older ?? 0;
+  const removed: string[] = [];
+  let readGone = 0;
+  const messages = shown.messages.filter((m, i) => {
+    if (!ids.has(m.id)) return true;
+    removed.push(m.id);
+    if (older + i < lastRead) readGone++;
+    return false;
+  });
+  if (!removed.length) return null;
+
+  const session = { ...shown, messages };
+  session.deletedIds = [...(session.deletedIds ?? []), ...removed].slice(-MAX_DELETED_IDS);
+  saveSession(session);
+  setReadCount(sessionId, Math.min(lastRead - readGone, (session.older ?? 0) + session.messages.length));
   return session;
 }
 

@@ -83,12 +83,44 @@ describe("background DHT writes of a daemon whose contacts are away", { timeout:
     // At the share, not starved: the minutes are used.
     expect(counts.reduce((a, b) => a + b, 0)).toBeGreaterThan(BOUND * 25 * 0.75);
     // Each key in its turn: none put at the old 4-minute pace (6 or more in 25 minutes), and every chat's heartbeat still
-    // put in the last quarter hour.
+    // put in the last 20 minutes. A turn comes every 10 to 12 minutes, up to 16 for the keys that wait through a minute
+    // whose share was not all used: a quarter hour would miss one whose turn straddles it.
     const late = new Map<string, number>();
     for (const p of puts) if (p.at - t0 >= 15 * MIN) late.set(p.key, (late.get(p.key) ?? 0) + 1);
     expect(Math.max(...late.values())).toBeLessThanOrEqual(4);
     expect(late.size).toBeGreaterThan(350);
-    const lastQuarter = new Set(puts.filter((p) => p.at - t0 >= 25 * MIN).map((p) => p.key));
+    const lastTwenty = new Set(puts.filter((p) => p.at - t0 >= 20 * MIN).map((p) => p.key));
+    expect(rows.filter((row) => !lastTwenty.has(identityFromSeedB64(row.seedB64).pubKeyZ32))).toEqual([]);
+  });
+});
+
+describe("background DHT writes of a daemon whose relays are all down", { timeout: 180_000 }, () => {
+  it("100 chats, every contact away: a write the DHT's share holds waits its turn there, not tried again every 4 s", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+    vi.stubGlobal("RTCPeerConnection", undefined);
+    await transact([STORES.links, STORES.messages], (s) => { s[STORES.links].clear(); s[STORES.messages].clear(); });
+    await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true });
+    const rows = Array.from({ length: 100 }, (_, i) => chat(i));
+    for (const row of rows) await db.putLink(row);
+    const { dht, puts } = fakeDht();
+    const down = (async () => { await new Promise((r) => setTimeout(r, 50)); throw new TypeError("fetch failed"); }) as typeof fetch;
+    const transport = new RelaysAndDht(dht, { relays: RELAYS, fetch: down, log: () => {} }, true);
+    const publish = transport.publish.bind(transport);
+    const tries: number[] = [];
+    transport.publish = (...args) => { tries.push(Date.now()); return publish(...args); };
+    node = new GhostlyNode({ onState: () => {}, onMessages: () => {}, onCallSignal: () => {} }, {
+      transport, automaticWallets: false, nativeTransports: {}, singleDevice: true, staysOnline: true, watchPeerIdleMs: DAEMON_WATCH_PEER_IDLE_MS,
+    });
+    const t0 = Date.now();
+    await node.start();
+    for (let m = 0; m < 30; m++) await vi.advanceTimersByTimeAsync(MIN);
+    // Before: each chat's heartbeat, past its DHT turn and failing on every relay, went again every 4 s until that turn
+    // came (~1,100 tries a minute here, ~2,300 at 200 chats, each a packet built and encrypted). Now it waits for its turn
+    // there, up to a minute: about one try a minute per chat.
+    expect(Math.max(...perMinute(tries, t0, 15, 30))).toBeLessThan(rows.length * 2);
+    // And the DHT still gets each chat's packets at the share.
+    expect(Math.max(...perMinute(puts.map((p) => p.at), t0, 15, 30))).toBeLessThanOrEqual(BOUND + 2);
+    const lastQuarter = new Set(puts.filter((p) => p.at - t0 >= 15 * MIN).map((p) => p.key));
     expect(rows.filter((row) => !lastQuarter.has(identityFromSeedB64(row.seedB64).pubKeyZ32))).toEqual([]);
   });
 });

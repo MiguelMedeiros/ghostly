@@ -140,7 +140,8 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
 - A message's `timestamp` is its place in the history: when this profile sent it, or when it arrived here. A
   received message also has `sentAt`, the time its sender's clock said. Histories are ordered by `timestamp`.
 - `--since <seq>` replays from the journal (the last 10,000 events, and no more than their last 16 MiB); `--cursor <file>` remembers the last event
-  handled, so a restarted bot resumes where it stopped.
+  handled, so a restarted bot resumes where it stopped. With both, the cursor's number wins: `--since` is where the
+  first start begins (`--since 0 --cursor f`: the whole journal once, then from where it stopped).
 - `--type message.received` keeps one type; `--type message` (or `message.`) a family. A family deeper down ends in
   "." (`group.typing.`): `group.message` is that type alone. A first word that is no family (`--type bogus`) is a usage
   error naming the families; a type no event has (`message.recieved`) is said on stderr, and the listener runs on.

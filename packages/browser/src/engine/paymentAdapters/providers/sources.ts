@@ -345,12 +345,14 @@ export class ProviderSources<P extends Connectable> {
   /**
    * Whether the saved source is this provider reaching the same wallet (the same wallet added twice): the provider's
    * `wallet` says which one (an NWC URI spelled another way, or another app connection to it, is the same), else these
-   * very settings. Its secrets are unsealed here to compare, and never leave.
+   * very settings. A connected source compares the secrets it connected with; one that is not unseals them here (a
+   * 600,000-iteration key: once per card of the kind, each new card took 320 ms more). They never leave.
    */
   async holds(providerId: string, settings: ProviderSettings): Promise<boolean> {
     const stored = this.stored;
     if (!stored || stored.providerId !== providerId) return false;
-    const unseal = async () => stored.secrets ? JSON.parse(await unsealSeed(stored.secrets, stored.deviceKey ?? "")) as Record<string, string> : {};
+    const connected = this.provider ? this.secrets : undefined;
+    const unseal = async () => connected ?? (stored.secrets ? JSON.parse(await unsealSeed(stored.secrets, stored.deviceKey ?? "")) as Record<string, string> : {});
     const wallet = this.find(providerId)?.wallet;
     if (wallet) {
       const secrets = await unseal();

@@ -33,8 +33,8 @@ test.use({
 
 interface Site { server: Server; origin: string; requests: string[] }
 
-/** A site with a page that describes itself, and its picture. It allows reading (CORS), as some sites do. */
-async function site(): Promise<Site> {
+/** A site with a page that describes itself (`title`, `description`), and its picture. It allows reading (CORS), as some sites do. */
+async function site({ title = "Ghosts &amp; peers", description = "Chat with no server in the middle." } = {}): Promise<Site> {
   const requests: string[] = [];
   const server = createServer((request, response) => {
     requests.push(request.url ?? "");
@@ -46,8 +46,8 @@ async function site(): Promise<Site> {
     }
     response.setHeader("content-type", "text/html; charset=utf-8");
     response.end(`<!doctype html><html><head><title>Plain</title>
-      <meta property="og:title" content="Ghosts &amp; peers">
-      <meta property="og:description" content="Chat with no server in the middle.">
+      <meta property="og:title" content="${title}">
+      <meta property="og:description" content="${description}">
       <meta property="og:site_name" content="Ghostly Test News">
       <meta property="og:image" content="/card.png">
       </head><body>…</body></html>`);
@@ -104,6 +104,39 @@ test("a link preview is made by the sender and drawn by the receiver without con
     await expect(bubble(bob, "again").getByTestId("link-preview-card")).toHaveCount(0);
     await expect(bubble(alice, "again").getByTestId("link-preview-card")).toHaveCount(0);
     expect(bobAsked).toEqual([]);
+  } finally {
+    news.server.close();
+  }
+});
+
+test("a preview's title and description show two lines at most, a long word broken inside the card", { tag: ["@feature:chat.link-preview.render"] }, async ({ peer }) => {
+  // A long headline in Arabic, and a description that is one long word (a file name, an address), as pages have.
+  const news = await site({
+    title: "عنوان طويل لمقالة عن الأشباح والأقران والدردشة بدون خادم في المنتصف ".repeat(3),
+    description: `Screenshot_2026-11-14_at_12.34.56${"_with_a_very_long_name".repeat(8)}.png`,
+  });
+  try {
+    const [alice, bob] = await Promise.all([peer("clamp-alice"), peer("clamp-bob")]);
+    await pair(alice, bob);
+    await alice.page.getByPlaceholder("Message…").fill(`look ${news.origin}/long`);
+    await expect(alice.page.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready");
+    await alice.page.getByPlaceholder("Message…").press("Enter");
+
+    for (const side of [alice, bob]) {
+      const card = bubble(side, "look").getByTestId("link-preview-card");
+      await expect(card).toBeVisible();
+      for (const testId of ["link-preview-title", "link-preview-description"]) {
+        const box = await card.getByTestId(testId).evaluate((element) => ({
+          lines: element.getBoundingClientRect().height / parseFloat(getComputedStyle(element).lineHeight),
+          cut: element.scrollHeight > element.clientHeight,
+          wide: element.scrollWidth > element.clientWidth,
+        }));
+        // Before, both drew every line they had (the headline 7 lines) and the long word ran past the card's edge, cut with no "…".
+        expect(Math.round(box.lines), testId).toBe(2);
+        expect(box.cut, testId).toBe(true);
+        expect(box.wide, testId).toBe(false);
+      }
+    }
   } finally {
     news.server.close();
   }

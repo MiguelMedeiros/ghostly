@@ -73,6 +73,7 @@ import {
   GhostlyHttpError,
   HTTP_SERVICE_PROTO,
   LEGACY_SERVICES,
+  MAX_SHARED_APPS,
   LIMITS,
   RELAY_POLL_INTERVALS,
   RTC_CONFIG,
@@ -1151,6 +1152,8 @@ export class GhostlyNode implements EngineImplementation {
     },
     transfers: this.transfers,
     changed: (delayMs) => this.emitState(delayMs),
+    // A file's progress, 4 states a second: its chat's view built again (what room its contact said it has), not every chat's.
+    progressed: (linkId) => { if (this.links.has(linkId)) this.chatChanged(linkId, 250); else this.emitState(250); },
     flush: () => this.flushState(),
     settled: (linkId, fileId, record, seen) => {
       if (seen && record.direction === "in" && record.state === "done") this.cueFeedback({ cue: "downloaded", key: fileId }, this.chatOf(linkId));
@@ -1781,7 +1784,8 @@ export class GhostlyNode implements EngineImplementation {
         else this.reactionNotes.delete(chat);
       }
       await this.messagesChanged(chat, [id]);
-      this.emitState();
+      // A group's reaction line is that group's view.
+      if (chat.startsWith("group:")) this.groupChanged(chat.slice("group:".length)); else this.emitState();
     },
     // Someone reacted to a message of mine: a quiet notice, never a message's sound or an unread count.
     notify: (chat, key) => this.feedback("reaction", `${chat}:${key}`, chat),
@@ -1906,7 +1910,7 @@ export class GhostlyNode implements EngineImplementation {
     placeAbove: (linkId, id) => this.placeAbove(linkId, id),
     membersChanged: groupId => this.groupMembersChanged(groupId),
     historyGone: groupId => this.groupHistoryGone(groupId),
-    emit: delayMs => this.emitState(delayMs),
+    emit: (delayMs, groupId) => groupId === undefined ? this.emitState(delayMs) : this.groupChanged(groupId, delayMs),
     communityApp: (groupId, sender, frame) => frame.t === COMMUNITY_REACTION_FRAME ? this.receiveGroupReaction(groupId, sender, frame)
       : frame.t === COMMUNITY_EDIT_FRAME ? this.receiveCommunityEdit(groupId, sender, frame)
       : frame.t === COMMUNITY_PIN_FRAME ? this.receiveGroupPin(groupId, sender, readPin(frame))
@@ -3087,27 +3091,44 @@ export class GhostlyNode implements EngineImplementation {
   private readonly chatViews = new WeakMap<LiveLink, LinkView>();
   private changedChats: Set<string> | null = null;
   /**
-   * The groups' views as the last state had them, and the community members payments go to: a state whose changes since
-   * named only 1:1 chats (a message, a delivery mark, the contact typing) keeps them, as nothing a group shows changed.
+   * Each group's view as the last state had it, with the community members payments go to there, in the list's order;
+   * and the groups changed since (`groupChanged`). A state whose changes named only chats and groups (a message, a
+   * member typing, an edge's change) builds the views of the groups they named again, and keeps every other group's.
    * Dropped by a contact's new name (`contactNamed`: a group's invitation shows it).
    */
-  private groupViews: { groups: GroupView[]; pay: LinkView[] } | null = null;
+  private groupViews: { byId: Map<string, { view: GroupView; pay: LinkView[] }>; groups: GroupView[]; pay: LinkView[] } | null = null;
+  private changedGroups = new Set<string>();
 
-  /** The state `emitState` sends: the views of the chats no change named since the last are the same objects. */
+  /** The state `emitState` sends: the views of the chats and groups no change named since the last are the same objects. */
   private pushedState(): EngineState {
     const changed = this.changedChats;
+    let again: Set<string> | null = changed && this.changedGroups;
     this.changedChats = new Set();
+    this.changedGroups = new Set();
     const viewOf = (live: LiveLink) => {
       let view = changed && !changed.has(live.stored.id) ? this.chatViews.get(live) : undefined;
       if (!view) this.chatViews.set(live, view = this.viewOf(live));
       return view;
     };
-    const chatsOnly = !!changed && [...changed].every(id => { const stored = this.links.get(id)?.stored; return !!stored && !stored.group; });
-    if (!chatsOnly || !this.groupViews) {
+    // A group's edge named: its group is built again. A chat gone since: all of them.
+    if (again) for (const id of changed!) {
+      const stored = this.links.get(id)?.stored;
+      if (!stored) { again = null; break; }
+      if (stored.group) again.add(stored.group);
+    }
+    if (!again || !this.groupViews) {
       // Every member of every group walked again: 0.7 ms per state at 4 communities of 256, 6x a state's 200 chats.
       const groups = this.groups.views();
       const edges = this.edgesByMember(), wakeTokens = this.wakeTokensByGroup();
-      this.groupViews = { groups: groups.map(group => this.groupStateView(group, edges, wakeTokens)), pay: this.communityPayViews(groups) };
+      this.groupViews = GhostlyNode.listedGroups(new Map(groups.map(group => [group.id, { view: this.groupStateView(group, edges, wakeTokens), pay: this.communityPayViews([group]) }])));
+    } else if (again.size) {
+      const { byId } = this.groupViews;
+      for (const id of again) {
+        const group = this.groups.view(id);
+        if (group) byId.set(id, { view: this.groupStateView(group, this.edgesByMember(id), this.wakeTokensByGroup(id)), pay: this.communityPayViews([group]) });
+        else byId.delete(id);
+      }
+      this.groupViews = GhostlyNode.listedGroups(byId, true);
     }
     const { groups, pay } = this.groupViews;
     return {
@@ -3145,6 +3166,13 @@ export class GhostlyNode implements EngineImplementation {
       edges: [...[...this.links.values()].filter(live => live.stored.group && !live.stored.groupEntry).map(viewOf), ...pay],
       groups,
     };
+  }
+
+  /** The groups' views as a state lists them; `sort`: in `Groups.views`' order again (the latest message first). */
+  private static listedGroups(byId: Map<string, { view: GroupView; pay: LinkView[] }>, sort = false): NonNullable<GhostlyNode["groupViews"]> {
+    const listed = [...byId.values()];
+    if (sort) listed.sort((a, b) => Math.max(b.view.lastMessageAt, b.view.createdAt) - Math.max(a.view.lastMessageAt, a.view.createdAt));
+    return { byId, groups: listed.map(group => group.view), pay: listed.flatMap(group => group.pay) };
   }
 
   /**
@@ -3881,6 +3909,15 @@ export class GhostlyNode implements EngineImplementation {
     this.reactionNotesBefore.delete(linkId);
     this.reactionNotesWhole.delete(linkId);
     this.events.onMessages(linkId, []);
+    // Its mute goes too, as the page's does: joined again under the id, it is not muted. Not through
+    // `setGroupWakeMuted`, which would hand the members of a group just left a new token.
+    const muted = this.settings.wakeMutedGroups;
+    if (muted?.includes(groupId)) {
+      const next = muted.filter(id => id !== groupId);
+      this.settings = { ...this.settings, wakeMutedGroups: next };
+      if (!next.length) delete this.settings.wakeMutedGroups;
+      void db.putSettings(this.settings);
+    }
     // The lines of my payments in it went too: ecash not taken yet is offered back on the Wallet page.
     this.awaitingSoon();
   }
@@ -7427,6 +7464,9 @@ export class GhostlyNode implements EngineImplementation {
   setServiceShared({ serviceId, peerPubKeyZ32, shared }: { serviceId: string; peerPubKeyZ32: string; shared: boolean }): void {
     const service = this.services.find((s) => s.id === serviceId);
     if (!service) return;
+    // Counted stopped or running: one turned on again later would push another off the contact's list.
+    if (shared && !service.sharedWith?.includes(peerPubKeyZ32)
+      && this.services.filter((s) => s.sharedWith?.includes(peerPubKeyZ32)).length >= MAX_SHARED_APPS) throw engineError("serviceShareFull", { max: MAX_SHARED_APPS });
     const granted = new Set(service.sharedWith ?? []);
     if (shared) granted.add(peerPubKeyZ32); else granted.delete(peerPubKeyZ32);
     if (granted.size === (service.sharedWith?.length ?? 0) && [...granted].every(k => service.sharedWith?.includes(k))) return;
@@ -10526,8 +10566,8 @@ export class GhostlyNode implements EngineImplementation {
     }
     await this.messagesChanged(message.linkId, [message.id]);
     if (!kept()) return false;
-    // A chat's message changes that chat's view only; a group's, the groups (built for every state).
-    if (live) this.chatChanged(message.linkId); else this.emitState();
+    // A chat's message changes that chat's view only; a group's, that group's.
+    this.historyChanged(message.linkId);
     // Reactions that came before it are shown now, and a member's edit.
     await this.reactions.stored(message);
     await this.groupEdits.stored(message);
@@ -10661,9 +10701,22 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /** A change of one chat's own (its link's word, its name): the next state builds this chat's view again, and reuses the others'. */
-  private chatChanged(linkId: string): void {
+  private chatChanged(linkId: string, delayMs = 50): void {
     this.changedChats?.add(linkId);
-    this.scheduleState(50);
+    this.scheduleState(delayMs);
+  }
+
+  /** A change of one group's own (a message, a member typing): the next state builds this group's view again, and keeps the others'. */
+  private groupChanged(groupId: string, delayMs = 50): void {
+    this.changedGroups.add(groupId);
+    this.scheduleState(delayMs);
+  }
+
+  /** A change of a chat's own or a group's (`group:<id>`): as `chatChanged` or `groupChanged`. */
+  private historyChanged(linkId: string): void {
+    if (linkId.startsWith("group:")) this.groupChanged(linkId.slice("group:".length));
+    else if (this.links.has(linkId)) this.chatChanged(linkId);
+    else this.emitState();
   }
 
   /** A chat's name or its contact's changed: a group's invitation or another group under its id shows it too. */

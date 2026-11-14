@@ -318,7 +318,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     setPhase("recording");
     // A call went on while the microphone was asked for: it is not taken in, the recording waits paused for its end.
     // So does one that followed a call the recording was started in, ended while the microphone was asked for.
-    if (anyCallOn() && (!callBefore || callPausedRef.current)) pauseRecording();
+    if (anyCallOn() && (!callBefore || callPausedRef.current)) { pauseRecording(); setAnnounce(t("chat.voice.callPaused")); }
   }, [disabled, unavailable, onError, reset, showHint, send, focusOutOfBar, lock, pauseRecording, t]);
 
   // A chat left mid-recording gives the microphone back, and the contact stops seeing "recording audio…".
@@ -421,7 +421,9 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     confirmResumeRef.current = false;
     callPausedRef.current = true;
     setCallPaused(true);
-  }, [callOn, lock, focusOutOfBar, pauseRecording]);
+    // Said, as Resume says it: a bar that stops with no word looks like a recording that broke.
+    setAnnounce(t("chat.voice.callPaused"));
+  }, [callOn, lock, focusOutOfBar, pauseRecording, t]);
 
   // Esc discards, Enter sends: wherever focus is while recording. Asking "discard?", Esc keeps. Not the keys of the
   // lock screen, nor of another dialog over the page (the lock screen is one): those keys are theirs. Most of the app's
@@ -587,6 +589,8 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
   const slideFade = Math.max(0.15, 1 - Math.abs(drag.x) / CANCEL_PX);
   const time = formatVoiceDuration(elapsed);
   const locked = mode === "locked";
+  // Turned off by a call, Resume says what it waits for.
+  const pauseLabel = !paused ? t("chat.file.pause") : callPaused ? t("chat.voice.resumeAfterCall") : t("chat.file.resume");
 
   return (
     <>
@@ -640,7 +644,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
               {locked && (
                 <button type="button" className="voice-icon-button voice-pause-button tap-target" data-testid="voice-pause" data-paused={paused || undefined}
                   disabled={phase === "starting" || sending || micEnded || callPaused}
-                  aria-label={paused ? t("chat.file.resume") : t("chat.file.pause")} title={paused ? t("chat.file.resume") : t("chat.file.pause")} onClick={togglePause}>
+                  aria-label={pauseLabel} title={pauseLabel} onClick={togglePause}>
                   {paused ? <MicIcon size={20} color="var(--color-danger)" /> : <PauseIcon size={20} />}
                 </button>
               )}
