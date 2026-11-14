@@ -174,6 +174,14 @@ const TIP_CHECK_EVERY_MS = 5 * 60_000;
  * group that needs one more hub gets it.
  */
 const CUT_OFF_STEP_UP_MS = 15_000;
+/**
+ * Members that lost their hub step in for it (`stepsIn`) this long after, one turn this long each, one of them for each
+ * `STEP_IN_LOAD` members it carried: about what a new hub's relays' budget brings up in its first minute. One for every
+ * 10 or 12 left the new hubs too slow (worst 175 s against 137, 36 members, 2026-11-13); one for every 6, no faster.
+ */
+const STEP_IN_MS = 60_000;
+const STEP_IN_TURN_MS = 3_000;
+const STEP_IN_LOAD = 8;
 /** A lobby request this recent is from a member still looking fast for my side of the edge: mine opens expecting it. */
 const LOBBY_EXPECT_MS = 30_000;
 /**
@@ -383,6 +391,8 @@ interface Live {
   replacing?: Set<string>;
   /** As a member cut off by a hub that left: since when (it does not step up as a hub for `CUT_OFF_STEP_UP_MS`). */
   cutOffSince?: number;
+  /** As a member: the hub whose edge was up that I gave up on (killed, or closed for good), when, and the load its entry said (`stepsIn`). */
+  lostHub?: { key: string; at: number; load: number };
   /** Entry sessions kept open a little after the welcome went: link id → until. */
   lingering: Map<string, number>;
   lastRoster: Roster;
@@ -1101,19 +1111,25 @@ export class Communities {
         return now - live.cutOffSince < CUT_OFF_STEP_UP_MS;
       };
       // On an app with a budget of connections (a Mac), only with room for a member beside the other hubs.
-      // And the admin's app while the members' admissions wait for it (`adminAtDoor`): only hubs answer knocks.
-      const want = () => settled() && !cutOff() && (shouldBeHub(me, this.hubs(live), now) || ((!!live.forceHub || adminAtDoor(s)) && freshHubs(this.hubs(live), now).length < COMMUNITY_TOPOLOGY.maxHubs))
+      // And the admin's app while the members' admissions wait for it (`adminAtDoor`): only hubs answer knocks. And at my
+      // turn among the members of a hub I lost (`stepsIn`), cut off or not: that is how one of them steps in at once.
+      const stepIn = () => this.stepsIn(live, now);
+      const want = () => settled() && (stepIn() !== undefined || (!cutOff() && (shouldBeHub(me, this.hubs(live), now) || ((!!live.forceHub || adminAtDoor(s)) && freshHubs(this.hubs(live), now).length < COMMUNITY_TOPOLOGY.maxHubs))))
         && this.capacity(groupId, live, now) > 0;
       if (want()) {
         // With no hub at all there is nobody to agree with: at once (another member doing the same is one
-        // more hub, which steps down when idle). Otherwise a random wait, so a crowd does not all step up.
-        if (!live.hubCandidateAt) live.hubCandidateAt = now + (freshHubs(this.hubs(live), now).length ? Math.floor(this.random() * this.timings.hubJitterMs) : 0);
+        // more hub, which steps down when idle). Otherwise a random wait, so a crowd does not all step up. A member
+        // stepping in for a hub it lost goes at its turn among that hub's members (`stepsIn`).
+        if (!live.hubCandidateAt) live.hubCandidateAt = stepIn() ?? now + (freshHubs(this.hubs(live), now).length ? Math.floor(this.random() * this.timings.hubJitterMs) : 0);
         if (now >= live.hubCandidateAt) {
           live.hubCandidateAt = 0;
           if (live.lastBeaconRead !== now) await this.readBeacon(groupId, live, now);
           if (want()) {
             live.forceHub = false; live.hub = true; live.hubSince = now; live.emptySince = now; live.leaving = 0;
             live.knocksScanned = false;
+            // Stepping in for a hub I lost: its members are about to ask in my lobby, read at the busy pace from now on.
+            // At the idle one (every half minute) they waited that long more for a hub that stepped in for them.
+            if (stepIn() !== undefined) live.lobbyBusyUntil = now + this.timings.lobbyBusyMs;
             // A write the relays' budget holds back is tried again in a moment (`BEACON_RETRY_MS`); meanwhile this hub
             // goes on with its tick: alone, it is the door before its entry is listed (`doorHubs`).
             await this.publishBeacon(groupId, live, now, true).catch(() => {});
@@ -1246,7 +1262,11 @@ export class Communities {
         // after a leave: the hub taken in its place is waited for longer, and it does not step up as a hub meanwhile
         // (`CUT_OFF_STEP_UP_MS`; on CLI daemons it stepped up two seconds later, a hub with no edge to anyone).
         const dropped = !live.hubsUp.has(key) && live.beaconAt === now && live.seenHubs.has(key) && !live.beacon.some(h => h.key === key);
-        if (now - since > wait || dropped) { if (live.hubsUp.has(key) || dropped) lost = true; live.hubsAvoided.set(key, now + 2 * wait); live.hubWaits.delete(key); live.hubsUp.delete(key); live.replacing?.delete(key); }
+        if (now - since > wait || dropped) {
+          if (live.hubsUp.has(key) && !back) live.lostHub = { key, at: now, load: live.beacon.find(h => h.key === key)?.load ?? 0 };
+          if (live.hubsUp.has(key) || dropped) lost = true;
+          live.hubsAvoided.set(key, now + 2 * wait); live.hubWaits.delete(key); live.hubsUp.delete(key); live.replacing?.delete(key);
+        }
       }
       let kept = live.myHubs.filter(key => (fresh.has(key) || this.recentHub(live, key)) && !live.hubsAvoided.has(key));
       kept = kept.slice(0, COMMUNITY_TOPOLOGY.hubsPerMember);
@@ -1261,15 +1281,21 @@ export class Communities {
       // for that hub's side, which opens when it reads my lobby. At the background pace it looked every half minute, and
       // found that side up to 30 s after it was there (a newcomer cut off by the admin's leave: 34 s, 2026-10-03).
       const bare = ![...edges.values()].some(id => this.host.linkReady(id, 2));
-      for (const key of picked) if (kept.length < Math.max(1, picked.length) && !kept.includes(key)) {
+      // A hub I gave up on whose members step in for it (`stepsIn`): no hub asked before my turn, or before enough of them
+      // are listed. Asking the hub left at once, every one of them waited a minute on it, and the members that stepped in
+      // in seconds were asked only after. At my turn I step in, or (no room to be a hub) pick. The hub picked within that
+      // while is taken as in place of one that left.
+      const waiting = !kept.length && (this.stepsIn(live, now) ?? 0) > now;
+      const lostLately = !!live.lostHub && now - live.lostHub.at <= STEP_IN_MS;
+      if (!waiting) for (const key of picked) if (kept.length < Math.max(1, picked.length) && !kept.includes(key)) {
         kept.push(key);
-        if ((gone.length || lost || bare) && !edges.has(key)) live.expect.add(key);
-        if (gone.length || lost) (live.replacing ??= new Set()).add(key);
+        if ((gone.length || lost || lostLately || bare) && !edges.has(key)) live.expect.add(key);
+        if (gone.length || lost || lostLately) (live.replacing ??= new Set()).add(key);
       }
       await this.lookPast(groupId, live, others, kept, now);
       live.myHubs = kept;
-      // Every hub I know is full or will not take me: I carry myself, if the beacon has room.
-      live.forceHub = !kept.length && others.length < COMMUNITY_TOPOLOGY.maxHubs;
+      // Every hub I know is full or will not take me: I carry myself, if the beacon has room (waiting for my turn, not yet).
+      live.forceHub = !waiting && !kept.length && others.length < COMMUNITY_TOPOLOGY.maxHubs;
       for (const hub of kept) {
         const id = edges.get(hub);
         if (id && this.host.linkReady(id, 2)) { live.lobbyChecks?.delete(hub); continue; }
@@ -1418,6 +1444,37 @@ export class Communities {
     if (others.length < COMMUNITY_TOPOLOGY.minHubs) return false;
     const edges = this.host.edges(groupId);
     return others.some(h => { const id = edges.get(h.key); return !!id && this.host.linkReady(id, 2); });
+  }
+
+  /**
+   * As a member that gave up on a hub whose edge was up (killed, or closed for good) that carried more members than one
+   * hub brings up in a minute, when only one of the hubs from before is left (most often the admin's): when I step up in
+   * its place, or undefined once enough members did (one for each `STEP_IN_LOAD` of the load its last entry said), or
+   * after `STEP_IN_MS`. Its members lost it in the same seconds and know nothing of each other: they take turns by
+   * rendezvous rank for its key (`hubRank`) among the members that are no hubs, `STEP_IN_TURN_MS` each, a turn taken
+   * only on a reading that still lists too few. Until its turn, or until enough stepped in, a member asks no hub
+   * (`waiting` in `topology`), then picks among them all.
+   *
+   * Before, they all asked the hub left, which opened their 7-19 edges at once: its relays' 60 requests a minute went in
+   * the first seconds on looking for them all, and almost none came up for two minutes. Each waited a minute for it, then
+   * 3-7 stepped up in the same second as hubs with no edge to anyone (36 members, 22 seeds with only the admin's hub
+   * left: median 208 s until everyone had everyone's lines, worst 277; now 106 and 148, no hub with nobody on it).
+   */
+  private stepsIn(live: Live, now: number): number | undefined {
+    const lost = live.lostHub;
+    // No more than the hub left brings up in about a minute (`RESTORED_MEMBER_EDGES`): they ask it, as before.
+    if (!lost || now - lost.at > STEP_IN_MS || lost.load <= RESTORED_MEMBER_EDGES) return undefined;
+    const s = live.session, me = s.myKey, fresh = freshHubs(this.hubs(live), now);
+    // Back meanwhile (its entry written since I gave it up): nobody steps in.
+    if (fresh.some(h => h.key === lost.key && h.ts > lost.at)) return undefined;
+    const others = fresh.filter(h => h.key !== me && h.key !== lost.key);
+    const stepped = others.filter(h => (h.since ?? h.ts) >= lost.at - STEP_IN_MS);
+    // One hub from before left, not more (they spread over them) nor none (every member steps up, `shouldBeHub`).
+    if (others.length - stepped.length !== 1) return undefined;
+    if (stepped.length >= Math.max(1, Math.ceil(lost.load / STEP_IN_LOAD))) return undefined;
+    const hubs = new Set(fresh.map(h => h.key));
+    const turn = rankHubs(lost.key, s.roster.map(([key]) => key).filter(key => !hubs.has(key) && key !== s.admin)).indexOf(me);
+    return turn < 0 ? undefined : lost.at + turn * STEP_IN_TURN_MS;
   }
 
   private hubLoad(groupId: string, live: Live, now: number): number {
