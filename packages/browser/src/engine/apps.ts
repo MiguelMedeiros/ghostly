@@ -2022,15 +2022,18 @@ export class Apps {
     // while the other workers still run, and the next check would start beside them.
     this.revocationSplits = new Map();
     try {
-      const out = await Promise.all(pooled(apps, APP_CHECK_PARALLEL, (app) => this.checkApp(app, stores).catch(() => null)));
-      return out.filter((r) => r !== null);
+      const out = (await Promise.all(pooled(apps, APP_CHECK_PARALLEL, (app) => this.checkApp(app, stores).catch(() => null)))).filter((r) => r !== null);
+      // Each one judged with the revocations this profile kept as they are now, read once for every app (up to 1024 of
+      // every app: once per app, a check read them again for each one).
+      const kept = out.length ? await this.keptValue() : null;
+      return await Promise.all(out.map(async ({ app, outcome }) => ({ ref: app.ref, outcome, run: await this.runCheckOf(app, stores, kept) })));
     } finally {
       this.revocationSplits = null;
     }
   }
 
-  /** One app's part of the update check (`checkNow`); null when it is not installed any more. */
-  private async checkApp(listed: InstalledApp, stores: AddedAppStore[]): Promise<AppCheckResult | null> {
+  /** One app's part of the update check (`checkNow`): its record as written; null when it is not installed any more. */
+  private async checkApp(listed: InstalledApp, stores: AddedAppStore[]): Promise<{ app: InstalledApp; outcome: AppCheckOutcome } | null> {
     if (!(await this.hasBundle(listed.bytes, listed.digest, listed.manifest))) await this.fetchFiles({ ref: listed.ref }).catch(() => {});
     const first = await this.app(listed.ref);
     if (!first) return null;
@@ -2207,7 +2210,7 @@ export class Apps {
     const put = idle ? sameRecord(current, stored) : await this.putAppIfUnchanged(app, stored);
     for (const files of [...dropped, ...(!put && wrote ? [wrote] : [])]) await this.removeUnusedBundle(app.ref, files.bytes, files.digest);
     if (!put) return null;
-    return { ref: app.ref, outcome, run: await this.runCheckOf(app, stores) };
+    return { app, outcome };
   }
 
   // ---------- files again (a restored profile) ----------

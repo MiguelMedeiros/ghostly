@@ -256,4 +256,26 @@ describe("what reading them costs", () => {
     // Each app is still judged with its own.
     expect(list.map((app) => app.run.status)).toEqual(["ok", "ok", "revoked", "ok"]);
   });
+
+  it("the update check judges every app's run with one read of them, not one more per app", async () => {
+    const store = apps(net);
+    const installed = await Promise.all([0, 1, 2, 3].map((i) => bundle({ name: `app${i}` })));
+    for (const [i, app] of installed.entries()) {
+      net.put(`${REPO}/app${i}.ghostlyapp`, app.bytes);
+      await store.preview({ url: `${REPO}/app${i}.ghostlyapp` });
+      await store.install({ digest: app.digest, grant: ["chat"] });
+    }
+    const kept = [await revocation(installed[2]!.ref, [installed[2]!.digest], "Leaked key")];
+    await wrap((await dbStore(STORES.settings, "readwrite")).put([[installed[2]!.ref, kept]], APP_REVOCATIONS_KEY));
+
+    // The second check of an Apps page visit finds nothing new and writes nothing.
+    await store.checkUpdates();
+    const gets = vi.spyOn(IDBObjectStore.prototype, "get");
+    const results = await store.checkUpdates();
+    // One per app as its check looks for an update, and one for every app's run: two per app before.
+    expect(gets.mock.calls.filter(([key]) => key === APP_REVOCATIONS_KEY)).toHaveLength(installed.length + 1);
+    gets.mockRestore();
+    // Each app is still judged with its own.
+    expect(results.map((r) => [r.ref, r.run.status])).toEqual(installed.map((app, i) => [app.ref, i === 2 ? "revoked" : "ok"]));
+  });
 });
