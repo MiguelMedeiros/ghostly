@@ -525,7 +525,8 @@ with `GHOSTLY_CALL_SOCKET_DIR=<folder>`: each call's socket is then `<folder>/<c
 must send the token first. Make the folder before the daemon starts, the daemon's user's, with the program user's
 group, `chmod 2750` (setgid, so the sockets take that group); the daemon refuses to start when the folder is missing,
 a link, another user's, writable by anyone else or open to anyone outside its group. An absolute path of at most 82
-bytes, one profile's daemon per folder (a starting daemon removes the sockets there); not on Windows.
+bytes; not on Windows. A starting daemon removes only the sockets of calls whose daemon is gone (`<call>.sock`, nobody
+answering), so the folder may hold other files, and several profiles' daemons may share it.
 
 **Events.** `call.incoming` `{call, chat, name, video, auto}`, `call.outgoing` `{call, chat, name, audio}`,
 `call.connected` `{call, chat, direction, audio: {socket, token, rate, channels, format, frameMs}}`, `call.stalled`

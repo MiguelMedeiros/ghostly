@@ -1,6 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, readdirSync, rmSync } from "node:fs";
-import { createServer, type Server, type Socket } from "node:net";
+import { connect, createServer, type Server, type Socket } from "node:net";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { CliError } from "../errors";
 import { privateFolder, runtimePath } from "../privateFolder";
@@ -47,10 +47,15 @@ export function sharedFolder(path: string): void {
   if ((info.mode & 0o027) !== 0) throw new CliError("refused", `${path} (GHOSTLY_CALL_SOCKET_DIR) may be written by others or entered by anyone outside its group: ${what}. Run \`chmod 2750 ${path}\`, then try again`);
 }
 
+/** A call's socket's name: its call id, 12 hex digits. */
+const CALL_SOCKET = /^[0-9a-f]{12}\.sock$/;
+
 /**
  * Removes the call sockets a daemon that died during a call left in this profile's folder (`audioSocketPath`; call
  * ids are 12 hex digits), or in the shared folder: no call outlives its daemon. A folder that is a link or someone
- * else's is left alone.
+ * else's is left alone, and so is anything else in it: the shared folder is the machine's, not Ghostly's alone. There a
+ * socket goes only once nobody answers on it (`removeIfDead`): two profiles' daemons may share the folder, and the
+ * other one's call is live.
  */
 export function clearAudioSockets(profileDir: string, sharedDir?: string): void {
   if (process.platform === "win32") return;
@@ -59,11 +64,26 @@ export function clearAudioSockets(profileDir: string, sharedDir?: string): void 
     const info = lstatSync(folder);
     if (!info.isDirectory() || (process.getuid && info.uid !== process.getuid())) return;
     for (const entry of readdirSync(folder, { withFileTypes: true })) {
-      if (entry.name.endsWith(".sock") && !entry.isDirectory()) rmSync(join(folder, entry.name), { force: true });
+      if (!CALL_SOCKET.test(entry.name) || entry.isDirectory()) continue;
+      if (sharedDir && entry.isSocket()) removeIfDead(join(folder, entry.name));
+      else rmSync(join(folder, entry.name), { force: true });
     }
   } catch {
     // No folder yet, or one it cannot read: nothing to clear.
   }
+}
+
+/**
+ * Removes a shared folder's call socket once a connection to it is refused: its daemon is gone. A live one is another
+ * daemon's call, and the connection (which sends no token) replaces nobody there and is closed at once.
+ */
+function removeIfDead(path: string): void {
+  const probe = connect(path);
+  probe.once("connect", () => probe.destroy());
+  probe.once("error", (error: NodeJS.ErrnoException) => {
+    if (error.code !== "ECONNREFUSED") return;
+    try { rmSync(path, { force: true }); } catch { /* Left for the next start. */ }
+  });
 }
 
 /**

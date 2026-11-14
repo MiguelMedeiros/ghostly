@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, symlinkSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createSocket } from "node:dgram";
@@ -431,6 +432,34 @@ describe("the audio socket", () => {
     expect(existsSync(join(profileDir, "calls"))).toBe(false);
     await calls.stopAll();
     expect(existsSync(started.audio.socket)).toBe(false);
+  });
+
+  it("a daemon's start clears only a dead call's socket from a shared folder: another daemon's live call and the user's own sockets stay", async () => {
+    const engine: CallEngine = { getState: () => ({ links: [] }) as unknown as EngineState, setCallSignal: () => {} };
+    const shared = join(tmp(), "calls");
+    mkdirSync(shared, { mode: 0o750 });
+    chmodSync(shared, 0o750);
+    // Another profile's daemon given the same folder, during a call.
+    const other = await AudioSocket.open(join(shared, "aaaaaaaaaaaa.sock"), 16000, { onAudio: () => {} }, { shared: true });
+    // A daemon that was killed during a call: its socket stays, nobody answers on it.
+    const dead = join(shared, "bbbbbbbbbbbb.sock");
+    const killed = spawnSync(process.execPath, ["-e", `require("node:net").createServer().listen(${JSON.stringify(dead)}, () => process.kill(process.pid, "SIGKILL"))`]);
+    expect(killed.signal).toBe("SIGKILL");
+    expect(statSync(dead).isSocket()).toBe(true);
+    // The user's own, in a folder that passes the check (/run/user/<uid> is 0700).
+    const docker = join(shared, "docker.sock");
+    const dockerServer = new Server();
+    await new Promise<void>((resolve) => dockerServer.listen(docker, resolve));
+    writeFileSync(join(shared, "notes.sock"), "kept");
+    new CallManager({ engine, emit: () => {}, profileDir: tmp(), socketDir: shared, answers: true });
+    await until(() => !existsSync(dead));
+    expect(readdirSync(shared).sort()).toEqual(["aaaaaaaaaaaa.sock", "docker.sock", "notes.sock"]);
+    // The other daemon's call still takes its program.
+    const program2 = await program(other.path);
+    program2.socket.write(`${other.token}\n`);
+    await until(() => other.connected);
+    await other.close();
+    await new Promise<void>((resolve) => dockerServer.close(() => resolve()));
   });
 });
 
