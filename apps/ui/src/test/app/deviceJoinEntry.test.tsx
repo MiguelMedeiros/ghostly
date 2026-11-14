@@ -329,6 +329,11 @@ describe("a device code opened as a link (the QR code, by a phone's camera)", ()
     for (const named of [`#${encodeURIComponent(`web+ghostly:Work#${device}`)}`, `#web+ghostly:Work#${device}`, `#web+ghostly://Work#${device}`]) {
       expect(readDeviceLink(named), named).toEqual({ code: device, profile: "Work" });
     }
+    // A name escaped in the link (a space, an accent) is escaped twice by the installed app's `/#%s`.
+    for (const name of ["Ana Lu", "Café"]) {
+      const named = `#${encodeURIComponent(`web+ghostly:${encodeURIComponent(name)}#${device}`)}`;
+      expect(readDeviceLink(named), named).toEqual({ code: device, profile: name });
+    }
   });
 
   it("leaves a chat invite and a route alone, for the router", () => {
