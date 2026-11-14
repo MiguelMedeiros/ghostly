@@ -277,6 +277,42 @@ describe("group link", () => {
   });
 });
 
+describe("group accept", () => {
+  // Found in a bug hunt: a community with nothing to accept (one this profile is in, or was removed from) answered
+  // {"group": id}, exit 0, as if accepted: the engine's knock again does nothing there. A private group said "No
+  // invitation to accept", without why.
+  const as = (node: ReturnType<typeof fake>["node"], view: Partial<GroupView>) => {
+    node.getState = () => ({ links: [], groups: [{ ...group, ...view }], settings: {}, transport: {} }) as unknown as EngineState;
+  };
+  const knock = { linkId: "c1", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "knocking" } as unknown as GroupView["invitation"];
+
+  it("is refused for a group with no invitation, saying why, and never reaches the engine", async () => {
+    const { ctx, node } = fake();
+    const acceptGroupInvitation = vi.fn(async () => undefined);
+    Object.assign(node, { acceptGroupInvitation });
+    for (const profile of ["community", "mesh"] as const) {
+      as(node, { profile, status: "active" });
+      await expect(callApi(ctx, "group.accept", { group: "Crew" }), profile).rejects.toMatchObject({ code: "refused", message: "You are in Crew already: there is no invitation to accept" });
+      as(node, { profile, status: "removed", statusReason: "You were removed from this group", isAdmin: false, canSend: false });
+      await expect(callApi(ctx, "group.accept", { group: "Crew" }), profile).rejects.toMatchObject({ code: "refused", message: "You were removed from this group: there is no invitation to accept" });
+    }
+    as(node, { profile: "community", status: "left", isAdmin: false, canSend: false });
+    await expect(callApi(ctx, "group.accept", { group: "Crew" })).rejects.toMatchObject({ code: "refused", message: "You are not in this group: there is no invitation to accept" });
+    expect(acceptGroupInvitation).not.toHaveBeenCalled();
+  });
+
+  it("goes to the engine for an invitation or a knock, a removed member's knock to get back in too", async () => {
+    const { ctx, node } = fake();
+    const acceptGroupInvitation = vi.fn(async () => undefined);
+    Object.assign(node, { acceptGroupInvitation });
+    for (const view of [{ profile: "community", invitation: knock }, { profile: "community", status: "removed", invitation: knock }, { profile: "mesh", members: [], invitation: { linkId: "c1", contact: "Ana", admin: "anakey", members: 2 } }] as Partial<GroupView>[]) {
+      as(node, view);
+      expect(await callApi(ctx, "group.accept", { group: "Crew" })).toEqual({ group: "g1" });
+    }
+    expect(acceptGroupInvitation).toHaveBeenCalledTimes(3);
+  });
+});
+
 describe("group remove", () => {
   it("says on stderr, as the app's Remove dialog does, that the link still lets the member back while it is on", async () => {
     const { ctx, node } = fake();
