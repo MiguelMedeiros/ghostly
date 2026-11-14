@@ -22,6 +22,7 @@ import type { GroupMention } from "@ghostly/core";
 import { LinkPreviewDraftCard } from "./composer/LinkPreviewDraft";
 import { EditBar, ReplyBar } from "./chat/ReplyQuote";
 import { useLinkPreviewDraft } from "../hooks/useLinkPreviewDraft";
+import { useEngineValue } from "../lib/engineState";
 import { AttachmentSheet } from "./composer/AttachmentSheet";
 import { dragCarriesFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteKeepsFiles, pasteNamesFiles, pasteShowsNothing, platformDroppedFiles, platformPastedFiles } from "../lib/pastedFiles";
 import { keepEditWords, keptEditWords } from "../lib/keptEdits";
@@ -258,7 +259,10 @@ export function MessageInput({
   const picker = useMentionPicker({ mentions, text, setText, textareaRef, caretRef });
   // Translate what I send, this chat's choice on this device (the Translation sheet).
   const translatesSend = useTranslatesWhatISend(draftId);
-  const linkPreview = useLinkPreviewDraft(text, linkPreviews && !disabled, edit?.preview);
+  // Hide my IP from contacts: reading a link's page tells its site this device's address, and a pasted link may be a
+  // contact's server. With it on no preview is made; the link goes as text (a picture link someone sent is not read either).
+  const relayOnly = useEngineValue((state) => state?.settings.relayOnly === true);
+  const linkPreview = useLinkPreviewDraft(text, linkPreviews && !disabled && !relayOnly, edit?.preview);
 
   // Ready to type when the chat opens, where that costs nothing: on a touch screen the keyboard would come up over
   // the chat before the person asked for it, so there the field waits for a tap (apps/ui/src/lib/touchOnly.ts).
