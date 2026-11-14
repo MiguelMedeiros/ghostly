@@ -160,13 +160,34 @@ describe("file save to a folder", () => {
     // Before, it said only "pass --force", and that replaced the other file with this one.
     await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", dir: folder })).rejects.toMatchObject({
       code: "confirm",
-      message: `${join(folder, "report.txt")} exists: pass --force (force: true over the socket) to replace it, or --path ${join(folder, "report (3).txt")} (path over the socket) to keep both`,
+      message: `${join(folder, "report.txt")} exists: pass --force (force: true over the socket) to replace it, or --path '${join(folder, "report (3).txt")}' (path over the socket) to keep both`,
+      details: { path: join(folder, "report (3).txt") },
     });
     expect(readFileSync(join(folder, "report.txt"), "utf8")).toBe("first");
     expect(readdirSync(folder).sort()).toEqual(["report (2).txt", "report.txt"]);
     // A --path the user named is theirs: replacing it is the one way out there.
     await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", path: join(folder, "report.txt") })).rejects.toMatchObject({
       code: "confirm", message: `${join(folder, "report.txt")} exists: pass --force (force: true over the socket) to replace it`,
+    });
+  });
+
+  it("the paths its hints suggest paste into a shell as one word: quoted, a ' in them escaped, raw in details", async () => {
+    // Before, "--path /x/report (2).txt" was a syntax error at "(" in bash and zsh, and a name with spaces two words.
+    const folder = join(dir, "it's here");
+    mkdirSync(folder);
+    writeFileSync(join(folder, "report.txt"), "first");
+    const quoted = (path: string) => `'${path.replaceAll("'", "'\\''")}'`;
+    await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", dir: folder })).rejects.toMatchObject({
+      code: "confirm",
+      message: `${join(folder, "report.txt")} exists: pass --force (force: true over the socket) to replace it, or --path ${quoted(join(folder, "report (2).txt"))} (path over the socket) to keep both`,
+      details: { path: join(folder, "report (2).txt") },
+    });
+    await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", path: folder })).rejects.toMatchObject({
+      code: "bad_request", message: `${folder} is a folder: name a file, or use --dir ${quoted(folder)} (dir over the socket)`, details: { dir: folder },
+    });
+    const missing = join(dir, "new folder");
+    await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", path: `${missing}/` })).rejects.toMatchObject({
+      code: "bad_request", message: `${missing}/ names a folder: name a file, or use --dir ${quoted(missing)} (dir over the socket)`, details: { dir: missing },
     });
   });
 

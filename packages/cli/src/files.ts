@@ -261,6 +261,14 @@ export function saveName(name: string): string {
 }
 
 /**
+ * A path as a hint offers it to be pasted into a shell: one word, single-quoted (a `'` in it escaped) unless it is plain.
+ * Every "<name> (2)" the keep-both hint names has a `(` in it, a syntax error in bash and zsh unquoted.
+ */
+function shellWord(path: string): string {
+  return /^[\w@%+=:,./-]+$/.test(path) ? path : `'${path.replaceAll("'", "'\\''")}'`;
+}
+
+/**
  * Gives the whole file at `partial` the name `target`: over a file there when `force`, else never (EEXIST). Where the
  * file system has no hard links (exFAT, some network shares), it is copied under the name, still never over a file.
  */
@@ -503,7 +511,7 @@ export const FILE_METHODS: Record<string, Method> = {
     // downloads folder left a file named downloads. A folder that is there is answered below, as without the slash.
     const path = str(params, "path");
     if (path && (path.endsWith("/") || path.endsWith(sep)) && !(await stat(named).catch(() => undefined))?.isDirectory()) {
-      throw new CliError("bad_request", `${path} names a folder: name a file, or use --dir ${named} (dir over the socket)`);
+      throw new CliError("bad_request", `${path} names a folder: name a file, or use --dir ${shellWord(named)} (dir over the socket)`, { dir: named });
     }
     // A voice message's name is Ghostly's, down to the second its sender claims: two of one second took one name, and
     // the --force the confirm hinted at replaced the first recording with the other. In --dir it steps to a free
@@ -514,7 +522,7 @@ export const FILE_METHODS: Record<string, Method> = {
     const taken = async (target: string, code?: string): Promise<CliError | undefined> => {
       const there = await stat(target).catch(() => undefined);
       // A folder there is no file to replace: before, it asked for --force, and the --force then failed "is a folder".
-      if (there?.isDirectory()) return new CliError("bad_request", `${target} is a folder: name a file, or use --dir ${target} (dir over the socket)`);
+      if (there?.isDirectory()) return new CliError("bad_request", `${target} is a folder: name a file, or use --dir ${shellWord(target)} (dir over the socket)`, { dir: target });
       if (!((there && !force) || code === "EEXIST")) return;
       const replace = `${target} exists: pass --force (force: true over the socket) to replace it`;
       if (path) return new CliError("confirm", replace);
@@ -522,7 +530,8 @@ export const FILE_METHODS: Record<string, Method> = {
       // named, and it replaced the other. The next free "<name> (2)" is offered, never taken unasked.
       let n = 2;
       while (n <= 1000 && (await stat(`${stem} (${n})${ext}`).catch(() => undefined))) n += 1;
-      return new CliError("confirm", `${replace}, or --path ${stem} (${n})${ext} (path over the socket) to keep both`);
+      const other = `${stem} (${n})${ext}`;
+      return new CliError("confirm", `${replace}, or --path ${shellWord(other)} (path over the socket) to keep both`, { path: other });
     };
     let target = named;
     for (let n = 2, refused = await taken(target); refused; n += 1, refused = await taken(target)) {
