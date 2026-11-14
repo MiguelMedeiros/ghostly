@@ -22,6 +22,7 @@ const documentOf = describe(HTMLIFrameElement.prototype, "contentDocument")?.get
 const windowOf = describe(HTMLIFrameElement.prototype, "contentWindow")?.get;
 const typeOf = describe(Document.prototype, "contentType")?.get;
 const urlOf = describe(Document.prototype, "URL")?.get;
+const stateOf = describe(Document.prototype, "readyState")?.get;
 const ownNavigator = navigator;
 const activationOf = describe(Navigator.prototype, "userActivation")?.get;
 const activeOf = typeof UserActivation === "undefined" ? undefined : describe(UserActivation.prototype, "isActive")?.get;
@@ -130,6 +131,22 @@ export function shownBlank(frame: HTMLIFrameElement): boolean {
   }
 }
 
+/**
+ * Whether the frame's page of the app is parsed, and one it may show (`guardedPage`): there to be seen, though its
+ * pictures and frames may still be on their way. Its `load` waits for them, each up to the "too slow" answer.
+ */
+export function parsedPage(frame: HTMLIFrameElement): boolean {
+  try {
+    const doc = documentOf ? apply(documentOf, frame, []) as Document | null : null;
+    return !!doc && !!stateOf && !shownBlank(frame) && apply(stateOf, doc, []) !== "loading" && guardedDocument(doc);
+  } catch {
+    return false;
+  }
+}
+
+/** How often the bridge looks whether the app's first page is parsed, until it is. */
+const PARSED_LOOK_MS = 100;
+
 function say(text: string): void {
   document.body.textContent = text;
 }
@@ -218,6 +235,12 @@ function start(): void {
         frame.src = "/";
         app = frame;
         document.body.replaceChildren(frame);
+        // Its first page is said shown once it is parsed, not only at its `load`: the app's page says the app is
+        // opening until then, over the frame. Only the first: the app's page needs no more.
+        const parsed = setInterval(() => {
+          if (app !== frame) clearInterval(parsed);
+          else if (parsedPage(frame)) { clearInterval(parsed); window.parent.postMessage({ type: BRIDGE_SHOWN }, __SERVICES_APP_ORIGIN__); }
+        }, PARSED_LOOK_MS);
       }, () => refuse("blocked", "This browser cannot open the app here."));
   });
   window.parent.postMessage({ type: BRIDGE_READY }, __SERVICES_APP_ORIGIN__);

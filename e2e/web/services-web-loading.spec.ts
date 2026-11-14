@@ -73,3 +73,56 @@ test("a contact's app the contact's machine is slow to answer is said as opening
     app.close();
   }
 });
+
+test("a contact's app is shown once its page is there, not held under \"Opening\" while an image of it is still on its way", {
+  tag: ["@feature:services.web-open", "@feature:headless.web-interop"],
+}, async ({ peer, relay }, info) => {
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => { release = resolve; });
+  const app = createServer(async (request, response) => {
+    if (request.url === "/") {
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.end(`<!doctype html><title>Demo</title><p id="title">Hello from the demo</p><img src="/photo.png" alt="">`);
+      return;
+    }
+    if (request.url !== "/photo.png") { response.writeHead(404); response.end(); return; }
+    // A big picture over a slow link, or a thumbnail the contact's machine is slow to make: it comes only when the test says so.
+    await released;
+    response.writeHead(204);
+    response.end();
+  });
+  await new Promise<void>((done) => app.listen(0, "127.0.0.1", done));
+  const url = await relay.listen();
+  const bot = new HeadlessBot();
+  try {
+    await bot.start(url, "Demo bot");
+    const person = await peer("person", { serviceWorkers: "allow", beforeOpen: async (context) => { await context.addInitScript(() => {
+      try { if (location.hostname === "localhost") localStorage.setItem("ghostly-test-services", "on"); } catch { /* opaque origin */ }
+    }); } });
+    const invite = await bot.run("invite", "create", "--label", "person");
+    await person.page.getByRole("button", { name: "Join chat", exact: true }).first().click();
+    await pasteInvite(person.page, invite.invite as string);
+    await expect(person.page.getByPlaceholder("Message…")).toBeEnabled();
+    await bot.run("chat", "wait", invite.chat as string, "--until", "live", "--timeout", "120");
+    await bot.run("service", "add", "Demo", `http://127.0.0.1:${(app.address() as AddressInfo).port}`);
+    await bot.run("service", "share", "demo", invite.chat as string);
+
+    const open = person.page.getByTestId("open-service").filter({ hasText: "Demo" });
+    await expect(open).toBeVisible({ timeout: 120_000 });
+    await open.click();
+    const view = person.page.locator("#ghostly-service-view");
+    const demo = person.page.frameLocator("[data-testid=service-view-frame]").frameLocator("iframe");
+    await expect(demo.locator("#title")).toHaveText("Hello from the demo", { timeout: 60_000 });
+    // The page is there: it is shown, though its picture is not (the frame's `load` waits for it, up to the 70 s
+    // "too slow" answer). It stayed hidden under "Opening Demo…" all that time.
+    await expect(view.getByRole("status")).toBeHidden({ timeout: 15_000 });
+    await expect(view.getByTestId("service-view-frame")).toBeVisible();
+  } catch (error) {
+    await bot.attachLogs(info);
+    throw error;
+  } finally {
+    release();
+    await bot.stop();
+    app.close();
+  }
+});
