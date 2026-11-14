@@ -119,17 +119,18 @@ export const commands: Record<string, Command> = {
     params: ({ options }, { invite }) => ({ invite, label: options.label }),
   },
   "message delete": {
-    method: "chat.delete", usage: "message delete <chat|group> <message> [--everyone [--wait none|confirmed|sent] [--timeout s]]",
+    method: "chat.delete", usage: "message delete <chat|group> <message> [--everyone [--wait none|confirmed|sent] [--timeout s]] [--purge]",
     summary: "Forget a message on this device (the contact keeps theirs; a waiting text of yours is cancelled, or deleted for everyone if a relay may have it); --everyone deletes one of yours, in a chat or a group, from every member's device",
     args: ["chat", "message"],
     options: {
       everyone: { type: "boolean", description: "Delete a message of yours for everyone (a chat or a group)" },
       wait: { type: "string", choices: ["none", "confirmed", "sent"], description: "With --everyone: in a chat none or confirmed, until the contact has it; in a group none or sent, until a member's edge took it (default: none with a daemon, confirmed or sent without)" },
       timeout: wait.timeout,
+      purge: { type: "boolean", description: "Take what it said out of the profile's folder now (the store folds at once), not within the hour: for a secret pasted into a chat" },
     },
     params: ({ options }, a) => {
       for (const flag of ["wait", "timeout"]) if (options[flag] !== undefined && options.everyone !== true) throw new CliError("usage", `--${flag} goes with --everyone`);
-      return { chat: a.chat, message: a.message, everyone: options.everyone === true, wait: options.wait, timeout: timeout(options) };
+      return { chat: a.chat, message: a.message, everyone: options.everyone === true, wait: options.wait, timeout: timeout(options), ...(options.purge === true && { purge: true }) };
     },
   },
   "message details": { method: "chat.details", usage: "message details <chat|group> <message>", summary: "How a message travelled", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },

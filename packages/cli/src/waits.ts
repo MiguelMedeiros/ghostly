@@ -56,6 +56,26 @@ export async function waitForRemoval(ctx: ApiContext, chat: string, messageId: s
   }
 }
 
+/** How long `purgeMessage` waits for the engine to take the message's row out: it does so in a few milliseconds. */
+const PURGE_WAIT_MS = 5_000;
+
+/**
+ * `message delete --purge`: once the message's row is gone (the engine takes it out on later turns, its files first),
+ * the store's journal is folded into a fresh snapshot now, not within the hour of the fold that comes by itself: what
+ * the message said leaves `db/journal.bin` and rows.db's WAL before the command answers. For a secret pasted into a
+ * chat; every delete folding would rewrite the snapshot each time.
+ */
+export async function purgeMessage(ctx: ApiContext, chat: string, messageId: string): Promise<void> {
+  const until = performance.now() + PURGE_WAIT_MS;
+  let gone = !(await node(ctx).getMessage(chat, messageId));
+  while (!gone && performance.now() < until) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    gone = !(await node(ctx).getMessage(chat, messageId));
+  }
+  await ctx.runtime.store.compact();
+  if (!gone) throw new CliError("timeout", `Timed out after ${PURGE_WAIT_MS / 1000} s: the message is deleted, but what it said may stay in the profile's store until its next fold (within the hour)`, { messageId, deleted: messageId });
+}
+
 /**
  * A private group with no member but me (they all left, or nobody accepted an invitation yet): what I send there now
  * reaches nobody, not even a member who joins later (a joiner reads nothing from before). A community's roster may not
