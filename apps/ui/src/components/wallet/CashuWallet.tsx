@@ -16,6 +16,7 @@ import { SourcePicker } from "./providers/SourcePicker";
 import { LightningCardSettings } from "./LightningCardSettings";
 import { CASHU_MINT_SOURCE, holdsLess } from "../walletCardData";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
+import { NAME, withName } from "../apps/aroundName";
 import { fillNodes } from "../../lib/fillNodes";
 import { satsIn, unitFor } from "../NetworkTag";
 import { mintNetwork } from "@ghostly/browser/shared/mints";
@@ -74,7 +75,7 @@ export function CashuWallet({ wallet, state, rail, sharedWith, onOpenCashu, focu
   const { t } = useI18n();
   // A card that spends another card's balance (Lightning through the mints, Breez on the Spark wallet): its number
   // stays, it is what it can spend, and a line says whose balance it is.
-  const sharedLine = sharedWith ? <span className="block text-xs text-text-muted mt-1" data-testid="wallet-shared-balance">{t("wallet.cards.sameBalance", { name: sharedWith })}</span> : null;
+  const sharedLine = sharedWith ? <span className="block text-xs text-text-muted mt-1" data-testid="wallet-shared-balance">{withName(t("wallet.cards.sameBalance", { name: NAME }), sharedWith)}</span> : null;
   const [action, setAction] = useState<Action>("receive");
   // The amount takes the focus when the person chose this wallet (`focusAmount`), chose Receive here or pressed Done.
   const [actionChosen, setActionChosen] = useState(false);
