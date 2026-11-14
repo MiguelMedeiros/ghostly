@@ -30,6 +30,8 @@ export const removalNumber = (seq: number | undefined) => Math.min((seq ?? 0) + 
 
 /** How often a chat is read whole for the quotes of removed messages (`QuoteSweeps`). */
 export const QUOTE_SWEEP_MS = 10_000;
+/** `QUOTE_SWEEP_MS` as the sweeps read it (tests shorten it). */
+export const quoteSweepTiming = { ms: QUOTE_SWEEP_MS };
 
 /** Removed messages whose quotes go, by their id here: the reference a reply names each by (`replyRef`), if any. */
 export type RemovedQuotes = ReadonlyMap<string, string | undefined>;
@@ -75,7 +77,7 @@ export class QuoteSweeps {
   private next(chat: string): void {
     const state = this.chats.get(chat);
     if (!state?.due.size || state.busy || state.timer) return;
-    const wait = state.at + QUOTE_SWEEP_MS - this.now();
+    const wait = state.at + quoteSweepTiming.ms - this.now();
     if (wait > 0) { state.timer = setTimeout(() => { state.timer = undefined; this.next(chat); }, wait); return; }
     const removed = state.due;
     state.due = new Map();
