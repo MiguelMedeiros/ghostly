@@ -489,10 +489,10 @@ async function noteBundles(change: (noted: Set<string>) => void): Promise<void> 
  */
 export const APP_REVOCATIONS_KEY = "appRevocations";
 /**
- * Revocations kept there: at most `each` of one app and `all` in all, dropped from the publisher holding the most (see
- * `keepRevocations`). A revocation is at most about 3.5 KiB (64 digests and a reason).
+ * Revocations kept there: at most `each` of one app and `all` in all, dropped from the publisher holding the most past
+ * its `reserve` (see `keepRevocations`). A revocation is at most about 3.5 KiB (64 digests and a reason).
  */
-const REVOCATIONS_KEPT = { each: 64, all: 1024 } as const;
+const REVOCATIONS_KEPT = { each: 64, all: 1024, reserve: 4 } as const;
 
 /**
  * The revocations as kept, by reference, in the order they were last added to (`all`), and those of `ref` (`mine`), read
@@ -543,22 +543,25 @@ function keepRevocations(settings: IDBObjectStore, adds: ReadonlyMap<string, rea
       changed = true;
     }
     if (!changed) return;
-    // Past the cap, room is made from the publisher that holds the most (on a tie, the one kept longest ago), from its
-    // apps kept longest ago: one publisher's revocations of its own apps never push out another's, and a publisher keeps
-    // its revocations until as many others each hold as many.
+    // Past the cap, room is made from the publisher that holds the most past its reserve (on a tie, the one kept longest
+    // ago), from its apps kept longest ago, down to its reserve: one publisher's revocations of its own apps never push out
+    // another's. With none past it, from the publisher kept last: many publishers holding a few each refuse room to one
+    // more, and never push out the newest few of a publisher kept before them.
     const held = new Map<string, number>();
     let all = 0;
     for (const [r, list] of kept) {
       held.set(appRefPublisher(r), (held.get(appRefPublisher(r)) ?? 0) + list.length);
       all += list.length;
     }
+    const past = (publisher: string) => (held.get(publisher) ?? 0) - REVOCATIONS_KEPT.reserve;
     while (all > REVOCATIONS_KEPT.all) {
       let most = "";
-      for (const [publisher, n] of held) if (n > (held.get(most) ?? 0)) most = publisher;
-      const [other, list] = [...kept].find(([r]) => appRefPublisher(r) === most)!;
-      const drop = Math.min(list.length, all - REVOCATIONS_KEPT.all);
+      for (const publisher of held.keys()) if (past(publisher) > Math.max(past(most), 0)) most = publisher;
+      const entries = [...kept];
+      const [other, list] = most ? entries.find(([r]) => appRefPublisher(r) === most)! : entries[entries.length - 1]!;
+      const drop = Math.min(list.length, all - REVOCATIONS_KEPT.all, most ? past(most) : Infinity);
       all -= drop;
-      held.set(most, held.get(most)! - drop);
+      held.set(appRefPublisher(other), held.get(appRefPublisher(other))! - drop);
       if (drop === list.length) kept.delete(other); else kept.set(other, list.slice(drop));
     }
     settings.put([...kept], APP_REVOCATIONS_KEY);
