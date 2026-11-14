@@ -281,6 +281,20 @@ describe("USDT addresses", () => {
     expect(eip681Number(text)).toBe(value);
   });
 
+  it("reads a fraction's zeros in one pass: a contact's long run of them costs its length, not its square", () => {
+    expect(eip681Number(`2.5${"0".repeat(50)}e1`)).toBe(25n);
+    // Each bubble reads its link's amount (up to 4 KiB of it) as it is drawn, 100 at a chat's open.
+    const cost = (n: number) => {
+      const text = `1.${"0".repeat(n)}1e3`;
+      const start = performance.now();
+      expect(eip681Number(text)).toBeNull();
+      return performance.now() - start;
+    };
+    cost(1_000);
+    const quarter = cost(8_000), whole = cost(32_000);
+    expect(whole).toBeLessThan(10 * Math.max(quarter, 25));
+  });
+
   it("reads a transfer link: the token, the chain (network), the recipient and the amount", () => {
     const uri = `ethereum:${ETHEREUM_USDT}@1/transfer?address=${EVM}&uint256=2.5e6`;
     const handedOut = `ethereum:${ETHEREUM_USDT.toLowerCase()}@1/transfer?address=${EVM}&uint256=2500000`;
