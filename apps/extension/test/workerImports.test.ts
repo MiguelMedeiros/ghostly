@@ -58,6 +58,7 @@ it("the service worker loads none of the app page's modules but the strings it s
   // Chrome starts the worker again after 30 s idle, at each event. Through the shared UI's settings, for one constant,
   // it loaded every English string of the app, the device store and React: 0.46 MB instead of 0.06 MB.
   const { modules, packages } = reachedFrom(join(ROOT, "apps/extension/src/background.ts"));
-  expect(modules.filter((file) => file.startsWith("apps/ui/"))).toEqual(["apps/ui/src/lib/appWebsite.ts", "apps/ui/src/locales/en/services.json"]);
+  // localHost.ts imports nothing: the worker's check of a contact's app link reads the previews' rule from it.
+  expect(modules.filter((file) => file.startsWith("apps/ui/"))).toEqual(["apps/ui/src/lib/appWebsite.ts", "apps/ui/src/lib/localHost.ts", "apps/ui/src/locales/en/services.json"]);
   expect(packages).toEqual(["@ghostly/core"]);
 });
