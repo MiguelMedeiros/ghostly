@@ -3,7 +3,7 @@ import { ANSWER_BY_MS, CookieJar, MAX_PENDING_REQUESTS, MAX_WAITING_REQUESTS, op
 import { closeServiceWindows, hostErrorText, serviceFraming, setServiceWindowsCloser } from "../../lib/serviceWindows";
 import { loadLocale, translatorFor } from "../../locales";
 import { onAppInput } from "../../lib/apps/open";
-import { ANSWER_AHEAD_BYTES, BRIDGE_OPEN_LINK, BRIDGE_READY, BRIDGE_REFUSED, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
+import { ANSWER_AHEAD_BYTES, BRIDGE_OPEN_LINK, BRIDGE_READY, BRIDGE_REFUSED, BRIDGE_SHOWN, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
 import { createHash } from "node:crypto";
 import { CHUNK_KIND, CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, GhostlyHttpError, HttpClient, LIMITS, MAX_CHUNK_PAYLOAD_BYTES, VIEWER_GUARD_CSP, VIEWER_GUARD_HASH, VIEWER_GUARD_SCRIPT, VIEWER_SERVICE_CSP, VIEWER_SERVICE_CSP_RELAY_ONLY, decodeChunk, decodeControl, encodeChunk, type ClientRequest, type ClientResponse } from "@ghostly/core";
 
@@ -731,6 +731,65 @@ describe("a contact's app shown over the app", () => {
     // A page of the app the bridge would not show.
     refused("unguarded");
     expect(notice.textContent).toBe("This page of Demo cannot be shown hereTry again");
+  });
+
+  it("says the app is opening, over its frame, until a page of it has loaded, and again once Try again loads it anew", async () => {
+    // Until then the frame shows only the bridge's empty white page, for as long as the contact takes to answer.
+    let offline = false;
+    const listeners = new Set<() => void>();
+    const presence = { offline: () => offline, watch: (changed: () => void) => { listeners.add(changed); return () => listeners.delete(changed); } };
+    const change = (to: boolean) => { offline = to; for (const l of listeners) l(); };
+    const loading = "Opening Demo on your contact's machine…";
+    await openServiceView({ host, tag: "ybndrfg8ejkmcpqx", peer: PEER, service: "demo", title: "Demo", send: async () => answer(200, [], []), words: { ...words, loading }, presence });
+    const view = document.getElementById(SERVICE_VIEW_ID)!;
+    const notice = view.querySelector<HTMLElement>("[data-testid=service-view-offline]")!;
+    const frame = view.querySelector<HTMLIFrameElement>("[data-testid=service-view-frame]")!;
+    const retry = view.querySelector<HTMLButtonElement>("[data-testid=service-view-retry]")!;
+    const close = view.querySelector<HTMLButtonElement>("[data-testid=service-view-close]")!;
+    const first = frame.src;
+    const origin = new URL(first).origin;
+    const inFrame = { postMessage: vi.fn() };
+    Object.defineProperty(frame, "contentWindow", { value: inFrame, configurable: true });
+    const shown = (from: { origin: string; source: unknown } = { origin, source: inFrame }) =>
+      dispatchEvent(new MessageEvent("message", { data: { type: BRIDGE_SHOWN }, origin: from.origin, source: from.source as Window }));
+    const loadingSaid = () => {
+      expect(notice.hidden).toBe(false);
+      expect(notice.getAttribute("role")).toBe("status");
+      expect(notice.querySelector("p")!.textContent).toBe(loading);
+      expect(notice.getAttribute("aria-busy")).toBe("true");
+      expect(retry.hidden, "nothing to try again").toBe(true);
+      // Kept in its place and size under the notice: the app's page lays itself out for the screen it opens on.
+      expect(frame.style.display).toBe("");
+      expect(frame.style.visibility).toBe("hidden");
+    };
+    loadingSaid();
+    expect(document.activeElement).toBe(close);
+    // Only the bridge in the view's frame is heard.
+    shown({ origin: "https://other.example", source: inFrame });
+    shown({ origin, source: window });
+    loadingSaid();
+    shown();
+    expect(notice.hidden).toBe(true);
+    expect(notice.hasAttribute("aria-busy")).toBe(false);
+    expect(frame.style.visibility).toBe("");
+    expect(frame.src, "the page that loaded stays").toBe(first);
+    // Its next pages say nothing more.
+    shown();
+    expect(notice.hidden).toBe(true);
+    // Offline: Try again is back, and once they are back the app is loaded anew, said as opening until it is there.
+    change(true);
+    expect(retry.hidden).toBe(false);
+    expect(notice.hasAttribute("aria-busy")).toBe(false);
+    retry.focus();
+    frame.src = "about:blank";
+    change(false);
+    loadingSaid();
+    expect(frame.src, "the app is loaded anew").toBe(first);
+    expect(document.activeElement, "not dropped to the page's body with the hidden Try again").toBe(close);
+    shown();
+    expect(notice.hidden).toBe(true);
+    expect(document.activeElement, "Try again had it: the focus goes to the app").toBe(frame);
+    closeServiceView();
   });
 
   it("opens on the notice when the contact is already offline", async () => {

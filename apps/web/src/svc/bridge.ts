@@ -5,7 +5,7 @@
  * to the app, with the request's own port, so the answer goes straight back to the worker. Built on its own into
  * `/_ghostly-svc/bridge.js` (apps/web/svcBuild.ts).
  */
-import { BRIDGE_CLEAR, BRIDGE_CLEARED, BRIDGE_OPEN_LINK, BRIDGE_PORT, BRIDGE_READY, BRIDGE_REFUSED, SERVICE_FRAME_ALLOW, WORKER_SCRIPT, isServiceHostname, parseServicesHost, type BridgeRefusal } from "./protocol";
+import { BRIDGE_CLEAR, BRIDGE_CLEARED, BRIDGE_OPEN_LINK, BRIDGE_PORT, BRIDGE_READY, BRIDGE_REFUSED, BRIDGE_SHOWN, SERVICE_FRAME_ALLOW, WORKER_SCRIPT, isServiceHostname, parseServicesHost, type BridgeRefusal } from "./protocol";
 import { clearSite, dropSharedCookies } from "./clearSite";
 import { VIEWER_GUARD_SCRIPT } from "../../../../packages/core/src/viewerGuard";
 import { CLIPBOARD_GUARD_SCRIPT } from "../../../../packages/core/src/clipboardGuard";
@@ -120,6 +120,16 @@ export function forwardLinks(win: Window, ask: (url: string) => void): void {
   };
 }
 
+/** Whether the frame still shows its first empty page (`about:blank`), or one this page cannot read: not the app. */
+export function shownBlank(frame: HTMLIFrameElement): boolean {
+  try {
+    const doc = documentOf ? apply(documentOf, frame, []) as Document | null : null;
+    return !doc || !urlOf || apply(urlOf, doc, []) === "about:blank";
+  } catch {
+    return true;
+  }
+}
+
 function say(text: string): void {
   document.body.textContent = text;
 }
@@ -161,6 +171,8 @@ function start(): void {
           forwardLinks(win, (url) => { if (using()) window.parent.postMessage({ type: BRIDGE_OPEN_LINK, url }, __SERVICES_APP_ORIGIN__); });
         }
       } catch { /* a page that is not HTML: nothing to hand on */ }
+      // Not the frame's first empty page: the contact's own, or what Ghostly says in its place (too slow, unreachable).
+      if (!shownBlank(app)) window.parent.postMessage({ type: BRIDGE_SHOWN }, __SERVICES_APP_ORIGIN__);
       return;
     }
     app = null;

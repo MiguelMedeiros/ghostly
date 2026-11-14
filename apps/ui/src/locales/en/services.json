@@ -42,6 +42,7 @@
     "elsewhere": "{{app}} tried to send you somewhere else, outside what your contact shares.",
     "failed": "The request failed.",
     "label": "{{app}}, shared by {{contact}}",
+    "loading": "Opening {{app}} on your contact's machine…",
     "notAnswering": "{{app}} is not answering on your contact's machine. Ask them to check that it is running.",
     "offline": "Your contact is offline, so {{app}} cannot open now. It opens again here when they are back.",
     "owner": "{{contact}}'s app, running on their machine. Not Ghostly: never type your recovery words or passwords here.",
