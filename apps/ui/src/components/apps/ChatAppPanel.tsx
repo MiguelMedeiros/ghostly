@@ -132,6 +132,21 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
     };
   }, [shown, linkId]);
 
+  // The page got room beside the chat, or lost it, while the app shows (a tablet turned, a window resized): Back went
+  // with the focus on it, or the chat goes under the app with the focus in it. The focus goes to Back over the chat, to
+  // the panel beside it; one elsewhere in the page stays.
+  const covering = useRef(withBack);
+  useEffect(() => {
+    if (covering.current === withBack) return;
+    covering.current = withBack;
+    if (!shown) return;
+    const panel = root.current;
+    const active = document.activeElement;
+    const column = panel?.parentElement?.querySelector<HTMLElement>(":scope > .chat-column");
+    if (active && active !== document.body && !(withBack && column?.contains(active))) return;
+    (withBack ? back.current : panel)?.focus({ preventScroll: true });
+  }, [withBack, shown]);
+
   // Stopped while shown (the watchdog, a takedown, its frame navigated): the focus was in its frame, gone with it, so it
   // goes to Open again when offered, else in the panel as on open, and Escape still closes; never pulled from where the
   // person went meanwhile.
