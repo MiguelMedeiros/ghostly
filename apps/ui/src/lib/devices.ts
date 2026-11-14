@@ -363,12 +363,9 @@ export function readDeviceLink(input: string): DeviceLink {
   const code = parts[parts.length - 1].trim();
   if (parts.length < 3) return { code: parts.length === 2 ? code : text };
   // A `web+ghostly:` link's name, as the router hands it over while the app is open: read without the scheme, as a
-  // fresh page reads it (`takeDeviceLinkFromAddress`).
-  let profile = protocolLinkCode(parts[parts.length - 2]);
-  if (profile === null) {
-    profile = parts[parts.length - 2];
-    try { profile = decodeURIComponent(profile); } catch { /* as it is */ }
-  }
+  // fresh page reads it (`takeDeviceLinkFromAddress`): the scheme's escaping undone, then the name's own.
+  let profile = protocolLinkCode(parts[parts.length - 2]) ?? parts[parts.length - 2];
+  try { profile = decodeURIComponent(profile); } catch { /* as it is */ }
   // From whatever made the link: shown and used as a name, so cleaned as a link is made.
   profile = cleanProfileName(profile.replace(/^\//, ""));
   return profile ? { code, profile } : { code };
