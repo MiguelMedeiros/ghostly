@@ -246,6 +246,19 @@ function serviceOf(ctx: ApiContext, params: Params): string {
 }
 
 /**
+ * On, unless `off`; or as the answer's own key (`shared`, `enabled`) says, when a socket client sends it back. Before,
+ * only `off` was read, so `{"shared": false}` shared the service with the contact and `{"enabled": false}` turned it on.
+ * Both, saying the opposite, are refused: neither is guessed.
+ */
+function onUnlessOff(params: Params, key: string): boolean {
+  const on = !bool(params, "off");
+  if (params[key] === undefined || params[key] === null) return on;
+  const said = bool(params, key);
+  if (params.off !== undefined && params.off !== null && said !== on) throw new CliError("bad_request", `${key}: ${said} and off: ${!on} say the opposite: give one of them`);
+  return said;
+}
+
+/**
  * A port the person chose that could not be taken, in words that name it. Before, one in use was Node's EADDRINUSE as
  * `engine`, and one not allowed read as a file (`localFileError`): "Not allowed to write or read the path".
  */
@@ -306,14 +319,15 @@ export const SERVICE_METHODS: Record<string, Method> = {
     return { removed: serviceId };
   },
   async "service.enable"(ctx, params) {
+    const enabled = onUnlessOff(params, "enabled");
     const serviceId = serviceOf(ctx, params);
-    await node(ctx).setServiceEnabled({ serviceId, enabled: !bool(params, "off") });
-    return { service: serviceId, enabled: !bool(params, "off") };
+    await node(ctx).setServiceEnabled({ serviceId, enabled });
+    return { service: serviceId, enabled };
   },
   async "service.share"(ctx, params) {
     // A grant the contact keeps using: only what this side chose names its chat, as for `call auto --from`.
     const link = ownChatOf(ctx, params);
-    const shared = !bool(params, "off");
+    const shared = onUnlessOff(params, "shared");
     const serviceId = serviceOf(ctx, params);
     await node(ctx).setServiceShared({ serviceId, peerPubKeyZ32: link.peerPubKeyZ32, shared });
     return { service: serviceId, chat: link.id, shared };
