@@ -671,7 +671,7 @@ const METHODS: Record<string, Method> = {
       const result = await node(ctx).removeMessage({ linkId: target.linkId, messageId: message.id });
       if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
       // Gone here at once: the fold need not wait for the contact or an edge.
-      if (purge) await purgeMessage(ctx, target.linkId, message.id);
+      if (purge) await purgeMessage(ctx, target.linkId, message);
       // `messageId`, as every command that makes or changes a message names it; `deleted` kept for callers that read
       // it (agents#1582).
       if (target.group) {
@@ -687,11 +687,12 @@ const METHODS: Record<string, Method> = {
     const ref = str(params, "message") ?? "<message>";
     const link = chatNotGroup(ctx, params, "message delete", `${/^[\w.:<>-]+$/.test(ref) ? ref : JSON.stringify(ref)} --everyone`);
     const messageId = str(params, "message", true);
-    if (!(await node(ctx).getMessage(link.id, messageId))) throw noMessage(messageId, { group: false, ref: str(params, "chat", true) });
+    const message = await node(ctx).getMessage(link.id, messageId);
+    if (!message) throw noMessage(messageId, { group: false, ref: str(params, "chat", true) });
     // A waiting text of mine is cancelled; one the outbox already handed to the link may be out, so the engine deletes it
     // for everyone instead, and `everyone` says so.
     const { everyone } = node(ctx).deleteMessage({ linkId: link.id, messageId });
-    if (purge) await purgeMessage(ctx, link.id, messageId);
+    if (purge) await purgeMessage(ctx, link.id, message);
     return { chat: link.id, messageId, deleted: messageId, everyone, ...purged };
   },
   /** A chat's or a group's (`group:<id>`, or its name) message, as the app's details show it; a group's said `No chat`. */

@@ -5066,6 +5066,17 @@ export class GhostlyNode implements EngineImplementation {
     return ids;
   }
 
+  /**
+   * The replies of a chat or group that quote a message gone from it (deleted here or for everyone, its row read before)
+   * lose its line now, not at the quotes' next sweep (`QuoteSweeps`, up to `QUOTE_SWEEP_MS` away, never for one deleted
+   * here): `message delete --purge` folds the store right after. The apps show such a quote as "Original message
+   * deleted" already, without its line.
+   */
+  async forgetQuotesOf(linkId: string, message: StoredMessage): Promise<void> {
+    const ids = await this.forgetQuotes(linkId, new Map([[message.id, replyRef(message)]]));
+    if (ids.length) await this.messagesChanged(linkId, ids);
+  }
+
   /** Local id of a file we send: the id on the wire is ours too, but lives in its own key space. */
   private static outgoingFileId(linkId: string, wireId: string): string {
     return `${linkId}-out-${wireId}`;

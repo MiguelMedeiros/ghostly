@@ -42,6 +42,7 @@ function fake() {
   const node = {
     chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [link], groups: [], settings: {}, transport: {} }) as unknown as EngineState,
     getMessage: get,
+    forgetQuotesOf: async () => {},
     deleteMessage: ({ linkId, messageId }: { linkId: string; messageId: string }) => {
       setTimeout(() => { const tx = db.transaction("messages", "readwrite"); tx.objectStore("messages").delete([linkId, messageId]); }, 30);
       return { everyone: false };
