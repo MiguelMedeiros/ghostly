@@ -4,6 +4,382 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.11.4
+
+### Security
+
+**Apps**
+
+- The web app's services bridge refuses to open a contact's shared app when the server's security policy keeps the bridge's own protections from running.
+- A store's name on the install screen and the Apps page covers only the version that store lists; any other version of the app shows "Unknown publisher".
+- A revocation a store published while an update was being installed is kept even if that store is removed before the update finishes.
+- An update or an installed version shown as revoked on an install screen can no longer be installed by Update or opened.
+- A built-in app checks whether its publisher revoked that version before it is installed.
+
+**Calls**
+
+- Call signals on chats made from older invite codes have the same receive limit as other chats.
+
+**Chat**
+
+- With Hide my IP from contacts on, a did:web identifier in a contact's message no longer offers a lookup that would contact the server the contact chose, and the composer no longer reads a link's page to make its preview.
+- The secret guard also asks before an Electrum seed, a seed written by its words' first four letters, or a seed written as a numbered list goes out as text.
+- Reply quotes whose original is not in the chat are marked as such right after the app starts, too.
+- A long file name in a chat bubble shows whole, so its extension is always visible.
+
+**CLI**
+
+- A profile backup that fails or is stopped no longer leaves an unencrypted copy of the profile's data in the profile folder or beside the backup, and copies left by earlier versions are removed when the profile next opens.
+
+**Desktop**
+
+- The desktop app's QUIC stack (quinn-udp, under Iroh) moves to 0.5.16 and 0.6.3 (RUSTSEC-2026-0538): a truncated datagram from the network could leave the receive loop spinning.
+- A held item larger than allowed is refused and the contact's later held items are picked up, instead of being retried at every poll.
+
+**Devices**
+
+- When a device takes a profile or discards a copy of it, the copy that goes takes with it the list of folders and files its apps could open on that device.
+
+**Files**
+
+- Files picked up from held storage count against the same per-contact budget as files received live.
+- More audio, video and picture formats (AVI, AIFF, CAF, WavPack, TTA, AU) go without their tags when sent; formats whose tags can't be removed yet (WMV/WMA, FLV, MPEG-TS, JPEG XL, JPEG 2000) are refused instead of sent as they are.
+
+**Groups**
+
+- A community hub checks the frames it routes for other members before keeping or forwarding them.
+
+**Relays**
+
+- The self-hosted HyperDHT relay no longer sends a later dial's handshake to relay addresses a far peer names, only to DHT nodes it found itself.
+
+**Transports**
+
+- Connections dialled in on a chat's native transport that never authenticate can no longer delay the contact's reconnect, make a transport change fail, or keep an Automatic chat on Iroh's relay instead of a direct connection.
+
+**Wallets**
+
+- The reason a contact gives when answering a payment is checked like other text from a contact before the app shows it.
+- A payment that names one of your requests from a chat that cannot pay it no longer counts toward that request, so a group's record of who paid a request names the member who paid it.
+- A contact's Ark receipt is taken only for a request made on Ark.
+- Lightning address payments show a service's success link only when it is on the service's own domain, and drop hidden characters from the payment description.
+- A Cashu mint's own name is shown without invisible or direction characters, on one line and of bounded length, like other wallet names.
+- Spark wallet connection errors no longer show the recovery phrase or API key if the SDK repeats them.
+
+**Web app**
+
+- Clear all data of the first profile also removes the Identities news it had seen.
+- A contact's shared web app can no longer keep every contact's app (and, on some deployments, the web app) from loading by leaving oversized cookies behind.
+- Opening a link to a chat that does not exist on this device no longer shows an error screen in the first profile.
+- Turning on a profile's lock screen also closes the "is online" notices already shown, which named a contact.
+- An invite, group or device link with a doubled `#` opens as with one, and leaves the address.
+
+### Fixed
+
+- `@ghostlytools/sdk/core` verifies a Keet identity proof. Its `verifyPeerProof` threw "Calling `require` for "b4a"" on every Keet proof, valid or not, because the bundled Keet library asked for its packages with a `require` an ES module does not have.
+
+**Accessibility**
+
+- On Dvorak, Colemak and other keyboard layouts, Alt+Shift+L folds the chat list and Alt+Shift+P opens the profile switcher with the keys marked L and P. Before, they followed the keys' places on a US keyboard, so on Dvorak Alt+Shift+L opened the profile switcher.
+- With a Windows Contrast theme on, the chat list's Search chats field keeps its frame instead of showing as a loose line of placeholder text.
+- In a high contrast mode (Windows Contrast themes, forced colors), the buttons on files, songs, videos and voice messages keep their edge. This covers a large file's Accept and Decline, Download with its size, Pause, Resume and Cancel while a file moves, and the playback speed. They had shown as bare words under the offer, with nothing to tell the main answer from the other. Normal colours are unchanged.
+- In a high contrast mode (Windows Contrast themes, forced colors), the main buttons of a first visit keep their edge: New and its arrow above the chat list, Copy invite under an invite's QR code (and Copy on Add device's), Copy on a link's QR, the install hint's Install and Got it, and New in the Wallets and Identities headers (Add on Apps). They had shown as bare bold text. Normal colours are unchanged.
+- With a dark Windows Contrast theme on, the QR of an invite and of Add a device keeps its white margin, so phones can scan it again in low light.
+- On a wide screen, pressing a page's Back with the keyboard, or a control that opens another page (Profile's Chats, Wallets, Services, Settings and Identities, Identities' Edit profile), now leaves the focus on the page that opens. Before, it fell to the document, and the next Tab started again at the top, before the whole chat list.
+- In Windows high contrast, the steps under a new chat's invite (Publish, Wait, Answer, Connect, Live) keep their dots and the line between them, with the steps done filled and the current one ringed. Before, only the five words were left.
+- A code block's or a long key's Copy that could not copy is now named "Not copied", the words it shows, so voice control finds it, and no longer tells you to select the text "below" when the key is beside it.
+
+**Android**
+
+- In the Android app with the app lock on, TalkBack no longer reads or presses the page hidden under the blank cover (for example the app's half in split screen while another app is in use). The page is there for it again as soon as the app is back in front.
+- In the Android app with the app lock on, a tap on the app's blank half in split screen only brings the app back. It no longer presses whatever button was hidden under the blank cover.
+
+**Apps**
+
+- On an installed app's screen, when an update check stops the app (its publisher revoked it, a store removed it) or lets it run again, the keyboard focus now stays in the screen. Before, the focus Open, Run anyway or Keep it stopped had fell to the page behind it.
+- An app whose files came back after a restored backup when you pressed Open on its card in a chat shows its icon everywhere right away, not only after the next visit to Apps.
+- An app's request to read files or a folder keeps your language's direction: an app named in Hebrew or Arabic no longer turns "asks to read a folder" around in English (and an English name no longer does it in Arabic).
+- An app that deleted one of its saved values just as you deleted its chat no longer leaves that chat's storage counted as full. Before, joining the chat again with the same invite could refuse new values with "storage is full" until Ghostly was reloaded.
+- A store's "Removed by …" line keeps your language's direction on the Apps page and an app's screens: a store named in Hebrew or Arabic no longer turns it around in Japanese, and its name and reason no longer swap places in any language.
+- A chat's + → Apps breaks a contact's long one-word name onto the next line. On a phone the sheet scrolled sideways, and in Arabic the end of the name was drawn off the screen.
+- An app's or a store's own description came first on its install screen, its details and Add, and could push the permissions, a store's removal notice or an out-of-date list's warning far down with hundreds of blank lines. It now comes after them, under "From the publisher" or "From the store", with its blank lines folded and only its first lines shown until Show all.
+- Apps with a contact (+ → Apps), the choice of a chat to open an app in, and an app's install and details screens no longer end with their buttons on the dialog's bottom edge.
+- An app's install screen opened while the device's clock ran ahead no longer stays good for longer than 10 minutes once the clock is set right: Install says it took too long and the app is checked again. With the clock set weeks ahead, it no longer keeps the page busy until the clock catches up.
+- An installed app whose files are missing on this device (a restored profile) no longer downloads a broken copy of them again at every visit to Apps and every Open. When the link it comes from serves a damaged file, Ghostly now waits an hour or until the link serves something else, as it already did for broken updates.
+- An app's, a store's or a contact's name inside a line of the Apps screens (Uninstall and Remove questions, Open's "in a chat", "Sent by", "In <store>", a card's "Ask … for a link") keeps its own direction: in Arabic, "Chess!" no longer reads "!Chess", nor "Ana :)" "(: Ana", and an Arabic title in English keeps its "!" at its end.
+- An app version its publisher revoked shows the publisher's reason, on its details and its install screen ("Its publisher revoked this version: Leaked key"). It said only that its publisher revoked it, while a store's reason for a removal was always shown.
+- On a phone, the ⓘ under "Ghostly won't install it" now breaks a long file name of the app onto new lines. Before, the install screen scrolled sideways, and in Arabic the start of the reason was off the screen.
+- An app's storage, files, chat messages and a contact's reads of its files no longer slow down as the stores you added list more revoked and removed apps: each is checked in about a microsecond, not up to half a millisecond.
+- An app beside a chat that stops (it stopped responding, or its version was taken down) now tells a screen reader why. Before, the line saying why came onto the screen without being read out: a person typing in the chat beside it heard nothing, and one whose focus was in the app heard only "Open again".
+- When an app's publisher put two different builds under one version number in two places (its own link and a mirror, or a store), the update check no longer downloads both whole at every visit to Apps (up to 16 MiB each), only to mark the app "Two different versions exist" again. Each is read whole once, then again only once that link serves another version or an hour has gone by.
+- An app uninstalled in another tab while the Apps page asks which chat to open it in now closes that question here, instead of letting you pick a chat that then says the app isn't installed.
+- An app uninstalled in another tab while its screen is open on the Apps page now closes that screen here, and it no longer opens by itself when the app is installed again.
+
+**Chat**
+
+- A chat on Automatic between two computers is live again within a second when one app comes back after it was killed or crashed while Iroh's relay can't be reached. Before, for about half your contacts it took 8 to 9 seconds.
+- A chat on Automatic is live again within a second when the app comes back after it was killed or crashed, whichever side's app it was. Before, for about half your contacts it took 8 to 14 seconds, until the contact's app noticed the old connection was gone.
+- A chat's Hold messages dialog breaks a contact's long one-word name onto the next line. On a phone the dialog scrolled sideways and cut the title off (its start, in Arabic).
+- Searching inside a chat, when the match you are on is deleted (by you or by your contact) or edited so it no longer matches, Older and Newer now go on to the match before or after it. Before, the search started again from the newest match.
+- In a compatibility chat, a text that reached the contact over the live connection keeps its two ticks. The next read of the contact's record, which still carried an older receipt, took one of them away again. The chat list now shows the same two ticks as the open chat. Before, it showed one tick for every text in such a chat.
+- In a high contrast mode (Windows Contrast themes, forced colors), the chat's message field keeps its edge while you are not typing in it, and the round Send and voice message button keeps its round shape. The field had read as loose text at the bottom of the chat, and the button as an icon alone. Normal colours are unchanged.
+- The notice that a contact's app couldn't open now goes once that app is no longer listed, in the chat's apps strip and on the Services page. Before, it stayed after the contact went offline and showed again next to a different app when they came back.
+- A chat on DHT only left open no longer redraws the app at every read of the contact's mailbox when nothing changed. With many DHT-only chats this was up to about 46 times a minute, each one going over every chat, so a profile left open spent CPU for nothing on screen.
+- Saving an edit of a message with a link preview right away, before the preview was made again, no longer removes the card for you and your contact. The message's card now stays while its link is still in the text and you did not remove it with ×, also when the site cannot be reached any more.
+- The Emoji and GIFs panel opened from the keyboard puts the keys in its search every time, not only the first time. The GIF search takes them on every open too. Before, a later open left them on the panel's button, so typing found nothing.
+- Sending a fragmented MP4 (a live or screen recording with a short fragment per frame) no longer freezes the web app for seconds before the video shows in the chat: the copy sent without its metadata is made of a few large parts, not two per fragment.
+- A chat whose contact's app crashed and came back reconnects over WebRTC even when the old HyperDHT or Iroh connection times out just as the new one is being made. Before, that timeout also cut off the new connection, and the chat stayed apart for about 90 seconds more.
+- The back of an ID card in a chat shows the whole name line, such as "Account at a provider · Alice Example · alice@example.com", on a second line where needed. Before, it was cut with an ellipsis, so the email of a sign-in proof was lost, and on a phone the card's face doesn't show it either.
+- In a short window, a message's ⋮ menu scrolls down to its last rows (Delete message, Delete for everyone). Before, every scroll of the menu jumped back to its top, so those rows could not be reached with the mouse.
+- Message details shows the message in its own direction, as its bubble does: in Arabic, an English "hello!" no longer reads "!hello", and in a left-to-right language an Arabic message's punctuation stays at its end.
+- A screen reader no longer says "Connected · Iroh (relayed)" each time a chat on Automatic comes back (when you open the app, reload it, or your contact's app comes back), only to say "Connected · WebRTC" a moment later. Since 1.11 such a chat comes back over Iroh's relay first and moves to WebRTC within a second: now only where it lands is said, and the relay only if the chat is still on it a few seconds later.
+- Searching a chat no longer freezes the app for seconds on a common letter when its messages hold links whose text names another site (the bubble shows their address): a message marks its first 100 matches in those addresses too, as everywhere else in it.
+- Sending a file costs the app less work while it moves. Each time it moved on (about 4 times a second), the app redrew its whole message: its mark, reactions, reply and menu. Now only the file's own part is redrawn, as it already was for a file you receive. With the processor slowed 4 times, the sender's page used about 20% less script time during a transfer.
+- Sending a file, a voice note or a payment in a chat ends your "typing…" or "recording…" for the contact at once, as a text does, instead of up to 6 seconds later.
+- Holding the mic to record, when the microphone is already allowed but slow to open (a Bluetooth headset), records while held and sends on release again, instead of switching to hands-free.
+- A paused voice recording no longer shows "recording audio…" to the contact; it shows again when you resume.
+- A voice message being recorded pauses when a call starts, instead of recording the call and sending itself at 15 minutes. After the call you can listen to it, send it or discard it.
+- On the web, closing a contact's app after they went offline or stopped sharing it puts the keyboard focus back in the Services dialog or the chat's message box, instead of at the top of the page.
+- A contact's shared app whose page asks for an address with a `\` after the `?` (a Windows path such as `/api?path=C:\Users`) now gets its answer: the request was refused as a bad path. A `\` before the `?` is still refused.
+
+**Wallets**
+
+- An open Bark or Spark request is no longer asked about at every wallet refresh (every 10 seconds) for as long as the app is open, each time with a sync to the Bark server or to Spark. A new request is still asked about at every refresh at first, then less and less often, down to once every 30 minutes. Money that arrives late, also on a request whose invoice expired, is still seen: at once when the balance moves, or at the next of those checks. With five unpaid requests open, an hour now costs 25 syncs instead of 360.
+- A `bitcoin:` link that writes its amount as required (`req-amount=0.0025`) now asks for that amount. It opened for any amount you typed, and the link handed to another wallet left the amount out. A link that gives the amount twice with two different values is no longer paid.
+- A request to a whole community whose wallet you removed now closes for every member, as it does in a private group. Before, members kept a Pay button for it, and paying it would have sent money to a wallet that is gone.
+- A payment request held for an away contact, or whose hold failed, and deleted here before the contact picked it up no longer reaches them at the next live chat, where they could still pay it.
+- A Fedimint payment your contact's app turned down because it already got those notes now says "These notes were already received" in your language instead of English.
+- In Wallets → New, choosing Lightning or Bitcoin with the keyboard puts the focus on the source's first field, and "← All kinds of wallet" puts it back on the kind you left. Both left it on the page, so the next Tab started over at the dialog's ×. While a wallet is being made, its Connect, Join or Create button (and the invite or API key field) keeps the focus too, also when it fails.
+- A chat's payment sheet now shows the contact's and the card's names in their own direction. In Arabic, a contact named "Bob 🚀" or "Bob!" read "🚀 Bob" or "!Bob" in "with …", what Send does, the card's back, Use and Accept's lines. In English, an Arabic name's emoji was drawn on the wrong side.
+- On the Wallets page, the real-money step of a pasted invoice or a Lightning address says the fee's unit ("plus a fee of up to 3 sats", not "up to 3"), as a chat's invoice card already does. In every language.
+
+**Calls**
+
+- In the Android app, pressing Camera in a full-screen call when Android no longer lets Ghostly use the camera now shows why, with Open settings, over the call. Before, the note was drawn under the call's window, so the press seemed to do nothing.
+- Unplugging a webcam with a built-in microphone, or a headset, during a call now moves every one of its devices to the default. Before, only the microphone moved: the camera stayed on the gone webcam and your contact saw a frozen picture, or the menu kept the gone headset as the speaker.
+- In a high contrast mode (Windows Contrast themes, forced colors), the call's Share screen button is filled while you share your screen, in the whole window and the small one. It had looked the same on and off. Normal colours are unchanged.
+- In the CLI, when answering a call fails, the caller's chat now says the call couldn't connect, as it does when an app's answer fails. Before, the caller's app recorded the call as declined.
+- On the Linux Desktop, a contact's video in a call that says its pictures are larger than any screen (VP8 allows 16383×16383) is no longer decoded: each such picture took a third of a second of a core and the app up to 2.4 GB of memory. Video up to 8K, cameras and shared screens, shows as before.
+- Calling a contact whose app is closed now stops waiting as soon as you take or place a call in another chat. Before, "Waking … for the call" waited on and then vanished without a word when the contact's app came up, and the call never rang.
+
+**Identities**
+
+- With many chats whose contacts are shown as one of their identities, the chat list no longer goes through every chat for each of those rows whenever anything changes in the app.
+- When your app does not take an identity a contact shared because it already keeps too many of theirs, or a newer proof of the same identity, the line under their card in the chat now says so from your side ("You already keep too many identities from this contact"). Before, it said "Your contact keeps too many identities from you already", the words sent back to the contact, which read the wrong way round.
+
+**CLI**
+
+- `ghostly app publish` no longer takes seconds to minutes on a file holding many private key headers with no end (cut keys in a test fixture or a log). Each header was read to the end of the file again: 1 MiB of them took about 30 seconds, 4 MiB several minutes. Such a file is now read once, and a whole key in the folder is still refused.
+- `ghostly app revoke` with the same `--digest` values in another order no longer adds a second revocation to `ghostly-revoke.json`: the digests are signed sorted, and the second run answers `added: false`.
+- `ghostly app revoke --up-to` past the bundle's own version now asks for `--force` with `confirm` (exit 5), as every refusal that `--force` lifts does, instead of a usage error (exit 2). A store key given to `app revoke` is refused as a key that "never signs an app or its revocations", and `app publish` names a field missing from the source as `kind in ghostly-app.json`, not as a missing `--key`.
+- `ghostly app serve --grant files` is refused with the reason, as `--grant internet` is, instead of being accepted and listed as granted: a bot can only be granted `chat` or `name`.
+- `ghostly app serve` of a bundle file that is not there, or of a folder, says so at once. Run with no daemon, it went online for about 12 seconds first.
+- `ghostly app serve` and `ghostly app unserve` with no daemon answer at once, refusals included. They change only the profile's list of served apps, but went online first: about 10 seconds when the relays did not answer, and the contacts' apps saw this device come online.
+- `ghostly app serve --url` refuses a link a contact's app cannot read the bundle from (a host other than raw.githubusercontent.com or cdn.jsdelivr.net at a commit, a port, a space). It was kept on the app card, where the contact's install failed, and a link with a space was dropped without a word. Without `--url`, the card takes the first readable link of where the bundle was read and the manifest's sources.
+- A `ghostly profile backup` that fails while it writes the profile's store (a full disk, for one) no longer leaves that partial copy of the store in the profile's folder. Each failed try left one more, taking the room the next try needed.
+- `ghostly profile backup` and `ghostly profile restore` given a passphrase on the command line (`--passphrase <secret>` or `--passphrase=<secret>`) now say it comes from `--passphrase-file` or `GHOSTLY_BACKUP_PASSPHRASE`, never the command line. Before, backup answered "Too many arguments" or "--passphrase takes no value", and restore "Unknown option --passphrase".
+- `ghostly profile backup` and `ghostly profile restore` with `--passphrase-file -` now read the passphrase from stdin, as every other secret the CLI takes does, so it can come from a password manager without touching the disk or the environment. Before, it looked for a file named `-` and answered "No such file or folder". A terminal on stdin is refused, so the passphrase is never shown as it is typed.
+- `ghostly profile backup` writes the profile's store as it reads it, a few hundred messages at a time, instead of holding the whole store in memory twice: with 400,000 messages the daemon took about 340 MB more memory and stopped answering for 0.4 s; now it takes a few MB more and goes on within a tenth of a second. The backup file and what it restores are the same.
+- A name in `<home>/current` that is not a profile's (the file edited by hand or written by a script) no longer blocks every command: `profile list`, `profile use` and `profile create` run anyway, and the other commands are refused naming the file and how to replace it (`profile use <name>`, `profile create <name> --use`, or deleting the file). Before, every command answered a usage error (exit 2) about a name nobody typed, without saying where it came from, and only `-p` got past it.
+- `ghostly button update --text` with only spaces (an empty variable with a space, `--text "$ANSWER "`) is refused (`bad_request`), and the question keeps its words. Before, it answered exit 0 and the question became the buttons' fallback line ("Reply: Yes / No") for everyone in the chat or group.
+- Without a daemon, `ghostly call answer`, `ghostly call flush` and `ghostly service close` say at once that they need the daemon (`unavailable`, start it with `ghostly daemon --detach`), and open the profile offline. Before, each went online for 6 to 12 seconds and then said `No call is on`, `No call in chat …` or `That service is not open here` (`not_found`), though only the daemon answers calls, queues their audio and keeps a contact's app open.
+- CLI calls: a call whose connection fails now hangs up to the contact, as the apps do. It ended on the daemon's side with nothing said, and the contact's app went on saying "Connecting..." (up to 45 s) or "Reconnecting..." for a call that was over.
+- CLI calls: a call that could not connect (it did not connect within 30 s, or its connections kept failing) now tells the contact so when it hangs up, as the apps do and as a failed answer already did. The contact's app said "ended" for a call that never connected, and a CLI contact reported `remote-hangup`; both sides now say the call couldn't connect (`failed`).
+- `ghostly call pipe` writes its errors (no daemon, no call on, a call that has no audio yet) to stderr. They went to stdout, which carries only the call's audio, so in `ghostly call pipe | aplay -f S16_LE …` the error was played as a click and the terminal showed nothing. The exit codes are the same.
+- `ghostly call pipe` says on stderr why it stops: "the call ended" with the reason `call.ended` gives (`hangup`, `remote-hangup`, `rejected`, `missed`, `failed`, `stopped`…), or "another program took its audio; the call goes on". Before, all of these ended with exit 0 and no message, so a contact hanging up looked the same as a second `call pipe` taking over the call.
+- `ghostly call start` to a contact whose app is not connected now says what comes next: `chat wait <chat> --until live` waits for it, then call again. It answered only "Calls need a live connection". The chat's id is in `details.chat`.
+- CLI calls: a call whose connection drops while a frame of audio goes out no longer logs an uncaught "Track is not open" error from the daemon. That frame is dropped, as one sent on a closed track already was.
+- A CLI command that names a chat by its id (as a bot does, from the `chat` of an event) builds only that chat, not the list of every chat: a `send` from a `listen --exec` bot spent 20-40 ms of the daemon's time on it at 1,000 chats, and up to 1 s at 10,000.
+- A CLI command that names a chat (`send`, `payment list --chat`, `chat pay`, `chat forward`, file and identity commands) answers about twice as fast on a profile with many chats: it read the list of all chats two or three times to find one (`chat forward` once more per chat it forwarded to), about 40 ms per `send` at 1,000 chats and up to 1 s at 10,000. It now reads it once.
+- `ghostly help chat rename` and the CLI README show the name as optional (`chat rename <chat> [name...]`): left out, it gives the chat back the contact's name. The usage line showed `<name...>`, as if it were required.
+- `ghostly chat request <chat> 5 --method usdt` asks for 5 USDT, as the app does, not 0.000005 USDT. Its answer says the amount asked, and `payment list` gives a USDT amount's `decimals`.
+- `ghostly chat request <chat> <sats> --method arkade` (or `usdt`, `fedimint`, `spark`, `bitcoin`) to a contact with no wallet of that kind, or a Mainnet request or payment to a contact with Testnet wallets only, is now `refused` with `details.reason` `contact_no_wallet` and the `wallet create` command the contact needs, as a contact with no wallet at all already was. Before, it was `engine` ("Your contact has no Testnet Ark wallet"), which a bot reads as the engine failing and may retry.
+- `ghostly call start`, `service open`, `app open`, `app close` and `app send` need a running daemon. Without one, they waited for the relays before they said so: about 3.5 s with a slow relay, and 10 s with one that does not answer. They now answer at once with the same words, and the profile does not go online for them.
+- `ghostly send`, `group send` and `file send` with an empty `--reply` (an unset variable, `--reply "$ID"`), and `ghostly button update` with an empty `--chosen`, are a usage error (exit 2) before the profile opens. Before, `--reply ""` sent a plain message and `button update --close --chosen ""` closed the buttons with no answer shown, both exit 0.
+- `ghostly file pause`, `file resume` and `file request` of a 1:1 file your contact offers that waits for `file accept` are refused with "Not taken yet: it waits for you to take it (file accept, or file decline)" and exit 1. Before, they answered as if the file was paused or asked for, with exit 0, while it still waited for your answer.
+- `ghostly file save --dir` of a file whose name is already in that folder now says both ways out: `--force` replaces the file there, or `--path <folder>/<name> (2).<ext>` (the next free name) keeps both. Before, it said only "pass --force", and following that hint overwrote the other file, such as a second `image.png` over the first.
+- `ghostly file save` of a received file that waits for you to take it (over the automatic download's size, or a group's file that did not come by itself) answers exit 5 naming `ghostly file accept`, as `file save --wait` and `file wait` do. Before, it answered "The file is not all here yet (0 of N bytes)" with exit 1, and a script retried it for good.
+- `ghostly store sign --out`, and `app publish --key` or `--out`, given a path where a file stands in place of a folder now say "<path> is a file, not a folder" (`not_found`, exit 3). Before, they answered `engine` (exit 1) with Node's raw "EEXIST: file already exists, mkdir".
+- The first steps `ghostly` shows in a new Ghostly folder join an invite as `printf '%s' "$INVITE" | ghostly invite join`. They showed `ghostly invite join -`, which typed at a terminal answers a usage error (an invite is not read from a terminal, to keep it off the screen and out of the history).
+- `ghostly forward` answers every target's result when a copy's wait ends short, and a chat or group that refused its copy still fails the command (exit 1) first. Before, a group's copy no edge took in time (a one-shot waits for one by default), or a chat's copy left waiting with `--wait sent`, failed it alone with that copy's id (exit 4): the other targets' results and refusals were lost, and a script that sent again sent twice to the targets that had theirs.
+- One-shot `ghostly group list`, `group show`, `group history`, `call list`, `service list`, `identity list`, `app served` and `x401 credential list` without a daemon read no 1:1 chat's history when they start. They read the whole history of every 1:1 chat first: with 50,000 messages in the profile each took about 0.3 to 0.5 s longer and 67 MB more memory.
+- `file wait`, `file save --wait`, `file accept` and `file request` naming the group of a group's file, run without the daemon, download the file again. They left the groups unstarted and waited their whole timeout with nothing downloaded; with only the file id they already worked.
+- `ghostly group list` and `group show` say when a join through a group's link stopped knocking because nobody answered for an hour (`unanswered: true`; `group accept` knocks again), and when the contact who invited you took the invitation back (`takenBack: true`). Both read as a live invitation before, and the daemon's log now says the join gave up too.
+- A daemon in big groups no longer spends a share of a core finding who joined or left them. Each change anywhere (a typing start, a message, a delivery mark) compared every group's members against each other: about 3 ms per full community each time, a quarter of a core in four busy ones. The lists are now walked once, about 30 times faster.
+- A one-shot `ghostly group send`, `group edit`, `group react` or `group typing` with no daemon running connects only in the group it names, not in every group the profile is in. Each other group's member connections put their records on the relays and read the members', so with a few groups shared with the same people one command asked the relays about three times as often, and a `group react` could time out after 60 s, exit 4, behind them.
+- `ghostly identity add oidc` (and any proof that only the app can make) says "Account at a provider: this kind of proof needs a browser window, make it in the app"; it read "Account at a provider proofs need a browser window".
+- `ghostly identity add` with a NIP-46 link that is not a valid `bunker://` URL (`nostr`, or `domain --signer nip05-nip46`) is refused as `bad_request`, naming the `bunker` field, before the signer starts. It ended as `engine`, so a script read its own mistake as a Ghostly failure.
+- A task, routine or usage card sent or updated, a `file send`, a `button update` and an edit, reaction or pin not confirmed yet no longer read the list of every chat to check whether someone joined that one chat: on a profile with 2,000 chats each card update spent about 23 ms of the daemon's time on it, and a one-shot `usage send` up to three times that.
+- A `ghostly listen --exec` hook now runs on the profile and Ghostly folder the listen was given with `--profile` or `--home`. It got only the environment the listen started in, so the hook's own `ghostly send` acted on the current profile: it failed with "No chat …" (seen only as "--exec exited 3"), or, when that profile had the same chat, answered from the other identity. The hook now gets `GHOSTLY_PROFILE` and `GHOSTLY_HOME` of its listen.
+- `listen --from <contact key>` now passes the removal of that contact's chat. Before, it matched a chat to the key by asking the daemon, and a chat that is gone has nothing to ask about, so its `chat.removed` was dropped unless the same run had already seen the chat. A `--since` or `--cursor` replay always dropped it, since the journal keeps nothing else of a removed chat. A `chat.removed` event now carries `peer`, the contact's key, once the chat is paired.
+- `listen --group` given a chat suggests `listen --from` with the chat's id. Before, it repeated what was typed, and for the name the contact chose or a prefix of the chat's id, `--from` then refused the suggestion.
+- `ghostly listen --group` now also passes a group's payments that go between two members: a member paying your request to the group, and a member's request to the group as it reaches you, in a private group or a community. Their `payment` names the group in `group`. Before, only your own request to the group came through.
+- `ghostly listen --group` now passes the group's `payment.created` and `payment.updated` events (a request to the group, a member paying it). Before, every one of them was dropped, since a payment event names a chat and never the group. A group's payment no longer passes `--from` for the chat it went through: `--group` lets it in.
+- `ghostly listen --webhook` posts an event once when the bridge refuses it (a 4xx or a redirect), as the line on stderr says. Before, it posted the event three times, so the bridge logged three refusals for one event.
+- `file send`, `profile picture`, `group picture` and `profile backup --out` say at once that a path is not there or is a folder. Before, they opened the profile first (and a one-shot went online), so a typo in the path took about a second on a big profile before the refusal. The answer is the same as before: not found for a missing path or folder, a bad request for a folder where a file goes.
+- Commands that change something on this device with no daemon running (a message deleted for this device only, and the like) no longer read the event stream's note of every message active in the last 30 days when the change touches a chat's history. They read only that chat's notes, as `send` and the other commands do.
+- Commands that only read the profile or change this device (`ghostly status`, `chat list`, `settings get`, `chat rename` and the like), run with no daemon, start faster on a busy profile. Each one read the event stream's note of every message active in the last 30 days first: 50,000 of them added about 0.16 s and 56 MB to every such command. They now read those notes only when a chat's history changes while they run.
+- A one-shot that only reads the profile (`ghostly status`, `chat history`, `group list` and the other reads) with no daemon running no longer reads every group's whole history first, only each group's newest message. With 50,000 messages in one group, `ghostly status` now takes 0.44 s and 139 MB instead of 0.73 s and 226 MB, and `group list` 0.32 s instead of 0.77 s.
+- A one-shot `ghostly typing --stop` (or `group typing --stop`) without a daemon no longer tells you to give `--for`, which `--stop` does not take: its `note` names `ghostly daemon --detach` only.
+- Commands that talk to contacts with no daemon running (`message send`, `react`, `edit`, `group send`, `file send` and the like) start faster on a busy profile. Each one read the event stream's note of every message active in the last 30 days first: 50,000 of them added about 0.07 s and 56 MB to every such command. They now read only the notes of the chats whose history changes while they run.
+- `ghostly profile use <name>` answers the profile the next commands run on, as `profile create --use` does: with `GHOSTLY_PROFILE` set to another profile it answered `{"current":"<name>"}` while every later command in that shell still ran on the other one. It now answers that profile and says on stderr that `GHOSTLY_PROFILE` still picks it.
+- `ghostly react` and `ghostly group react` with something that is not one emoji (a word, two emoji) answer a usage error (exit 2) that names it, before the profile opens. Before, a command without a daemon opened the profile and went online first (about 1 s on a profile with many chats), then answered `bad_request` "A reaction is one emoji" (exit 1), unlike `status set --emoji`.
+- A read such as `ghostly chat list` started just as the daemon stops or restarts now answers. On a busy machine, it could fail with "The daemon went away before it answered chat.list, twice" when it asked again before the stopping daemon had closed its socket.
+- `ghostly app revoke --bundle <file>` adds the revocation to the `ghostly-revoke.json` beside that bundle, where `app verify`, `app serve` and the app read it, and `app publish --out <file>` refuses a version the list beside `--out` already revokes. Before, the revocation always went into the app's folder: for a bundle published elsewhere nothing read it, and `app verify` still called the revoked version valid while `app revoke` said `current: true`.
+- `ghostly service add` with a name of only spaces says the name needs a character that shows (`bad_request`), as a chat's or the profile's name does; it answered `engine` ("the engine failed", exit 1). A name over 48 characters is refused naming the limit, where it was cut short with exit 0 and no word.
+- `ghostly service add` takes a target without `http://` (`localhost:8080`, `127.0.0.1:8080`) as the app does. Before, `localhost:8080` was refused as "Only a web app on this machine (127.0.0.1, localhost) can be shared" and `127.0.0.1:8080` was "Not a URL". A target off this machine is refused in one sentence that names the hosts allowed (localhost, 127.0.0.1 or [::1]), the one the app says.
+- `ghostly service open --port 80` prints a link that opens the contact's app; every request answered 404, because a browser leaves port 80 out of the address it asks for.
+- `ghostly settings set` refuses a key it does not change, or a value of the wrong kind (`online maybe`), as a usage error (exit 2) before the profile opens: an unknown key names the nearest one (`sendtyping`: did you mean `sendTyping`?) and lists them. Before, the profile opened and asked the relays first, then answered `bad_request` (exit 1) with no hint.
+- `ghostly settings`, `ghostly profile`, `group remove`/`group admin` and `service open` no longer read the list of every chat to check one setting: on a profile with 1,000 chats each spent 12-17 ms of the daemon's time on it (about 130 ms at 10,000), and a bot reading a setting before each reply paid it every time. A new chat's join notice reads only your name too.
+- When the daemon's socket goes to a folder outside the profile (a long home path) and that folder is open to other users or is not this user's, `ghostly daemon` answers `refused` and says what to do: remove the folder (ghostly makes it again) or `chmod 700` it. Before, it answered `engine` with no next step. A profile folder that is a link or another user's is `refused` too, as the profile's other checks are.
+- A line on the daemon's socket that is JSON but not an object (`null`, a list, a number) is answered `bad_request` "A request is a JSON object". `null` threw inside the daemon instead, and the requests written in the same go were never answered, so the program waited on them for good.
+- When another program listens on a profile's daemon socket and no ghostly process holds the profile, the daemon commands now say so and name the way out: stop that program or remove the socket file, then start the daemon. Before, `ghostly daemon restart` refused while telling you to run `ghostly daemon restart`, and `ghostly daemon` said a daemon already ran.
+- `status set` (and the socket's `status.set`) now keeps a status text whole when it is padded with invisible characters. A text that fit the 60 characters could lose its last ones without a word, because it was cut by its raw length before the invisible characters were taken out.
+- `ghostly x401 credential add -` and `ghostly wallet create … --stdin` typed at a terminal now answer at once with a usage error that says to pipe the credential or the name=value lines to them, as `invite join -` and `identity add --stdin` do. Before, they waited on the keyboard without a word until killed.
+- `ghostly store sign` run on the `ghostly-store.json` it signed, after an edit to it, is refused as an index that does not read as a signed one, as any other edit there is. It signed it before, without comparing its sequence with the one signed there, so a lower sequence went out that every client refuses as a rollback.
+- A path whose symbolic links go round in a loop (`file send`, `profile picture`, `group picture`, `profile backup --out`, and any other file the CLI reads or writes) is answered not found, "No such file or folder: … (its symbolic links go round in a loop)", with exit 3. Before, Node's raw "ELOOP: too many symbolic links encountered" came back as an engine failure.
+- `ghostly wallet create … --value` no longer repeats a value it took for a field's name. A macaroon, a rune or an API key given without its `name=` but ending in base64's `=` was printed back in the "names no field" error, on the terminal and in any log of it.
+- `ghostly wallet create … --value` given without `name=` no longer repeats the value in its usage error. A seed phrase or a macaroon typed without its name was printed back in full, on the terminal and in any log of it.
+- `ghostly app verify` and `ghostly app serve` of a URL give up on a URL after 60 seconds in all, its redirects included. A host that redirected just before each wait ran out could hold a read for up to six minutes.
+- `ghostly file send --voice` refuses a WAV whose header gives more than 255 channels or a sample rate outside 1 to 768 kHz as not audio (`bad_request`: "… is not audio (a WAV with 65535 channels at 8000 Hz, which no sound has…)"), before reading its samples. Before, the header was trusted: a small file saying 65,535 channels took over 1 GB of memory while it was read, and one saying 4 GHz a 366 MB meter, before it was refused.
+- A daemon whose WebRTC contacts have all gone away no longer wakes about 100 times a second. The WebRTC library's threads started with the first connection and stayed for as long as the daemon ran, even with no connection left. They now stop a minute after the last connection closes, and start again with the next one: an idle daemon went from about 107 wakeups a second to about 6.
+
+**Groups**
+
+- In a community, when the admin makes you the admin just as you leave and that message is lost on its way, your app still learns it and hands the role on. Before, the community kept you as its admin after you had left, and nobody could remove members, rename it or hand the role on.
+- A community uses less CPU on every member's device: the app no longer works out the same record of the group's membership changes again at each sync and each change. In a test with 64 and 128 members, that work went from about a tenth of the CPU to under 1%.
+- In a large community, when a hub's app closes, the members it carried now spread over the hubs left instead of all asking the same one, so they are often back sooner. When only one hub is left, they still wait as before.
+- In a large community, when the app of a hub carrying many members restarts, its members are back in about two minutes instead of four, and far fewer of them become hubs with nobody on them. The restarted app brings back a few of its members at once and the others go to another hub.
+- In a community, someone opening the link while a member was letting them in no longer waits up to 13 minutes when that member could not finish: the next member answering invites them again, and they are in within a minute.
+- In a large community, when the app of a hub carrying many members closes for good and only one other hub is left, its members are back in under two minutes instead of three to four, and none of them becomes a hub with nobody on it. A few of them take the closed hub's place at once and the others share the hubs.
+- A community whose link was turned off no longer says, at the foot of its members panel, "Anyone with the group's link can join": it says the link is off and only the admin can let people in again, with a new link. A member, whose panel has no link section once the link is off, read only the old sentence.
+- In a high contrast mode (Windows Contrast themes, forced colors), the rest of a group's link buttons and its admin's confirms keep their edge too: Copy under the link, and the confirm of Turn off the link and of Remove. They had shown as bare text, so an ask's Cancel and its action looked alike. Normal colours are unchanged.
+- In a high contrast mode (Windows Contrast themes, forced colors), a group's main buttons keep their edge: Accept on an invitation, Try again, New group's Create, Save and Invite in the members panel, the group link's Turn on and Share, Reset, Make admin and Keep. They had shown as bare bold text beside the words around them. Normal colours are unchanged.
+- Deleting a private group you are in while its admin's app is closed now takes you out of the group once the admin is back, as Leave does. Before, everyone kept you as a member for good.
+- Deleting a group's or community's newest message for everyone no longer makes every member's app read the group's whole history to put its unread and "@" marks back: it reads the last rows only. In a test with 1,500 messages, that step took about 3 ms instead of 13.
+- With a Windows Contrast theme (forced colors) on, a group's member dots show again: in the members list, on the group's connection button and in its panel, and when you pick whom to pay. A member who is reachable has a filled dot, one who isn't has a ring. Before, every dot was hidden, so you couldn't tell reachable members from the others.
+- In a private group you were removed from and then invited back to, your edits since reach a member coming back online right away. Your edits from before went first and were refused one by one, holding the new ones back by up to half a minute or more.
+- In a group's join, leave, removal, rename and picture lines, a member's name and the group's name read in their own direction, as the admin's name already did: in Arabic, a member named "Bob!" no longer reads "!Bob", nor a group "Club 🎉" "🎉 Club".
+- Opening the link of a full group or community, the waiting screen no longer shows numbers that cannot be (more members than the group holds, or a size past the most a group can have): an answer like that is left out, and the screen waits as it does while nobody has answered.
+- Opening a group for the first time since the app started no longer tells a screen reader that its old messages are new ("2 new messages"). Only messages that arrive after the group opened are read out.
+- In a private group of more than 16 members, a reaction taken back while you were away no longer shows up again when you come back. Before, a member's app that had stopped carrying the group for a while, and then carried it again, could hand you the reaction as it was before it was taken back.
+- Leave group and Delete from this device, for the only member left, now say that the group and its history end there and nobody can join it again. They said to open the group's link again (or that someone could let you in), though nobody is left to answer it.
+- Hand over admin or Remove confirmed for a member who left the group while you were asked now says "This person is no longer in the group" in your language. It said "Not a member" in English in every language.
+- In a private group you were removed from and then invited back to, a reaction of yours from before can no longer be changed or taken back. A change used to show only on your side: the other members kept the old reaction and saw the new one beside it, and taking it back left it there for them.
+- In a group, a screen reader now reads a payment note that arrives in the app's language, the way the timeline shows it, not as an English line ("Alice: ⚡ Requested 21 test sats").
+- A group payment's line where you are the payer or the payee now reads right in every language: "You are paying Alice", "Vous avez demandé à Bob", "Le pediste a Bob", "Hai chiesto a Bob", "طلبتَ من Bob". It slotted "You" into the line about two other members, which gave "You is paying Alice", "Vous a demandé à Bob", "Tú pidió a Bob", "Tu ha chiesto a Bob" and "طلب أنت من Bob".
+- A group's pin that arrived before its message, because the message was pinned while you were away, now names the message once it arrives. Before, `group show` kept the pin's `messageId` empty.
+
+**Desktop**
+
+- In the Desktop app, Join's "Paste from clipboard" now reads a copied picture of an invite's QR code, as pressing Ctrl+V on the dialog already did. Before, with a screenshot of the QR on the clipboard and no text, it said "Clipboard is empty".
+- On the Desktop, Settings' Storage used drops once Delete all chats has deleted their files, instead of counting them until Settings is opened again.
+
+**Devices**
+
+- Add a device, on the device being added: a screen reader now says the six digits to check, one by one, when they come. Before, it heard only "Confirm on your other device."
+- A `web+ghostly:` device link that names the profile, opened while the app is already open, now says "Add this phone to Work" instead of "Add this phone to web+ghostly:Work", as it already did in a new tab.
+- On a phone, a device on standby now keeps Use here, Take over and Remove from this device above the on-screen keyboard. Before, these dialogs stayed centred on the whole screen, so the password field and the button to confirm were under the keyboard, with no way to scroll to them.
+- When you move your profile to a device, that device no longer says "Active on another device · This device is on standby for this profile" just before it opens as the active one. It keeps showing the move until it opens, and a screen reader no longer reads the wrong line.
+
+**Everywhere**
+
+- On a network that blocks direct connections (a VPN or a firewall), the note that says so shows as soon as your chats go live through a relay, rather than only after a later connection attempt, or not at all for a while.
+- In a high contrast mode (Windows Contrast themes, forced colors), Add on the Apps page and New on the Identities and Wallets pages keep their edge. They had shown as bare text beside the page's title. Normal colours are unchanged.
+- On a computer with no touch screen, a narrow window (or one zoomed to 200 %) made shorter while a field had the focus no longer reads as a keyboard: the tab bar at the bottom stays, instead of going until the window is resized again.
+- The web app, Desktop, Android and the browser extension load about 14 KB less (gzip) when they open. Nostr's library used its own older copies of the crypto code the app already carries, so a second copy of the same curve and hash code shipped in the first load.
+- A screen reader now says when a payment or a request in the open chat changes where it stands: a request of yours turning Paid, ecash you sent turning Received, Failed or Taken back (with why), a Lightning payment of a request going from pending to paid, and in a group a payment note moving on ("Bob says they paid · waiting for Alice's wallet", then "Paid"). Each change is said once, in the app's language; nothing is said as the chat opens.
+- In Devices, Remove and Lost or stolen in the Remove dialog now keep the keyboard focus while the device is being removed. Before, the focus fell to the top of the page, and stayed there when the removal was refused.
+- A contact's app you opened can no longer make your Ghostly hold whole answers its page fetched and never read (up to 32 MiB each). An answer left unread past 4 MiB is now cut once its page stops reading it for 2 seconds, and what it held is let go; an answer the page keeps reading, such as a video playing, is not cut, unless the app's answers read that slowly add up to 64 MiB.
+- In the Share to… picker, the files left out of a share (too large, unreadable, no room on the device, past the first 32) are listed the way your language lists things, with 、 in Japanese and Chinese and و in Arabic, and an Arabic file name beside a Latin one keeps its own order.
+- Identities: an SSH key proof's signature copied from the terminal together with the line ssh-keygen prints before it ("Signing data on standard input", or a security key's "Confirm user presence…") is accepted, the newest signature when the copy holds an earlier run of the command too. It was refused with "Paste the whole signature", although the whole signature was there.
+- With many chats, a contact typing, setting a status, coming online, or a chat being renamed no longer rebuilds every chat for the app: only that chat is built again. Before, each such change cost time for every chat (at 2,000 chats, a change every 50 ms took about a quarter of a CPU core; now under 5%).
+- On a laptop with a touch screen (a 2-in-1, a Chromebook) used with its keyboard, a narrow window (or one zoomed to 200 %) made shorter while a field had the focus no longer reads as a keyboard: the tab bar at the bottom comes back once the field loses the focus, instead of staying away until the window is resized again.
+- Sending or forwarding a fragmented video with a caption track (a dashcam's or a drone's GPS each second) no longer
+  checks each caption run against every fragment's data before it goes. With 32,000 fragments that took 1.7 s where
+  the same video without captions took 0.37 s; it now takes about as long as without.
+
+**Extension**
+
+- While a tab shows Reconnecting…, the line under an open group's name says it is connecting, not how many members are reachable or that your app relays for others.
+- Settings → Notifications says system notifications come while the browser is open, even with no Ghostly tab, not "While Ghostly is open".
+- The toolbar button pressed while Ghostly opens again the pages "Update and restart" closed brings that page forward instead of opening a second tab.
+- In the browser extension, turning an app's Share back on after its site access was taken back in Chrome now asks Chrome for that access right away, instead of turning on and waiting for a second click on Allow.
+- In the browser extension, a file a contact's shared app uploads from a form no longer reaches the contact empty while the app says it was sent: the upload fails, and the app can say so.
+- A tab opened or reloaded gets only the chats that changed since the extension's tabs last saved them, not each chat's newest 400 messages again: about 51 MB per tab at 300 chats, though nothing had changed.
+- A double-click on the toolbar button while Ghostly starts opens one tab, not two.
+- While a tab shows Reconnecting…, a chat no longer says its contact is typing or recording audio until the tab is back: it said so the whole time when they were at it as the tab lost Ghostly.
+
+**Files**
+
+- Files your contacts send are no longer downloaded on their own past the room your device has left. Each file was checked alone against the free space, so several arriving together (six 20 MB videos with 100 MB free) were all taken and filled the disk part way through. Now the files still on their way count too, and one that does not fit beside them waits for you to accept it.
+
+**Relays**
+
+- The HyperDHT relay no longer drops every browser connected to it when the clock of the machine it runs on is set
+  back (a time sync, an operator fixing a clock that ran ahead). After a one-hour step it stopped reading each browser
+  at its next message for that hour, so the browser was dropped within a minute and all its chats went offline until it
+  reconnected. If you run your own HyperDHT relay, update it from this release.
+- The HyperDHT relay's container lets in the Desktop by default, and its README says which origins the Desktop sends
+  (`tauri://localhost` on macOS and Linux, `http://tauri.localhost` on Windows and Android). With Hide my IP from
+  contacts on, the Desktop dials HyperDHT through the relay from its webview, and a relay set up as the README said
+  refused it (403): every chat showed "HyperDHT relay unreachable". If you run your own HyperDHT relay with
+  `GHOSTLY_RELAY_ORIGINS` set, add those two.
+- A HyperDHT relay full to its limits brings its browsers' chats back much faster after a restart. With every browser
+  listening again at once, its DHT node spent most of its time looking through all its requests in flight and all its
+  listening chats for each answer and each new listen: at the default limits fewer than half of the chats were back
+  within a browser's 20 s, now three in four are, with the relay's CPU at half or less. If you run your own HyperDHT
+  relay, update it from this release.
+- A HyperDHT relay holding as many browsers' chats as its limits allow keeps every chat reachable. Its DHT node could
+  send only a sixth of the keep-alives those chats need at once, so they piled up (over 40,000 waiting at the default
+  limits), timed out, and the chats' announcements lapsed. If you run your own HyperDHT relay, update it from this
+  release.
+- Push relay and HyperDHT relay (self-hosted): set up behind a proxy (`GHOSTLY_RELAY_PROXIES`, or `GHOSTLY_RELAY_CLOUDFLARE` for the HyperDHT relay) whose requests come without that header, the first one logs `requests arrive without X-Forwarded-For though GHOSTLY_RELAY_PROXIES is set`, once per start. Before, every user behind such a proxy (nginx without `proxy_set_header X-Forwarded-For`, a plain pass-through) counted as the proxy: 16 browsers at most on the HyperDHT relay and 30 wake-ups a minute for all of them on the push relay, and the log only said `refused address` or `refused rate`.
+
+**Services**
+
+- Stopping or removing a service you share, or taking a contact off its list, now also ends that contact's requests that are still open. Before, a slow answer or a long download still reached them once your app sent it.
+- A contact's shared app that redirects to a relative address (`edit`, `?page=2`, `../other`) lands on the page the redirect means. Before, the address was read from the app's root: `edit` from `/admin/users/7` opened `/edit`, and `../other` under a shared base path showed "redirected elsewhere".
+
+**Web**
+
+- A screen reader now hears the web app's share and link hand-off screens change: a second tab's "Sending to Ghostly in your other tab…" turning "Sent", "Nothing was shared" or "Your link opened in Ghostly in your other tab.", and the Share to… page's "Nothing was shared" once it has waited, so whether the tab can be closed is said, not only shown. "Getting what was shared…" also ends with the app's own ellipsis in every language.
+- On a phone, Cancel in Share to… (something another app shared into Ghostly) is now as easy to tap as the app's other buttons: it took taps on only 40 px of height.
+- On a phone, the banner that offers a new version takes taps on its Reload and its × (Later) as on every other control, 44 px each way. Before, the × took them on 11 × 20 px and Reload on 29 px of height.
+- In the web app, a contact's shared app no longer pulls a whole answer off the contact's link (up to 32 MiB each) when the app's page does not read it, such as a paused video or a download it holds: the page now takes an answer only about 1 MiB ahead of what the app reads, so the contact's upload and this browser's memory are not spent on what is never shown.
+- Escape on a contact's app you opened from a chat's Shared services dialog closes the app alone, as ✕ does: the dialog you opened it from stays open under it. Before, the same Escape closed both.
+
+**Settings**
+
+- With a Windows Contrast theme (forced colors) on, the two messages in Settings' Text size preview sit in bubbles with an edge, as they do in a chat. Before, they were two loose lines.
+
+**Updates**
+
+- With a Windows Contrast theme (forced colors) on, the new-version banner's Download (Ghostly Browser), Reload (web) and Restart (Desktop) keep the frame of a button. Before, they read as bare text beside the banner's words.
+
+**Web app**
+
+- A link in a contact's shared app that opens in a new tab (`target="_blank"` or `window.open`) opens again: tapped, a link to another website opens in a new tab of the browser, as Desktop opens it in the system browser. Before, it did nothing and said nothing. Links to this device or the local network still open nowhere.
+- Try again on a contact's shared app while they are offline now tries to reach them at once, says it is trying, and then opens the app or says they are still offline. Before, it did nothing, and the app came back only when Ghostly's own next attempt found them, up to minutes later.
+- Opening a contact's shared app twice in quick succession (Open tapped twice, or one app and then another, before the first is shown) shows only the last one. Before, both were drawn, the first hidden under the second while it kept sending requests to the contact.
+
+**Website**
+
+- On ghostly.tools, an app's page on a phone keeps its install steps inside the screen when the app's title is one long word, instead of cutting every step off at the edge.
+- On ghostly.tools, an app's page on a phone wraps a long unbroken word in its description, license or release notes (a payment address, a long name) inside the screen, instead of cutting it off at the edge.
+- In Windows high contrast, ghostly.tools shows which one is chosen again: the composition on /developers and its negotiation scenario, the stage on /roadmap, and the installer suggested for your computer on the home page.
+
+### For developers
+
+**CI**
+
+- CI's notice on a draft pull request names Website and Tauri Backend when the draft runs them. It said "the fast tier only (lint and types, the affected unit tests)" while a draft that changes the site or Rust runs those jobs too.
+
+**CLI**
+
+- `ghostly engine walletReceiveLightning` hides the Cashu mint quote id unless `--show-secret` is given.
+- The CLI README's list of socket methods now names every method the daemon answers, among them `group.rename`, `group.typing`, `group.auto`, `saved.*`, `app.*`, the status card methods (`button.*`, `task.*`, `routine.*`, `usage.send`) and `x401.*`. A test keeps the list matched to the daemon's.
+
 ## 1.11.3
 
 ### Security

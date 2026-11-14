@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { CliError } from "../src/errors";
 import { oneShotJoinWait } from "../src/main";
 
-const session = (wait: () => Promise<unknown>, get: () => Promise<unknown> = async () => ({ stage: "waiting" })) => ({
-  call: async (method: string) => method === "chat.wait" ? wait() : method === "chat.get" ? get() : Promise.reject(new Error(method)),
+const session = (wait: () => Promise<unknown>, get: (params: { chat: string }) => Promise<unknown> = async () => ({ id: "c1", stage: "waiting" })) => ({
+  call: async (method: string, params?: unknown) => method === "chat.wait" ? wait() : method === "chat.get" ? get(params as { chat: string }) : Promise.reject(new Error(method)),
 });
 
 describe("one-shot invite join", () => {
@@ -26,6 +26,16 @@ describe("one-shot invite join", () => {
     for (const label of ["O'Brien", "$work", "`id`", "a(b)", "bob&"]) {
       expect((await oneShotJoinWait(s, { chat: "c1" }, label)).note).toMatch(/ghostly chat wait c1 --until paired$/);
     }
+  });
+
+  it("names the chat by its id when its label names another chat too", async () => {
+    // Found in a bug hunt: a second join with the same `--label alice` (a new invite after one that never paired) was
+    // told `chat wait alice --until paired`, which answered that "alice" names more than one chat.
+    const s = session(async () => { throw new CliError("timeout", "t"); }, async ({ chat }) => {
+      if (chat === "c2") return { id: "c2", stage: "failed" };
+      throw new CliError("bad_request", `${JSON.stringify(chat)} names more than one chat: use its id`);
+    });
+    expect((await oneShotJoinWait(s, { chat: "c2" }, "alice")).note).toMatch(/ghostly chat wait c2 --until paired$/);
   });
 
   it("says a paired chat paired, without a note", async () => {

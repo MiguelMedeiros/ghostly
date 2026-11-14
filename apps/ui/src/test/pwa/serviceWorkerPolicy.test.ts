@@ -147,6 +147,12 @@ describe("what the build precaches", () => {
     expect(languages).toEqual({ fr: ["/assets/fr-abc.js"], ja: ["/assets/ja-abc.js"] });
   });
 
+  it("names the build's other hashed files, kept on their first use: an older cache that holds one passes it on at a deploy", () => {
+    const bundle = [...BUNDLE, { type: "asset", fileName: "assets/wallet-abc.wasm" }, { type: "asset", fileName: "assets/index-abc.js.map" }];
+    expect(serviceWorkerFiles(["manifest.json", "version.json"], bundle).lazy).toEqual(["/assets/arkade-abc.js", "/assets/dist-abc.js", "/assets/esm-abc.js",
+      "/assets/ethers-abc.js", "/assets/keet-identity-key-abc.js", "/assets/pubky-abc.js", "/assets/usdt-abc.js", "/assets/wallet-abc.wasm", "/assets/zod-abc.js"]);
+  });
+
   it("an online-only module another screen imports as it loads stays: the path to it is not the online flow's", () => {
     const bundle = BUNDLE.map((file) => file.fileName === "assets/Chat-abc.js" ? { ...file, imports: ["assets/vendor-abc.js", "assets/pubky-abc.js"] } : file);
     expect(optionalFiles(bundle).onlineOnly).not.toContain("assets/pubky-abc.js");

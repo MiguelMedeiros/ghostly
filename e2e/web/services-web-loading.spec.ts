@@ -45,7 +45,7 @@ test("a contact's app the contact's machine is slow to answer is said as opening
     await expect(open).toBeVisible({ timeout: 120_000 });
     await open.click();
     const view = person.page.locator("#ghostly-service-view");
-    const notice = view.getByRole("status");
+    const notice = view.getByTestId("service-view-offline");
     const frame = view.getByTestId("service-view-frame");
     // Said, and busy, while the contact's machine has not answered; the frame (the bridge's white page) under it unseen.
     // It was the bridge's white page alone, with nothing said, for as long as the contact took.
@@ -115,7 +115,7 @@ test("a contact's app is shown once its page is there, not held under \"Opening\
     await expect(demo.locator("#title")).toHaveText("Hello from the demo", { timeout: 60_000 });
     // The page is there: it is shown, though its picture is not (the frame's `load` waits for it, up to the 70 s
     // "too slow" answer). It stayed hidden under "Opening Demo…" all that time.
-    await expect(view.getByRole("status")).toBeHidden({ timeout: 15_000 });
+    await expect(view.getByTestId("service-view-offline")).toBeHidden({ timeout: 15_000 });
     await expect(view.getByTestId("service-view-frame")).toBeVisible();
   } catch (error) {
     await bot.attachLogs(info);

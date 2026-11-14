@@ -162,6 +162,22 @@ describe("several cards on one network", () => {
     expect(registry.views().map((v) => v.name)).toEqual(["Cashu", "Hub (NWC)", "Hub (NWC) 2"]);
   });
 
+  it("adding a card unseals no other card's secrets while those are connected: a 600,000-iteration key each was +320 ms per card", async () => {
+    const relay = "wss%3A%2F%2Frelay.example", secret = "cd".repeat(32);
+    const uri = (n: number) => `nostr+walletconnect://${n.toString(16).padStart(2, "0").repeat(32)}?relay=${relay}&secret=${secret}`;
+    const nwcFake: LightningProviderDescriptor = { ...nwc, create: async () => new FakeLightningProvider({ alias: "Hub via relay.example", settleMs: 600_000 }) };
+    const registry = new LightningCards("testnet", { descriptors: () => [cashuMint, nwcFake], host: () => ({ platform: "web" }), events: { changed: vi.fn(), received: vi.fn(), resolved: vi.fn() }, hasMints: () => true });
+    registries.push(registry);
+    await registry.start();
+    for (const n of [1, 2, 3]) await registry.add("nwc", { uri: uri(n) });
+    await registry.ensureReady();
+    const unsealed = vi.spyOn(crypto.subtle, "decrypt");
+    await registry.add("nwc", { uri: uri(4) });
+    await expect(registry.add("nwc", { uri: uri(2) })).rejects.toThrow("That wallet is already your card “Hub (NWC) 2”");
+    expect(unsealed.mock.calls.length, "secrets unsealed").toBe(0);
+    expect(registry.views().map((v) => v.name)).toEqual(["Cashu", "Hub (NWC)", "Hub (NWC) 2", "Hub (NWC) 3", "Hub (NWC) 4"]);
+  });
+
   it("names: the source's short name, a number when taken, renamable, unique", async () => {
     const { registry } = cards();
     await registry.start();

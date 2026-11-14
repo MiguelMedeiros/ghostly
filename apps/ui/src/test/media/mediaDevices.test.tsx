@@ -210,6 +210,9 @@ describe("Settings → Audio & video", () => {
     expect(devices.userMedia[0].constraints).toEqual({ audio: { deviceId: { exact: "mic-headset" } } });
     devices.userMedia[0].grant();
     expect(await screen.findByTestId("settings-microphone-level")).toHaveAttribute("role", "meter");
+    // Named for what it does next, never a toggle too: "Stop, pressed" read as stopped already.
+    expect(screen.getByTestId("settings-microphone-test")).toHaveAccessibleName("Stop");
+    expect(screen.getByTestId("settings-microphone-test")).not.toHaveAttribute("aria-pressed");
 
     await user.click(screen.getByTestId("settings-microphone-test"));
     expect(screen.queryByTestId("settings-microphone-level")).toBeNull();
@@ -223,6 +226,8 @@ describe("Settings → Audio & video", () => {
     expect(devices.userMedia[0].constraints).toEqual({ video: { deviceId: { exact: "cam-usb" } }, audio: false });
     devices.userMedia[0].grant();
     expect(await screen.findByTestId("settings-camera-video")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-camera-preview")).toHaveAccessibleName("Stop");
+    expect(screen.getByTestId("settings-camera-preview")).not.toHaveAttribute("aria-pressed");
   });
 
   it("says so when the device cannot be opened", async () => {
@@ -339,7 +344,7 @@ describe("Settings → Audio & video", () => {
       const { user } = renderApp(<MediaSettings />);
       await user.click(await screen.findByTestId("settings-microphone-test"));
       expect(await screen.findByTestId("settings-microphone-failed")).toBeInTheDocument();
-      expect(screen.getByTestId("settings-microphone-test")).toHaveAttribute("aria-pressed", "false");
+      expect(screen.getByTestId("settings-microphone-test")).toHaveAccessibleName("Test");
     });
 
     it("plays the test sound on the chosen speaker there", async () => {

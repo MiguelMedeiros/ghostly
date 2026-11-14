@@ -1754,6 +1754,11 @@ button[data-held] { opacity: 0.4; }
 .sidebar-header[data-labels="off"] .sidebar-header-action { width: 40px; gap: 0; }
 .sidebar-header[data-labels="off"] .sidebar-new-split > .sidebar-header-action { width: auto; }
 .sidebar-header[data-labels="off"] [data-testid="sidebar-chat-actions"] > .sidebar-header-action { width: 100%; }
+/* Still too wide without them (a phone at a large text size): the wordmark goes, the ghost stays; then Join takes only
+   its own width, not New's. */
+.sidebar-header[data-wordmark="off"] .sidebar-wordmark { display: none; }
+.sidebar-header[data-join="own"] [data-testid="sidebar-chat-actions"] { grid-template-columns: auto auto; }
+.sidebar-header[data-join="own"] [data-testid="sidebar-chat-actions"] > .sidebar-header-action { width: auto; }
 
 /* Which money: "Test money" or "Real money", wherever money moves. Words first; the colour only echoes them. */
 .network-tag{display:inline-block;padding:0 6px;border:1px solid currentColor;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.04em;line-height:1.7;text-transform:uppercase;vertical-align:middle;white-space:nowrap}

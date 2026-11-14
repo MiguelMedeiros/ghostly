@@ -25,9 +25,9 @@ const DID_KEY = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
 function Where() { return <p data-testid="where">{useLocation().pathname}</p>; }
 
 /** A message from the contact Alice (or from this profile, `mine`), rendered in a chat with her. */
-function bubble(text: string, { mine = false, language }: { mine?: boolean; language?: Language } = {}) {
+function bubble(text: string, { mine = false, forwarded, language }: { mine?: boolean; forwarded?: number; language?: Language } = {}) {
   return renderApp(<>
-    <MessageBubble message={{ id: "m1", text, sender: mine ? "me" : "peer", timestamp: 1_700_000_000_000 }} peerNick="Alice" peerPubKey="peer" />
+    <MessageBubble message={{ id: "m1", text, sender: mine ? "me" : "peer", timestamp: 1_700_000_000_000, forwarded }} peerNick="Alice" peerPubKey="peer" />
     <Where />
   </>, { language });
 }
@@ -455,5 +455,24 @@ describe("identity cards", () => {
     expect(await within(card).findByTestId("entity-identity-error")).toHaveTextContent("Could not resolve it");
     expect(asked.length).toBeGreaterThan(0);
     expect(asked.every(url => /^https:\/\/pkarr\.pubky\.(org|app)\//.test(url))).toBe(true);
+  });
+
+  it("with Hide my IP on, offers no lookup of a did:web someone else chose, and asks its server nothing", async () => {
+    const asked: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async input => { asked.push(String(input)); throw new TypeError("offline in tests"); });
+    // A contact's, and a copy of one I forwarded: a server someone else chose.
+    for (const shown of [{}, { mine: true, forwarded: 1 }]) {
+      const { engine, unmount } = bubble("did:web:contact.example.com", shown);
+      act(() => engine.update({ settings: { ...engine.state.settings, relayOnly: true } }));
+      const card = screen.getByTestId("entity-identity");
+      expect(within(card).queryByTestId("entity-identity-resolve")).toBeNull();
+      expect(within(card).getByTestId("entity-identity-where")).toHaveTextContent("Hide my IP is on, so contact.example.com, a server your contact chose, isn't contacted.");
+      unmount();
+    }
+    expect(asked).toEqual([]);
+    // My own did:web, written here: Look it up stays, as my own picture links load.
+    const { engine } = bubble("did:web:mine.example.com", { mine: true });
+    act(() => engine.update({ settings: { ...engine.state.settings, relayOnly: true } }));
+    expect(within(screen.getByTestId("entity-identity")).getByTestId("entity-identity-resolve")).toBeInTheDocument();
   });
 });

@@ -39,27 +39,49 @@ const picture = (p: DesktopPerson) => p.app.execute<{ width: number; time: numbe
 
 /**
  * Why a call window shows no picture, for a failure's report: the state of its <video> and of the stream it was
- * given, and whether a second <video> given that same stream shows a picture within 5 s. One there says the peer's
- * pictures reach the page and the window's own player never started; none says they stopped before it.
+ * given, whether a second <video> given that same stream shows a picture within 5 s, and whether a third given a
+ * canvas stream of its own does. A second one says the peer's pictures reach the page and the window's own player
+ * never started; none says they stopped before it. A player that failed (`error` 4, `network` 3: WebKitGTK found the
+ * stream "not supported") on a live track with frames coming is the engine's: the fresh canvas says whether this
+ * page can play any canvas stream then, or only this one cannot.
  */
 const noPicture = (p: DesktopPerson) => p.app.executeAsync<string>(`
   const done = arguments[arguments.length - 1];
   const video = document.querySelector('[data-testid="remote-video"]');
   const stream = video && video.srcObject;
-  const state = (v) => ({ width: v.videoWidth, time: v.currentTime, ready: v.readyState, network: v.networkState, paused: v.paused, error: v.error && v.error.message });
-  if (!stream) return done(JSON.stringify({ video: video && state(video), stream: null }));
+  const state = (v) => ({ width: v.videoWidth, time: v.currentTime, ready: v.readyState, network: v.networkState, paused: v.paused, error: v.error && v.error.message, code: v.error && v.error.code });
+  if (!stream) return done(JSON.stringify({ video: video && state(video), stream: null, hidden: document.hidden }));
   const tracks = stream.getTracks().map((t) => ({ kind: t.kind, state: t.readyState, muted: t.muted, enabled: t.enabled }));
-  const second = document.createElement("video");
-  second.muted = true;
-  second.autoplay = true;
-  second.playsInline = true;
-  second.style.cssText = "position:fixed;left:0;top:0;width:2px;height:2px;opacity:0;pointer-events:none";
-  document.body.append(second);
-  second.srcObject = stream;
+  const player = (source) => {
+    const v = document.createElement("video");
+    v.muted = true;
+    v.autoplay = true;
+    v.playsInline = true;
+    v.style.cssText = "position:fixed;left:0;top:0;width:2px;height:2px;opacity:0;pointer-events:none";
+    document.body.append(v);
+    v.srcObject = source;
+    return v;
+  };
+  const second = player(stream);
+  const canvas = document.createElement("canvas");
+  canvas.width = 64;
+  canvas.height = 48;
+  const own = canvas.captureStream(15).getVideoTracks()[0];
+  const third = player(new MediaStream([own]));
+  let n = 0;
+  const drawing = setInterval(() => {
+    const g = canvas.getContext("2d");
+    g.fillStyle = "hsl(" + (n++ * 30) + " 70% 50%)";
+    g.fillRect(0, 0, 64, 48);
+  }, 66);
   setTimeout(() => {
-    const seen = { video: state(video), tracks, second: state(second) };
-    second.srcObject = null;
-    second.remove();
+    const seen = { video: state(video), tracks, second: state(second), fresh: state(third), hidden: document.hidden };
+    clearInterval(drawing);
+    own.stop();
+    for (const v of [second, third]) {
+      v.srcObject = null;
+      v.remove();
+    }
     done(JSON.stringify(seen));
   }, 5000);`);
 

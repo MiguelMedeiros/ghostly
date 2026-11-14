@@ -6,7 +6,7 @@ import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { CARD_RESTORE_GAP_MS, EditBuffer, EditQueue } from "../src/engine/edits";
 import type { GroupEditsHost } from "../src/engine/groupEdits";
-import type { Removal } from "../src/engine/removals";
+import { QUOTE_SWEEP_MS, quoteSweepTiming, type Removal } from "../src/engine/removals";
 import { EDIT_HISTORY_KEEP, EDIT_HISTORY_MAX_BYTES, canEdit, takesPeerEdit, withEdit } from "../src/shared/edits";
 import type { StoredLink, StoredMessage } from "../src/shared/types";
 import { refusedRow } from "../src/shared/refusals";
@@ -23,6 +23,12 @@ Object.defineProperty(globalThis.navigator, "storage", { value: { estimate: asyn
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const step of cleanup.splice(0).reverse()) await step(); });
+
+/** For a test that waits for a gathered sweep of quotes to go (`QuoteSweeps`): 10 s each was most of this file's run. */
+function shortSweeps() {
+  quoteSweepTiming.ms = 2_000;
+  cleanup.push(async () => { quoteSweepTiming.ms = QUOTE_SWEEP_MS; });
+}
 
 async function setup(contactOptions: { editSupport?: boolean; pinSupport?: boolean; confirm?: () => boolean } = {}) {
   const net = new FakeNativeNet();
@@ -478,6 +484,7 @@ describe("the contact's edits", () => {
   });
 
   it("removals of ids never here read the chat for their quotes once a while, not once each, and still clear them", async () => {
+    shortSweeps();
     const t = await setup();
     // A reply whose original never came: its quote is only what the contact's app said.
     expect(await t.contact.sendMessage("their answer", Date.now(), WIRE("R"), undefined, { i: WIRE("a"), s: "never here", f: "sender" })).toBeNull();
@@ -491,6 +498,29 @@ describe("the contact's edits", () => {
     await vi.waitFor(async () => expect((await t.row(theirs.id)).replyTo).toMatchObject({ id: WIRE("a"), snippet: "" }), { timeout: 15_000, interval: 200 });
     expect(sweeps).toHaveBeenCalledTimes(2);
   }, 30_000);
+
+  it("purges of one chat at once share its reads for their quotes, and each answers with its quotes gone", async () => {
+    const t = await setup();
+    const originals: string[] = [], replies: string[] = [];
+    for (const n of [1, 2, 3, 4, 5, 6, 7, 8]) {
+      originals.push((await t.node.sendMessage({ linkId: t.id, text: `purge me ${n}` })).messageId!);
+      replies.push((await t.node.sendMessage({ linkId: t.id, text: `about ${n}`, replyTo: originals.at(-1)! })).messageId!);
+    }
+    const rows = await Promise.all(originals.map(id => t.row(id)));
+    const reads = vi.spyOn(t.node as unknown as { forgetQuotes(...args: unknown[]): Promise<string[]> }, "forgetQuotes");
+    // The first purge's read runs while the others come: they share the next.
+    const first = t.node.forgetQuotesOf(rows[0]);
+    await vi.waitFor(() => expect(reads).toHaveBeenCalledTimes(1), { interval: 1 });
+    await Promise.all([first, ...rows.slice(1).map(row => t.node.forgetQuotesOf(row))]);
+    expect(reads).toHaveBeenCalledTimes(2);
+    for (const id of replies) expect((await t.row(id)).replyTo).toMatchObject({ snippet: "" });
+    // Once those are done, a purge reads again: nothing it needs waits for a read that began before it.
+    expect(await t.node.sendMessage({ linkId: t.id, text: "about 1 again", replyTo: originals[0] })).toBeTruthy();
+    const again = (await t.messages()).find(m => m.text === "about 1 again")!;
+    await t.node.forgetQuotesOf(rows[0]);
+    expect(reads).toHaveBeenCalledTimes(3);
+    expect((await t.row(again.id)).replyTo).toMatchObject({ snippet: "" });
+  });
 
   it("a removal of a message already deleted here still leaves no line of it in the replies here that quote it", async () => {
     const t = await setup();
@@ -1136,6 +1166,7 @@ describe("deleting many of my group messages for everyone", () => {
   }, 60_000);
 
   it("a removal, mine or a member's, leaves no line of its message in the replies here that quote it", async () => {
+    shortSweeps();
     const me = createIdentity().pubKeyZ32, bob = createIdentity().pubKeyZ32, g = `quotes-${crypto.randomUUID()}`, chat = `group:${g}`;
     const [myOriginal, bobsOriginal, bobsReply, myReply] = [`${me}:1:1`, `${bob}:1:1`, `${bob}:1:2`, `${me}:1:2`];
     const quote = (id: string, author: string, snippet: string) => ({ id, snippet, from: author === me ? "me" as const : "peer" as const, member: author, messageId: id });
@@ -1225,6 +1256,7 @@ describe("deleting many of my group messages for everyone", () => {
   it("a member's removals of its messages here read the group for their quotes once a while, not once each, and still clear them", async () => {
     // A member (a bot's passing notes, a script) can post and delete for everyone at the pace of edits: each read a long
     // group whole on every member's device.
+    shortSweeps();
     const me = createIdentity().pubKeyZ32, bob = createIdentity().pubKeyZ32, g = `here-${crypto.randomUUID()}`, chat = `group:${g}`;
     const ids = Array.from({ length: 12 }, (_, n) => `${bob}:1:${n + 1}`), reply = `${me}:1:1`;
     for (const [n, id] of ids.entries()) await db.addMessage({ linkId: chat, id, text: `note ${n}`, sender: "peer", member: bob, timestamp: n + 1, via: "datalink" });

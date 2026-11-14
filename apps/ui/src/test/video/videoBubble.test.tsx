@@ -423,7 +423,8 @@ describe("a video in the chat", () => {
     };
     await enter();
     expect(fullscreenWindow).toHaveBeenLastCalledWith(true);
-    expect(screen.getByRole("button", { name: "Exit full screen" })).toHaveAttribute("aria-pressed", "true");
+    // Named for what it does next, never a toggle too: "Exit full screen, pressed" read as left already.
+    expect(screen.getByRole("button", { name: "Exit full screen" })).not.toHaveAttribute("aria-pressed");
     // Escape leaves it, the window with it; the video goes on. The Escape is spent (false: its default prevented), so
     // a notice at the top that also answers Escape stays.
     expect(fireEvent.keyDown(document, { key: "Escape" })).toBe(false);

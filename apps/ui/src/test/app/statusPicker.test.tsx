@@ -8,6 +8,7 @@ import { StatusPickerHost } from "../../components/StatusPicker";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { PRESENCE_TELL_EVERY_MS, usePresence } from "../../hooks/useOwnStatus";
+import { statusEndText } from "../../lib/ownStatus";
 import { Settings } from "../../pages/Settings";
 import { axeViolations } from "../axe";
 import { fakeEngine } from "../fakeEngine";
@@ -181,11 +182,26 @@ describe("the status picker in the account menu", () => {
     await choose(user, within(dialog).getByTestId("status-end"), "today");
     await user.click(within(dialog).getByRole("button", { name: "Save" }));
     expect(engine.callsTo("setOwnStatus")[0]).toEqual({ status: { availability: "available", text: "Out", until: new Date(2026, 10, 10).getTime() } });
+    // Read as the end of today, not as tomorrow's weekday at midnight.
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await user.click(screen.getByTestId("account-profile"));
+    const row = await screen.findByTestId("profile-switcher-status");
+    await waitFor(() => expect(row).toHaveAccessibleName(/^Your status: Available, ⁨Out⁩, until 11:59\sPM\. Change status$/));
+    expect(row).toHaveTextContent(/until 11:59\sPM$/);
+    await user.keyboard("{Escape}");
 
     dialog = await openPicker(user);
+    expect(within(dialog).getByTestId("status-end")).toHaveTextContent(/Until 11:59\sPM/);
     await choose(user, within(dialog).getByTestId("status-end"), "never");
     await user.click(within(dialog).getByRole("button", { name: "Save" }));
     expect(engine.callsTo("setOwnStatus")[1]).toEqual({ status: { availability: "available", text: "Out" } });
+  });
+
+  it("writes an end at midnight as the last minute of the day before: This week's end is that day's", () => {
+    // Monday 10:00; a week ending as Sunday starts reads Saturday.
+    expect(statusEndText(new Date(2026, 10, 15).getTime(), "en", NOW)).toMatch(/^Sat 11:59\sPM$/);
+    expect(statusEndText(new Date(2026, 10, 10).getTime(), "ar", NOW)).not.toContain("الثلاثاء");
+    expect(statusEndText(new Date(2026, 10, 9, 23, 0).getTime(), "en", NOW)).toMatch(/^11:00\sPM$/);
   });
 
   it("in Arabic, keeps the person's text isolated in the menu row and in its name", async () => {
@@ -196,6 +212,9 @@ describe("the status picker in the account menu", () => {
     await waitFor(() => expect(row.querySelector("bdi")).toHaveTextContent("At lunch"));
     expect(row.querySelector("bdi")).toHaveAttribute("dir", "auto");
     expect(row.getAttribute("aria-label")).toContain("⁨At lunch⁩");
+    // Its parts listed the way Arabic lists them, not with an English comma.
+    expect(row.getAttribute("aria-label")).toContain("مشغول و🍕 ⁨At lunch⁩");
+    expect(row.getAttribute("aria-label")).not.toContain(",");
     await user.click(row);
     const dialog = await screen.findByRole("dialog", { name: "الحالة" });
     expect(within(dialog).getByRole("textbox")).toHaveAttribute("dir", "auto");
