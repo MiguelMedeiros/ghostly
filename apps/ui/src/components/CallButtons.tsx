@@ -35,7 +35,7 @@ export function CallButtons({ blocked, busy, onCall, phone }: CallButtonsProps) 
       <button
         onClick={() => press(false)}
         aria-disabled={off || undefined}
-        className={`${phone ? "w-11 h-11 flex items-center justify-center" : "p-2 max-md:px-2 max-md:py-2.5"} text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer ${offLook}`}
+        className={`${phone ? "w-[44px] h-[44px] flex items-center justify-center" : "p-2 max-md:px-2 max-md:py-2.5"} text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer ${offLook}`}
         title={blocked ?? t("calls.audio")}
         aria-label={t("calls.audio")}
         data-testid="call-audio"
