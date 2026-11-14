@@ -234,9 +234,10 @@
     "listSeparator": ", ",
     "sendUnavailable": "Une demande au groupe est payée par un membre ; pour payer quelqu’un, choisissez-le",
     "status": {
-      "claimedPaid": "{{names}} a payé · en attente du portefeuille de {{to}}",
+      "claimedPaid": "{{names}} ont payé · en attente du portefeuille de {{to}}",
       "claimedPaidByMe": "Vous avez payé · en attente du portefeuille de {{to}}",
       "claimedPaidToMe": "{{names}} ont payé · en attente de votre portefeuille",
+      "claimedPaidWithMe": "Vous et {{names}} avez payé · en attente du portefeuille de {{to}}",
       "closed": "Fermé",
       "paid": "Payé",
       "paidBy": "Payé par {{name}}",
