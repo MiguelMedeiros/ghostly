@@ -253,8 +253,17 @@ function noRemovalOnItsWay(ctx: ApiContext, linkIds: readonly string[], clearing
   throw new CliError("confirm", `${one ? "A message you deleted for everyone has" : `${n} messages you deleted for everyone have`} not reached the contact yet: ${now} now leaves ${one ? "it" : "them"} on their device. Keep this profile online until the contact is reachable (ghostly daemon --detach) and ${then}, or pass --force (force: true over the socket) to ${go} now`, { messages: pending });
 }
 
-/** Stages of a link join that waiting does not change: the group is full, this key is kept out, or the link was replaced. */
-const JOIN_ENDED = new Set(["full", "blocked", "replaced"]);
+/**
+ * Stages a one-shot `group join` stops waiting at. The link was replaced: knocking again does not get in. The group
+ * has no room yet (`full`, or `blocked` while it waits for every member's app to take more than eight): the engine
+ * goes on knocking until there is room, which a minute's wait seldom sees, so it says that the knock goes on only
+ * while the profile runs.
+ */
+const NO_ROOM: Record<string, string> = {
+  full: "No room yet: the group is full",
+  blocked: "No room yet: the group waits for every member's app to take more than eight members",
+};
+const JOIN_STOPS = new Set(["replaced", ...Object.keys(NO_ROOM)]);
 /** How long a one-shot `group join` waits to be let in: as long as a one-shot `invite join` waits to pair. */
 const ONE_SHOT_JOIN_S = 60;
 
@@ -266,12 +275,15 @@ const ONE_SHOT_JOIN_S = 60;
  */
 async function letIn(ctx: ApiContext, groupId: string): Promise<Record<string, unknown>> {
   const seen = (s: EngineState) => s.groups.find((g) => g.id === groupId);
-  const done = (g: GroupView | undefined) => !g || g.status === "active" || JOIN_ENDED.has(g.invitation?.stage ?? "");
+  const done = (g: GroupView | undefined) => !g || g.status === "active" || JOIN_STOPS.has(g.invitation?.stage ?? "");
   const group = await waitForState(ctx, (s) => { const g = seen(s); return done(g) ? { g } : undefined; }, ONE_SHOT_JOIN_S * 1000, `group ${groupId} to let this profile in`)
     .then(({ g }) => g, (error: unknown) => { if (error instanceof CliError && error.code === "timeout") return seen(state(ctx)); throw error; });
   const joined = group?.status === "active", stage = group?.invitation?.stage ?? null;
-  if (joined || !group || JOIN_ENDED.has(stage ?? "")) return { group: groupId, joined, stage };
-  return { group: groupId, joined, stage, warning: `Not in yet: no member's app has let you in. A member's app lets you in only while this profile is running: keep it running (ghostly daemon --detach), then ghostly group show ${shellWord(groupId)}` };
+  if (joined || !group || stage === "replaced") return { group: groupId, joined, stage };
+  const show = `keep it running (ghostly daemon --detach), then ghostly group show ${shellWord(groupId)}`;
+  const noRoom = stage ? NO_ROOM[stage] : undefined;
+  if (noRoom) return { group: groupId, joined, stage, warning: `${noRoom}. Your app goes on knocking only while this profile is running, and gets in when there is room: ${show}` };
+  return { group: groupId, joined, stage, warning: `Not in yet: no member's app has let you in. A member's app lets you in only while this profile is running: ${show}` };
 }
 
 const METHODS: Record<string, Method> = {
