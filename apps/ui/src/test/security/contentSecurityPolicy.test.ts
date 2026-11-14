@@ -247,6 +247,18 @@ describe("nothing written into a page on its way", () => {
   });
 });
 
+describe("a contact's app origin", () => {
+  // Every location there, the bridge's files first: the browser keys an origin's agent cluster by the first page of it
+  // that loads, and the apps' origins share the services host's site (ORIGIN_AGENT_CLUSTER, apps/web/src/svc/protocol.ts).
+  it("asks for an agent cluster of its own at every location, as the services worker does", async () => {
+    const { ORIGIN_AGENT_CLUSTER } = await import("../../../../web/src/svc/protocol");
+    const locations = [...read("apps/web/nginx-services.conf").replace(/#.*$/gm, "").matchAll(/location\s+([^{]+?)\s*\{([^}]*)\}/g)];
+    const answering = locations.filter(([, match]) => !match!.trim().startsWith("@"));
+    expect(answering.length).toBe(3);
+    for (const [, match, body] of answering) expect(body, match).toContain(`add_header Origin-Agent-Cluster "${ORIGIN_AGENT_CLUSTER}" always;`);
+  });
+});
+
 describe("the web app's window", () => {
   // A page of another site that opened the app would keep a handle to its window, and could set its address again and
   // again (an invite link each time) without a reload. The header cuts that handle; `-allow-popups` keeps the windows
