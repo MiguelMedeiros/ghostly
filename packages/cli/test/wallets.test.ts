@@ -201,6 +201,24 @@ describe("wallets", () => {
     expect(await callApi(ctx, "wallet.faucet", { type: "lightning", card: "cashu" })).toEqual({ amount: 10000, unit: "test sats" });
   });
 
+  it("an empty --card is a usage error, not the network's default card or the whole wallet", async () => {
+    // Found in a bug hunt: `wallet remove cashu --card "$CARD"` with CARD unset removed the whole Cashu wallet (exit 0),
+    // and `pay … --card ""` paid from the default card, as if no card had been named.
+    const { ctx, node } = fake();
+    for (const [method, params] of [
+      ["wallet.remove", { type: "cashu", card: "" }],
+      ["wallet.remove", { type: "lightning", card: "" }],
+      ["wallet.faucet", { type: "lightning", card: "" }],
+      ["wallet.receive", { amount: 10, card: "" }],
+      ["pay", { target: "lnbc1", card: "" }],
+      ["chat.request", { chat: "Alice", amount: 10, card: "" }],
+      ["chat.payRequest", { chat: "Alice", payment: "test", card: "" }],
+    ] as const) {
+      await expect(callApi(ctx, method, params), method).rejects.toMatchObject({ code: "usage", message: "--card needs a Lightning card id (ghostly wallet list)" });
+    }
+    for (const fn of [node.walletRemove, node.walletTestCoins, node.walletReceiveLightning, node.walletQuoteInvoice, node.requestPayment, node.payRequest]) expect(fn).not.toHaveBeenCalled();
+  });
+
   it("the faucet is Testnet's only", async () => {
     const { ctx } = fake();
     await expect(callApi(ctx, "wallet.faucet", { type: "cashu", network: "mainnet" })).rejects.toMatchObject({ code: "refused" });
