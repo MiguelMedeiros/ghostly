@@ -10,6 +10,7 @@ import { callApi, type ApiContext } from "../src/api";
 import { NodeFileBytes } from "../src/runtime/fileBytes";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 import { H264_MP4, PLACE, hasPlace, withMovie, xyzUdta } from "../../core/test/support/videoFixtures";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.files, files.video.metadata
 
 /** `file send` of a video: it leaves without where it was recorded, as the apps send it; one that cannot be stripped is refused. */
@@ -29,6 +30,7 @@ beforeAll(async () => {
 describe("file send of a video", () => {
   const sent: MessageFile[] = [];
   const node = {
+    chatView: chatViewOf,
     getState: () => ({ links: [link], groups: [group], settings: {}, transport: {}, transfers: {} }) as unknown as EngineState,
     getMessages: vi.fn(async () => []),
     getMessage: vi.fn(async () => undefined),

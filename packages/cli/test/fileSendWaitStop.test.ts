@@ -10,6 +10,7 @@ import { serve, type Host } from "../src/host";
 import { lockPath } from "../src/profiles";
 import { NodeFileBytes } from "../src/runtime/fileBytes";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.daemon, headless.files
 
 /**
@@ -37,6 +38,7 @@ describe.skipIf(process.platform === "win32")("a daemon that stops while a file 
     let sending: string | undefined;
     let sentAt = 0;
     const node = {
+      chatView: chatViewOf,
       getState: () => ({ links: [link], groups: [], settings: {}, transport: {}, transfers: sending ? { [sending]: { state: "transferring", direction: "out", transferred: 4, size: 8, stage: "sending" } } : {} }) as unknown as EngineState,
       getMessages: async () => [],
       getMessage: async () => undefined,
