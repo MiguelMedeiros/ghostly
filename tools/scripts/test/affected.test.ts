@@ -77,7 +77,9 @@ describe("a UI-only change", () => {
     expect(unit.ui.mode).toBe("related");
     expect(unit.ui.files).toEqual(["apps/ui/src/components/PaymentComposer.tsx"]);
     expect(unit.extension.mode).toBe("related");
-    for (const name of ["core", "browser", "sdk", "matrix", "scripts"]) expect(unit[name].mode).toBe("skip");
+    for (const name of ["core", "browser", "sdk", "matrix"]) expect(unit[name].mode).toBe("skip");
+    // Of the scripts, only the one that checks the UI's imports are declared.
+    expect(unit.scripts.files).toEqual(["tools/scripts/test/workspaceDepsDeclared.test.ts"]);
   });
 
   it("lints the file and typechecks what compiles apps/ui/src/, not the packages under it", () => {
@@ -459,7 +461,8 @@ describe("fallbacks", () => {
     const p = plan({ changed: changed("packages/core/src/index.ts"), inventory, e2eFiles, codeFiles: {} });
     const unit = byName(p.unit);
     for (const name of ["core", "browser", "sdk", "extension", "ui", "cli"]) expect(unit[name].mode).toBe("whole");
-    for (const name of ["matrix", "scripts"]) expect(unit[name].mode).toBe("skip");
+    expect(unit.matrix.mode).toBe("skip");
+    expect(unit.scripts.files).toEqual(["tools/scripts/test/workspaceDepsDeclared.test.ts"]);
     expect(p.e2e.mode).toBe("whole");
     expect(p.e2e.specs).not.toContain("e2e/desktop/smoke.spec.ts");
   });
@@ -563,6 +566,11 @@ describe("the rest", () => {
       ["rust-toolchain.toml", "rustToolchain.test.ts"],
       ["native/transports/iroh-web/src/lib.rs", "irohWebBuild.test.ts"],
       ["packages/iroh-web/pkg/ghostly_iroh_web_bg.wasm", "irohWebBuild.test.ts"],
+      // It lists the files with git, so no path of them is in its text: an import added or a dependency dropped.
+      ["packages/browser/src/shared/features.ts", "workspaceDepsDeclared.test.ts"],
+      ["packages/browser/package.json", "workspaceDepsDeclared.test.ts"],
+      ["apps/ui/src/components/rich/highlight.ts", "workspaceDepsDeclared.test.ts"],
+      ["apps/mini/chess/package.json", "workspaceDepsDeclared.test.ts"],
     ];
     for (const [file, test] of cases) {
       const p = scripts(file);
