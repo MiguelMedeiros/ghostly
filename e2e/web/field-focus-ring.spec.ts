@@ -6,6 +6,8 @@ import { expect, test } from "../support/fixtures";
  * The fields people type into show where the keyboard focus is: a ring around the chat list's search, the composer and
  * a chat's search, 3:1 or more against the colours on both of its sides (WCAG 2.4.11 and 1.4.11), in every colour theme,
  * light and dark. Before, each had `outline: none` and no ring: only the caret said where the focus was.
+ * And the buttons most screens use (components/wallet/ui.tsx's Button): before, the browser's own one-pixel ring, which
+ * Chromium drew in a colour of its choosing, as dark as a dark page beside a primary button.
  */
 
 const THEMES = ["classic", "cyan", "purple", "monochrome"] as const;
@@ -37,7 +39,8 @@ async function look(page: Page, colorTheme: string, scheme: "light" | "dark") {
 
 /**
  * The outline on `ring` (the field, or the shape around it): the lower of its contrasts with the background inside it
- * and the one outside it (WCAG's formula). 0 with no outline of 2 px or more.
+ * and the one outside it (WCAG's formula). An outline drawn off the element (a positive offset) has what is around the
+ * element on both of its sides. 0 with no outline of 2 px or more.
  */
 const ringContrast = (ring: Locator) => ring.evaluate((el) => {
   const rgb = (c: string) => (c.match(/[\d.]+/g) ?? []).slice(0, 4).map(Number);
@@ -53,7 +56,8 @@ const ringContrast = (ring: Locator) => ring.evaluate((el) => {
   if (style.outlineStyle === "none" || parseFloat(style.outlineWidth) < 2) return 0;
   const ring = lum(rgb(style.outlineColor));
   const ratio = (other: number) => (Math.max(ring, other) + 0.05) / (Math.min(ring, other) + 0.05);
-  return Math.min(ratio(lum(background(el))), ratio(lum(background(el.parentElement))));
+  const inside = parseFloat(style.outlineOffset) > 0 ? el.parentElement : el;
+  return Math.min(ratio(lum(background(inside))), ratio(lum(background(el.parentElement))));
 });
 
 test("the chat list's search, the composer and a chat's search show a ring with the focus, 3:1 or more in every theme", { tag: ["@feature:app.keyboard", "@feature:app.theme", "@feature:chat.search"] }, async ({ peer }) => {
@@ -91,6 +95,30 @@ test("the chat list's search, the composer and a chat's search show a ring with 
         await expect(field).not.toBeFocused();
         expect(await ringContrast(ring), `${name} without the focus, ${theme} ${scheme}`).toBe(0);
       }
+    }
+  }
+});
+
+test("the wallets' buttons, a filled one and a framed one, show a ring with the focus, 3:1 or more in every theme", { tag: ["@feature:app.keyboard", "@feature:app.theme"] }, async ({ peer }) => {
+  test.setTimeout(3 * 60_000);
+  const { page } = await peer("ring-buttons");
+  await page.goto("/#/wallet");
+  // A new profile's Wallets: Start on Testnet (primary, the accent's fill) and Start on Mainnet (secondary).
+  const buttons: [string, Locator][] = [["Start on Testnet", page.getByTestId("wallet-first-testnet")], ["Start on Mainnet", page.getByTestId("wallet-first-mainnet")]];
+  for (const theme of THEMES) {
+    for (const scheme of ["light", "dark"] as const) {
+      await look(page, theme, scheme);
+      for (const [name, button] of buttons) {
+        // Reached with the keyboard, as :focus-visible asks.
+        await button.focus();
+        await page.keyboard.press("Shift+Tab");
+        await page.keyboard.press("Tab");
+        await expect(button).toBeFocused();
+        // The button's colours fade in (transition-colors), its ring's too: read once it is there.
+        await expect.poll(() => ringContrast(button), { message: `${name}, ${theme} ${scheme}` }).toBeGreaterThanOrEqual(3);
+      }
+      await page.keyboard.press("Tab");
+      expect(await ringContrast(buttons[1][1]), `Start on Mainnet without the focus, ${theme} ${scheme}`).toBe(0);
     }
   }
 });
