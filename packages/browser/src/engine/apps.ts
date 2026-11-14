@@ -2421,12 +2421,16 @@ export class Apps {
   /**
    * The row an app's key names: its own, or else one kept under a key with a lone surrogate that the broker lists with
    * U+FFFD in its place. Such keys were kept before the broker refused them; without this, what `storage.keys` listed
-   * could be neither read nor deleted, and its bytes stayed counted against the scope.
+   * could be neither read nor deleted, and its bytes stayed counted against the scope. Only the keys that could be it are
+   * read: the same up to the first U+FFFD, then a surrogate or U+FFFD (every key of a full scope took 380 ms in Chromium,
+   * at each read, write and delete of a new key with U+FFFD).
    */
   private async rowOf(ref: string, scope: string, key: string): Promise<AppStorageRow | undefined> {
     const row = await wrap<AppStorageRow | undefined>((await store(STORES.appStorage, "readonly")).get([ref, scope, key]));
     if (row || !key.includes(REPLACEMENT)) return row;
-    const keys = await wrap((await store(STORES.appStorage, "readonly")).getAllKeys(keysOf(ref, scope))) as [string, string, string][];
+    const same = key.slice(0, key.indexOf(REPLACEMENT));
+    const near = IDBKeyRange.bound([ref, scope, `${same}\uD800`], [ref, scope, `${same}￾`], false, true);
+    const keys = await wrap((await store(STORES.appStorage, "readonly")).getAllKeys(near)) as [string, string, string][];
     const kept = keys.find((k) => k[2] !== key && asListed(k[2]) === key);
     return kept ? wrap<AppStorageRow | undefined>((await store(STORES.appStorage, "readonly")).get(kept)) : undefined;
   }
