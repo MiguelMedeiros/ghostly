@@ -247,12 +247,29 @@ function hasMnemonic(tokens: string[] | null, seed: SeedWords): boolean {
  * word "word" in its labels and a list in two columns ("1. … 13. …") still make one run. The spaces on each side of a
  * mark are one run when the mark is not there: two that could split it tried every split, and a draft of a number, a
  * word and long runs of spaces took the reader minutes.
+ *
+ * As people write such a list too: "1 – word" (a phone's smart dash), markdown ("**1.** word", "| 1 | word |"), the
+ * word in quotes or with a period, a bullet or a "|" between the columns, the number after the word ("word (1)"), and
+ * any script's digits, and the fullwidth "１．word" a Japanese or Chinese keyboard writes.
  */
-const NUMBERED = /(?<![\p{L}\p{N}.,])(?:word\s*)?#?(\d{1,2})\s*(?:[.:)-]\s*)?(\p{L}+)(?=[^\S\r\n]*(?:[,;][^\S\r\n]*)?(?:$|\r?\n|(?:word\s*)?#?\d))/gimu;
+const BETWEEN = String.raw`[^\S\r\n]*(?:[,;.|*_"'“”‘’«»」』•·\-–—，；．｜、。][^\S\r\n]*){0,6}`;
+const NUMBERED = new RegExp(String.raw`(?<![\p{L}\p{N}.,])(?:word\s*)?[#＃]?(\p{Nd}{1,2})\s*(?:[*_]{0,2}[.:)|\-–—．：）｜][*_]{0,2}\s*|[*_]{1,2}\s*)?["'“‘«「『*_]{0,2}(\p{L}+)(?=${BETWEEN}(?:$|\r?\n|(?:word\s*)?[#＃]?\p{Nd}))`, "gimu");
+const NUMBER_AFTER = new RegExp(String.raw`(?<![\p{L}\p{N}])(\p{L}+)[^\S\r\n]*[(\[（](\p{Nd}{1,2})[)\]）](?=${BETWEEN}(?:$|\r?\n|\p{L}+[^\S\r\n]*[(\[（]\p{Nd}))`, "gmu");
 
 function numbered(text: string): { numbers: number[]; words: string[] } | null {
-  const pairs = [...text.matchAll(NUMBERED)];
-  return pairs.length < 12 ? null : { numbers: pairs.map((pair) => Number(pair[1])), words: pairs.map((pair) => pair[2]) };
+  let pairs = [...text.matchAll(NUMBERED)].map(([, number, word]) => [number, word]);
+  if (pairs.length < 12) pairs = [...text.matchAll(NUMBER_AFTER)].map(([, word, number]) => [number, word]);
+  return pairs.length < 12 ? null : { numbers: pairs.map(([number]) => digits(number)), words: pairs.map(([, word]) => word) };
+}
+
+/** A number in any script's digits: each block of them runs 0 to 9 in order. */
+function digits(number: string): number {
+  return Array.from(number).reduce((value, digit) => {
+    const at = digit.codePointAt(0)!;
+    let zero = at;
+    while (/\p{Nd}/u.test(String.fromCodePoint(zero - 1))) zero--;
+    return value * 10 + ((at - zero) % 10);
+  }, 0);
 }
 
 /**
