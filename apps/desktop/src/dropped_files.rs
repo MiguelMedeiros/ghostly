@@ -543,10 +543,7 @@ mod tests {
             .build()
             .unwrap();
         let dropped = app.state::<DroppedFiles>();
-        dropped.put(
-            vec![plain, dir.join("report.txt")],
-            Instant::now(),
-        );
+        dropped.put(vec![plain, dir.join("report.txt")], Instant::now());
         assert_eq!(
             tauri::async_runtime::block_on(choose_dropped_files(main.clone())),
             Err(READ_INSTEAD.into())
