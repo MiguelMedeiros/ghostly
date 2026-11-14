@@ -5,6 +5,7 @@ import { isViewerOrigin, parseViewerUrl, viewerUrl, VIEWER_URL_PATTERN } from ".
 import { rememberPendingUpdate, takePagesToReopen } from "./updates";
 import { localOriginAllowed } from "./localAllowList";
 import servicesEn from "../../ui/src/locales/en/services.json";
+import { isLocalHost } from "../../ui/src/lib/localHost";
 
 /**
  * The service worker does what only it can: keep the peer (the offscreen
@@ -417,6 +418,48 @@ const VIEWER_COMMANDS = new Set(["Fetch.enable", "Page.enable", "Fetch.fulfillRe
  */
 const sandboxed = (policy: string) => `${policy}; sandbox allow-scripts allow-same-origin allow-forms`;
 
+/**
+ * Least time between two links a viewer tab opens outside, and the most it opens (counted while this worker runs): as
+ * the web view (`openOutside` in apps/web/src/svc/opener.ts) and Desktop's viewer window, so an app that asks on every
+ * tap does not fill the browser with tabs.
+ */
+const LINK_SPACING_MS = 2_000;
+const LINKS_PER_TAB = 20;
+const linksOpened = new Map<number, { count: number; last: number }>();
+
+/**
+ * Where a link the app opens in a new window goes, as on the web and Desktop: a plain http(s) link to another site, in
+ * a tab of the browser that is no viewer. Null for anything else, a site on this machine or the local network
+ * (`isLocalHost`), whose request would carry the browser's cookies there, and an app's origin (a tab there would serve
+ * no app, and outlive every close).
+ */
+function outsideLink(url: unknown): string | null {
+  if (typeof url !== "string" || url.length > 4096) return null;
+  let link: URL;
+  try { link = new URL(url); } catch { return null; }
+  if ((link.protocol !== "http:" && link.protocol !== "https:") || link.href.length > 4096) return null;
+  const name = link.hostname.toLowerCase().replace(/\.$/, "");
+  if (isLocalHost(name) || name.endsWith(".invalid")) return null;
+  return link.href;
+}
+
+/**
+ * A link the app opens in a new window (a `target="_blank"` link, `window.open`), which the sandbox drops with no
+ * word: Chrome still tells DevTools (`Page.windowOpen`), and whether the person's tap or key in the tab asked for it,
+ * which no script of the app can fake. Opened in a new tab with no opener and no referrer, only from a viewer tab.
+ */
+async function openOutside(tabId: number, url: unknown, userGesture: unknown): Promise<void> {
+  const link = outsideLink(url);
+  if (userGesture !== true || !link) return;
+  const now = Date.now();
+  const opened = linksOpened.get(tabId) ?? { count: 0, last: -Infinity };
+  if (opened.count >= LINKS_PER_TAB || now - opened.last < LINK_SPACING_MS) return;
+  // Counted before the read below, so a second ask meanwhile is spaced from this one.
+  linksOpened.set(tabId, { count: opened.count + 1, last: now });
+  if (!(await bindingOf(tabId))) return;
+  await chrome.tabs.create({ url: link });
+}
+
 interface PausedRequest {
   requestId: string;
   resourceType?: string;
@@ -466,7 +509,10 @@ const forget = (tabId: number) => chrome.storage.session.remove(bindingKey(tabId
  */
 let viewersClosed = 0;
 
-chrome.tabs.onRemoved.addListener((tabId) => void forget(tabId));
+chrome.tabs.onRemoved.addListener((tabId) => {
+  linksOpened.delete(tabId);
+  void forget(tabId);
+});
 
 /**
  * A reload of the extension (Update and restart, chrome://extensions, turned off and on) empties session storage, but a
@@ -772,6 +818,9 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
     void forget(tabId)
       .then(() => chrome.debugger.detach({ tabId }).catch(() => {}))
       .then(() => (close ? chrome.tabs.remove(tabId).catch(() => {}) : undefined));
+  } else if (method === "Page.windowOpen") {
+    const { url, userGesture } = params as { url?: unknown; userGesture?: unknown };
+    openOutside(tabId, url, userGesture).catch(() => {});
   }
 });
 
