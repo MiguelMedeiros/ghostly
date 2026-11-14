@@ -42,6 +42,7 @@
     "elsewhere": "{{app}} ha provato a mandarti altrove, fuori da ciò che il tuo contatto condivide.",
     "failed": "La richiesta non è riuscita.",
     "label": "{{app}}, condivisa da {{contact}}",
+    "loading": "Apertura di {{app}} sul computer del tuo contatto…",
     "notAnswering": "{{app}} non risponde sul computer del tuo contatto. Chiedi al tuo contatto di controllare che sia in esecuzione.",
     "offline": "Il tuo contatto è offline, quindi {{app}} non può aprirsi ora. Si riaprirà qui quando tornerà.",
     "owner": "App di {{contact}}, in esecuzione sul suo computer. Non è Ghostly: non digitare mai qui le tue parole di recupero o le password.",

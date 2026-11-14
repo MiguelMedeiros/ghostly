@@ -149,6 +149,11 @@ export const BRIDGE_CLEARED = "ghostly-svc-cleared";
  * person's tap (`outsideLink` in opener.ts), as Desktop sends it to the system browser.
  */
 export const BRIDGE_OPEN_LINK = "ghostly-svc-open-link";
+/**
+ * The bridge says a page of the contact's app has loaded in its frame (each one it may show): until the first, the app
+ * says it is opening it, over the frame, rather than showing the bridge's empty page.
+ */
+export const BRIDGE_SHOWN = "ghostly-svc-shown";
 
 /** A request the app takes from a port: anything else (a page of the contact's posting to it) is dropped. */
 export function readRequest(data: unknown): ServiceRequestMessage | null {
