@@ -1,6 +1,7 @@
 import { foldText } from "@ghostly/browser/shared/fold";
 import { englishT, type Translate } from "../locales/translate";
 import { parseMessage, type Block, type ListBlock, type MdLinkData, type Segment } from "./parse";
+import { markMentions, type MentionView } from "./parse/mentions";
 import type { ChatFile, ChatMessage } from "./types";
 
 /**
@@ -28,24 +29,27 @@ const MARKUP = /[*_~|`[]/;
  * words count (they show once tapped); a `[label](link)` is found by its label in place and by its address, after the
  * rest, so the address never runs into the words around the label.
  */
-function shownText(text: string): string {
-  if (!MARKUP.test(text)) return text;
-  let shown = shownCache.get(text);
+function shownText(text: string, mentions?: readonly MentionView[]): string {
+  if (!mentions?.length && !MARKUP.test(text)) return text;
+  // A group message's mentions read as its bubble shows them, "@" and the member's name now (parse/mentions).
+  const key = mentions?.length ? [text, ...mentions.map(m => `${m.o}:${m.l}:${m.name}`)].join("\u0000") : text;
+  let shown = shownCache.get(key);
   if (shown === undefined) {
     // An open search folds the chat again for each message that comes: a formatted text is parsed once, not each time.
     if (shownCache.size >= SHOWN_CACHE_MAX) shownCache.clear();
-    shown = parsedText(text);
-    shownCache.set(text, shown);
+    shown = parsedText(text, mentions);
+    shownCache.set(key, shown);
   }
   return shown;
 }
 const SHOWN_CACHE_MAX = 20_000;
 const shownCache = new Map<string, string>();
 
-function parsedText(text: string): string {
+function parsedText(text: string, mentions?: readonly MentionView[]): string {
   const links: string[] = [];
   const segments = (list: readonly Segment[]): string => list.map((segment) => {
     if (segment.type === "span") return segments(segment.children);
+    if (segment.type === "atom" && segment.kind === "member-mention") return `@${(segment.data as MentionView).name}`;
     if (segment.type !== "atom" || segment.kind !== "md-link") return segment.text;
     const data = segment.data as MdLinkData;
     links.push(data.url);
@@ -60,7 +64,8 @@ function parsedText(text: string): string {
       case "list": return list(part);
     }
   };
-  return [...parseMessage(text).map(block), ...links].join("\n");
+  const blocks = mentions?.length ? parseMessage(markMentions(text, mentions), { mentions }) : parseMessage(text);
+  return [...blocks.map(block), ...links].join("\n");
 }
 
 /** A file's kind in words, the same the app shows for it: a voice message, a video, a picture; none for other files. */
@@ -79,11 +84,15 @@ export type TranslatedText = (message: ChatMessage) => string | undefined;
 
 /**
  * What a message offers search: a file's name and its kind in `t`'s language and in English, a text's text as its
- * bubble shows it (`translated`, where it is shown translated); nothing for notices, call lines and payments.
+ * bubble shows it (`translated`, where it is shown translated; a group's mentions by the names they show); nothing for
+ * notices, call lines and payments.
  */
 export function searchText(message: ChatMessage, t: Translate = englishT, translated?: TranslatedText): string | undefined {
   if (message.sender === "system" || message.systemEvent || message.callEvent || message.paymentId) return undefined;
-  if (!message.file) return shownText(translated?.(message) ?? message.text);
+  if (!message.file) {
+    const translation = translated?.(message);
+    return translation !== undefined ? shownText(translation) : shownText(message.text, message.mentions);
+  }
   const words = new Set([fileKindWords(message.file, t), fileKindWords(message.file, englishT)]);
   return [message.file.name, ...words].filter(Boolean).join("\n");
 }
