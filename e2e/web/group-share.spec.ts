@@ -95,7 +95,7 @@ test("a new group opens on its link; Copy, Share and the header's Share link; jo
   await expect(dialog.getByTestId("group-link-copy")).toContainText("Copied");
   await dialog.getByTestId("group-link-share").click();
   await expect(dialog.getByTestId("group-link-share")).toContainText("Shared");
-  expect(await sharing(alice)).toEqual({ copied: [url], shared: [{ title: "Join ⁨Open door⁩ on Ghostly", url }] });
+  expect(await sharing(alice)).toEqual({ copied: [url], shared: [{ title: "Join \u2068Open door\u2069 on Ghostly", url }] });
   // …and copies it where there is none, so there is always something to paste.
   await captureSharing(alice, false);
   await dialog.getByTestId("group-link-share").click();

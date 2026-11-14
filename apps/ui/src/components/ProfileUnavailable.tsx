@@ -3,6 +3,7 @@ import { getBrowserHost } from "@ghostly/browser/host";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { ProfileOpenFailure } from "@ghostly/browser/shared/idb";
 import { useI18n } from "../contexts/I18nContext";
+import { NAME, withName } from "./apps/aroundName";
 import { useUpdate } from "../contexts/UpdateContext";
 import { useFocusKept } from "../hooks/useFocusKept";
 import { externalLinkProps } from "../lib/externalLink";
@@ -72,7 +73,7 @@ export function ProfileUnavailable({ failure }: { failure: ProfileOpenFailure })
           <div className="flex flex-wrap justify-center gap-2 pt-2">
             {others.map((profile) => (
               <button key={profile.id} type="button" data-testid="profile-unavailable-switch" onClick={() => switchProfile(profile.id, { route: "/" })} className={QUIET}>
-                {t("profileSwitcher.switchTo", { name: profile.name })}
+                {withName(t("profileSwitcher.switchTo", { name: NAME }), profile.name)}
               </button>
             ))}
           </div>
