@@ -79,7 +79,8 @@ const stagedKeys = (ns: string): string[] => {
 };
 /** A staged file left as a Blob on a record of the frozen copy: that database, and the record's id. */
 type HeldBlob = { database: string; id: string };
-type Note = { ns: string; id: string; size: number; sha256: string; held?: HeldBlob };
+/** `loose`: staged without a forced write to disk (`Staging.finish`, a small file), checked again by a later page. */
+type Note = { ns: string; id: string; size: number; sha256: string; held?: HeldBlob; loose?: true };
 
 const NOTES_DB = "ghostly-staging", NOTES = "files";
 /** Every note of a namespace: an array key sorts after every string, so `[ns, []]` closes the range. */
@@ -301,14 +302,37 @@ class Staging implements HandoffStaging {
     })().catch((error: unknown) => { this.adopted = null; throw error; });
     return this.adopted;
   }
+  /** The files this page staged without a forced write (`finish`): whole here, whatever happens to the device later. */
+  private readonly loose = new Set<string>();
+  private checked: Promise<void> | null = null;
+
+  /**
+   * Small files an earlier page staged without a forced write: whole there, but the device may have gone down since,
+   * before their bytes reached the disk. Each is read back once against its digest before its note is believed; one
+   * that is not the file goes, and the giver sends it again.
+   */
+  private check(): Promise<void> {
+    this.checked ??= (async () => {
+      const notes = (await inNotes("readonly", (store) => store.getAll(notesOf(this.ns))) ?? []) as Note[];
+      const loose = notes.filter((note) => note.loose && !this.loose.has(note.id));
+      if (!loose.length) return;
+      const store = await spaceFiles(this.database);
+      const bad = (await Promise.all(loose.map(async ({ id, sha256 }) => ((await store.digest(id).catch(() => null)) === sha256 ? null : id)))).filter((id): id is string => id !== null);
+      if (!bad.length) return;
+      await inNotes("readwrite", (store) => { for (const id of bad) store.delete([this.ns, id]); });
+      await Promise.all(bad.map((id) => store.remove(id).catch(() => {})));
+    })().catch((error: unknown) => { this.checked = null; throw error; });
+    return this.checked;
+  }
   private async notes(): Promise<Note[]> {
     await this.adopt();
+    await this.check();
     return (await inNotes("readonly", (store) => store.getAll(notesOf(this.ns))) ?? []) as Note[];
   }
   /** `held`: the file is not in this namespace's storage but a Blob on that record of the frozen copy. */
-  private async note(file: HandoffFile, held?: HeldBlob): Promise<void> {
+  private async note(file: HandoffFile, held?: HeldBlob, loose = false): Promise<void> {
     await this.adopt();
-    const note: Note = { ns: this.ns, id: file.id, size: file.size, sha256: file.sha256, ...(held ? { held } : {}) };
+    const note: Note = { ns: this.ns, id: file.id, size: file.size, sha256: file.sha256, ...(held ? { held } : {}), ...(loose ? { loose: true as const } : {}) };
     await inNotes("readwrite", (store) => { store.put(note); });
   }
   private async heldBlob(id: string): Promise<HeldBlob | null> {
@@ -328,20 +352,30 @@ class Staging implements HandoffStaging {
     } catch { return []; }
   }
 
-  async begin(id: string): Promise<void> {
-    await this.forget(id);
-    await (await spaceFiles(this.database)).remove(id).catch(() => {});
+  /** Their notes in one transaction, their files removed side by side: one by one, 3,000 files took 1.6 to 2.6 s. */
+  async begin(ids: readonly string[]): Promise<void> {
+    await this.adopt();
+    await inNotes("readwrite", (store) => { for (const id of ids) store.delete([this.ns, id]); });
+    const store = await spaceFiles(this.database);
+    await Promise.all(ids.map((id) => store.remove(id).catch(() => {})));
   }
 
   async append(id: string, offset: number, bytes: Uint8Array): Promise<void> {
     await (await spaceFiles(this.database)).append(id, offset, bytes);
   }
 
+  /**
+   * The size is read while the file is still open, from its handle. A small file is let go without a forced write to
+   * disk, as the restore reads it back whole into its record anyway: forced, each took 3.8 ms, 11.5 s of the 3,000 small
+   * files' pass 1 (bug hunt, 2026-11-13). Its note says so, and a later page checks it before believing it (`check`).
+   */
   async finish(file: HandoffFile): Promise<void> {
     const store = await spaceFiles(this.database);
-    await store.close(file.id);
-    if ((await store.size(file.id)) !== file.size) throw new Error("The file was not written whole");
-    await this.note(file);
+    const size = await store.size(file.id), loose = file.size <= SMALL_FILE_BYTES;
+    await store.close(file.id, !loose);
+    if (size !== file.size) throw new Error("The file was not written whole");
+    if (loose) this.loose.add(file.id);
+    await this.note(file, undefined, loose);
   }
 
   async discard(id: string): Promise<void> {

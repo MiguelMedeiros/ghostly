@@ -135,6 +135,8 @@ class Storage implements HandoffStagingHost {
   room: number | null = null;
   /** Called as the rest is restored, before it is written. */
   restoring: (() => void) | null = null;
+  /** How many files each `begin` took. */
+  begun: number[] = [];
   private next = 0;
   async open(database?: string): Promise<HandoffStaging> {
     const name = database ?? `ghostly_stage${++this.next}`;
@@ -143,7 +145,7 @@ class Storage implements HandoffStagingHost {
     return {
       database: name,
       held: async () => [...space.held.values()],
-      begin: async (id) => { space.files.set(id, new Uint8Array()); space.held.delete(id); },
+      begin: async (ids) => { this.begun.push(ids.length); for (const id of ids) { space.files.set(id, new Uint8Array()); space.held.delete(id); } },
       append: async (id, offset, bytes) => {
         const was = space.files.get(id) ?? new Uint8Array();
         if (offset !== was.length) throw new Error(`append at ${offset}, stored ${was.length}`);
@@ -326,6 +328,15 @@ describe("a pull with the right password", () => {
     await until(() => w.link.count("handoff-done", B) === 1);
     await settle();
     expect(w.giverRecords.record.handoff).toBeUndefined();
+  });
+
+  it("the files of a pass begin together: one call to the staging for the whole manifest, not one round trip per file", async () => {
+    const w = world();
+    for (let n = 0; n < 30; n++) w.profile.add(`chat-in-${String(n).padStart(3, "0")}`, bytesOf(100 + n));
+    await fullPull(w);
+    expect(w.storage.begun[0]).toBe(30);
+    expect(w.storage.begun.reduce((sum, files) => sum + files, 0)).toBe(30);
+    expect(w.storage.spaces.get(w.storage.pointer)!.held.size).toBe(30);
   });
 
   it("a pull right after this device released the profile to the giver: the taker counts the turn it released", async () => {
