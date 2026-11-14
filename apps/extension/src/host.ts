@@ -1,6 +1,6 @@
 import type { BrowserHost } from "@ghostly/browser/host";
 import { engine } from "@ghostly/browser/platform/engine";
-import { UI_PORT, type RuntimeMessage, type ViewerPage } from "./messages";
+import { uiPortName, type RuntimeMessage, type ViewerPage } from "./messages";
 import { extensionUpdates } from "./updates";
 import { extensionOidc } from "./oidc";
 import { extensionAtproto } from "./atproto";
@@ -30,7 +30,7 @@ export const extensionHost: BrowserHost = {
   oidc: extensionOidc,
   atproto: extensionAtproto,
 
-  async connect(onMessage, onDisconnect) {
+  async connect(onMessage, onDisconnect, since) {
     // Another tab switched profiles since this page started: it starts again as that one (ui/main.tsx)
     // rather than show one profile's pages over the other's peer.
     if (!pageProfileIsCurrent()) {
@@ -44,7 +44,8 @@ export const extensionHost: BrowserHost = {
       startAsProfileInUse();
       throw new Error("Switching profiles…");
     }
-    const port = chrome.runtime.connect({ name: UI_PORT });
+    // With the mark the extension's pages last mirrored: the peer sends no chat unchanged since.
+    const port = chrome.runtime.connect({ name: uiPortName(since) });
     port.onMessage.addListener(onMessage);
     port.onDisconnect.addListener(() => {
       void chrome.runtime.lastError;
