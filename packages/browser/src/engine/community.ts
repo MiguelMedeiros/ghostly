@@ -2188,9 +2188,11 @@ export class Communities {
         return;
       }
       case "group-full": {
-        // No room yet: the knock goes on at its slow pace, and the page says why it waits.
+        // No room yet: the knock goes on at its slow pace, and the page says why it waits. Numbers that cannot be (more
+        // members than it holds, a size past the cap) are not shown.
         const joining = group.joining, { n, max } = frame;
-        if (!joining || joining.linkId !== linkId || joining.inviter || !Number.isSafeInteger(n) || !Number.isSafeInteger(max) || (max as number) < 1 || (n as number) < 0) return;
+        if (!joining || joining.linkId !== linkId || joining.inviter || !Number.isSafeInteger(n) || !Number.isSafeInteger(max)) return;
+        if ((max as number) < 1 || (max as number) > COMMUNITY_LIMITS.members || (n as number) < 0 || (n as number) > (max as number)) return;
         this.toldFull.set(g, { n: n as number, max: max as number, at: this.now() });
         traceJoin(g, "full.received");
         this.host.emit();
