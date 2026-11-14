@@ -3,7 +3,7 @@ import { openAsBlob } from "node:fs";
 import { access, constants, copyFile, link, open, rename, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { GROUP_FILE_LIMITS, LIMITS, NO_PICTURE_METADATA, NO_AUDIO_METADATA, NO_VIDEO_METADATA, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, claimedTime, parseVoiceMeta, randomBytes, readImageMeta, sanitizeFileName, sanitizeMime, toBase64Url, voiceDownloadName, withoutAudioMetadata, withoutPictureMetadata, withoutVideoMetadata, type VoiceMeta } from "@ghostly/core";
-import { FILE_BYTES_STEP, fileBytes, fileBytesOf } from "@ghostly/browser/shared/fileBytes";
+import { FILE_BYTES_STEP, fileBytes, fileBytesOf, type FileBytes } from "@ghostly/browser/shared/fileBytes";
 import { fileStore } from "@ghostly/browser/shared/idb";
 import { removeStored, waitingGroupFile } from "@ghostly/browser/shared/storedFiles";
 import { replyRef } from "@ghostly/browser/shared/replies";
@@ -199,10 +199,27 @@ async function whileUnchanged<T>(path: string, read: () => Promise<T>): Promise<
 }
 
 /**
+ * The file copied into the profile (`stage`) for a send whose client is still there to hear of it (`CallScope.gone`).
+ * Ctrl-C on `file send` through a daemon, while a large file was copied in (seconds per GiB), said "stopped before the
+ * command answered"; the daemon went on, and the file went to the contact a moment later. Sent again, it went twice.
+ * The copy stops at its next step, and what was copied is removed: nothing is in the chat, nothing goes.
+ */
+async function stageWhileAsked(bytes: FileBytes, id: string, path: string, source: Blob, gone: AbortSignal | undefined): Promise<string> {
+  const stillAsked = () => {
+    if (gone?.aborted) throw new CliError("interrupted", "The file was not sent: the command that sent it went away before it was copied in");
+  };
+  const digest = await whileUnchanged(path, () => bytes.stage(id, source, stillAsked));
+  // Gone after the last step: the whole copy is there, and goes too.
+  if (gone?.aborted) await bytes.remove(id).catch(() => {});
+  stillAsked();
+  return digest;
+}
+
+/**
  * A file announced in a group (WISP 503): its bytes staged under a group file id with their digest, as a chat's are, then
  * the announcement. This device is its first holder and serves the members who ask.
  */
-async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, path: string, name: string, picked: number) {
+async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, path: string, name: string, picked: number, gone: AbortSignal | undefined) {
   if (picked > GROUP_FILE_LIMITS.maxBytes) throw new CliError("refused", `Too large for a group (at most ${GROUP_FILE_LIMITS.maxBytes} bytes)`);
   if (!picked) throw new CliError("refused", "An empty file cannot go to a group");
   const mime = mimeOf(path, str(params, "mime"), params.voice !== undefined);
@@ -222,7 +239,7 @@ async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, pa
   const file: MessageFile = { id: fileId, name, size, mime, ...(voice ? { voice } : {}), ...(image ? { image } : {}) };
   const timestamp = Date.now();
   const bytes = await fileBytes();
-  const digest = await whileUnchanged(path, () => bytes.stage(fileId, source));
+  const digest = await stageWhileAsked(bytes, fileId, path, source, gone);
   await fileStore.put({
     id: fileId, linkId: `group:${group.id}`, bytes: bytes.kind, digest, createdAt: timestamp, direction: "out",
     metadata: { name: file.name, size, mime, timestamp, ...(voice ? { voice } : {}), ...(image ? { image } : {}) },
@@ -328,7 +345,7 @@ function waitsForYou(name: string | undefined, fileId: string, where: { chat: st
 }
 
 export const FILE_METHODS: Record<string, Method> = {
-  async "file.send"(ctx, params) {
+  async "file.send"(ctx, params, call) {
     const path = resolve(str(params, "path", true));
     // The contact (or every member) reads its name as a message's text (docs/CLI.md § Safety): the name that goes out,
     // the file's own without --name, read once cleaned (a key split by a `:` or a line break the cleaning drops is whole).
@@ -346,7 +363,7 @@ export const FILE_METHODS: Record<string, Method> = {
     // nobody joined yet: none.
     const wait = oneOf(params, "wait", "group" in target ? ["none"] as const : ["none", "sent"] as const, !("group" in target) && oneShotWaits(ctx, target.link.id) ? "sent" : "none");
     const seconds = num(params, "timeout", 300, { min: 1, max: 86_400 });
-    if ("group" in target) return sendToGroup(ctx, params, target.group, path, name, info.size);
+    if ("group" in target) return sendToGroup(ctx, params, target.group, path, name, info.size, call?.gone);
     const { link } = target;
     if (link.profile && link.dataLink === "open" && !link.capabilities?.files) throw new CliError("unavailable", "The contact's app takes no files");
     // Only a session open now says what the contact's app takes: with none (the contact away), the file waits and goes
@@ -367,7 +384,7 @@ export const FILE_METHODS: Record<string, Method> = {
     const file: MessageFile = { id: `${link.id}-out-${wireId}`, name, size: source.size, mime, ...(voice ? { voice } : {}), ...(image ? { image } : {}) };
     const timestamp = sentAt();
     const bytes = await fileBytes();
-    const digest = await whileUnchanged(path, () => bytes.stage(file.id, source));
+    const digest = await stageWhileAsked(bytes, file.id, path, source, call?.gone);
     await fileStore.put({
       id: file.id, linkId: link.id, bytes: bytes.kind, digest, createdAt: timestamp, direction: "out", wireId,
       metadata: { name: file.name, size: file.size, mime: file.mime, timestamp, ...(voice ? { voice } : {}), ...(image ? { image } : {}) },
