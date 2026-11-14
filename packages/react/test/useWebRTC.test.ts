@@ -730,6 +730,22 @@ describe("answering a call", () => {
     expect(call.result.current.callState).toBe("connecting");
   });
 
+  it("tells each offer it holds back, and none it rings, so a handoff does not wait on a call that never rings", () => {
+    const call = renderCall();
+    const first = Date.now();
+    call.receive(remote.offer(first));
+    call.receive(remote.hangUp(first + 1));
+    const held: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      act(() => { vi.advanceTimersByTime(1900); });
+      held.push(Date.now());
+      call.receive(remote.offer(Date.now()));
+    }
+
+    expect(call.result.current.callState).toBe("idle");
+    expect(call.offerHeld.mock.calls).toEqual(held.map((ts) => [ts]));
+  });
+
   it("calling back once the held-back call stopped ringing places a call of its own", async () => {
     const call = renderCall();
     call.receive(remote.offer(Date.now()));

@@ -160,6 +160,7 @@ export const ENGINE_PARAMS: Readonly<Record<string, string>> = {
   setServiceShared: "{ serviceId, peerPubKeyZ32, shared }",
   updateSettings: "{ settings }",
   setCallSignal: "{ linkId, signal }",
+  callOfferHeld: "{ linkId, ts }",
   setTyping: "{ linkId, typing, kind?, status? }",
   setGroupTyping: "{ groupId, typing, kind?, status? }",
   setPresence: "{ presence }",
