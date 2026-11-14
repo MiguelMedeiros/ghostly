@@ -109,6 +109,8 @@
     "methodUnavailable": "この支払い方法は利用できません",
     "mintFailedFaucet": "{{host}} は今テストコインを出せませんでした",
     "mintFailedFaucetNext": "後でもう一度試してください。",
+    "mintFailedInvoice": "{{host}} は今インボイスを作成できませんでした",
+    "mintFailedInvoiceNext": "後でもう一度試してください。",
     "mintFailedQuote": "{{host}} は今この支払いを受け付けられませんでした",
     "mintFailedQuoteNext": "ウォレットから sats は出ていません。後でもう一度試してください。",
     "mintHoldsSats": "削除する前に、このミントから sats を移してください",

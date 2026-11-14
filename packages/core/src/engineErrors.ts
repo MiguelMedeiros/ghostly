@@ -37,6 +37,7 @@ export const ENGINE_ERRORS = {
   // A mint that failed (a server error, a closed connection), not refused: nothing happened, and it may work later.
   mintFailedQuote: "{host} could not take this payment right now, and no sats left your wallet: try again later. The mint said: {reason}",
   mintFailedFaucet: "{host} could not give test coins right now: try again later. The mint said: {reason}",
+  mintFailedInvoice: "{host} could not create an invoice right now: try again later. The mint said: {reason}",
   // Lightning.
   lightningFeeTooHigh: "The Lightning fee ({fee} sats) is too high",
   lightningRefused: "The mint refused this Lightning payment, and no sats left your wallet: it is safe to try again. The mint said: {reason}",
