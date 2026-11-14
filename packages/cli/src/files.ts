@@ -504,10 +504,13 @@ export const FILE_METHODS: Record<string, Method> = {
     const named = str(params, "path") ? resolve(str(params, "path", true)) : join(resolve(str(params, "dir") ?? "."), saveName(stored.metadata.voice ? voiceDownloadName(stored.metadata.mime, await voiceTime(ctx, stored)) : stored.metadata.name));
     const force = bool(params, "force");
     // A --path that ends in a separator names a folder: resolve() dropped the slash, and "--path downloads/" with no
-    // downloads folder left a file named downloads. A folder that is there is answered below, as without the slash.
+    // downloads folder left a file named downloads. A folder that is there is answered below, as without the slash. One
+    // that is not hints no --dir: before, it hinted --dir <that folder>, and that failed "No such file or folder".
     const path = str(params, "path");
-    if (path && (path.endsWith("/") || path.endsWith(sep)) && !(await stat(named).catch(() => undefined))?.isDirectory()) {
-      throw new CliError("bad_request", `${path} names a folder: name a file, or use --dir ${shellWord(named, "<the one in details.dir>")} (dir over the socket)`, { dir: named });
+    if (path && (path.endsWith("/") || path.endsWith(sep))) {
+      const there = await stat(named).catch(() => undefined);
+      if (!there) throw new CliError("not_found", `No such folder: ${named} (make it first, or name a file in a folder that is there)`);
+      if (!there.isDirectory()) throw new CliError("not_found", `${named} is a file, not a folder: name a file in a folder that is there`);
     }
     // A voice message's name is Ghostly's, down to the second its sender claims: two of one second took one name, and
     // the --force the confirm hinted at replaced the first recording with the other. In --dir it steps to a free
