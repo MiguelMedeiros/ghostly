@@ -719,8 +719,7 @@ export class EventHub {
       if (quiet) continue;
       if (!before) { this.emit("group.created", `group.created:${id}:${this.now()}`, { group: id, summary: groupJson(group) }); continue; }
       if (shape.status !== before.status) this.emit("group.status", `group.status:${id}:${shape.status}:${this.now()}`, { group: id, status: shape.status });
-      const joined = shape.members.filter((key) => !before.members.includes(key));
-      const left = before.members.filter((key) => !shape.members.includes(key));
+      const { joined, left } = membersDiff(before.members, shape.members);
       if (joined.length || left.length) this.emit("group.members", `group.members:${id}:${this.now()}`, { group: id, joined, left });
       this.pinned("group", id, before.pin, shape.pin);
       // A member started or stopped writing in a private group (WISP 902 · Group Mesh § Typing), as `typing.*` in a chat,
@@ -1191,6 +1190,22 @@ function typingFields(shape: ChatShape): { kind: string; status?: string } {
 function groupShape(group: GroupView): GroupShape {
   return { status: group.status ?? (group.invitation ? "invited" : null), members: group.members.map((m) => m.key).sort(),
     typing: Object.fromEntries((group.typing ?? []).map((t) => [t.key, { kind: t.kind ?? "typing", ...(t.status ? { status: t.status } : {}) }])), pin: group.pin ?? null };
+}
+
+/**
+ * Who joined and who left between two of `groupShape`'s sorted member lists, in one walk of both: a state comes up to
+ * every 50 ms, and a full community has 256 members, so a lookup of each key in the other list would cost each state
+ * O(members²) per group though nothing changed.
+ */
+function membersDiff(before: readonly string[], after: readonly string[]): { joined: string[]; left: string[] } {
+  const joined: string[] = [], left: string[] = [];
+  let i = 0, j = 0;
+  while (i < before.length || j < after.length) {
+    if (j >= after.length || (i < before.length && before[i] < after[j])) left.push(before[i++]);
+    else if (i >= before.length || after[j] < before[i]) joined.push(after[j++]);
+    else { i++; j++; }
+  }
+  return { joined, left };
 }
 
 /**
