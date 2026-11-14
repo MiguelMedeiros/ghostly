@@ -102,7 +102,7 @@ async function readInOrder(urls, limit, fetcher, take) {
   for (let taken = 0; taken < urls.length; taken++) {
     while (next < urls.length && pending.length < READS_AT_ONCE) pending.push(settle(urls[next++]));
     const { bytes, error } = await pending.shift();
-    take(urls[taken], bytes, error);
+    await take(urls[taken], bytes, error);
   }
 }
 
@@ -208,12 +208,15 @@ export async function fromStore(fetcher = fetch) {
     revocations[url] = b64(bytes);
   };
   // A file's first use comes in the order its read does, so every use before the next unread file can be judged now.
-  await readInOrder([...new Set(uses.map(({ url }) => url))], LIMITS.revocationsBytes, fetcher, (url, bytes, error) => {
+  await readInOrder([...new Set(uses.map(({ url }) => url))], LIMITS.revocationsBytes, fetcher, async (url, bytes, error) => {
     answers.set(url, { bytes, error });
     for (; judged < uses.length && answers.has(uses[judged].url); judged++) {
       const use = uses[judged];
-      judge(use, answers.get(use.url));
+      // A file no publisher kept is not held for a later one (that would hold every file read): it is read again.
+      const answer = answers.get(use.url) ?? (await read(use.url, LIMITS.revocationsBytes, fetcher).then((bytes) => ({ bytes }), (error) => ({ error })));
+      judge(use, answer);
       if (lastUse.get(use.url) === judged) answers.delete(use.url);
+      else answers.set(use.url, answer.bytes && revocations[use.url] === undefined ? null : answer);
     }
   });
   return { source: "store", index: b64(index), sig: b64(sig), bundles, revocations, problems };

@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { once } from "node:events";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import { LIMITS, STORE_URL, besideUrl, fromStore } from "./sync-store.mjs";
 
 const BUNDLE = "https://raw.githubusercontent.com/ghostly-fixtures/big/HEAD/app.ghostlyapp";
@@ -97,6 +99,31 @@ test("the build reads the bundles and the revocation files a few at a time", asy
   assert.ok(files.seen.most > 1 && files.seen.most <= 8, `revocation files: ${files.seen.most} at once`);
   assert.equal(Object.keys(snap.bundles).length, 40);
   assert.equal(files.seen.asked.filter((u) => u.endsWith("ghostly-revoke.json")).length, 40);
+});
+
+test("the build does not hold a revocation file it did not keep until a later publisher's listing reads it again", async () => {
+  // Publisher A lists 96 bundle URLs, then publisher B lists the same: B reads every one of A's revocation files too.
+  const urls = Array.from({ length: 96 }, (_, i) => `${RAW}/shared${i}/a.ghostlyapp`);
+  const chunks = Array.from({ length: urls.length / 4 }, (_, i) => urls.slice(4 * i, 4 * i + 4));
+  const listings = ["A", "B"].flatMap((p) => chunks.map((u) => ({ ref: p.repeat(52), urls: u })));
+  const file = new Uint8Array(4 * 1024 * 1024);
+  const { fetcher } = network(listings, Object.fromEntries(urls.map((u) => [revoke(u), file])));
+  // What is still referenced, not garbage the collector has yet to free.
+  setFlagsFromString("--expose-gc");
+  const gc = runInNewContext("gc");
+  const held = () => (gc(), process.memoryUsage().arrayBuffers);
+  const base = held();
+  let most = 0;
+  const snap = await fromStore(async (url, init) => {
+    most = Math.max(most, held() - base);
+    return fetcher(url, init);
+  });
+  // Each publisher keeps its share; B keeps the same files A kept.
+  const share = LIMITS.revocationsTotalBytes / 2 / file.length;
+  assert.deepEqual(Object.keys(snap.revocations), urls.slice(0, share).map(revoke));
+  // The kept files and the reads in flight, not every file A read and did not keep (96 × 4 MiB).
+  const bound = LIMITS.revocationsTotalBytes + 16 * file.length;
+  assert.ok(most < bound, `held ${Math.round(most / 1048576)} MiB, more than ${bound / 1048576}`);
 });
 
 test("reads that finish out of order keep the list's order, its byte budget and its problems as one read at a time does", async () => {
