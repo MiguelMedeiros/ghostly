@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
+import { isIP } from "node:net";
 import type { IceServer, PeerConnection, Track } from "node-datachannel";
 import { buildSdpFromSignal, callRtcConfig, extractParamsFromSdp, PAIRED_CALL_CANDIDATES, RTC_CONFIG, type CallIceServer, type CallSignal } from "@ghostly/core";
 import { CallAudio, type OpusCodec } from "./audio";
@@ -100,6 +101,10 @@ export function opusCodec(native: OpusNative, rate: CallRate): OpusCodec {
 export function loadCallStack(): Promise<CallStack | string> {
   return (loading ??= (async () => {
     try { if (!envSwitch("GHOSTLY_WEBRTC", true)) return "Calls are off on this headless Ghostly (GHOSTLY_WEBRTC=0)"; } catch (error) { return (error as Error).message; }
+    // libdatachannel takes a name there (`localhost`) without a word and gathers no candidate: each call failed 30 s later.
+    // Not echoed: the contact's app shows this reason, and the name may be one of this network's.
+    const bind = process.env.GHOSTLY_CALL_BIND;
+    if (bind && !isIP(bind)) return "Calls are off on this headless Ghostly: GHOSTLY_CALL_BIND takes an IP address of this machine, such as 127.0.0.1, not a name";
     try {
       const ndc = (await import("node-datachannel")) as unknown as CallStack["ndc"] & { default?: CallStack["ndc"] };
       const lib = (ndc.PeerConnection ? ndc : ndc.default!) as CallStack["ndc"];
