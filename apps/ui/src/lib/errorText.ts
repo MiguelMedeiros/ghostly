@@ -841,6 +841,7 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   walletAway: "errors.engine.walletAway",
   walletAwayUnnamed: "errors.engine.walletAwayUnnamed",
   groupTurnUnconfirmed: "errors.engine.groupTurnUnconfirmed",
+  serviceShareFull: "errors.engine.serviceShareFull",
   // As the chat's payment line says them (Chat.tsx).
   contactNoWallet: "chat.payments.noWallet",
   contactNoPayments: "chat.payments.offOrOld",
@@ -863,6 +864,7 @@ const ENGINE_NEXT: Partial<Record<EngineErrorCode, TranslationKey>> = {
   reviewedEcashSpent: "errors.engine.reviewedEcashSpentNext",
   reviewedSatsGone: "errors.engine.reviewedSatsGoneNext",
   sentAfterReview: "errors.engine.sentAfterReviewNext",
+  serviceShareFull: "errors.engine.serviceShareFullNext",
   testMintOnMainnet: "errors.engine.testMintOnMainnetNext",
 };
 /** The engine errors whose English goes behind the ⓘ too: a server's own reason in it is not said in the line. */
