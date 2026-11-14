@@ -1,6 +1,7 @@
 import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it } from "vitest";
 import { APP_CHECK_TIMINGS } from "../src/engine/apps";
+import { fileBytes } from "../src/shared/fileBytes";
 import { BUNDLE_URL, FakeNet, NOW_MS, STORE_URL, apps, bundle, emptyProfile, listing, storeFiles } from "./appsSupport";
 // covers: apps.engine.installed
 
@@ -78,5 +79,23 @@ describe("an update whose whole read brings another bundle than its peek", () =>
     }
     expect(whole(SOURCE)).toBe(1);
     expect((await store.list())[0]!.equivocation, "the mark stays").toMatchObject({ sequence: 1 });
+  });
+
+  it("asked for an installed app's missing files, a source whose peek shows them and whose whole read does not is read whole once", async () => {
+    const { net, store, v1, apart, whole } = await setup();
+    await (await fileBytes()).remove(`app-${v1.digest}`);
+    net.files.delete(BUNDLE_URL);
+    const v2 = await bundle({ sequence: 2, sources: [SOURCE] });
+    apart(SOURCE, v1.bytes, v2.bytes);
+    for (let open = 0; open < 3; open++) {
+      now += 60_000;
+      expect(await store.fetchFiles({ ref: v1.ref })).toEqual({ status: "needs-files" });
+    }
+    expect(whole(SOURCE), "read whole once, then only peeked").toBe(1);
+
+    // Served whole as it peeks now: fetched once the hour went by.
+    apart(SOURCE, v1.bytes, v1.bytes);
+    now += APP_CHECK_TIMINGS.freshMs + 1;
+    expect(await store.fetchFiles({ ref: v1.ref })).toEqual({ status: "ok" });
   });
 });
