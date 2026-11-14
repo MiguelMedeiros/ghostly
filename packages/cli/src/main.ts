@@ -558,8 +558,12 @@ export async function oneShotJoinWait(s: Pick<Session, "call">, result: Record<s
   const stage = (view.chat as { stage?: unknown } | null)?.stage ?? null;
   const answer = { ...result, paired: view.paired, stage };
   if (view.paired) return { answer };
-  // The label only when a shell reads it as typed: `O'Brien` waited for a closing quote, `$work` named no chat.
-  const ref = label?.trim() && shellWord(label.trim()) === label.trim() ? label.trim() : String(result.chat);
+  // The label only when a shell reads it as typed: `O'Brien` waited for a closing quote, `$work` named no chat. And only
+  // when it names this chat alone: a second join with the same `--label` was told a name that names two chats.
+  const typed = label?.trim();
+  const named = !!typed && shellWord(typed) === typed
+    && await s.call("chat.get", { chat: typed }).then((chat) => (chat as { id?: unknown } | null)?.id === result.chat, () => false);
+  const ref = named ? typed : String(result.chat);
   return { answer, note: `Not paired yet: the inviter's app is offline. It pairs when both are online: keep this profile running (ghostly daemon --detach), then ghostly chat wait ${ref} --until paired` };
 }
 
