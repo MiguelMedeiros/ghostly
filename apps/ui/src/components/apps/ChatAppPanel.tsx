@@ -1,4 +1,4 @@
-import { useContext, useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
+import { useContext, useEffect, useId, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import { useIsMobile } from "../../hooks/useIsMobile";
 import { usePhoneHeader } from "../../hooks/usePhoneHeader";
@@ -63,6 +63,7 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
   const root = useRef<HTMLElement>(null);
   const back = useRef<HTMLButtonElement>(null);
   const opener = useRef<HTMLElement | null>(null);
+  const stoppedId = useId();
   const { name, named } = contact;
   // Open again under a stopped app: busy while it opens, and why it failed, for that stopped app only.
   const [again, setAgain] = useState<{ of: unknown; busy?: boolean; error?: string } | null>(null);
@@ -184,7 +185,7 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
       {shown && <div className="chat-app-head h-14 header-safe flex items-center gap-2 max-md:gap-1 px-3 max-md:ps-1 max-md:pe-1 bg-panel-header border-b border-border shrink-0">
         {withBack && (
           <button ref={back} type="button" data-testid="mini-app-back" onClick={goBack}
-            aria-label={t("apps.view.back")} title={t("apps.view.back")}
+            aria-label={t("apps.view.back")} title={t("apps.view.back")} aria-describedby={app?.stopped ? stoppedId : undefined}
             className={`${phoneHeader ? "w-11 max-[340px]:w-9 tap-target" : "w-9"} h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0`}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="rtl:-scale-x-100"><path d="M15 19l-7-7 7-7" /></svg>
           </button>
@@ -225,9 +226,10 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
       </div>}
       {/* Stopped by the client (a takedown): why, in the app's place, until Close. Said politely in a line that is always
           there, as a live region must be before what it says: the focus stays in the chat beside it, or goes to a bare
-          "Open again", and a line that came with its words was not read out. */}
+          "Open again", and a line that came with its words was not read out. Shown again already stopped, it comes with
+          its words: Back, where the focus goes then, is described by it. */}
       <div role="status">
-        {shown && app?.stopped && <p data-testid="mini-app-stopped" className="m-0 p-6 text-center text-sm text-text-secondary">
+        {shown && app?.stopped && <p id={stoppedId} data-testid="mini-app-stopped" className="m-0 p-6 text-center text-sm text-text-secondary">
           {takedownText(title, app.stopped, t)}
         </p>}
       </div>
