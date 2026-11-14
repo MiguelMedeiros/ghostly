@@ -946,6 +946,71 @@ describe("a phone back after minutes asleep to a CLI daemon, over WebRTC alone",
 });
 
 /**
+ * Both apps stop, one after the other, and start again together (two bots a service manager restarts, a host that
+ * reboots), WebRTC the only transport between them, neither chat on screen. They quit as the engine does (node.ts
+ * `stop`): a goodbye on the session, then a last packet that does not advertise. The first to stop was live, so it
+ * resumes at its start; the second one's session had ended on that goodbye, so it does not, and its first read finds
+ * the goodbye put a second before. Read as any contact away, that left the resumed app's offer to its next read at the
+ * background pace: live again after about 35 s (two CLI daemons on loopback, bug hunt 2026-11-14), against 3 to 5 s when
+ * only one restarts.
+ */
+describe("both apps stop one after the other and start again together, over WebRTC alone", () => {
+  async function quitAsTheEngine(app: App): Promise<void> {
+    app.link.depart({ quitting: true });
+    await run(DEPART_FLUSH_MS);
+    app.stopped = app.link.stop(true);
+    killRtc(app.name);
+    await run(DEPART_FLUSH_MS);
+  }
+
+  it.each(["lower", "higher"] as const)("the app with the %s key stops first: live again in seconds", async firstStops => {
+    const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
+    const { inviter: lowSide, joiner: highSide } = invitationWhere("inviter");
+    const [firstSide, secondSide] = firstStops === "lower" ? [lowSide, highSide] : [highSide, lowSide];
+    let first = startApp(world, "first", firstSide, { side: secondSide, name: "second" }, "webrtc", emptyDhtDeliveryState());
+    let second = startApp(world, "second", secondSide, { side: firstSide, name: "first" }, "webrtc", emptyDhtDeliveryState());
+    expect(await until(() => first.link.isDataLinkOpen && second.link.isDataLinkOpen, 120_000), "live at first").toBeLessThan(Infinity);
+    await run(20_000);
+    await quitAsTheEngine(first);
+    expect(second.link.isDataLinkOpen, "the goodbye ends the session").toBe(false);
+    await quitAsTheEngine(second);
+    await run(500);
+    // Back together, the second one a moment ahead: its first read finds the first one's goodbye.
+    second = startApp(world, "second", secondSide, { side: firstSide, name: "first" }, "webrtc", second.dhtState);
+    const startedAt = Date.now();
+    await run(300);
+    first = startApp(world, "first", firstSide, { side: secondSide, name: "second" }, "webrtc", first.dhtState, true);
+    await until(() => first.link.isDataLinkOpen && second.link.isDataLinkOpen, 120_000);
+    const liveMs = Date.now() - startedAt;
+    if (process.env.RESTART_REPORT) appendFileSync(process.env.RESTART_REPORT, JSON.stringify({ together: true, firstStops, liveMs }) + "\n");
+    // Its next read at the fast pace, and the answer's way back (one restart alone: 3 to 5 s).
+    expect(liveMs, "from the start to live on both sides").toBeLessThan(10_000);
+    // The relays allow 30 requests a minute per client, reads and publishes together, for every chat.
+    await run(Math.max(0, startedAt + 120_000 - Date.now()));
+    for (const app of [first, second]) expect(app.requests.filter(r => r.at >= startedAt && r.at < startedAt + 120_000).length / 2, app.name).toBeLessThanOrEqual(10);
+  }, 240_000);
+
+  it("a contact that quit a minute before this app starts is read at the background pace, not watched", async () => {
+    const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
+    const { inviter: lowSide, joiner: highSide } = invitationWhere("inviter");
+    // The one that starts has the higher key: the lower key dials a saved contact at its start (`startApp`).
+    const first = startApp(world, "first", lowSide, { side: highSide, name: "second" }, "webrtc", emptyDhtDeliveryState());
+    let second = startApp(world, "second", highSide, { side: lowSide, name: "first" }, "webrtc", emptyDhtDeliveryState());
+    expect(await until(() => first.link.isDataLinkOpen && second.link.isDataLinkOpen, 120_000), "live at first").toBeLessThan(Infinity);
+    await run(20_000);
+    await quitAsTheEngine(first);
+    await quitAsTheEngine(second);
+    await run(60_000);
+    second = startApp(world, "second", highSide, { side: lowSide, name: "first" }, "webrtc", second.dhtState);
+    const startedAt = Date.now();
+    await run(120_000);
+    const reads = second.requests.filter(r => r.read === first.link.myPubKeyZ32 && r.at >= startedAt).length;
+    // The first read, then one every 30 s (`RELAY_POLL_INTERVALS.background`); watched, it read every 2 s, then every 4 s.
+    expect(reads).toBeLessThanOrEqual(120_000 / RELAY_POLL_INTERVALS.background + 2);
+  }, 240_000);
+});
+
+/**
  * Automatic, both apps with `upgrade/1`: after a restart the chat is live over Iroh through its relay and moves to WebRTC
  * about a second later, when queued texts flush and people type. Each side swaps when its own new session is ready, so
  * for a moment the contact still sends on the session this side just replaced. That session stopped at the swap and
