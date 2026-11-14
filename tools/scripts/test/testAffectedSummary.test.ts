@@ -29,3 +29,31 @@ describe("test-affected.mjs's closing line", () => {
     expect(lastLine(false)).not.toContain("on every push");
   });
 }, 60_000);
+
+/** The plan's "lint (eslint)" and "typecheck (tsc)" lines for a change both would check, with these flags. */
+function planLines(...flags: string[]): { lint: string[]; typecheck: string[] } {
+  const r = spawnSync(process.execPath, ["tools/scripts/test-affected.mjs", "--list", "--no-e2e", "--no-rust", ...flags, "--files", "apps/ui/src/App.tsx"], { cwd: ROOT, encoding: "utf8" });
+  expect(r.status).toBe(0);
+  const lines = r.stdout.split("\n");
+  const section = (title: string) => {
+    const from = lines.indexOf(title) + 1;
+    const to = lines.findIndex((l, i) => i >= from && !l.startsWith(" "));
+    return lines.slice(from, to);
+  };
+  return { lint: section("lint (eslint)"), typecheck: section("typecheck (tsc)") };
+}
+
+describe("test-affected.mjs's plan", () => {
+  it("says lint and typecheck are off under --no-lint/--no-typecheck, as CI's draft job runs it", () => {
+    const { lint, typecheck } = planLines("--no-lint", "--no-typecheck");
+    expect(lint).toEqual(["  off     --no-lint"]);
+    expect(typecheck.some((l) => l.includes("off     ui (root tsconfig) --no-typecheck"))).toBe(true);
+    expect(typecheck.filter((l) => /^\s+run\s/.test(l))).toEqual([]);
+  });
+
+  it("without the flags, says what lint and typecheck run", () => {
+    const { lint, typecheck } = planLines();
+    expect(lint).toEqual(["  files   eslint over 1 changed file(s): apps/ui/src/App.tsx"]);
+    expect(typecheck.some((l) => /^\s+run\s+ui \(root tsconfig\)/.test(l))).toBe(true);
+  });
+}, 60_000);
