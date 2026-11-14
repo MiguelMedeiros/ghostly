@@ -2085,14 +2085,19 @@ export class Apps {
       }
       const { bundle, bytes } = fetched;
       const version = versionOf(bundle.manifest, bundle.digest);
-      if (version.ref !== app.ref || known.has(version.digest)) continue;
-      if (want.digest !== undefined && version.digest !== want.digest) continue;
+      // A whole read that brought another bundle than its peek showed (a host answering the peek's range and the whole
+      // read apart), and is not taken, is not downloaded again for that peek for an hour: the peek alone would have it
+      // read whole at every check.
+      const apart = holds !== undefined && holds.digest !== version.digest;
+      const skip = () => { if (apart) this.refuseRead(url, holds!.digest); };
+      if (version.ref !== app.ref || known.has(version.digest)) { skip(); continue; }
+      if (want.digest !== undefined && version.digest !== want.digest) { skip(); continue; }
       // Another version under a number held marks the app. Its URL is not read whole again for an hour: with two of them
       // (one per source) the mark would take each in turn, and both were read whole at every check.
       if (app.pending && version.sequence === app.pending.sequence) {
         app = { ...app, equivocation: { sequence: version.sequence, digest: version.digest, at: this.now() } };
         outcome = "equivocation";
-        this.refuseRead(url, version.digest, true);
+        if (apart) skip(); else this.refuseRead(url, version.digest, true);
         continue;
       }
       const plan = planAppUpdate(app, { ...version, permissions: bundle.manifest.permissions });
@@ -2100,14 +2105,14 @@ export class Apps {
         if (plan.decision === "equivocation") {
           app = { ...app, equivocation: { sequence: version.sequence, digest: version.digest, at: this.now() } };
           outcome = "equivocation";
-          this.refuseRead(url, version.digest, true);
-        }
+          if (apart) skip(); else this.refuseRead(url, version.digest, true);
+        } else skip();
         continue;
       }
-      if (judge(version).status !== "ok") continue;
+      if (judge(version).status !== "ok") { skip(); continue; }
       // Judged again with the stores as held now: a store's index read while the bundle downloaded may revoke it.
-      if (this.runStatus(version, await this.heldViews(), app.revocations).status !== "ok") continue;
-      if (app.pending && version.sequence < app.pending.sequence) continue;
+      if (this.runStatus(version, await this.heldViews(), app.revocations).status !== "ok") { skip(); continue; }
+      if (app.pending && version.sequence < app.pending.sequence) { skip(); continue; }
       const kind = await this.writeBundle(version.digest, bytes);
       wrote = { bytes: kind, digest: version.digest };
       if (plan.action === "install") {
