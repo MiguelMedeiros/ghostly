@@ -435,6 +435,12 @@ describe("the real repository's import graph", () => {
     expect(picked).toEqual(["tools/scripts/test/translationRuntime.test.ts"]);
     expect(realPlan("native/transports/hyperdht/redial.mjs").browser.files.length).toBeLessThan(20);
   });
+
+  it("a UI locale file reaches the code that says its strings and the key checks", { timeout: 30_000 }, () => {
+    // fileAnnouncements.test.tsx checks chat.announce.fileOffer through lib/fileAnnounce.ts.
+    expect(realPlan("apps/ui/src/locales/en/chat.json").ui.files).toEqual(expect.arrayContaining(["apps/ui/src/lib/fileAnnounce.ts", "apps/ui/src/test/i18n/keys.test.ts"]));
+    expect(realPlan("apps/ui/src/locales/ja/home.json").ui.files).not.toContain("apps/ui/src/lib/fileAnnounce.ts");
+  });
 });
 
 describe("fallbacks", () => {
@@ -631,6 +637,34 @@ for (const doc of [...DOCS, "docs/CLI.md"]) readFileSync(resolve(ROOT, doc), "ut
     expect(run("apps/ui/src/lib/sounds.ts").ui).toEqual([]);
     expect(run("docs/TESTING.md")).toEqual({});
     expect(run("apps/web/nginx.conf").ui).toBeUndefined();
+  });
+
+  it("a UI locale file runs the tests of the code that uses its strings, and the tests that read the locales", () => {
+    // The UI's test config reads the locale files with readFileSync (localesAtOnce), so they are in no import graph:
+    // a draft changing only en/chat.json ran 2 of the 806 UI tests, none that checks a chat string.
+    const codeFiles = {
+      "apps/ui/src/lib/fileAnnounce.ts": `export const offer = (t) => t("chat.announce.fileOffer", { name });`,
+      "apps/ui/src/components/FileStage.tsx": "export const Stage = ({ stage }) => <span>{t(`chat.stage.${stage}`)}</span>;",
+      "apps/ui/src/components/HomeEmpty.tsx": `export const HomeEmpty = () => <p>{t("home.empty")}</p>;`,
+      "apps/ui/src/components/Chatty.tsx": `export const Chatty = () => <p>{t("chatTranslate.on")}</p>;`,
+      "apps/ui/src/test/chat/fileAnnouncements.test.tsx": `import { offer } from "../../lib/fileAnnounce";\nexpect(heard).toEqual(["Alice wants to send report.pdf"]);`,
+      "apps/ui/src/test/i18n/locales.ts": `import { loadedLocale } from "../../locales";`,
+      "apps/ui/src/test/i18n/keys.test.ts": `import english from "../../locales/en";\nimport { LOCALES } from "./locales";`,
+      "apps/ui/src/test/i18n/plurals.test.ts": `import { LOCALES, lookup } from "./locales";`,
+      "apps/ui/src/test/home/home.test.tsx": `import { HomeEmpty } from "../../components/HomeEmpty";`,
+      // t()'s helpers are no locale: a test saying a string through englishT names its key.
+      "apps/ui/src/test/lib/listText.test.ts": `import { englishT } from "../../locales/translate";`,
+    };
+    const ui = (...files: string[]) => byName(plan({ changed: changed(...files), inventory, e2eFiles, codeFiles }).unit).ui;
+    const readers = ["apps/ui/src/test/i18n/keys.test.ts", "apps/ui/src/test/i18n/plurals.test.ts"];
+    const chat = ui("apps/ui/src/locales/en/chat.json");
+    expect(chat.mode).toBe("related");
+    expect([...chat.files].sort()).toEqual(["apps/ui/src/components/FileStage.tsx", "apps/ui/src/lib/fileAnnounce.ts", "apps/ui/src/locales/en/chat.json", ...readers]);
+    expect(chat.reason).toContain("using a changed locale file's strings");
+    // Another language's file, a deleted one too (its keys go missing).
+    expect([...ui("-apps/ui/src/locales/fr/home.json").files].sort()).toEqual(["apps/ui/src/components/HomeEmpty.tsx", ...readers]);
+    // A JSON elsewhere in the UI is no locale.
+    expect(ui("apps/ui/src/lib/countries.json").files).toEqual(["apps/ui/src/lib/countries.json"]);
   });
 
   describe("the real repository", () => {
