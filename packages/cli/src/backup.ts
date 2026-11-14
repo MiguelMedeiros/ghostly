@@ -81,14 +81,24 @@ async function walk(root: string, dir = root, out: string[] = []): Promise<strin
 }
 
 /**
+ * A backup whose client went away (`CallScope.gone`: Ctrl-C on `profile backup` sent through a daemon, which said it
+ * stopped) stops here, and its cleanup removes what it wrote. The daemon went on and wrote the whole backup, unsealed
+ * with --no-passphrase, where the person was told none was made.
+ */
+function stillAsked(gone: AbortSignal | undefined): void {
+  if (gone?.aborted) throw new CliError("interrupted", "The backup was stopped: the command that asked for it went away before it was written");
+}
+
+/**
  * A file's first `size` bytes into the backup, a frame at a time. One that got shorter meanwhile stops the backup.
  * `buffer` (`FRAME_BYTES`) is the backup's one for every file: a new one each zero-filled 1 MiB, for a 1 KB file too,
  * and 50,000 small files took half a minute. The writer copies each frame before `bytes` returns.
  */
-async function copyIn(writer: BackupWriter, buffer: Uint8Array, path: string, size: number, opened?: FileHandle): Promise<void> {
+async function copyIn(writer: BackupWriter, buffer: Uint8Array, path: string, size: number, opened?: FileHandle, gone?: AbortSignal): Promise<void> {
   const handle = opened ?? await open(path, "r");
   try {
     for (let at = 0; at < size;) {
+      stillAsked(gone);
       const { bytesRead } = await handle.read(buffer, 0, Math.min(FRAME_BYTES, size - at), at);
       if (!bytesRead) throw new CliError("unavailable", `${path} changed while it was backed up: try again`);
       await writer.bytes(buffer.subarray(0, bytesRead));
@@ -104,7 +114,8 @@ export const BACKUP_METHODS: Record<string, Method> = {
    * written beside `path` and only takes its name once it is complete: a backup that fails leaves no file. `light`:
    * the files over the cut (`keptInLight`) are left out, their records kept.
    */
-  async "profile.backup"(ctx, params) {
+  async "profile.backup"(ctx, params, call) {
+    const gone = call?.gone;
     const asked = str(params, "path", true), path = resolve(asked);
     // A folder is no name for the backup: one there was "exists: choose another name", as if a file were in the way,
     // and one with a separator at its end and no folder there became a file of that name (resolve() drops the slash).
@@ -143,6 +154,7 @@ export const BACKUP_METHODS: Record<string, Method> = {
     leftOnExit.add(store).add(partial);
     try {
       await ctx.runtime.store.exportSnapshot(store);
+      stillAsked(gone);
       const holds = settings.find((setting) => setting.name === HOLDS), after = await readSetting(paths.dir, HOLDS);
       if (after !== null && after !== holds?.text) {
         const text = JSON.stringify({ ...parseHolds(holds?.text), ...parseHolds(after) }) + "\n";
@@ -170,14 +182,14 @@ export const BACKUP_METHODS: Record<string, Method> = {
       await put({ t: "profile", format: FORMAT, createdAt: Date.now(), files: files.length, bytes, ...(light && { light: { maxFileBytes: LIGHT_FILE_BYTES, maxVoiceBytes: LIGHT_VOICE_BYTES, files: leftOut.length, bytes: leftOutBytes, ids: leftOut.map((file) => basename(file.name)) } }) });
       await put({ t: "file", kind: "store", size: storeSize });
       const buffer = new Uint8Array(FRAME_BYTES);
-      await copyIn(writer, buffer, store, storeSize);
+      await copyIn(writer, buffer, store, storeSize, undefined, gone);
       // Each file opened before its record: one removed since the walk is left out, and the end counts what went in.
       let copied = 0, copiedBytes = 0;
       for (const file of files) {
         const path = join(paths.files, file.name), handle = await open(path, "r").catch(unlessGone);
         if (!handle) continue;
         await put({ t: "file", kind: "file", path: file.name.split(sep).join("/"), size: file.size });
-        await copyIn(writer, buffer, path, file.size, handle);
+        await copyIn(writer, buffer, path, file.size, handle, gone);
         copied++;
         copiedBytes += file.size;
       }
@@ -187,7 +199,8 @@ export const BACKUP_METHODS: Record<string, Method> = {
       await handle.sync();
       await handle.close();
       out = null;
-      // Its name only now, and never over a file that appeared meanwhile.
+      // Its name only now, and never over a file that appeared meanwhile, nor once nobody asks for it.
+      stillAsked(gone);
       try { await link(partial, path); } catch (error) { throw (error as NodeJS.ErrnoException).code === "EEXIST" ? new CliError("refused", `${path} exists: choose another name`) : error; }
       return { path, bytes: written, files: copied, protection: unsealed ? "none" : "passphrase", ...(light && { light: true, leftOut: leftOut.length, leftOutBytes }) };
     } catch (error) {

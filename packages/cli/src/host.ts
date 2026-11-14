@@ -296,6 +296,9 @@ function connection(ctx: ApiContext, socket: Socket, secret: Buffer, answering: 
   // A replay raises the limit by what it wrote; once the client has read everything, it is MAX_UNREAD again.
   let limit = MAX_UNREAD;
   const unsubscribe = () => { for (const off of unsubscribes.splice(0)) off(); };
+  // The client that asked the calls still open went away (Ctrl-C on the command): `CallScope.gone`.
+  const gone = new AbortController();
+  socket.on("close", () => gone.abort());
   // Ended, not destroyed: the client still reads whole lines up to the last one written, then the end.
   const write = (value: unknown, replayed = false) => {
     if (socket.destroyed || socket.writableEnded) return;
@@ -350,7 +353,7 @@ function connection(ctx: ApiContext, socket: Socket, secret: Buffer, answering: 
       for (const event of queued) if (event.seq > last) write({ event });
       return;
     }
-    const answered = callApi(ctx, request.method, request.params ?? {}).then(
+    const answered = callApi(ctx, request.method, request.params ?? {}, { gone: gone.signal }).then(
       (result) => write({ id, result: result ?? null }),
       (error) => write({ id, error: asCliError(error).toJSON() }),
     );

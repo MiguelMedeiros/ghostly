@@ -11,7 +11,7 @@ import { asCliError, CliError } from "./errors";
 import { shellWord } from "./shellWord";
 import {
   bool, chatOf, chatOrGroup, dhtOnly, findChat, findGroup, groupById, groupNameOf, groupOf, groupPrefixed, inviteTaken, keptForJoin, list, messageOf, noMessage, nobodyJoined, node, num, oneOf, oneShotWaits, settingsOf, shownName, sinceSeq, somebodyJoined, state, str, transportOffered, waitForState,
-  type ApiContext, type Method, type Params, type RefPlace,
+  type ApiContext, type CallScope, type Method, type Params, type RefPlace,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
 import { checkShownName } from "./profiles";
@@ -1343,10 +1343,13 @@ export { findChat, findGroup, startNamedChats } from "./apiKit";
 export type { ApiContext } from "./apiKit";
 export const API_METHODS: readonly string[] = Object.keys(METHODS);
 
-/** Runs one method of the API: one the table lists itself (`constructor`, which every object has, is none). */
-export async function callApi(ctx: ApiContext, method: string, params: unknown = {}): Promise<unknown> {
+/**
+ * Runs one method of the API: one the table lists itself (`constructor`, which every object has, is none). `call`: who
+ * asked, from a daemon's connection (`host.ts`).
+ */
+export async function callApi(ctx: ApiContext, method: string, params: unknown = {}, call?: CallScope): Promise<unknown> {
   const run = Object.hasOwn(METHODS, method) ? METHODS[method] : undefined;
   if (!run) throw new CliError("not_found", `No method ${method}`);
   if (params === null || typeof params !== "object" || Array.isArray(params)) throw new CliError("bad_request", "params must be an object");
-  return run(ctx, await withStoredIds(ctx, params as Params));
+  return run(ctx, await withStoredIds(ctx, params as Params), call);
 }
