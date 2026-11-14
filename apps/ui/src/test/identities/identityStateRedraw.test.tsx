@@ -3,7 +3,7 @@
 // Identities page) draws again only when what it shows changes: a state that changes nothing of it draws nothing.
 import { Profiler } from "react";
 import { act, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { IdentityTimelineEntry } from "@ghostly/core";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import type { NostrContactView, NostrOwnView } from "@ghostly/browser/nostr/types";
@@ -56,6 +56,11 @@ function transfersOnly(engine: FakeEngine) {
 }
 
 describe("an engine state that changes nothing of what shows identities", () => {
+  // Each state's proofs carry times from views.ts's `now()`, in whole seconds: a second that turns inside the 20 states
+  // changes them for real, and the lines rightly draw again. The clock stands still here; timers still run.
+  beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); });
+  afterEach(() => { vi.useRealTimers(); });
+
   it("draws none of a chat's ID card lines, and a changed proof draws only its own line", () => {
     const commits = entries.map(() => 0);
     const view = renderApp(<></>);
@@ -105,6 +110,27 @@ describe("an engine state that changes nothing of what shows identities", () => 
     transfersOnly(view.engine);
     expect(commits).toBe(0);
     act(() => view.engine.setState(fresh({ subject: [5, "changed.example"] }) as never));
+    expect(commits).toBeGreaterThan(0);
+  });
+
+  it("does not draw a contact's identities beside the chat for what the panel never shows of their chat", () => {
+    let commits = 0;
+    const view = renderApp(<Profiler id="panel" onRender={() => { commits++; }}>
+      <ContactIdentitiesPanel peerKey="peer" name="Alice" onClose={() => {}} />
+    </Profiler>);
+    act(() => view.engine.setState(fresh() as never));
+    commits = 0;
+    // The contact types and stops, their round trip time changes, the chat syncs: their chat's view changes, none of it
+    // in the panel. (Their presence is: its line and the dot on their picture follow it, as their own parts.)
+    const chat = (i: number): Partial<LinkView> => ({ peerTyping: i % 2 === 0, transportRttMs: 40 + i, lastSyncAt: 1_000 + i });
+    for (let i = 0; i < 20; i++) {
+      const state = fresh();
+      act(() => view.engine.setState({ ...state, links: [{ ...state.links[0], ...chat(i) }] } as never));
+    }
+    expect(commits).toBe(0);
+    // Their key is verified since: the Ghostly card says so.
+    const state = fresh();
+    act(() => view.engine.setState({ ...state, links: [{ ...state.links[0], peerVerified: !state.links[0].peerVerified }] } as never));
     expect(commits).toBeGreaterThan(0);
   });
 

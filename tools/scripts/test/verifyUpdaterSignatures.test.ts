@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { createHash, generateKeyPairSync, sign as cryptoSign } from "node:crypto";
 import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -17,11 +18,12 @@ const PLATFORMS = {
 let dir: string;
 let pubkey: string;
 
-/** Signs `file` the way `tauri build` does, with a throwaway key; returns the `.sig` text. */
-function sign(file: string, key = join(dir, "test.key")) {
+/** Signs `file` the way `tauri build` does, with a throwaway key; returns the `.sig` text. No version: as before `--app-version`. */
+function sign(file: string, key = join(dir, "test.key"), version: string | null = "1.2.3") {
   const env: NodeJS.ProcessEnv = { ...process.env, TAURI_SIGNING_PRIVATE_KEY_PASSWORD: "" };
   delete env.TAURI_SIGNING_PRIVATE_KEY;
-  const result = spawnSync(tauri, ["signer", "sign", "-f", key, "--app-version", "1.2.3", file], { encoding: "utf8", env });
+  const args = ["signer", "sign", "-f", key, ...(version === null ? [] : ["--app-version", version]), file];
+  const result = spawnSync(tauri, args, { encoding: "utf8", env });
   expect(result.status, result.stderr).toBe(0);
   return readFileSync(`${file}.sig`, "utf8").trim();
 }
@@ -115,9 +117,80 @@ describe("verify-updater-signatures", () => {
     expect(problem).toBe("the trusted comment does not match its signature");
   }, 60_000);
 
+  it("fails a bundle whose signature names no version, as the apps refuse it", async () => {
+    const out = release((d) => {
+      const appimage = join(d, PLATFORMS["linux-x86_64"]);
+      const manifest = JSON.parse(readFileSync(join(d, "latest.json"), "utf8"));
+      manifest.platforms["linux-x86_64"].signature = sign(appimage, undefined, null);
+      writeFileSync(join(d, "latest.json"), JSON.stringify(manifest));
+    });
+    const problems = Object.fromEntries((await verifyRelease(out, pubkey)).map((r) => [r.platform, r.problem]));
+    expect(problems["linux-x86_64"]).toBe("the signature names no version");
+    expect(problems["darwin-aarch64"]).toBeNull();
+    const run = cli(out);
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("✗ linux-x86_64: Ghostly_1.2.3_amd64.AppImage: the signature names no version");
+  }, 60_000);
+
+  it("fails a latest.json that announces another version than its bundles were signed for", async () => {
+    const out = release((d) => {
+      const manifest = JSON.parse(readFileSync(join(d, "latest.json"), "utf8"));
+      writeFileSync(join(d, "latest.json"), JSON.stringify({ ...manifest, version: "9.9.9" }));
+    });
+    const results = await verifyRelease(out, pubkey);
+    expect(results.map((r) => r.problem)).toEqual(Object.keys(PLATFORMS).map(() => 'signed for version 1.2.3, latest.json announces "9.9.9"'));
+    expect(cli(out).status).toBe(1);
+  }, 60_000);
+
+  it("matches the signed version the way the apps do: a leading v on either side is the same version", async () => {
+    const out = release((d) => {
+      const manifest = JSON.parse(readFileSync(join(d, "latest.json"), "utf8"));
+      writeFileSync(join(d, "latest.json"), JSON.stringify({ ...manifest, version: "v1.2.3" }));
+    });
+    expect((await verifyRelease(out, pubkey)).every((r) => r.problem === null)).toBe(true);
+  }, 60_000);
+
+  it("fails a manifest with no version at all", async () => {
+    const out = release((d) => {
+      const { platforms } = JSON.parse(readFileSync(join(d, "latest.json"), "utf8"));
+      writeFileSync(join(d, "latest.json"), JSON.stringify({ platforms }));
+    });
+    expect((await verifyRelease(out, pubkey)).map((r) => r.problem)).toEqual(Object.keys(PLATFORMS).map(() => "latest.json announces no version"));
+  }, 60_000);
+
+  it("fails a signature with a pre-1.0 trusted comment (timestamp and file, no version) even when it verifies", async () => {
+    // A minisign signature made here, so its trusted comment is exactly what the pre-1.0 releases carry.
+    const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+    const keyId = Buffer.from("b7433b5cac826f74", "hex");
+    const rawKey = Buffer.from(publicKey.export({ format: "jwk" }).x as string, "base64url");
+    const minisignKey = `untrusted comment: minisign public key\n${Buffer.concat([Buffer.from("Ed"), keyId, rawKey]).toString("base64")}\n`;
+    const file = join(dir, "Ghostly.app.tar.gz");
+    writeFileSync(file, "a pre-1.0 bundle\n".repeat(1000));
+    const trusted = "timestamp:1789870681\tfile:Ghostly.app.tar.gz";
+    const signature = cryptoSign(null, createHash("blake2b512").update(readFileSync(file)).digest(), privateKey);
+    const global = cryptoSign(null, Buffer.concat([signature, Buffer.from(trusted)]), privateKey);
+    const sig = [
+      "untrusted comment: signature from tauri secret key",
+      Buffer.concat([Buffer.from("ED"), keyId, signature]).toString("base64"),
+      `trusted comment: ${trusted}`,
+      global.toString("base64"),
+    ].join("\n");
+    const key = parsePublicKey(Buffer.from(minisignKey).toString("base64"));
+    const base64 = Buffer.from(sig).toString("base64");
+    expect(await signatureProblem(file, base64, key)).toBeNull();
+    expect(await signatureProblem(file, base64, key, "9.9.9")).toBe("the signature names no version");
+    expect(await signatureProblem(file, base64, key, "0.4.0")).toBe("the signature names no version");
+  });
+
   it("reads the real updater key of the app", () => {
     const config = JSON.parse(readFileSync(join(root, "apps/desktop/tauri.conf.json"), "utf8"));
     expect(parsePublicKey(config.plugins.updater.pubkey).keyId).toHaveLength(8);
+  });
+
+  it("has the app refuse an update whose signature does not name the version latest.json announces", () => {
+    // Off by default in tauri-plugin-updater: a signature with no version then passes for any announced version.
+    const config = JSON.parse(readFileSync(join(root, "apps/desktop/tauri.conf.json"), "utf8"));
+    expect(config.plugins.updater.requireSignedVersion).toBe(true);
   });
 });
 

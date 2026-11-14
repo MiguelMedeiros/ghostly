@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { voiceLevel } from "@ghostly/core";
 import type { LevelSource } from "../lib/voiceLevels";
+import { usePageShown } from "./usePageShown";
 
 /** From this level on, a side is speaking; a breath or a fan stays under it. */
 const SPEAKING = 0.06;
@@ -43,13 +44,16 @@ function analysed(stream: MediaStream | null): { read: () => number; stop: () =>
  * `--voice-level` (0 to 1, in tenths), read every 80 ms from an analyser on `stream`'s sound and written only when it
  * changes, each level held at least `WIDTH_HOLD_MS` (the first one, and 0 when they stop, at once). The sound is only measured,
  * here on this device: nothing of it is played or sent. Where the page cannot hear the call (a Linux Desktop call
- * keeps its sound in Rust), `source` says the level instead; with neither, nothing is marked.
+ * keeps its sound in Rust), `source` says the level instead; with neither, nothing is marked. Nothing is read while the
+ * page is hidden (the app out of sight in a call, a tab in the background): the ring is drawn for nobody, and each
+ * side's analyser kept an audio context and its timer running for the whole call.
  */
 export function useVoiceRing<T extends HTMLElement>(stream: MediaStream | null, on: boolean, source?: LevelSource) {
   const ref = useRef<T>(null);
+  const inSight = usePageShown();
   useEffect(() => {
     const el = ref.current;
-    if (!on || !el) return;
+    if (!on || !inSight || !el) return;
     let told = 0;
     const meter = source ? { read: () => told, stop: source((level) => { told = level; }) } : analysed(stream);
     if (!meter) return;
@@ -74,6 +78,6 @@ export function useVoiceRing<T extends HTMLElement>(stream: MediaStream | null, 
       delete el.dataset.speaking;
       el.style.removeProperty("--voice-level");
     };
-  }, [stream, on, source]);
+  }, [stream, on, inSight, source]);
   return ref;
 }

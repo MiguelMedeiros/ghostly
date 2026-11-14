@@ -107,6 +107,17 @@ describe("device state by turn read", () => {
     expect(turnAction("moving", { result: "tombstone", listed: false })).toEqual({ do: "become", state: "removed", reload: false });
   });
 
+  it("a tombstone the device it believes active did not sign ends no device: listed or not, it is moving", () => {
+    for (const listed of [true, false]) {
+      const facts = { result: "tombstone" as const, listed, believed: false };
+      expect(turnAction("active-start", facts)).toEqual({ do: "become", state: "moving", reload: false });
+      expect(turnAction("active-running", facts)).toEqual({ do: "become", state: "moving", reload: true });
+      for (const row of ["standby", "releasing", "superseded"] as const) expect(turnAction(row, facts), row).toEqual({ do: "become", state: "moving", reload: false });
+      expect(turnAction("taking", facts)).toMatchObject({ then: { do: "become", state: "moving", reload: false } });
+      expect(turnAction("moving", facts)).toEqual(waitsForSetUpdate);
+    }
+  });
+
   it("every state a cell leads to is a legal change of the device state", () => {
     const stateOf: Record<TurnRow, DeviceState> = { "active-start": "active", "active-running": "active", standby: "standby", releasing: "releasing", taking: "taking", superseded: "superseded", moving: "moving", removed: "removed" };
     const check = (from: DeviceState, action: TurnAction) => {

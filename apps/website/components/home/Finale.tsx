@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useInView } from "motion/react";
 import { useCalm } from "@/lib/useCalm";
+import { useInstaller } from "@/lib/useInstaller";
 import { Ghost, GhostMark, type GhostMood } from "@/components/ghost/Ghost";
 import { Icon } from "@/components/site/icons";
 import { Particles } from "@/components/site/Particles";
-import { PLATFORMS, defaultInstaller, downloads, platformOf, releaseUrl, type InstallerKey } from "@/lib/release";
+import { ANDROID_PAGE, PLATFORMS, downloads, platformOf, releaseUrl } from "@/lib/release";
 import { APP_URL } from "@/content/shell";
 import type { HomeCopy } from "@/content/home";
 import "@/app/finale.css";
@@ -45,10 +46,12 @@ function Words({ text, className = "", from = 0 }: { text: string; className?: s
  * The ending of the story. The title, the lead and the button are there the
  * moment the reader arrives; above them Boo and Casper meet, talk, and Casper
  * leaves, so Boo turns to you. Below, the download panel: one card per desktop
- * platform (the reader's machine first), the extension and the CLI. Without
- * scripts, or with reduced motion, the final frame is simply there.
+ * platform (the reader's machine first), the Android app, the extension and the
+ * CLI. On an Android phone the Android app's card leads; elsewhere it shows
+ * `qr`, which takes a phone to the install page. Without scripts, or with
+ * reduced motion, the final frame is simply there.
  */
-export function Finale({ t, version }: { t: HomeCopy["finale"]; version: string }) {
+export function Finale({ t, version, qr }: { t: HomeCopy["finale"]; version: string; qr: ReactNode }) {
   const links = downloads(version);
   const reduce = useCalm();
   const sectionRef = useRef<HTMLElement>(null);
@@ -62,28 +65,7 @@ export function Finale({ t, version }: { t: HomeCopy["finale"]; version: string 
   const [step, setStep] = useState(-1);
   const [surprised, setSurprised] = useState(false);
   const [poof, setPoof] = useState(false);
-  const [installer, setInstaller] = useState<InstallerKey | undefined>(undefined);
-
-  // The installer for this machine. Chrome on a Mac says whether it is Apple silicon; an iPad looks like a Mac but for its touch points.
-  useEffect(() => {
-    const nav = navigator as Navigator & {
-      userAgentData?: { getHighEntropyValues(hints: string[]): Promise<{ architecture?: string }> };
-    };
-    let cancelled = false;
-    const guess = defaultInstaller(nav.userAgent, nav.platform, undefined, nav.maxTouchPoints);
-    setInstaller(guess);
-    if (guess === "macArm" && nav.userAgentData) {
-      nav.userAgentData
-        .getHighEntropyValues(["architecture"])
-        .then((v) => {
-          if (!cancelled) setInstaller(defaultInstaller(nav.userAgent, nav.platform, v.architecture));
-        })
-        .catch(() => {});
-    }
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const installer = useInstaller();
 
   // The title, lead and button rise the moment the title reaches the viewport.
   useEffect(() => {
@@ -175,10 +157,37 @@ export function Finale({ t, version }: { t: HomeCopy["finale"]; version: string 
   const booLook = state === "play" ? { x: 0.8, y: 0.1 } : { x: 0, y: 0.2 };
   const casperLook = state === "play" ? { x: -0.8, y: 0.1 } : { x: -0.6, y: 0.15 };
 
-  // The reader's platform leads the panel; phones and unknown machines get the natural order.
-  const hot = installer ? platformOf(installer) : undefined;
+  // The reader's platform leads the panel; an Android phone gets the APK's card first, other phones and unknown machines the natural order.
+  const android = installer === "androidApk";
+  const hot = installer && installer !== "androidApk" ? platformOf(installer) : undefined;
   const platforms = hot ? [...PLATFORMS.filter((p) => p.id === hot), ...PLATFORMS.filter((p) => p.id !== hot)] : PLATFORMS;
   const speaker = (side: string) => (side === "boo" ? "Boo" : "Casper");
+
+  // The whole row: the APK and the install page, and on a computer the QR code that opens that page on a phone.
+  const androidCard = (
+    <div className="card fin-card fin-card--android" data-hot={android || undefined}>
+      <div className="fin-card-text">
+        <h4 className="fin-card-title">
+          <Icon name="android" /> {t.android.title}
+        </h4>
+        <p className="fin-card-body">{t.android.body}</p>
+        <div className="fin-android-actions">
+          <a className="btn fin-dl" href={links.androidApk} aria-current={android ? "true" : undefined}>
+            <Icon name="download" /> {t.android.cta} <span className="fin-dl-ext">v{version}</span>
+          </a>
+          <Link className="link-arrow" href={ANDROID_PAGE}>
+            {t.android.how} <span aria-hidden="true">→</span>
+          </Link>
+        </div>
+      </div>
+      {!android && (
+        <figure className="fin-qr">
+          {qr}
+          <figcaption className="caption">{t.android.scan}</figcaption>
+        </figure>
+      )}
+    </div>
+  );
 
   return (
     <section
@@ -250,13 +259,14 @@ export function Finale({ t, version }: { t: HomeCopy["finale"]; version: string 
         <div className="fin-panel" id="download">
           <div className="fin-panel-head">
             <h3 className="fin-panel-title">
-              <Icon name="desktop" /> {t.desktop.title} <span className="chip">v{version}</span>
+              <Icon name="download" /> {t.desktop.title} <span className="chip">v{version}</span>
             </h3>
             <a className="caption fin-all" href={releaseUrl(version)}>
               {t.all} <span aria-hidden="true">↗</span>
             </a>
           </div>
           <div className="fin-cards">
+            {android && androidCard}
             {platforms.map((p) => (
               <div key={p.id} className="card fin-card" data-hot={p.id === hot || undefined}>
                 <div className="fin-card-head">
@@ -271,6 +281,7 @@ export function Finale({ t, version }: { t: HomeCopy["finale"]; version: string 
                 </div>
               </div>
             ))}
+            {!android && androidCard}
             <div className="card fin-card fin-card--wide">
               <div className="fin-card-text">
                 <h4 className="fin-card-title">

@@ -1,9 +1,9 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useRef, useState } from "react";
 import { describe, expect, it } from "vitest";
 import { Menu, MenuItem } from "../../components/Menu";
-import { useDialogFocus } from "../../hooks/useDismiss";
+import { useDialogFocus, useTabTrap } from "../../hooks/useDismiss";
 
 // covers: app.menus
 
@@ -119,5 +119,32 @@ describe("a modal made of plain elements", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog", { name: "Identities" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Options" })).toHaveFocus();
+  });
+
+  // What the Linux Desktop's WebKitGTK hands the page for a real Shift+Tab (GTK's ISO_Left_Tab): no key name, the Tab key.
+  const shiftTabOnLinux = { key: "Unidentified", code: "Tab", keyCode: 9, shiftKey: true };
+
+  it("keeps a Shift+Tab that comes without a key name (the Linux Desktop's) inside, from its first control", async () => {
+    const user = userEvent.setup();
+    render(<Page />);
+    await user.click(screen.getByRole("button", { name: "Open" }));
+    await user.tab();
+    const first = screen.getByRole("button", { name: "Outer first" });
+    expect(first).toHaveFocus();
+    expect(fireEvent.keyDown(first, shiftTabOnLinux)).toBe(false);
+    expect(screen.getByRole("button", { name: "Open inner" })).toHaveFocus();
+  });
+
+  it("a Tab trap alone keeps that Shift+Tab inside too", () => {
+    function Trapped() {
+      const ref = useRef<HTMLDivElement>(null);
+      useTabTrap(ref);
+      return <div ref={ref}><button type="button">Trap first</button><button type="button">Trap last</button></div>;
+    }
+    render(<><button type="button">Behind</button><Trapped /></>);
+    const first = screen.getByRole("button", { name: "Trap first" });
+    first.focus();
+    expect(fireEvent.keyDown(first, shiftTabOnLinux)).toBe(false);
+    expect(screen.getByRole("button", { name: "Trap last" })).toHaveFocus();
   });
 });

@@ -15,6 +15,10 @@ const FIELDS: Record<string, readonly string[]> = {
   [STORES.groups]: ["invitation.seedB64", "entry.seedB64", "joining.seedB64", "state.seedB64", "state.secrets", "community.seedB64", "community.secrets", "community.entry.seedB64", "community.rv"],
   [STORES.swaps]: ["swap", "token"],
   [STORES.melts]: ["secrets", "outputs"],
+  // A sent token kept for Take it back, the outputs of a paid invoice not minted yet, and a Cashu review's swap and token.
+  [STORES.payments]: ["token"],
+  [STORES.quotes]: ["outputs"],
+  [STORES.intents]: ["prepared.swap", "prepared.token"],
 };
 /** A group removed and invited again keeps the group it was (`previous`), with secrets of its own. */
 const NESTED: Record<string, string> = { [STORES.groups]: "previous" };
@@ -30,7 +34,8 @@ const SEALED_SECRET = "sealedSecret";
 type Row = Record<string, unknown>;
 type Seal = (json: string, at: SecretPlace) => SealedField;
 
-const keyOf = (store: string, row: Row) => String(store === STORES.melts ? row.quote : row.id);
+const keyOf = (store: string, row: Row) =>
+  String(store === STORES.melts || store === STORES.quotes ? row.quote : store === STORES.intents ? read(row, "review.id") : row.id);
 
 function read(row: Row, path: string): unknown {
   return path.split(".").reduce<unknown>((at, part) => (at && typeof at === "object" ? (at as Row)[part] : undefined), row);

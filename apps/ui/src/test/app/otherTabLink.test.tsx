@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { OtherTab } from "../../components/OtherTab";
 import { translatorFor } from "../../locales";
-import { forwardLink, linkInAddress, takeLinks } from "../../lib/otherTabLink";
+import { dropLinks, forwardLink, linkInAddress, takeLinks } from "../../lib/otherTabLink";
 
 // covers: app.single-peer-per-browser
 
@@ -22,6 +22,11 @@ describe("linkInAddress", () => {
     expect(linkInAddress("#web%2Bghostly%3Aghostly1abc")).toBe("web%2Bghostly%3Aghostly1abc");
     expect(linkInAddress("#/join/group2/abc")).toBe("/join/group2/abc");
     expect(linkInAddress("#work#ghostly1zabc")).toBe("work#ghostly1zabc");
+    // A doubled `#` before it (a `#` typed after the app's own `#/`): the link it doubles.
+    expect(linkInAddress(`##${CODE}`)).toBe(`/${CODE}`);
+    expect(linkInAddress(`#/#${CODE}`)).toBe(`/${CODE}`);
+    expect(linkInAddress("##/join/group2/abc")).toBe("/join/group2/abc");
+    expect(linkInAddress("#/#web%2Bghostly%3Aghostly1abc")).toBe("/web%2Bghostly%3Aghostly1abc");
     for (const plain of ["", "#", "#/", "#/chat/0123abcd", "#/settings", "#/shared"]) expect(linkInAddress(plain)).toBeNull();
   });
 });
@@ -65,6 +70,17 @@ describe("a link handed to the tab that holds the profile", () => {
   });
 });
 
+describe("a link handed to a tab on standby", () => {
+  it("is refused at once, so the waiting tab drops it, and is never said to have opened", async () => {
+    stops.push(dropLinks("ghostly-peer"));
+    const taken = vi.fn();
+    const dropped = vi.fn();
+    stops.push(forwardLink("ghostly-peer", CODE, taken, 20, dropped));
+    await vi.waitFor(() => expect(dropped).toHaveBeenCalledTimes(1));
+    expect(taken).not.toHaveBeenCalled();
+  });
+});
+
 describe("the waiting screen", () => {
   it("says the link opens here if the other tab closes, and where it went once taken", () => {
     const t = translatorFor("en");
@@ -72,5 +88,20 @@ describe("the waiting screen", () => {
     expect(screen.getByTestId("other-tab").textContent).toContain("Close it and this tab opens your link.");
     rerender(<OtherTab state="linkTaken" t={t} />);
     expect(screen.getByTestId("other-tab").textContent).toContain("Your link opened in Ghostly in your other tab.");
+  });
+
+  it("is said to a screen reader as it changes: the same polite status stays mounted while the share or link goes over", () => {
+    const t = translatorFor("en");
+    const { rerender } = render(<OtherTab state="sharing" t={t} />);
+    const said = screen.getByRole("status");
+    expect(said).toHaveAttribute("aria-live", "polite");
+    expect(said).toHaveTextContent("Sending to Ghostly in your other tab…");
+    rerender(<OtherTab state="shareNone" t={t} />);
+    expect(screen.getByRole("status")).toBe(said);
+    expect(said).toHaveTextContent("Nothing was shared, or it was already picked up.");
+    rerender(<OtherTab state="link" t={t} />);
+    rerender(<OtherTab state="linkTaken" t={t} />);
+    expect(screen.getByRole("status")).toBe(said);
+    expect(said).toHaveTextContent("Your link opened in Ghostly in your other tab.");
   });
 });

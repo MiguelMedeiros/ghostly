@@ -45,7 +45,7 @@ export function IdentityActivity({ provider, subject, profile, links }: { provid
   const { posts, graph, loading, error, more, retry } = usePublicActivity(provider, subject, on);
   const network = Object.prototype.hasOwnProperty.call(ACTIVITY_NETWORKS, provider) ? ACTIVITY_NETWORKS[provider] : undefined;
   if (!network) return null;
-  if (!on) return <p className="identity-activity-note" data-testid="contact-activity-off">{t("identities.activity.off")}</p>;
+  if (!on) return <p className="identity-activity-note" data-testid="contact-activity-off">{t("identities.activity.off", { settings: t("settings.title"), section: t("settings.security") })}</p>;
   const found = profile?.found ? profile : undefined;
   const counts = found ? profileCounts(found, t) : "";
   const hosts = [...new Set([...(found?.hosts ?? []), ...(posts?.hosts ?? []), ...(graph?.hosts ?? [])])];
@@ -56,12 +56,12 @@ export function IdentityActivity({ provider, subject, profile, links }: { provid
       {found && <div className="identity-activity-profile" data-testid="contact-activity-profile">
         {found.avatar?.startsWith("data:image/") && <img src={found.avatar} alt="" className="identity-activity-avatar" data-testid="contact-activity-avatar" />}
         <div className="identity-activity-who">
-          {found.name && <span className="identity-activity-name" data-testid="contact-activity-name">{found.name}</span>}
+          {found.name && <span className="identity-activity-name" data-testid="contact-activity-name"><bdi>{found.name}</bdi></span>}
           {found.handle && <span className="identity-activity-handle" data-testid="contact-activity-handle"><bdi>{found.handle}</bdi></span>}
           {counts && <span className="identity-activity-counts" data-testid="contact-activity-counts">{counts}</span>}
         </div>
       </div>}
-      {found?.about && <p className="identity-activity-about" data-testid="contact-activity-about">{found.about}</p>}
+      {found?.about && <p className="identity-activity-about" data-testid="contact-activity-about"><bdi>{found.about}</bdi></p>}
       {(found?.website || posts?.profileUrl) && <div className="identity-activity-links">
         {found?.website && <a {...externalLinkProps(found.website)} rel="noopener noreferrer nofollow" dir="ltr" className="identity-activity-link" data-testid="contact-activity-website"><bdi>{shownUrl(found.website)}</bdi></a>}
         {posts?.profileUrl && <a {...externalLinkProps(posts.profileUrl)} className="identity-activity-link" data-testid="contact-activity-open-profile">{t("identities.activity.openIn", { network })}</a>}

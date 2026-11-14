@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type CompositionEvent } from "react";
+import { draftDirection } from "../lib/documentLanguage";
 import { fitText, fitTextEdit } from "../lib/fitText";
 import { fitsGroupName } from "../lib/groups";
 
 /**
- * A name field's handlers and ref: each change kept to what the name takes (`fits`, by `fitTextEdit`), the caret put
+ * A name field's handlers, ref and `dir` (the name read from its first letter, `draftDirection`): each change kept to what the name takes (`fits`, by `fitTextEdit`), the caret put
  * back where the kept text ends when something was left out (a controlled field otherwise moves it to the end). New
  * group and Rename (agents#1097), a new device's name.
  *
@@ -58,7 +59,7 @@ export function useFittedNameField(value: string, setValue: (value: string) => v
     caret.current = start.caret; setRefused(n => n + 1);
     setValue(start.value);
   }, [setValue, fits]);
-  return { ref, onChange, onCompositionStart, onCompositionEnd };
+  return { ref, onChange, onCompositionStart, onCompositionEnd, dir: draftDirection(value) };
 }
 
 /** A group name field (`fitsGroupName`). */

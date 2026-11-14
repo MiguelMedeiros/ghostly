@@ -1,4 +1,4 @@
-import { APP_DATA_MAX_BYTES, APP_SEND_LIMIT, appCardId, type AppCard, type AppSendError } from "@ghostly/core";
+import { APP_DATA_MAX_BYTES, APP_SEND_LIMIT, STATUS_CARD_LIMITS, appCardId, type AppCard, type AppSendError } from "@ghostly/core";
 import { bool, chatOf, node, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { peerVersion } from "./appEvents";
 import { servedApp, servedApps, type ServedApp } from "./appServe";
@@ -33,7 +33,9 @@ export const APP_CHAT_METHODS: Record<string, Method> = {
     let card: string | null = null;
     // The card is how a person learns of the app and gets it ("Install to play"); one whose app is open has no use for it.
     if (!bool(params, "noCard") && peer === null) {
-      const sent: AppCard = { kind: "app", id: appCardId(app.ref), ref: app.ref, digest: app.digest, sequence: app.sequence, title: app.title, version: app.version, ...(app.url !== undefined && { url: app.url }), opened: true };
+      // A manifest's version may be longer than a card takes: the card goes without it, as a person's app sends it.
+      const version = app.version.length <= STATUS_CARD_LIMITS.appVersion ? { version: app.version } : {};
+      const sent: AppCard = { kind: "app", id: appCardId(app.ref), ref: app.ref, digest: app.digest, sequence: app.sequence, title: app.title, ...version, ...(app.url !== undefined && { url: app.url }), opened: true };
       const result = await node(ctx).sendMessage({ linkId: chat, text: "", card: sent });
       if (result.error || !result.messageId) {
         // Not half open: with no card the contact would never know, so the open is taken back.

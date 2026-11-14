@@ -18,7 +18,7 @@ import { renderApp } from "../render";
  * and jumps over its whole history. The chat list's search asks for none: the engine searches what it did not send.
  */
 
-// The real sync (the setup stubs it out).
+// The real sync (the setup stubs it out, and stops its interval with the file).
 vi.unmock("@ghostly/browser/platform/sync");
 vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 

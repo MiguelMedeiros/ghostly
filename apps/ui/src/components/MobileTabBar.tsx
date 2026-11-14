@@ -113,7 +113,7 @@ export function MobileTabBar() {
               aria-current={active ? "page" : undefined}
               aria-label={label}
               data-testid={`mobile-tab-${tab.path.slice(1) || "chats"}`}
-              className={`flex-1 min-w-0 min-h-14 px-0.5 max-[359px]:px-0 flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-colors select-none [-webkit-touch-callout:none] ${
+              className={`current-mark current-mark-under relative flex-1 min-w-0 min-h-14 px-0.5 max-[359px]:px-0 flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-colors select-none [-webkit-touch-callout:none] ${
                 active ? "text-accent" : "text-text-muted"
               }`}
             >

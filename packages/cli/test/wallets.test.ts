@@ -5,14 +5,18 @@ import { INVITE_TAKEN } from "@ghostly/core";
 import type { EngineState } from "@ghostly/browser/shared/types";
 import { normalizeMintUrl } from "@ghostly/browser/engine/wallet";
 import { callApi, type ApiContext } from "../src/api";
+import { parseArgs } from "../src/args";
+import { COMMANDS, idSlot, positionals } from "../src/commands";
+import { pairs } from "../src/commands/shared";
 import { asCliError } from "../src/errors";
 import { invoiceNetwork, paymentJson } from "../src/wallets";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.wallets, headless.payments, headless.engine-passthrough
 
 /** The wallet and payment methods over a fake engine: what they refuse before the engine is asked. */
 function fake() {
   const node = {
-    getState: () => ({
+    chatView: chatViewOf, getState: () => ({
       links: [
         { id: "chat-one", label: "Alice", peerPubKeyZ32: "p", createdAt: 1, lastMessageAt: 0, profile: "paired-chat/1" },
         // An invite nobody took yet.
@@ -45,6 +49,8 @@ function fake() {
     walletCreate: vi.fn(async (p: { type: string; network: string }) => ({ id: `${p.type}:${p.network}`, type: p.type, network: p.network, config: {} })),
     walletRemove: vi.fn(async (_: unknown): Promise<void> => { throw new Error("This wallet still holds 42 sats on this device"); }),
     walletTestCoins: vi.fn(async () => ({ amount: 10000, unit: "test sats" })),
+    // As the engine reads the store: the newest `limit` of a long history (here, 1,000 movements).
+    walletHistory: vi.fn(async ({ limit }: { network: string; limit: number }) => Array.from({ length: Math.min(limit, 1_000) }, (_, i) => (i ? { id: `tx-${i}` } : { id: "h" }))),
     walletQuoteInvoice: vi.fn(async () => ({ quote: "q", mint: "m", amount: 10, feeReserve: 3 })),
     walletPayQuote: vi.fn(async (_: unknown) => ({ paid: true })),
     sendPayment: vi.fn(async (_: { timestamp: number }) => ({ paymentId: "p1" })),
@@ -68,6 +74,64 @@ describe("wallets", () => {
     const listed = await callApi(ctx, "wallet.list", {}) as { wallets: { type: string; balance: number }[]; offers: { type: string; available: boolean; reason: string | null }[] };
     expect(listed.wallets.map((w) => [w.type, w.balance])).toEqual([["cashu", 42], ["lightning", 42]]);
     expect(listed.offers.find((o) => o.type === "bark")).toMatchObject({ available: false, reason: expect.stringMatching(/browser/) });
+  });
+
+  it("the Lightning card through the mints answers the Cashu balance, not its copy read up to 15 s before", async () => {
+    // Found in a bug hunt: right after `chat pay bob 100` or a `pay` through that card, `wallet list` answered the card's
+    // balance from before the payment (10000 next to Cashu's 9900) until its next 15 s read.
+    const { ctx, node } = fake();
+    const engine = node.getState;
+    node.getState = () => {
+      const s = engine();
+      s.wallet.wallets = [...s.wallet.wallets!, { id: "lightning:testnet:nwc1", type: "lightning", network: "testnet", config: {}, card: "nwc1", name: "Hub", receive: false }];
+      const networks = s.wallet.networks!;
+      networks.testnet = { ...networks.testnet, balance: 30, lightnings: [{ card: "cashu", providerId: "cashu-mint", balance: 42, status: "ready" }, { card: "nwc1", providerId: "nwc", balance: 500, status: "ready" }] } as typeof networks.testnet;
+      return s;
+    };
+    const listed = await callApi(ctx, "wallet.list", {}) as { wallets: { id: string; balance: number }[] };
+    expect(listed.wallets.map((w) => [w.id, w.balance])).toEqual([["cashu:testnet", 30], ["lightning:testnet:cashu", 30], ["lightning:testnet:nwc1", 500]]);
+  });
+
+  it("a Spark, Arkade, Bark or Fedimint balance not read yet (or locked) is null with a status, never 0", async () => {
+    // Found in a bug hunt: those views hold 0 until the wallet read its balance, and `wallet list` answered that 0 with
+    // no status, where the app's total says "?".
+    const { ctx, node } = fake();
+    const engine = node.getState;
+    const federation = (read: boolean, status: string, error?: string) => ({ federationId: "f", balance: 7, status, lightning: true, invite: "fed1", ...(read ? { read: true } : {}), ...(error ? { error } : {}) });
+    let fedimint = [federation(true, "ready"), federation(false, "connecting")];
+    node.getState = () => {
+      const s = engine();
+      s.wallet.wallets = (["spark", "arkade", "bark", "fedimint"] as const).map((type) => ({ id: `${type}:testnet`, type, network: "testnet", config: {} }));
+      s.wallet.networks!.testnet = { ...s.wallet.networks!.testnet, spark: { configured: true, locked: true, balance: 0 }, ark: { configured: true, locked: false, balance: 0 },
+        bark: { configured: true, locked: false, read: true, balance: 9 }, fedimint: { balance: 7, federations: fedimint, history: [] } } as unknown as NonNullable<typeof s.wallet.networks>["testnet"];
+      return s;
+    };
+    const list = async () => (await callApi(ctx, "wallet.list", {}) as { wallets: { type: string; balance: number | null; status: string | null; error: string | null }[] }).wallets.map((w) => [w.type, w.balance, w.status, w.error]);
+    expect(await list()).toEqual([["spark", null, "locked", null], ["arkade", null, "reading", null], ["bark", 9, null, null], ["fedimint", null, "reading", null]]);
+    fedimint = [federation(true, "ready"), federation(false, "error", "unreachable")];
+    expect((await list())[3]).toEqual(["fedimint", null, "error", "unreachable"]);
+    fedimint = [federation(true, "ready")];
+    expect((await list())[3]).toEqual(["fedimint", 7, null, null]);
+  });
+
+  it("a USDT balance not read yet (or locked) is null with a status, never \"0\"", async () => {
+    // Found in a bug hunt: a USDT wallet's view holds "0" until its RPC answered (a slow one takes a minute, one that is
+    // down never does), and `wallet list` answered that "0" with no status, where the app's total says "?".
+    const { ctx, node } = fake();
+    const engine = node.getState;
+    let usdt: Record<string, unknown> = { configured: true, locked: true, balance: "0", gasBalance: "0" };
+    node.getState = () => {
+      const s = engine();
+      s.wallet.wallets = [{ id: "usdt:testnet", type: "usdt", network: "testnet", config: {} }];
+      s.wallet.networks!.testnet = { ...s.wallet.networks!.testnet, usdt } as unknown as NonNullable<typeof s.wallet.networks>["testnet"];
+      return s;
+    };
+    const list = async () => (await callApi(ctx, "wallet.list", {}) as { wallets: { balance: string | null; status: string | null }[] }).wallets.map((w) => [w.balance, w.status]);
+    expect(await list()).toEqual([[null, "locked"]]);
+    usdt = { configured: true, locked: false, balance: "0", gasBalance: "0" };
+    expect(await list()).toEqual([[null, "reading"]]);
+    usdt = { configured: true, locked: false, read: true, balance: "1500000", gasBalance: "0" };
+    expect(await list()).toEqual([["1500000", null]]);
   });
 
   it("refuse Bark before the engine, pass Fedimint's invite on, and draw a BDK phrase that is never answered", async () => {
@@ -139,6 +203,24 @@ describe("wallets", () => {
     expect(await callApi(ctx, "wallet.faucet", { type: "lightning", card: "cashu" })).toEqual({ amount: 10000, unit: "test sats" });
   });
 
+  it("an empty --card is a usage error, not the network's default card or the whole wallet", async () => {
+    // Found in a bug hunt: `wallet remove cashu --card "$CARD"` with CARD unset removed the whole Cashu wallet (exit 0),
+    // and `pay … --card ""` paid from the default card, as if no card had been named.
+    const { ctx, node } = fake();
+    for (const [method, params] of [
+      ["wallet.remove", { type: "cashu", card: "" }],
+      ["wallet.remove", { type: "lightning", card: "" }],
+      ["wallet.faucet", { type: "lightning", card: "" }],
+      ["wallet.receive", { amount: 10, card: "" }],
+      ["pay", { target: "lnbc1", card: "" }],
+      ["chat.request", { chat: "Alice", amount: 10, card: "" }],
+      ["chat.payRequest", { chat: "Alice", payment: "test", card: "" }],
+    ] as const) {
+      await expect(callApi(ctx, method, params), method).rejects.toMatchObject({ code: "usage", message: "--card needs a Lightning card id (ghostly wallet list)" });
+    }
+    for (const fn of [node.walletRemove, node.walletTestCoins, node.walletReceiveLightning, node.walletQuoteInvoice, node.requestPayment, node.payRequest]) expect(fn).not.toHaveBeenCalled();
+  });
+
   it("the faucet is Testnet's only", async () => {
     const { ctx } = fake();
     await expect(callApi(ctx, "wallet.faucet", { type: "cashu", network: "mainnet" })).rejects.toMatchObject({ code: "refused" });
@@ -167,7 +249,7 @@ describe("wallets", () => {
       [() => node.walletCreate.mockRejectedValueOnce(refused("You already have a Testnet Cashu wallet")), "wallet.create", { type: "cashu" }, "refused"],
       [() => node.walletReceiveLightning.mockRejectedValueOnce(refused("No mint could create an invoice: No mint configured")), "wallet.receive", { amount: 10 }, "unavailable"],
       [() => node.requestPayment.mockRejectedValueOnce(refused("No mint could create an invoice: No mint configured")), "chat.request", { chat: "Alice", amount: 10 }, "unavailable"],
-      [() => node.bitcoinReceiveAddress.mockRejectedValueOnce(refused("No Bitcoin source is set up")), "wallet.address", { type: "bitcoin" }, "unavailable"],
+      [() => node.bitcoinReceiveAddress.mockRejectedValueOnce(refused("No Bitcoin source is set up")), "wallet.address", { type: "bitcoin" }, "refused"],
       [() => node.walletTestCoins.mockRejectedValueOnce(refused("The faucet did not pay: This wallet has no test mint to ask for test coins")), "wallet.faucet", { type: "cashu" }, "unavailable"],
       [() => node.walletTestCoins.mockRejectedValueOnce(refused("Ghostly cannot ask this wallet's faucet by itself: open it instead")), "wallet.faucet", { type: "bitcoin" }, "unavailable"],
     ];
@@ -180,6 +262,47 @@ describe("wallets", () => {
     // A mint that did not answer stays the engine's.
     node.walletReceiveLightning.mockRejectedValueOnce(refused("No mint could create an invoice: mint.example did not answer"));
     expect(asCliError(await callApi(ctx, "wallet.receive", { amount: 10 }).catch((e: unknown) => e)).code).toBe("engine");
+  });
+
+  it("a payment's state that refuses what was asked is said with its code, not as the engine failing", async () => {
+    // Found in a bug hunt: each of these was `engine` (exit 1), on two real daemons with a local test mint.
+    const { ctx, node } = fake();
+    const engine = node.getState;
+    node.getState = () => {
+      const s = engine();
+      s.payments.sent = { id: "sent", linkId: "chat-one", kind: "payment", direction: "out", amount: 3, unit: "sat", state: "settled", createdAt: 3, network: "testnet" } as unknown as typeof s.payments[string];
+      s.payments.asked = { id: "asked", linkId: "chat-one", kind: "request", direction: "out", amount: 3, unit: "sat", state: "pending", createdAt: 4, network: "testnet" } as unknown as typeof s.payments[string];
+      return s;
+    };
+    Object.assign(node, {
+      reclaimPayment: vi.fn(async (_: unknown): Promise<void> => { throw new Error("Nothing to reclaim"); }),
+      checkPayment: vi.fn(async (_: unknown): Promise<void> => { throw new Error("Unknown payment request"); }),
+    });
+    // The mint asked for the swap of a payment and did not answer: the engine's `SwapUnsettledError`, read by its name.
+    const unsettled = Object.assign(new Error("testnut.cashu.space has not answered yet. The payment was not made. The sats set aside for it return to your wallet a few minutes after the mint answers."), { name: "SwapUnsettledError" });
+    const cases: [() => void, string, Record<string, unknown>, string, RegExp?][] = [
+      [() => {}, "payment.reclaim", { payment: "sent" }, "refused", /^Nothing to reclaim$/],
+      [() => {}, "payment.reclaim", { payment: "asked" }, "refused"],
+      [() => {}, "payment.check", { chat: "Alice", payment: "sent" }, "bad_request", /^"sent" is a payment you sent: payment check is for a request the contact made of you$/],
+      [() => {}, "payment.check", { chat: "Alice", payment: "asked" }, "bad_request", /^"asked" is your own request: /],
+      [() => node.payRequest.mockRejectedValueOnce(new Error("This request is no longer open")), "chat.payRequest", { chat: "Alice", payment: "test" }, "refused"],
+      [() => {}, "chat.payRequest", { chat: "Alice", payment: "asked" }, "bad_request", /^"asked" is your own request: the contact pays it$/],
+      [() => node.walletPayQuote.mockRejectedValueOnce(new Error("This invoice is already paid")), "pay", { target: "lntbs10u1pxyz" }, "refused"],
+      [() => node.sendPayment.mockRejectedValueOnce(unsettled), "chat.pay", { chat: "Alice", amount: 3 }, "unavailable", /^testnut\.cashu\.space has not answered yet\. The payment was not made\./],
+      // As the engine's payment desk throws it: its NoEcashError, a plain Error that says so with `unsettled`.
+      [() => node.sendPayment.mockRejectedValueOnce(Object.assign(new Error(unsettled.message), { unsettled: true })), "chat.pay", { chat: "Alice", amount: 3 }, "unavailable", /^testnut\.cashu\.space has not answered yet\./],
+    ];
+    const answered = [], wanted = [];
+    for (const [arrange, method, params, code, message] of cases) {
+      arrange();
+      const error = asCliError(await callApi(ctx, method, params).catch((e: unknown) => e));
+      answered.push({ method, params, code: error.code, message: error.message });
+      wanted.push({ method, params, code, message: message ? expect.stringMatching(message) : expect.any(String) });
+    }
+    expect(answered).toEqual(wanted);
+    // A check of the contact's own request still reaches the engine.
+    (node as unknown as { checkPayment: ReturnType<typeof vi.fn> }).checkPayment.mockResolvedValueOnce(undefined);
+    expect(await callApi(ctx, "payment.check", { chat: "Alice", payment: "test" })).toEqual({ chat: "chat-one", paymentId: "test" });
   });
 
   it("pay or ask from a profile with no wallet of the network: refused, naming the wallet to make", async () => {
@@ -207,6 +330,36 @@ describe("wallets", () => {
     expect(await answer("chat.pay", { chat: "Alice", amount: 100 })).toMatchObject({ code: "refused", details: { reason: "contact_no_wallet" } });
   });
 
+  it("faucet, receive or an address from a profile with no wallet of the type: refused, naming the wallet to make", async () => {
+    // Found in a bug hunt: each was `unavailable` (try again later) "This wallet has no test mint", "No mint configured"
+    // or "No Bitcoin source is set up", on a profile that had no wallet at all.
+    const { ctx, node } = fake();
+    const answer = async (method: string, params: Record<string, unknown>) => asCliError(await callApi(ctx, method, params).catch((e: unknown) => e)).toJSON();
+    const noMint = () => new Error("The faucet did not pay: This wallet has no test mint to ask for test coins");
+    // With the wallet, the engine's words stay `unavailable`: its mint or source did not answer.
+    node.walletTestCoins.mockRejectedValueOnce(noMint());
+    expect(await answer("wallet.faucet", { type: "cashu" })).toMatchObject({ code: "unavailable" });
+    const engine = node.getState;
+    node.getState = () => { const s = engine(); s.wallet.wallets!.push(...[{ id: "arkade:testnet", type: "arkade", network: "testnet", config: {} }, { id: "bitcoin:testnet", type: "bitcoin", network: "testnet", config: {} }] as never[]); return s; };
+    expect(await answer("wallet.address", { type: "arkade" })).toEqual({ code: "unavailable", message: "No arkade wallet with an address on testnet" });
+    node.bitcoinReceiveAddress.mockRejectedValueOnce(new Error("No Bitcoin source is set up"));
+    expect(await answer("wallet.address", { type: "bitcoin" })).toEqual({ code: "unavailable", message: "No Bitcoin source is set up" });
+    node.getState = () => { const s = engine(); s.wallet.wallets = []; return s; };
+    const none = (type: string, name: string) => ({ code: "refused", message: `You have no Testnet ${name} wallet: ghostly wallet create ${type}`, details: { reason: "no_wallet" } });
+    node.walletTestCoins.mockRejectedValueOnce(noMint());
+    expect(await answer("wallet.faucet", { type: "cashu" })).toEqual(none("cashu", "Cashu"));
+    // The faucet of a Lightning card with no source of its own is the test mint's.
+    node.walletTestCoins.mockRejectedValueOnce(noMint());
+    expect(await answer("wallet.faucet", { type: "lightning" })).toEqual(none("cashu", "Cashu"));
+    node.walletReceiveLightning.mockRejectedValueOnce(new Error("No mint could create an invoice: No mint configured"));
+    expect(await answer("wallet.receive", { amount: 100 })).toEqual(none("cashu", "Cashu"));
+    node.bitcoinReceiveAddress.mockRejectedValueOnce(new Error("No Bitcoin source is set up"));
+    expect(await answer("wallet.address", { type: "bitcoin" })).toEqual(none("bitcoin", "Bitcoin"));
+    expect(await answer("wallet.address", { type: "arkade" })).toEqual(none("arkade", "Arkade"));
+    node.bitcoinReceiveAddress.mockRejectedValueOnce(new Error("No Bitcoin source is set up"));
+    expect(await answer("wallet.address", { type: "bitcoin", network: "mainnet" })).toEqual({ ...none("bitcoin", "Bitcoin"), message: "You have no Mainnet Bitcoin wallet: ghostly wallet create bitcoin --network mainnet" });
+  });
+
   it("a wallet source that is not offered is the person's value, refused before the engine is asked", async () => {
     const { ctx, node } = fake();
     await expect(callApi(ctx, "wallet.create", { type: "bitcoin", provider: "nope" })).rejects.toMatchObject({ code: "bad_request", message: expect.stringContaining("ghostly wallet list") });
@@ -225,7 +378,10 @@ describe("wallets", () => {
     };
     expect(await refusal({ type: "lightning" })).toEqual({ code: "bad_request", message: "lightning needs --provider: one of nwc (ghostly wallet list)" });
     expect(await refusal({ type: "lightning", provider: "nwc" })).toEqual({ code: "bad_request", message: "nwc needs --value uri=<nostr+walletconnect://…>" });
-    expect(await refusal({ type: "lightning", provider: "nwc", values: { bogus: "1" } })).toEqual({ code: "bad_request", message: "nwc takes no --value bogus: its fields are uri" });
+    // A secret given with no name= but with a base64 `=` (a macaroon, a rune, an API key) reads as its own name: never said.
+    const macaroon = "AgEDbG5kAvgBAwoQ3b7x9QnQyZk6Y2l8m1Z0aBIBMBoWCgdhZGRyZXNzEgRyZWFkEgV3cml0ZRoTCgRpbmZvEgRyZWFk";
+    expect(await refusal({ type: "lightning", provider: "nwc", values: pairs([`${macaroon}==`]) })).toEqual({ code: "bad_request", message: "one --value names no field of nwc: its fields are uri" });
+    expect(await refusal({ type: "lightning", provider: "nwc", values: { bogus: "1" } })).toEqual({ code: "bad_request", message: "one --value names no field of nwc: its fields are uri" });
     expect(await refusal({ type: "bitcoin", values: { network: "signet" } })).toEqual({ code: "bad_request", message: "bdk needs --value script=<bip84|bip86>" });
     expect(await refusal({ type: "fedimint" })).toEqual({ code: "bad_request", message: "fedimint needs --invite <fed11…>" });
     expect(await refusal({ type: "spark", network: "mainnet" })).toEqual({ code: "bad_request", message: "spark on mainnet needs --api-key <key> (or api-key=… on --stdin)" });
@@ -245,6 +401,58 @@ describe("wallets", () => {
     const { ctx } = fake();
     await expect(callApi(ctx, "wallet.history", { limit: 1.5 })).rejects.toMatchObject({ code: "bad_request", message: "limit must be a whole number from 1 to 10000" });
     expect(await callApi(ctx, "wallet.history", { limit: 1 })).toEqual({ network: "testnet", history: [{ id: "h" }] });
+  });
+
+  it("history answers as many entries as --limit asks, past the wallet view's newest 100", async () => {
+    // Found in a performance hunt: --limit 500 sliced the view's 100 movements and printed 100, saying nothing.
+    const { ctx, node } = fake();
+    const answer = await callApi(ctx, "wallet.history", { limit: 500 }) as { network: string; history: { id: string }[] };
+    expect(node.walletHistory).toHaveBeenCalledWith({ network: "testnet", limit: 500 });
+    expect(answer.network).toBe("testnet");
+    expect(answer.history).toHaveLength(500);
+    expect(answer.history[499]).toEqual({ id: "tx-499" });
+  });
+
+  it("chat request --method usdt reads the amount in USDT, as the app's composer does, and answers the amount asked", async () => {
+    // Found in a bug hunt: "5" reached the engine as 5 base units (0.000005 USDT, plus the engine's 1-999 unit tag), and
+    // the answer was only {chat, paymentId}: nothing said the request asked about 0.0005 USDT.
+    const { ctx, node } = fake();
+    const engine = node.getState;
+    const saved: EngineState["payments"] = {};
+    node.getState = () => {
+      const s = engine();
+      s.wallet.networks!.testnet = { ...s.wallet.networks!.testnet, usdt: { configured: true, locked: false, read: true, balance: "0", gasBalance: "0", decimals: 6 } } as unknown as NonNullable<typeof s.wallet.networks>["testnet"];
+      return { ...s, payments: { ...s.payments, ...saved } };
+    };
+    // As the engine does: the amount plus a tag of 1-999 base units, saved with the wallet's target.
+    node.requestPayment.mockImplementation(async (p) => {
+      const { amount, method } = p as unknown as { amount: number; method?: string };
+      saved.r1 = method !== "usdt" ? { id: "r1", linkId: "chat-one", kind: "request", direction: "out", amount, unit: "sat", state: "pending", createdAt: 3, network: "testnet" }
+        : { id: "r1", linkId: "chat-one", kind: "request", direction: "out", amount: amount + 417, unit: "testusdt", state: "pending", createdAt: 3, network: "testnet",
+          target: { method: "usdt", network: "sepolia", provider: "p", asset: "TEST-USDT", unit: "token-base", address: "0x1", chainId: 11155111, token: "0x2", decimals: 6, expiresAt: 9 } } as EngineState["payments"][string];
+      return { paymentId: "r1" };
+    });
+    const request = (argv: string[]) => {
+      const command = COMMANDS["chat request"];
+      const parsed = parseArgs(argv, command.options ?? {}, idSlot(command));
+      return callApi(ctx, "chat.request", command.params!(parsed, positionals(command, parsed.positionals)));
+    };
+    expect(await request(["Alice", "5", "--method", "usdt"])).toEqual({ chat: "chat-one", paymentId: "r1", amount: 5_000_417, unit: "testusdt", decimals: 6 });
+    expect(node.requestPayment.mock.calls.at(-1)![0]).toMatchObject({ amount: 5_000_000, method: "usdt" });
+    await request(["Alice", "0.25", "--method", "usdt"]);
+    expect(node.requestPayment.mock.calls.at(-1)![0]).toMatchObject({ amount: 250_000 });
+    // More decimals than the token has is the person's value, refused before the engine, as the composer refuses it.
+    const calls = node.requestPayment.mock.calls.length;
+    await expect(request(["Alice", "0.0000001", "--method", "usdt"])).rejects.toMatchObject({ code: "bad_request", message: expect.stringMatching(/6 decimal places/) });
+    for (const typed of ["0", "0.0", "x", "1e3", ".5"]) expect(() => request(["Alice", typed, "--method", "usdt"]), typed).toThrow(/<amount> with --method usdt takes USDT above 0/);
+    expect(node.requestPayment).toHaveBeenCalledTimes(calls);
+    // `payment list` says the decimals of a token amount; a sats one carries none.
+    const listed = await callApi(ctx, "payment.list", {}) as { payments: { id: string; amount: number; unit: string; decimals?: number }[] };
+    expect(listed.payments.find((p) => p.id === "r1")).toMatchObject({ amount: 250_417, unit: "testusdt", decimals: 6 });
+    expect(listed.payments.find((p) => p.id === "req")).not.toHaveProperty("decimals");
+    // Sats stay whole sats, and the answer says them too.
+    expect(await request(["Alice", "5"])).toEqual({ chat: "chat-one", paymentId: "r1", amount: 5, unit: "sat" });
+    expect(node.requestPayment.mock.calls.at(-1)![0]).toMatchObject({ amount: 5 });
   });
 });
 
@@ -298,6 +506,14 @@ describe("real money", () => {
     const { ctx, node } = fake();
     await expect(callApi(ctx, "pay", { target: "lntbs10u1pxyz", maxFee: 2 })).rejects.toMatchObject({ code: "refused" });
     expect(node.walletPayQuote).not.toHaveBeenCalled();
+  });
+
+  it("an invoice for another amount than --amount is refused before paying", async () => {
+    const { ctx, node } = fake();
+    await expect(callApi(ctx, "pay", { target: "lntbs10u1pxyz", amount: 5 })).rejects.toMatchObject({ code: "refused", message: expect.stringMatching(/10 sats.*5/) });
+    expect(node.walletPayQuote).not.toHaveBeenCalled();
+    await expect(callApi(ctx, "pay", { target: "lntbs10u1pxyz", amount: 10 })).resolves.toMatchObject({ amount: 10, paid: true });
+    expect(node.walletPayQuote).toHaveBeenCalledTimes(1);
   });
 });
 

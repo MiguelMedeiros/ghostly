@@ -18,6 +18,7 @@
   "reloadUnreachable": "Can't reach Ghostly's server. Check your connection, then reload.",
   "shared": "Sent to Ghostly in your other tab.",
   "sharedHint": "Pick the chat there. You can close this one.",
+  "sharing": "Sending to Ghostly in your other tab…",
   "title": "Ghostly can't run in this browser",
   "tryOther": "Leave private mode and allow site data, update the browser, or open Ghostly in another one.",
   "trySecure": "Open Ghostly at its https:// address."

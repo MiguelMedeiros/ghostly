@@ -76,6 +76,8 @@ export function liveMainnetInvoice(sats: number): string {
   const { words } = bech32.decode(fakeInvoice(sats, new Uint8Array(32).fill(9)) as `${string}1${string}`, false);
   return bech32.encode(`lnbc${sats * 10}n`, words, false);
 }
+/** A regtest invoice that has not expired yet (REGTEST_INVOICE has): what a request still to be paid over Lightning carries. */
+export const liveRegtestInvoice = (sats: number) => fakeInvoice(sats, new Uint8Array(32).fill(9));
 export const TESTNET_INVOICE =
   "lntb2500u1pvjluezsp5zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zygspp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdq5xysxxatsyp3k7enxv4jsxqzpu9qrsgquk0rl77nj30yxdy8j9vdx85fkpmdla2087ne0xh8nhedh8w27kyke0lp53ut353s06fv3qfegext0eh0ymjpf39tuven09sam30g4vgp702pq0";
 export const REGTEST_INVOICE =

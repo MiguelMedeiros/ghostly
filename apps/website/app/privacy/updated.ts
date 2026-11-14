@@ -7,8 +7,8 @@
  */
 
 /** Shown until the released Ghostly has Apps: the last change to any line but the `{apps && ...}` items. */
-export const LAST_UPDATED = "November 3, 2026";
+export const LAST_UPDATED = "November 5, 2026";
 /** Shown once Apps are released: the last change to any line, the Apps items included. */
-export const LAST_UPDATED_APPS = "November 3, 2026";
+export const LAST_UPDATED_APPS = "November 5, 2026";
 /** page.tsx as these dates describe it (scripts/privacy-date.test.mjs). */
-export const PRIVACY_TEXT_SHA = "9d1338f6f43d750019bcde7f66fb5d5781a25c604f97c1583c0be3972b435424";
+export const PRIVACY_TEXT_SHA = "50f1f5987bfb480959d3147f1c17c760ae5773980884bda8e50af9b1d9601120";

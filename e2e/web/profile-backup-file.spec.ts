@@ -164,7 +164,7 @@ test("a restored copy's Cashu balance is what the mint still holds, and it pays"
     await page.getByTestId("wallet-pay-input").fill(strangerInvoice(sats, note));
     await page.getByRole("button", { name: `Pay ${sats.toLocaleString("en-US")} test sats` }).click();
     await page.getByTestId("wallet-pay-confirm").click();
-    await expect(page.getByText("Paid.", { exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("wallet-send-result").getByTestId("wallet-notice")).toHaveText("Paid.", { timeout: 30_000 });
   };
   await expect.poll(balance).toBe(TEST_COINS);
 

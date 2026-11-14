@@ -1,12 +1,12 @@
 import { useEffect, useState, useSyncExternalStore, type RefObject } from "react";
-import { useI18n } from "../contexts/I18nContext";
-import { useSettings } from "../contexts/SettingsContext";
+import { useI18n, useOptionalI18n } from "../contexts/I18nContext";
+import { useTranslateMessages } from "../contexts/SettingsContext";
 import { chatTranslateChoice, translatesChat, watchChatTranslate } from "../lib/chatTranslate";
 import { useCueChat } from "../lib/cues";
 import { languageName } from "../lib/documentLanguage";
 import { isDesktopApp } from "../lib/externalLink";
 import { translateEnabled } from "../lib/translateFlag";
-import { askTranslation, readTranslation, showOriginal, shownOriginal, translationRound, watchTranslations } from "../lib/translateReceived";
+import { askTranslation, readTranslation, showOriginal, shownOriginal, shownTranslations, translationRound, watchTranslations } from "../lib/translateReceived";
 import type { ChatMessage } from "../lib/types";
 
 /** A received message's translation, as its bubble shows it (lib/translateReceived.ts). */
@@ -69,11 +69,11 @@ const idle = () => () => {};
 export function useTranslation(message: ChatMessage, ref: RefObject<Element | null>, eligible: boolean): ShownTranslation | null {
   const chat = useCueChat();
   const { language } = useI18n();
-  const { settings } = useSettings();
+  const translateMessages = useTranslateMessages();
   const able = eligible && message.sender === "peer" && !!chat && translateEnabled() && isDesktopApp();
   // Only a bubble that could translate watches the chat's choice: "settings" for the rest, which reads no key.
   const choice = useSyncExternalStore(able ? watchChatTranslate : idle, () => (able ? chatTranslateChoice(chat!) : "settings"));
-  const on = able && translatesChat(choice, settings.translateMessages);
+  const on = able && translatesChat(choice, translateMessages);
   const near = useNearScreen(ref, on);
   // After a model is downloaded or removed (`forgetTranslations`), what is on screen is asked again.
   const round = useSyncExternalStore(on ? watchTranslations : idle, () => (on ? translationRound() : 0));
@@ -91,4 +91,18 @@ export function useTranslation(message: ChatMessage, ref: RefObject<Element | nu
     toggle: () => showOriginal(message.id, !original),
     translate: () => askTranslation(message, chat!, language, true),
   };
+}
+
+/**
+ * For chat search while `active` (hooks/useChatSearch.ts): what each received message of `chat` shows in place of its
+ * text, its translation where its bubble draws one (lib/translateReceived.ts `shownTranslations`); none where the chat
+ * does not translate. Only what the page already holds: searching asks for no translation.
+ */
+export function useShownTranslations(chat: string, active: boolean): ((message: ChatMessage) => string | undefined) | undefined {
+  const language = useOptionalI18n()?.language;
+  const translateMessages = useTranslateMessages();
+  const able = active && !!language && translateEnabled() && isDesktopApp();
+  const choice = useSyncExternalStore(able ? watchChatTranslate : idle, () => (able ? chatTranslateChoice(chat) : "settings"));
+  const on = able && translatesChat(choice, translateMessages);
+  return useSyncExternalStore(on ? watchTranslations : idle, () => (on ? shownTranslations(language!) : undefined));
 }

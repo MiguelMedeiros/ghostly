@@ -69,12 +69,12 @@ function OpenChatLanguageMenu({ chat, detected, group, open, onClose, anchorRef,
         <span className="block truncate whitespace-nowrap font-medium text-text-primary">{t("chatLanguage.title")}</span>
         <span className="block">{t("chatLanguage.note")}</span>
       </div>
-      <MenuItem testId="chat-language-auto" checked={current.by !== "hand"} hint={text(chatLanguageOf(detected, { group }), group)} onClick={() => choose(null)}>
+      <MenuItem testId="chat-language-auto" radio checked={current.by !== "hand"} hint={text(chatLanguageOf(detected, { group }), group)} onClick={() => choose(null)}>
         {t("chatLanguage.auto")}
       </MenuItem>
       <MenuSeparator />
       {languageChoices(current.languages).map(code => (
-        <MenuItem key={code} testId={`chat-language-${code}`} data={{ "data-language": code }} checked={current.by === "hand" && current.language === code} onClick={() => choose(code)}>
+        <MenuItem key={code} testId={`chat-language-${code}`} data={{ "data-language": code }} radio checked={current.by === "hand" && current.language === code} onClick={() => choose(code)}>
           {languageName(code, app)}
         </MenuItem>
       ))}

@@ -287,13 +287,25 @@ export function cardLine(card: ShownCard): string {
 }
 
 /**
+ * Whether a chat draws an app card as a card (WISP 405 § An app): a 1:1 chat, where Apps shows (`appsOn`,
+ * `useAppsAvailable`). `chat` is the message's chat as its bubble is given it (`MessageBubble`'s `linkId`): a paired
+ * chat's id, a group's `group:<id>`, or none (a v0.4 chat). In a group, a v0.4 chat or with Apps off, the message reads
+ * as its text, as an older app shows it. The bubble and every other view of the message (a quote, the pinned bar, the
+ * chat list, Saved, the screen reader) follow this one rule, so none of them says something the bubble does not.
+ */
+export function appCardsShown(chat: string | undefined, appsOn: boolean): boolean {
+  return appsOn && !!chat && !chat.startsWith("group:");
+}
+
+/**
  * An app card's line where a message's text would be (the chat list, a quote, the pinned bar, Saved, the screen
  * reader): "🧩 App: Chess 1.2.0" in the reader's language. Its text is the English fallback an older app shows, with
  * the bundle's link (WISP 405 § An app). An app installed here is named as its card names it, by its own title and
- * version, never the sender's words for it (`installed`: the list as last read). None for any other message.
+ * version, never the sender's words for it (`installed`: the list as last read). None for any other message, and none
+ * where its chat does not draw it as a card (`shown`: `appCardsShown`), where the message's text is read instead.
  */
-export function appCardLine(card: StatusCard | undefined, t: Translate, installed = installedApps()): string | undefined {
-  if (card?.kind !== "app") return undefined;
+export function appCardLine(card: StatusCard | undefined, shown: boolean, t: Translate, installed = installedApps()): string | undefined {
+  if (!shown || card?.kind !== "app") return undefined;
   const { title, version } = installed?.find((app) => app.ref === card.ref) ?? card;
   return `🧩 ${t("apps.card.label", { title: version ? `${title} ${version}` : title })}`;
 }

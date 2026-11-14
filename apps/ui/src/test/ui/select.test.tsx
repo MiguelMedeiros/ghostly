@@ -220,6 +220,24 @@ describe("Select", () => {
       expect(onChange).not.toHaveBeenCalled();
     });
 
+    it("leaves the list where it was scrolled when the window resizes under it", async () => {
+      // The last option of a list taller than its 320 px is scrolled to before it is clicked (WebDriver does too). A
+      // re-measure of the list (a resize, a scroll of the page) scrolled it back to the chosen option, and the click
+      // landed on the option above (Desktop e2e: Arabic, the last language, chose Japanese).
+      const reveal = vi.fn();
+      vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(reveal);
+      const { user } = renderApp(<Picker />);
+      await user.click(combobox());
+      await vi.waitFor(() => expect(reveal).toHaveBeenCalled());
+      reveal.mockClear();
+      window.dispatchEvent(new Event("resize"));
+      await new Promise((frame) => requestAnimationFrame(() => setTimeout(frame, 20)));
+      expect(reveal).not.toHaveBeenCalled();
+      // Moving to another option still brings it into view.
+      await user.keyboard("{ArrowDown}");
+      expect(reveal).toHaveBeenCalledTimes(1);
+    });
+
     it("clicking the label opens it, as the label names it", async () => {
       const { user } = renderApp(<Picker />);
       await user.click(screen.getByText("Domain lookups"));

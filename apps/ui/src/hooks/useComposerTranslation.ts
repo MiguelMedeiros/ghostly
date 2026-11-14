@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useSettings } from "../contexts/SettingsContext";
 import { isGroupChat, useChatLanguage } from "../lib/chatLanguage";
 import { chatTranslateChoice, translatesChat, watchChatTranslate } from "../lib/chatTranslate";
@@ -8,6 +8,7 @@ import { translateEnabled } from "../lib/translateFlag";
 import { chatDetections, watchTranslations } from "../lib/translateReceived";
 import type { DetectLanguages } from "../lib/translateWhich";
 import type { ComposerTranslation } from "./useDraftTranslation";
+import { useTranslateDownload } from "./useTranslateDownload";
 
 /** Only the Desktop app has a translation runtime in the first version (not Android, not the web app). */
 const hasRuntime = () => isDesktopApp() && !/Android/i.test(navigator.userAgent);
@@ -38,11 +39,12 @@ function useDraftDetector(wanted: boolean): DetectLanguages | undefined {
  * languages, most used first (docs/AUTO-TRANSLATE.md § UI, Composer). The draft's own language is read by the same
  * detector as received messages once it has loaded (until then, and without it, the draft is taken to be in the app's
  * language). In a build or client without translation nothing is watched or read.
- * Not here yet: `askModel`, the download question for the reverse model ("English to Italian, 37 MB"): a missing
- * model is said in the composer (ghostly-agents#1811).
+ * A model Translate needs and that is not here is asked for (`askModel`): nothing else downloads the chat's way back
+ * ("English to Italian, 37 MB"). `question` is where that renders, beside the composer.
  */
-export function useComposerTranslation(chat: string | undefined): ComposerTranslation | undefined {
+export function useComposerTranslation(chat: string | undefined): { translation: ComposerTranslation | undefined; question: ReactNode } {
   const { settings } = useSettings();
+  const { askPair, question } = useTranslateDownload();
   const id = chat ?? "";
   const able = !!chat && translateEnabled() && hasRuntime();
   const choice = useSyncExternalStore(able ? watchChatTranslate : idle, () => able ? chatTranslateChoice(id) : "settings");
@@ -52,6 +54,7 @@ export function useComposerTranslation(chat: string | undefined): ComposerTransl
   const language = on ? current.language : null;
   const key = on && !language ? current.languages.join(",") : "";
   const detect = useDraftDetector(on && !!(language || key));
-  return useMemo(() => language || key ? { language, languages: key ? key.split(",") : [], ...(detect && { detect }) } : undefined,
-    [language, key, detect]);
+  const translation = useMemo(() => language || key ? { language, languages: key ? key.split(",") : [], ...(detect && { detect }), askModel: askPair } : undefined,
+    [language, key, detect, askPair]);
+  return { translation, question };
 }

@@ -18,6 +18,7 @@
   "reloadUnreachable": "无法连接 Ghostly 服务器。请检查网络连接，然后重新加载。",
   "shared": "已发送到你另一个标签页中的 Ghostly。",
   "sharedHint": "请在那里选择聊天。你可以关闭此标签页。",
+  "sharing": "正在发送到你另一个标签页中的 Ghostly…",
   "title": "Ghostly 无法在此浏览器中运行",
   "tryOther": "请退出无痕模式并允许网站数据，更新浏览器，或在其他浏览器中打开 Ghostly。",
   "trySecure": "请通过 https:// 地址打开 Ghostly。"

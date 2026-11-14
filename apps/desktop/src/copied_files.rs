@@ -45,7 +45,7 @@ fn on_wayland() -> bool {
         && wl_clipboard_rs::utils::is_primary_selection_supported().is_ok()
 }
 
-fn targets() -> Vec<String> {
+pub(crate) fn targets() -> Vec<String> {
     if on_wayland() {
         use wl_clipboard_rs::paste::{get_mime_types, ClipboardType, Seat};
         return get_mime_types(ClipboardType::Regular, Seat::Unspecified)

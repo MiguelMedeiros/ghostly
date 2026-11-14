@@ -218,9 +218,10 @@ describe("the relays' request budget runs out in the middle of a pairing", () =>
       const outBefore = relay.requests.filter(r => r.who === "A" && r.method === "PUT").length;
       await a.setDeliveryMode("stream");
       await run(20_000);
-      // Held back while the minute is spent: all but A's offer, which goes over it once on each relay when A dials
-      // (`SIGNALING_ALLOWANCE_SHARE`; its presence and its "stream" envelope wait).
-      expect(relay.requests.filter(r => r.who === "A" && r.method === "PUT").length - outBefore, "held back while the minute is spent").toBeLessThanOrEqual(2);
+      // Held back while the minute is spent: all but what the contact waits on, which goes over it within the chat's
+      // allowance (`SIGNALING_ALLOWANCE_SHARE`): A's "stream" envelope, its offer when A dials, and its first presence
+      // when B does (`LinkSession.presenceDue`). Before, only the offer went (2 requests), and the rest waited the minute.
+      expect(relay.requests.filter(r => r.who === "A" && r.method === "PUT").length - outBefore, "held back while the minute is spent").toBeLessThanOrEqual(6);
 
       // Once the minute frees requests, what waited goes, and the chat is live again without a Reconnect.
       const took = await untilLive(a, b, 90_000);

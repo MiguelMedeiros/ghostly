@@ -14,6 +14,8 @@ type Snapshot = {
   index?: string;
   sig?: string;
   bundles: Record<string, string>;
+  /** Each publisher's `ghostly-revoke.json` the build read, by its URL; a snapshot from before it read them has none. */
+  revocations?: Record<string, string>;
   error?: string;
 };
 
@@ -42,7 +44,12 @@ export function storeView(): StoreView {
   }
   if (memo?.hour === hour) return memo.view;
   const view = readStore(
-    { index: bytes(snap.index), sig: bytes(snap.sig), bundles: Object.fromEntries(Object.entries(snap.bundles).map(([u, b]) => [u, bytes(b)])) },
+    {
+      index: bytes(snap.index),
+      sig: bytes(snap.sig),
+      bundles: Object.fromEntries(Object.entries(snap.bundles).map(([u, b]) => [u, bytes(b)])),
+      revocations: Object.fromEntries(Object.entries(snap.revocations ?? {}).map(([u, b]) => [u, bytes(b)])),
+    },
     now,
     fixture && snap.key ? snap.key : STORE_KEY,
   );

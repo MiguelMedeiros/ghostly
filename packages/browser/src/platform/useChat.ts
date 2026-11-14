@@ -24,9 +24,28 @@ const NO_MESSAGES: ChatMessage[] = [];
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const NO_RELAYS: string[] = [];
 
+/**
+ * What a chat shows of its link (`useChat`). The rest of it changes all the time with nothing of it on the page: each
+ * poll (polling, then the next one's time and the last sync), the contact typing, coming online or going away, the last
+ * message's time. Each of those drew the whole open chat again, its 100-odd message rows too; what shows them reads them.
+ */
+interface ChatLink {
+  id: string;
+  status: LinkView["status"];
+  dataLink: LinkView["dataLink"];
+  pairingReady: boolean;
+  myPubKeyZ32: string;
+  peerAck: number;
+  pollInterval: number;
+}
+const chatLink = (link: LinkView): ChatLink => ({
+  id: link.id, status: link.status, dataLink: link.dataLink, pairingReady: link.pairing?.status === "ready", myPubKeyZ32: link.myPubKeyZ32,
+  peerAck: link.peerAck, pollInterval: link.poll?.interval ?? 0,
+});
+
 /** What a chat shows of the engine's state (`useChat`). */
 interface ChatEngineView {
-  link: LinkView | undefined;
+  link: ChatLink | undefined;
   offline: boolean;
   protocol: string;
   relays: string[];
@@ -63,8 +82,9 @@ export const useChat: typeof Desktop.useChat = (params) => {
   const shown = useRef<ChatEngineView | null>(null);
   const view = useSyncExternalStore(subscribe, () => {
     const state = engine.state;
+    const link = peerPubKey ? state?.links.find((l) => l.peerPubKeyZ32 === peerPubKey) : undefined;
     const next: ChatEngineView = {
-      link: peerPubKey ? state?.links.find((l) => l.peerPubKeyZ32 === peerPubKey) : undefined,
+      link: link && chatLink(link),
       offline: state?.settings.online === false,
       protocol: state?.transport.protocol ?? "",
       relays: state?.transport.relays ?? NO_RELAYS,
@@ -73,6 +93,8 @@ export const useChat: typeof Desktop.useChat = (params) => {
     return shown.current;
   });
   const [sessionMessages, setMessages] = useState<ChatMessage[]>([]);
+  /** The chat whose stored messages `sessionMessages` holds: until then it holds none of them, or another chat's. */
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
   /**
    * A paired chat's texts sent from this page that the engine's history has not brought back yet: shown at once as
    * sending, even while the engine is still reading every chat's history at start. The engine stores each under the
@@ -112,7 +134,9 @@ export const useChat: typeof Desktop.useChat = (params) => {
     // Read as the chat list and the sync read it: a chat that changed is parsed once for all of them. One that did not
     // is the same list (the page's cache, never changed in place), so a change in another chat draws nothing here: a new
     // copy on every `session-updated` drew the open chat and reran its whole-history work for each message elsewhere.
-    if (sessionId) setMessages(loadShownSession(sessionId)?.messages ?? NO_MESSAGES);
+    if (!sessionId) return;
+    setMessages(loadShownSession(sessionId)?.messages ?? NO_MESSAGES);
+    setLoadedFor(sessionId);
   }, [sessionId]);
 
   useEffect(() => setPending([]), [sessionId]);
@@ -243,7 +267,7 @@ export const useChat: typeof Desktop.useChat = (params) => {
 
   // A paired chat cannot queue this in Pkarr the way a legacy one does, so it
   // waits for the session to open instead of announcing on mount and losing it.
-  const canAnnounce = !profile || (link?.dataLink === "open" && link?.pairing?.status === "ready");
+  const canAnnounce = !profile || (link?.dataLink === "open" && link.pairingReady);
 
   useEffect(() => {
     if (!canAnnounce || !linkId || !sessionId || getInviteCode(sessionId)) return;
@@ -356,7 +380,10 @@ export const useChat: typeof Desktop.useChat = (params) => {
     [sessionId],
   );
 
-  const poll = link?.poll;
+  // The poll and the last sync as of this draw: no draw comes for them (`ChatLink`). The page shows neither (its tech
+  // panel reads the last sync itself).
+  const linkNow = peerPubKey ? engine.state?.links.find((l) => l.peerPubKeyZ32 === peerPubKey) : undefined;
+  const poll = linkNow?.poll;
   const pollCountdown = {
     remaining: poll ? Math.max(0, poll.nextAt - Date.now()) : 0,
     total: poll?.interval || 1,
@@ -372,7 +399,7 @@ export const useChat: typeof Desktop.useChat = (params) => {
     myPubKey: link?.myPubKeyZ32 ?? "",
     peerPubKey: peerPubKey ?? "",
     encKeyPreview: encKeyB64 ? `${encKeyB64.slice(0, 8)}...${encKeyB64.slice(-4)}` : "",
-    currentPollInterval: poll?.interval ?? 0,
+    currentPollInterval: link?.pollInterval ?? 0,
     republishInterval: 4 * 60_000,
     messageTtl: 300,
     protocol: view.protocol,
@@ -385,8 +412,9 @@ export const useChat: typeof Desktop.useChat = (params) => {
 
   return {
     messages,
+    loaded: !!sessionId && loadedFor === sessionId,
     status,
-    lastSync: link?.lastSyncAt || null,
+    lastSync: linkNow?.lastSyncAt || null,
     isSending,
     sendMessage,
     burn,

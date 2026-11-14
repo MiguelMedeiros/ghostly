@@ -2,6 +2,7 @@ import { ACTIVE_TASK_STATUSES, taskProgress, type RoutineCard, type TaskCard, ty
 import type { CardIndexRow, GroupMemberView, GroupView, LinkView } from "@ghostly/browser/shared/types";
 import type { Translate } from "../contexts/I18nContext";
 import { foldText } from "./chatSearch";
+import { listText } from "./listText";
 
 /*
  * The Tasks board (WISP 405 · Status Cards § The Tasks board): every task card of the profile, from all its chats and
@@ -92,8 +93,9 @@ export function cardSenders(links: readonly SenderLink[], groups: readonly Sende
  * reads, and the board shows a task once. Entries of the same kind and id from the same sender are one: the one that
  * changed last stands for the card, the others are its `copies`. The same sender is the same key (`cardSenders`); a
  * group member who is no contact is matched by the name they state instead, since nothing else of theirs is the same
- * across chats, and only with a card that is not in their group already. Two contacts are never one, whatever they are
- * called. `entries`: the latest changed first, as `boardEntries` gives them, and so they stay.
+ * across chats, and only with another such member's card that is not in their group already: never with a contact's
+ * card or my own, whose name anyone can state. Two contacts are never one, whatever they are called. `entries`: the
+ * latest changed first, as `boardEntries` gives them, and so they stay.
  */
 export function mergeCopies<E extends BoardEntry>(entries: readonly E[], senderOf: (entry: Pick<BoardEntry, "linkId" | "author">) => CardSender): E[] {
   interface Card { sure?: string; at: number[]; chats: Set<string>; names: Set<string> }
@@ -123,7 +125,8 @@ export function mergeCopies<E extends BoardEntry>(entries: readonly E[], senderO
   entries.forEach((entry, i) => {
     const { name, loose } = senders[i];
     if (!loose) return;
-    const card = (name !== undefined ? byId.get(idOf(entry))?.find((c) => !c.chats.has(entry.linkId) && c.names.has(name)) : undefined) ?? make(i);
+    // A name is no identity: it never joins a contact's (or my own) card, only another member's who is no contact.
+    const card = (name !== undefined ? byId.get(idOf(entry))?.find((c) => c.sure === undefined && !c.chats.has(entry.linkId) && c.names.has(name)) : undefined) ?? make(i);
     add(card, i);
   });
   return [...byId.values()].flat().map((card) => ({ ...card, at: card.at.sort((a, b) => a - b) })).sort((a, b) => a.at[0] - b.at[0]).map(({ sure, at: [top, ...rest] }) => ({
@@ -354,12 +357,12 @@ export function boardCardLabel(t: Translate, task: BoardTask, age: string): stri
   const { card } = task;
   // A bot's own chat has the bot's name: said once, as on the card's chips.
   const names = chatNames(task), others = task.botKey === "me" ? names : names.filter((name) => name !== task.bot);
-  const from = others.length && task.botKey !== "me" ? t("cards.board.card.from", { bot: task.bot, chat: others.join(", ") }) : t("cards.board.card.in", { chat: (others.length ? others : names).join(", ") });
+  const from = others.length && task.botKey !== "me" ? t("cards.board.card.from", { bot: task.bot, chat: listText(others, t) }) : t("cards.board.card.in", { chat: listText(others.length ? others : names, t) });
   const parts = partsDone(task);
-  return [card.title, t(`cards.task.status.${card.status}`), progressText(t, task), parts && t("cards.board.card.parts", parts), from,
+  return listText([card.title, t(`cards.task.status.${card.status}`), progressText(t, task), parts && t("cards.board.card.parts", parts), from,
     card.pr && (card.pr.number !== undefined ? t("cards.task.pr", { number: card.pr.number }) : t("cards.task.prNoNumber")),
     card.pr?.state && t(`cards.board.card.prState.${card.pr.state}`), card.pr?.checks && t(`cards.board.card.checks.${card.pr.checks}`),
-    ...(card.tags ?? []), t("cards.task.updated", { ago: age })].filter(Boolean).join(", ");
+    ...(card.tags ?? []), t("cards.task.updated", { ago: age })].filter((part): part is string => !!part), t);
 }
 
 /**

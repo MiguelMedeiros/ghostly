@@ -62,6 +62,19 @@
 }
 .voice-wave:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3px; border-radius: 4px; }
 
+/*
+ * Forced colors (Windows Contrast themes) paint every background the page's colour, and the bars, the knob, the live
+ * bars and the recording dot were backgrounds alone: a voice message showed no shape and no place, a recording no
+ * level. There they keep the theme's own colours: bars in its text colour, what has played and the knob in Highlight.
+ */
+@media (forced-colors: active) {
+  .voice-wave-bars, .voice-wave-knob, .voice-live, .voice-bar-dot { forced-color-adjust: none; }
+  .voice-wave-base, .voice-live { color: CanvasText; }
+  .voice-wave-fill { color: Highlight; }
+  .voice-wave-knob { background: Highlight; box-shadow: 0 0 0 2px Canvas; }
+  .voice-bar-dot { background: CanvasText; }
+}
+
 /* The live waveform while recording: newest on the right, bars that grow in. */
 .voice-live {
   display: flex;
@@ -183,6 +196,7 @@
   animation: fade-in 120ms ease-out;
 }
 
+/* The bar's buttons are `.tap-target` too (index.css): on a phone a tap lands on 44 × 44 px around them, the bar unmoved. */
 .voice-icon-button {
   width: 36px;
   height: 36px;
@@ -232,6 +246,25 @@
 .voice-text-button:hover { filter: brightness(1.1); }
 .voice-text-button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
 .voice-text-danger { color: var(--color-danger); }
+/*
+ * A phone: beside Keep and Discard the question had a word or two of the bar ("¿Descartar …" at 375 px). It stands over
+ * the bar, as the hint does, wrapping if it must, and the two buttons share the bar.
+ */
+@media (max-width: 479px) {
+  .voice-confirm-text {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    inset-inline-start: 0;
+    width: max-content;
+    max-width: calc(100vw - 16px);
+    padding: 6px 12px;
+    border-radius: 8px;
+    background: var(--color-surface);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    white-space: normal;
+  }
+  .voice-confirm .voice-text-button { flex: 1; }
+}
 
 /* A slide to cancel ends in the bin: it drops in, the lid shuts, it fades. */
 .voice-binned {

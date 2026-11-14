@@ -65,16 +65,61 @@ function shiftChunks(b: Buffer, start: number, end: number, delta: number): void
 
 /**
  * `file` with `extra` boxes added at the end of its `moov` (its samples' offsets moved where `moov` comes before them)
- * and, with `sample`, a metadata track whose one sample it is, in a `mdat` added at the end of the file.
+ * and, with `sample`, a metadata track (or a track of another `handler`) whose one sample it is, in a `mdat` added at
+ * the end of the file.
  */
-export function withMovie(file: Buffer, extra: Buffer[], sample?: Buffer): Buffer<ArrayBuffer> {
+export function withMovie(file: Buffer, extra: Buffer[], sample?: Buffer, handler = "meta"): Buffer<ArrayBuffer> {
   const top = children(file, 0, file.length);
   const [, at, , end] = top.find(([type]) => type === "moov")!;
   const added = extra.reduce((sum, b) => sum + b.length, 0) + (sample ? metadataTrack(0, 0).length : 0);
   const moov = Buffer.from(file.subarray(at, end));
   if (top.some(([type, start]) => type === "mdat" && start > at)) shiftChunks(moov, 8, moov.length, added);
-  const track = sample ? [metadataTrack(file.length + added + 8, sample.length)] : [];
+  const track = sample ? [metadataTrack(file.length + added + 8, sample.length, handler)] : [];
   const grown = Buffer.concat([moov, ...extra, ...track]);
   grown.writeUInt32BE(grown.length, 0);
   return Buffer.concat([file.subarray(0, at), grown, file.subarray(end), ...(sample ? [box("mdat", sample)] : [])]);
+}
+
+/** `file` with `extra` boxes added at the end of its first `trak` (its samples' offsets moved where `moov` comes before them). */
+export function withTrack(file: Buffer, extra: Buffer[]): Buffer<ArrayBuffer> {
+  const top = children(file, 0, file.length);
+  const [, at, , end] = top.find(([type]) => type === "moov")!;
+  const moov = Buffer.from(file.subarray(at, end));
+  const [, trakAt, , trakEnd] = children(moov, 8, moov.length).find(([type]) => type === "trak")!;
+  const trak = Buffer.concat([moov.subarray(trakAt, trakEnd), ...extra]);
+  trak.writeUInt32BE(trak.length, 0);
+  const grown = Buffer.concat([moov.subarray(0, trakAt), trak, moov.subarray(trakEnd)]);
+  grown.writeUInt32BE(grown.length, 0);
+  if (top.some(([type, start]) => type === "mdat" && start > at)) shiftChunks(grown, 8, grown.length, grown.length - moov.length);
+  return Buffer.concat([file.subarray(0, at), grown, file.subarray(end)]);
+}
+
+/** `file` with `first` put before its first box (a tool's `uuid`, a QuickTime preview), its samples' offsets moved. */
+export function withFirst(file: Buffer, first: Buffer): Buffer<ArrayBuffer> {
+  const [, at, , end] = children(file, 0, file.length).find(([type]) => type === "moov")!;
+  const moov = Buffer.from(file.subarray(at, end));
+  shiftChunks(moov, 8, moov.length, first.length);
+  return Buffer.concat([first, file.subarray(0, at), moov, file.subarray(end)]);
+}
+
+/**
+ * When a movie says it was made, as a player reads it (ffprobe's `creation_time`, exiftool's `CreateDate`,
+ * `TrackCreateDate`, `MediaCreateDate`): each `mvhd`, `tkhd` and `mdhd` in its `moov`, with its version and its
+ * creation and modification times (seconds since 1904).
+ */
+export function headerTimes(b: Buffer): { type: string; version: number; created: number; modified: number }[] {
+  const out: { type: string; version: number; created: number; modified: number }[] = [];
+  const walk = (start: number, end: number) => {
+    for (const [type, , body, until] of children(b, start, end)) {
+      if (["moov", "trak", "mdia"].includes(type)) walk(body, until);
+      else if (["mvhd", "tkhd", "mdhd"].includes(type)) {
+        const version = b[body]!;
+        const created = version === 1 ? Number(b.readBigUInt64BE(body + 4)) : b.readUInt32BE(body + 4);
+        const modified = version === 1 ? Number(b.readBigUInt64BE(body + 12)) : b.readUInt32BE(body + 8);
+        out.push({ type, version, created, modified });
+      }
+    }
+  };
+  walk(0, b.length);
+  return out;
 }

@@ -1,4 +1,6 @@
 import "fake-indexeddb/auto";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { GhostLink, createIdentity, createLink, encodeFileData, fromBase64Url, type BoundChannel, type NativeEndpoint, type PairingState } from "@ghostly/core";
 import { createRelayedHyperEndpoint, hyperKeyPair, relayUrlProblem } from "../src/platform/hyperdhtRelay";
@@ -267,6 +269,30 @@ it("says it is unavailable when the relay goes away", async () => {
   await own.close();
   await vi.waitFor(() => expect(gone).toHaveBeenCalledTimes(1));
   await endpoint.close();
+}, 60_000);
+
+it("lets a chat's endpoint go once it is closed or refused, while the relay connection stays open", async () => {
+  const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
+  const own = await startRelay({ testnet: 2 });
+  // Another chat keeps the app's one relay connection open, as it does for as long as the app runs.
+  const keeperSeed = seed();
+  const keeper = await createRelayedHyperEndpoint(keeperSeed, own.url);
+  // In a function of its own: this test's own frame would keep the last one.
+  const openAndClose = async () => {
+    const endpoint = await createRelayedHyperEndpoint(seed(), own.url);
+    await endpoint.close();
+    return new WeakRef(endpoint);
+  };
+  const endpoints: WeakRef<NativeEndpoint>[] = [];
+  for (let i = 0; i < 20; i++) endpoints.push(await openAndClose());
+  // Refused listens on the same connection between (the relay refuses a key it already listens on) keep none of them.
+  for (let i = 0; i < 20; i++) await expect(createRelayedHyperEndpoint(keeperSeed, own.url)).rejects.toThrow("did not let this chat listen");
+  setFlagsFromString("--expose-gc");
+  const gc = runInNewContext("gc") as () => void;
+  // Each was kept, with its listener and its key pair, until the connection closed (about 6 KiB each).
+  await vi.waitFor(() => { gc(); expect(endpoints.flatMap((ref, i) => ref.deref() ? [i] : [])).toEqual([]); }, { timeout: 2000, interval: 50 });
+  await keeper.close();
+  await own.close();
 }, 60_000);
 
 it("drops a client past its listen budget and refuses topic queries, and keeps serving the others", async () => {
@@ -811,6 +837,146 @@ it("holds a client's handshakes only while they wait on it, and its signatures o
     await own.close();
   }
 }, 90_000);
+
+it("takes a client's first answer to a handshake, ignores one sent again in the same batch, and keeps serving every client", async () => {
+  const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
+  const { default: DHT } = await import("hyperdht");
+  const { default: RelayedDHT } = await import("@hyperswarm/dht-relay");
+  const { default: WebSocketStream } = await import("@hyperswarm/dht-relay/ws");
+  const own = await startRelay({ testnet: 3 });
+  // What would end the relay's process, as the dial's outcome.
+  const uncaught: unknown[] = [];
+  let crashed: (why: string) => void = () => {};
+  const crash = new Promise<string>(resolve => { crashed = resolve; });
+  const onUncaught = (error: unknown) => { uncaught.push(error); crashed(`uncaught ${String(error)}`); };
+  process.on("uncaughtException", onUncaught);
+  type Socket = { on(event: string, f: (...args: unknown[]) => void): void; once(event: string, f: () => void): void; destroy(): void };
+  type Server = { listen(keyPair: unknown): Promise<void>; address(): { port: number } | null; close(): Promise<void> };
+  type Client = { _protocol: Record<string, { send(m: unknown): void }>; createServer(options: unknown, onconnection: (socket: Socket) => void): Server; connect(publicKey: Uint8Array): Socket };
+  const sockets: WebSocket[] = [];
+  const client = async () => {
+    const socket = new WebSocket(own.url);
+    sockets.push(socket);
+    await new Promise(resolve => socket.addEventListener("open", resolve, { once: true }));
+    const stream = new WebSocketStream(true, socket) as { userData?: unknown };
+    // protomux keeps itself on a stream whose userData is null: the client corks its messages into one batch through it.
+    stream.userData = null;
+    const node = new RelayedDHT(stream, { custodial: false }) as unknown as Client;
+    return { node, mux: stream.userData as unknown as { cork(): void; uncork(): void } };
+  };
+  try {
+    const listener = await client();
+    const keyPair = DHT.keyPair();
+    let onReached: (value: string) => void = () => {};
+    const reached = new Promise<string>(resolve => { onReached = resolve; });
+    const server = listener.node.createServer({}, socket => { socket.on("error", () => {}); onReached("reached"); });
+    await server.listen(keyPair);
+    expect(server.address()?.port).toBeGreaterThan(0);
+    const dialler = await client();
+    const reply = dialler.node._protocol.noiseReply;
+    const send = reply.send.bind(reply);
+    let twice = false;
+    reply.send = message => {
+      if (twice) return send(message);
+      twice = true;
+      dialler.mux.cork(); send(message); send(message); dialler.mux.uncork();
+    };
+    const socket = dialler.node.connect(keyPair.publicKey);
+    socket.on("error", () => {});
+    const opened = new Promise(resolve => socket.once("open", () => resolve("open")));
+    const timeout = (ms: number) => new Promise(resolve => setTimeout(() => resolve("timeout"), ms));
+    await expect(Promise.race([opened, crash, timeout(20_000)])).resolves.toBe("open");
+    await expect(Promise.race([reached, timeout(5_000)])).resolves.toBe("reached");
+    expect(twice).toBe(true);
+    await new Promise(resolve => setTimeout(resolve, 200));
+    expect(uncaught).toEqual([]);
+    // Nobody was dropped, and another client still listens.
+    expect(own.stats()).toMatchObject({ dropped: 0 });
+    const other = (await client()).node.createServer({}, () => {});
+    await other.listen(DHT.keyPair());
+    expect(other.address()?.port).toBeGreaterThan(0);
+    socket.destroy();
+  } finally {
+    process.off("uncaughtException", onUncaught);
+    for (const socket of sockets) socket.close();
+    await own.close();
+  }
+}, 60_000);
+
+it("keeps a client's other chats reachable, both ways, while one chat's contact dials it over and over", async () => {
+  const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
+  const { default: DHT } = await import("hyperdht");
+  const { createHyperEndpoint } = await import("../../../native/transports/hyperdht/endpoint.mjs");
+  const net = await import("node:net");
+  const reasons: string[] = [];
+  const own = await startRelay({ testnet: 3, log: (...words: string[]) => { reasons.push(words.join(" ")); } });
+  const bootstrap = own.bootstrap.map((node: string) => { const [host, port] = node.split(":"); return { host, port: Number(port) }; });
+  // The browser's one relay connection, 150 ms each way: its handshakes wait on it as long as a far browser's do.
+  const links: import("node:net").Socket[] = [];
+  const delayed = (from: import("node:net").Socket, to: import("node:net").Socket) => from.on("data", data => { setTimeout(() => { if (!to.destroyed) to.write(data); }, 150); });
+  const proxy = net.createServer(down => {
+    const up = net.connect(own.port, "127.0.0.1");
+    for (const socket of [up, down]) socket.on("error", () => {});
+    delayed(down, up); delayed(up, down);
+    up.on("close", () => down.destroy());
+    down.on("close", () => up.destroy());
+    links.push(up, down);
+  });
+  await new Promise<void>(resolve => proxy.listen(0, "127.0.0.1", resolve));
+  const url = `ws://127.0.0.1:${(proxy.address() as { port: number }).port}`;
+  // Two chats of one browser on that connection; chat 2's contact runs a Desktop.
+  const [chat1, chat2] = await Promise.all([createRelayedHyperEndpoint(seed(), url), createRelayedHyperEndpoint(seed(), url)]);
+  chat1.onConnection = bound => bound.channel.close();
+  const contact = await createHyperEndpoint(crypto.getRandomValues(new Uint8Array(32)), { bootstrap, host: "127.0.0.1" }) as NativeEndpoint;
+  // Chat 1's contact dials chat 1 in 300 loops, each again as soon as the last ends.
+  const flooder = new DHT({ bootstrap, host: "127.0.0.1", firewalled: false });
+  const key1 = Buffer.from((chat1.descriptor as { publicKey: string }).publicKey, "hex");
+  let flooding = true;
+  const loops = Array.from({ length: 300 }, async () => {
+    while (flooding) {
+      await new Promise<void>(resolve => {
+        const socket = flooder.connect(key1);
+        socket.on("error", () => {});
+        socket.on("open", () => socket.destroy());
+        socket.on("close", () => resolve());
+      });
+    }
+  });
+  // One at a time: each waits for its own connection at the far end.
+  const dials = async (from: NativeEndpoint, to: NativeEndpoint) => {
+    const results: string[] = [];
+    for (let round = 0; round < 6; round++) {
+      try {
+        const accepted = incoming(to);
+        const dialled = await from.connect(to.descriptor);
+        await accepted;
+        dialled.channel.close();
+        results.push("ok");
+      } catch (error) {
+        results.push(String((error as Error)?.message ?? error));
+      }
+    }
+    return results;
+  };
+  try {
+    // The flood holds all chat 1 may hold waiting on the browser (a quarter of `handshakes`), and more before.
+    await vi.waitFor(() => expect(own.stats().held.handshakes).toBeGreaterThanOrEqual(16), { timeout: 20_000 });
+    const out = await dials(chat2, contact);
+    const into = await dials(contact, chat2);
+    expect({ out, into }).toEqual({ out: Array(6).fill("ok"), into: Array(6).fill("ok") });
+    // The flood is refused past chat 1's share, and the operator sees it; nobody is dropped.
+    expect(reasons).toContain("refused handshake listen share");
+    expect(own.stats().dropped).toBe(0);
+  } finally {
+    flooding = false;
+    await Promise.allSettled(loops);
+    await flooder.destroy();
+    await Promise.allSettled([chat1.close(), chat2.close(), contact.close()]);
+    for (const socket of links) socket.destroy();
+    proxy.close();
+    await own.close();
+  }
+}, 120_000);
 
 it("carries a whole paired chat between two browsers with WebRTC off, pinned as on any transport", async () => {
   const invitation = createLink();

@@ -123,7 +123,8 @@ describe("a daemon that accepts the socket but never answers", () => {
     await new Promise<void>((resolve) => server.listen(paths.socket, resolve));
     cleanups.push(() => { server.close(); rmSync(paths.socket, { force: true }); });
     const result = await within(8_000, ["--home", dir, "status"]);
-    expect(error(result, "unavailable", 1).message).toBe("The daemon went away");
+    // A read is asked once more; this daemon goes away again.
+    expect(error(result, "unavailable", 1).message).toBe("The daemon went away before it answered status, twice; a read changes nothing: run it again");
     expect(result.stderr).not.toContain("ECONNRESET");
   });
 

@@ -466,31 +466,41 @@ export interface HandoffAttempts {
 
 export const NO_ATTEMPTS: HandoffAttempts = { recent: [], total: 0 };
 
+/**
+ * When the lock-out ends by this clock, if it has not: one more than an hour away was stamped by a clock that ran ahead,
+ * and is over (WISP 06 § Failure table, clocks wrong by days).
+ */
+const lockedUntil = (attempts: HandoffAttempts | undefined, now: number): number | undefined =>
+  attempts?.until !== undefined && now < attempts.until && attempts.until - now <= HANDOFF_ATTEMPTS.hourMs ? attempts.until : undefined;
+
 /** Whether a device may try now: `refused` after 15 failures with no success, until the person lets it try again. */
 export function handoffAttemptAllowed(attempts: HandoffAttempts | undefined, now: number): "ok" | "locked-out" | "refused" {
   if (!attempts) return "ok";
   if (attempts.total >= HANDOFF_ATTEMPTS.total) return "refused";
-  if (attempts.until !== undefined && now < attempts.until) return "locked-out";
+  if (lockedUntil(attempts, now) !== undefined) return "locked-out";
   return "ok";
 }
-
 /**
  * One more failure. The giver counts an attempt as failed when it answers the first message, before it learns the
  * outcome, and takes it back on success: a taker that stops after the second message has used a try.
  */
 export function handoffAttemptFailed(attempts: HandoffAttempts | undefined, now: number): HandoffAttempts {
-  const recent = [...(attempts?.recent ?? []).filter((at) => now - at < HANDOFF_ATTEMPTS.hourMs), now];
+  // A failure stamped later than now (a clock that ran ahead) counts as now, so it still ages out.
+  const recent = [...(attempts?.recent ?? []).map((at) => Math.min(at, now)).filter((at) => now - at < HANDOFF_ATTEMPTS.hourMs), now];
   const total = (attempts?.total ?? 0) + 1;
   if (recent.length >= HANDOFF_ATTEMPTS.perHour) return { recent: [], total, until: now + HANDOFF_ATTEMPTS.hourMs };
-  return { recent, total, ...(attempts?.until !== undefined && now < attempts.until ? { until: attempts.until } : {}) };
+  const until = lockedUntil(attempts, now);
+  return { recent, total, ...(until !== undefined ? { until } : {}) };
 }
 
 /** A proof that held: the count starts again. */
 export const handoffAttemptSucceeded = (): HandoffAttempts => ({ recent: [], total: 0 });
 
 /** Seconds until a locked-out device may try again (for `handoff-busy`). */
-export const handoffRetryAfter = (attempts: HandoffAttempts | undefined, now: number): number =>
-  attempts?.until !== undefined && attempts.until > now ? Math.ceil((attempts.until - now) / 1000) : 0;
+export const handoffRetryAfter = (attempts: HandoffAttempts | undefined, now: number): number => {
+  const until = lockedUntil(attempts, now);
+  return until !== undefined ? Math.ceil((until - now) / 1000) : 0;
+};
 
 /** Two digests compared. */
 export const sameDigest = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length && bytesEqual(a, b);

@@ -1,4 +1,5 @@
 import type { FrameChannel } from "./frames";
+import { isHoldUrl } from "./storeForward";
 
 export const TRANSPORTS = ["iroh/1", "hyperdht/1", "webrtc/1"] as const;
 export type PairedTransport = typeof TRANSPORTS[number];
@@ -76,6 +77,19 @@ export const RELAY_URL = /^((https|wss):\/\/[^\s]{1,120}|(http|ws):\/\/(127\.0\.
 export const RELAY_WITH_SECRETS = /^[a-z]+:\/\/[^/?#]*@|[?#]/i;
 /** A relay URL a descriptor may name: `RELAY_URL`, with nothing but the server's address in it. */
 export const relayUrl = (value: unknown): value is string => typeof value === "string" && RELAY_URL.test(value) && !RELAY_WITH_SECRETS.test(value);
+/**
+ * Whether an Iroh endpoint may dial a contact through the relay its descriptor names (none: a direct address alone).
+ * The contact chose that relay and this device opens it on its own, again on each redial, so it is held to what a held
+ * item's address is (`isHoldUrl`): https at a public name or a public address, never this machine or its network.
+ * One of the endpoint's own relays (`own`: the person's settings, a private network's or a test's) is dialled as well,
+ * in either spelling: this device opens it anyway.
+ */
+export function dialableIrohRelay(relay: unknown, own: readonly string[]): boolean {
+  if (relay === null || relay === undefined) return true;
+  if (!relayUrl(relay)) return false;
+  const same = (a: string, b: string) => { try { return new URL(irohRelayUrl(a, "plain")).href === new URL(irohRelayUrl(b, "plain")).href; } catch { return false; } };
+  return own.some(mine => same(mine, relay)) || isHoldUrl(relay);
+}
 const HEX_KEY = /^[0-9a-f]{64}$/;
 /** An Iroh direct address as the adapters parse it: an IPv4 or bracketed IPv6 address and its port. */
 const SOCKET_ADDRESS = /^(\d{1,3}(\.\d{1,3}){3}|\[[0-9A-Fa-f:.]{2,45}(%[A-Za-z0-9._-]{1,16})?\]):\d{1,5}$/;
@@ -126,9 +140,11 @@ export function relayedTransports(local: TransportDescriptors, remote: Transport
 /** Symmetric rank sum; the fixed order breaks ties deterministically. Neither
  * a remote list nor a preference can add an unavailable local adapter. A
  * relayed transport ranks after every direct one: it is where a failed direct
- * path goes, never ahead of one that works. */
+ * path goes, never ahead of one that works. Iroh through its relay is the
+ * exception (WISP 100, revision 2026-11-08): it comes back almost at once after
+ * the app was away, and a browser's Iroh is never anything else. */
 export function rankTransports(local: readonly string[], remote: readonly string[], relayed: readonly string[] = []): PairedTransport[] {
-  const penalty = (t: PairedTransport) => relayed.includes(t) ? 1 : 0;
+  const penalty = (t: PairedTransport) => t !== "iroh/1" && relayed.includes(t) ? 1 : 0;
   return TRANSPORTS.filter(t => local.includes(t) && remote.includes(t))
     .sort((a, b) => penalty(a) - penalty(b)
       || (local.indexOf(a) + remote.indexOf(a)) - (local.indexOf(b) + remote.indexOf(b))
@@ -136,11 +152,16 @@ export function rankTransports(local: readonly string[], remote: readonly string
 }
 
 /**
- * What a chat prefers when nobody chose (Automatic): WebRTC where the app has it, else the first transport it has
- * (a Linux Desktop: WebKitGTK has no WebRTC). With nothing at all, WebRTC, which the offer then leaves out.
+ * What a chat prefers when nobody chose (Automatic): Iroh where the app has it, then WebRTC, then HyperDHT (WISP 100,
+ * revision 2026-11-08). Every app puts Iroh first, so the rank sum of two apps that both run it puts it first on both
+ * sides. With nothing at all, WebRTC, which the offer then leaves out.
+ * With Fallback off the chat may use only that one transport, and nothing moves it off a relayed Iroh then: WebRTC
+ * where the app has it, else the first transport it has (a Linux Desktop: WebKitGTK has no WebRTC), as before.
  */
-export function automaticTransport(available: readonly PairedTransport[]): PairedTransport {
-  return available.includes("webrtc/1") ? "webrtc/1" : TRANSPORTS.find(t => available.includes(t)) ?? "webrtc/1";
+export const AUTOMATIC_ORDER: readonly PairedTransport[] = ["iroh/1", "webrtc/1", "hyperdht/1"];
+export function automaticTransport(available: readonly PairedTransport[], fallback = true): PairedTransport {
+  if (!fallback) return available.includes("webrtc/1") ? "webrtc/1" : TRANSPORTS.find(t => available.includes(t)) ?? "webrtc/1";
+  return AUTOMATIC_ORDER.find(t => available.includes(t)) ?? "webrtc/1";
 }
 
 export function transportOrder(available: readonly PairedTransport[], preferred: PairedTransport,

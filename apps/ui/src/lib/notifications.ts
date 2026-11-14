@@ -8,7 +8,7 @@ interface ExtensionNotifications {
     id?:string;getURL(path:string):string;
     onMessage?:{addListener(listener:(message:{target?:string;type?:string;id?:unknown}|undefined,sender:{id?:string},answer:(response:unknown)=>void)=>boolean):void};
   };
-  storage?: {session?:{set(items:Record<string,string>):Promise<void>;remove(key:string):Promise<void>}};
+  storage?: {session?:{get(key:null):Promise<Record<string,unknown>>;set(items:Record<string,string>):Promise<void>;remove(key:string):Promise<void>}};
   permissions: {contains(options:{permissions:string[]}):Promise<boolean>;request(options:{permissions:string[]}):Promise<boolean>};
   /** Absent until the user grants the optional "notifications" permission. */
   notifications?: {
@@ -240,6 +240,23 @@ export function clearChatNotification(chat:string):void{
   chats.delete(tag);
   keepTags();
   void invoke("native_clear_notification",{id:tag}).catch(()=>{/* gone already, or an older app */});
+}
+/**
+ * Every extension notification that opens `chat` goes. Chrome keeps them in the system's list past the page that showed
+ * them (a reload), so the ones only session storage still knows of (`keepNotice`) go too: a deleted profile's
+ * "New messages in" would otherwise stay there, by name, for the rest of the browser's session.
+ */
+export async function clearExtensionNotices(chat:string):Promise<void>{
+  const chrome=extension();
+  if(!chrome) return;
+  const kept=await chrome.storage?.session?.get(null).catch(()=>({}))??{};
+  for(const [key,value] of Object.entries(kept)){
+    if(!key.startsWith("notice:") || value!==chat) continue;
+    const id=key.slice("notice:".length);
+    chats.delete(id);
+    keepNotice(id);
+    void chrome.notifications?.clear?.(id)?.catch(()=>{/* gone already */});
+  }
 }
 /**
  * `chat`: the chat a click opens (a session id, or `group:<id>`); it and `event`, the page's id for the notification,

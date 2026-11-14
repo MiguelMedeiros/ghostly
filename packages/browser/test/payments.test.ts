@@ -72,13 +72,13 @@ describe("reclaim", () => {
     expect(state("p1")?.token).toBeUndefined();
   });
 
-  it("calls a spent token settled only while the payment is still pending", async () => {
+  it("calls a spent token settled while the payment still waits on the contact, or was refused and kept its token", async () => {
     const { desk, wallet, state } = await setup([sentPayment, { ...sentPayment, id: "p2", state: "failed" }]);
     wallet.receiveToken.mockRejectedValue(new Error("Token already spent"));
     await desk.reclaim("p1");
     await desk.reclaim("p2");
     expect(state("p1")).toMatchObject({ state: "settled" });
-    expect(state("p2")).toMatchObject({ state: "failed" });
+    expect(state("p2")).toMatchObject({ state: "settled", token: undefined });
   });
 });
 

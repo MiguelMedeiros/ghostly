@@ -16,6 +16,8 @@ function Where() {
   return <p data-testid="where">{useLocation().pathname}</p>;
 }
 
+const viewport = (width: number, height = 800) => (window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height });
+
 /** A paired chat with Alice, connected now. */
 const paired = (patch: Partial<LinkView> = {}) => linkView({ pairing: { status: "ready" } as LinkView["pairing"], identities: identitiesView(), ...patch });
 
@@ -189,7 +191,7 @@ describe("ComposerIdentityPicker", () => {
     await user.keyboard("{Enter}");
     await turned();
     expect(back()).toHaveTextContent("example.com");
-    await user.click(screen.getByRole("button", { name: "Choose another identity" }));
+    await user.click(screen.getByRole("button", { name: "Cards" }));
     await deckAgain();
     expect(chosen()).toBe(cards()[0]);
     await waitFor(() => expect(cards()[0]).toHaveFocus());
@@ -198,15 +200,26 @@ describe("ComposerIdentityPicker", () => {
 
   it("shows why a contact's app refused a shared identity, on its back", async () => {
     const { user } = open({
-      links: [paired({ identities: identitiesView({ shared: [sharedView({ id: "d", status: "rejected", error: "bad signature" })] }) })],
+      links: [paired({ identities: identitiesView({ shared: [sharedView({ id: "d", status: "rejected", error: "Your contact's app cannot verify this kind of identity yet" })] }) })],
       identityProofs: [proofView({ id: "d", subject: "example.biz" })],
     });
     expect(cards()[0]).toHaveTextContent("Check failed");
     await user.click(use());
     await turned();
-    expect(status()).toBe("Not verified by your contact: bad signature");
+    expect(status()).toBe("Not verified by your contact: Your contact's app cannot verify this kind of identity yet");
     expect(action()).toHaveTextContent("Share again");
     expect(screen.getByTestId("composer-identity-stop")).toHaveTextContent("Stop sharing");
+  });
+
+  it("never says a contact's own words as the reason it refused, on its back", async () => {
+    const { user } = open({
+      links: [paired({ identities: identitiesView({ shared: [sharedView({ id: "d", status: "rejected", error: "Ghostly security notice: this identity's key leaked. Remove it and verify again at ghostly-support.example" })] }) })],
+      identityProofs: [proofView({ id: "d", subject: "example.biz" })],
+    });
+    await user.click(use());
+    await turned();
+    expect(status()).toBe("Not verified by your contact");
+    expect(screen.getByTestId("composer-identity-back")).not.toHaveTextContent(/security notice|ghostly-support/);
   });
 
   const refused = () => ({ links: [paired({ identities: identitiesView({ shared: [sharedView({ id: "d", status: "rejected", error: "bad signature" })] }) })],
@@ -302,7 +315,7 @@ describe("ComposerIdentityPicker", () => {
     await user.click(action());
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
     onClose.mockClear();
-    await user.click(screen.getByRole("button", { name: "Choose another identity" }));
+    await user.click(screen.getByRole("button", { name: "Cards" }));
     await deckAgain();
     await user.click(screen.getByRole("button", { name: "Manage identities" }));
     expect(onClose).toHaveBeenCalledOnce();
@@ -326,6 +339,31 @@ describe("ComposerIdentityPicker", () => {
     await turned();
     await second.user.keyboard("{Escape}");
     expect(second.onClose).toHaveBeenCalled();
+  });
+
+  it("on a phone the sheet keeps Tab: Tab and Shift+Tab go round its own controls, never to the page behind its backdrop", async () => {
+    // From Manage identities Tab went on to the chat under the backdrop (its Back, header, messages), the sheet still
+    // open over it; Shift+Tab from the chosen card went to the composer's voice and + buttons.
+    viewport(390, 844);
+    try {
+      const { user, engine } = renderApp(<><button>Behind</button><ComposerIdentityPicker peerKey="peer" contact="Alice" onClose={() => {}} /></>);
+      act(() => engine.update({ links: [paired()], identityProofs: [proofView()] }));
+      const manage = screen.getByTestId("composer-identities-manage");
+      act(() => chosen()!.focus());
+      await user.tab({ shift: true });
+      expect(manage).toHaveFocus();
+      await user.tab();
+      expect(sheet()).toContainElement(document.activeElement as HTMLElement);
+      expect(screen.getByRole("button", { name: "Behind" })).not.toHaveFocus();
+    } finally { viewport(1024, 768); }
+  });
+
+  it("on a wide screen, where it floats over the composer with no backdrop, Tab goes on to the page", async () => {
+    const { user, engine } = renderApp(<><ComposerIdentityPicker peerKey="peer" contact="Alice" onClose={() => {}} /><button>After</button></>);
+    act(() => engine.update({ links: [paired()], identityProofs: [proofView()] }));
+    act(() => screen.getByTestId("composer-identities-manage").focus());
+    await user.tab();
+    expect(screen.getByRole("button", { name: "After" })).toHaveFocus();
   });
 });
 
@@ -463,7 +501,7 @@ describe("MessageInput: the + menu's Identity row", () => {
       expect(await navigator.clipboard.readText()).toBe(KEY);
       expect(screen.getByTestId("composer-identity-copy-key")).toHaveTextContent("Copied");
       // Back to the cards, the Ghostly card chosen.
-      await user.click(screen.getByRole("button", { name: "Choose another identity" }));
+      await user.click(screen.getByRole("button", { name: "Cards" }));
       await deckAgain();
       expect(chosen()).toBe(ghostly());
     });

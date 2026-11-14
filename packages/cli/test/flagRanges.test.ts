@@ -40,6 +40,32 @@ describe("number flags out of range", () => {
     expect(seen).toMatchObject(cases.map(([args, message]) => ({ args, code: 2, json: { error: { code: "usage", message } } })));
   });
 
+  it("a negative amount where a command takes <sats> is refused as the amount, as a number flag is", async () => {
+    // Before: "Unknown option -5 for ghostly wallet receive (ghostly help wallet receive)", an option nobody has.
+    const dir = home("sats-positional");
+    const cases: [string[], string][] = [
+      [["wallet", "receive", "-5"], "<sats> takes a whole number from 1 up, not -5"],
+      [["wallet", "receive", "-500"], "<sats> takes a whole number from 1 up, not -500"],
+      [["wallet", "receive", "-5", "--network", "testnet"], "<sats> takes a whole number from 1 up, not -5"],
+      [["chat", "pay", "bob", "-1"], "<sats> takes a whole number from 1 up, not -1"],
+      [["chat", "request", "bob", "-2", "--memo", "x"], "<sats> takes a whole number from 1 up, not -2"],
+      [["wallet", "receive", "0"], "<sats> takes a whole number from 1 up, not 0"],
+      [["wallet", "receive", "1.5"], "<sats> takes a whole number from 1 up, not 1.5"],
+      [["wallet", "receive", "five"], "<sats> takes a whole number from 1 up, not \"five\""],
+      // Unchanged: a real unknown option, a number flag's own refusal, and text that starts with a dash.
+      [["wallet", "receive", "--nope"], "Unknown option --nope for ghostly wallet receive (ghostly help wallet receive)"],
+      [["chat", "pay", "bob", "5", "-x"], "Unknown option -x for ghostly chat pay (ghostly help chat pay)"],
+      [["chat", "history", "bob", "--limit", "-5"], "--limit takes a whole number from 1 to 10000, not -5"],
+      [["send", "bob", "-5"], "Unknown option -5 for ghostly send (put -- before text that starts with a dash; ghostly help send)"],
+    ];
+    const seen = [];
+    for (const [args] of cases) {
+      const result = await ghostly(["--home", dir, ...args], { input: "" });
+      seen.push({ args, code: result.code, json: result.json });
+    }
+    expect(seen).toMatchObject(cases.map(([args, message]) => ({ args, code: 2, json: { error: { code: "usage", message } } })));
+  });
+
   it("--hold's range is the API's", () => {
     expect(HOLD_MINUTES).toBe(HOLD_MAX_MINUTES);
   });

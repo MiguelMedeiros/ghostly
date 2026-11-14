@@ -11,8 +11,10 @@ import {
   readImageMeta,
   NO_PICTURE_METADATA,
   NO_VIDEO_METADATA,
+  NO_AUDIO_METADATA,
   withoutPictureMetadata,
   withoutVideoMetadata,
+  withoutAudioMetadata,
   parseVoiceMeta,
   toBase64Url,
   randomBytes,
@@ -73,6 +75,12 @@ function originOf(target: string | undefined): string | null {
   try { return parseLocalTarget(target).origin; } catch { return null; }
 }
 
+/** Asks the host for `target`'s address where it asks the person (Chrome's prompt), from the click: a no throws. */
+async function askLocalAccess(target: string): Promise<void> {
+  const { origin } = parseLocalTarget(target);
+  if (!(await getBrowserHost().requestLocalAccess(localAccessPattern(origin), origin))) throw new Error("Ghostly needs your permission to reach that local address");
+}
+
 const preparingListeners = new Set<() => void>();
 let preparingTold = 0;
 function preparingChanged(force = false): void {
@@ -96,17 +104,19 @@ async function copying<T>(copy: Promise<T>): Promise<T> {
   }
 }
 /**
- * A file as it is sent: a picture or an MP4 or QuickTime video without its metadata (where it was taken or recorded,
- * the device, the time), under the name and type it was picked with, before its size is read and its digest computed.
- * One whose metadata cannot be removed is refused (`NO_PICTURE_METADATA`, `NO_VIDEO_METADATA`), never sent as it was.
+ * A file as it is sent: a picture, an MP4 or QuickTime video or an audio file without its metadata (where it was taken
+ * or recorded, the device, the time, an audio file's tags), under the name and type it was picked with, before its
+ * size is read and its digest computed. One whose metadata cannot be removed is refused (`NO_PICTURE_METADATA`,
+ * `NO_VIDEO_METADATA`, `NO_AUDIO_METADATA`), never sent as it was. A voice note recorded here goes as it is: the
+ * recorder writes no tags.
  */
 async function sendable(source: File): Promise<File> {
   let stripped: Blob | undefined;
   try {
     const mime = sanitizeMime(source.type);
-    stripped = await withoutPictureMetadata(source, mime) ?? await withoutVideoMetadata(source, mime);
+    stripped = await withoutPictureMetadata(source, mime) ?? await withoutVideoMetadata(source, mime) ?? await withoutAudioMetadata(source, mime);
   } catch (error) {
-    if (error instanceof Error && (error.message === NO_PICTURE_METADATA || error.message === NO_VIDEO_METADATA)) throw error;
+    if (error instanceof Error && [NO_PICTURE_METADATA, NO_VIDEO_METADATA, NO_AUDIO_METADATA].includes(error.message)) throw error;
     return copying(Promise.reject(error));
   }
   return stripped ? new File([stripped], source.name, { type: source.type, lastModified: source.lastModified }) : source;
@@ -268,6 +278,7 @@ function walletPlatform(network?: WalletNetwork, card?: string): WalletPlatform 
       return engine.call("askToPay", { linkId: link.id, amount, method, memo, timestamp: Date.now(), ...(network?{network}:{}) });
     },
     answerTo: (askId) => Object.values(engine.state?.payments ?? {}).find((p) => p.ask === askId && p.kind === "request" && p.direction === "in") ?? null,
+    paymentOnItsWay: (requestId) => Object.values(engine.state?.payments ?? {}).find((p) => p.requestId === requestId && p.kind === "payment" && p.direction === "in" && p.state === "pending") ?? null,
   };
 }
 
@@ -291,10 +302,27 @@ export const servicesPlatform: ServicesPlatform | null = {
 
   async shareService(name, target) {
     const { origin } = parseLocalTarget(target);
-    // Where the platform asks the user, it only does so from a user gesture: this has to come first.
-    const granted = await getBrowserHost().requestLocalAccess(localAccessPattern(origin), origin);
-    if (!granted) throw new Error("Ghostly needs your permission to reach that local address");
-    await engine.call("addService", { name, target });
+    const pattern = localAccessPattern(origin);
+    const host = getBrowserHost();
+    const add = async () => { await engine.call("addService", { name, target }); };
+    // A second round only when another tab gave the access back between the yes and the app's row (the extension).
+    for (let round = 0; round < 2; round++) {
+      // Where the platform asks the user, it only does so from a user gesture: this has to come first.
+      const granted = await host.requestLocalAccess(pattern, origin);
+      if (!granted) break;
+      if (!host.withLocalAccess) return add();
+      if (await host.withLocalAccess(pattern, add)) return;
+    }
+    throw new Error("Ghostly needs your permission to reach that local address");
+  },
+  async localAccessNeeded(target) {
+    const host = getBrowserHost();
+    if (!host.localAccessAllowed) return false;
+    try { return !(await host.localAccessAllowed(parseLocalTarget(target).origin)); } catch { return false; }
+  },
+  async allowLocalAccess(target) {
+    // From the click, as when it was shared.
+    await askLocalAccess(target);
   },
   async removeService(serviceId) {
     // Read before the call: the state after it may not have caught up yet.
@@ -307,7 +335,13 @@ export const servicesPlatform: ServicesPlatform | null = {
       await getBrowserHost().forgetLocalAccess?.(origin).catch(() => {});
     }
   },
-  setServiceEnabled: (serviceId, enabled) => engine.call("setServiceEnabled", { serviceId, enabled }),
+  async setServiceEnabled(serviceId, enabled) {
+    // On again, it asks for its address as Allow does: the extension turns an app off when Chrome's site access to its
+    // host is taken back, and turned on without it its contacts were refused until a second click on Allow.
+    const target = enabled ? engine.state?.services.find((s) => s.id === serviceId)?.target : undefined;
+    if (target) await askLocalAccess(target);
+    await engine.call("setServiceEnabled", { serviceId, enabled });
+  },
   setServiceShared: (serviceId, peerPubKeyZ32, shared) => engine.call("setServiceShared", { serviceId, peerPubKeyZ32, shared }),
 
   getPeer(peerPubKeyZ32) {
@@ -332,7 +366,8 @@ export const servicesPlatform: ServicesPlatform | null = {
   async openService(peerPubKeyZ32, serviceId) {
     const link = engine.linkByPeer(peerPubKeyZ32);
     if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
-    await getBrowserHost().openService(peerPubKeyZ32, serviceId, viewerTag(link.myPubKeyZ32));
+    // Hide my IP from contacts as it is now: while it is on, the app loads nothing but its own origin.
+    await getBrowserHost().openService(peerPubKeyZ32, serviceId, viewerTag(link.myPubKeyZ32), engine.state?.settings.relayOnly === true);
   },
   openPaymentLink(uri) {
     const open = getBrowserHost().openPaymentLink;
@@ -576,12 +611,14 @@ export const servicesPlatform: ServicesPlatform | null = {
       ...(state.transport.iroh ? { iroh: { relays: state.settings.irohRelays ?? [], defaultRelays: state.transport.iroh.defaults } } : {}),
       hyperdhtRelay: state.settings.hyperdhtRelay ?? DEFAULT_HYPERDHT_RELAY,
       pushRelay: state.settings.pushRelay ?? "",
+      ...(state.pushRelayRefused ? { pushRelayRefused: { http: state.pushRelayRefused.http, ...(state.pushRelayRefused.text !== undefined ? { text: state.pushRelayRefused.text } : {}) } } : {}),
+      relayOnly: state.settings.relayOnly === true,
       ...(state.transport.direct ? { readRelays: state.settings.readRelays === true } : {}),
       ...(state.transport.directBlocked ? { directBlocked: true } : {}),
       ...(state.transport.clockOffMs !== undefined ? { clockOffMs: state.transport.clockOffMs } : {}),
     };
   },
-  setNetwork: ({ relays, turn, irohRelays, hyperdhtRelay, readRelays, pushRelay }) =>
+  setNetwork: ({ relays, turn, irohRelays, hyperdhtRelay, readRelays, pushRelay, relayOnly }) =>
     // `turn` left out leaves the TURN server as it is (a switch saved on its own, say).
-    engine.call("updateSettings", { settings: { relays, ...(turn !== undefined ? { iceServers: turn?.urls ? [turn] : [] } : {}), ...(irohRelays ? { irohRelays } : {}), ...(hyperdhtRelay !== undefined ? { hyperdhtRelay } : {}), ...(readRelays !== undefined ? { readRelays } : {}), ...(pushRelay !== undefined ? { pushRelay } : {}) } }),
+    engine.call("updateSettings", { settings: { relays, ...(turn !== undefined ? { iceServers: turn?.urls ? [turn] : [] } : {}), ...(irohRelays ? { irohRelays } : {}), ...(hyperdhtRelay !== undefined ? { hyperdhtRelay } : {}), ...(readRelays !== undefined ? { readRelays } : {}), ...(pushRelay !== undefined ? { pushRelay } : {}), ...(relayOnly !== undefined ? { relayOnly } : {}) } }),
 };

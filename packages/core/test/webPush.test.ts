@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { p256 } from "@noble/curves/nist.js";
 import { fromBase64Url, toBase64Url, utf8Decode, utf8Encode } from "../src/bytes";
 import {
-  WebPushError, checkPushEndpoint, decryptPushPayload, encryptPushPayload, generateVapidKeys, pushRequest, vapidAuthorization, vapidKeysMatch,
+  PUSH_PAD_BYTES, WebPushError, checkPushEndpoint, decryptPushPayload, encryptPushPayload, generateVapidKeys, pushRequest, vapidAuthorization, vapidKeysMatch,
 } from "../src/webPush";
 
 // covers: push.wake.crypto
@@ -35,6 +35,19 @@ describe("message encryption (RFC 8291)", () => {
     expect(toBase64Url(a)).not.toBe(toBase64Url(b));
     expect(utf8Decode(decryptPushPayload(a, secret, auth))).toBe("wake");
     expect(() => decryptPushPayload(a, secret, crypto.getRandomValues(new Uint8Array(16)))).toThrow();
+  });
+
+  it("a padded record (RFC 8188: the delimiter, then zeros) and an unpadded one both decrypt", () => {
+    const secret = p256.utils.randomSecretKey();
+    const auth = crypto.getRandomValues(new Uint8Array(16));
+    const target = { p256dh: toBase64Url(p256.getPublicKey(secret, false)), auth: toBase64Url(auth) };
+    const unpadded = encryptPushPayload(utf8Encode("wake"), target);
+    const padded = encryptPushPayload(utf8Encode("wake"), target, { padTo: 128 });
+    expect(padded.length).toBe(unpadded.length + 128 - 5);
+    expect(utf8Decode(decryptPushPayload(unpadded, secret, auth))).toBe("wake");
+    expect(utf8Decode(decryptPushPayload(padded, secret, auth))).toBe("wake");
+    // A plaintext longer than the padding is not cut: it goes as it is.
+    expect(utf8Decode(decryptPushPayload(encryptPushPayload(utf8Encode("x".repeat(200)), target, { padTo: 128 }), secret, auth))).toBe("x".repeat(200));
   });
 
   it("refuses keys that are not a subscription's", () => {
@@ -78,5 +91,15 @@ describe("where a push may go", () => {
     expect(request.headers).toMatchObject({ "Content-Encoding": "aes128gcm", TTL: "3600", Urgency: "high" });
     expect(request.headers.Authorization).toMatch(/^vapid t=/);
     expect(utf8Decode(decryptPushPayload(request.body, secret, auth))).toBe("token");
+  });
+
+  it("pads every request's body to one size, so its length says nothing about what it carries", () => {
+    const secret = p256.utils.randomSecretKey();
+    const auth = crypto.getRandomValues(new Uint8Array(16));
+    const target = { endpoint: "https://fcm.googleapis.com/fcm/send/abc", p256dh: toBase64Url(p256.getPublicKey(secret, false)), auth: toBase64Url(auth) };
+    const keys = generateVapidKeys();
+    const bodies = ["t", "token", "x".repeat(PUSH_PAD_BYTES - 1)].map((text) => pushRequest(target, keys, utf8Encode(text), { subject: "https://ghostly.tools" }).body);
+    expect(bodies.map((body) => body.length)).toEqual(bodies.map(() => 86 + PUSH_PAD_BYTES + 16));
+    expect(utf8Decode(decryptPushPayload(bodies[0]!, secret, auth))).toBe("t");
   });
 });

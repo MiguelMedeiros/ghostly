@@ -1,12 +1,13 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createBlindSignature, createNewMintKeys, hashToCurve, pointFromHex, serializeMintKeys, verifyUnblindedSignature, type Proof } from "@cashu/cashu-ts";
-import type { PaymentReview } from "@ghostly/core";
+import { createBlindSignature, createNewMintKeys, getTokenMetadata, hashToCurve, pointFromHex, serializeMintKeys, verifyUnblindedSignature, type Proof } from "@cashu/cashu-ts";
+import { ENDPOINT, type GhostLink, type PaymentReview, type PaymentResult } from "@ghostly/core";
 import { CashuWallet, SwapUnsettledError } from "../src/engine/wallet";
+import { PaymentDesk } from "../src/engine/payments";
 import { CashuAdapter, NEVER_REACHED_MINT } from "../src/engine/paymentAdapters/cashu";
 import { fakeInvoice } from "../src/engine/paymentAdapters/providers/testing";
 import { STORES, store, transact, wrap } from "../src/shared/idb";
-import type { PendingMelt, PendingSwap, StoredProof, StoredQuote } from "../src/shared/types";
+import type { PendingMelt, PendingSwap, StoredProof, StoredQuote, WalletTx } from "../src/shared/types";
 // covers: wallet.cashu.receive-lightning, wallet.cashu.receive-token, payments.cashu.send, payments.chat.review, wallet.cashu.pay-invoice
 
 /**
@@ -36,6 +37,10 @@ function fakeMint() {
   const quotes = new Map<string, { amount: number; state: string }>();
   const melts = new Map<string, { request: string; amount: number; fee_reserve: number; state: string }>();
   const calls: string[] = [];
+  /** Requests to these paths reach a mint that never answers, and does nothing with them. */
+  const held = new Set<string>();
+  /** The mint rotates its keyset again right before it reads each swap. */
+  let rotateOnSwap = false;
   const Y = (secret: string) => hashToCurve(new TextEncoder().encode(secret)).toHex(true);
   const total = (items: { amount: number | string }[]) => items.reduce((sum, item) => sum + Number(item.amount), 0);
 
@@ -70,6 +75,7 @@ function fakeMint() {
     const path = new URL(String(input)).pathname;
     const body = init?.body ? JSON.parse(String(init.body)) : {};
     calls.push(path);
+    if (held.has(path)) throw new TypeError("Failed to fetch");
     if (path === "/v1/info") {
       const bolt11 = { methods: [{ method: "bolt11", unit: "sat", min_amount: 1, max_amount: 1_000_000 }], disabled: false };
       return answer({ name: "Fake", version: "cdk-mintd/0.18.0", nuts: { 4: bolt11, 5: bolt11, 7: { supported: true }, 9: { supported: true } } });
@@ -95,6 +101,7 @@ function fakeMint() {
       return answer({ signatures: sign(body.outputs) });
     }
     if (path === "/v1/swap") {
+      if (rotateOnSwap) rotate();
       const refused = inputsRefusal(body.inputs) ?? refusal(body.outputs);
       if (refused) return refused;
       if (total(body.inputs) !== total(body.outputs)) return refuse(11002, "Transaction is not balanced");
@@ -126,13 +133,19 @@ function fakeMint() {
     return new Response("not found", { status: 404 });
   }));
 
+  function rotate() { for (const k of keysets) k.active = false; newKeyset(); }
   return {
     calls,
+    held,
+    rotateOnSwap: (on: boolean) => { rotateOnSwap = on; },
+    /** The token's ecash is spent by someone else (its sender took it back). */
+    spend: (token: string) => { for (const p of getTokenMetadata(token).incompleteProofs) spent.add(Y(p.secret)); },
+    unspent: (token: string) => getTokenMetadata(token).incompleteProofs.every((p) => !spent.has(Y(p.secret))),
     /** Someone paid one of our invoices. */
     paid: (quote: string, amount: number) => quotes.set(quote, { amount, state: "PAID" }),
     quoteState: (quote: string) => quotes.get(quote)?.state,
     /** The mint retires its keyset and signs on a new one from now on. */
-    rotate: () => { for (const k of keysets) k.active = false; newKeyset(); },
+    rotate,
     active: () => keysets.find((k) => k.active)!.id,
   };
 }
@@ -179,14 +192,29 @@ describe("after the mint rotates its keyset", () => {
     expect((await proofs()).filter((p) => p.id === mint.active()).reduce((sum, p) => sum + p.amount, 0)).toBe(21);
   });
 
-  it("a redeem the mint refuses is refused at once, nothing stays open, and the token can be redeemed again", async () => {
+  it("a redeem is made again on the keyset the mint signs with now, and the ecash is in at once", async () => {
+    // Before, the first redeem after a rotation was refused in cashu-ts' own English ("Mint rejected a stale keyset;
+    // the snapshot has been refreshed, re-prepare the operation"), and only a second try went through.
     const { token } = await wallet.createToken(13);
     expect(await balance()).toBe(87);
     mint.rotate();
-    const first = await wallet.receiveToken(token).catch((error: unknown) => error);
-    expect(first, "the mint answered").not.toBeInstanceOf(SwapUnsettledError);
-    expect(first).toBeInstanceOf(Error);
+    await expect(wallet.receiveToken(token)).resolves.toMatchObject({ amount: 13, mint: MINT, fee: 0 });
+    expect(await balance()).toBe(100);
+    expect((await proofs()).filter((p) => p.id === mint.active()).reduce((sum, p) => sum + p.amount, 0)).toBe(13);
     expect(await all<PendingSwap>(STORES.swaps)).toEqual([]);
+    expect(mint.unspent(token)).toBe(false);
+  });
+
+  it("a redeem the mint refuses again on its new keyset ends in the wallet's own words, and the token stays good", async () => {
+    const { token } = await wallet.createToken(13);
+    // The mint rotates again before each swap it reads: the outputs made anew are on a retired keyset too.
+    mint.rotateOnSwap(true);
+    const thrown = await wallet.receiveToken(token).catch((error: unknown) => error);
+    expect(thrown).not.toBeInstanceOf(SwapUnsettledError);
+    expect((thrown as Error).message).toBe("The mint did not confirm the ecash");
+    expect(await all<PendingSwap>(STORES.swaps)).toEqual([]);
+    expect(mint.unspent(token)).toBe(true);
+    mint.rotateOnSwap(false);
     await expect(wallet.receiveToken(token)).resolves.toMatchObject({ amount: 13, mint: MINT });
     expect(await balance()).toBe(100);
   });
@@ -228,5 +256,194 @@ describe("after the mint rotates its keyset", () => {
     expect(await all<PendingMelt>(STORES.melts)).toEqual([]);
     expect(await balance()).toBe(100);
     expect(await reserved()).toEqual([]);
+  });
+});
+
+/** A chat of ours with a contact who pays in ecash: what the contact is told, and the lines the chat gets. */
+function chat(payee: CashuWallet) {
+  const results: PaymentResult[] = [];
+  const lines: string[] = [];
+  const link = { isDataLinkOpen: true, supportsPayments: true, allowsPayment: () => true, paymentEnabled: () => true, requirePaymentSupport: async () => {},
+    sendPaymentResult: (result: PaymentResult) => results.push(result), sendPayment: async () => {}, sendPaymentRequest: async () => {}, sendPaymentAsk: async () => {} };
+  const host = { getLink: () => link as unknown as GhostLink, storeMessage: vi.fn(async (row: { text: string }) => { lines.push(row.text); }), onChange: vi.fn() };
+  const desk = new PaymentDesk(payee, host as never);
+  const pay = (token: string) => desk.onPayment("l1", { id: "pay1", timestamp: 1_000, amount: { value: "13", asset: "sat" }, endpoint: [ENDPOINT.cashu, token] });
+  return { desk, results, lines, pay };
+}
+
+/** The app opened again: a wallet (and a chat) that know nothing but what is stored. */
+function reopened() {
+  const desk: { current?: PaymentDesk } = {};
+  const next = new CashuWallet(() => [MINT], { onChange: vi.fn(), onTestMintNeeded: vi.fn(), onQuotePaid: vi.fn(), onMeltResolved: vi.fn(), onSwapSettled: (swap, done) => desk.current?.onSwapSettled(swap, done) });
+  const opened = chat(next);
+  desk.current = opened.desk;
+  return { wallet: next, ...opened };
+}
+
+const STALE = /stale keyset|re-prepare/i;
+
+describe("ecash received around a keyset rotation", () => {
+  it("a contact's ecash arriving after the rotation is credited, and nobody reads cashu-ts' words", async () => {
+    const { token } = await wallet.createToken(13);
+    mint.rotate();
+    const { results, lines, pay } = chat(wallet);
+    await pay(token);
+    expect(results).toEqual([{ id: "pay1", ok: true, credited: "13" }]);
+    expect(lines).toEqual(["⚡ 13 sats"]);
+    expect(await balance()).toBe(100);
+    expect(mint.unspent(token)).toBe(false);
+  });
+
+  it("a contact's redeem waiting on the mint when it rotated is credited after a restart, and the contact told", async () => {
+    const { token } = await wallet.createToken(13);
+    mint.held.add("/v1/swap");
+    const first = chat(wallet);
+    await first.pay(token);
+    expect(first.results, "nothing failed: the mint has not said").toEqual([]);
+    expect(await all<PendingSwap>(STORES.swaps)).toHaveLength(1);
+
+    mint.rotate();
+    mint.held.clear();
+    await wallet.stop();
+    const next = reopened();
+    wallet = next.wallet;
+    wallet.start();
+    await vi.waitFor(() => expect(next.results).toHaveLength(1));
+    expect(next.results).toEqual([{ id: "pay1", ok: true, credited: "13" }]);
+    expect(next.lines).toEqual(["⚡ 13 sats"]);
+    expect(await balance()).toBe(100);
+    expect(await all<PendingSwap>(STORES.swaps)).toEqual([]);
+    expect(mint.unspent(token)).toBe(false);
+  });
+
+  it("the same with the app closed long past the redeem's last request: the token is still good, so it is sent again", async () => {
+    const { token } = await wallet.createToken(13);
+    mint.held.add("/v1/swap");
+    await chat(wallet).pay(token);
+    mint.rotate();
+    mint.held.clear();
+    await wallet.stop();
+    // An hour went by: no request of it can still reach the mint. Before, it was let go and the contact told it failed.
+    const [kept] = await all<PendingSwap>(STORES.swaps);
+    await transact([STORES.swaps], (s) => { s[STORES.swaps].put({ ...kept, createdAt: kept.createdAt - 3_600_000, attemptEndedAt: kept.attemptEndedAt! - 3_600_000 }); });
+    const next = reopened();
+    wallet = next.wallet;
+    wallet.start();
+    await vi.waitFor(() => expect(next.results).toHaveLength(1));
+    expect(next.results).toEqual([{ id: "pay1", ok: true, credited: "13" }]);
+    expect(await balance()).toBe(100);
+    expect(await all<PendingSwap>(STORES.swaps)).toEqual([]);
+  });
+
+  it("a pasted token waiting on the mint when it rotated is in the wallet after a restart, as the wallet promised", async () => {
+    const { token } = await wallet.createToken(13);
+    mint.held.add("/v1/swap");
+    const said = await wallet.receiveToken(token).catch((error: unknown) => error);
+    expect(said).toBeInstanceOf(SwapUnsettledError);
+    expect((said as Error).message).toBe("mint.example has not answered yet. The ecash is added to your wallet as soon as it does.");
+
+    mint.rotate();
+    mint.held.clear();
+    await wallet.stop();
+    wallet = reopened().wallet;
+    wallet.start();
+    await vi.waitFor(async () => expect(await balance()).toBe(100));
+    expect(await all<PendingSwap>(STORES.swaps)).toEqual([]);
+    expect((await all<WalletTx>(STORES.walletTx)).filter((tx) => tx.kind === "ecash-in")).toMatchObject([{ amount: 13, fee: 0 }]);
+    expect(mint.unspent(token)).toBe(false);
+  });
+
+  it("a waiting redeem whose ecash its sender spent meanwhile ends after the restart, in the wallet's own words", async () => {
+    const { token } = await wallet.createToken(13);
+    mint.held.add("/v1/swap");
+    await chat(wallet).pay(token);
+    mint.rotate();
+    mint.spend(token);
+    mint.held.clear();
+    await wallet.stop();
+    const next = reopened();
+    wallet = next.wallet;
+    wallet.start();
+    await vi.waitFor(() => expect(next.results).toHaveLength(1));
+    expect(next.results).toEqual([{ id: "pay1", ok: false, error: "The mint did not confirm the ecash" }]);
+    expect(next.lines).toEqual(["Could not receive 13 sats: The mint did not confirm the ecash"]);
+    expect(await balance()).toBe(87);
+    expect(await all<PendingSwap>(STORES.swaps)).toEqual([]);
+  });
+
+  it("a waiting redeem whose mint reads the token but never takes the swap is kept, and sent less and less often", async () => {
+    const { token } = await wallet.createToken(13);
+    mint.held.add("/v1/swap");
+    await chat(wallet).pay(token);
+    await wallet.stop();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    try {
+      const next = reopened();
+      wallet = next.wallet;
+      const before = mint.calls.length;
+      wallet.start();
+      // Two hours of a mint that answers what it signed and what is spent, and drops every swap.
+      for (let second = 0; second < 7_200; second++) await vi.advanceTimersByTimeAsync(1_000);
+      const sent = mint.calls.slice(before).filter((path) => path === "/v1/swap").length;
+      expect(await all<PendingSwap>(STORES.swaps), "the token is still good: never let go").toHaveLength(1);
+      expect(next.results).toEqual([]);
+      // Every 30 s for the first minutes, then twice as late each time, up to every 10 min: about 17. Before, every 30 s: 240.
+      expect(sent).toBeLessThanOrEqual(20);
+      expect(mint.unspent(token)).toBe(true);
+      // The mint takes swaps again: the redeem goes through within its 10 min pace, and the contact is told.
+      mint.held.clear();
+      for (let second = 0; second < 600 && next.results.length === 0; second++) await vi.advanceTimersByTimeAsync(1_000);
+      expect(next.results).toEqual([{ id: "pay1", ok: true, credited: "13" }]);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(await balance()).toBe(100);
+    expect(await all<PendingSwap>(STORES.swaps)).toEqual([]);
+  });
+
+  it("the same token sent again by its payer every 10 s goes to the mint at the wallet's own pace, not at each frame", async () => {
+    const { token } = await wallet.createToken(13);
+    mint.held.add("/v1/swap");
+    await wallet.stop();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    try {
+      const next = reopened();
+      wallet = next.wallet;
+      wallet.start();
+      const before = mint.calls.length;
+      // An hour of the payer's app asking every 10 s and sending its token again, as its reconcile does while unredeemed.
+      for (let second = 0; second < 3_600; second++) {
+        if (second % 10 === 0) await next.pay(token);
+        await vi.advanceTimersByTimeAsync(1_000);
+      }
+      const asked = mint.calls.slice(before);
+      expect(await all<PendingSwap>(STORES.swaps), "the token is still good: never let go").toHaveLength(1);
+      expect(next.results).toEqual([]);
+      // At the wallet's own pace (every 30 s, then twice as late, up to every 10 min): about 10 in the hour. Before, a
+      // swap, a restore and a checkstate at each of the 360 frames.
+      const count = { swaps: asked.filter((p) => p === "/v1/swap").length, restores: asked.filter((p) => p === "/v1/restore").length };
+      expect(count.swaps, JSON.stringify(count)).toBeLessThanOrEqual(15);
+      expect(count.restores, JSON.stringify(count)).toBeLessThanOrEqual(30);
+      mint.held.clear();
+      for (let second = 0; second < 600 && next.results.length === 0; second++) {
+        if (second % 10 === 0) await next.pay(token);
+        await vi.advanceTimersByTimeAsync(1_000);
+      }
+      expect(next.results).toEqual([{ id: "pay1", ok: true, credited: "13" }]);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(await balance()).toBe(100);
+  });
+
+  it("ecash its sender spent before it arrived is refused as spent, never in cashu-ts' words", async () => {
+    const { token } = await wallet.createToken(13);
+    mint.rotate();
+    mint.spend(token);
+    const { results, lines, pay } = chat(wallet);
+    await pay(token);
+    expect(results).toEqual([{ id: "pay1", ok: false, error: "This ecash was already spent somewhere else" }]);
+    expect(lines.join(" ")).not.toMatch(STALE);
+    expect(await balance()).toBe(87);
   });
 });

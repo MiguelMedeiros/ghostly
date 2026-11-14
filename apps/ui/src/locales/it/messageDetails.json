@@ -28,7 +28,7 @@
   },
   "delivery": {
     "delivered": "Consegnato (ricevuta arrivata)",
-    "failed": "Non riuscito",
+    "failed": "Non inviato",
     "held": "Custodito per il contatto",
     "queued": "Non ancora confermato, riparte da solo",
     "sending": "Invio in corso",
@@ -161,6 +161,12 @@
     "timing": "Tempi",
     "voice": "Voce",
     "wire": "Rete"
+  },
+  "send": {
+    "failed": "non riuscito",
+    "failedBecause": "non riuscito: {{error}}",
+    "sending": "invio in corso",
+    "sent": "inviato"
   },
   "storage": {
     "blob": "l'intero file in IndexedDB",

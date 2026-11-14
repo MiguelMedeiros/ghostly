@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { entropyToMnemonic } from "@scure/bip39";
+import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { wordlist as french } from "@scure/bip39/wordlists/french.js";
 import { wordlist as italian } from "@scure/bip39/wordlists/italian.js";
 import { wordlist as japanese } from "@scure/bip39/wordlists/japanese.js";
@@ -35,6 +36,29 @@ const WIF = { compressed: "KwFfNUhSDaASSAwtG7ssQM1uVX8RgX5GHWnnLfhfiQDigjioWXHH"
 const XPRV = "xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jPPqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHi";
 const XPUB = "xpub661MyMwAqRbcFtXgS5sYJABqqG9YLmC4Q1Rdap9gSE8NqtwybGhePY2gZ29ESFjqJoCu1Rupje8YtGqsefD265TMg7usUDFdp6W1EGMcet8";
 const HEX = "01".repeat(32);
+const ascii = (text: string) => Array.from(text, (c) => c.charCodeAt(0));
+const base64 = (bytes: number[]) => btoa(String.fromCharCode(...bytes));
+const base64url = (bytes: number[]) => base64(bytes).replace(/\+/g, "-").replace(/\//g, "_");
+/**
+ * A macaroon as LND serialises it (version 2): location "lnd", an identifier (version 3, root key id 0x01…, the
+ * permissions), one caveat, and a signature of 0x01 bytes.
+ */
+const field = (type: number, bytes: number[]) => [type, bytes.length, ...bytes];
+const MACAROON = [
+  2, ...field(1, ascii("lnd")), ...field(2, [3, ...Array(16).fill(1), ...ascii("offchain:read,write onchain:read")]), 0,
+  ...field(2, ascii("time-before 2030-01-01")), 0,
+  0, ...field(6, Array(32).fill(1)),
+];
+const MACAROON_HEX = MACAROON.map((b) => b.toString(16).padStart(2, "0")).join("");
+const MACAROON_BASE64 = base64(MACAROON);
+const MACAROON_BASE64URL = base64url(MACAROON).replace(/=+$/, "");
+/** Core Lightning runes: base64url of a 32-byte authcode (0x01… here) and the restrictions, unique id first. */
+const RUNE = {
+  master: base64url([...Array(32).fill(1), ...ascii("=0")]),
+  restricted: base64url([...Array(32).fill(1), ...ascii("=3&method=listfunds&rate=60")]),
+  alternatives: base64url([...Array(32).fill(1), ...ascii("=7&method^list|method^get|method=pay&pnameamount_msat<100000")]),
+  bare: base64url(Array(32).fill(1)),
+};
 /** What a Japanese seed's words are separated by. */
 const IDEOGRAPHIC_SPACE = String.fromCharCode(0x3000);
 
@@ -70,6 +94,53 @@ describe("what the guard asks about", () => {
     const typo = MNEMONICS[0].replace("yellow", "yard");
     expect(findSecret(`${typo} zoo`)).toBeNull(); // checksum fails and the run is not the whole message
     expect(findSecret(typo)).toEqual({ kind: "mnemonic" });
+  });
+
+  /**
+   * Electrum's own test vector (electrum/tests/test_mnemonic.py, segwit) and twelve words in a row of the list that make
+   * a standard one: neither passes BIP39's checksum.
+   */
+  const ELECTRUM = {
+    segwit: "wild father tree among universe such mobile favorite target dynamic credit identify",
+    standard: "capital captain car carbon card cargo carpet carry cart case cash casino",
+  };
+
+  it.each(Object.entries(ELECTRUM))("an Electrum %s seed, alone or after other words", (_, seed) => {
+    for (const text of [seed, `my electrum seed is ${seed}`, `restore with ${seed} please`]) {
+      expect(findSecret(text)).toEqual({ kind: "mnemonic" });
+    }
+  });
+
+  it("a seed by each word's first four letters, as a metal backup stamps it", () => {
+    for (const mnemonic of [MNEMONICS[0], MNEMONICS[4], ABANDON]) {
+      const short = mnemonic.split(" ").map((w) => w.slice(0, 4)).join(" ");
+      for (const text of [short, short.toUpperCase(), `my seed: ${short}`, `stamped ${short} on steel`]) {
+        expect(findSecret(text)).toEqual({ kind: "mnemonic" });
+      }
+    }
+    // A run with a word mistyped, inside other text, is let through as a full-length one is.
+    expect(findSecret(`note: ${MNEMONICS[0].replace("yellow", "yard").split(" ").map((w) => w.slice(0, 4)).join(" ")}`)).toBeNull();
+  });
+
+  /**
+   * BIP39's test vectors for entropy 0x00 (24 bytes: "abandon" 17 times, "agent") and 0x68a79e…ce7c (32 bytes), whose
+   * runs with the labels' "word" in them, or read across two columns, fail their checksum.
+   */
+  const ZEROS = entropyToMnemonic(new Uint8Array(24), wordlist);
+  const HAMSTER = entropyToMnemonic(Uint8Array.from("68a79eaca2324873eacc50cb9c6eca8cc68ea5d936f98787c60c7ebc74e6ce7c".match(/../g)!, (b) => parseInt(b, 16)), wordlist).split(" ");
+
+  it.each([
+    ["under a header, labelled \"Word n:\"", `Recovery phrase\n${ZEROS.split(" ").map((w, i) => `Word ${i + 1}: ${w}`).join("\n")}`],
+    ["labelled \"Word n:\" on one line", ZEROS.split(" ").map((w, i) => `word ${i + 1}: ${w}`).join(" ")],
+    ["in two columns, as a Ledger card is filled in", `Recovery phrase (24 words)\n${HAMSTER.slice(0, 12)
+      .map((w, i) => `${i + 1}. ${w}    ${i + 13}. ${HAMSTER[i + 12]}`).join("\n")}`],
+    ["numbered out of order, after a line naming how many words", `Here are your 12 words\n${MNEMONICS[0].split(" ")
+      .map((w, i) => [i + 1, w] as const).reverse().map(([n, w]) => `${n}) ${w}`).join("\n")}`],
+    ["by first four letters in two columns", `Seed\n${MNEMONICS[4].split(" ").slice(0, 12)
+      .map((w, i) => `${i + 1} ${w.slice(0, 4)}  ${i + 13} ${MNEMONICS[4].split(" ")[i + 12].slice(0, 4)}`).join("\n")}`],
+    ["an Electrum seed under a header, numbered", `Electrum\n${ELECTRUM.standard.split(" ").map((w, i) => `${i + 1}. ${w}`).join("\n")}`],
+  ])("a seed written as a list %s", (_, text) => {
+    expect(findSecret(text)).toEqual({ kind: "mnemonic" });
   });
 
   /**
@@ -233,6 +304,26 @@ describe("what the guard asks about", () => {
     ["View key (private): …", `View key (private): ${HEX}`],
   ])("64-hex next to a word that says what it is: %s", (_, text) => expect(findSecret(text)).toEqual({ kind: "hex-key" }));
 
+  it.each([
+    ["an LND macaroon in hex, as the LND source asks for it", MACAROON_HEX],
+    ["an LND macaroon in hex after a label", `macaroon: ${MACAROON_HEX}`],
+    ["an LND macaroon in base64", MACAROON_BASE64],
+    ["an LND macaroon in an lndconnect URI", `lndconnect://node.example:10009?cert=MIIC&macaroon=${MACAROON_BASE64URL}`],
+    ["a Core Lightning master rune", RUNE.master],
+    ["a Core Lightning rune with restrictions", `rune: ${RUNE.restricted}`],
+    ["a Core Lightning rune with alternatives", RUNE.alternatives],
+    ["a rune with no restriction, beside the word", `my rune ${RUNE.bare}`],
+    ["a rune with its padding taken off, beside the word", `rune=${RUNE.master.replace(/=+$/, "")}`],
+    ["a bitcoind cookie", `__cookie__:${HEX}`],
+    ["a bitcoind rpcpassword", `rpcpassword=${HEX}`],
+    ["the RPC password or cookie field's words", `RPC password or cookie: ${HEX}`],
+    ["a .cookie file's contents after its name", `.cookie ${HEX}`],
+  ])("a login to a node: %s", (_, text) => expect(findSecret(text)).toEqual({ kind: "node-login" }));
+
+  it("64 hex digits beside \"password\" are a key", () => {
+    expect(findSecret(`password ${HEX}`)).toEqual({ kind: "hex-key" });
+  });
+
   it("a cashuA token, with its amount decoded here", () => {
     expect(findSecret(cashuA([1, 4, 16]))).toEqual({ kind: "cashu", amount: 21, unit: "sat" });
     expect(findSecret(`for you ${cashuA([100], "usd")} thanks`)).toEqual({ kind: "cashu", amount: 100, unit: "usd" });
@@ -253,7 +344,7 @@ describe("what the guard asks about", () => {
   });
 
   it("the finding never carries the text", () => {
-    for (const text of [ABANDON, NSEC, XPRV, `seed ${HEX}`, CASHU_B_21]) expect(JSON.stringify(findSecret(text))).not.toContain(text.slice(-12));
+    for (const text of [ABANDON, NSEC, XPRV, `seed ${HEX}`, CASHU_B_21, MACAROON_HEX, RUNE.master]) expect(JSON.stringify(findSecret(text))).not.toContain(text.slice(-12));
   });
 });
 
@@ -282,6 +373,9 @@ describe("a secret with characters that take no room on screen inside it", () =>
       ["64 hex digits beside \"private key\"", `private key: ${broken(HEX, mark)}`, "hex-key"],
       ["128 hex digits beside \"seed\"", `seed ${broken("ab".repeat(64), mark, 50)}`, "hex-key"],
       ["64 hex digits beside a broken \"secret\"", `${HEX} is the sec${mark}ret`, "hex-key"],
+      ["a macaroon in hex", broken(MACAROON_HEX, mark, 40), "node-login"],
+      ["a rune", broken(RUNE.restricted, mark), "node-login"],
+      ["a bitcoind cookie", broken(`__cookie__:${HEX}`, mark), "node-login"],
       ["a seed with marks inside its words", broken(MNEMONICS[0], mark, 3), "mnemonic"],
       ["a seed with marks for spaces", MNEMONICS[1].split(" ").join(mark), "mnemonic"],
     ])("%s", (_, text, kind) => expect(findSecret(text)).toEqual({ kind }));
@@ -356,6 +450,16 @@ describe("what it lets through", () => {
     "https://mempool.space/tx/4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b",
     "creqApWF0gaNhdGVub3N0cmFheKlucHJvZmlsZTFxeTI4d3VtbjhnaGo3dW45ZDNzaGp0bnl2OWtoMnVld2Q5aHN6OW1od2RlbjV0ZTB3ZmprY2N0ZTljdXJ4dmVuOWVlaHFjdHJ2NWhzenJ0aHdkZW41dGUwZGVoaHh0bnZkYWtxcWd5ZHFodTN6N2hhbmdtMXh3NHhydnpkZDBycWl6cjF5eHFq",
     "cashu is great, try a mint",
+    // Base64 and other long strings that are not a login to a node.
+    "integrity=\"sha256-n4bQgYhMfWWaL+qgxVrQFaO/TxsrC4Is0V1sFbDwCgg=\"",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+    "https://example.com/blog/this-is-a-very-long-article-title-for-the-blog-and-more",
+    "this_is_a_rather_long_identifier_name_in_some_code_base = 1",
+    "the rune on the old stone said " + "4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b",
+    "macaroons and cookies for dessert, " + "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08" + " is the hash",
+    "bc1p5d7rjq7g6rdk2yhzks9smlaqtedr4dekq08ge8ztwac72sfr9rusxg3297",
+    "02" + "01".repeat(32) + " is the node's pubkey",
+    "0201036c6e64 is how a macaroon starts",
     "",
   ])("%s", (text) => expect(findSecret(text)).toBeNull());
 
@@ -388,6 +492,15 @@ describe("what it lets through", () => {
     expect(findSecret("so we sang: about above absent absorb abstract absurd abuse access accident account accuse achieve, ok")).toBeNull();
     expect(findSecret(`note: ${MNEMONICS[0].replace("yellow", "yard")}`)).toBeNull();
   });
+
+  it("a numbered list whose items start with seed words, or prose of short words", () => {
+    const todo = ["Add tests", "Update the docs", "Remove old code", "Check the build", "Fix lint", "Review it", "Merge",
+      "Ship it", "Tell the team", "Close the issue", "Wait a day", "Watch the logs", "Rest"];
+    expect(findSecret(todo.map((item, i) => `${i + 1}. ${item}`).join("\n"))).toBeNull();
+    // Twelve numbered seed words in a row, each with more on its line, are a list of things, not a seed.
+    expect(findSecret(MNEMONICS[0].split(" ").map((w, i) => `${i + 1}. ${w} is fine`).join("\n"))).toBeNull();
+    expect(findSecret("that boat was huge, but this time we also went over the hill with a dog and a cat")).toBeNull();
+  });
 });
 
 describe("how long it takes", () => {
@@ -413,8 +526,15 @@ describe("how long it takes", () => {
     ["cashu-shaped text", `cashuB${"A".repeat(MAX)}`.slice(0, MAX)],
     ["hex with a zero-width space every few digits", "abcdef01\u200b".repeat(MAX / 9)],
     ["seed words with a soft hyphen in each", "zo\u00ado ".repeat(MAX / 5)],
+    ["a numbered word and a line of spaces", `1 a${" ".repeat(MAX - 4)}x`],
   ])("a 16 KiB message of %s is read in well under a frame", (_, text) => {
     expect(time(text)).toBeLessThan(50);
+  });
+
+  it("a numbered word between two runs of spaces is read in well under a frame", () => {
+    // Each run made the numbered-list reading try every split of it: 1.6 KB took a second, 16 KiB minutes.
+    expect(time(`1${" ".repeat(800)}a${" ".repeat(800)}x`)).toBeLessThan(50);
+    expect(time(`1${" ".repeat(MAX / 2 - 2)}a${" ".repeat(MAX / 2 - 2)}x`)).toBeLessThan(50);
   });
 
   it("folds a text once for the other languages' lists, not once per list", () => {

@@ -13,17 +13,20 @@ import { touchOnly } from "../../lib/touchOnly";
  * - `screen`: in `document.body`, over the whole window;
  * - `page`: as a Page's `overlay`, centred over that column (not over the chat list beside it on a desktop) and
  *   above the tab bar and the keyboard on a phone, since the column ends there;
- * - `dialog`: inside a modal `<dialog>`, where everything outside it is inert and under its backdrop.
+ * - `dialog`: inside a modal `<dialog>`, where everything outside it is inert and under its backdrop;
+ * - `header`: in a chat's header, shown just under it over the chat's column, near the header button that was pressed
+ *   (the call buttons' why): at the bottom it sat over the message field's + and emoji buttons.
  *
  * It never covers the field it is about: where the card at the bottom would be over the focused field, the error
  * line under it or its form's button (a short screen with the keyboard up, a phone on its side), it goes to the top (`useClearOfField`).
  */
-export function Toast({ toast, onDismiss, place = "screen", testId = "toast" }: { toast: ToastMessage | null; onDismiss(): void; place?: "screen" | "page" | "dialog"; testId?: string }) {
+export function Toast({ toast, onDismiss, place = "screen", testId = "toast" }: { toast: ToastMessage | null; onDismiss(): void; place?: "screen" | "page" | "dialog" | "header"; testId?: string }) {
   const { t } = useI18n();
   const region = useClearOfField(toast);
   const held = useHeldTime(toast, onDismiss);
+  const placeClass = place === "page" ? "toast-place toast-place-page" : place === "header" ? "toast-place toast-place-page toast-place-header" : "toast-place";
   const card: ReactNode = (
-    <div ref={region} role="status" aria-live="polite" aria-atomic="true" className={place === "page" ? "toast-place toast-place-page" : "toast-place"} data-testid={`${testId}-region`}>
+    <div ref={region} role="status" aria-live="polite" aria-atomic="true" className={placeClass} data-testid={`${testId}-region`}>
       {toast && (
         <div key={toast.id} {...held} data-testid={testId} data-tone={toast.tone}
           className="toast-card pointer-events-auto flex items-start gap-2.5 w-full max-w-sm rounded-xl border border-border bg-sidebar-bg px-4 py-3 shadow-2xl animate-fade-in">

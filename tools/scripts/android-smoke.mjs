@@ -11,8 +11,12 @@
 //   told to Iroh, and the screen a too-old WebView gets.
 // Every result goes to $ANDROID_SMOKE_OUT/results.json and results.md, with screenshots and the logs. Only the smoke
 // test fails the job (the app does not start or its UI does not render); a measurement records what it saw.
+// Every step has a time limit, and so does every adb call: a step that does not answer in time is a "step timed out"
+// row, a screenshot, the focused window, the top activity and logcat (timeout-*), and the job fails then, not at the
+// job's own limit (whose cancel also skips the results upload).
 //
 //   ANDROID_SMOKE_APK=<apk> ANDROID_SMOKE_OUT=<dir> node tools/scripts/android-smoke.mjs
+//   ANDROID_SMOKE_HANG=<step>: that step waits forever (to try the timeout path), e.g. "WebView found over adb".
 import { _android } from "playwright";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -26,20 +30,51 @@ const out = resolve(process.env.ANDROID_SMOKE_OUT ?? "android-smoke");
 if (!apk) throw new Error("ANDROID_SMOKE_APK: the APK to install");
 mkdirSync(out, { recursive: true });
 
+/** A step that did not answer in its time: it ends the probe (the next step would wait on the same stuck WebView). */
+class StepTimeout extends Error {
+  constructor(step, ms) {
+    super(`no answer in ${Math.round(ms / 1000)} s`);
+    this.step = step;
+  }
+}
+
 // A time limit as e2e/android/support/android.ts has: with the emulator gone, adb waits for a device until the job's timeout.
-const adb = (...args) => execFileSync("adb", args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 120_000 });
+const adbRun = (args, { timeout = 120_000, encoding = "utf8" } = {}) => {
+  try {
+    return execFileSync("adb", args, { encoding, maxBuffer: 64 * 1024 * 1024, timeout });
+  } catch (error) {
+    throw error?.code === "ETIMEDOUT" ? new StepTimeout(`adb ${args.join(" ")}`.slice(0, 120), timeout) : error;
+  }
+};
+const adb = (...args) => adbRun(args);
+const screencap = (file) => writeFileSync(resolve(out, file), adbRun(["exec-out", "screencap", "-p"], { encoding: "buffer" }));
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
+
+/** Runs one step in `ms` at most. Playwright's `_android.devices()` and `webView.page()`, and `page.evaluate`, have no limit. */
+const step = async (name, ms, run) => {
+  let timer;
+  try {
+    return await Promise.race([
+      process.env.ANDROID_SMOKE_HANG === name ? new Promise(() => {}) : run(),
+      new Promise((_, fail) => { timer = setTimeout(() => fail(new StepTimeout(name, ms)), ms); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 const results = [];
 /** One line of the table: `ok` true (works), false (does not), or null (not measured / unknown). */
 const record = (area, check, ok, detail) => {
   results.push({ area, check, ok, detail: typeof detail === "string" ? detail : JSON.stringify(detail) });
   console.log(`${ok === true ? "yes" : ok === false ? "NO " : " ? "} ${area}: ${check}: ${typeof detail === "string" ? detail : JSON.stringify(detail)}`);
 };
-/** Runs one measurement; an exception is its result, not the end of the probe. */
-const measure = async (area, check, run) => {
+/** Runs one measurement in `ms` at most; an exception is its result, not the end of the probe (a timeout is). */
+const measure = async (area, check, run, ms = 240_000) => {
   try {
-    await run();
+    await step(check, ms, run);
   } catch (error) {
+    if (error instanceof StepTimeout) throw error;
     record(area, check, false, String(error?.message ?? error).slice(0, 400));
   }
 };
@@ -51,12 +86,43 @@ const write = () => {
   writeFileSync(resolve(out, "results.md"), ["## Android emulator", "", "| Area | Check | Works | Detail |", "|---|---|---|---|", ...rows, ""].join("\n"));
 };
 
+/** A step timed out: what the device shows and says, the row, and the end of the run (the stuck call never returns). */
+const timedOut = (error) => {
+  const saved = [];
+  const save = (file, read) => {
+    try {
+      writeFileSync(resolve(out, file), read());
+      saved.push(file);
+    } catch {}
+  };
+  // Short limits: with the emulator itself stuck, every one of these waits its whole limit.
+  const quick = (...args) => adbRun(args, { timeout: 20_000 });
+  save("timeout-screen.png", () => adbRun(["exec-out", "screencap", "-p"], { encoding: "buffer", timeout: 20_000 }));
+  let focus = "";
+  save("timeout-window.txt", () => (focus = quick("shell", "dumpsys", "window").split("\n").filter((l) => /mCurrentFocus|mFocusedApp|mFocusedWindow/.test(l)).map((l) => l.trim()).join("\n")));
+  // Every task's activity (the launcher's comes first), then the head of the app's own.
+  save("timeout-activity-top.txt", () => {
+    const tasks = quick("shell", "dumpsys", "activity", "top").split(/\n(?=TASK )/);
+    const ours = tasks.find((task) => task.includes(`ACTIVITY ${PKG}/`)) ?? "";
+    return [...tasks.flatMap((task) => task.split("\n").filter((l) => /^\s*ACTIVITY /.test(l))), "", ...ours.split("\n").slice(0, 80)].join("\n");
+  });
+  save("timeout-ui.xml", () => quick("exec-out", "uiautomator", "dump", "/dev/tty"));
+  save("logcat.txt", () => {
+    const logcat = quick("logcat", "-d", "-v", "time");
+    if (appPid) writeFileSync(resolve(out, "logcat-app.txt"), logcat.split("\n").filter((l) => l.includes(`(${appPid.padStart(5)})`)).join("\n"));
+    return logcat;
+  });
+  record("smoke", `step timed out: ${error.step}`, false, `${error.message}; focus ${focus.split("\n")[0] || "unknown"}; saved ${saved.join(", ") || "nothing (adb did not answer)"}`);
+  write();
+  process.exit(1);
+};
+
 let smokeFailed = false;
 let device;
 let appPid = "";
 try {
   record("device", "Android", true, `${adb("shell", "getprop", "ro.build.version.release").trim()} (API ${adb("shell", "getprop", "ro.build.version.sdk").trim()}), ${adb("shell", "getprop", "ro.product.cpu.abi").trim()}`);
-  adb("install", "-r", apk);
+  adbRun(["install", "-r", apk], { timeout: 300_000 });
   adb("logcat", "-c");
   // `ghostly_e2e`: a debug build's switch for GHOSTLY_E2E=1 (MainActivity.kt): no name step, no default wallets. It
   // also keeps the app off public networks unless `GHOSTLY_TEST_PUBLIC_NET=1`, and the smoke measures them on purpose.
@@ -65,11 +131,11 @@ try {
   // The process the probe measures (the WebView-update check starts another at the end).
   appPid = adb("shell", "pidof", PKG).trim();
 
-  [device] = await _android.devices();
+  [device] = await step("Playwright finds the device", 120_000, () => _android.devices());
   if (!device) throw new Error("no device from adb");
   const t0 = Date.now();
-  const webview = await device.webView({ pkg: PKG }, { timeout: 120_000 });
-  const page = await webview.page();
+  const webview = await step("WebView found over adb", 150_000, () => device.webView({ pkg: PKG }, { timeout: 120_000 }));
+  const page = await step("WebView page connects", 120_000, () => webview.page());
   const consoleLines = [];
   page.on("console", (message) => consoleLines.push(`${message.type()}: ${message.text()}`.slice(0, 500)));
   page.setDefaultTimeout(120_000);
@@ -83,7 +149,7 @@ try {
   await page.screenshot({ path: resolve(out, "home.png") }).catch(() => {});
   if (!results.some((r) => r.check === "UI renders" && r.ok)) smokeFailed = true;
 
-  const env = await page.evaluate(() => ({
+  const env = await step("WebView environment", 60_000, () => page.evaluate(() => ({
     userAgent: navigator.userAgent,
     tauri: "__TAURI_INTERNALS__" in window,
     origin: location.origin,
@@ -91,7 +157,7 @@ try {
     coarse: matchMedia("(any-pointer: coarse)").matches,
     fine: matchMedia("(any-pointer: fine)").matches,
     viewport: `${innerWidth}x${innerHeight}@${devicePixelRatio}`,
-  }));
+  })));
   // The UI leaves the composer unfocused (no keyboard) only on a touch-only screen (apps/ui/src/lib/touchOnly.ts).
   record("webview", "touch only (no autofocus, no keyboard on open)", env.coarse && !env.fine, `any-pointer coarse ${env.coarse}, fine ${env.fine}; viewport ${env.viewport}`);
   record("webview", "version", env.tauri, `${env.userAgent.match(/Chrome\/[\d.]+/)?.[0] ?? env.userAgent}; ${env.origin}; secure context ${env.secure}`);
@@ -218,9 +284,9 @@ try {
       const connection = await invoke("paired_iroh_connect", { endpointId: b.endpointId ?? b.id ?? b, descriptor: address });
       record("iroh", "second endpoint connects to the first", true, { ms: Date.now() - t2, connection });
       await invoke("paired_iroh_stop", { endpointId: b.endpointId ?? b.id ?? b }).catch(() => {});
-    });
+    }, 180_000);
     await invoke("paired_iroh_stop", { endpointId: a.endpointId ?? a.id ?? a }).catch(() => {});
-  });
+  }, 360_000);
 
   // Pkarr (pkarr_network.rs): no relay to write to or read from, so the packet goes through the DHT over UDP only.
   await measure("pkarr", "DHT write (UDP)", async () => {
@@ -361,7 +427,7 @@ try {
     const asking = page.evaluate(() => window.__TAURI_INTERNALS__.invoke("native_notification_permission", { request: true }));
     await sleep(2_500);
     const dialog = top();
-    writeFileSync(resolve(out, "notification-ask.png"), execFileSync("adb", ["exec-out", "screencap", "-p"]));
+    screencap("notification-ask.png");
     // Allow, by its button in the system dialog.
     const ui = adb("exec-out", "uiautomator", "dump", "/dev/tty");
     const allow = ui.match(/text="Allow"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/);
@@ -375,7 +441,7 @@ try {
     const posted = adb("shell", "dumpsys", "notification", "--noredact").split("\n").filter((l) => /tools\.ghostly\.app/.test(l) && /a1-probe|channel=messages|chn=messages/i.test(l));
     adb("shell", "cmd", "statusbar", "expand-notifications");
     await sleep(1_500);
-    writeFileSync(resolve(out, "notification.png"), execFileSync("adb", ["exec-out", "screencap", "-p"]));
+    screencap("notification.png");
     adb("shell", "cmd", "statusbar", "collapse");
     // The tap's intent, as the notification's PendingIntent sends it: the page hears `notification-open`.
     await page.evaluate(() => {
@@ -394,7 +460,7 @@ try {
     const shown = await invoke("share_text", { text: "https://ghostly.tools/a1-probe" });
     await sleep(2_000);
     const sheet = top();
-    writeFileSync(resolve(out, "share-sheet.png"), execFileSync("adb", ["exec-out", "screencap", "-p"]));
+    screencap("share-sheet.png");
     record("host", "share sheet", shown === true && /Chooser|Resolver|intentresolver/i.test(sheet), `share_text ${shown}; top: ${sheet.slice(0, 160)}`);
     adb("shell", "input", "keyevent", "KEYCODE_BACK");
     await back();
@@ -436,7 +502,7 @@ try {
       await page.evaluate((theme) => document.documentElement.setAttribute("data-theme", theme), theme);
       await sleep(1_500);
       const file = `bars-${theme}.png`;
-      writeFileSync(resolve(out, file), execFileSync("adb", ["exec-out", "screencap", "-p"]));
+      screencap(file);
       shots.push(`${file}: ${await page.evaluate(() => getComputedStyle(document.body).backgroundColor)}`);
     }
     const appearance = adb("shell", "dumpsys", "window", "windows").match(/APPEARANCE_LIGHT_STATUS_BARS|mAppearance=\S+/g)?.slice(0, 3).join(" ") ?? "";
@@ -483,7 +549,7 @@ try {
     adb("shell", "am", "force-stop", PKG);
     adb("shell", "am", "start", "-W", "-n", `${PKG}/.MainActivity`, ...E2E_START, "--ei", "ghostly_min_webview", "999");
     await sleep(4_000);
-    writeFileSync(resolve(out, "webview-update.png"), execFileSync("adb", ["exec-out", "screencap", "-p"]));
+    screencap("webview-update.png");
     const ui = adb("exec-out", "uiautomator", "dump", "/dev/tty");
     record("host", "WebView too old: the update screen", /Update Android System WebView/.test(ui), (ui.match(/text="[^"]*WebView[^"]*"/g) ?? []).join(" ").slice(0, 300) || "not on screen");
     adb("shell", "am", "force-stop", PKG);
@@ -492,6 +558,7 @@ try {
 
   writeFileSync(resolve(out, "console.txt"), consoleLines.join("\n"));
 } catch (error) {
+  if (error instanceof StepTimeout) timedOut(error);
   smokeFailed = true;
   record("smoke", "probe", false, String(error?.stack ?? error).slice(0, 800));
 } finally {
@@ -524,9 +591,9 @@ try {
     record("smoke", "app log", null, String(error).slice(0, 200));
   }
   try {
-    if (device) await device.screenshot({ path: resolve(out, "device.png") });
+    if (device) await step("device screenshot", 30_000, () => device.screenshot({ path: resolve(out, "device.png") }));
   } catch {}
   write();
-  await device?.close().catch(() => {});
+  if (device) await step("device close", 30_000, () => device.close()).catch(() => {});
 }
 process.exit(smokeFailed ? 1 : 0);

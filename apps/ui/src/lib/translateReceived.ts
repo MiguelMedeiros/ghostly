@@ -8,8 +8,8 @@ import type { ChatMessage } from "./types";
 
 /*
  * Received messages read in the app's language (docs/AUTO-TRANSLATE.md § UI, § Cost and limits). A view of the message,
- * never stored: the original stays what is kept, quoted, searched and synced, and the translations here last as long as
- * the page. Only what bubbles on screen ask for is translated, in batches: messages that arrive or scroll in together go
+ * never stored: the original stays what is kept, quoted and synced (chat search reads what the bubble shows,
+ * `shownTranslations`), and the translations here last as long as the page. Only what bubbles on screen ask for is translated, in batches: messages that arrive or scroll in together go
  * as one request per language pair, never a whole history.
  */
 
@@ -223,6 +223,27 @@ export function readTranslation(message: Pick<Received, "id" | "text">, language
   const shown = same ? seen.value : value;
   keep(views, key, { version, value: shown });
   return shown;
+}
+
+let shownReader: { version: number; language: Language; read: (message: Pick<Received, "id" | "text">) => string | undefined } | undefined;
+
+/**
+ * For chat search: the text a received message's bubble shows in `language` in place of its own, its translation (none
+ * before it came, nor with Show original pressed), read from what the page already holds, never asked for. The same
+ * function until something changes, so a search reads the chat again only then.
+ */
+export function shownTranslations(language: Language): (message: Pick<Received, "id" | "text">) => string | undefined {
+  if (shownReader?.version !== version || shownReader.language !== language) {
+    shownReader = {
+      version, language, read: (message) => {
+        if (originals.has(message.id)) return undefined;
+        const from = decided.get(viewKey(message, language));
+        if (!from || !usable(`${from}-${language}`)) return undefined;
+        return translated.get(textKey(`${from}-${language}`, message.text)) ?? undefined;
+      },
+    };
+  }
+  return shownReader.read;
 }
 
 /** Whether Show original was pressed on this message (and not Show translation after it). */

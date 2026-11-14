@@ -22,6 +22,8 @@
     "unreadCount": "{{count}} non letti in {{name}}",
     "unreadOne": "1 non letto in {{name}}"
   },
+  "foundCount": "{{count}} chat trovate",
+  "foundOne": "1 chat trovata",
   "group": {
     "adminAnswered": "L'app dell'admin ha risposto…",
     "answerFailed": "Non è andato a buon fine. Riprova.",
@@ -31,6 +33,7 @@
     "inviterAwayUnknown": "Il contatto che ti ha invitato non è ancora connesso. Riprova tra un momento.",
     "letting": "Un membro ti sta facendo entrare…",
     "linkUnanswered": "Il link non ha risposto",
+    "others": "Un altro gruppo ha questo id: scegline uno",
     "takenBack": "Invito ritirato",
     "unanswered": "L'app di chi ti ha invitato non ha risposto. Accetta di nuovo, o rifiuta.",
     "waitingAdmin": "In attesa dell'app dell'admin…",
@@ -50,9 +53,7 @@
     "groupHint": "Un link che chiunque può aprire",
     "label": "Crea un gruppo o una chat"
   },
-  "noChats": "Nessuna chat",
   "noResults": "Nessun risultato",
-  "pinned": "Fissata",
   "quiet": "C'è silenzio qui...",
   "quietHint": "È ora di infestare qualcuno! 👻",
   "rail": {
@@ -75,10 +76,10 @@
     "unread_one": "{{count}} messaggio non letto",
     "unread_other": "{{count}} messaggi non letti"
   },
+  "searchLabel": "Cerca chat",
   "searchPlaceholder": "Cerca chat...",
   "settings": "Opzioni",
   "sharedIdentity": "Ha condiviso un'identità",
   "skipToContent": "Vai al contenuto",
-  "startChat": "Nuova chat",
-  "unread": "Messaggi non letti"
+  "startChat": "Nuova chat"
 }

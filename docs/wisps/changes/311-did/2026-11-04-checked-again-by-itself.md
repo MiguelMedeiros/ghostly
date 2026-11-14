@@ -1,0 +1,1 @@
+The contact's app checks a DID proof again by itself about a day after its last check, not only when "Check again" is pressed. A check that could not reach a server leaves the proof as it was. Wire identifiers are unchanged.

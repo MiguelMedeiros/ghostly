@@ -30,7 +30,15 @@ export function formatAmount(amount: number, language: Language = "en"): string 
  * "1.234,5" in Portuguese. The whole part goes through Intl as a bigint, the fraction digits are kept as written.
  */
 export function formatTokenAmount(value: number | string, decimals: number | undefined, language: Language = "en"): string {
-  const [whole, fraction] = formatPaymentAmount(value, decimals).split(".");
+  return formatDecimal(formatPaymentAmount(value, decimals), language);
+}
+
+/**
+ * A plain decimal as the engine writes it ("1234.50": a point, no grouping) in `language`, every digit kept: "1,234.50"
+ * in English, "1.234,50" in Portuguese. Never through a Number, so 18 decimals or a huge whole part lose nothing.
+ */
+export function formatDecimal(text: string, language: Language = "en"): string {
+  const [whole, fraction] = text.split(".");
   const format = numberFormat(language);
   const wholeText = format.format(BigInt(whole));
   if (!fraction) return wholeText;

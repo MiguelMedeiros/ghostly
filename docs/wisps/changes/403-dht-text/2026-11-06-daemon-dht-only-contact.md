@@ -1,0 +1,1 @@
+Client policy, no wire change: a headless daemon (a bot, which is always the chat open) reads a contact that chose DHT only every 10 s, as an app with the chat open does, not at the 30 s background pace; its texts arrived about 30 s late each, and a queue drained one per 30 s. Six reads a minute per such chat, as signaling; every other chat of the daemon keeps its pace.

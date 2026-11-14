@@ -9,6 +9,7 @@
   "downloading": "Download... {{percent}}%",
   "errorDetails": "Cosa ha risposto il programma di aggiornamento",
   "failed": "Impossibile controllare gli aggiornamenti",
+  "installFailed": "L'aggiornamento non è stato installato. Riprova.",
   "installing": "Aggiornamento...",
   "lastChecked": "Ultimo controllo alle {{when}}",
   "later": "Più tardi",

@@ -5,7 +5,7 @@
  * arrives inside a packet that is signed by the peer's key and encrypted with
  * the link key, which is what binds the WebRTC connection to the peer identity.
  */
-import { isGlobalIpv4Host } from "./callSignal";
+import { isCandidateAddress, isGlobalIpv4Host } from "./callSignal";
 
 export interface RtcSignal {
   t: "o" | "a";
@@ -157,7 +157,9 @@ export function parseRtcSignal(json: string): RtcSignal | null {
       return null;
     }
   }
-  return { t: raw.t, ts: raw.ts, o: raw.o, u: raw.u, p: raw.p, f: raw.f, s: raw.s, c: raw.c };
+  // A candidate on a name other than a browser's mDNS one is skipped (`isCandidateAddress`).
+  const c = raw.c.filter((candidate: string) => isCandidateAddress(candidate.split(",")[1]));
+  return { t: raw.t, ts: raw.ts, o: raw.o, u: raw.u, p: raw.p, f: raw.f, s: raw.s, c };
 }
 
 export function buildDataSdp(signal: RtcSignal): string {

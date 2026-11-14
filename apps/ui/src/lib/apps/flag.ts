@@ -66,7 +66,6 @@ const answered = new Map<string, boolean>();
 const unreachable = new Set<string>();
 const asking = new Set<string>();
 const listeners = new Set<() => void>();
-let version = 0;
 let retry: ReturnType<typeof setTimeout> | null = null;
 let listening = false;
 
@@ -74,7 +73,6 @@ let listening = false;
 export const RUNNER_RETRY_MS = 30_000;
 
 function told(): void {
-  version++;
   for (const listener of [...listeners]) listener();
 }
 
@@ -111,7 +109,10 @@ export function forgetAppsAvailable(): void {
 }
 
 const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
-const snapshot = () => version;
+
+/** What the runner check says of `runner`: undefined while it is being asked, null while it cannot be asked. */
+const policyOf = (runner: string | null): boolean | null | undefined =>
+  runner ? (answered.get(runner) ?? (unreachable.has(runner) ? null : undefined)) : undefined;
 
 /**
  * `appsAvailable` for this client now, asking the runner page once when the rest already holds. A runner page that
@@ -122,15 +123,16 @@ export function useAppsState(): AppsState {
   const enabled = appsEnabled();
   // Read, not subscribed to: where apps run depends on the host, not on the engine's state, and every message bubble
   // asks (a subscription to the engine would draw each of them again on every change of state). The runner check's
-  // own answers are subscribed to: they change once or twice in a page's life.
+  // own answers are subscribed to: they change once or twice in a page's life. Only this runner's answer is: asked again
+  // while it still cannot be asked (offline, every RUNNER_RETRY_MS), it draws none of them again.
   const runner = servicesPlatform?.apps?.runnerUrl ?? null;
   // Desktop serves its runner itself, with the policy: there is no server to ask.
   const served = servicesPlatform?.apps?.runnerServed === true;
   const opener = useAppOpener();
   const ask = enabled && opener && !served ? runner : null;
-  useSyncExternalStore(subscribe, snapshot, snapshot);
+  const snapshot = () => policyOf(runner);
+  const policy = useSyncExternalStore(subscribe, snapshot, snapshot);
   useEffect(() => { if (ask) askRunner(ask); }, [ask]);
-  const policy = runner ? (answered.get(runner) ?? (unreachable.has(runner) ? null : undefined)) : undefined;
   return appsAvailable({ enabled, runner, opener, runnerPolicy: served || policy });
 }
 

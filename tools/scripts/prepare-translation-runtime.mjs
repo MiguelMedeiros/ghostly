@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
 import { nativeRuntimeFiles } from './native-runtime-files.mjs'
+import { packTarGz, sourceDateEpoch } from './tar-gz.mjs'
 
 /**
  * Builds the translation runtime of this platform (native/translation: `bare` + QVAC's Bergamot addon + the stdio
@@ -54,8 +55,8 @@ await cp(resolve(source, 'node_modules'), resolve(target, 'node_modules'), { rec
 
 const archive = `${name}.tar.gz`
 await rm(resolve(dist, archive), { force: true })
-// tar is on every runner (bsdtar on Windows and macOS, GNU tar on Linux); relative names keep a drive letter out of it.
-execFileSync('tar', ['-czf', archive, name], { cwd: dist, stdio: 'inherit' })
+// The same bytes from the same commit on every build, so the SHA-256 the app pins can be rebuilt from the tag.
+await packTarGz(target, resolve(dist, archive), { mtime: sourceDateEpoch(source) })
 const hash = createHash('sha256')
 for await (const chunk of createReadStream(resolve(dist, archive))) hash.update(chunk)
 const sha256 = hash.digest('hex')

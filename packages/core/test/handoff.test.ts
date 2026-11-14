@@ -286,6 +286,29 @@ describe("wrong passwords", () => {
     expect(handoffAttemptAllowed(handoffAttemptSucceeded(), now)).toBe("ok");
   });
 
+  it("a lock-out counted while the clock ran a day ahead is over once the clock is put right", () => {
+    const DAY = 24 * HOUR, ahead = 10_000 + DAY;
+    let attempts = NO_ATTEMPTS;
+    for (let i = 0; i < 5; i++) attempts = handoffAttemptFailed(attempts, ahead + i);
+    expect(handoffAttemptAllowed(attempts, ahead + 5)).toBe("locked-out");
+    const right = 10_000 + 2 * HOUR;
+    expect(handoffAttemptAllowed(attempts, right)).toBe("ok");
+    expect(handoffRetryAfter(attempts, right)).toBe(0);
+    expect(handoffAttemptFailed(attempts, right)).toEqual({ recent: [right], total: 6 });
+  });
+
+  it("failures stamped by a clock that ran ahead age out an hour after the clock is put right", () => {
+    const ahead = 10_000 + 24 * HOUR, right = 10_000;
+    let attempts = NO_ATTEMPTS;
+    for (let i = 0; i < 3; i++) attempts = handoffAttemptFailed(attempts, ahead + i);
+    attempts = handoffAttemptFailed(attempts, right);
+    expect(attempts.recent).toEqual([right, right, right, right]);
+    attempts = handoffAttemptFailed(attempts, right + HOUR + 1);
+    attempts = handoffAttemptFailed(attempts, right + HOUR + 2);
+    expect(attempts.recent).toEqual([right + HOUR + 1, right + HOUR + 2]);
+    expect(handoffAttemptAllowed(attempts, right + HOUR + 3)).toBe("ok");
+  });
+
   it("a success starts the count again", () => {
     let attempts = NO_ATTEMPTS;
     for (let i = 0; i < 4; i++) attempts = handoffAttemptFailed(attempts, i);

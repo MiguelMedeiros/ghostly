@@ -4,7 +4,7 @@ import type { EnrollView } from "@ghostly/browser/devices/enroll";
 import { useI18n } from "../../contexts/I18nContext";
 import { useSettings } from "../../contexts/SettingsContext";
 import { DEVICE_SET_PASSWORD_MIN, defaultDeviceName, deviceLink, deviceLinkQr, enrollErrorKey, failureKey, lockPasswordProblem, timeLeft } from "../../lib/devices";
-import { currentProfile } from "../../lib/profiles";
+import { baseProfileName, currentProfile } from "../../lib/profiles";
 import { isDesktopApp } from "../../lib/externalLink";
 import { appLinkOrigin } from "../../lib/url";
 import { hashPassword, verifyPassword } from "../../lib/settings";
@@ -18,6 +18,7 @@ import { DeviceDialog, Digits, InfoLine, Status, field, primaryButton, quietButt
 import { said } from "../../lib/notices";
 import { fillNames } from "../../lib/fillNodes";
 import { problemLine } from "../../lib/problemText";
+import { FocusSafeButton } from "../ui/FocusSafeButton";
 
 /**
  * Add a device, on the active device (WISP 06 § Adding a device). First the lock password, in the same dialog: a device
@@ -56,8 +57,11 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
     const timer = setInterval(() => setNow(Date.now()), 1_000);
     return () => clearInterval(timer);
   }, [counting]);
-  /** The profile the code adds the device to, named in its link for the new device's screen. */
-  const [profileName] = useState(() => currentProfile().name);
+  /**
+   * The profile the code adds the device to, named in its link for the new device's screen. Its name alone: the word the
+   * app adds to a restored one would mark the new device's profile restored (`createProfile`), which it is not.
+   */
+  const [profileName] = useState(() => baseProfileName(currentProfile().id) ?? currentProfile().name);
 
   // While an enrollment runs, its state is read twice a second.
   useEffect(() => {
@@ -158,16 +162,23 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
             </div>
           )}
           {error && !error.field && <p data-testid="device-add-error" className="text-danger">{error.text}</p>}
-          <button type="submit" data-testid="device-add-next" disabled={busy || !password} className={primaryButton}>{t("devices.password.next")}</button>
+          <FocusSafeButton type="submit" data-testid="device-add-next" disabled={busy || !password} className={primaryButton}>{t("devices.password.next")}</FocusSafeButton>
         </form>
       </DeviceDialog>
     );
   }
 
+  // The digits to check and the device added are plain lines, and the focus stays on the body: a screen reader hears them
+  // from a line that is there from the code on and changes its text (one that comes with its step is often not read).
+  const spoken = view?.role !== "inviter" ? ""
+    : view.step === "confirm" ? <>{fillNames(t("devices.add.found"), { device: view.device })} <span dir="ltr">{`${view.digits.slice(0, 3)} ${view.digits.slice(3)}`}</span></>
+    : view.step === "done" ? fillNames(t("devices.add.done"), { device: view.device }) : "";
+
   return (
     <DeviceDialog title={t("devices.add.title")} onClose={onClose} testId="device-add">
       <Toast toast={notice.toast} onDismiss={notice.dismiss} place="dialog" testId="device-add-notice" />
       <div ref={body} tabIndex={-1} className="space-y-3 focus:outline-none">
+      <p role="status" className="sr-only" data-testid="device-add-spoken">{spoken}</p>
       {/* Try again, until the engine answers: a new code, or why there is none. */}
       {!view && busy && <Status testId="device-add-preparing" step="preparing">{t("devices.join.preparing")}</Status>}
       {view?.role === "inviter" && view.step === "waiting" && <>
@@ -184,9 +195,10 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
       {view?.role === "inviter" && view.step === "confirm" && <>
         <p data-testid="device-add-status" data-step="confirm" className="text-text-primary">{fillNames(t("devices.add.found"), { device: view.device })}</p>
         <Digits digits={view.digits} testId="device-add-digits" />
-        <div className="grid grid-cols-2 gap-3">
-          <button type="button" data-testid="device-add-no-match" disabled={busy} onClick={() => void confirm(false)} className={quietButton}>{t("devices.add.noMatch")}</button>
-          <button type="button" data-testid="device-add-match" disabled={busy} onClick={() => void confirm(true)} className={primaryButton}>{t("devices.add.match")}</button>
+        {/* Side by side while each word fits its half; stacked once a larger text size (or a long word) would cut one. */}
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,7rem),1fr))] gap-3">
+          <FocusSafeButton type="button" data-testid="device-add-no-match" disabled={busy} onClick={() => void confirm(false)} className={quietButton}>{t("devices.add.noMatch")}</FocusSafeButton>
+          <FocusSafeButton type="button" data-testid="device-add-match" disabled={busy} onClick={() => void confirm(true)} className={primaryButton}>{t("devices.add.match")}</FocusSafeButton>
         </div>
       </>}
       {view?.role === "inviter" && (view.step === "waiting" || view.step === "confirm") && !!view.refused && <Notice tone="warning" testId="device-add-refused">{t("devices.add.refused")}</Notice>}

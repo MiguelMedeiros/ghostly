@@ -1,5 +1,5 @@
 import "fake-indexeddb/auto";
-import { act, screen } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { Chat } from "../../pages/Chat";
 import { saveSession } from "../../lib/storage";
@@ -65,5 +65,26 @@ describe("the no-path note of a call that ended in a chat let go of", () => {
     again.rerender(<Chat {...props} visible />);
     await act(async () => {});
     expect(screen.queryByTestId("call-no-path")).toBeNull();
+  });
+
+  /**
+   * It stays until closed, so it never covers the header: on a phone the overlay over the top hid back, the name,
+   * the calls and ⋮, and the next call could not start from there. It is a line under the header, in the column's flow.
+   */
+  it("sits under the chat's header, never over its back button, calls or ⋮", async () => {
+    save();
+    Object.assign(hook, { noPath: true, callState: "idle" });
+    renderApp(<Chat {...props} visible />);
+    const note = await screen.findByTestId("call-no-path");
+    const header = screen.getByTestId("chat-back").closest(".header-safe")!;
+    expect(header).not.toBeNull();
+    expect(note).not.toHaveClass("top-notice");
+    expect(header.contains(note)).toBe(false);
+    // After the header in the column, with the back button, the calls and ⋮ before it.
+    expect(header.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    for (const control of [screen.getByTestId("chat-back"), screen.getByTestId("chat-options"), ...within(header as HTMLElement).getAllByRole("button", { name: /call/i })])
+      expect(header.contains(control)).toBe(true);
+    // Before the messages: the top of the column, not the end of the list.
+    expect(note.compareDocumentPosition(document.querySelector("[data-message-list]")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

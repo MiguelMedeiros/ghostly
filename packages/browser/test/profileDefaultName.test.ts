@@ -139,6 +139,34 @@ it("a profile someone names like the built-in name of a language keeps that name
   expect(registerProfile("pessoal000", "Pessoal", true).name, "restored with no marker said").toBe("Pessoal (restored)");
 });
 
+// The registry knew the built-in name only by its English word: a profile someone named "Personal" was shown as
+// "Pessoal" in a Portuguese app, beside the first one.
+it("a profile someone names Personal keeps that name in every language", async () => {
+  portuguese();
+  createProfile("Personal");
+  expect(listProfiles().map((p) => p.name)).toEqual(["Pessoal", "Personal"]);
+  renameProfile("", "Personal");
+  expect(listProfiles().map((p) => p.name), "the first one renamed so by hand").toEqual(["Personal", "Personal"]);
+  setDefaultProfileName("Personnel");
+  expect(listProfiles().map((p) => p.name)).toEqual(["Personal", "Personal"]);
+
+  portuguese();
+  const marker = (await openProfileBackup(await createProfileBackup(PASSPHRASE), PASSPHRASE)).payload.profile;
+  expect(marker, "its backup says the name was typed").toEqual({ name: "Personal", builtIn: false });
+  const back = await restoreProfileBackup(await createProfileBackup(PASSPHRASE), PASSPHRASE);
+  expect(back.name).toBe("Personal (restaurado)");
+});
+
+it("a registry from before the marker shows its first profile, never renamed, in the app's language", () => {
+  storage.setItem(registryKey(), JSON.stringify({ version: 1, active: "", profiles: [{ id: "", name: "Personal", createdAt: 0 }, { id: "restored00", name: "Personal", createdAt: 1, restored: true }] }));
+  portuguese();
+  expect(listProfiles().map((p) => p.name), "a copy an older app restored from it too").toEqual(["Pessoal", "Pessoal (restaurado)"]);
+  createProfile("Work");
+  expect(listProfiles().map((p) => p.name), "written again by this app").toEqual(["Pessoal", "Pessoal (restaurado)", "Work"]);
+  renameProfile("", "Personal");
+  expect(listProfiles()[0].name).toBe("Personal");
+});
+
 it("a renamed first profile's backup carries the name it was given", async () => {
   portuguese();
   renameProfile("", "Casa");

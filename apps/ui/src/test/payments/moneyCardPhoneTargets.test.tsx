@@ -6,7 +6,7 @@ import { PaymentBubble } from "../../components/PaymentBubble";
 import { PaymentReview } from "../../components/PaymentReview";
 import { servicesPlatform, type WalletPlatform } from "../../lib/platform";
 import { fakeEngine, linkView, paymentView } from "../fakeEngine";
-import { MAINNET_INVOICE, mint, REAL_MINT, TEST_MINT } from "./fixtures";
+import { liveMainnetInvoice, mint, REAL_MINT, TEST_MINT } from "./fixtures";
 import { renderApp } from "../render";
 
 // covers: payments.chat.review, payments.cashu.request, payments.cashu.reclaim, payments.external
@@ -23,7 +23,7 @@ describe("a money card in a chat on a phone", () => {
   };
 
   it("a request's Review payment, Pay with another wallet and fee field are thumb-sized", () => {
-    show({ kind: "request", direction: "in", amount: 2_100, invoice: MAINNET_INVOICE });
+    show({ kind: "request", direction: "in", amount: 2_100, invoice: liveMainnetInvoice(2_100) });
     expect(screen.getByRole("button", { name: "Review payment" })).toHaveClass("max-md:min-h-11");
     expect(screen.getByRole("button", { name: "Pay with another wallet" })).toHaveClass("max-md:min-h-11");
     expect(screen.getByRole("textbox", { name: /Maximum fee/ })).toHaveClass("max-md:min-h-11");

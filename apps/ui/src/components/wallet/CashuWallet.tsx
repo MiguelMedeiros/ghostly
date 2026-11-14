@@ -24,6 +24,8 @@ import { formatAmount } from "../../lib/amount";
 import { formatAt } from "../../lib/time";
 import { problemLine, problemText } from "../../lib/problemText";
 import { exactText } from "../../lib/exactText";
+import { copySecret } from "../../lib/shareLink";
+import { FocusSafeButton } from "../ui/FocusSafeButton";
 
 const TX_LABEL = {
   "lightning-in": "wallet.cashu.tx.lightningIn",
@@ -68,8 +70,11 @@ const shortFee = (t: Translate, ppk: number, testnet: boolean) => (ppk === 0 ? t
  * ecash held by the mints, filled and emptied over Lightning. The Cashu card also holds the mint
  * settings; the Lightning card is about invoices, and where they are paid into and from (its source).
  */
-export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = false }: { wallet: WalletPlatform; state: WalletState; rail: "cashu" | "lightning"; onOpenCashu: () => void; focusAmount?: boolean }) {
+export function CashuWallet({ wallet, state, rail, sharedWith, onOpenCashu, focusAmount = false }: { wallet: WalletPlatform; state: WalletState; rail: "cashu" | "lightning"; sharedWith?: string; onOpenCashu: () => void; focusAmount?: boolean }) {
   const { t } = useI18n();
+  // A card that spends another card's balance (Lightning through the mints, Breez on the Spark wallet): its number
+  // stays, it is what it can spend, and a line says whose balance it is.
+  const sharedLine = sharedWith ? <span className="block text-xs text-text-muted mt-1" data-testid="wallet-shared-balance">{t("wallet.cards.sameBalance", { name: sharedWith })}</span> : null;
   const [action, setAction] = useState<Action>("receive");
   // The amount takes the focus when the person chose this wallet (`focusAmount`), chose Receive here or pressed Done.
   const [actionChosen, setActionChosen] = useState(false);
@@ -248,6 +253,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
                 run with it, glued to it ("100,000sats"). The unit stays in the line's direction. */}
             <bdi className="text-4xl font-semibold tabular-nums">{formatAmount(testnet ? testShown : realShown, t.language)}</bdi>
             <span className="text-text-muted text-sm ms-2">{unitFor(t, unit, testnet ? testShown : realShown)}</span>
+            {sharedLine}
             {/* A Testnet wallet's whole balance is test sats; a test mint's sats never count in a Mainnet one. */}
             {testMint && !testnet && <span className="block text-xs text-warn-ink mt-1" data-testid="wallet-test-balance">{t("wallet.cashu.testBalance", { amount: formatAmount(testShown, t.language) })}</span>}
             {!!state.setAside && (
@@ -275,6 +281,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
           <p className="text-text-primary" data-testid="wallet-balance">
             <bdi className="text-4xl font-semibold tabular-nums">{ln?.balance === undefined ? "—" : formatAmount(ln.balance, t.language)}</bdi>
             <span className="text-text-muted text-sm ms-2">{t("wallet.lightning.balanceSource", { unit, source: sourceName ?? t("wallet.lightning.theSource") })}</span>
+            {sharedLine}
             {ln?.status !== "ready" && <span className="block text-xs text-warn-ink mt-1" data-testid="lightning-source-state">{ln?.error ? problemLine(ln.error, t) : t("wallet.lightning.connecting")}</span>}
           </p>
         )}
@@ -315,6 +322,9 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
 
         {action === "send" && (
           <div className="bg-surface rounded-xl p-4 space-y-3 animate-fade-in">
+            {/* The result, paid or pending, as Receive's: Done takes the keys, so only a line that was there, empty,
+                before its text says which. Refusals are the error's own alert. */}
+            <p role="status" className="sr-only">{sent ?? ""}</p>
             {sent ? (
               <div className="text-center py-3 space-y-3" data-testid="wallet-send-result">
                 {sent === t("wallet.cashu.paid") && <svg width="56" height="56" viewBox="0 0 56 56" className="mx-auto text-accent animate-check-ring" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -332,7 +342,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
                 {/* A memo is text someone else wrote, in any script: laid out by its own direction. */}
                 {quoted?.description && <p className="text-text-secondary text-sm" data-testid="wallet-pay-description"><bdi>{quoted.description}</bdi></p>}
                 {over !== undefined && <p className="text-danger-ink text-xs" data-testid="wallet-pay-over">{t("payments.composer.tooMuch", { amount: formatAmount(over, t.language), unit })}</p>}
-                {confirming && over === undefined ? <ConfirmRealMoney what={t("wallet.lightning.confirmWhat", { amount: formatAmount(quote.amount, t.language), fee: formatAmount(quote.feeReserve, t.language) })} busy={busy} onSend={() => payQuote(quote, true)} onBack={() => setConfirming(false)} /> : (
+                {confirming && over === undefined ? <ConfirmRealMoney what={t("wallet.lightning.confirmWhat", { amount: formatAmount(quote.amount, t.language), unit, fee: formatAmount(quote.feeReserve, t.language), feeUnit: unitFor(t, unit, quote.feeReserve) })} busy={busy} onSend={() => payQuote(quote, true)} onBack={() => setConfirming(false)} /> : (
                   <ButtonGroup fill>
                     <Button variant="primary" data-testid="wallet-pay-confirm" loading={running === "pay"} disabled={busy || over !== undefined} onClick={() => testnet ? payQuote(quote, false) : setConfirming(true)}>{busy ? t("wallet.lightning.paying") : t("wallet.lightning.pay")}</Button>
                     <Button onClick={() => { setQuote(null); setQuoted(null); }}>{t("common.cancel")}</Button>
@@ -357,7 +367,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
                 {/* The line's dim is its text's only: Max keeps full-strength ink and a phone-sized target. */}
                 {choosing && <p className="text-xs m-0 flex flex-wrap items-center gap-2" data-testid="wallet-pay-balance">
                   <span className="text-text-muted">{t("wallet.send.balance", { amount: formatAmount(state.balance, t.language), unit })}</span>
-                  {state.balance > 0 && <button type="button" className="min-h-6 max-md:min-h-11 rounded-md px-2.5 py-1 font-bold text-text-primary bg-surface-alt hover:bg-border cursor-pointer disabled:opacity-40" disabled={busy} data-testid="wallet-pay-max" onClick={() => { setPayAmount(String(state.balance)); maxed.current = true; }}>{t("wallet.send.max")}</button>}
+                  {state.balance > 0 && <FocusSafeButton type="button" className="min-h-6 max-md:min-h-11 rounded-md px-2.5 py-1 font-bold text-text-primary bg-surface-alt hover:bg-border cursor-pointer disabled:opacity-40" disabled={busy} data-testid="wallet-pay-max" onClick={() => { setPayAmount(String(state.balance)); maxed.current = true; }}>{t("wallet.send.max")}</FocusSafeButton>}
                 </p>}
                 {!destination && <Button type="submit" variant="primary" className="w-full" loading={running === "send"} disabled={busy || !payInput.trim() || (!isToken && route.kind !== "invoice" && !chosen)}>
                   {busy ? t("wallet.cashu.working") : isToken ? t("wallet.cashu.redeem") : chosen ? t("wallet.cashu.payAmount", { amount: formatAmount(chosen, t.language), unit }) : pasted?.amountSat ? t("wallet.cashu.payAmount", { amount: formatAmount(pasted.amountSat, t.language), unit }) : t("wallet.lightning.pay")}
@@ -388,7 +398,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
                     </div>
                     <div className="flex items-baseline justify-between gap-2 text-xs text-text-muted">
                       <span className="truncate">{formatAt(tx.timestamp, MOVED_AT, t.language)} · {mint?.name ?? new URL(tx.mint).hostname}{tx.note ? ` · ${noteText(t, tx)}` : ""}</span>
-                      <span className={`shrink-0 ${tx.fee > 0 ? "text-warn-ink" : ""}`}>{tx.fee > 0 ? t("wallet.cashu.history.fee", { amount: formatAmount(tx.fee, t.language) }) : t("wallet.cashu.history.noFee")}</span>
+                      <span className={`shrink-0 ${tx.fee > 0 ? "text-warn-ink" : ""}`}>{tx.fee > 0 ? t("wallet.cashu.history.fee", { amount: formatAmount(tx.fee, t.language), unit }) : t("wallet.cashu.history.noFee")}</span>
                     </div>
                   </div>
                 );
@@ -412,7 +422,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
             <Section title={t("wallet.lightning.recent")} testId="lightning-recent">
               {ln.recent.map((op) => (
                 <Row key={`${op.direction}-${op.paymentHash}`} testId="lightning-op" label={t(op.direction === "in" ? "wallet.lightning.recentIn" : "wallet.lightning.recentOut", { amount: formatAmount(op.amount, t.language), unit })}
-                  hint={`${formatAt(op.createdAt, MOVED_AT, t.language)} · ${lightningStateLabel(t, op.state)}${op.fee ? ` · ${t("wallet.cashu.history.fee", { amount: formatAmount(op.fee, t.language) })}` : ""}${op.error ? ` · ${problemLine(op.error, t)}` : ""}`} />
+                  hint={`${formatAt(op.createdAt, MOVED_AT, t.language)} · ${lightningStateLabel(t, op.state)}${op.fee ? ` · ${t("wallet.cashu.history.fee", { amount: formatAmount(op.fee, t.language), unit })}` : ""}${op.error ? ` · ${problemLine(op.error, t)}` : ""}`} />
               ))}
             </Section>
           )}
@@ -453,7 +463,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
           </Section>
           <Section title={t("wallet.cashu.settings")} testId="wallet-backup">
             <Row label={t("wallet.cashu.copyEcash")} hint={t("wallet.cashu.copyEcashHint")}>
-              <Button loading={running === "backup"} disabled={busy || state.balance === 0} onClick={() => { setCopied(false); void run(async () => { const tokens = await wallet.exportTokens(); await navigator.clipboard.writeText(tokens.map((token) => token.token).join("\n")); setCopied(true); }, "backup"); }}>{t("wallet.cashu.copyBackup")}</Button>
+              <Button loading={running === "backup"} disabled={busy || state.balance === 0} onClick={() => { setCopied(false); void run(async () => { const tokens = await wallet.exportTokens(); await copySecret(tokens.map((token) => token.token).join("\n")); setCopied(true); }, "backup"); }}>{t("wallet.cashu.copyBackup")}</Button>
               <p role="status" className="sr-only">{copied ? t("wallet.cashu.backupCopied") : ""}</p>
             </Row>
             {(copied || (error && backupFailed)) && <Block>{copied ? <Notice tone="success" testId="wallet-notice">{t("wallet.cashu.backupCopied")}</Notice> : error && <Notice problem={error} testId="wallet-error" />}</Block>}

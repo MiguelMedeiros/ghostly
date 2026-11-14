@@ -145,6 +145,32 @@ test("with reduced motion the scene is a still picture of the stage", { tag: ["@
   await expect(alice.page.getByTestId("pairing-stage-label")).toHaveAttribute("aria-live", "polite");
 });
 
+test("on a short screen the invite comes first, above the scene, in view when the chat opens", { tag: ["@feature:chat.paired.pairing-progress", "@feature:invite.code"] }, async ({ peer }) => {
+  const alice = await peer("progress-short");
+  // 200 % zoom of a 1280 × 800 window, a phone on its side, and a phone.
+  for (const [width, height] of [[640, 400], [667, 375], [375, 667]]) {
+    await alice.page.setViewportSize({ width, height });
+    await alice.page.goto("/#/");
+    await alice.page.getByTitle("New Chat").click();
+    const scene = alice.page.getByTestId("pairing-scene"), card = alice.page.getByTestId("invite-card");
+    await expect(scene).toHaveAttribute("data-stage", "waiting");
+    await expect(card).toBeVisible();
+    const box = async (selector: string) => (await alice.page.locator(selector).first().boundingBox())!;
+    const [sceneBox, cardBox, qr, list, composer] = await Promise.all(
+      ["[data-testid=pairing-scene]", "[data-testid=invite-card]", "[data-testid=invite-qr]", "[data-message-list]", "[data-composer]"].map(box));
+    expect(cardBox.y, `${width}×${height}: the card is under the scene`).toBeLessThan(sceneBox.y);
+    // The invite's QR starts on screen, between the top of the messages and the composer: no scroll to find it.
+    expect(qr.y, `${width}×${height}`).toBeGreaterThanOrEqual(list.y);
+    expect(qr.y + qr.height / 2, `${width}×${height}`).toBeLessThan(composer.y);
+  }
+  // A tall screen keeps the scene first.
+  await alice.page.setViewportSize({ width: 600, height: 900 });
+  await expect.poll(async () => {
+    const [scene, card] = await Promise.all([alice.page.getByTestId("pairing-scene").boundingBox(), alice.page.getByTestId("invite-card").boundingBox()]);
+    return scene!.y < card!.y;
+  }).toBe(true);
+});
+
 /** Every sound the page starts (its length, and when), and when the scene first shows its live stage. */
 async function recordSounds(page: Page) {
   await page.evaluate(() => {

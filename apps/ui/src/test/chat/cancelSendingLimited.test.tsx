@@ -20,7 +20,7 @@ function waitingChat() {
     messages: [{ id: "me_w1", ref: "w1", text: TEXT, sender: "me", timestamp: 1_700_000_000_500, delivery: "waiting" } as never] });
 }
 
-async function cancelSending(language: "en" | "pt", deleteMessage: () => void, limited: boolean) {
+async function cancelSending(language: "en" | "pt", deleteMessage: () => { everyone: boolean }, limited: boolean) {
   waitingChat();
   const { user, engine } = renderApp(<Chat sessionId="chat-1" visible onCallChange={() => {}} callLayer={null} />, { language });
   engine.on("deleteMessage", deleteMessage)
@@ -50,7 +50,7 @@ describe("Cancel sending a waiting message", () => {
   }
 
   it("taken by the engine, the bubble goes", async () => {
-    const engine = await cancelSending("en", () => undefined, false);
+    const engine = await cancelSending("en", () => ({ everyone: false }), false);
     expect(engine.callsTo("deleteMessage")).toEqual([{ linkId: "link-1", messageId: "me_w1" }]);
     expect(screen.queryByText(TEXT)).toBeNull();
     expect(screen.queryByTestId("message-retry-error")).toBeNull();

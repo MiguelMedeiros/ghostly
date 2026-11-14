@@ -1,11 +1,14 @@
 import { randomBytes } from "node:crypto";
-import { lookup } from "node:dns/promises";
+import { createSocket } from "node:dgram";
 import { createRequire } from "node:module";
+import { isIP } from "node:net";
 import type { IceServer, PeerConnection, Track } from "node-datachannel";
 import { buildSdpFromSignal, callRtcConfig, extractParamsFromSdp, PAIRED_CALL_CANDIDATES, RTC_CONFIG, type CallIceServer, type CallSignal } from "@ghostly/core";
 import { CallAudio, type OpusCodec } from "./audio";
 import type { CallRate, PlaybackQueue } from "./pcm";
 import { envSwitch } from "../envSwitch";
+import { CliError } from "../errors";
+import { rtcThreads } from "../runtime/rtcThreads";
 
 /**
  * A call's media on Node (WISP 601, WISP 1100 § Calls): libdatachannel (node-datachannel, the same native module
@@ -100,6 +103,13 @@ export function opusCodec(native: OpusNative, rate: CallRate): OpusCodec {
 export function loadCallStack(): Promise<CallStack | string> {
   return (loading ??= (async () => {
     try { if (!envSwitch("GHOSTLY_WEBRTC", true)) return "Calls are off on this headless Ghostly (GHOSTLY_WEBRTC=0)"; } catch (error) { return (error as Error).message; }
+    // libdatachannel takes a name there (`localhost`) without a word and gathers no candidate: each call failed 30 s later.
+    // Not echoed: the contact's app shows this reason, and the name may be one of this network's.
+    const bind = process.env.GHOSTLY_CALL_BIND;
+    // An address in brackets (`[::1]`) or with a space from an env file is not a name: say what to take off instead.
+    if (bind && !isIP(bind)) return isIP(bind.trim().replace(/^\[(.*)\]$/, "$1"))
+      ? "Calls are off on this headless Ghostly: GHOSTLY_CALL_BIND takes an IP address of this machine without brackets or spaces, such as 127.0.0.1 or ::1"
+      : "Calls are off on this headless Ghostly: GHOSTLY_CALL_BIND takes an IP address of this machine, such as 127.0.0.1, not a name";
     try {
       const ndc = (await import("node-datachannel")) as unknown as CallStack["ndc"] & { default?: CallStack["ndc"] };
       const lib = (ndc.PeerConnection ? ndc : ndc.default!) as CallStack["ndc"];
@@ -200,6 +210,31 @@ interface Connection {
   failed: boolean;
   /** Who hears its states once it has its audio: none are told before. */
   onState: ((state: MediaState) => void) | null;
+  /** Said once it is closed: libdatachannel's threads go with the process's last connection (`rtcThreads`). */
+  released: () => void;
+}
+
+/** Not echoed: the address may be one of this network's. */
+const CALL_BIND_GONE = "Calls can't start: GHOSTLY_CALL_BIND is not an address of this machine now (a typo, or a network that changed). Set it to one of this machine's addresses, such as 127.0.0.1, or unset it, then restart the daemon";
+
+/**
+ * Whether a socket can be bound on `address` now. On an address that is not this machine's (a typo, a network that
+ * changed since the daemon started), libdatachannel gathers no candidate and throws from an offer's description where
+ * node-datachannel catches nothing: the whole daemon aborted, every chat with it.
+ */
+export async function bindable(address: string): Promise<boolean> {
+  const socket = createSocket(isIP(address) === 6 ? "udp6" : "udp4");
+  try {
+    await new Promise<void>((bound, failed) => {
+      socket.once("error", failed);
+      socket.bind(0, address, () => bound());
+    });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    try { socket.close(); } catch { /* not bound */ }
+  }
 }
 
 /**
@@ -210,8 +245,10 @@ interface Connection {
 async function openConnection(stack: CallStack, options: ConnectionOptions, offer: CallSignal | null, held = false): Promise<Connection> {
   const { ndc } = stack;
   const bind = process.env.GHOSTLY_CALL_BIND;
+  if (bind && !(await bindable(bind))) throw new CliError("unavailable", CALL_BIND_GONE);
   const iceServers = callIceServers(options.iceServers);
   const pc = new ndc.PeerConnection("ghostly-call", { iceServers, ...(bind ? { bindAddress: bind } : {}) });
+  const released = rtcThreads.opened();
   // Each line says how long after this connection was made it happened: the order of the connection's states and
   // the contact's answer is what explains a call that failed as it connected. The states are heard from the start.
   const born = Date.now();
@@ -271,13 +308,13 @@ async function openConnection(stack: CallStack, options: ConnectionOptions, offe
     if (offer?.m) local.m = [...offer.m];
     // No picture is taken here, and none is sent: the contact's app rebuilds the video section closed (WISP 601).
     if (videoTrack) local.vr = 0;
-    conn = { pc, track, videoTrack, local, payloadType, ssrc, log, ice: { state: "new", pair: null }, closed: false, failed: false, onState: null };
+    conn = { pc, track, videoTrack, local, payloadType, ssrc, log, ice: { state: "new", pair: null }, closed: false, failed: false, onState: null, released };
     // What each side offered to meet on: when a call does not connect, the log says between which addresses.
     log(`candidates here: ${(local.c ?? []).join(" | ") || "none"}`);
     try { conn.ice.state = pc.iceState(); } catch { /* keeps "new" */ }
     return conn;
   } catch (error) {
-    pc.close();
+    try { pc.close(); } finally { released(); }
     throw error;
   }
 }
@@ -287,6 +324,7 @@ function closeConnection(conn: Connection): void {
   try { conn.track.close(); } catch { /* closed with the connection */ }
   try { conn.videoTrack?.close(); } catch { /* same */ }
   try { conn.pc.close(); } catch { /* already */ }
+  conn.released();
 }
 
 /**
@@ -361,7 +399,7 @@ export class CallMedia {
       track.onMessage((packet) => { for (const listener of listeners) listener(packet); });
       const audio = new CallAudio({
         rate: options.rate, payloadType: conn.payloadType, ssrc: conn.ssrc,
-        track: { send: (packet) => { if (track.isOpen()) track.sendMessageBinary(packet); }, onPacket: (listener) => listeners.push(listener) },
+        track: { send: trackSend(track), onPacket: (listener) => listeners.push(listener) },
         encoder: stack.opus(options.rate), decoder: stack.opus(options.rate), onFrame: options.onFrame, queue: options.queue,
       });
       const media = new CallMedia(conn, audio);
@@ -410,17 +448,27 @@ export class CallMedia {
 /**
  * WebKit (Safari, the macOS app) hides its host addresses behind mDNS names, which other machines, and often this
  * one, cannot resolve: then the call can only connect when the contact's own checks reach this side. The log says so,
- * since that is what a call stuck on "connecting" needs to be understood.
+ * since that is what a call stuck on "connecting" needs to be understood. The names are not looked up for it: a name
+ * nobody answers holds one of the few threads every other lookup of the daemon waits on, for seconds.
  */
 function mdnsNote(signal: CallSignal, log: (line: string) => void): void {
   for (const candidate of signal.c ?? []) {
     const host = candidate.split(" ")[4];
     if (!host?.endsWith(".local")) continue;
-    void lookup(host, { all: true }).then(
-      (found) => log(`${host} resolves here to ${found.map((a) => a.address).join(", ")}`),
-      () => log(`${host} does not resolve here: the call connects only if the contact's checks reach this side`),
-    );
+    log(`${host}: an mDNS name, not resolved here: the call connects only if the contact's checks reach this side`);
   }
+}
+
+/**
+ * Sends a call's packets on its track, while it is open. A track can close between `isOpen` and the send (the
+ * connection failing), and libdatachannel then throws "Track is not open" from the audio's timer, where nothing catches
+ * it: that frame is dropped, as one sent while the track is closed is.
+ */
+export function trackSend(track: Pick<Track, "isOpen" | "sendMessageBinary">): (packet: Buffer) => void {
+  return (packet) => {
+    if (!track.isOpen()) return;
+    try { track.sendMessageBinary(packet); } catch { /* closed meanwhile */ }
+  };
 }
 
 /** Whether a call's ICE servers (`callIceServers`) have a TURN server: its relay candidate is then the one waited for. */

@@ -1,0 +1,1 @@
+with "Notify me when a contact comes online" turned off, the receiving side's push worker shows no online notice of its own (only the quiet notice), whatever a contact that has not heard of the switch yet still sends: the app's table says the switch is off.

@@ -20,6 +20,8 @@ export function ChatServicesDialog({ peerPubKey, name, onClose }: { peerPubKey: 
   const backdrop = useBackdropDismiss(onClose);
   const dialogRef = useRef<HTMLDivElement>(null);
   const [refused, setRefused] = useState<{ id: string; problem: Problem } | null>(null);
+  // A grant the engine refused (this contact already has as many apps as it can see): said under the app's switch.
+  const [notGranted, setNotGranted] = useState<{ id: string; problem: Problem } | null>(null);
   useDialogFocus(dialogRef, onClose);
   if (!platform) return null;
   const online = platform.isOnline();
@@ -47,15 +49,21 @@ export function ChatServicesDialog({ peerPubKey, name, onClose }: { peerPubKey: 
               const on = service.sharedWith?.includes(peerPubKey) ?? false;
               const note = !service.enabled ? t("chat.services.paused") : !online ? t("connection.state.offline") : on ? t("chat.services.shared") : t("chat.services.notShared");
               return (
-                <div key={service.id} className="flex items-center gap-3 px-4 py-3" data-testid="chat-service-grant">
-                  <span className={`shrink-0 grid place-items-center w-9 h-9 rounded-lg ${on && service.enabled ? "bg-accent/15 text-accent" : "bg-surface-alt text-text-muted"}`}>{GLOBE}</span>
-                  {/* Name and address in their own direction, each as wide as its words: in Arabic a Latin one keeps its start. */}
-                  <div className="min-w-0 flex-1 flex flex-col items-start">
-                    <p dir="auto" className="max-w-full text-sm text-text-primary truncate">{service.name}</p>
-                    <p dir="auto" className="max-w-full text-[11px] text-text-muted font-mono truncate">{service.target.replace(/^https?:\/\//, "")}</p>
-                    <p className="text-[11px] text-text-secondary">{note}</p>
+                <div key={service.id} className="px-4 py-3 space-y-2" data-testid="chat-service-grant">
+                  <div className="flex items-center gap-3">
+                    <span className={`shrink-0 grid place-items-center w-9 h-9 rounded-lg ${on && service.enabled ? "bg-accent/15 text-accent" : "bg-surface-alt text-text-muted"}`}>{GLOBE}</span>
+                    {/* Name and address in their own direction, each as wide as its words: in Arabic a Latin one keeps its start. */}
+                    <div className="min-w-0 flex-1 flex flex-col items-start">
+                      <p dir="auto" className="max-w-full text-sm text-text-primary truncate">{service.name}</p>
+                      <p dir="auto" className="max-w-full text-[11px] text-text-muted font-mono truncate">{service.target.replace(/^https?:\/\//, "")}</p>
+                      <p className="text-[11px] text-text-secondary">{note}</p>
+                    </div>
+                    <Switch label={t("chat.services.let", { name, service: service.name })} testId="chat-service-toggle" checked={on} onChange={(next) => {
+                      setNotGranted(null);
+                      platform.setServiceShared(service.id, peerPubKey, next).catch((e) => setNotGranted({ id: service.id, problem: problemText(e, t) }));
+                    }} />
                   </div>
-                  <Switch label={t("chat.services.let", { name, service: service.name })} testId="chat-service-toggle" checked={on} onChange={(next) => void platform.setServiceShared(service.id, peerPubKey, next)} />
+                  {notGranted?.id === service.id && <Notice problem={notGranted.problem} testId="chat-service-grant-problem" />}
                 </div>
               );
             })}
@@ -77,12 +85,13 @@ export function ChatServicesDialog({ peerPubKey, name, onClose }: { peerPubKey: 
                     <span className="shrink-0 grid place-items-center w-9 h-9 rounded-lg bg-accent/15 text-accent">{GLOBE}</span>
                     <p className="flex-1 min-w-0 flex"><span dir="auto" className="min-w-0 text-sm text-text-primary truncate">{service.name ?? service.id}</span></p>
                     {platform.features.openServices
-                      ? <button type="button" data-testid="chat-service-open" onClick={() => {
+                      // Named with its app: a screen reader reaching each by Tab heard only "Open", whichever app it opens.
+                      ? <button type="button" data-testid="chat-service-open" aria-label={t("chat.services.openTheirs", { service: service.name ?? service.id })} onClick={() => {
                         setRefused(null);
                         // A refusal (a call on screen on the web, a window Desktop could not open) is said under its app.
                         platform.openService(peerPubKey, service.id).catch((e) => setRefused({ id: service.id, problem: problemText(e, t) }));
                       }}
-                        className="px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-on-accent hover:bg-accent-hover cursor-pointer">{t("chat.services.open")}</button>
+                        className="px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-on-accent hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] cursor-pointer">{t("chat.services.open")}</button>
                       : <span className="text-[11px] text-text-muted text-end">{t("chat.services.openElsewhere")}</span>}
                   </div>
                   {refused?.id === service.id && <Notice problem={refused.problem} testId="chat-service-problem" />}

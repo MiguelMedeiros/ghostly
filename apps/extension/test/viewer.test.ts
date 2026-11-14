@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { VIEWER_URL_PATTERN, parseViewerUrl, viewerUrl } from "../src/shared/viewer";
+import { VIEWER_URL_PATTERN, isViewerOrigin, parseViewerUrl, viewerUrl } from "../src/shared/viewer";
 import { PEER, TAG } from "./extension";
 
 // covers: services.open
@@ -34,5 +34,22 @@ describe("the viewer's virtual origin", () => {
     ["a service id with an underscore", `https://at_las.${PEER}.${TAG}.invalid/`],
   ])("refuses %s", (_, url) => {
     expect(parseViewerUrl(url)).toBeNull();
+  });
+});
+
+describe("a document of a contact's app's origin", () => {
+  it("is one at a viewer address, or at a blob: URL the app made", () => {
+    expect(isViewerOrigin(viewerUrl(PEER, "atlas", TAG, "/x"))).toBe(true);
+    expect(isViewerOrigin(`blob:https://atlas.${PEER}.${TAG}.invalid/0b7e2f4c-5a1d-4e8b-9c3f-2d6a1b0e7f45`)).toBe(true);
+  });
+
+  it.each([
+    ["about:blank", "about:blank"],
+    ["a data: document", "data:text/html,x"],
+    ["a blob: of another origin", "blob:https://example.com/0b7e2f4c-5a1d-4e8b-9c3f-2d6a1b0e7f45"],
+    ["another site", "https://example.com/"],
+    ["not a URL", "::"],
+  ])("is not %s", (_, url) => {
+    expect(isViewerOrigin(url)).toBe(false);
   });
 });
