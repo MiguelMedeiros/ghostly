@@ -91,7 +91,7 @@ async function picture(params: Params): Promise<string | null> {
 function joined(ctx: ApiContext, params: Params, twin?: string): GroupView {
   const group = groupOf(ctx, params, twin);
   if (group.status || !group.invitation) return group;
-  const shown = shellWord(str(params, "group", true));
+  const shown = shellWord(str(params, "group", true), group.id);
   throw new CliError("refused", group.invitation.accepted
     ? `You are not in ${group.name} yet: you accepted its invitation, and its admin has not let you in`
     : `You are not in ${group.name} yet: ghostly group accept ${shown} joins it`);

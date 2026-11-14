@@ -5,6 +5,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import type { EngineState, GroupView, LinkView } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
 import { CallManager, type CallEngine } from "../src/calls/manager";
+import { jsonOut } from "../src/jsonOut";
 import { allowlist } from "../src/listen";
 import { chatViewOf, groupViewOf } from "./support/chatView";
 import { pasted } from "./support/pasted";
@@ -183,9 +184,26 @@ describe("a hint naming a group a shell would expand", () => {
     return pasted(message.slice(message.indexOf(": ghostly ") + 2));
   };
 
-  it.each(["$5 lunch", "a`echo x`b", "it's", "x!y"])("%s: the command offered names the same group", async (name) => {
+  it.each(["$5 lunch", "a`echo x`b", "x!y"])("%s: the command offered names the same group", async (name) => {
     expect(await offered(call(name)("chat.send", { chat: name, text: "hi" }))).toEqual(["ghostly", "group", "send", name, "[text...]"]);
     expect(await offered(call(name)("chat.history", { chat: name }))).toEqual(["ghostly", "group", "history", name]);
     expect(await offered(allowlist([name], [], call(name), async () => null))).toEqual(["ghostly", "listen", "--group", name]);
+  });
+
+  /**
+   * The command line as the terminal shows it: the CLI prints every answer, a refusal too, as JSON, which shows the `\`
+   * of a `'\''` doubled. Pasted, the quote ended there and the rest of the name ran, a name its inviter chose.
+   */
+  const printed = async (refusal: Promise<unknown>) => {
+    const message = await refusal.then(() => "", (error: Error) => error.message);
+    const shown = jsonOut(message).slice(1, -1);
+    expect(shown).toContain(": ghostly ");
+    return pasted(shown.slice(shown.indexOf(": ghostly ") + 2).replace(/ (joins it|\[text\.\.\.\])$/, ""));
+  };
+
+  it.each(["it's", "a'; echo ran; 'b", "a\"b", "a\\b"])("%s: the command printed names the group by its id, pasted as one word", async (name) => {
+    expect(await printed(call(name)("chat.send", { chat: name, text: "hi" }))).toEqual(["ghostly", "group", "send", "g1crew"]);
+    expect(await printed(allowlist([name], [], call(name), async () => null))).toEqual(["ghostly", "listen", "--group", "g1crew"]);
+    expect(await printed(call(name)("chat.history", { chat: name }))).toEqual(["ghostly", "group", "history", "g1crew"]);
   });
 });

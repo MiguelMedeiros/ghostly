@@ -116,7 +116,7 @@ async function otherFlag(lookup: Promise<unknown>, ref: string, flag: "--from" |
     const other = flag === "--from" ? "group" : "chat";
     if (!(error instanceof CliError) || error.code !== "not_found" || typeof error.details?.[other] !== "string") throw error;
     const named = other === "chat" ? error.details.chat as string : ref;
-    const shown = shellWord(named);
+    const shown = shellWord(named, error.details[other] as string);
     throw new CliError("not_found", `${JSON.stringify(ref)} is a ${other}, not a ${flag === "--from" ? "chat" : "group"}: ghostly listen ${flag === "--from" ? "--group" : "--from"} ${shown}`, error.details);
   }
 }
