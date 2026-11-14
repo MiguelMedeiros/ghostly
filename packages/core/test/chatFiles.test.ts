@@ -1224,6 +1224,35 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     expect(w.b.records.get("in:week-001")?.error).toBe("The offer expired");
   });
 
+  it("a file the contact took is not ended by the offer's week: resumed or offered again after it, it goes on", async () => {
+    let now = 1_000;
+    // While true, nothing the receiver says reaches the sender.
+    let mute = false;
+    const w = wire({ drop: (_frame, from) => mute && from === "b" });
+    for (const side of [w.a, w.b]) (side.files as unknown as { host: ChatFilesHost }).host.now = () => now;
+    w.attach();
+    send(w, file("paused-01", 4 * 1024 * 1024));
+    send(w, file("offered-1", 4 * 1024 * 1024));
+    await until(() => (w.a.records.get("out:paused-01")?.confirmed ?? 0) > 0 && (w.a.records.get("out:offered-1")?.confirmed ?? 0) > 0);
+    // One paused here; the other offered again (as after a quiet spell), and the contact went away before answering.
+    w.a.files.pause("out", "paused-01");
+    mute = true;
+    w.a.files.resend("offered-1");
+    w.drop();
+    mute = false;
+    expect(state(w.a, "out", "offered-1")).toBe("offered");
+    // A week and a day later: the paused one is resumed while the contact is still away, then they come back.
+    now += FILE_LIMITS.offerTtlMs + 24 * 60 * 60 * 1000;
+    w.a.files.resume("out", "paused-01");
+    expect(state(w.a, "out", "paused-01")).toBe("queued");
+    w.attach();
+    for (const id of ["paused-01", "offered-1"]) {
+      await until(() => state(w.a, "out", id) === "done" || state(w.a, "out", id) === "failed");
+      expect(w.a.records.get(`out:${id}`)?.error).toBeUndefined();
+      expect(state(w.b, "in", id)).toBe("done");
+    }
+  });
+
   it("an offer that expired unanswered, offered again, is refused: never taken without asking", async () => {
     let now = 1_000;
     const w = wire();
