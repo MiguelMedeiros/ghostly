@@ -11,7 +11,7 @@ import { forgetAppsAvailable } from "../../lib/apps/flag";
 import { forgetInstalledApps } from "../../lib/apps/installed";
 import { setAppOpener } from "../../lib/apps/open";
 import type { AppOpener } from "../../lib/apps/open";
-import { appWithContact, chatApp, chatAppOver, requestOpenInChat, takeOpenRequest, updateChatApp } from "../../lib/apps/running";
+import { appWithContact, chatApp, chatAppOver, requestOpenInChat, takeOpenRequest, updateChatApp, useChatAppCovers } from "../../lib/apps/running";
 import { saveSession } from "../../lib/storage";
 import type { ChatSession } from "../../lib/types";
 import type { InstalledAppView } from "@ghostly/browser/engine/apps";
@@ -313,6 +313,45 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
       expect(app).toBeVisible();
     } finally {
       width.mockRestore();
+    }
+  });
+
+  it("with no room beside the chat, still covers it while the chat is kept loaded off screen: the chat is not drawn again as it goes and comes back", async () => {
+    windowIs(false);
+    // A chat kept loaded off screen (App's `loaded`) is `display: none`: its page measures 0 px until it shows again.
+    let paneWidth = 604;
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) { return this.classList.contains("chat-pane") ? paneWidth : 0; });
+    const observed: ResizeObserverCallback[] = [];
+    vi.stubGlobal("ResizeObserver", class { constructor(callback: ResizeObserverCallback) { observed.push(callback); } observe() {} disconnect() {} });
+    const resized = (to: number) => act(() => { paneWidth = to; for (const callback of observed) callback([], {} as ResizeObserver); });
+    // What the chat's page reads (Chat.tsx hides its column under the app): each change draws the whole chat again.
+    const covers: boolean[] = [];
+    function Page() { covers.push(useChatAppCovers("link-1")); return null; }
+    try {
+      renderApp(<div className="chat-pane">
+        <Page />
+        <div className="chat-column"><ChatAppResume linkId="link-1" /><textarea aria-label="Message" /></div>
+        <ChatAppPanel linkId="link-1" sessionId="s1" contact={{ name: "Ana", named: true }} peerKey="peer" />
+      </div>);
+      act(() => fakeEngine.update({ links: [ana(true)] }));
+      await act(() => open(REF, "link-1"));
+      const app = screen.getByTestId("mini-app");
+      expect(app).toHaveAttribute("data-place", "wide");
+      const drawn = covers.length;
+
+      // Another chat or page opened: this one is hidden, and comes back as it was.
+      resized(0);
+      expect(app).toHaveAttribute("data-place", "wide");
+      resized(604);
+      expect(app).toHaveAttribute("data-place", "wide");
+      expect(covers.slice(drawn)).toEqual([]);
+      // A window made wide enough meanwhile is measured as the chat shows again: the app goes beside it.
+      resized(0);
+      resized(1100);
+      expect(app).toHaveAttribute("data-place", "beside");
+    } finally {
+      width.mockRestore();
+      vi.unstubAllGlobals();
     }
   });
 
