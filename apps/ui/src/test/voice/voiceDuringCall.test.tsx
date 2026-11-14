@@ -141,6 +141,34 @@ describe("a voice recording when a call goes on", () => {
     expect(onSendFile).not.toHaveBeenCalled();
   });
 
+  it("pauses one started during a call whose microphone answers after another call went on", async () => {
+    let answer!: () => void;
+    const microphone = media.getUserMedia.getMockImplementation()!;
+    media.getUserMedia.mockImplementationOnce((constraints) => new Promise((resolve) => { answer = () => resolve(microphone(constraints)); }));
+    act(() => setCallOn(call, () => {}));
+    renderApp(<MessageInput onSend={onSend} onSendFile={onSendFile} />);
+    fireEvent.click(screen.getByTestId("voice-record"));
+    await wait(0);
+    expect(screen.getByTestId("voice-bar")).toHaveAttribute("data-phase", "starting");
+
+    // That call ends and the next one goes on, all while the browser still asks for the microphone.
+    act(() => setCallOn(call, null));
+    await wait(0);
+    act(() => setCallOn(call, () => {}));
+    await wait(0);
+    answer();
+    await wait(20 * 60_000);
+
+    expect(screen.getByTestId("voice-bar")).toHaveAttribute("data-phase", "paused");
+    expect(media.recorders[0].state).toBe("paused");
+    expect(screen.getByTestId("voice-pause")).toBeDisabled();
+    expect(onSendFile).not.toHaveBeenCalled();
+
+    act(() => setCallOn(call, null));
+    await wait(0);
+    expect(screen.getByTestId("voice-pause")).toBeEnabled();
+  });
+
   it("records one started during a call: that one is asked for", async () => {
     act(() => setCallOn(call, () => {}));
     await recordHandsFree();
