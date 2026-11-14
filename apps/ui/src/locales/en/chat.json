@@ -504,6 +504,7 @@
     "tooLarge": "Too large to play here. Download it to watch."
   },
   "voice": {
+    "callPaused": "Voice message paused for the call",
     "cancelled": "Voice message cancelled",
     "cantPlay": "This device can't play {{format}} recordings. Save it to play elsewhere.",
     "couldNotPlay": "Could not play this recording.",
@@ -529,6 +530,7 @@
     "recordHint": "Hold to record, or click for hands-free",
     "recorded": "Recorded {{time}}",
     "recording": "Recording",
+    "resumeAfterCall": "Resume after the call",
     "sent": "Voice message sent",
     "slideCancel": "Slide to cancel",
     "speed": "Playback speed {{speed}}",

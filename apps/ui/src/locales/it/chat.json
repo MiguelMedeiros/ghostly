@@ -505,6 +505,7 @@
     "tooLarge": "Troppo grande per riprodurlo qui. Scaricalo per guardarlo."
   },
   "voice": {
+    "callPaused": "Messaggio vocale in pausa per la chiamata",
     "cancelled": "Messaggio vocale annullato",
     "cantPlay": "Questo dispositivo non riproduce registrazioni {{format}}. Salvala per ascoltarla altrove.",
     "couldNotPlay": "Impossibile riprodurre questa registrazione.",
@@ -530,6 +531,7 @@
     "recordHint": "Tieni premuto per registrare, o clicca per le mani libere",
     "recorded": "Registrato {{time}}",
     "recording": "Registrazione in corso",
+    "resumeAfterCall": "Riprendi dopo la chiamata",
     "sent": "Messaggio vocale inviato",
     "slideCancel": "Scorri per annullare",
     "speed": "Velocità {{speed}}",
