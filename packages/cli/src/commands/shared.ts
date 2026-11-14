@@ -332,6 +332,14 @@ function cardBytes(fields: Record<string, unknown>, flags: string): Record<strin
   return fields;
 }
 
+/**
+ * A card's `--id` given as "" (an unset variable in a script: `--id "$ID"`) is a usage error. Taken as not given, a new
+ * id was made, and a script meant to update its card posted a second one.
+ */
+function cardId(options: Parsed["options"]): void {
+  if (options.id === "") throw new CliError("usage", "--id needs a card id");
+}
+
 /** `--progress`, `--left`: a percent, or a usage error that names the flag. */
 function percent(options: Parsed["options"], flag: string): void {
   const value = options[flag];
@@ -360,6 +368,7 @@ export function taskFields(options: Parsed["options"]): Record<string, unknown> 
   cardText("--step", options.step, STATUS_CARD_LIMITS.line);
   cardText("--branch", options.branch, STATUS_CARD_LIMITS.branch);
   for (const [flag, words] of [["status", TASK_STATUSES], ["pr-state", PR_STATES], ["pr-checks", PR_CHECKS]] as const) oneWord(options, flag, words);
+  cardId(options);
   set("id", options.id);
   set("title", options.title);
   set("status", options.status);
@@ -513,6 +522,7 @@ export function routineFields(options: Parsed["options"]): Record<string, unknow
       : `--cron takes a cron line of 0-9 A-Z a-z * , / ? # - and spaces, not ${JSON.stringify(options.cron)}`);
   }
   oneWord(options, "state", ROUTINE_STATES);
+  cardId(options);
   for (const key of ["id", "name", "schedule", "cron", "state"] as const) if (options[key] !== undefined) fields[key] = options[key];
   const next = cardTime(options.next, "next");
   if (next !== undefined) fields.nextRunAt = next;
@@ -575,6 +585,7 @@ export function usageFields(options: Parsed["options"]): Record<string, unknown>
   if (used !== undefined && limit !== undefined && used > limit) throw new CliError("usage", `--used takes at most --limit (${limit}), not ${used}`);
   for (const [flag, max] of [["label", STATUS_CARD_LIMITS.usageLabel], ["account", STATUS_CARD_LIMITS.usageLabel], ["window", STATUS_CARD_LIMITS.usageWindow]] as const) cardText(`--${flag}`, options[flag], max);
   given("also", options.also, STATUS_CARD_LIMITS.usageWindows);
+  cardId(options);
   for (const key of ["id", "left", "used", "limit", "label", "account", "window"] as const) if (options[key] !== undefined) fields[key] = options[key];
   const resets = cardTime(options.resets, "resets");
   if (resets !== undefined) fields.resetsAt = resets;
