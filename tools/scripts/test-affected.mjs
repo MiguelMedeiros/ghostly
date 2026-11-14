@@ -55,7 +55,8 @@ if (unitGroupText !== null && !unitGroup) {
   console.error(`--unit-group ${unitGroupText}: give <i>/<n>, 1 ≤ i ≤ n (e.g. --unit-group 2/4)`);
   process.exit(2);
 }
-const otherGroup = (u) => unitGroup !== null && unitGroupOf(u.name, unitGroup.count) !== unitGroup.index;
+// One nothing reaches is skipped in every group: "group N runs it" would send the reader to a group that skips it too.
+const otherGroup = (u) => unitGroup !== null && u.mode !== "skip" && unitGroupOf(u.name, unitGroup.count) !== unitGroup.index;
 
 const git = (...args) => {
   const r = spawnSync("git", args, { cwd: ROOT, encoding: "utf8" });
