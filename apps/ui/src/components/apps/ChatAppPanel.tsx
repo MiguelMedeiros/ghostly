@@ -78,8 +78,9 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
   useEffect(() => {
     const pane = root.current?.parentElement;
     if (phone || !pane) { setChatAppNarrow(linkId, false); return; }
-    // 0: not laid out (a chat kept loaded off screen); measured again as it shows.
-    const measure = () => setChatAppNarrow(linkId, pane.clientWidth > 0 && pane.clientWidth < BESIDE_MIN);
+    // 0: not laid out (a chat kept loaded off screen): as it was, measured again as it shows. Cleared there, each time the
+    // person left the chat and came back the whole chat was drawn twice, and laid out once beside the app for nothing.
+    const measure = () => { if (pane.clientWidth > 0) setChatAppNarrow(linkId, pane.clientWidth < BESIDE_MIN); };
     const observer = new ResizeObserver(measure);
     observer.observe(pane);
     measure();
