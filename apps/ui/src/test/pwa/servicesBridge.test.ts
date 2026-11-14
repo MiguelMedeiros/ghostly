@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, VIEWER_GUARD_HASH, VIEWER_GUARD_SCRIPT } from "@ghostly/core";
-import { BRIDGE_OPEN_LINK, BRIDGE_PORT, BRIDGE_REFUSED } from "../../../../web/src/svc/protocol";
+import { BRIDGE_OPEN_LINK, BRIDGE_PORT, BRIDGE_REFUSED, BRIDGE_SHOWN } from "../../../../web/src/svc/protocol";
 
 // covers: services.web-open
 
@@ -97,6 +97,36 @@ describe("the bridge's frame of the contact's app", () => {
     const frame = document.createElement("iframe");
     Object.defineProperty(frame, "contentDocument", { get: () => ({ URL: "about:blank" }) });
     expect(guardedPage(frame)).toBe(false);
+  });
+
+  it("says the app's page is shown once it is parsed, not only at its load, which waits for every picture in it", async () => {
+    // The app's page in the frame, as the bridge reads it (a browser's `Document.prototype` getters, which happy-dom
+    // has not): one that runs no script, parsed, its picture still on its way, so no `load` yet.
+    let state = "loading";
+    const page = document.implementation.createHTMLDocument();
+    const own = ["URL", "contentType", "readyState"].map((name) => [name, Object.getOwnPropertyDescriptor(Document.prototype, name)] as const);
+    for (const [name, value] of [["URL", () => `https://${LABEL}.svc.ghostly.example/`], ["contentType", () => "text/plain"], ["readyState", () => state]] as const) {
+      Object.defineProperty(Document.prototype, name, { get: value, configurable: true });
+    }
+    const framed = vi.spyOn(HTMLIFrameElement.prototype, "contentDocument", "get").mockReturnValue(page);
+    try {
+      await bridgeFrame();
+      const parent = window.parent as unknown as { postMessage: ReturnType<typeof vi.fn> };
+      const shown = () => parent.postMessage.mock.calls.filter(([data]) => (data as { type?: unknown }).type === BRIDGE_SHOWN).length;
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(shown()).toBe(0);
+      state = "interactive";
+      await vi.waitFor(() => expect(shown()).toBe(1));
+      // Said once: the app's page needs only the first.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(shown()).toBe(1);
+    } finally {
+      framed.mockRestore();
+      for (const [name, descriptor] of own) {
+        if (descriptor) Object.defineProperty(Document.prototype, name, descriptor);
+        else delete (Document.prototype as unknown as Record<string, unknown>)[name];
+      }
+    }
   });
 
   it("hands the app's page each link the app opens in a new window, which the view's sandbox would drop with no word", async () => {
