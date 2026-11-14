@@ -129,6 +129,62 @@ describe("the bridge's frame of the contact's app", () => {
     }
   });
 
+  it("hands on the links of each page of the app from when it is shown, not only from its load, which waits for every picture in it", async () => {
+    let state = "interactive";
+    const own = ["URL", "contentType", "readyState"].map((name) => [name, Object.getOwnPropertyDescriptor(Document.prototype, name)] as const);
+    for (const [name, value] of [["URL", () => `https://${LABEL}.svc.ghostly.example/`], ["contentType", () => "text/plain"], ["readyState", () => state]] as const) {
+      Object.defineProperty(Document.prototype, name, { get: value, configurable: true });
+    }
+    // The person taps in the app's page: its activation is this page's too.
+    class FakeActivation { get isActive() { return true; } }
+    vi.stubGlobal("UserActivation", FakeActivation);
+    const activation = new FakeActivation();
+    Object.defineProperty(Navigator.prototype, "userActivation", { get: () => activation, configurable: true });
+    // A page of the app parsed in the frame, its picture still on its way: no `load` yet.
+    const pageIn = () => {
+      const page = document.implementation.createHTMLDocument();
+      return { page, win: Object.assign(new EventTarget(), { open: () => null, document: page }) as unknown as Window };
+    };
+    const first = pageIn();
+    const windowSpy = vi.spyOn(HTMLIFrameElement.prototype, "contentWindow", "get").mockReturnValue(first.win);
+    const documentSpy = vi.spyOn(HTMLIFrameElement.prototype, "contentDocument", "get").mockReturnValue(first.page);
+    const tap = (win: Window) => win.dispatchEvent(Object.defineProperty(new Event("pointerdown"), "isTrusted", { value: true }));
+    try {
+      await bridgeFrame();
+      const parent = window.parent as unknown as { postMessage: ReturnType<typeof vi.fn> };
+      const handed = () => parent.postMessage.mock.calls.filter(([data]) => (data as { type?: unknown }).type === BRIDGE_OPEN_LINK).map(([data]) => (data as { url: string }).url);
+      await vi.waitFor(() => expect(parent.postMessage).toHaveBeenCalledWith({ type: BRIDGE_SHOWN }, APP_ORIGIN));
+      tap(first.win);
+      first.win.open("https://docs.example/first");
+      expect(handed()).toEqual(["https://docs.example/first"]);
+      // The app loads its next page in its frame: it is shown as it parses, its picture on its way too.
+      first.win.dispatchEvent(new Event("pagehide"));
+      state = "loading";
+      const next = pageIn();
+      windowSpy.mockReturnValue(next.win);
+      documentSpy.mockReturnValue(next.page);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      state = "interactive";
+      await vi.waitFor(() => {
+        tap(next.win);
+        next.win.open("https://docs.example/next");
+        expect(handed()).toEqual(["https://docs.example/first", "https://docs.example/next"]);
+      });
+      // Its `load`, once its picture came, changes nothing.
+      document.querySelector("iframe")!.dispatchEvent(new Event("load"));
+      next.win.open("https://docs.example/again");
+      expect(handed()).toEqual(["https://docs.example/first", "https://docs.example/next", "https://docs.example/again"]);
+    } finally {
+      windowSpy.mockRestore();
+      documentSpy.mockRestore();
+      for (const [name, descriptor] of own) {
+        if (descriptor) Object.defineProperty(Document.prototype, name, descriptor);
+        else delete (Document.prototype as unknown as Record<string, unknown>)[name];
+      }
+      delete (Navigator.prototype as { userActivation?: unknown }).userActivation;
+    }
+  });
+
   it("hands the app's page each link the app opens in a new window, which the view's sandbox would drop with no word", async () => {
     vi.stubGlobal("__SERVICES_HOST__", "https://*.svc.ghostly.example");
     vi.stubGlobal("__SERVICES_APP_ORIGIN__", APP_ORIGIN);
