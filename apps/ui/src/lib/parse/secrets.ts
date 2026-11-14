@@ -212,9 +212,11 @@ function hasMnemonic(tokens: string[] | null, seed: SeedWords): boolean {
 /**
  * A seed written as a numbered list: "1. abandon", "Word 2: ability", "3) able", one word to a number and nothing else
  * before the next number or the line's end. Read in the numbers' order, so a header above it ("Recovery phrase"), the
- * word "word" in its labels and a list in two columns ("1. … 13. …") still make one run.
+ * word "word" in its labels and a list in two columns ("1. … 13. …") still make one run. The spaces on each side of a
+ * mark are one run when the mark is not there: two that could split it tried every split, and a draft of a number, a
+ * word and long runs of spaces took the reader minutes.
  */
-const NUMBERED = /(?<![\p{L}\p{N}.,])(?:word\s*)?#?(\d{1,2})\s*[.:)-]?\s*(\p{L}+)(?=[^\S\r\n]*[,;]?[^\S\r\n]*(?:$|\r?\n|(?:word\s*)?#?\d))/gimu;
+const NUMBERED = /(?<![\p{L}\p{N}.,])(?:word\s*)?#?(\d{1,2})\s*(?:[.:)-]\s*)?(\p{L}+)(?=[^\S\r\n]*(?:[,;][^\S\r\n]*)?(?:$|\r?\n|(?:word\s*)?#?\d))/gimu;
 
 function numbered(text: string): { numbers: number[]; words: string[] } | null {
   const pairs = [...text.matchAll(NUMBERED)];

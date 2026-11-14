@@ -526,8 +526,15 @@ describe("how long it takes", () => {
     ["cashu-shaped text", `cashuB${"A".repeat(MAX)}`.slice(0, MAX)],
     ["hex with a zero-width space every few digits", "abcdef01\u200b".repeat(MAX / 9)],
     ["seed words with a soft hyphen in each", "zo\u00ado ".repeat(MAX / 5)],
+    ["a numbered word and a line of spaces", `1 a${" ".repeat(MAX - 4)}x`],
   ])("a 16 KiB message of %s is read in well under a frame", (_, text) => {
     expect(time(text)).toBeLessThan(50);
+  });
+
+  it("a numbered word between two runs of spaces is read in well under a frame", () => {
+    // Each run made the numbered-list reading try every split of it: 1.6 KB took a second, 16 KiB minutes.
+    expect(time(`1${" ".repeat(800)}a${" ".repeat(800)}x`)).toBeLessThan(50);
+    expect(time(`1${" ".repeat(MAX / 2 - 2)}a${" ".repeat(MAX / 2 - 2)}x`)).toBeLessThan(50);
   });
 
   it("folds a text once for the other languages' lists, not once per list", () => {
