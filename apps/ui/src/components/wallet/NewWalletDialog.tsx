@@ -107,6 +107,20 @@ export function NewWalletDialog({ wallet, offers, setupFailed = [], initialNetwo
   const close = () => { if (phase?.state === "done" && phase.made) finish(phase.made); else if (!busy) onClose(); };
   useDialogFocus(dialog, close, () => !finished.current);
   const backdrop = useBackdropDismiss(close);
+  // A kind's button gives way to its form, and Back to the kinds: the focus on the button gone would fall to the page.
+  // It goes to the form's first field (the invite and the API key take it themselves), or back to the kind just left.
+  const shown = useRef<WalletType | null>(null);
+  useEffect(() => {
+    const left = shown.current;
+    shown.current = chosen;
+    const root = dialog.current;
+    if (!root || root.contains(document.activeElement)) return;
+    const step = "[data-testid=new-wallet-step]";
+    const target = chosen
+      ? root.querySelector<HTMLElement>(`${step} input:not([type=hidden]), ${step} select, ${step} textarea, ${step} [role=combobox]`) ?? root.querySelector<HTMLElement>("[data-testid=new-wallet-back]")
+      : left && root.querySelector<HTMLElement>(`[data-testid=new-wallet-type-${left}]`);
+    target?.focus();
+  }, [chosen]);
   const offer = (type: WalletType) => offers.find((o) => o.type === type && o.network === network);
   const setupFailure = (type: WalletType) => setupFailed.find((f) => f.type === type && f.network === network)?.reason;
 
@@ -180,19 +194,19 @@ export function NewWalletDialog({ wallet, offers, setupFailed = [], initialNetwo
             {chosenOffer.needs === "invite" && (
               <form className="space-y-2" autoComplete="off" onSubmit={(e) => { e.preventDefault(); void create("fedimint", { invite }); }}>
                 <label className="block text-xs text-text-secondary">{t("wallet.new.invite")}
-                  <input data-testid="new-wallet-invite" className={`${input} mt-1 font-mono text-xs`} value={invite} placeholder="fed11…" {...exactText} autoFocus disabled={busy} onChange={(e) => setInvite(e.target.value)} />
+                  <input data-testid="new-wallet-invite" className={`${input} mt-1 font-mono text-xs`} value={invite} placeholder="fed11…" {...exactText} autoFocus readOnly={busy} onChange={(e) => setInvite(e.target.value)} />
                 </label>
                 <p className="text-[11px] text-text-muted">{t("wallet.new.inviteHint")}</p>
-                <Button type="submit" variant="primary" className="w-full" disabled={busy || !invite.trim()} data-testid="new-wallet-create">{busy ? t("wallet.new.busy.joining") : t("wallet.new.joinAndCreate")}</Button>
+                <Button type="submit" variant="primary" className="w-full" disabled={!invite.trim()} loading={busy} data-testid="new-wallet-create">{busy ? t("wallet.new.busy.joining") : t("wallet.new.joinAndCreate")}</Button>
               </form>
             )}
             {chosenOffer.needs === "apiKey" && (
               <form className="space-y-2" autoComplete="off" onSubmit={(e) => { e.preventDefault(); void create(chosen, { apiKey }); }}>
                 <label className="block text-xs text-text-secondary">{t("wallet.source.breez.apiKey")}
-                  <input data-testid="new-wallet-api-key" className={`${input} mt-1 font-mono text-xs`} type="password" autoComplete="new-password" value={apiKey} spellCheck={false} autoFocus disabled={busy} onChange={(e) => setApiKey(e.target.value)} />
+                  <input data-testid="new-wallet-api-key" className={`${input} mt-1 font-mono text-xs`} type="password" autoComplete="new-password" value={apiKey} spellCheck={false} autoFocus readOnly={busy} onChange={(e) => setApiKey(e.target.value)} />
                 </label>
                 <p className="text-[11px] text-text-muted">{t("wallet.source.breez.mainnetNeedsKey")}</p>
-                <Button type="submit" variant="primary" className="w-full" disabled={busy || !apiKey.trim()} data-testid="new-wallet-create">{busy ? t("wallet.new.busy.creating") : t("wallet.new.action.create")}</Button>
+                <Button type="submit" variant="primary" className="w-full" disabled={!apiKey.trim()} loading={busy} data-testid="new-wallet-create">{busy ? t("wallet.new.busy.creating") : t("wallet.new.action.create")}</Button>
               </form>
             )}
             {chosenOffer.needs === "provider" && (
@@ -203,7 +217,8 @@ export function NewWalletDialog({ wallet, offers, setupFailed = [], initialNetwo
                 )}
                 {/* The provider's English line, in its own direction (as in SourcePicker). */}
                 {descriptor?.description && <p className="text-xs text-text-secondary"><bdi>{descriptor.description}</bdi></p>}
-                {descriptor && Form && <Form key={`${network}-${descriptor.id}`} descriptor={descriptor} mode={network} busy={busy} onSubmit={(values) => void create(chosen, { providerId: descriptor.id, values })} />}
+                {/* Saving, not only busy: its button stays focusable while it works and when it fails (as on the card's own source). */}
+                {descriptor && Form && <Form key={`${network}-${descriptor.id}`} descriptor={descriptor} mode={network} busy={busy} saving={busy} onSubmit={(values) => void create(chosen, { providerId: descriptor.id, values })} />}
               </div>
             )}
           </div>
