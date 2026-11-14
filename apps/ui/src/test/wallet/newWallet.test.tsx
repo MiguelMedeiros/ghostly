@@ -362,6 +362,41 @@ describe("New, in the header", () => {
     }
     expect(engine.callsTo("walletCreate")).toEqual([]);
   });
+
+  it("with the keys: a form's button and field stay focusable while the wallet is made and after it fails (busy, not disabled)", async () => {
+    const { user, engine } = renderApp(<Wallet />);
+    engine.update({ wallet: walletView({ mints: [mint(REAL_MINT, 10)], balance: 10, offers: offers() }) });
+    let answer: (() => void) | undefined;
+    engine.on("walletCreate", () => new Promise((_, refuse) => { answer = () => refuse(new Error("Could not create the Testnet Fedimint wallet: unreachable. Nothing was saved; try again.")); }));
+    const settle = async () => { await waitFor(() => expect(answer).toBeDefined()); const a = answer!; answer = undefined; await act(async () => a()); };
+    await user.click(await screen.findByTestId("wallet-add"));
+    await user.click(screen.getByTestId("new-wallet-network-testnet"));
+
+    // The invite: Enter in its field, then its button.
+    await user.click(screen.getByTestId("new-wallet-type-fedimint"));
+    await user.type(screen.getByTestId("new-wallet-invite"), "fed11qqqq{Enter}");
+    expect(screen.getByTestId("new-wallet-invite")).toBeEnabled();
+    expect(screen.getByTestId("new-wallet-invite")).toHaveAttribute("readonly");
+    expect(screen.getByTestId("new-wallet-create")).toBeEnabled();
+    expect(screen.getByTestId("new-wallet-create")).toHaveAttribute("aria-busy", "true");
+    await settle();
+    expect(await screen.findByTestId("new-wallet-error")).toBeInTheDocument();
+    expect(screen.getByTestId("new-wallet-invite")).not.toHaveAttribute("readonly");
+    expect(screen.getByTestId("new-wallet-create")).not.toHaveAttribute("aria-busy");
+
+    // A source's form: its Use button.
+    await user.click(screen.getByTestId("new-wallet-back"));
+    await user.click(screen.getByTestId("new-wallet-type-lightning"));
+    const form = await screen.findByTestId("new-wallet-provider");
+    await choose(user, within(form).getByRole("combobox", { name: "Source" }), "nwc");
+    await user.type(within(form).getByLabelText("Connection URI"), "nostr+walletconnect://wallet");
+    await user.click(within(form).getByTestId("provider-save"));
+    expect(within(form).getByTestId("provider-save")).toBeEnabled();
+    expect(within(form).getByTestId("provider-save")).toHaveAttribute("aria-busy", "true");
+    await settle();
+    expect(await screen.findByTestId("new-wallet-error")).toBeInTheDocument();
+    expect(within(form).getByTestId("provider-save")).not.toHaveAttribute("aria-busy");
+  });
 });
 
 describe("a wallet connected with New", () => {
