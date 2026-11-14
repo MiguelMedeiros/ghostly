@@ -674,6 +674,11 @@ const RULES: readonly Rule[] = [
   { match: /^The account's DID no longer resolves: .+$/, key: "errors.proof.didNoResolve", detail: true },
   exact("The account's DID could not be resolved", "errors.proof.didUnresolved", "errors.proof.laterNext"),
   exact("This DID is deactivated: its owner retired it", "errors.proof.didDeactivated"),
+  // A DID's lookup that found no document it can use (proofs/did.ts, providers/did.ts previewOf): a DID card in a
+  // message and the Add dialog's preview. The document's address stays a value.
+  { match: /^No DID document at (?<url>https:\/\/\S+)$/, key: "errors.proof.didNoDocument" },
+  { match: /^(?<url>https:\/\/\S+\/did\.json) is not JSON$/, key: "errors.proof.didNotJson" },
+  exact("This DID lists no Ed25519, secp256k1 or P-256 key for authentication or assertionMethod, so it cannot sign", "errors.proof.didNoSigningKey"),
   exact("The proof file is not on the homeserver", "errors.proof.pubkyFileGone"),
   exact("The file on the homeserver is not this proof", "errors.proof.pubkyFileOther"),
   exact("This Pubky key has no records on the Pkarr relays", "errors.proof.pubkyNoRecords"),
