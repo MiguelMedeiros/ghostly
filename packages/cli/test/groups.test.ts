@@ -91,12 +91,26 @@ describe("a one-shot group join", () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it("stops at a stage waiting does not change, with no daemon's note", async () => {
-    for (const stage of ["full", "blocked", "replaced"]) {
+  it("stops at a replaced link, with no daemon's note: knocking again does not get in", async () => {
+    const { ctx, set } = oneShot();
+    const answer = callApi(ctx, "group.join", { link: LINK });
+    setTimeout(() => set([knocking("replaced")]), 5);
+    expect(await answer).toEqual({ group: "g9", joined: false, stage: "replaced" });
+  });
+
+  // Found in a bug hunt: at "full" or "blocked" it left at once with no note, as if the join were over, though the
+  // engine goes on knocking (the room comes back) and the knock ends with the one-shot.
+  it("at a group with no room yet, answers at once and says the knock goes on only while the profile runs", async () => {
+    const said = {
+      full: "No room yet: the group is full",
+      blocked: "No room yet: the group waits for every member's app to take more than eight members",
+    };
+    for (const stage of ["full", "blocked"] as const) {
       const { ctx, set } = oneShot();
       const answer = callApi(ctx, "group.join", { link: LINK });
       setTimeout(() => set([knocking(stage)]), 5);
-      expect(await answer).toEqual({ group: "g9", joined: false, stage });
+      expect(await answer).toEqual({ group: "g9", joined: false, stage,
+        warning: `${said[stage]}. Your app goes on knocking only while this profile is running, and gets in when there is room: keep it running (ghostly daemon --detach), then ghostly group show g9` });
     }
   });
 
