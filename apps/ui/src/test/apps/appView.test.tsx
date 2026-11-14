@@ -11,7 +11,7 @@ import { forgetAppsAvailable } from "../../lib/apps/flag";
 import { forgetInstalledApps } from "../../lib/apps/installed";
 import { setAppOpener } from "../../lib/apps/open";
 import type { AppOpener } from "../../lib/apps/open";
-import { appWithContact, chatApp, requestOpenInChat, takeOpenRequest, updateChatApp } from "../../lib/apps/running";
+import { appWithContact, chatApp, chatAppOver, requestOpenInChat, takeOpenRequest, updateChatApp } from "../../lib/apps/running";
 import { saveSession } from "../../lib/storage";
 import type { ChatSession } from "../../lib/types";
 import type { InstalledAppView } from "@ghostly/browser/engine/apps";
@@ -289,6 +289,31 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     expect(app).not.toBeVisible();
     expect(started[0]!.stop).not.toHaveBeenCalled();
     expect(screen.getByTestId("mini-app-resume")).toHaveFocus();
+  });
+
+  it("past a phone's width with no room beside the chat (a tablet held upright), covers the chat with Back to it, as a full-screen app", async () => {
+    // The chat's page beside the chat list at 1024 px: 604 px. Beside it, the chat had 244 px, and at 768 px none.
+    windowIs(false);
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) { return this.classList.contains("chat-pane") ? 604 : 0; });
+    try {
+      const { user } = panel();
+      await act(() => open(REF, "link-1"));
+      const app = screen.getByTestId("mini-app");
+      expect(app).toHaveAttribute("data-place", "wide");
+      expect(chatAppOver("link-1")).toBe(true);
+      expect(within(app).queryByTestId("mini-app-wide")).not.toBeInTheDocument();
+      const back = within(app).getByTestId("mini-app-back");
+      expect(back).toHaveFocus();
+
+      // Back: the chat, with the app one tap away and still running.
+      await user.click(back);
+      expect(app).not.toBeVisible();
+      expect(started[0]!.stop).not.toHaveBeenCalled();
+      await user.click(screen.getByTestId("mini-app-resume"));
+      expect(app).toBeVisible();
+    } finally {
+      width.mockRestore();
+    }
   });
 
   it("on a phone held upright, its Back, connection and Close are as big to tap as the chat header's (44 px)", async () => {
