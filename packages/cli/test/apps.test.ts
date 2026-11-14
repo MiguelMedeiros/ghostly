@@ -314,6 +314,30 @@ describe("app publish", () => {
     expect(ok(await ghostly(["app", "publish", dotted, "--key", key]))).toMatchObject({ files: ["index.html"], skipped: [".DS_Store"] });
   }, 60_000);
 
+  it("refuses a file or folder name that is not UTF-8 as a bad path, as any other name no bundle path may be", async (context) => {
+    const { manifest, files } = chess();
+    const key = vectorKey(tmp(), "publisher");
+    const named = (name: Buffer, folder = false) => {
+      const dir = appFolder(manifest, files);
+      const full = Buffer.concat([Buffer.from(`${dir}/`), name]);
+      try {
+        if (folder) { mkdirSync(full); writeFileSync(Buffer.concat([full, Buffer.from("/a.js")]), "x"); } else writeFileSync(full, "x");
+      } catch { return null; } // a file system that holds UTF-8 names only (macOS)
+      return dir;
+    };
+    const spaced = named(Buffer.from("my file.js"));
+    const bytes = named(Buffer.from([0xff, 0xfe, 0x2e, 0x6a, 0x73]));
+    const folder = named(Buffer.from([0x6c, 0x69, 0x62, 0xff]), true);
+    if (!spaced || !bytes || !folder) return context.skip();
+    expect((error(await ghostly(["app", "publish", spaced, "--key", key]), "refused", 1) as { details?: { reason?: string } }).details?.reason).toBe("bad-path");
+    for (const [dir, detail] of [[bytes, "��.js"], [folder, "lib�"]] as const) {
+      const refusal = error(await ghostly(["app", "publish", dir, "--key", key]), "refused", 1) as { message: string; details?: { reason?: string; detail?: string } };
+      expect(refusal.details).toEqual({ reason: "bad-path", detail });
+      expect(refusal.message).toContain("not UTF-8");
+      expect(existsSync(join(dir, "app.ghostlyapp"))).toBe(false);
+    }
+  }, 60_000);
+
   it("refuses a path option given as \"\" (an unset variable) as naming no file, never the current folder", async () => {
     const { manifest, files } = chess();
     const dir = appFolder(manifest, files);

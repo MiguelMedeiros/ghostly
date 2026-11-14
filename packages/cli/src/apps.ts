@@ -348,11 +348,14 @@ function collectFiles(dir: string, leaveOut: Set<string>): { files: { path: stri
   const skipped: string[] = [];
   let bytes = 0;
   const walk = (folder: string) => {
-    for (const name of readdirSync(folder).sort()) {
+    // Read as bytes: a name that is not UTF-8 comes back from a string read with U+FFFD in it, a path no file has.
+    const names = readdirSync(folder, { encoding: "buffer" }).map((raw) => ({ raw, name: raw.toString("utf8") }));
+    for (const { raw, name } of names.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
       const full = join(folder, name);
       const path = relative(dir, full).split(sep).join("/");
       if (leaveOut.has(full)) continue;
       if (name.startsWith(".")) { skipped.push(path); continue; }
+      if (!Buffer.from(name, "utf8").equals(raw)) throw refused(`${dir} holds a name that is not UTF-8, which no bundle path may be: rename it`, { reason: "bad-path", detail: path });
       const info = lstatSync(full);
       if (info.isSymbolicLink()) throw new CliError("bad_request", `${path} is a link: a bundle holds the folder's own files (copy it in, or remove it)`);
       if (info.isDirectory()) { walk(full); continue; }
