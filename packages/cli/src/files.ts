@@ -31,11 +31,14 @@ const TYPES: Record<string, string> = {
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp",
   ".pdf": "application/pdf", ".txt": "text/plain", ".md": "text/markdown", ".json": "application/json", ".csv": "text/csv",
   ".zip": "application/zip", ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".ogg": "audio/ogg", ".opus": "audio/ogg", ".wav": "audio/wav",
+  ".aac": "audio/aac", ".flac": "audio/flac", ".oga": "audio/ogg", ".weba": "audio/webm",
   ".webm": "audio/webm", ".mp4": "video/mp4", ".mov": "video/quicktime",
 };
 
-export function mimeOf(path: string, given?: string): string {
-  return sanitizeMime(given ?? TYPES[extname(path).toLowerCase()] ?? "application/octet-stream");
+/** A voice note in an .mp4 is its sound in an MP4 box, as an .m4a: sent as audio/mp4, not as a video. */
+export function mimeOf(path: string, given?: string, voice = false): string {
+  const known = TYPES[extname(path).toLowerCase()];
+  return sanitizeMime(given ?? (voice && known === "video/mp4" ? "audio/mp4" : known) ?? "application/octet-stream");
 }
 
 /**
@@ -134,7 +137,7 @@ async function voiceOf(params: Params, path: string, mime: string, size: number)
   if (params.voice === undefined) return {};
   const name = basename(path);
   if (!size) throw new CliError("bad_request", `${name} is empty: a voice note is audio`);
-  if (!PLAYABLE_AUDIO.test(baseMime(mime))) throw new CliError("bad_request", `${name} is ${mime}, not audio (webm, ogg, mp4, mpeg, aac, m4a or wav)`);
+  if (!PLAYABLE_AUDIO.test(baseMime(mime))) throw new CliError("bad_request", `${name} is ${mime}, not audio (webm, ogg, opus, mp4, m4a, mpeg, aac, wav or flac)`);
   // Without a length or a waveform, both are measured from the sound, as the apps measure their recordings.
   const given = params.voice === true ? undefined : num(params, "voice", 0, { min: 1 });
   let duration = given;
@@ -201,7 +204,7 @@ async function whileUnchanged<T>(path: string, read: () => Promise<T>): Promise<
 async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, path: string, name: string, picked: number) {
   if (picked > GROUP_FILE_LIMITS.maxBytes) throw new CliError("refused", `Too large for a group (at most ${GROUP_FILE_LIMITS.maxBytes} bytes)`);
   if (!picked) throw new CliError("refused", "An empty file cannot go to a group");
-  const mime = mimeOf(path, str(params, "mime"));
+  const mime = mimeOf(path, str(params, "mime"), params.voice !== undefined);
   const replyTo = str(params, "reply");
   if (replyTo) {
     if (!await findMessage(ctx, `group:${group.id}`, (m) => m.id === replyTo || replyRef(m) === replyTo)) throw noMessage(replyTo, { group: true, ref: str(params, "chat", true) }, { tail: ", or it cannot be replied to" });
@@ -349,7 +352,7 @@ export const FILE_METHODS: Record<string, Method> = {
     // as files/3 on the next one (the engine's `sendWaitingFile`), as the app's composer sends it.
     if (link.dataLink === "open" && !link.capabilities?.largeFiles && info.size > LIMITS.maxFileBytes) throw new CliError("refused", `Too large for the contact's app (at most ${LIMITS.maxFileBytes} bytes)`);
     if (typeof link.peerFileRoom === "number" && info.size > link.peerFileRoom) throw new CliError("refused", `Not enough space on the contact's device (${link.peerFileRoom} bytes free)`);
-    const mime = mimeOf(path, str(params, "mime"));
+    const mime = mimeOf(path, str(params, "mime"), params.voice !== undefined);
     // A reply names a message of this chat, as `send --reply` does: checked before anything is stored.
     const replyTo = str(params, "reply");
     if (replyTo) {
