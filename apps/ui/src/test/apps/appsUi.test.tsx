@@ -1240,6 +1240,24 @@ describe("with the apps flag on", () => {
     expect(screen.queryByTestId("app-details")).not.toBeInTheDocument();
   });
 
+  it("an app uninstalled in another tab while its question of which chat is open here closes that question, and the focus goes to Add", async () => {
+    let apps = [installed()];
+    fakeEngine.on("appList", () => apps).on("appStoreList", () => []).on("appCheckUpdates", () => []);
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    await user.click(await screen.findByTestId("installed-app-open"));
+    expect(await screen.findByTestId("app-chat-picker")).toBeInTheDocument();
+    apps = [];
+    act(() => fakeEngine.emit({ kind: "apps-checked" }));
+    await waitFor(() => expect(screen.queryByTestId("installed-app")).not.toBeInTheDocument());
+    // A chat picked now would go there to open an app no longer installed: the question goes with its row.
+    expect(screen.queryByTestId("app-chat-picker")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("apps-add")).toHaveFocus());
+    apps = [installed()];
+    act(() => fakeEngine.emit({ kind: "apps-checked" }));
+    expect(await screen.findByTestId("installed-app")).toBeInTheDocument();
+    expect(screen.queryByTestId("app-chat-picker")).not.toBeInTheDocument();
+  });
+
   it("a store's Remove asks first, names the installed apps it lists, and Cancel gives the focus back to Remove", async () => {
     let stores = [{ key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json", preloaded: false,
       name: "Hunt", kind: "curated" as const, sequence: 1, expires: 2_000_000_000, expired: false, fetchedAt: 1,
