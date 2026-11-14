@@ -240,9 +240,27 @@ export function profileExists(home: string, name: string): boolean {
   return existsSync(profileDir(home, name));
 }
 
+/** While a restore writes it, the profile's folder is not a profile: no profile name starts with a dot (`listProfiles`). */
+export const RESTORING = /^\.restoring-(.+)-(\d+)$/;
+
+/**
+ * Removes what a restore left once the process that made it is gone (killed before its own cleanup ran): the profile
+ * in the clear, its whole store and files, in a folder `profile list` never shows. A live process's restore stays.
+ */
+export function removeStoppedRestores(root: string): void {
+  for (const entry of existsSync(root) ? readdirSync(root) : []) {
+    const pid = Number(RESTORING.exec(entry)?.[2]);
+    if (!pid) continue;
+    let alive = pid === process.pid;
+    if (!alive) try { process.kill(pid, 0); alive = true; } catch (error) { alive = (error as NodeJS.ErrnoException).code === "EPERM"; }
+    if (!alive) rmSync(join(root, entry), { recursive: true, force: true });
+  }
+}
+
 export function listProfiles(home: string): string[] {
   const root = join(home, "profiles");
   if (!existsSync(root)) return [];
+  removeStoppedRestores(root);
   return readdirSync(root).filter((name) => NAME.test(name) && statSync(join(root, name)).isDirectory()).sort();
 }
 
