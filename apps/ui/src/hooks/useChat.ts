@@ -36,6 +36,8 @@ const MAX_DHT_TEXT_BYTES = 500;
 export function useChat(params: ChatParams | null) {
   const t = useT();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  /** The chat whose stored messages `messages` holds: until then it holds none of them, or another chat's. */
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [lastSync, setLastSync] = useState<number | null>(null);
   const [isSending, setIsSending] = useState(false);
@@ -100,6 +102,7 @@ export function useChat(params: ChatParams | null) {
       const existing = loadSession(sessionId);
       if (existing) {
         setMessages(existing.messages);
+        setLoadedFor(sessionId);
         const maxPeerTs = existing.messages.reduce(
           (max, m) =>
             m.sender === "peer" ? Math.max(max, m.timestamp) : max,
@@ -129,6 +132,7 @@ export function useChat(params: ChatParams | null) {
           createdAt: now,
         });
         setMessages([]);
+        setLoadedFor(sessionId);
         lastSeenTimestampRef.current = 0;
         sentBufferRef.current = [];
         myAckRef.current = 0;
@@ -619,6 +623,8 @@ export function useChat(params: ChatParams | null) {
 
   return {
     messages,
+    /** `messages` are this chat's stored ones: what they are now is its history, what comes after is news. */
+    loaded: !!params && loadedFor === params.sessionId,
     status,
     lastSync,
     isSending,
