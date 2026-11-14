@@ -106,6 +106,8 @@
   padding-inline: 6px;
   background: var(--color-panel-header);
   animation: fade-in 120ms ease-out;
+  /* Its width is its chat's, not the window's: the Discard question below asks it how much room it has. */
+  container: voice-bar / inline-size;
 }
 @media (max-width: 767px) { .voice-bar { inset-inline-end: 56px; } }
 /* A phone held in one hand: the timer and "slide to cancel" are all that fit, as in WhatsApp. */
@@ -247,16 +249,17 @@
 .voice-text-button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
 .voice-text-danger { color: var(--color-danger); }
 /*
- * A phone: beside Keep and Discard the question had a word or two of the bar ("¿Descartar …" at 375 px). It stands over
- * the bar, as the hint does, wrapping if it must, and the two buttons share the bar.
+ * A narrow bar: beside Keep and Discard the question had a word or two of it ("¿Descartar …" on a 375 px phone, "¿De…"
+ * on one on its side, where the window is wide but the chat beside the list is not). It stands over the bar, as the
+ * hint does, wrapping inside the bar's width if it must, and the two buttons share the bar.
  */
-@media (max-width: 479px) {
+@container voice-bar (max-width: 420px) {
   .voice-confirm-text {
     position: absolute;
     bottom: calc(100% + 8px);
     inset-inline-start: 0;
     width: max-content;
-    max-width: calc(100vw - 16px);
+    max-width: 100cqw;
     padding: 6px 12px;
     border-radius: 8px;
     background: var(--color-surface);
