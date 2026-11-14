@@ -70,7 +70,7 @@ test("the account bar switches profiles in one tap, each one reopening where it 
   }).observe(document, { childList: true, subtree: true }));
   await item(page, "Personal").click();
   await profileIs(page, "Personal");
-  expect(await page.evaluate(() => sessionStorage.getItem("e2e-splash")), "the restart showed Personal coming up").toBe("POpening Personal…");
+  expect(await page.evaluate(() => sessionStorage.getItem("e2e-splash")), "the restart showed Personal coming up").toBe("POpening \u2068Personal\u2069…");
   await expect(page.getByTestId("profile-switch-splash")).toHaveCount(0, { timeout: 15_000 });
   await expect(page.getByTestId("profile-name")).toHaveValue("Personal");
   await expect(page).toHaveURL(/#\/profile$/);
