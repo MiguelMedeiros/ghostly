@@ -87,6 +87,32 @@ export class QuoteSweeps {
   }
 }
 
+/**
+ * The quotes of messages purged here (the CLI's `message delete --purge`), which go before the purge answers, so with no
+ * pace: a purge that comes while the chat is read for others waits for that read to end, then those that came meanwhile
+ * share the next. N purges of one chat at once cost about two reads of it, not N.
+ */
+export class QuotePurges {
+  private readonly chats = new Map<string, { busy: Promise<void>; next?: { due: Map<string, string | undefined>; done: Promise<void> } }>();
+
+  constructor(private readonly sweep: (chat: string, removed: RemovedQuotes) => Promise<void>) {}
+
+  /** Resolves once a read that began after this call took the quotes of `id` out (rejects if that read failed). */
+  purge(chat: string, id: string, ref: string | undefined): Promise<void> {
+    const state = this.chats.get(chat);
+    if (state?.next) { state.next.due.set(id, ref); return state.next.done; }
+    const due = new Map([[id, ref]]);
+    const done = (state?.busy ?? Promise.resolve()).then(() => {
+      const current = this.chats.get(chat)!;
+      if (current.next?.due === due) current.next = undefined;
+      return this.sweep(chat, due);
+    });
+    const busy = done.catch(() => {}).finally(() => { if (this.chats.get(chat)?.busy === busy && !this.chats.get(chat)!.next) this.chats.delete(chat); });
+    if (state) { state.next = { due, done }; state.busy = busy; } else this.chats.set(chat, { busy, next: { due, done } });
+    return done;
+  }
+}
+
 /** The row a removal reads as to the edit queues: mine, its fallback text, its edit pending until said. */
 export function removalRow(linkId: string, removal: Removal): StoredMessage {
   return {
