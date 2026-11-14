@@ -167,6 +167,11 @@ export interface GroupsHost {
    * given). `groupId`: only that group's view changed (a member typing), and the others' are kept; none, all of them.
    */
   emit(delayMs?: number, groupId?: string): void;
+  /**
+   * A group file's transfer view changed (its progress, 4 a second while it moves), and nothing a chat or a group shows:
+   * the next state keeps every chat's and group's view. Absent: `emit(delayMs)`.
+   */
+  transfersChanged?(delayMs?: number): void;
   /** My name, sealed with my messages in every group: past 16 members, most members hold no edge with me to hear it there. */
   myNick?(): string | undefined;
   /** An application frame a member of a community sent the group (a note about a payment, a request to everyone). */
@@ -849,7 +854,8 @@ export class Groups {
         membership: groupId => this.fileMembership(groupId),
         out: groupId => this.fileOut(groupId),
         sendApp: (groupId, frame) => this.communities.sendApp(groupId, frame),
-        changed: delayMs => host.emit(delayMs),
+        // The desk writes only `transfers`: no chat's or group's view to build again.
+        changed: delayMs => host.transfersChanged ? host.transfersChanged(delayMs) : host.emit(delayMs),
         now: () => this.now(),
       });
       this.communities.files = this.files;
