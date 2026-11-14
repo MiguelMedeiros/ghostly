@@ -603,6 +603,12 @@ function refusePrivateLink(url: unknown): void {
 }
 
 const versionOf = (manifest: AppManifest, digest: string): AppVersion => ({ ref: appRef(manifest.publisher, manifest.name), sequence: manifest.sequence, digest });
+/**
+ * Whether a bundle is the one an installed record names: its signed manifest's reference and publisher, and no grant
+ * beyond what that manifest asks. A record is written as a restored profile holds it; only its digest was checked.
+ */
+const bundleFits = (app: InstalledApp, manifest: AppManifest): boolean =>
+  versionOf(manifest, app.digest).ref === app.ref && manifest.publisher === app.publisher && app.permissions.every((p) => manifest.permissions.includes(p));
 const byteLength = (text: string) => utf8Encode(text).length;
 
 /** The app with these revocations merged into the ones it holds, each kept once. */
@@ -1313,7 +1319,13 @@ export class Apps {
   }
 
   /** The installed bundle read back and checked again before it runs (WISP 1200 § Signatures: "again before it runs one"). */
-  private verifiedBundle(app: InstalledApp, running: boolean): Promise<AppBundle> {
+  private async verifiedBundle(app: InstalledApp, running: boolean): Promise<AppBundle> {
+    const bundle = await this.bundleRead(app, running);
+    if (!bundleFits(app, bundle.manifest)) fail("damaged", "This app's stored files do not match what was installed");
+    return bundle;
+  }
+
+  private bundleRead(app: InstalledApp, running: boolean): Promise<AppBundle> {
     if (running) this.runUsed.set(app.digest, this.now());
     const kept = this.verified.get(app.digest);
     // Used last, dropped last: a running app's `file` reads keep its bundle, and drop the ones no app has used for a while.
@@ -2376,6 +2388,7 @@ export class Apps {
       // Another bundle whole than its peek showed (a host answering the range and the whole read apart): not read whole
       // again for that peek for an hour, as at the update check.
       if (fetched.bundle.digest !== app.digest) { this.refuseRead(url, app.digest); continue; }
+      if (!bundleFits(app, fetched.bundle.manifest)) continue;
       return this.filesBack(app, fetched.bytes, stores);
     }
     return { status: "needs-files" };
