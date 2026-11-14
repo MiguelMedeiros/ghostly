@@ -872,6 +872,16 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // note hangs where the window does. Camera pressed in it, refused for good, said nothing anyone could see.
   const callWindowUp = callState === "offering" || callState === "answering" || callState === "connecting" || callState === "connected";
   const mediaNoticeInLayer = !visible || callWindowUp;
+  // The system paused our microphone in a call (an iPhone's Home Screen app while the screen is locked): the contact
+  // hears nothing until Ghostly is back on screen, and the call is still on. Only ever said while the call's window is up.
+  const micPausedNotice = webrtc.micPaused && !webrtc.mediaProblem && (
+    <div role="status" data-testid="call-mic-paused"
+      className="top-notice rounded-lg border border-border bg-panel-header px-4 py-2 text-center text-sm text-text-primary shadow-xl">
+      {t("calls.micPaused")}
+    </div>
+  );
+  // Both go in the call's window, which a screen reader reads alone while it fills the screen: beside it, they went unsaid.
+  const callNotices = !locked && (mediaNotice || micPausedNotice) ? <>{mediaNotice}{micPausedNotice}</> : null;
   /** The ⋮ menu's rarer rows: in it on a wide screen, in its More… sheet on a phone. `close` closes the menu they are in. */
   const rarerRows = (close: () => void) => <>
     <FolderMenuItem chat={sessionId} onChoose={() => { close(); setShowFolders(true); }} />
@@ -910,14 +920,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         </div>
       )}
       {!mediaNoticeInLayer && mediaNotice}
-      {/* The system paused our microphone in a call (an iPhone's Home Screen app while the screen is locked): the
-          contact hears nothing until Ghostly is back on screen, and the call is still on. */}
-      {webrtc.micPaused && !webrtc.mediaProblem && (
-        <div role="status" data-testid="call-mic-paused"
-          className="top-notice rounded-lg border border-border bg-panel-header px-4 py-2 text-center text-sm text-text-primary shadow-xl">
-          {t("calls.micPaused")}
-        </div>
-      )}
       {/* Chat Header. On a phone held upright (`phoneHeader`) it is the back button, the avatar, the name with the room
           it needs, the connection, a voice call and ⋮, and one quiet line under the name; the video call, a bot's Tasks
           and the contact's identities are in the ⋮ menu. Wider (a phone on its side, a narrow window), every button is
@@ -1343,7 +1345,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       )}
 
       {!visible && wakeNotice && !locked && createPortal(wakeNotice, callLayer ?? document.body)}
-      {mediaNoticeInLayer && mediaNotice && !locked && createPortal(mediaNotice, callLayer ?? document.body)}
+      {!callWindowUp && mediaNoticeInLayer && mediaNotice && !locked && createPortal(mediaNotice, callLayer ?? document.body)}
 
       {/* How the call ended, said once (`callEndSaid`): where the call's window hangs, since this chat may be off screen. */}
       {!locked && createPortal(<p role="status" className="sr-only" data-testid="call-end-spoken">{callEndSaid}</p>, callLayer ?? document.body)}
@@ -1377,6 +1379,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           onToggleVideo={webrtc.toggleVideo}
           onToggleScreenShare={webrtc.toggleScreenShare}
           devices={callDevices}
+          notices={callNotices}
         />
       )}
 
