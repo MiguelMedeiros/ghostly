@@ -146,6 +146,13 @@ describe("links", () => {
     ["a family and a flag", "https://x.example/a👨‍👩‍👧 https://x.example/b🇧🇷", "[link:https://x.example/a]👨‍👩‍👧 [link:https://x.example/b]🇧🇷"],
     ["a bracket, then an emoji", "(https://x.example/a)😂", "([link:https://x.example/a])😂"],
     ["a zero-width space", "https://x.example/a\u200b", "[link:https://x.example/a]\u200b"],
+    // Right-to-left text puts direction marks around a link: the link opened "\u2026/a%E2%80%8F", and took the emoji back.
+    ["a right-to-left mark", "https://x.example/a\u200f", "[link:https://x.example/a]\u200f"],
+    ["an emoji, then a right-to-left mark", "https://x.example/a\ud83d\udd25\u200f", "[link:https://x.example/a]\ud83d\udd25\u200f"],
+    ["an isolate around it", "\u2067https://x.example/a\u2069", "\u2067[link:https://x.example/a]\u2069"],
+    ["an Arabic letter mark", "https://x.example/a\u061c", "[link:https://x.example/a]\u061c"],
+    ["a soft hyphen", "https://x.example/a\u00ad", "[link:https://x.example/a]\u00ad"],
+    ["a keycap", "https://x.example/a1\ufe0f\u20e3 https://x.example/b#\u20e3", "[link:https://x.example/a]1\ufe0f\u20e3 [link:https://x.example/b]#\u20e3"],
     ["an emoji inside the path (kept)", "https://x.example/🔥/a", "[link:https://x.example/🔥/a]"],
   ])("ends a link before an emoji or invisible character typed after it: %s", (_name, text, shown) => expect(inline(text)).toBe(shown));
 
