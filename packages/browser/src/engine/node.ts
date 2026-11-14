@@ -204,7 +204,7 @@ import { paymentAlias } from "../shared/paymentIds";
 import { buttonPress, buttonsState, messageButtons } from "../shared/buttons";
 import { canEdit, canRemove, isJoinNotice, takesPeerEdit, withEdit } from "../shared/edits";
 import { CardEditPacer, EditBuffer, EditQueue } from "./edits";
-import { QuoteSweeps, patchRemoval, removalNumber, removalRow, withRemoval, type Removal, type RemovedQuotes } from "./removals";
+import { QuotePurges, QuoteSweeps, patchRemoval, removalNumber, removalRow, withRemoval, type Removal, type RemovedQuotes } from "./removals";
 import { ENGLISH_REMOVAL, removalRisksFunds, walletRemoval } from "../shared/walletRemoval";
 import { mintAwaiting, sentUntaken, walletAwaiting } from "./walletAwaiting";
 import type { WalletRemoval } from "../shared/walletRemoval";
@@ -1092,6 +1092,11 @@ export class GhostlyNode implements EngineImplementation {
   private readonly editBuffer = new EditBuffer();
   /** Removals of messages, whose quotes are looked for at most once a while per chat (`forgetQuotes`). */
   private readonly quoteSweeps = new QuoteSweeps(async (chat, removed) => {
+    const ids = await this.forgetQuotes(chat, removed);
+    if (ids.length) await this.messagesChanged(chat, ids);
+  });
+  /** Purges of messages, whose quotes go before each answers: those that come together share a read (`forgetQuotesOf`). */
+  private readonly quotePurges = new QuotePurges(async (chat, removed) => {
     const ids = await this.forgetQuotes(chat, removed);
     if (ids.length) await this.messagesChanged(chat, ids);
   });
@@ -5069,10 +5074,10 @@ export class GhostlyNode implements EngineImplementation {
   /**
    * The replies of a chat or a group that quote `message`, gone here, lose its line now, not at the sweep that comes
    * within `QUOTE_SWEEP_MS` (or never, for a delete here): the CLI's `message delete --purge`, before the store folds.
+   * Purges of one chat at once share its reads (`QuotePurges`).
    */
-  async forgetQuotesOf(message: StoredMessage): Promise<void> {
-    const ids = await this.forgetQuotes(message.linkId, new Map([[message.id, replyRef(message)]]));
-    if (ids.length) await this.messagesChanged(message.linkId, ids);
+  forgetQuotesOf(message: StoredMessage): Promise<void> {
+    return this.quotePurges.purge(message.linkId, message.id, replyRef(message));
   }
 
   /** Local id of a file we send: the id on the wire is ours too, but lives in its own key space. */
