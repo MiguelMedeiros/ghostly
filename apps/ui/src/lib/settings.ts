@@ -187,9 +187,7 @@ export function formatBytes(bytes: number, t?: Translate): string {
   return sizeIn(bytes / Math.pow(1024, i), units[i], t, 2);
 }
 
-export const APP_WEBSITE = "https://github.com/MiguelMedeiros/ghostly";
-/** Where every client sends someone who installs a new version by hand. */
-export const RELEASES_URL = `${APP_WEBSITE}/releases/latest`;
+export { APP_WEBSITE, RELEASES_URL } from "./appWebsite";
 export const APP_LICENSE = "MIT";
 
 export function saveSettings(settings: AppSettings): void {

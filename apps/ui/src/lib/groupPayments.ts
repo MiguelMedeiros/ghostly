@@ -35,14 +35,15 @@ export function groupPayTitle(note: GroupPayNote, group: GroupView, t: Translate
 }
 
 /**
- * Where it stands: `data-state` and the words. As in `groupPayTitle`, a line where I am the one who says I paid or the
- * one paid is its own sentence: "you" slotted into another's gives "waiting for you's wallet" or "Tú pagó".
+ * Where it stands: `data-state` and the words. As in `groupPayTitle`, a line where I am the one who says I paid, the one
+ * who paid or the one paid is its own sentence: "you" slotted into another's gives "waiting for you's wallet", "Tú pagó"
+ * or "دفعه أنت".
  */
 export function groupPayStatus(note: GroupPayNote, group: GroupView, t: Translate = english): { state: "open" | "sent" | "paid" | "closed"; text: string } {
   const mine = (key: string) => group.members.some(m => m.me && m.key === key);
   // A request to the group paid through an invoice names nobody: its payee cannot tell who paid (a note an older app
   // kept may still carry a name).
-  if (note.state === "paid") return { state: "paid", text: note.by && note.from === "*" && note.rail !== "lightning" ? t("payments.group.status.paidBy", { name: who(group, note.by, t, false) }) : t("payments.group.status.paid") };
+  if (note.state === "paid") return { state: "paid", text: note.by && note.from === "*" && note.rail !== "lightning" ? mine(note.by) ? t("payments.group.status.paidByMe") : t("payments.group.status.paidBy", { name: who(group, note.by, t, false) }) : t("payments.group.status.paid") };
   if (note.state === "closed") return { state: "closed", text: t(note.kind === "payment" ? "payments.group.status.takenBack" : "payments.group.status.closed") };
   const claims = note.claims ?? [];
   if (note.kind === "request" && claims.length) {

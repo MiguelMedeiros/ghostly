@@ -111,7 +111,9 @@ export function parseArgs(argv: readonly string[], spec: Record<string, OptionSp
         continue;
       }
       let value = inline;
-      if (value === undefined && option.optionalValue && !(i + 1 < argv.length && argv[i + 1] !== "" && Number.isFinite(Number(argv[i + 1])))) {
+      // An empty word after it is its value, refused below: `--voice "$MS"` with MS unset, not a positional ("Too many
+      // arguments", or "Missing <path>" with the path given). Number("") is 0, so it is taken here.
+      if (value === undefined && option.optionalValue && !(i + 1 < argv.length && Number.isFinite(Number(argv[i + 1])))) {
         options[name] = true;
         const next = argv[i + 1];
         if (next && !next.startsWith("-")) lonely.push({ index: positionals.length, word: next, refusal: notANumber(name, option, next) });

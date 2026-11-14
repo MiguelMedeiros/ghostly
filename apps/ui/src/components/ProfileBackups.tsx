@@ -17,6 +17,7 @@ import { Select } from "./ui/Select";
 import { ButtonGroup, Field, FieldGrid, InputGroup, Truncate } from "./layout";
 import { said } from "../lib/notices";
 import { fillNames } from "../lib/fillNodes";
+import { listText } from "../lib/listText";
 import { exactText } from "../lib/exactText";
 
 const EMPTY_S3: S3Config = { endpoint: "", region: "us-east-1", bucket: "", prefix: "ghostly", accessKeyId: "", secretAccessKey: "" };
@@ -262,7 +263,7 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
       )}
       {open === "restore" && sameDevice && (
         // The original is on this device: both would answer contacts as the same person. The person chooses.
-        <Field testId="restore-same-device" label={<span className="font-semibold">{t("profile.backups.sameDevice.title", { names: sameDevice.originals.map((entry) => `“${entry.name}”`).join(", ") })}</span>}
+        <Field testId="restore-same-device" label={<span className="font-semibold">{t("profile.backups.sameDevice.title", { names: listText(sameDevice.originals.map((entry) => `“${entry.name}”`), t) })}</span>}
           hint={t("profile.backups.sameDevice.hint")} info={t("profile.backups.sameDevice.info")}>
           {firstOnly && <Notice>{t("profile.backups.sameDevice.firstProfile")}</Notice>}
           <ButtonGroup>

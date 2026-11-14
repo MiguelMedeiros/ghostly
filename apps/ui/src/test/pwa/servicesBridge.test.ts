@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, VIEWER_GUARD_HASH, VIEWER_GUARD_SCRIPT } from "@ghostly/core";
-import { BRIDGE_OPEN_LINK, BRIDGE_PORT, BRIDGE_REFUSED } from "../../../../web/src/svc/protocol";
+import { BRIDGE_OPEN_LINK, BRIDGE_PORT, BRIDGE_REFUSED, BRIDGE_SHOWN } from "../../../../web/src/svc/protocol";
+import { runBridgeGuard } from "../pwaBridgeGuard";
 
 // covers: services.web-open
 
@@ -27,6 +28,7 @@ async function bridgeFrame(relayOnly?: boolean): Promise<HTMLIFrameElement> {
   Object.defineProperty(navigator, "serviceWorker", { value: workers, configurable: true });
   // The server's clear of the services host's cookies, before the app is framed.
   vi.stubGlobal("fetch", async () => new Response(null, { status: 204 }));
+  runBridgeGuard();
   await import("../../../../web/src/svc/bridge");
   expect(parent.postMessage).toHaveBeenCalled();
   const { port1 } = new MessageChannel();
@@ -99,6 +101,78 @@ describe("the bridge's frame of the contact's app", () => {
     expect(guardedPage(frame)).toBe(false);
   });
 
+  it("says the app's page is shown once it is parsed, not only at its load, which waits for every picture in it", async () => {
+    // The app's page in the frame, as the bridge reads it (a browser's `Document.prototype` getters, which happy-dom
+    // has not): one that runs no script, parsed, its picture still on its way, so no `load` yet.
+    let state = "loading";
+    const page = document.implementation.createHTMLDocument();
+    const own = ["URL", "contentType", "readyState"].map((name) => [name, Object.getOwnPropertyDescriptor(Document.prototype, name)] as const);
+    for (const [name, value] of [["URL", () => `https://${LABEL}.svc.ghostly.example/`], ["contentType", () => "text/plain"], ["readyState", () => state]] as const) {
+      Object.defineProperty(Document.prototype, name, { get: value, configurable: true });
+    }
+    const framed = vi.spyOn(HTMLIFrameElement.prototype, "contentDocument", "get").mockReturnValue(page);
+    try {
+      await bridgeFrame();
+      const parent = window.parent as unknown as { postMessage: ReturnType<typeof vi.fn> };
+      const shown = () => parent.postMessage.mock.calls.filter(([data]) => (data as { type?: unknown }).type === BRIDGE_SHOWN).length;
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(shown()).toBe(0);
+      state = "interactive";
+      await vi.waitFor(() => expect(shown()).toBe(1));
+      // Said once: the app's page needs only the first.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(shown()).toBe(1);
+    } finally {
+      framed.mockRestore();
+      for (const [name, descriptor] of own) {
+        if (descriptor) Object.defineProperty(Document.prototype, name, descriptor);
+        else delete (Document.prototype as unknown as Record<string, unknown>)[name];
+      }
+    }
+  });
+
+  it("hands on the links of the app's page from when it is shown parsed, before its load: the person can tap it then", async () => {
+    let active = false;
+    class FakeActivation { get isActive() { return active; } }
+    vi.stubGlobal("UserActivation", FakeActivation);
+    const activation = new FakeActivation();
+    Object.defineProperty(Navigator.prototype, "userActivation", { get: () => activation, configurable: true });
+    // The app's page parsed, its picture still on its way: shown, no `load` yet.
+    const page = document.implementation.createHTMLDocument();
+    const own = ["URL", "contentType", "readyState"].map((name) => [name, Object.getOwnPropertyDescriptor(Document.prototype, name)] as const);
+    for (const [name, value] of [["URL", () => `https://${LABEL}.svc.ghostly.example/`], ["contentType", () => "text/plain"], ["readyState", () => "interactive"]] as const) {
+      Object.defineProperty(Document.prototype, name, { get: value, configurable: true });
+    }
+    const opened: unknown[] = [];
+    const win = Object.assign(new EventTarget(), { open: (url: unknown) => { opened.push(url); return null; }, document: page }) as unknown as Window;
+    const framed = [vi.spyOn(HTMLIFrameElement.prototype, "contentWindow", "get").mockReturnValue(win), vi.spyOn(HTMLIFrameElement.prototype, "contentDocument", "get").mockReturnValue(page)];
+    try {
+      const frame = await bridgeFrame();
+      const parent = window.parent as unknown as { postMessage: ReturnType<typeof vi.fn> };
+      const sent = (type: string) => parent.postMessage.mock.calls.filter(([data]) => (data as { type?: unknown }).type === type).map(([data]) => data as { url?: string });
+      await vi.waitFor(() => expect(sent(BRIDGE_SHOWN)).toHaveLength(1));
+      // A tap in the shown page, on a link to another site.
+      win.dispatchEvent(Object.defineProperty(new Event("pointerdown"), "isTrusted", { value: true }));
+      active = true;
+      win.open("https://docs.example/early", "help");
+      expect(sent(BRIDGE_OPEN_LINK).map((data) => data.url)).toEqual(["https://docs.example/early"]);
+      // Its `load` later hands them on no second time.
+      frame.dispatchEvent(new Event("load"));
+      win.dispatchEvent(Object.defineProperty(new Event("pointerdown"), "isTrusted", { value: true }));
+      win.open("https://docs.example/later", "help");
+      // (A name no window has: looked up, then handed on, by one wrapper only.)
+      expect(sent(BRIDGE_OPEN_LINK).map((data) => data.url)).toEqual(["https://docs.example/early", "https://docs.example/later"]);
+      expect(opened).toEqual(["https://docs.example/early", "https://docs.example/later"]);
+    } finally {
+      for (const spy of framed) spy.mockRestore();
+      for (const [name, descriptor] of own) {
+        if (descriptor) Object.defineProperty(Document.prototype, name, descriptor);
+        else delete (Document.prototype as unknown as Record<string, unknown>)[name];
+      }
+      delete (Navigator.prototype as { userActivation?: unknown }).userActivation;
+    }
+  });
+
   it("hands the app's page each link the app opens in a new window, which the view's sandbox would drop with no word", async () => {
     vi.stubGlobal("__SERVICES_HOST__", "https://*.svc.ghostly.example");
     vi.stubGlobal("__SERVICES_APP_ORIGIN__", APP_ORIGIN);
@@ -124,6 +198,43 @@ describe("the bridge's frame of the contact's app", () => {
       expect(window.open("https://docs.example/c")).toBeNull();
       window.open("/relative", "_blank");
       expect(asked).toEqual(["https://docs.example/a", "https://docs.example/b", "https://docs.example/c", new URL("/relative", document.baseURI).href]);
+    } finally {
+      window.open = realOpen;
+    }
+  });
+
+  it("hands the app's page a link to a name no window has yet (target=\"_new\"), which a browser opens in a new window too", async () => {
+    vi.stubGlobal("__SERVICES_HOST__", "https://*.svc.ghostly.example");
+    vi.stubGlobal("__SERVICES_APP_ORIGIN__", APP_ORIGIN);
+    const { forwardLinks } = await import("../../../../web/src/svc/bridge");
+    const realOpen = window.open;
+    // As the view's sandbox: a name one of the page's frames has finds that frame, any other new window is refused.
+    const opened: unknown[][] = [];
+    window.open = ((...args: unknown[]) => {
+      opened.push(args);
+      return String(args[1]).toLowerCase() === "results" ? window : null;
+    }) as typeof window.open;
+    const asked: string[] = [];
+    try {
+      forwardLinks(window, (url) => asked.push(url));
+      const link = (attributes: Record<string, string>) => {
+        const a = document.createElement("a");
+        for (const [name, value] of Object.entries(attributes)) a.setAttribute(name, value);
+        a.textContent = "link";
+        document.body.append(a);
+        return a;
+      };
+      link({ href: "https://docs.example/new", target: "_new" }).click();
+      link({ href: "https://docs.example/help", target: "help" }).click();
+      // The page's own frame, and the page itself, keep theirs.
+      link({ href: "/search?q=1", target: "results" }).click();
+      link({ href: "#top", target: "_TOP" }).click();
+      expect(window.open("https://docs.example/popup", "popup", "width=400")).toBeNull();
+      expect(window.open("/search?q=2", "results")).toBe(window);
+      expect(window.open("/again", "_self")).toBeNull();
+      expect(asked).toEqual(["https://docs.example/new", "https://docs.example/help", "https://docs.example/popup"]);
+      // Looking a name up loads nothing in the window it finds.
+      expect(opened.filter((args) => args[0] === "")).toEqual([["", "_new"], ["", "help"], ["", "results"]]);
     } finally {
       window.open = realOpen;
     }

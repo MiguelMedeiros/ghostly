@@ -8,17 +8,18 @@ import { connectDaemon, DaemonClient, endedUnanswered, endedUnsent, isNotTheDaem
 import { childEnv, dropSecretEnv } from "./childEnv";
 import { COMMANDS, idSlot, noMoreThan, numberSlot, positionals, takesText, TEXT_COMMANDS } from "./commands";
 import { here, inRange, INPUT_BYTES, localStat, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
-import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS } from "./engineMethods";
+import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS, hideSecretFields } from "./engineMethods";
 import { asCliError, CliError, type ErrorCode, EXIT, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import type { Host } from "./host";
 import { jsonOut } from "./jsonOut";
 import { ownProfile } from "./privateFolder";
+import { shellWord } from "./shellWord";
 import { waitNotice, waitsFor, type WaitNotice } from "./waitNotice";
 import type { RuntimeOptions } from "./runtime/engine";
 import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, followDaemon, PAUSE_HOLD_MS, readCursor } from "./listen";
 import { format } from "node:util";
-import { completeWithPipedEvidence, credentialFromStdin, identityFields, identitySecretFields, secretsFromStdin, secretValuesWarning, settingValue, textFromStdin } from "./secretInput";
+import { completeWithPipedEvidence, credentialFromStdin, evidenceFromStdin, identityFields, identitySecretFields, secretsFromStdin, secretValuesWarning, settingValue, textFromStdin } from "./secretInput";
 import type { Translator } from "./translate";
 import {
   checkProfileName, checkShownNameOption, createProfile, currentProfile, currentProfileOrNone, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, noProfile, profileExists, profilePaths, selectProfile,
@@ -210,8 +211,12 @@ export function oneChatOnly(method: string, params: Record<string, unknown>): bo
   return newChatOnly(method) || ((chatOnly(method, params) || chatOrGroup(method, params)) && typeof params.chat === "string");
 }
 
-/** What a member says in one group, over that group's own edges: no 1:1 chat carries any of it. */
-const GROUP_EDGES_ONLY: ReadonlySet<string> = new Set(["group.send", "group.edit", "group.react", "group.typing"]);
+/**
+ * What a member says in one group, over that group's own edges: no 1:1 chat carries any of it. The admin's name,
+ * picture, hubs and fresh secret too (the group's metadata or a commit). Not `group.remove` (the one removed hears it
+ * over the chat that invited them) nor `group.admin` (the new admin takes back the invitations still out).
+ */
+const GROUP_EDGES_ONLY: ReadonlySet<string> = new Set(["group.send", "group.edit", "group.react", "group.typing", "group.rename", "group.picture", "group.hub", "group.rotate"]);
 
 /**
  * A command about one group that goes over its edges only (`GROUP_EDGES_ONLY`): a one-shot for it leaves the saved 1:1
@@ -229,16 +234,33 @@ export function oneGroupOnly(method: string): boolean {
  * so its start reads each chat's newest row (its place in `chat list`) and no history. It read every 1:1 chat whole:
  * `profile show` took 0.8 s and 243 MB instead of 0.45 s and 162 MB with 53,800 messages in the profile, and
  * `group list` 0.89 s and 220 MB instead of 0.42 s and 154 MB with 50,000. A group's own reads need its history only,
- * which its start reads whatever this says.
+ * which its start reads whatever this says. The wallet's reads come from its own stores (proofs, wallet history,
+ * payments), none from a chat's history: `wallet list` took 1.3 s and 239 MB instead of 0.48 s and 146 MB with 50,000
+ * messages; `payment list --chat` starts the chat it names. `identity providers` reads nothing of the profile, and
+ * `call auto` and `group auto` with no on|off what it keeps: each took 1.6 s and 211 MB instead of 0.8 s and 152 MB
+ * with 50,000.
  */
 const NO_HISTORY_READS: ReadonlySet<string> = new Set([
   "status", "profile.get", "settings.get", "status.get", "chat.list", "group.list", "group.get", "group.history",
-  "call.list", "service.list", "identity.list", "x401.credential.list", "app.served",
+  "call.list", "service.list", "identity.list", "x401.credential.list", "app.served", "wallet.list", "wallet.history",
+  "payment.list", "identity.providers",
 ]);
 
-/** Whether a one-shot for this call leaves every saved chat unstarted, its history unread (`NO_HISTORY_READS`). */
-export function readsNoHistory(method: string): boolean {
-  return NO_HISTORY_READS.has(method);
+/**
+ * Changes kept outside any chat (this profile's status, which each chat says on its next session; x401 keys and
+ * credentials; a service; a draft; a served app), and `call answer` and `call flush`, which a one-shot refuses whatever
+ * the chats say: a one-shot for one leaves every saved chat unstarted too. Each read every 1:1 chat whole first: with
+ * 30,000 messages in the profile, about 0.95 s and 200 MB instead of 0.45 s and 140 MB.
+ */
+const NO_HISTORY_WRITES: ReadonlySet<string> = new Set([
+  "status.set", "status.clear", "x401.key.new", "x401.credential.add", "x401.credential.remove", "service.add", "identity.cancel",
+  "app.serve", "app.unserve", "call.answer", "call.flush",
+]);
+
+/** Whether a one-shot for this call leaves every saved chat unstarted, its history unread (`NO_HISTORY_READS`, `NO_HISTORY_WRITES`). */
+export function readsNoHistory(method: string, params: Record<string, unknown> = {}): boolean {
+  if (method === "call.auto" || method === "group.auto") return params.on === undefined;
+  return NO_HISTORY_READS.has(method) || NO_HISTORY_WRITES.has(method);
 }
 
 /**
@@ -536,7 +558,12 @@ export async function oneShotJoinWait(s: Pick<Session, "call">, result: Record<s
   const stage = (view.chat as { stage?: unknown } | null)?.stage ?? null;
   const answer = { ...result, paired: view.paired, stage };
   if (view.paired) return { answer };
-  const ref = label?.trim() && !/\s/.test(label.trim()) ? label.trim() : String(result.chat);
+  // The label only when a shell reads it as typed: `O'Brien` waited for a closing quote, `$work` named no chat. And only
+  // when it names this chat alone: a second join with the same `--label` was told a name that names two chats.
+  const typed = label?.trim();
+  const named = !!typed && shellWord(typed) === typed
+    && await s.call("chat.get", { chat: typed }).then((chat) => (chat as { id?: unknown } | null)?.id === result.chat, () => false);
+  const ref = named ? typed : String(result.chat);
   return { answer, note: `Not paired yet: the inviter's app is offline. It pairs when both are online: keep this profile running (ghostly daemon --detach), then ghostly chat wait ${ref} --until paired` };
 }
 
@@ -1468,7 +1495,7 @@ async function engineCommand(argv: string[]): Promise<void> {
     const { hideStateSecrets } = await engineApi();
     result = hideStateSecrets(result as Parameters<typeof hideStateSecrets>[0]);
   }
-  print(result);
+  print(hideSecretFields(method, result, showSecret));
 }
 
 async function settingsCommand(sub: string | undefined, argv: string[]): Promise<void> {
@@ -1609,7 +1636,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
     if (params.evidenceFile) {
       try { params.evidence = readInput(params.evidenceFile as string); } catch (error) { throw localFileError(error, params.evidenceFile as string) ?? error; }
     }
-    else if (params.stdin) params.evidence = await readStdin();
+    else if (params.stdin) params.evidence = await evidenceFromStdin(readStdin, String(params.draft), process.stdin.isTTY === true);
     delete params.evidenceFile; delete params.stdin;
   }
   if (command.method === "x401.credential.add") {
@@ -1642,7 +1669,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
       return joined.answer;
     }
     return result;
-  }, { deferGroups: chatOnly(command.method, params) || newChatOnly(command.method), deferChats: oneChatOnly(command.method, params) || oneGroupOnly(command.method) || readsNoHistory(command.method), offline: offlineCall(command.method, params) });
+  }, { deferGroups: chatOnly(command.method, params) || newChatOnly(command.method), deferChats: oneChatOnly(command.method, params) || oneGroupOnly(command.method) || readsNoHistory(command.method, params), offline: offlineCall(command.method, params) });
   if (translator) {
     try { printAnswer(await (await import("./translate")).translateAnswer(result, translator)); } finally { translator.close(); }
     return;

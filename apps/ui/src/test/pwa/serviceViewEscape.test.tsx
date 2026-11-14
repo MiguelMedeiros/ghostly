@@ -11,7 +11,7 @@ import { renderApp } from "../render";
  * A contact's app opened from the chat's Shared services dialog is drawn over that dialog: the Escape that closes the
  * app is spent there, and the dialog the person opened it from is still open under it, as ✕ leaves it.
  */
-const words = { unreachable: "", failed: "", close: "Close", callOn: "", tooSlow: "", offline: "", retry: "", blocked: "", unguarded: "", label: "Demo", owner: "Not Ghostly", hostError: () => null };
+const words = { unreachable: "", failed: "", close: "Close", callOn: "", tooSlow: "", offline: "", retry: "", blocked: "", unguarded: "", label: "Demo", owner: "Not Ghostly", openLink: (site: string) => `Open ${site}`, hostError: () => null };
 
 beforeAll(() => {
   // happy-dom would load the bridge page from the network: nothing here needs it.

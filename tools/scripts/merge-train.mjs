@@ -206,6 +206,19 @@ export function ciState(runs) {
 }
 
 /**
+ * The jobs that turned CI Success red, from the jobs of its run: each one that failed or timed out, but the gate itself,
+ * with its page. A rerun adds a job with the same name, so the newest of each name counts.
+ */
+export function failedJobs(jobs) {
+  const newest = new Map();
+  for (const j of jobs) {
+    const had = newest.get(j.name);
+    if (j.name !== "CI Success" && (!had || (j.id ?? 0) >= (had.id ?? 0))) newest.set(j.name, j);
+  }
+  return [...newest.values()].filter((j) => j.conclusion === "failure" || j.conclusion === "timed_out").map((j) => ({ name: j.name, url: j.html_url ?? null }));
+}
+
+/**
  * Whether one of CI's runs on a commit says nothing about it, so the run before it on the same commit speaks: the run
  * has ended (a run whose status is not given counts as ended) and its gate's state (`ciState`, or `draftState` for the
  * fast tier) is "none": cancelled, skipped, or never started. Leaving draft can make two pull request runs a second
@@ -507,7 +520,7 @@ export const queuedHead = (sticky) => sticky?.body?.match(HEAD)?.[1] ?? null;
 const newCommitsText = (what) =>
   `Merge train: this pull request got new commits after it was queued (${what}), so it left the line. Add \`queue\` again once this head is reviewed and green.`;
 
-/** The commit the train rebased a lone pull request to, from its position comment: { sha, baseSha, at, retried }. */
+/** The commit the train rebased a lone pull request to, from its position comment: { sha, baseSha, at, retried, from? }. */
 export const aloneMark = (sticky) => {
   try {
     const m = JSON.parse(sticky?.body?.match(ALONE)?.[1] ?? "null");
@@ -554,6 +567,13 @@ const WORKFLOW_PUSH_REFUSED = /without `?workflows`? permission/;
 
 // A file name may hold any text, the train's marks too: `<` is escaped (as for titles in `batchBody`) so none forms.
 const escapeMark = (f) => f.replaceAll("<", "&lt;");
+// What a red pull request's author needs first: which jobs to open. The first few, each linked to its log.
+const SHOWN_FAILED = 5;
+const failedText = (failed) => {
+  if (!failed?.length) return "";
+  const shown = failed.slice(0, SHOWN_FAILED).map((j) => (j.url ? `[\`${escapeMark(j.name)}\`](${j.url})` : `\`${escapeMark(j.name)}\``));
+  return `; red: ${shown.join(", ")}${failed.length > SHOWN_FAILED ? ` and ${failed.length - SHOWN_FAILED} more` : ""}`;
+};
 // Several aboard whose files GitHub does not list, and a push refused for one workflow: any of them may change it.
 // They come back one at a time, in number order, each after the one before it (`after`): told the same thing, all of
 // them added `queue` again at once, boarded together and left together again, run after run.
@@ -693,6 +713,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     p.boardableAt = greenAt && Date.parse(greenAt) > Date.parse(p.queuedAt) ? greenAt : p.queuedAt;
     // When its CI Success turned red: a hold for the base's own red counts from the later of the two (`HOLD_HELP`).
     p.redAt = p.ci === "failure" ? gateDoneAt(jobs, "CI Success") : null;
+    p.failed = p.ci === "failure" ? failedJobs(jobs) : [];
     const said = await gh.comments(p.number);
     p.sticky = said.find((c) => isPosition(c, login));
     // GitHub lists both oldest first, and anyone may comment: past what the train reads, its own position comment (the
@@ -932,8 +953,9 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       say(`DROP #${p.number} (merges with a merge commit)`);
       done.dropped.push(p.number);
       await leave(p, null, `Merge train: \`${p.branch}\` merges into \`${base}\` with a merge commit, never squashed into a batch, so it left the line; it lands by hand with a merge commit when it is ready.`);
-    } else if (queuedHead(p.sticky) && queuedHead(p.sticky) !== p.sha && p.alone?.sha !== p.sha) {
-      // `queue` vouches for the head that was reviewed (or the train's own rebase of it): a later push needs a new review.
+    } else if (queuedHead(p.sticky) && queuedHead(p.sticky) !== p.sha && p.alone?.sha !== p.sha && p.alone?.from !== p.sha) {
+      // `queue` vouches for the head that was reviewed (or the train's own rebase of it, `from` the one before a push
+      // that did not happen): a later push needs a new review.
       say(`DROP #${p.number} (new head since it was queued)`);
       done.dropped.push(p.number);
       await leave(p, null, newCommitsText(`${queuedHead(p.sticky).slice(0, 12)} → ${p.sha.slice(0, 12)}`));
@@ -1167,7 +1189,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
         if (culprit) {
           say(`FAILED #${culprit.number}`);
           done.failed.push(culprit.number);
-          await leave(culprit, LABEL.failed, `Merge train: CI Success failed twice in a batch with only this pull request on \`${base}\` (last: #${batch.number}). Fix it, get it reviewed again, and add \`queue\` again.`);
+          await leave(culprit, LABEL.failed, `Merge train: CI Success failed twice in a batch with only this pull request on \`${base}\` (last: #${batch.number}${failedText(failedJobs(jobs))}). Fix it, get it reviewed again, and add \`queue\` again.`);
         } else {
           inFlight = await board(first, second, { waits });
         }
@@ -1270,8 +1292,10 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       return null;
     }
     // The mark goes first: a run that stops before the push leaves the reviewed head with a mark naming a commit it
-    // never got, which the next run reads as nothing in flight.
-    p.alone = { sha: built.sha, baseSha: built.baseSha, at: new Date(now).toISOString(), retried, ...(past ? { past } : {}) };
+    // never got, which the next run reads as nothing in flight. A branch already on the train's own rebase keeps it
+    // vouched for in `from`: else, stopped before the push, the next run read it as an author's push and dropped it.
+    const from = p.sha !== (queuedHead(p.sticky) ?? p.sha) && (p.alone?.sha === p.sha || p.alone?.from === p.sha) ? p.sha : null;
+    p.alone = { sha: built.sha, baseSha: built.baseSha, at: new Date(now).toISOString(), retried, ...(from ? { from } : {}), ...(past ? { past } : {}) };
     await setSticky(p, positionText(base, p, 0, 0, queuedHead(p.sticky) ?? p.sha, p.alone));
     say(`ALONE #${p.number}: rebased onto ${built.baseSha.slice(0, 12)} as ${built.sha.slice(0, 12)}${retried ? " (second run)" : ""}`);
     if (built.sha !== p.sha) {
@@ -1293,10 +1317,15 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     return { number: p.number, members: [p], alone: true };
   };
 
-  /** A lone pull request the train rebased and waits on: its head is the commit its mark names. */
+  /**
+   * A lone pull request the train rebased and waits on: its head is the commit its mark names, or the train's rebase
+   * before it (`from`) when the push of that one never happened.
+   */
   const flyAlone = async (p, past = null) => {
     const mark = p.alone;
     const stay = { number: p.number, members: [p], alone: true };
+    // The push failed: the rebase it promised is pushed again, a second run too (its head's red is the first run's).
+    if (p.sha !== mark.sha) return goAlone(p, { retried: mark.retried, rerun: mark.retried, past });
     const tip = await gh.branchSha(base);
     say(`ALONE #${p.number} at ${p.sha.slice(0, 12)} CI ${p.ci}`);
     // Turned into a draft since: GitHub merges no draft, so it waits in line like any draft and keeps its place. Put
@@ -1320,7 +1349,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       if (!mark.retried) return goAlone(p, { retried: true, rerun: true, past });
       say(`FAILED #${p.number}`);
       done.failed.push(p.number);
-      await leave(p, LABEL.failed, `Merge train: CI Success failed twice with only this pull request on \`${base}\` (last: ${p.sha.slice(0, 12)}). Fix it, get it reviewed again, and add \`queue\` again.`);
+      await leave(p, LABEL.failed, `Merge train: CI Success failed twice with only this pull request on \`${base}\` (last: ${p.sha.slice(0, 12)}${failedText(p.failed)}). Fix it, get it reviewed again, and add \`queue\` again.`);
       return null;
     }
     if (p.ci === "success") {
@@ -1353,7 +1382,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   const refused = (p) => p.unread || (p.ci !== "success" && p.ci !== "failure" && (p.shared?.length || p.crowded));
   if (!inFlight) {
     // One that flew past a hold (`past` below) is not this: with no hold it is back in line like the rest.
-    const lone = line().find((p) => p.alone?.sha === p.sha && !p.alone.past && canGoAlone(p) && !refused(p));
+    const lone = line().find((p) => (p.alone?.sha === p.sha || p.alone?.from === p.sha) && !p.alone.past && canGoAlone(p) && !refused(p));
     if (lone) inFlight = await flyAlone(lone);
   }
   // Held for CI Success red on the base itself, a batch or lone pull request stays in flight until the base moves, and

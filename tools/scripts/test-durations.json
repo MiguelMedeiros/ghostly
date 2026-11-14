@@ -205,7 +205,7 @@
   "packages/browser/test/domainProofs.test.ts": 0,
   "packages/browser/test/domainProvider.test.ts": 0.4,
   "packages/browser/test/ecashLineAfterRestart.test.ts": 0.3,
-  "packages/browser/test/edits.test.ts": 67.9,
+  "packages/browser/test/edits.test.ts": 52.1,
   "packages/browser/test/encryptedProfileStores.test.ts": 0.3,
   "packages/browser/test/engineServerCallOffer.test.ts": 0,
   "packages/browser/test/engineServerCallOn.test.ts": 0,

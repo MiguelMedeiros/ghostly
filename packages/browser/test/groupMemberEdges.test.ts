@@ -370,6 +370,29 @@ describe("a profile no longer in a private group", () => {
   }, 30_000);
 });
 
+describe("my message in a private group deleted for everyone", () => {
+  it("leaves no frame of it with its text in the group's rows once its quotes are forgotten (`message delete --purge`)", async () => {
+    const { node, groupId, admit } = await adminOf(["bob"]);
+    const chat = `group:${groupId}`;
+    const said = await node.sendGroupMessage({ groupId, text: "token sk-made-up-0123456789" });
+    const messageId = (said as { messageId: string }).messageId;
+    // A commit after it: the record is written whole, its copy of my last frames with it.
+    await admit();
+    await node.sendGroupMessage({ groupId, text: "the next one" });
+    const row = (await node.getMessage(chat, messageId))!;
+    // Each row that holds my last frames (the record, and the small row): which keep a text, by number.
+    const texts = async () => {
+      const record = (await db.getGroups()).find(g => g.id === groupId)!.state!.sent, live = (await db.getGroupLive()).get(groupId)!.state.sent!;
+      const ids = (sent: typeof live) => sent.filter(f => f.c).map(f => `${f.s}:${f.e}:${f.n}`);
+      return { record: ids(record).includes(messageId), live: ids(live).includes(messageId), next: ids(live).length };
+    };
+    expect(await texts()).toEqual({ record: true, live: true, next: 2 });
+    expect(await node.removeMessage({ linkId: chat, messageId })).toMatchObject({ error: null });
+    await node.forgetQuotesOf(row);
+    expect(await texts()).toEqual({ record: false, live: false, next: 1 });
+  }, 30_000);
+});
+
 describe("a hub and an edge to someone out of the roster", () => {
   const [admin, hub, member, gone] = ["admin", "hub", "member", "gone"];
   // Epochs 0 to 2 have `gone`; the commit of epoch 3 takes it out; 4 is a change after.

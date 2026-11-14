@@ -47,9 +47,13 @@ export function statusEnd(choice: Exclude<StatusEnd, "custom" | "keep">, languag
 export const capStatusText = (text: string) => [...text].slice(0, STATUS_TEXT_MAX).join("");
 export const statusTextLength = (text: string) => [...text].length;
 
-/** "11:00", "Fri 18:00", or "Dec 3, 18:00" further on: when a status ends, in the app's language. */
+/**
+ * "11:00", "Fri 18:00", or "Dec 3, 18:00" further on: when a status ends, in the app's language. An end at midnight
+ * (Today's, This week's) is the last minute of the day before, "23:59": the next day's "00:00" reads as tomorrow.
+ */
 export function statusEndText(until: number, language: string, now = Date.now()): string {
-  const end = new Date(until), days = (until - now) / 86_400_000;
+  const midnight = new Date(until).setHours(0, 0, 0, 0) === until;
+  const end = new Date(midnight ? until - 60_000 : until), days = (end.getTime() - now) / 86_400_000;
   if (end.toDateString() === new Date(now).toDateString()) return end.toLocaleTimeString(language, { hour: "numeric", minute: "2-digit" });
   return end.toLocaleString(language, { ...(days < 6 ? { weekday: "short" } : { month: "short", day: "numeric" }), hour: "numeric", minute: "2-digit" });
 }

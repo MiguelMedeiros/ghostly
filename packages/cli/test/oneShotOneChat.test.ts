@@ -108,9 +108,24 @@ describe("a one-shot about one chat", { timeout: 180_000 }, () => {
 
   it("leaves every chat unstarted, its history unread, for a read that needs none", () => {
     for (const method of ["status", "profile.get", "settings.get", "status.get", "chat.list", "group.list", "group.get", "group.history",
-      "call.list", "service.list", "identity.list", "x401.credential.list", "app.served"]) expect(readsNoHistory(method), method).toBe(true);
+      "call.list", "service.list", "identity.list", "x401.credential.list", "app.served", "wallet.list", "wallet.history", "payment.list",
+      "identity.providers"]) expect(readsNoHistory(method), method).toBe(true);
+    // `call auto` and `group auto` with no on|off say what is kept in the profile.
+    for (const method of ["call.auto", "group.auto"]) {
+      expect(readsNoHistory(method, {}), method).toBe(true);
+      expect(readsNoHistory(method, { on: true, from: ["carol"] }), method).toBe(false);
+    }
     // A chat's own read restores the chat it names (`startNamedChats`); a read across chats may need what their histories say.
-    for (const method of ["chat.history", "file.list", "payment.list", "wallet.list", "wallet.history", "saved.list", "events.replay", "chat.send"]) expect(readsNoHistory(method), method).toBe(false);
+    for (const method of ["chat.history", "file.list", "saved.list", "events.replay", "chat.send"]) expect(readsNoHistory(method), method).toBe(false);
+  });
+
+  it("leaves every chat unstarted, its history unread, for a change kept here and a call only a daemon answers", () => {
+    // What the profile keeps outside any chat (its status, x401 keys and credentials, a service, a draft, a served
+    // app), and `call answer` and `call flush`, which a one-shot refuses whatever the chats say.
+    for (const method of ["status.set", "status.clear", "x401.key.new", "x401.credential.add", "x401.credential.remove", "service.add",
+      "identity.cancel", "app.serve", "app.unserve", "call.answer", "call.flush"]) expect(readsNoHistory(method), method).toBe(true);
+    // A change about a message reads the chat it names (`startNamedChats`).
+    for (const method of ["saved.add", "saved.remove", "chat.rename"]) expect(readsNoHistory(method), method).toBe(false);
   });
 });
 
@@ -188,7 +203,10 @@ describe("a one-shot about one group", { timeout: 300_000 }, () => {
 
   it("leaves the 1:1 chats unstarted only for what goes over the group's edges", () => {
     for (const method of ["group.send", "group.edit", "group.react", "group.typing"]) expect(oneGroupOnly(method), method).toBe(true);
-    // An invitation goes over the contact's 1:1 chat, and an answer to one over the chat it came by.
-    for (const method of ["group.invite", "group.accept", "group.decline", "group.join", "chat.send"]) expect(oneGroupOnly(method), method).toBe(false);
+    // The admin's name, picture, hubs and fresh secret go over the edges too (a commit or the group's metadata).
+    for (const method of ["group.rename", "group.picture", "group.hub", "group.rotate"]) expect(oneGroupOnly(method), method).toBe(true);
+    // An invitation goes over the contact's 1:1 chat, and an answer to one over the chat it came by. A removal tells the
+    // one removed over the chat that invited them, and a new admin takes back the invitations still out, over theirs.
+    for (const method of ["group.invite", "group.accept", "group.decline", "group.join", "group.remove", "group.admin", "chat.send"]) expect(oneGroupOnly(method), method).toBe(false);
   });
 });

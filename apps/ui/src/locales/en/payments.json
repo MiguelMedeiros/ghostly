@@ -241,6 +241,7 @@
       "closed": "Closed",
       "paid": "Paid",
       "paidBy": "Paid by {{name}}",
+      "paidByMe": "Paid by you",
       "saysPaid": "{{names}} says they paid · waiting for {{to}}'s wallet",
       "saysPaidToMe": "{{names}} says they paid · waiting for your wallet",
       "sent": "Sent · waiting for {{name}}",

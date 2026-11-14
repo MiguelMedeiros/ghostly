@@ -87,6 +87,15 @@ describe("the argument parser", () => {
     expect(() => run(["bob", "v.wav", "extra", "--voice"])).toThrow(/^Too many arguments: ghostly file send /);
   });
 
+  it("answers --voice \"$MS\" with MS unset as --voice's empty value, not a word too many or a missing <path>", () => {
+    const send = COMMANDS["file send"]!;
+    const run = (argv: string[]) => { const parsed = parseArgs(argv, send.options!, idSlot(send)); return positionals(send, parsed.positionals); };
+    // Before, "Too many arguments: ghostly file send …" after the path, and "Missing <path>" before it, the path given.
+    for (const argv of [["bob", "v.wav", "--voice", ""], ["bob", "--voice", "", "v.wav"]]) {
+      expect(() => run(argv), argv.join(" ")).toThrow(new CliError("usage", "--voice takes a length in milliseconds, not \"\""));
+    }
+  });
+
   it("takes ids that start with a single dash where the command says ids come, never as text", () => {
     const draft = "-guUzRbBsj7cpq-yPjgCUQ";
     const ids = () => true;

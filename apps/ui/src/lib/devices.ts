@@ -6,7 +6,7 @@ import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import type { WalletView } from "@ghostly/browser/shared/types";
 import { useI18n, type Translate, type TranslationKey } from "../contexts/I18nContext";
 import { englishT } from "../locales/translate";
-import { DEVICE_INVITE_LIFETIME_S, TURN_NAME_BYTES, inviteLink, inviteQrSegments, readInviteCode, sanitizeDisplayText } from "@ghostly/core";
+import { DEVICE_INVITE_LIFETIME_S, TURN_NAME_BYTES, inviteLink, inviteQrSegments, readInviteCode, sanitizeDisplayText, trimEndOf } from "@ghostly/core";
 import { utf8Bytes } from "./fitText";
 import { reloadPage } from "./layerHistory";
 import { handOverUnlock } from "./lockHandover";
@@ -401,8 +401,9 @@ export function takeDeviceLink(): DeviceLink | null {
  * on a device on standby too, where no router runs. Anything else is left for the router.
  */
 export function takeDeviceLinkFromAddress(): void {
-  // A `/` the link ends with (typed, or added by a linkifier) is not the code's.
-  const rest = window.location.hash.replace(/^#/, "").replace(/\/+$/, "");
+  // A `/` the link ends with (typed, or added by a linkifier) is not the code's. Off in one pass (`trimEndOf`): any address
+  // opens the app, and a `/\/+$/` retried from every `/` of a long run that does not end it, before anything was drawn.
+  const rest = trimEndOf(window.location.hash.replace(/^#/, ""), "/");
   if (!rest) return;
   // As a link reads after its origin: `#ghostly1z…`, or `#<profile>#ghostly1z…`.
   const value = `#${protocolLinkCode(rest) ?? rest.replace(/^\//, "")}`;

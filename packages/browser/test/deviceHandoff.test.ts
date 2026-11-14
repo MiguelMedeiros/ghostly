@@ -184,6 +184,8 @@ interface World {
   asked: (HandoffTakerFacts | undefined)[]; quiescedFor: (HandoffTakerFacts | undefined)[];
   /** What the engine adds to the record at quiesce (the Breez databases of wallets that move), and what stays here. */
   quiesceExtra: DevicePatch; stays: HandoffStay[];
+  /** Why the engine stops nothing at quiesce, found after the giver's last check (a call that came meanwhile). */
+  quiesceRefusal: BusyReport | null;
   /** The databases the giver deleted once on standby. */
   droppedDatabases: string[][];
   quiesced: DevicePatch[]; reloads: number; activeAgain: number;
@@ -200,7 +202,7 @@ function world(options: { verifier?: boolean } = {}): World {
   const w = {
     link: new Link(), profile: new Profile(), storage: new Storage(),
     giverRecords: new Records(recordFor("ghostly_a", 0, "active")), takerRecords: new Records(recordFor("ghostly", 1, "standby")),
-    busy: { why: null }, setChanging: false, asked: [], quiescedFor: [], quiesceExtra: {}, stays: [], droppedDatabases: [], quiesced: [], reloads: 0, activeAgain: 0, takes: [], giverSelf: {}, takerSelf: {},
+    busy: { why: null }, setChanging: false, asked: [], quiescedFor: [], quiesceExtra: {}, quiesceRefusal: null, stays: [], droppedDatabases: [], quiesced: [], reloads: 0, activeAgain: 0, takes: [], giverSelf: {}, takerSelf: {},
     takeOutcome: () => ({ kind: "start", read: { result: "mine", good: true, seen: 0n, invalid: [], unsigned: [], conditions: {}, record: { sequence: (N + 1) * 2 ** 20 + 1 } } }) as unknown as TurnOutcome,
   } as unknown as World;
   w.makeGiver = (phase) => {
@@ -211,7 +213,7 @@ function world(options: { verifier?: boolean } = {}): World {
       busy: async (taker) => { w.asked.push(taker); return w.busy.why; },
       setChanging: () => w.setChanging,
       staying: async () => w.stays,
-      ...(phase === "active" ? { quiesce: async (patch: DevicePatch, taker?: HandoffTakerFacts) => { w.quiesced.push(patch); w.quiescedFor.push(taker); await w.giverRecords.move("releasing", { ...patch, ...w.quiesceExtra }); } } : {}),
+      ...(phase === "active" ? { quiesce: async (patch: DevicePatch, taker?: HandoffTakerFacts) => { if (w.quiesceRefusal) return w.quiesceRefusal; w.quiesced.push(patch); w.quiescedFor.push(taker); await w.giverRecords.move("releasing", { ...patch, ...w.quiesceExtra }); } } : {}),
       ...(phase === "gated" ? {
         // As device-link-only mode does (`handoffStandby.ts`): a copy that stopped leaves a note for the screen after the reload.
         backToActive: async (stopped) => {
@@ -1264,6 +1266,18 @@ describe("refusals before a byte is copied", () => {
     expect(w.giver.view()).toMatchObject({ role: "giver", step: "failed", failure: "call" });
     expect(w.link.count("handoff-pake", A)).toBe(0);
     expect(w.giverRecords.record.handoffAttempts).toBeUndefined();
+  });
+
+  it("a call that came after the giver's last check, while the engine got ready to freeze: nothing is frozen, and the taker is told a call is on there", async () => {
+    const w = world();
+    w.quiesceRefusal = { why: "call" };
+    await w.taker.pull(PASSWORD);
+    await until(() => w.taker.view()?.step === "failed");
+    expect(w.link.sent.filter((s) => s.frame.t === "handoff-busy").map((s) => s.frame.why)).toEqual(["call"]);
+    expect(w.taker.view()!.failure).toBe("call-there");
+    expect(w.giver.view()).toMatchObject({ role: "giver", step: "failed", failure: "call" });
+    expect(w.quiesced).toEqual([]);
+    expect(w.giverRecords.record.state).toBe("active");
   });
 
   it("a push from the active device that its wallets keep here is refused on the device itself, with the reason and the wallet", async () => {

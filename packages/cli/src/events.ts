@@ -749,7 +749,10 @@ export class EventHub {
     let edgeGroups: Map<string, string> | undefined;
     const groupOf = (linkId: string) => (edgeGroups ??= new Map(state.groups.flatMap((g) => g.members.flatMap((m) => m.edge ? [[m.edge.linkId, g.id] as const] : [])))).get(linkId)
       ?? parsePayLink(linkId)?.groupId;
-    for (const [id, payment] of Object.entries(state.payments ?? {})) {
+    // The engine keeps every payment for good and hands the same views object until one changes: the same object as in
+    // the last state is skipped, or each state (every 50 ms under traffic) walked them all, 7 ms at 20,000.
+    const payments = state.payments === this.state?.payments ? {} : state.payments ?? {};
+    for (const [id, payment] of Object.entries(payments)) {
       const shape = `${payment.state}|${payment.error ?? ""}|${payment.closed ? 1 : 0}`, before = this.payments.get(id);
       this.payments.set(id, shape);
       if (quiet || before === shape) continue;

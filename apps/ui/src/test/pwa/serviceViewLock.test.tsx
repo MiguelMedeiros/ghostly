@@ -16,7 +16,7 @@ import { renderApp } from "../render";
  * activation, which real input in a frame gives the page above it, counts; left alone, the lock comes as before.
  */
 const MINUTE = 60_000;
-const words = { unreachable: "", failed: "", close: "Close", callOn: "", tooSlow: "", offline: "", retry: "", blocked: "", unguarded: "", label: "Demo", owner: "Not Ghostly", hostError: () => null };
+const words = { unreachable: "", failed: "", close: "Close", callOn: "", tooSlow: "", offline: "", retry: "", blocked: "", unguarded: "", label: "Demo", owner: "Not Ghostly", openLink: (site: string) => `Open ${site}`, hostError: () => null };
 const activation = { isActive: false };
 
 function Probe() {

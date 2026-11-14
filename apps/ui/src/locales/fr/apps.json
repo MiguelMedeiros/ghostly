@@ -180,6 +180,7 @@
     "noMatch": "Aucune app de cette boutique ne correspond.",
     "notRead": "Pas encore lue",
     "read": "Lire",
+    "readDone": "{{name}} est à jour : {{apps}}",
     "readNamed": "Lire {{name}}",
     "refresh": "Actualiser",
     "refreshNamed": "Actualiser {{name}}",

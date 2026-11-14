@@ -1635,8 +1635,10 @@ export class Groups {
       group.removedIds = withRemovedId(group.removedIds ?? [], messageId);
       this.saveSoon(group);
     }
-    // A community's catch-up no longer hands its frame to a member who was away.
+    // A community's catch-up no longer hands its frame to a member who was away; a private group's log of mine keeps
+    // nothing of what it said.
     this.communities.session(groupId)?.forget(messageId);
+    this.sessions.get(groupId)?.forget(messageId);
     await this.files?.forget(groupId, messageId);
   }
 

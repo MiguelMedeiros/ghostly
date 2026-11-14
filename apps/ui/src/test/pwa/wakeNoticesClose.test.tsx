@@ -1,7 +1,8 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { closeWakeNotices as closeInBrowser } from "../../../../web/src/pwa/push";
+import { closeOnlineWakeNotices as closeOnlineInBrowser, closeWakeNotices as closeInBrowser } from "../../../../web/src/pwa/push";
+import { loadSettings, saveSettings } from "../../lib/settings";
 import { saveSession } from "../../lib/storage";
 import { setPushPlatform, useWakeTableSync, type PushPlatform } from "../../lib/wakePush";
 import { refreshWindowAway } from "../../lib/windowAway";
@@ -26,14 +27,14 @@ interface Notice { tag: string; closed: boolean }
 
 /** The browser's push registrations, one per profile scope, each with the notices its worker shows. */
 function fakeBrowser(byProfile: Record<string, string[]>) {
-  const registrations = new Map<string, { scope: string; notices: Notice[]; getNotifications(filter?: { tag?: string }): Promise<{ close(): void }[]> }>();
+  const registrations = new Map<string, { scope: string; notices: Notice[]; getNotifications(filter?: { tag?: string }): Promise<{ tag: string; close(): void }[]> }>();
   for (const [scopeName, tags] of Object.entries(byProfile)) {
     const notices = tags.map((tag) => ({ tag, closed: false }));
     const scope = new URL(`/push/${scopeName}/`, location.origin).href;
     registrations.set(scope, {
       scope, notices,
       async getNotifications(filter) {
-        return notices.filter((notice) => !notice.closed && (!filter?.tag || notice.tag === filter.tag)).map((notice) => ({ close: () => { notice.closed = true; } }));
+        return notices.filter((notice) => !notice.closed && (!filter?.tag || notice.tag === filter.tag)).map((notice) => ({ tag: notice.tag, close: () => { notice.closed = true; } }));
       },
     });
   }
@@ -46,7 +47,7 @@ function fakeBrowser(byProfile: Record<string, string[]>) {
 function platform(overrides: Partial<PushPlatform> = {}): PushPlatform {
   return {
     supported: () => true, subscribe: vi.fn(), current: vi.fn(async () => null), unsubscribe: vi.fn(), syncTable: vi.fn(async () => {}),
-    closeNotices: closeInBrowser, ...overrides,
+    closeNotices: closeInBrowser, closeOnlineNotices: closeOnlineInBrowser, ...overrides,
   } as PushPlatform;
 }
 
@@ -128,6 +129,19 @@ describe("the page closes its profile's stale wake-up notices", () => {
     await waitFor(() => expect(browser.open("default")).not.toContain("quiet:"));
     expect(closeNotices).toHaveBeenCalledWith("", undefined);
     expect(browser.open("default")).toEqual(DEFAULT_NOTICES.filter((tag) => tag !== "quiet:"));
+    expect(browser.open("work1")).toEqual(WORK_NOTICES);
+  });
+
+  it("turning the lock screen on closes the profile's online notices, which name a contact (WISP 04); the others stay", async () => {
+    const browser = fakeBrowser({ default: DEFAULT_NOTICES, work1: WORK_NOTICES });
+    setPushPlatform(platform());
+    blur(true);
+    renderHook(() => useWakeTableSync({ title: "Ghostly", body: "New message" }));
+    await moment();
+    expect(browser.open("default")).toEqual(DEFAULT_NOTICES);
+    const settings = loadSettings();
+    act(() => saveSettings({ ...settings, lockScreen: { ...settings.lockScreen, enabled: true, passwordHash: "hash" } }));
+    await waitFor(() => expect(browser.open("default")).toEqual(DEFAULT_NOTICES.filter((tag) => !tag.startsWith("wake-online:"))));
     expect(browser.open("work1")).toEqual(WORK_NOTICES);
   });
 });

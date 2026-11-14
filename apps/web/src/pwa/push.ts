@@ -1,5 +1,5 @@
 import type { VapidKeys } from "@ghostly/core";
-import { pushScope, quietWakeTag, seenChatWakeTags } from "../sw/policy";
+import { pushScope, quietWakeTag, seenChatWakeTags, wakeTag } from "../sw/policy";
 import { clearWakeEntries, writeWakeEntries, writeWakeText, type WakeEntry, type WakeText } from "../sw/wakeStore";
 import { clearWakeLimit } from "../sw/wakeLimit";
 
@@ -114,6 +114,17 @@ export async function closeWakeNotices(profile: string, path?: string): Promise<
   for (const tag of [quietWakeTag(profile), ...(path ? seenChatWakeTags(profile, path) : [])]) {
     for (const shown of await found.getNotifications({ tag }).catch(() => [])) shown.close();
   }
+}
+
+/**
+ * Closes every online notice of this profile (WISP 04): each names a contact, and a profile whose lock screen is on
+ * shows no name over the system's lock. Message and call notices name nobody and stay.
+ */
+export async function closeOnlineWakeNotices(profile: string): Promise<void> {
+  const found = await registration(profile, false).catch(() => undefined);
+  if (typeof found?.getNotifications !== "function") return;
+  const online = wakeTag("wake-online", profile, "");
+  for (const shown of await found.getNotifications().catch(() => [])) if (shown.tag.startsWith(online)) shown.close();
 }
 
 /** The worker's table for this profile: which chat each token names, its mute, and the words to show. */

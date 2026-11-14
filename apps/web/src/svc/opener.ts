@@ -4,7 +4,7 @@
  * from this page, where the peer runs. Closing it ends the app, its requests and its cookies.
  */
 import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, GhostlyHttpError, WEBRTC_GUARD, guardViewerAnswer, viewerResponseHeaders, viewerServicePolicy, type ClientRequest, type ClientResponse, type PageGuard } from "@ghostly/core";
-import { ANSWER_AHEAD_BYTES, BRIDGE_OPEN_LINK, BRIDGE_PAGE, BRIDGE_PORT, BRIDGE_READY, BRIDGE_REFUSED, HEAD_TIMEOUT_MS, MAX_RESPONSE_BYTES, SERVICE_FRAME_ALLOW, SERVICE_VIEW_CLOSE, SERVICE_VIEW_ID, closeServiceView, readRequest, serviceOrigin, type ServiceReply, type ServiceRequestMessage, type ServicesHost } from "./protocol";
+import { ANSWER_AHEAD_BYTES, BRIDGE_OPEN_LINK, BRIDGE_PAGE, BRIDGE_PORT, BRIDGE_READY, BRIDGE_REFUSED, BRIDGE_SHOWN, HEAD_TIMEOUT_MS, MAX_RESPONSE_BYTES, SERVICE_FRAME_ALLOW, SERVICE_VIEW_CLOSE, SERVICE_VIEW_ID, closeServiceView, readRequest, serviceOrigin, type ServiceReply, type ServiceRequestMessage, type ServicesHost } from "./protocol";
 import { SERVICE_LOCKED, callWindowOn, serviceWindowsClosedSince } from "../../../ui/src/lib/serviceWindows";
 import { appInput } from "../../../ui/src/lib/apps/open";
 import { isLocalHost } from "../../../ui/src/lib/parse/linkPreview";
@@ -34,9 +34,10 @@ function ownsBuffer(chunk: Uint8Array): chunk is Uint8Array<ArrayBuffer> {
  * while the contact is offline; `reaching` while Try again asks the engine to reach them, and `stillOffline` once that
  * ended with them still offline (without these, `offline`). `blocked` and `unguarded`: the view's notice when the bridge shows no app
  * (`BRIDGE_REFUSED`). `label` and `owner`: whose app it is and that it is not Ghostly (`serviceFraming`), the view's
- * name and the line under the app's name.
+ * name and the line under the app's name. `openLink`: the bar's button for a link the app asked for that the view held
+ * back (`openOutside`), for its site.
  */
-export interface OpenerWords { unreachable: string; failed: string; close: string; callOn: string; tooSlow: string; offline: string; retry: string; reaching?: string; stillOffline?: string; blocked: string; unguarded: string; label: string; owner: string; hostError: (headers: readonly (readonly [string, string])[]) => string | null }
+export interface OpenerWords { unreachable: string; failed: string; close: string; callOn: string; tooSlow: string; offline: string; retry: string; loading?: string; reaching?: string; stillOffline?: string; blocked: string; unguarded: string; label: string; owner: string; openLink: (site: string) => string; hostError: (headers: readonly (readonly [string, string])[]) => string | null }
 
 /**
  * Whether the contact is offline now (`offline`), and a way to hear when that may have changed (`watch`, which returns
@@ -309,6 +310,12 @@ const LINK_SPACING_MS = 2_000;
 const LINKS_PER_VIEW = 20;
 
 /**
+ * How long a tap or a key on this page (Open, the view's bar) keeps it active, as one in the app would (5 s in Chromium,
+ * Firefox and WebKit): a link the app asks for meanwhile is not one the person tapped in it.
+ */
+const OWN_INPUT_MS = 5_000;
+
+/**
  * Where a link the contact's app opens in a new window goes outside it (`BRIDGE_OPEN_LINK`), as on Desktop
  * (`external_target` in viewer.rs): a plain http(s) link to another site. Null for anything else, for a site on this
  * machine or the local network (`isLocalHost`), whose request would carry the browser's cookies there, for an app's
@@ -373,6 +380,8 @@ function watchDeadEntries(): void {
 export async function openServiceView(options: { host: ServicesHost; tag: string; peer: string; service: string; title: string; send: ServiceSend; words: OpenerWords; presence?: ContactPresence; relayOnly?: boolean }): Promise<void> {
   // The profile locking while it opens closes nothing yet: it is never drawn, behind the lock or over its screen.
   const locked = serviceWindowsClosedSince();
+  // The tap or the key on Open, now: it activates this page for seconds, as one in the app does (`openOutside`).
+  let ownInput = Date.now();
   const open = ++opens;
   handingOver = true;
   try { closeServiceView(); } finally { handingOver = false; }
@@ -414,7 +423,23 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   const named = document.createElement("div");
   named.style.cssText = "display:flex;flex-direction:column;min-width:0";
   named.append(name, owner);
-  bar.append(close, named);
+  // A link the view held back (`openOutside`), offered on a button of Ghostly's own, as a browser does with a blocked
+  // pop-up: said as it comes, in the bar's own words, and one tap opens it.
+  const held = document.createElement("div");
+  held.setAttribute("role", "status");
+  held.style.cssText = "margin-inline-start:auto;flex-shrink:0;max-width:50%";
+  const offer = document.createElement("button");
+  offer.type = "button";
+  offer.dataset.testid = "service-view-link";
+  offer.hidden = true;
+  offer.style.cssText = "display:inline-flex;align-items:center;max-width:100%;min-height:40px;padding:0 12px;border:1px solid var(--color-border,#333);border-radius:8px;background:transparent;color:inherit;font:600 14px system-ui,sans-serif;cursor:pointer;white-space:pre";
+  // The site, cut at its start where it does not fit, as an address bar does: its end says whose it is
+  // ("…example.net", not "accounts.google…"). An end-to-start box for its start-to-end name puts the ellipsis there.
+  const site = document.createElement("span");
+  site.dataset.testid = "service-view-link-site";
+  site.style.cssText = "min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl";
+  held.append(offer);
+  bar.append(close, named, held);
   const frame = document.createElement("iframe");
   frame.dataset.testid = "service-view-frame";
   frame.title = options.words.label;
@@ -427,13 +452,17 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   frame.setAttribute("allow", SERVICE_FRAME_ALLOW);
   frame.setAttribute("referrerpolicy", "no-referrer");
   frame.style.cssText = "flex:1;width:100%;border:0;background:#fff";
+  // The frame and, over it, what the view says in its place: while the app loads, the frame keeps its size under it (the
+  // app's page lays itself out for the screen it will be on).
+  const stage = document.createElement("div");
+  stage.style.cssText = "flex:1;position:relative;display:flex;min-height:0";
   // While the contact is offline: said here, in the app's look and the person's language and direction (the view is
   // the app's page), in place of the contact's last page; its requests are answered as unreachable meanwhile.
   const notice = document.createElement("div");
   notice.dataset.testid = "service-view-offline";
   notice.setAttribute("role", "status");
   notice.hidden = true;
-  notice.style.cssText = "flex:1;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;text-align:center;color:var(--color-text-primary,#eee);font:15px/1.5 system-ui,sans-serif";
+  notice.style.cssText = "position:absolute;inset:0;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;text-align:center;color:var(--color-text-primary,#eee);font:15px/1.5 system-ui,sans-serif";
   const said = document.createElement("p");
   said.style.cssText = "margin:0;max-width:32em";
   const retry = document.createElement("button");
@@ -442,7 +471,8 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   retry.textContent = options.words.retry;
   retry.style.cssText = "min-height:40px;padding:0 16px;border:1px solid var(--color-border,#333);border-radius:8px;background:transparent;color:inherit;font:600 14px system-ui,sans-serif;cursor:pointer";
   notice.append(said, retry);
-  view.append(bar, notice, frame);
+  stage.append(frame, notice);
+  view.append(bar, stage);
   const src = `${origin}${BRIDGE_PAGE}`;
   /** Why the bridge shows no app (`BRIDGE_REFUSED`), in the profile's words: said until Try again. */
   let refused: string | null = null;
@@ -450,35 +480,58 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   let shown: string | null = null;
   /** Try again is asking the engine to reach the contact; `tried`: it did, and they were still offline after. */
   let reaching = false, tried = false;
+  /** A page of the contact's app has loaded in the bridge since the bridge was loaded (`BRIDGE_SHOWN`). */
+  let appShown = false;
+  /** The frame was hidden under the offline or refused notice: its page may be stale, and it is loaded anew after. */
+  let stale = false;
+  /** Try again had the focus when the app was loaded anew: it goes to the app once its page is there. */
+  let focusApp = false;
   /**
    * The notice while the contact is offline, or while the bridge shows no app; once neither, the app again, loaded anew
-   * (its last page may be stale).
+   * (its last page may be stale). Until a page of the app is there, that it is opening, over the frame, which would show
+   * only the bridge's empty page meanwhile (as long as the contact takes to answer, up to `ANSWER_BY_MS`).
    */
   const present = () => {
     const offline = options.presence?.offline() === true;
     // Back: the next time they are offline is said as the first.
     if (!offline) tried = false;
-    const text = offline ? (reaching && options.words.reaching) || (tried && options.words.stillOffline) || options.words.offline : refused;
+    const away = offline || refused !== null;
+    if (!away && stale) {
+      stale = false;
+      appShown = false;
+      // Try again had the focus: hidden under the loading line, the browser drops it to the page's body.
+      focusApp = notice.contains(document.activeElement);
+      frame.src = src;
+    }
+    const loading = !away && !appShown ? options.words.loading ?? null : null;
+    const text = offline ? (reaching && options.words.reaching) || (tried && options.words.stillOffline) || options.words.offline : refused ?? loading;
     // Still in reach of the focus while it tries (`disabled` would drop it to the page), and pressed again, it asks nothing more.
-    if (offline && reaching) { notice.setAttribute("aria-busy", "true"); retry.setAttribute("aria-disabled", "true"); }
-    else { notice.removeAttribute("aria-busy"); retry.removeAttribute("aria-disabled"); }
+    if ((offline && reaching) || loading !== null) notice.setAttribute("aria-busy", "true");
+    else notice.removeAttribute("aria-busy");
+    if (offline && reaching) retry.setAttribute("aria-disabled", "true");
+    else retry.removeAttribute("aria-disabled");
     if (text === shown) return;
     shown = text;
     if (text !== null) {
       said.textContent = text;
       notice.hidden = false;
       notice.style.display = "flex";
-      frame.style.display = "none";
+      // Loading: nothing to try again, and the frame keeps its place under the notice.
+      retry.hidden = loading !== null;
+      if (loading !== null) { frame.style.display = ""; frame.style.visibility = "hidden"; }
+      else { stale = true; frame.style.display = "none"; }
       // The focus in the hidden app goes to ✕; on Try again, whose words changed, it stays.
       if (view.contains(document.activeElement) && document.activeElement !== close && !notice.contains(document.activeElement)) close.focus({ preventScroll: true });
+      if (retry.hidden && document.activeElement === retry) close.focus({ preventScroll: true });
     } else {
-      // Try again had the focus: hidden under it, the browser drops it to the page's body. It goes to the app.
-      const had = notice.contains(document.activeElement);
+      const had = focusApp || notice.contains(document.activeElement);
+      focusApp = false;
       notice.hidden = true;
       notice.style.display = "none";
       frame.style.display = "";
-      frame.src = src;
-      if (had) frame.focus({ preventScroll: true });
+      frame.style.visibility = "";
+      // Try again had the focus: hidden under it, the browser drops it to the page's body. It goes to the app.
+      if (had && (document.activeElement === close || !view.contains(document.activeElement) || notice.contains(document.activeElement))) frame.focus({ preventScroll: true });
     }
   };
   // While the contact is offline, it asks the engine to reach them now (rather than waiting on its own next try, minutes
@@ -506,21 +559,49 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   /**
    * A link the app opens in a new window, which its sandbox drops: opened here in a new tab with no opener and no
    * referrer, as Ghostly's own external links (`externalLinkProps`). Only within the person's own tap in the app, which
-   * activates this page too and no script can: never one the app opens by itself.
+   * activates this page too and no script can: never one the app opens by itself. Not while a tap or a key on this page
+   * still activates it (`OWN_INPUT_MS`): the bridge checks for a tap in the app, but it is on the app's origin, and the
+   * contact's page can run a script of its own there and ask as it does, right on the tap on Open. Such a link is not
+   * dropped unsaid: the person's own tap or key may have asked for it (the Tab into the app is a key on this page, and
+   * Enter on its first link comes right after), so the bar offers it, and only their tap there opens it.
    */
   const openOutside = (url: unknown) => {
     const link = outsideLink(url, options.host);
     const now = Date.now();
-    if (!link || !navigator.userActivation?.isActive || linksOpened >= LINKS_PER_VIEW || now - lastLink < LINK_SPACING_MS) return;
+    if (!link || !navigator.userActivation?.isActive || linksOpened >= LINKS_PER_VIEW) return;
+    if (now - ownInput <= OWN_INPUT_MS) { hold(link); return; }
+    if (now - lastLink < LINK_SPACING_MS) return;
+    openTab(link);
+  };
+  const openTab = (link: string) => {
     linksOpened++;
-    lastLink = now;
+    lastLink = Date.now();
+    offer.hidden = true;
+    offer.textContent = "";
+    offeredLink = null;
     window.open(link, "_blank", "noopener,noreferrer");
   };
+  let offeredLink: string | null = null;
+  const hold = (link: string) => {
+    offeredLink = link;
+    // Its site as the address bar shows it (a lookalike name in its punycode), in its own direction.
+    site.textContent = `⁨${new URL(link).host}⁩`;
+    // The words around it, in the person's language and order, kept whole.
+    const [before = "", after = ""] = options.words.openLink("\u0000").split("\u0000");
+    offer.replaceChildren(before, site, after);
+    offer.title = link;
+    offer.hidden = false;
+  };
+  offer.addEventListener("click", () => { if (offeredLink && linksOpened < LINKS_PER_VIEW) openTab(offeredLink); });
   const onMessage = (event: MessageEvent) => {
     if (event.source !== frame.contentWindow || event.origin !== origin) return;
     const message = event.data as { type?: unknown; reason?: unknown; url?: unknown } | null;
     if (message?.type === BRIDGE_OPEN_LINK) {
       openOutside(message.url);
+      return;
+    }
+    if (message?.type === BRIDGE_SHOWN) {
+      if (!appShown) { appShown = true; present(); }
       return;
     }
     if (message?.type === BRIDGE_REFUSED) {
@@ -559,6 +640,7 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
     removeEventListener("message", onMessage);
     removeEventListener("keydown", onKey, true);
     removeEventListener("popstate", onPop);
+    for (const type of OWN_INPUTS) removeEventListener(type, onOwnInput, true);
     for (const port of ports) port.close();
     bridge.abort();
     view.remove();
@@ -579,19 +661,21 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   // dialog it was opened from) would close on the same Escape.
   const onKey = (event: KeyboardEvent) => { if (event.key !== "Escape") return; event.preventDefault(); event.stopPropagation(); end(); };
   const onPop = () => { if (!isViewEntry(history.state)) end(); };
+  // Input in the app's frame never reaches this page (another origin): what does is the person's on Ghostly's own.
+  const onOwnInput = () => { ownInput = Date.now(); };
+  const OWN_INPUTS = ["pointerdown", "keydown", "touchend"] as const;
   watchDeadEntries();
   if (!isViewEntry(history.state)) history.pushState({ ...(history.state as Record<string, unknown> | null), [ENTRY]: true }, "");
   addEventListener("message", onMessage);
   addEventListener("keydown", onKey, true);
   addEventListener("popstate", onPop);
+  for (const type of OWN_INPUTS) addEventListener(type, onOwnInput, true);
   close.addEventListener("click", end);
   view.addEventListener(SERVICE_VIEW_CLOSE, end);
   frame.src = src;
   for (const el of shut) el.setAttribute("inert", "");
   document.body.append(view);
   close.focus();
-  if (options.presence) {
-    unwatch = options.presence.watch(present);
-    present();
-  }
+  if (options.presence) unwatch = options.presence.watch(present);
+  present();
 }

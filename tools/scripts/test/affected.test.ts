@@ -77,7 +77,9 @@ describe("a UI-only change", () => {
     expect(unit.ui.mode).toBe("related");
     expect(unit.ui.files).toEqual(["apps/ui/src/components/PaymentComposer.tsx"]);
     expect(unit.extension.mode).toBe("related");
-    for (const name of ["core", "browser", "sdk", "matrix", "scripts"]) expect(unit[name].mode).toBe("skip");
+    for (const name of ["core", "browser", "sdk", "matrix"]) expect(unit[name].mode).toBe("skip");
+    // Of the scripts, only the one that checks the UI's imports are declared.
+    expect(unit.scripts.files).toEqual(["tools/scripts/test/workspaceDepsDeclared.test.ts"]);
   });
 
   it("lints the file and typechecks what compiles apps/ui/src/, not the packages under it", () => {
@@ -433,6 +435,12 @@ describe("the real repository's import graph", () => {
     expect(picked).toEqual(["tools/scripts/test/translationRuntime.test.ts"]);
     expect(realPlan("native/transports/hyperdht/redial.mjs").browser.files.length).toBeLessThan(20);
   });
+
+  it("a UI locale file reaches the code that says its strings and the key checks", { timeout: 30_000 }, () => {
+    // fileAnnouncements.test.tsx checks chat.announce.fileOffer through lib/fileAnnounce.ts.
+    expect(realPlan("apps/ui/src/locales/en/chat.json").ui.files).toEqual(expect.arrayContaining(["apps/ui/src/lib/fileAnnounce.ts", "apps/ui/src/test/i18n/keys.test.ts"]));
+    expect(realPlan("apps/ui/src/locales/ja/home.json").ui.files).not.toContain("apps/ui/src/lib/fileAnnounce.ts");
+  });
 });
 
 describe("fallbacks", () => {
@@ -450,16 +458,27 @@ describe("fallbacks", () => {
   it('a package.json whose "scripts" alone changed installs nothing new: it is left out', () => {
     const p = plan({ changed: [{ path: "package.json", exists: true, scriptsOnly: true }], inventory, e2eFiles });
     expect(p.scriptsOnly).toEqual(["package.json"]);
-    expect(p.unit.every((u) => u.mode === "skip")).toBe(true);
+    expect(p.unit.filter((u) => u.name !== "scripts").every((u) => u.mode === "skip")).toBe(true);
     expect(p.lint.mode).toBe("skip");
     expect(p.e2e.mode).toBe("skip");
+  });
+
+  it("the root package.json's scripts alone still run the scripts tests that read its postinstall", () => {
+    const p = plan({ changed: [{ path: "package.json", exists: true, scriptsOnly: true }], inventory, e2eFiles });
+    const scripts = byName(p.unit).scripts;
+    expect(scripts.mode).toBe("related");
+    expect(scripts.files).toEqual(["tools/scripts/test/releaseInstallScripts.test.ts", "tools/scripts/test/webAppsTestFlag.test.ts"]);
+    // A workspace's package.json is not the root's.
+    const site = byName(plan({ changed: [{ path: "apps/website/package.json", exists: true, scriptsOnly: true }], inventory, e2eFiles }).unit).scripts;
+    expect(site.mode).toBe("skip");
   });
 
   it("core's index.ts runs every project that imports core whole, and every spec", () => {
     const p = plan({ changed: changed("packages/core/src/index.ts"), inventory, e2eFiles, codeFiles: {} });
     const unit = byName(p.unit);
     for (const name of ["core", "browser", "sdk", "extension", "ui", "cli"]) expect(unit[name].mode).toBe("whole");
-    for (const name of ["matrix", "scripts"]) expect(unit[name].mode).toBe("skip");
+    expect(unit.matrix.mode).toBe("skip");
+    expect(unit.scripts.files).toEqual(["tools/scripts/test/workspaceDepsDeclared.test.ts"]);
     expect(p.e2e.mode).toBe("whole");
     expect(p.e2e.specs).not.toContain("e2e/desktop/smoke.spec.ts");
   });
@@ -563,6 +582,11 @@ describe("the rest", () => {
       ["rust-toolchain.toml", "rustToolchain.test.ts"],
       ["native/transports/iroh-web/src/lib.rs", "irohWebBuild.test.ts"],
       ["packages/iroh-web/pkg/ghostly_iroh_web_bg.wasm", "irohWebBuild.test.ts"],
+      // It lists the files with git, so no path of them is in its text: an import added or a dependency dropped.
+      ["packages/browser/src/shared/features.ts", "workspaceDepsDeclared.test.ts"],
+      ["packages/browser/package.json", "workspaceDepsDeclared.test.ts"],
+      ["apps/ui/src/components/rich/highlight.ts", "workspaceDepsDeclared.test.ts"],
+      ["apps/mini/chess/package.json", "workspaceDepsDeclared.test.ts"],
     ];
     for (const [file, test] of cases) {
       const p = scripts(file);
@@ -623,6 +647,34 @@ for (const doc of [...DOCS, "docs/CLI.md"]) readFileSync(resolve(ROOT, doc), "ut
     expect(run("apps/ui/src/lib/sounds.ts").ui).toEqual([]);
     expect(run("docs/TESTING.md")).toEqual({});
     expect(run("apps/web/nginx.conf").ui).toBeUndefined();
+  });
+
+  it("a UI locale file runs the tests of the code that uses its strings, and the tests that read the locales", () => {
+    // The UI's test config reads the locale files with readFileSync (localesAtOnce), so they are in no import graph:
+    // a draft changing only en/chat.json ran 2 of the 806 UI tests, none that checks a chat string.
+    const codeFiles = {
+      "apps/ui/src/lib/fileAnnounce.ts": `export const offer = (t) => t("chat.announce.fileOffer", { name });`,
+      "apps/ui/src/components/FileStage.tsx": "export const Stage = ({ stage }) => <span>{t(`chat.stage.${stage}`)}</span>;",
+      "apps/ui/src/components/HomeEmpty.tsx": `export const HomeEmpty = () => <p>{t("home.empty")}</p>;`,
+      "apps/ui/src/components/Chatty.tsx": `export const Chatty = () => <p>{t("chatTranslate.on")}</p>;`,
+      "apps/ui/src/test/chat/fileAnnouncements.test.tsx": `import { offer } from "../../lib/fileAnnounce";\nexpect(heard).toEqual(["Alice wants to send report.pdf"]);`,
+      "apps/ui/src/test/i18n/locales.ts": `import { loadedLocale } from "../../locales";`,
+      "apps/ui/src/test/i18n/keys.test.ts": `import english from "../../locales/en";\nimport { LOCALES } from "./locales";`,
+      "apps/ui/src/test/i18n/plurals.test.ts": `import { LOCALES, lookup } from "./locales";`,
+      "apps/ui/src/test/home/home.test.tsx": `import { HomeEmpty } from "../../components/HomeEmpty";`,
+      // t()'s helpers are no locale: a test saying a string through englishT names its key.
+      "apps/ui/src/test/lib/listText.test.ts": `import { englishT } from "../../locales/translate";`,
+    };
+    const ui = (...files: string[]) => byName(plan({ changed: changed(...files), inventory, e2eFiles, codeFiles }).unit).ui;
+    const readers = ["apps/ui/src/test/i18n/keys.test.ts", "apps/ui/src/test/i18n/plurals.test.ts"];
+    const chat = ui("apps/ui/src/locales/en/chat.json");
+    expect(chat.mode).toBe("related");
+    expect([...chat.files].sort()).toEqual(["apps/ui/src/components/FileStage.tsx", "apps/ui/src/lib/fileAnnounce.ts", "apps/ui/src/locales/en/chat.json", ...readers]);
+    expect(chat.reason).toContain("using a changed locale file's strings");
+    // Another language's file, a deleted one too (its keys go missing).
+    expect([...ui("-apps/ui/src/locales/fr/home.json").files].sort()).toEqual(["apps/ui/src/components/HomeEmpty.tsx", ...readers]);
+    // A JSON elsewhere in the UI is no locale.
+    expect(ui("apps/ui/src/lib/countries.json").files).toEqual(["apps/ui/src/lib/countries.json"]);
   });
 
   describe("the real repository", () => {
@@ -763,6 +815,15 @@ describe("--unit-group: the draft tier's unit projects over a few runners", () =
     expect(r.stdout).toMatch(/\n {2}related ui {8}/);
     expect(r.stdout).toMatch(/\n {2}other {3}browser {3}group 2 runs it \(related: /);
     expect(r.stdout).toMatch(/\n {2}other {3}core {6}group 4 runs it \(related: /);
+  }, 60_000);
+
+  it("says a project nothing reaches is skipped, never that another group runs it", () => {
+    // Group 1 of 4 told the author that group 4 runs core's tests, and group 4 skipped them: they ran nowhere.
+    const r = affected("--no-e2e", "--no-rust", "--no-lint", "--no-typecheck", "--unit-group", "1/4", "--files", "docs/TESTING.md");
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/\n {2}skip {4}core {6}nothing it imports changed\n/);
+    expect(r.stdout).toContain("· skipped unit core: nothing it imports changed");
+    expect(r.stdout).not.toContain("runs it");
   }, 60_000);
 
   it("is what ci.yml's draft tier runs: one runner per group, each project of UNIT_ALONE on its own", () => {

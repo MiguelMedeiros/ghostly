@@ -295,7 +295,8 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
           </span>
         )}
         <div className="flex-1 min-w-0">
-          <p dir="auto" className="chat-text-audio-name leading-tight truncate m-0" title={file.name} data-testid="audio-name"><Highlight text={file.name} term={highlight} /></p>
+          {/* Whole, wrapping anywhere: cut with … at its end, a long name hid its extension on a phone. */}
+          <p dir="auto" className="chat-text-audio-name leading-tight [overflow-wrap:anywhere] m-0" title={file.name} data-testid="audio-name"><Highlight text={file.name} term={highlight} /></p>
           <input
             type="range"
             data-testid="audio-seek"

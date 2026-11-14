@@ -148,8 +148,13 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
     close.textContent = closeLabel();
     const box = document.createElement("div");
     box.className = "relative flex-1 [&>iframe]:absolute [&>iframe]:inset-0 [&>iframe]:h-full [&>iframe]:w-full [&>iframe]:border-0";
+    // Why it stopped, said politely in a line that is there, empty, from the start, as a live region must be before
+    // what it says: the focus stays on Close, or goes there from the app's frame, and a line that came with its words
+    // was not read out.
+    const said = document.createElement("div");
+    said.setAttribute("role", "status");
     bar.append(title, close);
-    overlay.append(bar, box);
+    overlay.append(bar, box, said);
     // The app's shell (App.tsx), not the whole page: the lock screen, drawn above the app, must still take a password.
     const under = [...document.querySelectorAll<HTMLElement>(".two-pane, .app-shell")].filter((node) => !node.inert);
     document.body.appendChild(overlay);
@@ -183,11 +188,11 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
         if (!stopped) { dismiss(); return; }
         // Taken down, or stopped on its own: its place says why, under the same bar, until Close.
         const why = document.createElement("p");
-        why.setAttribute("role", "status");
         why.setAttribute("data-testid", "mini-app-stopped");
         why.className = "m-0 p-6 text-center text-sm text-text-secondary";
         why.textContent = stoppedLabel(entry.title, stopped);
-        box.replaceWith(why);
+        box.remove();
+        said.append(why);
         // Stopped by the watchdog: it may run fine once started again, and the person decides.
         if (stopped.why === "unresponsive" && openAgainLabel) {
           const again = document.createElement("button");
@@ -215,7 +220,7 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
               if (errorText) failed.textContent = errorText(error);
             });
           });
-          why.after(again, failed);
+          said.after(again, failed);
         }
         // The focus was in the app's frame, gone with it: Close has it, so Escape still closes.
         if (overlay.isConnected && !overlay.contains(document.activeElement)) close.focus({ preventScroll: true });

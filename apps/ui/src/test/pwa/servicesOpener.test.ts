@@ -3,7 +3,7 @@ import { ANSWER_BY_MS, CookieJar, MAX_PENDING_REQUESTS, MAX_WAITING_REQUESTS, op
 import { closeServiceWindows, hostErrorText, serviceFraming, setServiceWindowsCloser } from "../../lib/serviceWindows";
 import { loadLocale, translatorFor } from "../../locales";
 import { onAppInput } from "../../lib/apps/open";
-import { ANSWER_AHEAD_BYTES, BRIDGE_OPEN_LINK, BRIDGE_READY, BRIDGE_REFUSED, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
+import { ANSWER_AHEAD_BYTES, BRIDGE_OPEN_LINK, BRIDGE_READY, BRIDGE_REFUSED, BRIDGE_SHOWN, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
 import { createHash } from "node:crypto";
 import { CHUNK_KIND, CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, GhostlyHttpError, HttpClient, LIMITS, MAX_CHUNK_PAYLOAD_BYTES, VIEWER_GUARD_CSP, VIEWER_GUARD_HASH, VIEWER_GUARD_SCRIPT, VIEWER_SERVICE_CSP, VIEWER_SERVICE_CSP_RELAY_ONLY, decodeChunk, decodeControl, encodeChunk, type ClientRequest, type ClientResponse } from "@ghostly/core";
 
@@ -141,7 +141,7 @@ function answer(status: number, headers: [string, string][], chunks: string[]): 
   };
 }
 
-const words = { unreachable: "Not reachable", failed: "Failed", close: "Close", callOn: "End the call to open it.", tooSlow: "Too slow", offline: "Your contact is offline", retry: "Try again", blocked: "This browser blocks Demo here", unguarded: "This page of Demo cannot be shown here", label: "Demo, shared by Demo bot", owner: "Demo bot's app, running on their machine. Not Ghostly.", hostError: () => null };
+const words = { unreachable: "Not reachable", failed: "Failed", close: "Close", callOn: "End the call to open it.", tooSlow: "Too slow", offline: "Your contact is offline", retry: "Try again", blocked: "This browser blocks Demo here", unguarded: "This page of Demo cannot be shown here", label: "Demo, shared by Demo bot", owner: "Demo bot's app, running on their machine. Not Ghostly.", openLink: (site: string) => `Open ${site}`, hostError: () => null };
 
 describe("one request from the app, over the contact's link", () => {
   it("goes with the page's headers and the app's cookies, and its answer streams back: cookies kept here, never handed to the page", async () => {
@@ -733,6 +733,65 @@ describe("a contact's app shown over the app", () => {
     expect(notice.textContent).toBe("This page of Demo cannot be shown hereTry again");
   });
 
+  it("says the app is opening, over its frame, until a page of it has loaded, and again once Try again loads it anew", async () => {
+    // Until then the frame shows only the bridge's empty white page, for as long as the contact takes to answer.
+    let offline = false;
+    const listeners = new Set<() => void>();
+    const presence = { offline: () => offline, watch: (changed: () => void) => { listeners.add(changed); return () => listeners.delete(changed); } };
+    const change = (to: boolean) => { offline = to; for (const l of listeners) l(); };
+    const loading = "Opening Demo on your contact's machine…";
+    await openServiceView({ host, tag: "ybndrfg8ejkmcpqx", peer: PEER, service: "demo", title: "Demo", send: async () => answer(200, [], []), words: { ...words, loading }, presence });
+    const view = document.getElementById(SERVICE_VIEW_ID)!;
+    const notice = view.querySelector<HTMLElement>("[data-testid=service-view-offline]")!;
+    const frame = view.querySelector<HTMLIFrameElement>("[data-testid=service-view-frame]")!;
+    const retry = view.querySelector<HTMLButtonElement>("[data-testid=service-view-retry]")!;
+    const close = view.querySelector<HTMLButtonElement>("[data-testid=service-view-close]")!;
+    const first = frame.src;
+    const origin = new URL(first).origin;
+    const inFrame = { postMessage: vi.fn() };
+    Object.defineProperty(frame, "contentWindow", { value: inFrame, configurable: true });
+    const shown = (from: { origin: string; source: unknown } = { origin, source: inFrame }) =>
+      dispatchEvent(new MessageEvent("message", { data: { type: BRIDGE_SHOWN }, origin: from.origin, source: from.source as Window }));
+    const loadingSaid = () => {
+      expect(notice.hidden).toBe(false);
+      expect(notice.getAttribute("role")).toBe("status");
+      expect(notice.querySelector("p")!.textContent).toBe(loading);
+      expect(notice.getAttribute("aria-busy")).toBe("true");
+      expect(retry.hidden, "nothing to try again").toBe(true);
+      // Kept in its place and size under the notice: the app's page lays itself out for the screen it opens on.
+      expect(frame.style.display).toBe("");
+      expect(frame.style.visibility).toBe("hidden");
+    };
+    loadingSaid();
+    expect(document.activeElement).toBe(close);
+    // Only the bridge in the view's frame is heard.
+    shown({ origin: "https://other.example", source: inFrame });
+    shown({ origin, source: window });
+    loadingSaid();
+    shown();
+    expect(notice.hidden).toBe(true);
+    expect(notice.hasAttribute("aria-busy")).toBe(false);
+    expect(frame.style.visibility).toBe("");
+    expect(frame.src, "the page that loaded stays").toBe(first);
+    // Its next pages say nothing more.
+    shown();
+    expect(notice.hidden).toBe(true);
+    // Offline: Try again is back, and once they are back the app is loaded anew, said as opening until it is there.
+    change(true);
+    expect(retry.hidden).toBe(false);
+    expect(notice.hasAttribute("aria-busy")).toBe(false);
+    retry.focus();
+    frame.src = "about:blank";
+    change(false);
+    loadingSaid();
+    expect(frame.src, "the app is loaded anew").toBe(first);
+    expect(document.activeElement, "not dropped to the page's body with the hidden Try again").toBe(close);
+    shown();
+    expect(notice.hidden).toBe(true);
+    expect(document.activeElement, "Try again had it: the focus goes to the app").toBe(frame);
+    closeServiceView();
+  });
+
   it("opens on the notice when the contact is already offline", async () => {
     await openServiceView({ host, tag: "ybndrfg8ejkmcpqx", peer: PEER, service: "demo", title: "Demo", send: async () => answer(200, [], []), words, presence: { offline: () => true, watch: () => () => {} } });
     expect(document.querySelector<HTMLElement>("[data-testid=service-view-offline]")!.hidden).toBe(false);
@@ -851,6 +910,8 @@ describe("a contact's app shown over the app", () => {
     vi.useFakeTimers();
     try {
       await open("demo");
+      // Past the tap on Open, which activates this page too (the next case).
+      vi.advanceTimersByTime(5_100);
       const frame = document.querySelector<HTMLIFrameElement>("[data-testid=service-view-frame]")!;
       const origin = new URL(frame.src).origin;
       const inFrame = { postMessage: vi.fn() };
@@ -884,6 +945,120 @@ describe("a contact's app shown over the app", () => {
     } finally {
       vi.useRealTimers();
       opened.mockRestore();
+      delete (navigator as { userActivation?: unknown }).userActivation;
+    }
+  });
+
+  it("opens no link the app asks for while the tap on Open, or one on Ghostly's page, still activates it: the app's page posts as the bridge, past its check", async () => {
+    // The bridge is on the app's origin: the contact's page runs a script of its own in it and asks as the bridge does,
+    // right after Open, while that tap still activates this page. Only a tap in the app, after the last one here, counts.
+    const activation = { isActive: true };
+    Object.defineProperty(navigator, "userActivation", { configurable: true, value: activation });
+    const opened = vi.spyOn(window, "open").mockReturnValue(null);
+    vi.useFakeTimers();
+    try {
+      await open("demo");
+      const frame = document.querySelector<HTMLIFrameElement>("[data-testid=service-view-frame]")!;
+      const origin = new URL(frame.src).origin;
+      const inFrame = { postMessage: vi.fn() };
+      Object.defineProperty(frame, "contentWindow", { value: inFrame, configurable: true });
+      const asks = (url: string) => dispatchEvent(new MessageEvent("message", { data: { type: BRIDGE_OPEN_LINK, url }, origin, source: inFrame as unknown as Window }));
+      asks("https://phish.example/on-open");
+      vi.advanceTimersByTime(4_900);
+      asks("https://phish.example/still-on-open");
+      expect(opened).not.toHaveBeenCalled();
+      // Past the tap on Open, a tap in the app (it activates this page again) opens one.
+      vi.advanceTimersByTime(200);
+      asks("https://docs.example/tapped");
+      expect(opened).toHaveBeenCalledTimes(1);
+      // A tap or a key on Ghostly's page (the view's bar) activates it too: not a tap in the app.
+      vi.advanceTimersByTime(3_000);
+      document.querySelector("[data-testid=service-view-owner]")!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+      asks("https://phish.example/on-bar");
+      vi.advanceTimersByTime(3_000);
+      dispatchEvent(new KeyboardEvent("keydown", { key: "Tab" }));
+      asks("https://phish.example/on-key");
+      expect(opened).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(5_100);
+      asks("https://docs.example/tapped-again");
+      expect(opened).toHaveBeenCalledTimes(2);
+      expect(opened.mock.calls.map(([url]) => url)).toEqual(["https://docs.example/tapped", "https://docs.example/tapped-again"]);
+    } finally {
+      vi.useRealTimers();
+      opened.mockRestore();
+      delete (navigator as { userActivation?: unknown }).userActivation;
+    }
+  });
+
+  it("offers a link it held back on a button in the view's bar, so the keyboard's Enter on the app's link right after the Tab into it is not lost: only a tap there opens it", async () => {
+    // The Tab from ✕ into the app is a key on Ghostly's page: Enter on the app's first link comes within its 5 s.
+    const activation = { isActive: true };
+    Object.defineProperty(navigator, "userActivation", { configurable: true, value: activation });
+    const opened = vi.spyOn(window, "open").mockReturnValue(null);
+    vi.useFakeTimers();
+    try {
+      await open("demo");
+      const frame = document.querySelector<HTMLIFrameElement>("[data-testid=service-view-frame]")!;
+      const origin = new URL(frame.src).origin;
+      const inFrame = { postMessage: vi.fn() };
+      Object.defineProperty(frame, "contentWindow", { value: inFrame, configurable: true });
+      const asks = (url: string) => dispatchEvent(new MessageEvent("message", { data: { type: BRIDGE_OPEN_LINK, url }, origin, source: inFrame as unknown as Window }));
+      const offer = document.querySelector<HTMLButtonElement>("[data-testid=service-view-link]")!;
+      expect(offer.hidden).toBe(true);
+      vi.advanceTimersByTime(6_000);
+      dispatchEvent(new KeyboardEvent("keydown", { key: "Tab" }));
+      vi.advanceTimersByTime(800);
+      asks("https://docs.example/guide");
+      expect(opened).not.toHaveBeenCalled();
+      // Said, in the bar's live region, with the link's site: the app's next ask takes its place.
+      asks("https://xn--80ak6aa92e.com/other");
+      expect(offer.hidden).toBe(false);
+      expect(offer.closest("[role=status]")).not.toBeNull();
+      expect(offer.textContent).toBe("Open ⁨xn--80ak6aa92e.com⁩");
+      asks("https://docs.example/guide");
+      expect(offer.textContent).toBe("Open ⁨docs.example⁩");
+      // Nothing held for a link the app asks for by itself, nor for one that is never opened outside.
+      activation.isActive = false;
+      asks("https://phish.example/by-itself");
+      activation.isActive = true;
+      asks("http://localhost:8080/");
+      expect(offer.textContent).toBe("Open ⁨docs.example⁩");
+      expect(opened).not.toHaveBeenCalled();
+      // The person's tap on Ghostly's own button opens it, once.
+      offer.click();
+      expect(opened).toHaveBeenCalledTimes(1);
+      expect(opened).toHaveBeenLastCalledWith("https://docs.example/guide", "_blank", "noopener,noreferrer");
+      expect(offer.hidden).toBe(true);
+      offer.click();
+      expect(opened).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+      opened.mockRestore();
+      delete (navigator as { userActivation?: unknown }).userActivation;
+    }
+  });
+
+  it("cuts a long site on the offer at its start, as an address bar does: on a phone the end of its name, the part that says whose it is, stays on screen", async () => {
+    const activation = { isActive: true };
+    Object.defineProperty(navigator, "userActivation", { configurable: true, value: activation });
+    try {
+      await open("demo");
+      const frame = document.querySelector<HTMLIFrameElement>("[data-testid=service-view-frame]")!;
+      const origin = new URL(frame.src).origin;
+      const inFrame = { postMessage: vi.fn() };
+      Object.defineProperty(frame, "contentWindow", { value: inFrame, configurable: true });
+      dispatchEvent(new MessageEvent("message", { data: { type: BRIDGE_OPEN_LINK, url: "https://accounts.google.com.sign-in-verify.example.net/login" }, origin, source: inFrame as unknown as Window }));
+      const offer = document.querySelector<HTMLButtonElement>("[data-testid=service-view-link]")!;
+      expect(offer.textContent).toBe("Open ⁨accounts.google.com.sign-in-verify.example.net⁩");
+      // The words around the site never shrink; the site alone does, from its start (an end-to-start box for a
+      // start-to-end name: the ellipsis falls on its left, before "accounts", never on "example.net").
+      const site = offer.querySelector<HTMLElement>("[data-testid=service-view-link-site]")!;
+      expect(site.textContent).toBe("⁨accounts.google.com.sign-in-verify.example.net⁩");
+      expect(site.style.direction).toBe("rtl");
+      expect(site.style.textOverflow).toBe("ellipsis");
+      expect(parseFloat(site.style.minWidth)).toBe(0);
+      expect(offer.style.overflow).not.toBe("hidden");
+    } finally {
       delete (navigator as { userActivation?: unknown }).userActivation;
     }
   });

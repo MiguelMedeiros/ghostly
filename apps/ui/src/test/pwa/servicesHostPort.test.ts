@@ -53,7 +53,7 @@ describe("a services host given with a port", () => {
   });
 
   it("hands the bridge its port when it says it loaded, from the origin the browser gives it", async () => {
-    const words = { unreachable: "Not reachable", failed: "Failed", close: "Close", callOn: "End the call to open it.", tooSlow: "Too slow", offline: "Your contact is offline", retry: "Try again", blocked: "", unguarded: "", label: "Demo, shared by Demo bot", owner: "Demo bot's app, running on their machine. Not Ghostly.", hostError: () => null };
+    const words = { unreachable: "Not reachable", failed: "Failed", close: "Close", callOn: "End the call to open it.", tooSlow: "Too slow", offline: "Your contact is offline", retry: "Try again", blocked: "", unguarded: "", label: "Demo, shared by Demo bot", owner: "Demo bot's app, running on their machine. Not Ghostly.", openLink: (site: string) => `Open ${site}`, hostError: () => null };
     try {
       await openServiceView({ host, tag: "ybndrfg8ejkmcpqx", peer: PEER, service: "demo", title: "Demo", send: async () => { throw new Error("not asked"); }, words });
       const origin = `https://${await serviceLabel("ybndrfg8ejkmcpqx", PEER, "demo")}.svc.ghostly.example`;

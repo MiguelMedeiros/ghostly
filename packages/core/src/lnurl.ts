@@ -261,7 +261,7 @@ export function parsePayParams(body: unknown, destination: LightningDestination)
   return {
     destination, callback: callback.href, callbackDomain: callback.host,
     minSendable: minSendable as number, maxSendable: maxSendable as number, minSat, maxSat,
-    metadata, descriptionHash: hex(sha256(new TextEncoder().encode(metadata))), description: description.slice(0, 280), identifier, commentAllowed: comment,
+    metadata, descriptionHash: hex(sha256(new TextEncoder().encode(metadata))), description: stripHidden(description.replace(/\s+/g, " ")).slice(0, 280), identifier, commentAllowed: comment,
   };
 }
 
@@ -280,10 +280,13 @@ export function invoiceCallbackUrl(params: LnurlPayParams, amountSat: number, co
   return url.href;
 }
 
-/** A success action's link: HTTPS, bounded, and no user part ("https://www.paypal.com@evil.example" opens evil.example). */
-function successUrl(text: string): boolean {
+/**
+ * A success action's link: HTTPS, bounded, no user part ("https://www.paypal.com@evil.example" opens evil.example),
+ * and on the callback's own host (LUD-09), so a service cannot hand out a link to somewhere else.
+ */
+function successUrl(text: string, host: string): boolean {
   if (!/^https:\/\//i.test(text) || text.length > LNURL_LIMITS.maxUrlLength) return false;
-  try { const url = new URL(text); return !url.username && !url.password; } catch { return false; }
+  try { const url = new URL(text); return !url.username && !url.password && url.host === host; } catch { return false; }
 }
 
 /**
@@ -304,7 +307,7 @@ export function parseInvoiceCallback(body: unknown, params: LnurlPayParams, amou
   const action = body.successAction;
   if (isRecord(action)) {
     if (action.tag === "message" && typeof action.message === "string") successAction = { tag: "message", message: reason(action.message) };
-    else if (action.tag === "url" && typeof action.url === "string" && successUrl(action.url)) successAction = { tag: "url", description: reason(action.description), url: action.url };
+    else if (action.tag === "url" && typeof action.url === "string" && successUrl(action.url, params.callbackDomain)) successAction = { tag: "url", description: reason(action.description), url: action.url };
   }
   return { invoice, successAction };
 }
