@@ -662,7 +662,7 @@ describe("listen with an allowlist and --turns", () => {
   it("a turn's id older than the newest page reads the whole history once, not on every command that names it", async () => {
     const history = Array.from({ length: 5000 }, (_, i) => ({ id: `peer_m${i}`, sender: "peer", text: `m${i}`, timestamp: i }));
     const node = {
-      getState: () => ({ links: [{ id: "c1", peerPubKeyZ32: KEY, label: "Alice", pairing: { status: "ready" } }], groups: [], settings: {}, transport: {} }),
+      chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [{ id: "c1", peerPubKeyZ32: KEY, label: "Alice", pairing: { status: "ready" } }], groups: [], settings: {}, transport: {} }),
       messagePage: vi.fn(async () => ({ messages: history.slice(-200), more: true })),
       getMessages: vi.fn(async () => history),
       getMessage: vi.fn(async (_linkId: string, id: string) => history.find((m) => m.id === id)),
