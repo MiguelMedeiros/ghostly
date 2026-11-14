@@ -17,7 +17,8 @@ import { BUILT_IN_APPS, DEFAULT_APP_STORES, type BuiltInApp } from "./appDefault
  *
  * - A bundle is kept whole, by digest, in file storage (`app-<digest>`), the same storage as chat files, but with no
  *   `files` row: a backup carries the installed list, the stores and the storage, never the bundles, and a restored
- *   profile shows "Needs its files" until a source answers again.
+ *   profile shows "Needs its files" until a source answers again. A device move hands the bundles its records name over
+ *   by digest beside the chat files (`handoffProfile.ts` in the app).
  * - The installed list (reference, publisher, the `sequence` and digest installed, the permissions granted, the
  *   manifest), the stores (URL and pinned key, with the last index read) and the storage rows are in the profile's
  *   database (`STORES.apps`, `STORES.appStores`, `STORES.appStorage`).
