@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { StoredMessage } from "@ghostly/browser/shared/types";
 import type { ApiContext } from "../src/api";
 import { waitForConfirmed, waitForEdit, waitForGroupFrame, waitForRemoval } from "../src/waits";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.chat
 
 /** A timed-out `edit --wait confirmed` and `group edit --wait sent` say what happens next, as `send`'s timeout does. */
@@ -10,7 +11,7 @@ const pending = { linkId: "chat-one", id: "me_1", text: "new", sender: "me", tim
 function fake(mode: "one-shot" | "daemon", links: unknown[] = [], groups?: unknown[]) {
   const node = {
     getMessage: vi.fn(async () => pending), groupTaken: vi.fn(() => 0), removalPending: vi.fn(() => true),
-    chatUnconfirmed: vi.fn(() => ({ reactions: [1], pin: null })), getState: () => ({ links, groups }),
+    chatUnconfirmed: vi.fn(() => ({ reactions: [1], pin: null })), chatView: chatViewOf, getState: () => ({ links, groups }),
   };
   return { runtime: { server: { node } }, mode } as unknown as ApiContext;
 }
