@@ -7,6 +7,7 @@ import { callApi, type ApiContext } from "../src/api";
 import { CallManager, type CallEngine } from "../src/calls/manager";
 import { allowlist } from "../src/listen";
 import { chatViewOf, groupViewOf } from "./support/chatView";
+import { pasted } from "./support/pasted";
 // covers: headless.groups
 
 /**
@@ -164,5 +165,27 @@ describe("listen --from a group, --group a chat", () => {
       await expect(allowlist([ref], [], withBob, async () => null)).rejects.toMatchObject({ details: { chat: "chat-bob" } });
     }
     expect(await allowlist(["chat-bob"], [], withBob, async () => null)).toBeDefined();
+  });
+});
+
+describe("a hint naming a group a shell would expand", () => {
+  // `"$5 lunch"` pasted into a shell named ` lunch`; a backtick in the name ran a command.
+  const call = (name: string) => (method: string, params: Record<string, unknown>) => {
+    const ctx = fake();
+    const node = (ctx.runtime as unknown as { server: { node: { getState: () => EngineState } } }).server.node;
+    node.getState = () => ({ ...state(), groups: [{ ...crew, name }] }) as unknown as EngineState;
+    return callApi(ctx, method, params);
+  };
+  /** The command line the refusal offers, as a shell reads it pasted. */
+  const offered = async (refusal: Promise<unknown>) => {
+    const message = await refusal.then(() => "", (error: Error) => error.message);
+    expect(message).toContain(": ghostly ");
+    return pasted(message.slice(message.indexOf(": ghostly ") + 2));
+  };
+
+  it.each(["$5 lunch", "a`echo x`b", "it's", "x!y"])("%s: the command offered names the same group", async (name) => {
+    expect(await offered(call(name)("chat.send", { chat: name, text: "hi" }))).toEqual(["ghostly", "group", "send", name, "[text...]"]);
+    expect(await offered(call(name)("chat.history", { chat: name }))).toEqual(["ghostly", "group", "history", name]);
+    expect(await offered(allowlist([name], [], call(name), async () => null))).toEqual(["ghostly", "listen", "--group", name]);
   });
 });
