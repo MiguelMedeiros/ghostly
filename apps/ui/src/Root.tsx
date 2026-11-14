@@ -32,6 +32,7 @@ import { onChatNotStored, reportChatNotStored } from "./lib/chatNotStored";
 import { LINK_GROUPS_WAITING, groupPath, linkGroupId, linkGroupsWaiting } from "./lib/groups";
 import { useEngineValue } from "./lib/engineState";
 import { engine } from "@ghostly/browser/platform/engine";
+import { trimEndOf } from "@ghostly/core";
 import { useAnchorHome, useAppNavigation } from "./hooks/useAppNavigation";
 import { modalOpen } from "./hooks/useAppCommands";
 import { problemText, type Problem } from "./lib/problemText";
@@ -58,7 +59,7 @@ const Wallet = menuPage(() => import("./pages/Wallet").then((m) => m.Wallet));
  * it when the address changes while the app is open: the name as the path, the code as its hash. Null for anything else.
  */
 function namedDeviceLink(pathname: string, hash: string): string | null {
-  const named = `#${pathname.replace(/^\//, "")}${hash.replace(/\/+$/, "")}`;
+  const named = `#${pathname.replace(/^\//, "")}${trimEndOf(hash, "/")}`;
   const link = readDeviceLink(named);
   return link.profile && /^ghostly1/i.test(link.code) && isDeviceCode(link.code) ? named : null;
 }
