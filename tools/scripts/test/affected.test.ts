@@ -764,6 +764,17 @@ describe("--unit-group: the draft tier's unit projects over a few runners", () =
     expect(r.stdout).toMatch(/\n {2}other {3}browser {3}group 2 runs it \(related: /);
     expect(r.stdout).toMatch(/\n {2}other {3}core {6}group 4 runs it \(related: /);
   }, 60_000);
+
+  it("is what ci.yml's draft tier runs: one runner per group, each project of UNIT_ALONE on its own", () => {
+    const ci = readFileSync(join(import.meta.dirname, "..", "..", "..", ".github", "workflows", "ci.yml"), "utf8");
+    const job = /^ {2}affected-tests:\n((?: {4}.*\n|\n)+)/m.exec(ci)?.[1] ?? "";
+    const list = /^ {8}group: \[([\d, ]+)\]$/m.exec(job)?.[1].split(",").map(Number) ?? [];
+    const count = list.length;
+    expect(list).toEqual(Array.from({ length: count }, (_, i) => i + 1));
+    expect(count).toBeGreaterThan(UNIT_ALONE.length);
+    expect(job).toContain(`name: Affected unit tests (draft \${{ matrix.group }}/${count})`);
+    expect(job).toMatch(new RegExp(`run: node tools/scripts/test-affected\\.mjs .*--unit-group \\$\\{\\{ matrix\\.group \\}\\}/${count}( |$)`, "m"));
+  });
 });
 
 describe("the real inventory", () => {
