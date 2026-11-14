@@ -5801,15 +5801,17 @@ export class GhostlyNode implements EngineImplementation {
       live.rttUnsaved = false;
       void db.patchLink(live.stored.id, { transportLog, transportHistory }, relaxed).catch(() => {});
     }
-    this.emitState();
+    // The chat's own story: its view alone is built again.
+    this.chatChanged(live.stored.id);
   }
 
   /** A round trip measured on the chat's transport: in the view at once, on disk at most every `RTT_SAVE_MS`. */
   private noteRtt(live: LiveLink, ms: number): void {
-    // A pong comes every few seconds on every live chat: one that shows about the same round trip posts no state.
+    // A pong comes every few seconds on every live chat: one that shows about the same round trip posts no state, and
+    // one that moved builds only its chat's view (a group's edge: its group's).
     const moved = live.rttPosted === undefined || Math.abs(live.rttPosted - ms) >= RTT_STEP_MS;
     const log = this.transportLogOf(live);
-    if (!log) { if (moved) this.emitState(); return; }
+    if (!log) { if (moved) this.chatChanged(live.stored.id); return; }
     const changed = log.rtt(ms);
     if (changed) live.rttUnsaved = true;
     const now = Date.now();
@@ -5817,7 +5819,7 @@ export class GhostlyNode implements EngineImplementation {
       live.rttSavedAt = now;
       this.saveTransportLog(live, log, { relaxed: true });
     } else if (changed) this.saveTransportLog(live, log, { toDisk: false });
-    else if (moved) this.emitState();
+    else if (moved) this.chatChanged(live.stored.id);
   }
 
   /** Which ways of paying one chat allows. */
