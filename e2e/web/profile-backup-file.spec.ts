@@ -30,7 +30,7 @@ async function emptyFileStorage(context: BrowserContext): Promise<void> {
   await page.close();
 }
 
-test("a profile goes to a file and comes back as a new profile, only with its passphrase", { tag: ["@feature:backup.profile.file", "@feature:backup.profile.same-device", "@feature:backup.passphrase-rules", "@feature:backup.envelope", "@feature:profiles.switch"] }, async ({ peer, browserName }) => {
+test("a profile goes to a file and comes back as a new profile, only with its passphrase", { tag: ["@journey", "@feature:backup.profile.file", "@feature:backup.profile.same-device", "@feature:backup.passphrase-rules", "@feature:backup.envelope", "@feature:profiles.switch"] }, async ({ peer, browserName }) => {
   const { page } = await peer("backup-file", storage(browserName));
 
   // A profile worth keeping: a name of its own, a chat and a nickname.

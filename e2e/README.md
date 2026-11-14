@@ -6,6 +6,7 @@ Real Chromium against the shipped build: the web app (`apps/web/dist`, served by
 npm run test:affected -- --port 50310   # only the tests tagged with the features your diff touches (docs/TESTING.md)
 npm run test:e2e            # everything (builds the web app and the extension first)
 npm run test:e2e:offline    # everything but the tests that need the internet
+npm run test:e2e:journeys   # only the 15 golden user journeys (`@journey`), about 10 minutes on 2 workers
 npm run test:e2e:ui         # pick, watch and debug tests
 npm run test:e2e:report     # the report of the last run: traces, videos, screenshots of failures
 HEADED=1 npm run test:e2e -- --project=extension   # watch the extension windows
@@ -476,6 +477,32 @@ devices, clipboard permissions) and CI installs Chromium only. Not in CI; run it
 It runs one test at a time: Playwright's WebKit keeps the origin-private file system of every profile it opens in one
 place per origin (`~/Library/WebKit/org.webkit.Playwright` on a Mac), so each test empties it as it starts, and two at
 once would delete each other's files.
+
+## Golden journeys
+
+What people do most, one test each, tagged `@journey`: `npm run test:e2e:journeys` runs them alone, web project only.
+Each is a test that already ran for its own sake, picked as the steadiest of its journey; a new one only where none
+covered it. Retagging one moves the journey: keep this table in step.
+
+| Journey | Test |
+|---|---|
+| Pair by invite | `paired.spec.ts` › a first connection needs no comparison |
+| Send, edit and react | `edits.spec.ts` › an edit shows on the contact's side in place; `reactions.spec.ts` › 1:1 reactions |
+| Reconnect after a restart | `restart-relink.spec.ts` › a reloaded page is live again with its contact |
+| A message to an away contact (DHT) | `dht-delivery.spec.ts` › DHT published while contact is away |
+| Create a group and join by link; a message and a file in a group | `group-files.spec.ts` › a new group, joined through its link |
+| A large file | `large-files.spec.ts` › a file over 16 MiB goes through file storage |
+| A voice and a video call | `calls.spec.ts` › an audio call grows a camera and a screen |
+| Pay and request Cashu in a chat | `wallet-providers.spec.ts` › Cashu: test coins in, a Send in the chat, and a Request paid in the chat |
+| Receive and pay Lightning from the wallet | `wallet-providers.spec.ts` › Lightning: Receive only makes an invoice, out by paying someone else's invoice |
+| Back up and restore a profile | `profile-backup-file.spec.ts` › a profile goes to a file and comes back |
+| Link a new device | `devices-enroll.spec.ts` › a profile adds a second device |
+| Switch profile | `profile-switcher.spec.ts` › the account bar switches profiles in one tap |
+| Open a mini-app (Chess) | `apps-built-in.spec.ts` › opened from a chat's Apps, Chess runs with the contact |
+| Network and privacy settings | `network-settings.spec.ts` › with Hide my IP from contacts on, connections use the TURN server alone |
+
+The two wallet journeys pay through the Cashu test mint: give them a mint of your own with `E2E_MINT_URL` (see
+[No servers](#no-servers)), or they reach the public one.
 
 ## When they run
 
