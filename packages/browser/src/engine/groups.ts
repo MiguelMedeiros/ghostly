@@ -162,8 +162,11 @@ export interface GroupsHost {
    * in a history they hold, so a group joined again showed the old one under what came after, until a reload.
    */
   historyGone?(groupId: string): void;
-  /** Something the pages show changed: they get a state. `delayMs`: how long it may wait (the engine's own wait when not given). */
-  emit(delayMs?: number): void;
+  /**
+   * Something the pages show changed: they get a state. `delayMs`: how long it may wait (the engine's own wait when not
+   * given). `groupId`: only that group's view changed (a member typing), and the others' are kept; none, all of them.
+   */
+  emit(delayMs?: number, groupId?: string): void;
   /** My name, sealed with my messages in every group: past 16 members, most members hold no edge with me to hear it there. */
   myNick?(): string | undefined;
   /** An application frame a member of a community sent the group (a note about a payment, a request to everyone). */
@@ -3395,6 +3398,8 @@ export class Groups {
         const came = m.sender === session.myKey ? timestamp : cameAt(timestamp, stored, arrivalNow(this.now()));
         markCame(this.marks, state.id, m.id, came, m.sender !== session.myKey, mentioned);
         noteCame(this.stored.get(state.id), came, m.sender !== session.myKey, mentioned);
+        // A new row's marks (the list's order, unread) moved after its state was asked for: this group's view, named again.
+        if (stored !== false) this.host.emit(undefined, state.id);
         // What the member was typing arrived: it is not typing any more.
         this.typings.messageFrom(state.id, m.sender);
       },
