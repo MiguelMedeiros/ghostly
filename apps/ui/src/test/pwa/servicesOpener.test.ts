@@ -1038,6 +1038,31 @@ describe("a contact's app shown over the app", () => {
     }
   });
 
+  it("cuts a long site on the offer at its start, as an address bar does: on a phone the end of its name, the part that says whose it is, stays on screen", async () => {
+    const activation = { isActive: true };
+    Object.defineProperty(navigator, "userActivation", { configurable: true, value: activation });
+    try {
+      await open("demo");
+      const frame = document.querySelector<HTMLIFrameElement>("[data-testid=service-view-frame]")!;
+      const origin = new URL(frame.src).origin;
+      const inFrame = { postMessage: vi.fn() };
+      Object.defineProperty(frame, "contentWindow", { value: inFrame, configurable: true });
+      dispatchEvent(new MessageEvent("message", { data: { type: BRIDGE_OPEN_LINK, url: "https://accounts.google.com.sign-in-verify.example.net/login" }, origin, source: inFrame as unknown as Window }));
+      const offer = document.querySelector<HTMLButtonElement>("[data-testid=service-view-link]")!;
+      expect(offer.textContent).toBe("Open ⁨accounts.google.com.sign-in-verify.example.net⁩");
+      // The words around the site never shrink; the site alone does, from its start (an end-to-start box for a
+      // start-to-end name: the ellipsis falls on its left, before "accounts", never on "example.net").
+      const site = offer.querySelector<HTMLElement>("[data-testid=service-view-link-site]")!;
+      expect(site.textContent).toBe("⁨accounts.google.com.sign-in-verify.example.net⁩");
+      expect(site.style.direction).toBe("rtl");
+      expect(site.style.textOverflow).toBe("ellipsis");
+      expect(parseFloat(site.style.minWidth)).toBe(0);
+      expect(offer.style.overflow).not.toBe("hidden");
+    } finally {
+      delete (navigator as { userActivation?: unknown }).userActivation;
+    }
+  });
+
   it("keeps the view's bar on screen, and draws no dialog of the browser's over it: no full screen, no alert or prompt", async () => {
     await open("one");
     const frame = document.querySelector("[data-testid=service-view-frame]")!;
