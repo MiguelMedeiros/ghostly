@@ -49,6 +49,11 @@ export interface FileDeskDeps {
   place?(linkId: string): number;
   transfers: Map<string, FileTransferView>;
   changed(delayMs?: number): void;
+  /**
+   * A transfer's progress in this chat, and nothing else of it: the next state (after `changed`'s 250 ms) builds this
+   * chat's view again, not every chat's. Absent: `changed(250)`.
+   */
+  progressed?(linkId: string): void;
   /** The state to the app now, not after `changed`'s wait: for a transfer the app must have before its message. */
   flush?(): void;
   /** A transfer ended, either way: its local file id and how (for the message's details). */
@@ -495,6 +500,8 @@ export class FileDesk {
   private changed(linkId: string, record: FileTransferRecord, transferred: number, progress: boolean): void {
     const chat = this.chat(linkId);
     const said = record.direction === "in" ? chat.announced.get(record.id) : undefined;
+    // Bytes moving on a transfer already shown: its view (`transfers`) and its chat's are all that change.
+    const moving = progress && !said && (record.direction === "out" || chat.local.has(record.id));
     if (said) {
       // The offer of a file said on the floor: it takes over the bubble that waited for it, in its place. What the
       // offer says is what the file is.
@@ -549,7 +556,8 @@ export class FileDesk {
       }
     }
     if (record.state === "done" && record.direction === "in") this.deps.wireIds(linkId)?.add(record.id);
-    this.deps.changed(progress ? 250 : 50);
+    if (moving && this.deps.progressed) this.deps.progressed(linkId);
+    else this.deps.changed(progress ? 250 : 50);
   }
 
   /**

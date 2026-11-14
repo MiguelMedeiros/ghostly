@@ -1152,6 +1152,8 @@ export class GhostlyNode implements EngineImplementation {
     },
     transfers: this.transfers,
     changed: (delayMs) => this.emitState(delayMs),
+    // A file's progress, 4 states a second: its chat's view built again (what room its contact said it has), not every chat's.
+    progressed: (linkId) => { if (this.links.has(linkId)) this.chatChanged(linkId, 250); else this.emitState(250); },
     flush: () => this.flushState(),
     settled: (linkId, fileId, record, seen) => {
       if (seen && record.direction === "in" && record.state === "done") this.cueFeedback({ cue: "downloaded", key: fileId }, this.chatOf(linkId));
@@ -10699,9 +10701,9 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /** A change of one chat's own (its link's word, its name): the next state builds this chat's view again, and reuses the others'. */
-  private chatChanged(linkId: string): void {
+  private chatChanged(linkId: string, delayMs = 50): void {
     this.changedChats?.add(linkId);
-    this.scheduleState(50);
+    this.scheduleState(delayMs);
   }
 
   /** A change of one group's own (a message, a member typing): the next state builds this group's view again, and keeps the others'. */

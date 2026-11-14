@@ -83,6 +83,28 @@ describe("the state a change of one chat pushes", () => {
     expect(view(third, b.id)).toBe(view(second, b.id));
   });
 
+  it("builds only the chat a files/3 transfer moves in for its progress, and no group", async () => {
+    const { node, next } = engine();
+    const a = await addChat(node, "Alice"), b = await addChat(node, "Bob");
+    let built = 0;
+    node["groups"].views = () => { built++; return []; };
+    node["emitState"]();
+    await next();
+    built = 0;
+    const record = { id: "w1", direction: "out", state: "active", confirmed: 0, file: { name: "x.bin", size: 1_000, mime: "application/octet-stream", timestamp: 1_000 } } as never;
+    // A send going on, then its progress (the receiver's acks): 4 states a second for as long as it moves.
+    node["fileDesk"]["changed"](b.id, record, 0, false);
+    const second = await next();
+    built = 0;
+    node["fileDesk"]["changed"](b.id, record, 500, true);
+    const third = await next();
+    expect(Object.values(third.transfers).map(t => t.transferred)).toEqual([500]);
+    expect(view(third, a.id)).toBe(view(second, a.id));
+    // Its own chat's view is built again: it shows the room the contact said it has for files (`peerFileRoom`).
+    expect(view(third, b.id)).not.toBe(view(second, b.id));
+    expect(built).toBe(0);
+  });
+
   it("keeps every group's view for a change of a 1:1 chat's own, and builds them again for a contact's name or a group's change", async () => {
     const { node, next } = engine();
     const a = await addChat(node, "Alice");
