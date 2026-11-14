@@ -154,6 +154,14 @@ describe("Settings → Audio & video", () => {
     expect(screen.getByTestId("settings-microphone")).toHaveAttribute("data-value", "");
   });
 
+  // In a language of the other direction, a name's ending punctuation was drawn on its other side ("!Mic").
+  it("names the device not connected in its own direction", async () => {
+    chooseDevice("audioinput", { id: "mic-usb", label: "Mic!" });
+    renderApp(<MediaSettings />, { language: "ar" });
+    const bdi = (await screen.findByTestId("settings-microphone-missing")).querySelector("bdi");
+    expect(bdi?.textContent).toBe("Mic!");
+  });
+
   it("follows a headset plugged in", async () => {
     chooseDevice("audioinput", { id: "mic-usb", label: "Blue Yeti" });
     renderApp(<MediaSettings />);
