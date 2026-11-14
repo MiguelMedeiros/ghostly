@@ -93,4 +93,21 @@ describe("a store's last read that failed", () => {
     await act(async () => {});
     expect(await screen.findByTestId("toast-text")).toHaveTextContent("You are offline.");
   });
+
+  it("says, politely, what a Refresh that worked read: the store's new count", async () => {
+    const listing = (n: number) => ({ ref: `ghostly:app/${KEY}/app${n}`, sequence: 1, digest: `d${n}`, urls: [], title: `App ${n}`, tagline: "" });
+    const off = store({ problem: "offline", apps: [1, 2, 3].map(listing) });
+    let now = off;
+    fakeEngine.on("appStoreRefresh", () => { now = store({ apps: [1, 2, 3, 4, 5].map(listing) }); return [now]; });
+    fakeEngine.on("appStoreList", () => [now]);
+    renderApp(<Apps />, { route: "/apps" });
+    await screen.findByTestId("app-store-problem");
+    const region = screen.getByTestId("toast-region");
+    expect(region).toHaveAttribute("aria-live", "polite");
+    expect(region).toHaveTextContent("");
+    await userEvent.click(within(screen.getByTestId("app-store")).getByTestId("app-store-refresh"));
+    await waitFor(() => expect(screen.queryByTestId("app-store-problem")).toBeNull());
+    expect(region).toHaveTextContent("Store off is up to date: 5 apps");
+    expect(screen.getByTestId("toast")).toHaveAttribute("data-tone", "success");
+  });
 });

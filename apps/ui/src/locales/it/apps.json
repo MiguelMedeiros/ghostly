@@ -180,6 +180,7 @@
     "noMatch": "Nessuna app di questo store corrisponde.",
     "notRead": "Non ancora letto",
     "read": "Leggi",
+    "readDone": "Elenco di {{name}} aggiornato: {{apps}}",
     "readNamed": "Leggi {{name}}",
     "refresh": "Aggiorna",
     "refreshNamed": "Aggiorna {{name}}",
