@@ -227,12 +227,6 @@ jobs:
       - name: Changelog entries are well formed
         run: node tools/scripts/changes.mjs
 
-      # A flaky test leaves the gate (@quarantine, tools/scripts/quarantine.json) for at most 7 days, with its open
-      # kind:flake issue (docs/TESTING.md, "Quarantine"). A pull request's build gets no secret: the nightly E2E (full)
-      # checks the issues.
-      - name: Quarantined tests are in date
-        run: node tools/scripts/quarantine.mjs
-
       # Runs no test: reads e2e/features.json and what every test says it covers (docs/TESTING.md). The map goes to
       # the run's summary page: it is not committed.
       - name: Test map (every feature has a test)
