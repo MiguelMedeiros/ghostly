@@ -135,6 +135,8 @@
     "reviewedSatsGoneNext": "Nothing was sent. Review it again.",
     "sentAfterReview": "Another payment left this wallet since the review",
     "sentAfterReviewNext": "Create a new review.",
+    "serviceShareFull": "A contact can reach at most {{max}} of your apps",
+    "serviceShareFullNext": "Take one back from them before sharing another.",
     "testMintOnMainnet": "This is a test mint: its sats are worthless",
     "testMintOnMainnetNext": "Add it to a Testnet Cashu wallet.",
     "unknownPaymentIntent": "Unknown payment intent",

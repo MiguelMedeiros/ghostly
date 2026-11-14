@@ -207,6 +207,8 @@ function ServiceCard({ service, online, contacts, onRemove }: { service: SharedS
   // refused until the person allows it here, from this click. Asked again when Share turns on or off: taking back
   // Chrome's site access turns the app off, and the card mounted before it would say "Shared" once it is on again.
   const [needsAccess, setNeedsAccess] = useState(false), [checked, setChecked] = useState(0);
+  // A grant the engine refused (that contact already has as many apps as it can see): said under its switch.
+  const [notGranted, setNotGranted] = useState<{ contact: string; problem: Problem } | null>(null);
   useEffect(() => {
     let live = true;
     void platform.localAccessNeeded?.(service.target).then((needed) => { if (live) setNeedsAccess(needed); }, () => {});
@@ -260,9 +262,15 @@ function ServiceCard({ service, online, contacts, onRemove }: { service: SharedS
           {contacts.map((c) => {
             const on = granted.includes(c.key);
             return (
-              <div key={c.key} className="flex items-center gap-3 px-4 py-2.5 min-h-12" data-testid="service-grant">
-                <div className="min-w-0 flex-1 flex flex-col items-start"><p dir="auto" className="max-w-full text-sm text-text-primary truncate">{c.name}</p><p dir="auto" className="max-w-full text-[11px] text-text-muted font-mono truncate">{c.short}</p></div>
-                <Switch label={t("services.letReach", { contact: c.name, app: service.name })} checked={on} onChange={(next) => void platform.setServiceShared(service.id, c.key, next)} />
+              <div key={c.key} className="px-4 py-2.5 space-y-2" data-testid="service-grant">
+                <div className="flex items-center gap-3 min-h-7">
+                  <div className="min-w-0 flex-1 flex flex-col items-start"><p dir="auto" className="max-w-full text-sm text-text-primary truncate">{c.name}</p><p dir="auto" className="max-w-full text-[11px] text-text-muted font-mono truncate">{c.short}</p></div>
+                  <Switch label={t("services.letReach", { contact: c.name, app: service.name })} checked={on} onChange={(next) => {
+                    setNotGranted(null);
+                    platform.setServiceShared(service.id, c.key, next).catch((e) => setNotGranted({ contact: c.key, problem: problemText(e, t) }));
+                  }} />
+                </div>
+                {notGranted?.contact === c.key && <Notice problem={notGranted.problem} testId="service-grant-problem" />}
               </div>
             );
           })}

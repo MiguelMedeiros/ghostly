@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
+import { engineError } from "@ghostly/core";
 import { callApi, type ApiContext } from "../src/api";
+import { asCliError } from "../src/errors";
 import { chatViewOf } from "./support/chatView";
 // covers: headless.services
 
@@ -41,5 +43,14 @@ describe("service share names its chat", () => {
       await expect(callApi(ctx, "service.share", { service: "svc-1", chat })).rejects.toMatchObject({ code: "bad_request", details: { chat: "chat-mallory", contact: KEY } });
     }
     expect(node.setServiceShared).not.toHaveBeenCalled();
+  });
+
+  // The engine refuses a grant past what the contact can see (before, every share answered `shared: true`, and the
+  // contact never saw the 17th app): `refused`, the person's to fix, in the engine's words.
+  it("past the apps a contact can see: refused, nothing said shared", async () => {
+    const { ctx, node } = fake();
+    node.setServiceShared.mockRejectedValueOnce(engineError("serviceShareFull", { max: 13 }));
+    const refusal = await callApi(ctx, "service.share", { service: "svc-1", chat: "chat-mallory" }).catch(asCliError);
+    expect(refusal).toMatchObject({ code: "refused", message: "A contact can reach at most 13 of your apps: take one back from them before sharing another" });
   });
 });
