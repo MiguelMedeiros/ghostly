@@ -26,6 +26,7 @@ import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
 import { focusLost, working } from "../lib/focus";
 import { getPrefix } from "../lib/storage";
+import { FocusSafeButton } from "./ui/FocusSafeButton";
 
 /**
  * The one list every profile of the device kept before: it cannot be told apart by profile, so it goes, unread. Money
@@ -300,7 +301,7 @@ function LightningCard({ invoice, mine, off, peerPubKey }: { invoice: Bolt11Invo
           <button ref={target} className={button} disabled={over !== undefined} {...working(busy)} data-testid="invoice-confirm" onClick={() => { if (busy) return; if (network === "mainnet") setConfirming(true); else void pay(quote, false); }}>
             {busy ? t("payments.invoice.paying") : t("payments.invoice.payWithFee", { amount: formatAmount(quote.amount, t.language), unit: satsIn(t, network), fee: formatAmount(quote.feeReserve, t.language) })}
           </button>
-          <button className={quiet} disabled={busy} onClick={() => setQuote(null)}>{t("common.cancel")}</button>
+          <FocusSafeButton className={quiet} disabled={busy} onClick={() => setQuote(null)}>{t("common.cancel")}</FocusSafeButton>
         </Fragment>
       ) : (
         <Fragment key="pay">

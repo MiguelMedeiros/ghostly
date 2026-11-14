@@ -206,7 +206,8 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     await user.type(screen.getByTestId("device-add-password"), "a long password");
     await user.click(screen.getByTestId("device-add-next"));
     await user.dblClick(await screen.findByTestId("device-add-match", {}, { timeout: 3_000 }));
-    expect(screen.getByTestId("device-add-match")).toBeDisabled();
+    // The one pressed keeps the focus, so it is off by aria-disabled; the other is plain disabled.
+    expect(screen.getByTestId("device-add-match")).toHaveAttribute("aria-disabled", "true");
     expect(screen.getByTestId("device-add-no-match")).toBeDisabled();
     await user.click(screen.getByTestId("device-add-no-match"));
     expect(engine.callsTo("deviceEnrollConfirm")).toEqual([{ match: true }]);

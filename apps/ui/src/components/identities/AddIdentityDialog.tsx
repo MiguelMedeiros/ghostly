@@ -21,6 +21,7 @@ import { localProvider } from "../../lib/providerWords";
 import { exactText } from "../../lib/exactText";
 import { radioGroupKeys, radioTabStop } from "../../lib/radioGroup";
 import { CopiedStatus } from "../chat/LinkQrDialog";
+import { FocusSafeButton } from "../ui/FocusSafeButton";
 
 const VALIDITY = [7, 30, 90, 180, 365];
 
@@ -272,10 +273,10 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
                 onKeyDown={e => radioGroupKeys(e, { choose: true })}>{provider.subject.label}
                 <div className="mt-1 grid gap-2 grid-cols-2 @sm:grid-cols-3">
                   {provider.subject.options.map((o, i) => (
-                    <button key={o.value} type="button" role="radio" aria-checked={subject === o.value} disabled={busy} onClick={() => setSubject(o.value)} tabIndex={i === subjectStop ? 0 : -1}
+                    <FocusSafeButton key={o.value} type="button" role="radio" aria-checked={subject === o.value} disabled={busy} onClick={() => setSubject(o.value)} tabIndex={i === subjectStop ? 0 : -1}
                       className={`flex items-center gap-2 rounded-xl border p-2 text-sm cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${subject === o.value ? `border-accent bg-accent/5 text-text-primary ${chosenInForcedColors}` : "border-border text-text-secondary hover:bg-surface-alt"}`}>
                       <ProviderMark provider={provider.id} subject={o.value} /><span className="truncate">{o.label}</span>
-                    </button>
+                    </FocusSafeButton>
                   ))}
                 </div>
               </div>

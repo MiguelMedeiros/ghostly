@@ -18,6 +18,7 @@ import { DeviceDialog, Digits, InfoLine, Status, field, primaryButton, quietButt
 import { said } from "../../lib/notices";
 import { fillNames } from "../../lib/fillNodes";
 import { problemLine } from "../../lib/problemText";
+import { FocusSafeButton } from "../ui/FocusSafeButton";
 
 /**
  * Add a device, on the active device (WISP 06 § Adding a device). First the lock password, in the same dialog: a device
@@ -161,7 +162,7 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
             </div>
           )}
           {error && !error.field && <p data-testid="device-add-error" className="text-danger">{error.text}</p>}
-          <button type="submit" data-testid="device-add-next" disabled={busy || !password} className={primaryButton}>{t("devices.password.next")}</button>
+          <FocusSafeButton type="submit" data-testid="device-add-next" disabled={busy || !password} className={primaryButton}>{t("devices.password.next")}</FocusSafeButton>
         </form>
       </DeviceDialog>
     );
@@ -195,8 +196,8 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
         <p data-testid="device-add-status" data-step="confirm" className="text-text-primary">{fillNames(t("devices.add.found"), { device: view.device })}</p>
         <Digits digits={view.digits} testId="device-add-digits" />
         <div className="grid grid-cols-2 gap-3">
-          <button type="button" data-testid="device-add-no-match" disabled={busy} onClick={() => void confirm(false)} className={quietButton}>{t("devices.add.noMatch")}</button>
-          <button type="button" data-testid="device-add-match" disabled={busy} onClick={() => void confirm(true)} className={primaryButton}>{t("devices.add.match")}</button>
+          <FocusSafeButton type="button" data-testid="device-add-no-match" disabled={busy} onClick={() => void confirm(false)} className={quietButton}>{t("devices.add.noMatch")}</FocusSafeButton>
+          <FocusSafeButton type="button" data-testid="device-add-match" disabled={busy} onClick={() => void confirm(true)} className={primaryButton}>{t("devices.add.match")}</FocusSafeButton>
         </div>
       </>}
       {view?.role === "inviter" && (view.step === "waiting" || view.step === "confirm") && !!view.refused && <Notice tone="warning" testId="device-add-refused">{t("devices.add.refused")}</Notice>}

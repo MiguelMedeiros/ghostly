@@ -4,6 +4,7 @@ import { focusInPlace } from "../../lib/focus";
 import { radioGroupKeys, radioTabStop } from "../../lib/radioGroup";
 import { useOptionalI18n, useT } from "../../contexts/I18nContext";
 import { useAmountText } from "../../hooks/useAmountText";
+import { FocusSafeButton } from "../ui/FocusSafeButton";
 
 /** The same building blocks as Settings, so a wallet's options read like any other option. */
 export { Section, Row, Block } from "../layout/Section";
@@ -86,14 +87,16 @@ const BUTTON = {
  * It is `aria-disabled`, not disabled (even when `disabled` is passed too): that would drop a keyboard's focus to the
  * page, and leave it there when the work fails. A press while loading, or a form's Enter on it, does nothing.
  * An `aria-disabled` passed in is kept: the caller's own "off for now", whose press it ignores itself.
+ * `disabled` that comes while it has the focus (another button's work, a field now unchanged) keeps it too, until the
+ * focus leaves (FocusSafeButton).
  */
 export function Button({ variant = "secondary", className = "", loading = false, disabled, onClick, children, ...props }: React.ComponentPropsWithRef<"button"> & { variant?: keyof typeof BUTTON; loading?: boolean }) {
   return (
-    <button type="button" {...props} disabled={disabled && !loading} aria-disabled={loading || props["aria-disabled"] || undefined} aria-busy={loading || undefined} data-loading={loading || undefined}
+    <FocusSafeButton type="button" {...props} disabled={disabled && !loading} aria-disabled={loading || props["aria-disabled"] || undefined} aria-busy={loading || undefined} data-loading={loading || undefined}
       onClick={(e) => { if (loading) e.preventDefault(); else onClick?.(e); }}
       className={`px-4 py-2 min-h-10 max-md:min-h-11 whitespace-nowrap rounded-lg text-sm transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed data-[loading]:opacity-80 data-[loading]:cursor-progress ${BUTTON[variant]} ${className}`}>
       {loading ? <span className="inline-flex items-center gap-2"><Spinner />{children}</span> : children}
-    </button>
+    </FocusSafeButton>
   );
 }
 

@@ -31,6 +31,7 @@ import { Notice } from "./ui/Notice";
 import { SecretGuardDialog } from "./SecretGuardDialog";
 import { findSecret, type SecretFinding } from "../lib/parse/secrets";
 import { fillNames } from "../lib/fillNodes";
+import { FocusSafeButton } from "./ui/FocusSafeButton";
 
 interface PaymentComposerProps {
   balance: number;
@@ -362,13 +363,13 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
           <input className="payment-back-memo" placeholder={t("payments.composer.memo")} aria-label={t("payments.composer.memo")} maxLength={140} value={memo} onChange={(e) => setMemo(e.target.value)} />
           <p className="payment-back-hint" data-testid={amountField.hint && !blocked ? "amount-unclear" : undefined}>{blocked ?? amountField.hint ?? (tooMuch ? t("payments.composer.tooMuch", { amount: formatAmount(holds!, t.language), unit }) : how(rail))}</p>
           {confirmSend ? <ConfirmRealMoney what={`${formatAmount(value, t.language)} ${unitFor(t, unit, value)}`} busy={busy !== null} onSend={() => void send(true)} onBack={() => setConfirmSend(false)} /> : <div className="payment-back-actions" data-turning={turning || undefined}>
-            <button data-testid="payment-request" disabled={turning || !value || busy !== null || !!asking || !!blocked} onClick={() => guarded(() => void request())} className="payment-back-secondary">
+            <FocusSafeButton data-testid="payment-request" disabled={turning || !value || busy !== null || !!asking || !!blocked} onClick={() => guarded(() => void request())} className="payment-back-secondary">
               {busy === "request" ? t("payments.composer.requesting") : t("payments.composer.request")}
-            </button>
-            <button data-testid="payment-send" disabled={turning || !canSend || !!blocked || !value || busy !== null || !!asking || tooMuch} onClick={() => guarded(() => void send())}
+            </FocusSafeButton>
+            <FocusSafeButton data-testid="payment-send" disabled={turning || !canSend || !!blocked || !value || busy !== null || !!asking || tooMuch} onClick={() => guarded(() => void send())}
               title={canSend ? undefined : sendUnavailable ?? t("payments.composer.sendHint")} className="payment-back-primary">
               {asking ? t("payments.composer.asking") : busy === "send" ? t("payments.composer.preparing") : t("payments.composer.send")}
-            </button>
+            </FocusSafeButton>
           </div>}
         </>}
         {error && <Notice problem={error} className="text-xs m-0" />}
