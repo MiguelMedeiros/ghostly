@@ -4,9 +4,13 @@ import { describe, expect, it } from "vitest";
 
 const ROOT = join(import.meta.dirname, "..", "..", "..");
 
-/** test-affected.mjs over a change that reaches no step, with these arguments. */
+/** test-affected.mjs over a change that reaches no step, with these arguments (and what npm put in the environment). */
 function run(...args: string[]) {
-  return spawnSync(process.execPath, ["tools/scripts/test-affected.mjs", "--files", "docs/TESTING.md", ...args], { cwd: ROOT, encoding: "utf8" });
+  return runWith({}, ...args);
+}
+function runWith(npm: Record<string, string>, ...args: string[]) {
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("npm_config_")));
+  return spawnSync(process.execPath, ["tools/scripts/test-affected.mjs", "--files", "docs/TESTING.md", ...args], { cwd: ROOT, encoding: "utf8", env: { ...env, ...npm } });
 }
 
 describe("test-affected.mjs's arguments", () => {
@@ -22,6 +26,18 @@ describe("test-affected.mjs's arguments", () => {
     const r = run("--list", "apps/ui/src/App.tsx");
     expect(r.status).toBe(2);
     expect(r.stderr).toContain("does not take apps/ui/src/App.tsx");
+  });
+
+  // `npm run test:affected --list` (no `--`): npm keeps the flag (npm_config_list=true, `--no-e2e` → npm_config_e2e="")
+  // and the script gets no argument at all, so the full run started.
+  it.each([
+    [{ npm_config_list: "true" }, "--list"],
+    [{ npm_config_e2e: "", npm_config_rust: "" }, "--no-e2e --no-rust"],
+  ])("refuses the flags npm kept for itself (%o) before anything runs", (npm, flags) => {
+    const r = runWith(npm);
+    expect(r.status).toBe(2);
+    expect(r.stdout).toBe("");
+    expect(r.stderr).toContain(`npm run test:affected -- ${flags}`);
   });
 
   it("takes every flag and option it documents, as CI's draft job passes them", () => {
