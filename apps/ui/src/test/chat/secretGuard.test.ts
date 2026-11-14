@@ -151,6 +151,29 @@ describe("what the guard asks about", () => {
     expect(findSecret(text)).toEqual({ kind: "mnemonic" });
   });
 
+  /** HAMSTER in two columns, line i with word i and word i + 12, each written as `item` writes it. */
+  const twoColumns = (item: (n: number, word: string) => string, gap = "    ") => `Recovery phrase\n${HAMSTER.slice(0, 12)
+    .map((w, i) => `${item(i + 1, w)}${gap}${item(i + 13, HAMSTER[i + 12])}`).join("\n")}`;
+  const arabicIndic = (n: number) => String(n).replace(/\d/g, (d) => "٠١٢٣٤٥٦٧٨٩"[Number(d)]);
+
+  it.each<[string, (n: number, word: string) => string, string?]>([
+    ["\"1 – word\" (an en dash, as a phone's smart punctuation writes it)", (n, w) => `${n} – ${w}`],
+    ["\"1 — word\" (an em dash)", (n, w) => `${n} — ${w}`],
+    ["\"1. word.\"", (n, w) => `${n}. ${w}.`],
+    ["\"**1.** word\" (markdown)", (n, w) => `**${n}.** ${w}`],
+    ["\"1. **word**\" (markdown)", (n, w) => `${n}. **${w}**`],
+    ["\"| 1 | word |\" (a markdown table)", (n, w) => `| ${n} | ${w} |`, " "],
+    ["\"1. word | 13. word\"", (n, w) => `${n}. ${w}`, " | "],
+    ["\"1. \\\"word\\\"\"", (n, w) => `${n}. "${w}"`],
+    ["\"word (1)\"", (n, w) => `${w} (${n})`],
+    ["\"1．word\" (a fullwidth dot, as Japanese and Chinese keyboards write it)", (n, w) => `${n}．${w}`],
+    ["\"１．word\" (fullwidth digits)", (n, w) => `${String(n).replace(/\d/g, (d) => String.fromCharCode(0xff10 + Number(d)))}．${w}`],
+    ["\"١. word\" (Arabic-Indic digits)", (n, w) => `${arabicIndic(n)}. ${w}`],
+    ["\"- 1. word\" (a bullet before each number)", (n, w) => `- ${n}. ${w}`],
+  ])("a seed in two columns written as %s", (_, item, gap) => {
+    expect(findSecret(twoColumns(item, gap))).toEqual({ kind: "mnemonic" });
+  });
+
   /**
    * BIP39's lists in the app's other languages, as a wallet set to one of them shows its seed (Japanese with ideographic
    * spaces). Entropy 0x7f repeated, as the English vectors above.
@@ -520,7 +543,8 @@ describe("what it lets through", () => {
     expect(findSecret(todo.map((item, i) => `${i + 1}. ${item}`).join("\n"))).toBeNull();
     // Twelve numbered seed words in a row, each with more on its line, are a list of things, not a seed.
     expect(findSecret(MNEMONICS[0].split(" ").map((w, i) => `${i + 1}. ${w} is fine`).join("\n"))).toBeNull();
-    expect(findSecret("that boat was huge, but this time we also went over the hill with a dog and a cat")).toBeNull();
+    expect(findSecret(MNEMONICS[0].split(" ").map((w, i) => `- ${i + 1} – ${w} (${i + 1}) is fine.`).join("\n"))).toBeNull();
+    expect(findSecret(`| # | item |\n|---|---|\n${todo.map((item, i) => `| ${i + 1} | ${item} |`).join("\n")}`)).toBeNull();    expect(findSecret("that boat was huge, but this time we also went over the hill with a dog and a cat")).toBeNull();
   });
 });
 
@@ -549,6 +573,8 @@ describe("how long it takes", () => {
     ["seed words with a soft hyphen in each", "zo\u00ado ".repeat(MAX / 5)],
     ["a numbered word and a line of spaces", `1 a${" ".repeat(MAX - 4)}x`],
     ["signer link schemes with no secret", "bunker://?relay=".repeat(MAX / 16)],
+    ["numbers, seed words and markdown", "| 1 | **zoo** | - ".repeat(MAX / 18)],
+    ["seed words numbered after them", "zoo (1) ".repeat(MAX / 8)],
   ])("a 16 KiB message of %s is read in well under a frame", (_, text) => {
     expect(time(text)).toBeLessThan(50);
   });
