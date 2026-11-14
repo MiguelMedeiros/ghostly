@@ -173,7 +173,7 @@ describe("a chat as the contact drives it", () => {
     const chat = row();
     const { node, linkOf } = await started(chat);
     const { events } = linkOf(chat.id).options;
-    const emits = vi.spyOn(node as never as { emitState(): void }, "emitState");
+    const emits = vi.spyOn(node as never as { scheduleState(): void }, "scheduleState");
     const read = (lastPacketAt: number) => events.onPresence({ online: true, lastPacketAt, seenAt: 5, nick: "Bob", services: [{ id: "web", type: "http" }] });
     read(10);
     expect(emits).toHaveBeenCalledTimes(1);
@@ -278,7 +278,7 @@ describe("a chat as the contact drives it", () => {
     const chat = row();
     const { node, linkOf } = await started(chat);
     const { events } = linkOf(chat.id).options;
-    const emit = vi.spyOn(node as unknown as { emitState(): void }, "emitState");
+    const emit = vi.spyOn(node as unknown as { scheduleState(): void }, "scheduleState");
     events.onPoll({ polling: true, nextInMs: 0 });
     expect(node.getState().links[0].poll.polling, "the first sync under way").toBe(true);
     events.onStatus("error");
