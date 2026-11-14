@@ -107,8 +107,21 @@ describe("a store's last read that failed", () => {
     expect(region).toHaveTextContent("");
     await userEvent.click(within(screen.getByTestId("app-store")).getByTestId("app-store-refresh"));
     await waitFor(() => expect(screen.queryByTestId("app-store-problem")).toBeNull());
-    expect(region).toHaveTextContent("Store off is up to date: 5 apps");
+    expect(region).toHaveTextContent("\u2068Store off\u2069 is up to date: 5 apps");
     expect(screen.getByTestId("toast")).toHaveAttribute("data-tone", "success");
+  });
+
+  // The card's text takes the page's direction: a name not isolated draws its ending "!" on its other side in Arabic,
+  // and an Arabic name's number before the name in English. Isolated, as everywhere else on the Apps screens.
+  it.each([
+    ["ar", "Hunt!", "\u2068Hunt!\u2069 محدّث: لا تطبيقات"],
+    ["en", "متجر 2", "\u2068متجر 2\u2069 is up to date: 0 apps"],
+  ] as const)("isolates the store's name in what a Refresh that worked says (%s)", async (language, name, said) => {
+    const named = store({ name });
+    fakeEngine.on("appStoreRefresh", () => [named]).on("appStoreList", () => [named]);
+    renderApp(<Apps />, { route: "/apps", language });
+    await userEvent.click(within(await screen.findByTestId("app-store")).getByTestId("app-store-refresh"));
+    expect(await screen.findByTestId("toast-text")).toHaveTextContent(said);
   });
 
   // Its host still serves a list past its date: the read works, and the store is not up to date.
