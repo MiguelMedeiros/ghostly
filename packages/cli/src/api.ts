@@ -15,7 +15,7 @@ import {
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
 import { checkShownName } from "./profiles";
-import { nobodyElseIn, purgeMessage, waitForConfirmed, waitForEdit, waitForGroupFrame, waitForMessage, waitForRemoval } from "./waits";
+import { nobodyElseIn, outOf, purgeMessage, waitForConfirmed, waitForEdit, waitForGroupFrame, waitForMessage, waitForRemoval } from "./waits";
 import { STATUS_CARD_METHODS, secretIn } from "./statusCards";
 import { BUTTON_METHODS, buttonsCard, pressable } from "./buttons";
 import { forgetHold, HOLD_MAX_MINUTES, holdChat, holdOf, releaseHold } from "./holds";
@@ -980,6 +980,9 @@ const METHODS: Record<string, Method> = {
   },
   async "group.accept"(ctx, params) {
     const group = groupOf(ctx, params);
+    // Nothing to accept, said with why: before, a community this profile is in or was removed from answered done, exit
+    // 0 (the engine's knock again does nothing there), and a private group "No invitation to accept".
+    if (!group.invitation) throw new CliError("refused", `${outOf(group) ?? `You are in ${group.name} already`}: there is no invitation to accept`);
     await node(ctx).acceptGroupInvitation({ groupId: group.id });
     return { group: group.id };
   },
