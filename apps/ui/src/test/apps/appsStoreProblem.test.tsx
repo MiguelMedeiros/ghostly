@@ -124,6 +124,21 @@ describe("a store's last read that failed", () => {
     expect(await screen.findByTestId("toast-text")).toHaveTextContent(said);
   });
 
+  // Its link serves the list kept again: the read works, and the store stays marked for its two lists until a newer one.
+  it("says a Refresh of a store still marked for two lists says so, not up to date", async () => {
+    const marked = store({ equivocation: { sequence: 5, at: SEEN } });
+    fakeEngine.on("appStoreRefresh", () => [marked]).on("appStoreList", () => [marked]);
+    renderApp(<Apps />, { route: "/apps" });
+    const line = await screen.findByTestId("app-store-problem");
+    await userEvent.click(within(screen.getByTestId("app-store")).getByTestId("app-store-refresh"));
+    await waitFor(() => expect(fakeEngine.callsTo("appStoreRefresh")).toHaveLength(1));
+    await act(async () => {});
+    const said = await screen.findByTestId("toast-text");
+    expect(said).not.toHaveTextContent("up to date");
+    expect(said).toHaveTextContent(line.textContent!);
+    expect(screen.getByTestId("toast")).not.toHaveAttribute("data-tone", "success");
+  });
+
   // Its host still serves a list past its date: the read works, and the store is not up to date.
   it("says a Refresh that read a list past its date is out of date, not up to date", async () => {
     const old = store({ expires: Math.floor(SEEN / 1000), expired: true });

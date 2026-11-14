@@ -225,7 +225,8 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
   // page's direction, so the store's name is isolated in its own (as `removedLine` does).
   const refresh = async () => {
     const [now] = await engine.call("appStoreRefresh", { key: store.key });
-    const failed = now?.problem ? appStoreProblemText(now, t) : null;
+    // Its red line, whatever it says: a read that works keeps a store marked for two lists until a newer list comes.
+    const failed = now ? appStoreProblemText(now, t) : null;
     if (failed) onProblem(failed);
     else if (now?.expired) onProblem(t("apps.store.stale", { date: date(now.expires ?? 0, t.language) }));
     else if (now) onRead(t("apps.store.readDone", { name: `\u2068${now.name ?? now.url}\u2069`, apps: t("apps.store.count", { count: now.apps.length }) }));
