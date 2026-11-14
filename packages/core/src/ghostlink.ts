@@ -262,7 +262,7 @@ export const LIVENESS_MISSED_PINGS = 3;
 const YIELD_BYE_MS = 300;
 const QUIET_FRAMES = new Set(["paired-ping", "paired-pong", "paired-bye", "paired-policy", "paired-switch-plan", "paired-switch-ready",
   "paired-switch-failed", "paired-switch-keep", "paired-rtc", "paired-adapters", "paired-nick", "paired-avatar", "paired-capabilities",
-  "paired-wake", "paired-hold", "paired-payments", "paired-groups", "paired-services", "paired-reconnect", "paired-reconnect-ack", CONTACT_ASKER_FRAME]);
+  "paired-wake", "paired-hold", "paired-payments", "paired-groups", "paired-services", CONTACT_ASKER_FRAME]);
 /**
  * What a session a move replaced still reads while its channel retires (`SWITCH_RETIRE_MS`): the contact's texts,
  * reactions, pins and edits, and its receipts of this side's, which it sends on that session until its own side moves.
@@ -889,8 +889,6 @@ export class GhostLink {
   private nativeFailures = new Map<PairedTransport, number>();
   private demotedUntil = new Map<PairedTransport, number>();
   private connectionEpoch = 0;
-  private switchAllowedUntil = 0;
-  private switchAck: (() => void) | null = null;
   private readonly switcher: TransportSwitch;
   /** `plan`: a switch both sides agreed; without one, a replacement the contact dialled (`attachReplacement`). */
   private candidate: LinkCandidate | null = null;
@@ -2433,7 +2431,6 @@ export class GhostLink {
     if (this.channel && plan?.choices.includes(binding.transport)) {
       void this.attachCandidate(channel, binding, plan).catch(() => {}); return;
     }
-    if (this.channel && Date.now() < this.switchAllowedUntil) { this.switchAllowedUntil = 0; this.disconnect(); }
     // While yielding, the listener closes in a moment, and a session taken on it with it.
     if (this.stopped || this.leaving || this.yielding || !this.transportOffer().includes(binding.transport)) { channel.close(); return; }
     if (this.channel) { this.attachReplacement(channel, binding); return; }
@@ -4894,11 +4891,6 @@ export class GhostLink {
             });
             return;
           }
-          if (frame?.t === "paired-reconnect") {
-            this.switchAllowedUntil = Date.now() + 30_000;
-            channel.send(JSON.stringify({ t: "paired-reconnect-ack" })); return;
-          }
-          if (frame?.t === "paired-reconnect-ack") { this.switchAck?.(); return; }
           if (frame?.t === "paired-adapters") {
             if (!frame.descriptors || typeof frame.descriptors !== "object" || JSON.stringify(frame.descriptors).length > 4096) return;
             const descriptors = checkedDescriptors(frame.descriptors);
