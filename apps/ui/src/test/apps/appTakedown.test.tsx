@@ -519,4 +519,38 @@ describe("an app in a chat the person went Back from, that stops", () => {
       expect(screen.queryByTestId("mini-app-resume")).not.toBeInTheDocument();
     });
   }
+
+  // Shown again already stopped, the line comes with its words, which a live region does not read: the focus goes to
+  // Back, and Back is described by why, on a phone and with no room beside the chat.
+  for (const where of ["phone", "narrow"]) {
+    for (const reason of ["revoked", "unresponsive"]) {
+      it(`${where}, ${reason}: going back to it, why is read with Back as the focus lands there`, async () => {
+        const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) { return where === "narrow" && this.classList.contains("chat-pane") ? 604 : 0; });
+        try {
+          const { user } = chatPanel(where === "phone");
+          await act(() => open(REF, "link-1"));
+          const app = screen.getByTestId("mini-app");
+          await user.click(within(app).getByTestId("mini-app-back"));
+          if (reason === "revoked") await checked({ status: "revoked" });
+          else act(() => started[0]!.stop(reason));
+          await user.click(screen.getByTestId("mini-app-resume"));
+          const back = within(app).getByTestId("mini-app-back");
+          expect(document.activeElement).toBe(back);
+          expect(back).toHaveAccessibleDescription(within(app).getByTestId("mini-app-stopped").textContent!);
+          expect(back).toHaveAccessibleDescription(reason === "revoked" ? "Chess was stopped: its publisher revoked this version" : /^Chess stopped responding/);
+        } finally {
+          width.mockRestore();
+        }
+      });
+    }
+  }
+
+  it("running, Back is described by nothing", async () => {
+    const { user } = chatPanel(true);
+    await act(() => open(REF, "link-1"));
+    const app = screen.getByTestId("mini-app");
+    await user.click(within(app).getByTestId("mini-app-back"));
+    await user.click(screen.getByTestId("mini-app-resume"));
+    expect(within(app).getByTestId("mini-app-back")).not.toHaveAttribute("aria-describedby");
+  });
 });
