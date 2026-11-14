@@ -231,16 +231,19 @@ export function oneGroupOnly(method: string): boolean {
  * `group list` 0.89 s and 220 MB instead of 0.42 s and 154 MB with 50,000. A group's own reads need its history only,
  * which its start reads whatever this says. The wallet's reads come from its own stores (proofs, wallet history,
  * payments), none from a chat's history: `wallet list` took 1.3 s and 239 MB instead of 0.48 s and 146 MB with 50,000
- * messages; `payment list --chat` starts the chat it names.
+ * messages; `payment list --chat` starts the chat it names. `identity providers` reads nothing of the profile, and
+ * `call auto` and `group auto` with no on|off what it keeps: each took 1.6 s and 211 MB instead of 0.8 s and 152 MB
+ * with 50,000.
  */
 const NO_HISTORY_READS: ReadonlySet<string> = new Set([
   "status", "profile.get", "settings.get", "status.get", "chat.list", "group.list", "group.get", "group.history",
   "call.list", "service.list", "identity.list", "x401.credential.list", "app.served", "wallet.list", "wallet.history",
-  "payment.list",
+  "payment.list", "identity.providers",
 ]);
 
 /** Whether a one-shot for this call leaves every saved chat unstarted, its history unread (`NO_HISTORY_READS`). */
-export function readsNoHistory(method: string): boolean {
+export function readsNoHistory(method: string, params: Record<string, unknown> = {}): boolean {
+  if (method === "call.auto" || method === "group.auto") return params.on === undefined;
   return NO_HISTORY_READS.has(method);
 }
 
@@ -1645,7 +1648,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
       return joined.answer;
     }
     return result;
-  }, { deferGroups: chatOnly(command.method, params) || newChatOnly(command.method), deferChats: oneChatOnly(command.method, params) || oneGroupOnly(command.method) || readsNoHistory(command.method), offline: offlineCall(command.method, params) });
+  }, { deferGroups: chatOnly(command.method, params) || newChatOnly(command.method), deferChats: oneChatOnly(command.method, params) || oneGroupOnly(command.method) || readsNoHistory(command.method, params), offline: offlineCall(command.method, params) });
   if (translator) {
     try { printAnswer(await (await import("./translate")).translateAnswer(result, translator)); } finally { translator.close(); }
     return;
