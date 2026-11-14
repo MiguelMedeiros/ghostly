@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GroupMemberView, GroupPayNote } from "@ghostly/browser/shared/types";
-import { groupPayTitle } from "../../lib/groupPayments";
+import { groupPayStatus, groupPayTitle } from "../../lib/groupPayments";
 import { loadLocale, translatorFor } from "../../locales";
 import type { Language } from "../../lib/settings";
 import { groupView } from "../fakeEngine";
@@ -47,5 +47,42 @@ describe("a group payment's line where I am the payer or payee", () => {
     expect(groupPayTitle(note({}), group)).toBe("Alice asked Bob");
     expect(groupPayTitle(note({ ask: true }), group)).toBe("Bob is paying Alice");
     expect(groupPayTitle(note({ kind: "payment" }), group)).toBe("Bob sent Alice");
+  });
+});
+
+/**
+ * Where a group payment stands, when I am the payer or payee: "you" slotted into the line about another member gave
+ * "waiting for you's wallet", "Vous a payé", "Tú pagó", "Tu ha pagato", "esperando a ti" and "بانتظار محفظة أنت".
+ */
+describe("a group payment's status where I am the payer or payee", () => {
+  const mine: Partial<GroupPayNote>[] = [
+    { from: "*", to: ME, claims: [BOB] }, // one member says they paid my request
+    { from: "*", to: ME, claims: [BOB, ALICE] }, // two members say they paid my request
+    { from: ME, to: ALICE, claims: [ME] }, // I say I paid one member's request
+    { kind: "payment", from: BOB, to: ME, state: "sent" }, // one member's payment to me on its way
+  ];
+  const lines: Record<Language, string[]> = {
+    en: ["Bob says they paid · waiting for your wallet", "Bob, Alice paid · waiting for your wallet", "You paid · waiting for Alice's wallet", "Sent · waiting for your wallet"],
+    pt: ["Bob diz que pagou · aguardando sua carteira", "Bob, Alice pagaram · aguardando sua carteira", "Você pagou · aguardando a carteira de Alice", "Enviado · aguardando sua carteira"],
+    es: ["Bob dice que pagó · esperando tu billetera", "Bob, Alice pagaron · esperando tu billetera", "Pagaste · esperando la billetera de Alice", "Enviado · esperando tu billetera"],
+    fr: ["Bob dit avoir payé · en attente de votre portefeuille", "Bob, Alice ont payé · en attente de votre portefeuille", "Vous avez payé · en attente du portefeuille de Alice", "Envoyé · en attente de votre portefeuille"],
+    it: ["Bob dice di aver pagato · in attesa del tuo portafoglio", "Bob, Alice hanno pagato · in attesa del tuo portafoglio", "Hai pagato · in attesa del portafoglio di Alice", "Inviato · in attesa del tuo portafoglio"],
+    ar: ["Bob يقول إنه دفع · بانتظار محفظتك", "Bob، Alice دفعوا · بانتظار محفظتك", "دفعتَ · بانتظار محفظة Alice", "أُرسل · بانتظار محفظتك"],
+    ja: ["Bob が支払ったと言っています · あなたのウォレット待ち", "Bob、Alice が支払い済み · あなたのウォレット待ち", "あなたが支払い済み · Alice のウォレット待ち", "送信済み · あなたのウォレット待ち"],
+    zh: ["Bob 说已支付 · 等待你的钱包", "Bob、Alice 已支付 · 等待你的钱包", "你已支付 · 等待 Alice 的钱包", "已发送 · 等待你的钱包"],
+  };
+  it.each(Object.keys(lines) as Language[])("in %s", async (language) => {
+    await loadLocale(language);
+    const t = translatorFor(language);
+    expect(mine.map(patch => groupPayStatus(note(patch), group, t).text)).toEqual(lines[language]);
+  });
+
+  it("names me in a list of members who say they paid as I am named mid-sentence", () => {
+    expect(groupPayStatus(note({ from: "*", claims: [BOB, ME] }), group).text).toBe("Bob, you paid · waiting for Alice's wallet");
+  });
+
+  it("between two other members, names both", () => {
+    expect(groupPayStatus(note({ claims: [BOB] }), group).text).toBe("Bob says they paid · waiting for Alice's wallet");
+    expect(groupPayStatus(note({ kind: "payment", state: "sent" }), group).text).toBe("Sent · waiting for Alice");
   });
 });

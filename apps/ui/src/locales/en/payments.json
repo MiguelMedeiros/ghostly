@@ -235,11 +235,15 @@
     "sendUnavailable": "A request to the group is paid by one member; to pay someone, choose them instead",
     "status": {
       "claimedPaid": "{{names}} paid · waiting for {{to}}'s wallet",
+      "claimedPaidByMe": "You paid · waiting for {{to}}'s wallet",
+      "claimedPaidToMe": "{{names}} paid · waiting for your wallet",
       "closed": "Closed",
       "paid": "Paid",
       "paidBy": "Paid by {{name}}",
       "saysPaid": "{{names}} says they paid · waiting for {{to}}'s wallet",
+      "saysPaidToMe": "{{names}} says they paid · waiting for your wallet",
       "sent": "Sent · waiting for {{name}}",
+      "sentToMe": "Sent · waiting for your wallet",
       "takenBack": "Taken back",
       "waiting": "Waiting for payment"
     },

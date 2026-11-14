@@ -235,11 +235,15 @@
     "sendUnavailable": "Una richiesta al gruppo la paga un membro; per pagare qualcuno, sceglilo",
     "status": {
       "claimedPaid": "{{names}} ha pagato · in attesa del portafoglio di {{to}}",
+      "claimedPaidByMe": "Hai pagato · in attesa del portafoglio di {{to}}",
+      "claimedPaidToMe": "{{names}} hanno pagato · in attesa del tuo portafoglio",
       "closed": "Chiuso",
       "paid": "Pagato",
       "paidBy": "Pagato da {{name}}",
       "saysPaid": "{{names}} dice di aver pagato · in attesa del portafoglio di {{to}}",
+      "saysPaidToMe": "{{names}} dice di aver pagato · in attesa del tuo portafoglio",
       "sent": "Inviato · in attesa di {{name}}",
+      "sentToMe": "Inviato · in attesa del tuo portafoglio",
       "takenBack": "Ripreso",
       "waiting": "In attesa del pagamento"
     },

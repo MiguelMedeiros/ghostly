@@ -235,11 +235,15 @@
     "sendUnavailable": "Una solicitud al grupo la paga un miembro; para pagar a alguien, elígelo",
     "status": {
       "claimedPaid": "{{names}} pagó · esperando la billetera de {{to}}",
+      "claimedPaidByMe": "Pagaste · esperando la billetera de {{to}}",
+      "claimedPaidToMe": "{{names}} pagaron · esperando tu billetera",
       "closed": "Cerrado",
       "paid": "Pagado",
       "paidBy": "Pagado por {{name}}",
       "saysPaid": "{{names}} dice que pagó · esperando la billetera de {{to}}",
+      "saysPaidToMe": "{{names}} dice que pagó · esperando tu billetera",
       "sent": "Enviado · esperando a {{name}}",
+      "sentToMe": "Enviado · esperando tu billetera",
       "takenBack": "Recuperado",
       "waiting": "Esperando el pago"
     },

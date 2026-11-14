@@ -235,11 +235,15 @@
     "sendUnavailable": "يدفع الطلب إلى المجموعة عضو واحد؛ لتدفع لشخص، اختره بدلًا من ذلك",
     "status": {
       "claimedPaid": "{{names}} دفع · بانتظار محفظة {{to}}",
+      "claimedPaidByMe": "دفعتَ · بانتظار محفظة {{to}}",
+      "claimedPaidToMe": "{{names}} دفعوا · بانتظار محفظتك",
       "closed": "مغلق",
       "paid": "مدفوع",
       "paidBy": "دفعه {{name}}",
       "saysPaid": "{{names}} يقول إنه دفع · بانتظار محفظة {{to}}",
+      "saysPaidToMe": "{{names}} يقول إنه دفع · بانتظار محفظتك",
       "sent": "أُرسل · بانتظار {{name}}",
+      "sentToMe": "أُرسل · بانتظار محفظتك",
       "takenBack": "مُسترد",
       "waiting": "بانتظار الدفع"
     },
