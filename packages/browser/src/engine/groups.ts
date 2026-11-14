@@ -897,8 +897,9 @@ export class Groups {
       this.framesKept.set(group.id, framed.map(m => ({ id: m.id, bytes: frameBytes(m.frame as GroupMessageFrame) })));
       // The session hands on from the frames its messages' rows hold (`StoredMessage.frame`), not from its own record.
       if (group.state) this.attach(group.state, framed.map(m => m.frame as GroupMessageFrame));
-      // My counter goes above every row of mine stored here: one an older app stored before it was killed mid-send.
-      this.ownRows(group.id, history);
+      // My counter goes above every row of mine stored here: one an older app stored before it was killed mid-send. Read
+      // once: the state keeps what they hold (`GroupState.rowHigh`).
+      if (!this.sessions.get(group.id)?.rowsRead) this.ownRows(group.id, history);
       if (group.invited) this.invited.set(group.id, new Set(Object.keys(group.invited)));
       loadMarks(this.marks, group, history);
       this.host.loaded?.(group.id, history);

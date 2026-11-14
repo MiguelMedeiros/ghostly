@@ -132,9 +132,12 @@ export class GroupRows {
     const lights = await this.raw.getGroupLight?.().catch(() => undefined) ?? new Map<string, GroupLight>();
     for (const group of groups) {
       const live = rows.get(group.id), state = group.state, held = group.seqReserved;
-      if (!live || !state || group.community) continue;
+      if (!state || group.community) continue;
+      // An app from before wrote the record since: it may have stored rows of mine above what was read of them once.
+      if (!live) { delete state.rowHigh; continue; }
       if (!held || held.e !== state.seqEpoch || held.n !== state.seq || live.top !== topOf(state) || live.state.seqEpoch !== state.seqEpoch || !(live.state.seq <= state.seq)) {
         if (live.came) group.came = { ...group.came, ...live.came, peer: later(group.came?.peer, live.came.peer), mention: later(group.came?.mention, live.came.mention) };
+        delete state.rowHigh;
         continue;
       }
       // Written with the record and each time `came` changed since: a mark taken back (`unmark`) stays back.
