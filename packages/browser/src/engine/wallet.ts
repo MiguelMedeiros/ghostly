@@ -478,7 +478,7 @@ export class CashuWallet {
       balance: total(proofs.filter((p) => p.mint === url && !p.reserved)),
       info: this.infos.get(url) ?? null,
     }));
-    const history = await newestWalletTx<WalletTx>((mint) => !network || mintNetwork(mint) === network, HISTORY_SHOWN);
+    const history = await this.history(network, HISTORY_SHOWN);
     const here = new Set(mints.map((m) => m.url));
     const swaps = allSwaps.filter((s) => here.has(s.mint) && !s.released && !s.finished);
     // What a swap is about: the proofs it spends, or what a redeem would bring.
@@ -496,6 +496,11 @@ export class CashuWallet {
       history,
       feesPaid: history.reduce((sum, tx) => sum + tx.fee, 0),
     };
+  }
+
+  /** A network's `count` newest movements, newest first (every network's when none is named): only those are read. */
+  history(network: WalletNetwork | undefined, count: number): Promise<WalletTx[]> {
+    return newestWalletTx<WalletTx>((mint) => !network || mintNetwork(mint) === network, count);
   }
 
   /** Every proof and swap stored, read once for the views of every network: each read is the whole store. */

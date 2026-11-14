@@ -324,7 +324,8 @@ const WALLETS: Record<string, Method> = {
     const n = network(params);
     const limit = num(params, "limit", 50, { min: 1, max: 10_000, whole: true });
     await federationsOpen(ctx);
-    return { network: n, history: (netView(state(ctx), n)?.history ?? []).slice(0, limit) };
+    // Read from the store: the wallet view keeps only the newest 100.
+    return { network: n, history: await node(ctx).walletHistory({ network: n, limit }) };
   },
 
   async "wallet.receive"(ctx, params) {
