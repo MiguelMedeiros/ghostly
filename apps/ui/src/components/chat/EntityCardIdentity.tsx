@@ -34,7 +34,7 @@ function lookupOf(t: Translate, provider: "pubky" | "did", subject: string, hide
   const { method, id } = parseDid(subject);
   if (method === "key" || method === "jwk") return { offline: true, where: t("chat.entity.lookupLocal") };
   if (method === "dht") return { offline: false, where: t("chat.entity.lookupDht") };
-  const server = id.split(":")[0].replace(/%3a/i, ":");
+  const server = id.split(":")[0].replace(/%3a/gi, ":");
   if (hideIp) return { offline: false, hidden: true, where: t("chat.entity.lookupWebHiddenIp", { host: server }) };
   return { offline: false, where: t("chat.entity.lookupWeb", { host: server }) };
 }
