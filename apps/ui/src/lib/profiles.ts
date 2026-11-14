@@ -196,9 +196,31 @@ export const hasBuiltInName = (id: string) => read().profiles.find((p) => p.id =
  * The profile this page runs as, fixed when it starts (see the entry points). The registry's choice can change under
  * a running page: a tab that waited for another to close takes over as the profile it opened with, while the other
  * tab may have switched the choice to another profile meanwhile. Until a page starts, it is the registry's.
+ *
+ * The tab keeps it across its own reloads (sessionStorage is per tab and outlives a reload): the reload into a new
+ * version another tab accepted, the restart out of the back/forward cache, a reload by the person. Started as the
+ * registry's choice, a tab of another profile came back as that one, waited behind the tab running it, and left its
+ * own profile running nowhere. Only a switch in the tab changes it.
  */
 let running: string | undefined;
-export function setRunningProfile(id: string | undefined): void { running = id; }
+const tabProfileKey = () => `${registryKey()}_tab`;
+function keepTabProfile(id: string | undefined): void {
+  try {
+    if (id === undefined) sessionStorage.removeItem(tabProfileKey());
+    else sessionStorage.setItem(tabProfileKey(), id);
+  } catch { /* not kept: the next start is the registry's choice */ }
+}
+export function setRunningProfile(id: string | undefined): void {
+  running = id;
+  keepTabProfile(id);
+}
+/** The profile this tab ran before it reloaded, while the registry still lists it. */
+export function tabProfileId(): string | undefined {
+  try {
+    const id = sessionStorage.getItem(tabProfileKey());
+    return id !== null && read().profiles.some((p) => p.id === id) ? id : undefined;
+  } catch { return undefined; }
+}
 /** The profile last chosen in this space: the one the next page starts as. */
 export function chosenProfileId(): string { return read().active; }
 /** The profile this page runs as; before it starts, the one to start as (the one last chosen in this space). */
@@ -496,6 +518,7 @@ export function switchProfile(id: string, options: { route?: string; avatar?: st
   // becomes active only now, quietly.
   setTimeout(() => {
     write({ ...read(), active: id }, false);
+    keepTabProfile(id);
     // Not through the router: the old profile would try to open the new one's chat first.
     window.history.replaceState(null, "", `#${shareKept ? "/shared" : options.route ?? lastRouteOf(id)}`);
     window.location.reload();
