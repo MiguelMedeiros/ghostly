@@ -84,6 +84,7 @@ import { replyRef } from "@ghostly/browser/shared/replies";
 import { problemLine, problemText, type Problem } from "../lib/problemText";
 import { Notice } from "../components/ui/Notice";
 import { working } from "../lib/focus";
+import { isolate } from "../lib/ownStatus";
 import { setSaved, useSavedIn } from "../hooks/useSavedMessages";
 import { Spinner } from "../components/wallet/ui";
 
@@ -835,7 +836,7 @@ export function GroupChat() {
     : community && group.status === "active" ? (others.length === 0 ? count : community.hub ? t("group.chat.communityHub", { members: count })
       : community.connected ? t("group.chat.communityConnected", { members: count }) : t("group.chat.communityConnecting", { members: count }))
     : group.invitation?.takenBack ? t("sidebar.group.takenBack")
-    : group.invitation && !knockingAgain ? (group.invitation.contact ? t("group.chat.invitation", { contact: group.invitation.contact }) : t("group.chat.invitationUnknown"))
+    : group.invitation && !knockingAgain ? (group.invitation.contact ? t("group.chat.invitation", { contact: isolate(group.invitation.contact) }) : t("group.chat.invitationUnknown"))
     // Nobody else in it (just created, or everyone left): there is no one to reach, so only the count.
     : group.status === "active" ? (others.length === 0 ? count : t("group.chat.reachable", { members: count, reachable, total: others.length }))
     : outOfIt;
@@ -1060,14 +1061,15 @@ export function GroupChat() {
       {confirmForget && group.status === "active" ? <LeaveGroupDialog forget group={group} returnFocus={optionsRef} onClose={() => setConfirmForget(false)}
         onConfirm={async () => { await engine.call("forgetGroup", { groupId }); goneHere(); setConfirmForget(false); nav.home(); }} />
       : confirmForget && <DeleteChatDialog name={group.name} onClose={() => setConfirmForget(false)}
-        title={group.name ? t("group.leave.forgetTitle", { name: group.name }) : t("group.leave.forgetTitleUnnamed")} confirm={t("group.menu.forget")}
+        // The group's and the inviter's names isolated: a title and a body are strings, with no room for a <bdi>.
+        title={group.name ? t("group.leave.forgetTitle", { name: isolate(group.name) }) : t("group.leave.forgetTitleUnnamed")} confirm={t("group.menu.forget")}
         // What goes: an invitation (declined, and its sender told; one taken back tells nobody), with the history kept
         // here from before when there is one (Decline keeps it, Delete does not), a first knock through the link, or a
         // group kept with its history.
         body={joiningByLink ? t("group.forget.joining") : group.invitation?.takenBack ? t("group.forget.takenBack") : group.invitation && !knockingAgain
           ? (messages.length > 0
-            ? (group.invitation.contact ? t("group.forget.invitationKept", { contact: group.invitation.contact }) : t("group.forget.invitationKeptUnknown"))
-            : (group.invitation.contact ? t("group.forget.invitation", { contact: group.invitation.contact }) : t("group.forget.invitationUnknown")))
+            ? (group.invitation.contact ? t("group.forget.invitationKept", { contact: isolate(group.invitation.contact) }) : t("group.forget.invitationKeptUnknown"))
+            : (group.invitation.contact ? t("group.forget.invitation", { contact: isolate(group.invitation.contact) }) : t("group.forget.invitationUnknown")))
           : t("group.forget.kept")}
         // A group I am no longer in (removed, left, an invitation): nothing to leave, only its history here goes.
         onConfirm={() => { setConfirmForget(false); void act(async () => { await engine.call("forgetGroup", { groupId }); goneHere(); nav.home(); }); }} />}

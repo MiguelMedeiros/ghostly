@@ -4,6 +4,7 @@ import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { focusLost } from "../lib/focus";
 import { forgetGroupLocal } from "../lib/groups";
+import { isolate } from "../lib/ownStatus";
 import { DeleteChatDialog } from "./DeleteChatDialog";
 
 type Other = NonNullable<GroupView["others"]>[number];
@@ -33,8 +34,9 @@ export function GroupOthers({ group, act, focusAfter }: { group: GroupView; act:
   const line = (other: Other) => {
     if ("link" in other) return t("group.others.link");
     const members = other.members === 1 ? t("group.chat.memberOne") : t("group.chat.memberCount", { count: other.members });
-    const name = other.name || t("group.chat.unnamed");
-    return other.contact ? t("group.others.invitedBy", { contact: other.contact, name, members }) : t("group.others.invitedByUnknown", { name, members });
+    // The inviter's and the group's names isolated: the line is a string, also the Switch dialog's.
+    const name = other.name ? isolate(other.name) : t("group.chat.unnamed");
+    return other.contact ? t("group.others.invitedBy", { contact: isolate(other.contact), name, members }) : t("group.others.invitedByUnknown", { name, members });
   };
   const button = "min-h-11 shrink-0 rounded-lg px-3 text-xs focus-visible:ring-2 focus-visible:ring-accent";
   return <div role="status" data-testid="group-others" className="border-b border-border bg-surface-alt px-4 py-2 text-xs text-text-secondary">

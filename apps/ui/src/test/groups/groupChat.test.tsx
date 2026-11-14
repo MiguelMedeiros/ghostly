@@ -82,10 +82,10 @@ describe("GroupChat: what the header says", () => {
     const { user, engine } = openGroup(groupView({ canSend: false, invitation: { linkId: "link-1", contact: "Alice", admin: ALICE, members: 3, accepted: false } }));
     engine.on("acceptGroupInvitation", () => { throw new Error("The contact who invited you is not connected. Try again when they are."); }).on("declineGroupInvitation", () => undefined);
     expect(screen.getByTestId("group-chat")).toHaveAttribute("data-status", "invitation");
-    expect(screen.getByTestId("group-members")).toHaveTextContent("Invitation from Alice");
+    expect(screen.getByTestId("group-members")).toHaveTextContent("Invitation from \u2068Alice\u2069");
     const card = screen.getByTestId("group-invitation");
     expect(card).toHaveTextContent("Friends");
-    expect(card).toHaveTextContent("Invited by Alice · 3 members");
+    expect(card).toHaveTextContent("Invited by \u2068Alice\u2069 · 3 members");
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     await user.click(screen.getByTestId("group-options"));
     expect(screen.queryByTestId("chat-search-open")).not.toBeInTheDocument();
@@ -93,7 +93,7 @@ describe("GroupChat: what the header says", () => {
     await user.keyboard("{Escape}");
     await user.click(within(card).getByTestId("group-accept"));
     expect(engine.callsTo("acceptGroupInvitation")).toEqual([{ groupId: "group-1" }]);
-    expect(await within(card).findByTestId("group-answer-refused")).toHaveTextContent("Alice is not connected yet. Try again in a moment.");
+    expect(await within(card).findByTestId("group-answer-refused")).toHaveTextContent("⁨Alice⁩ is not connected yet. Try again in a moment.");
     await user.click(within(card).getByTestId("group-decline"));
     expect(engine.callsTo("declineGroupInvitation")).toEqual([{ groupId: "group-1" }]);
   });
@@ -133,7 +133,7 @@ describe("GroupChat: what the header says", () => {
   it.each([["removed", "removed"], ["no status", undefined]] as const)("asks a member invited back over the history kept from before (%s)", async (_, status) => {
     openGroup(groupView({ status, canSend: false, invitation: { linkId: "link-1", contact: "Alice", admin: ALICE, members: 3, accepted: false } }),
       [stored({ id: "old", text: "from before", member: ALICE })]);
-    expect(screen.getByTestId("group-invitation")).toHaveTextContent("Invited by Alice · 3 members");
+    expect(screen.getByTestId("group-invitation")).toHaveTextContent("Invited by \u2068Alice\u2069 · 3 members");
     expect(screen.getByTestId("group-accept")).toBeInTheDocument();
     expect(await screen.findByText("from before")).toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
@@ -143,7 +143,7 @@ describe("GroupChat: what the header says", () => {
   it("says who took an invitation back, and what to do", () => {
     openGroup(takenBack);
     expect(screen.getByTestId("group-members")).toHaveTextContent("Invitation taken back");
-    expect(screen.getByTestId("group-taken-back")).toHaveTextContent("Alice took back the invitation to Book club" + "Ask Alice for a new invitation or the group's link.");
+    expect(screen.getByTestId("group-taken-back")).toHaveTextContent("\u2068Alice\u2069 took back the invitation to \u2068Book club\u2069" + "Ask \u2068Alice\u2069 for a new invitation or the group's link.");
     expect(screen.queryByText("This group is gone from this device.")).not.toBeInTheDocument();
   });
 
@@ -151,14 +151,14 @@ describe("GroupChat: what the header says", () => {
     fakeEngine.on("groupMessages", () => []).on("updateSettings", () => undefined);
     fakeEngine.update({ groups: [takenBack] });
     renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1", language: "pt" });
-    expect(screen.getByTestId("group-taken-back")).toHaveTextContent("Alice retirou o convite para Book club" + "Peça a Alice um novo convite ou o link do grupo.");
+    expect(screen.getByTestId("group-taken-back")).toHaveTextContent("\u2068Alice\u2069 retirou o convite para \u2068Book club\u2069" + "Peça a \u2068Alice\u2069 um novo convite ou o link do grupo.");
   });
 
   it("says an invitation to a group with no name was taken back in a sentence of its own, not with \"A group\" mid-sentence", () => {
     const noName = (contact: string) => groupView({ name: "", canSend: false, invitation: { linkId: "link-1", contact, admin: ALICE, members: 3, accepted: false, takenBack: true } });
     fakeEngine.on("groupMessages", () => []).on("updateSettings", () => undefined);
     for (const [contact, language, words] of [
-      ["Ana", "en", "Ana took back the invitation to the group"], ["Ana", "pt", "Ana retirou o convite para o grupo"],
+      ["Ana", "en", "\u2068Ana\u2069 took back the invitation to the group"], ["Ana", "pt", "\u2068Ana\u2069 retirou o convite para o grupo"],
       ["", "en", "The invitation to the group was taken back"], ["", "pt", "O convite para o grupo foi retirado"],
     ] as const) {
       fakeEngine.update({ groups: [noName(contact)] });
@@ -809,7 +809,8 @@ describe("GroupChat: the options menu", () => {
     await user.click(screen.getByTestId("group-options"));
     await user.click(screen.getByTestId("group-forget"));
     const dialog = screen.getByRole("dialog");
-    expect(within(dialog).getByRole("heading", { name: "Delete Friends?" })).toBeInTheDocument();
+    // The name is a <bdi> of its own: read as text, as the testing library's accessible name puts a space after it.
+    expect(within(dialog).getByRole("heading")).toHaveTextContent("Delete Friends?");
     expect(dialog).toHaveTextContent("Deleting the group from this device also leaves it.");
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(engine.callsTo("forgetGroup")).toEqual([]);
@@ -882,7 +883,7 @@ describe("GroupChat: the options menu", () => {
     await user.click(screen.getByTestId("group-options"));
     await user.click(screen.getByTestId("group-forget"));
     const dialog = screen.getByRole("dialog");
-    expect(within(dialog).getByRole("heading", { name: "Delete Friends?" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("heading", { name: "Delete \u2068Friends\u2069?" })).toBeInTheDocument();
     expect(dialog).toHaveTextContent("The group and its history go from this device.");
     expect(dialog).not.toHaveTextContent("contact");
     await user.click(within(dialog).getByRole("button", { name: "Delete from this device" }));
@@ -894,8 +895,8 @@ describe("GroupChat: the options menu", () => {
     await user.click(screen.getByTestId("group-options"));
     await user.click(screen.getByTestId("group-forget"));
     const dialog = screen.getByRole("dialog");
-    expect(within(dialog).getByRole("heading", { name: "Delete Friends?" })).toBeInTheDocument();
-    expect(dialog).toHaveTextContent("The invitation goes from this device. Ana is told you declined.");
+    expect(within(dialog).getByRole("heading", { name: "Delete \u2068Friends\u2069?" })).toBeInTheDocument();
+    expect(dialog).toHaveTextContent("The invitation goes from this device. \u2068Ana\u2069 is told you declined.");
     expect(dialog).not.toHaveTextContent("Your contact");
   });
 
@@ -917,7 +918,7 @@ describe("GroupChat: the options menu", () => {
     await user.click(screen.getByTestId("group-options"));
     await user.click(screen.getByTestId("group-forget"));
     const dialog = screen.getByRole("dialog");
-    expect(dialog).toHaveTextContent("The invitation and the group's history go from this device. Ana is told you declined.");
+    expect(dialog).toHaveTextContent("The invitation and the group's history go from this device. \u2068Ana\u2069 is told you declined.");
     await user.click(within(dialog).getByRole("button", { name: "Delete from this device" }));
     expect(engine.callsTo("forgetGroup")).toEqual([{ groupId: "group-1" }]);
   });
@@ -938,7 +939,7 @@ describe("GroupChat: the options menu", () => {
     await user.click(screen.getByTestId("group-options"));
     await user.click(screen.getByTestId("group-forget"));
     const dialog = screen.getByRole("dialog");
-    expect(within(dialog).getByRole("heading", { name: "Delete Friends?" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("heading")).toHaveTextContent("Delete Friends?");
     expect(dialog).toHaveTextContent("Deleting the group from this device also leaves it.");
     expect(dialog).toHaveTextContent("to come back, open the group's link again");
     // A community is no chat with a contact: none of the chat dialog's words.
@@ -1080,7 +1081,7 @@ describe("GroupChat: leaving", () => {
   it("says what leaving means before it happens, and can be called off", async () => {
     const { user, engine } = openGroup(active());
     const dialog = await leaveFromMenu(user);
-    expect(within(dialog).getByRole("heading", { name: "Leave Friends?" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("heading")).toHaveTextContent("Leave Friends?");
     expect(dialog).toHaveTextContent("The group and its history go from this device.");
     expect(within(dialog).queryByTestId("group-leave-successor")).not.toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
