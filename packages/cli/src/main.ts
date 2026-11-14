@@ -14,6 +14,7 @@ import type { GhostlyEvent } from "./events";
 import type { Host } from "./host";
 import { jsonOut } from "./jsonOut";
 import { ownProfile } from "./privateFolder";
+import { shellWord } from "./shellWord";
 import { waitNotice, waitsFor, type WaitNotice } from "./waitNotice";
 import type { RuntimeOptions } from "./runtime/engine";
 import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, followDaemon, PAUSE_HOLD_MS, readCursor } from "./listen";
@@ -542,7 +543,8 @@ export async function oneShotJoinWait(s: Pick<Session, "call">, result: Record<s
   const stage = (view.chat as { stage?: unknown } | null)?.stage ?? null;
   const answer = { ...result, paired: view.paired, stage };
   if (view.paired) return { answer };
-  const ref = label?.trim() && !/\s/.test(label.trim()) ? label.trim() : String(result.chat);
+  // The label only when a shell reads it as typed: `O'Brien` waited for a closing quote, `$work` named no chat.
+  const ref = label?.trim() && shellWord(label.trim()) === label.trim() ? label.trim() : String(result.chat);
   return { answer, note: `Not paired yet: the inviter's app is offline. It pairs when both are online: keep this profile running (ghostly daemon --detach), then ghostly chat wait ${ref} --until paired` };
 }
 
