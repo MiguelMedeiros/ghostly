@@ -5095,8 +5095,11 @@ export class GhostlyNode implements EngineImplementation {
    * within `QUOTE_SWEEP_MS` (or never, for a delete here): the CLI's `message delete --purge`, before the store folds.
    * Purges of one chat at once share its reads (`QuotePurges`).
    */
-  forgetQuotesOf(message: StoredMessage): Promise<void> {
-    return this.quotePurges.purge(message.linkId, message.id, replyRef(message));
+  async forgetQuotesOf(message: StoredMessage): Promise<void> {
+    await this.quotePurges.purge(message.linkId, message.id, replyRef(message));
+    // A group's saved state, without the frame it kept of the message (`Groups.removed`), written now: saved within a
+    // second otherwise, after the fold, which kept the state before it.
+    if (message.linkId.startsWith("group:")) await this.groups.flush();
   }
 
   /** Local id of a file we send: the id on the wire is ours too, but lives in its own key space. */
