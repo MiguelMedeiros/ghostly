@@ -10,7 +10,7 @@ use iroh::{
 };
 use serde::Serialize;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
@@ -75,6 +75,9 @@ impl Peer {
 /// How long an address is left to settle before the page is told: a network change moves the home relay and the
 /// direct addresses one after the other, and each word to the page is a record published again.
 const ADDRESS_SETTLES: Duration = Duration::from_secs(1);
+
+/// How many incoming connections an endpoint admits at once (a handshake, then a stream with its preface).
+const ADMITTING: usize = 4;
 
 /// Tells the page the endpoint's address each time it came to be another than the last one `said`, so the page
 /// never asks. `changes` yields when something about the address moved (Iroh's own watcher), `current` reads it.
@@ -317,21 +320,31 @@ impl TransportState {
         let listener_state = self.clone();
         let listener_events = events.clone();
         let listener = tokio::spawn(async move {
+            // Each connection is admitted beside the others, so one that stalls never holds the next. At most
+            // `ADMITTING` are unfinished at once, even before a socket exists: the oldest goes first. Stopping the
+            // listener drops the set, and every admission with it.
+            let mut admitting = tokio::task::JoinSet::new();
+            let mut order = VecDeque::new();
             while let Some(incoming) = listener_endpoint.accept().await {
-                // Serial admission bounds unfinished handshakes, even before a socket exists.
-                if let Ok(Ok(connection)) =
-                    tokio::time::timeout(Duration::from_secs(10), incoming).await
-                {
-                    let _ = listener_state
-                        .attach(
-                            id,
-                            listener_endpoint.clone(),
-                            connection,
-                            listener_events.clone(),
-                            true,
-                        )
-                        .await;
+                while admitting.try_join_next().is_some() {}
+                order.retain(|admission: &tokio::task::AbortHandle| !admission.is_finished());
+                if order.len() >= ADMITTING {
+                    if let Some(oldest) = order.pop_front() {
+                        oldest.abort();
+                    }
                 }
+                let (state, endpoint, events) = (
+                    listener_state.clone(),
+                    listener_endpoint.clone(),
+                    listener_events.clone(),
+                );
+                order.push_back(admitting.spawn(async move {
+                    if let Ok(Ok(connection)) =
+                        tokio::time::timeout(Duration::from_secs(10), incoming).await
+                    {
+                        let _ = state.attach(id, endpoint, connection, events, true).await;
+                    }
+                }));
             }
         });
         let mut inner = self.inner.lock().unwrap();
@@ -1843,6 +1856,58 @@ mod tests {
             e["type"] == "closed" && e["id"] == opened["id"]
         })
         .await;
+        stranger.close().await;
+    }
+
+    /// Connections that never open a stream wait out their own budget beside the next one: the contact still
+    /// gets in.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_connection_that_never_opens_a_stream_does_not_hold_the_next_one() {
+        let app = app();
+        let (alice, _, _) = start(&app, 42).await;
+        let (_, bob_address, bob_seen) = start(&app, 43).await;
+        let stranger = wire::endpoint([44; 32], true, None).await.unwrap();
+        let idle: Vec<_> = (0..3)
+            .map(|_| {
+                let (stranger, bob_address) = (stranger.clone(), bob_address.clone());
+                tokio::spawn(async move {
+                    let connection = wire::connect(&stranger, &bob_address).await?;
+                    connection.closed().await;
+                    Ok::<(), String>(())
+                })
+            })
+            .collect();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            connect(&app, alice, &bob_address).await.unwrap();
+            while !bob_seen.lock().unwrap().iter().any(kind("open")) {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("the contact got in behind the idle connections");
+        for task in idle {
+            task.abort();
+        }
+        stranger.close().await;
+    }
+
+    /// Unfinished connections are few: one more than `ADMITTING` drops the oldest, long before its own budget ends.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn one_connection_too_many_waiting_drops_the_oldest() {
+        let app = app();
+        let (_, bob_address, _) = start(&app, 45).await;
+        let stranger = wire::endpoint([46; 32], true, None).await.unwrap();
+        let mut idle = Vec::new();
+        for _ in 0..=ADMITTING {
+            idle.push(wire::connect(&stranger, &bob_address).await.unwrap());
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        tokio::time::timeout(Duration::from_secs(5), idle[0].closed())
+            .await
+            .expect("the oldest was dropped");
+        assert!(idle[1..].iter().all(|c| c.close_reason().is_none()));
         stranger.close().await;
     }
 
