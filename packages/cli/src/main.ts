@@ -968,10 +968,13 @@ const BACKUP_PASSPHRASE = "The backup passphrase comes from --passphrase-file or
 /** Restore takes no --no-passphrase: a backup made without one says so itself. */
 const RESTORE_PASSPHRASE = "This backup is encrypted: its passphrase comes from --passphrase-file or GHOSTLY_BACKUP_PASSPHRASE";
 const PASSPHRASE_ON_LINE = "The passphrase comes from --passphrase-file or GHOSTLY_BACKUP_PASSPHRASE, never the command line";
-/** `--passphrase` or `--passphrase=<value>` before any `--` (after it, words are positionals). */
+/**
+ * `--passphrase` or `--passphrase=<value>` before any `--` (after it, words are positionals), or a typo of it
+ * (`--pasphrase=<value>`): before, that was "did you mean --passphrase?", the one form refused here.
+ */
 const passphraseOnLine = (argv: readonly string[]): boolean => {
   const end = argv.indexOf("--");
-  return (end === -1 ? argv : argv.slice(0, end)).some((arg) => arg === "--passphrase" || arg.startsWith("--passphrase="));
+  return (end === -1 ? argv : argv.slice(0, end)).some((arg) => arg.startsWith("--") && nearest(arg.slice(2).split("=")[0], ["passphrase"]) === "passphrase");
 };
 
 /**
