@@ -14,6 +14,7 @@ import { EmojiTab } from "./composer/EmojiTab";
 import { Select } from "./ui/Select";
 import { Notice } from "./ui/Notice";
 import { input } from "./wallet/ui";
+import { FocusSafeButton } from "./ui/FocusSafeButton";
 
 /*
  * This profile's status (WISP 401 § Presence and status), Slack-like: its row in the account menu, and the picker that
@@ -186,10 +187,10 @@ function StatusPickerDialog({ onClose }: { onClose: () => void }) {
 
         {problem && <Notice problem={problem} className="text-xs" />}
         <div className="flex flex-wrap items-center gap-2">
-          {status && <button type="button" disabled={busy} onClick={() => void run(() => engine.call("clearOwnStatus"))} className={`${button} me-auto text-danger hover:bg-surface-hover`}>{t("status.clear")}</button>}
+          {status && <FocusSafeButton type="button" disabled={busy} onClick={() => void run(() => engine.call("clearOwnStatus"))} className={`${button} me-auto text-danger hover:bg-surface-hover`}>{t("status.clear")}</FocusSafeButton>}
           <div className="flex gap-2 ms-auto">
             <button type="button" onClick={onClose} className={`${button} bg-surface-alt text-text-primary border border-border`}>{t("common.cancel")}</button>
-            <button type="button" disabled={busy} onClick={save} className={`${button} bg-accent text-on-accent font-semibold`}>{t("common.save")}</button>
+            <FocusSafeButton type="button" disabled={busy} onClick={save} className={`${button} bg-accent text-on-accent font-semibold`}>{t("common.save")}</FocusSafeButton>
           </div>
         </div>
       </div>

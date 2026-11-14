@@ -1658,6 +1658,8 @@ input[type="checkbox"]:not(:disabled), input[type="radio"]:not(:disabled), selec
 [role="button"]:not(:disabled):not([aria-disabled="true"]), [role="switch"]:not(:disabled):not([aria-disabled="true"]) { cursor: pointer; }
 button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, input[type="radio"]:disabled, select:disabled,
 [role="button"][aria-disabled="true"], [role="switch"][aria-disabled="true"] { cursor: not-allowed; }
+/* Disabled while it has the focus (FocusSafeButton): looks as a disabled button does, and keeps the focus. */
+button[data-held] { opacity: 0.4; }
 
 /* Shared desktop baseline; the composer can still grow with multiline text. */
 @media (min-width: 768px) {

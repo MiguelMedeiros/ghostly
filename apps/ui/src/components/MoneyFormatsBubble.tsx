@@ -25,6 +25,7 @@ import { problemText, type Problem } from "../lib/problemText";
 import { qrFits } from "../lib/qrFits";
 import { Notice } from "./ui/Notice";
 import { focusLost, working } from "../lib/focus";
+import { FocusSafeButton } from "./ui/FocusSafeButton";
 
 const button =
   "px-3 py-1.5 max-md:min-h-11 bg-accent text-on-accent rounded-lg text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed data-[loading]:opacity-80 data-[loading]:cursor-progress";
@@ -224,7 +225,7 @@ function PayStep({ wallet, fixedAmount, unit, defaultFee, feeUnit, parse, prepar
         >
           {busy ? t("payments.bubble.preparing") : t("payments.bubble.review")}
         </button>
-        <button className={quiet} disabled={busy} onClick={() => setOpen(false)}>{t("common.cancel")}</button>
+        <FocusSafeButton className={quiet} disabled={busy} onClick={() => setOpen(false)}>{t("common.cancel")}</FocusSafeButton>
       </div>
       {error && <Notice problem={error} testId="money-pay-error" className="chat-text-card-line m-0" />}
     </div>

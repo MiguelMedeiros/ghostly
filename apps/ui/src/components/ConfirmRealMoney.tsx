@@ -3,6 +3,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { fillNodes } from "../lib/fillNodes";
 import { playCue } from "../lib/cues";
 import { focusLost } from "../lib/focus";
+import { FocusSafeButton } from "./ui/FocusSafeButton";
 
 /** What can take the keys: an enabled button, field or link. */
 const CONTROL = "button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href]";
@@ -46,7 +47,7 @@ export function ConfirmRealMoney({ what, busy, onSend, onBack }: { what: string;
             payment is refused. A press while busy does nothing. */}
         <button className={`${button} !bg-accent !text-on-accent data-[loading]:opacity-80 data-[loading]:cursor-progress`} data-testid="review-confirm-send"
           {...(busy ? { "aria-disabled": true, "aria-busy": true, "data-loading": true } : {})} onClick={() => { if (busy) return; playCue("realmoney"); onSend(); }}>{t("payments.confirmReal.send")}</button>
-        <button ref={back} className={button} data-testid="review-confirm-back" disabled={busy} onClick={() => { backed.current = true; onBack(); }}>{t("common.back")}</button>
+        <FocusSafeButton ref={back} className={button} data-testid="review-confirm-back" disabled={busy} onClick={() => { backed.current = true; onBack(); }}>{t("common.back")}</FocusSafeButton>
       </div>
     </div>
   );

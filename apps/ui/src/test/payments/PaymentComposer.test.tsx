@@ -772,7 +772,8 @@ describe("sending on Ark, Bark, on-chain and USDT", () => {
   ])("on %s, asks the contact's app for an address first, on the card's network", async (rail, id, typed, units) => {
     const { engine } = await ask(id, typed);
     expect(engine.callsTo("askToPay")).toEqual([{ linkId: "link-1", amount: units, method: rail, memo: "lunch", timestamp: expect.any(Number), network: id.split(":")[1] }]);
-    expect(send()).toBeDisabled();
+    // Send was pressed and keeps the focus while it waits: off by aria-disabled. Request is plain disabled.
+    expect(send()).toHaveAttribute("aria-disabled", "true");
     expect(request()).toBeDisabled();
     expect(engine.callsTo("preparePayment")).toEqual([]);
   });

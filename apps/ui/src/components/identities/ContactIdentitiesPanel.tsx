@@ -29,6 +29,7 @@ import { problemLine } from "../../lib/problemText";
 import { fillNames } from "../../lib/fillNodes";
 import { sourceWords } from "../../lib/providerWords";
 import { focusLost } from "../../lib/focus";
+import { FocusSafeButton } from "../ui/FocusSafeButton";
 
 type Entry = { id: typeof GHOSTLY; ghostly: true; card: IdCardContent } | { id: string; ghostly?: false; r: ReceivedIdentityView; card: IdCardContent };
 type Received = Extract<Entry, { r: ReceivedIdentityView }>;
@@ -212,7 +213,7 @@ function TheirGhostlyBack({ t, card, link, name, turning, onCards }: { t: Transl
           {card.issued && <><dt>{t("identities.contact.since")}</dt><dd>{card.validity}</dd></>}
         </dl>
         <div className="flex flex-wrap gap-2">
-          <button type="button" className="contact-card-action" data-testid="chat-identity-copy-key" disabled={turning} onClick={copy}>{copied ? t("identities.ghostly.copied") : t("identities.ghostly.copyKey")}</button>
+          <FocusSafeButton type="button" className="contact-card-action" data-testid="chat-identity-copy-key" disabled={turning} onClick={copy}>{copied ? t("identities.ghostly.copied") : t("identities.ghostly.copyKey")}</FocusSafeButton>
         </div>
         {failed && <p role="alert" className="id-card-back-note" data-testid="chat-identity-copy-error">{t("identities.add.copyError")}</p>}
       </div>
@@ -268,10 +269,10 @@ function TheirCardBack({ t, entry, linkId, name, nostr, turning, onCards }: { t:
             : r.status === "revoked" ? t("identities.contact.revoked", { status: card.statusLabel }) : card.statusLabel}</dd>
         </dl>
         <div className="flex flex-wrap gap-2">
-          {canCheck && <button type="button" className="contact-card-action" data-testid="chat-identity-recheck" disabled={turning} aria-disabled={!!busy || undefined}
-            onClick={() => { if (!busy) act("recheck", () => engine.call("recheckIdentityProof", { linkId, id: r.id })); }}>{busy === "recheck" ? t("identities.contact.checking") : t("identities.contact.recheck")}</button>}
-          {provider?.lookupDisplay && ok && <button type="button" className="contact-card-action" data-testid="chat-identity-lookup" disabled={turning} aria-disabled={!!busy || undefined}
-            onClick={() => { if (!busy) act("lookup", () => engine.call("lookupIdentityDisplay", { linkId, id: r.id })); }}>{busy === "lookup" ? t("identities.contact.lookingUp") : r.provider === "openpgp" ? t("identities.contact.lookupOpenpgp") : provider.lookupLabel ?? t("identities.contact.showProfile")}</button>}
+          {canCheck && <FocusSafeButton type="button" className="contact-card-action" data-testid="chat-identity-recheck" disabled={turning} aria-disabled={!!busy || undefined}
+            onClick={() => { if (!busy) act("recheck", () => engine.call("recheckIdentityProof", { linkId, id: r.id })); }}>{busy === "recheck" ? t("identities.contact.checking") : t("identities.contact.recheck")}</FocusSafeButton>}
+          {provider?.lookupDisplay && ok && <FocusSafeButton type="button" className="contact-card-action" data-testid="chat-identity-lookup" disabled={turning} aria-disabled={!!busy || undefined}
+            onClick={() => { if (!busy) act("lookup", () => engine.call("lookupIdentityDisplay", { linkId, id: r.id })); }}>{busy === "lookup" ? t("identities.contact.lookingUp") : r.provider === "openpgp" ? t("identities.contact.lookupOpenpgp") : provider.lookupLabel ?? t("identities.contact.showProfile")}</FocusSafeButton>}
         </div>
         {/* What Check again does, only where there is one: a withdrawn or revoked card is not checked again. */}
         {canCheck && <p className="id-card-back-note">{provider?.recheck ? t("identities.contact.recheckNoteRepeat") : t("identities.contact.recheckNote")}{provider?.lookupDisplay && ok ? ` ${t("identities.contact.lookupNote")}` : ""}</p>}

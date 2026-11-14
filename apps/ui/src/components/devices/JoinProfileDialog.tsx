@@ -20,6 +20,7 @@ import { problemText, type Problem } from "../../lib/problemText";
 import { said } from "../../lib/notices";
 import { fillNames } from "../../lib/fillNodes";
 import { keepFocusIn } from "../../lib/focus";
+import { FocusSafeButton } from "../ui/FocusSafeButton";
 
 /** How long a profile whose wallets are still loading is asked again before the join gives up and says why. */
 const LOADING_WAIT_MS = 60_000;
@@ -216,7 +217,7 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
           </label>
           {place === "new" && <InfoLine testId="device-join-new-profile" info={t("devices.join.newProfileInfo")}>{t("devices.join.newProfile")}</InfoLine>}
           {error && <Notice problem={error} testId="device-join-error" />}
-          <button type="submit" autoFocus data-testid="device-join-next" disabled={!name.trim() || busy} className={primaryButton}>{t("devices.join.add")}</button>
+          <FocusSafeButton type="submit" autoFocus data-testid="device-join-next" disabled={!name.trim() || busy} className={primaryButton}>{t("devices.join.add")}</FocusSafeButton>
         </form>
       )}
       {/* What the enroll step shows; it takes the focus when Add goes away under it. */}

@@ -30,6 +30,7 @@ import { useWindowAway } from "../lib/windowAway";
 import { useOnline } from "../hooks/useOnline";
 import { useEngineReconnecting, useEngineValue } from "../lib/engineState";
 import { focusLost } from "../lib/focus";
+import { FocusSafeButton } from "./ui/FocusSafeButton";
 
 const name = transportName;
 /**
@@ -350,9 +351,9 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
             Not while the contact keeps the chat on DHT only either: the engine refuses the dial, and the refusal read as a connection issue.
             Nor in the seconds after a live link closed with messages held: the contact may have chosen it and not said so yet.
             Nor with no transport this app can run: no dial can connect. Nor while the tab lost its peer: nothing dials. */}
-        {!dht && !peerLost &&link?.dhtDelivery?.peerMode !== "dht" && labelState !== "heldPlain" && !liveOff && !ready && !awaitingJoin && online && link && <button className={`-mx-1 min-h-9 rounded-md px-2 text-accent hover:bg-surface-hover disabled:opacity-40 aria-disabled:opacity-40 ${focus}`} disabled={busy}
+        {!dht && !peerLost &&link?.dhtDelivery?.peerMode !== "dht" && labelState !== "heldPlain" && !liveOff && !ready && !awaitingJoin && online && link && <FocusSafeButton className={`-mx-1 min-h-9 rounded-md px-2 text-accent hover:bg-surface-hover disabled:opacity-40 aria-disabled:opacity-40 ${focus}`} disabled={busy}
           ref={reconnectRef} aria-disabled={dialing || undefined} data-testid="connection-reconnect"
-          onClick={() => void reconnect(link.id)}>{t(dialing ? "connection.panel.reconnecting" : "connection.panel.reconnect")}</button>}
+          onClick={() => void reconnect(link.id)}>{t(dialing ? "connection.panel.reconnecting" : "connection.panel.reconnect")}</FocusSafeButton>}
         <details className="text-[11px]" data-testid="connection-details">
           <summary data-testid="connection-details-summary" className={`w-fit cursor-pointer rounded-md px-1 py-2 text-text-secondary ${focus}`}>{t("connection.panel.details")}</summary>
           <div className="space-y-2 px-1 pb-2">
@@ -360,9 +361,9 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
               <p className="font-medium text-text-primary">{waitText.label}</p>
               <p className="mt-0.5 break-words" data-testid="connection-waiting-why">{waitText.why}</p>
               <p className="mt-0.5">{waitText.meanwhile}</p>
-              {waitText.automatic && link && <button type="button" data-testid="connection-waiting-automatic" disabled={busy || !ghostlyOnline}
+              {waitText.automatic && link && <FocusSafeButton type="button" data-testid="connection-waiting-automatic" disabled={busy || !ghostlyOnline}
                 className={`mt-1.5 min-h-9 rounded-md px-2 text-accent hover:bg-surface disabled:opacity-40 ${focus}`}
-                onClick={() => void run(() => engine.call("setChatTransport", { linkId: link.id, transport: "auto" }))}>{t("connection.panel.useAutomatic")}</button>}
+                onClick={() => void run(() => engine.call("setChatTransport", { linkId: link.id, transport: "auto" }))}>{t("connection.panel.useAutomatic")}</FocusSafeButton>}
             </div>}
             {progress && (pairingOn || pairingFailed) && <div data-testid="connection-pairing-details" className="rounded-lg bg-surface-hover px-2.5 py-2 leading-4">
               <div className="font-medium text-text-primary">{stageWords}<PairingDetail detail={pairingDetail(progress)} testId="connection-pairing-detail" className="mt-0.5 font-normal text-text-secondary" /></div>
@@ -404,8 +405,8 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
                 {comparing && canCompare && !link?.peerVerified && <div className="rounded-lg bg-surface-hover p-3">
                   <code data-testid="pair-code" className="block select-all break-words text-sm tracking-widest text-text-primary">{pair?.code}</code>
                   <p className="mt-1">{t("connection.panel.compare")}</p>
-                  <button data-testid="pair-verify-confirm" disabled={busy} className={`mt-2 min-h-9 rounded-lg bg-accent px-3 text-panel-header ${focus}`}
-                    onClick={() => link && pair?.code && void run(async () => {await engine.call("confirmPair", {linkId:link.id,code:pair.code!});setComparing(false);}, setVerifyError)}>{t("connection.panel.codesMatch")}</button>
+                  <FocusSafeButton data-testid="pair-verify-confirm" disabled={busy} className={`mt-2 min-h-9 rounded-lg bg-accent px-3 text-panel-header ${focus}`}
+                    onClick={() => link && pair?.code && void run(async () => {await engine.call("confirmPair", {linkId:link.id,code:pair.code!});setComparing(false);}, setVerifyError)}>{t("connection.panel.codesMatch")}</FocusSafeButton>
                   {verifyError && <Notice problem={problemText(verifyError, t)} tone="warning" testId="pair-verify-error" className="mt-1.5" />}
                 </div>}
               </>}
