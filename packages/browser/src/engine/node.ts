@@ -3065,7 +3065,28 @@ export class GhostlyNode implements EngineImplementation {
     return live && !live.stored.group ? this.viewOf(live) : undefined;
   }
 
+  /** Every chat's view built again: what a caller reads may follow a change no state was asked for. */
   getState(): EngineState {
+    this.changedChats = null;
+    return this.pushedState();
+  }
+
+  /**
+   * Each chat's view as the last state had it, by its live link (a chat made again is built again), and the chats
+   * changed since (`chatChanged`; null: unknown which, all). A state then costs the chats that changed, not every chat.
+   */
+  private readonly chatViews = new WeakMap<LiveLink, LinkView>();
+  private changedChats: Set<string> | null = null;
+
+  /** The state `emitState` sends: the views of the chats no change named since the last are the same objects. */
+  private pushedState(): EngineState {
+    const changed = this.changedChats;
+    this.changedChats = new Set();
+    const viewOf = (live: LiveLink) => {
+      let view = changed && !changed.has(live.stored.id) ? this.chatViews.get(live) : undefined;
+      if (!view) this.chatViews.set(live, view = this.viewOf(live));
+      return view;
+    };
     const groups = this.groups.views();
     const edges = this.edgesByMember();
     return {
@@ -3085,7 +3106,7 @@ export class GhostlyNode implements EngineImplementation {
         ...(!this.contactRtc() && !Object.keys(this.nativeFactories).length && { groupLinks: false as const }),
       },
       // Group edges are links the engine runs, not chats anyone sees.
-      links: [...this.links.values()].filter((live) => !live.stored.group).map((live) => this.viewOf(live)).sort((a, b) => b.createdAt - a.createdAt),
+      links: [...this.links.values()].filter((live) => !live.stored.group).map(viewOf).sort((a, b) => b.createdAt - a.createdAt),
       services: this.services
         .map((s) => ({ ...s, requests: this.requestCounts.get(s.id) ?? 0 }))
         .sort((a, b) => a.createdAt - b.createdAt),
@@ -3100,7 +3121,7 @@ export class GhostlyNode implements EngineImplementation {
       contactRequests: this.contactLinks.requests(),
       contactAsks: this.contactAsks.views(),
       nostr: this.nostrSocial.state(),
-      edges: [...[...this.links.values()].filter(live => live.stored.group && !live.stored.groupEntry).map(live => this.viewOf(live)), ...this.communityPayViews(groups)],
+      edges: [...[...this.links.values()].filter(live => live.stored.group && !live.stored.groupEntry).map(viewOf), ...this.communityPayViews(groups)],
       groups: groups.map(group => ({ ...group, ...(this.groupAdminOff.has(group.id) && { adminOff: true as const }), ...(this.reactionNotes.has(`group:${group.id}`) && { lastReaction: this.reactionNotes.get(`group:${group.id}`) }), ...this.groupWakeView(group), members: group.members.map(member => {
         const edge = member.me ? undefined : this.edgeView(group.id, member.key, edges);
         return edge ? { ...member, edge } : member;
@@ -4005,7 +4026,7 @@ export class GhostlyNode implements EngineImplementation {
     const clean = sanitizeDisplayText(label.trim().replace(/\s+/gu, " "), 48)?.replace(/ {2,}/g, " ");
     live.stored = { ...live.stored, label: clean };
     void db.patchLink(linkId, { label: live.stored.label });
-    this.emitState();
+    this.chatChanged(linkId);
   }
 
   /** `linkId`: a chat's, or `group:<id>` for a group on screen, whose edges then take native listeners as a chat on screen does. */
@@ -6538,7 +6559,7 @@ export class GhostlyNode implements EngineImplementation {
     this.peerStatusTimers.set(linkId, setTimeout(() => {
       this.peerStatusTimers.delete(linkId);
       if (until > Date.now()) this.redrawAtStatusEnd(linkId, until);
-      else this.emitState();
+      else this.chatChanged(linkId);
     }, Math.min(until - Date.now() + 1, GhostlyNode.TIMER_MAX_MS)));
   }
 
@@ -9151,7 +9172,7 @@ export class GhostlyNode implements EngineImplementation {
           if (status === "online") live.lastSyncAt = Date.now();
           // A read like the one before changes no row: only the open chat's panel shows its time, and a group's
           // members when they were last seen. A failed read of a chat that never synced is like the one before too.
-          if (status !== was || (!synced && status === "online") || stored.group || linkId === this.activeLinkId) this.emitState();
+          if (status !== was || (!synced && status === "online") || stored.group || linkId === this.activeLinkId) this.chatChanged(linkId);
         },
         onPoll: ({ polling, nextInMs }) => {
           const was = live.poll.polling, first = !live.lastSyncAt && !live.firstReadDone;
@@ -9159,7 +9180,7 @@ export class GhostlyNode implements EngineImplementation {
           if (was && !polling) live.firstReadDone = true;
           // Shown in the open chat's panel, and in the list only as a chat's first sync under way: its first read, not
           // every read of a chat whose reads fail (no network), which was a state a read for each such chat.
-          if (linkId === this.activeLinkId || (first && polling !== was)) this.emitState();
+          if (linkId === this.activeLinkId || (first && polling !== was)) this.chatChanged(linkId);
         },
         onMessageReceipt: async id => {
           const oneToOne = !!stored.profile && !stored.group;
@@ -9184,14 +9205,14 @@ export class GhostlyNode implements EngineImplementation {
           if (!stored.profile || stored.group) return;
           live.stored = { ...live.stored, peerWake: target ?? undefined };
           void db.patchLink(linkId, { peerWake: target ?? undefined });
-          this.emitState();
+          this.chatChanged(linkId);
         },
         onPeerAck: (ack) => {
           if (stored.profile) return;
           // Never back: the contact's record keeps an older ack than a text that reached it over the data link (sendMessage).
           if (ack <= live.peerAck) return;
           live.peerAck = ack;
-          this.emitState();
+          this.chatChanged(linkId);
         },
         onDirectEvidence: evidence => this.directPath.note(stored.peerPubKeyZ32, evidence),
         // A pinned contact only, by the key that is the person: a group's edges and a contact's other chats are the same device again.
@@ -9228,14 +9249,14 @@ export class GhostlyNode implements EngineImplementation {
           if ((avatar ?? undefined) === live.stored.peerAvatar) return;
           live.stored = { ...live.stored, peerAvatar: avatar ?? undefined };
           void db.patchLink(linkId, { peerAvatar: avatar ?? undefined });
-          this.emitState();
+          this.chatChanged(linkId);
         },
         // A paired contact says its name on every session, and an empty one when it has none to show.
         onPeerNick: (nick) => {
           if ((nick ?? "") === live.stored.peerNick) return;
           live.stored = { ...live.stored, peerNick: nick ?? "" };
           void db.patchLink(linkId, { peerNick: nick ?? "" });
-          this.emitState();
+          this.chatChanged(linkId);
         },
         onPresence: (presence) => {
           // Every read of the contact's packet says its presence: one that finds it as before shows nothing new.
@@ -9252,7 +9273,7 @@ export class GhostlyNode implements EngineImplementation {
             void db.patchLink(linkId, { peerNick: presence.nick });
             same = false;
           }
-          if (!same) this.emitState();
+          if (!same) this.chatChanged(linkId);
         },
         onMessage: (message) => {
           if (live.stored.inviteCode) {
@@ -9278,9 +9299,9 @@ export class GhostlyNode implements EngineImplementation {
         },
         onCallSignal: (signal) => this.events.onCallSignal(linkId, signal),
         // Presence, not a message: only the state shows it, nothing is stored or counted.
-        onPeerTyping: () => this.emitState(),
+        onPeerTyping: () => this.chatChanged(linkId),
         // So are presence and a set status; a status that ends leaves the view when it does.
-        onPeerStatus: state => { this.emitState(); this.redrawAtStatusEnd(linkId, state.status?.until); },
+        onPeerStatus: state => { this.chatChanged(linkId); this.redrawAtStatusEnd(linkId, state.status?.until); },
         // Taken (shown, older than what is shown, or waiting for its message) is confirmed; no room left is not.
         onReaction: async reaction => (await this.reactions.receive(linkId, "peer", reaction)) !== "dropped",
         onReactionReceipt: n => this.reactionReceipt(linkId, n),
@@ -10535,6 +10556,18 @@ export class GhostlyNode implements EngineImplementation {
    * that may not wait as long as the snapshot already due (a new file behind another's progress) brings it forward.
    */
   private emitState(delayMs = 50): void {
+    // What changed is not said: every chat's view is built again.
+    this.changedChats = null;
+    this.scheduleState(delayMs);
+  }
+
+  /** A change of one chat's own (its link's word, its name): the next state builds this chat's view again, and reuses the others'. */
+  private chatChanged(linkId: string): void {
+    this.changedChats?.add(linkId);
+    this.scheduleState(50);
+  }
+
+  private scheduleState(delayMs: number): void {
     // Another device took the turn (WISP 06): the pages show the standby screen, and hear nothing more of this engine.
     if (this.gatedOut) return;
     const due = Date.now() + delayMs;
@@ -10547,7 +10580,7 @@ export class GhostlyNode implements EngineImplementation {
       this.stateTimer = null;
       // Asked for just before another device's turn stopped this engine: the pages keep the standby screen.
       if (this.gatedOut) return;
-      this.events.onState(this.getState());
+      this.events.onState(this.pushedState());
       this.dropBriefViews();
       // A chat deleted or muted, a token made: the other devices learn which tokens the profile hands out.
       if (this.deviceLinks) this.syncDeviceTokens();
