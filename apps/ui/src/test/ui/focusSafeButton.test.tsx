@@ -55,6 +55,24 @@ describe.each(["raw", "button"] as const)("a %s button disabled by its own work"
   });
 });
 
+it("a held button keeps the focus while the window is away (a tab switch, a save dialog its work opened)", async () => {
+  const work = vi.fn(() => new Promise<void>(() => {}));
+  const { user } = renderApp(<Work as="raw" work={work} />);
+  const go = screen.getByTestId("go");
+  go.focus();
+  await user.keyboard("{Enter}");
+  expect(go).toHaveAttribute("aria-disabled", "true");
+  // As Chromium says the window lost the focus: blur and focusout on the focused button, which stays the active one.
+  // Natively disabled now, Chromium would drop it to the page, where the window's return finds it.
+  act(() => { go.dispatchEvent(new FocusEvent("blur")); go.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); });
+  expect(document.activeElement).toBe(go);
+  expect(go).toBeEnabled();
+  expect(go).toHaveAttribute("aria-disabled", "true");
+  act(() => { go.dispatchEvent(new FocusEvent("focus")); go.dispatchEvent(new FocusEvent("focusin", { bubbles: true })); });
+  await user.tab();
+  expect(go).toBeDisabled();
+});
+
 it("a held submit button sends no form on Enter", async () => {
   const submit = vi.fn((e: React.FormEvent) => e.preventDefault());
   function Form() {
