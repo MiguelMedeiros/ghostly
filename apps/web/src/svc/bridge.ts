@@ -144,7 +144,7 @@ export function parsedPage(frame: HTMLIFrameElement): boolean {
   }
 }
 
-/** How often the bridge looks whether the app's first page is parsed, until it is. */
+/** How often the bridge looks whether a page of the app is parsed, until it is. */
 const PARSED_LOOK_MS = 100;
 
 function say(text: string): void {
@@ -172,22 +172,42 @@ function start(): void {
     return;
   }
   let app: HTMLIFrameElement | null = null;
+  // A page that may be shown has the links it opens in a new window handed to the app's page, once, from when it is
+  // parsed (`look`): it is shown, and used, while its pictures and frames are still on their way; or at its `load`.
+  const hooked = new WeakSet<Document>();
+  const hook = (frame: HTMLIFrameElement) => {
+    try {
+      const doc = documentOf ? apply(documentOf, frame, []) as Document | null : null;
+      const win = windowOf ? apply(windowOf, frame, []) as Window | null : null;
+      if (!doc || !win || hooked.has(doc)) return;
+      hooked.add(doc);
+      // Only one the person opens in the app (`watchUse`): the app's page checks its own activation too, which a tap
+      // on Ghostly's Open, or one in Ghostly's page, gives it for seconds while the app's page loads or runs.
+      const using = watchUse(win);
+      forwardLinks(win, (url) => { if (using()) window.parent.postMessage({ type: BRIDGE_OPEN_LINK, url }, __SERVICES_APP_ORIGIN__); });
+      // The app loads another page in its frame: looked at again until that one is parsed.
+      win.addEventListener("pagehide", () => look(frame, doc), { once: true });
+    } catch { /* a page that is not HTML: nothing to hand on */ }
+  };
+  // Looks whether a page of the app other than `left` is parsed, until one is. The first is said shown then, not only at
+  // its `load`: the app's page says the app is opening until then, over the frame. Only the first: the app's page needs
+  // no more.
+  const look = (frame: HTMLIFrameElement, left: Document | null) => {
+    const parsed = setInterval(() => {
+      if (app !== frame) { clearInterval(parsed); return; }
+      if (!parsedPage(frame) || (documentOf && apply(documentOf, frame, []) === left)) return;
+      clearInterval(parsed);
+      hook(frame);
+      if (!left) window.parent.postMessage({ type: BRIDGE_SHOWN }, __SERVICES_APP_ORIGIN__);
+    }, PARSED_LOOK_MS);
+  };
   // Each page the app's frame loads is looked at before this page's guard goes over the frame (both listen on the
   // document, as no `load` reaches the window; this one, put there first, runs first): one without the guard of its
   // own is taken away.
-  // A page that may be shown has the links it opens in a new window handed to the app's page.
   document.addEventListener("load", (event) => {
     if (!app || event.target !== app) return;
     if (guardedPage(app)) {
-      const win = windowOf ? apply(windowOf, app, []) as Window | null : null;
-      try {
-        // Only one the person opens in the app (`watchUse`): the app's page checks its own activation too, which a tap
-        // on Ghostly's Open, or one in Ghostly's page, gives it for seconds while the app's page loads or runs.
-        if (win) {
-          const using = watchUse(win);
-          forwardLinks(win, (url) => { if (using()) window.parent.postMessage({ type: BRIDGE_OPEN_LINK, url }, __SERVICES_APP_ORIGIN__); });
-        }
-      } catch { /* a page that is not HTML: nothing to hand on */ }
+      hook(app);
       // Not the frame's first empty page: the contact's own, or what Ghostly says in its place (too slow, unreachable).
       if (!shownBlank(app)) window.parent.postMessage({ type: BRIDGE_SHOWN }, __SERVICES_APP_ORIGIN__);
       return;
@@ -235,12 +255,7 @@ function start(): void {
         frame.src = "/";
         app = frame;
         document.body.replaceChildren(frame);
-        // Its first page is said shown once it is parsed, not only at its `load`: the app's page says the app is
-        // opening until then, over the frame. Only the first: the app's page needs no more.
-        const parsed = setInterval(() => {
-          if (app !== frame) clearInterval(parsed);
-          else if (parsedPage(frame)) { clearInterval(parsed); window.parent.postMessage({ type: BRIDGE_SHOWN }, __SERVICES_APP_ORIGIN__); }
-        }, PARSED_LOOK_MS);
+        look(frame, null);
       }, () => refuse("blocked", "This browser cannot open the app here."));
   });
   window.parent.postMessage({ type: BRIDGE_READY }, __SERVICES_APP_ORIGIN__);

@@ -82,7 +82,7 @@ test("a contact's app is shown once its page is there, not held under \"Opening\
   const app = createServer(async (request, response) => {
     if (request.url === "/") {
       response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-      response.end(`<!doctype html><title>Demo</title><p id="title">Hello from the demo</p><img src="/photo.png" alt="">`);
+      response.end(`<!doctype html><title>Demo</title><p id="title">Hello from the demo</p><a id="docs" href="https://docs.example/guide" target="_blank">Docs</a><img src="/photo.png" alt="">`);
       return;
     }
     if (request.url !== "/photo.png") { response.writeHead(404); response.end(); return; }
@@ -117,6 +117,17 @@ test("a contact's app is shown once its page is there, not held under \"Opening\
     // "too slow" answer). It stayed hidden under "Opening Demo…" all that time.
     await expect(view.getByRole("status")).toBeHidden({ timeout: 15_000 });
     await expect(view.getByTestId("service-view-frame")).toBeVisible();
+    // In use while its picture is still on its way: a link it opens in a new tab, tapped, opens one. It opened nothing,
+    // with no word, until the picture came (the bridge hooked the page's links only at its `load`).
+    const context = person.page.context();
+    await context.route("https://docs.example/**", (route) => route.fulfill({ contentType: "text/html", body: "<title>Docs</title>docs" }));
+    // Past the 5 s the tap on Open keeps Ghostly's page active: a link asked for meanwhile is not one tapped in the app.
+    await person.page.waitForTimeout(5_500);
+    const tab = context.waitForEvent("page");
+    await demo.locator("#docs").click();
+    const docs = await tab;
+    await expect(docs).toHaveURL("https://docs.example/guide");
+    await docs.close();
   } catch (error) {
     await bot.attachLogs(info);
     throw error;
