@@ -45,8 +45,13 @@ export const DETECT_CHARS = 2_000;
 const UNDETERMINED = "und";
 const NONE: TranslateWhich = { from: null, detected: null };
 
-/** A run of letters, digits and token characters with a digit in it: a number, a token, an invoice, an address, a code. */
-const CODE_RUN = /[A-Za-z0-9_+/=:.-]*\d[A-Za-z0-9_+/=:.-]*|\p{N}+/gu;
+/**
+ * A run of letters, digits and token characters, or of numbers of any script. One with a digit in it is a number, a
+ * token, an invoice, an address, a code (`codeless`). Each run is read whole once: a `[…]*\d` was tried from each
+ * character of a long run with no digit, and a contact's 48,000 held the page for seconds.
+ */
+const CODE_RUN = /[A-Za-z0-9_+/=:.-]+|\p{N}+/gu;
+const codeless = (run: string) => /\d|^\p{N}/u.test(run) ? " " : run;
 const EMOJI = /\p{Extended_Pictographic}|\p{Emoji_Modifier}|\p{Regional_Indicator}|‍|️/gu;
 const LETTER = /\p{L}/gu;
 
@@ -82,7 +87,7 @@ export function detectableText(text: string, mentions: readonly { o: number; l: 
     unmentioned = points.join("");
   }
   return parseMessage(unmentioned).map(blockText).join(" ")
-    .replace(CODE_RUN, " ")
+    .replace(CODE_RUN, codeless)
     .replace(EMOJI, " ")
     .replace(/\s+/g, " ")
     .trim();
