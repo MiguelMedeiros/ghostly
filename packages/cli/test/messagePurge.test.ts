@@ -46,6 +46,7 @@ function fake() {
       setTimeout(() => { const tx = db.transaction("messages", "readwrite"); tx.objectStore("messages").delete([linkId, messageId]); }, 30);
       return { everyone: false };
     },
+    sweepQuotes: async () => {},
   };
   return { runtime: { server: { node }, store, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
 }

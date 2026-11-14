@@ -72,11 +72,24 @@ export class QuoteSweeps {
     }));
   }
 
-  private next(chat: string): void {
+  /**
+   * What waits for this chat is swept now, after a sweep still running, whatever the time since the last one:
+   * `message delete --purge` folds the store next, and the quotes must have lost their lines by then.
+   */
+  async settle(chat: string): Promise<void> {
+    for (let state = this.chats.get(chat); state && (state.busy || state.due.size); state = this.chats.get(chat)) {
+      if (state.busy) { await state.busy; continue; }
+      clearTimeout(state.timer);
+      state.timer = undefined;
+      this.next(chat, true);
+    }
+  }
+
+  private next(chat: string, now = false): void {
     const state = this.chats.get(chat);
     if (!state?.due.size || state.busy || state.timer) return;
     const wait = state.at + QUOTE_SWEEP_MS - this.now();
-    if (wait > 0) { state.timer = setTimeout(() => { state.timer = undefined; this.next(chat); }, wait); return; }
+    if (wait > 0 && !now) { state.timer = setTimeout(() => { state.timer = undefined; this.next(chat); }, wait); return; }
     const removed = state.due;
     state.due = new Map();
     state.at = this.now();

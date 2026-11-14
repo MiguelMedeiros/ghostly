@@ -4933,6 +4933,14 @@ export class GhostlyNode implements EngineImplementation {
     return { error: null };
   }
 
+  /**
+   * The replies of a chat or a group that quote a message deleted for everyone lose its line now, not at the next sweep
+   * (`QuoteSweeps`, up to 10 s): `message delete --purge` folds the store right after.
+   */
+  sweepQuotes(linkId: string): Promise<void> {
+    return this.quoteSweeps.settle(linkId);
+  }
+
   /** Whether my removal of this message of a 1:1 chat is still on its way to the contact (`removeMessage`). */
   removalPending({ linkId, messageId }: { linkId: string; messageId: string }): boolean {
     return !!this.links.get(linkId)?.stored.removals?.some(r => r.id === messageId);

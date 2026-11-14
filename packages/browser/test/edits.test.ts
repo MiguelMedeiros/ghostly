@@ -6,7 +6,7 @@ import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { CARD_RESTORE_GAP_MS, EditBuffer, EditQueue } from "../src/engine/edits";
 import type { GroupEditsHost } from "../src/engine/groupEdits";
-import type { Removal } from "../src/engine/removals";
+import { QuoteSweeps, type Removal } from "../src/engine/removals";
 import { EDIT_HISTORY_KEEP, EDIT_HISTORY_MAX_BYTES, canEdit, takesPeerEdit, withEdit } from "../src/shared/edits";
 import type { StoredLink, StoredMessage } from "../src/shared/types";
 import { refusedRow } from "../src/shared/refusals";
@@ -1160,6 +1160,18 @@ describe("deleting many of my group messages for everyone", () => {
     // The second within the sweep's time goes when it is up (`QuoteSweeps`).
     await vi.waitFor(async () => expect((await db.getMessages(chat)).map(m => m.replyTo)).toEqual([quote(myOriginal, me, ""), quote(bobsOriginal, bob, "")]), { timeout: 15_000, interval: 200 });
   }, 30_000);
+
+  it("a sweep of quotes asked for (`message delete --purge`) goes now, not when the sweep's time is up", async () => {
+    let sweeps: string[][] = [];
+    const quotes = new QuoteSweeps(async (_chat, removed) => { await new Promise(r => setTimeout(r, 20)); sweeps.push([...removed.keys()]); });
+    quotes.add("group:g", "one", "one");
+    quotes.add("group:g", "two", "two");
+    await quotes.settle("group:g");
+    expect(sweeps).toEqual([["one"], ["two"]]);
+    sweeps = [];
+    await quotes.settle("group:g");
+    expect(sweeps).toEqual([]);
+  });
 
   it("a member's reply that comes after its original was deleted for everyone keeps no line of it", async () => {
     const me = createIdentity().pubKeyZ32, bob = createIdentity().pubKeyZ32, g = `late-${crypto.randomUUID()}`, chat = `group:${g}`;

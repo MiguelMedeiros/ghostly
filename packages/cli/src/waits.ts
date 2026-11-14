@@ -72,6 +72,8 @@ export async function purgeMessage(ctx: ApiContext, chat: string, messageId: str
     await new Promise((resolve) => setTimeout(resolve, 20));
     gone = !(await node(ctx).getMessage(chat, messageId));
   }
+  // A reply here that quotes it keeps its first 120 characters until the quote sweep, up to 10 s after the last one.
+  await node(ctx).sweepQuotes(chat);
   await ctx.runtime.store.compact();
   if (!gone) throw new CliError("timeout", `Timed out after ${PURGE_WAIT_MS / 1000} s: the message is deleted, but what it said may stay in the profile's store until its next fold (within the hour)`, { messageId, deleted: messageId });
 }
