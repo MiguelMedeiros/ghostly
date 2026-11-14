@@ -314,9 +314,9 @@ export function CallOverlay({
         </div>
       )}
 
-      {/* Status */}
+      {/* Status. Over the contact's picture (`data-over-picture`) it is white with a shadow (index.css). */}
       <div className="call-top absolute top-8 left-0 right-0 text-center z-10">
-        <p className="text-text-muted text-sm" data-testid="call-status" data-state={callState} data-reconnecting={reconnecting || undefined} role={callState === "connected" ? undefined : "status"}>
+        <p className="text-text-muted text-sm" data-testid="call-status" data-over-picture={showRemoteVideo ? true : undefined} data-state={callState} data-reconnecting={reconnecting || undefined} role={callState === "connected" ? undefined : "status"}>
           {!remoteHasVideo && isVideoOff && callState === "connected" && (
             <span className="text-accent">{t("calls.audio")}</span>
           )}
