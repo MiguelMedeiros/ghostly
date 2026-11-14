@@ -8,7 +8,7 @@ import { expect, test, type Page } from "@playwright/test";
  * the proxy in front of the site) is refused.
  *
  * No other site shows a page of this one inside a frame: every answer says so, a file of the site's included, and a page
- * of another origin that frames the site, an invite in the address, gets an empty frame. No answer names the framework.
+ * of another origin that frames the site, an invite in the address, gets an empty frame. No answer carries `X-Powered-By`.
  */
 const PAGES = ["/", "/cli", "/wisps", "/wisps/401-paired-chat", "/roadmap", "/developers", "/privacy"];
 // The pages, a page that is not there and files from public/.
@@ -73,7 +73,8 @@ for (const path of ANSWERS) {
     expect(headers["x-frame-options"]).toBe("DENY");
     expect(headers["x-content-type-options"]).toBe("nosniff");
     expect(headers["referrer-policy"]).toBe("strict-origin-when-cross-origin");
-    // Nothing says which framework serves the site: a scanner would know which advisories to try.
+    // No `X-Powered-By: Next.js`, which nothing reads. Next's own headers (x-nextjs-cache, x-nextjs-prerender, the RSC
+    // Vary) and the /_next/ paths in every page still show the framework: hiding it is not what this checks.
     expect(headers["x-powered-by"]).toBeUndefined();
   });
 }
