@@ -61,17 +61,21 @@ const PURGE_WAIT_MS = 5_000;
 
 /**
  * `message delete --purge`: once the message's row is gone (the engine takes it out on later turns, its files first),
- * the store's journal is folded into a fresh snapshot now, not within the hour of the fold that comes by itself: what
- * the message said leaves `db/journal.bin` and rows.db's WAL before the command answers. For a secret pasted into a
- * chat; every delete folding would rewrite the snapshot each time.
+ * the replies that quote it lose its line (a delete here leaves it in their rows, one for everyone to a sweep within
+ * 10 s), then the store's journal is folded into a fresh snapshot now, not within the hour of the fold that comes by
+ * itself: what the message said leaves rows.db, `db/journal.bin` and rows.db's WAL before the command answers. For a
+ * secret pasted into a chat; every delete folding would rewrite the snapshot each time. `message`: its row, read
+ * before the delete.
  */
-export async function purgeMessage(ctx: ApiContext, chat: string, messageId: string): Promise<void> {
+export async function purgeMessage(ctx: ApiContext, message: StoredMessage): Promise<void> {
+  const { linkId: chat, id: messageId } = message;
   const until = performance.now() + PURGE_WAIT_MS;
   let gone = !(await node(ctx).getMessage(chat, messageId));
   while (!gone && performance.now() < until) {
     await new Promise((resolve) => setTimeout(resolve, 20));
     gone = !(await node(ctx).getMessage(chat, messageId));
   }
+  if (gone) await node(ctx).forgetQuotesOf(message);
   await ctx.runtime.store.compact();
   if (!gone) throw new CliError("timeout", `Timed out after ${PURGE_WAIT_MS / 1000} s: the message is deleted, but what it said may stay in the profile's store until its next fold (within the hour)`, { messageId, deleted: messageId });
 }

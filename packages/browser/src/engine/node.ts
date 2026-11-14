@@ -5066,6 +5066,15 @@ export class GhostlyNode implements EngineImplementation {
     return ids;
   }
 
+  /**
+   * The replies of a chat or a group that quote `message`, gone here, lose its line now, not at the sweep that comes
+   * within `QUOTE_SWEEP_MS` (or never, for a delete here): the CLI's `message delete --purge`, before the store folds.
+   */
+  async forgetQuotesOf(message: StoredMessage): Promise<void> {
+    const ids = await this.forgetQuotes(message.linkId, new Map([[message.id, replyRef(message)]]));
+    if (ids.length) await this.messagesChanged(message.linkId, ids);
+  }
+
   /** Local id of a file we send: the id on the wire is ours too, but lives in its own key space. */
   private static outgoingFileId(linkId: string, wireId: string): string {
     return `${linkId}-out-${wireId}`;
