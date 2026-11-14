@@ -4,6 +4,7 @@ import { removalRisksFunds, walletRemoval, type WalletRemoval } from "@ghostly/b
 import type { WalletNetwork, WalletPlatform, WalletState, WalletType } from "../../lib/platform";
 import { useBackdropDismiss, useBackCloses } from "../../hooks/useDismiss";
 import { useI18n } from "../../contexts/I18nContext";
+import { listText } from "../../lib/listText";
 import { copySecret } from "../../lib/shareLink";
 import { NetworkTag } from "../NetworkTag";
 import { networkState } from "../walletCardData";
@@ -142,7 +143,7 @@ export function RemoveWalletDialog({ removal, wallet, source, lead, onClose, onR
       {returnable.length > 0 && (
         <div className="space-y-2">
           <Notice testId="wallet-remove-returnable">
-            {t("wallet.remove.returnable", { amounts: returnable.map((i) => i.amount).join(", ") })}
+            {t("wallet.remove.returnable", { amounts: listText(returnable.map((i) => i.amount), t) })}
           </Notice>
           {returnable.some((item) => item.paymentId) && (
             <ul className="bg-surface rounded-xl divide-y divide-border text-sm" data-testid="wallet-remove-returnable-items">
