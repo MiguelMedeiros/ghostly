@@ -1,5 +1,5 @@
 import type { GroupView, StoredMessage } from "@ghostly/browser/shared/types";
-import { noMessage, nobodyJoinedChat, node, state, type ApiContext } from "./apiKit";
+import { connectionClosed, noMessage, nobodyJoinedChat, node, state, type ApiContext } from "./apiKit";
 import { CliError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import { goesOn as goesOnIn } from "./waitNotice";
@@ -44,6 +44,7 @@ export async function waitForEdit(ctx: ApiContext, chat: string, messageId: stri
     if (!message.edit?.pending) return message;
     if (performance.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: the contact has not confirmed the edit yet (it needs a live chat and a contact's app that shows edits). It ${goesOn(ctx, chat)}`, known(ctx, { messageId, edits: message.edit.seq }));
     await new Promise((resolve) => setTimeout(resolve, 250));
+    if (ctx.closed?.aborted) throw connectionClosed();
   }
 }
 
@@ -53,6 +54,7 @@ export async function waitForRemoval(ctx: ApiContext, chat: string, messageId: s
   while (node(ctx).removalPending({ linkId: chat, messageId })) {
     if (performance.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: the message is gone here and the contact has not confirmed yet. Its removal ${goesOn(ctx, chat)}`, known(ctx, { messageId }));
     await new Promise((resolve) => setTimeout(resolve, 250));
+    if (ctx.closed?.aborted) throw connectionClosed();
   }
 }
 
@@ -96,6 +98,7 @@ export async function waitForGroupFrame(ctx: ApiContext, groupId: string, messag
     if (out) throw new CliError("refused", `${out}: no member took it, and it no longer goes`, { messageId, ...("edit" in which ? { edits: which.edit } : which) });
     if (performance.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: no member's edge took it yet (it stays in the group and goes when one opens). It ${goesOn(ctx)}`, known(ctx, { messageId, ...("edit" in which ? { edits: which.edit } : which) }));
     await new Promise((resolve) => setTimeout(resolve, 250));
+    if (ctx.closed?.aborted) throw connectionClosed();
   }
 }
 
@@ -117,6 +120,7 @@ export async function waitForConfirmed(ctx: ApiContext, chat: string, what: "rea
   while (pending(node(ctx).chatUnconfirmed({ linkId: chat }))) {
     if (performance.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: the contact has not confirmed the ${what} yet. It is kept here and ${goesOn(ctx, chat)}`, known(ctx, { chat }));
     await new Promise((resolve) => setTimeout(resolve, 250));
+    if (ctx.closed?.aborted) throw connectionClosed();
   }
 }
 
@@ -142,7 +146,7 @@ async function waitForDelivery(ctx: ApiContext, chat: string, messageId: string,
     let settled = false;
     const finish = (error: unknown, message?: StoredMessage) => {
       if (settled) return;
-      settled = true; clearTimeout(timer); off(); ctx.stopping?.removeEventListener("abort", giveUp);
+      settled = true; clearTimeout(timer); off(); ctx.stopping?.removeEventListener("abort", giveUp); ctx.closed?.removeEventListener("abort", gone);
       if (error) reject(error); else resolve(message!);
     };
     const check = (last = false) => void node(ctx).getMessage(chat, messageId).then((message) => {
@@ -153,13 +157,15 @@ async function waitForDelivery(ctx: ApiContext, chat: string, messageId: string,
       } catch (error) { finish(error); }
     }, finish);
     const giveUp = () => check(true);
+    const gone = () => finish(connectionClosed());
     const timer = setTimeout(giveUp, ms);
     // Any event naming the message: a message first seen already delivered comes as `message.sent`, never as
     // `message.delivery`. Listening before the first read leaves no gap for a change to slip through.
     const off = ctx.hub.onEvent((event: GhostlyEvent) => {
       if (event.chat === chat && (event.messageId === messageId || (event.message as { id?: string } | undefined)?.id === messageId)) check();
     });
-    if (stopped(ctx)) giveUp();
-    else { ctx.stopping?.addEventListener("abort", giveUp, { once: true }); check(); }
+    if (ctx.closed?.aborted) gone();
+    else if (stopped(ctx)) giveUp();
+    else { ctx.stopping?.addEventListener("abort", giveUp, { once: true }); ctx.closed?.addEventListener("abort", gone, { once: true }); check(); }
   });
 }

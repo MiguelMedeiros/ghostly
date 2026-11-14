@@ -28,6 +28,11 @@ export interface ApiContext {
    * timeout with `details.reason: "daemon-stopped"`, before the connections end.
    */
   stopping?: AbortSignal;
+  /**
+   * Aborted when the connection a call came on closes (a daemon's, `host.ts`): a wait still open for it ends at once
+   * (`connectionClosed`), where it kept its listener or its reads to its own timeout, up to a day, with nobody to answer.
+   */
+  closed?: AbortSignal;
   /** The daemon is a `listen` that found none and runs the profile itself: a stop ends that listen too. */
   listen?: true;
 }
@@ -514,8 +519,12 @@ export function waitForState<T>(ctx: ApiContext, check: (state: EngineState) => 
   const now = check(state(ctx));
   if (now !== undefined) return Promise.resolve(now);
   return new Promise<T>((resolve, reject) => {
-    const end = (error: unknown) => { clearTimeout(timer); off(); stopping?.removeEventListener("abort", stopped); if (error) reject(error); };
+    const end = (error: unknown) => {
+      clearTimeout(timer); off(); stopping?.removeEventListener("abort", stopped); ctx.closed?.removeEventListener("abort", gone);
+      if (error) reject(error);
+    };
     const stopped = () => end(new CliError("timeout", `The daemon stopped before the wait ended, waiting for ${what}`, { reason: "daemon-stopped" }));
+    const gone = () => end(connectionClosed());
     const timer = setTimeout(() => end(new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s waiting for ${what}`)), ms);
     const off = ctx.hub.onState((next) => {
       let value: T | undefined;
@@ -524,8 +533,15 @@ export function waitForState<T>(ctx: ApiContext, check: (state: EngineState) => 
       end(null);
       resolve(value);
     });
-    if (stopping?.aborted) stopped();
-    else stopping?.addEventListener("abort", stopped, { once: true });
+    if (ctx.closed?.aborted) gone();
+    else if (stopping?.aborted) stopped();
+    else {
+      stopping?.addEventListener("abort", stopped, { once: true });
+      ctx.closed?.addEventListener("abort", gone, { once: true });
+    }
   });
 }
+
+/** How a wait ends whose client's connection closed (`ApiContext.closed`): nobody reads it, the wait only stops. */
+export const connectionClosed = () => new CliError("interrupted", "The connection closed before the wait ended");
 
