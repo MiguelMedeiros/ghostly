@@ -118,6 +118,8 @@ test("a person on the web opens the web app a bot shares, on an origin of its ow
     // the system browser: the view's sandbox alone dropped it with no word. One to this machine opens nowhere.
     const context = person.page.context();
     await context.route("https://docs.example/**", (route) => route.fulfill({ contentType: "text/html", body: "<title>Docs</title>docs" }));
+    // Past the 5 s the tap on Open keeps Ghostly's page active: a link asked for meanwhile is not one tapped in the app.
+    await person.page.waitForTimeout(5_500);
     const tab = context.waitForEvent("page");
     await demo.locator("#docs").click();
     const docs = await tab;

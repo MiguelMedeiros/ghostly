@@ -309,6 +309,12 @@ const LINK_SPACING_MS = 2_000;
 const LINKS_PER_VIEW = 20;
 
 /**
+ * How long a tap or a key on this page (Open, the view's bar) keeps it active, as one in the app would (5 s in Chromium,
+ * Firefox and WebKit): a link the app asks for meanwhile is not one the person tapped in it.
+ */
+const OWN_INPUT_MS = 5_000;
+
+/**
  * Where a link the contact's app opens in a new window goes outside it (`BRIDGE_OPEN_LINK`), as on Desktop
  * (`external_target` in viewer.rs): a plain http(s) link to another site. Null for anything else, for a site on this
  * machine or the local network (`isLocalHost`), whose request would carry the browser's cookies there, for an app's
@@ -373,6 +379,8 @@ function watchDeadEntries(): void {
 export async function openServiceView(options: { host: ServicesHost; tag: string; peer: string; service: string; title: string; send: ServiceSend; words: OpenerWords; presence?: ContactPresence; relayOnly?: boolean }): Promise<void> {
   // The profile locking while it opens closes nothing yet: it is never drawn, behind the lock or over its screen.
   const locked = serviceWindowsClosedSince();
+  // The tap or the key on Open, now: it activates this page for seconds, as one in the app does (`openOutside`).
+  let ownInput = Date.now();
   const open = ++opens;
   handingOver = true;
   try { closeServiceView(); } finally { handingOver = false; }
@@ -506,12 +514,14 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   /**
    * A link the app opens in a new window, which its sandbox drops: opened here in a new tab with no opener and no
    * referrer, as Ghostly's own external links (`externalLinkProps`). Only within the person's own tap in the app, which
-   * activates this page too and no script can: never one the app opens by itself.
+   * activates this page too and no script can: never one the app opens by itself. Not while a tap or a key on this page
+   * still activates it (`OWN_INPUT_MS`): the bridge checks for a tap in the app, but it is on the app's origin, and the
+   * contact's page can run a script of its own there and ask as it does, right on the tap on Open.
    */
   const openOutside = (url: unknown) => {
     const link = outsideLink(url, options.host);
     const now = Date.now();
-    if (!link || !navigator.userActivation?.isActive || linksOpened >= LINKS_PER_VIEW || now - lastLink < LINK_SPACING_MS) return;
+    if (!link || !navigator.userActivation?.isActive || now - ownInput <= OWN_INPUT_MS || linksOpened >= LINKS_PER_VIEW || now - lastLink < LINK_SPACING_MS) return;
     linksOpened++;
     lastLink = now;
     window.open(link, "_blank", "noopener,noreferrer");
@@ -559,6 +569,7 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
     removeEventListener("message", onMessage);
     removeEventListener("keydown", onKey, true);
     removeEventListener("popstate", onPop);
+    for (const type of OWN_INPUTS) removeEventListener(type, onOwnInput, true);
     for (const port of ports) port.close();
     bridge.abort();
     view.remove();
@@ -579,11 +590,15 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   // dialog it was opened from) would close on the same Escape.
   const onKey = (event: KeyboardEvent) => { if (event.key !== "Escape") return; event.preventDefault(); event.stopPropagation(); end(); };
   const onPop = () => { if (!isViewEntry(history.state)) end(); };
+  // Input in the app's frame never reaches this page (another origin): what does is the person's on Ghostly's own.
+  const onOwnInput = () => { ownInput = Date.now(); };
+  const OWN_INPUTS = ["pointerdown", "keydown", "touchend"] as const;
   watchDeadEntries();
   if (!isViewEntry(history.state)) history.pushState({ ...(history.state as Record<string, unknown> | null), [ENTRY]: true }, "");
   addEventListener("message", onMessage);
   addEventListener("keydown", onKey, true);
   addEventListener("popstate", onPop);
+  for (const type of OWN_INPUTS) addEventListener(type, onOwnInput, true);
   close.addEventListener("click", end);
   view.addEventListener(SERVICE_VIEW_CLOSE, end);
   frame.src = src;
