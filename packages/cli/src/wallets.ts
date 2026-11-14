@@ -1,6 +1,6 @@
 import { generateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
-import type { WalletNetwork } from "@ghostly/core";
+import { parsePaymentAmount, type WalletNetwork } from "@ghostly/core";
 import type { EngineState, NetworkWalletsView, PaymentView, WalletInstanceView, WalletOffer, WalletType } from "@ghostly/browser/shared/types";
 import { bool, chatOf, inviteTaken, node, num, oneOf, ownChatOf, sentAt, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { paymentNetwork } from "@ghostly/browser/engine/paymentAdapters/walletInstances";
@@ -145,9 +145,23 @@ export function walletJson(instance: WalletInstanceView, s: EngineState) {
   };
 }
 
+/** A token amount (USDT) is in base units: its `decimals` say how many make one. Sats carry none. */
+const tokenDecimals = (p: PaymentView): { decimals?: number } => (p.target?.method === "usdt" ? { decimals: p.target.decimals ?? 6 } : {});
+
+/** USDT typed as the app's composer takes it ("5", "0.25") in base units: more decimals than the token has is refused. */
+function tokenUnits(text: string, decimals: number): number {
+  try {
+    const units = parsePaymentAmount(text.trim(), decimals);
+    if (units > 0) return units;
+  } catch (error) {
+    throw new CliError("bad_request", `amount: ${(error as Error).message}`);
+  }
+  throw new CliError("bad_request", "amount must be above 0");
+}
+
 export function paymentJson(p: PaymentView) {
   return {
-    id: p.id, chat: p.linkId, kind: p.kind, direction: p.direction, amount: p.amount, unit: p.unit, memo: p.memo ?? null,
+    id: p.id, chat: p.linkId, kind: p.kind, direction: p.direction, amount: p.amount, unit: p.unit, ...tokenDecimals(p), memo: p.memo ?? null,
     state: p.state, error: p.error ?? null, network: paymentNetwork(p), method: p.target?.method ?? (p.federation || p.federations ? "fedimint" : p.invoice ? "lightning" : p.mint || p.mints ? "cashu" : null),
     createdAt: p.createdAt, ...(p.group ? { group: p.group } : {}), ...(p.closed ? { closed: true } : {}), ...(p.txid ? { txid: p.txid } : {}),
   };
@@ -408,21 +422,26 @@ const WALLETS: Record<string, Method> = {
     return { chat: link.id, paymentId };
   },
 
-  /** A request in a chat (the payment sheet's Request): the contact's app pays it. */
+  /**
+   * A request in a chat (the payment sheet's Request): the contact's app pays it. A USDT amount given as text ("5",
+   * "0.25") is USDT, turned into base units with the wallet's decimals as the app's composer does; a number is base units.
+   * The answer says the amount asked: USDT's carries the engine's tag of a few base units, and its decimals.
+   */
   async "chat.request"(ctx, params) {
     const memo = memoOf(params, "request");
     const link = chatOf(ctx, params);
-    const amount = num(params, "amount", 0, { min: 1 });
-    if (!amount) throw new CliError("bad_request", "amount is required");
     const method = params.method === undefined ? undefined : oneOf(params, "method", PAY_METHODS, "cashu");
+    const n = network(params);
+    const amount = method === "usdt" && typeof params.amount === "string" ? tokenUnits(params.amount, netView(state(ctx), n)?.usdt?.decimals ?? 6) : num(params, "amount", 0, { min: 1 });
+    if (!amount) throw new CliError("bad_request", "amount is required");
     const rail = params.rail === undefined ? undefined : oneOf(params, "rail", ["cashu", "lightning"] as const, "cashu");
     await federationsOpen(ctx);
-    const n = network(params);
     const { paymentId } = await node(ctx).requestPayment({
       linkId: link.id, amount, timestamp: sentAt(), network: n,
       ...(memo ? { memo } : {}), ...(method ? { method } : {}), ...(rail ? { rail } : {}), ...(str(params, "card") ? { card: str(params, "card") } : {}),
     }).catch((error: unknown) => { throw (!method || method === "cashu") && error instanceof Error && NO_MINT.test(error.message) ? noWalletOf(ctx, n, error) : error; });
-    return { chat: link.id, paymentId };
+    const asked = state(ctx).payments[paymentId];
+    return { chat: link.id, paymentId, ...(asked ? { amount: asked.amount, unit: asked.unit, ...tokenDecimals(asked) } : {}) };
   },
 
   /** Pays a request the contact made in a chat. */
