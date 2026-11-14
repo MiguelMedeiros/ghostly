@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { accessSync, constants, existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { contactKeyOf, nameKey, namedByThem } from "./apiKit";
+import { contactKeyOf, groupPrefixed, nameKey, namedByThem } from "./apiKit";
 import { childEnv } from "./childEnv";
 import { connectDaemon, type DaemonAddress, type DaemonClient } from "./client";
 import { CliError, localFileError } from "./errors";
@@ -89,8 +89,9 @@ export class Allowlist {
 /**
  * `--from` and `--group` as ids, resolved once at start: a contact key as that key (whatever any chat is named), else a
  * chat by its id or a label this side gave it, as `call auto on --from` (`findOwnNamedChat`): a prefix of its id or the
- * name its contact gave itself is refused, since another contact could call itself that; a group by id, prefix or name.
- * A name that later changes (or a contact who renames themselves) moves nothing.
+ * name its contact gave itself is refused, since another contact could call itself that; a group only by its id (or
+ * `group:<id>`): its name or a prefix of its id is refused, with its id. A name that later changes (or a contact who
+ * renames themselves) moves nothing.
  */
 export async function allowlist(from: readonly string[], groups: readonly string[], call: (method: string, params: Record<string, unknown>) => Promise<unknown>, peerOf: (chat: string) => Promise<string | null>): Promise<Allowlist> {
   const chats = new Set<string>(), keys = new Set<string>(), groupIds = new Set<string>();
@@ -99,7 +100,13 @@ export async function allowlist(from: readonly string[], groups: readonly string
     if (key !== undefined) { keys.add(key); continue; }
     chats.add(await fromChat(ref, call));
   }
-  for (const ref of groups) groupIds.add(((await otherFlag(call("group.get", { group: ref }), ref, "--group", call)) as { id: string }).id);
+  for (const ref of groups) {
+    const group = (await otherFlag(call("group.get", { group: ref }), ref, "--group", call)) as { id: string; name?: string | null };
+    // A group has no label given here: its name is its admin's, its id its creator's, so a prefix is theirs too. Another
+    // group's admin could rename theirs to it (and the lookup prefers a group this profile is in over an invitation).
+    if (group.id !== ref && group.id !== groupPrefixed(ref)) throw namedByAdmin(ref, group);
+    groupIds.add(group.id);
+  }
   return new Allowlist(chats, keys, groupIds, peerOf);
 }
 
@@ -111,18 +118,23 @@ async function fromChat(ref: string, call: (method: string, params: Record<strin
   return chat.id;
 }
 
+/** `--group`'s refusal: `ref` found `group` only by its name or a prefix of its id, both chosen by others. */
+function namedByAdmin(ref: string, group: { id: string; name?: string | null }): CliError {
+  return new CliError("bad_request", `${JSON.stringify(ref)} names a group only by what others chose (its name, a prefix of its id): use its id: ghostly listen --group ${shellWord(group.id, group.id)}`, { group: group.id, name: group.name ?? null });
+}
+
 /**
  * A `--from` that names a group, or a `--group` a chat: said with the flag that takes it. The lookup's own hint named
- * `ghostly group show` (or `chat show`), which lists nothing. A chat is named by its id: `--from` refuses a prefix of it
- * or the name its contact chose, which `--group`'s lookup took, so a `--group` that found its chat only so is refused
- * as `--from` refuses it, with no `--from` to paste.
+ * `ghostly group show` (or `chat show`), which lists nothing. Each is named by its id: `--from` refuses a prefix of a chat's
+ * id or the name its contact chose, `--group` a group's name or a prefix of its id. A `--group` that found its chat
+ * only so is refused as `--from` refuses it, with no `--from` to paste.
  */
 async function otherFlag(lookup: Promise<unknown>, ref: string, flag: "--from" | "--group", call: (method: string, params: Record<string, unknown>) => Promise<unknown>): Promise<unknown> {
   try { return await lookup; } catch (error) {
     const other = flag === "--from" ? "group" : "chat";
     if (!(error instanceof CliError) || error.code !== "not_found" || typeof error.details?.[other] !== "string") throw error;
     if (other === "chat" && contactKeyOf(ref) === undefined) await fromChat(ref, call);
-    const named = other === "chat" ? error.details.chat as string : ref;
+    const named = error.details[other] as string;
     const shown = shellWord(named, error.details[other] as string);
     throw new CliError("not_found", `${JSON.stringify(ref)} is a ${other}, not a ${flag === "--from" ? "chat" : "group"}: ghostly listen ${flag === "--from" ? "--group" : "--from"} ${shown}`, error.details);
   }

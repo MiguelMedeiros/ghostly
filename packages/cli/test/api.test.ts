@@ -388,6 +388,24 @@ describe("chats", () => {
     expect(await list.allows(event(mallory.id))).toBe(false);
   });
 
+  it("listen --group takes a group only by its id: its name (its admin's) and a prefix of its id (its creator's) are refused", async () => {
+    // Team is still only an invitation; Mallory, admin of a group this profile is in, renamed hers "Team".
+    const team = { ...group, id: "Tm4q9ZkLx2PdR7sVw0Yb3A", name: "Team", status: undefined, invitation: { linkId: "chatOwner" } } as unknown as GroupView;
+    const theirs = { ...group, id: "Qz8uE1hJc5NnFo6Gk2Mt7B", name: "Team", status: "active" } as unknown as GroupView;
+    const ctx = { runtime: { server: { node: { chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [], groups: [team, theirs] }) } } } } as unknown as ApiContext;
+    const call = (method: string, params: Record<string, unknown>) => callApi(ctx, method, params);
+    const refused = (id: string, name: string) => ({ code: "bad_request", message: expect.stringContaining(`use its id: ghostly listen --group ${id}`), details: { group: id, name } });
+    for (const ref of ["Team", "team", "group:Team"]) await expect(allowlist([], [ref], call, async () => null)).rejects.toMatchObject(refused(theirs.id, "Team"));
+    for (const ref of ["Qz8u", "group:Qz8u"]) await expect(allowlist([], [ref], call, async () => null)).rejects.toMatchObject(refused(theirs.id, "Team"));
+    // Its id, as is or after group:, still names it (an invitation too).
+    const event = (id: string) => ({ seq: 1, id: "g", type: "group.message", at: 1, group: id } as GhostlyEvent);
+    for (const ref of [team.id, `group:${team.id}`]) {
+      const list = await allowlist([], [ref], call, async () => null);
+      expect(await list.allows(event(team.id))).toBe(true);
+      expect(await list.allows(event(theirs.id))).toBe(false);
+    }
+  });
+
   it("listen --from takes a label given here in every form send and call auto on --from take it (a tab, a trailing space, decomposed accents)", async () => {
     // Stored as `chat rename` stores them: a tab as a space, in NFC. The contact chose no name; Mallory calls herself "owner".
     const ops = link("chatOpsxxxxxxxxx", { label: "ops bot" }), cafe = link("chatCafexxxxxxxx", { label: "Café" }), mallory = link("chatMalloryxxxxx", { peerNick: "owner" });
