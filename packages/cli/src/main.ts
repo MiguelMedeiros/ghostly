@@ -4,7 +4,7 @@ import { closeSync, fstatSync, openSync, readFileSync, readSync, rmSync } from "
 import { dirname, sep } from "node:path";
 import packageJson from "../package.json" with { type: "json" };
 import { checkSettingKey, checkSettingValue, GLOBAL_OPTIONS, globalOption, liftGlobals, nearest, parseArgs, unknownGlobalOption, type OptionSpec, type Parsed } from "./args";
-import { connectDaemon, DaemonClient, endedUnanswered, endedUnsent, isNotTheDaemon } from "./client";
+import { connectDaemon, DaemonClient, endedUnanswered, endedUnsent, isNotTheDaemon, notTheDaemon } from "./client";
 import { childEnv, dropSecretEnv } from "./childEnv";
 import { COMMANDS, idSlot, noMoreThan, numberSlot, positionals, takesText, TEXT_COMMANDS } from "./commands";
 import { here, inRange, INPUT_BYTES, localStat, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
@@ -984,7 +984,7 @@ async function runDaemon(g: Globals, seconds: number): Promise<void> {
   const until = performance.now() + seconds * 1000;
   let host: Host;
   for (;;) {
-    if (await connectDaemon(g.paths)) throw childAnswer(detached, new CliError("busy", `A daemon already runs profile ${g.profile}`));
+    await noDaemonAnswers(g, detached);
     try { host = await openHost(g.paths, "daemon", VERSION); break; }
     catch (error) {
       if (detached) throw childAnswer(detached, error);
@@ -1000,6 +1000,17 @@ async function runDaemon(g: Globals, seconds: number): Promise<void> {
   onStopSignals(stop);
   host.ctx.hub.emit("daemon.started", `daemon.started:${process.pid}:${Date.now()}`, { pid: process.pid, version: VERSION });
   print({ daemon: "ready", profile: g.profile, pid: process.pid, socket: g.paths.socket, lastSeq: host.ctx.hub.lastSeq });
+}
+
+/**
+ * Throws busy when something answers on the profile's socket while a process holds the profile (a daemon starts only
+ * then). With nobody holding it, what answers is no daemon: the start said one ran, and the refusal names the way out.
+ */
+async function noDaemonAnswers(g: Globals, detached = false): Promise<void> {
+  const client = await connectDaemon(g.paths);
+  if (!client) return;
+  client.close();
+  throw childAnswer(detached, lockOwner(g.paths) === null ? notTheDaemon(g.paths, false) : new CliError("busy", `A daemon already runs profile ${g.profile}`));
 }
 
 /**
@@ -1126,11 +1137,11 @@ async function stopDaemon(g: Globals, client: DaemonClient, seconds: number): Pr
   catch (error) {
     // What answers on the socket and does not prove it is the profile's daemon is told nothing: a daemon of an older
     // release (it cannot prove it) is stopped as the process that holds the profile's lock, which only this user
-    // can write. With nobody holding it, what answers is not the daemon, and the refusal stands.
+    // can write. With nobody holding it, what answers is not the daemon, and the refusal stands, saying what to do.
     const refused = isNotTheDaemon(error);
     if (!(error instanceof CliError && error.code === "timeout") && !refused) throw error;
     const holder = lockOwner(g.paths);
-    if (holder === null) throw error;
+    if (holder === null) throw refused ? notTheDaemon(g.paths, false) : error;
     process.stderr.write(refused
       ? `ghostly: what answers on the socket did not prove it is this profile's daemon (an older release's cannot): stopping the process that holds the profile (${holder}) with SIGTERM\n`
       : `ghostly: the daemon (process ${holder}) did not answer daemon.stop in ${seconds} s: stopping it with SIGTERM\n`);
@@ -1194,7 +1205,7 @@ async function startDetached(g: Globals, seconds: number) {
   try {
     const until = performance.now() + seconds * 1000;
     for (;;) {
-      if (await connectDaemon(g.paths)) throw new CliError("busy", `A daemon already runs profile ${g.profile}`);
+      await noDaemonAnswers(g);
       if (lockOwner(g.paths) === null) {
         const started = await spawnDaemon(g, until);
         if (started) return started;
