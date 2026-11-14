@@ -131,15 +131,35 @@ try {
   // The process the probe measures (the WebView-update check starts another at the end).
   appPid = adb("shell", "pidof", PKG).trim();
 
-  [device] = await step("Playwright finds the device", 120_000, () => _android.devices());
-  if (!device) throw new Error("no device from adb");
+  // The WebView's page, once more on a new connection to the device if the first never answers. Playwright closes the
+  // device by itself when one of its WebView polls over adb fails, and a `webView.page()` asked then (or one whose
+  // devtools socket never opens) waits forever; the client keeps that first answer, so only a new device has a new one.
+  let deviceClosed = false;
+  const findWebView = async (again) => {
+    [device] = await step(`Playwright finds the device${again}`, 120_000, () => _android.devices());
+    if (!device) throw new Error("no device from adb");
+    device.once("close", () => (deviceClosed = true));
+    return await step(`WebView found over adb${again}`, 150_000, () => device.webView({ pkg: PKG }, { timeout: 120_000 }));
+  };
   const t0 = Date.now();
-  const webview = await step("WebView found over adb", 150_000, () => device.webView({ pkg: PKG }, { timeout: 120_000 }));
-  const page = await step("WebView page connects", 120_000, () => webview.page());
+  let webview = await findWebView("");
+  let page;
+  let connected = "first try";
+  try {
+    page = await step("WebView page connects", 120_000, () => webview.page());
+  } catch (error) {
+    if (!(error instanceof StepTimeout)) throw error;
+    const sockets = adb("shell", "cat", "/proc/net/unix").split("\n").map((l) => l.match(/@(\S*webview_devtools_remote\S*)/)?.[1]).filter(Boolean);
+    connected = `second try on a new device connection (the first: no answer in 120 s from pid ${webview.pid()}'s WebView, Playwright had ${deviceClosed ? "closed" : "not closed"} the device; devtools sockets ${sockets.join(", ") || "none"}; app pid ${appPid})`;
+    await step("device close", 30_000, () => device.close()).catch(() => {});
+    webview = await findWebView(", second try");
+    page = await step("WebView page connects, second try", 120_000, () => webview.page());
+  }
   const consoleLines = [];
   page.on("console", (message) => consoleLines.push(`${message.type()}: ${message.text()}`.slice(0, 500)));
   page.setDefaultTimeout(120_000);
   record("smoke", "WebView found over adb", true, `${Date.now() - t0} ms, ${page.url()}`);
+  record("smoke", "WebView page connects", true, connected);
 
   // The UI rendered: the same marks as the Desktop smoke test (e2e/desktop/smoke.spec.ts).
   await measure("smoke", "UI renders", async () => {
