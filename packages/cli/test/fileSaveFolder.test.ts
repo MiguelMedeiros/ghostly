@@ -14,7 +14,8 @@ import { openPersistentIndexedDb } from "../src/runtime/storage";
 
 /**
  * `file save --path` naming a folder: a bad_request that says to name a file or use --dir, never a hint to --force over
- * it (which then failed "is a folder"); an empty --path or --dir is a usage error, not the current folder. A voice message
+ * it (which then failed "is a folder"); one with a trailing separator that is not there is not_found, with no --dir hint
+ * (which then failed "No such file or folder"); an empty --path or --dir is a usage error, not the current folder. A voice message
  * goes into --dir under the name Ghostly makes for it, as the apps' Download does, its row looked for among the chat's
  * newest first: the whole history of a 20,000-message chat costs a quarter of a second to read.
  */
@@ -93,13 +94,16 @@ describe("file save to a folder", () => {
 
   it("a --path that ends in a separator names a folder, never the file's name, whether the folder is there or not", async () => {
     // Before, resolve() dropped the slash: "--path downloads/" with no downloads folder left a file named downloads.
+    // Before, a missing one hinted --dir <that folder>, which then failed "No such file or folder": none is hinted.
     const missing = join(dir, "newfolder");
-    await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", path: `${missing}/` })).rejects.toMatchObject({
-      code: "bad_request", message: `${missing}/ names a folder: name a file, or use --dir ${missing} (dir over the socket)`,
-    });
+    const refused = await callApi(ctx, "file.save", { file: "chat-one-in-r", path: `${missing}/` }).catch((error: unknown) => error);
+    expect(refused).toMatchObject({ code: "not_found", message: `No such folder: ${missing} (make it first, or name a file in a folder that is there)` });
+    expect((refused as { details?: unknown }).details).toBeUndefined();
     const file = join(dir, "slash.txt");
     writeFileSync(file, "x");
-    await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", path: `${file}/`, force: true })).rejects.toMatchObject({ code: "bad_request" });
+    await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", path: `${file}/`, force: true })).rejects.toMatchObject({
+      code: "not_found", message: `${file} is a file, not a folder: name a file in a folder that is there`,
+    });
     expect(readdirSync(dir)).not.toContain("newfolder");
     expect(readFileSync(file, "utf8")).toBe("x");
   });
@@ -208,10 +212,6 @@ describe("file save to a folder", () => {
     });
     await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", path: folder })).rejects.toMatchObject({
       code: "bad_request", message: `${folder} is a folder: name a file, or use --dir <the one in details.dir> (dir over the socket)`, details: { dir: folder },
-    });
-    const missing = join(dir, "new folder");
-    await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", path: `${missing}/` })).rejects.toMatchObject({
-      code: "bad_request", message: `${missing}/ names a folder: name a file, or use --dir ${quoted(missing)} (dir over the socket)`, details: { dir: missing },
     });
   });
 
