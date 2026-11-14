@@ -90,6 +90,7 @@ import {
   loadShownSession,
   peerDisplayName,
   updateSessionLabel,
+  chatLabelOf,
 } from "../lib/storage";
 import { chatPath, inviteShareText } from "../lib/url";
 import { copySecret } from "../lib/shareLink";
@@ -658,9 +659,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
 
   const saveLabel = () => {
     if (!sessionId) return;
-    const trimmed = labelDraft.trim();
-    updateSessionLabel(sessionId, trimmed);
-    setChatLabel(trimmed);
+    const label = chatLabelOf(labelDraft) ?? "";
+    updateSessionLabel(sessionId, label);
+    setChatLabel(label);
     setIsEditingLabel(false);
     window.dispatchEvent(new Event("session-updated"));
   };
