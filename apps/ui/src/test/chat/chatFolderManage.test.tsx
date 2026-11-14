@@ -17,7 +17,7 @@ const NOW = Date.now();
 const key = (c: string) => c.repeat(52);
 const chat = (id: string, name: string, over: Partial<ChatSession> = {}): ChatSession =>
   ({ id, profile: "paired-chat/1", mySeedB64: `seed-${id}`, peerPubKeyB64: key(id), encKeyB64: "enc", messages: [], createdAt: NOW, nick: name, nickSource: "profile", ...over });
-const list = (language?: "pt") => renderApp(<UpdateProvider><Sidebar /></UpdateProvider>, { language });
+const list = (language?: "pt" | "ar") => renderApp(<UpdateProvider><Sidebar /></UpdateProvider>, { language });
 const folderNames = () => screen.queryAllByTestId("chat-folder-name").map(n => n.textContent);
 const folder = (name: string) => screen.getAllByTestId("chat-folder-section").find(s => within(s).getByTestId("chat-folder-name").textContent === name)!;
 const names = (root: HTMLElement) => within(root).queryAllByTestId("chat-row-name").map(n => n.textContent);
@@ -81,6 +81,14 @@ describe("a folder's ⋮", () => {
     setChatFolder("a", agents.id);
     return agents;
   };
+
+  // The tooltip is drawn in the page's direction: in Arabic a name's ending punctuation went to its other side ("!Club").
+  it("its tooltip names the folder in its own direction", () => {
+    saveSession(chat("a", "Alice"));
+    setChatFolder("a", createFolder("Club!")!.id);
+    list("ar");
+    expect(options("Club!")).toHaveAttribute("title", "خيارات المجلد \u2068Club!\u2069");
+  });
 
   it("renames it, with its name ready to be typed over", async () => {
     seed();
