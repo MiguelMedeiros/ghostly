@@ -7,17 +7,21 @@ import type { Translate } from "../locales/translate";
 import { knownErrorParts, rawError } from "../lib/errorText";
 import type { Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
+import { isolate } from "../lib/ownStatus";
 
 /** How long the reason an answer did not go stays under Accept and Decline. */
 export const REFUSAL_SHOWN_MS = 8000;
 
 type Invitation = NonNullable<GroupView["invitation"]>;
 
-/** A contact's invitation in one line: who invited and to how many, or where the answer is. */
+/**
+ * A contact's invitation in one line: who invited and to how many, or where the answer is. The inviter's name, here as
+ * in every invitation line, is isolated: a string has no room for a <bdi>.
+ */
 export function invitationLine(invitation: Invitation, t: Translate): string {
   const members = invitation.members === 1 ? t("group.chat.memberOne") : t("group.chat.memberCount", { count: invitation.members });
   return invitation.takenBack ? t("sidebar.group.takenBack") : invitation.unanswered ? t("sidebar.group.unanswered") : invitation.accepted ? t("group.chat.joining")
-    : invitation.contact ? t("sidebar.group.invitedBy", { contact: invitation.contact, members }) : t("sidebar.group.invitedByUnknown", { members });
+    : invitation.contact ? t("sidebar.group.invitedBy", { contact: isolate(invitation.contact), members }) : t("sidebar.group.invitedByUnknown", { members });
 }
 
 /**
@@ -42,7 +46,7 @@ export const answerable = (invitation: Invitation | undefined) => !!invitation &
 
 /** Who took the invitation back, and what to do: the words of a taken-back invitation's page. */
 function takenBackWords(group: GroupView, t: Translate): { title: string; next: string } {
-  const contact = group.invitation!.contact, name = group.name;
+  const contact = group.invitation!.contact && isolate(group.invitation!.contact), name = group.name && isolate(group.name);
   return contact ? { title: name ? t("group.chat.takenBack", { contact, name }) : t("group.chat.takenBackNoName", { contact }), next: t("group.chat.takenBackNext", { contact }) }
     : { title: name ? t("group.chat.takenBackUnknown", { name }) : t("group.chat.takenBackUnknownNoName"), next: t("group.chat.takenBackNextUnknown") };
 }
@@ -121,7 +125,7 @@ export function useInvitationAnswer(group: Pick<GroupView, "id" | "invitation">,
  */
 function refusal(error: unknown, contact: string | undefined, t: Translate): Problem {
   const raw = rawError(error);
-  if (/not connected/i.test(raw)) return { tone: "error", title: contact ? t("sidebar.group.inviterAway", { contact }) : t("sidebar.group.inviterAwayUnknown") };
+  if (/not connected/i.test(raw)) return { tone: "error", title: contact ? t("sidebar.group.inviterAway", { contact: isolate(contact) }) : t("sidebar.group.inviterAwayUnknown") };
   const known = knownErrorParts(raw, t);
   return known ? { tone: "error", ...known } : { tone: "error", title: t("sidebar.group.answerFailed"), ...(raw && { detail: raw }) };
 }
