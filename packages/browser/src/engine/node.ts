@@ -1911,6 +1911,8 @@ export class GhostlyNode implements EngineImplementation {
     membersChanged: groupId => this.groupMembersChanged(groupId),
     historyGone: groupId => this.groupHistoryGone(groupId),
     emit: (delayMs, groupId) => groupId === undefined ? this.emitState(delayMs) : this.groupChanged(groupId, delayMs),
+    // A group file's progress is no chat's nor group's, as a 1:1 file's (`fileProgress`): every view stays as it was.
+    transfersChanged: (delayMs = 50) => this.scheduleState(delayMs),
     communityApp: (groupId, sender, frame) => frame.t === COMMUNITY_REACTION_FRAME ? this.receiveGroupReaction(groupId, sender, frame)
       : frame.t === COMMUNITY_EDIT_FRAME ? this.receiveCommunityEdit(groupId, sender, frame)
       : frame.t === COMMUNITY_PIN_FRAME ? this.receiveGroupPin(groupId, sender, readPin(frame))
