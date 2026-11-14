@@ -3,7 +3,7 @@ import { ANSWER_BY_MS, CookieJar, MAX_PENDING_REQUESTS, MAX_WAITING_REQUESTS, op
 import { closeServiceWindows, hostErrorText, serviceFraming, setServiceWindowsCloser } from "../../lib/serviceWindows";
 import { loadLocale, translatorFor } from "../../locales";
 import { onAppInput } from "../../lib/apps/open";
-import { ANSWER_AHEAD_BYTES, BRIDGE_READY, BRIDGE_REFUSED, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
+import { ANSWER_AHEAD_BYTES, BRIDGE_OPEN_LINK, BRIDGE_READY, BRIDGE_REFUSED, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
 import { createHash } from "node:crypto";
 import { CHUNK_KIND, CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, GhostlyHttpError, HttpClient, LIMITS, MAX_CHUNK_PAYLOAD_BYTES, VIEWER_GUARD_CSP, VIEWER_GUARD_HASH, VIEWER_GUARD_SCRIPT, VIEWER_SERVICE_CSP, VIEWER_SERVICE_CSP_RELAY_ONLY, decodeChunk, decodeControl, encodeChunk, type ClientRequest, type ClientResponse } from "@ghostly/core";
 
@@ -789,6 +789,51 @@ describe("a contact's app shown over the app", () => {
     const sandbox = document.querySelector("[data-testid=service-view-frame]")!.getAttribute("sandbox")!.split(" ");
     expect(sandbox).toContain("allow-scripts");
     expect(sandbox.filter((flag) => flag.startsWith("allow-popups") || flag.startsWith("allow-top-navigation"))).toEqual([]);
+  });
+
+  it("opens a link the app opens in a new window in a new tab of its own, on the person's tap, as Desktop sends it to the browser: never a local one, nor an app's or Ghostly's own", async () => {
+    // The view's sandbox drops the app's own new windows with no word: the bridge hands each one here.
+    const activation = { isActive: true };
+    Object.defineProperty(navigator, "userActivation", { configurable: true, value: activation });
+    const opened = vi.spyOn(window, "open").mockReturnValue(null);
+    vi.useFakeTimers();
+    try {
+      await open("demo");
+      const frame = document.querySelector<HTMLIFrameElement>("[data-testid=service-view-frame]")!;
+      const origin = new URL(frame.src).origin;
+      const inFrame = { postMessage: vi.fn() };
+      Object.defineProperty(frame, "contentWindow", { value: inFrame, configurable: true });
+      const asks = (url: unknown, from: { origin: string; source: unknown } = { origin, source: inFrame }) => {
+        dispatchEvent(new MessageEvent("message", { data: { type: BRIDGE_OPEN_LINK, url }, origin: from.origin, source: from.source as Window }));
+        vi.advanceTimersByTime(2_000);
+      };
+      asks("https://docs.example/guide?a=1#top");
+      expect(opened).toHaveBeenCalledTimes(1);
+      expect(opened).toHaveBeenLastCalledWith("https://docs.example/guide?a=1#top", "_blank", "noopener,noreferrer");
+      // Only the bridge in the view's frame is heard.
+      asks("https://docs.example/", { origin: "https://other.example", source: inFrame });
+      asks("https://docs.example/", { origin, source: window });
+      // Nothing but a plain web link to another public site: none on this machine or the local network, none on an
+      // app's origin (a tab of its own there would outlive the view), none on Ghostly's own.
+      for (const url of ["javascript:alert(1)", "data:text/html,hi", "file:///etc/passwd", "http://localhost:8080/", "http://192.168.1.1/", "http://[::1]/", "http://router/", "http://nas.local/",
+        `${origin}/popup`, "https://svc.ghostly.example/", `${location.origin}/`, `https://docs.example/${"a".repeat(4096)}`, 42, null]) asks(url);
+      expect(opened).toHaveBeenCalledTimes(1);
+      // Never one the app opens by itself: only within the person's own tap in it (it activates this page; no script can).
+      activation.isActive = false;
+      asks("https://docs.example/later");
+      expect(opened).toHaveBeenCalledTimes(1);
+      activation.isActive = true;
+      // One every 2 s at most, and 20 in a view's life, as on Desktop: an app opening tabs on every tap stops there.
+      dispatchEvent(new MessageEvent("message", { data: { type: BRIDGE_OPEN_LINK, url: "https://docs.example/1" }, origin, source: inFrame as unknown as Window }));
+      dispatchEvent(new MessageEvent("message", { data: { type: BRIDGE_OPEN_LINK, url: "https://docs.example/2" }, origin, source: inFrame as unknown as Window }));
+      expect(opened).toHaveBeenCalledTimes(2);
+      for (let i = 0; i < 30; i++) asks(`https://docs.example/${i}`);
+      expect(opened).toHaveBeenCalledTimes(20);
+    } finally {
+      vi.useRealTimers();
+      opened.mockRestore();
+      delete (navigator as { userActivation?: unknown }).userActivation;
+    }
   });
 
   it("keeps the view's bar on screen, and draws no dialog of the browser's over it: no full screen, no alert or prompt", async () => {

@@ -143,6 +143,12 @@ export type BridgeRefusal = "blocked" | "unguarded";
  */
 export const BRIDGE_CLEAR = "ghostly-svc-clear";
 export const BRIDGE_CLEARED = "ghostly-svc-cleared";
+/**
+ * The bridge hands the app's page a link the contact's app opens in a new window (`url`: `target="_blank"`,
+ * `window.open`), which the view's sandbox drops: the app's page opens one to another site in a new tab, on the
+ * person's tap (`outsideLink` in opener.ts), as Desktop sends it to the system browser.
+ */
+export const BRIDGE_OPEN_LINK = "ghostly-svc-open-link";
 
 /** A request the app takes from a port: anything else (a page of the contact's posting to it) is dropped. */
 export function readRequest(data: unknown): ServiceRequestMessage | null {
