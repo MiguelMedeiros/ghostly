@@ -57,7 +57,7 @@ describe("a link preview in the composer", () => {
     await waitFor(() => expect(screen.queryByTestId("composer-link-preview")).toBeNull());
   });
 
-  it("draws the page's title and description in their own direction, lined up with the app", async () => {
+  it("draws the page's title and description in their own direction", async () => {
     sites();
     composer();
     type("look https://news.example/story");
@@ -65,7 +65,6 @@ describe("a link preview in the composer", () => {
     await waitFor(() => expect(card).toHaveAttribute("data-status", "ready"));
     for (const id of ["composer-link-preview-title", "composer-link-preview-description"]) {
       expect(within(card).getByTestId(id), id).toHaveAttribute("dir", "auto");
-      expect(within(card).getByTestId(id).className, id).toMatch(/\btext-match-parent\b/);
     }
   });
 
@@ -295,13 +294,12 @@ describe("a link preview in a message", () => {
     }
   });
 
-  it("draws the page's words in their own direction, lined up with the app", () => {
+  it("draws the page's words in their own direction", () => {
     renderApp(<MessageBubble message={{ id: "m13", text: "https://news.example/story", sender: "peer", timestamp: 1_700_000_000_000,
       preview: { u: "https://news.example/story", t: "مرحبا بكم!", d: "Hello world!", s: "أخبار" } }} />);
     // In the app's direction, an English title in Arabic was drawn "!Hello world", an Arabic one in English with its "!" at its end's far side.
     for (const id of ["link-preview-title", "link-preview-description", "link-preview-site"]) {
       expect(screen.getByTestId(id), id).toHaveAttribute("dir", "auto");
-      expect(screen.getByTestId(id).className, id).toMatch(/\btext-match-parent\b/);
     }
   });
 

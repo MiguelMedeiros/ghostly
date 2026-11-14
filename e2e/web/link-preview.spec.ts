@@ -142,7 +142,7 @@ test("a preview's title and description show two lines at most, a long word brok
   }
 });
 
-test("a preview's words read in their own direction in English and in Arabic, lined up with the app", { tag: ["@feature:chat.link-preview.render"] }, async ({ peer }) => {
+test("a preview's words read in their own direction, in English and in Arabic", { tag: ["@feature:chat.link-preview.render"] }, async ({ peer }) => {
   const news = await site({ title: "Hello world!", description: "مرحبا بكم!" });
   try {
     const [alice, bob] = await Promise.all([peer("bidi-alice"), peer("bidi-bob")]);
@@ -161,20 +161,20 @@ test("a preview's words read in their own direction in English and in Arabic, li
       const card = chat(side).getByTestId("link-preview-card").last();
       await expect(card).toBeVisible();
       for (const [testId, own] of [["link-preview-title", "ltr"], ["link-preview-description", "rtl"]] as const) {
-        const drawn = await card.getByTestId(testId).evaluate((element, app) => {
+        // Before, both lines took the app's direction: "!Hello world" in Arabic, "مرحبا بكم!" with its "!" at the far end in
+        // English. Polled: the row is drawn again as the message is delivered, and a node read meanwhile has no box.
+        await expect.poll(() => card.getByTestId(testId).evaluate((element, own) => {
           const text = element.firstChild as Text;
           const rect = (from: number, to: number) => { const range = document.createRange(); range.setStart(text, from); range.setEnd(text, to); return range.getBoundingClientRect(); };
           const first = rect(0, 1), mark = rect(text.data.length - 1, text.data.length), all = rect(0, text.data.length), box = element.getBoundingClientRect();
           return {
             direction: getComputedStyle(element).direction,
             // The final "!" at the end its words read toward: after "Hello" in English, before "مرحبا" in Arabic.
-            markAtEnd: getComputedStyle(element).direction === "rtl" ? mark.left < first.left : mark.left > first.left,
-            // On the app's side of the card, as the lines around it.
-            appSide: app === "rtl" ? Math.abs(box.right - all.right) < 2 : Math.abs(all.left - box.left) < 2,
+            markAtEnd: own === "rtl" ? mark.left < first.left : mark.left > first.left,
+            // Starting at its words' own start, as the message's text does.
+            ownStart: own === "rtl" ? Math.abs(box.right - all.right) < 2 : Math.abs(all.left - box.left) < 2,
           };
-        }, app);
-        // Before, both lines took the app's direction: "!Hello world" in Arabic, "مرحبا بكم!" with its "!" at the far end in English.
-        expect(drawn, `${app} app, ${testId}`).toEqual({ direction: own, markAtEnd: true, appSide: true });
+        }, own), `${app} app, ${testId}`).toEqual({ direction: own, markAtEnd: true, ownStart: true });
       }
     }
   } finally {
@@ -182,7 +182,7 @@ test("a preview's words read in their own direction in English and in Arabic, li
   }
 });
 
-test("a place in a message shows a location card, and its map loads from OpenStreetMap only on tap",{ tag: ["@feature:chat.location.card"] }, async ({ peer }) => {
+test("a place in a message shows a location card, and its map loads from OpenStreetMap only on tap", { tag: ["@feature:chat.location.card"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("place-alice"), peer("place-bob")]);
   const tiles: string[] = [];
   await bob.context.route("https://tile.openstreetmap.org/**", route => {

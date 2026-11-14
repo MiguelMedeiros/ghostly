@@ -15,9 +15,9 @@ export function LinkPreviewDraftCard({ draft, onRemove }: { draft: LinkPreviewDr
           <p className="text-[12.5px] text-text-secondary truncate">{t("composer.previewLoading", { host })}</p>
         ) : (
           <>
-            {/* The page's words in their own direction, lined up with the app (as the card the message shows). */}
-            <p dir="auto" className="text-[13px] font-semibold text-text-primary truncate text-match-parent" data-testid="composer-link-preview-title">{preview?.t ?? host}</p>
-            {preview?.d && <p dir="auto" className="text-[12px] text-text-secondary line-clamp-2 leading-snug text-match-parent" data-testid="composer-link-preview-description">{preview.d}</p>}
+            {/* The page's words in their own direction, as on the card the message shows. */}
+            <p dir="auto" className="text-[13px] font-semibold text-text-primary truncate" data-testid="composer-link-preview-title">{preview?.t ?? host}</p>
+            {preview?.d && <p dir="auto" className="text-[12px] text-text-secondary line-clamp-2 leading-snug" data-testid="composer-link-preview-description">{preview.d}</p>}
             <p className="text-[11px] text-text-muted truncate">{preview?.s ? `${preview.s} · ` : ""}{host}</p>
           </>
         )}

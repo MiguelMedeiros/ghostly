@@ -53,13 +53,14 @@ export function LinkPreviewCard({ preview }: { preview: LinkPreview }) {
         </span>
       )}
       <span className="block px-2.5 py-2">
-        {/* The page's words read in their own direction (the card keeps the app's), lined up with the app: in Arabic an
-            English title was drawn "!Hello world", and in English an Arabic one had its "!" at the far end. */}
-        {site ? <span dir="auto" className="block chat-text-preview-site text-text-secondary truncate text-match-parent" data-testid="link-preview-site">{site}</span>
+        {/* The page's words read in their own direction, as the message's text does (the card keeps the app's): in Arabic
+            an English title was drawn "!Hello world", and in English an Arabic one had its "!" at the far end. Lined up
+            with the app instead (`match-parent`), a cut Arabic title in English lost its "…" past the card's edge. */}
+        {site ? <span dir="auto" className="block chat-text-preview-site text-text-secondary truncate" data-testid="link-preview-site">{site}</span>
           : <HostLine host={hostOf(preview.u)} testId="link-preview-site" className="block chat-text-preview-site text-text-secondary" />}
         {/* Two lines at most, a long word broken inside the card: `line-clamp` makes them boxes, so no `block` (built after it, it won). */}
-        {preview.t && <span dir="auto" className="chat-text-preview-title font-semibold leading-snug line-clamp-2 [overflow-wrap:anywhere] text-match-parent" data-testid="link-preview-title">{preview.t}</span>}
-        {preview.d && <span dir="auto" className="chat-text-preview-description text-text-secondary leading-snug line-clamp-2 [overflow-wrap:anywhere] mt-0.5 text-match-parent" data-testid="link-preview-description">{preview.d}</span>}
+        {preview.t && <span dir="auto" className="chat-text-preview-title font-semibold leading-snug line-clamp-2 [overflow-wrap:anywhere]" data-testid="link-preview-title">{preview.t}</span>}
+        {preview.d && <span dir="auto" className="chat-text-preview-description text-text-secondary leading-snug line-clamp-2 [overflow-wrap:anywhere] mt-0.5" data-testid="link-preview-description">{preview.d}</span>}
         <HostLine host={hostOf(preview.u)} testId="link-preview-url" className="block text-[11px] text-link mt-1" />
       </span>
     </a>
