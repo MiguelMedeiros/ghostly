@@ -722,6 +722,60 @@ describe("viewer tabs", () => {
     expect(world.callsTo("debugger.detach")).toEqual([[{ tabId }]]);
   });
 
+  it("opens a link the app opens in a new window in a tab of the browser, on the person's tap only, as the web view and Desktop do", async () => {
+    const tabId = await openViewer(world);
+    // What Chromium sends for a `target="_blank"` click or a `window.open` the viewer's sandbox (no allow-popups) blocks.
+    const windowOpen = (url: string, userGesture = true, tab = tabId) =>
+      fire(world.chrome.debugger.onEvent, { tabId: tab }, "Page.windowOpen", { url, windowName: "_blank", windowFeatures: [], userGesture });
+    const opened = () => world.callsTo("tabs.create").slice(1).map(([url]) => url);
+    let now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+    try {
+      windowOpen("https://example.org/doc?q=1");
+      await settle();
+      expect(opened()).toEqual(["https://example.org/doc?q=1"]);
+
+      // None the app opens by itself, none to this machine or the local network, to an app's origin or that is no web page.
+      now += 10_000;
+      windowOpen("https://example.org/self", false);
+      for (const url of ["http://localhost:8080/", "http://192.168.1.1/", "https://nas.local/", "http://router/", "http://[::1]/",
+        `https://${SERVICE}.${PEER}.${TAG}.invalid/other`, "javascript:alert(1)", "file:///etc/passwd", "chrome://settings", `https://example.org/${"a".repeat(4100)}`]) windowOpen(url);
+      await settle();
+      expect(opened()).toEqual(["https://example.org/doc?q=1"]);
+
+      // One every 2 seconds at most.
+      windowOpen("https://example.org/a");
+      windowOpen("https://example.org/b");
+      await settle();
+      expect(opened()).toEqual(["https://example.org/doc?q=1", "https://example.org/a"]);
+
+      // And none from a tab that is no viewer.
+      now += 10_000;
+      const bank = await world.chrome.tabs.create({ url: "https://bank.example/" });
+      windowOpen("https://example.org/c", true, bank.id);
+      await settle();
+      expect(opened()).toEqual(["https://example.org/doc?q=1", "https://example.org/a", "https://bank.example/"]);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it("opens at most 20 links from one viewer tab", async () => {
+    const tabId = await openViewer(world);
+    let now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+    try {
+      for (let i = 0; i < 25; i++) {
+        now += 3_000;
+        fire(world.chrome.debugger.onEvent, { tabId }, "Page.windowOpen", { url: `https://example.org/${i}`, windowName: "_blank", windowFeatures: [], userGesture: true });
+        await settle();
+      }
+      expect(world.callsTo("tabs.create").slice(1)).toHaveLength(20);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it("forgets the tab when the debugger leaves it, as when the person cancels Chrome's debugging bar", async () => {
     const tabId = await openViewer(world);
     fire(world.chrome.debugger.onDetach, { tabId }, "canceled_by_user");
