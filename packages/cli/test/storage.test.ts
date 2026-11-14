@@ -10,13 +10,13 @@ import { keyOrder, openPersistentIndexedDb, type PersistentIndexedDb } from "../
 import { openTreeFile, openTreeReader, TreeFile } from "../src/runtime/sqlTree";
 // covers: headless.storage
 
-/** Every disk sync the store asks for. */
-const syncs = vi.hoisted(() => ({ count: 0 }));
+/** Every disk sync the store asks for, and those of them that held the thread. */
+const syncs = vi.hoisted(() => ({ count: 0, onThread: 0 }));
 vi.mock("node:fs", async (original) => {
   const fs = await original<typeof import("node:fs")>();
   return {
     ...fs,
-    fsyncSync: (fd: number) => { syncs.count++; fs.fsyncSync(fd); disk.synced++; },
+    fsyncSync: (fd: number) => { syncs.count++; syncs.onThread++; fs.fsyncSync(fd); disk.synced++; },
     fsync: (fd: number, done: (error: NodeJS.ErrnoException | null) => void) => {
       syncs.count++;
       if (faults.sync) return void setTimeout(() => done(Object.assign(new Error("EIO: i/o error, fsync"), { code: "EIO" })), disk.syncMs);
@@ -123,17 +123,29 @@ describe("persistent IndexedDB", () => {
     await tx(d, ["messages"], (s) => { s.messages.put({ linkId: "a", id: "m1", text: "hello" }); });
     expect(syncs.count - before).toBe(1);
 
-    // With no transaction after it, a relaxed one is synced within a second, once.
+    // With no transaction after it, a relaxed one is synced within a second, once, and off the thread: a sync in place
+    // held the whole daemon as long as a busy disk took (1 to 2 s while a file came in).
+    before = syncs.count;
+    const onThread = syncs.onThread, synced = disk.synced;
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
-      before = syncs.count;
       await relaxed("delivered", "seen:m1");
       await relaxed("yes", "seen:m2");
       expect(syncs.count - before).toBe(0);
       vi.advanceTimersByTime(1_000);
       expect(syncs.count - before).toBe(1);
+      expect(syncs.onThread - onThread).toBe(0);
       vi.advanceTimersByTime(5_000);
       expect(syncs.count - before).toBe(1);
+    } finally { vi.useRealTimers(); }
+    // Once that sync is done, a later relaxed entry gets one of its own a second after it.
+    await vi.waitFor(() => expect(disk.synced - synced).toBe(1));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await relaxed("later", "seen:m3");
+      vi.advanceTimersByTime(1_000);
+      expect(syncs.count - before).toBe(2);
+      expect(syncs.onThread - onThread).toBe(0);
     } finally { vi.useRealTimers(); }
 
     // Crash: all of it is there.
