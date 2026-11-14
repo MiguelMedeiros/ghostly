@@ -328,7 +328,8 @@ starts its own again, and the one `restart` started would race it for the profil
 A file `file send` cannot read is refused with its path: one this user may not read is `refused` (exit 1), and one
 that changes on disk while it is copied in (a log still written to, a file being saved: it grew, shrank or was written
 again) is `unavailable` (exit 1, `details.reason: file_changed`, `details.path`), with nothing kept. Send it again once
-nothing writes to it, or send a copy.
+nothing writes to it, or send a copy. Ctrl-C on a `file send` through a daemon while the file is still being copied in
+(a large one takes seconds) stops the send there: nothing is kept and nothing goes, so send it again when you want it.
 
 ## Bots
 
