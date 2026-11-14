@@ -57,6 +57,54 @@ describe("group join", () => {
   });
 });
 
+describe("a one-shot group join", () => {
+  // Found in a bug hunt: with no daemon it left at once with {"group": id} and exit 0; the knock ends with the
+  // command, so nobody let it in, even with the community's admin online, and nothing said so.
+  const knocking = (stage: string) => ({ id: "g9", name: "", createdAt: 1, profile: "community", isAdmin: false, canSend: false, lastMessageAt: 0, invited: [], memberLinks: {}, members: [],
+    invitation: { linkId: "c1", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage } }) as unknown as GroupView;
+  function oneShot(mode: "one-shot" | "daemon" = "one-shot") {
+    let groups: GroupView[] = [];
+    const listeners = new Set<(s: EngineState) => void>();
+    const getState = () => ({ links: [], groups, settings: {}, transport: {} }) as unknown as EngineState;
+    const node = { getState, joinGroupByLink: vi.fn(async () => { groups = [knocking("knocking")]; return { groupId: "g9" }; }) };
+    const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: (l: (s: EngineState) => void) => { listeners.add(l); return () => listeners.delete(l); }, lastSeq: 0, replay: () => [] }, mode, version: "test" } as unknown as ApiContext;
+    const set = (g: GroupView[]) => { groups = g; for (const l of listeners) l(getState()); };
+    return { ctx, set };
+  }
+
+  it("waits until a member's app lets it in, and says it is in", async () => {
+    const { ctx, set } = oneShot();
+    const answer = callApi(ctx, "group.join", { link: LINK });
+    setTimeout(() => set([knocking("admitted")]), 5);
+    setTimeout(() => set([{ ...knocking("admitted"), status: "active", invitation: undefined } as GroupView]), 10);
+    expect(await answer).toEqual({ group: "g9", joined: true, stage: null });
+  });
+
+  it("after 60 s not in, says so and the next step; the knock is kept for a daemon", async () => {
+    vi.useFakeTimers();
+    try {
+      const { ctx } = oneShot();
+      const answer = callApi(ctx, "group.join", { link: LINK });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(await answer).toEqual({ group: "g9", joined: false, stage: "knocking",
+        warning: "Not in yet: no member's app has let you in. A member's app lets you in only while this profile is running: keep it running (ghostly daemon --detach), then ghostly group show g9" });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("stops at a stage waiting does not change, with no daemon's note", async () => {
+    for (const stage of ["full", "blocked", "replaced"]) {
+      const { ctx, set } = oneShot();
+      const answer = callApi(ctx, "group.join", { link: LINK });
+      setTimeout(() => set([knocking(stage)]), 5);
+      expect(await answer).toEqual({ group: "g9", joined: false, stage });
+    }
+  });
+
+  it("through a daemon, answers at once as before", async () => {
+    expect(await callApi(oneShot("daemon").ctx, "group.join", { link: LINK })).toEqual({ group: "g9" });
+  });
+});
+
 describe("a group message names its author", () => {
   it("from the roster when the message came with the member's key only", () => {
     expect(groupMessageJson(message("a", { member: "anakey" }), group)).toMatchObject({ nick: "Ana", member: "anakey" });
