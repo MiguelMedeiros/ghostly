@@ -923,12 +923,13 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           and the contact's identities are in the ⋮ menu. Wider (a phone on its side, a narrow window), every button is
           in the row, a little narrower than on a desktop. On the narrowest phone (320px) the back button gives 8px to
           the name, so "Cérebro (Mac)" and a bot's status under it still fit beside three buttons; its tap still lands on
-          44 × 44 px (`.tap-target`). */}
+          44 × 44 px (`.tap-target`). Its buttons and the avatar are sized in px, as the name is: in rem they grew with the
+          browser's text size and left the name 33px at 150%. */}
       <div className="h-14 header-safe flex items-center justify-between px-4 max-md:ps-1 max-md:pe-1 bg-panel-header border-b border-border shrink-0">
         <div className="flex items-center gap-3 max-md:gap-1 min-w-0">
           <button
             onClick={nav.up}
-            className={`md:hidden ${phoneHeader ? "w-11 max-[340px]:w-9 tap-target" : "w-9"} h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0`}
+            className={`md:hidden ${phoneHeader ? "w-[44px] max-[340px]:w-[36px] h-[44px] tap-target" : "w-9 h-11"} flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0`}
             title={t("common.back")}
             data-testid="chat-back"
           >
@@ -938,7 +939,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           </button>
           {/* With a picture, a click opens it large (AvatarViewer.tsx). */}
           <AvatarOpener src={face?.photo ?? peerAvatar} name={shownName} testId="chat-avatar-open"
-            className="relative w-10 h-10 max-md:w-9 max-md:h-9 rounded-full bg-surface-hover flex items-center justify-center shrink-0 [--ring:var(--theme-panel-header)]">
+            className="relative w-10 h-10 max-md:w-[36px] max-md:h-[36px] rounded-full bg-surface-hover flex items-center justify-center shrink-0 [--ring:var(--theme-panel-header)]">
             <PeerAvatar peerPubKey={params?.peerPubKeyB64} label={shownName} named={!isAnonymous} photo={face?.photo} testId="chat-avatar" presence={paired} />
             {face && <FaceCorner face={face} />}
             {inviteCode && !pairedReady && (
@@ -1047,7 +1048,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
               ref={optionsRef}
               onClick={() => setMenuOpen(!menuOpen)}
               onKeyDown={openOnArrow(() => setMenuOpen(true))}
-              className={`relative ${phoneHeader ? "w-11 h-11 flex items-center justify-center" : "p-2 max-md:px-1.5 max-md:py-2.5"} text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer`}
+              className={`relative ${phoneHeader ? "w-[44px] h-[44px] flex items-center justify-center" : "p-2 max-md:px-1.5 max-md:py-2.5"} text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer`}
               title={t("chat.options")}
               aria-haspopup="true"
               aria-expanded={menuOpen}
