@@ -49,6 +49,8 @@ function fake() {
     walletCreate: vi.fn(async (p: { type: string; network: string }) => ({ id: `${p.type}:${p.network}`, type: p.type, network: p.network, config: {} })),
     walletRemove: vi.fn(async (_: unknown): Promise<void> => { throw new Error("This wallet still holds 42 sats on this device"); }),
     walletTestCoins: vi.fn(async () => ({ amount: 10000, unit: "test sats" })),
+    // As the engine reads the store: the newest `limit` of a long history (here, 1,000 movements).
+    walletHistory: vi.fn(async ({ limit }: { network: string; limit: number }) => Array.from({ length: Math.min(limit, 1_000) }, (_, i) => (i ? { id: `tx-${i}` } : { id: "h" }))),
     walletQuoteInvoice: vi.fn(async () => ({ quote: "q", mint: "m", amount: 10, feeReserve: 3 })),
     walletPayQuote: vi.fn(async (_: unknown) => ({ paid: true })),
     sendPayment: vi.fn(async (_: { timestamp: number }) => ({ paymentId: "p1" })),
@@ -399,6 +401,16 @@ describe("wallets", () => {
     const { ctx } = fake();
     await expect(callApi(ctx, "wallet.history", { limit: 1.5 })).rejects.toMatchObject({ code: "bad_request", message: "limit must be a whole number from 1 to 10000" });
     expect(await callApi(ctx, "wallet.history", { limit: 1 })).toEqual({ network: "testnet", history: [{ id: "h" }] });
+  });
+
+  it("history answers as many entries as --limit asks, past the wallet view's newest 100", async () => {
+    // Found in a performance hunt: --limit 500 sliced the view's 100 movements and printed 100, saying nothing.
+    const { ctx, node } = fake();
+    const answer = await callApi(ctx, "wallet.history", { limit: 500 }) as { network: string; history: { id: string }[] };
+    expect(node.walletHistory).toHaveBeenCalledWith({ network: "testnet", limit: 500 });
+    expect(answer.network).toBe("testnet");
+    expect(answer.history).toHaveLength(500);
+    expect(answer.history[499]).toEqual({ id: "tx-499" });
   });
 
   it("chat request --method usdt reads the amount in USDT, as the app's composer does, and answers the amount asked", async () => {

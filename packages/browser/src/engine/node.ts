@@ -6686,6 +6686,11 @@ export class GhostlyNode implements EngineImplementation {
     finally { clearTimeout(timer); wallet.resume(); }
   }
 
+  /** A network's `limit` newest Cashu movements, as its wallet view's history, which keeps only the newest 100 (`wallet history --limit`). */
+  walletHistory({ network, limit }: { network: WalletNetwork; limit: number }): Promise<WalletTx[]> {
+    return this.wallet.history(network, limit);
+  }
+
   /**
    * "Get test coins", pressed by the person on a Testnet wallet: a small fixed amount from that wallet's own faucet.
    * Cashu, and Lightning through the mints: the test mint pays an invoice asked of it on purpose. USDT: Aave's Sepolia
