@@ -56,6 +56,9 @@ jobs:
   #   checks when the site changed, and Tauri when Rust changed. The app's tests, the packages shards, the CLI on ARM64,
   #   the builds, the site's browser checks and the macOS jobs wait for ready_for_review, whose run plans everything.
   #   Many sessions push drafts at once, and the free plan runs about 20 jobs at a time (5 on macOS).
+  # - So does a ready pull request that already has `queue` and whose head is behind its base: the merge train boards
+  #   it on that fast tier, and its batch's full run on the base's tip is the gate. Its gate job is "CI Success (draft)"
+  #   too. At the base's tip (where the train rebases a lone pull request) it runs everything, as without `queue`.
   # - Website: runs when the pull request changes something the site reads (apps/website/, docs/, the files its
   #   scripts copy or quote; the list is tested against those scripts).
   # - The Desktop jobs on macOS: skipped only when every change is in apps/website/ or docs/, which the app never reads.
@@ -89,6 +92,7 @@ jobs:
       affected: ${{ steps.plan.outputs.affected }}
       draft: ${{ steps.plan.outputs.draft }}
       left_draft: ${{ steps.plan.outputs.left_draft }}
+      queued: ${{ steps.plan.outputs.queued }}
       tested: ${{ steps.plan.outputs.tested }}
     steps:
       - name: Checkout the gate
@@ -147,24 +151,33 @@ jobs:
             draft=true
             echo "left_draft=true" >> "$GITHUB_OUTPUT"
           fi
+          # Ready, with `queue` already, and behind its base: the merge train boards it on the fast tier and its batch
+          # runs everything (ci-changes.mjs's queuedBehind). At the base's tip it runs everything: the train lands a lone
+          # pull request on its own run there.
+          queued=false
+          if [[ "$draft" == "false" ]] && node tools/scripts/ci-changes.mjs --queued-behind; then
+            draft=true
+            queued=true
+            echo "queued=true" >> "$GITHUB_OUTPUT"
+          fi
           echo "draft=$draft" >> "$GITHUB_OUTPUT"
           # A pull request that changes no file (main merged back into dev after a release) gives nothing to plan
           # from: every path gate is on (a draft still gets the fast tier).
           if (( CHANGED == 0 )); then
             echo "::notice::This pull request changes no file: every path gate is on"
-            node tools/scripts/ci-changes.mjs --draft="$draft" --all
+            node tools/scripts/ci-changes.mjs --draft="$draft" --queued="$queued" --all
             exit 0
           fi
           gh api --paginate "$FILES_URL" --jq '.[] | "\(.filename)\t\(.previous_filename // "")"' > "$RUNNER_TEMP/files.tsv"
           # The files API lists at most 3000 files: a longer pull request runs everything.
           if (( $(wc -l < "$RUNNER_TEMP/files.tsv") < CHANGED )); then
             echo "::notice::More files changed than the files API lists: every path gate is on"
-            node tools/scripts/ci-changes.mjs --draft="$draft" --all
+            node tools/scripts/ci-changes.mjs --draft="$draft" --queued="$queued" --all
             exit 0
           fi
           files=$(tr '\t' '\n' < "$RUNNER_TEMP/files.tsv" | grep -v '^$')
           echo "$files"
-          node tools/scripts/ci-changes.mjs --draft="$draft" <<< "$files"
+          node tools/scripts/ci-changes.mjs --draft="$draft" --queued="$queued" <<< "$files"
 
   # ============================================
   # Frontend (src, packages, extension) - React + Vite + TypeScript
@@ -887,6 +900,7 @@ jobs:
         env:
           DRAFT: ${{ needs.changes.outputs.draft }}
           LEFT_DRAFT: ${{ needs.changes.outputs.left_draft }}
+          QUEUED: ${{ needs.changes.outputs.queued }}
           TESTED: ${{ needs.changes.outputs.tested }}
           PUSH_TO_DEV: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' }}
           CHANGES: ${{ needs.changes.result }}
@@ -953,7 +967,9 @@ jobs:
           if [[ "$TESTED" == "true" ]]; then
             echo "::notice::This tree passed CI Success on a pull request already (see Changed paths): Tauri Backend saved the Cargo cache when dev lacked it."
           fi
-          if [[ "$LEFT_DRAFT" == "true" ]]; then
+          if [[ "$QUEUED" == "true" ]]; then
+            echo "::notice::Queued and behind its base: the fast tier passed. The merge train boards it on this run, and its batch's full run is the check that counts (alone, the train rebases it onto the tip, where it gets the full tier)."
+          elif [[ "$LEFT_DRAFT" == "true" ]]; then
             echo "::notice::Left draft after this run started: the fast tier passed, and the full run waits behind this one. The merge train may board it on this run and cancel that full run; the batch's run is the check that counts."
           elif [[ "$DRAFT" == "true" ]]; then
             echo "::notice::Draft: the fast tier passed. Once you mark it ready (gh pr ready), the merge train may board it on this run and cancel the full run; the batch's run is the check that counts."
