@@ -319,6 +319,38 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     }
   });
 
+  it("keeps the focus with the app as its chat's page gets room beside it, or loses it (a tablet turned, a window resized)", async () => {
+    windowIs(false);
+    let paneWidth = 604;
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) { return this.classList.contains("chat-pane") ? paneWidth : 0; });
+    const observed: ResizeObserverCallback[] = [];
+    vi.stubGlobal("ResizeObserver", class { constructor(callback: ResizeObserverCallback) { observed.push(callback); } observe() {} disconnect() {} });
+    const resized = (to: number) => act(() => { paneWidth = to; for (const callback of observed) callback([], {} as ResizeObserver); });
+    try {
+      const { user } = panel();
+      await act(() => open(REF, "link-1"));
+      const app = screen.getByTestId("mini-app");
+      expect(within(app).getByTestId("mini-app-back")).toHaveFocus();
+      // Room beside the chat: Back goes with the focus on it, which stays in the panel (Escape still closes it there).
+      resized(1006);
+      expect(app).toHaveAttribute("data-place", "beside");
+      expect(app).toHaveFocus();
+      // Beside it, the person types in the chat; then no room again: the chat goes under the app, and so would the focus.
+      await user.click(screen.getByRole("textbox", { name: "Message" }));
+      resized(604);
+      expect(app).toHaveAttribute("data-place", "wide");
+      expect(within(app).getByTestId("mini-app-back")).toHaveFocus();
+      // Beside it again with the focus in the chat: it stays there.
+      resized(1006);
+      await user.click(screen.getByRole("textbox", { name: "Message" }));
+      resized(1100);
+      expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus();
+    } finally {
+      width.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("with no room beside the chat, still covers it while the chat is kept loaded off screen: the chat is not drawn again as it goes and comes back", async () => {
     windowIs(false);
     // A chat kept loaded off screen (App's `loaded`) is `display: none`: its page measures 0 px until it shows again.
