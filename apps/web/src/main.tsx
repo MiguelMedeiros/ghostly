@@ -92,11 +92,24 @@ await becomeThePeer(peerLock, () => {
   // Opened for a link (an invite, a group's, a device code's): that tab opens it, with the same wait. Taken there, it
   // leaves this address, so this tab opens nothing twice if it takes over later; until then, this tab keeps it. A tab
   // on standby opens none: it refuses it, and the link leaves this address all the same, kept for no one.
+  const stops: (() => void)[] = [];
+  const handOn = (link: string) => {
+    // Out of the address only while it is still this link's: a later one there waits for its own answer.
+    const leave = () => { if (linkInAddress(window.location.hash) === link) history.replaceState(history.state, "", `${window.location.pathname}${window.location.search}#/`); };
+    stops.push(forwardLink(peerLock, link, () => { leave(); draw("linkTaken"); }, SHARE_FORWARD_AFTER_MS, () => { leave(); draw("plain"); }));
+  };
   const link = sharing ? null : linkInAddress(window.location.hash);
-  if (link) {
-    const leave = () => history.replaceState(history.state, "", `${window.location.pathname}${window.location.search}#/`);
-    stopLink = forwardLink(peerLock, link, () => { leave(); draw("linkTaken"); }, SHARE_FORWARD_AFTER_MS, () => { leave(); draw("plain"); });
-  }
+  if (link) handOn(link);
+  // One that reaches this tab while it waits (the installed app sends a link to the window used last, or it is typed
+  // into the address bar, or Back returns to one) goes the same way, rather than stay in the address and history.
+  const arrived = () => {
+    const next = linkInAddress(window.location.hash);
+    if (!next) return;
+    handOn(next);
+    if (!sharing) draw("link");
+  };
+  addEventListener("hashchange", arrived);
+  stopLink = () => { removeEventListener("hashchange", arrived); for (const stop of stops) stop(); };
   draw(sharing ? "sharing" : link ? "link" : "plain");
   // The lock is there but the browser refuses it: the same screen as a browser without it.
 }).catch((error: unknown) => (error instanceof PeerLockUnavailable ? cannotRun(["locks"], error) : Promise.reject(error)));
