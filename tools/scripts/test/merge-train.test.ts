@@ -3,11 +3,14 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { aloneMark, appTrainIn, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, gateOf, gitLayer, HOLD, HOLD_HELP, holdBatch, holdText, isBatch, LABEL, listBases, MAX_WAIT, MIN_BATCH, localBases, missedWakes, order, ordinal, pickBatch, PLANNED_JOBS, positionText, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting, vouchedAt, wakeIn } from "../merge-train.mjs";
+import { aloneMark, appTrainIn, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, failedJobs, gateOf, gitLayer, HOLD, HOLD_HELP, holdBatch, holdText, isBatch, LABEL, listBases, MAX_WAIT, MIN_BATCH, localBases, missedWakes, order, ordinal, pickBatch, PLANNED_JOBS, positionText, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting, vouchedAt, wakeIn } from "../merge-train.mjs";
 
 type Pr = { number: number; title: string; body: string; draft: boolean; sha: string; branch: string; fork: boolean; labels: string[]; createdAt: string; closedAt?: string; open: boolean; base: string; merged?: boolean; author?: string; nodeId?: string; editor?: string };
 const green = [{ name: "CI Success", status: "completed", conclusion: "success", started_at: "2026-10-08T00:00:00Z", id: 1 }];
 const red = [{ name: "CI Success", status: "completed", conclusion: "failure", started_at: "2026-10-08T00:00:00Z", id: 1 }];
+/** A red run as CI ends one: a job failed (its log at `html_url`), so CI Success did. */
+const LINT_LOG = "https://github.com/MiguelMedeiros/ghostly/actions/runs/7/job/70";
+const redRun = [{ name: "Frontend lint and types", status: "completed", conclusion: "failure", html_url: LINT_LOG, id: 2 }, { name: "Web unit tests", status: "completed", conclusion: "success", id: 3 }, ...red];
 const running = [{ name: "CI Success", status: "in_progress", conclusion: null, started_at: "2026-10-08T00:00:00Z", id: 1 }];
 const fastGreen = [{ name: "CI Success (draft)", status: "completed", conclusion: "success", id: 1 }];
 const fastRed = [{ name: "CI Success (draft)", status: "completed", conclusion: "failure", id: 1 }];
@@ -265,9 +268,9 @@ function fakeRepo() {
   /** CI ends on every open batch and on every head the train rebased: red when it holds one of `bad`. */
   const settle = (bad: number[] = []) => {
     for (const p of pulls.values()) {
-      if (p.open && rebased.has(p.sha)) runs.set(p.sha, bad.includes(p.number) ? red : green);
+      if (p.open && rebased.has(p.sha)) runs.set(p.sha, bad.includes(p.number) ? redRun : green);
       if (!p.open || !readState(p.body)) continue;
-      runs.set(p.sha, readState(p.body).prs.some((m: { number: number }) => bad.includes(m.number)) ? red : green);
+      runs.set(p.sha, readState(p.body).prs.some((m: { number: number }) => bad.includes(m.number)) ? redRun : green);
     }
   };
   const batch = () => [...pulls.values()].find((p) => p.open && readState(p.body));
@@ -659,6 +662,8 @@ describe("a run of the train", () => {
     expect(repo.landed).toEqual(["#11", "#12", "#14"]);
     expect(repo.pulls.get(13)!.labels).toEqual([LABEL.failed]);
     expect(repo.comments.get(13)!.at(-1)!.body).toMatch(/failed twice in a batch with only this pull request on `dev`/);
+    // Which job to open, linked to its log: the batch's page is one more step away, and CI Success alone says nothing.
+    expect(repo.comments.get(13)!.at(-1)!.body).toContain(`; red: [\`Frontend lint and types\`](${LINT_LOG})). Fix it,`);
   });
 
   it("boards ready pull requests on a green fast tier while their own full CI runs, and cancels those runs", async () => {
@@ -2238,6 +2243,7 @@ describe("one pull request alone", () => {
     expect(r.opened).toEqual([]);
     expect(repo.pulls.get(11)!.labels).toEqual([LABEL.failed]);
     expect(repo.comments.get(11)!.map((c) => c.body)).toEqual([expect.stringMatching(/failed twice with only this pull request on `dev`/)]);
+    expect(repo.comments.get(11)![0].body).toContain(`; red: [\`Frontend lint and types\`](${LINT_LOG})). Fix it,`);
   });
 
   it("lands a flake on its second run", async () => {
@@ -3157,6 +3163,20 @@ describe("CI on a commit", () => {
     const forged = run("CI Success", "completed", "success", "2099-01-01T00:00:00Z", 5);
     expect(ciState([run("CI Success", "completed", "failure", "2026-10-07T10:00:00Z", 4), forged])).toBe("success");
     expect(ciState([forged, run("CI Success", "completed", "failure", "2026-10-07T12:00:00Z", 6)])).toBe("failure");
+  });
+
+  it("names the jobs that turned CI Success red: failed or timed out, the newest of each name, never the gate", () => {
+    const failed = failedJobs([
+      run("Frontend lint and types", "completed", "failure"),
+      { ...run("CLI on Linux ARM64", "completed", "failure", "2026-10-07T10:00:00Z", 2), html_url: "https://example.test/job/2" },
+      run("CLI on Linux ARM64", "completed", "success", "2026-10-07T11:00:00Z", 3), // a rerun that passed
+      run("E2E", "completed", "timed_out", "2026-10-07T10:00:00Z", 4),
+      run("Security", "completed", "skipped"),
+      run("Web unit tests", "completed", "cancelled"),
+      run("CI Success", "completed", "failure", "2026-10-07T10:00:00Z", 9),
+    ]);
+    expect(failed).toEqual([{ name: "Frontend lint and types", url: null }, { name: "E2E", url: null }]);
+    expect(failedJobs([run("CI Success", "completed", "failure")])).toEqual([]);
   });
 
   it("is CI's own run: the newest run of this repository's ci.yml on exactly that commit", () => {
