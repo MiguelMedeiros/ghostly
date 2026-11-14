@@ -1336,6 +1336,19 @@ export class GroupSession {
   }
 
   /**
+   * My message `id` was deleted for everyone: its frame, and each copy said again, keep their place in my log (`nextSeq`,
+   * `couldRead`, the removal's copies) and lose what they said. The log is in the saved state beside the epochs' secrets,
+   * so the text stayed readable from the profile until 32 later sends pushed it out (`message delete --purge` promises
+   * it leaves the folder). Saved soon, as a community's `forget`; `flush` writes it now.
+   */
+  forget(id: string): void {
+    if (!this.state.sent.some(f => f.c && this.messageIdOf(f) === id)) return;
+    this.state.sent = this.state.sent.map(f => !f.c || this.messageIdOf(f) !== id ? f
+      : { t: f.t, g: f.g, e: f.e, s: f.s, n: f.n, ts: f.ts, nn: "", c: "", sig: "", ...(f.o ? { o: f.o } : {}) });
+    this.persistSoon();
+  }
+
+  /**
    * Saves, then sends my frame to every other member of its epoch still in the group (`saved`: the caller saved it). One no edge took (none was up:
    * my app just opened) is remembered (`alone`): I may be behind on the chain without knowing, and members let in
    * meanwhile could never open it (`resealBehind`).
@@ -2277,8 +2290,8 @@ export class GroupSession {
     const lacks = missingIn(frame, to);
     return this.state.sent.filter(sent => this.state.chain[sent.e] && rosterHas(this.state.chain[sent.e].m, to) && lacks(sent) && !this.isRemoved(sent));
   }
-  /** A frame of a message deleted for everyone (`hooks.removed`): handed to nobody, its removal is what they get. */
-  private isRemoved(f: GroupMessageFrame): boolean { return !!this.hooks.removed?.(this.messageIdOf(f)); }
+  /** A frame of a message deleted for everyone (`hooks.removed`, or one of mine `forget` emptied): handed to nobody, its removal is what they get. */
+  private isRemoved(f: GroupMessageFrame): boolean { return !f.c || !!this.hooks.removed?.(this.messageIdOf(f)); }
 
   // -- metadata (WISP 902 § Metadata) ---------------------------------------
 
