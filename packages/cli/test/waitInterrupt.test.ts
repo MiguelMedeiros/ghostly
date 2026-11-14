@@ -115,6 +115,9 @@ describe("what a wait says", () => {
     });
     expect(waitNotice("chat.wait", { chat: "bob" }, "daemon")).toEqual({ waiting: "waiting for chat bob to be live (up to 60 s; Ctrl-C stops waiting)", stopped: "chat bob was not live yet" });
     expect(waitNotice("chat.wait", { chat: "bob", until: "paired" }, "daemon")?.stopped).toBe("chat bob was not paired yet");
+    // A one-shot join by a group's link waits to be let in; through a daemon it answers at once.
+    expect(waitNotice("group.join", { link: "x" }, "one-shot")).toEqual({ waiting: "waiting for a member's app to let this profile in (up to 60 s; Ctrl-C stops waiting)", stopped: "not let in yet: the knock goes on while this profile is running (ghostly daemon --detach)" });
+    expect(waitNotice("group.join", { link: "x" }, "daemon")).toBeNull();
   });
 
   it("knows the waits a one-shot does by default, with no --wait, and that a daemon answers those at once", () => {
