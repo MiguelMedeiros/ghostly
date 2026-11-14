@@ -93,7 +93,7 @@ describe("GroupChat: what the header says", () => {
     await user.keyboard("{Escape}");
     await user.click(within(card).getByTestId("group-accept"));
     expect(engine.callsTo("acceptGroupInvitation")).toEqual([{ groupId: "group-1" }]);
-    expect(await within(card).findByTestId("group-answer-refused")).toHaveTextContent("⁨Alice⁩ is not connected yet. Try again in a moment.");
+    expect(await within(card).findByTestId("group-answer-refused")).toHaveTextContent("\u2068Alice\u2069 is not connected yet. Try again in a moment.");
     await user.click(within(card).getByTestId("group-decline"));
     expect(engine.callsTo("declineGroupInvitation")).toEqual([{ groupId: "group-1" }]);
   });

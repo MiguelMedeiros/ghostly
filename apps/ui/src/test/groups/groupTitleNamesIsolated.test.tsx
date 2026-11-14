@@ -26,7 +26,7 @@ const admin = (patch: Partial<GroupView> = {}) => groupView({
   members: [member({ key: ME, me: true, role: "admin" }), member({ key: BOB, nick: "Bob!" })], ...patch,
 });
 /** The name between FSI and PDI, as a string with no room for a <bdi> holds it. */
-const iso = (name: string) => `⁨${name}⁩`;
+const iso = (name: string) => `\u2068${name}\u2069`;
 /** The <bdi>s holding exactly this name inside the element. */
 const isolated = (el: HTMLElement, name: string) => [...el.querySelectorAll("bdi")].filter(bdi => bdi.textContent === name).length;
 
