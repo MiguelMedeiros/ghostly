@@ -90,14 +90,15 @@ describe("a row's ⓘ", () => {
 });
 
 describe("LinkRow", () => {
-  it("is one button for the whole line, whose long label ellipsizes and whose value never shrinks", async () => {
+  it("is one button for the whole line, whose long label wraps (a name passes its own ellipsis) and whose value never shrinks", async () => {
     const onClick = vi.fn();
-    const { user } = renderApp(<LinkRow testId="link" leading={<span>W</span>} label="A rather long profile name" hint="Name, picture" value="3 chats" onClick={onClick} />);
-    const link = screen.getByRole("button", { name: /A rather long profile name/ });
+    const { user } = renderApp(<LinkRow testId="link" leading={<span>W</span>} label="Confidentialité et sécurité" hint="Name, picture" value="3 chats" onClick={onClick} />);
+    const link = screen.getByRole("button", { name: /Confidentialité et sécurité/ });
     expect(link).toBe(screen.getByTestId("link"));
     expect(link).toHaveClass("w-full", "min-h-12");
-    expect(screen.getByText("A rather long profile name")).toHaveClass("truncate");
-    expect(screen.getByText("A rather long profile name").parentElement).toHaveClass("min-w-0", "flex-1");
+    expect(screen.getByText("Confidentialité et sécurité")).toHaveClass("break-words");
+    expect(screen.getByText("Confidentialité et sécurité")).not.toHaveClass("truncate");
+    expect(screen.getByText("Confidentialité et sécurité").parentElement).toHaveClass("min-w-0", "flex-1");
     expect(screen.getByText("Name, picture")).toHaveClass("break-words");
     expect(screen.getByText("3 chats")).toHaveClass("shrink-0", "whitespace-nowrap");
     await user.click(link);
