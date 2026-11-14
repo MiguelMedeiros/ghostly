@@ -129,6 +129,48 @@ describe("the bridge's frame of the contact's app", () => {
     }
   });
 
+  it("hands on the links of the app's page from when it is shown parsed, before its load: the person can tap it then", async () => {
+    let active = false;
+    class FakeActivation { get isActive() { return active; } }
+    vi.stubGlobal("UserActivation", FakeActivation);
+    const activation = new FakeActivation();
+    Object.defineProperty(Navigator.prototype, "userActivation", { get: () => activation, configurable: true });
+    // The app's page parsed, its picture still on its way: shown, no `load` yet.
+    const page = document.implementation.createHTMLDocument();
+    const own = ["URL", "contentType", "readyState"].map((name) => [name, Object.getOwnPropertyDescriptor(Document.prototype, name)] as const);
+    for (const [name, value] of [["URL", () => `https://${LABEL}.svc.ghostly.example/`], ["contentType", () => "text/plain"], ["readyState", () => "interactive"]] as const) {
+      Object.defineProperty(Document.prototype, name, { get: value, configurable: true });
+    }
+    const opened: unknown[] = [];
+    const win = Object.assign(new EventTarget(), { open: (url: unknown) => { opened.push(url); return null; }, document: page }) as unknown as Window;
+    const framed = [vi.spyOn(HTMLIFrameElement.prototype, "contentWindow", "get").mockReturnValue(win), vi.spyOn(HTMLIFrameElement.prototype, "contentDocument", "get").mockReturnValue(page)];
+    try {
+      const frame = await bridgeFrame();
+      const parent = window.parent as unknown as { postMessage: ReturnType<typeof vi.fn> };
+      const sent = (type: string) => parent.postMessage.mock.calls.filter(([data]) => (data as { type?: unknown }).type === type).map(([data]) => data as { url?: string });
+      await vi.waitFor(() => expect(sent(BRIDGE_SHOWN)).toHaveLength(1));
+      // A tap in the shown page, on a link to another site.
+      win.dispatchEvent(Object.defineProperty(new Event("pointerdown"), "isTrusted", { value: true }));
+      active = true;
+      win.open("https://docs.example/early", "help");
+      expect(sent(BRIDGE_OPEN_LINK).map((data) => data.url)).toEqual(["https://docs.example/early"]);
+      // Its `load` later hands them on no second time.
+      frame.dispatchEvent(new Event("load"));
+      win.dispatchEvent(Object.defineProperty(new Event("pointerdown"), "isTrusted", { value: true }));
+      win.open("https://docs.example/later", "help");
+      // (A name no window has: looked up, then handed on, by one wrapper only.)
+      expect(sent(BRIDGE_OPEN_LINK).map((data) => data.url)).toEqual(["https://docs.example/early", "https://docs.example/later"]);
+      expect(opened).toEqual(["https://docs.example/early", "https://docs.example/later"]);
+    } finally {
+      for (const spy of framed) spy.mockRestore();
+      for (const [name, descriptor] of own) {
+        if (descriptor) Object.defineProperty(Document.prototype, name, descriptor);
+        else delete (Document.prototype as unknown as Record<string, unknown>)[name];
+      }
+      delete (Navigator.prototype as { userActivation?: unknown }).userActivation;
+    }
+  });
+
   it("hands the app's page each link the app opens in a new window, which the view's sandbox would drop with no word", async () => {
     vi.stubGlobal("__SERVICES_HOST__", "https://*.svc.ghostly.example");
     vi.stubGlobal("__SERVICES_APP_ORIGIN__", APP_ORIGIN);
