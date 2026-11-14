@@ -105,11 +105,15 @@ const PASTE_SPACES = " \t\n\r\u00a0\u202f";
  * of "Join us: <https://…#ghostly1…>!", "« ghostly1… »" or "code: ghostly1…". The last word, without the quotes,
  * brackets and marks before and after it. Readers try it only once the paste itself did not read, so a bare token
  * reads as it always did and a token with a character lost is still refused as one.
+ * A `/` a link ends with (typed, or added by a chat app's linkifier: `…/#/join/group2/…/`) is not the token's either,
+ * as `inviteRouteCode` drops it from an invite's route; a bare address keeps its own (`https://ghostly.tools/`).
  */
 export function unwrapPasted(text: string): string {
   const words = trimEndOf(text.trim(), PASTE_CLOSERS + PASTE_SPACES).split(/\s+/);
   const last = words[words.length - 1] ?? "";
   let start = 0;
   while (start < last.length && PASTE_OPENERS.includes(last[start])) start++;
-  return trimEndOf(last.slice(start), PASTE_CLOSERS);
+  const token = trimEndOf(last.slice(start), PASTE_CLOSERS);
+  const bare = trimEndOf(token, PASTE_CLOSERS + "/");
+  return /:\/\/[^/]*$/.test(bare) ? token : bare;
 }
