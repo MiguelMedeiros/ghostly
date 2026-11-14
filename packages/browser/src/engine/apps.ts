@@ -99,6 +99,11 @@ const STAGED = { max: 4, ms: 10 * 60 * 1000 } as const;
 const BUNDLES_KEPT = { min: 2, ms: 60 * 1000 } as const;
 /** URLs the engine remembers it read whole and refused (`Apps.refusedReads`). */
 const REFUSED_READS_KEPT = 256;
+/**
+ * Listing URLs the update check keeps as peeked with nothing to take (`Apps.listingMisses`), the oldest going first: a
+ * store that lists new URLs at each index would grow them at every check.
+ */
+export const LISTING_MISSES_KEPT = 1024;
 /** The first bytes of a bundle: magic, the manifest's length and the largest manifest. */
 const PEEK_BYTES = APP_BUNDLE_MAGIC.length + 4 + APP_BUNDLE_LIMITS.manifestBytes;
 /** What a peek reads first: the magic, the length and any usual manifest (about 1 KiB). A longer one is read to its end after. */
@@ -717,9 +722,15 @@ export class Apps {
   /**
    * Listing URLs whose peek showed nothing to take (`<store> <ref> <url>` → `<index digest> <listed digest> <pin>
    * <installed digest> <waiting digest>`): the same index listing the same, for the same app, is not peeked again at
-   * every check.
+   * every check. At most `LISTING_MISSES_KEPT`, the oldest going first; a store's go when it is removed.
    */
   private readonly listingMisses = new Map<string, string>();
+
+  private missListing(missed: string, seen: string): void {
+    this.listingMisses.delete(missed);
+    this.listingMisses.set(missed, seen);
+    for (const old of this.listingMisses.keys()) { if (this.listingMisses.size <= LISTING_MISSES_KEPT) break; this.listingMisses.delete(old); }
+  }
   /**
    * URLs whose whole read the update check, or a fetch of missing files, refused (a file hash that does not hold, a bad
    * signature, too large, another version under a number held), with the digest their peek showed then: the same peek
@@ -1607,6 +1618,7 @@ export class Apps {
     const held = await this.storeRecord(key);
     if (!held) return;
     this.behindReads.delete(key);
+    for (const missed of this.listingMisses.keys()) if (missed.startsWith(`${key} `)) this.listingMisses.delete(missed);
     // Its index's revocations stay with the apps they stop (an index held from before they were kept at each read).
     await this.keepStoreRevocations(held);
     const seen = held.index ?{ sequence: held.index.sequence, digest: held.digest ?? "" } : held.seen;
@@ -2117,7 +2129,7 @@ export class Apps {
         let peek: ReturnType<typeof peekAppManifest>;
         try { peek = await this.peekAt(url); } catch { continue; }
         if (!peek || !newer(peek) || (want.digest !== undefined && peek.digest !== want.digest)) {
-          if (want.miss) this.listingMisses.set(...want.miss);
+          if (want.miss) this.missListing(...want.miss);
           continue;
         }
         holds = peek;
