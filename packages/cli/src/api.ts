@@ -263,14 +263,21 @@ const ONE_SHOT_JOIN_S = 60;
  * in only while its knocks go on, and they stop when the command leaves. It left at once with `{"group": id}` and exit
  * 0, in 0.5 s, the admin online: the group stayed an invitation at "knocking" and nothing said a daemon had to run for
  * the knock to be answered. The answer says whether it is in and at what stage it waits, and what to do when it is not.
+ * A contact's invitation to the group, not accepted, keeps its place and the link is only kept beside it: nothing
+ * knocks, and only `group accept` moves it, so it answers at once with that.
  */
 async function letIn(ctx: ApiContext, groupId: string): Promise<Record<string, unknown>> {
   const seen = (s: EngineState) => s.groups.find((g) => g.id === groupId);
+  const invited = seen(state(ctx))?.invitation;
+  if (invited && !invited.viaLink && !invited.accepted) {
+    return { group: groupId, joined: false, stage: null, warning: `Not in yet: ${invited.contact || "a contact"} invited you to this group and the invitation waits for your answer. Accept it: ghostly group accept ${shellWord(groupId)}` };
+  }
   const done = (g: GroupView | undefined) => !g || g.status === "active" || JOIN_ENDED.has(g.invitation?.stage ?? "");
   const group = await waitForState(ctx, (s) => { const g = seen(s); return done(g) ? { g } : undefined; }, ONE_SHOT_JOIN_S * 1000, `group ${groupId} to let this profile in`)
     .then(({ g }) => g, (error: unknown) => { if (error instanceof CliError && error.code === "timeout") return seen(state(ctx)); throw error; });
   const joined = group?.status === "active", stage = group?.invitation?.stage ?? null;
   if (joined || !group || JOIN_ENDED.has(stage ?? "")) return { group: groupId, joined, stage };
+  if (stage === "admitted") return { group: groupId, joined, stage, warning: `Not in yet: a member's app let you in, and the group's welcome has not finished arriving. It arrives only while this profile is running: keep it running (ghostly daemon --detach), then ghostly group show ${shellWord(groupId)}` };
   return { group: groupId, joined, stage, warning: `Not in yet: no member's app has let you in. A member's app lets you in only while this profile is running: keep it running (ghostly daemon --detach), then ghostly group show ${shellWord(groupId)}` };
 }
 
