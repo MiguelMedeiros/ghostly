@@ -596,7 +596,7 @@ export function SpeedPill({ rate, locale, onGone }: { rate: number; locale: stri
       onClick={() => nextVoiceRate()}
       // The pill is as tall as the line it sits on; its touch area reaches a little past it. On a phone that area is
       // 44 px tall and at least 44 px wide, grown toward the time only: on the play button's side it would cut into its.
-      className={`relative shrink-0 min-w-[34px] h-[18px] px-1.5 rounded-full border-none ${FORCED_EDGE} bg-black/25text-text-primary/85 text-[11px] font-semibold leading-none cursor-pointer hover:bg-black/35 tabular-nums before:content-[''] before:absolute before:-start-1 before:-end-1 before:-inset-y-1 max-md:before:start-0 max-md:before:-end-3 max-md:before:-inset-y-[13px]`}
+      className={`relative shrink-0 min-w-[34px] h-[18px] px-1.5 rounded-full border-none ${FORCED_EDGE} bg-black/25 text-text-primary/85 text-[11px] font-semibold leading-none cursor-pointer hover:bg-black/35 tabular-nums before:content-[''] before:absolute before:-start-1 before:-end-1 before:-inset-y-1 max-md:before:start-0 max-md:before:-end-3 max-md:before:-inset-y-[13px]`}
     >
       {label}
     </button>
