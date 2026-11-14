@@ -505,6 +505,7 @@
     "tooLarge": "Trop volumineux pour être lu ici. Téléchargez-le pour le regarder."
   },
   "voice": {
+    "callPaused": "Message vocal mis en pause pour l’appel",
     "cancelled": "Message vocal annulé",
     "cantPlay": "Cet appareil ne lit pas les enregistrements {{format}}. Enregistrez-le pour l'écouter ailleurs.",
     "couldNotPlay": "Impossible de lire cet enregistrement.",
@@ -530,6 +531,7 @@
     "recordHint": "Maintenez pour enregistrer, ou cliquez pour le mode mains libres",
     "recorded": "Enregistré {{time}}",
     "recording": "Enregistrement en cours",
+    "resumeAfterCall": "Reprendre après l’appel",
     "sent": "Message vocal envoyé",
     "slideCancel": "Glissez pour annuler",
     "speed": "Vitesse {{speed}}",
