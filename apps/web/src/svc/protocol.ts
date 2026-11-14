@@ -150,7 +150,8 @@ export const BRIDGE_CLEARED = "ghostly-svc-cleared";
  */
 export const BRIDGE_OPEN_LINK = "ghostly-svc-open-link";
 /**
- * The bridge says a page of the contact's app has loaded in its frame (each one it may show): until the first, the app
+ * The bridge says a page of the contact's app is in its frame (its first once parsed, then each one that loads, as long
+ * as it may show it): until the first, the app
  * says it is opening it, over the frame, rather than showing the bridge's empty page.
  */
 export const BRIDGE_SHOWN = "ghostly-svc-shown";

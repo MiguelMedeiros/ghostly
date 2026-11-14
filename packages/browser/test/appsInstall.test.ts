@@ -124,6 +124,34 @@ describe("install", () => {
     await again.addStore({ url: STORE_URL });
     expect(await again.preview({ store: keyOf(STORE_KEY), ref: v1.ref })).toMatchObject({ unknownPublisher: true });
   });
+
+  it("a curated store vouches only for the version it lists: another one, from a card, keeps Unknown publisher", async () => {
+    const v1 = await bundle();
+    const v2 = await bundle({ sequence: 2 });
+    net.put(PINNED_URL, v2.bytes);
+    await net.putStore(await storeFiles({ apps: [listing(v1, [BUNDLE_URL])] }));
+    const store = apps(net);
+    await store.addStore({ url: STORE_URL, key: keyOf(STORE_KEY) });
+    const preview = await store.preview({ card: { ref: v2.ref, url: PINNED_URL, sequence: 2, digest: v2.digest } });
+    expect(preview).toMatchObject({ digest: v2.digest, unknownPublisher: true, listedBy: [] });
+    expect(await store.install({ digest: v2.digest, grant: ["chat"] })).toMatchObject({ unknownPublisher: true, listedBy: [] });
+    expect((await store.list())[0]).toMatchObject({ digest: v2.digest, unknownPublisher: true, listedBy: [] });
+  });
+
+  it("an app installed from a store keeps that store's name while the store lists a newer version it waits for", async () => {
+    const v1 = await bundle();
+    net.put(BUNDLE_URL, v1.bytes);
+    await net.putStore(await storeFiles({ apps: [listing(v1)] }));
+    const store = apps(net);
+    await store.addStore({ url: STORE_URL, key: keyOf(STORE_KEY) });
+    await store.preview({ store: keyOf(STORE_KEY), ref: v1.ref });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    const v2 = await bundle({ sequence: 2, permissions: ["chat", "name"] });
+    net.put(PINNED_URL, v2.bytes);
+    await net.putStore(await storeFiles({ sequence: 2, apps: [listing(v2, [PINNED_URL])] }));
+    expect((await store.checkUpdates())[0]!.outcome).toBe("ask");
+    expect((await store.list())[0]).toMatchObject({ digest: v1.digest, pending: { sequence: 2 }, unknownPublisher: false, listedBy: [{ key: keyOf(STORE_KEY) }] });
+  });
 });
 
 describe("updates", () => {

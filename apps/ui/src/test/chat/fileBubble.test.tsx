@@ -507,3 +507,14 @@ describe("a moving file's progress bar", () => {
     expect(bar.getAttribute("aria-valuetext")?.replace(/\u00a0/g, " ")).toMatch(/^50% de 4[.,]2 GB$/);
   });
 });
+
+// A long name cut with … at its end hid what the file is on a phone (a tooltip is no help there): it wraps, its end kept.
+describe("a long file name", () => {
+  it("wraps onto more lines and keeps its extension in sight", () => {
+    show(null, { name: "Payment receipt.pdf (signed copy for your records).exe", size: 1024 });
+    const name = screen.getByTestId("file-name");
+    expect(name).toHaveTextContent("Payment receipt.pdf (signed copy for your records).exe");
+    expect(name).not.toHaveClass("truncate");
+    expect(name.className).toContain("[overflow-wrap:anywhere]");
+  });
+});

@@ -347,7 +347,7 @@ function ProviderCard({ provider: p, open, onAbout, onChoose }: { provider: Iden
           <span className="min-w-0 flex-1">
             {/* The category beside the name where the card is wide enough for every name, under it otherwise: never a mix. */}
             <span className="flex flex-col items-start gap-y-1 @md:flex-row @md:items-center @md:gap-x-2">
-              <span dir="auto" className="text-sm text-text-primary truncate max-w-full">{p.label}</span>
+              <span dir="auto" className="text-sm text-text-primary break-words max-w-full">{p.label}</span>
               <CategoryPill provider={p} />
             </span>
             <span data-testid="add-identity-summary" className="block text-xs text-text-muted mt-0.5"><bdi>{p.summary}</bdi></span>

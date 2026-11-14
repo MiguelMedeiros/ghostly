@@ -30,9 +30,24 @@ const option = (name) => {
   const i = argv.indexOf(name);
   return i >= 0 ? argv[i + 1] : undefined;
 };
+const usage = () => readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1, 17).map((l) => l.replace(/^\/\/ ?/, "")).join("\n");
 if (flag("--help") || flag("-h")) {
-  console.log(readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1, 17).map((l) => l.replace(/^\/\/ ?/, "")).join("\n"));
+  console.log(usage());
   process.exit(0);
+}
+// An argument it does not take is refused before anything runs: a mistyped --list or --no-e2e, or a path without
+// --files, would otherwise be dropped and start the full run.
+const FLAGS = ["--list", "--no-e2e", "--no-rust", "--no-lint", "--no-typecheck", "--no-stack"];
+const OPTIONS = ["--base", "--port", "--unit-group"];
+const unknown = [];
+for (let i = 0; i < argv.length; i++) {
+  if (OPTIONS.includes(argv[i])) i++;
+  else if (argv[i] === "--files") while (i + 1 < argv.length && !argv[i + 1].startsWith("--")) i++;
+  else if (!FLAGS.includes(argv[i])) unknown.push(argv[i]);
+}
+if (unknown.length) {
+  console.error(`test:affected does not take ${unknown.join(" ")}\n\n${usage()}`);
+  process.exit(2);
 }
 
 const JOBS = Math.max(1, Number(process.env.JOBS) || 2);
@@ -55,7 +70,8 @@ if (unitGroupText !== null && !unitGroup) {
   console.error(`--unit-group ${unitGroupText}: give <i>/<n>, 1 ≤ i ≤ n (e.g. --unit-group 2/4)`);
   process.exit(2);
 }
-const otherGroup = (u) => unitGroup !== null && unitGroupOf(u.name, unitGroup.count) !== unitGroup.index;
+// One nothing reaches is skipped in every group: "group N runs it" would send the reader to a group that skips it too.
+const otherGroup = (u) => unitGroup !== null && u.mode !== "skip" && unitGroupOf(u.name, unitGroup.count) !== unitGroup.index;
 
 const git = (...args) => {
   const r = spawnSync("git", args, { cwd: ROOT, encoding: "utf8" });
@@ -134,9 +150,10 @@ for (const u of p.unit) {
   else console.log(`  ${u.mode.padEnd(7)} ${u.name.padEnd(9)} ${u.reason}`);
 }
 console.log("lint (eslint)");
-console.log(`  ${p.lint.mode.padEnd(7)} ${p.lint.reason}${p.lint.files ? `: ${short(p.lint.files)}` : ""}`);
+if (noLint && p.lint.mode !== "skip") console.log(`  ${"off".padEnd(7)} --no-lint`);
+else console.log(`  ${p.lint.mode.padEnd(7)} ${p.lint.reason}${p.lint.files ? `: ${short(p.lint.files)}` : ""}`);
 console.log("typecheck (tsc)");
-for (const t of p.typecheck) console.log(`  ${t.mode.padEnd(7)} ${t.name.padEnd(18)} ${t.reason}`);
+for (const t of p.typecheck) console.log(`  ${(noTypecheck && t.mode !== "skip" ? "off" : t.mode).padEnd(7)} ${t.name.padEnd(18)} ${noTypecheck && t.mode !== "skip" ? "--no-typecheck" : t.reason}`);
 console.log("rust (cargo)");
 for (const r of p.rust) console.log(`  ${(noRust && r.mode === "run" ? "off" : r.mode).padEnd(7)} ${r.name.padEnd(9)} ${noRust && r.mode === "run" ? "--no-rust" : r.reason}`);
 console.log("e2e (playwright)");

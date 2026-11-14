@@ -180,6 +180,7 @@
     "noMatch": "このストアに一致するアプリはありません。",
     "notRead": "未読み込み",
     "read": "読み込む",
+    "readDone": "{{name}} は最新です：{{apps}}",
     "readNamed": "{{name}} を読み込む",
     "refresh": "更新",
     "refreshNamed": "{{name}} を更新",

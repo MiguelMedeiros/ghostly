@@ -432,7 +432,12 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   offer.type = "button";
   offer.dataset.testid = "service-view-link";
   offer.hidden = true;
-  offer.style.cssText = "max-width:100%;min-height:40px;padding:0 12px;border:1px solid var(--color-border,#333);border-radius:8px;background:transparent;color:inherit;font:600 14px system-ui,sans-serif;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+  offer.style.cssText = "display:inline-flex;align-items:center;max-width:100%;min-height:40px;padding:0 12px;border:1px solid var(--color-border,#333);border-radius:8px;background:transparent;color:inherit;font:600 14px system-ui,sans-serif;cursor:pointer;white-space:pre";
+  // The site, cut at its start where it does not fit, as an address bar does: its end says whose it is
+  // ("…example.net", not "accounts.google…"). An end-to-start box for its start-to-end name puts the ellipsis there.
+  const site = document.createElement("span");
+  site.dataset.testid = "service-view-link-site";
+  site.style.cssText = "min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl";
   held.append(offer);
   bar.append(close, named, held);
   const frame = document.createElement("iframe");
@@ -580,7 +585,10 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   const hold = (link: string) => {
     offeredLink = link;
     // Its site as the address bar shows it (a lookalike name in its punycode), in its own direction.
-    offer.textContent = options.words.openLink(`⁨${new URL(link).host}⁩`);
+    site.textContent = `⁨${new URL(link).host}⁩`;
+    // The words around it, in the person's language and order, kept whole.
+    const [before = "", after = ""] = options.words.openLink("\u0000").split("\u0000");
+    offer.replaceChildren(before, site, after);
     offer.title = link;
     offer.hidden = false;
   };

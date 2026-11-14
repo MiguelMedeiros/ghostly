@@ -17,8 +17,8 @@ import { englishT, type Translate } from "../locales/translate";
  * - `deleted`: it was here when the reply came, and is gone.
  * - `unverified`: it is not here; the line is only what the replier's app said.
  * - `missing`: it is not here, and nothing came with the reply but its id (a reply over the DHT).
- * - `loading`: it is not here yet: the chat's older messages have not come in (just started, the engine's history not
- *   in). The line is what the reply carries until they do.
+ * - `loading`: the engine found it (`messageId`) but it is not here yet: the chat's older messages have not come in
+ *   (just started, the engine's history not in). The line is what the reply carries until they do.
  */
 export type QuoteState = "found" | "deleted" | "unverified" | "missing" | "loading";
 
@@ -141,8 +141,10 @@ export function quoteFor(reply: MessageReply, index: ReplyIndex, nameOf: NameOf,
     return { state: "found", name: nameOf(from, original.member ?? reply.member), snippet, mine: from === "me", targetId: original.id, ...(member && { member }) };
   }
   const name = reply.from ? nameOf(reply.from, reply.member) : undefined;
-  // Not deleted while the older messages are still on their way: it may be among them.
-  const state: QuoteState = index.partial ? "loading" : reply.messageId ? "deleted" : reply.snippet ? "unverified" : "missing";
+  // Not deleted while the older messages are still on their way: it may be among them. Only a reply the engine found
+  // its original for (`messageId`, `resolveReply` reads the whole chat): one with none was not found, so its line is
+  // the replier's word and says so at once, older messages here or not.
+  const state: QuoteState = reply.messageId ? index.partial ? "loading" : "deleted" : reply.snippet ? "unverified" : "missing";
   const member = reply.from === "peer" ? reply.member : undefined;
   return { state, name, snippet: state === "unverified" || state === "loading" ? reply.snippet : "", mine: reply.from === "me", ...(member && { member }) };
 }

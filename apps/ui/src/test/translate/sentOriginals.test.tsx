@@ -96,11 +96,12 @@ describe("my translated bubble", () => {
     expect(line).toHaveTextContent("Translated to Italian · Show original");
     expect(screen.getByTestId("message-text")).toHaveTextContent("Ci vediamo domani alle sei");
     const toggle = within(line).getByRole("button", { name: "Show original" });
-    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    // Named for what it does next, never a toggle too: "Show translation, pressed" was said with the original shown.
+    expect(toggle).not.toHaveAttribute("aria-pressed");
     await user.click(toggle);
     expect(screen.getByTestId("message-text")).toHaveTextContent("See you tomorrow at six");
     expect(toggle).toHaveTextContent("Show translation");
-    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    expect(toggle).not.toHaveAttribute("aria-pressed");
     await user.click(toggle);
     expect(screen.getByTestId("message-text")).toHaveTextContent("Ci vediamo domani alle sei");
   });

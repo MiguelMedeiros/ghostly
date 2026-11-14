@@ -18,11 +18,14 @@ export interface LinkPreviewDraft {
  * The preview of the first link in a draft (WISP 401 § Link previews), made by this app once the text rests. The
  * person can remove it; a removed link gets no preview again in this draft. `preview` is what goes with the message
  * when it is sent now: only a finished preview whose link is still in the text. `kept`: the preview of the message being
- * edited; it stands for its link until a new one is made (saved at once, or the site failing now, it is not lost).
+ * edited; it stands for its link until a new one is made (saved at once, or the site failing now, it is not lost). It
+ * reads no page, so it stays while no new one may be made (`enabled` off: previews turned off, Hide my IP on).
  */
 export function useLinkPreviewDraft(text: string, enabled: boolean, kept?: LinkPreview) {
-  const link = useMemo(() => (enabled ? previewableLink(text) : null), [enabled, text]);
-  const key = link ? canonicalUrl(link) ?? link : null;
+  const typed = useMemo(() => (enabled || kept ? previewableLink(text) : null), [enabled, kept, text]);
+  const typedKey = typed ? canonicalUrl(typed) ?? typed : null;
+  const link = enabled ? typed : null;
+  const key = enabled ? typedKey : null;
   const [draft, setDraft] = useState<LinkPreviewDraft | null>(null);
   const [removed, setRemoved] = useState<ReadonlySet<string>>(() => new Set());
 
@@ -39,12 +42,12 @@ export function useLinkPreviewDraft(text: string, enabled: boolean, kept?: LinkP
   }, [link, key, removed]);
 
   const made = draft && key === draft.key && !removed.has(draft.key) ? draft : null;
-  const shown: LinkPreviewDraft | null = made?.status !== "ready" && link && key && kept?.u === key && !removed.has(key)
-    ? { link, key, status: "ready", preview: kept } : made;
+  const shown: LinkPreviewDraft | null = made?.status !== "ready" && typed && typedKey && kept?.u === typedKey && !removed.has(typedKey)
+    ? { link: typed, key: typedKey, status: "ready", preview: kept } : made;
   const remove = useCallback(() => {
-    if (!key) return;
-    setRemoved(prev => new Set([...prev, key]));
-  }, [key]);
+    if (!typedKey) return;
+    setRemoved(prev => new Set([...prev, typedKey]));
+  }, [typedKey]);
   /** A sent message starts a new draft: what was removed may be previewed again. */
   const reset = useCallback(() => { setRemoved(new Set()); setDraft(null); }, []);
   const preview = shown?.status === "ready" && shown.preview && linksIn(text).some(l => canonicalUrl(l) === shown.preview!.u) ? shown.preview : null;

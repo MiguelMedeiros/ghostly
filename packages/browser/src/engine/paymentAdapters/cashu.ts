@@ -9,7 +9,10 @@ import type { CashuWallet, CashuPrepared } from '../wallet';
  * same approval, and reconcile waits for it (the coordinator runs one operation per payment at a time).
  */
 export const CASHU_REQUEST_TIMEOUT_MS=30_000;
-/** How long a melt's request may last: cashu-ts's default `requestTimeout` (5 min), which this wallet does not change. */
+/**
+ * How long a melt's request may last, its retries (NUT-19) included under one deadline (`boundMintRequests`): cashu-ts's
+ * default `requestTimeout` (5 min) for one try.
+ */
 export const MELT_REQUEST_TIMEOUT_MS=300_000;
 /** The margin past that for a mint slow to act on a swap it did receive. */
 export const SWAP_SETTLED_MS=120_000;

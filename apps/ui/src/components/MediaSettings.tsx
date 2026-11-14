@@ -68,7 +68,8 @@ export function MediaSettings() {
       <DeviceRow kind="videoinput" list={list} choices={choices} info={t("settings.media.cameraInfo")}
         below={preview ? (id, fail) => <CameraPreview id={id} fail={(failure) => { fail(failure); if (failure) setPreview(false); }} /> : undefined}>
         {() => (
-          <Button data-testid="settings-camera-preview" aria-pressed={preview} onClick={() => setPreview(!preview)}>
+          // Named for what it does next (Preview, Stop), so it is no toggle: "Stop, pressed" read as stopped.
+          <Button data-testid="settings-camera-preview" onClick={() => setPreview(!preview)}>
             {preview ? t("settings.media.stop") : t("settings.media.preview")}
           </Button>
         )}
@@ -181,7 +182,8 @@ function MicrophoneTest({ id, fail }: { id: string | undefined; fail: (failure: 
         <div className="h-full bg-accent" style={{ width: `${Math.round(level * 100)}%` }} />
       </div>
     )}
-    <Button data-testid="settings-microphone-test" aria-pressed={on} onClick={() => setOn(!on)}>
+    {/* Named for what it does next (Test, Stop), as the camera's Preview. */}
+    <Button data-testid="settings-microphone-test" onClick={() => setOn(!on)}>
       {on ? t("settings.media.stop") : t("settings.media.test")}
     </Button>
   </>;

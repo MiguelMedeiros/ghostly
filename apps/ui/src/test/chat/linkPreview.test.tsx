@@ -6,6 +6,7 @@ import { MessageBubble } from "../../components/MessageBubble";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { forgetLinkPreviews } from "../../lib/linkPreviewFetch";
 import { renderApp } from "../render";
+import { fakeEngine } from "../fakeEngine";
 
 // covers: chat.link-preview.compose, chat.link-preview.render, chat.location.card
 
@@ -93,6 +94,20 @@ describe("a link preview in the composer", () => {
     await waitFor(() => expect(onSend).toHaveBeenCalledWith("https://closed.example/page"));
   });
 
+  // Hide my IP from contacts: the site a link names learns this device's address when it is read, as a picture link
+  // someone sent would (MessageBubble). A pasted link may be a contact's, so with it on nothing is read; it goes as text.
+  it("asks nothing with Hide my IP on: the link goes as plain text", async () => {
+    fakeEngine.update({ settings: { relayOnly: true } });
+    const fetch = sites();
+    composer();
+    type("look https://their-server.example/page");
+    await new Promise(resolve => setTimeout(resolve, 800));
+    expect(screen.queryByTestId("composer-link-preview")).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+    send();
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("look https://their-server.example/page"));
+  });
+
   it("of a message being edited goes with the edit while its link stays: saved at once, or the site failing now", async () => {
     const fetch = vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Failed to fetch"));
     const kept: LinkPreview = { u: "https://news.example/story", t: "Ghosts are real", s: "Example News" };
@@ -135,6 +150,45 @@ describe("a link preview in the composer", () => {
     type("look https://other.example/page");
     save();
     await waitFor(() => expect(onSave).toHaveBeenCalledWith("look https://other.example/page", undefined));
+  });
+
+  it("of a message being edited still goes with the edit when no new one may be made: Hide my IP on, or previews off", async () => {
+    const fetch = sites();
+    const kept: LinkPreview = { u: "https://news.example/story", t: "Ghosts are real", s: "Example News" };
+    const onSave = vi.fn<(text: string, extra?: { preview?: LinkPreview }) => Promise<string | null>>().mockResolvedValue(null);
+    const editing = (text: string, linkPreviews: boolean) => renderApp(<LockScreenProvider><MessageInput onSend={onSend} linkPreviews={linkPreviews}
+      edit={{ key: "me_1", text, snippet: text, preview: kept, onSave, onClose: () => {} }} /></LockScreenProvider>);
+    const save = () => fireEvent.keyDown(field(), { key: "Enter" });
+
+    for (const [hideIp, linkPreviews] of [[true, true], [false, false]] as const) {
+      fakeEngine.update({ settings: { relayOnly: hideIp } });
+      onSave.mockClear();
+      let view = editing("look https://news.example/story", linkPreviews);
+      await waitFor(() => expect(field()).toHaveValue("look https://news.example/story"));
+      type("Look https://news.example/story");
+      await new Promise(resolve => setTimeout(resolve, 800));
+      expect(screen.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready");
+      save();
+      await waitFor(() => expect(onSave).toHaveBeenCalledWith("Look https://news.example/story", { preview: kept }));
+      view.unmount();
+
+      // Removed with ×, it does not go; nor with its link gone.
+      onSave.mockClear();
+      view = editing("look https://news.example/story", linkPreviews);
+      await waitFor(() => expect(screen.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready"));
+      fireEvent.click(screen.getByTestId("link-preview-remove"));
+      save();
+      await waitFor(() => expect(onSave).toHaveBeenCalledWith("look https://news.example/story", undefined));
+      view.unmount();
+      onSave.mockClear();
+      view = editing("look https://news.example/story", linkPreviews);
+      await waitFor(() => expect(field()).toHaveValue("look https://news.example/story"));
+      type("look, no link");
+      save();
+      await waitFor(() => expect(onSave).toHaveBeenCalledWith("look, no link", undefined));
+      view.unmount();
+    }
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("is not made for a link inside a spoiler: its card would tell what the spoiler hides", async () => {
