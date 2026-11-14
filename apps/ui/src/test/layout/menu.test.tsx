@@ -10,6 +10,10 @@ import { renderApp } from "../render";
 
 // covers: app.menus
 
+/** The screen's safe area as `env(safe-area-inset-*)` gives it (happy-dom has none): none but where a test sets it. */
+const safe = vi.hoisted(() => ({ insets: { top: 0, right: 0, bottom: 0, left: 0 } }));
+vi.mock("../../hooks/useFloatingBox", async (actual) => ({ ...(await actual<typeof import("../../hooks/useFloatingBox")>()), safeAreaInsets: () => safe.insets }));
+
 /** How wide the window is, as matchMedia and layout read it. */
 const viewport = (width: number, height = 800) => (window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height });
 
@@ -26,7 +30,7 @@ function Harness({ onPick = () => {}, portal, align, prefer, within }: { onPick?
   </div>;
 }
 
-afterEach(() => { viewport(1024, 768); vi.restoreAllMocks(); });
+afterEach(() => { viewport(1024, 768); vi.restoreAllMocks(); safe.insets = { top: 0, right: 0, bottom: 0, left: 0 }; });
 
 describe("Menu: one line per row", () => {
   it("drops from its opener as wide as its longest row, and no row wraps", async () => {
@@ -187,6 +191,43 @@ describe("Menu: one line per row", () => {
     expect(menu.style.left).toBe(`${400 + 8}px`);
     // Above the opener it would cover the chat's header, which the window alone would allow: it opens below.
     expect(menu.style.top).toBe(`${136 + 4}px`);
+  });
+
+  /**
+   * An iPhone on its side (844 × 390): 47px each side for the notch and the rounded corners, 21px at the bottom for the
+   * home indicator. With larger text a menu kept 8px from the window's edges reached into them: the chat's ⋮ ran 15px
+   * under the home indicator, and in Japanese the composer's + 38px into the notch's side.
+   */
+  const SIDE = { width: 844, height: 390, insets: { top: 0, right: 47, bottom: 21, left: 47 } };
+
+  it("on a phone on its side it stays clear of the notch's side and the home indicator", async () => {
+    viewport(SIDE.width, SIDE.height);
+    safe.insets = SIDE.insets;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      // The composer's + low on the left of the chat; a 480px menu from it, uncorrected, to 961px.
+      const box = this.dataset.testid === "menu" ? { left: 481, right: 961, top: 6, bottom: 312 } : this.dataset.testid === "anchor" ? { left: 481, right: 525, top: 316, bottom: 360 } : { left: 0, right: 0, top: 0, bottom: 0 };
+      return { ...box, x: box.left, y: box.top, width: box.right - box.left, height: box.bottom - box.top, toJSON: () => box } as DOMRect;
+    });
+    const { user } = renderApp(<Harness align="start" prefer="up" />);
+    await user.click(screen.getByRole("button", { name: "Options" }));
+    expect(screen.getByTestId("menu").style.translate).toBe(`${844 - 47 - 8 - 961}px 0`);
+  });
+
+  it("portal: on a phone on its side its room ends above the home indicator, and its edge before the notch's side", async () => {
+    viewport(SIDE.width, SIDE.height);
+    safe.insets = SIDE.insets;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      // A chat header's ⋮ at the top right of the safe area; a 480 × 614px menu.
+      const box = this.dataset.testid === "menu" ? { left: 0, right: 480, top: 0, bottom: 614 } : this.dataset.testid === "anchor" ? { left: 753, right: 797, top: 6, bottom: 50 } : { left: 0, right: 0, top: 0, bottom: 0 };
+      return { ...box, x: box.left, y: box.top, width: box.right - box.left, height: box.bottom - box.top, toJSON: () => box } as DOMRect;
+    });
+    const { user } = renderApp(<Harness portal />);
+    await user.click(screen.getByRole("button", { name: "Options" }));
+    const menu = screen.getByTestId("menu");
+    expect(menu.style.top).toBe(`${50 + 4}px`);
+    expect(menu.style.maxHeight).toBe(`${390 - 21 - 50 - 4 - 8}px`);
+    // Its end on the opener's end would be on the safe area's edge: it keeps 8px from it, as from the window's.
+    expect(menu.style.left).toBe(`${844 - 47 - 8 - 480}px`);
   });
 
   it("is a sheet from the bottom on a phone, with full-width rows; the backdrop closes it", async () => {
