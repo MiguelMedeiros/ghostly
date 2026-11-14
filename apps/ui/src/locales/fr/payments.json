@@ -235,11 +235,15 @@
     "sendUnavailable": "Une demande au groupe est payée par un membre ; pour payer quelqu’un, choisissez-le",
     "status": {
       "claimedPaid": "{{names}} a payé · en attente du portefeuille de {{to}}",
+      "claimedPaidByMe": "Vous avez payé · en attente du portefeuille de {{to}}",
+      "claimedPaidToMe": "{{names}} ont payé · en attente de votre portefeuille",
       "closed": "Fermé",
       "paid": "Payé",
       "paidBy": "Payé par {{name}}",
       "saysPaid": "{{names}} dit avoir payé · en attente du portefeuille de {{to}}",
+      "saysPaidToMe": "{{names}} dit avoir payé · en attente de votre portefeuille",
       "sent": "Envoyé · en attente de {{name}}",
+      "sentToMe": "Envoyé · en attente de votre portefeuille",
       "takenBack": "Repris",
       "waiting": "En attente du paiement"
     },

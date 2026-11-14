@@ -235,11 +235,15 @@
     "sendUnavailable": "向群组的请求由一位成员支付；要付款给某人，请选择对方",
     "status": {
       "claimedPaid": "{{names}} 已支付 · 等待 {{to}} 的钱包",
+      "claimedPaidByMe": "你已支付 · 等待 {{to}} 的钱包",
+      "claimedPaidToMe": "{{names}} 已支付 · 等待你的钱包",
       "closed": "已关闭",
       "paid": "已支付",
       "paidBy": "由 {{name}} 支付",
       "saysPaid": "{{names}} 说已支付 · 等待 {{to}} 的钱包",
+      "saysPaidToMe": "{{names}} 说已支付 · 等待你的钱包",
       "sent": "已发送 · 等待 {{name}}",
+      "sentToMe": "已发送 · 等待你的钱包",
       "takenBack": "已撤回",
       "waiting": "等待付款"
     },
