@@ -100,6 +100,30 @@ describe("asking the node", () => {
     await expect(ask(once(async () => Response.json({ url: "https://x", token: "t", room: `g_${g}`, identity: me.pubKeyZ32, expiresIn: 600 })))).rejects.toThrow(failed);
   });
 
+  it("follows no redirect and sends no cookie or referrer: a 307 would send my key and name to a host the group never named", async () => {
+    const sfu = fakeSfu(g, () => roster);
+    await ask(sfu.fetch as typeof fetch);
+    expect(sfu.fetch.mock.calls[0][1]).toMatchObject({ redirect: "error", credentials: "omit", referrerPolicy: "no-referrer", cache: "no-store" });
+  });
+
+  it("a reply past 64 KiB is read no further than that, said or not in its length", async () => {
+    const failed = "call.ghostly.test could not start the group's call. Try again later.";
+    const chunk = new Uint8Array(16 * 1024).fill(0x20);
+    let pulled = 0, cancelled = false;
+    const endless = new ReadableStream<Uint8Array>({ pull: c => { pulled++; c.enqueue(chunk); }, cancel: () => { cancelled = true; } }, { highWaterMark: 0 });
+    await expect(ask(vi.fn(async () => new Response(endless)) as unknown as typeof fetch)).rejects.toThrow(failed);
+    expect(pulled).toBeLessThanOrEqual(6);
+    expect(cancelled).toBe(true);
+
+    let read = false;
+    const declared = new ReadableStream<Uint8Array>({ pull: c => { read = true; c.enqueue(chunk); } }, { highWaterMark: 0 });
+    await expect(ask(vi.fn(async () => new Response(declared, { headers: { "Content-Length": String(128 * 1024 * 1024) } })) as unknown as typeof fetch)).rejects.toThrow(failed);
+    expect(read).toBe(false);
+
+    const pass = JSON.stringify({ url: "wss://sfu.ghostly.test", token: "t", room: `g_${g}`, identity: me.pubKeyZ32, expiresIn: 600 });
+    await expect(ask(vi.fn(async () => new Response(pass.padEnd(64 * 1024))) as unknown as typeof fetch)).resolves.toMatchObject({ token: "t" });
+  });
+
   it("a ws:// address is taken only on this machine: LiveKit puts the pass in the address, so elsewhere it would go out in clear", async () => {
     const reply = (url: string) => vi.fn(async () => Response.json({ url, token: "t", room: `g_${g}`, identity: me.pubKeyZ32, expiresIn: 600 })) as unknown as typeof fetch;
     for (const url of ["ws://sfu.ghostly.test", "ws://192.168.1.20:7880", "ws://127.0.0.1.example.org", "ws://[::2]:7880"])
