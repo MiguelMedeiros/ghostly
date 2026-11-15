@@ -33,9 +33,16 @@ const answerPass = (handler: (params: { groupId: string }) => unknown) =>
   (fakeEngine as unknown as { on(method: string, h: typeof handler): void }).on("groupCallToken", handler);
 const passAsks = () => fakeEngine.calls.filter((c) => (c.method as string) === "groupCallToken").map((c) => c.params);
 
+/** Someone else in the room, as LiveKit hands them over: the name is the node's. */
+const remote = (identity: string, name: string) => ({
+  identity, name, isMicrophoneEnabled: true, isCameraEnabled: false, isScreenShareEnabled: false, isSpeaking: false, getTrackPublication: () => undefined,
+});
+
 class FakeRoom {
   static rooms: FakeRoom[] = [];
-  readonly remoteParticipants = new Map();
+  /** Who is already in the next room joined. */
+  static others: ReturnType<typeof remote>[] = [];
+  readonly remoteParticipants = new Map(FakeRoom.others.map((p) => [p.identity, p]));
   readonly activeSpeakers = [];
   private readonly listeners = new Map<string, () => void>();
   readonly localParticipant = {
@@ -43,7 +50,7 @@ class FakeRoom {
     trackPublications: new Map(), getTrackPublication: () => undefined,
     setMicrophoneEnabled: vi.fn(async () => undefined),
   };
-  readonly connect = vi.fn(async (_url: string, _token: string) => {});
+  readonly connect = vi.fn(async (_url: string, _token: string, _options?: unknown) => {});
   readonly disconnect = vi.fn(async () => this.listeners.get("disconnected")?.());
   constructor() { FakeRoom.rooms.push(this); }
   on(event: string, listener: () => void) { this.listeners.set(event, listener); return this; }
@@ -58,6 +65,7 @@ function joinButton(group = community()) {
 
 afterEach(() => {
   FakeRoom.rooms = [];
+  FakeRoom.others = [];
   endOtherCalls(Symbol("none"));
   vi.useRealTimers();
 });
@@ -149,5 +157,78 @@ describe("Join call in a group's header", () => {
     act(() => { endOtherCalls(other); });
     await waitFor(() => expect(screen.queryByTestId("group-call")).toBeNull());
     expect(FakeRoom.rooms[0].disconnect).toHaveBeenCalled();
+  });
+
+  it("names each tile by the group's own names, whatever name the node gave, and says who is not in the group", async () => {
+    const ana = "ana".padEnd(46, "a") + "ana111", other = "ana".padEnd(46, "b") + "ana222", stranger = "zz".padEnd(46, "z") + "zzz333";
+    const members = [{ key: ME, role: "member", me: true, online: true, missing: 0 }, ...[ana, other].map((key) => ({ key, role: "member", me: false, online: true, missing: 0, nick: "Ana" }))];
+    // The node calls the second Ana "Miguel", and someone outside the roster "Ana".
+    FakeRoom.others = [remote(ana, "Ana"), remote(other, "Miguel"), remote(stranger, "Ana")];
+    answerPass(() => pass());
+    const { user } = joinButton(community({ members } as Partial<GroupView>));
+    await user.click(screen.getByTestId("group-call-join"));
+    await waitFor(() => expect(screen.getAllByTestId("group-call-tile")).toHaveLength(4));
+    const tileOf = (identity: string) => screen.getAllByTestId("group-call-tile").find((tile) => tile.dataset.identity === identity)!;
+    expect(tileOf(ME)).toHaveTextContent("You");
+    expect(tileOf(ana)).toHaveTextContent("Ana ⁦(…ana111)⁩");
+    expect(tileOf(other)).toHaveTextContent("Ana ⁦(…ana222)⁩");
+    expect(tileOf(other)).not.toHaveTextContent("Miguel");
+    expect(tileOf(stranger)).toHaveTextContent("Not in this group (…zzz333)");
+  });
+});
+
+describe("Join call with Hide my IP from contacts on", () => {
+  const TURN = { urls: "turn:turn.sfu.ghostly.test:3478", username: "u", credential: "c" };
+  const hideIp = (group: GroupView) => {
+    fakeEngine.update({ settings: { ...fakeEngine.state.settings, relayOnly: true } });
+    return joinButton(group);
+  };
+
+  it("asks once before the node sees this device's IP, then joins through the node's relay alone", async () => {
+    answerPass(() => pass({ iceServers: [{ urls: "stun:sfu.ghostly.test:3478" }, TURN] }));
+    const { user } = hideIp(community({ id: "group-hide-ip" }));
+    await user.click(screen.getByTestId("group-call-join"));
+    expect(screen.getByTestId("group-call-hide-ip")).toHaveTextContent("Join with Hide my IP on?");
+    await user.click(screen.getByTestId("group-call-hide-ip-info"));
+    expect(screen.getByTestId("group-call-hide-ip-info-text")).toHaveTextContent("see this device's IP");
+    await user.click(screen.getByTestId("group-call-hide-ip-cancel"));
+    expect(screen.queryByTestId("group-call-hide-ip")).toBeNull();
+    expect(passAsks()).toHaveLength(0);
+
+    await user.click(screen.getByTestId("group-call-join"));
+    await user.click(screen.getByTestId("group-call-hide-ip-confirm"));
+    await waitFor(() => expect(FakeRoom.rooms[0]?.connect).toHaveBeenCalledWith("wss://sfu.ghostly.test", "pass-1", {
+      rtcConfig: { iceServers: [{ urls: ["turn:turn.sfu.ghostly.test:3478"], username: "u", credential: "c" }], iceTransportPolicy: "relay" },
+    }));
+    expect(passAsks()).toEqual([{ groupId: "group-hide-ip" }]);
+
+    // Asked once: joining again goes straight in.
+    await user.click(screen.getByTestId("group-call-leave"));
+    await user.click(screen.getByTestId("group-call-join"));
+    expect(screen.queryByTestId("group-call-hide-ip")).toBeNull();
+    await waitFor(() => expect(FakeRoom.rooms[1]?.connect).toHaveBeenCalled());
+  });
+
+  it("stays off, saying why, when the node gives no relay to go through", async () => {
+    answerPass(() => pass({ iceServers: [{ urls: "stun:sfu.ghostly.test:3478" }] }));
+    const { user } = hideIp(community({ id: "group-no-relay" }));
+    await user.click(screen.getByTestId("group-call-join"));
+    await user.click(screen.getByTestId("group-call-hide-ip-confirm"));
+    expect(await screen.findByTestId("group-call-problem-notice-title")).toHaveTextContent("Can't join while Hide my IP is on");
+    await user.click(screen.getByTestId("group-call-problem-notice-info"));
+    expect(screen.getByTestId("group-call-problem-notice-why")).toHaveTextContent("Turn Hide my IP off to join");
+    expect(screen.queryByTestId("group-call-retry")).toBeNull();
+    expect(screen.getByTestId("group-call-join")).toHaveAttribute("aria-disabled", "true");
+    expect(screen.queryByTestId("group-call")).toBeNull();
+    expect(FakeRoom.rooms).toHaveLength(0);
+
+    await user.click(screen.getByTestId("group-call-join"));
+    expect(passAsks()).toHaveLength(1);
+    expect(screen.queryByTestId("group-call-hide-ip")).toBeNull();
+    expect(screen.getByTestId("group-call-problem-notice-title")).toHaveTextContent("Can't join while Hide my IP is on");
+
+    // Hide my IP off: Join call is back.
+    act(() => fakeEngine.update({ settings: { ...fakeEngine.state.settings, relayOnly: false } }));
+    expect(screen.getByTestId("group-call-join")).not.toHaveAttribute("aria-disabled");
   });
 });

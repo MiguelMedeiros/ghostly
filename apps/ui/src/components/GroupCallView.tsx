@@ -44,6 +44,8 @@ interface GroupCallViewProps {
   onReturnToChat?: () => void;
   layer?: HTMLElement | null;
   devices?: CallDevices | null;
+  /** Someone's name by their key, as the group knows them: the node's own name for them is not believed. */
+  nameOf?: (identity: string) => string;
 }
 
 const MINI_KEY = "ghostly_group_call_mini";
@@ -108,7 +110,7 @@ function MutedMark({ label }: { label: string }) {
 }
 
 /** A face (camera or avatar) or a shared screen, with the name and a muted mark; the active speaker wears a ring. */
-function Tile({ person, you, kind, speaking, name }: { person: GroupCallParticipant; you: boolean; kind: "face" | "screen"; speaking: boolean; name: ReactNode }) {
+function Tile({ person, you, kind, speaking, name, face }: { person: GroupCallParticipant; you: boolean; kind: "face" | "screen"; speaking: boolean; name: ReactNode; face: string }) {
   const { t } = useI18n();
   const track = kind === "screen" ? person.tracks.screen : person.camera ? person.tracks.camera : null;
   return (
@@ -124,7 +126,7 @@ function Tile({ person, you, kind, speaking, name }: { person: GroupCallParticip
         <TrackVideo track={track} fit={kind === "screen" ? "contain" : "cover"} mirror={you && kind === "face"} />
       ) : (
         <div className="call-avatar shrink-0 w-[min(40%,6rem)] aspect-square rounded-full bg-chat-bg flex items-center justify-center">
-          <span className="text-text-muted text-2xl">{initial(person.name)}</span>
+          <span className="text-text-muted text-2xl">{initial(face)}</span>
         </div>
       )}
       <div className="absolute bottom-1.5 inset-x-1.5 flex items-center gap-1.5">
@@ -139,7 +141,7 @@ function Tile({ person, you, kind, speaking, name }: { person: GroupCallParticip
  * A group call through the group's node: everyone's tile in a grid, the active speaker ringed, and a shared screen
  * large with the faces beside it. Drawn from `useGroupCall`'s state, passed in; it imports no LiveKit.
  */
-export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, onToggleScreen, onLeave, canShareScreen = false, pinned = false, onReturnToChat, layer, devices = null }: GroupCallViewProps) {
+export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, onToggleScreen, onLeave, canShareScreen = false, pinned = false, onReturnToChat, layer, devices = null, nameOf: groupNameOf }: GroupCallViewProps) {
   const { t } = useI18n();
   const infoId = useId();
   const [info, setInfo] = useState(false);
@@ -173,16 +175,18 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
 
   const { local, participants, activeSpeaker } = call;
   const everyone = [local, ...participants];
-  const nameOf = (p: GroupCallParticipant) => (p === local ? t("calls.you") : p.name);
+  // Everyone else by the group's own name for their key (WISP 602 § The reply): the node's name is not theirs to vouch for.
+  const shown = (p: GroupCallParticipant) => (p === local || !groupNameOf ? p.name : groupNameOf(p.identity));
+  const nameOf = (p: GroupCallParticipant) => (p === local ? t("calls.you") : shown(p));
   const order = useShareOrder(everyone.filter((p) => p.screen && p.tracks.screen).map((p) => p.identity));
   const presenter = everyone.find((p) => p.identity === order[order.length - 1]) ?? null;
   // The other screens are tiles beside the faces.
   const otherScreens = order.slice(0, -1).map((id) => everyone.find((p) => p.identity === id)!);
   const faces = everyone.map((p) => (
-    <Tile key={p.identity} person={p} you={p === local} kind="face" speaking={p.identity === activeSpeaker} name={nameOf(p)} />
+    <Tile key={p.identity} person={p} you={p === local} kind="face" speaking={p.identity === activeSpeaker} name={nameOf(p)} face={shown(p)} />
   ));
   const screenTiles = otherScreens.map((p) => (
-    <Tile key={`${p.identity}-screen`} person={p} you={p === local} kind="screen" speaking={false} name={fillNames(t("calls.group.screenOf"), { name: nameOf(p) })} />
+    <Tile key={`${p.identity}-screen`} person={p} you={p === local} kind="screen" speaking={false} name={fillNames(t("calls.group.screenOf"), { name: nameOf(p) })} face={shown(p)} />
   ));
   // The small window shows one tile: the screen being shared, or else whoever speaks.
   const focus = presenter ?? everyone.find((p) => p.identity === activeSpeaker) ?? participants[0] ?? local;
@@ -219,9 +223,9 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
       {mini ? (
         <div className="absolute inset-0 grid">
           {focus === presenter ? (
-            <Tile person={focus} you={focus === local} kind="screen" speaking={false} name={fillNames(t("calls.group.screenOf"), { name: nameOf(focus) })} />
+            <Tile person={focus} you={focus === local} kind="screen" speaking={false} name={fillNames(t("calls.group.screenOf"), { name: nameOf(focus) })} face={shown(focus)} />
           ) : (
-            <Tile person={focus} you={focus === local} kind="face" speaking={focus.identity === activeSpeaker} name={nameOf(focus)} />
+            <Tile person={focus} you={focus === local} kind="face" speaking={focus.identity === activeSpeaker} name={nameOf(focus)} face={shown(focus)} />
           )}
         </div>
       ) : (
@@ -238,7 +242,7 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
           {presenter ? (
             <div data-testid="group-call-stage" className="flex-1 min-h-0 flex max-md:flex-col gap-2 px-4 pb-32">
               <div className="flex-1 min-w-0 min-h-0 grid">
-                <Tile person={presenter} you={presenter === local} kind="screen" speaking={false} name={fillNames(t("calls.group.screenOf"), { name: nameOf(presenter) })} />
+                <Tile person={presenter} you={presenter === local} kind="screen" speaking={false} name={fillNames(t("calls.group.screenOf"), { name: nameOf(presenter) })} face={shown(presenter)} />
               </div>
               <div data-testid="group-call-side" className="md:w-48 max-md:h-28 shrink-0 flex md:flex-col gap-2 overflow-auto">
                 {[...screenTiles, ...faces].map((tile) => <div key={tile.key} className="shrink-0 grid md:h-28 max-md:w-36">{tile}</div>)}

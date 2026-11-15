@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GROUP_CALL_MUTED_ABOVE, joinsMuted, useGroupCall, type LivekitModule, type UseGroupCallOptions } from "../../hooks/useGroupCall";
+import { GROUP_CALL_MUTED_ABOVE, joinsMuted, NO_RELAY, useGroupCall, type LivekitModule, type UseGroupCallOptions } from "../../hooks/useGroupCall";
 import { chooseDevice } from "../../lib/mediaDevices";
 import { FakeTrack } from "../../../../../packages/react/test/fakes";
 
@@ -209,6 +209,20 @@ describe("useGroupCall", () => {
   it("connects with LiveKit's own ICE servers when the pass has none", async () => {
     await joined();
     expect(room().connect).toHaveBeenCalledWith("wss://call.example", "pass", undefined);
+  });
+
+  it("with Hide my IP on, keeps to the pass's TURN under the relay policy, and joins nothing without one", async () => {
+    const turn = { urls: "turn:turn.example:3478", username: "u", credential: "c" };
+    await joined({ iceServers: [{ urls: "stun:stun.example:3478" }, turn], relayOnly: true });
+    expect(room().connect).toHaveBeenCalledWith("wss://call.example", "pass", { rtcConfig: { iceServers: [{ ...turn, urls: [turn.urls] }], iceTransportPolicy: "relay" } });
+
+    FakeRoom.rooms = [];
+    loadLivekit.mockClear();
+    const { result } = renderHook(() => useGroupCall({ url: "wss://call.example", token: "pass", iceServers: [{ urls: "stun:stun.example:3478" }], relayOnly: true, loadLivekit }));
+    await waitFor(() => expect(result.current.status).toBe("failed"));
+    expect(result.current.error).toMatchObject({ action: "join", message: NO_RELAY });
+    expect(loadLivekit).not.toHaveBeenCalled();
+    expect(FakeRoom.rooms).toHaveLength(0);
   });
 
   it(`joins muted past ${GROUP_CALL_MUTED_ABOVE} people, and with the microphone on at ${GROUP_CALL_MUTED_ABOVE}`, async () => {
