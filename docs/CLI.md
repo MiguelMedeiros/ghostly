@@ -330,6 +330,8 @@ that changes on disk while it is copied in (a log still written to, a file being
 again) is `unavailable` (exit 1, `details.reason: file_changed`, `details.path`), with nothing kept. Send it again once
 nothing writes to it, or send a copy. Ctrl-C on a `file send` through a daemon while the file is still being copied in
 (a large one takes seconds) stops the send there: nothing is kept and nothing goes, so send it again when you want it.
+The same goes for one that waits for the contact (`--wait sent`, and a one-shot's own wait): Ctrl-C during the copy
+stops the send, and after it only the waiting. Its line says both, and `ghostly file list <chat>` shows which it was.
 
 ## Bots
 
