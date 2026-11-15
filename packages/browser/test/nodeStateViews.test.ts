@@ -22,9 +22,9 @@ function engine() {
   const node = new GhostlyNode(events, { automaticWallets: false });
   nodes.push(node);
   /** The next state the engine pushes. */
-  const next = async (): Promise<EngineState> => {
+  const next = async (timeout = 1_000): Promise<EngineState> => {
     const before = events.onState.mock.calls.length;
-    await vi.waitFor(() => expect(events.onState.mock.calls.length).toBeGreaterThan(before));
+    await vi.waitFor(() => expect(events.onState.mock.calls.length).toBeGreaterThan(before), { timeout });
     return events.onState.mock.calls.at(-1)![0] as EngineState;
   };
   return { node, next };
@@ -134,6 +134,23 @@ describe("the state a change of one chat pushes", () => {
     const second = await next();
     expect(view(second, a.id)).toBe(view(first, a.id));
     expect(view(second, b.id)).not.toBe(view(first, b.id));
+    expect(built).toBe(0);
+  });
+
+  it("builds no chat and no group for a shared app's request counts", async () => {
+    const { node, next } = engine();
+    const a = await addChat(node, "Alice");
+    let built = 0;
+    node["groups"].views = () => { built++; return []; };
+    node["services"] = [{ id: "s1", name: "Notes", target: "http://localhost:3400", enabled: true, createdAt: 1, sharedWith: [a.peerPubKeyZ32] }];
+    node["emitState"]();
+    const first = await next();
+    built = 0;
+    // A contact's page loading its assets: many requests, one state a second carries their count.
+    for (let i = 0; i < 3; i++) expect(node["hostedService"]("s1", a.peerPubKeyZ32)).toBeDefined();
+    const second = await next(3_000);
+    expect(second.services.find(s => s.id === "s1")?.requests).toBe(3);
+    expect(view(second, a.id)).toBe(view(first, a.id));
     expect(built).toBe(0);
   });
 
