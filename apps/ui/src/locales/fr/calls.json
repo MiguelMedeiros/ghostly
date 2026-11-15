@@ -22,6 +22,7 @@
   "ended": "Appel terminé",
   "endsCurrent": "Répondre met fin à votre appel en cours",
   "group": {
+    "byAdminInfo": "L'admin du groupe a coupé ceci pour vous dans cet appel. Vous pourrez le réactiver quand il le permettra.",
     "endAndJoin": "Raccrocher et rejoindre",
     "endOtherBody": "Rejoindre l'appel du groupe met fin à votre appel en cours.",
     "endOtherTitle": "Mettre fin à votre appel ?",
@@ -37,6 +38,7 @@
     "left": "{{name}} a quitté l'appel",
     "leftMany": "{{names}} ont quitté l'appel",
     "muted": "En sourdine",
+    "mutedByAdmin": "Micro coupé par l'admin",
     "noCallKey": "Pas encore possible de rejoindre : la clé de l'appel n'est pas arrivée",
     "noCallKeyInfo": "Les appels de ce groupe sont chiffrés de bout en bout, et leur clé n'est pas encore arrivée sur cet appareil. Réessayez dans un instant.",
     "noRelay": "Impossible de rejoindre avec Masquer mon IP activé",
@@ -46,7 +48,10 @@
     "notMember": "Hors de ce groupe (…{{key}})",
     "notSealed": "Cet appel n'a pas pu être chiffré, vous l'avez donc quitté",
     "notSealedInfo": "Dans la salle, cette app n'a pas pu chiffrer ce que vous envoyez, alors vous êtes parti avant que rien ne parte en clair. Réessayez, ou utilisez un navigateur récent.",
+    "offByAdmin": "Coupé par l'admin",
     "refused": "Vous n'avez pas encore accès à cet appel",
+    "removed": "L'admin vous a retiré de cet appel",
+    "removedInfo": "Le nœud du groupe ne vous laisse pas revenir dans cet appel sans l'accord de l'admin. Vous restez dans le groupe.",
     "retry": "Réessayer",
     "screenOf": "Écran de {{name}}",
     "unreachable": "Impossible de joindre l'appel du groupe"
