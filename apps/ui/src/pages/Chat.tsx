@@ -802,7 +802,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // A phone held upright: the header keeps the name, the connection, a voice call and ⋮; the video call, the bot's
   // Tasks and the contact's identities are rows of the ⋮ menu, and the running tasks are counted on ⋮.
   // The connection stays in the row: it is the one mark that changes by itself, and a failure has to be seen.
-  const phoneHeader = usePhoneHeader();
+  // So is a pane as narrow beside the chat list (a phone on its side, a tablet upright).
+  const [pane, setPane] = useState<HTMLDivElement | null>(null);
+  const phoneHeader = usePhoneHeader(pane);
   // The tasks still going and the routines not paused: a phone's ⋮ counts them, and has Tasks while there is one.
   const [pickCardRow] = useState(() => rowPicker<ChatMessage, ChatMessage>(m => panelCard(m.card) ? m : undefined));
   const cardRows = useMemo(() => pickCardRow(messages), [pickCardRow, messages]);
@@ -913,7 +915,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     <ChatOnScreen.Provider value={visible}>
     <CueChat.Provider value={sessionId}>
     <NowPlayingChat.Provider value={playingChat}>
-    <div className="chat-pane flex-1 h-full">
+    <div ref={setPane} className="chat-pane flex-1 h-full">
     {/* A message that comes while the chat is open, read out once to a screen reader. */}
     <MessageAnnouncer chat={sessionId} linkId={paired ? chatLink?.id : undefined} messages={messages} nameOf={() => shownName} active={visible} ready={loaded} />
     {/* Files dropped anywhere on the column go to the composer (`data-file-drop`). */}
@@ -929,7 +931,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       {!mediaNoticeInLayer && mediaNotice}
       {/* Chat Header. On a phone held upright (`phoneHeader`) it is the back button, the avatar, the name with the room
           it needs, the connection, a voice call and ⋮, and one quiet line under the name; the video call, a bot's Tasks
-          and the contact's identities are in the ⋮ menu. Wider (a phone on its side, a narrow window), every button is
+          and the contact's identities are in the ⋮ menu; so in a pane as narrow beside the chat list (most phones on their
+          side, a tablet upright). Wider (a Pro Max on its side, a desktop's window), every button is
           in the row, a little narrower than on a desktop. On the narrowest phone (320px) the back button gives 8px to
           the name, so "Cérebro (Mac)" and a bot's status under it still fit beside three buttons; its tap still lands on
           44 × 44 px (`.tap-target`). Its buttons and the avatar are sized in px, as the name is: in rem they grew with the
