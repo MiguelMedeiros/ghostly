@@ -41,6 +41,37 @@ describe("Remove, in a wallet's details", () => {
     expect(await screen.findByTestId("wallet-card-cashu-testnet")).toHaveAttribute("aria-selected", "true");
   });
 
+  it("by the keyboard, the focus goes to the card shown next, not to the page", async () => {
+    const { user, engine, dialog } = await removing(walletView({ mints: [mint(TEST_MINT, 0)], ark: arkReady({ balance: 0 }) }), "arkade-testnet");
+    engine.on("walletRemove", () => { engine.update({ wallet: walletView({ mints: [mint(TEST_MINT, 0)] }) }); });
+    expect(within(dialog).getByTestId("wallet-remove-cancel")).toHaveFocus();
+    await user.keyboard("{Tab}");
+    expect(within(dialog).getByTestId("wallet-remove-confirm")).toHaveFocus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(screen.queryByTestId("wallet-remove-dialog")).not.toBeInTheDocument());
+    const next = await screen.findByTestId("wallet-card-cashu-testnet");
+    await waitFor(() => expect(next).toHaveFocus());
+    expect(next).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("the last wallet of the tab chosen gone, the focus goes to that tab's New", async () => {
+    const { user, engine } = renderApp(<Wallet />);
+    engine.update({ wallet: walletView({ mints: [mint(TEST_MINT, 0)], ark: arkReady({ network: "bitcoin", balance: 0 }) }) });
+    await user.click(await screen.findByTestId("wallet-network-mainnet"));
+    await user.click(await screen.findByTestId("wallet-remove"));
+    engine.on("walletRemove", () => { engine.update({ wallet: walletView({ mints: [mint(TEST_MINT, 0)] }) }); });
+    await user.click(within(screen.getByTestId("wallet-remove-dialog")).getByTestId("wallet-remove-confirm"));
+    await waitFor(() => expect(screen.getByTestId("wallet-network-mainnet-new")).toHaveFocus());
+  });
+
+  it("the page's network left with no wallet shows the other: the focus goes to its card", async () => {
+    const { user, engine, dialog } = await removing(walletView({ mints: [mint(TEST_MINT, 0)], ark: arkReady({ network: "bitcoin", balance: 0 }) }), "arkade-mainnet");
+    engine.on("walletRemove", () => { engine.update({ wallet: walletView({ mints: [mint(TEST_MINT, 0)] }) }); });
+    await user.click(within(dialog).getByTestId("wallet-remove-confirm"));
+    const shown = await screen.findByTestId("wallet-card-cashu-testnet");
+    await waitFor(() => expect(shown).toHaveFocus());
+  });
+
   it("a funded Mainnet wallet says how much, offers its backup, and asks in words that the money becomes unreachable", async () => {
     const { user, engine, dialog } = await removing(walletView({ mints: [mint(REAL_MINT, 21_000)], balance: 21_000 }), "cashu-mainnet");
     expect(within(dialog).getByTestId("wallet-remove-network")).toHaveTextContent("Real money");

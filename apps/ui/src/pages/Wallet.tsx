@@ -207,7 +207,22 @@ export function Wallet() {
   const removed = (id: string) => {
     const next = shown.find((c) => c.id !== id);
     if (next) select(next.id, false);
+    else setFocusPanel(false);
+    setGone(id);
   };
+  // Remove went with its card, and the focus with it to the page: it goes to the card shown now (its panel follows the
+  // deck a render later), or to New with no card left, once the removed one is no longer shown.
+  const [gone, setGone] = useState<string | null>(null);
+  const showing = selected?.id ?? null;
+  useLayoutEffect(() => {
+    if (!gone || showing === gone || panel === gone) return;
+    const target = showing
+      ? panel === showing && page.current?.querySelector<HTMLElement>(`[data-testid="${walletCardTestId(showing)}"]`)
+      : document.querySelector<HTMLElement>(`[data-testid="wallet-network-${network}-new"]`) ?? document.querySelector<HTMLElement>("[data-testid=wallet-add]");
+    if (!target) return;
+    setGone(null);
+    if (focusLost()) focusInPlace(target);
+  }, [gone, showing, panel, network]);
   return (
     <Page title={t("tabs.wallets")} testId="wallet" trailing={wallet && state && (
       <PageAction label={t("sidebar.new")} title={t("wallet.page.create")} testId="wallet-add" onClick={() => setCreating(cards.length && !firstRun ? network : "testnet")} />
