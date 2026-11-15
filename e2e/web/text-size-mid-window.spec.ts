@@ -23,6 +23,6 @@ test("a 1024 px window at a 24 px browser font keeps the desktop's CSS with the 
   for (const px of [20, 24, 32]) {
     await textSize(page, px);
     await expect(handle, `the resize handle at ${px} px`).toBeVisible();
-    expect(await page.evaluate(() => matchMedia("(max-width: 767px)").matches), `JS's phone query at ${px} px`).toBe(false);
+    expect(await page.evaluate(() => matchMedia("(width < 768px)").matches), `JS's phone query at ${px} px`).toBe(false);
   }
 });

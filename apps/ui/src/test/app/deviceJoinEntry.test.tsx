@@ -55,7 +55,7 @@ function catchReload() {
   return reload;
 }
 
-const phone = () => vi.spyOn(window, "matchMedia").mockImplementation((query) => ({ matches: query === "(max-width: 767px)", media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false }));
+const phone = () => vi.spyOn(window, "matchMedia").mockImplementation((query) => ({ matches: query === "(width < 768px)", media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false }));
 const asPixel = () => Object.defineProperty(navigator, "userAgent", { configurable: true, value: PIXEL });
 
 /** The one screen, once it shows. */

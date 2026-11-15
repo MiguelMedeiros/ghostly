@@ -12,7 +12,7 @@
 
 @theme {
   /* Tailwind's breakpoints in px, as the app's own media queries and its JS layout queries are (`MOBILE_QUERY` is
-     767px, hooks/useIsMobile.ts). In rem they followed the browser's font size: at Very large (24px) a 1024px window was
+     `width < 768px`, hooks/useIsMobile.ts). In rem they followed the browser's font size: at Very large (24px) a 1024px window was
      under `md` but not a phone to JS, and showed the list and the chat side by side with the phone's CSS on both. */
   --breakpoint-sm: 640px;
   --breakpoint-md: 768px;
@@ -868,7 +868,7 @@ html[data-standalone="true"] {
   to { transform: translateY(0); }
 }
 
-@media (max-width: 767px) {
+@media (width < 768px) {
   html,
   body {
     overscroll-behavior: none;
@@ -1011,7 +1011,7 @@ html[data-standalone="true"] {
 
 /* An incoming call on a phone on its side (320-480px high): that padding left no room for End and answer's words under
    its button. The screen scrolls if it still does not fit. */
-@media (max-width: 767px) and (max-height: 480px) {
+@media (width < 768px) and (max-height: 480px) {
   .incoming-call {
     padding-top: calc(1.5rem + env(safe-area-inset-top));
     padding-bottom: calc(1.5rem + env(safe-area-inset-bottom));
@@ -1098,7 +1098,7 @@ html[data-standalone="true"] {
   pointer-events: none;
 }
 
-@media (max-width: 767px) {
+@media (width < 768px) {
   .toast-place {
     bottom: calc(3.5rem + 0.75rem + env(safe-area-inset-bottom));
   }
@@ -1113,7 +1113,7 @@ html[data-standalone="true"] {
   bottom: 1.5rem;
 }
 
-@media (max-width: 767px) {
+@media (width < 768px) {
   .toast-place.toast-place-page,
   html[data-keyboard="true"] .toast-place.toast-place-page {
     bottom: 0.75rem;
@@ -1831,7 +1831,7 @@ button[data-held] { opacity: 0.4; }
     bottom: calc(100% - var(--app-height, 100%));
   }
 }
-@media (pointer: coarse) and (max-width: 767px) {
+@media (pointer: coarse) and (width < 768px) {
   /* Its `height: 100%` would win over `bottom`. */
   html[data-keyboard="true"] .chat-app-panel {
     bottom: calc(100% - var(--app-height, 100%));

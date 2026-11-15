@@ -22,7 +22,7 @@ import { renderApp } from "../render";
 function phone(touch: boolean) {
   const matchMedia = window.matchMedia.bind(window);
   vi.spyOn(window, "matchMedia").mockImplementation((query: string) => {
-    const matches = query === "(max-width: 767px)" ? true : query === "(any-pointer: coarse)" ? touch : query === "(any-pointer: fine)" ? !touch : null;
+    const matches = query === "(width < 768px)" ? true : query === "(any-pointer: coarse)" ? touch : query === "(any-pointer: fine)" ? !touch : null;
     if (matches === null) return matchMedia(query);
     const still = () => {};
     return { matches, media: query, onchange: null, addEventListener: still, removeEventListener: still, addListener: still, removeListener: still, dispatchEvent: () => false } as MediaQueryList;

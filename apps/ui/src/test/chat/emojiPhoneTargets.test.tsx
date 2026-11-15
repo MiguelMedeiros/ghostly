@@ -19,9 +19,9 @@ import { renderApp } from "../render";
  * browser's (e2e/web/phone-touch-targets.spec.ts).
  */
 const CSS = readFileSync(join(fileURLToPath(import.meta.url), "../../../components/composer/composer.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
-/** The phone's rules (`@media (max-width: 767px)`) for `selector`. */
+/** The phone's rules (`@media (width < 768px)`) for `selector`. */
 const phoneRule = (selector: string) => {
-  const phone = [...CSS.matchAll(/@media \(max-width: 767px\) \{([\s\S]*?)\n\}/g)].map((m) => m[1]).join("\n");
+  const phone = [...CSS.matchAll(/@media \(width < 768px\) \{([\s\S]*?)\n\}/g)].map((m) => m[1]).join("\n");
   return phone.match(new RegExp(`^\\s*${selector.replace(/[.*+?^${}()|[\]\\-]/g, "\\$&")} \\{([^}]*)\\}`, "m"))?.[1] ?? "";
 };
 
