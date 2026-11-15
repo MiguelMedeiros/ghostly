@@ -128,10 +128,12 @@ export function authoredNote(p: PaymentView, at: Placement, all: readonly Paymen
     ...(testOf(p, federationNetwork) ? { x: 1 as const } : {}), ...(p.memo ? { m: p.memo.slice(0, 140) } : {}), ...(p.ask ? { a: 1 as const } : {}), ts: p.createdAt };
   if (p.kind === "request" && p.direction === "out") {
     // Mine to be paid: open until paid, and who paid it when my wallet knows (ecash comes in on the payer's edge);
-    // never from a member's claim, which is only its word.
+    // never from a member's claim, which is only its word. Only ecash that could have settled it names its payer: in full,
+    // from the mint it was settled in, never notes (a group's request names no federation).
     const from = p.group ? "*" : at.peer;
     if (!from) return null;
-    const payment = all.find(x => x.kind === "payment" && x.direction === "in" && x.requestId === p.id && x.state === "settled");
+    const payment = all.find(x => x.kind === "payment" && x.direction === "in" && x.requestId === p.id && x.state === "settled"
+      && !x.federation && x.amount >= p.amount && (!p.mint || x.mint === p.mint));
     const by = !p.group ? from : payment ? memberOf(payment.linkId) : undefined;
     const st = p.state === "settled" ? "paid" : p.state === "failed" || p.state === "reclaimed" ? "closed" : "open";
     return { ...base, k: "req", f: from, to: at.me, st, ...(st === "paid" && by ? { by } : {}) };

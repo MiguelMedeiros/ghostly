@@ -159,6 +159,12 @@ describe("authoredNote: what this device says about its own payments", () => {
     const r = pay({ id: "req-00001", linkId: "group:g1", group: "g1", mints: ["https://mint.real"], state: "settled" });
     const ecash = pay({ id: "p1", kind: "payment", direction: "in", requestId: r.id, state: "settled", linkId: "AC" });
     expect(authoredNote(r, { groupId: "g1", me: A }, [r, ecash], undefined, id => id === "AC" ? C : undefined)).toMatchObject({ f: "*", to: A, st: "paid", by: C });
+    // Notes naming it (kept so by an older version), or ecash short of it, came first: neither stands for who paid it.
+    const settled = { ...r, mint: "https://mint.real" };
+    const notes = pay({ id: "p0", kind: "payment", direction: "in", requestId: r.id, state: "settled", linkId: "AD", amount: 1, federation: "fed1" });
+    const short = pay({ id: "p0b", kind: "payment", direction: "in", requestId: r.id, state: "settled", linkId: "AD", amount: 1, mint: "https://mint.real" });
+    const full = { ...ecash, mint: "https://mint.real" };
+    expect(authoredNote(settled, { groupId: "g1", me: A }, [settled, notes, short, full], undefined, id => ({ AC: C, AD: D })[id])).toMatchObject({ st: "paid", by: C });
     const invoice = { ...r, invoice: "lnbc1", mints: [] };
     const paid = authoredNote(invoice, { groupId: "g1", me: A }, [invoice], { claims: [D] } as GroupPayNote);
     expect(paid).toMatchObject({ r: "lightning", st: "paid" });
