@@ -50,3 +50,6 @@ blob-report-matrix
 # The bundles of the built-in apps: read from each app's own repository by apps/ui/scripts/built-in-apps.mjs (npm run sync:apps)
 apps/ui/src/assets/apps/*.ghostlyapp
 apps/ui/src/assets/apps/*.part
+
+# Throwaway bug-hunt probes stay out of the repo
+.hunt/
