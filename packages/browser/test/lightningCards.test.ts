@@ -179,6 +179,28 @@ describe("several cards on one network", () => {
     expect(registry.views().map((v) => v.name)).toEqual(["Cashu", "Hub (NWC)", "Hub (NWC) 2", "Hub (NWC) 3", "Hub (NWC) 4"]);
   });
 
+  it("a handoff's facts unseal no connected card's secrets; a card not connected is still read from its sealed ones", async () => {
+    const lnd: LightningProviderDescriptor = { ...fakeNode, id: "lnd", label: "LND", fields: [...fakeNode.fields, { name: "certificate", label: "Certificate", kind: "secret", optional: true }] };
+    const registry = new LightningCards("testnet", { descriptors: () => [cashuMint, lnd], host: () => ({ platform: "web" }), events: { changed: vi.fn(), received: vi.fn(), resolved: vi.fn() }, hasMints: () => true });
+    registries.push(registry);
+    await registry.start();
+    const pinning = [];
+    for (const alias of ["a", "b", "c"]) pinning.push(await registry.add("lnd", { alias, certificate: `cert-${alias}` }));
+    await registry.add("lnd", { alias: "plain" });
+    await registry.ensureReady();
+    const unsealed = vi.spyOn(crypto.subtle, "decrypt");
+    expect((await registry.handoffFacts()).pinned).toEqual(pinning.map((id) => `lightning:testnet:${id}`));
+    expect(unsealed.mock.calls.length, "secrets unsealed").toBe(0);
+
+    // The same cards read again after a restart, none connected yet: each pinning one is unsealed once.
+    await registry.stop();
+    const again = new LightningCards("testnet", { descriptors: () => [cashuMint, lnd], host: () => ({ platform: "web" }), events: { changed: vi.fn(), received: vi.fn(), resolved: vi.fn() }, hasMints: () => true });
+    registries.push(again);
+    await again.start();
+    expect((await again.handoffFacts()).pinned).toEqual(pinning.map((id) => `lightning:testnet:${id}`));
+    expect(unsealed.mock.calls.length, "secrets unsealed").toBe(3);
+  });
+
   it("names: the source's short name, a number when taken, renamable, unique", async () => {
     const { registry } = cards();
     await registry.start();
