@@ -4997,8 +4997,9 @@ export class GhostlyNode implements EngineImplementation {
     // meanwhile (`Outbox.cancel`, which also keeps it from going from now on): then it may be out, and its removal goes.
     const going = this.outboxes.get(linkId)?.cancel(messageId) ?? false;
     // A waiting file of mine whose offer went on the DHT floor may be in the contact's chat (its bubble waits there for
-    // the bytes): it left, and its removal goes, or the contact kept it as "Cancelled by the sender" (agents#5945).
-    const onFloor = !!message.file && (message.fileOnFloor === "sent" || message.fileOnFloor === "seen");
+    // the bytes): it left, and its removal goes, or the contact kept it as "Cancelled by the sender" (agents#5945). So
+    // may one whose offer is being said there now (a relay publication of seconds): its row says so only once it is done.
+    const onFloor = !!message.file && (message.fileOnFloor === "sent" || message.fileOnFloor === "seen" || this.floorSaying.has(message.file.id));
     if (!wireId || (message.delivery === "waiting" && !going && !onFloor)) { await this.forgetMessage(linkId, messageId, message); return { error: null }; }
     const removal: Removal = { id: messageId, wireId, e: removalNumber(message.edit?.seq), at: Date.now(), pending: true };
     live.stored = { ...live.stored, removals: withRemoval(live.stored.removals, removal) };
@@ -5365,7 +5366,10 @@ export class GhostlyNode implements EngineImplementation {
     const link = live.link, file = message.file, linkId = live.stored.id;
     if (!link || !file || message.fileOnFloor || !this.fileFloorReady(live, message)) return;
     const offer = GhostlyNode.floorOffer(linkId, file), at = Date.now();
-    const error = await link.announceFile(offer, message.timestamp, GhostlyNode.wireReply(message), message.forwarded);
+    this.floorSaying.add(file.id);
+    let error: string | null;
+    try { error = await link.announceFile(offer, message.timestamp, GhostlyNode.wireReply(message), message.forwarded); }
+    finally { this.floorSaying.delete(file.id); }
     const said = !error && link.dhtPendingId === dhtFileId(offer.wireId);
     if (!said && error !== DHT_FILE_TOO_LARGE) return;
     const noted = await db.patchMessage(linkId, message.id, current => current.delivery !== "waiting" || current.fileOnFloor ? null
@@ -5377,6 +5381,9 @@ export class GhostlyNode implements EngineImplementation {
     else if (said && noted) await live.floorFiles?.then(known => known.set(dhtFileId(offer.wireId), message.id), () => {});
     await this.messagesChanged(linkId, [message.id]);
   }
+
+  /** The waiting files whose offer is being said on the DHT floor right now (`sayFileOnFloor`), by file id. */
+  private readonly floorSaying = new Set<string>();
 
   /**
    * A file of mine said on the floor and deleted here before it went live: the floor stops saying it, and the next

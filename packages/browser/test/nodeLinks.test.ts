@@ -1559,6 +1559,37 @@ describe("text in a chat", () => {
     await cancelOnFloor("said before the cancel");
   });
 
+  /**
+   * Delete for everyone while a waiting file's offer is being said on the DHT floor (its publication takes seconds, the
+   * moment right after sending a wrong file): the delete read a row with no `fileOnFloor` yet and took the file for one
+   * that never left, so no removal went, and the contact's chat kept its bubble and name as "Cancelled by the sender".
+   */
+  it("Delete for everyone while a waiting file's offer is being said on the DHT floor sends its removal", async () => {
+    const chat = row();
+    const { node, linkOf } = await started(chat);
+    vi.spyOn(node["desk"], "replay").mockResolvedValue();
+    const link = linkOf(chat.id), wireId = `floor${crypto.randomUUID().slice(0, 8)}`, messageId = "me_7";
+    let removed: Promise<unknown> | undefined;
+    const announceFile = vi.fn(async (offer: { wireId: string }) => {
+      removed = node.removeMessage({ linkId: chat.id, messageId });
+      await removed;
+      Object.assign(link, { dhtPendingId: dhtFileId(offer.wireId) });
+      return null;
+    });
+    Object.assign(link, { isDataLinkOpen: false, supportsFiles: false, fileAnnounceError: () => null, announceFile, settleDht: vi.fn(async () => {}), sendFilesFrame: vi.fn(() => true) });
+    node.sendFile({ linkId: chat.id, file: { id: `${chat.id}-out-${wireId}`, name: "a.txt", size: 1, mime: "text/plain" }, timestamp: 7 });
+    await vi.waitFor(async () => expect((await db.getMessage(chat.id, messageId))?.delivery).toBe("waiting"));
+    void node.sendMessage({ linkId: chat.id, text: "after it", timestamp: 8 });
+    await vi.waitFor(async () => expect((await db.getMessages(chat.id)).filter((m) => m.delivery === "waiting")).toHaveLength(2));
+    link.options.events.onDhtDelivery({ peerMode: "dht" } as never);
+    await vi.waitFor(() => expect(announceFile).toHaveBeenCalledOnce());
+    expect(await removed).toEqual({ error: null });
+    await vi.waitFor(async () => expect(await db.getMessage(chat.id, messageId)).toBeUndefined());
+    // Its removal goes to the contact once live, as for one deleted for everyone after its offer was said.
+    expect(node.removalPending({ linkId: chat.id, messageId })).toBe(true);
+    expect((await saved(chat.id))?.removals?.map((r) => r.wireId)).toEqual([wireId]);
+  });
+
   // covers: groups.files
   it("a group edge's waiting file deleted while the session waits for the member's capabilities stays gone and never goes", async () => {
     const { node } = await started();
