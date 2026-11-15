@@ -716,6 +716,7 @@ export class DhtDelivery {
       if (next.forwarded && !this.roomForHops(next.message, next.expires, next.reply, next.forwarded)) { const { forwarded: _dropped, ...alone } = next; next = alone; }
       if (next.reply && this.packetError(next.message, next.expires, next.reply)) { const { reply: _dropped, ...alone } = next; next = alone; }
       await this.persist({ ...this.state, pending: next }); this.changed();
+      if (this.withdrawalWaits()) { this.schedule(); return null; }
       // The next read comes at the pace for a text awaiting its receipt.
       try { await this.publish(true); this.schedule(); return null; }
       catch (error) {
@@ -782,6 +783,7 @@ export class DhtDelivery {
       const next = this.fileEnvelope(file, timestamp, reply, forwarded);
       if (typeof next === "string") return next;
       await this.persist({ ...this.state, pending: next }); this.changed();
+      if (this.withdrawalWaits()) { this.schedule(); return null; }
       try { await this.publish(true); }
       catch (error) {
         if (!isDiscoveryBudgetError(error)) { this.errors.publish = `DHT publication failed: ${String(error instanceof Error ? error.message : error)}. Bounded retry continues until expiry.`; this.changed(); }
@@ -801,6 +803,9 @@ export class DhtDelivery {
    * one's place on the relays, so a contact who looks later finds no text. Resolves once the state without it is saved;
    * the new envelope goes after. One that does not go (no relay reachable) is tried again within seconds (`withdrawal`):
    * a reader takes the withdrawn envelope until its expiry and the clock skew allowed past it (`DHT_EXPIRY_SKEW_MS`).
+   * Inside the publication spacing it waits for it (`withdrawalWaits`), and the text that takes the floor meanwhile goes
+   * in the same envelope: deleting 10 texts queued for an away contact one after the other put 10 envelopes on every
+   * relay in under 2 s, each replaced a moment later (bug hunt, 2026-11-15).
    */
   async withdraw(wireId: string): Promise<void> {
     const expires = await this.serialize(async () => {
@@ -810,10 +815,18 @@ export class DhtDelivery {
       return pending.attempts > 0 && pending.expires > this.clock() ? pending.expires : 0;
     });
     if (expires) void this.serialize(async () => {
-      this.withdrawal = { until: expires + DHT_EXPIRY_SKEW_MS, attempts: 0, next: 0 };
-      try { await this.publish(true); } catch { /* tried again with a text's backoff (`withdrawal`) */ }
+      this.withdrawal = { until: Math.max(this.withdrawal?.until ?? 0, expires + DHT_EXPIRY_SKEW_MS), attempts: 0, next: 0 };
+      if (!this.withdrawalWaits()) { try { await this.publish(true); } catch { /* tried again with a text's backoff (`withdrawal`) */ } }
       this.schedule();
     });
+  }
+  /**
+   * A withdrawal still to go (`withdrawal`) came within the publication spacing: it goes once the spacing allows
+   * (`schedule`), with whatever text holds the floor by then, not in an envelope of its own now.
+   */
+  private withdrawalWaits(): boolean {
+    const now = this.clock(), withdrawal = this.withdrawal;
+    return !!withdrawal && withdrawal.until > now && withdrawal.attempts < MAX_ATTEMPTS && now - this.lastPublish < 4_000;
   }
   /** The id of what awaits its receipt on the floor now, if anything does. */
   get pendingId(): string | undefined {
