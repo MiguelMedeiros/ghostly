@@ -919,6 +919,28 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     expect(w.a.files.resend("mine-001")).toBe(false);
   });
 
+  it("a sent file that failed after its contact had it whole ends done when sent again: the contact answers the offer that it is done", async () => {
+    let lose = true;
+    const w = wire({ drop: (frame) => lose && frame.t === "pf-done" });
+    w.attach();
+    let unreadable = false;
+    // Past the sender's read-ahead: going back to 0 reads the file again.
+    const size = FILE_LIMITS.readBytes + 50_000, src = source(size);
+    w.a.sources.set("redo-001", { read: (offset, length) => (unreadable ? Promise.reject(new Error("The object can not be found here.")) : src.read(offset, length)), digest: () => src.digest() });
+    w.a.files.offer(file("redo-001", size));
+    await until(() => state(w.b, "in", "redo-001") === "done");
+    // Its pf-done lost, an earlier ask of the receiver's (its idle nudge) comes after it, while the file cannot be read.
+    unreadable = true;
+    await w.a.files.handle({ t: "pf-accept", id: "redo-001", offset: 0 });
+    await until(() => state(w.a, "out", "redo-001") === "failed");
+    expect(state(w.b, "in", "redo-001")).toBe("done");
+    lose = unreadable = false;
+    // Send again: offered from the start, the receiver says it is done. Ignored, the file was offered every 30 s for good.
+    expect(w.a.files.resend("redo-001")).toBe(true);
+    await until(() => state(w.a, "out", "redo-001") === "done", 2_000);
+    expect(w.a.records.get("out:redo-001")).toMatchObject({ confirmed: size });
+  });
+
   it("a lost chunk (a transport switch) makes the receiver say where it stands, and the sender goes back", async () => {
     let lost = false;
     const w = wire({ keepBytes: true, drop: (frame) => {

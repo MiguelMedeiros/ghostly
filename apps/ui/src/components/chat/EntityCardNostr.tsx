@@ -48,7 +48,8 @@ export function NostrEntityCard({ code, pointer }: { code: string; pointer: Nost
   const title = profile
     ? p?.name ?? shortNpub(pointer.pubkey)
     : note ? t("chat.entity.noteBy", { author: shortNpub(note.author) }) : t("chat.entity.aNote");
-  const subtitle = profile ? (p?.handle ? `@${p.handle} · ${shortNpub(pointer.pubkey)}` : p?.name ? shortNpub(pointer.pubkey) : undefined) : undefined;
+  // The handle in its own direction: in the app's, an Arabic app drew "@alice · npub…" with its "@" past the npub.
+  const subtitle = profile ? (p?.handle ? <><bdi>@{p.handle}</bdi> · {shortNpub(pointer.pubkey)}</> : p?.name ? shortNpub(pointer.pubkey) : undefined) : undefined;
 
   return (
     <EntityCardFrame testId="entity-nostr" data={{ "data-type": pointer.type, "data-loaded": result ? "true" : undefined }}
@@ -60,7 +61,7 @@ export function NostrEntityCard({ code, pointer }: { code: string; pointer: Nost
         {p.avatar && <img src={p.avatar} alt="" data-testid="entity-nostr-avatar" className="h-10 w-10 rounded-full object-cover" />}
         {/* What the person wrote, in its own direction as a message's text (lined up with the app, a clamped line lost its "…"). */}
         {p.about && <p dir="auto" data-testid="entity-nostr-about" className="m-0 line-clamp-4 whitespace-pre-wrap break-words text-text-primary">{p.about}</p>}
-        {p.nip05 && <p className="m-0"><span className="break-all">{p.nip05}</span> <span className="text-text-primary/65">{t("chat.entity.nip05")}</span></p>}
+        {p.nip05 && <p className="m-0"><span dir="ltr" className="break-all">{p.nip05}</span> <span className="text-text-primary/65">{t("chat.entity.nip05")}</span></p>}
       </>}
       {note && (note.muted
         ? <p className="m-0" data-testid="entity-nostr-muted">{t("chat.entity.muted")}</p>

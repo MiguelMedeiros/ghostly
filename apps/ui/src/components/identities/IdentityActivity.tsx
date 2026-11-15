@@ -101,8 +101,10 @@ function Chips({ graph, links }: { graph?: PublicGraphViewLike | null; links: re
       {graph.contacts.map(c => {
         const name = contactName(c.linkId, links, t);
         const how = c.follows && c.followedBy ? t("identities.activity.mutual", { name }) : c.follows ? t("identities.activity.follows", { name }) : t("identities.activity.followedBy", { name });
+        // The arrow points from the follower to the one followed: mirrored where the app reads right to left, since it
+        // then sits to the right of the name ("⇄" is the same either way).
         return <li key={c.linkId} className="identity-activity-chip" data-testid="contact-activity-contact" data-link={c.linkId} title={how} aria-label={how}>
-          <span aria-hidden="true">{c.follows && c.followedBy ? "⇄" : c.follows ? "→" : "←"}</span> <bdi>{name}</bdi>
+          <span aria-hidden="true" className="inline-block rtl:-scale-x-100">{c.follows && c.followedBy ? "⇄" : c.follows ? "→" : "←"}</span> <bdi>{name}</bdi>
         </li>;
       })}
     </ul>

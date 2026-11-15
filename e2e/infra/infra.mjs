@@ -92,6 +92,8 @@ const PROBES = {
   "Fedimint guardian / gateway": async () => (await tcp(endpoints.fedimint.api.replace(/^ws/, "http"))) && tcp(endpoints.fedimint.gateway),
   S3: () => http(`${endpoints.s3.endpoint}/health`),
   "Iroh relay": () => http(endpoints.irohRelay),
+  // The mock's health asks LiveKit too, inside the stack.
+  "LiveKit / group-token mock": async () => (await http(endpoints.sfu.livekit.replace(/^ws/, "http"))) && http(`${endpoints.sfu.token}/healthz`),
   // Up once its own HyperDHT node is reachable, not when it first answers.
   "HyperDHT relay": () => hyperdhtRelayReady(),
   "AT Protocol PDS / PLC": async () => (await http(`${endpoints.atproto.pds}/xrpc/_health`)) && http(`${endpoints.atproto.plc}/_health`),

@@ -169,8 +169,19 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
   useEffect(callWindowShown, []);
   useTabTrap(box, !mini);
   useBackCloses(() => setMiniState(true), !mini);
+  // Whole-screen, the focus comes into the call. Either way, what had it (Join call) has it back when the call goes
+  // with the focus in it, as in the 1:1 call (CallOverlay): a Leave pressed by keyboard left it on the page's body.
+  const opener = useRef<HTMLElement | null>(null);
   useEffect(() => {
-    if (!mini && box.current && !box.current.contains(document.activeElement)) box.current.focus({ preventScroll: true });
+    const active = document.activeElement as HTMLElement | null;
+    if (box.current && !box.current.contains(active)) {
+      if (active && active !== document.body) opener.current = active;
+      if (!mini) box.current.focus({ preventScroll: true });
+    }
+    return () => {
+      const before = opener.current;
+      if (before?.isConnected && (!document.activeElement || document.activeElement === document.body)) before.focus({ preventScroll: true });
+    };
   }, [mini, box]);
 
   const { local, participants, activeSpeaker } = call;
