@@ -79,6 +79,14 @@ function Shell({ label, network, chain, amount, testId, lines, detail, qr, child
   const [showQr, setShowQr] = useState(false);
   // More than one QR code holds: no QR button, said in words.
   const fits = useMemo(() => qrFits(qr), [qr]);
+  // The code pressed goes, and its keys go to the QR button, not the page, whose next Tab starts from the top.
+  const qrButton = useRef<HTMLButtonElement>(null);
+  const shownQr = useRef(showQr);
+  useEffect(() => {
+    if (shownQr.current === showQr) return;
+    shownQr.current = showQr;
+    if (!showQr && focusLost()) qrButton.current?.focus({ preventScroll: true });
+  }, [showQr]);
   return (
     <div className="min-w-[230px] max-md:min-w-[min(230px,68vw)] max-w-[min(300px,72vw)] px-1 py-0.5" data-testid={testId} data-network={network ?? "unknown"}>
       <div className="flex flex-wrap items-center justify-between gap-1.5">
@@ -102,7 +110,7 @@ function Shell({ label, network, chain, amount, testId, lines, detail, qr, child
       )}
       <div className="flex flex-wrap gap-1.5 mt-2">
         {children}
-        {fits && <button className={quiet} onClick={() => setShowQr(!showQr)}>{showQr ? t("payments.formats.hideQr") : "QR"}</button>}
+        {fits && <button ref={qrButton} className={quiet} onClick={() => setShowQr(!showQr)}>{showQr ? t("payments.formats.hideQr") : "QR"}</button>}
       </div>
     </div>
   );
