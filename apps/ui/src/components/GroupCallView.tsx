@@ -126,7 +126,8 @@ function Tile({ person, you, kind, speaking, name, face }: { person: GroupCallPa
         <TrackVideo track={track} fit={kind === "screen" ? "contain" : "cover"} mirror={you && kind === "face"} />
       ) : (
         <div className="call-avatar shrink-0 w-[min(40%,6rem)] aspect-square rounded-full bg-chat-bg flex items-center justify-center">
-          <span className="text-text-muted text-2xl">{initial(face)}</span>
+          {/* A letter for the eye: the name below is what a screen reader reads ("M You" read the letter of your name). */}
+          <span aria-hidden="true" className="text-text-muted text-2xl">{initial(face)}</span>
         </div>
       )}
       <div className="absolute bottom-1.5 inset-x-1.5 flex items-center gap-1.5">
