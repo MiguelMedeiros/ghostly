@@ -194,6 +194,29 @@ describe("editing my message", () => {
     expect((await t.messages()).find(m => m.id === theirs.id)).toBeDefined();
   });
 
+  /**
+   * agents#5945: a file of mine waits for the live link (`delivery: "waiting"`) also once its offer went on the DHT
+   * floor and the contact's chat shows its bubble. Deleted for everyone then, it was taken for one that never left: no
+   * removal went, and the contact kept the bubble, its name and a voice note's waveform, as "Cancelled by the sender".
+   */
+  it("deleting for everyone a waiting file whose offer went on the DHT floor tells the contact; one never said there is only deleted here", async () => {
+    const t = await setup();
+    const file = (c: string, fileOnFloor?: "sent" | "seen"): StoredMessage => ({ linkId: t.id, id: `me_file${c}`, text: "📎 notes.pdf", sender: "me", timestamp: Date.now(), via: "datalink",
+      delivery: "waiting", file: { id: `${t.id}-out-${WIRE(c)}`, name: "notes.pdf", size: 1_000, mime: "application/pdf" }, ...(fileOnFloor && { fileOnFloor }) });
+    for (const [c, fileOnFloor] of [["S", "seen"], ["F", "sent"]] as const) {
+      await db.addMessage(file(c, fileOnFloor));
+      expect(await t.node.removeMessage({ linkId: t.id, messageId: `me_file${c}` })).toEqual({ error: null });
+      expect((await t.messages()).find(m => m.id === `me_file${c}`)).toBeUndefined();
+      await vi.waitFor(() => expect(t.contactEdits.filter(e => e.id === WIRE(c))).toEqual([{ id: WIRE(c), e: 1, ts: expect.any(Number), m: REMOVED_TEXT, rm: true }]));
+    }
+    // Never said on the floor: the contact has nothing of it, and nothing goes.
+    await db.addMessage(file("N"));
+    expect(await t.node.removeMessage({ linkId: t.id, messageId: "me_fileN" })).toEqual({ error: null });
+    expect((await t.messages()).find(m => m.id === "me_fileN")).toBeUndefined();
+    await new Promise(resolve => setTimeout(resolve, 150));
+    expect(t.contactEdits.filter(e => e.id === WIRE("N"))).toEqual([]);
+  });
+
   it("an edit and its confirmation read the edited message, not the chat's whole history", async () => {
     const t = await setup();
     // As the CLI and the web app host it: the pages hear the rows that changed, not the whole history.
