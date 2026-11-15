@@ -6,7 +6,7 @@ import { useBackCloses, useTabTrap } from "../../hooks/useDismiss";
 import { takedownText, useAppOpener } from "../../lib/apps/open";
 import { appErrorText } from "../../lib/apps/errors";
 import { ChatOnScreen } from "../../lib/chatOnScreen";
-import { chatApp, registerAppSlot, setChatApp, setChatAppNarrow, updateChatApp, useChatApp, useChatAppNarrow, type AppContact } from "../../lib/apps/running";
+import { chatApp, noteChoice, registerAppSlot, setChatApp, setChatAppNarrow, updateChatApp, useChatApp, useChatAppNarrow, type AppContact } from "../../lib/apps/running";
 import { PeerAvatar } from "../Avatar";
 import { ChatConnection } from "../ChatConnection";
 import { AppGlyph } from "./AppIcon";
@@ -282,9 +282,12 @@ export function ChatAppResume({ linkId }: { linkId: string }) {
   const { t } = useI18n();
   const app = useChatApp(linkId);
   if (!app || app.shown) return null;
+  // The person's newest choice in this chat: another app's Open still on its way here (its files downloading) starts
+  // nothing once it finishes, instead of stopping this one and taking its place.
+  const resume = () => { noteChoice(linkId); updateChatApp(linkId, { shown: true }); };
   return (
     <>
-    <button type="button" data-testid="mini-app-resume" data-serving={app.serving || undefined} onClick={() => updateChatApp(linkId, { shown: true })}
+    <button type="button" data-testid="mini-app-resume" data-serving={app.serving || undefined} onClick={resume}
       className="flex w-full items-center gap-2 px-4 py-2 bg-panel-header border-b border-border text-[13px] font-medium text-accent hover:bg-surface-hover cursor-pointer shrink-0 text-start">
       <AppGlyph size={16} />
       <span className="min-w-0 flex-1">
