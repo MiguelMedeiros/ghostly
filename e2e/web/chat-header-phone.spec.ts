@@ -131,8 +131,17 @@ test("on a phone a chat's header keeps the contact's whole name beside the conne
     await page.keyboard.press("Escape");
     await expect(page.getByTestId("chat-hold")).toHaveCount(0);
 
-    // A phone on its side has the room: every button is in the header again.
+    // A phone on its side leaves the chat a pane beside the list as narrow as an upright phone's screen: the header is
+    // the phone's there, by the pane, and the whole name shows. It followed the window, had every button, and cut the
+    // name to "Cérebro…" (to "Con…" for a contact with no name) with an iPhone's safe areas. A Pro Max on its side has
+    // the room: every button is in the header again.
+    await rename("Cérebro (Mac)");
     await page.setViewportSize({ width: 844, height: 390 });
+    for (const id of ["connection-options", "call-audio"]) await expect(page.getByTestId(id), id).toBeVisible();
+    for (const id of MOVED) await expect(page.getByTestId(id), id).toHaveCount(0);
+    const side = await line();
+    expect(side.whole, `on its side: ${JSON.stringify(side)}`).toBeLessThanOrEqual(side.shown);
+    await page.setViewportSize({ width: 932, height: 430 });
     for (const id of ["connection-options", ...MOVED]) await expect(page.getByTestId(id), id).toBeVisible();
   } finally {
     await bot.stop();
