@@ -441,7 +441,8 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
   // While Uninstall (or an Update) runs, the screen stays, as the install screen's: a Cancel then showed the app as
   // still here, and it was deleted a moment later. Escape on the question is its Cancel, as on the other Remove questions.
   const close = () => { if (!busy) onClose(); };
-  const keepIt = () => { if (!busy) setRemoving(false); };
+  // Each screen says only its own error: a Fetch files that failed was read out again on the question, as Uninstall's.
+  const keepIt = () => { if (!busy) { setError(null); setRemoving(false); } };
   const why = runLine(app.run, t);
   const canRun = app.run.status === "ok";
   if (removing) {
@@ -484,7 +485,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
       <div className="flex flex-wrap justify-end gap-2">
         {/* While an Update (or Fetch files) runs, nothing here leaves the screen, as Escape doesn't: opening the app mid-update
             ran it while its files were replaced, and the update's error then had no screen to show on. */}
-        <Button ref={uninstall} variant="danger" data-testid="app-uninstall-open" disabled={busy} onClick={() => setRemoving(true)}>{t("apps.app.uninstall")}</Button>
+        <Button ref={uninstall} variant="danger" data-testid="app-uninstall-open" disabled={busy} onClick={() => { setError(null); setRemoving(true); }}>{t("apps.app.uninstall")}</Button>
         {app.run.status === "needs-files" && <Button data-testid="app-fetch-files" disabled={busy} loading={pending === "files"} onClick={() => void act(fetchFiles, false, "files")}>{t("apps.app.fetchFiles")}</Button>}
         {app.run.status === "removed" && <Button data-testid="app-run-anyway" disabled={busy} onClick={() => { onOpen(app, { runAnyway: true }); onClose(); }}>{t("apps.app.runAnyway")}</Button>}
         {!canRun && app.run.status !== "needs-files" && <Button data-testid="app-keep-stopped" disabled={busy} onClick={onClose}>{t("apps.app.keepStopped")}</Button>}
