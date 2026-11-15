@@ -39,6 +39,8 @@
     "refused": "Non hai ancora accesso a questa chiamata",
     "retry": "Riprova",
     "screenOf": "Schermo di {{name}}",
+    "sealed": "Non puoi ancora entrare nelle chiamate cifrate",
+    "sealedInfo": "L'admin del gruppo ha attivato la crittografia end-to-end per le chiamate. Questa app non può ancora farlo, quindi non invia la tua voce e il tuo video in chiaro al nodo del gruppo.",
     "unreachable": "Impossibile raggiungere la chiamata del gruppo"
   },
   "incomingAudio": "Chiamata vocale in arrivo...",

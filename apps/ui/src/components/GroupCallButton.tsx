@@ -44,6 +44,10 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
    */
   const held = useRef<{ pass: GroupCallPass; until: number; sfu: string | undefined } | null>(null);
   const sfu = groupCallOf(group)?.sfu;
+  // The admin turned on sealed call media (WISP 602 § End-to-end encryption): this app cannot seal it yet, so it does
+  // not join and says why, rather than send its media to the node unsealed.
+  const sealed = groupCallOf(group)?.e2ee === 1;
+  const sealedProblem: Problem = { tone: "error", title: t("calls.group.sealed"), info: t("calls.group.sealedInfo") };
   const sfuNow = useRef(sfu);
   sfuNow.current = sfu;
   const [asking, setAsking] = useState(false);
@@ -55,7 +59,7 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
   const relayOnly = useEngineValue((state) => state?.settings.relayOnly === true);
   const [askIp, setAskIp] = useState(false);
   const [noRelay, setNoRelay] = useState(false);
-  const blocked = relayOnly && noRelay;
+  const blocked = sealed || (relayOnly && noRelay);
   const noRelayProblem: Problem = { tone: "error", title: t("calls.group.noRelay"), info: t("calls.group.noRelayInfo") };
   const call = useGroupCall({ url: joined?.url ?? "", token: joined?.token ?? "", iceServers: joined?.iceServers, relayOnly, loadLivekit });
 
@@ -93,6 +97,7 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
   };
   const press = () => {
     if (asking) return;
+    if (sealed) return setProblem(sealedProblem);
     if (blocked) return setProblem(noRelayProblem);
     if (relayOnly && !joinedShowingIp.has(ipShownTo)) setAskIp(true);
     else go();

@@ -26,6 +26,8 @@ export interface GroupCallPass {
 /** The group's call, as its admin signed it in the metadata (WISP 602 § The group names its node). */
 export interface GroupCallField {
   sfu: string;
+  /** `1` when the admin turned on sealed call media (WISP 602 § End-to-end encryption), which this app cannot seal yet. */
+  e2ee?: 1;
 }
 
 /** The group's call, when it has one: only a group the admin gave a call node shows Join call. */
