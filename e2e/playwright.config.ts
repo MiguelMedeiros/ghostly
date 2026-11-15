@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { withoutQuarantine } from "./support/quarantine";
 
 // The end-to-end environment's variables (npm run e2e:infra:up writes them; see e2e/infra/env.mjs). Loaded
 // before anything reads the environment; a variable the shell already set wins.
@@ -27,7 +28,7 @@ const { CHROMIUM_SANDBOX } = await import("./support/chromiumSandbox");
 const deployed = process.env.E2E_WEB_URL;
 const port = Number(process.env.E2E_WEB_PORT || 4173);
 
-export default defineConfig({
+export default withoutQuarantine(defineConfig({
   testDir: ".",
   outputDir: "../test-results/e2e",
   // The headless CLI, built once before the workers start: a build in a worker empties its dist/ under the others' bots.
@@ -100,4 +101,4 @@ export default defineConfig({
         env: { VITE_OIDC_TEST_ISSUER: OIDC_TEST_ISSUER, VITE_ATPROTO_TEST_PLC: ATPROTO_TEST_PLC, GHOSTLY_PLUGINS: "packages/sdk/examples/adapter/src/index.ts", VITE_APPS_TEST: "1",
           VITE_SERVICES_HOST: `http://*.localhost:${port}`, VITE_SERVICES_APP_ORIGIN: `http://localhost:${port}` },
       },
-});
+}));

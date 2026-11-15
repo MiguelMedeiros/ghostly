@@ -21,6 +21,12 @@
   "endAndAnswer": "End and answer",
   "ended": "Call ended",
   "endsCurrent": "Answering ends your current call",
+  "group": {
+    "info": "It goes through the group's node. Anyone in the group can talk, show their camera and share their screen. Past 8 people you join muted.",
+    "leave": "Leave call",
+    "muted": "Muted",
+    "screenOf": "{{name}}'s screen"
+  },
   "incomingAudio": "Incoming audio call...",
   "incomingVideo": "Incoming video call...",
   "mediaDenied": "No access to the mic or camera",

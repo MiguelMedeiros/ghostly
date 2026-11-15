@@ -652,6 +652,24 @@ describe("what each state shows", () => {
   });
 });
 
+// In a right-to-left language the composer is mirrored (Send at the left): an arrow still pointing right pointed back
+// into the screen's edge. Send points where the message goes, the way the app's Back arrows and chevrons mirror.
+describe("Send's arrow in a right-to-left language", () => {
+  const mirrored = (button: HTMLElement) => button.querySelector("svg")?.classList.contains("rtl:-scale-x-100");
+
+  it("the composer's Send and the voice bar's Send are mirrored; the mic is not", async () => {
+    composer();
+    expect(mirrored(mic())).toBe(false);
+    fireEvent.click(mic());
+    await wait(0);
+    expect(mirrored(screen.getByTestId("voice-send"))).toBe(true);
+    fireEvent.keyDown(document.body, { key: "Escape" });
+
+    fireEvent.change(screen.getByPlaceholderText("Message…"), { target: { value: "hi" } });
+    expect(mirrored(screen.getByRole("button", { name: "Send message" }))).toBe(true);
+  });
+});
+
 describe("Esc", () => {
   async function lockedFor(ms: number) {
     composer();

@@ -12,6 +12,7 @@ import { hasVisible, stripHidden } from "./text";
  * alone: in a community as a pair payload `{ "dm": … }`, in a private group as a `group-pair` frame, on their edge or
  * handed on once by a hub. Nobody else, hubs included, reads the invite. The receiver answers `got` when it shows the
  * request and `no` when its person declines; accepting is joining the invite, which pins the key the request names.
+ * Only tests import it yet: parts 2 to 4 of the private-message series (part 1 was #4943) wire it into the apps.
  */
 
 /** The `paired-groups` version an app announces when it takes `group-pair` frames (7 is the file-session request's). */

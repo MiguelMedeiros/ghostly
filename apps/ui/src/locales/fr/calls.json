@@ -21,6 +21,12 @@
   "endAndAnswer": "Raccrocher et répondre",
   "ended": "Appel terminé",
   "endsCurrent": "Répondre met fin à votre appel en cours",
+  "group": {
+    "info": "Il passe par le nœud du groupe. Tout membre peut parler, montrer sa caméra et partager son écran. Au-delà de 8 personnes, vous arrivez en sourdine.",
+    "leave": "Quitter l'appel",
+    "muted": "En sourdine",
+    "screenOf": "Écran de {{name}}"
+  },
   "incomingAudio": "Appel audio entrant...",
   "incomingVideo": "Appel vidéo entrant...",
   "mediaDenied": "Pas d'accès au micro ou à la caméra",

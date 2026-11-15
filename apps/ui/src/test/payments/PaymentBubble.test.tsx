@@ -296,6 +296,7 @@ describe("a request with a payment already on its way", () => {
   it("an approved payment of it stays, with Check, even once the request reads as paid", () => {
     show(incomingRequest({ mints: [REAL_MINT], state: "settled" }), { wallet: { mints: [mint(REAL_MINT, 900)], intents: [unfinished("submitted")] } });
     expect(screen.getByRole("region", { name: "Payment review" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check existing payment" })).toBeInTheDocument();
   });
 
   it("a payment of it that failed leaves the request payable again", () => {

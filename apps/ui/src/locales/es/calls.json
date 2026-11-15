@@ -21,6 +21,12 @@
   "endAndAnswer": "Finalizar y contestar",
   "ended": "Llamada finalizada",
   "endsCurrent": "Contestar finaliza tu llamada actual",
+  "group": {
+    "info": "Pasa por el nodo del grupo. Cualquiera del grupo puede hablar, mostrar su cámara y compartir su pantalla. Con más de 8 personas entras silenciado.",
+    "leave": "Salir de la llamada",
+    "muted": "Silenciado",
+    "screenOf": "Pantalla de {{name}}"
+  },
   "incomingAudio": "Llamada de voz entrante...",
   "incomingVideo": "Videollamada entrante...",
   "mediaDenied": "Sin acceso al micrófono o la cámara",
