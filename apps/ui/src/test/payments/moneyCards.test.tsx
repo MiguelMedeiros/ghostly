@@ -207,6 +207,18 @@ describe("the chat's money cards from the keyboard", () => {
       expect(screen.getByTestId("invoice-pay")).toHaveFocus();
     });
 
+    // Pressing the QR code hides it and puts a QR button in its place, and that button gives the code back: the keys stay
+    // on the card's toggle, not on the page, whose next Tab starts from the top.
+    it("the QR code and its QR button hand the keys to each other", async () => {
+      const { user } = show();
+      const card = screen.getByTestId("invoice-bubble");
+      await press(user, within(card).getByTitle(/QR/));
+      const qr = within(card).getByRole("button", { name: "QR" });
+      await waitFor(() => expect(qr).toHaveFocus());
+      await user.keyboard("{Enter}");
+      await waitFor(() => expect(within(card).getByTitle(/QR/)).toHaveFocus());
+    });
+
     it("Paid takes the keys from the Pay that paid it", async () => {
       const { user, engine } = show();
       engine.on("walletQuoteInvoice", () => quote).on("walletPayQuote", () => ({ paid: true }));
@@ -234,6 +246,17 @@ describe("the chat's money cards from the keyboard", () => {
       await user.keyboard("{Enter}");
       received.answer({ amount: 1008 });
       await waitFor(() => expect(screen.getByTestId("token-redeemed")).toHaveFocus());
+    });
+
+    it("the QR code and its QR button hand the keys to each other", async () => {
+      fakeEngine.setState({ links: [linkView()] });
+      fakeEngine.on("walletInspectCashu", () => ({ inspection: { kind: "token", amount: 1008, unit: "sat", mint: "https://mint.example.com", accepted: true } }));
+      const { user } = renderApp(<MessageBubble message={message(`cashuBa${"o".repeat(60)}`)} peerPubKey="peer" />);
+      const card = await screen.findByTestId("cashu-token-bubble");
+      await press(user, within(card).getByTitle(/QR/));
+      await waitFor(() => expect(within(card).getByRole("button", { name: "QR" })).toHaveFocus());
+      await user.keyboard("{Enter}");
+      await waitFor(() => expect(within(card).getByTitle(/QR/)).toHaveFocus());
     });
   });
 

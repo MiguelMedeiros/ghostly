@@ -7,12 +7,13 @@ import type { GroupCallError } from "../hooks/useGroupCall";
 import { applySpeaker } from "../lib/mediaDevices";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { useBackCloses, useTabTrap } from "../hooks/useDismiss";
+import { useFocusKept } from "../hooks/useFocusKept";
 import { initial } from "../lib/initial";
 import { fillNames } from "../lib/fillNodes";
 import { errorText } from "../lib/errorText";
 import { callWindowShown } from "../lib/serviceWindows";
 import { mediaProblemKeys } from "../lib/mediaProblemText";
-import { DeviceMenu } from "./CallOverlay";
+import { DeviceMenu, DeviceNoticeBar } from "./CallOverlay";
 
 /** One person in a group call, as `useGroupCall` gives them: what they send, and the tracks to show and play. */
 export interface GroupCallParticipant {
@@ -213,6 +214,8 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
       if (before?.isConnected && (!document.activeElement || document.activeElement === document.body)) before.focus({ preventScroll: true });
     };
   }, [mini, box]);
+  // As in the 1:1 call: the device notice goes with the focus maybe on it, which goes to the Devices button it is about.
+  useFocusKept(box, () => box.current?.querySelector<HTMLElement>("[data-testid=call-devices]") ?? null);
 
   const { local, participants, activeSpeaker } = call;
   const everyone = [local, ...participants];
@@ -304,6 +307,9 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
           {errorShown.next && <span className="block">{errorShown.next}</span>}
         </p>
       )}
+
+      {/* A headset unplugged, the chosen microphone back: said over the controls, in the whole window (the small one has no room). */}
+      {!mini && devices?.notice && <DeviceNoticeBar devices={devices} />}
 
       <div className="call-controls absolute bottom-12 max-md:bottom-[calc(2rem+env(safe-area-inset-bottom))] left-0 right-0 flex items-center justify-center gap-6 max-md:gap-8 z-10">
         <button onClick={onToggleMic} data-testid="group-call-mic" title={local.mic ? t("calls.mute") : t("calls.unmute")}
