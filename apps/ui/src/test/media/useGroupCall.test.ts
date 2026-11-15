@@ -1,8 +1,11 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { BaseKeyProvider, ExternalE2EEKeyProvider, KeyProviderEvent, type KeyInfo, type KeyProviderOptions } from "livekit-client";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { CALL_KEY_SLOTS, callKeySlot, GroupCallKeyProvider, PREVIOUS_KEY_MS } from "../../hooks/groupCallKeys";
 import { GROUP_CALL_MUTED_ABOVE, joinsMuted, NO_CALL_KEY, NO_RELAY, NO_SEALING, NOT_SEALED, useGroupCall, type LivekitModule, type UseGroupCallOptions } from "../../hooks/useGroupCall";
 import { chooseDevice } from "../../lib/mediaDevices";
 import { FakeTrack } from "../../../../../packages/react/test/fakes";
@@ -229,15 +232,18 @@ let steps: string[] = [];
 /** Every track a local participant sent, in order, with whether its room was sealed and joined then. */
 let published: { what: string; sealed: boolean }[] = [];
 
-/** LiveKit's shared-key provider (`ExternalE2EEKeyProvider`): the raw bytes of every key set in it, in order. */
+/** The call's key provider (`GroupCallKeyProvider`): the raw bytes of every key set in it, and its epochs, in order. */
 class FakeKeyProvider {
   static providers: FakeKeyProvider[] = [];
   readonly keys: number[][] = [];
-  readonly setKey = vi.fn(async (key: string | ArrayBuffer) => {
+  readonly epochs: number[] = [];
+  readonly setEpochKey = vi.fn(async (epoch: number, key: string | ArrayBuffer) => {
     if (typeof key === "string") throw new Error("a passphrase: the call key goes in as raw bytes");
     this.keys.push([...new Uint8Array(key)]);
+    this.epochs.push(epoch);
     steps.push("key");
   });
+  readonly dispose = vi.fn();
   constructor() { FakeKeyProvider.providers.push(this); }
 }
 
@@ -251,7 +257,7 @@ class FakeWorker {
 let sealing = true;
 
 const fakeLivekit = {
-  Room: FakeRoom, RoomEvent, Track: { Source }, ExternalE2EEKeyProvider: FakeKeyProvider,
+  Room: FakeRoom, RoomEvent, Track: { Source }, GroupCallKeyProvider: FakeKeyProvider,
   isE2EESupported: () => sealing, e2eeWorker: () => new FakeWorker(),
 } as unknown as LivekitModule;
 const loadLivekit = vi.fn(async () => fakeLivekit);
@@ -546,12 +552,14 @@ describe("useGroupCall", () => {
   it("loads livekit-client and its E2EE worker only at the join, never at the module's import", () => {
     const read = (file: string) => readFileSync(join(fileURLToPath(import.meta.url), "../../../hooks", file), "utf8");
     const source = read("useGroupCall.ts");
-    const statics = source.match(/^import\s+(?!type\b)[^;]*from\s+["'](?:livekit-client|\.\/groupCallLivekit)["']/gm);
+    const statics = source.match(/^import\s+(?!type\b)[^;]*from\s+["'](?:livekit-client|\.\/groupCallLivekit|\.\/groupCallKeys)["']/gm);
     expect(statics).toBeNull();
     expect(source).toContain('import("./groupCallLivekit")');
     // The module loaded at the join is where livekit-client and the worker come from.
     const lazy = read("groupCallLivekit.ts");
     expect(lazy).toMatch(/from "livekit-client";/);
+    // The call's key provider (it extends livekit-client's) comes with it, never on its own.
+    expect(lazy).toContain('export { GroupCallKeyProvider } from "./groupCallKeys";');
     expect(lazy).toContain('new Worker(new URL("livekit-client/e2ee-worker", import.meta.url), { type: "module" })');
   });
 });
@@ -665,6 +673,7 @@ describe("useGroupCall, a sealed call (WISP 602 § End-to-end encryption)", () =
     const [provider] = FakeKeyProvider.providers;
     hook.rerender({ url: "wss://call.example", token: "pass", loadLivekit, e2ee: key(5, 9) });
     await waitFor(() => expect(provider.keys).toEqual([Array(32).fill(7), Array(32).fill(9)]));
+    expect(provider.epochs).toEqual([4, 5]);
     // The same epoch again (a new object for the same key) sets nothing.
     hook.rerender({ url: "wss://call.example", token: "pass", loadLivekit, e2ee: key(5, 9) });
     await act(async () => {});
@@ -696,6 +705,8 @@ describe("useGroupCall, a sealed call (WISP 602 § End-to-end encryption)", () =
     await act(() => result.current.leave());
     expect(room().disconnect).toHaveBeenCalledWith(true);
     expect(FakeWorker.workers[0].terminate).toHaveBeenCalled();
+    // and the key provider: no key of the epoch before is taken out of a room that is gone
+    expect(FakeKeyProvider.providers[0].dispose).toHaveBeenCalled();
   });
 
   describe("fails closed: a sealed room that does not seal is left, every track stopped, and says why", () => {
@@ -781,5 +792,210 @@ describe("useGroupCall, a sealed call (WISP 602 § End-to-end encryption)", () =
     expect(room().setE2EEEnabled).not.toHaveBeenCalled();
     expect(FakeKeyProvider.providers).toHaveLength(0);
     expect(FakeWorker.workers).toHaveLength(0);
+  });
+});
+
+/**
+ * LiveKit's own key ring, as a sealed room's E2EE worker keeps it: livekit-client's `ParticipantKeyHandler` (its
+ * TypeScript source, loaded at run time), with the room's key provider options, set from the provider's `setKey` events
+ * the way the room passes them on (livekit-client 2.24.0: `e2ee/E2eeManager.ts:161` the options, `:461-462` and
+ * `:534-547` each event to the worker with its `updateCurrentKeyIndex`, `worker/e2ee.worker.ts:171-173,356-358` into the
+ * shared ring). The slot a frame is sealed with is the ring's current index (`worker/FrameCryptor.ts:514,539`); a frame
+ * is opened with the key at the slot its last byte names (`:716-723`).
+ */
+interface Ring {
+  setKey(key: CryptoKey, keyIndex?: number, updateCurrentKeyIndex?: boolean): Promise<void>;
+  getCurrentKeyIndex(): number;
+  getKeySet(keyIndex?: number): { material: CryptoKey } | undefined;
+}
+const livekitE2ee = join(dirname(createRequire(import.meta.url).resolve("livekit-client")), "../src/e2ee");
+let RingOf: new (identity: string, options: KeyProviderOptions) => Ring;
+
+/**
+ * A provider's keys reaching a ring: how many were set, how many of them a test's own keys (not one taken out), and a
+ * promise for the last one in.
+ */
+function wire(provider: BaseKeyProvider, ring: Ring) {
+  const seen = { sets: 0, keys: 0, last: Promise.resolve() };
+  provider.on(KeyProviderEvent.SetKey, (info: KeyInfo, update: boolean) => {
+    seen.sets += 1;
+    if (labelOf(info.key) !== "another key") seen.keys += 1;
+    seen.last = seen.last.then(() => ring.setKey(info.key, info.keyIndex, update));
+  });
+  return seen;
+}
+
+/**
+ * Which raw key a CryptoKey came from: every HKDF key imported while a test runs (`createKeyMaterialFromBuffer`), by
+ * its bytes in hex. The tests' keys are one byte 32 times; any other (the random key a slot is taken out with) reads
+ * as "another key".
+ */
+const imported = new WeakMap<CryptoKey, string>();
+const hex = (bytes: Uint8Array) => [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+const filled = (fill: number) => hex(new Uint8Array(32).fill(fill));
+const labelOf = (key: CryptoKey | undefined): string => {
+  const bytes = key && imported.get(key);
+  return bytes && /^(..)\1{31}$/.test(bytes) ? bytes : "another key";
+};
+
+beforeAll(async () => {
+  RingOf = (await import(/* @vite-ignore */ join(livekitE2ee, "worker/ParticipantKeyHandler.ts"))).ParticipantKeyHandler;
+});
+
+describe("a sealed call's keys in LiveKit's own key ring", () => {
+  const subtle = crypto.subtle as unknown as { importKey: (...args: unknown[]) => Promise<CryptoKey> };
+  const importKey = subtle.importKey;
+  beforeEach(() => {
+    subtle.importKey = async function (this: unknown, ...args: unknown[]) {
+      const key = await importKey.apply(this, args);
+      if (args[0] === "raw" && args[2] === "HKDF") imported.set(key, hex(new Uint8Array(args[1] as ArrayBuffer)));
+      return key;
+    };
+  });
+  afterEach(() => {
+    Reflect.deleteProperty(subtle, "importKey");
+    ringed.length = 0;
+  });
+
+  /** How long the key of the epoch before stays here in these tests (`PREVIOUS_KEY_MS` in the app). */
+  const WINDOW_MS = 300;
+  const ringed: { ring: Ring; seen: ReturnType<typeof wire> }[] = [];
+  /** The app's provider (`GroupCallKeyProvider`), and LiveKit's `ExternalE2EEKeyProvider`, each over its own ring. */
+  class RingedCallKeys extends GroupCallKeyProvider {
+    readonly ring = new RingOf("shared-key", this.getOptions());
+    readonly seen = wire(this, this.ring);
+    constructor() {
+      super(WINDOW_MS);
+      ringed.push(this);
+    }
+  }
+  class RingedExternal extends ExternalE2EEKeyProvider {
+    readonly ring = new RingOf("shared-key", this.getOptions());
+    readonly seen = wire(this, this.ring);
+    constructor() {
+      super();
+      ringed.push(this);
+    }
+    dispose() {}
+  }
+  const ringLivekit = { ...fakeLivekit, GroupCallKeyProvider: RingedCallKeys, ExternalE2EEKeyProvider: RingedExternal } as unknown as LivekitModule;
+  const loadRinged = async () => ringLivekit;
+  const seal = (epoch: number, fill: number) => ({ epoch, key: new Uint8Array(32).fill(fill) });
+  const props = (e2ee: ReturnType<typeof seal>) => ({ url: "wss://call.example", token: "pass", loadLivekit: loadRinged, e2ee });
+  /** The raw key (hex) in a ring's slot, once every key set so far is in. */
+  const inSlot = async ({ ring, seen }: (typeof ringed)[number], slot: number) => {
+    await seen.last;
+    const set = ring.getKeySet(slot);
+    return set ? labelOf(set.material) : "none";
+  };
+  /** The group moves to `e2ee`'s epoch: the call's `keys`-th key is in. */
+  const moved = async (hook: Awaited<ReturnType<typeof joined>>, e2ee: ReturnType<typeof seal>, keys: number) => {
+    hook.rerender(props(e2ee));
+    await waitFor(() => expect(ringed[0].seen.keys).toBe(keys));
+    await ringed[0].seen.last;
+  };
+
+  describe("useGroupCall at an epoch move", () => {
+    it("each epoch's key lands in its own slot, epoch % 16, and the newest is the one this device seals with", async () => {
+      const hook = await joined(props(seal(4, 0xa4)));
+      const [keys] = ringed;
+      expect(await inSlot(keys, 4)).toBe(filled(0xa4));
+      expect(keys.ring.getCurrentKeyIndex()).toBe(4);
+      await moved(hook, seal(5, 0xa5), 2);
+      expect(await inSlot(keys, 5)).toBe(filled(0xa5));
+      expect(keys.ring.getCurrentKeyIndex()).toBe(5);
+      expect(ringed).toHaveLength(1);
+    });
+
+    it("the key of the epoch before stays in its slot after a move: frames still sealed with it open", async () => {
+      const hook = await joined(props(seal(4, 0xa4)));
+      await moved(hook, seal(5, 0xa5), 2);
+      const [keys] = ringed;
+      // Both epochs' keys are in the ring (one slot, replaced, held only the newest)...
+      const ring = await Promise.all(Array.from({ length: CALL_KEY_SLOTS }, (_, slot) => inSlot(keys, slot)));
+      expect(ring.filter((k) => k !== "none")).toEqual([filled(0xa4), filled(0xa5)]);
+      // ...each at the slot its frames are tagged with.
+      expect(await inSlot(keys, 4)).toBe(filled(0xa4));
+      expect(await inSlot(keys, 5)).toBe(filled(0xa5));
+      expect(keys.ring.getCurrentKeyIndex()).toBe(5);
+    });
+
+    it("an epoch 16 later takes the same slot, and replaces the key there", async () => {
+      const hook = await joined(props(seal(4, 0xa4)));
+      await moved(hook, seal(5, 0xa5), 2);
+      await moved(hook, seal(20, 0xb4), 3);
+      const [keys] = ringed;
+      expect(callKeySlot(20)).toBe(4);
+      expect(await inSlot(keys, 4)).toBe(filled(0xb4));
+      expect(await inSlot(keys, 5)).toBe(filled(0xa5));
+      expect(keys.ring.getCurrentKeyIndex()).toBe(4);
+    });
+
+    it("the key of the epoch before is taken out after a moment, the slot sealed with unmoved", async () => {
+      const hook = await joined(props(seal(4, 0xa4)));
+      await moved(hook, seal(5, 0xa5), 2);
+      const [keys] = ringed;
+      await waitFor(() => expect(keys.seen.sets).toBe(3), { timeout: WINDOW_MS * 5 });
+      expect(await inSlot(keys, 4)).toBe("another key");
+      expect(await inSlot(keys, 5)).toBe(filled(0xa5));
+      expect(keys.ring.getCurrentKeyIndex()).toBe(5);
+    });
+  });
+
+  describe("GroupCallKeyProvider", () => {
+    const bytes = (fill: number) => new Uint8Array(32).fill(fill).buffer;
+    const events = (provider: BaseKeyProvider) => {
+      const out: { keyIndex?: number; current: boolean; key: string }[] = [];
+      provider.on(KeyProviderEvent.SetKey, (info: KeyInfo, current: boolean) => out.push({ keyIndex: info.keyIndex, current, key: labelOf(info.key) }));
+      return out;
+    };
+
+    it("is LiveKit's shared-key setup with a ring of 16: no ratchet, a failing key never marked invalid", () => {
+      expect(new GroupCallKeyProvider().getOptions()).toMatchObject({ sharedKey: true, ratchetWindowSize: 0, failureTolerance: -1, keyringSize: CALL_KEY_SLOTS });
+      expect(CALL_KEY_SLOTS).toBe(16);
+      expect(PREVIOUS_KEY_MS).toBe(10_000);
+      expect([0, 5, 15, 16, 31, 33].map(callKeySlot)).toEqual([0, 5, 15, 0, 15, 1]);
+    });
+
+    it("sets each epoch's key at its slot as the one to seal with; takes the one before out later, and older ones at once, without moving it", async () => {
+      const provider = new GroupCallKeyProvider(WINDOW_MS);
+      const seen = events(provider);
+      await provider.setEpochKey(4, bytes(4));
+      await provider.setEpochKey(5, bytes(5));
+      expect(seen).toEqual([{ keyIndex: 4, current: true, key: filled(4) }, { keyIndex: 5, current: true, key: filled(5) }]);
+      // Two moves in a row: the key before the one replaced goes at once.
+      await provider.setEpochKey(6, bytes(6));
+      expect(seen.slice(2)).toEqual([{ keyIndex: 6, current: true, key: filled(6) }, { keyIndex: 4, current: false, key: "another key" }]);
+      expect(provider.epoch).toBe(6);
+      await vi.waitFor(() => expect(seen).toHaveLength(5), { timeout: WINDOW_MS * 5 });
+      expect(seen[4]).toEqual({ keyIndex: 5, current: false, key: "another key" });
+      expect(provider.getLatestManuallySetKeyIndex()).toBe(6);
+    });
+
+    it("gives the ring as it is when the room connects again: the newest sealed with, a key taken out not back", async () => {
+      const provider = new GroupCallKeyProvider(WINDOW_MS);
+      await provider.setEpochKey(4, bytes(4));
+      await provider.setEpochKey(5, bytes(5));
+      await provider.setEpochKey(6, bytes(6));
+      // What LiveKit does at each signal connect (E2eeManager.ts:430-433), into a fresh worker's ring.
+      const ring = new RingOf("shared-key", provider.getOptions());
+      const latest = provider.getLatestManuallySetKeyIndex();
+      for (const info of provider.getKeys()) await ring.setKey(info.key, info.keyIndex, latest === (info.keyIndex ?? 0));
+      expect(ring.getCurrentKeyIndex()).toBe(6);
+      expect(labelOf(ring.getKeySet(6)?.material)).toBe(filled(6));
+      expect(labelOf(ring.getKeySet(5)?.material)).toBe(filled(5));
+      expect(labelOf(ring.getKeySet(4)?.material)).toBe("another key");
+      expect(ring.getKeySet(4)).toBeDefined();
+    });
+
+    it("takes nothing out once disposed (the call is over)", async () => {
+      const provider = new GroupCallKeyProvider(20);
+      const seen = events(provider);
+      await provider.setEpochKey(4, bytes(4));
+      await provider.setEpochKey(5, bytes(5));
+      provider.dispose();
+      await new Promise((done) => setTimeout(done, 150));
+      expect(seen).toHaveLength(2);
+    });
   });
 });
