@@ -102,9 +102,17 @@ export interface ApprovalRequest {
   notes?: readonly string[];
 }
 
+/** A signer's own wait for the person's approval ended (Pubky's relay forgot the request): a time-out, not a failure. */
+export class SignerTimeout extends Error {}
+
 export interface SignerContext {
   values: Record<string, string>;
   signal: AbortSignal;
+  /**
+   * How long the caller waits for the approval (the CLI's --timeout): a signer with a wait of its own takes this one,
+   * up to its `maxWaitMs`. Its own wait when absent (the app).
+   */
+  waitMs?: number;
   /** The signer asks the person to approve on a page (NIP-46 auth_url): the UI shows it as a link, never opens it itself. */
   onAuthUrl(url: string): void;
   onProgress(message: string): void;
@@ -148,6 +156,8 @@ interface SignerBase {
 export interface InAppSigner<E> extends SignerBase {
   kind: "in-app";
   fields?: readonly SignerField[];
+  /** The longest it can wait for an approval, whatever `waitMs` says (Pubky: its relay keeps a request five minutes). */
+  maxWaitMs?: number;
   /** Opens the signer, runs `work`, and always cleans up (closes connections, drops keys) before resolving. */
   run<T>(ctx: SignerContext, work: (session: SignerSession<E>) => Promise<T>): Promise<T>;
 }
