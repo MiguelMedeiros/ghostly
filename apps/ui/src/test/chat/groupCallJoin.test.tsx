@@ -16,7 +16,8 @@ import { renderApp } from "../render";
 /**
  * Join call in a group's header (WISP 602): only in a group with a call node, the pass asked of the engine
  * (`groupCallToken`), the room joined on a fake LiveKit (no WebRTC in the test DOM), the two refusals said apart with
- * Try again, the pass asked again before it runs out without leaving the room, and one call at a time with a 1:1 call.
+ * Try again, the pass asked again before it runs out without leaving the room, one call at a time with a 1:1 call, and
+ * off where this app cannot join one (the Linux Desktop).
  */
 
 vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
@@ -352,5 +353,46 @@ describe("Join call with Hide my IP from contacts on", () => {
     // Hide my IP off: Join call is back.
     act(() => fakeEngine.update({ settings: { ...fakeEngine.state.settings, relayOnly: false } }));
     expect(screen.getByTestId("group-call-join")).not.toHaveAttribute("aria-disabled");
+  });
+});
+
+describe("Join call where this app cannot join a group call", () => {
+  const LINUX_DESKTOP = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
+  const tauri = window as unknown as { __TAURI_INTERNALS__?: object };
+  afterEach(() => {
+    delete tauri.__TAURI_INTERNALS__;
+    Reflect.deleteProperty(navigator, "userAgent");
+  });
+
+  it("is off on the Linux Desktop, its ⓘ sending to the web app in a browser, and asks the node for nothing", async () => {
+    Object.defineProperty(navigator, "userAgent", { value: LINUX_DESKTOP, configurable: true });
+    tauri.__TAURI_INTERNALS__ = {};
+    const asked = vi.fn(() => pass());
+    answerPass(asked);
+    const { user } = joinButton();
+    const join = screen.getByTestId("group-call-join");
+    expect(join).toHaveAttribute("aria-disabled", "true");
+    expect(screen.queryByTestId("group-call-problem")).toBeNull();
+
+    await user.click(screen.getByTestId("group-call-unsupported-info"));
+    expect(screen.getByTestId("group-call-unsupported-info")).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("group-call-problem-notice-title")).toHaveTextContent("Group calls aren't on Linux yet: join from app.ghostly.tools in a browser");
+    expect(screen.queryByTestId("group-call-retry")).toBeNull();
+    await user.click(screen.getByTestId("group-call-unsupported-info"));
+    expect(screen.queryByTestId("group-call-problem")).toBeNull();
+
+    await user.click(join);
+    expect(screen.getByTestId("group-call-problem-notice-title")).toHaveTextContent("aren't on Linux yet");
+    expect(asked).not.toHaveBeenCalled();
+    expect(passAsks()).toHaveLength(0);
+    expect(screen.queryByTestId("group-call")).toBeNull();
+    expect(FakeRoom.rooms).toHaveLength(0);
+  });
+
+  it("is on in a browser on Linux, with no ⓘ", () => {
+    Object.defineProperty(navigator, "userAgent", { value: LINUX_DESKTOP, configurable: true });
+    joinButton();
+    expect(screen.getByTestId("group-call-join")).not.toHaveAttribute("aria-disabled");
+    expect(screen.queryByTestId("group-call-unsupported-info")).toBeNull();
   });
 });
