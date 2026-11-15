@@ -663,6 +663,15 @@ const RULES: readonly Rule[] = [
   { match: /^(?<domain>\S+) has no address$/, key: "errors.proof.noAddress", next: "errors.proof.noAddressNext", detail: true },
   { match: /^(?<domain>\S+) points to a private network address, so it was not contacted$/, key: "errors.proof.privateAddress", next: "errors.proof.privateAddressNext", detail: true },
   { match: /^[^:]+: (?<login>\S+) does not list the key that signed \([^)]*\)$/, key: "errors.proof.keyNotListed", detail: true },
+  // Add's refusals for an SSH key proof (providers/ssh.ts, core sshsig.ts): what is wrong with the key, the account or the
+  // pasted signature, then what to do. They read as they came, in English, in every language until 2026-11-15.
+  exact("Paste your public key (the one line in ~/.ssh/id_ed25519.pub) or its SHA256: fingerprint", "errors.proof.sshNotKey", "errors.proof.sshNotKeyNext"),
+  { match: /^Unsupported SSH key type(?: "[^"]*")?$/, key: "errors.proof.sshKeyType", next: "errors.proof.sshKeyTypeNext" },
+  { match: /^RSA keys must be (?<min>\d+)-(?<max>\d+) bits$/, key: "errors.proof.sshRsaSize", next: "errors.proof.sshRsaSizeNext" },
+  { match: /^Enter a (?<forge>GitHub|GitLab) username$/, key: "errors.proof.sshForgeLogin" },
+  exact("Paste the whole signature, from -----BEGIN SSH SIGNATURE----- to -----END SSH SIGNATURE-----", "errors.proof.sshWholeSignature", "errors.proof.sshWholeSignatureNext"),
+  { match: /^That signature is for "(?<namespace>[^"]*)", not "ghostly": run the command with -n ghostly$/, key: "errors.proof.sshNamespace", next: "errors.proof.sshNamespaceNext" },
+  exact("The signature is not over this statement: copy the command again and sign exactly what it shows", "errors.proof.sshNotStatement", "errors.proof.sshNotStatementNext"),
   // Why a contact's proof failed this app's check, the first time or on the daily re-check (verify.ts, the providers'
   // verify(), core identityProofs.ts onPresent), and the refusals a contact's app sends back for mine. The account,
   // host or domain stays a value; an address or status code goes behind the ⓘ.
