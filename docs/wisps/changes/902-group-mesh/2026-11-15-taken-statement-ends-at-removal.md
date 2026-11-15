@@ -1,0 +1,1 @@
+Metadata: the new admin's window for the former admin's statement still on its way also ends when the new admin removes that admin, so a former admin it removed cannot change the group's name, picture, hubs or call node through it. A leave does not end it: the member an admin hands its role to before leaving is the case the window is for. Nothing on the wire changes.

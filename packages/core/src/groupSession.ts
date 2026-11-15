@@ -991,6 +991,8 @@ export class GroupSession {
       this.requireAdmin();
       if (!rosterHas(this.roster, memberKey) || memberKey === this.myKey) throw new Error("Not a member");
       await this.commit("remove", memberKey, now, left);
+      // The admin before me, removed (not leaving, the case `takesOver` is for): what they sign is no longer taken.
+      if (!left && memberKey === this.takeover?.from) this.takeover = undefined;
     });
   }
 

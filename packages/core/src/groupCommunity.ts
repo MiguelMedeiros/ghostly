@@ -1737,6 +1737,8 @@ export class CommunitySession {
         const next = rosterHas(this.roster, memberKey) ? memberKey : this.admittedThrough(memberKey)[0];
         if (next === undefined) { if (first) throw new Error("Not a member"); return true; }
         await this.commit("remove", { s: next }, now);
+        // The admin before me, removed: what they sign is no longer taken (`takesOver`).
+        if (next === this.takeover?.from) this.takeover = undefined;
         return false;
       });
       if (done) return;
