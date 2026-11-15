@@ -1,10 +1,13 @@
-import { screen, within } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GroupCallView, type GroupCallParticipant, type GroupCallState } from "../../components/GroupCallView";
+import type { CallDevices, DeviceNotice } from "../../hooks/useCallDevices";
+import type { GroupCallError } from "../../hooks/useGroupCall";
+import { EMPTY_DEVICES } from "../../lib/mediaDevices";
 import { FakeTrack } from "../../../../../packages/react/test/fakes";
 import { axeViolations } from "../axe";
 import { renderApp } from "../render";
@@ -242,5 +245,119 @@ describe("what a screen reader hears", () => {
 
     rerender(draw(state(0, { participants: people("dee") }), true));
     expect(news()).toEqual(["Cy, Eli left"]);
+  });
+});
+
+describe("a mic, camera or screen that did not come on", () => {
+  const refused = (name: string) => Object.assign(new Error("Permission denied"), { name });
+  const micRefused = (): GroupCallError => ({ action: "mic", message: "Permission denied", cause: refused("NotAllowedError") });
+  const withError = (error: GroupCallError | null, props: Partial<Parameters<typeof GroupCallView>[0]> = {}, language?: "pt") => {
+    const handlers = { onToggleMic: vi.fn(), onToggleCamera: vi.fn(), onToggleScreen: vi.fn(), onLeave: vi.fn() };
+    const draw = (next: GroupCallError | null) => <GroupCallView call={state(2, { local: person("me", { mic: false }) })} groupName="Community" canShareScreen {...handlers} {...props} error={next} />;
+    const result = renderApp(draw(error), language && { language });
+    return { ...result, setError: (next: GroupCallError | null) => result.rerender(draw(next)) };
+  };
+
+  it("says a mic refused at the join as an alert, with where to allow it", async () => {
+    withError(micRefused());
+    const alert = screen.getByRole("alert");
+    expect(alert).toBe(screen.getByTestId("group-call-error"));
+    expect(alert).toHaveTextContent("No access to the micAllow access in your browser or system settings.");
+    expect(screen.getByRole("dialog", { name: "Community" })).toContainElement(alert);
+    expect(await axeViolations(screen.getByTestId("group-call"))).toEqual([]);
+  });
+
+  it("says a camera not found, and a screen share refused or not supported, in the 1:1 call's words", () => {
+    const { setError } = withError({ action: "camera", message: "Requested device not found", cause: refused("NotFoundError") });
+    expect(screen.getByRole("alert")).toHaveTextContent("No camera found, so video is offConnect one, or close the app using it.");
+    setError({ action: "screen", message: "Screen sharing is blocked. Allow screen recording for this app in your system's privacy settings.", cause: refused("NotAllowedError") });
+    expect(screen.getByRole("alert")).toHaveTextContent("Screen sharing is blocked. Allow screen recording for this app in your system's privacy settings.");
+    setError({ action: "screen", message: "Screen sharing is not available here" });
+    expect(screen.getByRole("alert")).toHaveTextContent(/^Screen sharing is not available here$/);
+  });
+
+  it("says one it does not know as it came, and in the small window too", () => {
+    withError({ action: "mic", message: "could not publish the track", cause: new Error("could not publish the track") }, { pinned: true });
+    expect(screen.getByTestId("group-call")).toHaveAttribute("data-mini", "true");
+    expect(screen.getByRole("alert")).toHaveTextContent(/^could not publish the track$/);
+  });
+
+  it("is said in the app's language", () => {
+    withError(micRefused(), {}, "pt");
+    expect(screen.getByRole("alert")).toHaveTextContent("Sem acesso ao microfonePermita o acesso nos ajustes do navegador ou do sistema.");
+  });
+
+  it("goes after a few seconds, is said anew at the next failed try, and goes when a try works", () => {
+    vi.useFakeTimers();
+    try {
+      const { setError } = withError(micRefused());
+      const first = screen.getByRole("alert");
+      act(() => { vi.advanceTimersByTime(7900); });
+      expect(screen.getByRole("alert")).toBe(first);
+      act(() => { vi.advanceTimersByTime(200); });
+      expect(screen.queryByRole("alert")).toBeNull();
+
+      // Pressed again, refused again: the same words, a new alert a screen reader says.
+      setError(micRefused());
+      const again = screen.getByRole("alert");
+      expect(again).toHaveTextContent("No access to the mic");
+      setError(micRefused());
+      expect(screen.getByRole("alert")).not.toBe(again);
+
+      setError(null);
+      expect(screen.queryByRole("alert")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("says nothing for a failed join: the call's button says that one", () => {
+    withError({ action: "join", message: "could not connect" });
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
+/** The call's devices as `useCallDevices` gives them, with `notice` up. */
+function devicesWith(notice: DeviceNotice | null): CallDevices {
+  return {
+    list: EMPTY_DEVICES, current: { audioinput: "", videoinput: "", audiooutput: "" }, speaker: undefined, speakers: false,
+    choose: vi.fn(), notice, dismiss: vi.fn(), switchBack: vi.fn(), hold: vi.fn(),
+  };
+}
+
+// A headset that drops mid-call switches the sound to the default: the group call says so, as the 1:1 does.
+describe("the group call's device notice", () => {
+  it("says a lost device in a status the screen reader reads, and closes by its ×", async () => {
+    const devices = devicesWith({ kind: "audioinput", type: "lost", name: "Headset" });
+    const { user } = view(state(1), { devices });
+    const notice = screen.getByTestId("call-device-notice");
+    expect(notice).toHaveAttribute("role", "status");
+    expect(within(screen.getByTestId("group-call")).getByTestId("call-device-notice")).toBe(notice);
+    expect(notice).toHaveTextContent("Headset");
+    await user.click(within(notice).getByRole("button", { name: "Close" }));
+    expect(devices.dismiss).toHaveBeenCalledOnce();
+  });
+
+  it("offers Switch back when the chosen device is back, its time held while the focus is on it", async () => {
+    const devices = devicesWith({ kind: "audioinput", type: "back", name: "Headset", id: "h1" });
+    const { user } = view(state(1), { devices });
+    await user.click(screen.getByTestId("call-device-switch-back"));
+    expect(devices.switchBack).toHaveBeenCalledOnce();
+    expect(devices.hold).toHaveBeenLastCalledWith(true);
+  });
+
+  it("gives the focus to Devices when it goes with the focus on Switch back", () => {
+    const devices = devicesWith({ kind: "audioinput", type: "back", name: "Headset", id: "h1" });
+    const { rerender } = view(state(1), { devices });
+    act(() => screen.getByTestId("call-device-switch-back").focus());
+    const handlers = { onToggleMic: vi.fn(), onToggleCamera: vi.fn(), onToggleScreen: vi.fn(), onLeave: vi.fn() };
+    rerender(<GroupCallView call={state(1)} groupName="Community" {...handlers} devices={{ ...devices, notice: null }} />);
+    expect(screen.queryByTestId("call-device-notice")).toBeNull();
+    expect(screen.getByTestId("call-devices")).toHaveFocus();
+  });
+
+  it("is not drawn in the small window, which has no room for it", () => {
+    view(state(1), { devices: devicesWith({ kind: "audioinput", type: "lost", name: "Headset" }), pinned: true });
+    expect(screen.queryByTestId("call-device-notice")).toBeNull();
   });
 });

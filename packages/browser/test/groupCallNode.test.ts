@@ -38,4 +38,18 @@ describe("a group's call node on headless community engines", { timeout: 120_000
 
     await expect(alice.groups.setCall("no-such-group", SFU)).rejects.toThrow("Group not found");
   });
+
+  it("sealed before anyone joins (the e2e's order: create, call --e2ee, link): a member who joins later sees e2ee: 1", async () => {
+    const SFU = "https://call.example.com";
+    const world = new CommunityWorld();
+    const alice = world.add("alice"), bob = world.add("bob");
+    const id = await alice.groups.create("Thursday");
+    await alice.groups.setCall(id, SFU, true);
+    const link = await alice.groups.enableLink(id);
+    expect(world.view(alice, id)?.call).toEqual({ sfu: SFU, e2ee: 1 });
+    await bob.groups.joinByLink(`https://app.ghostly.tools/#/join/${link}`);
+    await world.until(() => world.member(bob, id), 10 * 60_000);
+    await world.until(() => world.view(bob, id)?.call !== undefined, 60_000);
+    expect(world.view(bob, id)?.call).toEqual({ sfu: SFU, e2ee: 1 });
+  });
 });

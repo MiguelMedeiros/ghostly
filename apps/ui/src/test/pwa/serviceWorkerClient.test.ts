@@ -351,6 +351,21 @@ describe("a share, on the page's side", () => {
     expect(carryIncomingShare()).toBe(false);
   });
 
+  it("a share given back to the worker takes the count of those that could not be kept with it, the worker's and the picker's", () => {
+    listenForShares();
+    const say = (text: string, dropped?: number) => container.dispatchEvent(Object.assign(new Event("message"), { data: { type: "share", item: { title: "", text, url: "", files: [] }, ...(dropped && { dropped }) } }));
+    say("shown", 2);
+    for (const text of ["second", "third", "fourth"]) say(text);
+    expect(incomingShare()).toMatchObject({ text: "shown", dropped: 3 });
+    expect(carryIncomingShare()).toBe(true);
+    const kept = registration.active!.posted.filter((message) => (message as { type: string }).type === "share-keep");
+    expect(kept).toEqual([
+      { type: "share-keep", item: { title: "", text: "shown", url: "", files: [] }, dropped: 3 },
+      { type: "share-keep", item: { title: "", text: "second", url: "", files: [] } },
+      { type: "share-keep", item: { title: "", text: "third", url: "", files: [] } },
+    ]);
+  });
+
   it("a share into the same window replaces the page: the shares in its picker go back to the worker, once, ahead of the new one", async () => {
     listenForShares();
     await vi.waitFor(() => expect(registration.active!.posted).toHaveLength(1));

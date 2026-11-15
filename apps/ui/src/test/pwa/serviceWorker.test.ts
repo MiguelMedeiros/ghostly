@@ -532,6 +532,19 @@ describe("the shares the worker holds and forwards", () => {
     ]);
   });
 
+  it("a share given back with a count of those that could not be kept: the next page is told it, with any the worker dropped since", async () => {
+    const worker = await startWorker();
+    const leaving = page("a");
+    worker.say({ type: "share-keep", item: item("shown"), dropped: 2 }, leaving);
+    worker.say({ type: "share-keep", item: item("behind"), dropped: Number.NaN } as never, leaving);
+    const next = page("b");
+    worker.say({ type: "share-ready" }, next);
+    expect(next.heard).toEqual([
+      { type: "share", item: item("shown") },
+      { type: "share", item: item("behind"), dropped: 2 },
+    ]);
+  });
+
   it("a profile's push worker holds nothing", async () => {
     const worker = await startWorker("https://app.ghostly.tools/push/default/");
     worker.say({ type: "share-keep", item: { title: "", text: "hi", url: "", files: [] } }, page("a"));

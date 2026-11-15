@@ -1,20 +1,44 @@
 // A mock of a Ghostly node's group-call token route (WISP 602), in front of the e2e stack's LiveKit server (--dev).
 // It runs every check of WISP 602 § What the node checks, with a roster a test sets (PUT /test/roster/<g>) or the
 // environment gives (SFU_TOKEN_ROSTERS), and answers with a LiveKit access token signed by the dev key. node:crypto
-// only. It also serves a page with LiveKit's browser client (/smoke) for the stack's smoke spec.
+// only. It also serves a page with LiveKit's browser client (/smoke) for the stack's smoke spec, and for the group-call
+// spec's outsider: someone with a pass but not the group's call key, joining sealed with a key of its own.
 import { createRequire } from "node:module";
 import { createHmac, createPublicKey, verify } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ZBASE32 = "ybndrfg8ejkmcpqxot1uwisza345h769";
 const B64URL = /^[A-Za-z0-9_-]+$/;
 const LIMIT = 30, MINUTE = 60_000;
 
-/** A page that joins a room with a pass and publishes its camera; each remote camera plays in a <video data-identity>. */
+/**
+ * A page that joins a room with a pass and publishes its camera; each remote camera plays in a <video data-identity>.
+ * `joinSealed` joins with LiveKit's E2EE instead, the way the app does (the same livekit-client, its worker, a raw
+ * 32-byte key as HKDF material), under a key of its own, and publishes nothing; `window.sealErrors` counts the frames
+ * its worker could not open.
+ */
 const SMOKE = `<!doctype html><meta charset="utf-8"><title>SFU smoke</title><script src="/livekit-client.umd.js"></script>
 <script>
+window.joinSealed = async (url, token, key) => {
+  const { Room, RoomEvent, Track, ExternalE2EEKeyProvider } = LivekitClient;
+  const keyProvider = new ExternalE2EEKeyProvider();
+  await keyProvider.setKey(Uint8Array.from(atob(key.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0)).buffer);
+  const room = new Room({ adaptiveStream: false, encryption: { keyProvider, worker: new Worker("/livekit-client.e2ee.worker.js") } });
+  window.sealErrors = 0;
+  room.on(RoomEvent.EncryptionError, () => { window.sealErrors += 1; });
+  room.on(RoomEvent.TrackSubscribed, (track, _publication, participant) => {
+    if (track.kind !== Track.Kind.Video) return;
+    const video = track.attach();
+    video.dataset.identity = participant.identity;
+    document.body.append(video);
+  });
+  await room.setE2EEEnabled(true);
+  window.room = room;
+  await room.connect(url, token);
+};
 window.joinCall = async (url, token) => {
   const { Room, RoomEvent, Track } = LivekitClient;
   const room = new Room();
@@ -130,8 +154,9 @@ export function startTokenService({ port = 0, host = "127.0.0.1", origin, liveki
       return send(res, livekit ? 200 : 503, { ok: livekit, origin });
     }
     if (path === "/smoke") return res.writeHead(200, { "content-type": "text/html" }).end(SMOKE);
-    if (path === "/livekit-client.umd.js") {
-      const file = await Promise.resolve().then(() => readFile(createRequire(import.meta.url).resolve("livekit-client"))).catch(() => null);
+    if (path === "/livekit-client.umd.js" || path === "/livekit-client.e2ee.worker.js") {
+      const at = (umd) => (path === "/livekit-client.umd.js" ? umd : join(dirname(umd), "livekit-client.e2ee.worker.js"));
+      const file = await Promise.resolve().then(() => readFile(at(createRequire(import.meta.url).resolve("livekit-client")))).catch(() => null);
       return file ? res.writeHead(200, { "content-type": "text/javascript" }).end(file) : send(res, 404, { error: "livekit-client is not installed here" });
     }
     send(res, 404, { error: "not found" });
