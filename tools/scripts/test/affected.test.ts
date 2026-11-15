@@ -497,6 +497,7 @@ describe("fallbacks", () => {
     expect(byName(plan({ changed: changed("apps/ui/vitest.ui.config.ts"), inventory, e2eFiles }).unit).ui.mode).toBe("whole");
     expect(byName(plan({ changed: changed("apps/ui/src/test/setup.ts"), inventory, e2eFiles }).unit).ui.mode).toBe("whole");
     expect(plan({ changed: changed("eslint.config.mjs"), inventory, e2eFiles }).lint.mode).toBe("whole");
+    expect(plan({ changed: changed("tools/eslint/noGroupHas.mjs"), inventory, e2eFiles }).lint.mode).toBe("whole");
     expect(plan({ changed: changed("tsconfig.json"), inventory, e2eFiles }).typecheck.every((t) => t.mode === "run")).toBe(true);
     expect(plan({ changed: changed("e2e/playwright.config.ts"), inventory, e2eFiles }).e2e.mode).toBe("whole");
   });
