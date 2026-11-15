@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { MAX_AVATAR_LENGTH, MAX_AVATAR_SIDE, NO_PICTURE_METADATA, sanitizeAvatar, stripPictureMetadata } from "@ghostly/core";
+import { MAX_AVATAR_LENGTH, MAX_AVATAR_SIDE, MAX_GROUP_CALL_SFU, NO_PICTURE_METADATA, groupCallSfu, sanitizeAvatar, stripPictureMetadata } from "@ghostly/core";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { bool, contactKeyOf, groupById, groupNameOf, groupOf, node, ownChatOf, settingsOf, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError, localFileError } from "./errors";
@@ -82,6 +82,23 @@ export async function pictureFrom(path: string): Promise<string> {
 async function picture(params: Params): Promise<string | null> {
   if (bool(params, "clear")) return null;
   return pictureFrom(str(params, "path", true));
+}
+
+/**
+ * The node a group's calls go through (WISP 602): an https origin in its one spelling, refused here before anything is
+ * signed. A URL that names an https origin in another spelling (a path, a trailing `/`, capitals) is told that origin.
+ */
+function callNode(raw: string, ref: string, groupId: string): string {
+  const sfu = groupCallSfu(raw);
+  if (sfu) return sfu;
+  let origin: string | undefined;
+  try {
+    const url = new URL(raw);
+    if (url.protocol === "https:" && url.origin.length <= MAX_GROUP_CALL_SFU) origin = url.origin;
+  } catch { /* no URL at all */ }
+  throw new CliError("bad_request", origin
+    ? `${JSON.stringify(raw)} is not an origin (no path, query or trailing /): ghostly group call ${shellWord(ref, groupId)} --sfu ${origin}`
+    : `${JSON.stringify(raw)} is not an https origin: a call node is like https://call.example.com`);
 }
 
 /**
@@ -175,6 +192,14 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
     const group = joined(ctx, params);
     await node(ctx).setGroupPicture({ groupId: group.id, picture: await picture(params) });
     return { group: group.id, picture: !bool(params, "clear") };
+  },
+  async "group.call"(ctx, params) {
+    const group = joined(ctx, params);
+    if (group.profile !== "community") throw new CliError("refused", `${group.name} is a private group: only a community group has calls through a node`);
+    if (!group.isAdmin) throw new CliError("refused", `Only the admin of ${group.name} sets its call node`);
+    const sfu = bool(params, "clear") ? null : callNode(str(params, "sfu", true), str(params, "group", true), group.id);
+    await node(ctx).setGroupCall({ groupId: group.id, sfu });
+    return view(ctx, group.id, params);
   },
   async "profile.picture"(ctx, params) {
     const avatar = await picture(params);
