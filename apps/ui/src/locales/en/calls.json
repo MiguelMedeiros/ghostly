@@ -39,6 +39,8 @@
     "refused": "You're not let into this call yet",
     "retry": "Try again",
     "screenOf": "{{name}}'s screen",
+    "sealed": "Can't join sealed calls yet",
+    "sealedInfo": "The group's admin turned on end-to-end encryption for its calls. This app can't do that yet, so it won't send your voice and video to the group's node unsealed.",
     "unreachable": "Couldn't reach the group's call"
   },
   "incomingAudio": "Incoming audio call...",

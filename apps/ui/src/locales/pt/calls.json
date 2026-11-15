@@ -39,6 +39,8 @@
     "refused": "Você ainda não tem acesso a esta chamada",
     "retry": "Tentar de novo",
     "screenOf": "Tela de {{name}}",
+    "sealed": "Ainda não dá para entrar em chamadas cifradas",
+    "sealedInfo": "O admin do grupo ligou a criptografia de ponta a ponta nas chamadas. Este app ainda não consegue fazer isso, então não envia sua voz e seu vídeo sem cifra ao nó do grupo.",
     "unreachable": "Não foi possível alcançar a chamada do grupo"
   },
   "incomingAudio": "Chamada de áudio recebida...",

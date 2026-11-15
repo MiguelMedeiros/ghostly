@@ -39,6 +39,8 @@
     "refused": "Aún no tienes acceso a esta llamada",
     "retry": "Reintentar",
     "screenOf": "Pantalla de {{name}}",
+    "sealed": "Aún no puedes unirte a llamadas cifradas",
+    "sealedInfo": "El admin del grupo activó el cifrado de extremo a extremo en sus llamadas. Esta app aún no puede hacerlo, así que no envía tu voz ni tu video sin cifrar al nodo del grupo.",
     "unreachable": "No se pudo llegar a la llamada del grupo"
   },
   "incomingAudio": "Llamada de voz entrante...",

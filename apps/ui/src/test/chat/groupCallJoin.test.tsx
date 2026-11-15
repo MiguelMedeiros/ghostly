@@ -16,7 +16,8 @@ import { renderApp } from "../render";
 /**
  * Join call in a group's header (WISP 602): only in a group with a call node, the pass asked of the engine
  * (`groupCallToken`), the room joined on a fake LiveKit (no WebRTC in the test DOM), the two refusals said apart with
- * Try again, the pass asked again before it runs out without leaving the room, and one call at a time with a 1:1 call.
+ * Try again, the pass asked again before it runs out without leaving the room, one call at a time with a 1:1 call, and
+ * none in a group that asks for sealed call media, which this app cannot seal yet.
  */
 
 vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
@@ -186,6 +187,19 @@ describe("Join call in a group's header", () => {
     act(() => { endOtherCalls(other); });
     await waitFor(() => expect(screen.queryByTestId("group-call")).toBeNull());
     expect(FakeRoom.rooms[0].disconnect).toHaveBeenCalled();
+  });
+
+  it("stays off, saying why, in a group whose admin turned on sealed call media: this app cannot seal it (WISP 602)", async () => {
+    answerPass(() => pass());
+    const { user } = joinButton(community({ call: { ...CALL, e2ee: 1 } } as Partial<GroupView>));
+    await user.click(screen.getByTestId("group-call-join"));
+    expect(await screen.findByTestId("group-call-problem-notice-title")).toHaveTextContent("Can't join sealed calls yet");
+    await user.click(screen.getByTestId("group-call-problem-notice-info"));
+    expect(screen.getByTestId("group-call-problem-notice-why")).toHaveTextContent("end-to-end encryption");
+    expect(screen.queryByTestId("group-call-retry")).toBeNull();
+    expect(screen.getByTestId("group-call-join")).toHaveAttribute("aria-disabled", "true");
+    expect(passAsks()).toHaveLength(0);
+    expect(FakeRoom.rooms).toHaveLength(0);
   });
 
   it("names each tile by the group's own names, whatever name the node gave, and says who is not in the group", async () => {
