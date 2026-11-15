@@ -5379,11 +5379,13 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /**
-   * A file of mine said on the floor and deleted here before it went live: the floor stops saying it, and the next
-   * session that carries files/3 tells the contact's bubble it was cancelled (`sayWithdrawnFiles`).
+   * A file of mine said on the floor and deleted here before it went live: the floor stops saying it (`withdrawDht`: a
+   * new envelope without it takes its place, as for a text; only settled, the relays kept its offer for minutes and a
+   * contact who read them then got its bubble), and the next session that carries files/3 tells a bubble the contact
+   * already has that it was cancelled (`sayWithdrawnFiles`).
    */
   private async withdrawFloorFile(live: LiveLink, wireId: string): Promise<void> {
-    void live.link?.settleDht(dhtFileId(wireId)).catch(() => {});
+    await live.link?.withdrawDht(dhtFileId(wireId)).catch(() => {});
     live.stored = { ...live.stored, withdrawnFiles: [...(live.stored.withdrawnFiles ?? []).filter(id => id !== wireId), wireId].slice(-64) };
     await db.patchLink(live.stored.id, { withdrawnFiles: live.stored.withdrawnFiles });
   }
