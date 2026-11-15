@@ -3,7 +3,7 @@ import {
   EXPECT_PEER_MS, presenceSeenAt, groupName, knockIdentity, knockRecords, mentionsMember, pinIsNewer, readPin, receivedTimestamp, mergeKnocks, readKnocks, rosterAdmin, rosterHas, verifyCommitSignature, decodeCommunityLink, commitHash,
   CatchUpAnswers, GROUP_ADMIN_OFF_ERROR, GROUP_LIMITS, frameBytes, meshMessageRef, type GroupMessageFrame,
   GROUP_HAVE_FRAME, GROUP_VERSION_FILES, GROUP_WANT_FRAME, GROUP_WANT_NO_FRAME, type GroupFileMeta,
-  type GhostRecord, type PeerPresence, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type StatusCard, type WireReaction, type WirePin, type GroupPinFrame, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
+  type GhostRecord, type PeerPresence, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type StatusCard, type WireReaction, type WirePin, type GroupPinFrame, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMeta, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupLight, GroupLive, GroupView, MessagePage, OtherGroup, StoredGroup, StoredMessage, StoredPin } from "../shared/types";
 import type { Removal } from "./removals";
@@ -1395,6 +1395,13 @@ export class Groups {
     const session = this.sessions.get(groupId);
     if (session?.status !== "active") return undefined;
     return { me: session.myKey, community: false, onHubs: this.hubs.active(groupId, session, this.now()), inRoster: key => rosterHas(session.roster, key), couldRead: (key, messageId, ts) => session.couldRead(key, messageId, ts) };
+  }
+
+  /** Me in a group I am active in, private or community alike, for its call (WISP 602): my member key, its seed, and the admin's metadata. */
+  callMember(groupId: string): { key: string; seedB64: string; meta?: GroupMeta } | undefined {
+    if (this.isCommunity(groupId)) return this.communities.callMember(groupId);
+    const session = this.sessions.get(groupId);
+    return session?.status === "active" ? { key: session.myKey, seedB64: session.state.seedB64, meta: session.state.meta } : undefined;
   }
 
   /**
