@@ -451,6 +451,20 @@ describe("group call", () => {
     expect(setGroupCall).not.toHaveBeenCalled();
   });
 
+  it("refuses a profile out of the community with why, as rename and picture do, not as one who is not its admin", async () => {
+    // Before: "Only the admin of Thursday sets its call node" to a member removed, and to the admin who left it.
+    const { ctx, node } = fake();
+    for (const [status, statusReason, message] of [
+      ["removed", "You were removed from this group", "You were removed from this group"],
+      ["left", undefined, "You are not in this group"],
+    ] as const) {
+      node.getState = () => ({ links: [], groups: [{ ...thursday, isAdmin: false, status, statusReason }, group], settings: {}, transport: {} }) as unknown as EngineState;
+      for (const params of [{ sfu: SFU }, { clear: true }]) {
+        await expect(callApi(ctx, "group.call", { group: "Thursday", ...params }), status).rejects.toMatchObject({ code: "refused", message });
+      }
+    }
+  });
+
   it("refuses anything but an https origin in its one spelling before signing, naming the origin when there is one", async () => {
     const { ctx, setGroupCall } = community();
     for (const [sfu, message] of [
