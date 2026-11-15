@@ -151,8 +151,10 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
   }, [joined, groupId]);
 
   // A sealed call follows the group's epoch: each new one's key goes into the room (WISP 602 § End-to-end encryption).
-  // The group's view can name the epoch a moment before its secret is here: the key is asked again until it is.
+  // The group's view can name the epoch a moment before its secret is here: the key is asked again until it is, and
+  // once more when the view says the epoch can be read (`canSend`), however late its secret came after the retries.
   const epoch = group.epoch;
+  const readable = group.canSend;
   useEffect(() => {
     if (!joined || !sealed) return;
     let live = true, tries = 0;
@@ -165,7 +167,7 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
     };
     void ask();
     return () => { live = false; clearTimeout(timer); };
-  }, [joined, sealed, epoch, groupId]);
+  }, [joined, sealed, epoch, readable, groupId]);
 
   // On the app's calls while in the room: a 1:1 call answered meanwhile ("End and answer") leaves it.
   const on = !!joined && (call.status === "connecting" || call.status === "connected");
