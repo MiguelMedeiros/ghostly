@@ -100,6 +100,22 @@ describe("Join call in a group's header", () => {
     expect(passAsks()).toHaveLength(1);
   });
 
+  it("after the admin names another node, Join call asks it for a pass, not the old node's still held", async () => {
+    answerPass(() => pass());
+    const group = community();
+    const { user, rerender } = joinButton(group);
+    await user.click(screen.getByTestId("group-call-join"));
+    await waitFor(() => expect(FakeRoom.rooms[0]?.connect).toHaveBeenCalledWith("wss://sfu.ghostly.test", "pass-1", undefined));
+    await user.click(screen.getByTestId("group-call-leave"));
+    const moved = community({ call: { sfu: "https://call.example.com" } } as Partial<GroupView>);
+    answerPass(() => pass({ url: "wss://call.example.com", token: "pass-2" }));
+    fakeEngine.update({ groups: [moved] });
+    rerender(<GroupCallButton group={moved} loadLivekit={loadLivekit} />);
+    await user.click(screen.getByTestId("group-call-join"));
+    await waitFor(() => expect(FakeRoom.rooms[1]?.connect).toHaveBeenCalledWith("wss://call.example.com", "pass-2", undefined));
+    expect(passAsks()).toHaveLength(2);
+  });
+
   it("a refused pass says so in one line, Try again asks again and joins", async () => {
     answerPass(() => { throw new Error("The call node refused the pass (403)"); });
     const { user } = joinButton();
