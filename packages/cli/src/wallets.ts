@@ -234,7 +234,28 @@ const WALLET_REFUSALS: [RegExp, ErrorCode][] = [
   [/^Nothing to (reclaim|take back)$/, "refused"],
   [/^This request is no longer open$/, "refused"],
   [/^This invoice is already paid$/, "refused"],
+  // A request with a payment of mine on its way (ecash waiting on the contact's answer, Lightning at the mint) is not
+  // paid twice, and `payment check` of one with no invoice or address another wallet could pay has nothing to look at.
+  [/^You already paid this request$/, "refused"],
+  [/^A Lightning payment for this request is still pending$/, "refused"],
+  [/^This request cannot be paid from another wallet$/, "refused"],
 ];
+
+/** The engine's names of the ways of paying (payments.ts `METHOD_NAME`), as a person reads them. */
+const METHOD_NAMES: Record<string, string> = { cashu: "Cashu", lightning: "Lightning", arkade: "Ark", usdt: "USDT", bark: "Bark", bitcoin: "on-chain Bitcoin", fedimint: "Fedimint", spark: "Spark" };
+/** What the engine's payment desk says to a request that names where to pay (`target`): only its review pays it. */
+const REVIEW_FIRST = "Review and explicitly approve this payment before sending";
+
+/**
+ * A request paid only through a review the person approves (Ark, Spark, on-chain, USDT...): `chat pay-request` makes
+ * no review, so it is `unavailable`, naming the way of paying from the CLI's copy of the request and where to pay it.
+ * Before, `engine` in the app's words, which a bot may retry.
+ */
+function reviewOnly(request: PaymentView, error: unknown): unknown {
+  if (!(error instanceof Error) || error instanceof CliError || error.message !== REVIEW_FIRST) return error;
+  const name = request.target ? METHOD_NAMES[request.target.method] : undefined;
+  return new CliError("unavailable", `${name ? `This request is paid with ${name}` : "This request is paid through a review"}: chat pay-request cannot approve that payment, pay it in the app`);
+}
 
 const WALLET_NAMES: Record<WalletType, string> = { cashu: "Cashu", lightning: "Lightning", arkade: "Arkade", bark: "Bark", spark: "Spark", bitcoin: "Bitcoin", fedimint: "Fedimint", usdt: "USDT" };
 
@@ -472,7 +493,8 @@ const WALLETS: Record<string, Method> = {
     if (n === "mainnet" && !bool(params, "confirmReal")) throw new CliError("confirm", "This request is for real money (Mainnet): pass --confirm-real to confirm this payment", { network: n });
     const via = params.via === undefined ? undefined : oneOf(params, "via", ["lightning"] as const, "lightning");
     await federationsOpen(ctx);
-    await node(ctx).payRequest({ linkId: link.id, paymentId, network: n, ...(via ? { via } : {}), ...(params.maxFee !== undefined ? { maxFee: num(params, "maxFee", 0) } : {}), ...(card ? { card } : {}), ...real(params) });
+    await node(ctx).payRequest({ linkId: link.id, paymentId, network: n, ...(via ? { via } : {}), ...(params.maxFee !== undefined ? { maxFee: num(params, "maxFee", 0) } : {}), ...(card ? { card } : {}), ...real(params) })
+      .catch((error: unknown) => { throw reviewOnly(request, error); });
     return paymentJson(state(ctx).payments[paymentId] ?? request);
   },
 

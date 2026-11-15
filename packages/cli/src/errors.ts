@@ -65,6 +65,8 @@ const ENGINE_CODES: Record<string, ErrorCode> = {
   invalidMintUrl: "bad_request", mintNotHttps: "bad_request", invalidMaxFee: "bad_request",
   notEnoughSats: "refused", notEnoughForFee: "refused", mintsNoAnyAmount: "refused", ecashAlreadySpent: "refused", ecashFeeTakesAll: "refused", lightningRefused: "refused", contactNoWallet: "refused", contactNoPayments: "refused",
   serviceShareFull: "refused",
+  // A request that already has a payment of mine (a review approved or sent, ecash on its way) is not paid twice.
+  requestHasPayment: "refused", requestPaymentInFlight: "refused",
 };
 /** `details.reason` of an engine error a bot tells apart from others of its code. */
 const ENGINE_REASONS: Record<string, string> = { contactNoWallet: "contact_no_wallet", contactNoPayments: "contact_payments_off" };
