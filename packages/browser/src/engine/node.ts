@@ -6549,6 +6549,8 @@ export class GhostlyNode implements EngineImplementation {
   rotateGroup({ groupId }: { groupId: string }): Promise<void> { return this.groups.rotate(groupId); }
   setGroupPicture({ groupId, picture }: { groupId: string; picture: string | null }): Promise<void> { return this.groups.setPicture(groupId, picture); }
   renameGroup({ groupId, name }: { groupId: string; name: string }): Promise<void> { return this.groups.rename(groupId, name); }
+  /** The admin of a community group names the node that forwards its calls, or removes it with null (WISP 602). */
+  setGroupCall({ groupId, sfu }: { groupId: string; sfu: string | null }): Promise<void> { return this.groups.setCall(groupId, sfu); }
   forgetGroup({ groupId }: { groupId: string }): Promise<void> { this.groupEdits.forget(groupId); return this.groups.forget(groupId); }
 
   /**

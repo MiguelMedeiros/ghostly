@@ -575,7 +575,7 @@ export class Communities {
     const former = Object.entries(s.state.nicks).filter(([key]) => !inRoster.has(key));
     return [{ ...base, name: s.name, ...(former.length ? { formerNames: Object.fromEntries(former) } : {}), status: s.status, statusReason: s.state.statusReason, epoch: s.epoch, myKey: s.myKey, isAdmin: s.isAdmin,
       ...(s.isMember && s.entryKey ? { entryLink: encodeCommunityLink({ g: s.id, host: s.entryKey }) } : {}),
-      canSend: s.canSend, ...(s.picture ? { picture: s.picture } : {}), ...(invitation ? { invitation } : {}),
+      canSend: s.canSend, ...(s.picture ? { picture: s.picture } : {}), ...(invitation ? { invitation } : {}), ...(s.call ? { call: s.call } : {}),
       // Not an edge to one whose leave I hold, which its app keeps a while after it left (`leftBehind`): it carries nothing.
       community: { hub: live.hub, hubs: hubs.length, connected: [...edges.keys()].filter(key => ready(key) && !this.gone(live, key)).length, ...(s.isAdmin && live.unansweredTold && { unansweredKnocks: live.unanswered!.size }) },
       members: roster.map(([key, role]) => ({ key, role, me: key === s.myKey,
@@ -956,6 +956,7 @@ export class Communities {
   // message dated after it.
   async setPicture(groupId: string, picture: string | null): Promise<void> { await this.require(groupId).setPicture(picture, this.now()); }
   async rename(groupId: string, name: string): Promise<void> { await this.require(groupId).rename(name, this.now()); }
+  async setCall(groupId: string, sfu: string | null): Promise<void> { await this.require(groupId).setCall(sfu, this.now()); }
   /** A new link (the old one reaches nobody), or none. */
   async replaceLink(groupId: string, off = false): Promise<string> {
     const s = this.require(groupId);

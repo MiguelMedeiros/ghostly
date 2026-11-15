@@ -273,6 +273,8 @@ const RULES: readonly Rule[] = [
   exact("Could not share the screen. Try again.", "calls.share.failed", "calls.share.failedNext"),
   exact("Your contact's app cannot show a screen in this call", "calls.share.contactCannot"),
   exact("Screen sharing is not available on Linux yet", "calls.share.notOnLinux"),
+  // Why a group's call button is off on the Linux Desktop (apps/ui/src/desktop/nativeCalls.ts `groupCallSupport`).
+  exact("Group calls aren't on Linux yet: join from app.ghostly.tools in a browser", "calls.noGroupOnLinux"),
   exact("All native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now.", "errors.transport.slotsFull", "errors.transport.slotsFullNext"),
   // Its listener, which did not start or stopped (packages/browser/src/platform: hyperdhtRelay.ts, irohWeb.ts; the
   // Iroh WASM's own, native/transports/iroh-web/src/lib.rs). A browser sees no status on a refused WebSocket, so a
