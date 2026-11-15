@@ -63,16 +63,18 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
    */
   const [profileName] = useState(() => baseProfileName(currentProfile().id) ?? currentProfile().name);
 
-  // While an enrollment runs, its state is read twice a second.
+  // While an enrollment runs, its state is read twice a second. One that ended (added or failed) changes no more, and
+  // Try again's new code starts the reads again; a dialog left open on the outcome reads nothing.
+  const running = step === "enroll" && !!view && view.step !== "done" && view.step !== "failed";
   useEffect(() => {
-    if (step !== "enroll") return;
+    if (!running) return;
     const timer = setInterval(() => void engine.call("deviceEnrollView").then((next) => {
       if (!next || dismissed.current) return;
       ended.current = next.step === "done" || next.step === "failed";
       setView(next);
     }, () => {}), 500);
     return () => clearInterval(timer);
-  }, [step]);
+  }, [running]);
   // The password form, They match or Try again went away with its step: the focus stays in the dialog.
   useEffect(() => { if (step === "enroll") keepFocusIn(body.current); }, [step, view?.step, busy]);
   // Closed before it ended: the code is spent, and nothing was added.
