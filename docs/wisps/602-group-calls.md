@@ -145,7 +145,9 @@ where the epoch secret is the 32-byte secret of the newest commit on the member'
 
 ## Removal
 
-A member taken out of the roster gets no new token: check 5 refuses it. A participant already in the room may stay until its token expires; the node may remove it from the room when it takes the commit, and this revision does not require it.
+A member taken out of the roster gets no new token: check 5 refuses it. That does not end a stay already begun: the token is checked only when a participant joins, and LiveKit sends a connected participant fresh tokens, which its client also uses to reconnect, so a participant already in the room stays until it leaves or the node removes it. `expiresIn` bounds only a new join.
+
+So the node SHOULD remove from `"g_" + g` every participant whose identity is no longer in its roster of `g`, as soon as it takes the commit that takes that key out (with LiveKit, `RoomService.RemoveParticipant` with that identity). A node that cannot tell yet whether a key is in the roster (its roster could not be read) keeps the participant and asks again later. Ghostly's own app leaves the call by itself when its group is no longer active; this is for a client that does not, or one that missed the commit.
 
 ## Compatibility
 
@@ -157,7 +159,6 @@ The node learns who joins the call, when, from which address, and the name it gi
 
 ## Open decisions
 
-- Removing a removed member's live participant from the room at once, not when its token expires.
 - Turning end-to-end encryption on by default once every client that can join supports it.
 - Group calls in `group-mesh/1` groups.
 
