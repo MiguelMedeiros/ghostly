@@ -1,11 +1,26 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fire, settle, type FakeWorld } from "./fakeChrome";
 import { resetEngine } from "./fakeEngine";
+import { toZ32, viewerTag } from "@ghostly/core";
+import { OPENED_KEY } from "../../ui/src/lib/openedServices";
 import { OTHER_PEER, OTHER_TAG, PEER, SERVICE, TAG, bootExtension, useProfile } from "./extension";
 
 // covers: services.open
 
 vi.mock("@ghostly/browser/engine/server", async () => (await import("./fakeEngine")).engineServerModule);
+// The chats the page's peer sends it, with the apps each contact lists.
+const pageEngine = vi.hoisted(() => {
+  const listeners = new Set<() => void>();
+  type Link = { myPubKeyZ32: string; peerPubKeyZ32: string; peerServices: { id: string }[] | null };
+  return {
+    state: null as null | { links: Link[] },
+    subscribe(listener: () => void) { listeners.add(listener); return () => listeners.delete(listener); },
+    linkByPeer: () => undefined,
+    send(links: Link[]) { pageEngine.state = { links }; for (const listener of [...listeners]) listener(); },
+    reset() { pageEngine.state = null; listeners.clear(); },
+  };
+});
+vi.mock("@ghostly/browser/platform/engine", async (original) => ({ ...(await original<object>()), engine: pageEngine }));
 
 /** What a contact's app may have kept on its viewer origin: everything Chrome lets an extension clear for one. */
 const KEPT = { cookies: true, localStorage: true, indexedDB: true, cacheStorage: true, serviceWorkers: true, fileSystems: true, cache: true };
@@ -16,6 +31,7 @@ let world: FakeWorld;
 
 beforeEach(async () => {
   resetEngine();
+  pageEngine.reset();
   world = await bootExtension();
 });
 
@@ -51,6 +67,50 @@ describe("what a contact's app kept in its viewer tab", () => {
     // Cleared once: a second Delete of the same chat has nothing left to clear.
     await forgetServicesOf({ tag: TAG });
     expect(removed()).toHaveLength(2);
+  });
+
+  it("goes with its chat and its profile though no list noted it open: every app the chat lists is noted", async () => {
+    // Opened before this version kept its list: only the chat's list of apps names it.
+    const { forgetServicesOf } = await page();
+    const me = OTHER_PEER;
+    pageEngine.send([
+      { myPubKeyZ32: me, peerPubKeyZ32: PEER, peerServices: [{ id: SERVICE }, { id: "notes" }] },
+      { myPubKeyZ32: PEER, peerPubKeyZ32: OTHER_PEER, peerServices: null },
+    ]);
+    // The same list again, with every state: noted once.
+    pageEngine.send([{ myPubKeyZ32: me, peerPubKeyZ32: PEER, peerServices: [{ id: SERVICE }, { id: "notes" }] }]);
+
+    await forgetServicesOf({ tag: viewerTag(me) });
+    expect(removed()).toEqual([[{ origins: [origin(PEER, viewerTag(me))] }, KEPT], [{ origins: [origin(PEER, viewerTag(me), "notes")] }, KEPT]]);
+
+    pageEngine.send([{ myPubKeyZ32: me, peerPubKeyZ32: PEER, peerServices: [{ id: "chess" }] }]);
+    await forgetServicesOf({ profile: "" });
+    expect(removed()).toHaveLength(3);
+    expect(removed()[2]).toEqual([{ origins: [origin(PEER, viewerTag(me), "chess")] }, KEPT]);
+  });
+
+  it("a page reads and writes the list once for all the apps its chats list, not once per app", async () => {
+    // Each read checks every entry's address: once per app, a page's first state would cost the square of them.
+    const { forgetServicesOf } = await page();
+    const key = (n: number) => toZ32(new Uint8Array(32).fill(n));
+    const links = Array.from({ length: 20 }, (_, i) => ({ myPubKeyZ32: key(i + 1), peerPubKeyZ32: key(i + 101), peerServices: [{ id: SERVICE }, { id: "notes" }] }));
+    const reads = vi.spyOn(localStorage, "getItem");
+    const writes = vi.spyOn(localStorage, "setItem");
+    const ofList = (spy: typeof reads | typeof writes) => spy.mock.calls.filter(([k]) => k === OPENED_KEY).length;
+    pageEngine.send(links);
+    expect([ofList(reads), ofList(writes)]).toEqual([1, 1]);
+
+    // The next page, with all of them on the list already: one read, nothing to write.
+    pageEngine.reset();
+    vi.resetModules();
+    await page();
+    reads.mockClear();
+    writes.mockClear();
+    pageEngine.send(links);
+    expect([ofList(reads), ofList(writes)]).toEqual([1, 0]);
+
+    await forgetServicesOf({ profile: "" });
+    expect(removed()).toHaveLength(40);
   });
 
   it("a viewer tab whose debugger was cancelled still closes before its origin is cleared", async () => {

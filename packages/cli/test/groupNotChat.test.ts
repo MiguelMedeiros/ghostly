@@ -231,4 +231,11 @@ describe("a hint naming a group a shell would expand", () => {
   it("message delete Crew keeps the name alone when --everyone takes it as the group", async () => {
     expect(await offered(call("Crew")("chat.delete", { chat: "Crew", message: "m1" }))).toEqual(["ghostly", "message", "delete", "Crew", "m1", "--everyone"]);
   });
+
+  it("message delete <group> <message> --purge keeps --purge in the command offered", async () => {
+    // Pasted without it, the message went for everyone and its text stayed in the profile's folder up to an hour.
+    expect(await offered(call("Crew")("chat.delete", { chat: "Crew", message: "m1", purge: true }))).toEqual(["ghostly", "message", "delete", "Crew", "m1", "--everyone", "--purge"]);
+    expect(await offered(call("Crew")("chat.delete", { chat: "group:Crew", message: "m1", purge: true }))).toEqual(["ghostly", "message", "delete", "group:Crew", "m1", "--everyone", "--purge"]);
+    expect(await offered(call("Crew")("chat.delete", { chat: "Crew", message: "m1", purge: false }))).toEqual(["ghostly", "message", "delete", "Crew", "m1", "--everyone"]);
+  });
 });

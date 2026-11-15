@@ -1,6 +1,6 @@
-import { screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { useLocation } from "react-router-dom";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PaymentReview } from "@ghostly/core";
 import { ETHEREUM_USDT, SEPOLIA_TEST_USDT } from "@ghostly/core";
 import { MessageBubble } from "../../components/MessageBubble";
@@ -8,8 +8,8 @@ import type { ChatMessage } from "../../lib/types";
 import type { NetworkWalletsView, WalletView } from "@ghostly/browser/shared/types";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
-import { BARK_TESTNET, BC1Q, EVM, arkadeAddress, bcrt1q, bolt12Offer, TB1Q } from "./moneyFormatFixtures";
-import { REGTEST_INVOICE } from "./fixtures";
+import { BARK_TESTNET, BC1Q, EVM, arkadeAddress, bcrt1q, bolt12Offer, corrupt, TB1Q, XMR_MAINNET, XMR_STAGENET, XMR_STAGENET_SUBADDRESS } from "./moneyFormatFixtures";
+import { MAINNET_INVOICE, REGTEST_INVOICE } from "./fixtures";
 
 // covers: payments.money.onchain-card, payments.money.bolt12-card, payments.money.ark-card, payments.money.usdt-card, payments.money.network
 
@@ -212,5 +212,268 @@ describe("a USDT address", () => {
     bubble(`USDT please ethereum:0x1c7d4b196cb0c7b01d743fbc6116a902379c7238@11155111/transfer?address=${EVM}&uint256=2500000`);
     expect(screen.queryByTestId("usdt-bubble")).toBeNull();
     expect(screen.queryByTestId("money-amount")).toBeNull();
+  });
+});
+
+// covers: payments.money.onchain-card, payments.money.bolt12-card, payments.money.usdt-card, payments.money.monero-card, app.i18n
+describe("in Arabic, a pasted money card keeps its amount whole and its words in their own direction", () => {
+  /**
+   * In Arabic the pasted money cards read as the Lightning invoice's card does (InvoiceBubble): only the number is
+   * isolated, so the unit stays in the line's direction, and what someone else wrote keeps its own direction. A bare
+   * number glued to "sats تجريبية" was one left-to-right run with "sats", read "sats 12,345 تجريبية" from the right, and a
+   * label "1 cup coffee" read "cup coffee 1".
+   */
+  const MEMO = "1 cup coffee";
+
+  function bubble(text: string) {
+    return renderApp(<MessageBubble message={{ id: "m1", text, sender: "peer", timestamp: 1_700_000_000_000 }} peerPubKey="peer" />, { language: "ar" });
+  }
+
+  beforeEach(() => fakeEngine.reset());
+
+  it("a bitcoin: link", () => {
+    bubble(`bitcoin:${bcrt1q()}?amount=0.00012345&label=${encodeURIComponent(MEMO)}`);
+    const card = screen.getByTestId("onchain-bubble");
+    expect(within(card).getByTestId("money-amount").tagName).toBe("BDI");
+    expect(within(card).getByText(MEMO)).toHaveAttribute("dir", "auto");
+  });
+
+  it("a BOLT 12 offer", () => {
+    bubble(bolt12Offer({ chains: ["regtest"], amountMsat: 21_000_000, description: MEMO }));
+    const card = screen.getByTestId("bolt12-bubble");
+    expect(within(card).getByTestId("money-amount").tagName).toBe("BDI");
+    expect(within(card).getByText(MEMO)).toHaveAttribute("dir", "auto");
+  });
+
+  it("a USDT link", () => {
+    bubble(`ethereum:${SEPOLIA_TEST_USDT}@11155111/transfer?address=${EVM}&uint256=2.5e6`);
+    expect(within(screen.getByTestId("usdt-bubble")).getByTestId("money-amount").tagName).toBe("BDI");
+  });
+
+  it("a monero: link", () => {
+    bubble(`monero:${XMR_STAGENET}?tx_amount=0.25&tx_description=${encodeURIComponent(MEMO)}`);
+    const card = screen.getByTestId("monero-bubble");
+    expect(within(card).getByTestId("money-amount").tagName).toBe("BDI");
+    expect(within(card).getByText(MEMO)).toHaveAttribute("dir", "auto");
+  });
+});
+
+// covers: payments.money.onchain-card, payments.money.bolt12-card
+describe("Copy on money in a message", () => {
+  /**
+   * Copy on money in a message. What is copied is pasted into another wallet, so "Copied" is only said once it is: when
+   * the copy is refused the clipboard still holds what was there before (maybe another address), and the card says so
+   * and shows the text to select.
+   */
+  const message = (text: string): ChatMessage => ({ id: "m1", text, sender: "peer", timestamp: 1_700_000_000_000 });
+  const bubble = (text: string) => renderApp(<MessageBubble message={message(text)} peerPubKey="peer" />);
+  const TOKEN = "cashuB" + "o".repeat(40);
+  const ADDRESS = "satoshi@example.com";
+
+  /** The browser refuses the copy: no permission, or the page lost the focus. The older route is refused too. */
+  const refuse = () => {
+    vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new DOMException("Write permission denied.", "NotAllowedError"));
+    document.execCommand = vi.fn(() => false);
+  };
+
+  beforeEach(() => {
+    fakeEngine.reset();
+    fakeEngine.on("walletInspectCashu", () => ({ inspection: { kind: "token", amount: 100, unit: "sat", mint: "https://mint.example.com", accepted: true } }));
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  const CARDS: [string, () => string, string, string, () => string][] = [
+    ["a Lightning invoice", () => MAINNET_INVOICE, "invoice-bubble", "Copy", () => MAINNET_INVOICE],
+    ["a Lightning address", () => ADDRESS, "lnurl-bubble", "Copy", () => ADDRESS],
+    ["an ecash token", () => TOKEN, "cashu-token-bubble", "Copy", () => TOKEN],
+    ["a Bitcoin address", () => TB1Q, "onchain-bubble", "Copy address", () => TB1Q],
+    ["a BOLT12 offer", () => bolt12Offer({ description: "tips" }), "bolt12-bubble", "Copy offer", () => bolt12Offer({ description: "tips" })],
+    ["an Ark address", () => arkadeAddress(), "ark-bubble", "Copy address", () => arkadeAddress()],
+  ];
+
+  it.each(CARDS)("%s: a refused copy says so, never Copied, and shows the text to select", async (_, text, testId, name, value) => {
+    const { user } = bubble(text());
+    const card = await screen.findByTestId(testId);
+    refuse();
+    await user.click(within(card).getByRole("button", { name }));
+    expect(await within(card).findByTestId("money-copy-error")).toHaveTextContent("Could not copy. Select the text and copy it yourself.");
+    expect(within(card).queryByRole("button", { name: "Copied" })).not.toBeInTheDocument();
+    expect(within(card).getByTestId("money-copy-text")).toHaveTextContent(value());
+  });
+
+  it.each(CARDS)("%s: a copy that worked says Copied, with no error", async (_, text, testId, name, value) => {
+    const { user } = bubble(text());
+    const card = await screen.findByTestId(testId);
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+    await user.click(within(card).getByRole("button", { name }));
+    expect(await within(card).findByRole("button", { name: "Copied" })).toBeInTheDocument();
+    expect(writeText).toHaveBeenCalledWith(value());
+    expect(within(card).queryByTestId("money-copy-error")).not.toBeInTheDocument();
+    expect(within(card).queryByTestId("money-copy-text")).not.toBeInTheDocument();
+  });
+
+  it("a copy that works after a refused one takes the error away", async () => {
+    const { user } = bubble(TB1Q);
+    const card = await screen.findByTestId("onchain-bubble");
+    refuse();
+    await user.click(within(card).getByRole("button", { name: "Copy address" }));
+    await within(card).findByTestId("money-copy-error");
+    vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+    await user.click(within(card).getByRole("button", { name: "Copy address" }));
+    expect(await within(card).findByRole("button", { name: "Copied" })).toBeInTheDocument();
+    expect(within(card).queryByTestId("money-copy-error")).not.toBeInTheDocument();
+  });
+});
+
+// covers: payments.money.onchain-card, payments.money.bolt12-card, payments.uri
+describe("Open in wallet on a payment in a message", () => {
+  /**
+   * "Open in wallet" on a payment in a message. In Desktop's WKWebView (and an extension page) a `lightning:` or
+   * `bitcoin:` link goes nowhere, so the link asks the platform to open it (`openPaymentLink`), as Pay externally's
+   * does. The macOS WKWebView itself is proven in e2e/desktop-macos/payment-links.spec.ts.
+   */
+  const message = (text: string): ChatMessage => ({ id: "m1", text, sender: "peer", timestamp: 1_700_000_000_000 });
+  const bubble = (text: string) => renderApp(<MessageBubble message={message(text)} peerPubKey="peer" />);
+  const BIP21 = `bitcoin:${TB1Q}?amount=0.0001&label=Coffee`;
+
+  /** Clicks the link as a person would, and says whether the page was left to follow it. */
+  const click = (link: HTMLElement) => fireEvent.click(link);
+
+  beforeEach(() => fakeEngine.reset());
+
+  it.each([
+    ["a Bitcoin payment link", BIP21, "onchain-open-wallet", BIP21],
+    ["a Bitcoin address", TB1Q, "onchain-open-wallet", `bitcoin:${TB1Q}`],
+    ["a BOLT12 offer", "", "bolt12-open-wallet", ""],
+  ])("%s: the desktop app and the extension hand the link to the system", async (_, text, testId, expected) => {
+    const offer = bolt12Offer({ description: "tips" });
+    const open = vi.fn(async () => {});
+    fakeEngine.openPaymentLink = open;
+    bubble(text || offer);
+    const link = await screen.findByTestId(testId);
+    const uri = expected || `lightning:${offer}`;
+    expect(link).toHaveAttribute("href", uri);
+    expect(click(link)).toBe(false);
+    expect(open).toHaveBeenCalledWith(uri);
+  });
+
+  it("a test-money link hands out no real-money leg: the QR and Open in wallet carry what the card shows", async () => {
+    const mainnetInvoice = "lnbc21u1p42mkf2dqqpp56q3d9mfahf0974jqwy0yyfrg7zxksgxk7ufcc084yydhfx43daqqsp59g4z52329g4z52329g4z52329g4z52329g4z52329g4z52329g4q9qrsgqcqzyskhkhqar4dqgqfmarvdttr8x2nrp4txtamfupfftrnn4hmrp7s8ayen7hp2ye58jq8zu65rch9eplpxkhf3pf2nvuynhqxvkw5f7a2vgq486x8x";
+    bubble(`pay me here bitcoin:${TB1Q}?amount=0.00001&lightning=${mainnetInvoice}`);
+    expect(await screen.findByTestId("onchain-open-wallet")).toHaveAttribute("href", `bitcoin:${TB1Q}?amount=0.00001`);
+    expect(screen.queryByTestId("onchain-lightning")).toBeNull();
+    expect(document.body.innerHTML).not.toContain("lnbc");
+  });
+
+  it.each([
+    ["written plainly", `bitcoin:${TB1Q}?amount=0.0001&label=Bob%27s%20(Tue)&message=Thanks!*~`],
+    ["percent-encoded", `bitcoin:${TB1Q}?amount=0.0001&label=Bob%27s%20%28Tue%29&message=Thanks%21%2A%7E`],
+  ])("a label and message with ' ( ) ! * ~ (%s) make a link the desktop app and the extension open", async (_, text) => {
+    const open = vi.fn(async () => {});
+    fakeEngine.openPaymentLink = open;
+    bubble(text);
+    const link = await screen.findByTestId("onchain-open-wallet");
+    const uri = `bitcoin:${TB1Q}?amount=0.0001&label=Bob%27s%20%28Tue%29&message=Thanks%21%2A%7E`;
+    expect(link).toHaveAttribute("href", uri);
+    // The card reads them as they were written.
+    expect(document.body.textContent).toContain("Bob's (Tue)");
+    // What the extension (apps/extension/src/background.ts) and Desktop (apps/desktop/src/commands.rs is_payment_link)
+    // agree to open: anything else is refused, and the person reads "Couldn't open a wallet".
+    expect(uri).toMatch(/^(lightning|bitcoin):[A-Za-z0-9?=&%.:_-]{1,4096}$/);
+    click(link);
+    expect(open).toHaveBeenCalledWith(uri);
+  });
+
+  it("on a web page the browser follows the link itself", async () => {
+    bubble(BIP21);
+    const link = await screen.findByTestId("onchain-open-wallet");
+    expect(click(link)).toBe(true);
+  });
+
+  it("a wallet that cannot be opened says so beside the link", async () => {
+    fakeEngine.openPaymentLink = vi.fn(async () => { throw new Error("Not a payment link"); });
+    bubble(BIP21);
+    click(await screen.findByTestId("onchain-open-wallet"));
+    expect(await screen.findByTestId("onchain-open-wallet-error")).toHaveTextContent("Couldn't open a wallet" + "Copy the text or scan the code instead.");
+  });
+});
+
+// covers: payments.money.monero-card
+describe("a Monero address or monero: link in a message", () => {
+  const message = (text: string, patch: Partial<ChatMessage> = {}): ChatMessage => ({ id: "m1", text, sender: "peer", timestamp: 1_700_000_000_000, ...patch });
+  const bubble = (text: string, patch: Partial<ChatMessage> = {}) => renderApp(<MessageBubble message={message(text, patch)} peerPubKey="peer" />);
+
+  beforeEach(() => fakeEngine.reset());
+
+  it("shows the amount in XMR, the description, the full address, and Pay opens the link in the person's own wallet", async () => {
+    const link = `monero:${XMR_MAINNET}?tx_amount=0.25&recipient_name=Bob&tx_description=Rent%20May`;
+    const { user } = bubble(`rent: ${link}`);
+    const card = screen.getByTestId("monero-bubble");
+    expect(card).toHaveTextContent("Monero");
+    expect(within(card).getByTestId("money-network")).toHaveTextContent("Real money");
+    expect(within(card).getByTestId("money-amount")).toHaveTextContent("0.25");
+    expect(card).toHaveTextContent("XMR");
+    expect(card).toHaveTextContent("Bob");
+    expect(card).toHaveTextContent("Rent May");
+    expect(within(card).getByTestId("money-detail")).toHaveTextContent(XMR_MAINNET);
+    expect(screen.getByText("rent:")).toBeInTheDocument();
+
+    // A plain link on the web: the browser hands it to the wallet app.
+    const pay = within(card).getByTestId("monero-pay");
+    expect(pay).toHaveTextContent("Pay");
+    expect(pay).toHaveAttribute("href", `monero:${XMR_MAINNET}?tx_amount=0.25&recipient_name=Bob&tx_description=Rent%20May`);
+    expect(pay).not.toHaveAttribute("target");
+
+    // No wallet, no keys, nothing asked of the engine.
+    expect(fakeEngine.callsTo("preparePayment")).toHaveLength(0);
+    expect(screen.queryByTestId("money-off")).toBeNull();
+
+    // Why Pay leaves the app, behind the ⓘ.
+    expect(within(card).queryByTestId("monero-info-text")).toBeNull();
+    await user.click(within(card).getByTestId("monero-info"));
+    expect(within(card).getByTestId("monero-info-text")).toHaveTextContent("Ghostly has no Monero wallet");
+    expect(within(card).getByTestId("monero-info")).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("on Desktop and the extension, Pay asks the platform to open the link", async () => {
+    const open = vi.fn(async () => {});
+    fakeEngine.openPaymentLink = open;
+    bubble(XMR_MAINNET);
+    const pay = await screen.findByTestId("monero-pay");
+    expect(fireEvent.click(pay)).toBe(false);
+    expect(open).toHaveBeenCalledWith(`monero:${XMR_MAINNET}`);
+  });
+
+  it("says the network in words when it is not mainnet, with Any amount when the text gives none", () => {
+    bubble(XMR_STAGENET_SUBADDRESS);
+    const card = screen.getByTestId("monero-bubble");
+    expect(card).toHaveAttribute("data-network", "testnet");
+    expect(within(card).getByTestId("money-network")).toHaveTextContent("Test money· stagenet");
+    expect(card).toHaveTextContent("Any amount");
+  });
+
+  it("offers no Pay on my own message, and copies the address", async () => {
+    const { user } = bubble(XMR_MAINNET, { sender: "me" });
+    const card = screen.getByTestId("monero-bubble");
+    expect(within(card).queryByTestId("monero-pay")).toBeNull();
+    // The ⓘ only explains Pay: no Pay, no ⓘ.
+    expect(within(card).queryByTestId("monero-info")).toBeNull();
+    await user.click(within(card).getByRole("button", { name: "Copy address" }));
+    expect(await navigator.clipboard.readText()).toBe(XMR_MAINNET);
+  });
+
+  it("is text, not a card, when the checksum is wrong", () => {
+    bubble(`send to ${corrupt(XMR_MAINNET)}`);
+    expect(screen.queryByTestId("monero-bubble")).toBeNull();
+  });
+
+  it("is said in the app's language, the amount written its way", async () => {
+    const { user } = renderApp(<MessageBubble message={message(`monero:${XMR_MAINNET}?tx_amount=1.5`)} peerPubKey="peer" />, { language: "pt" });
+    const pay = await screen.findByTestId("monero-pay");
+    expect(pay).toHaveTextContent("Pagar");
+    expect(pay).toHaveAttribute("title", "Abre sua carteira Monero neste aparelho");
+    expect(screen.getByTestId("money-amount")).toHaveTextContent("1,5");
+    await user.click(screen.getByTestId("monero-info"));
+    expect(screen.getByTestId("monero-info-text")).toHaveTextContent("O Ghostly não tem carteira Monero");
   });
 });

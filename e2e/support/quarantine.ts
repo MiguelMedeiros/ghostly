@@ -1,6 +1,8 @@
 import type { PlaywrightTestConfig } from "@playwright/test";
 
-const QUARANTINE = /@quarantine\b/;
+// The whole tag, in the titles and tags Playwright joins by spaces: a longer tag (@quarantine-later) stays in the gate,
+// as tools/scripts/quarantine.mjs counts only this word, and every test it drops there needs its dated line.
+const QUARANTINE = /(?<=^|\s)@quarantine(?=\s|$)/;
 
 /**
  * The config without the tests tagged @quarantine: flaky, out of the gate for at most 7 days with their issue

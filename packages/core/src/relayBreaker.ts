@@ -202,12 +202,18 @@ export class RelayBreaker {
     this.lastAllDownProbe = -Infinity;
   }
 
-  /** Each relay's health, in the order given. */
+  /**
+   * Each relay's health, in the order given. While every one is left alone for failing, `until` is the next probe
+   * (`allDownProbe`, every 15 s), whose answer ends the wait of them all: said as the end of each one's wait, a daemon's
+   * `status` and the connection panel named a time up to 5 minutes after the relays were seen answering again.
+   */
   health(relays: string[]): RelayHealth[] {
+    const allDown = relays.length > 0 && relays.every((relay) => this.blockedFor(relay) > 0 && this.circuits.get(relay)?.kind === "error");
     return relays.map((relay) => {
       const circuit = this.circuits.get(relay);
       if (!circuit || circuit.openUntil === 0 || this.blockedFor(relay) === 0) return { relay, state: "ok" };
-      return { relay, state: circuit.kind === "throttled" ? "throttled" : "failing", until: Math.max(circuit.openUntil, this.now()), ...(circuit.reason && { reason: circuit.reason }) };
+      const until = allDown ? this.now() + this.askedAgainIn(relay, relays) : Math.max(circuit.openUntil, this.now());
+      return { relay, state: circuit.kind === "throttled" ? "throttled" : "failing", until, ...(circuit.reason && { reason: circuit.reason }) };
     });
   }
 }

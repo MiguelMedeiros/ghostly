@@ -1,4 +1,8 @@
 import { screen, within } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GroupCallView, type GroupCallParticipant, type GroupCallState } from "../../components/GroupCallView";
 import { FakeTrack } from "../../../../../packages/react/test/fakes";
@@ -49,6 +53,25 @@ describe("the group call grid", () => {
     expect(bo).toHaveTextContent("Bo");
   });
 
+  it("reads each tile to a screen reader by its name alone, not the avatar's letter before it", () => {
+    view(state(0, { participants: [person("ana", { mic: false })] }));
+    // The text a screen reader reads: every text node outside an aria-hidden part, and the muted mark by its name.
+    const spoken = (el: Element) => {
+      const words: string[] = [];
+      const walk = (node: Node) => {
+        if (node instanceof Element && node.getAttribute("aria-hidden") === "true") return;
+        if (node instanceof Element && node.getAttribute("role") === "img") return void words.push(node.getAttribute("aria-label") ?? "");
+        if (node.nodeType === Node.TEXT_NODE) words.push(node.textContent ?? "");
+        node.childNodes.forEach(walk);
+      };
+      walk(el);
+      return words.filter(Boolean).join(" ");
+    };
+    const [you, ana] = tiles();
+    expect(spoken(you)).toBe("You");
+    expect(spoken(ana)).toBe("Muted Ana");
+  });
+
   it("marks who is muted, and rings the active speaker alone", () => {
     const { rerenderWith } = view(state(0, { participants: [person("ana", { mic: false }), person("bo", { speaking: true })], activeSpeaker: "bo" }));
     const byId = (id: string) => tiles().find((t) => t.dataset.identity === id)!;
@@ -92,6 +115,29 @@ describe("a shared screen", () => {
 
     rerenderWith(sharing([]));
     expect(screen.getByTestId("group-call-grid")).toBeInTheDocument();
+  });
+});
+
+describe("the tiles on a phone's safe areas", () => {
+  /** The declarations the stylesheet gives `.call-tiles`, in and out of a phone's media block. */
+  const tileRules = () => {
+    const css = readFileSync(join(fileURLToPath(import.meta.url), "../../../index.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    return [...css.matchAll(/([^{}]*)\{([^{}]*)\}/g)].filter(([, selector]) => /^\s*\.call-tiles\s*$/.test(selector)).map(([, , body]) => body.trim());
+  };
+
+  it.each([
+    ["the grid", state(2)],
+    ["the stage", state(0, { participants: [person("ana", { screen: true, tracks: { screen: video() } })] })],
+  ])("%s keeps clear of the notch on either side and of the controls over a home bar", (_, call) => {
+    view(call);
+    const area = screen.getByTestId(call.participants.some((p) => p.screen) ? "group-call-stage" : "group-call-grid");
+    expect(area).toHaveClass("call-tiles");
+    const rules = tileRules();
+    // On its side the notch is on the left or the right: the tiles start 1rem past it.
+    expect(rules).toContainEqual(expect.stringMatching(/padding-left:\s*calc\(1rem \+ env\(safe-area-inset-left\)\)/));
+    expect(rules).toContainEqual(expect.stringMatching(/padding-right:\s*calc\(1rem \+ env\(safe-area-inset-right\)\)/));
+    // Upright, the controls end 2.5rem + 72 px over the home bar: the tiles end 1rem above them.
+    expect(rules).toContainEqual(expect.stringMatching(/padding-bottom:\s*calc\(2\.5rem \+ 72px \+ 1rem \+ env\(safe-area-inset-bottom\)\)/));
   });
 });
 
@@ -139,6 +185,27 @@ describe("the group call window", () => {
     expect(screen.getByTestId("group-call-leave")).toBeInTheDocument();
     await user.click(screen.getByTestId("group-call-minimize"));
     expect(onReturnToChat).toHaveBeenCalledOnce();
+  });
+
+  it.each([[false, "whole screen"], [true, "small window"]])("gives the focus back to what opened it when the call is left (pinned %s: %s)", async (pinned) => {
+    function Host() {
+      const [on, setOn] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOn(true)}>Join call</button>
+          {on && <GroupCallView call={state(2)} groupName="Community" canShareScreen pinned={pinned}
+            onToggleMic={vi.fn()} onToggleCamera={vi.fn()} onToggleScreen={vi.fn()} onLeave={() => setOn(false)} />}
+        </>
+      );
+    }
+    const { user } = renderApp(<Host />);
+    const join = screen.getByRole("button", { name: "Join call" });
+    await user.click(join);
+    if (!pinned) expect(screen.getByTestId("group-call")).toHaveFocus();
+    screen.getByTestId("group-call-leave").focus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("group-call")).toBeNull();
+    expect(join).toHaveFocus();
   });
 
   it("shrinks into the small window by its button, which shows the shared screen, and grows back", async () => {

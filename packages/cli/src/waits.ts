@@ -76,7 +76,7 @@ export async function purgeMessage(ctx: ApiContext, message: StoredMessage): Pro
     gone = !(await node(ctx).getMessage(chat, messageId));
   }
   if (gone) await node(ctx).forgetQuotesOf(message);
-  await ctx.runtime.store.compact();
+  await ctx.runtime.store.compact({ scrub: true });
   if (!gone) throw new CliError("timeout", `Timed out after ${PURGE_WAIT_MS / 1000} s: the message is deleted, but what it said may stay in the profile's store until its next fold (within the hour)`, { messageId, deleted: messageId });
 }
 

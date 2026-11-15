@@ -121,6 +121,21 @@ if (servicesHost) {
   });
 }
 /**
+ * Every app a chat lists, noted as the list comes (`noteListed`): one opened here before the opened-apps list was kept
+ * is on no list, and would keep what it stored after Delete chat, Clear all data and Delete profile. Nothing of it
+ * loads while no chat lists one.
+ */
+if (openServices) {
+  engine.subscribe(() => {
+    const state = engine.state;
+    if (!state) return;
+    const links = [...state.links, ...(state.edges ?? [])].filter((link) => link.peerServices?.some((s) => s.type === "http"));
+    if (!links.length) return;
+    const profile = activeProfileId();
+    void import("./svc/forget").then(({ noteListed }) => noteListed(profile, links)).catch(() => {});
+  });
+}
+/**
  * Hide my IP from contacts is on: a contact's app does not open here. No policy this page sends keeps a Chromium browser
  * from connecting to a server a frame in the app points at (its "Preload pages" connects before the policy refuses the
  * frame), and that server would see this device's address. The extension (`RELAY_ONLY_REFUSED` in its background.ts)

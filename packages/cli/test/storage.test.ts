@@ -1215,6 +1215,36 @@ describe("messages kept in rows.db", () => {
     for (const name of readdirSync(dir)) expect(readFileSync(join(dir, name)).includes("deleted-secret"), name).toBe(false);
   });
 
+  it("a fold that scrubs (`message delete --purge`) leaves no copy of a message written over or deleted in rows.db's pages", async () => {
+    // `secure_delete` zeroes the cell a delete frees, but not every copy a page's rebalancing left in its unused space:
+    // after a few thousand writes, one text gone from every row was still in a page of the file (agents#5946).
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    opened.push(store);
+    const d = await db(store.factory);
+    let seed = 1;
+    const random = (below: number) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % below; };
+    const live = new Map<string, string | null>(), gone: string[] = [];
+    const drop = (id: string) => { const text = live.get(id); if (text) gone.push(text); };
+    for (let round = 0, n = 0; round < 300; round++) {
+      await tx(d, ["messages"], (s) => {
+        for (let op = 0; op < 10; op++) {
+          const ids = [...live.keys()], kind = ids.length < 5 ? 0 : random(10);
+          const id = kind < 5 ? `m${String(random(1_000_000)).padStart(7, "0")}` : ids[random(ids.length)]!;
+          drop(id);
+          if (kind < 5) { const text = `gone-${n++}-secret`; live.set(id, text); s.messages.put({ linkId: "chat", id, timestamp: n, text: `${text} `.padEnd(50 + random(900), "y") }); }
+          else if (kind < 8) { live.set(id, null); s.messages.put({ linkId: "chat", id, timestamp: n, text: "".padEnd(20 + random(900), "d"), deleted: true }); }
+          else { live.delete(id); s.messages.delete(["chat", id]); }
+        }
+      });
+    }
+    d.close();
+    await store.compact({ scrub: true });
+    const bytes = readFileSync(join(dir, "rows.db"));
+    expect(gone.length).toBeGreaterThan(900);
+    expect(gone.filter((text) => bytes.includes(`${text} `))).toEqual([]);
+  });
+
   it("a deleted chat and its messages leave the journal once the snapshot is an hour old, at a start, a write or a close", async () => {
     const chats = (factory: IDBFactory) => new Promise<IDBDatabase>((resolve, reject) => {
       const request = factory.open("ghostly", 1);

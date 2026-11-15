@@ -783,6 +783,26 @@ export class DhtDelivery {
       return null;
     });
   }
+  /** Whether the floor holds this text of mine, or an edit of it (`pending`), whatever its retries or expiry. */
+  holds(wireId: string): boolean {
+    const pending = this.state.pending;
+    return !!pending && (pending.message[0] === wireId || pending.edit?.[0] === wireId);
+  }
+  /**
+   * A text of mine (or an edit of it) deleted here while it waits on the floor leaves it: the state no longer holds it
+   * (nor as `confirmed`: no receipt came), and, while its envelope was still in effect, a new one without it takes that
+   * one's place on the relays, so a contact who looks later finds no text. Resolves once the state without it is saved;
+   * the new envelope goes after.
+   */
+  async withdraw(wireId: string): Promise<void> {
+    const inEffect = await this.serialize(async () => {
+      const pending = this.state.pending;
+      if (!pending || (pending.message[0] !== wireId && pending.edit?.[0] !== wireId)) return false;
+      await this.persist({ ...this.state, pending: undefined }); this.changed();
+      return pending.attempts > 0 && pending.expires > this.clock();
+    });
+    if (inEffect) void this.serialize(async () => { try { await this.publish(true); } catch { /* the next envelope goes without it */ } this.schedule(); });
+  }
   /** The id of what awaits its receipt on the floor now, if anything does. */
   get pendingId(): string | undefined {
     const now = this.clock(), pending = this.state.pending;

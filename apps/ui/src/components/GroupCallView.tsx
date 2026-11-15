@@ -47,6 +47,8 @@ interface GroupCallViewProps {
   devices?: CallDevices | null;
   /** In the room (`useGroupCall`'s status "connected"): said once, and who comes and goes after it is said too. */
   connected?: boolean;
+  /** Someone's name by their key, as the group knows them: the node's own name for them is not believed. */
+  nameOf?: (identity: string) => string;
 }
 
 const MINI_KEY = "ghostly_group_call_mini";
@@ -144,7 +146,7 @@ function MutedMark({ label }: { label: string }) {
 }
 
 /** A face (camera or avatar) or a shared screen, with the name and a muted mark; the active speaker wears a ring. */
-function Tile({ person, you, kind, speaking, name }: { person: GroupCallParticipant; you: boolean; kind: "face" | "screen"; speaking: boolean; name: ReactNode }) {
+function Tile({ person, you, kind, speaking, name, face }: { person: GroupCallParticipant; you: boolean; kind: "face" | "screen"; speaking: boolean; name: ReactNode; face: string }) {
   const { t } = useI18n();
   const track = kind === "screen" ? person.tracks.screen : person.camera ? person.tracks.camera : null;
   return (
@@ -160,7 +162,8 @@ function Tile({ person, you, kind, speaking, name }: { person: GroupCallParticip
         <TrackVideo track={track} fit={kind === "screen" ? "contain" : "cover"} mirror={you && kind === "face"} />
       ) : (
         <div className="call-avatar shrink-0 w-[min(40%,6rem)] aspect-square rounded-full bg-chat-bg flex items-center justify-center">
-          <span className="text-text-muted text-2xl">{initial(person.name)}</span>
+          {/* A letter for the eye: the name below is what a screen reader reads ("M You" read the letter of your name). */}
+          <span aria-hidden="true" className="text-text-muted text-2xl">{initial(face)}</span>
         </div>
       )}
       <div className="absolute bottom-1.5 inset-x-1.5 flex items-center gap-1.5">
@@ -175,7 +178,7 @@ function Tile({ person, you, kind, speaking, name }: { person: GroupCallParticip
  * A group call through the group's node: everyone's tile in a grid, the active speaker ringed, and a shared screen
  * large with the faces beside it. Drawn from `useGroupCall`'s state, passed in; it imports no LiveKit.
  */
-export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, onToggleScreen, onLeave, canShareScreen = false, pinned = false, onReturnToChat, layer, devices = null, connected = true }: GroupCallViewProps) {
+export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, onToggleScreen, onLeave, canShareScreen = false, pinned = false, onReturnToChat, layer, devices = null, connected = true, nameOf: groupNameOf }: GroupCallViewProps) {
   const { t } = useI18n();
   const infoId = useId();
   const [info, setInfo] = useState(false);
@@ -203,23 +206,37 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
   useEffect(callWindowShown, []);
   useTabTrap(box, !mini);
   useBackCloses(() => setMiniState(true), !mini);
+  // Whole-screen, the focus comes into the call. Either way, what had it (Join call) has it back when the call goes
+  // with the focus in it, as in the 1:1 call (CallOverlay): a Leave pressed by keyboard left it on the page's body.
+  const opener = useRef<HTMLElement | null>(null);
   useEffect(() => {
-    if (!mini && box.current && !box.current.contains(document.activeElement)) box.current.focus({ preventScroll: true });
+    const active = document.activeElement as HTMLElement | null;
+    if (box.current && !box.current.contains(active)) {
+      if (active && active !== document.body) opener.current = active;
+      if (!mini) box.current.focus({ preventScroll: true });
+    }
+    return () => {
+      const before = opener.current;
+      if (before?.isConnected && (!document.activeElement || document.activeElement === document.body)) before.focus({ preventScroll: true });
+    };
   }, [mini, box]);
 
   const { local, participants, activeSpeaker } = call;
-  const news = useCallNews(participants, connected, t);
+  // Who comes and goes is said by the group's own name for them too, not the node's.
+  const news = useCallNews(groupNameOf ? participants.map((p) => ({ ...p, name: groupNameOf(p.identity) })) : participants, connected, t);
   const everyone = [local, ...participants];
-  const nameOf = (p: GroupCallParticipant) => (p === local ? t("calls.you") : p.name);
+  // Everyone else by the group's own name for their key (WISP 602 § The reply): the node's name is not theirs to vouch for.
+  const shown = (p: GroupCallParticipant) => (p === local || !groupNameOf ? p.name : groupNameOf(p.identity));
+  const nameOf = (p: GroupCallParticipant) => (p === local ? t("calls.you") : shown(p));
   const order = useShareOrder(everyone.filter((p) => p.screen && p.tracks.screen).map((p) => p.identity));
   const presenter = everyone.find((p) => p.identity === order[order.length - 1]) ?? null;
   // The other screens are tiles beside the faces.
   const otherScreens = order.slice(0, -1).map((id) => everyone.find((p) => p.identity === id)!);
   const faces = everyone.map((p) => (
-    <Tile key={p.identity} person={p} you={p === local} kind="face" speaking={p.identity === activeSpeaker} name={nameOf(p)} />
+    <Tile key={p.identity} person={p} you={p === local} kind="face" speaking={p.identity === activeSpeaker} name={nameOf(p)} face={shown(p)} />
   ));
   const screenTiles = otherScreens.map((p) => (
-    <Tile key={`${p.identity}-screen`} person={p} you={p === local} kind="screen" speaking={false} name={fillNames(t("calls.group.screenOf"), { name: nameOf(p) })} />
+    <Tile key={`${p.identity}-screen`} person={p} you={p === local} kind="screen" speaking={false} name={fillNames(t("calls.group.screenOf"), { name: nameOf(p) })} face={shown(p)} />
   ));
   // The small window shows one tile: the screen being shared, or else whoever speaks.
   const focus = presenter ?? everyone.find((p) => p.identity === activeSpeaker) ?? participants[0] ?? local;
@@ -258,9 +275,9 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
       {mini ? (
         <div className="absolute inset-0 grid">
           {focus === presenter ? (
-            <Tile person={focus} you={focus === local} kind="screen" speaking={false} name={fillNames(t("calls.group.screenOf"), { name: nameOf(focus) })} />
+            <Tile person={focus} you={focus === local} kind="screen" speaking={false} name={fillNames(t("calls.group.screenOf"), { name: nameOf(focus) })} face={shown(focus)} />
           ) : (
-            <Tile person={focus} you={focus === local} kind="face" speaking={focus.identity === activeSpeaker} name={nameOf(focus)} />
+            <Tile person={focus} you={focus === local} kind="face" speaking={focus.identity === activeSpeaker} name={nameOf(focus)} face={shown(focus)} />
           )}
         </div>
       ) : (
@@ -275,16 +292,16 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
           </div>
           {info && <p id={infoId} data-testid="group-call-info-text" className="mx-auto max-w-md px-4 pb-2 text-center text-xs text-text-secondary break-words">{t("calls.group.info")}</p>}
           {presenter ? (
-            <div data-testid="group-call-stage" className="flex-1 min-h-0 flex max-md:flex-col gap-2 px-4 pb-32">
+            <div data-testid="group-call-stage" className="call-tiles flex-1 min-h-0 flex max-md:flex-col gap-2">
               <div className="flex-1 min-w-0 min-h-0 grid">
-                <Tile person={presenter} you={presenter === local} kind="screen" speaking={false} name={fillNames(t("calls.group.screenOf"), { name: nameOf(presenter) })} />
+                <Tile person={presenter} you={presenter === local} kind="screen" speaking={false} name={fillNames(t("calls.group.screenOf"), { name: nameOf(presenter) })} face={shown(presenter)} />
               </div>
               <div data-testid="group-call-side" className="md:w-48 max-md:h-28 shrink-0 flex md:flex-col gap-2 overflow-auto">
                 {[...screenTiles, ...faces].map((tile) => <div key={tile.key} className="shrink-0 grid md:h-28 max-md:w-36">{tile}</div>)}
               </div>
             </div>
           ) : (
-            <div data-testid="group-call-grid" className="flex-1 min-h-0 grid gap-2 px-4 pb-32 auto-rows-fr" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
+            <div data-testid="group-call-grid" className="call-tiles flex-1 min-h-0 grid gap-2 auto-rows-fr" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
               {faces}
             </div>
           )}

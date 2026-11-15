@@ -31,17 +31,6 @@ export function getRandomGhostName(): string {
   return GHOST_NAMES[draw[0]! % GHOST_NAMES.length];
 }
 
-export function getGhostName(peerKey: string): string {
-  let hash = 0;
-  for (let i = 0; i < peerKey.length; i++) {
-    const char = peerKey.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash;
-  }
-  const index = Math.abs(hash) % GHOST_NAMES.length;
-  return GHOST_NAMES[index];
-}
-
 let _profile = "";
 
 export function setStorageProfile(profile: string): void {
@@ -77,11 +66,13 @@ export function keyOwner(): (key: string) => boolean {
 /**
  * The switches of this device, not of a profile, kept under the first profile's prefix: they never go with one. Every
  * profile here reads them: Keep awake, Stay connected, the call's small window (CallOverlay: its choice, its place and
- * size, the self view's) and the update notice dismissed (UpdateContext).
+ * size, the self view's), the group call's (GroupCallView: its choice, its place and size) and the update notice
+ * dismissed (UpdateContext).
  */
 const DEVICE_KEYS = new Set([
   "ghostly_keep_awake", "ghostly_stay_connected",
   "ghostly_call_mini", "ghostly_call_window_box", "ghostly_call_self_view_box", "ghostly_update_dismissed",
+  "ghostly_group_call_mini", "ghostly_group_call_window_box",
 ]);
 // Never one of this device's switches: Clear all data of the first profile turned them off for every profile here, taking
 // it back dropped them with its old copy's keys, and its backups and moves carried them (bug hunt, 2026-11-11).

@@ -3,7 +3,7 @@ import {
   EXPECT_PEER_MS, presenceSeenAt, groupName, knockIdentity, knockRecords, mentionsMember, pinIsNewer, readPin, receivedTimestamp, mergeKnocks, readKnocks, rosterAdmin, rosterHas, verifyCommitSignature, decodeCommunityLink, commitHash,
   CatchUpAnswers, GROUP_ADMIN_OFF_ERROR, GROUP_LIMITS, frameBytes, meshMessageRef, type GroupMessageFrame,
   GROUP_HAVE_FRAME, GROUP_VERSION_FILES, GROUP_WANT_FRAME, GROUP_WANT_NO_FRAME, type GroupFileMeta,
-  type GhostRecord, type PeerPresence, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type StatusCard, type WireReaction, type WirePin, type GroupPinFrame, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
+  type GhostRecord, type PeerPresence, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type StatusCard, type WireReaction, type WirePin, type GroupPinFrame, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMeta, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupLight, GroupLive, GroupView, MessagePage, OtherGroup, StoredGroup, StoredMessage, StoredPin } from "../shared/types";
 import type { Removal } from "./removals";
@@ -1397,6 +1397,13 @@ export class Groups {
     return { me: session.myKey, community: false, onHubs: this.hubs.active(groupId, session, this.now()), inRoster: key => rosterHas(session.roster, key), couldRead: (key, messageId, ts) => session.couldRead(key, messageId, ts) };
   }
 
+  /** Me in a group I am active in, private or community alike, for its call (WISP 602): my member key, its seed, and the admin's metadata. */
+  callMember(groupId: string): { key: string; seedB64: string; meta?: GroupMeta } | undefined {
+    if (this.isCommunity(groupId)) return this.communities.callMember(groupId);
+    const session = this.sessions.get(groupId);
+    return session?.status === "active" ? { key: session.myKey, seedB64: session.state.seedB64, meta: session.state.meta } : undefined;
+  }
+
   /**
    * Why this device is out of the group for good, as `fileCheck` says it; undefined while it is in it, or not loaded. A
    * community join that lost a race (`lost`) is asked again and back in by itself: its files wait, not stop for good.
@@ -1772,9 +1779,12 @@ export class Groups {
     if (this.isCommunity(groupId)) return this.communities.rename(groupId, name);
     await this.session(groupId).rename(name);
   }
-  /** The admin names (or, with null, removes) the node that forwards the group's calls: community groups only (WISP 602). */
-  async setCall(groupId: string, sfu: string | null): Promise<void> {
-    if (this.isCommunity(groupId)) return this.communities.setCall(groupId, sfu);
+  /**
+   * The admin names (or, with null, removes) the node that forwards the group's calls: community groups only (WISP 602).
+   * `e2ee` turns sealed call media on or off; left out, the group keeps what it had.
+   */
+  async setCall(groupId: string, sfu: string | null, e2ee?: boolean): Promise<void> {
+    if (this.isCommunity(groupId)) return this.communities.setCall(groupId, sfu, e2ee);
     this.session(groupId);
     throw new Error("Only a community group has calls through a node");
   }
