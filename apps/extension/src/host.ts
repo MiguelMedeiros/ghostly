@@ -1,5 +1,6 @@
 import type { BrowserHost } from "@ghostly/browser/host";
 import { engine } from "@ghostly/browser/platform/engine";
+import { viewerTag } from "@ghostly/core";
 import { uiPortName, type RuntimeMessage, type ViewerPage } from "./messages";
 import { extensionUpdates } from "./updates";
 import { extensionOidc } from "./oidc";
@@ -25,6 +26,29 @@ const openedViewers = openedServices<OpenedViewer>(
   },
   (a, b) => a.service === b.service && a.peer === b.peer && a.tag === b.tag,
 );
+
+/**
+ * Every app each chat lists, noted as the list comes (`peerServices`): an app opened before the opened-apps list was
+ * kept is on no list, and Delete chat, Clear all data and Delete profile no longer know the chat's apps by then.
+ * Clearing an origin no app ever opened clears nothing. Each one once per page: the list comes with every state.
+ */
+const listedNoted = new Set<string>();
+engine.subscribe(() => {
+  const links = engine.state?.links;
+  // A page left behind by a switch in another tab may still hold the other profile's chats.
+  if (!links || !pageProfileIsCurrent()) return;
+  const profile = activeProfileId();
+  for (const link of links) {
+    if (!link.peerServices?.length) continue;
+    const tag = viewerTag(link.myPubKeyZ32);
+    for (const { id: service } of link.peerServices) {
+      const key = `${profile} ${tag} ${service} ${link.peerPubKeyZ32}`;
+      if (listedNoted.has(key)) continue;
+      listedNoted.add(key);
+      openedViewers.note({ profile, tag, service, peer: link.peerPubKeyZ32 });
+    }
+  }
+});
 
 // A contact's app tabs close when the profile locks, as Desktop's windows do: the worker serves them, page or not.
 setServiceWindowsCloser(() => void chrome.runtime.sendMessage({ target: "background", type: "close-services" } satisfies RuntimeMessage).catch(() => {}));
