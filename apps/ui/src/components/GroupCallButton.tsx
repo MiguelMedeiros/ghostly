@@ -59,6 +59,8 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
 
   const hold = (pass: GroupCallPass, from: string | undefined) => { held.current = { pass, until: Date.now() + pass.expiresIn * 1000, sfu: from }; };
   const enter = (pass: GroupCallPass) => {
+    // A 1:1 call answered while the pass was asked for: it ends first, as on pressing Join call, the pass kept for it.
+    if (otherCallOn(key)) return setAskEnd(true);
     if (!relayOnly || groupCallRelayConfig(pass.iceServers).iceServers?.length) return setJoined(pass);
     setNoRelay(true);
     setProblem(noRelayProblem);
