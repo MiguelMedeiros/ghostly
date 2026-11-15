@@ -779,6 +779,75 @@ describe("group call node, group-community/1 (WISP 602)", () => {
     expect([alice.session.call, bob.session.call, bob.session.name]).toEqual([undefined, undefined, "Thursday"]);
   });
 
+  /**
+   * Bob away while Alice names the node, then made the admin: the commit reaches him before her statement.
+   * `before` is what he held when he went away, `away` what Alice changes then: the statement returned is her last.
+   */
+  async function promotedBeforeSync(before?: (alice: Member) => Promise<void>, away = (alice: Member) => alice.session.setCall(SFU, true)) {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob"), carol = await net.admit(alice, "carol");
+    await net.meet(alice, bob); await net.meet(alice, carol); await net.meet(bob, carol);
+    await before?.(alice);
+    await net.settle();
+    net.away.set("bob", []);
+    await away(alice);
+    await alice.session.transferAdmin(bob.session.myKey);
+    await net.settle();
+    const held = net.away.get("bob")!;
+    net.away.delete("bob");
+    const isMeta = (f: CommunityFrame) => f.t === "group-meta";
+    for (const { from, frame } of held.filter(h => !isMeta(h.frame))) await bob.session.handle(from, frame);
+    await net.settle();
+    expect(bob.session.isAdmin).toBe(true);
+    return { net, alice, bob, carol, statement: held.filter(h => isMeta(h.frame)).pop()! };
+  }
+
+  it("a new admin who did not have the node yet takes the former admin's statement and signs it again, so a rename keeps it", async () => {
+    const { net, alice, bob, carol, statement } = await promotedBeforeSync();
+    expect(bob.session.call).toBeUndefined();
+    await bob.session.handle(statement.from, statement.frame);
+    await net.settle();
+    expect([bob.session.call, carol.session.call, alice.session.call]).toEqual(Array(3).fill({ sfu: SFU, e2ee: 1 }));
+    expect(bob.session.state.meta!.by).toBe(bob.session.myKey);
+    // Signed again as it was: no statement of his without the node is kept to hand on.
+    expect(bob.session.state.metaPast).toBeUndefined();
+    await bob.session.rename("Thursday");
+    await net.settle();
+    for (const m of [alice, bob, carol]) expect([m.session.name, m.session.call]).toEqual(["Thursday", { sfu: SFU, e2ee: 1 }]);
+  });
+
+  it("a new admin who signed an older statement again takes the former admin's later one and keeps the change it made since", async () => {
+    const { net, alice, bob, carol, statement } = await promotedBeforeSync(alice => alice.session.rename("Book club"), async alice => {
+      await alice.session.setCall(SFU, true);
+      await alice.session.rename("Thursday");
+    });
+    // Bob signed again what he held: the first name, no node.
+    expect([bob.session.name, bob.session.call]).toEqual(["Book club", undefined]);
+    await bob.session.setPicture(RED);
+    await bob.session.handle(statement.from, statement.frame);
+    await net.settle();
+    for (const m of [alice, bob, carol]) expect([m.session.name, m.session.picture, m.session.call]).toEqual(["Thursday", RED, { sfu: SFU, e2ee: 1 }]);
+    // His line for the name credits Alice, who renamed it.
+    expect(net.authors.filter(a => a.at === "bob").pop()).toEqual({ at: "bob", by: alice.session.myKey });
+  });
+
+  it("a new admin takes the former admin's statement only for a while after the role moved, and no one else's", async () => {
+    const { net, bob, carol, statement } = await promotedBeforeSync();
+    // Carol, never the admin, signs a node under a commit of the chain: refused.
+    const s = bob.session, key = epochKeys(fromBase64Url(s.state.secrets[s.topHash]), s.id, s.epoch).message;
+    const carolSeed = identityFromSeedB64(carol.session.state.seedB64).seed;
+    const before = s.state.chain[s.epoch - 1];
+    const hers = signGroupMeta({ g: s.id, e: before.e, h: communityCommitHash(before), r: 9, ts: 1 }, encodeGroupMetaBody({ call: { sfu: SFU } }), carolSeed, carol.session.myKey);
+    await s.handle(carol.session.myKey, clone(wrapGroupMeta(hers, s.topHash, key, true)));
+    expect(s.call).toBeUndefined();
+    // Alice's, ten minutes and more after Bob became the admin: refused.
+    later(10 * 60_000 + 1);
+    await s.handle(statement.from, statement.frame);
+    await net.settle();
+    expect([bob.session.call, carol.session.call]).toEqual([undefined, { sfu: SFU, e2ee: 1 }]);
+  });
+
   it("the admin turns sealed call media on and off, and naming the node again keeps it as it was", async () => {
     const net = new Net();
     const alice = net.create("alice");
