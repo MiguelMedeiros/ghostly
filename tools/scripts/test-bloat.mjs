@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Tests that cost CI time and break on refactors without catching a bug.
 //
-//   node tools/scripts/test-bloat.mjs [--since 7d] [--out report.md] [--json | --summary]
-//                                                     the weekly report, out of CI's artifacts (test-bloat-report.mjs)
+//   node tools/scripts/test-bloat.mjs [--since 7d] [--out report.md] [--json | --summary] [--cache <dir>] [--max-calls 200]
+//                                                     the weekly report, out of CI's artifacts (test-bloat-report.mjs),
+//                                                     capped at 200 GitHub calls and cached
 //   node tools/scripts/test-bloat.mjs --weak          list the weak unit and component tests (vitest, outside e2e/)
 //   node tools/scripts/test-bloat.mjs --weak --json   the same as JSON, for the weekly report
 //
