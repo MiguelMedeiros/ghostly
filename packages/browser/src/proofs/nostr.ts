@@ -39,10 +39,6 @@ export async function withNostrSigner<T>(options: { bunker?: string; signal: Abo
   let timer: ReturnType<typeof setTimeout> | undefined;
   let abort: (() => void) | undefined;
   let closed = false;
-  const guard: NostrSigner = {
-    getPublicKey: async () => { if (closed) throw new Error('Signer request cancelled'); const key = await active!.getPublicKey(); if (closed) throw new Error('Signer request cancelled'); return key; },
-    signEvent: async event => { if (closed) throw new Error('Signer request cancelled'); const signed = await active!.signEvent(event); if (closed) throw new Error('Signer request cancelled'); return signed; },
-  };
   let active: NostrSigner | undefined;
   try {
     const timeout = new Promise<never>((_, reject) => {
@@ -50,7 +46,22 @@ export async function withNostrSigner<T>(options: { bunker?: string; signal: Abo
       options.signal.addEventListener('abort', abort, { once: true });
       timer = setTimeout(() => { closed = true; reject(new Error('Signer timed out. Your Ghostly identity is unchanged.')); }, 120_000);
     });
-    const action = async () => {
+    // Ending once no signer step waits on it: nothing more to cut short.
+    timeout.catch(() => {});
+    /**
+     * Only the signer's own steps (connecting, its key, a signature) are ended by the two minutes or the cancel. What
+     * `work` does with an answer, such as the engine checking and saving the proof (a NIP-05 lookup takes up to 30 s),
+     * runs to its end: cut short, the person read "unchanged" of a proof that was saved (agents#6035).
+     */
+    const step = async <R>(asked: () => Promise<R>): Promise<R> => {
+      if (closed) throw new Error('Signer request cancelled');
+      return Promise.race([asked(), timeout]);
+    };
+    const guard: NostrSigner = {
+      getPublicKey: () => step(() => active!.getPublicKey()),
+      signEvent: event => step(() => active!.signEvent(event)),
+    };
+    const connect = async () => {
       if (options.bunker) {
         const bp = parseProofBunker(options.bunker);
         // Loaded here, not with the app: the NIP-46 signer and its relay pool are only for a bunker.
@@ -67,10 +78,10 @@ export async function withNostrSigner<T>(options: { bunker?: string; signal: Abo
         active = extensionSigner();
         if (!active) throw new Error('No NIP-07 signer in this window. Use a bunker connection from your Nostr signer.');
       }
-      if (closed) throw new Error('Signer request cancelled');
-      return work(guard);
     };
-    return await Promise.race([action(), timeout]);
+    await Promise.race([connect(), timeout]);
+    if (closed) throw new Error('Signer request cancelled');
+    return await work(guard);
   } finally {
     closed = true;
     if (timer) clearTimeout(timer);
