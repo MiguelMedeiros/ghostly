@@ -67,15 +67,18 @@ describe("a wait on a terminal, and Ctrl-C", { timeout: 120_000 }, () => {
 
   // A one-shot's own default waits are in "knows the waits a one-shot does by default" below: on this chat, which nobody
   // joined, a file send without --wait answers at once.
-  it("a one-shot file send that waits says so too; Ctrl-C says the file still goes", async () => {
+  it("a one-shot file send that waits says so too; Ctrl-C says the file still goes once it is in the chat", async () => {
     const path = join(dir, "notes.txt");
     writeFileSync(path, "kept on Ctrl-C\n");
     const send = start(["file", "send", "solo", path, "--wait", "sent"], onTty);
-    await said(send, "ghostly: waiting for it to go out to solo (up to 300 s; Ctrl-C stops waiting, it still goes)\n");
+    await said(send, "ghostly: copying notes.txt into the profile, then waiting for it to go out to solo (up to 300 s; Ctrl-C stops the send while it is copied in, then only the waiting)\n");
     send.child.kill("SIGINT");
     expect(await send.exited(15_000)).toBe(130);
-    expect(send.stderr).toContain("ghostly: stopped waiting (Ctrl-C): it is kept here and goes with this profile's next command, or keep it online with `ghostly daemon --detach`\n");
+    expect(send.stderr).toContain("ghostly: stopped waiting (Ctrl-C): notes.txt was not sent to solo if it was still being copied in; if it was in the chat, it is kept here and goes with this profile's next command, or keep it online with `ghostly daemon --detach` (ghostly file list solo says which)\n");
     expect(lockFiles()).toEqual([]);
+    // A few bytes are copied in at once: this one was in the chat, as the list says.
+    const files = ok(await ghostly(["--home", dir, "file", "list", "solo"])) as { files: { file: { name: string } }[] };
+    expect(files.files.map((f) => f.file.name)).toContain("notes.txt");
   });
 
   it("through a daemon, Ctrl-C ends the command (exit 130) and the daemon runs on; the daemon's own Ctrl-C still stops it, exit 0", async () => {
@@ -121,7 +124,7 @@ describe("what a wait says", () => {
   });
 
   it("knows the waits a one-shot does by default, with no --wait, and that a daemon answers those at once", () => {
-    expect(waitNotice("file.send", { chat: "bob", path: "/f" }, "one-shot")?.waiting).toBe("waiting for it to go out to bob (up to 300 s; Ctrl-C stops waiting, it still goes)");
+    expect(waitNotice("file.send", { chat: "bob", path: "/f" }, "one-shot")?.waiting).toBe("copying f into the profile, then waiting for it to go out to bob (up to 300 s; Ctrl-C stops the send while it is copied in, then only the waiting)");
     expect(waitNotice("chat.react", { chat: "bob", message: "m", emoji: "👍" }, "one-shot")?.waiting).toBe("waiting for bob's app to confirm it (up to 30 s; Ctrl-C stops waiting, it still goes)");
     expect(waitNotice("chat.pin", { chat: "bob", message: "m", timeout: 5 }, "one-shot")?.waiting).toBe("waiting for bob's app to confirm it (up to 5 s; Ctrl-C stops waiting, it still goes)");
     expect(waitNotice("group.react", { group: "crew", message: "m", emoji: "👍" }, "one-shot")?.waiting).toBe("waiting for a member's edge in group crew to take it (up to 30 s; Ctrl-C stops waiting, it still goes)");
@@ -136,14 +139,29 @@ describe("what a wait says", () => {
     expect(waitNotice("chat.send", { chat: "bob", text: "hi" }, "daemon")).toBeNull();
   });
 
-  it("through a daemon, a file send that is still copying the file in says so, and that Ctrl-C does not stop it", () => {
-    // It said nothing while the daemon copied it in (6-30 s for 1 GiB): a slow copy read as a hung daemon.
+  it("through a daemon, a file send that is still copying the file in says so, and that Ctrl-C stops the send", () => {
+    // It said nothing while the daemon copied it in (6-30 s for 1 GiB): a slow copy read as a hung daemon. Ctrl-C there
+    // stops the send (fileSendClientGone.test.ts): it said "it still goes", and the user waited for a file that never came.
     expect(waitNotice("file.send", { chat: "bob", path: "/home/me/big.iso" }, "daemon")).toEqual({
-      waiting: "copying big.iso into the profile before it goes to bob (Ctrl-C stops waiting, it still goes)",
-      stopped: "the daemon copies big.iso in and sends it to bob",
+      waiting: "copying big.iso into the profile before it goes to bob (Ctrl-C stops the send)",
+      stopped: "big.iso was not sent to bob: send it again when you want it",
     });
-    expect(waitNotice("file.send", { chat: "group:crew", path: "/f", name: "notes.txt", wait: "none" }, "daemon")?.waiting).toBe("copying notes.txt into the profile before it goes to group crew (Ctrl-C stops waiting, it still goes)");
-    // One that waits for the contact says that wait, as before.
-    expect(waitNotice("file.send", { chat: "bob", path: "/f", wait: "sent" }, "daemon")?.waiting).toBe("waiting for it to go out to bob (up to 300 s; Ctrl-C stops waiting, it still goes)");
+    expect(waitNotice("file.send", { chat: "group:crew", path: "/f", name: "notes.txt", wait: "none" }, "daemon")?.waiting).toBe("copying notes.txt into the profile before it goes to group crew (Ctrl-C stops the send)");
+  });
+
+  it("a file send that waits for the contact says Ctrl-C stops the send while the file is copied in, and only the waiting after", () => {
+    // `--wait sent` through a daemon, and a one-shot's own wait: Ctrl-C during the copy (seconds per GiB) stopped the
+    // send (the daemon's `stageWhileAsked`, the one-shot's profile closing under the copy), and the line said "it is
+    // kept here and still goes": nothing was in the chat, and the user waited for a file that never came.
+    expect(waitNotice("file.send", { chat: "bob", path: "/home/me/big.iso", wait: "sent" }, "daemon")).toEqual({
+      waiting: "copying big.iso into the profile, then waiting for it to go out to bob (up to 300 s; Ctrl-C stops the send while it is copied in, then only the waiting)",
+      stopped: "big.iso was not sent to bob if it was still being copied in; if it was in the chat, it is kept here and still goes by itself while this profile is online (ghostly file list bob says which)",
+    });
+    expect(waitNotice("file.send", { chat: "bob", path: "/f", name: "notes.txt", timeout: 20 }, "one-shot")).toEqual({
+      waiting: "copying notes.txt into the profile, then waiting for it to go out to bob (up to 20 s; Ctrl-C stops the send while it is copied in, then only the waiting)",
+      stopped: "notes.txt was not sent to bob if it was still being copied in; if it was in the chat, it is kept here and goes with this profile's next command, or keep it online with `ghostly daemon --detach` (ghostly file list bob says which)",
+    });
+    // A chat named in words a shell would split: the command names it quoted.
+    expect(waitNotice("file.send", { chat: "Ann Lee", path: "/f", wait: "sent" }, "daemon")?.stopped).toContain("(ghostly file list 'Ann Lee' says which)");
   });
 });

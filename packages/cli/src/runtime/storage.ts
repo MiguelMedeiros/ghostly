@@ -168,8 +168,11 @@ export interface PersistentIndexedDb {
   readonly recovered: boolean;
   /** Waits for writes that carried a Blob (read asynchronously) to reach the disk. */
   flush(): Promise<void>;
-  /** Folds the journal into a fresh snapshot. */
-  compact(): Promise<void>;
+  /**
+   * Folds the journal into a fresh snapshot. `scrub`: rows.db is written again whole first, so that nothing deleted is
+   * left in its pages (`TreeFile.scrub`).
+   */
+  compact(options?: { scrub?: boolean }): Promise<void>;
   /** Flushes, marks the journal closed (or folds it, once it is long), and stops writing: the process is about to leave. */
   close(): Promise<void>;
   /** Bytes of the journal now, for tests and `ghostly status`. */
@@ -561,10 +564,10 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     while (syncing) await syncing;
   }
 
-  async function writeSnapshot() {
+  async function writeSnapshot(scrub = false) {
     const dirty = schemaDirty;
     schemaDirty = false;
-    try { await snapshotToDisk(); } catch (error) {
+    try { await snapshotToDisk(scrub); } catch (error) {
       schemaDirty ||= dirty;
       throw error;
     }
@@ -671,7 +674,7 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     } finally { reader?.db.close(); }
   }
 
-  async function snapshotToDisk() {
+  async function snapshotToDisk(scrub = false) {
     // The journal is closed and removed below: not while a sync runs on it.
     await synced();
     const name = randomBytes(8).toString("hex");
@@ -681,6 +684,7 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
       // also one whose entry waits behind this snapshot in the queue (the snapshot may hold what it did elsewhere). Its
       // entry, written after, is then one SQLite holds, which a replay skips.
       trees.apply(seq);
+      if (scrub) trees.scrub();
       trees.sync();
     }
     const temporary = snapshotPath + ".tmp";
@@ -740,12 +744,12 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     factory,
     recovered: !replayed.closed,
     flush: () => queue,
-    async compact() {
+    async compact(options) {
       // After the transactions running now: the fold is whole.
       await settled();
       // The caller reads the snapshot next (a backup): a fold that failed is its failure, not a line on stderr.
       let thrown: { error: unknown } | null = null;
-      await enqueue(() => writeSnapshot().catch((error: unknown) => { thrown = { error }; throw error; }));
+      await enqueue(() => writeSnapshot(options?.scrub).catch((error: unknown) => { thrown = { error }; throw error; }));
       if (thrown) throw (thrown as { error: unknown }).error;
     },
     async close() {

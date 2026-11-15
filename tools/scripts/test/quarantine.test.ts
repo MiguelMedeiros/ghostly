@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { checkEntries, fileEntries, specMarks } from "../quarantine.mjs";
+import { withoutQuarantine } from "../../../e2e/support/quarantine";
+import { checkEntries, e2eSources, fileEntries, specMarks } from "../quarantine.mjs";
 
 const TODAY = "2026-11-14";
 
@@ -59,6 +60,46 @@ describe("quarantine marks", () => {
       "e2e/web/a.spec.ts:1: @quarantine without a `// quarantine: #<issue> until <YYYY-MM-DD>` line above it",
       "e2e/web/a.spec.ts:7: a quarantine line with no @quarantine test under it",
     ]);
+  });
+
+  it("counts @quarantine in a title or a describe as the tag, and refuses it without its line", () => {
+    const text = ['test("a title that says @quarantine in words", async () => {});', "", "", "", "", "", 'test.describe(`slow @quarantine`, () => {});'].join("\n");
+    expect(specMarks("e2e/web/a.spec.ts", text).errors).toEqual([
+      "e2e/web/a.spec.ts:1: @quarantine without a `// quarantine: #<issue> until <YYYY-MM-DD>` line above it",
+      "e2e/web/a.spec.ts:7: @quarantine without a `// quarantine: #<issue> until <YYYY-MM-DD>` line above it",
+    ]);
+  });
+
+  it("leaves a longer tag alone, as the gate does", () => {
+    const text = ['test("a", { tag: ["@quarantine-later", "@quarantine:x"] }, async () => {});', 'test("b @quarantined", async () => {});'].join("\n");
+    expect(specMarks("e2e/web/a.spec.ts", text)).toEqual({ entries: [], errors: [] });
+  });
+
+  // The gate's filter (e2e/support/quarantine.ts) drops a test when its titles and tags, joined by spaces, match: the
+  // check must count every one it drops, or a test leaves the gate with no date.
+  it("counts every test the gate's filter drops", () => {
+    const [drop] = withoutQuarantine({}).grepInvert as RegExp[];
+    const cases = [
+      { source: 'test("sends", { tag: ["@quarantine"] }, f);', grep: "sends @quarantine" },
+      { source: 'test("a title that says @quarantine in words", f);', grep: "a title that says @quarantine in words" },
+      { source: "test.describe(`slow @quarantine`, f);", grep: "slow @quarantine inside it" },
+      { source: 'test("a", { tag: ["@quarantine-later"] }, f);', grep: "a @quarantine-later" },
+      { source: 'test("a", { tag: ["@quarantine:x"] }, f);', grep: "a @quarantine:x" },
+      { source: 'test("b @quarantined", f);', grep: "b @quarantined" },
+      { source: 'test("c", { tag: ["@feature:chat.quarantine"] }, f);', grep: "c @feature:chat.quarantine" },
+    ];
+    for (const { source, grep } of cases) {
+      expect(specMarks("e2e/web/a.spec.ts", source).errors.length > 0, source).toBe(drop.test(grep));
+    }
+  });
+
+  // A tag kept in a helper's constant reaches a test as the tag: the helpers are read too, all but the filter itself.
+  it("reads every e2e source file, helpers included", () => {
+    const files = e2eSources();
+    expect(files).toContain("e2e/web/menus.spec.ts");
+    expect(files).toContain("e2e/support/appStore.ts");
+    expect(files).not.toContain("e2e/support/quarantine.ts");
+    expect(files.some((f) => f.includes("node_modules/"))).toBe(false);
   });
 
   it("reads the unit test list", () => {

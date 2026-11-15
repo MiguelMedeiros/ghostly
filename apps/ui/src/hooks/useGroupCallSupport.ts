@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useT } from "../contexts/I18nContext";
-import { groupCallSupport } from "../desktop/nativeCalls";
+import { groupCallSupport } from "../desktop/groupCallSupport";
 import { errorText } from "../lib/errorText";
 
 /** What a group's call button reads: whether this app can join a group call, and why not, in the app's language. */

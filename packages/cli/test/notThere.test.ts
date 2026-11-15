@@ -21,14 +21,17 @@ function fake() {
     chatView: chatViewOf, getState: () => ({ links: [link], groups: [], settings: {}, transport: {},
       services: [{ id: "svc-1", name: "Notes", target: "http://127.0.0.1:8080", enabled: true, sharedWith: [], requests: 0 }],
       identityProofs: [{ id: "proof-1", provider: "github", subject: "ana", verified: true, issuedAt: 1, expiresAt: 2, sharedWith: [] }],
-      payments: { "pay-1": { id: "pay-1", linkId: "chat-one", kind: "request", direction: "in", state: "pending", amount: 21, createdAt: 1 } },
+      payments: { "pay-1": { id: "pay-1", linkId: "chat-one", kind: "request", direction: "in", state: "pending", amount: 21, createdAt: 1 },
+        "sent-1": { id: "sent-1", linkId: "chat-one", kind: "payment", direction: "out", state: "settled", amount: 5, createdAt: 2 },
+        "got-1": { id: "got-1", linkId: "chat-one", kind: "payment", direction: "in", state: "settled", amount: 7, createdAt: 3 },
+        "elsewhere-1": { id: "elsewhere-1", linkId: "chat-two", kind: "request", direction: "in", state: "pending", amount: 9, createdAt: 4 } },
       wallet: { networks: { testnet: { lightnings: [{ card: "main", name: "Main", receive: true }] } } } }) as unknown as EngineState,
     getMessage: vi.fn(async (linkId: string, id: string) => rows.find((m) => m.linkId === linkId && m.id === id)),
     removeService: vi.fn(), setServiceEnabled: vi.fn(), setServiceShared: vi.fn(),
     removeIdentityProof: vi.fn(async () => {}), withdrawIdentityProof: vi.fn(async () => {}), cancelIdentityProof: vi.fn(),
     retryMessage: vi.fn(async () => {}),
     shareIdentityProof: vi.fn(async () => {}), recheckIdentityProof: vi.fn(async () => {}),
-    checkPayment: vi.fn(async () => {}), reclaimPayment: vi.fn(async () => {}), lightningSetReceive: vi.fn(async () => {}), lightningRename: vi.fn(async () => {}),
+    checkPayment: vi.fn(async () => {}), reclaimPayment: vi.fn(async () => {}), payRequest: vi.fn(async () => {}), lightningSetReceive: vi.fn(async () => {}), lightningRename: vi.fn(async () => {}),
   };
   const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
   return { ctx, node };
@@ -106,6 +109,19 @@ describe("a payment, a proof or a Lightning card that is not there", () => {
     // A card of another network is not this one's.
     await expect(callApi(ctx, "lightning.default", { card: "main", network: "mainnet" })).rejects.toMatchObject({ code: "not_found", message: 'No Lightning card "main" on mainnet (ghostly wallet list)' });
     for (const call of [node.shareIdentityProof, node.recheckIdentityProof, node.checkPayment, node.reclaimPayment, node.lightningSetReceive, node.lightningRename]) expect(call).not.toHaveBeenCalled();
+  });
+
+  it("chat pay-request names the id quoted and where the payments are, and tells a payment from a request", async () => {
+    const { ctx, node } = fake();
+    // Before: `No request nope in this chat`, unquoted, nothing to run next, and the same for a payment of this chat.
+    const none = (id: string) => ({ code: "not_found", message: `No request ${JSON.stringify(id)} in this chat (ghostly payment list --chat chat-one)` });
+    await expect(callApi(ctx, "chat.payRequest", { chat: "Alice", payment: "nope" })).rejects.toMatchObject(none("nope"));
+    await expect(callApi(ctx, "chat.payRequest", { chat: "Alice", payment: "elsewhere-1" })).rejects.toMatchObject(none("elsewhere-1"));
+    await expect(callApi(ctx, "chat.payRequest", { chat: "Alice", payment: "sent-1" })).rejects.toMatchObject({ code: "not_found",
+      message: '"sent-1" is a payment you sent, not a request: chat pay-request pays a request the contact made of you (ghostly payment list --chat chat-one)' });
+    await expect(callApi(ctx, "chat.payRequest", { chat: "Alice", payment: "got-1" })).rejects.toMatchObject({ code: "not_found",
+      message: '"got-1" is a payment you received, not a request: chat pay-request pays a request the contact made of you (ghostly payment list --chat chat-one)' });
+    expect(node.payRequest).not.toHaveBeenCalled();
   });
 
   it("one that is there goes to the engine as before", async () => {

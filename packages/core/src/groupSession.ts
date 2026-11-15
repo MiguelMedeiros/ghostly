@@ -889,7 +889,16 @@ export class GroupSession {
   }
   private persist(): Promise<void> {
     if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = undefined; }
-    return this.hooks.save(structuredClone(this.state));
+    return this.hooks.save(this.copy());
+  }
+  /**
+   * The state as a save takes it: the session goes on changing its own. The chain carries the whole roster at every
+   * commit and is never compacted (1.4 ms a deep copy at 271 commits in a group of 31, 0.1 ms for the rest), and a
+   * commit on it is signed and never changes: the copy shares the commits, in an array of its own.
+   */
+  private copy(): GroupState {
+    const { chain, ...rest } = this.state;
+    return { ...structuredClone(rest), chain: chain.slice() };
   }
   /**
    * A save within `GROUP_LIMITS.saveWithinMs`, for what a received message, commit or secret changes (what was seen,
@@ -903,7 +912,7 @@ export class GroupSession {
     this.saveTimer = setTimeout(() => {
       this.saveTimer = undefined;
       // Between two frames, never in the middle of one being handled.
-      void this.serialize(() => this.hooks.save(structuredClone(this.state))).catch(() => {});
+      void this.serialize(() => this.hooks.save(this.copy())).catch(() => {});
     }, GROUP_LIMITS.saveWithinMs);
   }
   /** Writes what is waiting to be saved now (before a restart, in tests). */
