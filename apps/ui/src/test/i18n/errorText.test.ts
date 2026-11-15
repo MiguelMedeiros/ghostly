@@ -596,6 +596,14 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["example.com has no address", `${BROWSER}/proofs/domain.ts`, "`${domain} has no address`"],
   ["example.com points to a private network address, so it was not contacted", `${BROWSER}/proofs/domain.ts`, "`${domain} points to a private network address, so it was not contacted`"],
   ["GitHub: octo-cat does not list the key that signed (SHA256:abc)", `${BROWSER}/proofs/providers/ssh.ts`, " does not list the key that signed ("],
+  // Add's refusals for an SSH key proof.
+  ["Paste your public key (the one line in ~/.ssh/id_ed25519.pub) or its SHA256: fingerprint", `${BROWSER}/proofs/providers/ssh.ts`],
+  ['Unsupported SSH key type "ssh-dss"', `${CORE}/sshsig.ts`, "Unsupported SSH key type"],
+  ["RSA keys must be 2048-16384 bits", `${CORE}/sshsig.ts`, "`RSA keys must be ${RSA_MIN_BITS}-${RSA_MAX_BITS} bits`"],
+  ["Enter a GitHub username", `${BROWSER}/proofs/providers/ssh.ts`, "`Enter a ${SSH_FORGE_LABEL[forge]} username`"],
+  ["Paste the whole signature, from -----BEGIN SSH SIGNATURE----- to -----END SSH SIGNATURE-----", `${CORE}/sshsig.ts`],
+  ['That signature is for "git", not "ghostly": run the command with -n ghostly', `${BROWSER}/proofs/providers/ssh.ts`, "`That signature is for \"${parsed.namespace}\", not \"${SSHSIG_NAMESPACE}\": run the command with -n ${SSHSIG_NAMESPACE}`"],
+  ["The signature is not over this statement: copy the command again and sign exactly what it shows", `${BROWSER}/proofs/providers/ssh.ts`],
   ...PROOF_REASONS,
   // What the Add dialog's field refuses (agents#2222).
   ["Enter a domain name, like example.com", `${CORE}/domainProofs.ts`],
