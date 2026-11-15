@@ -1,13 +1,17 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { mediaProblem, SCREEN_SHARE_ERROR_MS } from "@ghostly/react";
 import { CORNERS, useFloatingBox } from "../hooks/useFloatingBox";
 import type { CallDevices } from "../hooks/useCallDevices";
+import type { GroupCallError } from "../hooks/useGroupCall";
 import { applySpeaker } from "../lib/mediaDevices";
-import { useI18n } from "../contexts/I18nContext";
+import { useI18n, type Translate } from "../contexts/I18nContext";
 import { useBackCloses, useTabTrap } from "../hooks/useDismiss";
 import { initial } from "../lib/initial";
 import { fillNames } from "../lib/fillNodes";
+import { errorText } from "../lib/errorText";
 import { callWindowShown } from "../lib/serviceWindows";
+import { mediaProblemKeys } from "../lib/mediaProblemText";
 import { DeviceMenu } from "./CallOverlay";
 
 /** One person in a group call, as `useGroupCall` gives them: what they send, and the tracks to show and play. */
@@ -44,9 +48,24 @@ interface GroupCallViewProps {
   onReturnToChat?: () => void;
   layer?: HTMLElement | null;
   devices?: CallDevices | null;
+  /** `useGroupCall`'s last error: a refused mic, camera or screen share is said for a few seconds, or until the next try. */
+  error?: GroupCallError | null;
 }
 
 const MINI_KEY = "ghostly_group_call_mini";
+
+/** Why your mic, camera or screen did not come on, as the 1:1 call says it: a title, and the next step when there is one. */
+function errorLines(error: GroupCallError, t: Translate): { title: string; next?: string } {
+  if (error.action === "mic" || error.action === "camera") {
+    const problem = mediaProblem(error.cause);
+    if (problem === "denied" || problem === "unavailable") {
+      const { title, next } = mediaProblemKeys(problem, error.action);
+      return { title: t(title), next: t(next) };
+    }
+  }
+  // The screen share's line (`screenShareErrorMessage`), or an error the table knows; else as it came.
+  return { title: errorText(error.message, t) };
+}
 
 /** Columns for `n` tiles: as square as it goes, so 4 is 2 × 2, 9 is 3 × 3 and 25 is 5 × 5. */
 function gridColumns(n: number): number {
@@ -139,8 +158,18 @@ function Tile({ person, you, kind, speaking, name }: { person: GroupCallParticip
  * A group call through the group's node: everyone's tile in a grid, the active speaker ringed, and a shared screen
  * large with the faces beside it. Drawn from `useGroupCall`'s state, passed in; it imports no LiveKit.
  */
-export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, onToggleScreen, onLeave, canShareScreen = false, pinned = false, onReturnToChat, layer, devices = null }: GroupCallViewProps) {
+export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, onToggleScreen, onLeave, canShareScreen = false, pinned = false, onReturnToChat, layer, devices = null, error = null }: GroupCallViewProps) {
   const { t } = useI18n();
+  // Each new error is said anew (its own alert), and goes after a few seconds; a failed join has no window to say it in.
+  const [said, setSaid] = useState({ error, id: 0, over: false });
+  if (said.error !== error) setSaid({ error, id: said.id + 1, over: false });
+  const shownError = said.error === error && !said.over && error?.action !== "join" ? error : null;
+  useEffect(() => {
+    if (!shownError) return;
+    const timer = setTimeout(() => setSaid((s) => (s.error === shownError ? { ...s, over: true } : s)), SCREEN_SHARE_ERROR_MS);
+    return () => clearTimeout(timer);
+  }, [shownError]);
+  const errorShown = shownError && errorLines(shownError, t);
   const infoId = useId();
   const [info, setInfo] = useState(false);
   const [miniPreference, setMiniState] = useState(() => localStorage.getItem(MINI_KEY) === "1");
@@ -250,6 +279,14 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
             </div>
           )}
         </>
+      )}
+
+      {shownError && errorShown && (
+        <p key={said.id} role="alert" data-testid="group-call-error" data-action={shownError.action}
+          className="call-share-error absolute bottom-32 max-md:bottom-[calc(8.5rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-10 w-max max-w-[calc(100%-2rem)] rounded-lg bg-black/70 px-3 py-2 text-center text-xs text-white">
+          <span className="block font-medium">{errorShown.title}</span>
+          {errorShown.next && <span className="block">{errorShown.next}</span>}
+        </p>
       )}
 
       <div className="call-controls absolute bottom-12 max-md:bottom-[calc(2rem+env(safe-area-inset-bottom))] left-0 right-0 flex items-center justify-center gap-6 max-md:gap-8 z-10">
