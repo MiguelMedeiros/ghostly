@@ -1,12 +1,18 @@
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { Profiler } from "react";
+import { act, fireEvent, screen, waitFor, within, render } from "@testing-library/react";
+import { Profiler, type ReactNode } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageInput } from "../../components/MessageInput";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { loadEmoji } from "../../lib/emoji";
 import { resetGifSearch } from "../../lib/gifSearch";
 import { setStorageProfile as setProfile } from "../../lib/storage";
-import { renderApp } from "../render";
+import { renderApp, AppProviders } from "../render";
+import userEvent from "@testing-library/user-event";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { installFakeAudio, installFakeMedia, removeFakeMedia } from "../voice/fakeMedia";
+import type { Language } from "../../lib/settings";
 
 // covers: app.composer.attach, app.composer.expressions, app.emoji-picker, chat.paired.emoji, chat.paired.gifs, chat.paired.gifs.categories, chat.paired.gifs.busy
 
@@ -827,5 +833,354 @@ describe("GIF search while the Internet Archive says to wait", () => {
     await user.click(smiley());
     expect(await screen.findByTestId("gif-busy")).toHaveTextContent("A busca de GIFs está ocupada agora.");
     expect(screen.getByTestId("gif-busy-wait")).toHaveTextContent("Tente de novo em 0:30.");
+  });
+});
+
+// covers: chat.paired.send
+describe("the composer counts a message's bytes", () => {
+  /**
+   * A chat's message is at most 16 KiB of UTF-8 (the engine's limit), not 16,384 characters. Seen 2026-10-08 on dev: a
+   * paired chat's field took 16,300 "é" (32,600 bytes), its counter said 84 left, and Send came back with the engine's
+   * English "Message exceeds 16384 UTF-8 bytes." in every language.
+   */
+  const onSend = vi.fn(async (_text: string) => null as string | null);
+  afterEach(() => { onSend.mockClear(); localStorage.clear(); sessionStorage.clear(); setProfile(""); });
+
+  function composer(extra: Partial<Parameters<typeof MessageInput>[0]> = {}) {
+    return renderApp(<LockScreenProvider><MessageInput draftId="bytes" onSend={onSend} maxLength={16_384} textBytes={16_384} {...extra} /></LockScreenProvider>);
+  }
+  const field = () => screen.getByPlaceholderText<HTMLTextAreaElement>("Message…");
+
+  it("a text under 16,384 characters but over 16 KiB stays in the field with why, and nothing is sent", async () => {
+    composer();
+    fireEvent.change(field(), { target: { value: "é".repeat(16_300) } });
+    // Over the limit, the count says so: not the 84 characters left.
+    expect(screen.getByTestId("composer-left")).toHaveTextContent("-16216 B");
+    await act(async () => { fireEvent.keyDown(field(), { key: "Enter" }); });
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("That is too long to send (32,600 bytes, the limit is 16,384). Shorten it, or send it as a file.");
+    expect(field().value).toHaveLength(16_300);
+  });
+
+  it("emoji count four bytes each: 4,096 go, one more does not", async () => {
+    composer();
+    fireEvent.change(field(), { target: { value: "👻".repeat(4_097) } });
+    await act(async () => { fireEvent.keyDown(field(), { key: "Enter" }); });
+    expect(onSend).not.toHaveBeenCalled();
+    fireEvent.change(field(), { target: { value: "👻".repeat(4_096) } });
+    expect(screen.getByTestId("composer-left")).toHaveTextContent("0 B");
+    await act(async () => { fireEvent.keyDown(field(), { key: "Enter" }); });
+    expect(onSend).toHaveBeenCalledWith("👻".repeat(4_096));
+  });
+
+  it("off the live link, past 16 KiB the hard count shows instead of the DHT's", () => {
+    composer({ softBytes: 256 });
+    fireEvent.change(field(), { target: { value: "x".repeat(300) } });
+    expect(screen.getByTestId("dht-byte-count")).toHaveTextContent("300 / 256 B");
+    fireEvent.change(field(), { target: { value: "é".repeat(8_200) } });
+    expect(screen.queryByTestId("dht-byte-count")).toBeNull();
+    expect(screen.getByTestId("composer-left")).toHaveTextContent("-16 B");
+  });
+});
+
+// covers: app.i18n
+/**
+ * The message field and a file's caption read a draft in its own direction, as its bubble will: from its first letter
+ * (`dir="auto"`). Empty or with no letter yet they keep the app's, so the placeholder and a lone emoji stay where the app
+ * writes. The direction a browser draws: e2e/web/text-direction.spec.ts.
+ */
+describe("the message field's direction", () => {
+  const field = () => screen.getByPlaceholderText<HTMLTextAreaElement>("Message…");
+  const type = (text: string) => fireEvent.change(field(), { target: { value: text } });
+
+  it("follows the draft's first letter, and the app's while there is none", () => {
+    renderApp(<LockScreenProvider><MessageInput onSend={vi.fn(async () => null)} /></LockScreenProvider>);
+    expect(field()).not.toHaveAttribute("dir");
+    type("👍 2");
+    expect(field()).not.toHaveAttribute("dir");
+    type("draft kept?");
+    expect(field()).toHaveAttribute("dir", "auto");
+    type("مرحبا يا صديقي!");
+    expect(field()).toHaveAttribute("dir", "auto");
+    type("");
+    expect(field()).not.toHaveAttribute("dir");
+  });
+
+  it("the caption of a file being sent does the same", async () => {
+    URL.createObjectURL = vi.fn(() => "blob:file");
+    URL.revokeObjectURL = vi.fn();
+    renderApp(<LockScreenProvider><MessageInput onSend={vi.fn(async () => null)} onSendFile={vi.fn(async () => null)} /></LockScreenProvider>);
+    const file = new File(["notes"], "notes.txt", { type: "text/plain" });
+    fireEvent.paste(field(), { clipboardData: { files: [file], types: ["Files"], items: [{ kind: "file", type: file.type, getAsFile: () => file }], getData: () => "" } });
+    const caption = await screen.findByTestId("attachment-caption");
+    expect(caption).not.toHaveAttribute("dir");
+    fireEvent.change(caption, { target: { value: "notes for Sunday?" } });
+    expect(caption).toHaveAttribute("dir", "auto");
+    fireEvent.change(caption, { target: { value: "🙂" } });
+    expect(caption).not.toHaveAttribute("dir");
+  });
+});
+
+// covers: chat.paired.send
+describe("the composer's caret while a send disables it", () => {
+  const onSend = vi.fn<(text: string) => Promise<string | null>>(async () => null);
+  const composer = (disabled: boolean) => <LockScreenProvider><MessageInput draftId="focus-test" onSend={onSend} disabled={disabled} /></LockScreenProvider>;
+  /** A wrapper that stays the same across rerenders (renderApp's is new each time, which would mount a new composer). */
+  const Providers = ({ children }: { children: ReactNode }) => <AppProviders>{children}</AppProviders>;
+  const renderApp = (ui: React.ReactElement) => ({ ...render(ui, { wrapper: Providers }), user: userEvent.setup() });
+  const field = () => screen.getByPlaceholderText<HTMLTextAreaElement>("Message…");
+
+  /**
+   * What Chrome and WebKit do to a focused field that turns disabled: they take its focus away, to the body. happy-dom
+   * keeps it (and ignores blur() on a disabled field), so the test lets go of it for them.
+   */
+  const browserDropsFocus = () => act(() => {
+    const input = field();
+    expect(input).toBeDisabled();
+    input.disabled = false; input.blur(); input.disabled = true;
+  });
+
+  afterEach(() => { localStorage.clear(); setProfile(""); });
+
+  it("comes back to the field once it is enabled again", async () => {
+    const { rerender } = renderApp(composer(false));
+    expect(field()).toHaveFocus();
+    rerender(composer(true));
+    browserDropsFocus();
+    expect(field()).not.toHaveFocus();
+    rerender(composer(false));
+    expect(field()).toHaveFocus();
+  });
+
+  it("stays where the person put it meanwhile", async () => {
+    const { rerender, user } = renderApp(<>{composer(false)}<button type="button">elsewhere</button></>);
+    rerender(<>{composer(true)}<button type="button">elsewhere</button></>);
+    browserDropsFocus();
+    await user.click(screen.getByRole("button", { name: "elsewhere" }));
+    rerender(<>{composer(false)}<button type="button">elsewhere</button></>);
+    expect(screen.getByRole("button", { name: "elsewhere" })).toHaveFocus();
+  });
+
+  it("is not taken when the field did not have it", async () => {
+    const { rerender } = renderApp(<>{composer(false)}<button type="button">elsewhere</button></>);
+    screen.getByRole("button", { name: "elsewhere" }).focus();
+    rerender(<>{composer(true)}<button type="button">elsewhere</button></>);
+    act(() => { (document.activeElement as HTMLElement).blur(); });
+    rerender(<>{composer(false)}<button type="button">elsewhere</button></>);
+    expect(field()).not.toHaveFocus();
+  });
+});
+
+// covers: app.accessibility, app.theme
+describe("the composer in forced colors", () => {
+  /**
+   * Forced colors (Windows Contrast themes) drop box shadows and replace backgrounds with the page's: the composer's
+   * field, edged by an inset shadow on its fill, read as loose text, and the round Send / mic button lost its shape.
+   * In forced colors only, the field (and the voice bar in its place) gets an outline, the round buttons a ButtonText
+   * border. What the browser draws is e2e/web/forced-colors-controls.spec.ts.
+   */
+  const CSS = readFileSync(join(fileURLToPath(import.meta.url), "../../../components/composer/composer.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const FORCED = "@media (forced-colors: active)";
+
+  /** The rules inside `@media (forced-colors: active)` blocks (selector -> declarations), and the stylesheet without them. */
+  function forced(): { rules: Map<string, Record<string, string>>; rest: string } {
+    const rules = new Map<string, Record<string, string>>();
+    let rest = "", at = 0;
+    for (let start = CSS.indexOf(FORCED); start >= 0; start = CSS.indexOf(FORCED, at)) {
+      const open = CSS.indexOf("{", start);
+      let depth = 1, i = open + 1;
+      for (; depth > 0; i++) depth += CSS[i] === "{" ? 1 : CSS[i] === "}" ? -1 : 0;
+      rest += CSS.slice(at, start);
+      for (const [, selectors, body] of CSS.slice(open + 1, i - 1).matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+        const decls: Record<string, string> = {};
+        for (const [, name, value] of body.matchAll(/([\w-]+)\s*:\s*([^;]+);/g)) decls[name] = value.trim();
+        for (const selector of selectors.split(",")) rules.set(selector.trim(), decls);
+      }
+      at = i;
+    }
+    return { rules, rest: rest + CSS.slice(at) };
+  }
+
+  describe("the composer's field in forced colors (composer.css)", () => {
+    it("the field and the voice bar in its place keep a CanvasText edge, drawn inside them, so nothing moves", () => {
+      const { rules } = forced();
+      for (const selector of [".composer-field", ".composer-row > .voice-bar"]) {
+        expect(rules.get(selector), `${selector} inside ${FORCED}`).toMatchObject({ outline: "1px solid CanvasText", "outline-offset": "-1px" });
+      }
+    });
+
+    it("the focused field's ring still wins over that edge", () => {
+      // `.composer-field:has(.composer-textarea:focus-visible)` is more specific than `.composer-field`, wherever it stands.
+      expect(forced().rest).toMatch(/\.composer-field:has\(\.composer-textarea:focus-visible\)\s*\{[^}]*outline:\s*2px solid/);
+    });
+  });
+
+  const FORCED_EDGE = ["forced-colors:border", "forced-colors:border-[color:ButtonText]"];
+
+  describe("the round Send and mic buttons in forced colors", () => {
+    beforeEach(() => { installFakeMedia(); installFakeAudio(); });
+    afterEach(() => removeFakeMedia());
+
+    it("the mic, then Send once there is a message, carry a ButtonText border", () => {
+      renderApp(<MessageInput onSend={async () => null} onSendFile={async () => null} />);
+      const mic = screen.getByTestId("voice-record");
+      for (const c of FORCED_EDGE) expect(mic, "the mic").toHaveClass(c);
+      fireEvent.change(screen.getByPlaceholderText("Message…"), { target: { value: "hi" } });
+      const send = screen.getByRole("button", { name: "Send message" });
+      for (const c of FORCED_EDGE) expect(send, "Send").toHaveClass(c);
+    });
+
+    it("Send, in a chat that sends no files", () => {
+      renderApp(<MessageInput onSend={async () => null} />);
+      const send = screen.getByRole("button", { name: "Send message" });
+      for (const c of FORCED_EDGE) expect(send).toHaveClass(c);
+    });
+  });
+});
+
+// covers: chat.paired.send
+describe("a refusal above the composer", () => {
+  /** What a group answers a file it paces, and a text over 16 KiB, in the languages slowest to read. */
+  const PACED_JA = "このグループに短時間で多くのファイルを送りました。3分待ってから、もう一度送ってください。";
+  const TOO_LONG_ZH = "内容过长，无法发送（18,000 字节，上限为 16,384）。请缩短，或作为文件发送。";
+  const PACED_AR = "أرسلت ملفات كثيرة إلى هذه المجموعة للتو. انتظر 3 دقائق، ثم أرسله مرة أخرى.";
+  const SHORT_EN = "Could not send the file.";
+
+  /** The mean silent reading speed (IReST, characters a minute, spaces not counted): how long a line takes to read. */
+  const readMs = (text: string, perMinute: number) => [...text.replace(/\s/g, "")].length / perMinute * 60_000;
+
+  const sendRefused = async (refusal: string, language: Language) => {
+    renderApp(<LockScreenProvider><MessageInput draftId={`hold-${language}`} onSend={async () => null} onSendFile={async () => refusal} /></LockScreenProvider>, { language });
+    fireEvent.change(screen.getByTestId("file-input"), { target: { files: [new File(["x"], "a.txt", { type: "text/plain" })] } });
+    return screen.findByRole("alert");
+  };
+  const card = () => screen.queryByText(/./, { selector: "[role='alert'] span" });
+  const wait = (ms: number) => act(() => { vi.advanceTimersByTime(ms); });
+
+  afterEach(() => { vi.useRealTimers(); localStorage.clear(); });
+
+  it.each([["ja", PACED_JA, 357], ["zh", TOO_LONG_ZH, 255], ["ar", PACED_AR, 612]] as const)(
+    "in %s stays up at least as long as it takes to read, then goes by itself", async (language, refusal, perMinute) => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      await sendRefused(refusal, language);
+      expect(card()).toHaveTextContent(refusal);
+      wait(Math.max(5_200, readMs(refusal, perMinute)));
+      expect(card()).toHaveTextContent(refusal);
+      wait(30_000);
+      expect(card()).toBeNull();
+    });
+
+  it("a short English line still goes after 5 s", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await sendRefused(SHORT_EN, "en");
+    wait(4_800);
+    expect(card()).toHaveTextContent(SHORT_EN);
+    wait(400);
+    expect(card()).toBeNull();
+  });
+
+  it("stays while it is pointed at, and goes once the pointer leaves", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const alert = await sendRefused(PACED_JA, "ja");
+    fireEvent.pointerEnter(alert.firstElementChild!);
+    wait(60_000);
+    expect(card()).toHaveTextContent(PACED_JA);
+    fireEvent.pointerLeave(alert.firstElementChild!);
+    wait(30_000);
+    expect(card()).toBeNull();
+  });
+
+  it("stays while its × has the focus; closed, it hands the focus to the message field", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const alert = await sendRefused(PACED_JA, "ja");
+    const close = within(alert).getByRole("button");
+    act(() => close.focus());
+    wait(60_000);
+    expect(card()).toHaveTextContent(PACED_JA);
+    expect(close).toHaveFocus();
+    fireEvent.click(close);
+    expect(card()).toBeNull();
+    expect(screen.getByRole("textbox")).toHaveFocus();
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it("gives its × a 32 x 32 px tap target, as the app's other card does", async () => {
+    const alert = await sendRefused(SHORT_EN, "en");
+    expect(within(alert).getByRole("button", { name: "Close" })).toHaveClass("grid", "h-8", "w-8", "place-items-center");
+  });
+
+  it("goes by itself once the focus has left its ×", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const alert = await sendRefused(PACED_JA, "ja");
+    const close = within(alert).getByRole("button");
+    act(() => close.focus());
+    wait(60_000);
+    act(() => screen.getByRole("textbox").focus());
+    wait(30_000);
+    expect(card()).toBeNull();
+    expect(screen.getByRole("textbox")).toHaveFocus();
+  });
+});
+
+// covers: app.composer.paste-files, app.mobile-layout
+describe("Send files on a phone", () => {
+  /**
+   * On a phone, Send files (files pasted, dropped or shared into a chat) gives a thumb 44 × 44 px where a tap lands, as
+   * the rest of the app does: each file's × was 28 × 28 px and Cancel / Send 40 px tall. The × carry `.tap-target`
+   * (index.css), which grows where a tap lands past the box without moving the tile; Cancel and Send are 44 px tall under
+   * the phone breakpoint. The measure itself is a browser's (e2e/web/phone-touch-targets.spec.ts).
+   */
+  const INDEX_CSS = readFileSync(join(fileURLToPath(import.meta.url), "../../../index.css"), "utf8");
+
+  /** A 1 x 1 PNG's header: the sheet draws a picture only once its header says its size. */
+  const PNG = [137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0];
+
+  function pasteFiles(files: File[]) {
+    renderApp(<MessageInput onSend={vi.fn().mockResolvedValue(null)} onSendFile={vi.fn().mockResolvedValue(null)} />);
+    fireEvent.paste(screen.getByPlaceholderText("Message…"), {
+      clipboardData: { files, types: ["Files"], items: files.map((file) => ({ kind: "file", type: file.type, getAsFile: () => file })), getData: () => "" },
+    });
+    return screen.findByTestId("attachment-sheet");
+  }
+
+  const picture = () => new File([new Uint8Array(PNG)], "IMG_0042.png", { type: "image/png" });
+  const notes = (i: number) => new File([new Uint8Array(100 * i)], `notes-${i}.txt`, { type: "text/plain" });
+
+  beforeEach(() => {
+    URL.createObjectURL = vi.fn(() => "blob:picture");
+    URL.revokeObjectURL = vi.fn();
+  });
+
+  it("a picture and three files: each × is thumb-sized, and its tile does not clip that larger area", async () => {
+    const sheet = await pasteFiles([picture(), notes(1), notes(2), notes(3)]);
+    await within(sheet).findByRole("img", { name: "IMG_0042.png" });
+    const removers = within(sheet).getAllByRole("button", { name: /^Remove / });
+    expect(removers.map((button) => button.getAttribute("aria-label"))).toEqual(["Remove IMG_0042.png", "Remove notes-1.txt", "Remove notes-2.txt", "Remove notes-3.txt"]);
+    for (const button of removers) {
+      expect(button, button.getAttribute("aria-label")!).toHaveClass("tap-target", "absolute");
+      const tile = button.closest("li")!;
+      expect(tile.className, button.getAttribute("aria-label")!).not.toMatch(/\boverflow-/);
+      // The sizes overflow-hidden gave the grid stay: the tiles neither grow with their content nor move.
+      expect(tile).toHaveClass("aspect-square", "min-w-0", "min-h-0");
+    }
+  });
+
+  it("Cancel and Send are 44 px tall, with one file or several", async () => {
+    const several = await pasteFiles([picture(), notes(1)]);
+    for (const id of ["attachment-cancel", "attachment-send"]) expect(within(several).getByTestId(id), id).toHaveClass("max-md:min-h-11");
+    fireEvent.click(within(several).getByTestId("attachment-cancel"));
+    expect(screen.queryByTestId("attachment-sheet")).toBeNull();
+  });
+
+  it("one file alone: Cancel and Send are 44 px tall too", async () => {
+    const one = await pasteFiles([notes(1)]);
+    for (const id of ["attachment-cancel", "attachment-send"]) expect(within(one).getByTestId(id), id).toHaveClass("max-md:min-h-11");
+  });
+
+  it("a .tap-target placed with absolute stays where it is: the phone rule makes only the others relative", () => {
+    const phone = INDEX_CSS.match(/@media \(width < 768px\) \{\n((?: {2}[^\n]*\n)*?\s*\.tap-target::after[^\n]*\n)\}/)?.[1] ?? "";
+    expect(phone).toMatch(/\.tap-target::after \{/);
+    expect(phone).toMatch(/\.tap-target:not\(\.absolute\) \{ position: relative; \}/);
+    expect(phone).not.toMatch(/\.tap-target \{[^}]*position/);
   });
 });

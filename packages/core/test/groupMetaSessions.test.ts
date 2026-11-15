@@ -5,7 +5,7 @@ import { epochKeys } from "../src/groupCrypto";
 import { commitHash } from "../src/groupCommits";
 import { GroupSession, type GroupEdgeFrame, type GroupState } from "../src/groupSession";
 import { CommunitySession, communityCommitHash, type CommunityFrame, type CommunityState } from "../src/groupCommunity";
-import { encodeGroupMetaBody, signGroupMeta, wrapGroupMeta, type GroupMetaChange, type GroupMetaFrame } from "../src/groupMeta";
+import { encodeGroupMetaBody, groupCallSfu, parseGroupMetaBody, signGroupMeta, wrapGroupMeta, type GroupMetaChange, type GroupMetaFrame } from "../src/groupMeta";
 // covers: groups.picture.protocol, groups.picture.set, groups.picture.late-joiner, groups.rename.protocol
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
@@ -697,5 +697,39 @@ describe("group name, group-community/1", () => {
     const dave = await net.admit(carol, "dave");
     await net.meet(carol, dave); await net.meet(bob, dave);
     expect([bob.session.name, carol.session.name, dave.session.name]).toEqual(["Book club", "Book club", "Book club"]);
+  });
+});
+
+describe("group call node, group-community/1 (WISP 602)", () => {
+  const SFU = "https://call.example.com";
+
+  it("is an https origin in its one spelling, and a call that does not hold is no call: the name beside it still shows", () => {
+    expect(groupCallSfu(SFU)).toBe(SFU);
+    expect(groupCallSfu("https://call.example.com:8443")).toBe("https://call.example.com:8443");
+    for (const bad of ["http://call.example.com", "https://call.example.com/", "https://call.example.com/sfu", "https://Call.example.com", "https://call.example.com:443",
+      "https://u@call.example.com", "https://call.example.com?x", "https://call.example.com#x", `https://${"a".repeat(200)}.com`, "call.example.com", "", 1, null]) expect(groupCallSfu(bad), String(bad)).toBeUndefined();
+    expect(parseGroupMetaBody(JSON.stringify({ name: "Thursday", call: { sfu: SFU, e2ee: 7 } }))).toEqual({ name: "Thursday", call: { sfu: SFU } });
+    expect(parseGroupMetaBody(JSON.stringify({ name: "Thursday", call: { sfu: "http://call.example.com" } }))).toEqual({ name: "Thursday" });
+    expect(parseGroupMetaBody(JSON.stringify({ name: "Thursday", call: "https://call.example.com" }))).toEqual({ name: "Thursday" });
+    expect(() => encodeGroupMetaBody({ call: { sfu: "https://call.example.com/sfu" } })).toThrow("A group's call node is an https origin");
+  });
+
+  it("the admin sets it for every member, a rename and a picture keep it, a member is refused, and clearing it clears it", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob");
+    await net.meet(alice, bob);
+    await alice.session.setCall(SFU);
+    await net.settle();
+    expect(bob.session.call).toEqual({ sfu: SFU });
+    await alice.session.rename("Thursday");
+    await alice.session.setPicture(RED);
+    await net.settle();
+    expect([bob.session.name, bob.session.picture, bob.session.call]).toEqual(["Thursday", RED, { sfu: SFU }]);
+    await expect(bob.session.setCall(null)).rejects.toThrow("Only the admin");
+    await expect(alice.session.setCall("http://call.example.com")).rejects.toThrow("https origin");
+    await alice.session.setCall(null);
+    await net.settle();
+    expect([alice.session.call, bob.session.call, bob.session.name]).toEqual([undefined, undefined, "Thursday"]);
   });
 });

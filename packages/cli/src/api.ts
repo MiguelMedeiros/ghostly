@@ -1,4 +1,4 @@
-import { AWAITING_PEER_MS, inviteLink, LIMITS, MENTION_EVERYONE, normalizeRelayUrl, ownInviteRefusal, relayUrlProblem, replySnippet, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type TypingKind } from "@ghostly/core";
+import { AWAITING_PEER_MS, decodeGroupEntryLink, inviteLink, LIMITS, MENTION_EVERYONE, normalizeRelayUrl, ownInviteRefusal, relayUrlProblem, replySnippet, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type TypingKind } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
 import { DEFAULT_HYPERDHT_RELAY } from "@ghostly/browser/shared/hyperdhtRelay";
@@ -272,14 +272,29 @@ const ONE_SHOT_JOIN_S = 60;
  * in only while its knocks go on, and they stop when the command leaves. It left at once with `{"group": id}` and exit
  * 0, in 0.5 s, the admin online: the group stayed an invitation at "knocking" and nothing said a daemon had to run for
  * the knock to be answered. The answer says whether it is in and at what stage it waits, and what to do when it is not.
- * A contact's invitation to the group, not accepted, keeps its place and the link is only kept beside it: nothing
- * knocks, and only `group accept` moves it, so it answers at once with that.
+ * A contact's invitation to the group keeps its place and the link is only kept beside it: nothing knocks, so it
+ * answers at once. Not accepted, only `group accept` moves it; accepted, only its welcome does, over the contact's chat.
+ * In a group under the link's id already (`held`, before the join), the link is only kept beside it unless it is this
+ * profile's own group's (the engine's `joinByLink`): nothing knocks, and it answered `"joined": true` for a link whose
+ * group it never joined, with a second group waiting under the id that only `group show`'s `others` said.
  */
-async function letIn(ctx: ApiContext, groupId: string): Promise<Record<string, unknown>> {
+async function letIn(ctx: ApiContext, groupId: string, link: string, held: GroupView | undefined): Promise<Record<string, unknown>> {
   const seen = (s: EngineState) => s.groups.find((g) => g.id === groupId);
+  const id = shellWord(groupId, groupId);
   const invited = seen(state(ctx))?.invitation;
-  if (invited && !invited.viaLink && !invited.accepted) {
-    return { group: groupId, joined: false, stage: null, warning: `Not in yet: ${invited.contact || "a contact"} invited you to this group and the invitation waits for your answer. Accept it: ghostly group accept ${shellWord(groupId, groupId)}` };
+  if (invited && !invited.viaLink && !invited.takenBack) {
+    const who = invited.contact || "a contact";
+    if (!invited.accepted) return { group: groupId, joined: false, stage: null, warning: `Not in yet: ${who} invited you to this group and the invitation waits for your answer. Accept it: ghostly group accept ${id}` };
+    return { group: groupId, joined: false, stage: null, warning: `Not in yet: you accepted ${who}'s invitation to this group, and its welcome has not arrived; the link was kept beside it, and knocks nowhere. The welcome arrives only while this profile is running: keep it running (ghostly daemon --detach), then ghostly group show ${id}` };
+  }
+  const opened = decodeGroupEntryLink(link);
+  const own = held?.entryLink ? decodeGroupEntryLink(held.entryLink) : null;
+  if (held?.status === "active" && opened && own?.host !== opened.host) {
+    const kept = seen(state(ctx))?.others?.some((o) => "link" in o && decodeGroupEntryLink(o.link)?.host === opened.host);
+    const pick = `keep the one you are in (ghostly engine keepGroup '{"groupId":"${groupId}"}') or take the link's instead (ghostly engine switchGroup '{"groupId":"${groupId}","to":"<its link, from group show --show-secret>"}')`;
+    return { group: groupId, joined: false, stage: null, warning: kept
+      ? `Not joined: you are in a group under this link's id already, and only a group's welcome says whose a link is, so the link was kept beside that group and knocks nowhere. ghostly group show ${id} lists it under "others": ${pick}`
+      : `Not joined: you are in a group under this link's id already, and as many other groups as are kept already wait beside it to be picked, so the link was not kept. ghostly group show ${id} lists them under "others": ${pick}, then open the link again` };
   }
   const done = (g: GroupView | undefined) => !g || g.status === "active" || JOIN_STOPS.has(g.invitation?.stage ?? "");
   const group = await waitForState(ctx, (s) => { const g = seen(s); return done(g) ? { g } : undefined; }, ONE_SHOT_JOIN_S * 1000, `group ${groupId} to let this profile in`)
@@ -735,7 +750,17 @@ const METHODS: Record<string, Method> = {
     // a contact's key as a group's: the command offered names the group by `group:` unless the name alone reaches it.
     const ref = str(params, "message") ?? "<message>", typed = str(params, "chat", true);
     const reachesGroup = (name: string) => { try { return "group" in findChatOrGroup(state(ctx).links, state(ctx).groups, name); } catch { return false; } };
-    const link = notAGroup(ctx, params, () => chatOf(ctx, params), (shown, id) => `ghostly message delete ${groupPrefixed(typed) === null && reachesGroup(typed) ? shown : shellWord(groupPrefixed(typed) === null ? `group:${typed}` : typed, `group:${id}`)} ${ref === "<message>" ? ref : shellWord(ref, "<message>")} --everyone`);
+    let link: ReturnType<typeof chatOf>;
+    try {
+      link = notAGroup(ctx, params, () => chatOf(ctx, params), (shown, id) => `ghostly message delete ${groupPrefixed(typed) === null && reachesGroup(typed) ? shown : shellWord(groupPrefixed(typed) === null ? `group:${typed}` : typed, `group:${id}`)} ${ref === "<message>" ? ref : shellWord(ref, "<message>")} --everyone`);
+    } catch (error) {
+      // Another member's message: only its author deletes it, so the `--everyone` offered was then refused as not mine,
+      // a second command to learn it cannot be deleted at all. A history that cannot be read keeps that hint.
+      const group = error instanceof CliError ? error.details?.group : undefined;
+      const theirs = typeof group === "string" && ref !== "<message>" ? await messageOf(ctx, `group:${group}`, ref).catch(() => undefined) : undefined;
+      if (theirs && theirs.sender !== "me") throw new CliError("not_found", `${JSON.stringify(typed)} is a group, and ${JSON.stringify(ref)} is another member's message in it: only its author deletes a group's message, for everyone`, { group });
+      throw error;
+    }
     const messageId = str(params, "message", true);
     const message = await node(ctx).getMessage(link.id, messageId);
     if (!message) throw noMessage(messageId, { group: false, ref: str(params, "chat", true) });
@@ -848,14 +873,17 @@ const METHODS: Record<string, Method> = {
   },
   async "group.join"(ctx, params) {
     let groupId: string;
+    const link = str(params, "link", true);
+    // What was held before the join: a group already active under the link's id only gets the link noted beside it.
+    const before = ctx.mode === "one-shot" ? state(ctx).groups : [];
     try {
-      ({ groupId } = await node(ctx).joinGroupByLink({ link: str(params, "link", true) }));
+      ({ groupId } = await node(ctx).joinGroupByLink({ link }));
     } catch (error) {
       // Not a link to a group at all: the caller's input, as `invite join` answers a word that is no invite.
       if (error instanceof Error && error.message === "This is not a link to a group") throw new CliError("bad_request", error.message);
       throw error;
     }
-    return ctx.mode === "one-shot" ? letIn(ctx, groupId) : { group: groupId };
+    return ctx.mode === "one-shot" ? letIn(ctx, groupId, link, before.find((g) => g.id === groupId)) : { group: groupId };
   },
   async "group.list"(ctx, params) {
     const showSecret = bool(params, "showSecret");

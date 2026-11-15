@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { renderHook } from "@testing-library/react";
 import { FakeMediaStream, FakeTrack } from "../../../../../packages/react/test/fakes";
 
 // covers: calls.linux-native, calls.devices-linux, calls.reconnect, calls.speaking, settings.network.relay-only
@@ -41,8 +42,12 @@ vi.mock("@tauri-apps/api/core", () => ({
   },
 }));
 
-const { NativePeerConnection, SCREEN_UNAVAILABLE, askedDevice, bytesOf, connectionStateOf, deviceList, deviceName, isJpeg, nativeCallMedia, nativeCallOptions, nativeDevices, ownIceServers } = await import("../../desktop/nativeCalls");
+const { GROUP_CALLS_NOT_ON_LINUX, NativePeerConnection, SCREEN_UNAVAILABLE, askedDevice, bytesOf, connectionStateOf, deviceList, deviceName, groupCallSupport, isJpeg, nativeCallMedia, nativeCallOptions, nativeDevices, ownIceServers } = await import("../../desktop/nativeCalls");
 const { callRtcConfig, keepsToRelays } = await import("@ghostly/core");
+const { useGroupCallSupport } = await import("../../hooks/useGroupCallSupport");
+const { errorText } = await import("../../lib/errorText");
+const { translateWith } = await import("../../locales/translate");
+const { LOCALES } = await import("../i18n/locales");
 const { CallRelayError } = await import("@ghostly/react");
 const { chooseDevice } = await import("../../lib/mediaDevices");
 const { callLevels } = await import("../../lib/voiceLevels");
@@ -95,6 +100,67 @@ describe("what the host makes of what Rust says about calls", () => {
   it("on Linux without the GStreamer plugins, offers no calls and says what to install", () => {
     const missing = "Calls need GStreamer plugins: install gstreamer1.0-plugins-good";
     expect(nativeCallOptions({ native: true, missing })).toEqual({ node: { callsSupport: false, callsUnavailable: missing } });
+  });
+});
+
+/** The agents each app's page has: WKWebView, WebView2, WebKitGTK, Android's WebView, and two browsers. */
+const AGENTS = {
+  mac: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)",
+  windows: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0",
+  linux: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15",
+  android: "Mozilla/5.0 (Linux; Android 14; Pixel 8 Build/AP2A.240805.005; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/131.0.0.0 Mobile Safari/537.36",
+  firefoxLinux: "Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0",
+  safariMac: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15",
+};
+
+describe("where group calls work", () => {
+  const off = { supported: false, reason: GROUP_CALLS_NOT_ON_LINUX };
+  const on = { supported: true, reason: null };
+
+  it("not on the Linux Desktop, whose WebView has no WebRTC: the button says to join from the web app", () => {
+    expect(groupCallSupport(true, AGENTS.linux)).toEqual(off);
+    expect(GROUP_CALLS_NOT_ON_LINUX).toBe("Group calls aren't on Linux yet: join from app.ghostly.tools in a browser");
+  });
+
+  it("on the macOS and Windows Desktop, with the WebView's own WebRTC, and in the Android app", () => {
+    expect(groupCallSupport(true, AGENTS.mac)).toEqual(on);
+    expect(groupCallSupport(true, AGENTS.windows)).toEqual(on);
+    expect(groupCallSupport(true, AGENTS.android)).toEqual(on);
+  });
+
+  it("in a browser on any system, Linux included: that is where the Linux Desktop sends people", () => {
+    for (const agent of [AGENTS.firefoxLinux, AGENTS.linux, AGENTS.safariMac, AGENTS.windows]) expect(groupCallSupport(false, agent)).toEqual(on);
+  });
+
+  describe("on this page, as the group's call button reads it", () => {
+    const tauri = window as unknown as { __TAURI_INTERNALS__?: object };
+    afterEach(() => {
+      delete tauri.__TAURI_INTERNALS__;
+      Reflect.deleteProperty(navigator, "userAgent");
+    });
+    const agent = (value: string) => Object.defineProperty(navigator, "userAgent", { value, configurable: true });
+
+    it("off with the reason in the Linux Desktop, on in its browser", () => {
+      agent(AGENTS.linux);
+      tauri.__TAURI_INTERNALS__ = {};
+      expect(groupCallSupport()).toEqual(off);
+      expect(renderHook(() => useGroupCallSupport()).result.current).toEqual(off);
+      delete tauri.__TAURI_INTERNALS__;
+      expect(renderHook(() => useGroupCallSupport()).result.current).toEqual(on);
+    });
+
+    it("on in the Mac and Windows Desktop", () => {
+      tauri.__TAURI_INTERNALS__ = {};
+      for (const value of [AGENTS.mac, AGENTS.windows]) {
+        agent(value);
+        expect(renderHook(() => useGroupCallSupport()).result.current).toEqual(on);
+      }
+    });
+
+    it("says the reason in the app's language", () => {
+      const pt = translateWith(LOCALES.pt, "pt");
+      expect(errorText(GROUP_CALLS_NOT_ON_LINUX, pt)).toBe("Chamadas em grupo ainda não chegaram ao Linux: entre pelo app.ghostly.tools num navegador");
+    });
   });
 });
 
