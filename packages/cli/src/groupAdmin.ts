@@ -196,6 +196,10 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
   async "group.call"(ctx, params) {
     const group = joined(ctx, params);
     if (group.profile !== "community") throw new CliError("refused", `${group.name} is a private group: only a community group has calls through a node`);
+    // A profile out of the group (removed, or the admin who left) is told why, as the engine's rename and picture say
+    // it: before, "Only the admin" to them all.
+    const out = outOf(group);
+    if (out) throw new CliError("refused", out);
     if (!group.isAdmin) throw new CliError("refused", `Only the admin of ${group.name} sets its call node`);
     const sfu = bool(params, "clear") ? null : callNode(str(params, "sfu", true), str(params, "group", true), group.id);
     await node(ctx).setGroupCall({ groupId: group.id, sfu });
