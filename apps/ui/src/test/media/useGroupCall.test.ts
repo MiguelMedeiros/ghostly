@@ -96,8 +96,13 @@ class FakeLocalParticipant extends FakeParticipant {
     }
     return pub;
   }
+  /** What went out, and whether its room was sealed and joined at that moment (`FakeRoom.sealedNow`). */
+  private sent(what: string) {
+    published.push({ what, sealed: this.room.sealedNow() });
+  }
   readonly setMicrophoneEnabled = vi.fn(async (on: boolean, _options?: unknown) => {
     steps.push("mic");
+    if (on) this.sent("mic");
     const fails = FakeRoom.micFails;
     FakeRoom.micFails = null;
     if (fails) throw fails;
@@ -105,10 +110,12 @@ class FakeLocalParticipant extends FakeParticipant {
   });
   readonly setCameraEnabled = vi.fn(async (on: boolean, _options?: unknown) => {
     steps.push("camera");
+    if (on) this.sent("camera");
     return this.toggle(Source.Camera, "video", on);
   });
   readonly publishTrack = vi.fn(async (track: MediaStreamTrack, options: { source: SourceName }) => {
     steps.push("publish");
+    this.sent(`publish ${options.source} ${track.kind}`);
     const pub = new FakePublication(options.source, new FakeLocalTrack(track));
     this.trackPublications.set(`pub-${track.id}`, pub);
     this.room.emit(RoomEvent.LocalTrackPublished);
@@ -138,7 +145,15 @@ class FakeRoom {
   activeSpeakers: FakeParticipant[] = [];
   readonly localParticipant = new FakeLocalParticipant(this);
   private readonly listeners = new Map<string, Set<(...args: unknown[]) => void>>();
+  /** LiveKit's E2EE turned on in this room, and the room joined. */
+  e2ee = false;
+  connected = false;
+  /** Whether a track published now goes out sealed: E2EE configured with a key provider and worker, on, and joined. */
+  sealedNow() {
+    return !!this.options.encryption?.keyProvider && !!this.options.encryption.worker && this.e2ee && this.connected;
+  }
   readonly connect = vi.fn(async (_url: string, _token: string, _opts?: { rtcConfig?: RTCConfiguration; autoSubscribe?: boolean }) => {
+    this.connected = true;
     for (const id of FakeRoom.waiting) this.remoteParticipants.set(id, new FakeParticipant(id, id.toUpperCase()));
     FakeRoom.atJoin?.(this);
   });
@@ -147,7 +162,10 @@ class FakeRoom {
     this.emit(RoomEvent.Disconnected);
   });
   /** LiveKit's E2EE switch: `steps` records it against the connect, as a sealed join must turn it on first. */
-  readonly setE2EEEnabled = vi.fn(async (_on: boolean) => { steps.push("e2ee"); });
+  readonly setE2EEEnabled = vi.fn(async (on: boolean) => {
+    steps.push("e2ee");
+    this.e2ee = on;
+  });
   constructor(readonly options: { encryption?: { keyProvider: FakeKeyProvider; worker: FakeWorker } } & Record<string, unknown>) {
     FakeRoom.rooms.push(this);
     steps.push("room");
@@ -186,6 +204,8 @@ class FakeRoom {
 
 /** The order a join goes in: for a sealed one the key set, the room, E2EE on, the connect, and only then any publish. */
 let steps: string[] = [];
+/** Every track a local participant sent, in order, with whether its room was sealed and joined then. */
+let published: { what: string; sealed: boolean }[] = [];
 
 /** LiveKit's shared-key provider (`ExternalE2EEKeyProvider`): the raw bytes of every key set in it, in order. */
 class FakeKeyProvider {
@@ -227,12 +247,13 @@ async function joined(over: Partial<UseGroupCallOptions> = {}) {
   return hook;
 }
 
-/** A `getDisplayMedia` answering with one fake screen track. */
-function displayMedia() {
+/** A `getDisplayMedia` answering with one fake screen track, and the screen's own audio when `withAudio`. */
+function displayMedia({ withAudio = false } = {}) {
   const screen = new FakeTrack("video");
-  const getDisplayMedia = vi.fn(async () => ({ getVideoTracks: () => [screen], getAudioTracks: () => [] }) as unknown as MediaStream);
+  const audio = new FakeTrack("audio");
+  const getDisplayMedia = vi.fn(async () => ({ getVideoTracks: () => [screen], getAudioTracks: () => (withAudio ? [audio] : []) }) as unknown as MediaStream);
   Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getDisplayMedia } });
-  return { screen, getDisplayMedia };
+  return { screen, audio, getDisplayMedia };
 }
 
 afterEach(() => {
@@ -240,6 +261,7 @@ afterEach(() => {
   FakeKeyProvider.providers = [];
   FakeWorker.workers = [];
   steps = [];
+  published = [];
   sealing = true;
   FakeRoom.waiting = [];
   FakeRoom.micFails = null;
@@ -533,6 +555,48 @@ describe("useGroupCall, a sealed call (WISP 602 § End-to-end encryption)", () =
     await act(() => result.current.toggleCamera());
     expect(steps).toEqual(["key", "room", "e2ee", "connect", "mic", "publish", "camera"]);
     expect(room().setE2EEEnabled).toHaveBeenCalledTimes(1);
+  });
+
+  it("every publish path goes out on a sealed, joined room: microphone, camera, screen; the screen's own audio never goes out", async () => {
+    const { screen, audio } = displayMedia({ withAudio: true });
+    const { result } = await joined({ e2ee: key(4, 7) });
+    await act(() => result.current.toggleCamera());
+    await act(() => result.current.toggleScreen());
+    // off and on again: each new publish is sealed too
+    await act(() => result.current.toggleMic());
+    await act(() => result.current.toggleMic());
+    await act(() => result.current.toggleScreen());
+    await act(() => result.current.toggleScreen());
+    expect(published.map((p) => p.what)).toEqual(["mic", "camera", "publish screen_share video", "mic", "publish screen_share video"]);
+    expect(published.filter((p) => !p.sealed)).toEqual([]);
+    // the screen's audio was asked for nowhere and is stopped at once
+    expect(audio.stop).toHaveBeenCalled();
+    expect(room().localParticipant.publishTrack.mock.calls.map(([track]) => track)).not.toContain(audio);
+    expect(room().localParticipant.publishTrack.mock.calls[0][0]).toBe(screen);
+  });
+
+  it("Hide my IP turned on during a sealed call joins again sealed: a new key provider with the key and worker, E2EE before the connect, mic and camera after", async () => {
+    const turn = { urls: "turn:turn.example:3478", username: "u", credential: "c" };
+    const iceServers = [{ urls: "stun:stun.example:3478" }, turn];
+    const e2ee = key(4, 7);
+    const hook = await joined({ iceServers, e2ee });
+    await act(() => hook.result.current.toggleCamera());
+    const direct = room();
+    steps = [];
+    published = [];
+
+    hook.rerender({ url: "wss://call.example", token: "pass", iceServers, relayOnly: true, e2ee, loadLivekit });
+    await waitFor(() => expect(FakeRoom.rooms).toHaveLength(2));
+    await waitFor(() => expect(hook.result.current.status).toBe("connected"));
+    await waitFor(() => expect(hook.result.current.local).toMatchObject({ mic: true, camera: true }));
+    expect(direct.disconnect).toHaveBeenCalledWith(true);
+    expect(FakeWorker.workers[0].terminate).toHaveBeenCalled();
+    expect(FakeKeyProvider.providers).toHaveLength(2);
+    expect(FakeKeyProvider.providers[1].keys).toEqual([Array(32).fill(7)]);
+    expect(room().options.encryption).toEqual({ keyProvider: FakeKeyProvider.providers[1], worker: FakeWorker.workers[1] });
+    expect(room().connect).toHaveBeenCalledWith("wss://call.example", "pass", { rtcConfig: { iceServers: [{ ...turn, urls: [turn.urls] }], iceTransportPolicy: "relay" }, autoSubscribe: false });
+    expect(steps).toEqual(["key", "room", "e2ee", "connect", "mic", "camera"]);
+    expect(published).toEqual([{ what: "mic", sealed: true }, { what: "camera", sealed: true }]);
   });
 
   it("subscribes by hand to sealed publications only: a track in the clear in the room at the join is never taken", async () => {
