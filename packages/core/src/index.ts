@@ -106,6 +106,7 @@ export * from "./groupCommunity";
 export * from "./communityRendezvous";
 export * from "./groupHubs";
 export * from "./groupSignals";
+export * from "./groupCalls";
 export * from "./groupMeta";
 export * from "./groupTyping";
 export * from "./groupFiles";
