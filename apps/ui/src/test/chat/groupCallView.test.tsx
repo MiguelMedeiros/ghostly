@@ -1,6 +1,8 @@
-import { screen, within } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GroupCallView, type GroupCallParticipant, type GroupCallState } from "../../components/GroupCallView";
+import type { CallDevices, DeviceNotice } from "../../hooks/useCallDevices";
+import { EMPTY_DEVICES } from "../../lib/mediaDevices";
 import { FakeTrack } from "../../../../../packages/react/test/fakes";
 import { axeViolations } from "../axe";
 import { renderApp } from "../render";
@@ -148,5 +150,50 @@ describe("the group call window", () => {
     expect(tiles().map((t) => [t.dataset.identity, t.dataset.kind])).toEqual([["ana", "screen"]]);
     await user.click(screen.getByTestId("group-call-minimize"));
     expect(screen.getByTestId("group-call")).toHaveAttribute("data-mini", "false");
+  });
+});
+
+/** The call's devices as `useCallDevices` gives them, with `notice` up. */
+function devicesWith(notice: DeviceNotice | null): CallDevices {
+  return {
+    list: EMPTY_DEVICES, current: { audioinput: "", videoinput: "", audiooutput: "" }, speaker: undefined, speakers: false,
+    choose: vi.fn(), notice, dismiss: vi.fn(), switchBack: vi.fn(), hold: vi.fn(),
+  };
+}
+
+// A headset that drops mid-call switches the sound to the default: the group call says so, as the 1:1 does.
+describe("the group call's device notice", () => {
+  it("says a lost device in a status the screen reader reads, and closes by its ×", async () => {
+    const devices = devicesWith({ kind: "audioinput", type: "lost", name: "Headset" });
+    const { user } = view(state(1), { devices });
+    const notice = screen.getByTestId("call-device-notice");
+    expect(notice).toHaveAttribute("role", "status");
+    expect(within(screen.getByTestId("group-call")).getByTestId("call-device-notice")).toBe(notice);
+    expect(notice).toHaveTextContent("Headset");
+    await user.click(within(notice).getByRole("button", { name: "Close" }));
+    expect(devices.dismiss).toHaveBeenCalledOnce();
+  });
+
+  it("offers Switch back when the chosen device is back, its time held while the focus is on it", async () => {
+    const devices = devicesWith({ kind: "audioinput", type: "back", name: "Headset", id: "h1" });
+    const { user } = view(state(1), { devices });
+    await user.click(screen.getByTestId("call-device-switch-back"));
+    expect(devices.switchBack).toHaveBeenCalledOnce();
+    expect(devices.hold).toHaveBeenLastCalledWith(true);
+  });
+
+  it("gives the focus to Devices when it goes with the focus on Switch back", () => {
+    const devices = devicesWith({ kind: "audioinput", type: "back", name: "Headset", id: "h1" });
+    const { rerender } = view(state(1), { devices });
+    act(() => screen.getByTestId("call-device-switch-back").focus());
+    const handlers = { onToggleMic: vi.fn(), onToggleCamera: vi.fn(), onToggleScreen: vi.fn(), onLeave: vi.fn() };
+    rerender(<GroupCallView call={state(1)} groupName="Community" {...handlers} devices={{ ...devices, notice: null }} />);
+    expect(screen.queryByTestId("call-device-notice")).toBeNull();
+    expect(screen.getByTestId("call-devices")).toHaveFocus();
+  });
+
+  it("is not drawn in the small window, which has no room for it", () => {
+    view(state(1), { devices: devicesWith({ kind: "audioinput", type: "lost", name: "Headset" }), pinned: true });
+    expect(screen.queryByTestId("call-device-notice")).toBeNull();
   });
 });
