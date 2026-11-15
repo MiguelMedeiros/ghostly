@@ -224,14 +224,22 @@ export function readCursor(path: string | undefined): number | undefined {
  * Where listen starts: after the event number the cursor file holds, else after `since` (--since: the first start's
  * place). Before, --since won without a word, and a unit with `--since 0 --cursor f` ran every handled event's hook
  * again at each restart. A cursor file that holds no number is refused unless --since is given, which starts it.
+ * `known`, once the journal's last event is: says on stderr where it starts. A cursor past it (a profile restored from a
+ * backup, a journal reset, a cursor copied from another profile) starts with new events; before, stderr said "starting
+ * after it" (or nothing, without --since) and the next event wrote a lower number over the file.
  */
-export function startAt(since: number | undefined, cursor: string | undefined, say: (line: string) => void): number | undefined {
-  if (since === undefined) return readCursor(cursor);
+export function startAt(since: number | undefined, cursor: string | undefined, say: (line: string) => void): { from: number | undefined; known(lastSeq: number): void } {
   let kept: number | undefined;
-  try { kept = readCursor(cursor); } catch { return since; }
-  if (kept === undefined) return since;
-  if (kept !== since) say(`ghostly: ${cursor} holds event ${kept}: starting after it, not after --since ${since}`);
-  return kept;
+  if (since === undefined) kept = readCursor(cursor);
+  else try { kept = readCursor(cursor); } catch { /* --since starts it */ }
+  return {
+    from: kept ?? since,
+    known: (lastSeq) => {
+      if (kept === undefined) return;
+      if (kept > lastSeq) say(`ghostly: ${cursor} holds event ${kept}, past this profile's last event (${lastSeq}): starting with new events`);
+      else if (since !== undefined && kept !== since) say(`ghostly: ${cursor} holds event ${kept}: starting after it, not after --since ${since}`);
+    },
+  };
 }
 
 /**
