@@ -155,4 +155,25 @@ describe.skipIf(process.platform === "win32")("a listen attached to the daemon t
       await expect.poll(() => seqs, { timeout: 5_000 }).toEqual([4, 5, 6]);
     } finally { following?.close(); await s.close(); }
   });
+
+  it("a cursor past the daemon's last event follows a restarted daemon from that last event, not from the cursor's", async () => {
+    const { hub, emit } = countingHub(3);
+    let s = await served("past", hub);
+    let following: ReturnType<typeof followDaemon> | undefined;
+    try {
+      const client = await connectDaemon(s.address);
+      const { seqs, handle } = slowHandler();
+      // A cursor from a profile restored from a backup, or copied from another: event 50 of a journal at 3.
+      following = followDaemon(s.address, client!, handle, 50);
+      await following.subscribed;
+      await s.close();
+      emit("started");
+      emit("right after the start");
+      s = await served("past", hub, true);
+      // Before: the reconnect asked for the events after 50, and these two were skipped for good.
+      await expect.poll(() => seqs.length, { timeout: 10_000 }).toBe(2);
+      emit("later");
+      await expect.poll(() => seqs, { timeout: 5_000 }).toEqual([4, 5, 6]);
+    } finally { following?.close(); await s.close(); }
+  });
 });
