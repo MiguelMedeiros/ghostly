@@ -14,6 +14,7 @@ import { fillNames } from "../lib/fillNodes";
 import { errorText } from "../lib/errorText";
 import { callWindowShown } from "../lib/serviceWindows";
 import { mediaProblemKeys } from "../lib/mediaProblemText";
+import { openAppSettings } from "../desktop/androidCameraRefusal";
 import { DeviceMenu, DeviceNoticeBar } from "./CallOverlay";
 
 /** One person in a group call, as `useGroupCall` gives them: what they send, and the tracks to show and play. */
@@ -60,13 +61,16 @@ interface GroupCallViewProps {
 
 const MINI_KEY = "ghostly_group_call_mini";
 
-/** Why your mic, camera or screen did not come on, as the 1:1 call says it: a title, and the next step when there is one. */
-function errorLines(error: GroupCallError, t: Translate): { title: string; next?: string } {
+/**
+ * Why your mic, camera or screen did not come on, as the 1:1 call says it: a title, and the next step when there is one.
+ * Refused in the Android app, `android`: the line opens Android's settings, as the 1:1 call's notice does.
+ */
+function errorLines(error: GroupCallError, t: Translate): { title: string; next?: string; android?: boolean } {
   if (error.action === "mic" || error.action === "camera") {
     const problem = mediaProblem(error.cause);
     if (problem === "denied" || problem === "unavailable") {
-      const { title, next } = mediaProblemKeys(problem, error.action);
-      return { title: t(title), next: t(next) };
+      const { title, next, android } = mediaProblemKeys(problem, error.action);
+      return { title: t(title), next: t(next), android };
     }
   }
   // The screen share's line (`screenShareErrorMessage`), or an error the table knows; else as it came.
@@ -345,6 +349,12 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
           className="call-share-error absolute bottom-32 max-md:bottom-[calc(8.5rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-10 w-max max-w-[calc(100%-2rem)] rounded-lg bg-black/70 px-3 py-2 text-center text-xs text-white">
           <span className="block font-medium">{errorShown.title}</span>
           {errorShown.next && <span className="block">{errorShown.next}</span>}
+          {errorShown.android && (
+            <button type="button" data-testid="group-call-error-settings" onClick={() => void openAppSettings()}
+              className="relative mt-1 cursor-pointer rounded underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent before:absolute before:-inset-y-3 before:-inset-x-2 before:content-['']">
+              {t("settings.noticesOpenSettings")}
+            </button>
+          )}
         </p>
       )}
 
