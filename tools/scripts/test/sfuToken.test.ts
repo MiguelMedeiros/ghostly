@@ -1,4 +1,7 @@
 import { createHmac, createPrivateKey, sign } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { keyBytes, signedBytes, startTokenService, verifyRequest } from "../../../e2e/infra/sfu-token/server.mjs";
 
@@ -100,5 +103,24 @@ describe("the group-token mock (e2e/infra/sfu-token, WISP 602)", () => {
     const { post } = await service({ [G]: { [K]: "" } });
     const { token } = await (await post(request({ name: "😀".repeat(70) }))).json();
     expect(JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString()).name).toBe("😀".repeat(64));
+  });
+
+  it("joins a sealed room the app's way: the app's livekit-client, its E2EE worker where the page asks for it, a raw key", async () => {
+    const { url } = await service();
+    const require = createRequire(import.meta.url);
+    const app = JSON.parse(readFileSync(join(import.meta.dirname, "../../../package.json"), "utf8")).dependencies["livekit-client"];
+    const mock = JSON.parse(readFileSync(join(import.meta.dirname, "../../../e2e/infra/sfu-token/package.json"), "utf8")).dependencies["livekit-client"];
+    // The outsider must run the app's E2EE: livekit-client 2.15's worker let a frame through to the decoder while it did
+    // not know yet whether its sender seals, which reads as frames decoded without the key.
+    expect(mock).toBe(app);
+    const page = await (await fetch(`${url}/smoke`)).text();
+    const worker = page.match(/new Worker\("([^"]+)"\)/)?.[1];
+    expect(worker).toBe("/livekit-client.e2ee.worker.js");
+    expect(page).toContain("encryption: { keyProvider");
+    expect(page).not.toMatch(/setKey\(passphrase\)/);
+    const served = await fetch(`${url}${worker}`);
+    expect(served.status).toBe(200);
+    expect(served.headers.get("content-type")).toBe("text/javascript");
+    expect(Buffer.from(await served.arrayBuffer()).equals(readFileSync(join(dirname(require.resolve("livekit-client")), "livekit-client.e2ee.worker.js")))).toBe(true);
   });
 });

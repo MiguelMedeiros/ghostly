@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { LocalTrackPublication, Participant, Room } from "livekit-client";
+import type { LocalTrackPublication, Participant, RemoteTrackPublication, Room, TrackPublication } from "livekit-client";
 import { callRtcConfig } from "@ghostly/core";
 import { screenShareErrorMessage } from "@ghostly/react";
 import { preferredDevice } from "../lib/mediaDevices";
@@ -106,9 +106,19 @@ interface Session {
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error ?? "")) || "failed";
 
-function personOf(p: Participant, lk: LivekitModule, local: boolean): GroupCallParticipant {
+/**
+ * Whether a call may play a publication's media: in a sealed call, only what its sender sealed. LiveKit's E2EE hands
+ * a publication the SFU marks unencrypted straight to the decoder (its worker's "known to publish unencrypted media"),
+ * so someone the node lets in without the group's call key would be heard and seen in the clear.
+ */
+const playable = (pub: TrackPublication | undefined, sealed: boolean): boolean => !!pub && (!sealed || pub.isEncrypted);
+
+function personOf(p: Participant, lk: LivekitModule, local: boolean, sealed: boolean): GroupCallParticipant {
   const { Source } = lk.Track;
-  const track = (source: (typeof Source)[keyof typeof Source]) => p.getTrackPublication(source)?.track?.mediaStreamTrack ?? null;
+  const track = (source: (typeof Source)[keyof typeof Source]) => {
+    const pub = p.getTrackPublication(source);
+    return local || playable(pub, sealed) ? (pub?.track?.mediaStreamTrack ?? null) : null;
+  };
   return {
     identity: p.identity,
     name: p.name || p.identity,
@@ -123,10 +133,10 @@ function personOf(p: Participant, lk: LivekitModule, local: boolean): GroupCallP
   };
 }
 
-function snapshot(room: Room, lk: LivekitModule): GroupCallState {
+function snapshot(room: Room, lk: LivekitModule, sealed: boolean): GroupCallState {
   return {
-    local: personOf(room.localParticipant, lk, true),
-    participants: [...room.remoteParticipants.values()].map((p) => personOf(p, lk, false)),
+    local: personOf(room.localParticipant, lk, true, sealed),
+    participants: [...room.remoteParticipants.values()].map((p) => personOf(p, lk, false, sealed)),
     activeSpeaker: room.activeSpeakers[0]?.identity ?? null,
   };
 }
@@ -180,6 +190,15 @@ async function rekey(session: Session, seal: GroupCallSeal | null | undefined): 
   if (!session.keys || !seal || seal.epoch === session.epoch || session.ended) return;
   session.epoch = seal.epoch;
   await session.keys.setKey(keyBytes(seal.key));
+}
+
+/**
+ * A sealed call subscribes by hand (`autoSubscribe: false`): to a publication its sender sealed, and never to one in the
+ * clear, so unsealed media never reaches this device's decoder. Safe to call again for the same publication.
+ */
+function admit(pub: RemoteTrackPublication): void {
+  const want = pub.isEncrypted;
+  if (pub.isDesired !== want || pub.isSubscribed !== want) pub.setSubscribed(want);
 }
 
 /**
@@ -240,22 +259,36 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
         // Sealed before connecting, so no track ever goes out unsealed; a room that will not seal is not joined.
         if (encryption) await room.setE2EEEnabled(true);
         s.refresh = () => {
-          if (live && !s.ended) setState(snapshot(room, lk));
+          if (live && !s.ended) setState(snapshot(room, lk, sealed));
         };
         const E = lk.RoomEvent;
         for (const event of [E.ParticipantConnected, E.ParticipantDisconnected, E.ParticipantNameChanged, E.TrackPublished,
           E.TrackUnpublished, E.TrackSubscribed, E.TrackUnsubscribed, E.TrackMuted, E.TrackUnmuted, E.LocalTrackPublished,
           E.LocalTrackUnpublished, E.ActiveSpeakersChanged, E.Reconnected]) room.on(event, s.refresh);
+        if (encryption) {
+          room.on(E.TrackPublished, (pub: RemoteTrackPublication) => admit(pub));
+          // Not asked for with autoSubscribe off; a track in the clear that comes all the same is dropped.
+          room.on(E.TrackSubscribed, (_track: unknown, pub: RemoteTrackPublication) => {
+            if (!pub.isEncrypted) admit(pub);
+          });
+        }
         room.on(E.Disconnected, () => {
           // The node closed the room or dropped you: the call is over here too.
           if (s.ended) return;
           void endSession(s);
           if (live) setStatus("left");
         });
-        await room.connect(url, token, rtcConfig ? { rtcConfig } : undefined);
+        const connectOptions = { ...(rtcConfig && { rtcConfig }), ...(encryption && { autoSubscribe: false }) };
+        await room.connect(url, token, Object.keys(connectOptions).length ? connectOptions : undefined);
         if (!live || s.ended) {
           await endSession(s);
           return;
+        }
+        // What the room held at the join: its sealed publications, subscribed by hand.
+        if (encryption) {
+          for (const p of room.remoteParticipants.values()) {
+            for (const pub of p.trackPublications.values()) admit(pub);
+          }
         }
         // The group moved to a new epoch while joining.
         await rekey(s, seal.current);

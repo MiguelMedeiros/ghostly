@@ -16,15 +16,19 @@ const LIMIT = 30, MINUTE = 60_000;
 
 /**
  * A page that joins a room with a pass and publishes its camera; each remote camera plays in a <video data-identity>.
- * `joinSealed` joins with LiveKit's E2EE under a passphrase of its own instead, and publishes nothing.
+ * `joinSealed` joins with LiveKit's E2EE instead, the way the app does (the same livekit-client, its worker, a raw
+ * 32-byte key as HKDF material), under a key of its own, and publishes nothing; `window.sealErrors` counts the frames
+ * its worker could not open.
  */
 const SMOKE = `<!doctype html><meta charset="utf-8"><title>SFU smoke</title><script src="/livekit-client.umd.js"></script>
 <script>
-window.joinSealed = async (url, token, passphrase) => {
+window.joinSealed = async (url, token, key) => {
   const { Room, RoomEvent, Track, ExternalE2EEKeyProvider } = LivekitClient;
   const keyProvider = new ExternalE2EEKeyProvider();
-  await keyProvider.setKey(passphrase);
-  const room = new Room({ e2ee: { keyProvider, worker: new Worker("/livekit-client.e2ee.worker.js") } });
+  await keyProvider.setKey(Uint8Array.from(atob(key.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0)).buffer);
+  const room = new Room({ adaptiveStream: false, encryption: { keyProvider, worker: new Worker("/livekit-client.e2ee.worker.js") } });
+  window.sealErrors = 0;
+  room.on(RoomEvent.EncryptionError, () => { window.sealErrors += 1; });
   room.on(RoomEvent.TrackSubscribed, (track, _publication, participant) => {
     if (track.kind !== Track.Kind.Video) return;
     const video = track.attach();
@@ -32,8 +36,8 @@ window.joinSealed = async (url, token, passphrase) => {
     document.body.append(video);
   });
   await room.setE2EEEnabled(true);
-  await room.connect(url, token);
   window.room = room;
+  await room.connect(url, token);
 };
 window.joinCall = async (url, token) => {
   const { Room, RoomEvent, Track } = LivekitClient;

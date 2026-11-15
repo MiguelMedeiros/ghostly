@@ -39,7 +39,18 @@ class FakeLocalTrack {
 
 class FakePublication {
   isMuted = false;
-  constructor(readonly source: SourceName, public track: FakeLocalTrack | undefined) {}
+  /** LiveKit's `isEncrypted`: the SFU's word that the sender seals this track (its `encryption` is not NONE). */
+  isEncrypted = true;
+  /** What this device asked for (`setSubscribed`); undefined: nothing asked, as LiveKit's `isDesired` reads it. */
+  private subscribed?: boolean;
+  constructor(readonly source: SourceName, public track: FakeLocalTrack | undefined, private readonly kind: "audio" | "video" = "audio") {}
+  get isDesired() { return this.subscribed !== false; }
+  get isSubscribed() { return this.track !== undefined; }
+  /** LiveKit's subscribe switch: the SFU sends the track, or stops. */
+  readonly setSubscribed = vi.fn((on: boolean) => {
+    this.subscribed = on;
+    this.track = on ? (this.track ?? new FakeLocalTrack(new FakeTrack(this.kind) as unknown as MediaStreamTrack)) : undefined;
+  });
 }
 
 class FakeParticipant {
@@ -60,9 +71,10 @@ class FakeParticipant {
   get isCameraEnabled() { return this.enabled(Source.Camera); }
   get isScreenShareEnabled() { return this.enabled(Source.ScreenShare); }
 
-  /** A remote participant's track, subscribed. */
-  publish(source: SourceName, kind: "audio" | "video") {
-    const pub = new FakePublication(source, new FakeLocalTrack(new FakeTrack(kind) as unknown as MediaStreamTrack));
+  /** A remote participant's track: subscribed and sealed unless said otherwise. */
+  publish(source: SourceName, kind: "audio" | "video", { subscribed = true, encrypted = true } = {}) {
+    const pub = new FakePublication(source, subscribed ? new FakeLocalTrack(new FakeTrack(kind) as unknown as MediaStreamTrack) : undefined, kind);
+    pub.isEncrypted = encrypted;
     this.trackPublications.set(source, pub);
     return pub;
   }
@@ -85,13 +97,18 @@ class FakeLocalParticipant extends FakeParticipant {
     return pub;
   }
   readonly setMicrophoneEnabled = vi.fn(async (on: boolean, _options?: unknown) => {
+    steps.push("mic");
     const fails = FakeRoom.micFails;
     FakeRoom.micFails = null;
     if (fails) throw fails;
     return this.toggle(Source.Microphone, "audio", on);
   });
-  readonly setCameraEnabled = vi.fn(async (on: boolean, _options?: unknown) => this.toggle(Source.Camera, "video", on));
+  readonly setCameraEnabled = vi.fn(async (on: boolean, _options?: unknown) => {
+    steps.push("camera");
+    return this.toggle(Source.Camera, "video", on);
+  });
   readonly publishTrack = vi.fn(async (track: MediaStreamTrack, options: { source: SourceName }) => {
+    steps.push("publish");
     const pub = new FakePublication(options.source, new FakeLocalTrack(track));
     this.trackPublications.set(`pub-${track.id}`, pub);
     this.room.emit(RoomEvent.LocalTrackPublished);
@@ -115,12 +132,15 @@ class FakeRoom {
   static waiting: string[] = [];
   /** Why the next room's microphone will not open. */
   static micFails: Error | null = null;
+  /** What the room holds when the next one connects, beyond `waiting`'s people. */
+  static atJoin: ((room: FakeRoom) => void) | null = null;
   readonly remoteParticipants = new Map<string, FakeParticipant>();
   activeSpeakers: FakeParticipant[] = [];
   readonly localParticipant = new FakeLocalParticipant(this);
-  private readonly listeners = new Map<string, Set<() => void>>();
-  readonly connect = vi.fn(async (_url: string, _token: string, _opts?: { rtcConfig?: RTCConfiguration }) => {
+  private readonly listeners = new Map<string, Set<(...args: unknown[]) => void>>();
+  readonly connect = vi.fn(async (_url: string, _token: string, _opts?: { rtcConfig?: RTCConfiguration; autoSubscribe?: boolean }) => {
     for (const id of FakeRoom.waiting) this.remoteParticipants.set(id, new FakeParticipant(id, id.toUpperCase()));
+    FakeRoom.atJoin?.(this);
   });
   // Like LiveKit's, but stops nothing itself: the hook must stop its own tracks.
   readonly disconnect = vi.fn(async (_stopTracks?: boolean) => {
@@ -130,20 +150,21 @@ class FakeRoom {
   readonly setE2EEEnabled = vi.fn(async (_on: boolean) => { steps.push("e2ee"); });
   constructor(readonly options: { encryption?: { keyProvider: FakeKeyProvider; worker: FakeWorker } } & Record<string, unknown>) {
     FakeRoom.rooms.push(this);
+    steps.push("room");
     const connect = this.connect.getMockImplementation()!;
     this.connect.mockImplementation(async (...args) => { steps.push("connect"); return connect(...args); });
   }
-  on(event: string, listener: () => void) {
+  on(event: string, listener: (...args: unknown[]) => void) {
     if (!this.listeners.has(event)) this.listeners.set(event, new Set());
     this.listeners.get(event)!.add(listener);
     return this;
   }
-  off(event: string, listener: () => void) {
+  off(event: string, listener: (...args: unknown[]) => void) {
     this.listeners.get(event)?.delete(listener);
     return this;
   }
-  emit(event: string) {
-    for (const listener of this.listeners.get(event) ?? []) listener();
+  emit(event: string, ...args: unknown[]) {
+    for (const listener of this.listeners.get(event) ?? []) listener(...args);
   }
 
   join(identity: string, name?: string) {
@@ -163,7 +184,7 @@ class FakeRoom {
   }
 }
 
-/** The order a sealed join goes in: the key set, E2EE on, then the connect. */
+/** The order a join goes in: for a sealed one the key set, the room, E2EE on, the connect, and only then any publish. */
 let steps: string[] = [];
 
 /** LiveKit's shared-key provider (`ExternalE2EEKeyProvider`): the raw bytes of every key set in it, in order. */
@@ -222,6 +243,7 @@ afterEach(() => {
   sealing = true;
   FakeRoom.waiting = [];
   FakeRoom.micFails = null;
+  FakeRoom.atJoin = null;
   loadLivekit.mockClear();
   Reflect.deleteProperty(navigator, "mediaDevices");
 });
@@ -463,8 +485,55 @@ describe("useGroupCall, a sealed call (WISP 602 § End-to-end encryption)", () =
     expect(room().options.encryption).toEqual({ keyProvider: provider, worker: FakeWorker.workers[0] });
     expect(room().options).toMatchObject({ adaptiveStream: false });
     expect(room().setE2EEEnabled).toHaveBeenCalledWith(true);
-    expect(steps).toEqual(["key", "e2ee", "connect"]);
+    expect(steps).toEqual(["key", "room", "e2ee", "connect", "mic"]);
     expect(result.current.status).toBe("connected");
+  });
+
+  it("publishes nothing before E2EE is on and the room joined: the microphone and a shared screen go out after both", async () => {
+    displayMedia();
+    const { result } = await joined({ e2ee: key(4, 7) });
+    await act(() => result.current.toggleScreen());
+    await act(() => result.current.toggleCamera());
+    expect(steps).toEqual(["key", "room", "e2ee", "connect", "mic", "publish", "camera"]);
+    expect(room().setE2EEEnabled).toHaveBeenCalledTimes(1);
+  });
+
+  it("subscribes by hand to sealed publications only: a track in the clear in the room at the join is never taken", async () => {
+    let sealedPub: FakePublication | undefined, clearPub: FakePublication | undefined;
+    FakeRoom.atJoin = (r) => {
+      const bia = new FakeParticipant("bia", "Bia");
+      sealedPub = bia.publish(Source.Microphone, "audio", { subscribed: false });
+      const eve = new FakeParticipant("eve", "Eve");
+      clearPub = eve.publish(Source.Camera, "video", { subscribed: false, encrypted: false });
+      r.remoteParticipants.set("bia", bia).set("eve", eve);
+    };
+    const { result } = await joined({ e2ee: key(4, 7) });
+    expect(room().connect).toHaveBeenCalledWith("wss://call.example", "pass", { autoSubscribe: false });
+    expect(sealedPub!.setSubscribed).toHaveBeenCalledWith(true);
+    expect(clearPub!.setSubscribed).not.toHaveBeenCalledWith(true);
+    expect(clearPub!.track).toBeUndefined();
+    act(() => room().emit(RoomEvent.TrackSubscribed, sealedPub!.track, sealedPub, room().remoteParticipants.get("bia")));
+    const people = Object.fromEntries(result.current.participants.map((p) => [p.identity, p.tracks]));
+    expect(people.bia.audio).toBe(sealedPub!.track!.mediaStreamTrack);
+    expect(people.eve.camera).toBeNull();
+  });
+
+  it("a publication in the clear that comes later is not taken, and one the SFU sends all the same is dropped and not played", async () => {
+    const { result } = await joined({ e2ee: key(4, 7) });
+    const eve = room().join("eve", "Eve");
+    const later = eve.publish(Source.Microphone, "audio", { subscribed: false, encrypted: false });
+    act(() => room().emit(RoomEvent.TrackPublished, later, eve));
+    expect(later.setSubscribed).not.toHaveBeenCalledWith(true);
+    expect(later.track).toBeUndefined();
+    // Sent anyway (a server that subscribes on its own): unsubscribed at once, and the window never gets it.
+    const pushed = eve.publish(Source.Camera, "video", { encrypted: false });
+    act(() => room().emit(RoomEvent.TrackSubscribed, pushed.track, pushed, eve));
+    expect(pushed.setSubscribed).toHaveBeenCalledWith(false);
+    expect(result.current.participants.find((p) => p.identity === "eve")?.tracks).toMatchObject({ audio: null, camera: null });
+    // A sealed one that comes later is taken.
+    const sealedLater = eve.publish(Source.ScreenShare, "video", { subscribed: false });
+    act(() => room().emit(RoomEvent.TrackPublished, sealedLater, eve));
+    expect(sealedLater.setSubscribed).toHaveBeenCalledWith(true);
   });
 
   it("sets the new epoch's key in the call when the group moves on, without joining again", async () => {
@@ -506,8 +575,18 @@ describe("useGroupCall, a sealed call (WISP 602 § End-to-end encryption)", () =
   });
 
   it("without e2ee the room is joined as before: no encryption, no key provider, no worker", async () => {
-    await joined();
+    FakeRoom.atJoin = (r) => {
+      const bia = new FakeParticipant("bia", "Bia");
+      bia.publish(Source.Microphone, "audio", { encrypted: false });
+      r.remoteParticipants.set("bia", bia);
+    };
+    const { result } = await joined();
     expect(room().options).toEqual({ adaptiveStream: false, dynacast: true });
+    expect(room().connect).toHaveBeenCalledWith("wss://call.example", "pass", undefined);
+    // LiveKit subscribes by itself, and an unsealed call plays what it gets.
+    const bia = room().remoteParticipants.get("bia")!;
+    expect(bia.getTrackPublication(Source.Microphone)!.setSubscribed).not.toHaveBeenCalled();
+    expect(result.current.participants[0].tracks.audio).toBe(bia.getTrackPublication(Source.Microphone)!.track!.mediaStreamTrack);
     expect(room().setE2EEEnabled).not.toHaveBeenCalled();
     expect(FakeKeyProvider.providers).toHaveLength(0);
     expect(FakeWorker.workers).toHaveLength(0);

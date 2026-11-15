@@ -171,11 +171,12 @@ test.describe("a sealed group call", () => {
       for (const p of [ana, bia]) await routeSfu(p);
       await Promise.all([ana, bia].map((p) => joinGroup(p, link)));
 
-      type Shown = { id: string; call: { sfu: string; e2ee?: 1 } | null; members: { key: string; me: boolean }[] };
+      // `group show` prints the signed `e2ee: 1` as a flag, as it prints `picture` (the CLI's JSON style).
+      type Shown = { id: string; call: { sfu: string; e2ee: boolean } | null; members: { key: string; me: boolean }[] };
       const shown = async () => (await node.run("group", "show", group)) as unknown as Shown;
       await expect.poll(async () => (await shown()).members.length, { timeout: 180_000, intervals: [2_000] }).toBe(3);
       const before = await shown();
-      expect(before.call).toEqual({ sfu: endpoints.sfu.origin, e2ee: 1 });
+      expect(before.call).toEqual({ sfu: endpoints.sfu.origin, e2ee: true });
       const keys = before.members.filter((m) => !m.me).map((m) => m.key);
       const outsider = outsiderKey();
       // The node lets the outsider in too: its pass is as valid as the members'. Only the call key is missing.
@@ -204,12 +205,20 @@ test.describe("a sealed group call", () => {
       await plays(ana, b, "screen");
       await expect(ana.page.getByTestId("group-call-problem")).toHaveCount(0);
 
-      // The outsider: a pass the node signed, the room's media flowing to it, and a key of its own.
+      // The outsider: a pass the node signed, the room's media flowing to it, and a key of its own. Its page runs the
+      // app's livekit-client and worker, which drop a frame they can't open: one that reached its decoder would be media
+      // in the clear.
       const pass = await outsiderPass(before.id, outsider);
       const page = await (await browser.newContext()).newPage();
       await page.goto(`${endpoints.sfu.token}/smoke`);
       await page.evaluate(([u, t, p]) => (window as unknown as { joinSealed(u: string, t: string, p: string): Promise<void> }).joinSealed(u, t, p), [pass.url, pass.token, randomBytes(32).toString("base64url")]);
       await expect.poll(async () => (await received(page, b)).bytes, { timeout: 30_000 }).toBeGreaterThan(50_000);
+      // What came was sealed, under a key it doesn't hold: its worker failed to open it.
+      await expect.poll(() => page.evaluate(() => (window as unknown as { sealErrors: number }).sealErrors), { timeout: 30_000 }).toBeGreaterThan(0);
+      const first = await received(page, b);
+      expect(first.frames).toBe(0);
+      // And it stays so while the screen keeps coming.
+      await expect.poll(async () => (await received(page, b)).bytes, { timeout: 30_000 }).toBeGreaterThan(first.bytes + 10_000);
       const after = await received(page, b);
       expect(after.frames).toBe(0);
       for (const width of await page.locator("video").evaluateAll((els) => (els as HTMLVideoElement[]).map((v) => v.videoWidth))) expect(width).toBe(0);

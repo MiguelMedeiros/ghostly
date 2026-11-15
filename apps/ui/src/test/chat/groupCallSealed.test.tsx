@@ -82,7 +82,7 @@ describe("Join call in a group whose call is sealed end to end", () => {
     const { user } = joinButton();
     await user.click(screen.getByTestId("group-call-join"));
     expect(await screen.findByTestId("group-call")).toBeInTheDocument();
-    await waitFor(() => expect(FakeRoom.rooms[0]?.connect).toHaveBeenCalledWith("wss://sfu.ghostly.test", "pass-1", undefined));
+    await waitFor(() => expect(FakeRoom.rooms[0]?.connect).toHaveBeenCalledWith("wss://sfu.ghostly.test", "pass-1", { autoSubscribe: false }));
     expect(asks("groupCallKey")[0]).toEqual({ groupId: "group-1" });
     const [provider] = FakeKeyProvider.providers;
     expect(FakeRoom.rooms[0].options.encryption).toEqual({ keyProvider: provider, worker });
