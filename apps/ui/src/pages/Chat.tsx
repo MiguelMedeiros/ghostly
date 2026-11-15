@@ -802,7 +802,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // A phone held upright: the header keeps the name, the connection, a voice call and ⋮; the video call, the bot's
   // Tasks and the contact's identities are rows of the ⋮ menu, and the running tasks are counted on ⋮.
   // The connection stays in the row: it is the one mark that changes by itself, and a failure has to be seen.
-  // So is a pane as narrow beside the chat list (a phone on its side, a tablet upright).
+  // So is a pane as narrow beside the chat list on a touch screen (a phone on its side, a tablet upright).
   const [pane, setPane] = useState<HTMLDivElement | null>(null);
   const phoneHeader = usePhoneHeader(pane);
   // The tasks still going and the routines not paused: a phone's ⋮ counts them, and has Tasks while there is one.
@@ -931,8 +931,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       {!mediaNoticeInLayer && mediaNotice}
       {/* Chat Header. On a phone held upright (`phoneHeader`) it is the back button, the avatar, the name with the room
           it needs, the connection, a voice call and ⋮, and one quiet line under the name; the video call, a bot's Tasks
-          and the contact's identities are in the ⋮ menu; so in a pane as narrow beside the chat list (most phones on their
-          side, a tablet upright). Wider (a Pro Max on its side, a desktop's window), every button is
+          and the contact's identities are in the ⋮ menu; so in a pane as narrow beside the chat list on a touch screen (most
+          phones on their side, a tablet upright). Wider (a Pro Max on its side), or with a mouse (a Desktop window at its
+          default 900x700, a 479 px pane), every button is
           in the row, a little narrower than on a desktop. On the narrowest phone (320px) the back button gives 8px to
           the name, so "Cérebro (Mac)" and a bot's status under it still fit beside three buttons; its tap still lands on
           44 × 44 px (`.tap-target`). Its buttons and the avatar are sized in px, as the name is: in rem they grew with the
