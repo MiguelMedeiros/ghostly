@@ -1,4 +1,4 @@
-import { dialableIrohRelay, fromBase64Url, irohDescriptor, irohRelayUrl, type BoundChannel, type FrameChannel, type NativeBinding, type NativeEndpoint } from "@ghostly/core";
+import { dialableIrohRelay, fromBase64Url, irohDescriptor, irohRelayUrl, relayUrl, type BoundChannel, type FrameChannel, type NativeBinding, type NativeEndpoint } from "@ghostly/core";
 
 /**
  * Iroh (WISP 102) in a browser: the same QUIC/TLS session and binding as the
@@ -54,6 +54,9 @@ export function irohRelayProblem(value: string): string | null {
   const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
   if (url.protocol !== "https:" && !(url.protocol === "http:" && local)) return `Use an https:// relay address: ${value}`;
   if (url.username || url.password || url.search || url.hash || value.length > 256) return `Not a relay address: ${value}`;
+  // Nor one a contact would drop with the whole descriptor (`relayUrl`: past 120 characters, a loopback path past 100),
+  // leaving this profile unreached over Iroh without a word. Checked as Iroh names it: parsed, in its longer spelling.
+  if (!relayUrl(new URL(irohRelayUrl(value)).href)) return `Not a relay address: ${value}`;
   return null;
 }
 
