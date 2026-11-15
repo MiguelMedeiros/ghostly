@@ -232,7 +232,7 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
           {!blocked && <button type="button" onClick={() => void join()} data-testid="group-call-retry" className={`min-h-8 rounded-md px-2 font-semibold text-accent hover:bg-surface-hover max-md:min-h-11 ${focus}`}>{t("calls.group.retry")}</button>}
         </div>
       </div>}
-      {joined && <GroupCallView call={call} groupName={group.name || t("group.chat.unnamed")} canShareScreen={canShareScreen} nameOf={nameOf} raised={raised} moderator={moderator}
+      {joined && <GroupCallView call={call} groupName={group.name || t("group.chat.unnamed")} canShareScreen={canShareScreen} nameOf={nameOf} raised={raised} moderator={moderator} connected={call.status === "connected"}
         onToggleMic={() => void call.toggleMic()} onToggleCamera={() => void call.toggleCamera()} onToggleScreen={() => void call.toggleScreen()} onLeave={leave} />}
       {askIp && <HideIpDialog onClose={() => setAskIp(false)} onConfirm={() => { setAskIp(false); joinedShowingIp.add(ipShownTo); go(); }} />}
       {askEnd && <EndOtherCallDialog onClose={() => setAskEnd(false)} onConfirm={() => { setAskEnd(false); endOtherCalls(key); void join(); }} />}
