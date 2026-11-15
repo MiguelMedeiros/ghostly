@@ -895,6 +895,8 @@ export class CommunitySession {
   role(key: string): GroupRole | undefined { return this.roster.find(([k]) => k === key)?.[1]; }
   /** The group's picture, if it has one. */
   get picture(): string | undefined { return groupMetaPicture(this.state.meta); }
+  /** The node that forwards the group's calls, while the statement I keep names one that holds (WISP 602). */
+  get call(): { sfu: string } | undefined { return groupMetaBody(this.state.meta).call; }
   /**
    * Members of any epoch in the window: whom a frame may come from. A side commit's roster counts only while its branch
    * could still win (`mayWin`): one let in only on a branch that lost is not in the roster anyone sees, and the main
@@ -2802,6 +2804,16 @@ export class CommunitySession {
       this.requireMember();
       if (!this.isAdmin) throw new Error("Only the admin can rename the group");
       const body = encodeGroupMetaBody({ ...groupMetaBody(this.state.meta), name });
+      if (body !== this.state.meta?.body) await this.publishMeta(body, now);
+    });
+  }
+
+  /** Names (or, with null, removes) the node that forwards the group's calls (WISP 602): only the admin, beside the name and picture. */
+  setCall(sfu: string | null, now = Date.now()): Promise<void> {
+    return this.serialize(async () => {
+      this.requireMember();
+      if (!this.isAdmin) throw new Error("Only the admin can set the group's call node");
+      const body = encodeGroupMetaBody({ ...groupMetaBody(this.state.meta), call: sfu === null ? undefined : { sfu } });
       if (body !== this.state.meta?.body) await this.publishMeta(body, now);
     });
   }

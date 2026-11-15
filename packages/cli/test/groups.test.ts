@@ -5,13 +5,13 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { EngineState, GroupView, StoredMessage } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
 import { parseArgs } from "../src/args";
-import { COMMANDS, TEXT_COMMANDS } from "../src/commands";
+import { COMMANDS, TEXT_COMMANDS, idSlot, positionals } from "../src/commands";
 import { EventHub, type GhostlyEvent } from "../src/events";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 import { pageOf } from "./support/messagePage";
 import { groupViewOf } from "./support/chatView";
 import { groupJson, groupMessageJson } from "../src/views";
-// covers: headless.groups, headless.group-admin, groups.rename
+// covers: headless.groups, headless.group-admin, headless.group-call, groups.rename
 
 /**
  * What a bot in a group reads: who wrote a message (the roster names mesh and community senders), the id of what it
@@ -365,6 +365,66 @@ describe("group remove", () => {
     expect(await remove("Ana")).not.toHaveProperty("warning");
     node.getState = () => ({ links: [], groups: [group], settings: {}, transport: {} }) as unknown as EngineState;
     expect((await remove("bokey")).warning).toMatch(/^They can still join again/);
+  });
+});
+
+describe("group call", () => {
+  const SFU = "https://call.example.com";
+  const thursday = { ...group, id: "g7", name: "Thursday", profile: "community", entryLink: undefined } as unknown as GroupView;
+  /** A community whose view names the node the last `setGroupCall` set, as the engine's does once the statement is signed. */
+  function community(admin = true) {
+    const { ctx, node } = fake();
+    let call: { sfu: string } | undefined;
+    const setGroupCall = vi.fn(async ({ sfu }: { groupId: string; sfu: string | null }) => { call = sfu === null ? undefined : { sfu }; });
+    Object.assign(node, { setGroupCall, getState: () => ({ links: [], groups: [{ ...thursday, isAdmin: admin, ...(call && { call }) }, group], settings: {}, transport: {} }) as unknown as EngineState });
+    return { ctx, setGroupCall };
+  }
+  const show = async (ctx: ApiContext) => await callApi(ctx, "group.get", { group: "Thursday" }) as Record<string, unknown>;
+
+  it("the admin sets it and group show prints call.sfu; --clear removes it", async () => {
+    const { ctx, setGroupCall } = community();
+    expect((await show(ctx)).call).toBeNull();
+    expect(await callApi(ctx, "group.call", { group: "Thursday", sfu: SFU })).toMatchObject({ id: "g7", call: { sfu: SFU } });
+    expect(setGroupCall).toHaveBeenLastCalledWith({ groupId: "g7", sfu: SFU });
+    expect((await show(ctx)).call).toEqual({ sfu: SFU });
+    expect(await callApi(ctx, "group.call", { group: "Thursday", clear: true })).toMatchObject({ id: "g7", call: null });
+    expect(setGroupCall).toHaveBeenLastCalledWith({ groupId: "g7", sfu: null });
+    expect((await show(ctx)).call).toBeNull();
+  });
+
+  it("refuses a member who is not the admin, and a private group, before the engine signs anything", async () => {
+    const { ctx, setGroupCall } = community(false);
+    await expect(callApi(ctx, "group.call", { group: "Thursday", sfu: SFU })).rejects.toMatchObject({ code: "refused", message: "Only the admin of Thursday sets its call node" });
+    await expect(callApi(ctx, "group.call", { group: "Thursday", clear: true })).rejects.toMatchObject({ code: "refused" });
+    await expect(callApi(ctx, "group.call", { group: "Crew", sfu: SFU })).rejects.toMatchObject({ code: "refused", message: "Crew is a private group: only a community group has calls through a node" });
+    expect(setGroupCall).not.toHaveBeenCalled();
+  });
+
+  it("refuses anything but an https origin in its one spelling before signing, naming the origin when there is one", async () => {
+    const { ctx, setGroupCall } = community();
+    for (const [sfu, message] of [
+      ["http://call.example.com", "\"http://call.example.com\" is not an https origin: a call node is like https://call.example.com"],
+      ["wss://call.example.com", "\"wss://call.example.com\" is not an https origin: a call node is like https://call.example.com"],
+      ["call.example.com", "\"call.example.com\" is not an https origin: a call node is like https://call.example.com"],
+      [`https://${"a".repeat(200)}.com`, `"https://${"a".repeat(200)}.com" is not an https origin: a call node is like https://call.example.com`],
+      ["https://call.example.com/sfu", "\"https://call.example.com/sfu\" is not an origin (no path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
+      ["https://call.example.com/", "\"https://call.example.com/\" is not an origin (no path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
+      ["https://Call.Example.com:443", "\"https://Call.Example.com:443\" is not an origin (no path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
+      ["https://call.example.com?x=1", "\"https://call.example.com?x=1\" is not an origin (no path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
+    ] as const) await expect(callApi(ctx, "group.call", { group: "Thursday", sfu }), sfu).rejects.toMatchObject({ code: "bad_request", message });
+    expect(setGroupCall).not.toHaveBeenCalled();
+    // A port that is not the default one is part of the origin.
+    await callApi(ctx, "group.call", { group: "Thursday", sfu: "https://call.example.com:8443" });
+    expect(setGroupCall).toHaveBeenLastCalledWith({ groupId: "g7", sfu: "https://call.example.com:8443" });
+  });
+
+  it("takes --sfu or --clear, one of them", () => {
+    const command = COMMANDS["group call"];
+    const params = (argv: string[]) => { const parsed = parseArgs(argv, command.options ?? {}, idSlot(command)); return command.params!(parsed, positionals(command, parsed.positionals)); };
+    expect(params(["Thursday", "--sfu", SFU])).toEqual({ group: "Thursday", sfu: SFU });
+    expect(params(["Thursday", "--clear"])).toEqual({ group: "Thursday", clear: true });
+    expect(() => params(["Thursday"])).toThrow("Missing --sfu: ghostly group call <group> --sfu <https origin> | --clear");
+    expect(() => params(["Thursday", "--sfu", SFU, "--clear"])).toThrow("--clear removes the call node: not with --sfu");
   });
 });
 
