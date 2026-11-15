@@ -12,6 +12,14 @@ import { decodeCashu, findSecret } from "../../lib/parse/secrets";
 // The lists the composer loads as it opens.
 import "../../lib/parse/seedLists";
 
+/** Electrum's checksum is an HMAC-SHA512: counted, to see how many windows it was tried on. */
+const hmacCalls = vi.hoisted(() => ({ count: 0 }));
+vi.mock("@noble/hashes/hmac.js", async (original) => {
+  const real = await original<typeof import("@noble/hashes/hmac.js")>();
+  const hmac = Object.assign((...args: Parameters<typeof real.hmac>) => { hmacCalls.count++; return real.hmac(...args); }, real.hmac);
+  return { ...real, hmac };
+});
+
 // covers: app.composer.secret-guard
 
 /**
@@ -529,6 +537,38 @@ describe("how long it takes", () => {
     ["a numbered word and a line of spaces", `1 a${" ".repeat(MAX - 4)}x`],
   ])("a 16 KiB message of %s is read in well under a frame", (_, text) => {
     expect(time(text)).toBeLessThan(50);
+  });
+
+  /**
+   * English seed words in a row, none of whose windows any list takes for a seed: each word is taken only once the
+   * last 25 with it are no seed, so every checksum of the budget is tried and fails. A contact can send this.
+   */
+  const noSeedRun = (() => {
+    const words: string[] = [];
+    let bytes = 0;
+    for (let next = 0; bytes < MAX - 9; next++) {
+      const word = wordlist[(next * 7) % wordlist.length];
+      // After a word on no list, so the tail is never a whole message of seed words.
+      if (findSecret(`the ${[...words.slice(-24), word].join(" ")}`)) continue;
+      words.push(word);
+      bytes += word.length + 1;
+    }
+    return words.join(" ");
+  })();
+
+  it("a 16 KiB run of seed words with no seed in it is read in well under a frame", () => {
+    expect(findSecret(noSeedRun)).toBeNull();
+    expect(time(noSeedRun)).toBeLessThan(50);
+  });
+
+  it("tries Electrum's checksum, an HMAC-SHA512, on a few hundred windows of a message at most", () => {
+    // It was tried on every 12-word window of the budget: 60 to 120 ms of the daemon's thread per message forwarded.
+    for (const text of [noSeedRun, `\u200b${noSeedRun}`]) {
+      hmacCalls.count = 0;
+      expect(findSecret(text)).toBeNull();
+      // With a zero-width space before it, the same words were read again as the text reads without it.
+      expect(hmacCalls.count).toBeLessThanOrEqual(256);
+    }
   });
 
   it("a numbered word between two runs of spaces is read in well under a frame", () => {
