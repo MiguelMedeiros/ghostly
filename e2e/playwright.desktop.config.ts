@@ -1,4 +1,5 @@
 import { defineConfig } from "@playwright/test";
+import { withoutQuarantine } from "./support/quarantine";
 
 /**
  * End-to-end tests for Ghostly Desktop: the real bundled app, driven through
@@ -11,7 +12,7 @@ import { defineConfig } from "@playwright/test";
  *
  * Linux and Windows only: macOS has no WebDriver for WKWebView. See README.md.
  */
-export default defineConfig({
+export default withoutQuarantine(defineConfig({
   testDir: "./desktop",
   outputDir: "../test-results/desktop",
   // One app, one window, one machine.
@@ -24,4 +25,4 @@ export default defineConfig({
   reporter: process.env.CI
     ? [["list"], ["html", { open: "never", outputFolder: "../playwright-report-desktop" }], ["github"]]
     : [["list"], ["html", { open: "never", outputFolder: "../playwright-report-desktop" }]],
-});
+}));
