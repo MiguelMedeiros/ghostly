@@ -529,6 +529,7 @@ contracts in 37 s, Playwright (2 workers, one retry) in 39 minutes, inside the w
 ## Writing one
 
 For Desktop, use `test` and `app` from `support/desktop.ts`: `app.text(selector)` returns null until something matches, so wait with `expect.poll`. For the browser clients, use `test` and `peer` from `support/fixtures.ts` (or `extensionPeer` / `webPeer` from `support/extension.ts`), `link(a, b)` to put two people in a chat and `connect(a, b)` to wait for the peer-to-peer link. Look for text in the conversation with `chat(peer)`, since the chat list previews the last message too. Prefer what a person sees (titles, labels, text); add a `data-testid` to the app when there is nothing else to hold on to.
+A helper that loads the app again (a `reload` after setting something it reads as it starts) waits with `openApp(page, name, () => page.reload())`, as `openPeer` does for the first load: on a machine whose network changes under Chromium (another e2e's docker containers coming and going), a load it aborted with `net::ERR_NETWORK_CHANGED` before the app drew is done again, at most twice, with a `↻ … reloaded` line in the log (`support/bootReload.ts`). Any other failure still fails at once.
 
 Say what it covers: `{ tag: ["@feature:<id>"] }` with ids from [`features.json`](features.json), plus `"@gated"` when it needs infrastructure that is not always there. `npm run test:map` checks the tags on every pull request; see [docs/TESTING.md](../docs/TESTING.md).
 
