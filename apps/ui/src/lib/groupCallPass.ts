@@ -1,3 +1,4 @@
+import { parseEngineError } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import type { Translate } from "../contexts/I18nContext";
@@ -47,6 +48,8 @@ export function passRefreshInMs(expiresIn: number): number {
 
 /** The node's refusal (its one `403`, WISP 602 § What the node checks): the member is not on its roster yet. */
 const REFUSED = [/\b403\b/, /\bforbidden\b/i, /\bnot let in\b/i];
+/** The engine's own words for it: the node did not let this member in, or this device is not in the group. */
+const REFUSED_CODES = new Set(["groupCallRefused", "groupCallNotMember"]);
 
 /**
  * Why the call did not start: the node refused the pass (not on its roster yet, as a member just let in is), or the
@@ -54,6 +57,8 @@ const REFUSED = [/\b403\b/, /\bforbidden\b/i, /\bnot let in\b/i];
  */
 export function groupCallProblem(cause: unknown, t: Translate): Problem {
   const detail = rawError(cause) || undefined;
-  const refused = !!detail && REFUSED.some((r) => r.test(detail));
+  // A string: the engine's group-call codes come with its token slice, and until then no text parses to them.
+  const code: string | undefined = detail ? parseEngineError(detail)?.code : undefined;
+  const refused = REFUSED_CODES.has(code ?? "") || (!!detail && REFUSED.some((r) => r.test(detail)));
   return { tone: "error", title: t(refused ? "calls.group.refused" : "calls.group.unreachable"), ...(detail && { detail }) };
 }

@@ -105,6 +105,19 @@ describe("Join call in a group's header", () => {
     expect(passAsks()).toHaveLength(2);
   });
 
+  it("the engine's own refusals, not let in by the node or not a member, say the refused line too", async () => {
+    for (const refusal of [
+      "sfu.ghostly.test did not let you into the group's call. Try again in a minute.",
+      "You are not in this group, so you can't join its call",
+    ]) {
+      answerPass(() => { throw new Error(refusal); });
+      const { user, unmount } = joinButton();
+      await user.click(screen.getByTestId("group-call-join"));
+      expect(await screen.findByTestId("group-call-problem-notice-title")).toHaveTextContent("You're not let into this call yet");
+      unmount();
+    }
+  });
+
   it("a node it cannot reach says another line, its English behind the ⓘ", async () => {
     answerPass(() => { throw new Error("fetch failed"); });
     const { user } = joinButton();
