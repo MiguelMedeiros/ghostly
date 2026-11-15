@@ -379,7 +379,9 @@ const CARD_RESTORE_MS = 7 * 24 * 60 * 60_000;
  * A look for those cards reads the chat's whole history, so a chat starts one at a time, at most once this often: a
  * contact that says `edit/1` again and again on a session gets one look now and one more after the gap, whatever the count.
  */
-const CARD_RESTORE_EVERY_MS = 30_000;
+export const CARD_RESTORE_EVERY_MS = 30_000;
+/** `CARD_RESTORE_EVERY_MS` as the looks read it (tests shorten it). */
+export const cardRestoreTiming = { everyMs: CARD_RESTORE_EVERY_MS };
 /**
  * A round trip that moved is shown at once, and written to disk by itself (relaxed, no disk sync of its own) at most
  * this often: a 15 s sample on an internet path moves by 10 ms most of the time. A power cut loses at most this much
@@ -4657,7 +4659,7 @@ export class GhostlyNode implements EngineImplementation {
     let state = this.cardRestores.get(linkId);
     if (!state) this.cardRestores.set(linkId, state = { at: -Infinity, busy: false, again: false });
     if (state.busy) { state.again = true; return; }
-    const wait = state.at + CARD_RESTORE_EVERY_MS - Date.now();
+    const wait = state.at + cardRestoreTiming.everyMs - Date.now();
     if (wait > 0) {
       state.timer ??= setTimeout(() => { state.timer = undefined; if (this.cardRestores.get(linkId) === state) this.restoreCardsSoon(linkId); }, wait);
       void flush();
@@ -7139,7 +7141,12 @@ export class GhostlyNode implements EngineImplementation {
       if (target.view.providerId !== providerId || providerId === CASHU_MINT_SOURCE) throw new Error("A card keeps its source: add another card with New");
       await target.sources.set(providerId, values);
     } else if (providerId === CASHU_MINT_SOURCE) await this.lightningClearSource({ network });
-    else await cards.setReceive((await cards.findSame(providerId, values)) ?? (await cards.add(providerId, values)));
+    else {
+      const same = await cards.findSame(providerId, values);
+      // A card at home on another device is never this device's default for receiving (as in lightningSetReceive).
+      if (same) refuseAway(`lightning:${this.net(network)}:${same}`, this.walletView.networks?.[this.net(network)].lightnings?.find((c) => c.card === same)?.name || WALLET_NAMES.lightning);
+      await cards.setReceive(same ?? (await cards.add(providerId, values)));
+    }
     await this.refreshWallet();
   }
   /**
