@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { linkEnd } from "./parse/links";
 
 /*
  * Something another app shared into Ghostly (the installed web app is a share target): text, a link, images,
@@ -213,13 +214,28 @@ export function keepShareFor(chat: string, share: IncomingShare): void {
 }
 
 /**
+ * Whether `text` carries `url` as a link of its own: after the text's start, a space or an opening bracket or quote,
+ * and ending where a bubble's link would (`linkEnd`: "https://a.example/p." or "(https://a.example/p)" carry it).
+ * A longer address that starts with it ("https://a.example/p2") or holds it ("…?u=https://a.example/p") does not.
+ */
+function carriesLink(text: string, url: string): boolean {
+  const word = /\S*/y;
+  for (let at = text.indexOf(url); at >= 0; at = text.indexOf(url, at + 1)) {
+    if (at > 0 && !/[\s\p{Ps}\p{Pi}"']/u.test(text[at - 1]!)) continue;
+    word.lastIndex = at;
+    if (linkEnd(word.exec(text)![0]) === linkEnd(url)) return true;
+  }
+  return false;
+}
+
+/**
  * The text a share puts in the draft: its text, and its link where the text does not already carry it (apps
  * differ: some put the link in `text`, some in `url`, some in both). A title only when there is nothing else.
  */
 export function shareText(share: Pick<IncomingShare, "title" | "text" | "url">): string {
   const text = share.text.trim();
   const url = share.url.trim();
-  const parts = [text, url && !text.includes(url) ? url : ""].filter(Boolean);
+  const parts = [text, url && !carriesLink(text, url) ? url : ""].filter(Boolean);
   if (!parts.length && share.title.trim()) parts.push(share.title.trim());
   return parts.join("\n");
 }
