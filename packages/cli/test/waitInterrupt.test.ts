@@ -136,13 +136,14 @@ describe("what a wait says", () => {
     expect(waitNotice("chat.send", { chat: "bob", text: "hi" }, "daemon")).toBeNull();
   });
 
-  it("through a daemon, a file send that is still copying the file in says so, and that Ctrl-C does not stop it", () => {
-    // It said nothing while the daemon copied it in (6-30 s for 1 GiB): a slow copy read as a hung daemon.
+  it("through a daemon, a file send that is still copying the file in says so, and that Ctrl-C stops the send", () => {
+    // It said nothing while the daemon copied it in (6-30 s for 1 GiB): a slow copy read as a hung daemon. Ctrl-C there
+    // stops the send (fileSendClientGone.test.ts): it said "it still goes", and the user waited for a file that never came.
     expect(waitNotice("file.send", { chat: "bob", path: "/home/me/big.iso" }, "daemon")).toEqual({
-      waiting: "copying big.iso into the profile before it goes to bob (Ctrl-C stops waiting, it still goes)",
-      stopped: "the daemon copies big.iso in and sends it to bob",
+      waiting: "copying big.iso into the profile before it goes to bob (Ctrl-C stops the send)",
+      stopped: "big.iso was not sent to bob: send it again when you want it",
     });
-    expect(waitNotice("file.send", { chat: "group:crew", path: "/f", name: "notes.txt", wait: "none" }, "daemon")?.waiting).toBe("copying notes.txt into the profile before it goes to group crew (Ctrl-C stops waiting, it still goes)");
+    expect(waitNotice("file.send", { chat: "group:crew", path: "/f", name: "notes.txt", wait: "none" }, "daemon")?.waiting).toBe("copying notes.txt into the profile before it goes to group crew (Ctrl-C stops the send)");
     // One that waits for the contact says that wait, as before.
     expect(waitNotice("file.send", { chat: "bob", path: "/f", wait: "sent" }, "daemon")?.waiting).toBe("waiting for it to go out to bob (up to 300 s; Ctrl-C stops waiting, it still goes)");
   });
