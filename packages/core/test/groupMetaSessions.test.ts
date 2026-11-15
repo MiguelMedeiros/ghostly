@@ -459,6 +459,22 @@ describe("group name, group-mesh/1", () => {
     await mesh.settle();
     expect([bob.name, carol.name]).toEqual(["Ghosts", "Book club"]);
   });
+
+  it("a new admin who removes the former admin takes their statement no more, and one who saw them leave still does", async () => {
+    const removed = await promotedBeforeSync();
+    await removed.bob.remove(removed.alice.myKey);
+    await removed.mesh.settle();
+    // Carol, who holds it, hands it on.
+    await removed.bob.handle(removed.carol.myKey, removed.statement.frame);
+    await removed.mesh.settle();
+    expect(removed.bob.name).toBe("Ghosts");
+    const left = await promotedBeforeSync();
+    await left.bob.remove(left.alice.myKey, Date.now(), { left: true });
+    await left.mesh.settle();
+    await left.bob.handle(left.carol.myKey, left.statement.frame);
+    await left.mesh.settle();
+    expect([left.bob.name, left.carol.name]).toEqual(["Book club", "Book club"]);
+  });
 });
 
 // -- group-community/1 ------------------------------------------------------------------------------
@@ -914,6 +930,16 @@ describe("group call node, group-community/1 (WISP 602)", () => {
     await s.handle(statement.from, statement.frame);
     await net.settle();
     expect([bob.session.call, carol.session.call]).toEqual([undefined, { sfu: SFU, e2ee: 1 }]);
+  });
+
+  it("a new admin who removes the former admin takes their statement no more", async () => {
+    const { net, alice, bob, carol, statement } = await promotedBeforeSync();
+    await bob.session.remove(alice.session.myKey);
+    await net.settle();
+    // Carol, who holds it, hands it on.
+    await bob.session.handle(carol.session.myKey, statement.frame);
+    await net.settle();
+    expect(bob.session.call).toBeUndefined();
   });
 
   it("the admin turns sealed call media on and off, and naming the node again keeps it as it was", async () => {
