@@ -241,6 +241,16 @@ class FakeRoom {
     }
     this.emit(RoomEvent.ParticipantPermissionsChanged, before, p);
   }
+  /**
+   * The node taking every source away: an empty `canPublishSources` is LiveKit's "every source", so it says none with
+   * `canPublish: false` (as the e2e token double does), and what `p` published is muted.
+   */
+  forbid(p: FakeParticipant) {
+    const before = p.permissions;
+    p.permissions = { canPublish: false, canPublishSources: [] };
+    for (const pub of p.trackPublications.values()) pub.isMuted = true;
+    this.emit(RoomEvent.ParticipantPermissionsChanged, before, p);
+  }
   /** The room closing on this device, as LiveKit says it (`Disconnected` with its reason). */
   drop(reason: number) {
     this.connected = false;
@@ -662,6 +672,47 @@ describe("useGroupCall, moderated by the group's admin (WISP 602 § Moderation)"
     act(() => room().permit(ana, EVERY));
     expect(result.current.participants[0]).toMatchObject({ mic: false, byAdmin: { mic: false } });
     // Nothing of yours stops for someone else's mute.
+    expect(result.current.local.mic).toBe(true);
+  });
+
+  it("every source taken (canPublish off) stops the microphone and camera here and marks all three as the admin's", async () => {
+    const { result } = await joined();
+    const me = room().localParticipant;
+    await act(() => result.current.toggleCamera());
+    const mic = me.getTrackPublication(Source.Microphone)!.track!.mediaStreamTrack as unknown as FakeTrack;
+    const camera = me.getTrackPublication(Source.Camera)!.track!.mediaStreamTrack as unknown as FakeTrack;
+
+    await act(async () => room().forbid(me));
+    await waitFor(() => expect(mic.stop).toHaveBeenCalled());
+    expect(camera.stop).toHaveBeenCalled();
+    expect(result.current.local).toMatchObject({ mic: false, camera: false, byAdmin: { mic: true, camera: true, screen: true } });
+    me.setMicrophoneEnabled.mockClear();
+    await act(() => result.current.toggleMic());
+    expect(me.setMicrophoneEnabled).not.toHaveBeenCalled();
+
+    await act(async () => room().permit(me, EVERY));
+    expect(result.current.local).toMatchObject({ byAdmin: { mic: false, camera: false, screen: false } });
+  });
+
+  it("joins without the microphone when the pass may publish nothing (every source muted before joining)", async () => {
+    FakeRoom.atJoin = (r) => { r.localParticipant.permissions = { canPublish: false, canPublishSources: [] }; };
+    const { result } = renderHook(() => useGroupCall({ url: "wss://call.example", token: "pass", loadLivekit }));
+    await waitFor(() => expect(result.current.status).toBe("connected"));
+    await act(async () => {});
+    expect(room().localParticipant.setMicrophoneEnabled).not.toHaveBeenCalled();
+    expect(result.current.local).toMatchObject({ mic: false, byAdmin: { mic: true, camera: true, screen: true } });
+  });
+
+  it("shows another member muted on every source as muted by the admin", async () => {
+    const { result } = await joined();
+    let ana!: FakeParticipant;
+    act(() => {
+      ana = room().join("ana", "Ana");
+      ana.publish(Source.Microphone, "audio");
+      room().emit(RoomEvent.TrackSubscribed);
+    });
+    act(() => room().forbid(ana));
+    expect(result.current.participants[0]).toMatchObject({ mic: false, byAdmin: { mic: true, camera: true, screen: true } });
     expect(result.current.local.mic).toBe(true);
   });
 

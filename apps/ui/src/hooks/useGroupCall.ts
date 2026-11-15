@@ -136,11 +136,12 @@ const PARTICIPANT_REMOVED = 4;
 
 /**
  * What the group's admin took away from someone in this call (WISP 602 § Moderation): a source left out of their
- * `canPublishSources`. An empty list is LiveKit's "every source".
+ * `canPublishSources`. An empty list is LiveKit's "every source", so every source taken is `canPublish` off.
  */
 function heldOf(p: Participant): NonNullable<GroupCallParticipant["byAdmin"]> {
+  const none = p.permissions?.canPublish === false;
   const allowed = p.permissions?.canPublishSources ?? [];
-  const held = (source: keyof typeof PROTO_SOURCE) => allowed.length > 0 && !allowed.includes(PROTO_SOURCE[source]);
+  const held = (source: keyof typeof PROTO_SOURCE) => none || (allowed.length > 0 && !allowed.includes(PROTO_SOURCE[source]));
   return { mic: held("mic"), camera: held("camera"), screen: held("screen") };
 }
 
