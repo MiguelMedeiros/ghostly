@@ -47,6 +47,48 @@ describe('external Nostr signers', () => {
       await failed;
     } finally { vi.useRealTimers(); await fixture.close(); }
   });
+  // agents#6035: the work after the signature (the engine checking and saving the proof, a NIP-05 lookup up to 30 s)
+  // was raced against the two minutes and the cancel too: "Your Ghostly identity is unchanged" while the proof was saved.
+  it('lets the work after a signature finish when the cancel or the two minutes come meanwhile, and still ends a signer step that waits', async () => {
+    let approve!: () => void;
+    let gate = new Promise<void>(resolve => { approve = resolve; });
+    const fixture = await startTestBunker(0, { hold: () => gate });
+    const challenge = (externalKey: string): ProofChallenge => ({ adapter:'nostr',externalKey,subject:createIdentity().pubKeyZ32,audience:createIdentity().pubKeyZ32,
+      context:'a'.repeat(64),session:'b'.repeat(64),nonce:'Z'.repeat(43),issuedAt:1800000000,expiresAt:1800086400 });
+    const asked = async (count: number) => { while (fixture.methods.filter((m: string) => m === 'sign_event').length < count) await new Promise(r => setImmediate(r)); };
+    try {
+      for (const ending of ['cancel', 'two minutes'] as const) {
+        const controller = new AbortController();
+        let check!: () => void;
+        const checked = new Promise<void>(resolve => { check = resolve; });
+        let signed!: () => void;
+        const hasSigned = new Promise<void>(resolve => { signed = resolve; });
+        if (ending === 'two minutes') vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+        try {
+          const result = withNostrSigner({ bunker:fixture.bunker,signal:controller.signal,onAuth:vi.fn() }, async signer => {
+            const event = await signer.signEvent(nostrProofTemplate(challenge(await signer.getPublicKey())));
+            signed();
+            await checked;
+            return { saved: event.pubkey };
+          });
+          approve();
+          await hasSigned;
+          if (ending === 'cancel') controller.abort(); else await vi.advanceTimersByTimeAsync(120_000);
+          check();
+          await expect(result, ending).resolves.toEqual({ saved: fixture.userPub });
+        } finally { vi.useRealTimers(); }
+      }
+      // A signer step still waiting on the phone is ended by the cancel, as before.
+      gate = new Promise<void>(() => {});
+      const controller = new AbortController();
+      const waiting = withNostrSigner({ bunker:fixture.bunker,signal:controller.signal,onAuth:vi.fn() }, async signer =>
+        signer.signEvent(nostrProofTemplate(challenge(await signer.getPublicKey()))));
+      const failed = expect(waiting).rejects.toThrow('Signing cancelled');
+      await asked(3);
+      controller.abort();
+      await failed;
+    } finally { vi.useRealTimers(); await fixture.close(); }
+  });
   it('rejects secrets, insecure remote relays and unrelated URL schemes', () => {
     for(const input of ['nsec1secret','https://example.com',`bunker://${'a'.repeat(64)}?relay=ws://example.com`, `bunker://${'a'.repeat(64)}?relay=wss://user:pass@example.com`])
       expect(()=>parseProofBunker(input)).toThrow();
@@ -65,6 +107,7 @@ describe('NIP-07 permission and cancellation', () => {
     const controller=new AbortController(), afterKey=vi.fn();
     try {
       const result=withNostrSigner({signal:controller.signal,onAuth:vi.fn()},async signer=>{await signer.getPublicKey();afterKey();});
+      await vi.waitFor(()=>expect(getPublicKey).toHaveBeenCalled());
       controller.abort(); await expect(result).rejects.toThrow(/cancelled/);
       resolveKey('a'.repeat(64)); await new Promise(r=>setTimeout(r,0)); expect(afterKey).not.toHaveBeenCalled();
     } finally { vi.unstubAllGlobals(); }
