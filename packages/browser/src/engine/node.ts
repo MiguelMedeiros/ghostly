@@ -7139,7 +7139,12 @@ export class GhostlyNode implements EngineImplementation {
       if (target.view.providerId !== providerId || providerId === CASHU_MINT_SOURCE) throw new Error("A card keeps its source: add another card with New");
       await target.sources.set(providerId, values);
     } else if (providerId === CASHU_MINT_SOURCE) await this.lightningClearSource({ network });
-    else await cards.setReceive((await cards.findSame(providerId, values)) ?? (await cards.add(providerId, values)));
+    else {
+      const same = await cards.findSame(providerId, values);
+      // A card at home on another device is never this device's default for receiving (as in lightningSetReceive).
+      if (same) refuseAway(`lightning:${this.net(network)}:${same}`, this.walletView.networks?.[this.net(network)].lightnings?.find((c) => c.card === same)?.name || WALLET_NAMES.lightning);
+      await cards.setReceive(same ?? (await cards.add(providerId, values)));
+    }
     await this.refreshWallet();
   }
   /**
