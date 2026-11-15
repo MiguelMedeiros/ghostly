@@ -1,0 +1,259 @@
+import { act, renderHook, fireEvent, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { badgeCount, canBadge, resetAppBadge, setAppBadgeTarget, showAppBadge, useAppBadge } from "../../lib/appBadge";
+import { dockBadge } from "../../desktop/dockBadge";
+import { groupChat, setChatMute, setMentionsNotify } from "../../lib/chatMute";
+import { markGroupRead } from "../../lib/groups";
+import { getPrefix, saveSession } from "../../lib/storage";
+import type { ChatMessage, ChatSession } from "../../lib/types";
+import { LockScreen } from "../../components/LockScreen";
+import { LockScreenProvider, useLockScreen } from "../../contexts/LockScreenContext";
+import { handOverUnlock } from "../../lib/lockHandover";
+import { activeProfileId } from "../../lib/profiles";
+import { hashPassword } from "../../lib/settings";
+import { renderApp } from "../render";
+
+// covers: app.attention.badge
+describe("the app's icon badge", () => {
+  const NOW = 1_800_000_000_000;
+  const message = (id: string) => ({ id, text: id, sender: "peer", timestamp: NOW - 1000 }) as ChatMessage;
+  const session = (id: string, messages: number, read = 0): ChatSession => {
+    if (read) localStorage.setItem(`${getPrefix()}read_${id}`, String(read));
+    return { id, mySeedB64: "s", peerPubKeyB64: `peer-${id}`, encKeyB64: "e", createdAt: 0, messages: Array.from({ length: messages }, (_, i) => message(`${id}-${i}`)) } as ChatSession;
+  };
+
+  describe("the number on the app's icon", () => {
+    it("counts unread messages in 1:1 chats", () => {
+      expect(badgeCount([session("a", 3), session("b", 5, 4), session("c", 2, 2)], [], NOW)).toBe(4);
+    });
+
+    it("leaves a muted chat out, until its mute ends", () => {
+      setChatMute("a", NOW + 60_000);
+      setChatMute("b", "forever");
+      const chats = [session("a", 3), session("b", 2), session("c", 1)];
+      expect(badgeCount(chats, [], NOW)).toBe(1);
+      expect(badgeCount(chats, [], NOW + 120_000)).toBe(4);
+    });
+
+    it("counts one for each group with something new, not an invitation, and not a muted group", () => {
+      markGroupRead("read", NOW - 500);
+      setChatMute(groupChat("muted"), "forever");
+      const groups = [
+        { id: "new", lastMessageAt: NOW - 100 },
+        { id: "read", lastMessageAt: NOW - 1000 },
+        { id: "invited", lastMessageAt: NOW - 100, invitation: {} },
+        { id: "muted", lastMessageAt: NOW - 100 },
+      ];
+      expect(badgeCount([], groups, NOW)).toBe(1);
+    });
+
+    it("a group whose newest message is mine (a forward to several chats) has nothing new", () => {
+      markGroupRead("mine", NOW - 500);
+      expect(badgeCount([], [{ id: "mine", lastMessageAt: NOW - 100, lastPeerMessageAt: NOW - 1000 }], NOW)).toBe(0);
+      expect(badgeCount([], [{ id: "mine", lastMessageAt: NOW - 100, lastPeerMessageAt: NOW - 100 }], NOW)).toBe(1);
+    });
+
+    it("a mention gets through a muted group's mute, unless the group keeps mentions quiet too", () => {
+      setChatMute(groupChat("g"), "forever");
+      const groups = [{ id: "g", lastMessageAt: NOW - 100, lastMentionAt: NOW - 100 }];
+      expect(badgeCount([], groups, NOW)).toBe(1);
+      setMentionsNotify(groupChat("g"), false);
+      expect(badgeCount([], groups, NOW)).toBe(0);
+    });
+  });
+
+  describe("showing it", () => {
+    const nav = { setAppBadge: vi.fn(() => Promise.resolve()), clearAppBadge: vi.fn(() => Promise.resolve()) };
+    beforeEach(() => {
+      resetAppBadge();
+      nav.setAppBadge.mockClear();
+      nav.clearAppBadge.mockClear();
+    });
+    afterEach(() => resetAppBadge());
+
+    it("sets the number, clears it at 0, and sends only a change", () => {
+      showAppBadge(3, nav);
+      showAppBadge(3, nav);
+      expect(nav.setAppBadge).toHaveBeenCalledTimes(1);
+      expect(nav.setAppBadge).toHaveBeenCalledWith(3);
+      showAppBadge(0, nav);
+      expect(nav.clearAppBadge).toHaveBeenCalledTimes(1);
+    });
+
+    it("does nothing where there is no badge, and a refusal is not an error", async () => {
+      expect(canBadge({})).toBe(false);
+      expect(() => showAppBadge(2, {})).not.toThrow();
+      const refusing = { setAppBadge: vi.fn(() => Promise.reject(new DOMException("not installed", "NotAllowedError"))) };
+      expect(() => showAppBadge(2, refusing)).not.toThrow();
+      const throwing = { setAppBadge: vi.fn(() => { throw new Error("no"); }) };
+      resetAppBadge();
+      expect(() => showAppBadge(5, throwing)).not.toThrow();
+      await Promise.resolve();
+    });
+  });
+
+  describe("on Desktop, the Dock icon", () => {
+    afterEach(() => setAppBadgeTarget(null));
+
+    it("takes the number the web app's icon would, through Tauri's window badge, and no count at 0", async () => {
+      const call = vi.fn((_command: string, _args: Record<string, unknown>) => Promise.resolve(null));
+      setAppBadgeTarget(dockBadge(call, false));
+      expect(canBadge()).toBe(true);
+      setChatMute("muted", "forever");
+      showAppBadge(badgeCount([session("a", 2), session("muted", 4)], [{ id: "desk", lastMessageAt: NOW - 100 }], NOW));
+      showAppBadge(3);
+      showAppBadge(0);
+      expect(call.mock.calls).toEqual([
+        ["plugin:window|set_badge_count", { label: "main", value: 3 }],
+        ["plugin:window|set_badge_count", { label: "main", value: null }],
+      ]);
+    });
+
+    // Tauri's badge resolved on Linux and showed nothing: it reaches only Unity itself, which no current desktop runs.
+    it("on Linux, the launcher's count goes to the app's own launcher entry, 0 when there is none", async () => {
+      const call = vi.fn((_command: string, _args: Record<string, unknown>) => Promise.resolve(null));
+      setAppBadgeTarget(dockBadge(call, true));
+      showAppBadge(4);
+      showAppBadge(0);
+      expect(call.mock.calls).toEqual([
+        ["native_unread_count", { count: 4 }],
+        ["native_unread_count", { count: 0 }],
+      ]);
+    });
+
+    it("a platform without a badge (Windows) refuses quietly", async () => {
+      const call = vi.fn(() => Promise.reject(new Error("unsupported")));
+      setAppBadgeTarget(dockBadge(call, false));
+      expect(() => showAppBadge(2)).not.toThrow();
+      await Promise.resolve();
+      expect(call).toHaveBeenCalledTimes(1);
+    });
+
+    it("without a target, the browser's own navigator is asked", () => {
+      setAppBadgeTarget(null);
+      expect(canBadge()).toBe(typeof (navigator as { setAppBadge?: unknown }).setAppBadge === "function");
+    });
+  });
+
+  describe("keeping it in step", () => {
+    afterEach(() => { setAppBadgeTarget(null); resetAppBadge(); vi.restoreAllMocks(); });
+
+    // Every 3 s and on every stored message: parsing each chat again each time took 11 ms at 100 long chats.
+    it("parses again only a chat whose stored text changed", () => {
+      const icon: number[] = [];
+      setAppBadgeTarget({ setAppBadge: async (count) => { icon.push(count ?? 0); }, clearAppBadge: async () => { icon.push(0); } });
+      saveSession(session("a", 2));
+      saveSession(session("b", 1));
+      const parse = vi.spyOn(JSON, "parse");
+      const chatsParsed = () => parse.mock.calls.filter(([raw]) => typeof raw === "string" && raw.includes("\"peerPubKeyB64\"")).length;
+      const { unmount } = renderHook(() => useAppBadge());
+      expect(chatsParsed()).toBe(2);
+      expect(icon).toEqual([3]);
+
+      parse.mockClear();
+      act(() => { window.dispatchEvent(new Event("session-updated")); });
+      expect(chatsParsed()).toBe(0);
+
+      saveSession(session("a", 4));
+      parse.mockClear();
+      act(() => { window.dispatchEvent(new Event("session-updated")); });
+      expect(chatsParsed()).toBe(1);
+      expect(icon).toEqual([3, 5]);
+      unmount();
+    });
+
+    // Another profile open in another tab writes its keys a few times for each message it gets: none of them is one the
+    // icon counts here, and each read every chat of this profile again (1 ms per write at 300 chats).
+    it("does not read the chats again for another profile's writes in another tab", () => {
+      setAppBadgeTarget({ setAppBadge: async () => {}, clearAppBadge: async () => {} });
+      saveSession(session("a", 2));
+      saveSession(session("b", 1));
+      const real = localStorage;
+      let chatReads = 0;
+      const chatKeys = new Set([`${getPrefix()}a`, `${getPrefix()}b`]);
+      vi.stubGlobal("localStorage", {
+        get length() { return real.length; },
+        key: (i: number) => real.key(i),
+        getItem: (key: string) => { if (chatKeys.has(key)) chatReads++; return real.getItem(key); },
+        setItem: (key: string, value: string) => real.setItem(key, value),
+        removeItem: (key: string) => real.removeItem(key),
+        clear: () => real.clear(),
+      });
+      try {
+        const { unmount } = renderHook(() => useAppBadge());
+        chatReads = 0;
+        act(() => {
+          for (let i = 0; i < 30; i++) {
+            for (const key of ["ghostly_w0rkpr0f1l_c0ffee", "ghostly_w0rkpr0f1l_read_c0ffee", "ghostly_w0rkpr0f1l_app_settings"]) {
+              window.dispatchEvent(new StorageEvent("storage", { key }));
+            }
+          }
+        });
+        expect(chatReads).toBe(0);
+
+        // This profile's own keys, and a storage cleared, still count it again.
+        act(() => { window.dispatchEvent(new StorageEvent("storage", { key: `${getPrefix()}mute_a` })); });
+        expect(chatReads).toBe(2);
+        act(() => { window.dispatchEvent(new StorageEvent("storage", { key: null })); });
+        expect(chatReads).toBe(4);
+        unmount();
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+  });
+});
+
+// covers: app.attention.badge
+describe("the number on the app's icon while the app is locked", () => {
+  const message = (id: string) => ({ id, text: id, sender: "peer", timestamp: Date.now() - 1000 }) as ChatMessage;
+  const session = (id: string, messages: number): ChatSession =>
+    ({ id, mySeedB64: "s", peerPubKeyB64: `peer-${id}`, encKeyB64: "e", createdAt: 0, messages: Array.from({ length: messages }, (_, i) => message(`${id}-${i}`)) }) as ChatSession;
+
+  /** The app's shell as far as the icon goes: it stays mounted under the lock. */
+  function Shell() {
+    useAppBadge();
+    const { isLocked, lock } = useLockScreen();
+    return <button data-testid="lock" onClick={lock}>{String(isLocked)}</button>;
+  }
+
+  const lockField = () => screen.getByLabelText("Ghostly is locked").querySelector("input[type=password]") as HTMLInputElement;
+
+  const icon: number[] = [];
+  beforeEach(async () => {
+    icon.length = 0;
+    resetAppBadge();
+    setAppBadgeTarget({ setAppBadge: async (count) => { icon.push(count ?? 0); }, clearAppBadge: async () => { icon.push(0); } });
+    saveSession(session("a", 2));
+    const hash = await hashPassword("pw");
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: hash, timeoutMinutes: 5 } }));
+    handOverUnlock(activeProfileId(), hash);
+    renderApp(<LockScreenProvider><LockScreen /><Shell /></LockScreenProvider>);
+  });
+  afterEach(() => {
+    setAppBadgeTarget(null);
+    resetAppBadge();
+    localStorage.clear(); sessionStorage.clear();
+  });
+
+  it("is cleared when the app locks, says nothing of what comes while locked, and comes back on unlock", async () => {
+    expect(screen.getByTestId("lock")).toHaveTextContent("false");
+    expect(icon).toEqual([2]);
+
+    act(() => { fireEvent.click(screen.getByTestId("lock")); });
+    expect(icon).toEqual([2, 0]);
+
+    // Messages arrive under the lock.
+    saveSession(session("a", 7));
+    act(() => { window.dispatchEvent(new Event("session-updated")); });
+    act(() => { window.dispatchEvent(new StorageEvent("storage", { key: `${getPrefix()}a` })); });
+    expect(icon).toEqual([2, 0]);
+
+    fireEvent.change(lockField(), { target: { value: "pw" } });
+    await act(async () => { fireEvent.submit(lockField().closest("form")!); });
+    await screen.findByText("false");
+    // The number comes from useAppBadge's effect, which React may run a task after the page shows the unlock: findBy
+    // resolves on the page, outside act, so it is waited for.
+    await waitFor(() => expect(icon).toEqual([2, 0, 7]));
+  });
+});
