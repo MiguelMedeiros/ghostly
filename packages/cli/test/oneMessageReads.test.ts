@@ -65,6 +65,19 @@ describe("delete", () => {
     const { COMMANDS } = await import("../src/commands");
     expect(COMMANDS["message delete"]!.usage).toBe("message delete <chat|group> <message> [--everyone [--wait none|confirmed|sent] [--timeout s]] [--purge]");
   });
+
+  it("another member's message in a group says only its author deletes it, not a --everyone that is then refused as not mine", async () => {
+    const { ctx, node } = fake();
+    for (const chat of ["Crew", "g1", "group:g1"])
+      for (const purge of [false, true])
+        await expect(callApi(ctx, "chat.delete", { chat, message: "k:0:1", ...(purge && { purge }) })).rejects.toMatchObject({
+          code: "not_found", message: `"${chat}" is a group, and "k:0:1" is another member's message in it: only its author deletes a group's message, for everyone`, details: { group: "g1" },
+        });
+    // The --everyone that was offered says the same thing in its own words.
+    await expect(callApi(ctx, "chat.delete", { chat: "Crew", message: "k:0:1", everyone: true })).rejects.toMatchObject({ code: "not_found", message: expect.stringMatching(/only your own/) });
+    expect(node.deleteMessage).not.toHaveBeenCalled();
+    expect(node.removeMessage).not.toHaveBeenCalled();
+  });
 });
 
 describe("message details", () => {
