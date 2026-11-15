@@ -84,11 +84,11 @@ export function waitNotice(method: string, given: Record<string, unknown>, mode:
     : null;
   const params = waitOf(method, given, mode);
   // A daemon's file send answers once it has copied the file into the profile (files.ts `stage`): 6-30 s for 1 GiB, said
-  // nothing, and read as a hung daemon. Ctrl-C leaves the daemon to finish it.
+  // nothing, and read as a hung daemon. Ctrl-C there stops the send (files.ts `stageWhileAsked`): nothing goes.
   if (method === "file.send" && mode === "daemon" && params.wait !== "sent") {
     const file = word(params.name) ?? (word(params.path) ? basename(params.path as string) : "the file");
     const chatRef = word(params.chat) ?? "the chat", chat = chatRef.startsWith("group:") ? `group ${chatRef.slice("group:".length)}` : chatRef;
-    return { waiting: `copying ${file} into the profile before it goes to ${chat} (Ctrl-C stops waiting, it still goes)`, stopped: `the daemon copies ${file} in and sends it to ${chat}` };
+    return { waiting: `copying ${file} into the profile before it goes to ${chat} (Ctrl-C stops the send)`, stopped: `${file} was not sent to ${chat}: send it again when you want it` };
   }
   const waits = waitsFor(method, params);
   if (waits === undefined) return null;
