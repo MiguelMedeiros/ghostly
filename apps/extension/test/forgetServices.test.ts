@@ -1,11 +1,25 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fire, settle, type FakeWorld } from "./fakeChrome";
 import { resetEngine } from "./fakeEngine";
+import { viewerTag } from "@ghostly/core";
 import { OTHER_PEER, OTHER_TAG, PEER, SERVICE, TAG, bootExtension, useProfile } from "./extension";
 
 // covers: services.open
 
 vi.mock("@ghostly/browser/engine/server", async () => (await import("./fakeEngine")).engineServerModule);
+// The chats the page's peer sends it, with the apps each contact lists.
+const pageEngine = vi.hoisted(() => {
+  const listeners = new Set<() => void>();
+  type Link = { myPubKeyZ32: string; peerPubKeyZ32: string; peerServices: { id: string }[] | null };
+  return {
+    state: null as null | { links: Link[] },
+    subscribe(listener: () => void) { listeners.add(listener); return () => listeners.delete(listener); },
+    linkByPeer: () => undefined,
+    send(links: Link[]) { pageEngine.state = { links }; for (const listener of [...listeners]) listener(); },
+    reset() { pageEngine.state = null; listeners.clear(); },
+  };
+});
+vi.mock("@ghostly/browser/platform/engine", async (original) => ({ ...(await original<object>()), engine: pageEngine }));
 
 /** What a contact's app may have kept on its viewer origin: everything Chrome lets an extension clear for one. */
 const KEPT = { cookies: true, localStorage: true, indexedDB: true, cacheStorage: true, serviceWorkers: true, fileSystems: true, cache: true };
@@ -16,6 +30,7 @@ let world: FakeWorld;
 
 beforeEach(async () => {
   resetEngine();
+  pageEngine.reset();
   world = await bootExtension();
 });
 
@@ -51,6 +66,26 @@ describe("what a contact's app kept in its viewer tab", () => {
     // Cleared once: a second Delete of the same chat has nothing left to clear.
     await forgetServicesOf({ tag: TAG });
     expect(removed()).toHaveLength(2);
+  });
+
+  it("goes with its chat and its profile though no list noted it open: every app the chat lists is noted", async () => {
+    // Opened before this version kept its list: only the chat's list of apps names it.
+    const { forgetServicesOf } = await page();
+    const me = OTHER_PEER;
+    pageEngine.send([
+      { myPubKeyZ32: me, peerPubKeyZ32: PEER, peerServices: [{ id: SERVICE }, { id: "notes" }] },
+      { myPubKeyZ32: PEER, peerPubKeyZ32: OTHER_PEER, peerServices: null },
+    ]);
+    // The same list again, with every state: noted once.
+    pageEngine.send([{ myPubKeyZ32: me, peerPubKeyZ32: PEER, peerServices: [{ id: SERVICE }, { id: "notes" }] }]);
+
+    await forgetServicesOf({ tag: viewerTag(me) });
+    expect(removed()).toEqual([[{ origins: [origin(PEER, viewerTag(me))] }, KEPT], [{ origins: [origin(PEER, viewerTag(me), "notes")] }, KEPT]]);
+
+    pageEngine.send([{ myPubKeyZ32: me, peerPubKeyZ32: PEER, peerServices: [{ id: "chess" }] }]);
+    await forgetServicesOf({ profile: "" });
+    expect(removed()).toHaveLength(3);
+    expect(removed()[2]).toEqual([{ origins: [origin(PEER, viewerTag(me), "chess")] }, KEPT]);
   });
 
   it("a viewer tab whose debugger was cancelled still closes before its origin is cleared", async () => {
