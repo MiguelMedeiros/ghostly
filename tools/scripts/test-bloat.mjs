@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // Tests that cost CI time and break on refactors without catching a bug.
 //
+//   node tools/scripts/test-bloat.mjs [--since 7d] [--out report.md] [--json | --summary]
+//                                                     the weekly report, out of CI's artifacts (test-bloat-report.mjs)
 //   node tools/scripts/test-bloat.mjs --weak          list the weak unit and component tests (vitest, outside e2e/)
 //   node tools/scripts/test-bloat.mjs --weak --json   the same as JSON, for the weekly report
 //
@@ -15,14 +17,16 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
+import { USAGE, main } from "./test-bloat-report.mjs";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..", "..");
 const SKIP_DIRS = new Set(["node_modules", "dist", "target", ".git", ".claude", "coverage", "website", "notes-local", "gen", "test-results", "playwright-report"]);
 
 const FLAGS = ["--weak", "--json"];
 const args = process.argv.slice(2);
-if (!args.includes("--weak") || args.some((arg) => !FLAGS.includes(arg))) {
-  console.error(`usage: node tools/scripts/test-bloat.mjs --weak [--json]`);
+if (!args.includes("--weak")) process.exit(await main(args));
+if (args.some((arg) => !FLAGS.includes(arg))) {
+  console.error(USAGE);
   process.exit(2);
 }
 
