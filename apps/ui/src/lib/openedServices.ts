@@ -34,10 +34,15 @@ export function openedServices<T extends Opened>(valid: (entry: Record<string, u
   };
   return {
     list,
-    /** Noted before the app opens: whatever it keeps there from then on is cleared with the chat. */
-    note(opened: T): void {
+    /**
+     * Noted before the app opens: whatever it keeps there from then on is cleared with the chat. Several at once read
+     * and write the list once: each read checks every entry.
+     */
+    note(...opened: T[]): void {
       const entries = list();
-      if (!entries.some((o) => same(o, opened))) save([...entries, opened]);
+      const before = entries.length;
+      for (const one of opened) if (!entries.some((o) => same(o, one))) entries.push(one);
+      if (entries.length > before) save(entries);
     },
     /**
      * Clears the origins of the apps opened from one chat (`tag`) or by one profile (`profile`), one at a time or, with
