@@ -37,17 +37,23 @@ class FakeKeyProvider {
 
 class FakeRoom {
   static rooms: FakeRoom[] = [];
+  /** The next room comes without LiveKit's E2EE manager: joined, it does not seal (`hasE2EESetup` false). */
+  static noManager = false;
   readonly remoteParticipants = new Map();
   readonly activeSpeakers = [];
   private readonly listeners = new Map<string, () => void>();
+  /** LiveKit's: E2EE set up on the room, and on once its worker says so (here, as E2EE is turned on). */
+  private readonly manager = !FakeRoom.noManager;
+  get hasE2EESetup() { return !!this.options.encryption && this.manager; }
+  isE2EEEnabled = false;
   readonly localParticipant = {
-    identity: ME, name: "Me", isMicrophoneEnabled: false, isCameraEnabled: false, isScreenShareEnabled: false, isSpeaking: false,
+    identity: ME, name: "Me", isMicrophoneEnabled: false, isCameraEnabled: false, isScreenShareEnabled: false, isSpeaking: false, isE2EEEnabled: false,
     trackPublications: new Map(), getTrackPublication: () => undefined,
     setMicrophoneEnabled: vi.fn(async () => undefined),
   };
   readonly connect = vi.fn(async (_url: string, _token: string, _options?: unknown) => {});
   readonly disconnect = vi.fn(async () => this.listeners.get("disconnected")?.());
-  readonly setE2EEEnabled = vi.fn(async (_on: boolean) => {});
+  readonly setE2EEEnabled = vi.fn(async (on: boolean) => { this.isE2EEEnabled = on; this.localParticipant.isE2EEEnabled = on; });
   constructor(readonly options: { encryption?: { keyProvider: FakeKeyProvider; worker: unknown } }) { FakeRoom.rooms.push(this); }
   on(event: string, listener: () => void) { this.listeners.set(event, listener); return this; }
 }
@@ -71,6 +77,7 @@ beforeEach(() => {
 
 afterEach(() => {
   FakeRoom.rooms = [];
+  FakeRoom.noManager = false;
   FakeKeyProvider.providers = [];
   Reflect.deleteProperty(window, "RTCRtpScriptTransform");
 });
@@ -139,6 +146,34 @@ describe("Join call in a group whose call is sealed end to end", () => {
     expect(await screen.findByTestId("group-call")).toBeInTheDocument();
     await waitFor(() => expect(FakeRoom.rooms[0]?.connect).toHaveBeenCalled());
     expect(FakeKeyProvider.providers[0].keys).toEqual([Array(32).fill(5)]);
+  });
+
+  it("a view whose call says e2ee: true (the flag form) is sealed as e2ee: 1 is: the key asked, LiveKit's E2EE on", async () => {
+    canSeal();
+    fakeEngine.on("groupCallKey", () => callKey(1, 5));
+    const { user } = joinButton(community({ call: { sfu: SEALED.sfu, e2ee: true } as unknown as GroupView["call"] }));
+    await user.click(screen.getByTestId("group-call-join"));
+    await waitFor(() => expect(FakeRoom.rooms[0]?.connect).toHaveBeenCalledWith("wss://sfu.ghostly.test", "pass-1", { autoSubscribe: false }));
+    expect(asks("groupCallKey")[0]).toEqual({ groupId: "group-1" });
+    expect(FakeRoom.rooms[0].options.encryption).toEqual({ keyProvider: FakeKeyProvider.providers[0], worker });
+    expect(FakeRoom.rooms[0].setE2EEEnabled).toHaveBeenCalledWith(true);
+  });
+
+  it("a sealed call whose room doesn't seal once joined is left: the window goes, and the notice says why", async () => {
+    canSeal();
+    FakeRoom.noManager = true;
+    fakeEngine.on("groupCallKey", () => callKey(1, 5));
+    const { user } = joinButton();
+    await user.click(screen.getByTestId("group-call-join"));
+    expect(await screen.findByTestId("group-call-problem-notice-title")).toHaveTextContent("This call couldn't be sealed, so you left it");
+    const [room] = FakeRoom.rooms;
+    expect(room.connect).toHaveBeenCalled();
+    expect(room.disconnect).toHaveBeenCalledWith(true);
+    expect(room.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("group-call")).toBeNull();
+    await user.click(screen.getByTestId("group-call-problem-notice-info"));
+    expect(screen.getByTestId("group-call-problem-notice-why")).toHaveTextContent("You left so nothing went out unsealed.");
+    expect(screen.getByTestId("group-call-problem-notice-details")).toHaveTextContent("no E2EE manager on the room");
   });
 
   it("a group whose call is not sealed joins as before: no key asked, no E2EE on the room", async () => {

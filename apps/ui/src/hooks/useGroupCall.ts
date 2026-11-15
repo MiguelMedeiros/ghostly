@@ -43,6 +43,8 @@ export interface UseGroupCallOptions extends GroupCallJoin {
   relayOnly?: boolean;
   /** Where livekit-client comes from; only tests set it. */
   loadLivekit?: () => Promise<LivekitModule>;
+  /** How long a sealed room may take after its connect to say it seals (`SEAL_WAIT_MS`); only tests set it. */
+  sealWaitMs?: number;
 }
 
 export type GroupCallStatus = "idle" | "connecting" | "connected" | "left" | "failed";
@@ -73,6 +75,43 @@ export const NO_SEALING = "This browser can't seal call media end to end, and th
 /** Why a sealed call is not joined: the group's call key for this epoch is not on this device yet. */
 export const NO_CALL_KEY = "This group's call key is not here yet";
 
+/** Why a sealed call was left: once in the room, LiveKit did not show it seals this device's media (`unsealedBy`). */
+export const NOT_SEALED = "This call could not be sealed end to end, so this app left it";
+
+/** How long a sealed room may take, after its connect, for its E2EE worker to say it seals this device's media. */
+export const SEAL_WAIT_MS = 10_000;
+
+/** LiveKit's mark on a sender whose encoded frames go through its E2EE worker (`E2EE_FLAG`, livekit-client e2ee/constants.ts). */
+const LIVEKIT_SEALED_SENDER = "lk_e2ee";
+
+/**
+ * Why a room joined sealed does not seal this device's media now, or null when it does (WISP 602 § End-to-end
+ * encryption): the room has its E2EE worker and LiveKit's E2EE manager, its sender encryption is on (`isE2EEEnabled`,
+ * which LiveKit sets once the worker says so), and each track this device publishes goes through the worker: its
+ * sender carries LiveKit's mark (Insertable Streams) or a script transform, and the SFU lists it as encrypted. The
+ * signals the e2e's seal probe reads (e2e/support/sealProbe.ts), checked by the app: never a call left unsealed.
+ */
+export function unsealedBy(room: Room, worker: Worker | undefined): string | null {
+  if (!worker) return "no E2EE worker";
+  if (!room.hasE2EESetup) return "no E2EE manager on the room";
+  if (!room.isE2EEEnabled || !room.localParticipant.isE2EEEnabled) return "the room's E2EE is not on for this device";
+  for (const pub of room.localParticipant.trackPublications.values()) {
+    const sender = pub.track?.sender as (RTCRtpSender & { transform?: unknown }) | undefined;
+    // No sender: nothing of this track goes out.
+    if (!sender) continue;
+    if (!(LIVEKIT_SEALED_SENDER in sender) && !sender.transform) return `the ${pub.source} sender has no E2EE transform`;
+    if (!pub.isEncrypted) return `the ${pub.source} track is not published as encrypted`;
+  }
+  return null;
+}
+
+/** Whether the room's E2EE comes on within `ms` (LiveKit sets `isE2EEEnabled` when its worker answers), while `alive`. */
+async function sealsWithin(room: Room, ms: number, alive: () => boolean): Promise<boolean> {
+  const until = Date.now() + ms;
+  while (!room.isE2EEEnabled && alive() && Date.now() < until) await new Promise((done) => setTimeout(done, 50));
+  return room.isE2EEEnabled;
+}
+
 /**
  * The room's WebRTC configuration under "Hide my IP from contacts", as a 1:1 call's (`callRtcConfig`): the pass's TURN
  * servers alone, and the relay policy, so no candidate but the relay's reaches the node. No server: nothing to join by.
@@ -99,6 +138,11 @@ interface Session {
   worker?: Worker;
   /** Joined under "Hide my IP from contacts" (the relay policy). */
   relayed: boolean;
+  /**
+   * In a sealed call, once the room said it seals: checks it still does (`unsealedBy`), and otherwise leaves the room,
+   * stops every track and says why. True while sealed, and in a call that is not sealed.
+   */
+  sealedStill: () => boolean;
   ended: boolean;
   screen: MediaStreamTrack | null;
   screenEnded: (() => void) | null;
@@ -210,7 +254,7 @@ function admit(pub: RemoteTrackPublication): void {
  * `e2ee` set, the room is joined sealed with LiveKit's E2EE (a shared key from `ExternalE2EEKeyProvider`), or not at
  * all: never unsealed. Sealing turned on or off for the group joins the room again.
  */
-export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, loadLivekit }: UseGroupCallOptions): GroupCall {
+export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, loadLivekit, sealWaitMs = SEAL_WAIT_MS }: UseGroupCallOptions): GroupCall {
   const [state, setState] = useState<GroupCallState>(EMPTY);
   const [status, setStatus] = useState<GroupCallStatus>("idle");
   const [error, setError] = useState<GroupCallError | null>(null);
@@ -224,6 +268,8 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
   load.current = loadLivekit;
   const seal = useRef(e2ee);
   seal.current = e2ee;
+  const sealWait = useRef(sealWaitMs);
+  sealWait.current = sealWaitMs;
   const sealed = e2ee !== undefined;
   // "Hide my IP from contacts" turned on in a room joined without it: the room is joined again, relay only. A room's
   // ICE policy is set at its join, and the direct path it found would stay until a rejoin.
@@ -243,7 +289,7 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
     let live = true;
     const kept = carry.current;
     carry.current = null;
-    const s: Session = { relayed: relay.current, ended: false, screen: null, screenEnded: null, screenAsking: false, refresh: () => {} };
+    const s: Session = { relayed: relay.current, ended: false, screen: null, screenEnded: null, screenAsking: false, refresh: () => {}, sealedStill: () => true };
     session.current = s;
     setState(EMPTY);
     setStatus("connecting");
@@ -289,6 +335,23 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
             if (!pub.isEncrypted) admit(pub);
           });
         }
+        // A sealed room that does not seal is left at once: the room, every track, and the reason said (fail closed).
+        let sealChecked = false;
+        s.sealedStill = () => {
+          if (!encryption || !sealChecked || s.ended) return !s.ended;
+          const why = unsealedBy(room, s.worker);
+          if (!why) return true;
+          void endSession(s);
+          if (live) {
+            setStatus("failed");
+            setError({ action: "join", message: NOT_SEALED, cause: why });
+          }
+          return false;
+        };
+        if (encryption) {
+          room.on(E.LocalTrackPublished, () => void s.sealedStill());
+          if (E.ParticipantEncryptionStatusChanged) room.on(E.ParticipantEncryptionStatusChanged, () => void s.sealedStill());
+        }
         room.on(E.Disconnected, () => {
           // The node closed the room or dropped you: the call is over here too.
           if (s.ended) return;
@@ -300,6 +363,13 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
         if (!live || s.ended) {
           await endSession(s);
           return;
+        }
+        // Nothing goes out until the room says it seals: LiveKit's worker turns its E2EE on, else the room is left.
+        if (encryption) {
+          await sealsWithin(room, sealWait.current, () => live && !s.ended);
+          if (!live || s.ended) return;
+          sealChecked = true;
+          if (!s.sealedStill()) return;
         }
         // What the room held at the join: its sealed publications, subscribed by hand.
         if (encryption) {
@@ -318,6 +388,7 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
             // In the call all the same, muted: the person sees why and can try the button.
             if (live) setError({ action: "mic", message: messageOf(cause), cause });
           }
+          if (!s.sealedStill()) return;
           s.refresh();
         }
         if (kept?.camera && live && !s.ended) {
@@ -326,6 +397,7 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
           } catch (cause) {
             if (live) setError({ action: "camera", message: messageOf(cause), cause });
           }
+          if (!s.sealedStill()) return;
           s.refresh();
         }
       } catch (cause) {
@@ -361,11 +433,11 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
     const on = !s.room.localParticipant.isMicrophoneEnabled;
     try {
       await s.room.localParticipant.setMicrophoneEnabled(on, on ? { deviceId: preferredDevice("audioinput") } : undefined);
-      if (on) setError(null);
+      if (on && !s.ended) setError(null);
     } catch (cause) {
       setError({ action: "mic", message: messageOf(cause), cause });
     }
-    s.refresh();
+    if (s.sealedStill()) s.refresh();
   }, []);
 
   const toggleCamera = useCallback(async () => {
@@ -374,11 +446,11 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
     const on = !s.room.localParticipant.isCameraEnabled;
     try {
       await s.room.localParticipant.setCameraEnabled(on, on ? { deviceId: preferredDevice("videoinput") } : undefined);
-      if (on) setError(null);
+      if (on && !s.ended) setError(null);
     } catch (cause) {
       setError({ action: "camera", message: messageOf(cause), cause });
     }
-    s.refresh();
+    if (s.sealedStill()) s.refresh();
   }, []);
 
   const toggleScreen = useCallback(async () => {
@@ -420,12 +492,13 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
     track.addEventListener("ended", s.screenEnded);
     try {
       await s.room.localParticipant.publishTrack(track, { source: s.lk.Track.Source.ScreenShare });
-      setError(null);
+      // Not over a seal check's reason: a screen that went out unsealed left the call (`sealedStill`).
+      if (!s.ended) setError(null);
     } catch (cause) {
       await stopScreen(s);
       setError({ action: "screen", message: screenShareErrorMessage(cause) ?? messageOf(cause), cause });
     }
-    s.refresh();
+    if (s.sealedStill()) s.refresh();
   }, []);
 
   const leave = useCallback(async () => {

@@ -40,6 +40,8 @@
     "noSealing": "Impossible de rejoindre cet appel chiffré ici",
     "noSealingInfo": "Les appels de ce groupe sont chiffrés de bout en bout, et ce navigateur ne sait pas les chiffrer. Rejoignez-le depuis un Chrome, Edge, Firefox ou Safari récent.",
     "notMember": "Hors de ce groupe (…{{key}})",
+    "notSealed": "Cet appel n'a pas pu être chiffré, vous l'avez donc quitté",
+    "notSealedInfo": "Les appels de ce groupe sont chiffrés de bout en bout et, une fois dans la salle, cette app n'a pas pu chiffrer ce que vous envoyez. Vous l'avez quitté pour que rien ne parte en clair. Réessayez, ou rejoignez-le depuis un Chrome, Edge, Firefox ou Safari récent.",
     "refused": "Vous n'avez pas encore accès à cet appel",
     "retry": "Réessayer",
     "screenOf": "Écran de {{name}}",

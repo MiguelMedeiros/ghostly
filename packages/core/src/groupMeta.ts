@@ -59,6 +59,13 @@ export interface GroupMetaBody {
 export const MAX_GROUP_CALL_SFU = 200;
 
 /**
+ * Whether a `call`'s `e2ee` turns sealed call media on (WISP 602 § End-to-end encryption): `1`, as every writer writes
+ * it, or `true`, read as on so a body that says it as a JSON flag never leaves a call unsealed. Anything else is off.
+ * Read either way, it is kept and written again as `1`.
+ */
+export const groupCallE2ee = (raw: unknown): boolean => raw === 1 || raw === true;
+
+/**
  * A group's call node as WISP 602 takes it: an `https` origin in its one spelling (`new URL(sfu).origin`: lower-case
  * host, no default port, path, query, fragment, userinfo or trailing `/`), at most `MAX_GROUP_CALL_SFU` characters.
  * Undefined otherwise: it is signed into every token request, so a second spelling is no call node.
@@ -139,7 +146,7 @@ export function encodeGroupMetaBody(body: GroupMetaBody): string {
   if (body.call) {
     const sfu = groupCallSfu(body.call.sfu);
     if (!sfu) throw new Error("A group's call node is an https origin");
-    out.call = body.call.e2ee === 1 ? { sfu, e2ee: 1 } : { sfu };
+    out.call = groupCallE2ee(body.call.e2ee) ? { sfu, e2ee: 1 } : { sfu };
   }
   return JSON.stringify(out);
 }
@@ -168,8 +175,8 @@ export function parseGroupMetaBody(body: string): GroupMetaBody | null {
   // A `call` that does not hold is no `call` (WISP 602): the group has no calls, its name and picture still show.
   const call = (parsed as Record<string, unknown>).call;
   const sfu = call && typeof call === "object" ? groupCallSfu((call as Record<string, unknown>).sfu) : undefined;
-  // Sealing is on only for exactly `1`; any other value is off (WISP 602 § End-to-end encryption), and kept as off.
-  if (sfu) out.call = (call as Record<string, unknown>).e2ee === 1 ? { sfu, e2ee: 1 } : { sfu };
+  // Sealing is on for `1` or `true`, kept as `1`; any other value is off (WISP 602 § End-to-end encryption), kept as off.
+  if (sfu) out.call = groupCallE2ee((call as Record<string, unknown>).e2ee) ? { sfu, e2ee: 1 } : { sfu };
   return out;
 }
 

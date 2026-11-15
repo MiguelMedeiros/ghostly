@@ -181,7 +181,7 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
 
   // The room closed (the node dropped you) or would not take you: the window goes, and a failed join says why.
   useEffect(() => {
-    if (call.status === "failed") setProblem(groupCallSealProblem(call.error?.message, t) ?? groupCallProblem(call.error?.cause ?? call.error?.message, t));
+    if (call.status === "failed") setProblem(groupCallSealProblem(call.error?.message, t, call.error?.cause) ?? groupCallProblem(call.error?.cause ?? call.error?.message, t));
     if (call.status === "failed" || call.status === "left") setJoined(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only the status moving there ends it
   }, [call.status]);

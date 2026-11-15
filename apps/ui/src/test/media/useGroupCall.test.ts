@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GROUP_CALL_MUTED_ABOVE, joinsMuted, NO_CALL_KEY, NO_RELAY, NO_SEALING, useGroupCall, type LivekitModule, type UseGroupCallOptions } from "../../hooks/useGroupCall";
+import { GROUP_CALL_MUTED_ABOVE, joinsMuted, NO_CALL_KEY, NO_RELAY, NO_SEALING, NOT_SEALED, useGroupCall, type LivekitModule, type UseGroupCallOptions } from "../../hooks/useGroupCall";
 import { chooseDevice } from "../../lib/mediaDevices";
 import { FakeTrack } from "../../../../../packages/react/test/fakes";
 
@@ -30,10 +30,13 @@ const RoomEvent = {
   ActiveSpeakersChanged: "activeSpeakersChanged",
   Reconnected: "reconnected",
   Disconnected: "disconnected",
+  ParticipantEncryptionStatusChanged: "participantEncryptionStatusChanged",
 } as const;
 
 class FakeLocalTrack {
   readonly stop = vi.fn(() => this.mediaStreamTrack.stop());
+  /** A local track's sender: with LiveKit's `lk_e2ee` mark when its room's E2EE took its encoded frames. */
+  sender?: Record<string, unknown>;
   constructor(readonly mediaStreamTrack: MediaStreamTrack) {}
 }
 
@@ -84,10 +87,13 @@ class FakeLocalParticipant extends FakeParticipant {
   constructor(private readonly room: FakeRoom) {
     super("me", "Me");
   }
+  /** LiveKit's: this device's sender encryption, on once E2EE is turned on in the room. */
+  get isE2EEEnabled() { return this.room.e2ee; }
   private toggle(source: SourceName, kind: "audio" | "video", on: boolean) {
     let pub = this.getTrackPublication(source);
     if (on && !pub) {
       pub = this.publish(source, kind);
+      this.room.seal(pub);
       this.room.emit(RoomEvent.LocalTrackPublished);
     }
     if (pub) {
@@ -118,6 +124,7 @@ class FakeLocalParticipant extends FakeParticipant {
     this.sent(`publish ${options.source} ${track.kind}`);
     const pub = new FakePublication(options.source, new FakeLocalTrack(track));
     this.trackPublications.set(`pub-${track.id}`, pub);
+    this.room.seal(pub);
     this.room.emit(RoomEvent.LocalTrackPublished);
     return pub;
   });
@@ -141,6 +148,11 @@ class FakeRoom {
   static micFails: Error | null = null;
   /** What the room holds when the next one connects, beyond `waiting`'s people. */
   static atJoin: ((room: FakeRoom) => void) | null = null;
+  /**
+   * How the next sealed room fails to seal, as LiveKit would show it: no E2EE manager, its worker never saying E2EE is
+   * on, or the sources whose sender's frames its E2EE does not take (a publish that goes out in the clear).
+   */
+  static unsealed: { manager?: boolean; worker?: boolean; senders?: string[] } = {};
   readonly remoteParticipants = new Map<string, FakeParticipant>();
   activeSpeakers: FakeParticipant[] = [];
   readonly localParticipant = new FakeLocalParticipant(this);
@@ -148,6 +160,15 @@ class FakeRoom {
   /** LiveKit's E2EE turned on in this room, and the room joined. */
   e2ee = false;
   connected = false;
+  /** LiveKit's `isE2EEEnabled`: set once the room's E2EE worker says it seals this device's media. */
+  isE2EEEnabled = false;
+  private readonly fails = FakeRoom.unsealed;
+  /** LiveKit's `hasE2EESetup`: the room has its E2EE manager (`encryption` given). */
+  get hasE2EESetup() { return !!this.options.encryption && !this.fails.manager; }
+  /** A local publication's sender, as LiveKit's E2EE leaves it: marked when its frames go through the worker. */
+  seal(pub: FakePublication) {
+    pub.track!.sender = this.sealedNow() && !this.fails.senders?.includes(pub.source) ? { lk_e2ee: true } : {};
+  }
   /** Whether a track published now goes out sealed: E2EE configured with a key provider and worker, on, and joined. */
   sealedNow() {
     return !!this.options.encryption?.keyProvider && !!this.options.encryption.worker && this.e2ee && this.connected;
@@ -165,6 +186,7 @@ class FakeRoom {
   readonly setE2EEEnabled = vi.fn(async (on: boolean) => {
     steps.push("e2ee");
     this.e2ee = on;
+    if (this.options.encryption && !this.fails.worker) this.isE2EEEnabled = on;
   });
   constructor(readonly options: { encryption?: { keyProvider: FakeKeyProvider; worker: FakeWorker } } & Record<string, unknown>) {
     FakeRoom.rooms.push(this);
@@ -266,6 +288,7 @@ afterEach(() => {
   FakeRoom.waiting = [];
   FakeRoom.micFails = null;
   FakeRoom.atJoin = null;
+  FakeRoom.unsealed = {};
   loadLivekit.mockClear();
   Reflect.deleteProperty(navigator, "mediaDevices");
 });
@@ -673,6 +696,73 @@ describe("useGroupCall, a sealed call (WISP 602 § End-to-end encryption)", () =
     await act(() => result.current.leave());
     expect(room().disconnect).toHaveBeenCalledWith(true);
     expect(FakeWorker.workers[0].terminate).toHaveBeenCalled();
+  });
+
+  describe("fails closed: a sealed room that does not seal is left, every track stopped, and says why", () => {
+    const sealedJoin = () => renderHook(() => useGroupCall({ url: "wss://call.example", token: "pass", e2ee: key(4, 7), loadLivekit, sealWaitMs: 200 }));
+    const left = (why: string) => {
+      expect(room().disconnect).toHaveBeenCalledWith(true);
+      expect(FakeWorker.workers[FakeWorker.workers.length - 1].terminate).toHaveBeenCalled();
+      return { action: "join", message: NOT_SEALED, cause: why };
+    };
+
+    it("its worker never says E2EE is on: left before anything goes out", async () => {
+      FakeRoom.unsealed = { worker: true };
+      const { result } = sealedJoin();
+      await waitFor(() => expect(result.current.status).toBe("failed"));
+      expect(result.current.error).toEqual(left("the room's E2EE is not on for this device"));
+      expect(steps).toEqual(["key", "room", "e2ee", "connect"]);
+      expect(published).toEqual([]);
+      expect(room().localParticipant.setMicrophoneEnabled).not.toHaveBeenCalled();
+    });
+
+    it("the room has no E2EE manager: left before anything goes out", async () => {
+      FakeRoom.unsealed = { manager: true };
+      const { result } = sealedJoin();
+      await waitFor(() => expect(result.current.status).toBe("failed"));
+      expect(result.current.error).toEqual(left("no E2EE manager on the room"));
+      expect(published).toEqual([]);
+    });
+
+    it("the microphone's sender goes out without LiveKit's E2EE transform: left at once, the microphone stopped", async () => {
+      FakeRoom.unsealed = { senders: [Source.Microphone] };
+      const { result } = sealedJoin();
+      await waitFor(() => expect(result.current.status).toBe("failed"));
+      expect(result.current.error).toEqual(left("the microphone sender has no E2EE transform"));
+      const mic = room().localParticipant.getTrackPublication(Source.Microphone)!;
+      expect(mic.track!.stop).toHaveBeenCalled();
+      expect(steps).toEqual(["key", "room", "e2ee", "connect", "mic"]);
+    });
+
+    it("a screen shared mid-call whose sender is not sealed: the call is left, the screen and the microphone stopped", async () => {
+      FakeRoom.unsealed = { senders: [Source.ScreenShare] };
+      const { screen } = displayMedia();
+      const { result } = await joined({ e2ee: key(4, 7) });
+      expect(result.current.status).toBe("connected");
+      await act(() => result.current.toggleScreen());
+      expect(result.current.status).toBe("failed");
+      expect(result.current.error).toEqual(left("the screen_share sender has no E2EE transform"));
+      expect(screen.stop).toHaveBeenCalled();
+      expect(room().localParticipant.getTrackPublication(Source.Microphone)!.track!.stop).toHaveBeenCalled();
+    });
+
+    it("the room's E2EE turned off during the call (LiveKit's encryption status): left", async () => {
+      const { result } = await joined({ e2ee: key(4, 7) });
+      act(() => {
+        room().isE2EEEnabled = false;
+        room().emit(RoomEvent.ParticipantEncryptionStatusChanged, false, room().localParticipant);
+      });
+      await waitFor(() => expect(result.current.status).toBe("failed"));
+      expect(result.current.error).toEqual(left("the room's E2EE is not on for this device"));
+    });
+
+    it("a call that is not sealed is not checked: it joins and publishes as before", async () => {
+      FakeRoom.unsealed = { manager: true, worker: true, senders: [Source.Microphone] };
+      const { result } = await joined();
+      expect(result.current.status).toBe("connected");
+      expect(result.current.error).toBeNull();
+      expect(room().disconnect).not.toHaveBeenCalled();
+    });
   });
 
   it("without e2ee the room is joined as before: no encryption, no key provider, no worker", async () => {

@@ -40,6 +40,8 @@
     "noSealing": "Can't join this sealed call here",
     "noSealingInfo": "This group's calls are sealed end to end, and this browser can't seal them. Join from a recent Chrome, Edge, Firefox or Safari.",
     "notMember": "Not in this group (…{{key}})",
+    "notSealed": "This call couldn't be sealed, so you left it",
+    "notSealedInfo": "This group's calls are sealed end to end, and once in the room this app couldn't seal what you send. You left so nothing went out unsealed. Try again, or join from a recent Chrome, Edge, Firefox or Safari.",
     "refused": "You're not let into this call yet",
     "retry": "Try again",
     "screenOf": "{{name}}'s screen",

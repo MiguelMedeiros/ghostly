@@ -40,6 +40,8 @@
     "noSealing": "无法在这里加入这个加密通话",
     "noSealingInfo": "这个群组的通话采用端到端加密，而这个浏览器无法加密。请使用较新的 Chrome、Edge、Firefox 或 Safari 加入。",
     "notMember": "不在此群组 (…{{key}})",
+    "notSealed": "无法加密这个通话，所以你已离开",
+    "notSealedInfo": "这个群组的通话采用端到端加密，进入房间后，这个应用无法加密你发送的内容。为了不让任何内容未经加密发出，你已离开。请重试，或使用较新的 Chrome、Edge、Firefox 或 Safari 加入。",
     "refused": "你暂时还不能加入此通话",
     "retry": "重试",
     "screenOf": "{{name}} 的屏幕",

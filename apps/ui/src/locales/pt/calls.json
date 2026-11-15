@@ -40,6 +40,8 @@
     "noSealing": "Não dá para entrar nesta chamada protegida aqui",
     "noSealingInfo": "As chamadas deste grupo são criptografadas de ponta a ponta, e este navegador não consegue fazer isso. Entre por um Chrome, Edge, Firefox ou Safari recente.",
     "notMember": "Fora deste grupo (…{{key}})",
+    "notSealed": "Não deu para proteger esta chamada, então você saiu dela",
+    "notSealedInfo": "As chamadas deste grupo são criptografadas de ponta a ponta e, já na sala, este app não conseguiu criptografar o que você envia. Você saiu para que nada fosse sem criptografia. Tente de novo, ou entre por um Chrome, Edge, Firefox ou Safari recente.",
     "refused": "Você ainda não tem acesso a esta chamada",
     "retry": "Tentar de novo",
     "screenOf": "Tela de {{name}}",

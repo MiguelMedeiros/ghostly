@@ -40,6 +40,8 @@
     "noSealing": "No puedes unirte aquí a esta llamada cifrada",
     "noSealingInfo": "Las llamadas de este grupo están cifradas de extremo a extremo, y este navegador no puede cifrarlas. Únete desde un Chrome, Edge, Firefox o Safari reciente.",
     "notMember": "No está en este grupo (…{{key}})",
+    "notSealed": "No se pudo cifrar esta llamada, así que saliste",
+    "notSealedInfo": "Las llamadas de este grupo están cifradas de extremo a extremo y, ya en la sala, esta app no pudo cifrar lo que envías. Saliste para que nada saliera sin cifrar. Vuelve a intentarlo o únete desde un Chrome, Edge, Firefox o Safari reciente.",
     "refused": "Aún no tienes acceso a esta llamada",
     "retry": "Reintentar",
     "screenOf": "Pantalla de {{name}}",

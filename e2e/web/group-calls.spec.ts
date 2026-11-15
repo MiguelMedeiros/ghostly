@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { generateKeyPairSync, randomBytes, sign, type KeyObject } from "node:crypto";
 import type { Browser, Page } from "@playwright/test";
 import { endpoints } from "../infra/env.mjs";
@@ -154,6 +155,19 @@ async function outsiderPass(g: string, { k, key }: ReturnType<typeof outsiderKey
   return (await res.json()) as { url: string; token: string };
 }
 
+/**
+ * The web app the page runs is this checkout's build: its `ghostly-build` tag (apps/web/vite.config.ts) names this
+ * checkout's commit. Locally Playwright serves whatever already listens on the suite's port (`reuseExistingServer`), so
+ * another checkout's `vite preview` there (another session's, or a nightly round's, on the same port) would be tested
+ * in its place, without this code. Skipped against a deployed app (`E2E_WEB_URL`).
+ */
+async function servesThisCheckout(page: Page): Promise<void> {
+  if (process.env.E2E_WEB_URL) return;
+  const head = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  const build = ((await page.locator('meta[name="ghostly-build"]').getAttribute("content")) ?? "").split(" ").at(-1) ?? "";
+  expect(build.length >= 7 && head.startsWith(build), `the app served on ${page.url()} is build "${build}", not this checkout's ${head.slice(0, 12)}: another checkout's server is on the port; stop it or pick a free E2E_WEB_PORT`).toBe(true);
+}
+
 /** The mock's page, probed, in a context of its own. */
 async function outsiderPage(browser: Browser): Promise<Page> {
   const context = await browser.newContext();
@@ -192,6 +206,7 @@ test.describe("a sealed group call", () => {
       const bia = await peer("Bia", { beforeOpen: async (context) => { await installSealProbe(context); await shareTestPattern(context); } });
       for (const p of [ana, bia]) await routeSfu(p);
       probed.push(["ana", ana.page], ["bia", bia.page]);
+      await servesThisCheckout(ana.page);
       await Promise.all([ana, bia].map((p) => joinGroup(p, link)));
 
       // `group show` prints the signed `e2ee: 1` as a flag, as it prints `picture` (the CLI's JSON style).
