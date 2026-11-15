@@ -1,4 +1,7 @@
 import { screen, within } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GroupCallView, type GroupCallParticipant, type GroupCallState } from "../../components/GroupCallView";
@@ -112,6 +115,29 @@ describe("a shared screen", () => {
 
     rerenderWith(sharing([]));
     expect(screen.getByTestId("group-call-grid")).toBeInTheDocument();
+  });
+});
+
+describe("the tiles on a phone's safe areas", () => {
+  /** The declarations the stylesheet gives `.call-tiles`, in and out of a phone's media block. */
+  const tileRules = () => {
+    const css = readFileSync(join(fileURLToPath(import.meta.url), "../../../index.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    return [...css.matchAll(/([^{}]*)\{([^{}]*)\}/g)].filter(([, selector]) => /^\s*\.call-tiles\s*$/.test(selector)).map(([, , body]) => body.trim());
+  };
+
+  it.each([
+    ["the grid", state(2)],
+    ["the stage", state(0, { participants: [person("ana", { screen: true, tracks: { screen: video() } })] })],
+  ])("%s keeps clear of the notch on either side and of the controls over a home bar", (_, call) => {
+    view(call);
+    const area = screen.getByTestId(call.participants.some((p) => p.screen) ? "group-call-stage" : "group-call-grid");
+    expect(area).toHaveClass("call-tiles");
+    const rules = tileRules();
+    // On its side the notch is on the left or the right: the tiles start 1rem past it.
+    expect(rules).toContainEqual(expect.stringMatching(/padding-left:\s*calc\(1rem \+ env\(safe-area-inset-left\)\)/));
+    expect(rules).toContainEqual(expect.stringMatching(/padding-right:\s*calc\(1rem \+ env\(safe-area-inset-right\)\)/));
+    // Upright, the controls end 2.5rem + 72 px over the home bar: the tiles end 1rem above them.
+    expect(rules).toContainEqual(expect.stringMatching(/padding-bottom:\s*calc\(2\.5rem \+ 72px \+ 1rem \+ env\(safe-area-inset-bottom\)\)/));
   });
 });
 
