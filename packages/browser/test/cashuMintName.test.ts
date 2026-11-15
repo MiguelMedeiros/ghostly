@@ -11,6 +11,7 @@ vi.mock("@cashu/cashu-ts", async (importOriginal) => ({
     async loadMint(): Promise<void> {}
     getMintInfo = () => ({ name: info.name, motd: info.motd, version: "nutshell/0.16", isSupported: () => ({ supported: true, params: [] }) });
     keyChain = { getKeysets: () => [] };
+    mint = { _request: async () => ({}) };
   },
 }));
 

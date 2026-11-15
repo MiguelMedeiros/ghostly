@@ -16,6 +16,7 @@ import { SourcePicker } from "./providers/SourcePicker";
 import { LightningCardSettings } from "./LightningCardSettings";
 import { CASHU_MINT_SOURCE, holdsLess } from "../walletCardData";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
+import { NAME, withName } from "../apps/aroundName";
 import { fillNodes } from "../../lib/fillNodes";
 import { satsIn, unitFor } from "../NetworkTag";
 import { mintNetwork } from "@ghostly/browser/shared/mints";
@@ -25,6 +26,7 @@ import { formatAt } from "../../lib/time";
 import { problemLine, problemText } from "../../lib/problemText";
 import { exactText } from "../../lib/exactText";
 import { copySecret } from "../../lib/shareLink";
+import { FocusSafeButton } from "../ui/FocusSafeButton";
 
 const TX_LABEL = {
   "lightning-in": "wallet.cashu.tx.lightningIn",
@@ -73,7 +75,7 @@ export function CashuWallet({ wallet, state, rail, sharedWith, onOpenCashu, focu
   const { t } = useI18n();
   // A card that spends another card's balance (Lightning through the mints, Breez on the Spark wallet): its number
   // stays, it is what it can spend, and a line says whose balance it is.
-  const sharedLine = sharedWith ? <span className="block text-xs text-text-muted mt-1" data-testid="wallet-shared-balance">{t("wallet.cards.sameBalance", { name: sharedWith })}</span> : null;
+  const sharedLine = sharedWith ? <span className="block text-xs text-text-muted mt-1" data-testid="wallet-shared-balance">{withName(t("wallet.cards.sameBalance", { name: NAME }), sharedWith)}</span> : null;
   const [action, setAction] = useState<Action>("receive");
   // The amount takes the focus when the person chose this wallet (`focusAmount`), chose Receive here or pressed Done.
   const [actionChosen, setActionChosen] = useState(false);
@@ -312,7 +314,7 @@ export function CashuWallet({ wallet, state, rail, sharedWith, onOpenCashu, focu
             ) : (
               <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); void run(async () => { const created = await wallet.receiveLightning(Number(amount), rail === "cashu" ? "cashu" : undefined); setInvoiceQuote(created.quote); setInvoiceExpiresAt(created.expiresAt); setPaymentHash(created.paymentHash); setInvoice(created.invoice); }, "invoice"); }}>
                 <Amount value={amount} onChange={setAmount} unit={unit} testId="wallet-receive-amount" autoFocus={focusAmount || actionChosen} />
-                <Button type="submit" variant="primary" className="w-full" data-testid="wallet-create-invoice" loading={running === "invoice"} disabled={busy || !amount || (viaMint ? !state.mints.length : ln?.status !== "ready")}>{busy ? (viaMint ? t("wallet.cashu.askingMint") : sourceName ? t("wallet.lightning.asking", { source: sourceName }) : t("wallet.lightning.askingSource")) : t("wallet.cashu.createInvoice")}</Button>
+                <Button type="submit" variant="primary" className="w-full !whitespace-normal" data-testid="wallet-create-invoice" loading={running === "invoice"} disabled={busy || !amount || (viaMint ? !state.mints.length : ln?.status !== "ready")}>{busy ? (viaMint ? t("wallet.cashu.askingMint") : sourceName ? t("wallet.lightning.asking", { source: sourceName }) : t("wallet.lightning.askingSource")) : t("wallet.cashu.createInvoice")}</Button>
                 <Notice>{rail === "cashu" ? t("wallet.cashu.tokenHint") : t("wallet.lightning.anyonePays")}</Notice>
               </form>
             )}
@@ -366,7 +368,7 @@ export function CashuWallet({ wallet, state, rail, sharedWith, onOpenCashu, focu
                 {/* The line's dim is its text's only: Max keeps full-strength ink and a phone-sized target. */}
                 {choosing && <p className="text-xs m-0 flex flex-wrap items-center gap-2" data-testid="wallet-pay-balance">
                   <span className="text-text-muted">{t("wallet.send.balance", { amount: formatAmount(state.balance, t.language), unit })}</span>
-                  {state.balance > 0 && <button type="button" className="min-h-6 max-md:min-h-11 rounded-md px-2.5 py-1 font-bold text-text-primary bg-surface-alt hover:bg-border cursor-pointer disabled:opacity-40" disabled={busy} data-testid="wallet-pay-max" onClick={() => { setPayAmount(String(state.balance)); maxed.current = true; }}>{t("wallet.send.max")}</button>}
+                  {state.balance > 0 && <FocusSafeButton type="button" className="min-h-6 max-md:min-h-11 rounded-md px-2.5 py-1 font-bold text-text-primary bg-surface-alt hover:bg-border cursor-pointer disabled:opacity-40" disabled={busy} data-testid="wallet-pay-max" onClick={() => { setPayAmount(String(state.balance)); maxed.current = true; }}>{t("wallet.send.max")}</FocusSafeButton>}
                 </p>}
                 {!destination && <Button type="submit" variant="primary" className="w-full" loading={running === "send"} disabled={busy || !payInput.trim() || (!isToken && route.kind !== "invoice" && !chosen)}>
                   {busy ? t("wallet.cashu.working") : isToken ? t("wallet.cashu.redeem") : chosen ? t("wallet.cashu.payAmount", { amount: formatAmount(chosen, t.language), unit }) : pasted?.amountSat ? t("wallet.cashu.payAmount", { amount: formatAmount(pasted.amountSat, t.language), unit }) : t("wallet.lightning.pay")}

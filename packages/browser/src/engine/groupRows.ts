@@ -1,6 +1,6 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
-import type { GroupState } from "@ghostly/core";
+import { groupMessageId, type GroupState } from "@ghostly/core";
 import type { GroupLight, GroupLive, StoredGroup } from "../shared/types";
 import type { GroupStore } from "./groups";
 
@@ -71,6 +71,22 @@ function lightOf(group: StoredGroup, kept: readonly string[]): GroupLight {
  */
 const markOf = (light: string): string => bytesToHex(sha256(utf8ToBytes(light))).slice(0, 32);
 
+/**
+ * Whether `light` was written while its record held what it holds now (its `of`), by this build or by one from before
+ * a field of `lightOf` was kept there: that build's mark is over the record's fields without it. A field added to
+ * `lightOf` later needs its line here, or every row written before is dropped at the first load after the update.
+ */
+function marks(light: GroupLight, now: GroupLight, of: string): boolean {
+  if (light.of === undefined || light.of === of) return true;
+  // Before the members' edits were kept here: a row of this build always has them, `[]` for none.
+  if (light.relayEdits) return false;
+  const { relayEdits: _edits, ...before } = now;
+  if (light.of === markOf(JSON.stringify(before))) return true;
+  // Before the hubs and the members' apps were: a row of a build from since has its hubs, if the record had any.
+  const { hubs: _hubs, large: _large, ...older } = before;
+  return !light.hubs && !light.large && light.of === markOf(JSON.stringify(older));
+}
+
 function liveOf(group: StoredGroup): GroupLive {
   const s = group.state!;
   return { top: topOf(s), state: { seq: s.seq, seqEpoch: s.seqEpoch, seen: s.seen, sent: s.sent, nicks: s.nicks, ...(s.alone && { alone: s.alone }), ...(s.provisional && { provisional: s.provisional }),
@@ -123,9 +139,9 @@ export class GroupRows {
       }
       // Written with the record and each time `came` changed since: a mark taken back (`unmark`) stays back.
       if (live.came) group.came = live.came; else delete group.came;
-      const recorded = group.large ?? [], of = markOf(JSON.stringify(lightOf(group, recorded)));
+      const recorded = group.large ?? [], now = lightOf(group, recorded), of = markOf(JSON.stringify(now));
       // Else an app from before took a pin, a deletion, other hubs or an edit since, from the record: the record counts.
-      const light = lights.get(group.id), fresh = light && (light.of === undefined || light.of === of) ? light : undefined;
+      const light = lights.get(group.id), fresh = light && marks(light, now, of) ? light : undefined;
       if (fresh) {
         if (fresh.pin) group.pin = fresh.pin; else delete group.pin;
         if (fresh.removedIds.length) group.removedIds = fresh.removedIds; else delete group.removedIds;
@@ -147,7 +163,7 @@ export class GroupRows {
    */
   async save(group: StoredGroup): Promise<void> {
     const written = this.written.get(group.id), state = group.state!, edits = editsOf(state);
-    if (this.raw.putGroupLive && written && holds(written.state, written.key, state) && (edits === written.edits || this.raw.putGroupLight)) {
+    if (this.raw.putGroupLive && written && holds(written.state, written.key, state, group.removedIds) && (edits === written.edits || this.raw.putGroupLight)) {
       await this.raw.putGroupLive(group.id, liveOf(group));
       written.came = cameOf(group);
       if (edits === written.edits) return;
@@ -164,7 +180,7 @@ export class GroupRows {
     // Out of the group, or not in it yet: no small row.
     if (!state) { this.written.delete(group.id); return this.raw.putGroup(group, null); }
     const was = this.written.get(group.id);
-    if (was && holds(was.state, was.key, state)) {
+    if (was && holds(was.state, was.key, state, group.removedIds)) {
       const rest = restKey(group);
       // Only a pin, a deletion for everyone, the hubs, a member's app noted or the members' edits changed: their row alone,
       // the record stays as it is.
@@ -208,7 +224,18 @@ export class GroupRows {
   }
 }
 
-/** Whether a record holding `written` (its `recordKey` `key`) holds `state` too, but for what the small row says. */
-function holds(written: GroupState, key: string, state: GroupState): boolean {
-  return written.seqEpoch === state.seqEpoch && state.seq <= written.seq && key === recordKey(state);
+/**
+ * Whether a record holding `written` (its `recordKey` `key`) holds `state` too, but for what the small row says. Not
+ * when it keeps a frame of mine whose message was deleted for everyone since (`removedIds`): the record is written whole
+ * only when the rest changes, so its copy of my last frames kept that text, readable with the secrets beside it, long
+ * after the small row's no longer did (`message delete --purge` promises it leaves the profile's folder).
+ */
+function holds(written: GroupState, key: string, state: GroupState, removedIds: readonly string[] = []): boolean {
+  return written.seqEpoch === state.seqEpoch && state.seq <= written.seq && key === recordKey(state) && !keepsRemoved(written, removedIds);
+}
+
+/** Whether `state` keeps the text of a frame of mine whose message (its first place, for one said again) is in `removedIds`. */
+function keepsRemoved(state: GroupState, removedIds: readonly string[]): boolean {
+  if (!removedIds.length) return false;
+  return state.sent.some(f => f.c && removedIds.includes(f.o ? groupMessageId(f.s, f.o.e, f.o.n) : groupMessageId(f.s, f.e, f.n)));
 }

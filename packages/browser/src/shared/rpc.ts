@@ -343,6 +343,8 @@ export interface EngineApi {
   setServiceShared(params: { serviceId: string; peerPubKeyZ32: string; shared: boolean }): void;
   updateSettings(params: { settings: SettingsPatch }): void;
   setCallSignal(params: { linkId: string; signal: string | null }): Promise<void>;
+  /** This page kept the contact's offer of `ts` as missed, with no ring (`useWebRTC`, QUICK_REDIAL_MS): a handoff need not wait for it. */
+  callOfferHeld(params: { linkId: string; ts: number }): void;
   /**
    * This side is typing in a paired chat (true), or stopped: cleared the text, sent it, left the chat (false). Said
    * on the live session only, throttled there; nothing is said while Settings `sendTyping` is off. `kind`: what this
@@ -464,6 +466,22 @@ export interface EngineApi {
   setGroupPicture(params: { groupId: string; picture: string | null }): void;
   /** The admin renames the group (1 to 64 characters, one line); the picture stays. */
   renameGroup(params: { groupId: string; name: string }): void;
+  /**
+   * The admin of a community group names the node that forwards its calls (an https origin, WISP 602), or removes it with
+   * null. `e2ee` turns sealed call media on or off; left out, the group keeps what it had.
+   */
+  setGroupCall(params: { groupId: string; sfu: string | null; e2ee?: boolean }): void;
+  /**
+   * A pass into the group's call from the node its admin named in the group's `call` (WISP 602 · Group Calls), asked
+   * with my member key; a 403 is asked again for ~10 s, as a node may not have taken my admission yet. Rejects with an
+   * engine error a page says in one line: no call, not a member, refused, busy, unreachable, timed out.
+   */
+  groupCallToken(params: { groupId: string }): { url: string; token: string; room: string; identity: string; expiresIn: number; iceServers?: RTCIceServer[] };
+  /**
+   * The key that seals the group's call media for its newest epoch (WISP 602 § End-to-end encryption): base64url of
+   * 32 bytes, and that epoch. Null until the epoch's secret arrives, once out of the group, or in a private group.
+   */
+  groupCallKey(params: { groupId: string }): { epoch: number; key: string } | null;
   /** Forgets the group and its history on this device (leaving first when still in it). */
   forgetGroup(params: { groupId: string }): void;
   /**
@@ -765,9 +783,10 @@ export interface KeptPictures {
  * The chats (`links`), group edges (`edges`) and groups a posted state left out as the ones that client was sent last:
  * each list here is every id of the state's list, in its order, and the state's list holds only the views that changed
  * or are new. An id the state's list lacks is the page's view from the state before (its pictures with it); an id no
- * longer here is gone.
+ * longer here is gone. `members`: the groups the state's list holds without their member list, the one that client was
+ * sent last (a message in a community changes its view, not its members): the page keeps it from the state before.
  */
-export interface KeptViews { links?: string[]; edges?: string[]; groups?: string[] }
+export interface KeptViews { links?: string[]; edges?: string[]; groups?: string[]; members?: string[] }
 
 /**
  * A state as a client across a copying boundary gets it (`copyingSink`, the extension's port): `payments` and `wallet`

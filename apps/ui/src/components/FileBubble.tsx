@@ -12,6 +12,7 @@ import { AvatarViewer } from "./AvatarViewer";
 import { Highlight } from "./chat/ChatSearch";
 import { FORCED_EDGE, RoundRetry, WhyButton, WhyText } from "./chat/RoundRetry";
 import { useT } from "../contexts/I18nContext";
+import { NAME, SECOND_NAME, withNames } from "./apps/aroundName";
 import type { ChatFile } from "../lib/types";
 import { problemLine, saveProblemLine } from "../lib/problemText";
 
@@ -272,9 +273,10 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
       )}
       {offered && !group && (
         <div className="px-2 pb-1.5" data-testid="file-offer">
-          {/* A name with nothing to break at (one long word) wraps anywhere, or it runs out of the bubble. */}
+          {/* A name with nothing to break at (one long word) wraps anywhere, or it runs out of the bubble. The contact's
+              and the file's names keep their own direction in a line in the page's. */}
           <p className="chat-text-media-line m-0 mb-1 [overflow-wrap:anywhere]">
-            {t("chat.file.wantsToSend", { name: peerName, file: file.name, size: formatFileSize(file.size, t) })}
+            {withNames(t("chat.file.wantsToSend", { name: NAME, file: SECOND_NAME, size: formatFileSize(file.size, t) }), [peerName, file.name])}
           </p>
           {typeof transfer.room === "number" && (
             <p className={`chat-text-media-meta m-0 mb-1 ${transfer.room < file.size ? "text-danger-ink" : "text-text-primary/75"}`} data-testid="file-room">

@@ -89,6 +89,7 @@ const PROOF_REASONS: readonly (readonly [string, string, string?])[] = [
   ["Your contact's app cannot verify this kind of identity yet", `${CORE}/identityProofs.ts`],
   ["Your contact's app could not check it. Try again later.", `${CORE}/identityProofs.ts`],
   ["Your contact keeps too many identities from you already", `${CORE}/identityProofs.ts`],
+  ["Your contact keeps a newer proof of this identity from you", `${CORE}/identityProofs.ts`],
   ["That identity is no longer in your profile", `${CORE}/identityProofs.ts`],
   ["Your contact could not verify it", `${CORE}/identityProofs.ts`],
   ...PROOF_UNAVAILABLE,
@@ -171,6 +172,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Could not share the screen. Try again.", "packages/react/src/useWebRTC.ts"],
   ["Your contact's app cannot show a screen in this call", "packages/react/src/useWebRTC.ts"],
   ["Screen sharing is not available on Linux yet", "apps/ui/src/desktop/nativeCalls.ts"],
+  ["Group calls aren't on Linux yet: join from app.ghostly.tools in a browser", "apps/ui/src/desktop/groupCallSupport.ts"],
   ["Your contact's app cannot take calls", `${CORE}/ghostlink.ts`],
   ["Your contact needs an updated Ghostly for calls", `${CORE}/ghostlink.ts`],
   ["Calls are not available in this app", `${CORE}/ghostlink.ts`],
@@ -622,6 +624,10 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["That did:jwk does not hold a JSON Web Key", `${CORE}/did.ts`],
   ["That did:jwk contains a private key. Never share it: make a new key", `${CORE}/did.ts`],
   ["That did:jwk is not an Ed25519, secp256k1 or P-256 key", `${CORE}/did.ts`],
+  // A DID's lookup that found no document it can use: a DID card in a message, the Add dialog's preview.
+  ["No DID document at https://example.org/.well-known/did.json", `${BROWSER}/proofs/did.ts`, "`No DID document at ${documentUrl}`"],
+  ["https://example.org/.well-known/did.json is not JSON", `${BROWSER}/proofs/did.ts`, "`${documentUrl} is not JSON`"],
+  ["This DID lists no Ed25519, secp256k1 or P-256 key for authentication or assertionMethod, so it cannot sign", `${BROWSER}/proofs/providers/did.ts`],
   ["Enter at least one relay address (https://…)", `${BROWSER}/engine/node.ts`],
   ["Enter at least one relay address (wss://…)", `${BROWSER}/nostr/relay.ts`],
   ["Add a TURN server first", `${BROWSER}/engine/node.ts`],
@@ -639,6 +645,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Enter a relay address (wss://…)", `${BROWSER}/shared/hyperdhtRelay.ts`],
   ["Use a wss:// relay address", `${BROWSER}/shared/hyperdhtRelay.ts`],
   ["Not a relay address: wss://relay.example.org/?key=1", `${BROWSER}/shared/hyperdhtRelay.ts`, "Not a relay address: ${url}"],
+  [`Use a shorter relay address: wss://${"a".repeat(121)}`, `${BROWSER}/shared/hyperdhtRelay.ts`, "Use a shorter relay address: ${url}"],
+  [`Use a shorter relay address: https://${"a".repeat(121)}`, `${BROWSER}/platform/irohWeb.ts`, "Use a shorter relay address: ${value}"],
   ["Enter a relay address (https://…)", `${BROWSER}/shared/pushRelay.ts`],
   ["Leave the user and password out of the address", `${BROWSER}/shared/pushRelay.ts`],
   ["Use at most five Iroh relays", `${BROWSER}/engine/node.ts`],
@@ -1089,6 +1097,16 @@ describe("the engine's known errors (@ghostly/core ENGINE_ERRORS)", () => {
     expect(problemText(new Error(quote), translators.pt)).toEqual({ tone: "error", title: "testnut.cashu.space não conseguiu aceitar este pagamento agora", next: "Nenhum sat saiu da sua carteira. Tente de novo mais tarde.", detail: quote });
     expect(problemText(new Error(faucet), english)).toEqual({ tone: "error", title: "testnut.cashu.space couldn't give test coins right now", next: "Try again later.", detail: faucet });
     for (const language of LANGUAGES) for (const raw of [quote, faucet]) expect(errorText(raw, translators[language]), language).not.toContain("UND_ERR");
+  });
+
+  it("a mint that failed Receive's invoice (a 503) is named with the next step, in the language; its own words go behind the ⓘ", () => {
+    const raw = engineText("mintFailedInvoice", { host: "127.0.0.1:4701", reason: "down" });
+    expect(problemText(new Error(raw), translators.pt)).toEqual({ tone: "error", title: "127.0.0.1:4701 não conseguiu criar uma fatura agora", next: "Tente de novo mais tarde.", detail: raw });
+    expect(problemText(new Error(raw), english)).toEqual({ tone: "error", title: "127.0.0.1:4701 couldn't create an invoice right now", next: "Try again later.", detail: raw });
+    for (const language of LANGUAGES) {
+      expect(errorText(raw, translators[language]), language).toContain("127.0.0.1:4701");
+      expect(errorText(raw, translators[language]), language).not.toContain("down");
+    }
   });
 
   it("a mint that has not answered a payment's or a redeem's swap is named, with what comes back, in the language: not \"Something went wrong\"", () => {

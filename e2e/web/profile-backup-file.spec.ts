@@ -30,7 +30,7 @@ async function emptyFileStorage(context: BrowserContext): Promise<void> {
   await page.close();
 }
 
-test("a profile goes to a file and comes back as a new profile, only with its passphrase", { tag: ["@feature:backup.profile.file", "@feature:backup.profile.same-device", "@feature:backup.passphrase-rules", "@feature:backup.envelope", "@feature:profiles.switch"] }, async ({ peer, browserName }) => {
+test("a profile goes to a file and comes back as a new profile, only with its passphrase", { tag: ["@journey", "@feature:backup.profile.file", "@feature:backup.profile.same-device", "@feature:backup.passphrase-rules", "@feature:backup.envelope", "@feature:profiles.switch"] }, async ({ peer, browserName }) => {
   const { page } = await peer("backup-file", storage(browserName));
 
   // A profile worth keeping: a name of its own, a chat and a nickname.
@@ -83,7 +83,7 @@ test("a profile goes to a file and comes back as a new profile, only with its pa
   await backups.getByTestId("restore-passphrase").fill(PASSPHRASE);
   await backups.getByTestId("restore-go").click();
   const warning = backups.getByTestId("restore-same-device");
-  await expect(warning).toContainText("This backup is “Diary”, which is on this device");
+  await expect(warning).toContainText("This backup is “\u2068Diary\u2069”, which is on this device");
   await expect(warning).toContainText("Both would act as the same person to your contacts.");
   await expect(warning.getByTestId("restore-replace"), "the first profile cannot be removed").toHaveCount(0);
   await expect(page.getByTestId("profile-row")).toHaveCount(1);
@@ -132,7 +132,7 @@ test("the first profile never renamed, backed up in Portuguese and restored, is 
   await backups.getByTestId("restore-file").setInputFiles({ name: file.suggestedFilename(), mimeType: "application/octet-stream", buffer: bundle });
   await backups.getByTestId("restore-passphrase").fill(PASSPHRASE);
   await backups.getByTestId("restore-go").click();
-  await expect(backups.getByTestId("restore-same-device")).toContainText("“Pessoal”");
+  await expect(backups.getByTestId("restore-same-device")).toContainText("“\u2068Pessoal\u2069”");
   await backups.getByTestId("restore-copy").click();
   await expect(page.getByTestId("profile-restored-tag")).toHaveText("Restaurado", { timeout: 60_000 });
   await expect(page.getByTestId("profile-name")).toHaveValue("Pessoal");

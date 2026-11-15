@@ -20,7 +20,7 @@ import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { HARNESS_PORTS, REMOTE, VARIABLES } from "../../e2e/infra/env.mjs";
 import { codeFiles as repoCode, knownFiles, workspacePackages } from "./affected/files.mjs";
-import { plan as makePlan } from "./affected/select.mjs";
+import { plan as makePlan, parseUnitGroup, unitGroupOf } from "./affected/select.mjs";
 import { COMMANDS, SHARED, blanked, envTarget, gatedTests, stackDecision, statusWhy } from "./affected/stack.mjs";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..", "..");
@@ -30,9 +30,31 @@ const option = (name) => {
   const i = argv.indexOf(name);
   return i >= 0 ? argv[i + 1] : undefined;
 };
+const usage = () => readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1, 17).map((l) => l.replace(/^\/\/ ?/, "")).join("\n");
 if (flag("--help") || flag("-h")) {
-  console.log(readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1, 17).map((l) => l.replace(/^\/\/ ?/, "")).join("\n"));
+  console.log(usage());
   process.exit(0);
+}
+// An argument it does not take is refused before anything runs: a mistyped --list or --no-e2e, or a path without
+// --files, would otherwise be dropped and start the full run.
+const FLAGS = ["--list", "--no-e2e", "--no-rust", "--no-lint", "--no-typecheck", "--no-stack"];
+const OPTIONS = ["--base", "--port", "--unit-group"];
+const unknown = [];
+for (let i = 0; i < argv.length; i++) {
+  if (OPTIONS.includes(argv[i])) i++;
+  else if (argv[i] === "--files") while (i + 1 < argv.length && !argv[i + 1].startsWith("--")) i++;
+  else if (!FLAGS.includes(argv[i])) unknown.push(argv[i]);
+}
+if (unknown.length) {
+  console.error(`test:affected does not take ${unknown.join(" ")}\n\n${usage()}`);
+  process.exit(2);
+}
+// `npm run test:affected --list`, without the `--`: npm keeps the flag for itself (npm_config_list=true, `--no-e2e` as
+// npm_config_e2e="") and passes none, so the full run would start. An option's value still arrives, refused above.
+const kept = FLAGS.filter((f) => process.env[`npm_config_${f.replace(/^--(no-)?/, "").replaceAll("-", "_")}`] !== undefined);
+if (kept.length) {
+  console.error(`npm kept ${kept.join(" ")} for itself: put a -- before the script's arguments (npm run test:affected -- ${kept.join(" ")})`);
+  process.exit(2);
 }
 
 const JOBS = Math.max(1, Number(process.env.JOBS) || 2);
@@ -47,6 +69,16 @@ const noTypecheck = flag("--no-typecheck");
 const noStack = flag("--no-stack");
 const port = option("--port") ?? process.env.E2E_WEB_PORT;
 const webUrl = process.env.E2E_WEB_URL;
+// --unit-group <i>/<n>: only the unit projects of group i of n (CI's draft tier runs one group per runner; select.mjs
+// UNIT_ALONE says which project goes where). Lint, typecheck, Rust and e2e are as without it.
+const unitGroupText = flag("--unit-group") ? option("--unit-group") ?? "" : null;
+const unitGroup = unitGroupText === null ? null : parseUnitGroup(unitGroupText);
+if (unitGroupText !== null && !unitGroup) {
+  console.error(`--unit-group ${unitGroupText}: give <i>/<n>, 1 ≤ i ≤ n (e.g. --unit-group 2/4)`);
+  process.exit(2);
+}
+// One nothing reaches is skipped in every group: "group N runs it" would send the reader to a group that skips it too.
+const otherGroup = (u) => unitGroup !== null && u.mode !== "skip" && unitGroupOf(u.name, unitGroup.count) !== unitGroup.index;
 
 const git = (...args) => {
   const r = spawnSync("git", args, { cwd: ROOT, encoding: "utf8" });
@@ -119,12 +151,16 @@ if (changed.length > 40) console.log(`  … and ${changed.length - 40} more`);
 for (const s of p.scriptsOnly) console.log(`\nnote: only the "scripts" of ${s} changed: nothing here tests a script, so run the ones you changed yourself`);
 console.log(`\nworkers: vitest ${JOBS} (JOBS), playwright ${E2E_WORKERS} (E2E_WORKERS)\n`);
 
-console.log("unit (vitest)");
-for (const u of p.unit) console.log(`  ${u.mode.padEnd(7)} ${u.name.padEnd(9)} ${u.reason}`);
+console.log(`unit (vitest)${unitGroup ? `: group ${unitGroup.index} of ${unitGroup.count} (--unit-group)` : ""}`);
+for (const u of p.unit) {
+  if (otherGroup(u)) console.log(`  ${"other".padEnd(7)} ${u.name.padEnd(9)} group ${unitGroupOf(u.name, unitGroup.count)} runs it (${u.mode}: ${u.reason})`);
+  else console.log(`  ${u.mode.padEnd(7)} ${u.name.padEnd(9)} ${u.reason}`);
+}
 console.log("lint (eslint)");
-console.log(`  ${p.lint.mode.padEnd(7)} ${p.lint.reason}${p.lint.files ? `: ${short(p.lint.files)}` : ""}`);
+if (noLint && p.lint.mode !== "skip") console.log(`  ${"off".padEnd(7)} --no-lint`);
+else console.log(`  ${p.lint.mode.padEnd(7)} ${p.lint.reason}${p.lint.files ? `: ${short(p.lint.files)}` : ""}`);
 console.log("typecheck (tsc)");
-for (const t of p.typecheck) console.log(`  ${t.mode.padEnd(7)} ${t.name.padEnd(18)} ${t.reason}`);
+for (const t of p.typecheck) console.log(`  ${(noTypecheck && t.mode !== "skip" ? "off" : t.mode).padEnd(7)} ${t.name.padEnd(18)} ${noTypecheck && t.mode !== "skip" ? "--no-typecheck" : t.reason}`);
 console.log("rust (cargo)");
 for (const r of p.rust) console.log(`  ${(noRust && r.mode === "run" ? "off" : r.mode).padEnd(7)} ${r.name.padEnd(9)} ${noRust && r.mode === "run" ? "--no-rust" : r.reason}`);
 console.log("e2e (playwright)");
@@ -205,6 +241,7 @@ const started = Date.now();
 
 // unit
 for (const u of p.unit) {
+  if (otherGroup(u)) { skipped.push(`unit ${u.name}: group ${unitGroupOf(u.name, unitGroup.count)} runs it (--unit-group ${unitGroup.index}/${unitGroup.count})`); continue; }
   if (u.mode === "skip") { skipped.push(`unit ${u.name}: ${u.reason}`); continue; }
   const cwd = join(ROOT, u.cwd);
   const common = [...u.args, `--maxWorkers=${JOBS}`, "--passWithNoTests"];

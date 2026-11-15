@@ -109,6 +109,8 @@ describe("an app's or a store's own description", () => {
     const more = within(box).getByTestId("app-description-more");
     expect(more).toHaveAttribute("aria-expanded", "false");
     expect(more).toHaveAttribute("aria-controls", text.id);
+    // A 44 px target on a phone (phone-touch-targets.spec.ts measures where a tap lands).
+    expect(more).toHaveClass("max-md:min-h-11", "max-md:min-w-11");
     await user.click(more);
     expect(text).not.toHaveClass("line-clamp-4");
     expect(more).toHaveAttribute("aria-expanded", "true");

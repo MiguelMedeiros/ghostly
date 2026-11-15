@@ -22,4 +22,22 @@ describe("an empty --reply or --chosen", { timeout: 60_000 }, () => {
       expect(error(await ghostly(["--home", dir, ...args]), "usage", 2).message, args.join(" ")).toBe(message);
     }
   });
+
+  /**
+   * Taken as not given, `task send --id ""` made a new id: a script meant to update its card posted a second one. An
+   * empty `pin` message and `payment list --chat ""` failed late, `bad_request` (exit 1), a one-shot online first.
+   */
+  it("is a usage error for a card's --id, pin's message and payment list's --chat too", async () => {
+    const dir = home("empty-id");
+    for (const [args, message] of [
+      [["task", "send", "bob", "--title", "Build", "--id", ""], "--id needs a card id"],
+      [["task", "send", "bob", "--title", "Build", "--id="], "--id needs a card id"],
+      [["routine", "send", "bob", "--name", "Backup", "--schedule", "every day 01:00", "--id", ""], "--id needs a card id"],
+      [["usage", "send", "bob", "--left", "50", "--id", ""], "--id needs a card id"],
+      [["pin", "bob", ""], "Missing <message>: ghostly pin <chat|group> <message> | --remove"],
+      [["payment", "list", "--chat", ""], "--chat needs a chat"],
+    ] as const) {
+      expect(error(await ghostly(["--home", dir, ...args]), "usage", 2).message, args.join(" ")).toBe(message);
+    }
+  });
 });

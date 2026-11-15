@@ -267,6 +267,22 @@ describe("store-and-forward engine", () => {
     expect(transport.puts).toBe(puts);
   });
 
+  it("a message deleted here takes its held item out, and asks for a state once the chat's count no longer has it", async () => {
+    const { a } = setup();
+    engines.push(a.engine);
+    a.messages.set("me_d1", { text: "deleted before it was picked up", timestamp: 1000 });
+    a.messages.set("me_d2", { text: "still waiting", timestamp: 2000 });
+    await a.engine.hold("link-a", { kind: "text", id: "wire-del-1", messageId: "me_d1", bytes: 31, timestamp: 1000 });
+    await a.engine.hold("link-a", { kind: "text", id: "wire-del-2", messageId: "me_d2", bytes: 13, timestamp: 2000 });
+    expect(a.engine.view("link-a").outstanding).toBe(2);
+    // What a state built at each ask would show: a pushed state rebuilds only the chats a change named.
+    const seen: number[] = [];
+    a.host.changed = () => { seen.push(a.engine.view("link-a").outstanding); };
+    await a.engine.forget("link-a", "me_d1");
+    expect(a.engine.view("link-a").outstanding).toBe(1);
+    expect(seen.at(-1), "a state asked for after the item left the outbox").toBe(1);
+  });
+
   it("with ratchet/1 on both sides every held item is a ratcheted bundle, picked up in order; an app without it gets plain ones", async () => {
     for (const bobHas of [true, false]) {
       const { a, b, buckets } = setup({ ratchet: { alice: true, bob: bobHas } });

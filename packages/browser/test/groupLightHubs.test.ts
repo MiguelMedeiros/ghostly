@@ -1,3 +1,5 @@
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
 import { describe, expect, it } from "vitest";
 import type { GroupState } from "@ghostly/core";
 import type { GroupStore } from "../src/engine/groups";
@@ -26,6 +28,9 @@ function memory() {
   };
   return { store, groups, light, puts };
 }
+
+/** A row's `of` as the builds wrote it: the record's `GroupLight` fields, hashed (`markOf`). */
+const markOf = (light: object) => bytesToHex(sha256(utf8ToBytes(JSON.stringify(light)))).slice(0, 32);
 
 const state = () => ({ seq: 3, seqEpoch: 1, seen: {}, sent: {}, nicks: {}, chain: [{ sig: "top" }], secrets: {} }) as unknown as GroupState;
 const group = (): StoredGroup => ({ id: "g", name: "Hubs", state: state(), hubs: ["h1", "h2"], large: ["a", "b"] } as unknown as StoredGroup);
@@ -78,5 +83,27 @@ describe("a private group's hubs, in its GroupLight row", () => {
     expect(back.group.large).toEqual(["a", "b", "d", "c"]);
     // Its hubs are only where the edges go before the beacon is read: the row's, however old, are as good a start.
     expect(back.group.hubs).toEqual(["h9"]);
+  });
+
+  it("a row a build from before the members' edits were kept there wrote, with its mark, is still read; one an app from before outdated is not", async () => {
+    const m = memory(), rows = new GroupRows(m.store), g = group();
+    await rows.store.putGroup(g);
+    // The mark such a build wrote: over the record's pin, deletions, hubs and members' apps, with no `relayEdits` key.
+    const before = markOf({ removedIds: [], removals: [], hubs: ["h1", "h2"] });
+    m.light.set("g", { removedIds: ["x:1:1"], removals: [], hubs: ["h3"], of: before });
+    let back = await loaded(m);
+    expect(back.group.removedIds).toEqual(["x:1:1"]);
+    expect(back.group.hubs).toEqual(["h3"]);
+    // And one from before hubs were kept there: no hubs in the row, nor in its mark.
+    m.light.set("g", { removedIds: ["x:1:2"], removals: [], of: markOf({ removedIds: [], removals: [] }) });
+    back = await loaded(m);
+    expect(back.group.removedIds).toEqual(["x:1:2"]);
+    expect(back.group.hubs).toEqual(["h1", "h2"]);
+    // An app from before took a pin in the record since: the row's mark no longer matches, the record counts.
+    m.groups.get("g")!.pin = { id: "x:1:3" } as unknown as StoredGroup["pin"];
+    m.light.set("g", { removedIds: ["x:1:1"], removals: [], hubs: ["h3"], of: before });
+    back = await loaded(m);
+    expect(back.group.removedIds).toBeUndefined();
+    expect(back.group.hubs).toEqual(["h1", "h2"]);
   });
 });

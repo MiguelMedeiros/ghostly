@@ -151,6 +151,9 @@ export function MessageAnnouncer({ chat, linkId, messages, nameOf, noteLine, act
   /** `at`: where `last` was, so rows that came or went above it are noticed. */
   const seen = useRef<{ chat: string; ids: Set<string>; last?: string; at: number } | null>(null);
   const pending = useRef<Announceable[]>([]);
+  /** The chat's messages as last drawn: what is pending is read from them, as it stands when the window ends. */
+  const latest = useRef(messages);
+  latest.current = messages;
   const timers = useRef<{ flush?: ReturnType<typeof setTimeout>; clear?: ReturnType<typeof setTimeout>; turns?: ReturnType<typeof setTimeout> }>({});
   const appCards = appCardsShown(linkId, useAppsAvailable());
   const words = useRef({ t, nameOf, noteLine, active, online, appCards });
@@ -359,8 +362,12 @@ export function MessageAnnouncer({ chat, linkId, messages, nameOf, noteLine, act
     if (timers.current.flush) return;
     timers.current.flush = setTimeout(() => {
       timers.current.flush = undefined;
-      const batch = pending.current;
+      // Only what is still in the chat, as it is now: one deleted within the window is not read out, one edited is read
+      // as it stands. Looked for from the end, where they came in.
+      const wanted = new Set(pending.current.map(m => m.id));
       pending.current = [];
+      const list = latest.current, batch: Announceable[] = [];
+      for (let at = list.length - 1; at >= 0 && batch.length < wanted.size; at--) if (wanted.has(list[at].id)) batch.unshift(list[at]);
       const { t, nameOf, noteLine, active, appCards } = words.current;
       if (!batch.length || !active) return;
       const names = new Set(batch.map(m => nameOf(m)));

@@ -1,4 +1,4 @@
-import { AWAITING_PEER_MS, inviteLink, LIMITS, MENTION_EVERYONE, normalizeRelayUrl, ownInviteRefusal, relayUrlProblem, replySnippet, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type TypingKind } from "@ghostly/core";
+import { AWAITING_PEER_MS, decodeGroupEntryLink, inviteLink, LIMITS, MENTION_EVERYONE, normalizeRelayUrl, ownInviteRefusal, relayUrlProblem, replySnippet, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type TypingKind } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
 import { DEFAULT_HYPERDHT_RELAY } from "@ghostly/browser/shared/hyperdhtRelay";
@@ -8,18 +8,19 @@ import { FORWARD_MESSAGES, FORWARD_TARGETS } from "@ghostly/browser/engine/forwa
 import { findSecret, guardText, secretWords } from "./secretGuard";
 import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
 import { asCliError, CliError } from "./errors";
+import { shellWord } from "./shellWord";
 import {
-  bool, chatOf, chatOrGroup, dhtOnly, findChat, findGroup, groupNameOf, groupOf, groupPrefixed, inviteTaken, keptForJoin, list, messageOf, noMessage, nobodyJoined, node, num, oneOf, oneShotWaits, settingsOf, shownName, sinceSeq, somebodyJoined, state, str, transportOffered, waitForState,
-  type ApiContext, type Method, type Params, type RefPlace,
+  bool, chatOf, chatOrGroup, dhtOnly, findChat, findChatOrGroup, findGroup, groupById, groupNameOf, groupOf, groupPrefixed, inviteTaken, keptForJoin, list, messageOf, noMessage, nobodyJoined, node, num, oneOf, oneShotWaits, settingsOf, shownName, sinceSeq, somebodyJoined, state, str, transportOffered, waitForState,
+  type ApiContext, type CallScope, type Method, type Params, type RefPlace,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
 import { checkShownName } from "./profiles";
-import { nobodyElseIn, waitForConfirmed, waitForEdit, waitForGroupFrame, waitForMessage, waitForRemoval } from "./waits";
+import { nobodyElseIn, outOf, purgeMessage, waitForConfirmed, waitForEdit, waitForGroupFrame, waitForMessage, waitForRemoval } from "./waits";
 import { STATUS_CARD_METHODS, secretIn } from "./statusCards";
 import { BUTTON_METHODS, buttonsCard, pressable } from "./buttons";
 import { forgetHold, HOLD_MAX_MINUTES, holdChat, holdOf, releaseHold } from "./holds";
 import { endTyping, keepOneShot, keepTyping, sayTyping } from "./typing";
-import { GROUP_ADMIN_METHODS, noMember } from "./groupAdmin";
+import { GROUP_ADMIN_METHODS, noMember, withUrl } from "./groupAdmin";
 import { withStoredIds } from "./turnRefs";
 import { IDENTITY_METHODS } from "./identities";
 import { X401_METHODS } from "./x401";
@@ -252,6 +253,70 @@ function noRemovalOnItsWay(ctx: ApiContext, linkIds: readonly string[], clearing
   throw new CliError("confirm", `${one ? "A message you deleted for everyone has" : `${n} messages you deleted for everyone have`} not reached the contact yet: ${now} now leaves ${one ? "it" : "them"} on their device. Keep this profile online until the contact is reachable (ghostly daemon --detach) and ${then}, or pass --force (force: true over the socket) to ${go} now`, { messages: pending });
 }
 
+/**
+ * Stages a one-shot `group join` stops waiting at. The link was replaced: knocking again does not get in. The group
+ * has no room yet (`full`, or `blocked` while it waits for every member's app to take more than eight): the engine
+ * goes on knocking until there is room, which a minute's wait seldom sees, so it says that the knock goes on only
+ * while the profile runs.
+ */
+const NO_ROOM: Record<string, string> = {
+  full: "No room yet: the group is full",
+  blocked: "No room yet: the group waits for every member's app to take more than eight members",
+};
+const JOIN_STOPS = new Set(["replaced", ...Object.keys(NO_ROOM)]);
+/** How long a one-shot `group join` waits to be let in: as long as a one-shot `invite join` waits to pair. */
+const ONE_SHOT_JOIN_S = 60;
+
+/**
+ * A one-shot `group join` waits to be let in, as a one-shot invite join waits to pair: a member's app lets the joiner
+ * in only while its knocks go on, and they stop when the command leaves. It left at once with `{"group": id}` and exit
+ * 0, in 0.5 s, the admin online: the group stayed an invitation at "knocking" and nothing said a daemon had to run for
+ * the knock to be answered. The answer says whether it is in and at what stage it waits, and what to do when it is not.
+ * A contact's invitation to the group keeps its place and the link is only kept beside it: nothing knocks, so it
+ * answers at once. Not accepted, only `group accept` moves it; accepted, only its welcome does, over the contact's chat.
+ * In a group under the link's id already (`held`, before the join), the link is only kept beside it unless it is this
+ * profile's own group's (the engine's `joinByLink`): nothing knocks, and it answered `"joined": true` for a link whose
+ * group it never joined, with a second group waiting under the id that only `group show`'s `others` said.
+ * Through a daemon the knock goes on after the answer, so it waits for nothing; it answered `{"group": id}` only, with
+ * neither whether it was in nor a word about a link only kept beside a group held.
+ */
+async function letIn(ctx: ApiContext, groupId: string, link: string, held: GroupView | undefined): Promise<Record<string, unknown>> {
+  const seen = (s: EngineState) => s.groups.find((g) => g.id === groupId);
+  const id = shellWord(groupId, groupId);
+  const invited = seen(state(ctx))?.invitation;
+  if (invited && !invited.viaLink && !invited.takenBack) {
+    const who = invited.contact || "a contact";
+    if (!invited.accepted) return { group: groupId, joined: false, stage: null, warning: `Not in yet: ${who} invited you to this group and the invitation waits for your answer. Accept it: ghostly group accept ${id}` };
+    return { group: groupId, joined: false, stage: null, warning: `Not in yet: you accepted ${who}'s invitation to this group, and its welcome has not arrived; the link was kept beside it, and knocks nowhere. The welcome arrives only while this profile is running: keep it running (ghostly daemon --detach), then ghostly group show ${id}` };
+  }
+  const opened = decodeGroupEntryLink(link);
+  const own = held?.entryLink ? decodeGroupEntryLink(held.entryLink) : null;
+  if (held?.status === "active" && opened && own?.host !== opened.host) {
+    const kept = seen(state(ctx))?.others?.some((o) => "link" in o && decodeGroupEntryLink(o.link)?.host === opened.host);
+    const pick = `keep the one you are in (ghostly engine keepGroup '{"groupId":"${groupId}"}') or take the link's instead (ghostly engine switchGroup '{"groupId":"${groupId}","to":"<its link, from group show --show-secret>"}')`;
+    return { group: groupId, joined: false, stage: null, warning: kept
+      ? `Not joined: you are in a group under this link's id already, and only a group's welcome says whose a link is, so the link was kept beside that group and knocks nowhere. ghostly group show ${id} lists it under "others": ${pick}`
+      : `Not joined: you are in a group under this link's id already, and as many other groups as are kept already wait beside it to be picked, so the link was not kept. ghostly group show ${id} lists them under "others": ${pick}, then open the link again` };
+  }
+  if (ctx.mode !== "one-shot") {
+    const now = seen(state(ctx));
+    return { group: groupId, joined: now?.status === "active", stage: now?.invitation?.stage ?? null };
+  }
+  const done = (g: GroupView | undefined) => !g || g.status === "active" || JOIN_STOPS.has(g.invitation?.stage ?? "");
+  const group = await waitForState(ctx, (s) => { const g = seen(s); return done(g) ? { g } : undefined; }, ONE_SHOT_JOIN_S * 1000, `group ${groupId} to let this profile in`)
+    .then(({ g }) => g, (error: unknown) => { if (error instanceof CliError && error.code === "timeout") return seen(state(ctx)); throw error; });
+  const joined = group?.status === "active", stage = group?.invitation?.stage ?? null;
+  if (joined || !group) return { group: groupId, joined, stage };
+  // A replaced link never lets it in: the next step is a new link, not a daemon.
+  if (stage === "replaced") return { group: groupId, joined, stage, warning: "This link was replaced or turned off: ask someone in the group for the current link, then ghostly group join <link>" };
+  const show = `keep it running (ghostly daemon --detach), then ghostly group show ${shellWord(groupId, groupId)}`;
+  const full = stage === "full" ? group.invitation?.full : undefined;
+  const noRoom = stage ? NO_ROOM[stage] : undefined;
+  if (noRoom) return { group: groupId, joined, stage, warning: `${noRoom}${full ? ` (${full.n} of ${full.max} members)` : ""}. Your app goes on knocking only while this profile is running, and gets in when there is room: ${show}` };
+  if (stage === "admitted") return { group: groupId, joined, stage, warning: `Not in yet: a member's app let you in, and the group's welcome has not finished arriving. It arrives only while this profile is running: ${show}` };
+  return { group: groupId, joined, stage, warning: `Not in yet: no member's app has let you in. A member's app lets you in only while this profile is running: ${show}` };
+}
+
 const METHODS: Record<string, Method> = {
   ...WALLET_METHODS,
   ...FILE_METHODS,
@@ -268,11 +333,14 @@ const METHODS: Record<string, Method> = {
 
   async status(ctx) {
     const s = state(ctx);
+    // A daemon's: how each relay is doing and where its last read went, as the apps' connection panel says. With every
+    // relay down, its status read as with them all fine. A one-shot asked none of them.
+    const seen = ctx.mode === "daemon" ? s.transport.discovery : undefined;
     return {
       version: ctx.version, profile: ctx.runtime.paths.name, mode: ctx.mode, pid: process.pid,
       online: s.settings.online, name: s.settings.nick || null, webrtc: ctx.runtime.webrtc, calls: ctx.runtime.callsUnavailable === null,
       chats: s.links.length, live: s.links.filter(isLive).length, groups: s.groups.length,
-      discovery: { protocol: s.transport.protocol, relays: s.transport.relays },
+      discovery: { protocol: s.transport.protocol, relays: s.transport.relays, ...(seen && { health: seen.relays, via: seen.path?.via ?? null }) },
       events: { lastSeq: ctx.hub.lastSeq },
       // A listen running the profile: `daemon stop` and `restart` end it too, as their answers say.
       ...(ctx.listen && { listen: true }),
@@ -654,6 +722,8 @@ const METHODS: Record<string, Method> = {
     return { chat: link.id, messageId };
   },
   async "chat.delete"(ctx, params) {
+    // `--purge`: what it said leaves the profile's folder before the answer (`purgeMessage`), and the answer says so.
+    const purge = bool(params, "purge"), purged = purge ? { purged: true } : {};
     // For everyone (WISP 400 § Delete for everyone): a message of mine, in a chat or a group, gone from every device.
     if (bool(params, "everyone")) {
       const target = chatOrGroup(ctx, str(params, "chat", true));
@@ -668,26 +738,44 @@ const METHODS: Record<string, Method> = {
       if (!message) throw noMessage(ref, { group: target.group, ref: str(params, "chat", true) }, { whose: "of yours", tail: ": only your own messages are deleted for everyone" });
       const result = await node(ctx).removeMessage({ linkId: target.linkId, messageId: message.id });
       if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
+      // Gone here at once: the fold need not wait for the contact or an edge.
+      if (purge) await purgeMessage(ctx, message);
       // `messageId`, as every command that makes or changes a message names it; `deleted` kept for callers that read
       // it (agents#1582).
       if (target.group) {
         const e = result.e;
         const edges = !e ? 0 : wait === "sent" ? await waitForGroupFrame(ctx, target.id, message.id, e, ms) : node(ctx).groupTaken({ groupId: target.id, messageId: message.id, edit: e });
-        return { group: target.id, messageId: message.id, deleted: message.id, everyone: true, sent: edges > 0, edges };
+        return { group: target.id, messageId: message.id, deleted: message.id, everyone: true, sent: edges > 0, edges, ...purged };
       }
       if (wait === "confirmed") await waitForRemoval(ctx, target.linkId, message.id, ms);
-      return { chat: target.id, messageId: message.id, deleted: message.id, everyone: true, confirmed: !node(ctx).removalPending({ linkId: target.linkId, messageId: message.id }) };
+      return { chat: target.id, messageId: message.id, deleted: message.id, everyone: true, confirmed: !node(ctx).removalPending({ linkId: target.linkId, messageId: message.id }), ...purged };
     }
     // A group's message is deleted for everyone only (the apps forget none on one device): a group named without the
     // flag says so, with the command that takes it, not "No chat".
-    const ref = str(params, "message") ?? "<message>";
-    const link = chatNotGroup(ctx, params, "message delete", `${/^[\w.:<>-]+$/.test(ref) ? ref : JSON.stringify(ref)} --everyone`);
+    // `message delete --everyone` takes a chat's name before a group's, and never takes a name shaped like a chat's id or
+    // a contact's key as a group's: the command offered names the group by `group:` unless the name alone reaches it.
+    const ref = str(params, "message") ?? "<message>", typed = str(params, "chat", true);
+    const reachesGroup = (name: string) => { try { return "group" in findChatOrGroup(state(ctx).links, state(ctx).groups, name); } catch { return false; } };
+    let link: ReturnType<typeof chatOf>;
+    try {
+      // `--purge` stays in the command offered: pasted without it, the text stayed in the profile's folder up to an hour.
+      link = notAGroup(ctx, params, () => chatOf(ctx, params), (shown, id) => `ghostly message delete ${groupPrefixed(typed) === null && reachesGroup(typed) ? shown : shellWord(groupPrefixed(typed) === null ? `group:${typed}` : typed, `group:${id}`)} ${ref === "<message>" ? ref : shellWord(ref, "<message>")} --everyone${purge ? " --purge" : ""}`);
+    } catch (error) {
+      // Another member's message: only its author deletes it, so the `--everyone` offered was then refused as not mine,
+      // a second command to learn it cannot be deleted at all. A history that cannot be read keeps that hint.
+      const group = error instanceof CliError ? error.details?.group : undefined;
+      const theirs = typeof group === "string" && ref !== "<message>" ? await messageOf(ctx, `group:${group}`, ref).catch(() => undefined) : undefined;
+      if (theirs && theirs.sender !== "me") throw new CliError("not_found", `${JSON.stringify(typed)} is a group, and ${JSON.stringify(ref)} is another member's message in it: only its author deletes a group's message, for everyone`, { group });
+      throw error;
+    }
     const messageId = str(params, "message", true);
-    if (!(await node(ctx).getMessage(link.id, messageId))) throw noMessage(messageId, { group: false, ref: str(params, "chat", true) });
+    const message = await node(ctx).getMessage(link.id, messageId);
+    if (!message) throw noMessage(messageId, { group: false, ref: str(params, "chat", true) });
     // A waiting text of mine is cancelled; one the outbox already handed to the link may be out, so the engine deletes it
     // for everyone instead, and `everyone` says so.
     const { everyone } = node(ctx).deleteMessage({ linkId: link.id, messageId });
-    return { chat: link.id, messageId, deleted: messageId, everyone };
+    if (purge) await purgeMessage(ctx, message);
+    return { chat: link.id, messageId, deleted: messageId, everyone, ...purged };
   },
   /** A chat's or a group's (`group:<id>`, or its name) message, as the app's details show it; a group's said `No chat`. */
   async "chat.details"(ctx, params) {
@@ -788,18 +876,21 @@ const METHODS: Record<string, Method> = {
     const { groupId } = await node(ctx).createGroup({ name, profile });
     let link: string | null = null;
     if (profile === "community") ({ link } = await node(ctx).enableGroupLink({ groupId }));
-    return { group: groupId, link };
+    return withUrl(groupId, link);
   },
   async "group.join"(ctx, params) {
     let groupId: string;
+    const link = str(params, "link", true);
+    // What was held before the join: a group already active under the link's id only gets the link noted beside it.
+    const before = state(ctx).groups;
     try {
-      ({ groupId } = await node(ctx).joinGroupByLink({ link: str(params, "link", true) }));
+      ({ groupId } = await node(ctx).joinGroupByLink({ link }));
     } catch (error) {
       // Not a link to a group at all: the caller's input, as `invite join` answers a word that is no invite.
       if (error instanceof Error && error.message === "This is not a link to a group") throw new CliError("bad_request", error.message);
       throw error;
     }
-    return { group: groupId };
+    return letIn(ctx, groupId, link, before.find((g) => g.id === groupId));
   },
   async "group.list"(ctx, params) {
     const showSecret = bool(params, "showSecret");
@@ -913,12 +1004,11 @@ const METHODS: Record<string, Method> = {
     sayTyping(ctx, target, typing, word);
     const until = seconds ? Date.now() + seconds * 1000 : null;
     const kept = seconds ? keepTyping(ctx, target, seconds * 1000, word) : null;
-    const reached = (s: EngineState) => (s.groups.find((g) => g.id === group.id) ?? group).members.filter((m) => !m.me && m.online && !m.viaHub).length;
-    if (kept && ctx.mode === "one-shot") await keepOneShot(ctx, target, kept, (s) => reached(s) > 0);
-    const now = state(ctx);
+    const reached = (now: GroupView | undefined) => (now ?? group).members.filter((m) => !m.me && m.online && !m.viaHub).length;
+    if (kept && ctx.mode === "one-shot") await keepOneShot(ctx, target, kept, (s) => reached(s.groups.find((g) => g.id === group.id)) > 0);
     return {
       group: group.id, typing, ...(typing ? { kind } : {}), ...(status ? { status } : {}),
-      reached: reached(now), sendTyping: now.settings.sendTyping !== false, ...(until ? { until } : {}),
+      reached: reached(groupById(ctx, group.id)), sendTyping: settingsOf(ctx).sendTyping !== false, ...(until ? { until } : {}),
       ...(!kept && ctx.mode === "one-shot" && { note: typing ? ONE_SHOT_TYPING : ONE_SHOT_TYPING_STOP }),
     };
   },
@@ -938,6 +1028,9 @@ const METHODS: Record<string, Method> = {
   },
   async "group.accept"(ctx, params) {
     const group = groupOf(ctx, params);
+    // Nothing to accept, said with why: before, a community this profile is in or was removed from answered done, exit
+    // 0 (the engine's knock again does nothing there), and a private group "No invitation to accept".
+    if (!group.invitation) throw new CliError("refused", `${outOf(group) ?? `You are in ${group.name} already`}: there is no invitation to accept`);
     await node(ctx).acceptGroupInvitation({ groupId: group.id });
     return { group: group.id };
   },
@@ -1132,15 +1225,15 @@ export function groupSendRefused(error: string): CliError {
  * the form `pin` and `saved` take, is that group too (it read "No chat" before). A name no chat and no group has stays
  * the chat's error.
  */
-function notAGroup<T>(ctx: ApiContext, params: Params, chat: () => T, hint: (shown: string) => string): T {
+function notAGroup<T>(ctx: ApiContext, params: Params, chat: () => T, hint: (shown: string, id: string) => string): T {
   try { return chat(); } catch (error) {
     if (!(error instanceof CliError) || error.code !== "not_found") throw error;
     const ref = str(params, "chat", true);
     const named = groupPrefixed(ref) ?? ref;
     let group: GroupView;
     try { group = findGroup(state(ctx).groups, named); } catch { throw error; }
-    const shown = /^[\w.:-]+$/.test(named) ? named : JSON.stringify(named);
-    throw new CliError("not_found", `${JSON.stringify(ref)} is a group, not a chat: ${hint(shown)}`, { group: group.id });
+    const shown = shellWord(named, group.id);
+    throw new CliError("not_found", `${JSON.stringify(ref)} is a group, not a chat: ${hint(shown, group.id)}`, { group: group.id });
   }
 }
 
@@ -1315,10 +1408,13 @@ export { findChat, findGroup, startNamedChats } from "./apiKit";
 export type { ApiContext } from "./apiKit";
 export const API_METHODS: readonly string[] = Object.keys(METHODS);
 
-/** Runs one method of the API: one the table lists itself (`constructor`, which every object has, is none). */
-export async function callApi(ctx: ApiContext, method: string, params: unknown = {}): Promise<unknown> {
+/**
+ * Runs one method of the API: one the table lists itself (`constructor`, which every object has, is none). `call`: who
+ * asked, from a daemon's connection (`host.ts`).
+ */
+export async function callApi(ctx: ApiContext, method: string, params: unknown = {}, call?: CallScope): Promise<unknown> {
   const run = Object.hasOwn(METHODS, method) ? METHODS[method] : undefined;
   if (!run) throw new CliError("not_found", `No method ${method}`);
   if (params === null || typeof params !== "object" || Array.isArray(params)) throw new CliError("bad_request", "params must be an object");
-  return run(ctx, await withStoredIds(ctx, params as Params));
+  return run(ctx, await withStoredIds(ctx, params as Params), call);
 }

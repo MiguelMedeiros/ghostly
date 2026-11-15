@@ -5,7 +5,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { clearAllData } from "../../lib/clearData";
 import { markIdentityNewsSeen } from "../../lib/identities";
 import { openProfileBackup, writeProfileBackup } from "../../lib/profileBackup";
-import { ownsKey, ownsOriginalKey } from "../../lib/storage";
+import { keyOwner, originalKeyOwner } from "../../lib/storage";
 
 // covers: app.clear-data, backup.profile.file
 
@@ -31,8 +31,8 @@ afterEach(() => { localStorage.clear(); vi.restoreAllMocks(); });
 describe("the first profile's Identities news seen", () => {
   it("is the first profile's own key", () => {
     expect(localStorage.getItem(KEY)).toContain("link-abc");
-    expect(ownsKey(KEY)).toBe(true);
-    expect(ownsOriginalKey(KEY)).toBe(true);
+    expect(keyOwner()(KEY)).toBe(true);
+    expect(originalKeyOwner()(KEY)).toBe(true);
   });
 
   it("Clear all data of the first profile removes it", async () => {

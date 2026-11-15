@@ -97,7 +97,7 @@ it("--out naming a folder is refused in words that say so, and leaves no file of
   expect(ok(await ghostly(["--home", dir, "profile", "backup", "--out", join(folder, "bot.ghostly-backup")], { env: PASS }))).toMatchObject({ path: join(folder, "bot.ghostly-backup") });
 });
 
-it("a passphrase on the command line is refused in the same words however it comes, for backup and restore, and never echoed", async () => {
+it("a passphrase on the command line is refused in the same words however it comes (a typo of the flag too), for backup and restore, and never echoed", async () => {
   const dir = home("backup-passphrase-line");
   const file = join(dir, "bot.ghostly-backup");
   const secret = "a secret on the line";
@@ -111,6 +111,10 @@ it("a passphrase on the command line is refused in the same words however it com
     ["restore --passphrase", ["profile", "restore", file, "copy", "--passphrase"]],
     ["restore --passphrase <secret>", ["profile", "restore", file, "copy", "--passphrase", secret]],
     ["restore --passphrase=<secret>", ["profile", "restore", file, "copy", `--passphrase=${secret}`]],
+    // A typo of it: before, "Unknown option --pasphrase (did you mean --passphrase?)", the one form refused here.
+    ["backup --pasphrase=<secret>", ["profile", "backup", "--out", file, `--pasphrase=${secret}`]],
+    ["backup --passprase <secret>", ["profile", "backup", "--out", file, "--passprase", secret]],
+    ["restore --pasphrase=<secret>", ["profile", "restore", file, "copy", `--pasphrase=${secret}`]],
   ] as const) {
     const run = await ghostly(["--home", dir, ...line], { env: NO_PASS });
     const failure = run.json.error as { code?: string; message?: string } | undefined;
@@ -249,6 +253,32 @@ it("--passphrase-file - reads the passphrase from stdin, for backup and restore"
   const empty = error(await ghostly(["--home", dir, "profile", "backup", "--out", join(dir, "none.ghostly-backup"), "--passphrase-file", "-"], { env: NO_PASS, input: "" }), "bad_request", 1);
   expect(empty.message).toBe("Stdin is empty: it holds the backup's passphrase");
   expect(existsSync(join(dir, "none.ghostly-backup"))).toBe(false);
+});
+
+// Only one line break at a file's end was left out and the environment was taken as given, with nothing said: a backup
+// made from a file with a second line break, a CRLF or a byte order mark opened with that file only, and the same
+// passphrase from a password manager (the environment, a paste) was "Wrong passphrase".
+it("a backup refuses a passphrase with a space, line break or byte order mark at an end, or a NUL, and names it", async () => {
+  const dir = home("backup-loose-ends");
+  ok(await ghostly(["--home", dir, "profile", "set", "--name", "Loose bot"]));
+  const out = join(dir, "x.ghostly-backup"), file = join(dir, "pass"), pass = PASS.GHOSTLY_BACKUP_PASSPHRASE;
+  const fromFile = async (bytes: string | Buffer) => { writeFileSync(file, bytes); return error(await ghostly(["--home", dir, "profile", "backup", "--out", out, "--passphrase-file", file], { env: NO_PASS }), "bad_request", 1).message; };
+  const RULE = "(one line break at its end is left out already): the same passphrase typed or pasted would not open the backup. Take it out";
+  expect(await fromFile(`${pass}\n\n`)).toBe(`The passphrase in ${file} ends with a line break ${RULE}`);
+  expect(await fromFile(`${pass}\r`)).toBe(`The passphrase in ${file} ends with a carriage return ${RULE}`);
+  expect(await fromFile(`\uFEFF${pass}\r\n`)).toBe(`The passphrase in ${file} starts with a byte order mark ${RULE}`);
+  expect(await fromFile(`${pass}  \n`)).toBe(`The passphrase in ${file} ends with a space ${RULE}`);
+  expect(await fromFile(" ".repeat(12))).toBe(`The passphrase in ${file} starts with a space ${RULE}`);
+  expect(await fromFile(Buffer.from(`\uFEFF${pass}\r\n`, "utf16le"))).toBe(`${file} holds a NUL: a file saved as UTF-16? Save the passphrase as UTF-8 text`);
+  const env = error(await ghostly(["--home", dir, "profile", "backup", "--out", out], { env: { GHOSTLY_BACKUP_PASSPHRASE: `${pass}\r` } }), "bad_request", 1);
+  expect(env.message).toBe("The passphrase in GHOSTLY_BACKUP_PASSPHRASE ends with a carriage return: the same passphrase typed or pasted would not open the backup. Take it out");
+  const piped = error(await ghostly(["--home", dir, "profile", "backup", "--out", out, "--passphrase-file", "-"], { env: NO_PASS, input: `\t${pass}\n` }), "bad_request", 1);
+  expect(piped.message).toBe(`The passphrase in stdin starts with a tab ${RULE}`);
+  expect(existsSync(out), "nothing written for a refused passphrase").toBe(false);
+  // A space inside is the passphrase's own, and a CRLF file's line end is left out whole: the environment opens it.
+  writeFileSync(file, `${pass}\r\n`);
+  ok(await ghostly(["--home", dir, "profile", "backup", "--out", out, "--passphrase-file", file], { env: NO_PASS }));
+  expect(ok(await ghostly(["--home", dir, "profile", "restore", out, "copy"], { env: PASS }))).toMatchObject({ restored: "copy" });
 });
 
 // The folder took the profile's name before anything was in it: a restore stopped half way (Ctrl-C, a kill) left a

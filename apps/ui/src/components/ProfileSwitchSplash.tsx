@@ -4,6 +4,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { useLockScreen } from "../contexts/LockScreenContext";
 import { clearPendingSwitch, pendingSwitch, type PendingSwitch } from "../lib/profiles";
 import { initial } from "../lib/initial";
+import { isolate } from "../lib/ownStatus";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 
@@ -57,5 +58,6 @@ export function ProfileSwitchSplash() {
   }, [leaving]);
 
   if (!pending) return null;
-  return <ProfileSwitchView pending={pending} arrived={arrived} leaving={leaving} label={t("profileSwitcher.switching", { name: pending.name })} />;
+  // The profile's name isolated in a line in the page's direction: "Club!" read "!Club" in Arabic.
+  return <ProfileSwitchView pending={pending} arrived={arrived} leaving={leaving} label={t("profileSwitcher.switching", { name: isolate(pending.name) })} />;
 }

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { appCardId, statusCardText, type AppCard } from "@ghostly/core";
 import type { InstalledAppView } from "@ghostly/browser/engine/apps";
 import { MessageBubble } from "../../components/MessageBubble";
+import { AppIcon } from "../../components/apps/AppIcon";
 import { forgetAppsAvailable } from "../../lib/apps/flag";
 import { forgetAppIcons } from "../../lib/apps/icons";
 import { forgetInstalledApps, refreshInstalledApps } from "../../lib/apps/installed";
@@ -128,5 +129,46 @@ describe("an installed app's icon", () => {
     await act(() => refreshInstalledApps());
     await settle();
     expect(pictures()).toEqual(Array.from({ length: 20 }, () => "blob:icon-0"));
+  });
+
+  // The same files fetched by a card's own Open (the engine's entry gets them first): no update check tells the pages,
+  // so the card reads the list again, as the chat's Apps does. Its icon showed at no later visit until the Apps page.
+  it("of an app whose files a card's Open fetched shows then", async () => {
+    installed = { ...app(DIGEST), run: { status: "needs-files" } } as InstalledAppView;
+    let files = false;
+    fakeEngine.on("appFile", () => {
+      if (!files) throw new Error("needs-files: This app's files are not on this device yet");
+      return new Uint8Array([137, 80, 78, 71, installed.sequence]);
+    });
+    setAppOpener(vi.fn(async () => { files = true; installed = app(DIGEST); }));
+    await refreshInstalledApps();
+    renderApp(cards());
+    await screen.findAllByTestId("app-icon", {}, { timeout: 3000 });
+    await settle();
+    expect(pictures()).toEqual(Array.from({ length: 20 }, () => undefined));
+    fireEvent.click(screen.getAllByTestId("app-card-open")[0]!);
+    await settle();
+    expect(pictures()).toEqual(Array.from({ length: 20 }, () => "blob:icon-0"));
+  });
+
+  // Each icon was held until the tab closed, its app uninstalled or not: ten apps' pictures (up to 256 KiB each) stayed.
+  it("of an app uninstalled goes, and is read again when it is installed again", async () => {
+    const ten = Array.from({ length: 10 }, (_, i) => ({ ...app(DIGEST), ref: `${KEY}/app${i}`, name: `app${i}` }) as InstalledAppView);
+    let list = ten;
+    fakeEngine.on("appList", () => list);
+    await refreshInstalledApps();
+    renderApp(<>{ten.map((a) => <AppIcon key={a.ref} installed={a} />)}</>);
+    await settle();
+    expect(made).toHaveLength(10);
+    list = [];
+    await act(() => refreshInstalledApps());
+    await settle();
+    expect(vi.mocked(URL.revokeObjectURL).mock.calls.map(([url]) => url).sort()).toEqual([...made].sort());
+    list = [ten[0]!];
+    await act(() => refreshInstalledApps());
+    renderApp(<AppIcon installed={ten[0]} />);
+    await settle();
+    expect(fakeEngine.callsTo("appFile")).toHaveLength(11);
+    expect(made).toHaveLength(11);
   });
 });

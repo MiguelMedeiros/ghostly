@@ -29,8 +29,12 @@ export const STORE_URL = "https://raw.githubusercontent.com/MiguelMedeiros/ghost
 export const STORE_HOSTS = ["raw.githubusercontent.com", "cdn.jsdelivr.net"];
 export const LIMITS = {
   indexBytes: 4 * 1024 * 1024, sigBytes: 1024, bundleBytes: 16 * 1024 * 1024, apps: 200, urls: 4, totalBytes: 64 * 1024 * 1024,
-  /** One `ghostly-revoke.json`, as the app bounds it (appFetch.ts), and every one the build reads together. */
-  revocationsBytes: 16 * 1024 * 1024, revocationsTotalBytes: 64 * 1024 * 1024,
+  /**
+   * One `ghostly-revoke.json`, as the app bounds it (appFetch.ts), and every one the listings of one publisher read: a
+   * bound of each, so one publisher's files never leave another's unread (a file not kept revokes nothing). All of them
+   * together stay under `revocationsTotalBytes`, an even share each (the snapshot is one JSON string the build imports).
+   */
+  revocationsBytes: 16 * 1024 * 1024, revocationsPublisherBytes: 64 * 1024 * 1024, revocationsTotalBytes: 64 * 1024 * 1024,
   /** The `sources` one manifest may name (core's appBundle.ts). */
   sources: 8,
 };
@@ -53,11 +57,53 @@ async function read(url, limit, fetcher = fetch) {
   const res = await fetcher(url, { redirect: "error", credentials: "omit", referrerPolicy: "no-referrer", signal: AbortSignal.timeout(TIMEOUT_MS) });
   if (res.status === 404) throw Object.assign(new Error(`${url}: HTTP 404`), { missing: true });
   if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
+  const tooLarge = () => new Error(`${url}: larger than ${limit} bytes`);
   const declared = Number(res.headers.get("content-length") ?? 0);
-  if (declared > limit) throw new Error(`${url}: larger than ${limit} bytes`);
-  const bytes = new Uint8Array(await res.arrayBuffer());
-  if (bytes.length > limit) throw new Error(`${url}: larger than ${limit} bytes`);
+  if (declared > limit) {
+    await res.body?.cancel();
+    throw tooLarge();
+  }
+  if (!res.body) return new Uint8Array();
+  // A body with no length (or one fetch unpacks) is read only up to the limit, not whole and then refused.
+  const chunks = [];
+  let total = 0;
+  const reader = res.body.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > limit) {
+      await reader.cancel();
+      throw tooLarge();
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let at = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, at);
+    at += chunk.length;
+  }
   return bytes;
+}
+
+/** How many reads the build makes at once. */
+const READS_AT_ONCE = 8;
+
+/**
+ * Reads `urls`, at most READS_AT_ONCE at a time, and hands each to `take(url, bytes, error)` in the list's order, so the
+ * byte budgets `take` keeps and the problems it writes come out as one read at a time gives them. A read starts only
+ * when the one READS_AT_ONCE places before it was taken: no more than READS_AT_ONCE answers are held at once.
+ */
+async function readInOrder(urls, limit, fetcher, take) {
+  const settle = (url) => read(url, limit, fetcher).then((bytes) => ({ bytes }), (error) => ({ error }));
+  const pending = [];
+  let next = 0;
+  for (let taken = 0; taken < urls.length; taken++) {
+    while (next < urls.length && pending.length < READS_AT_ONCE) pending.push(settle(urls[next++]));
+    const { bytes, error } = await pending.shift();
+    await take(urls[taken], bytes, error);
+  }
 }
 
 const b64 = (bytes) => Buffer.from(bytes).toString("base64");
@@ -116,31 +162,63 @@ export async function fromStore(fetcher = fetch) {
   }
   const readBundles = new Map();
   let total = index.length + sig.length;
-  for (const listing of listings) {
-    for (const url of listing.urls.filter((u) => typeof u === "string" && isFetchUrl(u))) {
-      if (bundles[url] !== undefined) continue;
-      try {
-        const bytes = await read(url, LIMITS.bundleBytes, fetcher);
-        if (total + bytes.length > LIMITS.totalBytes) throw new Error(`${url}: over the ${LIMITS.totalBytes} bytes all bundles may take`);
-        total += bytes.length;
-        bundles[url] = b64(bytes);
-        readBundles.set(url, bytes);
-      } catch (error) {
-        problems.push(String(error?.message ?? error));
-      }
-    }
-  }
-  let revocationsTotal = 0;
-  for (const url of new Set(listings.flatMap((listing) => revocationUrls(listing, readBundles)))) {
+  const bundleUrls = new Set(listings.flatMap((listing) => listing.urls.filter((u) => typeof u === "string" && isFetchUrl(u))));
+  await readInOrder([...bundleUrls], LIMITS.bundleBytes, fetcher, (url, bytes, error) => {
     try {
-      const bytes = await read(url, LIMITS.revocationsBytes, fetcher);
-      if (revocationsTotal + bytes.length > LIMITS.revocationsTotalBytes) throw new Error(`${url}: over the ${LIMITS.revocationsTotalBytes} bytes all revocation files may take`);
-      revocationsTotal += bytes.length;
-      revocations[url] = b64(bytes);
+      if (error) throw error;
+      if (total + bytes.length > LIMITS.totalBytes) throw new Error(`${url}: over the ${LIMITS.totalBytes} bytes all bundles may take`);
+      total += bytes.length;
+      bundles[url] = b64(bytes);
+      readBundles.set(url, bytes);
     } catch (error) {
-      if (!error?.missing) problems.push(String(error?.message ?? error));
+      problems.push(String(error?.message ?? error));
+    }
+  });
+  // By publisher (the reference's key, as core's appRefPublisher reads it): the URLs its listings read, and their bytes.
+  const publishers = new Map();
+  const failed = new Set();
+  const keyOf = (listing) => (typeof listing.ref === "string" ? listing.ref.slice(0, 52) : "");
+  for (const listing of listings) publishers.set(keyOf(listing), { urls: new Set(), bytes: 0 });
+  const share = Math.min(LIMITS.revocationsPublisherBytes, Math.floor(LIMITS.revocationsTotalBytes / Math.max(1, publishers.size)));
+  // Each publisher's files in its listings' order; a file read once, then judged for every publisher that reads it.
+  const uses = [];
+  for (const listing of listings) {
+    const publisher = publishers.get(keyOf(listing));
+    for (const url of revocationUrls(listing, readBundles)) {
+      if (publisher.urls.has(url)) continue;
+      publisher.urls.add(url);
+      uses.push({ publisher, url });
     }
   }
+  const lastUse = new Map(uses.map(({ url }, i) => [url, i]));
+  const answers = new Map();
+  let judged = 0;
+  const judge = ({ publisher, url }, { bytes, error }) => {
+    if (error) {
+      if (!failed.has(url) && !error?.missing) problems.push(String(error?.message ?? error));
+      failed.add(url);
+      return;
+    }
+    // Over this publisher's bound, the file is not kept for it; another publisher whose listings read it still may.
+    if (publisher.bytes + bytes.length > share) {
+      problems.push(`${url}: over the ${share} bytes one publisher's revocation files may take`);
+      return;
+    }
+    publisher.bytes += bytes.length;
+    revocations[url] = b64(bytes);
+  };
+  // A file's first use comes in the order its read does, so every use before the next unread file can be judged now.
+  await readInOrder([...new Set(uses.map(({ url }) => url))], LIMITS.revocationsBytes, fetcher, async (url, bytes, error) => {
+    answers.set(url, { bytes, error });
+    for (; judged < uses.length && answers.has(uses[judged].url); judged++) {
+      const use = uses[judged];
+      // A file no publisher kept is not held for a later one (that would hold every file read): it is read again.
+      const answer = answers.get(use.url) ?? (await read(use.url, LIMITS.revocationsBytes, fetcher).then((bytes) => ({ bytes }), (error) => ({ error })));
+      judge(use, answer);
+      if (lastUse.get(use.url) === judged) answers.delete(use.url);
+      else answers.set(use.url, answer.bytes && revocations[use.url] === undefined ? null : answer);
+    }
+  });
   return { source: "store", index: b64(index), sig: b64(sig), bundles, revocations, problems };
 }
 

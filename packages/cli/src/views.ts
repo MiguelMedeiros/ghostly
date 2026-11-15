@@ -337,6 +337,9 @@ export function groupJson(group: GroupView, showSecret = false) {
     ...(group.others?.length ? { others: group.others.map((o) => ("link" in o ? { link: showSecret ? o.link : "<hidden>" } : { chat: o.linkId, name: o.name, members: o.members })) } : {}),
     community: group.community ?? null,
     picture: !!group.picture,
+    // The node that forwards a community group's calls, as its admin named it, and whether its media is sealed end to end
+    // (WISP 602; `group call`).
+    call: group.call ? { sfu: group.call.sfu, e2ee: group.call.e2ee === 1 } : null,
     pin: pinJson(group.pin),
   };
 }

@@ -1,5 +1,6 @@
 import type { BrowserHost } from "@ghostly/browser/host";
 import { engine } from "@ghostly/browser/platform/engine";
+import { MAX_SERVICES, viewerTag } from "@ghostly/core";
 import { uiPortName, type RuntimeMessage, type ViewerPage } from "./messages";
 import { extensionUpdates } from "./updates";
 import { extensionOidc } from "./oidc";
@@ -11,6 +12,51 @@ import { activeNamespace, markEngineRestart, pageProfileIsCurrent, startAsProfil
 import { setServiceWindowsCloser } from "../../ui/src/lib/serviceWindows";
 import { forgetLocalAccess, releaseUnusedLocalAccess, withLocalAccess } from "./localAccess";
 import { allowLocalOrigin, localOriginAllowed } from "./localAllowList";
+import { activeProfileId } from "../../ui/src/lib/profiles";
+import { openedServices, type Opened } from "../../ui/src/lib/openedServices";
+import { parseViewerUrl, viewerUrl } from "./shared/viewer";
+
+/** A contact's app this device opened in a viewer tab, by what names its origin (`https://<service>.<peer>.<tag>.invalid`). */
+interface OpenedViewer extends Opened { service: string; peer: string }
+const openedViewers = openedServices<OpenedViewer>(
+  (o) => {
+    if (typeof o.service !== "string" || typeof o.peer !== "string") return false;
+    const parsed = parseViewerUrl(viewerUrl(o.peer, o.service, o.tag as string));
+    return parsed?.serviceId === o.service && parsed.peerPubKeyZ32 === o.peer && parsed.tag === o.tag;
+  },
+  (a, b) => a.service === b.service && a.peer === b.peer && a.tag === b.tag,
+);
+
+/**
+ * Every app each chat and group member lists, noted as the list comes (`peerServices`): an app opened before the opened-apps list was
+ * kept is on no list, and Delete chat, Clear all data and Delete profile no longer know the chat's apps by then.
+ * Clearing an origin no app ever opened clears nothing. Each one once per page: the list comes with every state. All
+ * of a state's together: one at a time, a page's first state would read the whole list once per app. Only web apps
+ * (`http`), the only ones a viewer tab opens, and no more for a chat than one list holds (`MAX_SERVICES`): a contact
+ * may list new apps at any time, and each entry is one origin Delete chat has Chrome clear.
+ */
+const listedNoted = new Set<string>();
+engine.subscribe(() => {
+  const state = engine.state;
+  // A page left behind by a switch in another tab may still hold the other profile's chats.
+  if (!state?.links || !pageProfileIsCurrent()) return;
+  // A group member's apps open from their chat in the group (`linkByPeer`) as a contact's do.
+  const links = [...state.links, ...(state.edges ?? [])];
+  const profile = activeProfileId();
+  const listed: OpenedViewer[] = [];
+  for (const link of links) {
+    if (!link.peerServices?.length) continue;
+    const tag = viewerTag(link.myPubKeyZ32);
+    for (const { id: service, type } of link.peerServices) {
+      if (type !== "http") continue;
+      const key = `${profile} ${tag} ${service} ${link.peerPubKeyZ32}`;
+      if (listedNoted.has(key)) continue;
+      listedNoted.add(key);
+      listed.push({ profile, tag, service, peer: link.peerPubKeyZ32 });
+    }
+  }
+  if (listed.length) openedViewers.noteUpTo(MAX_SERVICES, ...listed);
+});
 
 // A contact's app tabs close when the profile locks, as Desktop's windows do: the worker serves them, page or not.
 setServiceWindowsCloser(() => void chrome.runtime.sendMessage({ target: "background", type: "close-services" } satisfies RuntimeMessage).catch(() => {}));
@@ -19,7 +65,7 @@ setServiceWindowsCloser(() => void chrome.runtime.sendMessage({ target: "backgro
 export function viewerPage(app?: string): ViewerPage {
   const { language } = loadSettings();
   const t = translatorFor(language);
-  return { lang: languageTag(language), dir: textDirection(language), unreachable: t("services.window.unreachable"), failed: t("services.window.failed"), ...(app ? { app } : {}) };
+  return { lang: languageTag(language), dir: textDirection(language), unreachable: t("services.window.unreachable"), failed: t("services.window.failed"), upload: t("services.window.upload"), ...(app ? { app } : {}) };
 }
 
 /** Ghostly Browser: the peer lives in the offscreen document, reached through extension messaging. */
@@ -89,6 +135,8 @@ export const extensionHost: BrowserHost = {
       startAsProfileInUse();
       throw new Error("Switching profiles…");
     }
+    // Noted first: what the app keeps on its origin goes with the chat, its data or its profile (`forgetServices`).
+    openedViewers.note({ profile: activeProfileId(), tag, service: serviceId, peer: peerPubKeyZ32 });
     const reply = await chrome.runtime.sendMessage({
       target: "background",
       type: "open-service",
@@ -102,4 +150,11 @@ export const extensionHost: BrowserHost = {
     } satisfies RuntimeMessage);
     if (!reply?.ok) throw new Error(reply?.error ?? "Could not open the service");
   },
+
+  // The worker closes their tabs and has Chrome clear each origin; one it did not clear stays listed, for the next clear.
+  forgetServices: (which) =>
+    openedViewers.forget(which, async ({ peer, service, tag }) => {
+      const reply = await chrome.runtime.sendMessage({ target: "background", type: "forget-service", peerPubKeyZ32: peer, serviceId: service, tag } satisfies RuntimeMessage);
+      return reply?.ok === true;
+    }),
 };

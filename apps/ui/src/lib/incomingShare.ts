@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { linkEnd } from "./parse/links";
 
 /*
  * Something another app shared into Ghostly (the installed web app is a share target): text, a link, images,
@@ -42,9 +43,10 @@ export interface IncomingShare {
   read?: () => Promise<File[]>;
   /**
    * Keeps the share for the page that loads next (a profile switch restarts the app), which shows it in its picker
-   * again. False where it could not be kept. Without it, the share goes with this page.
+   * again. False where it could not be kept. Without it, the share goes with this page. Called with the share's
+   * `dropped` as it is now (those not kept counted since it came), which the next page says with it.
    */
-  carry?: () => boolean;
+  carry?: (dropped?: number) => boolean;
   /**
    * Told when the share is sent to a chat: it no longer waits in the picker, so a later share does not take its place
    * (the Android app's copies stay until that chat's composer reads them, or the page goes).
@@ -141,7 +143,7 @@ export function dropIncomingShare(): void {
  * is redrawn: the page is going.
  */
 export function carryIncomingShare(): boolean {
-  const carry = (share: IncomingShare | null) => { try { return share?.carry?.() ?? false; } catch { return false; } };
+  const carry = (share: IncomingShare | null) => { try { return share?.carry?.(share.dropped) ?? false; } catch { return false; } };
   let sent = false;
   for (const [chat, shares] of forChat) {
     const left = shares.filter((share) => !carry(share));
@@ -213,13 +215,28 @@ export function keepShareFor(chat: string, share: IncomingShare): void {
 }
 
 /**
+ * Whether `text` carries `url` as a link of its own: after the text's start, a space or an opening bracket or quote,
+ * and ending where a bubble's link would (`linkEnd`: "https://a.example/p." or "(https://a.example/p)" carry it).
+ * A longer address that starts with it ("https://a.example/p2") or holds it ("…?u=https://a.example/p") does not.
+ */
+function carriesLink(text: string, url: string): boolean {
+  const word = /\S*/y;
+  for (let at = text.indexOf(url); at >= 0; at = text.indexOf(url, at + 1)) {
+    if (at > 0 && !/[\s\p{Ps}\p{Pi}"']/u.test(text[at - 1]!)) continue;
+    word.lastIndex = at;
+    if (linkEnd(word.exec(text)![0]) === linkEnd(url)) return true;
+  }
+  return false;
+}
+
+/**
  * The text a share puts in the draft: its text, and its link where the text does not already carry it (apps
  * differ: some put the link in `text`, some in `url`, some in both). A title only when there is nothing else.
  */
 export function shareText(share: Pick<IncomingShare, "title" | "text" | "url">): string {
   const text = share.text.trim();
   const url = share.url.trim();
-  const parts = [text, url && !text.includes(url) ? url : ""].filter(Boolean);
+  const parts = [text, url && !carriesLink(text, url) ? url : ""].filter(Boolean);
   if (!parts.length && share.title.trim()) parts.push(share.title.trim());
   return parts.join("\n");
 }

@@ -730,6 +730,22 @@ describe("answering a call", () => {
     expect(call.result.current.callState).toBe("connecting");
   });
 
+  it("tells each offer it holds back, and none it rings, so a handoff does not wait on a call that never rings", () => {
+    const call = renderCall();
+    const first = Date.now();
+    call.receive(remote.offer(first));
+    call.receive(remote.hangUp(first + 1));
+    const held: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      act(() => { vi.advanceTimersByTime(1900); });
+      held.push(Date.now());
+      call.receive(remote.offer(Date.now()));
+    }
+
+    expect(call.result.current.callState).toBe("idle");
+    expect(call.offerHeld.mock.calls).toEqual(held.map((ts) => [ts]));
+  });
+
   it("calling back once the held-back call stopped ringing places a call of its own", async () => {
     const call = renderCall();
     call.receive(remote.offer(Date.now()));
@@ -1271,6 +1287,28 @@ describe("when the prompt is refused or there is no device", () => {
     expect(call.result.current.mediaProblemOf).toBe("camera");
   });
 
+  it("the note that the camera is off goes once the camera comes on in the call", async () => {
+    const call = renderCall();
+    act(() => { void call.result.current.startCall(true); });
+    devices.userMedia[0].deny(new DOMException("Requested device not found", "NotFoundError"));
+    await settle();
+    devices.userMedia[1].grant();
+    await settle();
+    const pc = FakePeerConnection.instances[0];
+    call.receive(remote.answer(Date.now() + 1));
+    await settle();
+    act(() => pc.setIceState("connected"));
+    expect(call.result.current.mediaProblem).toBe("unavailable");
+
+    // The camera plugged in (or the app holding it closed), well within the note's time: Camera turns it on.
+    act(() => { void call.result.current.toggleVideo(); });
+    devices.userMedia[2].grant();
+    await settle();
+
+    expect(call.result.current.isVideoOff).toBe(false);
+    expect(call.result.current.mediaProblem).toBeNull();
+  });
+
   it.each([
     ["NotAllowedError", "denied"],
     ["SecurityError", "denied"],
@@ -1469,6 +1507,25 @@ describe("when the prompt is refused or there is no device", () => {
       expect(devices.getUserMedia).toHaveBeenCalledOnce();
       expect(devices.liveTracks()).toEqual([]);
       expect(call.result.current.callState).toBe("idle");
+    });
+
+    it("a call that ends while the camera is asked for lets the microphone go at once, and the camera once allowed", async () => {
+      const call = eachAlone();
+      call.receive(remote.offer(Date.now(), true));
+      act(() => { void call.result.current.acceptCall(true); });
+      devices.userMedia[0].grant();
+      await settle();
+      // The caller gives up while Android's camera dialog is still up: no call is left to hold the microphone for.
+      call.receive(remote.hangUp(Date.now() + 1));
+      await settle();
+
+      expect(call.result.current.callState).toBe("idle");
+      expect(devices.liveTracks()).toEqual([]);
+
+      devices.userMedia[1].grant();
+      await settle();
+      expect(devices.liveTracks()).toEqual([]);
+      expect(call.result.current.localStream).toBeNull();
     });
   });
 

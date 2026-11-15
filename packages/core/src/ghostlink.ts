@@ -3215,6 +3215,10 @@ export class GhostLink {
   dhtWentNowhere(id: string): boolean { return !!this.dht?.wentNowhereFor(id); }
   /** What went on the DHT floor under this id needs no more retries there (it went live, or was withdrawn). */
   async settleDht(id: string): Promise<void> { await this.dht?.acknowledge(id); }
+  /** Whether the DHT floor holds this text of mine, or an edit of it, awaiting its receipt or not (`DhtDelivery.holds`). */
+  dhtHolds(wireId: string): boolean { return !!this.dht?.holds(wireId); }
+  /** A text of mine deleted here leaves the DHT floor, an edit of it waiting there too (`DhtDelivery.withdraw`). */
+  async withdrawDht(wireId: string): Promise<void> { await this.dht?.withdraw(wireId); }
 
   /** Publishes a `_call` signal; a connected peer also gets it right away over the data link. */
   async setCallSignal(signal: string | null): Promise<void> {
@@ -5136,7 +5140,8 @@ export class GhostLink {
   private peerPacketArrived(presence: PeerPresence): void {
     const before = this.peerPacketSeen;
     this.peerPacketSeen = presence.lastPacketAt;
-    if (!before || presence.lastPacketAt === before || !presence.online || this.dialing || this.channel) return;
+    if (!before) { this.leftAsThisStarted(presence); return; }
+    if (presence.lastPacketAt === before || !presence.online || this.dialing || this.channel) return;
     if (!this.options.pairing?.credentials.peerKey || Date.now() - presenceSeenAt(presence) >= EXPECT_PEER_MS) return;
     if (Date.now() > this.lostUntil) return;
     this.lostUntil = 0;
@@ -5144,6 +5149,20 @@ export class GhostLink {
     this.autoConnectFailures = 0;
     this.lastAutoConnectAt = 0;
     this.backDial = true;
+  }
+
+  /**
+   * The first packet of the contact's read since this link started is the one it leaves as it quits (it does not
+   * advertise), put moments ago: both apps stopped and start again together (two bots a service manager restarts, a host
+   * that reboots). The one that stopped first was live then and resumes; this one's session had ended on its goodbye, so
+   * it does not, and read as any contact away, the resumed app's offer waited for the background pace (35 s on the
+   * relays, bug hunt 2026-11-14). Watched instead as a contact that just left a live session is (`peerLost`).
+   */
+  private leftAsThisStarted(presence: PeerPresence): void {
+    if (!presence.lastPacketAt || presence.online || this.dialing || this.channel) return;
+    if (!this.options.pairing?.credentials.peerKey || !this.options.params.profile) return;
+    if (Date.now() - presenceSeenAt(presence) >= EXPECT_PEER_MS) return;
+    this.peerLost("left-as-this-started");
   }
 
   /**

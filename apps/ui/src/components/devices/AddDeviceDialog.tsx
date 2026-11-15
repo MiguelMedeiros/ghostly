@@ -18,6 +18,7 @@ import { DeviceDialog, Digits, InfoLine, Status, field, primaryButton, quietButt
 import { said } from "../../lib/notices";
 import { fillNames } from "../../lib/fillNodes";
 import { problemLine } from "../../lib/problemText";
+import { FocusSafeButton } from "../ui/FocusSafeButton";
 
 /**
  * Add a device, on the active device (WISP 06 § Adding a device). First the lock password, in the same dialog: a device
@@ -161,7 +162,7 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
             </div>
           )}
           {error && !error.field && <p data-testid="device-add-error" className="text-danger">{error.text}</p>}
-          <button type="submit" data-testid="device-add-next" disabled={busy || !password} className={primaryButton}>{t("devices.password.next")}</button>
+          <FocusSafeButton type="submit" data-testid="device-add-next" disabled={busy || !password} className={primaryButton}>{t("devices.password.next")}</FocusSafeButton>
         </form>
       </DeviceDialog>
     );
@@ -173,8 +174,13 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
     : view.step === "confirm" ? <>{fillNames(t("devices.add.found"), { device: view.device })} <span dir="ltr">{`${view.digits.slice(0, 3)} ${view.digits.slice(3)}`}</span></>
     : view.step === "done" ? fillNames(t("devices.add.done"), { device: view.device }) : "";
 
+  // From They match until the device is added or the enrollment failed, × and Escape do nothing: the grant may have gone
+  // out, and closing would cancel it, leaving "Not finished" on both devices. The engine ends the step on its own.
+  const granting = view?.role === "inviter" && (view.step === "adding" || (view.step === "confirm" && busy));
+  const close = () => { if (!granting) onClose(); };
+
   return (
-    <DeviceDialog title={t("devices.add.title")} onClose={onClose} testId="device-add">
+    <DeviceDialog title={t("devices.add.title")} onClose={close} testId="device-add">
       <Toast toast={notice.toast} onDismiss={notice.dismiss} place="dialog" testId="device-add-notice" />
       <div ref={body} tabIndex={-1} className="space-y-3 focus:outline-none">
       <p role="status" className="sr-only" data-testid="device-add-spoken">{spoken}</p>
@@ -194,9 +200,10 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
       {view?.role === "inviter" && view.step === "confirm" && <>
         <p data-testid="device-add-status" data-step="confirm" className="text-text-primary">{fillNames(t("devices.add.found"), { device: view.device })}</p>
         <Digits digits={view.digits} testId="device-add-digits" />
-        <div className="grid grid-cols-2 gap-3">
-          <button type="button" data-testid="device-add-no-match" disabled={busy} onClick={() => void confirm(false)} className={quietButton}>{t("devices.add.noMatch")}</button>
-          <button type="button" data-testid="device-add-match" disabled={busy} onClick={() => void confirm(true)} className={primaryButton}>{t("devices.add.match")}</button>
+        {/* Side by side while each word fits its half; stacked once a larger text size (or a long word) would cut one. */}
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,7rem),1fr))] gap-3">
+          <FocusSafeButton type="button" data-testid="device-add-no-match" disabled={busy} onClick={() => void confirm(false)} className={quietButton}>{t("devices.add.noMatch")}</FocusSafeButton>
+          <FocusSafeButton type="button" data-testid="device-add-match" disabled={busy} onClick={() => void confirm(true)} className={primaryButton}>{t("devices.add.match")}</FocusSafeButton>
         </div>
       </>}
       {view?.role === "inviter" && (view.step === "waiting" || view.step === "confirm") && !!view.refused && <Notice tone="warning" testId="device-add-refused">{t("devices.add.refused")}</Notice>}

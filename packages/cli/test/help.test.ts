@@ -299,6 +299,10 @@ describe("help", () => {
     // The join pipes the invite in: `invite join -` typed at a terminal is refused, the secret kept off a TTY.
     expect(first.stdout).toContain(`$ printf '%s' "$INVITE" | ghostly invite join `);
     expect(first.stdout).not.toContain("invite join -");
+    // Each step's words start in one column, as the list's do.
+    const steps = first.stdout.split("\n").filter((line) => line.startsWith("  $ "));
+    expect(steps).toHaveLength(4);
+    expect(new Set(steps.map((line) => /^.*? {3,}(?=\S)/.exec(line)?.[0].length))).toEqual(new Set([steps[0].length - "make an invite for a contact".length]));
     expect(first.stdout).toContain("Usage: ghostly <command>");
     expect((await ghostly(["help", "--home", dir])).stdout).not.toContain("First steps");
     expect((await ghostly(["--home", dir, "profile", "create", "bot"])).code).toBe(0);

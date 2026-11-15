@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { GROUP_FILE_LIMITS, fileMessageText, groupFileFallback, type GroupFileMeta } from "@ghostly/core";
 import { CommunityWorld, RELAY_NETWORK, type NetworkModel, type Peer } from "./communityWorld";
 import { groupFileId, type GroupFileStore, type GroupFileWriter } from "../src/engine/groupFiles";
 import type { StoredFile } from "../src/shared/idb";
 import { waitingGroupFile } from "../src/shared/storedFiles";
 import type { FileTransferView } from "../src/shared/types";
+vi.mock("../../core/src/identity", async importOriginal => (await import("../../core/test/support/verifyOnce")).verifyOnce(await importOriginal()));
 // covers: groups.files, groups.files.wire
 
 /**

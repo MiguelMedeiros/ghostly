@@ -233,6 +233,7 @@ describe("group auto", () => {
     w.auto.check(w.state());
     await Promise.resolve();
     expect(w.engine.acceptGroupInvitation).not.toHaveBeenCalled();
+    expect(world(w.dir).auto.get()).toEqual({ on: true, from: ["chat-owner"] });
   });
 
   it("a removed chat leaves the list; the last one turns it off; off forgets them all", () => {

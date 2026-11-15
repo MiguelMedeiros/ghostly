@@ -293,7 +293,8 @@ export function Settings() {
     focusPasswordOpener.current = null;
     if (opener && focusLost()) (opener === "edit" ? passwordEdit : lockSwitch).current?.focus();
   }, [showPasswordForm]);
-  const [storageInfo, setStorageInfo] = useState({ used: 0, keys: 0 });
+  // Counted as the page opens, so the Desktop's count below sees no change (that is Delete all chats, recounted twice more).
+  const [storageInfo, setStorageInfo] = useState(getStorageUsage);
   // Whether the browser may clear this device's storage (lib/storagePersistence). Nothing on Desktop: no browser evicts it.
   const { protection, estimate } = useStorageProtection();
   // The Desktop's own count (lib/desktopStorage): its WebView's storage plus the profile's files on disk.
@@ -360,7 +361,6 @@ export function Settings() {
   const wakeAwayDevice = wakeAway ? devices?.devices.find((device) => device.key === wakeAwayKey)?.name : undefined;
 
   useEffect(() => {
-    setStorageInfo(getStorageUsage());
     setChatCount(listSessions().length);
     getVersion().then(setAppVersion).catch(() => setAppVersion("0.0.0"));
   }, []);

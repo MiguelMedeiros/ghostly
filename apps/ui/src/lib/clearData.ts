@@ -3,7 +3,7 @@ import { removeFileBytes } from "@ghostly/browser/shared/fileBytes";
 import { forgetServicesOf, getBrowserHost, releaseUnusedLocalAccessOf } from "@ghostly/browser/host";
 import { engine } from "@ghostly/browser/platform/engine";
 import { forgetDevice } from "@ghostly/browser/devices/store";
-import { LEGACY_JOIN_PREFIX, getStorageProfile, ownsKey } from "./storage";
+import { LEGACY_JOIN_PREFIX, getStorageProfile, keyOwner } from "./storage";
 import { activeProfileId, registryKey } from "./profiles";
 import { profileDatabase } from "./profileData";
 import { linkedFilesDatabase } from "./apps/webFiles";
@@ -25,8 +25,9 @@ export const CLEAR_ENGINE_MS = 15_000;
  * 3. Its files, wherever they are kept, and on the web its apps' linked files (the paths and folders they were given;
  *    the Desktop's go with its files).
  * 4. Its push subscription ends at the push service, so contacts who kept it can no longer wake this app.
- *    On the web and Desktop, what the contacts' apps it opened kept on their own origins goes too (`forgetServices`);
- *    in the extension, Chrome's access to each local host it shared an app at, unless another profile shares one there.
+ *    On the web, Desktop and the extension, what the contacts' apps it opened kept on their own origins goes too
+ *    (`forgetServices`); in the extension, Chrome's access to each local host it shared an app at, unless another
+ *    profile shares one there.
  * 5. Its device state (WISP 06): the device record, Desktop's copy of it, and this device's signing key for the profile.
  * 6. A host whose peer outlives the page starts a new one. The caller then reloads.
  *
@@ -51,7 +52,7 @@ async function clearProfile(profileId: string): Promise<void> {
   ]);
   clearTimeout(timer);
   if (!stopped) await clearProfileStores().catch(() => {});
-  const keysToRemove: string[] = [];
+  const keysToRemove: string[] = [], ownsKey = keyOwner();
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
     if (!key || key === registryKey()) continue;

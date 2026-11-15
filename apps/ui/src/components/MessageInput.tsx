@@ -7,6 +7,8 @@ import { VoiceRecorderButton } from "./voice/VoiceRecorderButton";
 import { canRecordVoice } from "../lib/voiceRecorder";
 import type { LinkPreview, TypingKind, VoiceMeta } from "@ghostly/core";
 import { useI18n } from "../contexts/I18nContext";
+import { NAME, withName } from "./apps/aroundName";
+import { isolate } from "../lib/ownStatus";
 import { useIsLocked } from "../contexts/LockScreenContext";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { ComposerMenu, type ComposerAction } from "./composer/ComposerMenu";
@@ -755,7 +757,7 @@ export function MessageInput({
         const err = await onSendFile(prepared.file).finally(done);
         // Said in the chat, or there when it is opened again: the chat may have been left meanwhile.
         if (err) { sayInChat(id, err); return false; }
-        if (prepared.asIs) sayInChat(id, t("composer.videoSentAsIs", { name: file.name }));
+        if (prepared.asIs) sayInChat(id, t("composer.videoSentAsIs", { name: isolate(file.name) }));
       }
       return true;
     } finally {
@@ -1071,10 +1073,11 @@ export function MessageInput({
     <div className="flex items-center gap-3 animate-fade-in">
       <p role="status" data-testid="file-preparing" className="m-0 flex min-w-0 items-center gap-2 text-[13px] text-text-secondary">
         <span aria-hidden="true" className="inline-block size-4 shrink-0 animate-spin rounded-full border-2 border-accent border-e-transparent motion-reduce:animate-none" />
+        {/* The file's name keeps its own direction in a line in the page's. */}
         <span className="min-w-0 truncate">
-          {shownProgress !== undefined
-            ? t("composer.videoConverting", { name: shown.name })
-            : t("composer.filePreparing", { name: shown.name })}
+          {withName(shownProgress !== undefined
+            ? t("composer.videoConverting", { name: NAME })
+            : t("composer.filePreparing", { name: NAME }), shown.name)}
         </span>
       </p>
       {/* Outside the status: a screen reader is told the conversion once, not each percent. */}
@@ -1194,7 +1197,8 @@ export function MessageInput({
           disabled={disabled || !text.trim()}
           className="composer-send w-11 h-11 max-md:w-12 max-md:h-12 flex items-center justify-center bg-accent rounded-full text-on-accent hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shrink-0"
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+          {/* Points where the message goes: to the left where the app reads right to left. */}
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" className="rtl:-scale-x-100">
             <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
           </svg>
         </button>}

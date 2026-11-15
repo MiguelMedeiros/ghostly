@@ -168,8 +168,11 @@ export interface PersistentIndexedDb {
   readonly recovered: boolean;
   /** Waits for writes that carried a Blob (read asynchronously) to reach the disk. */
   flush(): Promise<void>;
-  /** Folds the journal into a fresh snapshot. */
-  compact(): Promise<void>;
+  /**
+   * Folds the journal into a fresh snapshot. `scrub`: rows.db is written again whole first, so that nothing deleted is
+   * left in its pages (`TreeFile.scrub`).
+   */
+  compact(options?: { scrub?: boolean }): Promise<void>;
   /** Flushes, marks the journal closed (or folds it, once it is long), and stops writing: the process is about to leave. */
   close(): Promise<void>;
   /** Bytes of the journal now, for tests and `ghostly status`. */
@@ -366,12 +369,9 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
       pending.delete(this._rollbackLog);
       trees?.abort(this._rollbackLog);
     }
-    const dispatched = dispatch.call(this, event);
-    // fake-indexeddb keeps every transaction a database ever ran in its list (its scheduler only skips the finished
-    // ones), each with its requests, results and rollback log: a daemon's heap grew by about 100 KB a message, without
-    // end. Nothing looks for a finished one there again, so it goes once its last event is out (`dropEnded`).
-    if ((event.type === "complete" || event.type === "abort") && this._state === "finished") dropEnded(this.db._rawDatabase, this);
-    return dispatched;
+    // A finished transaction leaves its database's list by fake-indexeddb itself (6.2.7 on): kept, each held its
+    // requests, results and rollback log, and a daemon's heap grew by about 100 KB a message (storage.test.ts).
+    return dispatch.call(this, event);
   };
   const deleteDatabase = factory.deleteDatabase.bind(factory);
   factory.deleteDatabase = (name: string) => {
@@ -495,7 +495,7 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
    * `sync`: "now", synced before this returns; "shared", synced by the caller through `shareSync`; "lazy", a relaxed
    * transaction's entry. A sync blocks the whole process for milliseconds, and what such a transaction wrote can be
    * made again (the event set's note of a message it already reported): written, it outlives the process; a power cut
-   * may take its last second.
+   * may take its last second. Its sync, a second later, runs off the thread as a shared one does.
    */
   function writeEntry(entry: Buffer, sync: "now" | "shared" | "lazy" = "now"): boolean {
     const lazy = sync === "lazy";
@@ -515,7 +515,9 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
       if (journalFd !== null && whole >= 0) try { ftruncateSync(journalFd, whole); } catch { /* the snapshot at close makes it whole */ }
       throw error;
     }
-    if (lazy) relaxed ??= setTimeout(() => { try { syncNow(); } catch (error) { failed(error); } }, RELAXED_SYNC_MS).unref();
+    // Off the thread too: synced in place, the second's relaxed entries held the whole daemon for as long as a busy
+    // disk took to take them, 1 to 2 s at a time while a file came in, and texts, one-shots and the links waited.
+    if (lazy) relaxed ??= setTimeout(() => { relaxed = null; shareSync(() => {}); }, RELAXED_SYNC_MS).unref();
     holdsRatchet ||= entry.includes(RATCHET);
     if (statSync(journalPath).size > COMPACT_BYTES || ratchetDue() || deleteDue()) void enqueue(writeSnapshot);
     return true;
@@ -562,10 +564,10 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     while (syncing) await syncing;
   }
 
-  async function writeSnapshot() {
+  async function writeSnapshot(scrub = false) {
     const dirty = schemaDirty;
     schemaDirty = false;
-    try { await snapshotToDisk(); } catch (error) {
+    try { await snapshotToDisk(scrub); } catch (error) {
       schemaDirty ||= dirty;
       throw error;
     }
@@ -672,7 +674,7 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     } finally { reader?.db.close(); }
   }
 
-  async function snapshotToDisk() {
+  async function snapshotToDisk(scrub = false) {
     // The journal is closed and removed below: not while a sync runs on it.
     await synced();
     const name = randomBytes(8).toString("hex");
@@ -682,6 +684,7 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
       // also one whose entry waits behind this snapshot in the queue (the snapshot may hold what it did elsewhere). Its
       // entry, written after, is then one SQLite holds, which a replay skips.
       trees.apply(seq);
+      if (scrub) trees.scrub();
       trees.sync();
     }
     const temporary = snapshotPath + ".tmp";
@@ -741,12 +744,12 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     factory,
     recovered: !replayed.closed,
     flush: () => queue,
-    async compact() {
+    async compact(options) {
       // After the transactions running now: the fold is whole.
       await settled();
       // The caller reads the snapshot next (a backup): a fold that failed is its failure, not a line on stderr.
       let thrown: { error: unknown } | null = null;
-      await enqueue(() => writeSnapshot().catch((error: unknown) => { thrown = { error }; throw error; }));
+      await enqueue(() => writeSnapshot(options?.scrub).catch((error: unknown) => { thrown = { error }; throw error; }));
       if (thrown) throw (thrown as { error: unknown }).error;
     },
     async close() {
@@ -992,23 +995,6 @@ function readWithoutCopy(classes: RawClasses) {
     }
     return values;
   };
-}
-
-/** Transactions whose last event is out, by database, and dropped from its list at the next turn: all at once. */
-const ended = new WeakMap<object, Set<unknown>>();
-
-/** A finished transaction's place in its database's list, given back: one walk of the list for all that ended in a turn. */
-function dropEnded(db: { transactions: unknown[] }, transaction: unknown) {
-  let gone = ended.get(db);
-  if (gone) { gone.add(transaction); return; }
-  ended.set(db, (gone = new Set([transaction])));
-  setImmediate(() => {
-    ended.delete(db);
-    const list = db.transactions;
-    let kept = 0;
-    for (const held of list) if (!gone.has(held)) list[kept++] = held;
-    list.length = kept;
-  });
 }
 
 /** The classes whose scheduler starts every transaction it can in one pass: shared by every store opened. */

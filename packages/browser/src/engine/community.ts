@@ -3,7 +3,7 @@ import {
   beaconKeys, beaconRecords, createIdentity, decodeCommunityLink, doorHubs, groupName, entryParams, publicKeyFromZ32, encodeCommunityLink, freshHubs, identityFromSeedB64, knockIdentity, knockRecords, lobbyKeys, lobbyRecords, mergeBeacon, newerHead, readBeaconHead, type CommunityHead,
   mentionsMember, receivedTimestamp, mergeKnocks, mergeLobby, pickHubs, rankHubs, readBeacon, readKnocks, readLobby, rosterHas, routedCommunityFrame, shouldBeHub,
   GROUP_HAVE_FRAME, WATCH_PEER_MS, COMMUNITY_PIN_FRAME,
-  type CommunityFrame, type CommunityLeaveFrame, type CommunityMessageFrame, type GroupEdit, type GroupFileMeta, type GroupMention, type WireReply, type StatusCard, type CommunityState, type GroupEntryLink, type GroupMetaChange, type Hub, type Knock, type Roster,
+  type CommunityFrame, type CommunityLeaveFrame, type CommunityMessageFrame, type GroupEdit, type GroupFileMeta, type GroupMention, type WireReply, type StatusCard, type CommunityState, type GroupEntryLink, type GroupMeta, type GroupMetaChange, type Hub, type Knock, type Roster,
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import { groupReply } from "../shared/replies";
@@ -504,6 +504,11 @@ export class Communities {
     if (!session?.isMember) return undefined;
     return { me: session.myKey, community: true, inRoster: key => rosterHas(session.roster, key), couldRead: (key, messageId) => session.couldRead(key, messageId) };
   }
+  /** Me in a community I am a member of, for its call (WISP 602): my member key, its seed, and the admin's metadata. */
+  callMember(groupId: string): { key: string; seedB64: string; meta?: GroupMeta } | undefined {
+    const session = this.live.get(groupId)?.session;
+    return session?.isMember ? { key: session.myKey, seedB64: session.state.seedB64, meta: session.state.meta } : undefined;
+  }
   /** Is this device a hub of the group? (tests and the load harness) */
   isHub(groupId: string): boolean { const live = this.live.get(groupId); return !!live?.hub && live.session.status === "active"; }
 
@@ -570,7 +575,7 @@ export class Communities {
     const former = Object.entries(s.state.nicks).filter(([key]) => !inRoster.has(key));
     return [{ ...base, name: s.name, ...(former.length ? { formerNames: Object.fromEntries(former) } : {}), status: s.status, statusReason: s.state.statusReason, epoch: s.epoch, myKey: s.myKey, isAdmin: s.isAdmin,
       ...(s.isMember && s.entryKey ? { entryLink: encodeCommunityLink({ g: s.id, host: s.entryKey }) } : {}),
-      canSend: s.canSend, ...(s.picture ? { picture: s.picture } : {}), ...(invitation ? { invitation } : {}),
+      canSend: s.canSend, ...(s.picture ? { picture: s.picture } : {}), ...(invitation ? { invitation } : {}), ...(s.call ? { call: s.call } : {}),
       // Not an edge to one whose leave I hold, which its app keeps a while after it left (`leftBehind`): it carries nothing.
       community: { hub: live.hub, hubs: hubs.length, connected: [...edges.keys()].filter(key => ready(key) && !this.gone(live, key)).length, ...(s.isAdmin && live.unansweredTold && { unansweredKnocks: live.unanswered!.size }) },
       members: roster.map(([key, role]) => ({ key, role, me: key === s.myKey,
@@ -951,6 +956,7 @@ export class Communities {
   // message dated after it.
   async setPicture(groupId: string, picture: string | null): Promise<void> { await this.require(groupId).setPicture(picture, this.now()); }
   async rename(groupId: string, name: string): Promise<void> { await this.require(groupId).rename(name, this.now()); }
+  async setCall(groupId: string, sfu: string | null, e2ee?: boolean): Promise<void> { await this.require(groupId).setCall(sfu, e2ee, this.now()); }
   /** A new link (the old one reaches nobody), or none. */
   async replaceLink(groupId: string, off = false): Promise<string> {
     const s = this.require(groupId);
@@ -1022,6 +1028,18 @@ export class Communities {
     this.lineOrder.tick(now);
     const active = [...this.live.values()].filter(l => l.session.status === "active");
     this.sharing = { groups: Math.max(1, active.length), hubs: Math.max(1, active.filter(l => l.hub).length) };
+    // Whether this app relays for the others is on the group's view ("your app relays for others"): a state names each
+    // group where it stepped up or down in this tick, as the engine builds a group's view again only for one that does.
+    const wasHub = new Map([...this.live].map(([id, l]) => [id, l.hub]));
+    try { await this.tickGroups(now); } finally {
+      for (const [id, l] of this.live) if (wasHub.has(id) && wasHub.get(id) !== l.hub) this.host.emit(undefined, id);
+    }
+    for (const [key, until] of this.refused) if (until <= now) this.refused.delete(key);
+    for (const groupId of [...this.leftBehind.keys()]) await this.leftMoved(groupId, now);
+  }
+
+  /** `tick`'s turn through each group: its knocks while it joins, a lost race or a removal, and its topology. */
+  private async tickGroups(now: number): Promise<void> {
     for (const group of [...this.stored.values()]) {
       const live = this.live.get(group.id);
       if (group.joining?.check && live && live.session.status !== "active" && await this.checkTurnedKnock(group, live.session, now)) continue;
@@ -1071,8 +1089,6 @@ export class Communities {
       }
       await this.topology(group.id, live, now).catch(() => {});
     }
-    for (const [key, until] of this.refused) if (until <= now) this.refused.delete(key);
-    for (const groupId of [...this.leftBehind.keys()]) await this.leftMoved(groupId, now);
   }
 
   private async topology(groupId: string, live: Live, now: number): Promise<void> {
@@ -1359,8 +1375,9 @@ export class Communities {
     }
     // A text of mine an app killed mid-send saved but did not store or say (WISP 903 § Messages).
     await s.resume().catch(() => {});
-    // An answer over leaves the gaps it did not fill gone: the members view stops counting them (nothing else changed).
-    if (s.settleGaps()) this.host.emit();
+    // An answer over leaves the gaps it did not fill gone: this group's members view stops counting them (nothing else
+    // changed), so the state names this group alone and keeps every other group's view.
+    if (s.settleGaps()) this.host.emit(undefined, groupId);
     // Something I said with no edge up may be sealed under a commit I took for the newest: said again once caught up.
     await s.reseal().catch(() => {});
     await this.reconcile(groupId, live, now);
@@ -2428,6 +2445,8 @@ export class Communities {
         const came = m.sender === session.myKey ? timestamp : cameAt(timestamp, stored, arrivalNow(this.now()));
         markCame(this.marks, id, m.id, came, m.sender !== session.myKey, mentioned);
         noteCame(this.stored.get(id), came, m.sender !== session.myKey, mentioned);
+        // A new row's marks (the list's order, unread) moved after its state was asked for: this group's view, named again.
+        if (stored !== false) this.host.emit(undefined, id);
         // On its row now. A copy I had already changes no row: the state keeps its frame.
         return stored !== false;
       },

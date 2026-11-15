@@ -13,6 +13,7 @@ import { useAmountText } from "../../hooks/useAmountText";
 import { problemText, type Problem } from "../../lib/problemText";
 import { Notice } from "../ui/Notice";
 import { shownUrl } from "../../lib/parse/links";
+import { FocusSafeButton } from "../ui/FocusSafeButton";
 
 interface Quote { quote: string; mint: string; amount: number; feeReserve: number; source?: string }
 interface Invoice { invoice: string; note: string; successAction?: { tag: "message" | "url"; message?: string; description?: string; url?: string } }
@@ -114,7 +115,7 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
         {confirming && over === undefined ? <ConfirmRealMoney what={t("wallet.lightning.confirmWhat", { amount: formatAmount(quote.amount, t.language), unit, fee: formatAmount(quote.feeReserve, t.language), feeUnit: satsIn(t, real ? "mainnet" : "testnet", quote.feeReserve) })} busy={busy} onSend={() => pay(true)} onBack={() => setConfirming(false)} /> : (
           <div className="flex flex-wrap gap-2">
             <button type="button" className={primary} disabled={over !== undefined} {...working} data-testid="lnurl-pay" onClick={() => real ? setConfirming(true) : pay(false)}>{busy ? t("wallet.lightning.paying") : t("wallet.lightning.pay")}</button>
-            <button type="button" className={quiet} disabled={busy} onClick={() => { setError(null); setQuote(null); setInvoice(null); }}>{t("common.cancel")}</button>
+            <FocusSafeButton type="button" className={quiet} disabled={busy} onClick={() => { setError(null); setQuote(null); setInvoice(null); }}>{t("common.cancel")}</FocusSafeButton>
           </div>
         )}
         {error && <Notice problem={error} testId="lnurl-error" className={`${dense ? "text-[11px]" : "text-xs"} m-0`} />}
@@ -166,12 +167,12 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
       {/* The line's dim is its text's only: Max keeps full-strength ink and the panel's phone-sized target. */}
       {holds !== undefined && <p className={`${dense ? "text-[11px]" : "text-xs"} m-0 flex flex-wrap items-center gap-2`} data-testid="lnurl-balance">
         <span className="opacity-70">{t("wallet.send.balance", { amount: formatAmount(holds, t.language), unit })}</span>
-        {!fixed && max !== undefined && max >= info.minSat && <button type="button" className="min-h-6 max-md:min-h-11 rounded-md px-2.5 py-1 font-bold bg-black/20 hover:bg-black/30 cursor-pointer disabled:opacity-40" disabled={busy} data-testid="lnurl-max" onClick={() => { maxed.current = true; setAmount(String(max)); }}>{t("wallet.send.max")}</button>}
+        {!fixed && max !== undefined && max >= info.minSat && <FocusSafeButton type="button" className="min-h-6 max-md:min-h-11 rounded-md px-2.5 py-1 font-bold bg-black/20 hover:bg-black/30 cursor-pointer disabled:opacity-40" disabled={busy} data-testid="lnurl-max" onClick={() => { maxed.current = true; setAmount(String(max)); }}>{t("wallet.send.max")}</FocusSafeButton>}
       </p>}
       {info.commentAllowed > 0 && <input data-testid="lnurl-comment" className={field} placeholder={t("wallet.lightning.commentFor", { to: info.text })} maxLength={info.commentAllowed} value={comment} onChange={(e) => setComment(e.target.value)} {...composition.inputProps} onKeyDown={onEnter} />}
       <div className="flex flex-wrap gap-2">
         <button type="button" className={primary} disabled={!Number(amount)} {...working} data-testid="lnurl-invoice" onClick={getInvoice}>{busy ? t("wallet.lightning.askingInvoice") : t("wallet.lightning.getInvoice")}</button>
-        <button type="button" className={quiet} disabled={busy} onClick={() => { setError(null); setInfo(null); setAmount(""); setComment(""); }}>{t("common.back")}</button>
+        <FocusSafeButton type="button" className={quiet} disabled={busy} onClick={() => { setError(null); setInfo(null); setAmount(""); setComment(""); }}>{t("common.back")}</FocusSafeButton>
       </div>
       {error && <Notice problem={error} testId="lnurl-error" className={`${dense ? "text-[11px]" : "text-xs"} m-0`} />}
     </div>

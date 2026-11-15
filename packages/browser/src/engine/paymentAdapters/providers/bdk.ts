@@ -1,5 +1,5 @@
 import { sha256 } from "@noble/hashes/sha2.js";
-import { mnemonicToSeedSync, validateMnemonic } from "@scure/bip39";
+import { mnemonicToSeedWebcrypto, validateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import type { ChangeSet, Network, Transaction, Wallet } from "@bitcoindevkit/bdk-wallet-web";
 import { isBitcoinAddress } from "@ghostly/core";
@@ -254,7 +254,9 @@ export class BdkOnchain implements OnchainProvider {
     const chain = CHAIN[config.network];
     let pair: ReturnType<Bdk["seed_to_descriptor"]>, wallet: Wallet, publicDescriptor: string;
     try {
-      pair = bdk.seed_to_descriptor(mnemonicToSeedSync(mnemonic), chain, SCRIPT[config.script].type);
+      // The seed's 2,048 rounds of PBKDF2 go to the browser's own (WebCrypto), off the page's thread: in script they held
+      // it at each open (every start and reconnect of a saved wallet), about 35 ms on a desktop CPU.
+      pair = bdk.seed_to_descriptor(await mnemonicToSeedWebcrypto(mnemonic), chain, SCRIPT[config.script].type);
       wallet = bdk.Wallet.create(chain, pair.external, pair.internal);
       publicDescriptor = wallet.public_descriptor("external");
     } catch (error) { throw new SourceConfigError(`bad descriptor: the recovery phrase does not make a ${SCRIPT[config.script].label} wallet (${message(error)})`, error); }

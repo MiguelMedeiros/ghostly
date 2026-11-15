@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { configure, screen, waitFor } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
@@ -206,13 +207,52 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     await user.type(screen.getByTestId("device-add-password"), "a long password");
     await user.click(screen.getByTestId("device-add-next"));
     await user.dblClick(await screen.findByTestId("device-add-match", {}, { timeout: 3_000 }));
-    expect(screen.getByTestId("device-add-match")).toBeDisabled();
+    // The one pressed keeps the focus, so it is off by aria-disabled; the other is plain disabled.
+    expect(screen.getByTestId("device-add-match")).toHaveAttribute("aria-disabled", "true");
     expect(screen.getByTestId("device-add-no-match")).toBeDisabled();
     await user.click(screen.getByTestId("device-add-no-match"));
     expect(engine.callsTo("deviceEnrollConfirm")).toEqual([{ match: true }]);
     answer({ role: "inviter", step: "adding", device: "Phone" });
     expect(await screen.findByTestId("device-add-adding")).toHaveTextContent("Phone");
     expect(screen.queryByTestId("device-add-error")).toBeNull();
+  }, 20_000);
+
+  it("from They match until it is added or failed, Escape and the × do nothing: closing would cancel a grant that went out", async () => {
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: await hashPassword("a long password"), timeoutMinutes: 5 } }));
+    // Hosted as Settings does: closing unmounts it, which cancels an enrollment that did not end.
+    function Host() {
+      const [open, setOpen] = useState(true);
+      return open ? <AddDeviceDialog onClose={() => setOpen(false)} /> : null;
+    }
+    const { user, engine } = renderApp(<Host />);
+    engine.on("deviceEnrollInvite", () => waiting);
+    engine.on("deviceHandoffVerifier", () => undefined);
+    engine.on("deviceEnrollCancel", () => undefined);
+    let view: EnrollView = { role: "inviter", step: "confirm", digits: "482913", device: "Phone", kind: "web" };
+    engine.on("deviceEnrollView", () => view);
+    let answer!: (view: EnrollView) => void;
+    engine.on("deviceEnrollConfirm", () => new Promise<EnrollView>((resolve) => { answer = resolve; }));
+    await user.type(screen.getByTestId("device-add-password"), "a long password");
+    await user.click(screen.getByTestId("device-add-next"));
+    await user.click(await screen.findByTestId("device-add-match", {}, { timeout: 3_000 }));
+    const closeAll = async () => {
+      screen.getByTestId("device-add").dispatchEvent(new Event("cancel", { cancelable: true }));
+      await user.click(screen.getByRole("button", { name: "Close" }));
+    };
+    // They match pressed, the engine not answered yet: the grant may be going out.
+    await closeAll();
+    expect(screen.getByTestId("device-add")).toBeInTheDocument();
+    view = { role: "inviter", step: "adding", device: "Phone" };
+    answer(view);
+    await screen.findByTestId("device-add-adding");
+    await closeAll();
+    expect(screen.getByTestId("device-add")).toBeInTheDocument();
+    expect(engine.callsTo("deviceEnrollCancel")).toEqual([]);
+    view = { role: "inviter", step: "done", device: "Phone", published: true };
+    await screen.findByTestId("device-add-done", {}, { timeout: 3_000 });
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByTestId("device-add")).toBeNull());
+    expect(engine.callsTo("deviceEnrollCancel")).toEqual([]);
   }, 20_000);
 
   it("says a device is connecting once one read the code, and Try again after a failure makes a new code", async () => {

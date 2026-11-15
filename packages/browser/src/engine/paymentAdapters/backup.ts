@@ -8,10 +8,11 @@ interface SnapshotStore {
 export interface ArkDatabaseSnapshot {version:number;stores:SnapshotStore[]}
 /**
  * Wallet database versions a backup may carry. 3 is what SDK 0.4.74-0.4.76 made (Ghostly 1.1.3 and earlier);
- * 4 is SDK 0.4.78's, which adds the vtxos `scriptUnspent` index. An older one is restored at its own version
- * and the SDK upgrades it the first time the wallet opens. arkBackupSchema.test.ts fails when the SDK moves on.
+ * 4 is SDK 0.4.78's, which adds the vtxos `scriptUnspent` index; 6 is SDK 0.5's, which adds the contracts' watch
+ * indexes (no Ghostly made a 5). An older one is restored at its own version and the SDK upgrades it the first
+ * time the wallet opens. arkBackupSchema.test.ts fails when the SDK moves on.
  */
-export const ARK_DB_VERSIONS:readonly number[]=[3,4];
+export const ARK_DB_VERSIONS:readonly number[]=[3,4,6];
 const allowed=new Set(['vtxos','utxos','transactions','walletState','contracts','contractsCollections','intents','virtualTxs','vtxoBranches']);
 export const encodeBackup=(value:unknown)=>JSON.stringify(value,(_key,v)=>typeof v==='bigint'?{$ghostly:'bigint',value:String(v)}:v instanceof Uint8Array?{$ghostly:'bytes',value:Array.from(v)}:v);
 export const decodeBackup=(text:string):unknown=>JSON.parse(text,(_key,v)=>v?.$ghostly==='bigint'?BigInt(v.value):v?.$ghostly==='bytes'?new Uint8Array(v.value):v);
@@ -33,7 +34,8 @@ export async function snapshotArkDatabase(walletId:string):Promise<ArkDatabaseSn
 /** Only imports into a freshly allocated database; never replaces an existing wallet. */
 export async function restoreArkDatabase(walletId:string,snapshot:ArkDatabaseSnapshot):Promise<void>{
  if(!ARK_DB_VERSIONS.includes(snapshot.version) || !Array.isArray(snapshot.stores) || snapshot.stores.length>allowed.size || new Set(snapshot.stores.map(s=>s.name)).size!==snapshot.stores.length || snapshot.stores.some(s=>!allowed.has(s.name) || !Array.isArray(s.values) || !Array.isArray(s.keys) || s.values.length!==s.keys.length))throw new Error('Unsupported Ark backup schema');
- for(const name of ['vtxos','utxos','transactions','walletState','contracts','contractsCollections'])if(!snapshot.stores.some(s=>s.name===name))throw new Error('Incomplete Ark database backup');
+ // SDK 0.5 (version 6) no longer makes the legacy `contractsCollections` store; one it upgraded keeps it.
+ for(const name of ['vtxos','utxos','transactions','walletState','contracts',...snapshot.version<6?['contractsCollections']:[]])if(!snapshot.stores.some(s=>s.name===name))throw new Error('Incomplete Ark database backup');
  const request=indexedDB.open(`ghostly-ark-${walletId}`,snapshot.version);
  let created=false;
  request.onupgradeneeded=event=>{

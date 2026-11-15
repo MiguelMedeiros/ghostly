@@ -35,8 +35,42 @@ env:
   # GitHub's ubuntu-24.04 runners refuse the unprivileged user namespaces Chromium's sandbox needs ("Chromium sandboxing
   # failed!"): the e2e and site checks launch it without here, as before; our own machines keep it on (e2e/support/chromiumSandbox.ts).
   E2E_CHROMIUM_SANDBOX: "0"
+  # The flaky tests out of the gate (@quarantine; docs/TESTING.md, "Quarantine") run here, every night.
+  GHOSTLY_QUARANTINE: "1"
 
 jobs:
+  quarantined-unit:
+    name: Quarantined unit tests
+    if: ${{ inputs.jobs != 'desktop' && inputs.jobs != 'matrix' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'schedule' && 'dev' || github.ref }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Each quarantine's issue still open and kind:flake (with a token that can read the issues), and its dates.
+      - name: Quarantines in date, with their issues
+        env:
+          GHOSTLY_FLAKE_TOKEN: ${{ secrets.GHOSTLY_FLAKE_TOKEN }}
+        run: node tools/scripts/quarantine.mjs
+
+      - name: The files in tools/scripts/quarantine.json
+        if: ${{ !cancelled() }}
+        run: node tools/scripts/quarantine.mjs --run
+
   e2e-full:
     name: End-to-end, gated suites included
     # Not when only the Desktop jobs or the matrix were asked for (a scheduled run has no inputs: everything).

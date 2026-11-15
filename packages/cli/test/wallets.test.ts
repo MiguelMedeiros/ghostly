@@ -49,6 +49,8 @@ function fake() {
     walletCreate: vi.fn(async (p: { type: string; network: string }) => ({ id: `${p.type}:${p.network}`, type: p.type, network: p.network, config: {} })),
     walletRemove: vi.fn(async (_: unknown): Promise<void> => { throw new Error("This wallet still holds 42 sats on this device"); }),
     walletTestCoins: vi.fn(async () => ({ amount: 10000, unit: "test sats" })),
+    // As the engine reads the store: the newest `limit` of a long history (here, 1,000 movements).
+    walletHistory: vi.fn(async ({ limit }: { network: string; limit: number }) => Array.from({ length: Math.min(limit, 1_000) }, (_, i) => (i ? { id: `tx-${i}` } : { id: "h" }))),
     walletQuoteInvoice: vi.fn(async () => ({ quote: "q", mint: "m", amount: 10, feeReserve: 3 })),
     walletPayQuote: vi.fn(async (_: unknown) => ({ paid: true })),
     sendPayment: vi.fn(async (_: { timestamp: number }) => ({ paymentId: "p1" })),
@@ -167,6 +169,20 @@ describe("wallets", () => {
     expect(node.setChatPaymentMethods.mock.calls.at(-1)![0]).toEqual({ linkId: "chat-one", methods: { cashu: true }, networks: { cashu: ["testnet"] } });
   });
 
+  it("chat.accept with a method and no on turns it on, as `chat accept <chat> <method>` does; only on: false turns it off", async () => {
+    // Found in a bug hunt: over the socket a missing `on` read as false and the chat silently stopped taking the method.
+    const { ctx, node } = fake();
+    await callApi(ctx, "chat.accept", { chat: "Alice", method: "cashu" });
+    expect(node.setChatPaymentMethods.mock.calls.at(-1)![0]).toEqual({ linkId: "chat-one", methods: { cashu: true } });
+    await callApi(ctx, "chat.accept", { chat: "Alice", method: "cashu", networks: ["testnet"] });
+    expect(node.setChatPaymentMethods.mock.calls.at(-1)![0]).toEqual({ linkId: "chat-one", methods: { cashu: true }, networks: { cashu: ["testnet"] } });
+    await callApi(ctx, "chat.accept", { chat: "Alice", method: "cashu", on: false });
+    expect(node.setChatPaymentMethods.mock.calls.at(-1)![0]).toEqual({ linkId: "chat-one", methods: { cashu: false } });
+    // An `on` that is no boolean is refused, never read as on.
+    await expect(callApi(ctx, "chat.accept", { chat: "Alice", method: "cashu", on: "false" })).rejects.toMatchObject({ code: "bad_request" });
+    expect(node.setChatPaymentMethods).toHaveBeenCalledTimes(3);
+  });
+
   it("chat.accept with no method answers what the chat takes now and changes nothing", async () => {
     // Found in a bug hunt: no command showed which ways of paying a chat takes; `chat accept bob` was a usage error.
     const { ctx, node } = fake();
@@ -199,6 +215,24 @@ describe("wallets", () => {
     expect(await callApi(ctx, "wallet.remove", { type: "lightning", card: "cashu" })).toEqual({ removed: { type: "lightning", network: "testnet", card: "cashu" } });
     expect(node.walletRemove.mock.calls.at(-1)![0]).toMatchObject({ type: "lightning", card: "cashu" });
     expect(await callApi(ctx, "wallet.faucet", { type: "lightning", card: "cashu" })).toEqual({ amount: 10000, unit: "test sats" });
+  });
+
+  it("an empty --card is a usage error, not the network's default card or the whole wallet", async () => {
+    // Found in a bug hunt: `wallet remove cashu --card "$CARD"` with CARD unset removed the whole Cashu wallet (exit 0),
+    // and `pay … --card ""` paid from the default card, as if no card had been named.
+    const { ctx, node } = fake();
+    for (const [method, params] of [
+      ["wallet.remove", { type: "cashu", card: "" }],
+      ["wallet.remove", { type: "lightning", card: "" }],
+      ["wallet.faucet", { type: "lightning", card: "" }],
+      ["wallet.receive", { amount: 10, card: "" }],
+      ["pay", { target: "lnbc1", card: "" }],
+      ["chat.request", { chat: "Alice", amount: 10, card: "" }],
+      ["chat.payRequest", { chat: "Alice", payment: "test", card: "" }],
+    ] as const) {
+      await expect(callApi(ctx, method, params), method).rejects.toMatchObject({ code: "usage", message: "--card needs a Lightning card id (ghostly wallet list)" });
+    }
+    for (const fn of [node.walletRemove, node.walletTestCoins, node.walletReceiveLightning, node.walletQuoteInvoice, node.requestPayment, node.payRequest]) expect(fn).not.toHaveBeenCalled();
   });
 
   it("the faucet is Testnet's only", async () => {
@@ -266,8 +300,11 @@ describe("wallets", () => {
       [() => {}, "payment.check", { chat: "Alice", payment: "sent" }, "bad_request", /^"sent" is a payment you sent: payment check is for a request the contact made of you$/],
       [() => {}, "payment.check", { chat: "Alice", payment: "asked" }, "bad_request", /^"asked" is your own request: /],
       [() => node.payRequest.mockRejectedValueOnce(new Error("This request is no longer open")), "chat.payRequest", { chat: "Alice", payment: "test" }, "refused"],
+      [() => {}, "chat.payRequest", { chat: "Alice", payment: "asked" }, "bad_request", /^"asked" is your own request: the contact pays it$/],
       [() => node.walletPayQuote.mockRejectedValueOnce(new Error("This invoice is already paid")), "pay", { target: "lntbs10u1pxyz" }, "refused"],
       [() => node.sendPayment.mockRejectedValueOnce(unsettled), "chat.pay", { chat: "Alice", amount: 3 }, "unavailable", /^testnut\.cashu\.space has not answered yet\. The payment was not made\./],
+      // As the engine's payment desk throws it: its NoEcashError, a plain Error that says so with `unsettled`.
+      [() => node.sendPayment.mockRejectedValueOnce(Object.assign(new Error(unsettled.message), { unsettled: true })), "chat.pay", { chat: "Alice", amount: 3 }, "unavailable", /^testnut\.cashu\.space has not answered yet\./],
     ];
     const answered = [], wanted = [];
     for (const [arrange, method, params, code, message] of cases) {
@@ -378,6 +415,16 @@ describe("wallets", () => {
     const { ctx } = fake();
     await expect(callApi(ctx, "wallet.history", { limit: 1.5 })).rejects.toMatchObject({ code: "bad_request", message: "limit must be a whole number from 1 to 10000" });
     expect(await callApi(ctx, "wallet.history", { limit: 1 })).toEqual({ network: "testnet", history: [{ id: "h" }] });
+  });
+
+  it("history answers as many entries as --limit asks, past the wallet view's newest 100", async () => {
+    // Found in a performance hunt: --limit 500 sliced the view's 100 movements and printed 100, saying nothing.
+    const { ctx, node } = fake();
+    const answer = await callApi(ctx, "wallet.history", { limit: 500 }) as { network: string; history: { id: string }[] };
+    expect(node.walletHistory).toHaveBeenCalledWith({ network: "testnet", limit: 500 });
+    expect(answer.network).toBe("testnet");
+    expect(answer.history).toHaveLength(500);
+    expect(answer.history[499]).toEqual({ id: "tx-499" });
   });
 
   it("chat request --method usdt reads the amount in USDT, as the app's composer does, and answers the amount asked", async () => {

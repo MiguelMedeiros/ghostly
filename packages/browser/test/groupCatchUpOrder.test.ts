@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CommunityWorld, type Peer } from "./communityWorld";
 import { MESH_SYNC_HOLD_MS } from "../src/engine/groups";
+vi.mock("../../core/src/identity", async importOriginal => (await import("../../core/test/support/verifyOnce")).verifyOnce(await importOriginal()));
 // covers: groups.catch-up
 
 /**

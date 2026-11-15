@@ -54,6 +54,9 @@ describe("the site's invite reader agrees with the app's", () => {
     }
     expect(checkInvite(`${inviteCode}).`)).toEqual({ ok: true, code: inviteCode });
     expect(checkInvite(`${typo}.`)).toEqual({ ok: false, reason: "typo" });
+    // A `/` the link ends with (typed, or added by a chat app's linkifier) is not the code's, in both.
+    for (const code of [inviteCode, inviteCode.toUpperCase(), typo]) for (const tail of ["/", "//", "/.", "/)."]) same(`${code}${tail}`);
+    expect(checkInvite(`${inviteCode}/`)).toEqual({ ok: true, code: inviteCode });
     // Not a sentence's mark: still read as part of the code, in both.
     for (const tail of ["?utm_source=x", "&ref=x", "x"]) same(`${inviteCode}${tail}`);
   });

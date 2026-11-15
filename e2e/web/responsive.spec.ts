@@ -443,6 +443,37 @@ test("a wallet's tabs read whole on a phone in every language, the icon above th
   await expect(page.getByTestId("wallet-history")).toHaveAccessibleName("السجل");
 });
 
+test("at a larger text size on a phone, a wallet's tabs and its invoice button read whole in every language", { tag: ["@feature:app.responsive", "@feature:app.i18n", "@feature:app.accessibility", "@feature:wallet.history"] }, async ({ peer }) => {
+  const alice = await peer("alice", { mobile: true, viewport: { width: 375, height: 667 } });
+  const { page } = alice;
+  await page.goto("/#/wallet");
+  await createWallet(alice, "cashu", "testnet");
+  // 150 % of the browser's text size, as its settings set it (rem follows it).
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Page.setFontSizes", { fontSizes: { standard: 24, fixed: 20 } });
+  await expect.poll(() => page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize))).toBe(24);
+  const problems: string[] = [];
+  for (const language of ["en", "pt", "es", "fr", "it", "ja", "zh", "ar"]) {
+    await page.goto("/#/settings/appearance");
+    await choose(page.getByTestId("settings-language"), language);
+    await page.goto("/#/wallet");
+    await openWallet(alice, "cashu-testnet");
+    await expect(page.getByTestId("wallet-history")).toBeVisible();
+    problems.push(...(await walletTabs(page)).problems.map((problem) => `${language}: ${problem}`));
+    // "Créer une facture Lightning": its words inside the button, on as many lines as they need.
+    const invoice = page.getByTestId("wallet-create-invoice");
+    await invoice.scrollIntoViewIfNeeded();
+    const out = await invoice.evaluate((button) => {
+      const range = document.createRange();
+      range.selectNodeContents(button);
+      const ink = range.getBoundingClientRect(), box = button.getBoundingClientRect();
+      return ink.left < box.left - 1 || ink.right > box.right + 1 ? `"${button.textContent}" runs out of its button: ${Math.round(ink.width)} > ${Math.round(box.width)}` : "";
+    });
+    if (out) problems.push(`${language}: ${out}`);
+  }
+  expect(problems, "every label whole at 375px and 150 % text").toEqual([]);
+});
+
 /** Whether a control can be used where it is, without scrolling: in the window, and what a click there lands on. */
 const reachable = (page: Page, testId: string) => page.getByTestId(testId).evaluate((el) => {
   const r = el.getBoundingClientRect(), hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);

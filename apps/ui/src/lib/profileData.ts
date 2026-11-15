@@ -7,12 +7,13 @@ import { handoffProfileHost } from "@ghostly/browser/devices/handoffHost";
 import { dropFileSpace } from "@ghostly/browser/shared/fileBytes";
 import { dropBreezDatabasesOf } from "@ghostly/browser/engine/paymentAdapters/providers/breezDatabases";
 import { activeProfileId, chosenProfileId, forgetProfileHere, homeDatabaseOf, listProfiles, namespaceOf, prefixOf, registryKey, settingsKeyFor, unregisterProfile } from "./profiles";
-import { LEGACY_JOIN_PREFIX, ownsOriginalKey, retryUnsaved, unreadUnder } from "./storage";
+import { LEGACY_JOIN_PREFIX, originalKeyOwner, retryUnsaved, unreadUnder } from "./storage";
 import { clearPeek, peekFresh, storeKey as peekStoreKey } from "./profilePeek";
 import { lockRetryAt, tryLockPassword, waitMessage } from "./lockAttempts";
 import { pushPlatform } from "./wakePush";
 import { linkedFilesDatabase } from "./apps/webFiles";
 import { resetIncomingShare } from "./incomingShare";
+import { forgetGifSearchesOf } from "./gifSearch";
 
 /**
  * What deleting a profile would take away, read from its own storage without starting it. `wallets`: the kinds of
@@ -57,7 +58,9 @@ export async function profileSummary(id: string): Promise<ProfileSummary> {
   if (!db) return summary;
   try {
     const has = (name: string) => db.objectStoreNames.contains(name);
-    const tx = db.transaction(["proofs", "settings", "services"].filter(has), "readonly");
+    const tx = db.transaction(["proofs", "settings", "services", "groups"].filter(has), "readonly");
+    // Its groups are chats too, as the chat list shows them, and go with it.
+    if (has("groups")) summary.chats += await request(tx.objectStore("groups").count());
     if (has("proofs")) summary.cashuSats = (await request(tx.objectStore("proofs").getAll()) as { amount: number; reserved?: boolean }[]).reduce((sum, p) => sum + (p.reserved ? 0 : p.amount), 0);
     if (has("settings")) summary.wallets = walletsIn(await request(tx.objectStore("settings").getAllKeys()));
     if (has("services")) summary.services = (await request(tx.objectStore("services").count()));
@@ -308,19 +311,20 @@ export async function removeProfileHere(): Promise<void> {
   // The first profile running on a namespace a handoff installed: what a take left in its own namespace goes as well
   // (an earlier build's take dropped its database and kept its keys), since the profile starts there again, empty.
   const original = homeDatabaseOf(id) === "ghostly" ? "" : homeDatabaseOf(id).slice("ghostly_".length);
-  await dropProfile(id, (key) => keyOfSpace(ns, key) || (!id && keyOfSpace(original, key)));
+  const own = keysOfSpace(ns), originals = id ? null : keysOfSpace(original);
+  await dropProfile(id, (key) => own(key) || !!originals?.(key));
   forgetProfileHere(id);
   await releaseUnusedLocalAccessOf();
 }
 
 /**
- * Whether a local key is a namespace's own: `ghostly_<ns>_`, or for the first profile's original one (`ns` empty) the
- * keys without another profile's id or space after `ghostly_` (`ownsOriginalKey`) and the legacy join marks. Never the
- * registry, which the app needs to start at all.
+ * Which local keys are a namespace's own: `ghostly_<ns>_`, or for the first profile's original one (`ns` empty) the
+ * keys without another profile's id or space after `ghostly_` (`originalKeyOwner`) and the legacy join marks. Never the
+ * registry, which the app needs to start at all. For one pass over the keys (`keyOwner`).
  */
-export function keyOfSpace(ns: string, key: string): boolean {
-  if (key === registryKey()) return false;
-  return ns ? key.startsWith(`ghostly_${ns}_`) : ownsOriginalKey(key) || key.startsWith(LEGACY_JOIN_PREFIX);
+export function keysOfSpace(ns: string): (key: string) => boolean {
+  const registry = registryKey(), original = ns ? null : originalKeyOwner();
+  return (key) => key !== registry && (original ? original(key) || key.startsWith(LEGACY_JOIN_PREFIX) : key.startsWith(`ghostly_${ns}_`));
 }
 
 /**
@@ -352,7 +356,7 @@ async function dropProfile(id: string, owned: (key: string) => boolean): Promise
   retryUnsaved();
   // Its push subscription (WISP 401 § Wake-up push) ends with it: its worker goes, and contacts who kept it get 410.
   await pushPlatform()?.unsubscribe(id).catch(() => {});
-  // What the contacts' apps it opened kept on their own origins (the web app's).
+  // What the contacts' apps it opened kept on their own origins.
   await forgetServicesOf({ profile: id });
   // Each fork of it goes as "Discard this copy" takes it, with its linked files: no screen lists it once the record
   // is gone. Never a database a profile on the list runs on.
@@ -363,4 +367,6 @@ async function dropProfile(id: string, owned: (key: string) => boolean): Promise
   await forgetDevice(dbName).catch(() => {});
   // What another profile's peek saw of it (its contacts' keys, link and message ids), and its notice.
   clearPeek(id);
+  // Its GIF searches, which the tab's session keeps across a profile switch.
+  forgetGifSearchesOf(prefixOf(id));
 }

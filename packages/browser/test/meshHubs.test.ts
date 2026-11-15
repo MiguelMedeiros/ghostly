@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { MESH_HUBS, REACTION_LIMITS, beaconKeys, lobbyKeys, lobbyRecords, meshRendezvous, readBeacon, fromBase64Url, type GroupState } from "@ghostly/core";
 import { CommunityWorld, type Peer } from "./communityWorld";
+vi.mock("../../core/src/identity", async importOriginal => (await import("../../core/test/support/verifyOnce")).verifyOnce(await importOriginal()));
 // covers: groups.hubs, groups.hubs.budget, groups.send, groups.catch-up, groups.remove-member, groups.leave
 
 /**

@@ -72,7 +72,28 @@ describe("the argument parser", () => {
     expect(parseArgs(["alice", "note.webm", "--voice", "4200"], options!).options).toEqual({ voice: 4200 });
     expect(parseArgs(["alice", "note.webm", "--voice=4200", "--name", "hi.webm"], options!).options).toEqual({ voice: 4200, name: "hi.webm" });
     expect(parseArgs(["alice", "note.webm", "--voice", "--name", "hi.webm"], options!).options).toEqual({ voice: true, name: "hi.webm" });
-    expect(() => parseArgs(["--voice=soon"], options!)).toThrow(/takes a number/);
+    expect(() => parseArgs(["--voice=soon"], options!)).toThrow(new CliError("usage", "--voice takes a length in milliseconds, not \"soon\""));
+  });
+
+  it("answers a length --voice did not take (2s) as its own, not as one argument too many", () => {
+    const send = COMMANDS["file send"]!;
+    const run = (argv: string[]) => { const parsed = parseArgs(argv, send.options!, idSlot(send)); return positionals(send, parsed.positionals); };
+    // Before, "Too many arguments: ghostly file send <chat|group> <path> …", which does not say --voice is the problem.
+    for (const [argv, typed] of [[["bob", "v.wav", "--voice", "2s"], "2s"], [["bob", "v.wav", "--voice", "1.5s"], "1.5s"], [["bob", "--voice", "2000ms", "v.wav"], "2000ms"], [["--voice", "2s", "bob", "v.wav"], "2s"]] as const) {
+      expect(() => run([...argv]), argv.join(" ")).toThrow(new CliError("usage", `--voice takes a length in milliseconds, not ${JSON.stringify(typed)}`));
+    }
+    // A word after a lone --voice that the line has room for is still a positional, and a word too many elsewhere is still that.
+    expect(run(["bob", "--voice", "v.wav"])).toEqual({ chat: "bob", path: "v.wav" });
+    expect(() => run(["bob", "v.wav", "extra", "--voice"])).toThrow(/^Too many arguments: ghostly file send /);
+  });
+
+  it("answers --voice \"$MS\" with MS unset as --voice's empty value, not a word too many or a missing <path>", () => {
+    const send = COMMANDS["file send"]!;
+    const run = (argv: string[]) => { const parsed = parseArgs(argv, send.options!, idSlot(send)); return positionals(send, parsed.positionals); };
+    // Before, "Too many arguments: ghostly file send …" after the path, and "Missing <path>" before it, the path given.
+    for (const argv of [["bob", "v.wav", "--voice", ""], ["bob", "--voice", "", "v.wav"]]) {
+      expect(() => run(argv), argv.join(" ")).toThrow(new CliError("usage", "--voice takes a length in milliseconds, not \"\""));
+    }
   });
 
   it("takes ids that start with a single dash where the command says ids come, never as text", () => {
@@ -553,6 +574,9 @@ describe("the argument parser", () => {
     expect(params("file save", ["f1", "--wait", "--timeout", "5"])).toMatchObject({ wait: true, timeout: 5 });
     expect(params("identity complete", ["d1", "--evidence-file", "proof.txt"])).toEqual({ draft: "d1", evidenceFile: resolve("proof.txt"), stdin: false });
     expect(params("identity complete", ["d1", "--stdin"])).toEqual({ draft: "d1", evidenceFile: undefined, stdin: true });
+    // `-` is stdin, as for --passphrase-file: not a file named "-" in the folder.
+    expect(params("identity complete", ["d1", "--evidence-file", "-"])).toEqual({ draft: "d1", evidenceFile: undefined, stdin: true });
+    expect(() => params("identity complete", ["d1", "--evidence-file", "-", "--stdin"])).toThrow("--evidence-file or --stdin, not both");
   });
 });
 
@@ -586,6 +610,9 @@ describe("errors", () => {
     const mint = { host: "testnut.cashu.space", reason: "internal error" };
     expect(asCliError(engineError("mintFailedQuote", mint)).toJSON()).toEqual({ code: "engine", message: "testnut.cashu.space could not take this payment right now, and no sats left your wallet: try again later. The mint said: internal error" });
     expect(asCliError(engineError("mintFailedFaucet", mint)).toJSON()).toEqual({ code: "engine", message: "testnut.cashu.space could not give test coins right now: try again later. The mint said: internal error" });
+    // `wallet receive` at a mint that failed (a 503) said "No mint could create an invoice: down" as `engine`: now the mint
+    // is named, with the next step, and it is `unavailable` (try again later), as a mint with no answer at all.
+    expect(asCliError(engineError("mintFailedInvoice", { host: "127.0.0.1:4701", reason: "down" })).toJSON()).toEqual({ code: "unavailable", message: "127.0.0.1:4701 could not create an invoice right now: try again later. The mint said: down" });
     // One the table does not name stays the engine's, in its words.
     expect(asCliError(engineError("outcomeUnknown")).toJSON()).toEqual({ code: "engine", message: "Outcome unknown. Check the existing payment; do not send another." });
   });

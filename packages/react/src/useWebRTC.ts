@@ -32,6 +32,11 @@ interface UseWebRTCParams {
    */
   callHandledElsewhere?: number;
   publishCallSignal: (signal: string | null) => void;
+  /**
+   * The contact's offer of `ts` was kept as missed here, with no ring (QUICK_REDIAL_MS): told so that what waits on a call
+   * ringing (a handoff of the profile) does not wait on it.
+   */
+  offerHeld?: (ts: number) => void;
   setFastPoll: (fast: boolean) => void;
   /**
    * A line for the chat. `call`, on the lines a call has one of on this side (its ring, its miss): the time of the offer
@@ -295,6 +300,7 @@ export function useWebRTC({
   incomingCallSignal,
   callHandledElsewhere,
   publishCallSignal,
+  offerHeld,
   setFastPoll,
   addCallEventMessage,
   removeCallEventMessage,
@@ -397,6 +403,12 @@ export function useWebRTC({
   }, []);
 
   /**
+   * The microphone a video call holds while its camera is asked for alone (`asksEachAlone`): the call can end while
+   * Android's dialog is up (or the chat goes away), and the microphone goes then, not once the dialog is answered.
+   */
+  const askingCameraRef = useRef<MediaStream | null>(null);
+
+  /**
    * The microphone, and the camera for a video call, in one request. A camera refused or missing does not keep the call
    * from starting or being answered: the microphone is asked alone, and the call goes on as a voice call that says why
    * the camera is off (`cameraError`); the camera can still be turned on later. A microphone refused or missing fails
@@ -415,6 +427,7 @@ export function useWebRTC({
           throw error;
         }
         if (cancelled()) return { stream };
+        askingCameraRef.current = stream;
         try {
           const camera = await mediaRef.current.getUserMedia({ audio: false, video: captureFrom("video") });
           camera.getVideoTracks().forEach((track) => stream.addTrack(track));
@@ -424,6 +437,8 @@ export function useWebRTC({
           stream.getTracks().forEach((track) => track.stop());
           setMediaProblemOf("both");
           throw error;
+        } finally {
+          if (askingCameraRef.current === stream) askingCameraRef.current = null;
         }
       }
       try {
@@ -445,10 +460,14 @@ export function useWebRTC({
     [captureFrom],
   );
 
+  /** The id of the note shown last that the camera is off (`showCameraOff`): the camera coming on takes it away. */
+  const cameraOffShownRef = useRef(0);
   /** A video call went on without the camera (`captureForCall`): the person is told why it is off. */
   const showCameraOff = useCallback((error: unknown) => {
     setMediaProblemOf("camera");
+    if (!mediaProblem(error)) return;
     showMediaProblem(error);
+    cameraOffShownRef.current = mediaProblemIdRef.current;
   }, [showMediaProblem]);
 
   /**
@@ -628,6 +647,8 @@ export function useWebRTC({
       });
       localStreamRef.current = null;
     }
+    askingCameraRef.current?.getTracks().forEach((t) => t.stop());
+    askingCameraRef.current = null;
 
     if (pcRef.current) {
       pcRef.current.close();
@@ -994,6 +1015,8 @@ export function useWebRTC({
       setLocalStream(stream);
       setPicture(next);
       if (next) callHadVideoRef.current = true;
+      // The camera is on now: a note still up that it is off would say the opposite.
+      if (next === "camera") setMediaProblemShownState((shown) => (shown?.id === cameraOffShownRef.current ? null : shown));
       publishPicture(next);
     },
     [setPicture, publishPicture, captureFrom],
@@ -1532,6 +1555,7 @@ export function useWebRTC({
       lastProcessedSignalRef.current = signal.ts;
       setMissedAt(performance.now());
       heldOfferRef.current = { signal, at: performance.now(), line: addCallEventMessage?.("call_missed", signalHasVideo(signal), undefined, signal.ts) || null };
+      offerHeld?.(signal.ts);
     } else if (signal.t === "o" && (callStateRef.current === "idle" || yielded)) {
       lastProcessedSignalRef.current = signal.ts;
       ringOffer(signal);
@@ -1571,7 +1595,7 @@ export function useWebRTC({
         hangUp(false);
       }
     }
-  }, [incomingCallSignal, handleAnswer, hangUp, updateCallState, setFastPoll, addCallEventMessage, applyRemotePicture, restartAnswer, restartable, cleanupConnection, removeCallEventMessage, answerIceRestart, applyIceRestartAnswer, ringOffer, setMissedAt]);
+  }, [incomingCallSignal, handleAnswer, hangUp, updateCallState, setFastPoll, addCallEventMessage, applyRemotePicture, restartAnswer, restartable, cleanupConnection, removeCallEventMessage, answerIceRestart, applyIceRestartAnswer, ringOffer, setMissedAt, offerHeld]);
 
   // An unanswered call does not ring forever (RING_MS). Ours hangs up and says "No answer". Theirs stops ringing here
   // with a missed call and sends nothing: the caller's own ring runs out too, and a hang-up would read as declined.
@@ -1721,6 +1745,7 @@ export function useWebRTC({
         });
         localStreamRef.current = null;
       }
+      askingCameraRef.current?.getTracks().forEach((t) => t.stop());
 
       if (pcRef.current) {
         pcRef.current.close();

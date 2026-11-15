@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { formatVideoDuration, sanitizeFileName } from "@ghostly/core";
 import { useOptionalI18n, useT } from "../../contexts/I18nContext";
+import { NAME, withName } from "../apps/aroundName";
 import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
 import { useFocusKept } from "../../hooks/useFocusKept";
 import { useTransfer } from "../../hooks/useServicesPlatform";
@@ -340,7 +341,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
           </div>
           {typeof transfer.room === "number" && (
             <p className={`chat-text-media-meta m-0 mt-1 ${noRoom ? "text-danger-ink" : "text-text-primary/75"}`} data-testid="audio-room">
-              {noRoom ? t("chat.media.noRoom", { size: formatFileSize(transfer.room, t) }) : t("chat.media.wantsToSend", { name: peerName, size: formatFileSize(transfer.room, t) })}
+              {noRoom ? t("chat.media.noRoom", { size: formatFileSize(transfer.room, t) }) : withName(t("chat.media.wantsToSend", { name: NAME, size: formatFileSize(transfer.room, t) }), peerName)}
             </p>
           )}
         </div>

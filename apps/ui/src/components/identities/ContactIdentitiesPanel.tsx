@@ -29,6 +29,7 @@ import { problemLine } from "../../lib/problemText";
 import { fillNames } from "../../lib/fillNodes";
 import { sourceWords } from "../../lib/providerWords";
 import { focusLost } from "../../lib/focus";
+import { FocusSafeButton } from "../ui/FocusSafeButton";
 
 type Entry = { id: typeof GHOSTLY; ghostly: true; card: IdCardContent } | { id: string; ghostly?: false; r: ReceivedIdentityView; card: IdCardContent };
 type Received = Extract<Entry, { r: ReceivedIdentityView }>;
@@ -69,6 +70,10 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
   const beside = useBeside(backdrop);
   const besideNow = useRef(beside); besideNow.current = beside;
   useDialogFocus(ref, onClose, undefined, undefined, () => besideNow.current);
+  // Over the chat now (an app opened beside it): a dialog, so it has the focus, as when it opens over the chat.
+  useEffect(() => {
+    if (!beside && ref.current && !ref.current.contains(document.activeElement)) ref.current.focus({ preventScroll: true });
+  }, [beside]);
   const face = useContactFace(peerKey), sent = usePeerAvatar(peerKey);
   const photo = face?.photo ?? sent;
   const now = Math.floor(Date.now() / 1000);
@@ -121,7 +126,8 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
 
 /**
  * Whether the panel sits beside the chat rather than over it: its backdrop is shown only over it (contact-panel.css,
- * by the chat's column width and the screen's), so this follows the column as it is resized.
+ * by the chat's column width and the screen's, and whether an app sits beside the chat), so this follows the column as
+ * it is resized, and the chat's column as an app beside it opens or closes (the page keeps its size then).
  */
 function useBeside(backdrop: RefObject<HTMLElement | null>) {
   const [beside, setBeside] = useState(false);
@@ -133,6 +139,8 @@ function useBeside(backdrop: RefObject<HTMLElement | null>) {
     if (typeof ResizeObserver !== "function") return;
     const observer = new ResizeObserver(check);
     observer.observe(pane);
+    const column = pane.querySelector(":scope > .chat-column");
+    if (column) observer.observe(column);
     return () => observer.disconnect();
   }, [backdrop]);
   return beside;
@@ -198,8 +206,8 @@ function TheirGhostlyBack({ t, card, link, name, turning, onCards }: { t: Transl
         <div className="id-card-back-sees">
           {card.photo ? <img src={card.photo} alt="" className="h-10 w-10 shrink-0 rounded-xl object-cover" /> : <ProviderMark provider={GHOSTLY} />}
           <span className="id-card-back-who">
-            <span className="id-card-back-name">{card.label}{card.name ? ` · ${card.name}` : ""}</span>
-            <span className="id-card-back-subject" title={card.subject} data-testid="chat-identity-received-subject">{card.short}</span>
+            <span className="id-card-back-name">{card.label}{card.name && <> · <bdi>{card.name}</bdi></>}</span>
+            <span className="id-card-back-subject" title={card.subject} data-testid="chat-identity-received-subject"><bdi dir="ltr">{card.short}</bdi></span>
             <span className="id-card-back-meta">{card.category}</span>
           </span>
         </div>
@@ -212,7 +220,7 @@ function TheirGhostlyBack({ t, card, link, name, turning, onCards }: { t: Transl
           {card.issued && <><dt>{t("identities.contact.since")}</dt><dd>{card.validity}</dd></>}
         </dl>
         <div className="flex flex-wrap gap-2">
-          <button type="button" className="contact-card-action" data-testid="chat-identity-copy-key" disabled={turning} onClick={copy}>{copied ? t("identities.ghostly.copied") : t("identities.ghostly.copyKey")}</button>
+          <FocusSafeButton type="button" className="contact-card-action" data-testid="chat-identity-copy-key" disabled={turning} onClick={copy}>{copied ? t("identities.ghostly.copied") : t("identities.ghostly.copyKey")}</FocusSafeButton>
         </div>
         {failed && <p role="alert" className="id-card-back-note" data-testid="chat-identity-copy-error">{t("identities.add.copyError")}</p>}
       </div>
@@ -243,11 +251,11 @@ function TheirCardBack({ t, entry, linkId, name, nostr, turning, onCards }: { t:
         <div className="id-card-back-sees">
           <ProviderMark provider={r.provider} subject={card.bound} />
           <span className="id-card-back-who">
-            <span className="id-card-back-name">{card.label}{card.name ? ` · ${card.name}` : ""}</span>
+            <span className="id-card-back-name">{card.label}{card.name && <> · <bdi>{card.name}</bdi></>}</span>
             {/* A domain whole, wrapped: its end names who owns it, and the face shows only that end. */}
             {r.provider === "domain"
               ? <span className="id-card-back-subject id-card-back-subject-whole" data-testid="chat-identity-received-subject"><bdi dir="ltr">{card.subject}</bdi></span>
-              : <span className="id-card-back-subject" title={card.subject} data-testid="chat-identity-received-subject">{card.short}</span>}
+              : <span className="id-card-back-subject" title={card.subject} data-testid="chat-identity-received-subject"><bdi dir="ltr">{card.short}</bdi></span>}
             <span className="id-card-back-meta">{card.category}</span>
             {/* A name the evidence or a lookup carried, and who wrote it: a holder's own words are not a proof. */}
             {card.name && <span className="id-card-back-meta id-card-back-meta-whole" data-testid="chat-identity-received-name-source">{fillNames(t("identities.contact.nameFrom"), { source: card.profile?.found && card.profile.name ? t("identities.contact.theirProfile") : sourceWords(r.provider, r.display?.source ?? r.verified.display?.source ?? "", t) })}</span>}
@@ -268,10 +276,10 @@ function TheirCardBack({ t, entry, linkId, name, nostr, turning, onCards }: { t:
             : r.status === "revoked" ? t("identities.contact.revoked", { status: card.statusLabel }) : card.statusLabel}</dd>
         </dl>
         <div className="flex flex-wrap gap-2">
-          {canCheck && <button type="button" className="contact-card-action" data-testid="chat-identity-recheck" disabled={turning} aria-disabled={!!busy || undefined}
-            onClick={() => { if (!busy) act("recheck", () => engine.call("recheckIdentityProof", { linkId, id: r.id })); }}>{busy === "recheck" ? t("identities.contact.checking") : t("identities.contact.recheck")}</button>}
-          {provider?.lookupDisplay && ok && <button type="button" className="contact-card-action" data-testid="chat-identity-lookup" disabled={turning} aria-disabled={!!busy || undefined}
-            onClick={() => { if (!busy) act("lookup", () => engine.call("lookupIdentityDisplay", { linkId, id: r.id })); }}>{busy === "lookup" ? t("identities.contact.lookingUp") : r.provider === "openpgp" ? t("identities.contact.lookupOpenpgp") : provider.lookupLabel ?? t("identities.contact.showProfile")}</button>}
+          {canCheck && <FocusSafeButton type="button" className="contact-card-action" data-testid="chat-identity-recheck" disabled={turning} aria-disabled={!!busy || undefined}
+            onClick={() => { if (!busy) act("recheck", () => engine.call("recheckIdentityProof", { linkId, id: r.id })); }}>{busy === "recheck" ? t("identities.contact.checking") : t("identities.contact.recheck")}</FocusSafeButton>}
+          {provider?.lookupDisplay && ok && <FocusSafeButton type="button" className="contact-card-action" data-testid="chat-identity-lookup" disabled={turning} aria-disabled={!!busy || undefined}
+            onClick={() => { if (!busy) act("lookup", () => engine.call("lookupIdentityDisplay", { linkId, id: r.id })); }}>{busy === "lookup" ? t("identities.contact.lookingUp") : r.provider === "openpgp" ? t("identities.contact.lookupOpenpgp") : provider.lookupLabel ?? t("identities.contact.showProfile")}</FocusSafeButton>}
         </div>
         {/* What Check again does, only where there is one: a withdrawn or revoked card is not checked again. */}
         {canCheck && <p className="id-card-back-note">{provider?.recheck ? t("identities.contact.recheckNoteRepeat") : t("identities.contact.recheckNote")}{provider?.lookupDisplay && ok ? ` ${t("identities.contact.lookupNote")}` : ""}</p>}

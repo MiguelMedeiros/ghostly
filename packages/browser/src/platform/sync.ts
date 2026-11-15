@@ -1,6 +1,6 @@
 import {
   addMessages,
-  deleteMessage,
+  deleteMessages,
   saveSession,
   setEngineMessages,
   STORED_MESSAGES,
@@ -201,11 +201,13 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
   const here = named.length ? new Set(shown.messages.map((m) => m.id)) : undefined;
   const gone = named.filter((id) => here!.has(id));
   if (gone.length) {
-    for (const id of gone) deleteMessage(shown.id, id);
+    // Out of the session held here, not one read again (a parse and a merge of a chat of thousands), and as the list
+    // last mirrored left it but for these rows: what changes next is still all the mirror below looks at.
+    const kept = untouched(linkId, shown.id);
+    shown = deleteMessages(shown.id, gone, shown) ?? shown;
     forget(shown.id);
+    if (kept) mirrored.set(linkId, { ...mirrored.get(linkId)!, stored: storedSession(shown.id) });
     notifySessionsChanged();
-    shown = sessionForPeer(link.peerPubKeyZ32);
-    if (!shown) return;
     // Nothing unread left: the chat's notification goes, as reading the chat takes it (the Android and Linux apps keep one).
     if (!getUnreadCount(shown)) clearChatNotification(shown.id);
   }
@@ -491,7 +493,7 @@ async function reconcile(): Promise<void> {
     void engine.call("removeLink", { linkId: link.id }).catch(() => {});
     // An app still running in it (a Desktop app window) stops: the engine answers nothing more for this chat.
     stopAppsIn(link.id);
-    // What the contact's apps opened from this chat kept on this device goes with it (the web app's origins).
+    // What the contact's apps opened from this chat kept on this device goes with it (their origins).
     void forgetServicesOf({ tag: viewerTag(link.myPubKeyZ32) });
   }
   if (!later && !renamed) settled = { state, sessions };

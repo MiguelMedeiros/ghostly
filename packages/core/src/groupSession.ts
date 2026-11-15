@@ -889,7 +889,16 @@ export class GroupSession {
   }
   private persist(): Promise<void> {
     if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = undefined; }
-    return this.hooks.save(structuredClone(this.state));
+    return this.hooks.save(this.copy());
+  }
+  /**
+   * The state as a save takes it: the session goes on changing its own. The chain carries the whole roster at every
+   * commit and is never compacted (1.4 ms a deep copy at 271 commits in a group of 31, 0.1 ms for the rest), and a
+   * commit on it is signed and never changes: the copy shares the commits, in an array of its own.
+   */
+  private copy(): GroupState {
+    const { chain, ...rest } = this.state;
+    return { ...structuredClone(rest), chain: chain.slice() };
   }
   /**
    * A save within `GROUP_LIMITS.saveWithinMs`, for what a received message, commit or secret changes (what was seen,
@@ -903,7 +912,7 @@ export class GroupSession {
     this.saveTimer = setTimeout(() => {
       this.saveTimer = undefined;
       // Between two frames, never in the middle of one being handled.
-      void this.serialize(() => this.hooks.save(structuredClone(this.state))).catch(() => {});
+      void this.serialize(() => this.hooks.save(this.copy())).catch(() => {});
     }, GROUP_LIMITS.saveWithinMs);
   }
   /** Writes what is waiting to be saved now (before a restart, in tests). */
@@ -1333,6 +1342,19 @@ export class GroupSession {
     this.state.sent.push(frame);
     let bytes = this.state.sent.reduce((sum, f) => sum + f.c.length, 0);
     while (this.state.sent.length > GROUP_LIMITS.outlog || bytes > GROUP_LIMITS.outlogBytes) bytes -= this.state.sent.shift()!.c.length;
+  }
+
+  /**
+   * My message `id` was deleted for everyone: its frame, and each copy said again, keep their place in my log (`nextSeq`,
+   * `couldRead`, the removal's copies) and lose what they said. The log is in the saved state beside the epochs' secrets,
+   * so the text stayed readable from the profile until 32 later sends pushed it out (`message delete --purge` promises
+   * it leaves the folder). Saved soon, as a community's `forget`; `flush` writes it now.
+   */
+  forget(id: string): void {
+    if (!this.state.sent.some(f => f.c && this.messageIdOf(f) === id)) return;
+    this.state.sent = this.state.sent.map(f => !f.c || this.messageIdOf(f) !== id ? f
+      : { t: f.t, g: f.g, e: f.e, s: f.s, n: f.n, ts: f.ts, nn: "", c: "", sig: "", ...(f.o ? { o: f.o } : {}) });
+    this.persistSoon();
   }
 
   /**
@@ -2277,8 +2299,8 @@ export class GroupSession {
     const lacks = missingIn(frame, to);
     return this.state.sent.filter(sent => this.state.chain[sent.e] && rosterHas(this.state.chain[sent.e].m, to) && lacks(sent) && !this.isRemoved(sent));
   }
-  /** A frame of a message deleted for everyone (`hooks.removed`): handed to nobody, its removal is what they get. */
-  private isRemoved(f: GroupMessageFrame): boolean { return !!this.hooks.removed?.(this.messageIdOf(f)); }
+  /** A frame of a message deleted for everyone (`hooks.removed`, or one of mine `forget` emptied): handed to nobody, its removal is what they get. */
+  private isRemoved(f: GroupMessageFrame): boolean { return !f.c || !!this.hooks.removed?.(this.messageIdOf(f)); }
 
   // -- metadata (WISP 902 § Metadata) ---------------------------------------
 

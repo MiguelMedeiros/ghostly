@@ -70,6 +70,9 @@ vi.mock("@ghostly/core", async (importOriginal) => {
     // Its choice, wallets aside: Lightning too, which it has no wallet of (peerAllowsPayment leaves it out).
     peerChoosesPayment = vi.fn((m: string) => m === "cashu" || m === "lightning");
     allowsPayment = vi.fn(() => true);
+    /** Nothing of mine waits on the DHT floor here. */
+    dhtHolds = vi.fn(() => false);
+    withdrawDht = vi.fn(async () => {});
     constructor(readonly options: GhostLinkOptions) { links.push(this as never); }
   }
   return { ...actual, GhostLink: RecordedLink };
@@ -194,6 +197,20 @@ describe("a chat as the contact drives it", () => {
     expect(emits).toHaveBeenCalledTimes(1);
     events.onRtt(55);
     expect(emits).toHaveBeenCalledTimes(2);
+  });
+
+  it("an attempt to go live that ended names its chat, and builds no other chat's view", async () => {
+    const a = row(), b = row();
+    const { node, linkOf } = await started(a, b);
+    const unnamed = vi.spyOn(node as never as { emitState(): void }, "emitState");
+    const named = vi.spyOn(node as never as { chatChanged(linkId: string): void }, "chatChanged");
+    // A contact that looks online but is not reached: each dial that ends says so, every 20 s to 3 min.
+    const attempt = { at: Date.now(), side: "dialled" as const, failed: [{ transport: "iroh/1" as const, error: "unreachable" }], retryAt: Date.now() + 20_000 };
+    (linkOf(b.id) as never as { liveAttempt: unknown }).liveAttempt = attempt;
+    linkOf(b.id).options.events.onLiveAttempt!(attempt);
+    expect(unnamed).not.toHaveBeenCalled();
+    expect(named.mock.calls).toEqual([[b.id]]);
+    expect(node.getState().links.find((link) => link.id === b.id)!.liveAttempt).toEqual(attempt);
   });
 
   it("an acknowledgement moves a legacy chat's read mark, never a paired one's", async () => {
@@ -1519,8 +1536,10 @@ describe("text in a chat", () => {
     await vi.waitFor(async () => expect(await gone()).toBe(true));
     // Whatever was going to happen to it has happened by now.
     await new Promise((resolve) => setTimeout(resolve, 100));
-    // Withdrawn: the floor stops saying it, and the chat keeps its id for the next session.
-    expect(settleDht).toHaveBeenCalledWith(dhtFileId(wireId));
+    // Withdrawn: a new envelope without it takes its place on the floor (not only settled there), and the chat keeps
+    // its id for the next session.
+    expect(link.withdrawDht).toHaveBeenCalledWith(dhtFileId(wireId));
+    expect(settleDht).not.toHaveBeenCalled();
     expect((await saved(chat.id))?.withdrawnFiles).toEqual([wireId]);
     expect(await gone()).toBe(true);
     expect((await saved(chat.id))?.deletedIds).toContain(messageId);
@@ -1540,6 +1559,37 @@ describe("text in a chat", () => {
 
   it("Cancel sending once a waiting file's offer was said on the DHT floor withdraws it", async () => {
     await cancelOnFloor("said before the cancel");
+  });
+
+  /**
+   * Delete for everyone while a waiting file's offer is being said on the DHT floor (its publication takes seconds, the
+   * moment right after sending a wrong file): the delete read a row with no `fileOnFloor` yet and took the file for one
+   * that never left, so no removal went, and the contact's chat kept its bubble and name as "Cancelled by the sender".
+   */
+  it("Delete for everyone while a waiting file's offer is being said on the DHT floor sends its removal", async () => {
+    const chat = row();
+    const { node, linkOf } = await started(chat);
+    vi.spyOn(node["desk"], "replay").mockResolvedValue();
+    const link = linkOf(chat.id), wireId = `floor${crypto.randomUUID().slice(0, 8)}`, messageId = "me_7";
+    let removed: Promise<unknown> | undefined;
+    const announceFile = vi.fn(async (offer: { wireId: string }) => {
+      removed = node.removeMessage({ linkId: chat.id, messageId });
+      await removed;
+      Object.assign(link, { dhtPendingId: dhtFileId(offer.wireId) });
+      return null;
+    });
+    Object.assign(link, { isDataLinkOpen: false, supportsFiles: false, fileAnnounceError: () => null, announceFile, settleDht: vi.fn(async () => {}), sendFilesFrame: vi.fn(() => true) });
+    node.sendFile({ linkId: chat.id, file: { id: `${chat.id}-out-${wireId}`, name: "a.txt", size: 1, mime: "text/plain" }, timestamp: 7 });
+    await vi.waitFor(async () => expect((await db.getMessage(chat.id, messageId))?.delivery).toBe("waiting"));
+    void node.sendMessage({ linkId: chat.id, text: "after it", timestamp: 8 });
+    await vi.waitFor(async () => expect((await db.getMessages(chat.id)).filter((m) => m.delivery === "waiting")).toHaveLength(2));
+    link.options.events.onDhtDelivery({ peerMode: "dht" } as never);
+    await vi.waitFor(() => expect(announceFile).toHaveBeenCalledOnce());
+    expect(await removed).toEqual({ error: null });
+    await vi.waitFor(async () => expect(await db.getMessage(chat.id, messageId)).toBeUndefined());
+    // Its removal goes to the contact once live, as for one deleted for everyone after its offer was said.
+    expect(node.removalPending({ linkId: chat.id, messageId })).toBe(true);
+    expect((await saved(chat.id))?.removals?.map((r) => r.wireId)).toEqual([wireId]);
   });
 
   // covers: groups.files

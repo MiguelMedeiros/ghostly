@@ -1,4 +1,4 @@
-import { inviteLink, inviteOwnership, readInviteCode, type InviteRefusal, type LinkParams } from "@ghostly/core";
+import { inviteLink, inviteOwnership, readInviteCode, trimEndOf, type InviteRefusal, type LinkParams } from "@ghostly/core";
 import { knownChatKeys, listSessions, type SessionKeys } from "./storage";
 
 /**
@@ -70,7 +70,9 @@ export function undoubledRoute(route: string): string {
 export function inviteRouteCode(pathname: string): string | null {
   const protocol = protocolLinkCode(pathname);
   if (protocol !== null) return protocol || "web+ghostly:";
-  return pathname.match(/^\/?(ghostly1.*?)\/*$/i)?.[1] ?? pathname.match(/^\/chat\/(.+)$/)?.[1] ?? null;
+  // Its `/`s off in one pass: a lazy code before `\/*$` tried the rest from every `/` of a long run that does not end the address.
+  const code = pathname.match(/^\/?(ghostly1.*)$/i)?.[1];
+  return code !== undefined ? trimEndOf(code, "/") : pathname.match(/^\/chat\/(.+)$/)?.[1] ?? null;
 }
 
 /** What reading a pasted, scanned or opened invite gave: the keys, or the one reason the UI says. */
@@ -119,14 +121,6 @@ export const INVITE_REFUSAL_MESSAGE = {
   damaged: "join.damaged",
   device: "join.device",
 } as const satisfies Record<InviteRefusal, string>;
-
-export function buildInviteCode(
-  seedB: string,
-  pubKeyA: string,
-  encKey: string,
-): string {
-  return `${seedB}/${pubKeyA}/${encKey}`;
-}
 
 /** A link for the other person: opening it joins the chat, and the app takes the keys out of the address at once. */
 export function buildInviteUrl(

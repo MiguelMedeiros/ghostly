@@ -3,7 +3,7 @@ import {
   EXPECT_PEER_MS, presenceSeenAt, groupName, knockIdentity, knockRecords, mentionsMember, pinIsNewer, readPin, receivedTimestamp, mergeKnocks, readKnocks, rosterAdmin, rosterHas, verifyCommitSignature, decodeCommunityLink, commitHash,
   CatchUpAnswers, GROUP_ADMIN_OFF_ERROR, GROUP_LIMITS, frameBytes, meshMessageRef, type GroupMessageFrame,
   GROUP_HAVE_FRAME, GROUP_VERSION_FILES, GROUP_WANT_FRAME, GROUP_WANT_NO_FRAME, type GroupFileMeta,
-  type GhostRecord, type PeerPresence, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type StatusCard, type WireReaction, type WirePin, type GroupPinFrame, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
+  type GhostRecord, type PeerPresence, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type StatusCard, type WireReaction, type WirePin, type GroupPinFrame, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMeta, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupLight, GroupLive, GroupView, MessagePage, OtherGroup, StoredGroup, StoredMessage, StoredPin } from "../shared/types";
 import type { Removal } from "./removals";
@@ -162,8 +162,16 @@ export interface GroupsHost {
    * in a history they hold, so a group joined again showed the old one under what came after, until a reload.
    */
   historyGone?(groupId: string): void;
-  /** Something the pages show changed: they get a state. `delayMs`: how long it may wait (the engine's own wait when not given). */
-  emit(delayMs?: number): void;
+  /**
+   * Something the pages show changed: they get a state. `delayMs`: how long it may wait (the engine's own wait when not
+   * given). `groupId`: only that group's view changed (a member typing), and the others' are kept; none, all of them.
+   */
+  emit(delayMs?: number, groupId?: string): void;
+  /**
+   * A group file's transfer view changed (its progress, 4 a second while it moves), and nothing a chat or a group shows:
+   * the next state keeps every chat's and group's view. Absent: `emit(delayMs)`.
+   */
+  transfersChanged?(delayMs?: number): void;
   /** My name, sealed with my messages in every group: past 16 members, most members hold no edge with me to hear it there. */
   myNick?(): string | undefined;
   /** An application frame a member of a community sent the group (a note about a payment, a request to everyone). */
@@ -795,6 +803,8 @@ export class Groups {
   private readonly hubs: MeshHubs;
   /** Groups whose edges are being reconciled because their hubs changed: one at a time. */
   private readonly hubReconcile = new Set<string>();
+  /** Each private group's hubs as its view marks them, at the last tick (`hubsTick`): a change asks for its view again. */
+  private readonly hubsShown = new Map<string, string>();
   /** Groups a commit took me out of, and when: their edges close `REMOVED_LINGER_MS` later. */
   private readonly removedAt = new Map<string, number>();
   /** Who is typing in each private group, and this side's word there (WISP 902 · Group Mesh § Typing). */
@@ -844,7 +854,8 @@ export class Groups {
         membership: groupId => this.fileMembership(groupId),
         out: groupId => this.fileOut(groupId),
         sendApp: (groupId, frame) => this.communities.sendApp(groupId, frame),
-        changed: delayMs => host.emit(delayMs),
+        // The desk writes only `transfers`: no chat's or group's view to build again.
+        changed: delayMs => host.transfersChanged ? host.transfersChanged(delayMs) : host.emit(delayMs),
         now: () => this.now(),
       });
       this.communities.files = this.files;
@@ -1386,6 +1397,13 @@ export class Groups {
     return { me: session.myKey, community: false, onHubs: this.hubs.active(groupId, session, this.now()), inRoster: key => rosterHas(session.roster, key), couldRead: (key, messageId, ts) => session.couldRead(key, messageId, ts) };
   }
 
+  /** Me in a group I am active in, private or community alike, for its call (WISP 602): my member key, its seed, and the admin's metadata. */
+  callMember(groupId: string): { key: string; seedB64: string; meta?: GroupMeta } | undefined {
+    if (this.isCommunity(groupId)) return this.communities.callMember(groupId);
+    const session = this.sessions.get(groupId);
+    return session?.status === "active" ? { key: session.myKey, seedB64: session.state.seedB64, meta: session.state.meta } : undefined;
+  }
+
   /**
    * Why this device is out of the group for good, as `fileCheck` says it; undefined while it is in it, or not loaded. A
    * community join that lost a race (`lost`) is asked again and back in by itself: its files wait, not stop for good.
@@ -1635,8 +1653,10 @@ export class Groups {
       group.removedIds = withRemovedId(group.removedIds ?? [], messageId);
       this.saveSoon(group);
     }
-    // A community's catch-up no longer hands its frame to a member who was away.
+    // A community's catch-up no longer hands its frame to a member who was away; a private group's log of mine keeps
+    // nothing of what it said.
     this.communities.session(groupId)?.forget(messageId);
+    this.sessions.get(groupId)?.forget(messageId);
     await this.files?.forget(groupId, messageId);
   }
 
@@ -1759,6 +1779,15 @@ export class Groups {
     if (this.isCommunity(groupId)) return this.communities.rename(groupId, name);
     await this.session(groupId).rename(name);
   }
+  /**
+   * The admin names (or, with null, removes) the node that forwards the group's calls: community groups only (WISP 602).
+   * `e2ee` turns sealed call media on or off; left out, the group keeps what it had.
+   */
+  async setCall(groupId: string, sfu: string | null, e2ee?: boolean): Promise<void> {
+    if (this.isCommunity(groupId)) return this.communities.setCall(groupId, sfu, e2ee);
+    this.session(groupId);
+    throw new Error("Only a community group has calls through a node");
+  }
 
   /**
    * `answer`: false when an invitation goes because its inviter took it back, so no decline is said for it. `wipe`: an
@@ -1813,6 +1842,7 @@ export class Groups {
     this.lastHanded.delete(groupId);
     this.rewelcomed.delete(groupId);
     this.hubs.forget(groupId);
+    this.hubsShown.delete(groupId);
     this.removedAt.delete(groupId);
     this.lastGossip.delete(groupId);
     this.gapsAsked.delete(groupId);
@@ -2030,8 +2060,11 @@ export class Groups {
       const group = this.stored.get(groupId);
       // Taken out as a hub, my last act done: no edges held for it in the budget of the other groups (`room`).
       if (session.status !== "active" && !this.removedAt.has(groupId) && this.hubs.isHub(groupId)) this.hubs.forget(groupId);
-      if (!group || group.left || session.status !== "active" || !this.hubs.large(session)) continue;
+      if (!group || group.left || session.status !== "active" || !this.hubs.large(session)) { this.hubsShown.delete(groupId); continue; }
       await this.hubs.tick(groupId, session, group, now).catch(() => false);
+      // A beacon reading that adds a hub, or a hub aging out of it, names no other change: this group's view, built again.
+      const shown = this.hubs.active(groupId, session, now) ? `${this.hubs.isHub(groupId)} ${this.hubs.hubs(groupId, session, now).sort().join(" ")}` : "";
+      if (shown !== (this.hubsShown.get(groupId) ?? "")) { this.hubsShown.set(groupId, shown); this.host.emit(undefined, groupId); }
       if (this.hubReconcile.has(groupId)) continue;
       const wanted = this.edgesWanted(groupId, session, group, now);
       const edges = this.host.edges(groupId);
@@ -2646,8 +2679,8 @@ export class Groups {
     }
     if (session?.status === "active" && frame && typeof frame === "object" && (frame as { t?: unknown }).t === "group-here") { this.heardHere(groupId, session, peerKey, frame as Record<string, unknown>); return; }
     if (session?.status === "active" && frame && typeof frame === "object" && (frame as { t?: unknown }).t === "group-reach") {
-      if (this.hubs.enabled) this.hubs.reached(groupId, session, peerKey, frame as Record<string, unknown>, this.now());
-      this.host.emit();
+      // A hub says it at least once a minute: one taken builds this group's view again, one left aside nothing.
+      if (this.hubs.enabled && this.hubs.reached(groupId, session, peerKey, frame as Record<string, unknown>, this.now())) this.host.emit(undefined, groupId);
       return;
     }
     if (!session) return;
@@ -3393,6 +3426,8 @@ export class Groups {
         const came = m.sender === session.myKey ? timestamp : cameAt(timestamp, stored, arrivalNow(this.now()));
         markCame(this.marks, state.id, m.id, came, m.sender !== session.myKey, mentioned);
         noteCame(this.stored.get(state.id), came, m.sender !== session.myKey, mentioned);
+        // A new row's marks (the list's order, unread) moved after its state was asked for: this group's view, named again.
+        if (stored !== false) this.host.emit(undefined, state.id);
         // What the member was typing arrived: it is not typing any more.
         this.typings.messageFrom(state.id, m.sender);
       },

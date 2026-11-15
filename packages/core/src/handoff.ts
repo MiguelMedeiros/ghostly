@@ -501,6 +501,3 @@ export const handoffRetryAfter = (attempts: HandoffAttempts | undefined, now: nu
   const until = lockedUntil(attempts, now);
   return until !== undefined ? Math.ceil((until - now) / 1000) : 0;
 };
-
-/** Two digests compared. */
-export const sameDigest = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length && bytesEqual(a, b);

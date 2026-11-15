@@ -4,6 +4,9 @@
  * for a command a daemon answers.
  */
 
+import { basename } from "node:path";
+import { shellWord } from "./shellWord";
+
 /** What happens next to what a wait was waiting on: a daemon goes on, a one-shot's profile closes now. */
 export const goesOn = (mode: "daemon" | "one-shot"): string => mode === "one-shot"
   ? "goes with this profile's next command, or keep it online with `ghostly daemon --detach`"
@@ -76,10 +79,33 @@ export const chatState = (until: string): { to: string; not: string } => CHAT_ST
 
 /** What a call waits for, in a person's words, or null for a call that does not wait. */
 export function waitNotice(method: string, given: Record<string, unknown>, mode: "daemon" | "one-shot"): WaitNotice | null {
+  // A one-shot join by a group's link waits to be let in (api.ts `letIn`); through a daemon it answers at once.
+  if (method === "group.join") return mode === "one-shot"
+    ? { waiting: "waiting for a member's app to let this profile in (up to 60 s; Ctrl-C stops waiting)", stopped: "not let in yet: the knock goes on while this profile is running (ghostly daemon --detach)" }
+    : null;
   const params = waitOf(method, given, mode);
+  // A daemon's file send answers once it has copied the file into the profile (files.ts `stage`): 6-30 s for 1 GiB, said
+  // nothing, and read as a hung daemon. Ctrl-C there stops the send (files.ts `stageWhileAsked`): nothing goes.
+  if (method === "file.send" && mode === "daemon" && params.wait !== "sent") {
+    const file = word(params.name) ?? (word(params.path) ? basename(params.path as string) : "the file");
+    const chatRef = word(params.chat) ?? "the chat", chat = chatRef.startsWith("group:") ? `group ${chatRef.slice("group:".length)}` : chatRef;
+    return { waiting: `copying ${file} into the profile before it goes to ${chat} (Ctrl-C stops the send)`, stopped: `${file} was not sent to ${chat}: send it again when you want it` };
+  }
   const waits = waitsFor(method, params);
   if (waits === undefined) return null;
   const seconds = typeof params.timeout === "number" ? params.timeout : waits;
+  // One that waits for the contact (`--wait sent`, a one-shot's own wait) copies the file in first as well, and Ctrl-C
+  // then stops the send (a daemon's `stageWhileAsked`, a one-shot's profile closing under the copy): it said "it is kept
+  // here and still goes" with nothing in the chat. Which of the two it was, only the chat's file list tells.
+  if (method === "file.send") {
+    const file = word(params.name) ?? (word(params.path) ? basename(params.path as string) : "the file");
+    const chatRef = word(params.chat), chat = chatRef ?? "the contact";
+    const list = chatRef ? ` (ghostly file list ${shellWord(chatRef, "<chat>")} says which)` : "";
+    return {
+      waiting: `copying ${file} into the profile, then waiting for it to go out to ${chat} (up to ${seconds} s; Ctrl-C stops the send while it is copied in, then only the waiting)`,
+      stopped: `${file} was not sent to ${chat} if it was still being copied in; if it was in the chat, it is kept here and ${goesOn(mode)}${list}`,
+    };
+  }
   const upTo = `up to ${seconds} s; Ctrl-C stops waiting`;
   if (method === "chat.wait") {
     const chat = word(params.chat) ?? "the chat", state = chatState(word(params.until) ?? "live");

@@ -5,11 +5,12 @@ import type { HandoffProfileHost } from "@ghostly/browser/devices/handoffHost";
 import { memorySink } from "@ghostly/browser/backup/stream";
 import { databaseExists } from "@ghostly/browser/backup/database";
 import { databaseName, wrap, type StoredFile } from "@ghostly/browser/shared/idb";
-import { FILE_BYTES_STEP, SMALL_FILE_BYTES, digestText, dropFileSpace, fileBytes, type FileBytes } from "@ghostly/browser/shared/fileBytes";
+import { FILE_BYTES_STEP, SMALL_FILE_BYTES, digestText, dropFileSpace, fileBytes, fileBytesOf, type FileBytes, type FileBytesKind } from "@ghostly/browser/shared/fileBytes";
 import { fileSource, restoreHandoffBundle, writeProfileBackup, type FileSource } from "./profileBackup";
 import { listDeviceRecords } from "@ghostly/browser/devices/store";
 import { databaseOfSpace, newSpace, pointProfile, profileOfDatabase, recoverProfilePointer } from "./profiles";
-import { dropWalletStorageOf, keyOfSpace } from "./profileData";
+import { dropWalletStorageOf, keysOfSpace } from "./profileData";
+import { MEDIA_DEVICES_SUFFIX } from "./mediaDevices";
 import { linkedFilesDatabase } from "./apps/webFiles";
 
 /*
@@ -28,6 +29,48 @@ import { linkedFilesDatabase } from "./apps/webFiles";
  */
 
 const DIGEST = /^[A-Za-z0-9_-]{43}$/;
+/**
+ * An installed app's bundle: kept whole in file storage as `app-<digest>`, with no `files` row (the engine's `apps.ts`).
+ * Its record names where (`bytes`), for the version installed and the one waiting. A move hands it over by digest beside
+ * the chat files (WISP 1200 § Where installed apps live): left behind, every app on the new device needed its files and
+ * fetched them again, and one whose source no longer served that version did not open there at all (bug hunt, 2026-11-06).
+ */
+type AppRecord = { ref: string; digest?: unknown; bytes?: unknown; pending?: { digest?: unknown; bytes?: unknown } };
+const bundleId = (digest: string) => `app-${digest}`;
+const BUNDLE_ID = /^app-[A-Za-z0-9_-]{43}$/;
+const bundlesOf = (app: AppRecord): { id: string; kind: unknown }[] => [app, ...(app.pending ? [app.pending] : [])]
+  .filter((version): version is { digest: string; bytes?: unknown } => typeof version.digest === "string" && DIGEST.test(version.digest))
+  .map((version) => ({ id: bundleId(version.digest), kind: version.bytes }));
+const FILE_KINDS: readonly FileBytesKind[] = ["opfs", "native", "idb"];
+
+/** The installed apps' records of a profile's database, none where it has no store for them yet. */
+async function appRecords(db: IDBDatabase): Promise<AppRecord[]> {
+  if (!db.objectStoreNames.contains("apps")) return [];
+  return ((await wrap(db.transaction("apps", "readonly").objectStore("apps").getAll())) ?? []) as AppRecord[];
+}
+
+/**
+ * The staged files that are the restored apps' bundles stay in this device's file storage, whatever their size, and
+ * their records are pointed at it (the giver's says where it kept them: another kind on another platform). Resolves to
+ * the other files, the chat files `restore` points records at.
+ */
+async function pointBundles(database: string, staged: HandoffFile[], kind: FileBytesKind): Promise<HandoffFile[]> {
+  const db = await wrap(indexedDB.open(database));
+  try {
+    const apps = await appRecords(db);
+    const named = new Set(apps.flatMap(bundlesOf).map(({ id }) => id));
+    const bundles = new Set(staged.filter((file) => named.has(file.id)).map((file) => file.id));
+    if (!bundles.size) return staged;
+    const here = (version?: { digest?: unknown }) => typeof version?.digest === "string" && bundles.has(bundleId(version.digest));
+    const tx = db.transaction("apps", "readwrite"), records = tx.objectStore("apps");
+    for (const app of apps) {
+      if (!here(app) && !here(app.pending)) continue;
+      records.put({ ...app, ...(here(app) && { bytes: kind }), ...(app.pending && here(app.pending) && { pending: { ...app.pending, bytes: kind } }) });
+    }
+    await new Promise<void>((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onabort = tx.onerror = () => reject(tx.error ?? new Error("The apps' records could not be written")); });
+    return staged.filter((file) => !bundles.has(file.id));
+  } finally { db.close(); }
+}
 /** Where earlier builds kept the notes: one list under `ghostly-staging:<ns>`, then one key per file under it. */
 const stagingKey = (ns: string) => `ghostly-staging:${ns}`;
 /** A namespace and a file id hold no colon, so no key of one namespace begins as another's does. */
@@ -124,6 +167,17 @@ function profileSource(database: string): HandoffSource {
       digests.set(file.id, sha);
       found.set(file.id, { file: { id: file.id, size: source.size, sha256: sha }, source });
     }
+    // The apps' bundles, where their records say they are: one not here (it needs its files on this device too) is not.
+    for (const { id, kind } of (await appRecords(peer)).flatMap(bundlesOf)) {
+      if (found.has(id) || !FILE_KINDS.includes(kind as FileBytesKind)) continue;
+      const store = (await fileBytesOf(kind as FileBytesKind).catch(() => null))?.forSpace?.(database);
+      const size = store ? await store.size(id).catch(() => null) : null;
+      if (!store || !size) continue;
+      const sha = digests.get(id) ?? await store.digest(id).catch(() => undefined);
+      if (!sha) continue;
+      digests.set(id, sha);
+      found.set(id, { file: { id, size, sha256: sha }, source: { size, read: (offset, length) => store.read(id, offset, length) } });
+    }
     return found;
   }
   return {
@@ -177,7 +231,9 @@ async function copyFrom(from: FileSource, to: FileBytes, file: HandoffFile): Pro
  * one is in file storage. A Blob whose record's checked digest is the file's is not copied (WISP 06 § Installing the
  * staged state: "Files `B` already held are linked into it, not copied"): `restore` puts that Blob on the staged record.
  * Copied, every file was written twice and read back once at each move back, the device's whole media history (bug hunt,
- * 2026-11-04). Resolves to whether it was left where it is.
+ * 2026-11-04). A larger one is linked where file storage can give it a second name (Desktop): the staged profile's
+ * name is a file of its own, and the frozen copy keeps its own, so a revert or a kept fork finds it as it was.
+ * Resolves to whether its Blob was left on the frozen copy's record.
  */
 async function copyHeldFile(db: IDBDatabase, id: string, to: FileBytes, file: HandoffFile): Promise<boolean> {
   const tx = db.transaction(["files", "fileState"], "readonly");
@@ -188,6 +244,17 @@ async function copyHeldFile(db: IDBDatabase, id: string, to: FileBytes, file: Ha
   if (stored?.blob && checked && stored.digest === file.sha256 && stored.blob.size === file.size) {
     await to.remove(file.id).catch(() => {});
     return true;
+  }
+  // An app's bundle has no record: it is in the frozen copy's file storage, where this device keeps new files.
+  if (!stored && BUNDLE_ID.test(id)) { await copyFile(await spaceFiles(db.name), id, to, file); return false; }
+  // A plain file can change on disk under its record (a sync or backup tool, a bad disk): a linked one is kept only when
+  // its bytes still hash to the file's digest. `digest` reads them where they are stored (Desktop: in Rust), so nothing
+  // is written and no byte crosses into the page. A link that fails (a disk with no such names) or a file that is not
+  // the file any more is copied and checked below, which refuses the changed one.
+  if (stored && !stored.blob && stored.bytes === to.kind && to.link && checked && stored.digest === file.sha256) {
+    const same = async () => (await to.size(file.id)) === file.size && (await to.digest(file.id)) === file.sha256;
+    if (await to.link(db.name, id, file.id).then(same, () => false).catch(() => false)) return false;
+    await to.remove(file.id).catch(() => {});
   }
   const source = stored ? await fileSource(stored, db.name, false, async () => db) : null;
   if (!source) throw new Error("The file is not on this device");
@@ -202,7 +269,7 @@ function dropDatabase(name: string): Promise<void> {
 }
 
 /**
- * Every local key of a namespace (`keyOfSpace`). Never the registry of profiles: in a Desktop space of its own
+ * Every local key of a namespace (`keysOfSpace`). Never the registry of profiles: in a Desktop space of its own
  * (GHOSTLY_PROFILE=<base>) the first profile's namespace is the base, and the registry `ghostly_<base>_profiles` has its
  * prefix. Deleting the old namespace after a handoff took the registry with it, so the app opened the empty old
  * namespace and listed no other profile (Linux bug hunt, 2026-10-03). The first profile's original namespace, whose
@@ -211,7 +278,8 @@ function dropDatabase(name: string): Promise<void> {
  */
 function dropKeys(ns: string): void {
   if (!ns && profileOfDatabase(databaseOfSpace(ns))) return;
-  const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((key): key is string => !!key && keyOfSpace(ns, key));
+  const owned = keysOfSpace(ns);
+  const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((key): key is string => !!key && owned(key));
   for (const key of keys) { try { localStorage.removeItem(key); } catch { /* nothing more to do */ } }
 }
 
@@ -315,12 +383,13 @@ class Staging implements HandoffStaging {
     await this.note(file);
   }
 
-  async restore(bundle: Uint8Array, files: HandoffFile[]): Promise<void> {
+  async restore(bundle: Uint8Array, staged: HandoffFile[]): Promise<void> {
     await this.dropRest();
     await restoreHandoffBundle(bundle, this.ns);
     // Each file's record points at the bytes staged for it: a small one holds them whole, a large one in file storage.
     const store = await spaceFiles(this.database);
     const kind = (await fileBytes()).kind;
+    const files = await pointBundles(this.database, staged, kind);
     const db = await wrap(indexedDB.open(this.database));
     // The frozen copies files are left on as Blobs (`copyHeld`), opened as stored once each.
     const frozen = new Map<string, IDBDatabase>();
@@ -404,13 +473,26 @@ class Staging implements HandoffStaging {
   }
 }
 
+/**
+ * The microphone, camera and speaker this device chose for the profile, from the namespace it ran before onto the one
+ * staged: a move never carries the giver's (`writeProfileBackup`), whose ids name that browser's devices. Taking the
+ * profile back, a device uses its own headset again; a device the profile never ran on uses the system's defaults.
+ */
+function keepOwnDevices(old: string, staged: string): void {
+  const prefix = (ns: string) => (ns ? `ghostly_${ns}_` : "ghostly_");
+  try {
+    const own = localStorage.getItem(`${prefix(spaceOf(old))}${MEDIA_DEVICES_SUFFIX}`);
+    if (own !== null) localStorage.setItem(`${prefix(spaceOf(staged))}${MEDIA_DEVICES_SUFFIX}`, own);
+  } catch { /* the defaults, as on a device the profile never ran on */ }
+}
+
 const staging: HandoffStagingHost = {
   async open(database) {
     return new Staging(database ? spaceOf(database) : newSpace());
   },
   // Installed, the staged namespace is the profile's own: its notes only served a pull that had not finished, and one
   // key per file would stay outside every profile's prefix for as long as this copy lives (bug hunt, 2026-11-04).
-  async install(old, staged) { pointProfile(old, staged); await dropNotes(spaceOf(staged)); },
+  async install(old, staged) { keepOwnDevices(old, staged); pointProfile(old, staged); await dropNotes(spaceOf(staged)); },
   async revert(old, staged) { pointProfile(staged, old); },
   async drop(database) {
     const ns = spaceOf(database);

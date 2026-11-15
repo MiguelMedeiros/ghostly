@@ -117,6 +117,23 @@ export async function pauseRequest(
   throw new Error("the paused request was never answered");
 }
 
+/**
+ * Asks the peer for a contact's app's request over the viewer port, as the worker does (`askPeer`), as `sender`: the
+ * worker by default. Undefined when the port closes with no answer.
+ */
+export async function askPeer(
+  world: FakeWorld,
+  request: Partial<{ peerPubKeyZ32: string; serviceId: string; method: string; path: string; headers: [string, string][]; bodyB64: string | null }> = {},
+  sender: chrome.runtime.MessageSender = { id: world.chrome.runtime.id, url: world.chrome.runtime.getURL("background.js") },
+): Promise<unknown> {
+  const port = world.connectFrom(sender, "viewer");
+  return new Promise((resolve) => {
+    port.onMessage.addListener((message: unknown) => resolve((message as { reply: unknown }).reply));
+    port.onDisconnect.addListener(() => resolve(undefined));
+    port.postMessage({ id: 1, request: { peerPubKeyZ32: PEER, serviceId: SERVICE, method: "GET", path: "/", headers: [], bodyB64: null, ...request } });
+  });
+}
+
 export function bodyText(params: Record<string, unknown>): string {
   return Buffer.from(params.body as string, "base64").toString("utf8");
 }

@@ -15,6 +15,7 @@ import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
 import { fillNames } from "../lib/fillNodes";
 import { isolate } from "../lib/ownStatus";
+import { FocusSafeButton } from "./ui/FocusSafeButton";
 
 /**
  * Deleting a profile removes its chats, keys and wallets for good. The dialog says what is inside, offers
@@ -79,7 +80,7 @@ export function DeleteProfileDialog({ entry, onClose }: { entry: ProfileEntry; o
         ) : (
           <InputGroup>
             <input type="password" autoComplete="new-password" aria-label={t("profile.delete.backupPassphrase")} className={input} placeholder={t("profile.backups.passphraseNew")} value={passphrase} onChange={(e) => setPassphrase(e.target.value)} />
-            <button type="button" disabled={busy || passphrase.length < 12 || (locked && (!lockPassword || waitSeconds > 0))} className={`${button} bg-surface-alt text-text-primary border border-border`}
+            <FocusSafeButton type="button" disabled={busy || passphrase.length < 12 || (locked && (!lockPassword || waitSeconds > 0))} className={`${button} bg-surface-alt text-text-primary border border-border`}
               onClick={() => void run(async () => {
                 // The desktop app asks where to save it; closing that dialog, or Cancel, saves nothing, and the passphrase stays to try again.
                 try {
@@ -87,7 +88,7 @@ export function DeleteProfileDialog({ entry, onClose }: { entry: ProfileEntry; o
                   if (how === "cancelled") return;
                 } catch (e) { if (isCancelled(e)) return; throw e; } finally { end(); }
                 setSaved(true); setBackingUp(false); setPassphrase("");
-              })}>{t("common.save")}</button>
+              })}>{t("common.save")}</FocusSafeButton>
           </InputGroup>
         )}
 
@@ -98,8 +99,8 @@ export function DeleteProfileDialog({ entry, onClose }: { entry: ProfileEntry; o
         ) : error && <Notice problem={error} className="text-xs" />}
         <div className="flex flex-wrap justify-end gap-2">
           <button type="button" onClick={onClose} className={`${button} bg-surface-alt text-text-primary border border-border`}>{t("common.cancel")}</button>
-          <button type="button" data-testid="delete-profile-go" disabled={busy || typed.trim() !== plain || (locked && (!lockPassword || waitSeconds > 0))} onClick={() => void run(async () => { await deleteProfile(entry.id, lockPassword); onClose(); })}
-            className={`${button} bg-danger-fill text-white font-semibold`}>{busy ? t("profile.delete.deleting") : t("common.delete")}</button>
+          <FocusSafeButton type="button" data-testid="delete-profile-go" disabled={busy || typed.trim() !== plain || (locked && (!lockPassword || waitSeconds > 0))} onClick={() => void run(async () => { await deleteProfile(entry.id, lockPassword); onClose(); })}
+            className={`${button} bg-danger-fill text-white font-semibold`}>{busy ? t("profile.delete.deleting") : t("common.delete")}</FocusSafeButton>
         </div>
       </div>
     </div>

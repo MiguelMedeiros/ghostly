@@ -10,6 +10,7 @@ import type { InstanceCard } from "./walletCardData";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
 import { fillNames } from "../lib/fillNodes";
+import { FocusSafeButton } from "./ui/FocusSafeButton";
 
 /** A card's test id on the Accept side: its kind and its network (`payment-accept-cashu-testnet`). */
 export const acceptCardTestId = (id: string) => `payment-accept-${id.replace(/:/g, "-")}`;
@@ -130,9 +131,9 @@ export function ChatPaymentAccept({ peer, contact, cards, network, empty, onSave
     {!(bare && state === "idle") && <>
     <p className="payment-accept-status" data-testid="payment-accept-status" data-state={state} role="status">{status}</p>
     {error && <Notice problem={error} className="text-xs m-0" />}
-    <button ref={saveRef} type="button" data-testid="payment-accept-save" className="composer-sheet-action" disabled={!changed || busy} onClick={save}>
+    <FocusSafeButton ref={saveRef} type="button" data-testid="payment-accept-save" className="composer-sheet-action" disabled={!changed || busy} onClick={save}>
       {t(busy ? "payments.accept.saving" : "payments.accept.save")}
-    </button>
+    </FocusSafeButton>
     </>}
   </>;
 }

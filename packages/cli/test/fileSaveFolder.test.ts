@@ -14,7 +14,8 @@ import { openPersistentIndexedDb } from "../src/runtime/storage";
 
 /**
  * `file save --path` naming a folder: a bad_request that says to name a file or use --dir, never a hint to --force over
- * it (which then failed "is a folder"); an empty --path or --dir is a usage error, not the current folder. A voice message
+ * it (which then failed "is a folder"); one with a trailing separator that is not there is not_found, with no --dir hint
+ * (which then failed "No such file or folder"); an empty --path or --dir is a usage error, not the current folder. A voice message
  * goes into --dir under the name Ghostly makes for it, as the apps' Download does, its row looked for among the chat's
  * newest first: the whole history of a 20,000-message chat costs a quarter of a second to read.
  */
@@ -93,13 +94,16 @@ describe("file save to a folder", () => {
 
   it("a --path that ends in a separator names a folder, never the file's name, whether the folder is there or not", async () => {
     // Before, resolve() dropped the slash: "--path downloads/" with no downloads folder left a file named downloads.
+    // Before, a missing one hinted --dir <that folder>, which then failed "No such file or folder": none is hinted.
     const missing = join(dir, "newfolder");
-    await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", path: `${missing}/` })).rejects.toMatchObject({
-      code: "bad_request", message: `${missing}/ names a folder: name a file, or use --dir ${missing} (dir over the socket)`,
-    });
+    const refused = await callApi(ctx, "file.save", { file: "chat-one-in-r", path: `${missing}/` }).catch((error: unknown) => error);
+    expect(refused).toMatchObject({ code: "not_found", message: `No such folder: ${missing} (make it first, or name a file in a folder that is there)` });
+    expect((refused as { details?: unknown }).details).toBeUndefined();
     const file = join(dir, "slash.txt");
     writeFileSync(file, "x");
-    await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", path: `${file}/`, force: true })).rejects.toMatchObject({ code: "bad_request" });
+    await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", path: `${file}/`, force: true })).rejects.toMatchObject({
+      code: "not_found", message: `${file} is a file, not a folder: name a file in a folder that is there`,
+    });
     expect(readdirSync(dir)).not.toContain("newfolder");
     expect(readFileSync(file, "utf8")).toBe("x");
   });
@@ -152,6 +156,21 @@ describe("file save to a folder", () => {
     await expect(callApi(ctx, "file.save", { file: "chat-one-in-vb", path: join(folder, name) })).rejects.toMatchObject({ code: "confirm" });
   });
 
+  it("a voice message steps past a folder of its name in --dir as past a file; a --path folder is still refused", async () => {
+    const folder = join(dir, "voice-folders");
+    mkdirSync(folder);
+    const name = voiceDownloadName("audio/webm", 1_700_000_005_000), stem = name.slice(0, -".webm".length);
+    // A folder at its name and at its next one, a file at the one after.
+    mkdirSync(join(folder, name));
+    mkdirSync(join(folder, `${stem} (2).webm`));
+    writeFileSync(join(folder, `${stem} (3).webm`), "other");
+    // Before, it stopped at the first folder: "is a folder: use --dir <that folder>".
+    expect(await callApi(ctx, "file.save", { file: "chat-one-in-v", dir: folder })).toMatchObject({ path: join(folder, `${stem} (4).webm`) });
+    expect(readFileSync(join(folder, `${stem} (4).webm`), "utf8")).toBe("MZ");
+    expect(readFileSync(join(folder, `${stem} (3).webm`), "utf8")).toBe("other");
+    await expect(callApi(ctx, "file.save", { file: "chat-one-in-v", path: join(folder, name) })).rejects.toMatchObject({ code: "bad_request", details: { dir: join(folder, name) } });
+  });
+
   it("a second file of one name in --dir is a confirm that names both ways out: --force replaces, --path keeps both", async () => {
     const folder = join(dir, "same-name");
     mkdirSync(folder);
@@ -160,13 +179,39 @@ describe("file save to a folder", () => {
     // Before, it said only "pass --force", and that replaced the other file with this one.
     await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", dir: folder })).rejects.toMatchObject({
       code: "confirm",
-      message: `${join(folder, "report.txt")} exists: pass --force (force: true over the socket) to replace it, or --path ${join(folder, "report (3).txt")} (path over the socket) to keep both`,
+      message: `${join(folder, "report.txt")} exists: pass --force (force: true over the socket) to replace it, or --path '${join(folder, "report (3).txt")}' (path over the socket) to keep both`,
+      details: { path: join(folder, "report (3).txt") },
     });
     expect(readFileSync(join(folder, "report.txt"), "utf8")).toBe("first");
     expect(readdirSync(folder).sort()).toEqual(["report (2).txt", "report.txt"]);
     // A --path the user named is theirs: replacing it is the one way out there.
     await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", path: join(folder, "report.txt") })).rejects.toMatchObject({
       code: "confirm", message: `${join(folder, "report.txt")} exists: pass --force (force: true over the socket) to replace it`,
+    });
+  });
+
+  it("the paths its hints suggest paste into a shell as one word: quoted, raw in details; one with a ' only there", async () => {
+    // Before, "--path /x/report (2).txt" was a syntax error at "(" in bash and zsh, and a name with spaces two words.
+    const quoted = (path: string) => `'${path}'`;
+    const spaced = join(dir, "here and there");
+    mkdirSync(spaced);
+    writeFileSync(join(spaced, "report.txt"), "first");
+    await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", dir: spaced })).rejects.toMatchObject({
+      code: "confirm",
+      message: `${join(spaced, "report.txt")} exists: pass --force (force: true over the socket) to replace it, or --path ${quoted(join(spaced, "report (2).txt"))} (path over the socket) to keep both`,
+      details: { path: join(spaced, "report (2).txt") },
+    });
+    // A ' quoted as '\'' read '\\'' in the JSON answer: pasted, the quote ended there and the rest of the path ran.
+    const folder = join(dir, "it's here");
+    mkdirSync(folder);
+    writeFileSync(join(folder, "report.txt"), "first");
+    await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", dir: folder })).rejects.toMatchObject({
+      code: "confirm",
+      message: `${join(folder, "report.txt")} exists: pass --force (force: true over the socket) to replace it, or --path <the one in details.path> (path over the socket) to keep both`,
+      details: { path: join(folder, "report (2).txt") },
+    });
+    await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", path: folder })).rejects.toMatchObject({
+      code: "bad_request", message: `${folder} is a folder: name a file, or use --dir <the one in details.dir> (dir over the socket)`, details: { dir: folder },
     });
   });
 

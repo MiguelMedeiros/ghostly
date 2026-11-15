@@ -33,11 +33,11 @@ async function lone() {
   return node;
 }
 
-const request = (io: IO) => io.createRequest(SILENT, null, true, 0, null, null);
+const request = (io: IO, to = SILENT) => io.createRequest(to, null, true, 0, null, null);
 
 /** A reply to `tid` as a DHT node writes it: type and version, no flags, the tid, the address it saw (dht-rpc 6.28.0). */
-function reply(io: IO, tid: number) {
-  io.onmessage(io.clientSocket, Uint8Array.from([0x13, 0, tid & 0xff, tid >> 8, 127, 0, 0, 1, 9, 0]), SILENT);
+function reply(io: IO, tid: number, from = SILENT) {
+  io.onmessage(io.clientSocket, Uint8Array.from([0x13, 0, tid & 0xff, tid >> 8, 127, 0, 0, 1, 9, 0]), from);
 }
 
 function shuffled<T>(items: T[]) {
@@ -72,6 +72,35 @@ it("hands each reply to the request of its tid, after tids wrap and when two sha
   reply(io, 0);
   expect(got).toEqual(["wrapped", "last", "again"]);
   expect(io.inflight.length).toBe(before);
+});
+
+/**
+ * A relay full to its limits has about as many requests in flight as there are tids (65,536), most of them waiting in the
+ * window's queue, so a new request nearly always shares its tid with an older one sent to another node. Measured at the
+ * default limits after a restart, one reply in six went to the older request: its lookup took that node's closest nodes
+ * for another target, and the reply its own request waited for found nothing left to answer.
+ */
+it("hands a reply to the request of its tid sent to the node that answers", async () => {
+  const { io } = await lone();
+  const got: string[] = [];
+  const named = (name: string, to: { host: string; port: number }) => {
+    const req = request(io, to);
+    req.onresponse = () => { got.push(name); };
+    return req;
+  };
+  const [a, b, c] = [{ host: "127.0.0.1", port: 9 }, { host: "127.0.0.2", port: 9 }, { host: "127.0.0.1", port: 10 }];
+  io._tid = 7;
+  named("older to a", a);
+  io._tid = 7;
+  named("newer to b", b);
+  io._tid = 7;
+  named("newest to c", c);
+
+  reply(io, 7, c);
+  reply(io, 7, b);
+  // From a node none was sent to (a server answering from another socket): the oldest left, as before.
+  reply(io, 7, { host: "127.0.0.3", port: 9 });
+  expect(got).toEqual(["newest to c", "newer to b", "older to a"]);
 });
 
 it("keeps every request findable while requests come and go in any order", async () => {

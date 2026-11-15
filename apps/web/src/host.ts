@@ -121,6 +121,21 @@ if (servicesHost) {
   });
 }
 /**
+ * Every app a chat lists, noted as the list comes (`noteListed`): one opened here before the opened-apps list was kept
+ * is on no list, and would keep what it stored after Delete chat, Clear all data and Delete profile. Nothing of it
+ * loads while no chat lists one.
+ */
+if (openServices) {
+  engine.subscribe(() => {
+    const state = engine.state;
+    if (!state) return;
+    const links = [...state.links, ...(state.edges ?? [])].filter((link) => link.peerServices?.some((s) => s.type === "http"));
+    if (!links.length) return;
+    const profile = activeProfileId();
+    void import("./svc/forget").then(({ noteListed }) => noteListed(profile, links)).catch(() => {});
+  });
+}
+/**
  * Hide my IP from contacts is on: a contact's app does not open here. No policy this page sends keeps a Chromium browser
  * from connecting to a server a frame in the app points at (its "Preload pages" connects before the policy refuses the
  * frame), and that server would see this device's address. The extension (`RELAY_ONLY_REFUSED` in its background.ts)
@@ -211,8 +226,10 @@ export const webHost = createInPageHost({
       words: {
         unreachable: t("services.window.unreachable"), failed: t("services.window.failed"), close: t("common.close"), callOn: t("services.window.callOn", { app: title }),
         tooSlow: t("services.window.tooSlow", { app: title }), offline: t("services.window.offline", { app: title }), retry: t("services.window.retry"),
+        loading: t("services.window.loading", { app: title }),
         reaching: t("services.window.reaching"), stillOffline: t("services.window.stillOffline", { app: title }),
         blocked: t("services.window.blocked", { app: title }), unguarded: t("services.window.unguarded", { app: title }),
+        openLink: (site) => t("services.window.openLink", { site }),
         ...serviceFraming(title, chatNamesForPeer(peerPubKeyZ32), peerPubKeyZ32, t),
         hostError: (headers) => hostErrorText(headers, title, t),
       },

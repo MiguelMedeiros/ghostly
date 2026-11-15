@@ -492,6 +492,15 @@ describe("the standby screen", () => {
     expect(screen.getByRole("button", { name: "Use here" })).toBeInTheDocument();
   });
 
+  // In a language of the other direction, a name's ending punctuation was drawn on its other side ("!Club").
+  it("names another profile in its own direction", async () => {
+    createProfile("Club!");
+    fakeEngine.on("deviceSet", () => set({ state: "standby" })).on("deviceHandoffView", () => null).on("deviceTakeoverInfo", () => ({ offered: false }));
+    renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "MacBook" }} />, { language: "ar" });
+    const bdi = (await screen.findByTestId("device-standby-switch")).querySelector("bdi");
+    expect(bdi?.textContent).toBe("Club!");
+  });
+
   it("on a phone Check connection is 44 px tall, as the screen's other buttons are", async () => {
     fakeEngine.on("deviceSet", () => set({ state: "standby", devices: set().devices.map((device) => ({ ...device, self: device.key === PHONE, active: device.key === DESKTOP, status: device.key === DESKTOP ? "live" as const : undefined })) }));
     fakeEngine.on("deviceHandoffView", () => null);

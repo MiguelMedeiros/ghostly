@@ -60,10 +60,11 @@ export function asCliError(error: unknown): CliError {
  * `details.reason`. Any other keeps `engine`. Read by its shape, as `profileOpenError`.
  */
 const ENGINE_CODES: Record<string, ErrorCode> = {
-  mintUnreachable: "unavailable", lnurlUnreachable: "unavailable", hostUnreachable: "unavailable", networkUnreachable: "unavailable", usdtRpcUnavailable: "unavailable",
+  mintUnreachable: "unavailable", lnurlUnreachable: "unavailable", hostUnreachable: "unavailable", networkUnreachable: "unavailable", usdtRpcUnavailable: "unavailable", mintFailedInvoice: "unavailable",
   hostTimedOut: "timeout", networkTimedOut: "timeout",
   invalidMintUrl: "bad_request", mintNotHttps: "bad_request", invalidMaxFee: "bad_request",
   notEnoughSats: "refused", notEnoughForFee: "refused", mintsNoAnyAmount: "refused", ecashAlreadySpent: "refused", ecashFeeTakesAll: "refused", lightningRefused: "refused", contactNoWallet: "refused", contactNoPayments: "refused",
+  serviceShareFull: "refused",
 };
 /** `details.reason` of an engine error a bot tells apart from others of its code. */
 const ENGINE_REASONS: Record<string, string> = { contactNoWallet: "contact_no_wallet", contactNoPayments: "contact_payments_off" };

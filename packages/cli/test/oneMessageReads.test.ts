@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { EngineState, GroupView, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
-import { chatViewOf } from "./support/chatView";
+import { chatViewOf, groupViewOf } from "./support/chatView";
 // covers: headless.forward, headless.chat
 
 /**
@@ -17,7 +17,7 @@ function fake() {
   const rows: StoredMessage[] = [row("chat-one", "peer_1"), row("chat-one", "peer_2"), row("group:g1", "k:0:1"), row("chat-two", "me_fwd", { sender: "me", delivery: "sent" }),
     row("chat-one", "me_1", { sender: "me", wireId: "W1", delivery: "delivered" }), row("group:g1", "mine:0:2", { sender: "me" })];
   const node = {
-    chatView: chatViewOf, getState: () => ({ links: [link("chat-one", "Alice"), link("chat-two", "Bob")], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
+    chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [link("chat-one", "Alice"), link("chat-two", "Bob")], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
     getMessages: vi.fn(async (linkId: string) => rows.filter((m) => m.linkId === linkId)),
     groupMessages: vi.fn(async ({ groupId }: { groupId: string }) => rows.filter((m) => m.linkId === `group:${groupId}`)),
     getMessage: vi.fn(async (linkId: string, id: string) => rows.find((m) => m.linkId === linkId && m.id === id)),
@@ -63,7 +63,20 @@ describe("delete", () => {
     await expect(callApi(ctx, "chat.delete", { chat: "Nobody", message: "mine:0:2" })).rejects.toMatchObject({ code: "not_found", message: 'No chat "Nobody" (ghostly chat list)' });
     expect(node.deleteMessage).not.toHaveBeenCalled();
     const { COMMANDS } = await import("../src/commands");
-    expect(COMMANDS["message delete"]!.usage).toBe("message delete <chat|group> <message> [--everyone [--wait none|confirmed|sent] [--timeout s]]");
+    expect(COMMANDS["message delete"]!.usage).toBe("message delete <chat|group> <message> [--everyone [--wait none|confirmed|sent] [--timeout s]] [--purge]");
+  });
+
+  it("another member's message in a group says only its author deletes it, not a --everyone that is then refused as not mine", async () => {
+    const { ctx, node } = fake();
+    for (const chat of ["Crew", "g1", "group:g1"])
+      for (const purge of [false, true])
+        await expect(callApi(ctx, "chat.delete", { chat, message: "k:0:1", ...(purge && { purge }) })).rejects.toMatchObject({
+          code: "not_found", message: `"${chat}" is a group, and "k:0:1" is another member's message in it: only its author deletes a group's message, for everyone`, details: { group: "g1" },
+        });
+    // The --everyone that was offered says the same thing in its own words.
+    await expect(callApi(ctx, "chat.delete", { chat: "Crew", message: "k:0:1", everyone: true })).rejects.toMatchObject({ code: "not_found", message: expect.stringMatching(/only your own/) });
+    expect(node.deleteMessage).not.toHaveBeenCalled();
+    expect(node.removeMessage).not.toHaveBeenCalled();
   });
 });
 

@@ -65,13 +65,18 @@ function trimEnd(text: string, chars: string): string {
   return text.slice(0, end);
 }
 
-/** The last word of what was copied, without the quotes, brackets and sentence marks around it. */
+/**
+ * The last word of what was copied, without the quotes, brackets and sentence marks around it, nor a `/` a link
+ * ends with (typed, or added by a chat app's linkifier: `ghostly.tools/#ghostly1…/`).
+ */
 function unwrapPasted(text: string): string {
   const words = trimEnd(text.trim(), PASTE_CLOSERS + PASTE_SPACES).split(/\s+/);
   const last = words[words.length - 1] ?? "";
   let start = 0;
   while (start < last.length && PASTE_OPENERS.includes(last[start])) start++;
-  return trimEnd(last.slice(start), PASTE_CLOSERS);
+  const token = trimEnd(last.slice(start), PASTE_CLOSERS);
+  const bare = trimEnd(token, PASTE_CLOSERS + "/");
+  return /:\/\/[^/]*$/.test(bare) ? token : bare;
 }
 
 /**

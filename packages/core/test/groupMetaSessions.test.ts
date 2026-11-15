@@ -5,7 +5,7 @@ import { epochKeys } from "../src/groupCrypto";
 import { commitHash } from "../src/groupCommits";
 import { GroupSession, type GroupEdgeFrame, type GroupState } from "../src/groupSession";
 import { CommunitySession, communityCommitHash, type CommunityFrame, type CommunityState } from "../src/groupCommunity";
-import { encodeGroupMetaBody, signGroupMeta, wrapGroupMeta, type GroupMetaChange, type GroupMetaFrame } from "../src/groupMeta";
+import { encodeGroupMetaBody, groupCallE2ee, groupCallSfu, groupMetaBody, parseGroupMetaBody, signGroupMeta, wrapGroupMeta, type GroupMeta, type GroupMetaChange, type GroupMetaFrame } from "../src/groupMeta";
 // covers: groups.picture.protocol, groups.picture.set, groups.picture.late-joiner, groups.rename.protocol
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
@@ -697,5 +697,114 @@ describe("group name, group-community/1", () => {
     const dave = await net.admit(carol, "dave");
     await net.meet(carol, dave); await net.meet(bob, dave);
     expect([bob.session.name, carol.session.name, dave.session.name]).toEqual(["Book club", "Book club", "Book club"]);
+  });
+});
+
+describe("group call node, group-community/1 (WISP 602)", () => {
+  const SFU = "https://call.example.com";
+
+  it("is an https origin in its one spelling, and a call that does not hold is no call: the name beside it still shows", () => {
+    expect(groupCallSfu(SFU)).toBe(SFU);
+    expect(groupCallSfu("https://call.example.com:8443")).toBe("https://call.example.com:8443");
+    for (const bad of ["http://call.example.com", "https://call.example.com/", "https://call.example.com/sfu", "https://Call.example.com", "https://call.example.com:443",
+      "https://u@call.example.com", "https://call.example.com?x", "https://call.example.com#x", `https://${"a".repeat(200)}.com`, "call.example.com", "", 1, null]) expect(groupCallSfu(bad), String(bad)).toBeUndefined();
+    expect(parseGroupMetaBody(JSON.stringify({ name: "Thursday", call: { sfu: SFU, e2ee: 7 } }))).toEqual({ name: "Thursday", call: { sfu: SFU } });
+    expect(parseGroupMetaBody(JSON.stringify({ name: "Thursday", call: { sfu: "http://call.example.com" } }))).toEqual({ name: "Thursday" });
+    expect(parseGroupMetaBody(JSON.stringify({ name: "Thursday", call: "https://call.example.com" }))).toEqual({ name: "Thursday" });
+    expect(() => encodeGroupMetaBody({ call: { sfu: "https://call.example.com/sfu" } })).toThrow("A group's call node is an https origin");
+  });
+
+  it("keeps sealed call media (e2ee: 1) through a read and a write, and reads any other value as off (WISP 602 § End-to-end encryption)", () => {
+    const sealed = JSON.stringify({ name: "Thursday", call: { sfu: SFU, e2ee: 1 } });
+    const read = parseGroupMetaBody(sealed);
+    expect(read).toEqual({ name: "Thursday", call: { sfu: SFU, e2ee: 1 } });
+    expect(encodeGroupMetaBody(read!)).toBe(sealed);
+    expect(JSON.parse(encodeGroupMetaBody({ ...read, name: "Friday" }))).toEqual({ name: "Friday", call: { sfu: SFU, e2ee: 1 } });
+    expect(JSON.parse(encodeGroupMetaBody({ ...read, pic: RED }))).toEqual({ name: "Thursday", pic: RED, call: { sfu: SFU, e2ee: 1 } });
+    for (const off of [0, 2, 7, "1", "true", false, null, [1], { on: 1 }]) {
+      expect(parseGroupMetaBody(JSON.stringify({ call: { sfu: SFU, e2ee: off } })), JSON.stringify(off)).toEqual({ call: { sfu: SFU } });
+      expect(encodeGroupMetaBody({ call: { sfu: SFU, e2ee: off as never } }), JSON.stringify(off)).toBe(JSON.stringify({ call: { sfu: SFU } }));
+    }
+  });
+
+  it("reads e2ee: true as on, as 1, and writes it again as 1 (WISP 602 § End-to-end encryption)", () => {
+    for (const on of [1, true]) expect(groupCallE2ee(on), String(on)).toBe(true);
+    for (const off of [0, false, "1", "true", null, undefined, 2]) expect(groupCallE2ee(off), String(off)).toBe(false);
+    const flagged = JSON.stringify({ name: "Thursday", call: { sfu: SFU, e2ee: true } });
+    const read = parseGroupMetaBody(flagged);
+    expect(read).toEqual({ name: "Thursday", call: { sfu: SFU, e2ee: 1 } });
+    expect(encodeGroupMetaBody(read!)).toBe(JSON.stringify({ name: "Thursday", call: { sfu: SFU, e2ee: 1 } }));
+    expect(encodeGroupMetaBody({ call: { sfu: SFU, e2ee: true as never } })).toBe(JSON.stringify({ call: { sfu: SFU, e2ee: 1 } }));
+    // A statement whose body says it as a flag: its session's call is sealed.
+    expect(groupMetaBody({ body: flagged } as GroupMeta).call).toEqual({ sfu: SFU, e2ee: 1 });
+  });
+
+  it("an admin's rename or picture change keeps sealed call media on for every member", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob");
+    await net.meet(alice, bob);
+    // The admin's statement signed by hand, as another app would write it.
+    const s = bob.session, key = epochKeys(fromBase64Url(s.state.secrets[s.topHash]), s.id, s.epoch).message;
+    const aliceSeed = identityFromSeedB64(alice.session.state.seedB64).seed;
+    const body = JSON.stringify({ name: "Thursday", call: { sfu: SFU, e2ee: 1 } });
+    const statement = wrapGroupMeta(signGroupMeta({ g: s.id, e: s.epoch, h: s.topHash, r: 50, ts: 1 }, body, aliceSeed, alice.session.myKey), s.topHash, key, true);
+    for (const member of [alice, bob]) expect(await member.session.handle(bob.session.myKey, clone(statement))).toBe(true);
+    expect([alice.session.call, bob.session.call]).toEqual([{ sfu: SFU, e2ee: 1 }, { sfu: SFU, e2ee: 1 }]);
+    await alice.session.rename("Friday");
+    await net.settle();
+    expect([bob.session.name, bob.session.call]).toEqual(["Friday", { sfu: SFU, e2ee: 1 }]);
+    await alice.session.setPicture(RED);
+    await net.settle();
+    expect([bob.session.name, bob.session.picture, bob.session.call]).toEqual(["Friday", RED, { sfu: SFU, e2ee: 1 }]);
+    expect(parseGroupMetaBody(bob.session.state.meta!.body)?.call).toEqual({ sfu: SFU, e2ee: 1 });
+  });
+
+  it("the admin sets it for every member, a rename and a picture keep it, a member is refused, and clearing it clears it", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob");
+    await net.meet(alice, bob);
+    await alice.session.setCall(SFU);
+    await net.settle();
+    expect(bob.session.call).toEqual({ sfu: SFU });
+    await alice.session.rename("Thursday");
+    await alice.session.setPicture(RED);
+    await net.settle();
+    expect([bob.session.name, bob.session.picture, bob.session.call]).toEqual(["Thursday", RED, { sfu: SFU }]);
+    await expect(bob.session.setCall(null)).rejects.toThrow("Only the admin");
+    await expect(alice.session.setCall("http://call.example.com")).rejects.toThrow("https origin");
+    await alice.session.setCall(null);
+    await net.settle();
+    expect([alice.session.call, bob.session.call, bob.session.name]).toEqual([undefined, undefined, "Thursday"]);
+  });
+
+  it("the admin turns sealed call media on and off, and naming the node again keeps it as it was", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob");
+    await net.meet(alice, bob);
+    const OTHER = "https://call2.example.com";
+    await alice.session.setCall(SFU, true);
+    await net.settle();
+    expect([alice.session.call, bob.session.call]).toEqual([{ sfu: SFU, e2ee: 1 }, { sfu: SFU, e2ee: 1 }]);
+    // The node named again, or another one, without a word on e2ee: before, its statement left `e2ee` out (off).
+    await alice.session.setCall(OTHER);
+    await net.settle();
+    expect(bob.session.call).toEqual({ sfu: OTHER, e2ee: 1 });
+    expect(parseGroupMetaBody(bob.session.state.meta!.body)?.call).toEqual({ sfu: OTHER, e2ee: 1 });
+    await alice.session.setCall(OTHER, false);
+    await net.settle();
+    expect(bob.session.call).toEqual({ sfu: OTHER });
+    await alice.session.setCall(SFU);
+    await net.settle();
+    expect(bob.session.call).toEqual({ sfu: SFU });
+    await expect(bob.session.setCall(SFU, true)).rejects.toThrow("Only the admin");
+    // Cleared, the group has no call; a node named later starts with sealed media off.
+    await alice.session.setCall(SFU, true);
+    await alice.session.setCall(null);
+    await alice.session.setCall(SFU);
+    await net.settle();
+    expect(bob.session.call).toEqual({ sfu: SFU });
   });
 });

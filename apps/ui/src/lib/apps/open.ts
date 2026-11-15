@@ -16,6 +16,7 @@ export interface OpenAppOptions { runAnyway?: boolean; again?: unknown }
 /**
  * Opens `ref` in the 1:1 chat `linkId`, or alone when it is null. Rejects when it cannot start (revoked, removed, no runner…).
  * Resolves "shown" when it already ran there and was shown again: nothing new started, so the contact is not told again.
+ * So does one in a chat that a newer open there overtook (the web): it starts nothing, and the newer one stays.
  */
 export type AppOpener = (ref: string, linkId: string | null, options?: OpenAppOptions) => Promise<"shown" | void>;
 
@@ -45,13 +46,17 @@ export function useAppOpener(): AppOpener | null {
  */
 export type AppTakedown = { why: "revoked" } | { why: "removed"; store: string } | { why: "failed" } | { why: "unresponsive" } | { why: "offline" } | { why: "focus" };
 
-/** "Chess was stopped: its maker revoked this version", where the app ran. */
-export function takedownText(title: string, takedown: AppTakedown, t: Translate): string {
+/**
+ * "Chess was stopped: its maker revoked this version", where the app ran. The line takes the page's direction, so the
+ * app's title and the store's name are isolated in their own (as `removedLine` does).
+ */
+export function takedownText(name: string, takedown: AppTakedown, t: Translate): string {
+  const title = `\u2068${name}\u2069`;
   if (takedown.why === "failed") return t("apps.view.stoppedFailed", { title });
   if (takedown.why === "offline") return t("apps.view.stoppedOffline", { title });
   if (takedown.why === "unresponsive") return t("apps.view.stoppedUnresponsive", { title });
   if (takedown.why === "focus") return t("apps.view.stoppedFocus", { title });
-  return takedown.why === "revoked" ? t("apps.view.stoppedRevoked", { title }) : t("apps.view.stoppedRemoved", { title, store: takedown.store });
+  return takedown.why === "revoked" ? t("apps.view.stoppedRevoked", { title }) : t("apps.view.stoppedRemoved", { title, store: `\u2068${takedown.store}\u2069` });
 }
 
 /** An app running now, as its opener registered it: its ref, the version it runs, whether the person chose Run anyway, and how to stop it. */
@@ -106,12 +111,27 @@ export function stopRunningApps(): void {
   for (const entry of [...running]) entry.stop();
 }
 
+/** How many times each chat was deleted (`stopAppsIn`): an open still on its way in it when it goes never starts. */
+const deletions = new Map<string, number>();
+
 /**
  * Stops every app still running in the chat `linkId` and says nothing: the chat was deleted, and the engine refuses its
  * storage and its frames from now on. The web's panel went with the chat already; a Desktop app window has no panel.
  */
 export function stopAppsIn(linkId: string): void {
+  deletions.set(linkId, (deletions.get(linkId) ?? 0) + 1);
   for (const entry of [...running]) if (entry.linkId === linkId) entry.stop();
+}
+
+/**
+ * Read by an opener before its first wait, as `lockedSince`: the returned function says whether the chat `linkId` was
+ * deleted since (never, for an app alone). A Desktop app is registered only once its window is there, so a deletion in
+ * between stops nothing of it: the opener asks after every wait, and stops what it made.
+ */
+export function chatDeletedSince(linkId: string | null): () => boolean {
+  if (linkId === null) return () => false;
+  const at = deletions.get(linkId) ?? 0;
+  return () => (deletions.get(linkId) ?? 0) !== at;
 }
 
 const inputListeners = new Set<() => void>();

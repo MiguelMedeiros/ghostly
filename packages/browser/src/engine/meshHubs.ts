@@ -753,12 +753,13 @@ export class MeshHubs {
    * beacon as I read it (or seen there within `graceMs`); from another member, only that it says it is a hub (`claimed`),
    * and nothing it says of other members' apps. At most one
    * every `REACH_HEARD_MS` from a member. Nothing of it is saved: what a member's app takes, its own edge says (`edgeReady`).
+   * Whether it was taken: one left aside changes nothing the group shows.
    */
-  reached(groupId: string, session: GroupSession, from: string, frame: Record<string, unknown>, now: number): void {
-    if (!rosterHas(session.roster, from) || from === session.myKey || !Array.isArray(frame.k) || frame.k.length > session.roster.length) return;
+  reached(groupId: string, session: GroupSession, from: string, frame: Record<string, unknown>, now: number): boolean {
+    if (!rosterHas(session.roster, from) || from === session.myKey || !Array.isArray(frame.k) || frame.k.length > session.roster.length) return false;
     const live = this.get(groupId, now);
-    if (now - (live.reachHeard.get(from) ?? -Infinity) < REACH_HEARD_MS) return;
-    if (session.hubPolicy.no.includes(from) || live.departed.has(from)) return;
+    if (now - (live.reachHeard.get(from) ?? -Infinity) < REACH_HEARD_MS) return false;
+    if (session.hubPolicy.no.includes(from) || live.departed.has(from)) return false;
     const seen = live.seenHubs.get(from);
     const inBeacon = live.beacon.some(h => h.key === from) || (seen !== undefined && now - seen <= this.timings.graceMs);
     live.reachHeard.set(from, now);
@@ -769,7 +770,7 @@ export class MeshHubs {
       // a hub to me only until my first reading of this epoch's beacon, and nothing it says of members' apps is taken.
       live.claimed.set(from, now);
       if (!live.epochRead) live.reach.set(from, reach);
-      return;
+      return true;
     }
     live.reach.set(from, reach);
     live.seenHubs.set(from, now);
@@ -778,10 +779,11 @@ export class MeshHubs {
     const none = Array.isArray(frame.u) && frame.u.length <= Math.min(UNREACHED_SAID, session.roster.length)
       ? frame.u.filter((key): key is string => typeof key === "string" && key !== session.myKey && !reach.has(key) && rosterHas(session.roster, key)) : [];
     if (none.length) live.reachNone.set(from, new Set(none)); else live.reachNone.delete(from);
-    if (!Array.isArray(frame.l) || frame.l.length > session.roster.length) { live.reachLegacy.delete(from); return; }
+    if (!Array.isArray(frame.l) || frame.l.length > session.roster.length) { live.reachLegacy.delete(from); return true; }
     // A hub knows only of the members whose edges it holds.
     const legacy = frame.l.filter((key): key is string => typeof key === "string" && key !== session.myKey && reach.has(key) && !live.takesHubs.has(key));
     if (legacy.length) live.reachLegacy.set(from, new Set(legacy)); else live.reachLegacy.delete(from);
+    return true;
   }
 
   /** A member I have no edge with is reachable through a hub whose edge to me is up and that says it reaches them. */

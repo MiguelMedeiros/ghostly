@@ -273,6 +273,8 @@ const RULES: readonly Rule[] = [
   exact("Could not share the screen. Try again.", "calls.share.failed", "calls.share.failedNext"),
   exact("Your contact's app cannot show a screen in this call", "calls.share.contactCannot"),
   exact("Screen sharing is not available on Linux yet", "calls.share.notOnLinux"),
+  // Why a group's call button is off on the Linux Desktop (apps/ui/src/desktop/groupCallSupport.ts).
+  exact("Group calls aren't on Linux yet: join from app.ghostly.tools in a browser", "calls.noGroupOnLinux"),
   exact("All native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now.", "errors.transport.slotsFull", "errors.transport.slotsFullNext"),
   // Its listener, which did not start or stopped (packages/browser/src/platform: hyperdhtRelay.ts, irohWeb.ts; the
   // Iroh WASM's own, native/transports/iroh-web/src/lib.rs). A browser sees no status on a refused WebSocket, so a
@@ -674,6 +676,11 @@ const RULES: readonly Rule[] = [
   { match: /^The account's DID no longer resolves: .+$/, key: "errors.proof.didNoResolve", detail: true },
   exact("The account's DID could not be resolved", "errors.proof.didUnresolved", "errors.proof.laterNext"),
   exact("This DID is deactivated: its owner retired it", "errors.proof.didDeactivated"),
+  // A DID's lookup that found no document it can use (proofs/did.ts, providers/did.ts previewOf): a DID card in a
+  // message and the Add dialog's preview. The document's address stays a value.
+  { match: /^No DID document at (?<url>https:\/\/\S+)$/, key: "errors.proof.didNoDocument" },
+  { match: /^(?<url>https:\/\/\S+\/did\.json) is not JSON$/, key: "errors.proof.didNotJson" },
+  exact("This DID lists no Ed25519, secp256k1 or P-256 key for authentication or assertionMethod, so it cannot sign", "errors.proof.didNoSigningKey"),
   exact("The proof file is not on the homeserver", "errors.proof.pubkyFileGone"),
   exact("The file on the homeserver is not this proof", "errors.proof.pubkyFileOther"),
   exact("This Pubky key has no records on the Pkarr relays", "errors.proof.pubkyNoRecords"),
@@ -692,6 +699,7 @@ const RULES: readonly Rule[] = [
   exact("Your contact's app cannot verify this kind of identity yet", "errors.proof.contactUnsupported"),
   exact("Your contact's app could not check it. Try again later.", "errors.proof.contactUnavailable", "errors.proof.laterNext"),
   exact("Your contact keeps too many identities from you already", "errors.proof.contactTooMany"),
+  exact("Your contact keeps a newer proof of this identity from you", "errors.proof.contactNewer"),
   exact("That identity is no longer in your profile", "errors.proof.notInProfile"),
   exact("Your contact could not verify it", "errors.proof.contactRefused"),
   // A check that could not run (IdentityCheckUnavailable: sshForges.ts, providers/atproto.ts, atproto/resolve.ts, pubky.ts,
@@ -760,6 +768,8 @@ const RULES: readonly Rule[] = [
   // list's line may hold spaces ("relay .example.org").
   { match: /^Use an https:\/\/ relay address: (?<address>\S+)$/, key: "errors.relays.useHttps" },
   { match: /^Not a relay address: (?<address>.+)$/, key: "errors.relays.notAddress" },
+  // An Iroh or HyperDHT relay past what a contact reads (`relayUrlTooLong`): a relay address, one too long.
+  { match: /^Use a shorter relay address: (?<address>\S+)$/, key: "errors.relays.useShorter" },
   // The rest of what Settings, Network refuses before or on Save (packages/browser/src/shared: hyperdhtRelay.ts,
   // pushRelay.ts, ice.ts; engine/node.ts updateSettings). The field it is about is marked there, so no line names it.
   { match: /^Enter a relay address \((?<example>(?:https|wss):\/\/)…\)$/, key: "errors.relays.enterAddress" },
@@ -793,6 +803,7 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   mintHoldsSats: "errors.engine.mintHoldsSats",
   mintFailedQuote: "errors.engine.mintFailedQuote",
   mintFailedFaucet: "errors.engine.mintFailedFaucet",
+  mintFailedInvoice: "errors.engine.mintFailedInvoice",
   lastMint: "errors.engine.lastMint",
   noSharedMint: "errors.engine.noSharedMint",
   reviewedSatsGone: "errors.engine.reviewedSatsGone",
@@ -839,6 +850,12 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   walletAway: "errors.engine.walletAway",
   walletAwayUnnamed: "errors.engine.walletAwayUnnamed",
   groupTurnUnconfirmed: "errors.engine.groupTurnUnconfirmed",
+  groupNoCall: "errors.engine.groupNoCall",
+  groupCallNotMember: "errors.engine.groupCallNotMember",
+  groupCallRefused: "errors.engine.groupCallRefused",
+  groupCallBusy: "errors.engine.groupCallBusy",
+  groupCallFailed: "errors.engine.groupCallFailed",
+  serviceShareFull: "errors.engine.serviceShareFull",
   // As the chat's payment line says them (Chat.tsx).
   contactNoWallet: "chat.payments.noWallet",
   contactNoPayments: "chat.payments.offOrOld",
@@ -849,21 +866,28 @@ const ENGINE_NEXT: Partial<Record<EngineErrorCode, TranslationKey>> = {
   fedimintRealOnTestnet: "errors.engine.fedimintRealOnTestnetNext",
   fedimintRedeemUnheard: "errors.engine.fedimintRedeemUnheardNext",
   fedimintTestOnMainnet: "errors.engine.fedimintTestOnMainnetNext",
+  groupCallBusy: "errors.engine.groupCallBusyNext",
+  groupCallFailed: "errors.engine.groupCallFailedNext",
+  groupCallNotMember: "errors.engine.groupCallNotMemberNext",
+  groupCallRefused: "errors.engine.groupCallRefusedNext",
+  groupNoCall: "errors.engine.groupNoCallNext",
   groupTurnUnconfirmed: "errors.engine.groupTurnUnconfirmedNext",
   lastMint: "errors.engine.lastMintNext",
   lightningRefused: "errors.engine.lightningRefusedNext",
   lnurlUnreachable: "errors.engine.lnurlUnreachableNext",
   mintFailedFaucet: "errors.engine.mintFailedFaucetNext",
+  mintFailedInvoice: "errors.engine.mintFailedInvoiceNext",
   mintFailedQuote: "errors.engine.mintFailedQuoteNext",
   parkedSigned: "errors.engine.parkedSignedNext",
   requestNotAwaiting: "errors.engine.requestNotAwaitingNext",
   reviewedEcashSpent: "errors.engine.reviewedEcashSpentNext",
   reviewedSatsGone: "errors.engine.reviewedSatsGoneNext",
   sentAfterReview: "errors.engine.sentAfterReviewNext",
+  serviceShareFull: "errors.engine.serviceShareFullNext",
   testMintOnMainnet: "errors.engine.testMintOnMainnetNext",
 };
 /** The engine errors whose English goes behind the ⓘ too: a server's own reason in it is not said in the line. */
-const ENGINE_DETAIL: ReadonlySet<EngineErrorCode> = new Set(["lightningRefused", "mintFailedQuote", "mintFailedFaucet"]);
+const ENGINE_DETAIL: ReadonlySet<EngineErrorCode> = new Set(["lightningRefused", "mintFailedQuote", "mintFailedFaucet", "mintFailedInvoice"]);
 /** The values that are amounts: written again the app's way (the engine wrote them its own way). */
 const AMOUNTS = new Set(["amount", "fee", "min", "max"]);
 

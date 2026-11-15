@@ -32,6 +32,7 @@ import { onChatNotStored, reportChatNotStored } from "./lib/chatNotStored";
 import { LINK_GROUPS_WAITING, groupPath, linkGroupId, linkGroupsWaiting } from "./lib/groups";
 import { useEngineValue } from "./lib/engineState";
 import { engine } from "@ghostly/browser/platform/engine";
+import { trimEndOf } from "@ghostly/core";
 import { useAnchorHome, useAppNavigation } from "./hooks/useAppNavigation";
 import { modalOpen } from "./hooks/useAppCommands";
 import { problemText, type Problem } from "./lib/problemText";
@@ -58,7 +59,7 @@ const Wallet = menuPage(() => import("./pages/Wallet").then((m) => m.Wallet));
  * it when the address changes while the app is open: the name as the path, the code as its hash. Null for anything else.
  */
 function namedDeviceLink(pathname: string, hash: string): string | null {
-  const named = `#${pathname.replace(/^\//, "")}${hash.replace(/\/+$/, "")}`;
+  const named = `#${pathname.replace(/^\//, "")}${trimEndOf(hash, "/")}`;
   const link = readDeviceLink(named);
   return link.profile && /^ghostly1/i.test(link.code) && isDeviceCode(link.code) ? named : null;
 }
@@ -244,7 +245,8 @@ function ChatNotStoredNotice() {
 /**
  * A link with a doubled `#` before it (`##ghostly1…`, `##/join/…`, or the app's own `#/` with a `#…` typed or pasted
  * after it): the router reads it as home with the link as its hash, so no intake took it and it stayed in the address.
- * It opens as the link it doubles, and the intakes take it from there.
+ * It opens as the link it doubles, and the intakes take it from there. One that starts with `//` or `/\` after it is no
+ * page's, as with one `#` (`anchorTarget`): the router reads it as another site's address and refuses it, so home.
  */
 function DoubledHashLink() {
   const { pathname, hash } = useLocation();
@@ -252,7 +254,8 @@ function DoubledHashLink() {
   useEffect(() => {
     if (pathname !== "/" || !hash) return;
     const route = undoubledRoute(hash);
-    if (linkInAddress(route) !== null || /^\/chat\/./.test(route)) navigate(route, { replace: true });
+    if (/^[\\/]{2}/.test(route)) navigate("/", { replace: true });
+    else if (linkInAddress(route) !== null || /^\/chat\/./.test(route)) navigate(route, { replace: true });
   }, [pathname, hash, navigate]);
   return null;
 }

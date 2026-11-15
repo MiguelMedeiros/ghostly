@@ -69,6 +69,17 @@ describe("the Content-Security-Policy of every shell", () => {
     if (connect !== "anything") expect(connect).toContain("'self'");
   });
 
+  // covers: groups.protocol.call-key
+  it.each(Object.keys(policies) as (keyof typeof policies)[])("%s starts the app's bundled workers (a group call's media encryption, the QR reader) from its own origin, and no blob: worker", (shell) => {
+    // A worker is checked against worker-src, else child-src, else script-src, else default-src: no policy names the
+    // first two, so the bundled file runs under script-src 'self' and a worker built from a blob: URL does not.
+    const d = directives(policies[shell]());
+    const workers = d.get("worker-src") ?? d.get("child-src") ?? d.get("script-src") ?? d.get("default-src");
+    expect(d.has("worker-src"), "worker-src").toBe(false);
+    expect(workers).toContain("'self'");
+    expect(workers).not.toContain("blob:");
+  });
+
   it("keeps every sound a file of its own: Vite inlines an asset under 4 KiB as a data: URL, which connect-src 'self' refuses", () => {
     const folder = join(import.meta.dirname, "../../assets/sounds");
     for (const name of readdirSync(folder).filter(f => f.endsWith(".mp3"))) expect(statSync(join(folder, name)).size, name).toBeGreaterThan(4096);

@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { GROUP_FILE_LIMITS, type GroupFileMeta } from "@ghostly/core";
 import { CommunityWorld, type Peer } from "./communityWorld";
 import { GroupFileDesk, groupFileId, type GroupFileStore, type GroupFileWriter } from "../src/engine/groupFiles";
 import type { StoredFile } from "../src/shared/idb";
 import type { FileTransferView } from "../src/shared/types";
+vi.mock("../../core/src/identity", async importOriginal => (await import("../../core/test/support/verifyOnce")).verifyOnce(await importOriginal()));
 // covers: groups.files
 
 const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("base64url");

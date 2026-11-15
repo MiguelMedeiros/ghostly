@@ -59,7 +59,15 @@ export const commands: Record<string, Command> = {
     params: ({ options }, { target }) => ({ target, amount: options.amount, network: options.network, maxFee: options["max-fee"], card: options.card, comment: options.comment, chat: options.chat, confirmReal: options["confirm-real"] === true, force: options.force === true }),
   },
   "payment check": { method: "payment.check", usage: "payment check <chat> <payment>", summary: "Paid from another wallet: the contact's app looks now", args: ["chat", "payment"], params: (_, a) => ({ chat: a.chat, payment: a.payment }) },
-  "payment list": { method: "payment.list", usage: "payment list [--chat <chat>]", summary: "Payments and requests, newest first", options: { chat: { type: "string", description: "Only this chat's" } }, params: ({ options }) => ({ chat: options.chat }) },
+  "payment list": {
+    method: "payment.list", usage: "payment list [--chat <chat>]", summary: "Payments and requests, newest first",
+    options: { chat: { type: "string", description: "Only this chat's" } },
+    // `--chat "$CHAT"` with CHAT unset: before, `bad_request` (exit 1), a one-shot online first.
+    params: ({ options }) => {
+      if (options.chat === "") throw new CliError("usage", "--chat needs a chat");
+      return { chat: options.chat };
+    },
+  },
   "payment reclaim": { method: "payment.reclaim", usage: "payment reclaim <payment>", summary: "Take back ecash the contact has not taken", args: ["payment"], params: (_, a) => ({ payment: a.payment }) },
   "wallet add-mint": {
     method: "wallet.mint.add", usage: "wallet add-mint <url> [--primary]", summary: "Add a Cashu mint (a local or test mint is Testnet's)",
