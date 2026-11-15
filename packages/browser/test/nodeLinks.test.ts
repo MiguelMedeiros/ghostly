@@ -1536,8 +1536,10 @@ describe("text in a chat", () => {
     await vi.waitFor(async () => expect(await gone()).toBe(true));
     // Whatever was going to happen to it has happened by now.
     await new Promise((resolve) => setTimeout(resolve, 100));
-    // Withdrawn: the floor stops saying it, and the chat keeps its id for the next session.
-    expect(settleDht).toHaveBeenCalledWith(dhtFileId(wireId));
+    // Withdrawn: a new envelope without it takes its place on the floor (not only settled there), and the chat keeps
+    // its id for the next session.
+    expect(link.withdrawDht).toHaveBeenCalledWith(dhtFileId(wireId));
+    expect(settleDht).not.toHaveBeenCalled();
     expect((await saved(chat.id))?.withdrawnFiles).toEqual([wireId]);
     expect(await gone()).toBe(true);
     expect((await saved(chat.id))?.deletedIds).toContain(messageId);

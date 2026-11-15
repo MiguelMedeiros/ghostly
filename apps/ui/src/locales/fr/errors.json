@@ -691,6 +691,7 @@
     "noneAnsweredNext": "Vérifiez votre connexion, puis réessayez.",
     "notAddress": "Ce n'est pas une adresse de relais : {{address}}",
     "useHttps": "Utilisez une adresse de relais https:// : {{address}}",
+    "useShorter": "Utilisez une adresse de relais plus courte : {{address}}",
     "useWss": "Utilisez une adresse de relais wss://"
   },
   "services": {

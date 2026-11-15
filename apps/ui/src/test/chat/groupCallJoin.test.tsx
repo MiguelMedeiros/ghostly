@@ -21,6 +21,22 @@ import { renderApp } from "../render";
 
 vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
+/** The Android app's `call_service` (CallService.kt) and its notification's Hang up (`call-hang-up`). */
+const tauri = vi.hoisted(() => ({
+  invoke: vi.fn(async (command: string, _args?: unknown): Promise<unknown> => (command === "call_service" ? true : command === "native_notification_permission" ? "granted" : undefined)),
+  hangUp: undefined as (() => void) | undefined,
+}));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: tauri.invoke,
+  listen: async (name: string, handler: () => void) => {
+    if (name !== "call-hang-up") return () => {};
+    tauri.hangUp = handler;
+    return () => { if (tauri.hangUp === handler) tauri.hangUp = undefined; };
+  },
+  getVersion: async () => "0.4.0",
+}));
+const serviceTold = () => tauri.invoke.mock.calls.filter(([command]) => command === "call_service").map(([, args]) => (args as { call: unknown }).call);
+
 const ME = "me".padEnd(52, "y");
 const CALL = { sfu: "https://sfu.ghostly.test" };
 const community = (patch: Partial<GroupView> = {}) =>
@@ -48,7 +64,7 @@ class FakeRoom {
   readonly localParticipant = {
     identity: ME, name: "Me", isMicrophoneEnabled: false, isCameraEnabled: false, isScreenShareEnabled: false, isSpeaking: false,
     trackPublications: new Map(), getTrackPublication: () => undefined,
-    setMicrophoneEnabled: vi.fn(async () => undefined),
+    setMicrophoneEnabled: vi.fn(async function (this: { isMicrophoneEnabled: boolean }, on: boolean) { this.isMicrophoneEnabled = on; }),
   };
   readonly connect = vi.fn(async (_url: string, _token: string, _options?: unknown) => {});
   readonly disconnect = vi.fn(async () => this.listeners.get("disconnected")?.());
@@ -188,6 +204,26 @@ describe("Join call in a group's header", () => {
     expect(FakeRoom.rooms[0].disconnect).toHaveBeenCalled();
   });
 
+  it("a 1:1 call answered while the pass is asked for: Join call asks to end it before joining, with the pass it got", async () => {
+    let give!: (p: GroupCallPass) => void;
+    answerPass(() => new Promise<GroupCallPass>((resolve) => { give = resolve; }));
+    const { user } = joinButton();
+    await user.click(screen.getByTestId("group-call-join"));
+    await waitFor(() => expect(passAsks()).toHaveLength(1));
+    // Answered in a chat meanwhile, with no group call on yet to end.
+    const other = Symbol("1:1 call"), hangUp = vi.fn();
+    setCallOn(other, hangUp);
+    await act(async () => { give(pass()); });
+    expect(await screen.findByTestId("group-call-end-other")).toBeInTheDocument();
+    expect(screen.queryByTestId("group-call")).toBeNull();
+    expect(FakeRoom.rooms).toHaveLength(0);
+    expect(hangUp).not.toHaveBeenCalled();
+    await user.click(screen.getByTestId("group-call-end-other-confirm"));
+    expect(hangUp).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(FakeRoom.rooms[0]?.connect).toHaveBeenCalledWith("wss://sfu.ghostly.test", "pass-1", undefined));
+    expect(passAsks()).toHaveLength(1);
+  });
+
   it("names each tile by the group's own names, whatever name the node gave, and says who is not in the group", async () => {
     const ana = "ana".padEnd(46, "a") + "ana111", other = "ana".padEnd(46, "b") + "ana222", stranger = "zz".padEnd(46, "z") + "zzz333";
     const members = [{ key: ME, role: "member", me: true, online: true, missing: 0 }, ...[ana, other].map((key) => ({ key, role: "member", me: false, online: true, missing: 0, nick: "Ana" }))];
@@ -203,6 +239,46 @@ describe("Join call in a group's header", () => {
     expect(tileOf(other)).toHaveTextContent("Ana ⁦(…ana222)⁩");
     expect(tileOf(other)).not.toHaveTextContent("Miguel");
     expect(tileOf(stranger)).toHaveTextContent("Not in this group (…zzz333)");
+  });
+});
+
+describe("a group call in the Android app", () => {
+  const ANDROID = "Mozilla/5.0 (Linux; Android 15; Pixel 8; wv) AppleWebKit/537.36 Chrome/131.0 Mobile Safari/537.36";
+  afterEach(() => {
+    delete (window as unknown as { __TAURI_INTERNALS__?: object }).__TAURI_INTERNALS__;
+    tauri.invoke.mockClear();
+    tauri.hangUp = undefined;
+  });
+
+  // Out of sight (Home, the screen off) Android silences the microphone of an app with no call service: the others in
+  // the room stopped hearing the phone within seconds, as in a 1:1 call before lib/callService.ts.
+  it("holds the call service from the microphone on to Leave call, and the notification's Hang up leaves the room", async () => {
+    (window as unknown as { __TAURI_INTERNALS__?: object }).__TAURI_INTERNALS__ = {};
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue(ANDROID);
+    answerPass(() => pass());
+    const { user } = joinButton();
+    await user.click(screen.getByTestId("group-call-join"));
+    await waitFor(() => expect(serviceTold()).toEqual([{ name: "Club", video: false }]));
+    // Muted, it holds on: from the background Android would refuse to start it again.
+    await user.click(screen.getByTestId("group-call-mic"));
+    expect(serviceTold()).toEqual([{ name: "Club", video: false }]);
+    await user.click(screen.getByTestId("group-call-leave"));
+    await waitFor(() => expect(serviceTold()).toEqual([{ name: "Club", video: false }, null]));
+
+    await user.click(screen.getByTestId("group-call-join"));
+    await waitFor(() => expect(tauri.hangUp).toBeDefined());
+    act(() => tauri.hangUp!());
+    await waitFor(() => expect(screen.queryByTestId("group-call")).toBeNull());
+    expect(FakeRoom.rooms[1].disconnect).toHaveBeenCalled();
+    expect(serviceTold()[serviceTold().length - 1]).toBeNull();
+  });
+
+  it("holds nothing outside the Android app", async () => {
+    answerPass(() => pass());
+    const { user } = joinButton();
+    await user.click(screen.getByTestId("group-call-join"));
+    await waitFor(() => expect(FakeRoom.rooms[0]?.localParticipant.setMicrophoneEnabled).toHaveBeenCalled());
+    expect(serviceTold()).toEqual([]);
   });
 });
 
@@ -236,6 +312,23 @@ describe("Join call with Hide my IP from contacts on", () => {
     await user.click(screen.getByTestId("group-call-join"));
     expect(screen.queryByTestId("group-call-hide-ip")).toBeNull();
     await waitFor(() => expect(FakeRoom.rooms[1]?.connect).toHaveBeenCalled());
+  });
+
+  it("asks again when the admin names another call node: the yes was for the node it was given for", async () => {
+    answerPass(() => pass({ iceServers: [TURN] }));
+    const group = community({ id: "group-new-node" });
+    const { user, rerender } = hideIp(group);
+    await user.click(screen.getByTestId("group-call-join"));
+    await user.click(screen.getByTestId("group-call-hide-ip-confirm"));
+    await waitFor(() => expect(FakeRoom.rooms[0]?.connect).toHaveBeenCalled());
+    await user.click(screen.getByTestId("group-call-leave"));
+
+    const moved = { ...group, call: { sfu: "https://call.example.com" } };
+    act(() => fakeEngine.update({ groups: [moved] }));
+    rerender(<GroupCallButton group={moved} loadLivekit={loadLivekit} />);
+    await user.click(screen.getByTestId("group-call-join"));
+    expect(screen.getByTestId("group-call-hide-ip")).toBeInTheDocument();
+    expect(FakeRoom.rooms).toHaveLength(1);
   });
 
   it("stays off, saying why, when the node gives no relay to go through", async () => {

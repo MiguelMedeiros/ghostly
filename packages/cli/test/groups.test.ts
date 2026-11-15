@@ -504,6 +504,17 @@ describe("group call", () => {
     expect(setGroupCall).toHaveBeenLastCalledWith({ groupId: "g7", sfu: "https://call.example.com:8443" });
   });
 
+  it("refuses sfu with clear on the socket, as the command line refuses --sfu with --clear, before anything is signed", async () => {
+    // Before: `clear` won, the node was cleared and `call: null` came back, exit 0.
+    const { ctx, setGroupCall } = community();
+    await callApi(ctx, "group.call", { group: "Thursday", sfu: SFU });
+    setGroupCall.mockClear();
+    await expect(callApi(ctx, "group.call", { group: "Thursday", sfu: SFU, clear: true })).rejects.toMatchObject({ code: "bad_request", message: "clear removes the call node: not with sfu" });
+    await expect(callApi(ctx, "group.call", { group: "Thursday", e2ee: false, clear: true })).rejects.toMatchObject({ code: "bad_request", message: "clear removes the call node: not with e2ee" });
+    expect(setGroupCall).not.toHaveBeenCalled();
+    expect((await show(ctx)).call).toEqual({ sfu: SFU, e2ee: false });
+  });
+
   it("takes --sfu or --clear, one of them, and --e2ee or --no-e2ee with --sfu or alone", () => {
     const command = COMMANDS["group call"];
     const params = (argv: string[]) => { const parsed = parseArgs(argv, command.options ?? {}, idSlot(command)); return command.params!(parsed, positionals(command, parsed.positionals)); };
@@ -515,6 +526,20 @@ describe("group call", () => {
     expect(params(["Thursday", "--no-e2ee"])).toEqual({ group: "Thursday", e2ee: false });
     expect(() => params(["Thursday", "--clear", "--e2ee"])).toThrow("--clear removes the call node: not with --e2ee or --no-e2ee");
     expect(() => params(["Thursday", "--e2ee", "--no-e2ee"])).toThrow("--e2ee or --no-e2ee, not both");
+  });
+});
+
+describe("a picture", () => {
+  it("refuses path with clear on the socket, as the command line refuses a <jpeg> with --clear, before the engine is asked", async () => {
+    // Before: `clear` won and the picture was removed, exit 0.
+    const { ctx, node } = fake();
+    const setGroupPicture = vi.fn(async () => undefined), updateSettings = vi.fn(async () => undefined);
+    Object.assign(node, { setGroupPicture, updateSettings });
+    for (const [method, params] of [["group.picture", { group: "Crew" }], ["profile.picture", {}]] as const) {
+      await expect(callApi(ctx, method, { ...params, path: "/tmp/me.jpg", clear: true }), method).rejects.toMatchObject({ code: "bad_request", message: "clear removes the picture: not with path" });
+    }
+    expect(setGroupPicture).not.toHaveBeenCalled();
+    expect(updateSettings).not.toHaveBeenCalled();
   });
 });
 

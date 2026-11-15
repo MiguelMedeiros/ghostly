@@ -3,9 +3,11 @@ import { createPortal } from "react-dom";
 import { endOtherCalls, otherCallOn, setCallOn } from "@ghostly/react";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { useI18n } from "../contexts/I18nContext";
+import { useSettings } from "../contexts/SettingsContext";
 import { useBackCloses, useBackdropDismiss, useQuestionDialog } from "../hooks/useDismiss";
 import { groupCallRelayConfig, NO_CALL_KEY, NO_SEALING, useGroupCall, type GroupCallSeal, type LivekitModule } from "../hooks/useGroupCall";
 import { useHandler } from "../hooks/useHandler";
+import { useCallService } from "../lib/callService";
 import { askGroupCallPass, groupCallOf, groupCallProblem, PASS_REFRESH_LEAD_S, passRefreshInMs, type GroupCallPass } from "../lib/groupCallPass";
 import { focus } from "../lib/connection";
 import { askGroupCallKey, canSealCallMedia, groupCallSealed, groupCallSealProblem } from "../lib/groupCallPass";
@@ -23,7 +25,10 @@ const REFRESH_RETRY_MS = 30_000;
 const KEY_RETRY_MS = 2_000;
 const KEY_RETRIES = 15;
 
-/** The groups whose call this app, while open, was told to join with "Hide my IP from contacts" on: it asks once each. */
+/**
+ * The group's call nodes (`${groupId} ${sfu}`) this app, while open, was told to join with "Hide my IP from contacts"
+ * on: it asks once each, and again for another node the admin names.
+ */
 const joinedShowingIp = new Set<string>();
 
 /**
@@ -34,6 +39,7 @@ const joinedShowingIp = new Set<string>();
 export function GroupCallButton({ group, loadLivekit }: { group: GroupView; loadLivekit?: () => Promise<LivekitModule> }) {
   const { t } = useI18n();
   const groupId = group.id;
+  const ipShownTo = `${groupId} ${group.call?.sfu ?? ""}`;
   const id = useId();
   const [key] = useState(() => Symbol("group call"));
   /** The pass the room was joined with: it stays while in the room, since a new token would leave and join again. */
@@ -78,6 +84,8 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
 
   const hold = (pass: GroupCallPass, from: string | undefined) => { held.current = { pass, until: Date.now() + pass.expiresIn * 1000, sfu: from }; };
   const enter = (pass: GroupCallPass) => {
+    // A 1:1 call answered while the pass was asked for: it ends first, as on pressing Join call, the pass kept for it.
+    if (otherCallOn(key)) return setAskEnd(true);
     if (!relayOnly || groupCallRelayConfig(pass.iceServers).iceServers?.length) return setJoined(pass);
     setNoRelay(true);
     setProblem(noRelayProblem);
@@ -111,7 +119,7 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
   const press = () => {
     if (asking) return;
     if (blocked) return setProblem(unsealable ? noSealingProblem : noRelayProblem);
-    if (relayOnly && !joinedShowingIp.has(groupId)) setAskIp(true);
+    if (relayOnly && !joinedShowingIp.has(ipShownTo)) setAskIp(true);
     else go();
   };
   // Not believed from the node: each tile is named by the group's roster, a key outside it said to be so.
@@ -162,6 +170,15 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
     return () => setCallOn(key, null);
   }, [on, key, leave]);
 
+  // The Android app keeps the call going out of sight, as a 1:1 call (lib/callService.ts): from the microphone first
+  // on (Android 14 and up start a microphone service only with its permission granted) to the call's end, muted or
+  // not, since from the background Android would refuse to start it again. No group's name while the app lock is on.
+  const { settings } = useSettings();
+  const [heard, setHeard] = useState(false);
+  useEffect(() => { if (!on) setHeard(false); else if (call.local.mic) setHeard(true); }, [on, call.local.mic]);
+  useCallService(on && heard ? { name: group.name || t("group.chat.unnamed"), video: call.local.camera } : null, leave,
+    settings.lockScreen.enabled && !!settings.lockScreen.passwordHash);
+
   // The room closed (the node dropped you) or would not take you: the window goes, and a failed join says why.
   useEffect(() => {
     if (call.status === "failed") setProblem(groupCallSealProblem(call.error?.message, t) ?? groupCallProblem(call.error?.cause ?? call.error?.message, t));
@@ -190,7 +207,7 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
       </div>}
       {joined && <GroupCallView call={call} groupName={group.name || t("group.chat.unnamed")} canShareScreen={canShareScreen} nameOf={nameOf}
         onToggleMic={() => void call.toggleMic()} onToggleCamera={() => void call.toggleCamera()} onToggleScreen={() => void call.toggleScreen()} onLeave={leave} />}
-      {askIp && <HideIpDialog onClose={() => setAskIp(false)} onConfirm={() => { setAskIp(false); joinedShowingIp.add(groupId); go(); }} />}
+      {askIp && <HideIpDialog onClose={() => setAskIp(false)} onConfirm={() => { setAskIp(false); joinedShowingIp.add(ipShownTo); go(); }} />}
       {askEnd && <EndOtherCallDialog onClose={() => setAskEnd(false)} onConfirm={() => { setAskEnd(false); endOtherCalls(key); void join(); }} />}
     </div>
   );
