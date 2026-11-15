@@ -41,6 +41,7 @@
   "mute": "Disattiva audio",
   "needLive": "Le chiamate richiedono una connessione diretta",
   "noAnswer": "Nessuna risposta",
+  "noGroupOnLinux": "Le chiamate di gruppo non sono ancora su Linux: partecipa da app.ghostly.tools in un browser",
   "noPath": "Impossibile connettere la chiamata",
   "noPathGuide": "Come risolvere",
   "noPathNext": "Una VPN o un firewall, tuo o del tuo contatto, può bloccare le chiamate. Un server TURN le fa passare.",

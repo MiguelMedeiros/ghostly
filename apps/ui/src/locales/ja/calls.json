@@ -41,6 +41,7 @@
   "mute": "ミュート",
   "needLive": "通話には直接接続が必要です",
   "noAnswer": "応答がありません",
+  "noGroupOnLinux": "Linux ではまだグループ通話を使えません。ブラウザで app.ghostly.tools から参加してください",
   "noPath": "通話を接続できませんでした",
   "noPathGuide": "解決方法",
   "noPathNext": "あなたか相手のVPNやファイアウォールが通話を妨げている可能性があります。TURNサーバーを使うと通話できます。",
