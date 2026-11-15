@@ -373,6 +373,12 @@ function ReadFailed({ error, testId, onRetry }: { error: unknown; testId: string
 
 /** A store is the same store from one read to the next by its key. */
 const storeKey = (store: AppStoreSummary) => store.key;
+/**
+ * What of a store is compared from one read to the next: all but the time of its last read, which the engine stamps
+ * on every store it reads, one that reads as before too (each update check, each Refresh). Only whether it was ever
+ * read is drawn (`read`, its stale line).
+ */
+const withoutReadTime = (store: AppStoreSummary) => ({ ...store, fetchedAt: store.fetchedAt !== undefined });
 /** No app installed yet (or not read yet): the same list each time, so no store's block is drawn again for it. */
 const NO_APPS: readonly InstalledAppView[] = [];
 
@@ -448,7 +454,7 @@ export function Apps() {
   // A store that reads as before stays the object held, and the list held when all do: the update check and each
   // Refresh read every store again, and a store's block draws its listings again only when its own list changed.
   const reloadStores = useCallback(() => engine.call("appStoreList").then(
-    (list) => { setStores((held) => kept(held, list, storeKey)); setStoresFailure(null); },
+    (list) => { setStores((held) => kept(held, list, storeKey, withoutReadTime)); setStoresFailure(null); },
     (e: unknown) => { setStores((s) => s ?? []); setStoresFailure(e); }), []);
   // A store read again or removed can stop an installed app (a removal) or change who lists it, as one added: both lists again.
   const storeChanged = useCallback(() => void Promise.all([reloadStores(), refreshInstalledApps()]), [reloadStores]);
