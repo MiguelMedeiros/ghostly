@@ -22,6 +22,7 @@
   "ended": "Chamada encerrada",
   "endsCurrent": "Atender encerra sua chamada atual",
   "group": {
+    "byAdminInfo": "O admin do grupo desligou isto para você nesta chamada. Você pode ligar de novo quando ele permitir.",
     "endAndJoin": "Encerrar e entrar",
     "endOtherBody": "Entrar na chamada do grupo encerra a chamada em que você está.",
     "endOtherTitle": "Encerrar sua chamada?",
@@ -37,6 +38,7 @@
     "left": "{{name}} saiu",
     "leftMany": "{{names}} saíram",
     "muted": "No mudo",
+    "mutedByAdmin": "Silenciado pelo admin",
     "noCallKey": "Ainda não dá para entrar: a chave da chamada não chegou",
     "noCallKeyInfo": "As chamadas deste grupo são criptografadas de ponta a ponta, e a chave delas ainda não chegou a este aparelho. Tente de novo daqui a pouco.",
     "noRelay": "Não dá para entrar com Ocultar meu IP ligado",
@@ -46,7 +48,10 @@
     "notMember": "Fora deste grupo (…{{key}})",
     "notSealed": "Não deu para proteger esta chamada, então você saiu dela",
     "notSealedInfo": "Já na sala, este app não conseguiu criptografar o que você envia, então você saiu antes que algo saísse sem criptografia. Tente de novo ou use um navegador recente.",
+    "offByAdmin": "Desligado pelo admin",
     "refused": "Você ainda não tem acesso a esta chamada",
+    "removed": "O admin tirou você desta chamada",
+    "removedInfo": "O nó do grupo não deixa você voltar a esta chamada sem a permissão do admin. Você continua no grupo.",
     "retry": "Tentar de novo",
     "screenOf": "Tela de {{name}}",
     "unreachable": "Não foi possível alcançar a chamada do grupo"

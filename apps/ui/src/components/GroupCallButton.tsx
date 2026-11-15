@@ -9,7 +9,7 @@ import { groupCallRelayConfig, NO_CALL_KEY, NO_SEALING, useGroupCall, type Group
 import { useGroupCallSupport } from "../hooks/useGroupCallSupport";
 import { useHandler } from "../hooks/useHandler";
 import { useCallService } from "../lib/callService";
-import { askGroupCallPass, groupCallOf, groupCallProblem, PASS_REFRESH_LEAD_S, passRefreshInMs, type GroupCallPass } from "../lib/groupCallPass";
+import { askGroupCallPass, groupCallOf, groupCallProblem, PASS_REFRESH_LEAD_S, passRefreshInMs, passRefused, type GroupCallPass } from "../lib/groupCallPass";
 import { focus } from "../lib/connection";
 import { askGroupCallKey, canSealCallMedia, groupCallSealed, groupCallSealProblem } from "../lib/groupCallPass";
 import { useEngineValue } from "../lib/engineState";
@@ -70,7 +70,12 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
   const [canSeal] = useState(canSealCallMedia);
   const unsealable = sealed && !canSeal;
   const [seal, setSeal] = useState<GroupCallSeal | null>(null);
-  const blocked = !support.supported || (relayOnly && noRelay) || unsealable;
+  // The admin took you out of the call (WISP 602 § Moderation): Join call stays off and says so while the node refuses
+  // you a pass. Pressed, it asks the node once more, so an unban lets you back in.
+  const [removed, setRemoved] = useState(false);
+  const removedProblem: Problem = { tone: "error", title: t("calls.group.removed"), info: t("calls.group.removedInfo") };
+  const cannot = !support.supported || (relayOnly && noRelay) || unsealable;
+  const blocked = cannot || removed;
   const noRelayProblem: Problem = { tone: "error", title: t("calls.group.noRelay"), info: t("calls.group.noRelayInfo") };
   const noSealingProblem = groupCallSealProblem(NO_SEALING, t)!;
   const unsupported: Problem | null = support.reason === null ? null : { tone: "error", title: support.reason };
@@ -104,10 +109,11 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
     try {
       const from = sfu;
       const pass = await askGroupCallPass(groupId);
+      setRemoved(false);
       hold(pass, from);
       enter(pass);
     } catch (cause) {
-      setProblem(groupCallProblem(cause, t));
+      setProblem(removed && passRefused(cause) ? removedProblem : groupCallProblem(cause, t));
     } finally {
       setAsking(false);
     }
@@ -127,7 +133,8 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
     if (asking) return;
     if (joined) return setRaised((n) => n + 1);
     if (unsupported) return setProblem(problem ? null : unsupported);
-    if (blocked) return setProblem(unsealable ? noSealingProblem : noRelayProblem);
+    // Removed by the admin, it goes on as a join: the node is asked again, and while it refuses, its reason stays.
+    if (cannot) return setProblem(unsealable ? noSealingProblem : noRelayProblem);
     if (relayOnly && !joinedShowingIp.has(ipShownTo)) setAskIp(true);
     else go();
   };
@@ -192,9 +199,15 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
   useCallService(on && heard ? { name: group.name || t("group.chat.unnamed"), video: call.local.camera } : null, leave,
     settings.lockScreen.enabled && !!settings.lockScreen.passwordHash);
 
-  // The room closed (the node dropped you) or would not take you: the window goes, and a failed join says why.
+  // The room closed (the node dropped you) or would not take you: the window goes, and a failed join says why. Taken
+  // out by the admin, the pass held is dropped (the node bans the key) and Join call says why.
   useEffect(() => {
     if (call.status === "failed") setProblem(groupCallSealProblem(call.error?.message, t, call.error?.cause) ?? groupCallProblem(call.error?.cause ?? call.error?.message, t));
+    if (call.status === "left" && call.removedByAdmin) {
+      held.current = null;
+      setRemoved(true);
+      setProblem(removedProblem);
+    }
     if (call.status === "failed" || call.status === "left") setJoined(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only the status moving there ends it
   }, [call.status]);

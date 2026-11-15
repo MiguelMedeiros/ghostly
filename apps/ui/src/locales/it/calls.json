@@ -22,6 +22,7 @@
   "ended": "Chiamata terminata",
   "endsCurrent": "Rispondere chiude la chiamata in corso",
   "group": {
+    "byAdminInfo": "L'admin del gruppo te l'ha disattivato in questa chiamata. Potrai riattivarlo quando lo permetterà.",
     "endAndJoin": "Chiudi ed entra",
     "endOtherBody": "Entrare nella chiamata del gruppo chiude la chiamata in corso.",
     "endOtherTitle": "Chiudere la chiamata?",
@@ -37,6 +38,7 @@
     "left": "{{name}} ha lasciato la chiamata",
     "leftMany": "{{names}} hanno lasciato la chiamata",
     "muted": "Microfono disattivato",
+    "mutedByAdmin": "Silenziato dall'admin",
     "noCallKey": "Non puoi ancora entrare: la chiave della chiamata non è arrivata",
     "noCallKeyInfo": "Le chiamate di questo gruppo sono cifrate end-to-end e la loro chiave non è ancora arrivata su questo dispositivo. Riprova tra un attimo.",
     "noRelay": "Non puoi entrare con Nascondi il mio IP attivo",
@@ -46,7 +48,10 @@
     "notMember": "Non è in questo gruppo (…{{key}})",
     "notSealed": "Non è stato possibile cifrare questa chiamata, quindi sei uscito",
     "notSealedInfo": "Nella stanza, questa app non è riuscita a cifrare ciò che invii, quindi sei uscito prima che qualcosa partisse in chiaro. Riprova o usa un browser recente.",
+    "offByAdmin": "Disattivato dall'admin",
     "refused": "Non hai ancora accesso a questa chiamata",
+    "removed": "L'admin ti ha tolto da questa chiamata",
+    "removedInfo": "Il nodo del gruppo non ti fa rientrare in questa chiamata senza il permesso dell'admin. Resti nel gruppo.",
     "retry": "Riprova",
     "screenOf": "Schermo di {{name}}",
     "unreachable": "Impossibile raggiungere la chiamata del gruppo"
