@@ -1,5 +1,5 @@
 import type { GroupView, StoredMessage } from "@ghostly/browser/shared/types";
-import { groupById, noMessage, nobodyJoinedChat, node, type ApiContext } from "./apiKit";
+import { groupById, noMessage, nobodyJoinedChat, node, type ApiContext, type Method } from "./apiKit";
 import { CliError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import { goesOn as goesOnIn } from "./waitNotice";
@@ -78,6 +78,24 @@ export async function purgeMessage(ctx: ApiContext, message: StoredMessage): Pro
   if (gone) await node(ctx).forgetQuotesOf(message);
   await ctx.runtime.store.compact({ scrub: true });
   if (!gone) throw new CliError("timeout", `Timed out after ${PURGE_WAIT_MS / 1000} s: the message is deleted, but what it said may stay in the profile's store until its next fold (within the hour)`, { messageId, deleted: messageId });
+}
+
+/**
+ * `message delete --purge` that the delete answers no to (`not_found`, `refused`): the store folds all the same, so
+ * the error says so in its words and `details.purged`. A message no longer here (the contact deleted it for everyone,
+ * or a delete here without `--purge` took it) and another member's group message (only its author deletes it, and
+ * once they do it is gone here) answered no and folded nothing: what a deleted copy said stayed in `db/journal.bin`
+ * and rows.db's WAL until the fold within the hour. A usage mistake (`bad_request`) folds nothing.
+ */
+export function foldsAnyway(method: Method): Method {
+  return async (ctx, params, call) => {
+    try { return await method(ctx, params, call); } catch (error) {
+      if (params.purge !== true || !(error instanceof CliError) || (error.code !== "not_found" && error.code !== "refused")) throw error;
+      await ctx.runtime.store.compact({ scrub: true });
+      // Said first: a refusal may end in a command to paste (`... is a group, not a chat: ghostly message delete ...`).
+      throw new CliError(error.code, `The store was folded anyway, so a deleted copy of it is gone from the profile's folder. ${error.message}`, { ...error.details, purged: true });
+    }
+  };
 }
 
 /**
