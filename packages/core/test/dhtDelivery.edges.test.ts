@@ -579,6 +579,45 @@ describe("DHT delivery: sending and lifecycle", () => {
     await h.bob.stop();
   });
 
+  it("a withdrawal whose envelope did not go is published again within seconds, without the text, not at the keep-alive", async () => {
+    // A chat in the background, read every 30 s once no text of its awaits a receipt.
+    const h = setup({ mode: "stream", pollMs: null }); await h.bob.start();
+    expect(await h.bob.send("the token: sk-3", Date.now(), ID)).toBeNull();
+    const published = h.transport.publish.mock.calls.length;
+    h.transport.publish.mockRejectedValueOnce(new Error("No Pkarr relay reachable"));
+    await h.bob.withdraw(ID);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.transport.publish.mock.calls.length).toBe(published + 1);
+    // Within a text's first backoff (4 s), not the keep-alive's four minutes.
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(h.transport.publish.mock.calls.length).toBe(published + 2);
+    expect(h.openPublished()[6]).toBeNull();
+    // It went: nothing more until the keep-alive.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(h.transport.publish.mock.calls.length).toBe(published + 2);
+    for (const call of h.transport.publish.mock.calls.slice(published)) expect(JSON.parse(decrypt(call[1][0].value, h.envelopeKey))[0][6]).toBeNull();
+    await h.bob.stop();
+  });
+
+  it("a withdrawal that keeps failing is tried again with a text's backoff, eight times at most, then waits for the keep-alive", async () => {
+    const h = setup(); await h.bob.start();
+    expect(await h.bob.send("the token: sk-4", Date.now(), ID)).toBeNull();
+    const published = h.transport.publish.mock.calls.length;
+    const at: number[] = [];
+    h.transport.publish.mockImplementation(async () => { at.push(Date.now()); throw new Error("No Pkarr relay reachable"); });
+    await h.bob.withdraw(ID);
+    await vi.advanceTimersByTimeAsync(DHT_MESSAGE_TTL);
+    const gaps = at.slice(1).map((t, i) => Math.round((t - at[i]) / 1_000));
+    // 4, 8, 16, 32 s, then capped at a minute: the withdrawal's own publication and seven more.
+    expect(gaps).toEqual([4, 8, 16, 32, 60, 60, 60]);
+    // Then only the keep-alive, four minutes after the last try (at 240 s, so at 480 s).
+    await vi.advanceTimersByTimeAsync(200_000);
+    expect(at.length).toBe(9);
+    expect(Math.round((at[8] - at[7]) / 1_000)).toBe(240);
+    for (const call of h.transport.publish.mock.calls.slice(published)) expect(JSON.parse(decrypt(call[1][0].value, h.envelopeKey))[0][6]).toBeNull();
+    await h.bob.stop();
+  });
+
   it("replays a confirmed receipt on start, and starting twice polls once", async () => {
     const h = setup({ state: { ...emptyDhtDeliveryState(), confirmed: ID } });
     await h.bob.start(); await h.bob.start();
