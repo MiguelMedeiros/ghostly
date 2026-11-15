@@ -48,6 +48,7 @@
   "mute": "Mute",
   "needLive": "Calls need a live connection",
   "noAnswer": "No answer",
+  "noGroupOnLinux": "Group calls aren't on Linux yet: join from app.ghostly.tools in a browser",
   "noPath": "The call couldn't connect",
   "noPathGuide": "How to fix it",
   "noPathNext": "A VPN or firewall, yours or your contact's, may block calls. A TURN server gets them through.",
