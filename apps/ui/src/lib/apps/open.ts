@@ -16,6 +16,7 @@ export interface OpenAppOptions { runAnyway?: boolean; again?: unknown }
 /**
  * Opens `ref` in the 1:1 chat `linkId`, or alone when it is null. Rejects when it cannot start (revoked, removed, no runner…).
  * Resolves "shown" when it already ran there and was shown again: nothing new started, so the contact is not told again.
+ * So does one in a chat that a newer open there overtook (the web): it starts nothing, and the newer one stays.
  */
 export type AppOpener = (ref: string, linkId: string | null, options?: OpenAppOptions) => Promise<"shown" | void>;
 
