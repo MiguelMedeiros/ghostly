@@ -41,6 +41,11 @@ export interface UseGroupCallOptions extends GroupCallJoin {
    * and a pass without one is not joined (`groupCallRelayConfig`).
    */
   relayOnly?: boolean;
+  /**
+   * The pass a join again under `relayOnly` uses, when there is a newer one still good: the one the room was joined
+   * with lasts an hour at most (WISP 602), and a call that outlived it was refused at its rejoin.
+   */
+  newest?: () => GroupCallJoin | null;
   /** Where livekit-client comes from; only tests set it. */
   loadLivekit?: () => Promise<LivekitModule>;
   /** How long a sealed room may take after its connect to say it seals (`SEAL_WAIT_MS`); only tests set it. */
@@ -300,7 +305,7 @@ function admit(pub: RemoteTrackPublication): void {
  * `e2ee` set, the room is joined sealed with LiveKit's E2EE (a shared key per epoch, `GroupCallKeyProvider`), or not
  * at all: never unsealed. Sealing turned on or off for the group joins the room again.
  */
-export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, loadLivekit, sealWaitMs = SEAL_WAIT_MS }: UseGroupCallOptions): GroupCall {
+export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, newest, loadLivekit, sealWaitMs = SEAL_WAIT_MS }: UseGroupCallOptions): GroupCall {
   const [state, setState] = useState<GroupCallState>(EMPTY);
   const [status, setStatus] = useState<GroupCallStatus>("idle");
   const [error, setError] = useState<GroupCallError | null>(null);
@@ -318,16 +323,20 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
   const sealWait = useRef(sealWaitMs);
   sealWait.current = sealWaitMs;
   const sealed = e2ee !== undefined;
+  const latest = useRef(newest);
+  latest.current = newest;
   // "Hide my IP from contacts" turned on in a room joined without it: the room is joined again, relay only. A room's
   // ICE policy is set at its join, and the direct path it found would stay until a rejoin.
   const [rejoin, setRejoin] = useState(0);
   const carry = useRef<{ mic: boolean; camera: boolean } | null>(null);
+  const again = useRef(false);
 
   useEffect(() => {
     const s = session.current;
     if (!relayOnly || !s || s.ended || s.relayed) return;
     const me = s.room?.localParticipant;
     carry.current = me ? { mic: me.isMicrophoneEnabled, camera: me.isCameraEnabled } : null;
+    again.current = true;
     setRejoin((n) => n + 1);
   }, [relayOnly]);
 
@@ -336,6 +345,8 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
     let live = true;
     const kept = carry.current;
     carry.current = null;
+    const pass = (again.current && latest.current?.()) || { url, token, iceServers: ice.current };
+    again.current = false;
     const s: Session = { relayed: relay.current, ended: false, screen: null, screenEnded: null, screenAsking: false, refresh: () => {}, sealedStill: () => true };
     session.current = s;
     setState(EMPTY);
@@ -345,7 +356,7 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
 
     void (async () => {
       try {
-        const servers = ice.current;
+        const servers = pass.iceServers;
         const rtcConfig = s.relayed ? groupCallRelayConfig(servers) : servers?.length ? { iceServers: servers } : undefined;
         // Nothing to relay through: joining would hand the node this device's address.
         if (s.relayed && !rtcConfig?.iceServers?.length) throw new Error(NO_RELAY);
@@ -416,7 +427,7 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
           setStatus("left");
         });
         const connectOptions = { ...(rtcConfig && { rtcConfig }), ...(encryption && { autoSubscribe: false }) };
-        await room.connect(url, token, Object.keys(connectOptions).length ? connectOptions : undefined);
+        await room.connect(pass.url, pass.token, Object.keys(connectOptions).length ? connectOptions : undefined);
         if (!live || s.ended) {
           await endSession(s);
           return;

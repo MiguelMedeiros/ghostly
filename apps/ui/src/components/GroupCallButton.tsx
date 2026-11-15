@@ -79,7 +79,13 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
   const noRelayProblem: Problem = { tone: "error", title: t("calls.group.noRelay"), info: t("calls.group.noRelayInfo") };
   const noSealingProblem = groupCallSealProblem(NO_SEALING, t)!;
   const unsupported: Problem | null = support.reason === null ? null : { tone: "error", title: support.reason };
-  const call = useGroupCall({ url: joined?.url ?? "", token: joined?.token ?? "", iceServers: joined?.iceServers, relayOnly, e2ee: sealed ? seal : undefined, loadLivekit });
+  // Hide my IP turned on in the room joins it again: with the newest pass for that room while it holds, as the first
+  // may have run out.
+  const newest = () => {
+    const kept = held.current;
+    return kept && kept.pass.url === joined?.url && kept.until > Date.now() ? kept.pass : null;
+  };
+  const call = useGroupCall({ url: joined?.url ?? "", token: joined?.token ?? "", iceServers: joined?.iceServers, relayOnly, e2ee: sealed ? seal : undefined, newest, loadLivekit });
   /** The group's call key for its newest epoch, before a sealed join; says why when it isn't here. */
   const takeKey = async (): Promise<boolean> => {
     setAsking(true);
