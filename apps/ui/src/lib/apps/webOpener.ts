@@ -48,12 +48,16 @@ function warnStop(title: string, reason: AppStopReason): AppTakedown | null {
 export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, openAgainLabel, errorText, nameIn, onStop, linkedFiles }: WebOpenerOptions): AppOpener {
   /** The layer of each app open alone, by app and chat: the same one opened again is shown as it is. */
   const alone = new Map<string, HTMLElement>();
+  /** How many opens were asked in each chat: one that finishes after a newer one was asked there starts nothing. */
+  const asked = new Map<string, number>();
   const open: AppOpener = (ref, linkId, options) => start(ref, linkId, options);
   /** `replace`: Open again on a stopped layer, which goes only once the app can start, so a failure is said there. */
   const start = async (ref: string, linkId: string | null | undefined, options: Parameters<AppOpener>[2], replace?: () => void): Promise<void | "shown"> => {
     const engine = apps();
     if (!engine) throw new Error("Apps cannot run in this app");
     const host: AppsPlatform = linkedFiles ? { ...engine, linkedFiles } : engine;
+    const turn = linkId ? (asked.get(linkId) ?? 0) + 1 : 0;
+    if (linkId) asked.set(linkId, turn);
     // The same app still running in that chat (hidden by Back) is only shown again: no entry read, no runner asked, so
     // it comes back offline too.
     const already = linkId && options?.again === undefined && appSlot(linkId) ? chatApp(linkId) : undefined;
@@ -87,6 +91,9 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
     const slot = linkId ? appSlot(linkId) : undefined;
     if (linkId && !slot) throw new Error(CHAT_CLOSED);
     if (linkId && slot) {
+      // Another open asked in this chat while this one was on its way (its files downloading, the runner checked) is
+      // what the person wants now: this one starts nothing, never stopping the newer one, and tells the contact nothing.
+      if (asked.get(linkId) !== turn) return "shown";
       const there = chatApp(linkId);
       // Open again on a stopped app that the person closed meanwhile (Close, Back): it stays closed.
       if (options?.again !== undefined && there?.running !== options.again) throw new Error("closed while it opened again");
