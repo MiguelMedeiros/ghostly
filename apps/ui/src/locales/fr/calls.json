@@ -24,6 +24,7 @@
   "group": {
     "info": "Il passe par le nœud du groupe. Tout membre peut parler, montrer sa caméra et partager son écran. Au-delà de 8 personnes, vous arrivez en sourdine.",
     "leave": "Quitter l'appel",
+    "memberOutside": "Pas membre de ce groupe {{key}}",
     "muted": "En sourdine",
     "screenOf": "Écran de {{name}}"
   },

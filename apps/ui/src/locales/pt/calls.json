@@ -24,6 +24,7 @@
   "group": {
     "info": "Passa pelo nó do grupo. Qualquer pessoa do grupo pode falar, mostrar a câmera e compartilhar a tela. Com mais de 8 pessoas, você entra no mudo.",
     "leave": "Sair da chamada",
+    "memberOutside": "Não está neste grupo {{key}}",
     "muted": "No mudo",
     "screenOf": "Tela de {{name}}"
   },

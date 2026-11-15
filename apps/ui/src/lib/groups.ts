@@ -9,7 +9,7 @@ import { forgetChatTranslate } from "./chatTranslate";
 import { forgetSentOriginals } from "./sentOriginals";
 import { forgetTranslateSend } from "./chatTranslateSend";
 import type { GroupEdgeView, GroupMemberView, GroupView, LinkView } from "@ghostly/browser/shared/types";
-import { publicKeyLabel } from "./publicKeyLabel";
+import { keyEnd, publicKeyLabel } from "./publicKeyLabel";
 import { transportName } from "./connection";
 import { ago } from "./time";
 import { english } from "./english";
@@ -125,7 +125,7 @@ function shownName(nick: string): string {
  * an Arabic name's direction "محمد (…k1p0aa)" is laid out as "(k1p0aa…) محمد", the key's end read as its start. The
  * name is shown as `shownName` reads it, so the only key's end it shows is its own, right after the name.
  */
-const withKeyEnd = (nick: string, key: string) => `${shownName(nick)} \u2066(…${key.slice(-6)})\u2069`;
+const withKeyEnd = (nick: string, key: string) => `${shownName(nick)} ${keyEnd(key)}`;
 
 /** `sameNamed`: a member whose name another member shows too is told apart by the end of their key (`withKeyEnd`). */
 export const memberName = (m: { key: string; me: boolean; nick?: string }, t: Translate = english, sameNamed?: ReadonlySet<string>) =>
@@ -147,6 +147,15 @@ export const authorName = (group: FormerNamesOf & { formerNames?: GroupView["for
   const former = group.formerNames?.[key];
   return former ? othersName(formerName(group, key, former), t) : t("group.member.unnamed", { key: key.slice(0, 8) });
 };
+
+/**
+ * Who is who in the group's call, by the key the node's pass gives each person (WISP 602 `identity`): a member as the
+ * group's chat names them (`authorName`), anyone else as not in this group, with the end of their key. Never the name
+ * the node puts in the pass: nothing signs it, and it may be whatever the person asked for.
+ */
+export const groupCallNameOf = (group: FormerNamesOf & { formerNames?: GroupView["formerNames"] }, t: Translate = english) =>
+  (identity: string): string =>
+    group.members.some(m => m.key === identity) ? authorName(group, identity, t) : t("calls.group.memberOutside", { key: keyEnd(identity) });
 
 /**
  * The name `key` went by when it was no longer in the roster. In a community, where anyone with the link comes in, it

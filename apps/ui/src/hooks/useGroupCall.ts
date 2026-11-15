@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { LocalTrackPublication, Participant, Room } from "livekit-client";
 import { screenShareErrorMessage } from "@ghostly/react";
 import { preferredDevice } from "../lib/mediaDevices";
+import { keyEnd } from "../lib/publicKeyLabel";
 import type { GroupCallParticipant, GroupCallState } from "../components/GroupCallView";
 
 /*
@@ -25,6 +26,11 @@ export interface GroupCallJoin {
 export interface UseGroupCallOptions extends GroupCallJoin {
   /** Where livekit-client comes from; only tests set it. */
   loadLivekit?: () => Promise<LivekitModule>;
+  /**
+   * What each person is called, by their key (`identity`): the group's own names (`groupCallNameOf`). Without it, the
+   * end of the key (`keyEnd`). Never the name the node put in the pass: nothing signs it.
+   */
+  nameOf?: (identity: string) => string;
 }
 
 export type GroupCallStatus = "idle" | "connecting" | "connected" | "left" | "failed";
@@ -72,7 +78,8 @@ function personOf(p: Participant, lk: LivekitModule, local: boolean): GroupCallP
   const track = (source: (typeof Source)[keyof typeof Source]) => p.getTrackPublication(source)?.track?.mediaStreamTrack ?? null;
   return {
     identity: p.identity,
-    name: p.name || p.identity,
+    // LiveKit's `name` is left out: it is whatever the node was asked for (`nameOf` names each person by their key).
+    name: keyEnd(p.identity),
     mic: p.isMicrophoneEnabled,
     camera: p.isCameraEnabled,
     screen: p.isScreenShareEnabled,
@@ -133,7 +140,7 @@ async function endSession(session: Session): Promise<void> {
  * Joins the room at `url` with `token` while both are set, with the microphone on and the camera off, or muted past
  * `GROUP_CALL_MUTED_ABOVE` people. A new url or token leaves the old room first; unmounting leaves it too.
  */
-export function useGroupCall({ url, token, iceServers, loadLivekit }: UseGroupCallOptions): GroupCall {
+export function useGroupCall({ url, token, iceServers, loadLivekit, nameOf }: UseGroupCallOptions): GroupCall {
   const [state, setState] = useState<GroupCallState>(EMPTY);
   const [status, setStatus] = useState<GroupCallStatus>("idle");
   const [error, setError] = useState<GroupCallError | null>(null);
@@ -291,5 +298,12 @@ export function useGroupCall({ url, token, iceServers, loadLivekit }: UseGroupCa
     setStatus("left");
   }, []);
 
-  return { ...state, status, error, toggleMic, toggleCamera, toggleScreen, leave };
+  // Named from `nameOf` as it is now, not at the room's last event: a member renamed in the roster is renamed in the call.
+  const named = useMemo(() => {
+    if (!nameOf) return state;
+    const name = (p: GroupCallParticipant) => (p.identity ? { ...p, name: nameOf(p.identity) } : p);
+    return { ...state, local: name(state.local), participants: state.participants.map(name) };
+  }, [state, nameOf]);
+
+  return { ...named, status, error, toggleMic, toggleCamera, toggleScreen, leave };
 }

@@ -24,6 +24,7 @@
   "group": {
     "info": "Passa dal nodo del gruppo. Chiunque nel gruppo può parlare, mostrare la fotocamera e condividere lo schermo. Oltre 8 persone entri senza microfono.",
     "leave": "Esci dalla chiamata",
+    "memberOutside": "Non è in questo gruppo {{key}}",
     "muted": "Microfono disattivato",
     "screenOf": "Schermo di {{name}}"
   },

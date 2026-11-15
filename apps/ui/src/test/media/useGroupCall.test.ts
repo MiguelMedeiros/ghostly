@@ -1,11 +1,18 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, screen, waitFor } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GROUP_CALL_MUTED_ABOVE, joinsMuted, useGroupCall, type LivekitModule, type UseGroupCallOptions } from "../../hooks/useGroupCall";
+import type { GroupMemberView } from "@ghostly/browser/shared/types";
+import { GroupCallView } from "../../components/GroupCallView";
+import { GROUP_CALL_MUTED_ABOVE, joinsMuted, useGroupCall, type GroupCall, type LivekitModule, type UseGroupCallOptions } from "../../hooks/useGroupCall";
+import { authorName, groupCallNameOf } from "../../lib/groups";
 import { chooseDevice } from "../../lib/mediaDevices";
+import { keyEnd } from "../../lib/publicKeyLabel";
+import { loadLocale, translatorFor } from "../../locales";
 import { FakeTrack } from "../../../../../packages/react/test/fakes";
+import { renderApp } from "../render";
 
 /**
  * `useGroupCall` over a fake LiveKit room: the test DOM has no WebRTC, so no real media and no network. The fake
@@ -201,7 +208,7 @@ describe("useGroupCall", () => {
     expect(room().options).toMatchObject({ adaptiveStream: false });
     expect(room().localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true, { deviceId: { ideal: "mic-2" } });
     expect(room().localParticipant.setCameraEnabled).not.toHaveBeenCalled();
-    await waitFor(() => expect(result.current.local).toMatchObject({ identity: "me", name: "Me", mic: true, camera: false, screen: false }));
+    await waitFor(() => expect(result.current.local).toMatchObject({ identity: "me", name: keyEnd("me"), mic: true, camera: false, screen: false }));
     // your own voice is not handed to the window
     expect(result.current.local.tracks.audio).toBeUndefined();
   });
@@ -233,7 +240,7 @@ describe("useGroupCall", () => {
       ana = room().join("ana", "Ana");
       room().join("bo");
     });
-    expect(result.current.participants.map((p) => [p.identity, p.name])).toEqual([["ana", "Ana"], ["bo", "bo"]]);
+    expect(result.current.participants.map((p) => [p.identity, p.name])).toEqual([["ana", keyEnd("ana")], ["bo", keyEnd("bo")]]);
     act(() => {
       ana.publish(Source.Microphone, "audio");
       ana.publish(Source.Camera, "video");
@@ -395,5 +402,107 @@ describe("useGroupCall", () => {
     const statics = source.match(/^import\s+(?!type\b)[^;]*from\s+["']livekit-client["']/gm);
     expect(statics).toBeNull();
     expect(source).toContain('import("livekit-client")');
+  });
+});
+
+/*
+ * Who is who in the call. The node's pass puts a name beside each key, and nothing signs it: anyone can ask for the
+ * name another member shows. Each person is named by their key, as the group's chat names them.
+ */
+const keyOf = (start: string, end: string) => start.padEnd(46, "y") + end;
+const ANA = keyOf("ana", "an4aaa");
+const ANA_TOO = keyOf("anatoo", "an4bbb");
+const MIGUEL = keyOf("miguel", "k1p0aa");
+const STRANGER = keyOf("stranger", "str4ng");
+const member = (key: string, nick?: string, me = false): GroupMemberView =>
+  ({ key, role: "member", me, online: true, missing: 0, ...(nick !== undefined && { nick }) });
+/** A community where two members go by Ana. The fake room's own key is "me". */
+const community = (nicks: Record<string, string> = {}) => ({
+  profile: "community" as const,
+  members: [member("me", undefined, true), member(ANA, nicks[ANA] ?? "Ana"), member(ANA_TOO, "Ana"), member(MIGUEL, "Miguel")],
+});
+
+/** The call window over the hook's state, as GroupCallButton draws it. */
+function drawn(call: GroupCall) {
+  const noop = () => {};
+  renderApp(createElement(GroupCallView, { call, groupName: "Community", onToggleMic: noop, onToggleCamera: noop, onToggleScreen: noop, onLeave: noop }));
+  return (identity: string) => screen.getAllByTestId("group-call-tile").find((tile) => tile.dataset.identity === identity)!;
+}
+
+describe("useGroupCall's names", () => {
+  it("tells two people the node calls Ana apart by their key's end, as the group's chat does", async () => {
+    const group = community();
+    const { result } = await joined({ nameOf: groupCallNameOf(group) });
+    act(() => {
+      room().join(ANA, "Ana");
+      room().join(ANA_TOO, "Ana");
+    });
+    expect(result.current.participants.map((p) => p.name)).toEqual([`Ana ${keyEnd(ANA)}`, `Ana ${keyEnd(ANA_TOO)}`]);
+    expect(result.current.participants.map((p) => p.name)).toEqual([authorName(group, ANA), authorName(group, ANA_TOO)]);
+    const tile = drawn(result.current);
+    expect(tile(ANA)).toHaveTextContent(`Ana ${keyEnd(ANA)}`);
+    expect(tile(ANA_TOO)).toHaveTextContent(`Ana ${keyEnd(ANA_TOO)}`);
+    expect(keyEnd(ANA)).toBe("\u2066(…an4aaa)\u2069");
+  });
+
+  it("names someone not in the group as not in it, never by the name the node gave them", async () => {
+    const { result } = await joined({ nameOf: groupCallNameOf(community()) });
+    act(() => {
+      room().join(MIGUEL, "Miguel");
+      room().join(STRANGER, "Miguel");
+    });
+    expect(result.current.participants.map((p) => p.name)).toEqual(["Miguel", `Not in this group ${keyEnd(STRANGER)}`]);
+    const tile = drawn(result.current);
+    expect(tile(MIGUEL)).toHaveTextContent("Miguel");
+    expect(tile(STRANGER)).toHaveTextContent(`Not in this group ${keyEnd(STRANGER)}`);
+    expect(tile(STRANGER)).not.toHaveTextContent("Miguel");
+  });
+
+  it("follows the roster: a member renamed there is renamed in the call, with no event from the room", async () => {
+    const { result, rerender } = await joined({ nameOf: groupCallNameOf(community()) });
+    act(() => void room().join(ANA, "Ana"));
+    expect(result.current.participants[0]!.name).toBe(`Ana ${keyEnd(ANA)}`);
+    rerender({ url: "wss://call.example", token: "pass", loadLivekit, nameOf: groupCallNameOf(community({ [ANA]: "Ana Paula" })) });
+    expect(result.current.participants[0]!.name).toBe("Ana Paula");
+    expect(room().connect).toHaveBeenCalledTimes(1);
+  });
+
+  it("without nameOf, names each person by their key's end: the node's names reach nothing", async () => {
+    const { result } = await joined();
+    act(() => {
+      room().join(ANA, "Ana");
+      room().join("bo", "Bo");
+    });
+    expect(result.current.local.name).toBe(keyEnd("me"));
+    expect(result.current.participants.map((p) => p.name)).toEqual([keyEnd(ANA), keyEnd("bo")]);
+    const state = JSON.stringify({ local: result.current.local, participants: result.current.participants });
+    for (const name of ['"Ana"', '"Bo"', '"Me"']) expect(state).not.toContain(name);
+  });
+});
+
+describe("groupCallNameOf", () => {
+  it("names a member as the group's chat does, me included", () => {
+    const group = community();
+    const nameOf = groupCallNameOf(group);
+    for (const key of ["me", ANA, ANA_TOO, MIGUEL]) expect(nameOf(key)).toBe(authorName(group, key));
+    expect(nameOf("me")).toBe("You");
+    expect(nameOf(ANA)).toBe(`Ana ${keyEnd(ANA)}`);
+    expect(nameOf(MIGUEL)).toBe("Miguel");
+    // a member with no name goes by their key, as in the chat
+    expect(groupCallNameOf({ members: [member(ANA)] })(ANA)).toBe(authorName({ members: [member(ANA)] }, ANA));
+  });
+
+  it("says a key not in the roster is not in the group, a former member's too", () => {
+    const group = { ...community(), formerNames: { [STRANGER]: "Miguel" } };
+    expect(groupCallNameOf(group)(STRANGER)).toBe(`Not in this group ${keyEnd(STRANGER)}`);
+    expect(groupCallNameOf(group)(STRANGER)).not.toContain("Miguel");
+  });
+
+  it("says it in the interface's language, the key's end isolated left to right", async () => {
+    await loadLocale("pt");
+    await loadLocale("ar");
+    expect(groupCallNameOf(community(), translatorFor("pt"))(STRANGER)).toBe("Não está neste grupo \u2066(…str4ng)\u2069");
+    expect(groupCallNameOf(community(), translatorFor("ar"))(STRANGER)).toBe("ليس في هذه المجموعة \u2066(…str4ng)\u2069");
+    expect(groupCallNameOf(community(), translatorFor("pt"))("me")).toBe("Você");
   });
 });

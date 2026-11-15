@@ -24,6 +24,7 @@
   "group": {
     "info": "It goes through the group's node. Anyone in the group can talk, show their camera and share their screen. Past 8 people you join muted.",
     "leave": "Leave call",
+    "memberOutside": "Not in this group {{key}}",
     "muted": "Muted",
     "screenOf": "{{name}}'s screen"
   },

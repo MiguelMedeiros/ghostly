@@ -24,6 +24,7 @@
   "group": {
     "info": "Pasa por el nodo del grupo. Cualquiera del grupo puede hablar, mostrar su cámara y compartir su pantalla. Con más de 8 personas entras silenciado.",
     "leave": "Salir de la llamada",
+    "memberOutside": "No está en este grupo {{key}}",
     "muted": "Silenciado",
     "screenOf": "Pantalla de {{name}}"
   },
