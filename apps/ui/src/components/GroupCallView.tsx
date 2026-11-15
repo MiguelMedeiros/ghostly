@@ -57,6 +57,8 @@ interface GroupCallViewProps {
   error?: GroupCallError | null;
   /** Someone's name by their key, as the group knows them: the node's own name for them is not believed. */
   nameOf?: (identity: string) => string;
+  /** Moves each time Join call is pressed while in the call: the small window opens whole again. */
+  raised?: number;
 }
 
 const MINI_KEY = "ghostly_group_call_mini";
@@ -202,7 +204,7 @@ function Tile({ person, you, kind, speaking, name, face }: { person: GroupCallPa
  * A group call through the group's node: everyone's tile in a grid, the active speaker ringed, and a shared screen
  * large with the faces beside it. Drawn from `useGroupCall`'s state, passed in; it imports no LiveKit.
  */
-export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, onToggleScreen, onLeave, canShareScreen = false, pinned = false, onReturnToChat, layer, devices = null, connected = true, error = null, nameOf: groupNameOf }: GroupCallViewProps) {
+export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, onToggleScreen, onLeave, canShareScreen = false, pinned = false, onReturnToChat, layer, devices = null, connected = true, error = null, nameOf: groupNameOf, raised = 0 }: GroupCallViewProps) {
   const { t } = useI18n();
   // Each new error is said anew (its own alert), and goes after a few seconds; a failed join has no window to say it in.
   const [said, setSaid] = useState({ error, id: 0, over: false });
@@ -226,6 +228,10 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
       // only a preference
     }
   };
+  // Join call pressed again while in the call: the small window opens whole, as its own button does.
+  useEffect(() => {
+    if (raised) setMini(false);
+  }, [raised]);
   // The sizes of the 1:1 call's small window (CallOverlay): on a touch screen its five buttons need 264 × 168.
   const phone = window.innerWidth < 768;
   const touch = typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches;
