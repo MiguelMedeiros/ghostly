@@ -156,6 +156,7 @@ import { isRefusalId } from "../shared/refusals";
 import { FileAppender, readStored, removeStored, storedSize, streamStored } from "../shared/storedFiles";
 import { FileDesk } from "./fileDesk";
 import { groupFileId, storedGroupFiles } from "./groupFiles";
+import { fetchGroupCallToken, groupCallSfu, type GroupCallPass } from "./groupCall";
 import { DEFAULT_MINTS, TEST_MINT, mintNetwork } from "../shared/mints";
 import type {
   ContactLinkView,
@@ -6551,6 +6552,18 @@ export class GhostlyNode implements EngineImplementation {
   /** The admin of a community group names the node that forwards its calls, or removes it with null (WISP 602). */
   setGroupCall({ groupId, sfu }: { groupId: string; sfu: string | null }): Promise<void> { return this.groups.setCall(groupId, sfu); }
   forgetGroup({ groupId }: { groupId: string }): Promise<void> { this.groupEdits.forget(groupId); return this.groups.forget(groupId); }
+
+  /**
+   * A pass into the group's call from the node its admin named (WISP 602 · Group Calls), asked with my member key, a
+   * private group's as a community's. Throws an engine error a page says in a line: no call, not a member, refused.
+   */
+  async groupCallToken({ groupId }: { groupId: string }): Promise<GroupCallPass> {
+    const me = typeof groupId === "string" ? this.groups.callMember(groupId) : undefined;
+    if (!me) throw engineError("groupCallNotMember");
+    const sfu = groupCallSfu(me.meta);
+    if (!sfu) throw engineError("groupNoCall");
+    return fetchGroupCallToken({ sfu, g: groupId, k: me.key, seed: identityFromSeedB64(me.seedB64).seed, name: this.sharedNick });
+  }
 
   /** Rejects when the signal cannot go now (no live session): it is kept and goes on the next one while fresh. */
   async setCallSignal({ linkId, signal }: { linkId: string; signal: string | null }): Promise<void> {
