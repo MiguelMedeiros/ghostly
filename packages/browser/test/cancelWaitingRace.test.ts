@@ -13,30 +13,37 @@ import { db } from "../src/engine/db";
  * removal goes after it. Never gone here and kept by the contact.
  */
 
-/** Two relays sharing one store of packets: each takes PUTs or refuses them; reads always answer. `onPut` runs as a PUT is taken. */
+/**
+ * Two relays sharing one store of packets: each takes PUTs or refuses them; reads always answer, after `slowReads` ms
+ * when set (a public relay takes 3 to 5 s to say a key holds nothing). `onPut` runs as a PUT is taken, `onGet` as a read comes.
+ */
 function fakeRelays() {
   const packets = new Map<string, Uint8Array>();
-  let refusing = false;
-  const hooks: { onPut?: () => void } = {};
+  let refusing = false, slowReads = 0;
+  const hooks: { onPut?: () => void; onGet?: () => void } = {};
   const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const key = new URL(String(input)).pathname.slice(1);
-    if (init?.method !== "PUT") return packets.has(key) ? new Response(packets.get(key)! as BodyInit) : new Response(null, { status: 404 });
+    if (init?.method !== "PUT") {
+      hooks.onGet?.();
+      if (slowReads) await new Promise((resolve) => setTimeout(resolve, slowReads));
+      return packets.has(key) ? new Response(packets.get(key)! as BodyInit) : new Response(null, { status: 404 });
+    }
     if (refusing) return new Response(null, { status: 403 });
     hooks.onPut?.();
     packets.set(key, new Uint8Array(init.body as Uint8Array));
     return new Response(null, { status: 204 });
   }) as typeof globalThis.fetch;
-  return { packets, fetch, hooks, refuse: (on: boolean) => { refusing = on; } };
+  return { packets, fetch, hooks, refuse: (on: boolean) => { refusing = on; }, slow: (ms: number) => { slowReads = ms; } };
 }
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const step of cleanup.splice(0).reverse()) await step(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
-async function chat() {
+async function chat(timeoutMs = 200) {
   await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true });
   vi.stubGlobal("RTCPeerConnection", undefined);
   const relays = fakeRelays();
-  const transport = new RelayTransport({ relays: ["https://a.test", "https://b.test"], fetch: relays.fetch, timeoutMs: 200, requestsPerMinute: Infinity, log: () => {} });
+  const transport = new RelayTransport({ relays: ["https://a.test", "https://b.test"], fetch: relays.fetch, timeoutMs, requestsPerMinute: Infinity, log: () => {} });
   const native = vi.fn();
   const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() },
     { transport, automaticWallets: false, nativeTransports: { "iroh/1": native, "hyperdht/1": native } });
@@ -131,4 +138,26 @@ it("Delete for everyone on a waiting text, as the retry marks it sending: never 
   const pending = t.node.removalPending({ linkId: t.linkId, messageId: first });
   expect(pending).toBe(t.got("cancel me"));
   expect(await t.row(first)).toBeUndefined();
+}, 60_000);
+
+it("Delete for everyone on a text awaiting its receipt on the floor: its row goes at once, not after the floor's read in flight", async () => {
+  const t = await chat(10_000);
+  const id = await t.send("delete me", Date.now());
+  await vi.waitFor(async () => expect((await t.row(id))?.delivery).toBe("sent"), { timeout: 5_000, interval: 50 });
+  const wireId = (await t.row(id))!.wireId!;
+  const floor = (t.node as unknown as { links: Map<string, { link?: { dhtHolds(id: string): boolean } }> }).links.get(t.linkId)!.link!;
+  expect(floor.dhtHolds(wireId)).toBe(true);
+  // The away contact's mailbox is read as a public relay answers it, slowly; the delete comes as such a read begins.
+  t.relays.slow(3_000);
+  await new Promise<void>((resolve) => { t.relays.hooks.onGet = resolve; });
+  t.relays.hooks.onGet = undefined;
+  const asked = Date.now();
+  const removing = t.node.removeMessage({ linkId: t.linkId, messageId: id });
+  await vi.waitFor(async () => expect(await t.row(id)).toBeUndefined(), { timeout: 10_000, interval: 20 });
+  // It waited for that read (3 s here, up to the relays' 10 s timeout), the bubble left in the chat meanwhile.
+  expect(Date.now() - asked).toBeLessThan(1_000);
+  expect(await removing).toEqual({ error: null });
+  // Answered once the floor no longer holds it, as `message delete --purge` needs.
+  expect(floor.dhtHolds(wireId)).toBe(false);
+  t.relays.slow(0);
 }, 60_000);

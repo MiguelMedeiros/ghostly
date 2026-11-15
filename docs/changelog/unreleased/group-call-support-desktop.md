@@ -1,4 +1,4 @@
 ---
-section: For developers / Calls
+section: For users / Calls
 ---
-- The app knows where it can join a group call, not reachable yet: the web app and the Desktop on macOS and Windows can, the Linux Desktop (whose WebView has no WebRTC) says "Group calls aren't on Linux yet: join from app.ghostly.tools in a browser" on the group's call button once there is one.
+- On the Linux Desktop, whose WebView has no WebRTC, a group's Join call shows off, with an ⓘ saying "Group calls aren't on Linux yet: join from app.ghostly.tools in a browser"; it asks the group's node for nothing. The web app and the Desktop on macOS and Windows join as before.
