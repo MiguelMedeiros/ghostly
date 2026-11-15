@@ -1,4 +1,7 @@
-import { engineError, randomBytes, sign, toBase64Url, utf8Encode, type GroupMeta } from "@ghostly/core";
+import {
+  GROUP_CALL_SOURCES, engineError, isZ32Key, randomBytes, sign, signGroupCallModeration, toBase64Url, utf8Encode,
+  type GroupCallModerationAct, type GroupCallSource, type GroupMeta,
+} from "@ghostly/core";
 
 /**
  * A member asks its group's call node for a pass (WISP 602 · Group Calls § The token request): signed with its member
@@ -136,6 +139,82 @@ export async function fetchGroupCallToken(ask: GroupCallAsk): Promise<GroupCallP
     if (!pass) throw engineError("groupCallFailed", { host });
     return pass;
   }
+}
+
+/** The room's state after an act (WISP 602 § Moderation, the reply): the sources taken from each key, and who is banned. */
+export interface GroupCallRoomState { muted: Record<string, GroupCallSource[]>; banned: string[] }
+
+/**
+ * Why a moderation request did nothing. `not_admin`: I am not the group's admin, so nothing was sent. `refused`: the
+ * node's 403. `rate_limited`: its 429, again after `retryAfter` seconds. `unsupported`: the group names no node, or
+ * its node is older than the route (404 or 405). `unreachable`: no answer in time, or one that is not a room's state.
+ */
+export type GroupCallModerationCode = "not_admin" | "refused" | "rate_limited" | "unsupported" | "unreachable";
+export type GroupCallModerationResult = { ok: true; state: GroupCallRoomState } | { ok: false; code: GroupCallModerationCode; retryAfter?: number };
+
+/** A 429 that says no time (or says it badly) is asked again after the node's window, a minute; one that says more, an hour at most. */
+const DEFAULT_RETRY_AFTER_S = 60;
+const MAX_RETRY_AFTER_S = 3600;
+
+export interface GroupCallModerationAsk {
+  sfu: string;
+  g: string;
+  /** The seed of my member key in the group, the admin's. */
+  seed: Uint8Array;
+  act: GroupCallModerationAct;
+  target?: string;
+  src?: readonly GroupCallSource[];
+  fetch?: typeof fetch;
+  now?: () => number;
+}
+
+/**
+ * Sends the admin's signed request to `<sfu>/sfu/group-moderate` (WISP 602 § Moderation) once, as a token request goes
+ * (no redirect, no cookie, the same timeout and capped read), and says what came back as a code, never as a throw.
+ */
+export async function sendGroupCallModeration(ask: GroupCallModerationAsk): Promise<GroupCallModerationResult> {
+  const doFetch = ask.fetch ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
+  const now = ask.now ?? Date.now;
+  const request = signGroupCallModeration({ sfu: ask.sfu, g: ask.g, act: ask.act, target: ask.target, src: ask.src, ts: Math.floor(now() / 1000) }, ask.seed);
+  let response: Response;
+  try {
+    response = await doFetch(`${ask.sfu}/sfu/group-moderate`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request), signal: AbortSignal.timeout(GROUP_CALL_TIMEOUT_MS),
+      redirect: "error", credentials: "omit", referrerPolicy: "no-referrer", cache: "no-store",
+    });
+  } catch { return { ok: false, code: "unreachable" }; }
+  if (response.status === 403) return { ok: false, code: "refused" };
+  if (response.status === 429) return { ok: false, code: "rate_limited", retryAfter: retryAfterS(response.headers.get("Retry-After"), now()) };
+  if (response.status === 404 || response.status === 405) return { ok: false, code: "unsupported" };
+  let raw: unknown = null;
+  if (response.ok) try { const text = await readCapped(response, MAX_REPLY_BYTES); raw = text === null ? null : JSON.parse(text); } catch { raw = null; }
+  const state = parseGroupCallRoomState(raw);
+  return state ? { ok: true, state } : { ok: false, code: "unreachable" };
+}
+
+/** `Retry-After` in seconds, given as seconds or as an HTTP date. */
+function retryAfterS(header: string | null, now: number): number {
+  const value = header?.trim() ?? "";
+  if (/^\d{1,10}$/.test(value)) return Math.min(Number(value), MAX_RETRY_AFTER_S);
+  const at = value ? Date.parse(value) : NaN;
+  return Number.isFinite(at) ? Math.min(Math.max(0, Math.ceil((at - now) / 1000)), MAX_RETRY_AFTER_S) : DEFAULT_RETRY_AFTER_S;
+}
+
+/**
+ * The reply's room state, or null when it is none: its keys are member keys and its sources known ones, listed once and
+ * sorted, as the WISP has the node write them. A key with no source left is not muted.
+ */
+export function parseGroupCallRoomState(raw: unknown): GroupCallRoomState | null {
+  const state = (raw as { state?: unknown } | null)?.state as { muted?: unknown; banned?: unknown } | null | undefined;
+  if (!state || typeof state !== "object" || !state.muted || typeof state.muted !== "object" || Array.isArray(state.muted) || !Array.isArray(state.banned)) return null;
+  const muted: Record<string, GroupCallSource[]> = {};
+  for (const [key, src] of Object.entries(state.muted)) {
+    if (!isZ32Key(key) || !Array.isArray(src)) return null;
+    const known = GROUP_CALL_SOURCES.filter(s => src.includes(s));
+    if (known.length) muted[key] = known;
+  }
+  if (!state.banned.every(isZ32Key)) return null;
+  return { muted, banned: [...new Set(state.banned as string[])].sort() };
 }
 
 /**
