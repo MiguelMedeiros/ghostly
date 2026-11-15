@@ -425,8 +425,12 @@ describe("group call", () => {
   /** A community whose view names the node the last `setGroupCall` set, as the engine's does once the statement is signed. */
   function community(admin = true) {
     const { ctx, node } = fake();
-    let call: { sfu: string } | undefined;
-    const setGroupCall = vi.fn(async ({ sfu }: { groupId: string; sfu: string | null }) => { call = sfu === null ? undefined : { sfu }; });
+    let call: { sfu: string; e2ee?: 1 } | undefined;
+    // Left out, `e2ee` stays as it was, as the engine's `setCall` keeps it.
+    const setGroupCall = vi.fn(async ({ sfu, e2ee }: { groupId: string; sfu: string | null; e2ee?: boolean }) => {
+      const sealed = e2ee ?? call?.e2ee === 1;
+      call = sfu === null ? undefined : sealed ? { sfu, e2ee: 1 } : { sfu };
+    });
     Object.assign(node, { setGroupCall, getState: () => ({ links: [], groups: [{ ...thursday, isAdmin: admin, ...(call && { call }) }, group], settings: {}, transport: {} }) as unknown as EngineState });
     return { ctx, setGroupCall };
   }
@@ -437,10 +441,27 @@ describe("group call", () => {
     expect((await show(ctx)).call).toBeNull();
     expect(await callApi(ctx, "group.call", { group: "Thursday", sfu: SFU })).toMatchObject({ id: "g7", call: { sfu: SFU } });
     expect(setGroupCall).toHaveBeenLastCalledWith({ groupId: "g7", sfu: SFU });
-    expect((await show(ctx)).call).toEqual({ sfu: SFU });
+    expect((await show(ctx)).call).toEqual({ sfu: SFU, e2ee: false });
     expect(await callApi(ctx, "group.call", { group: "Thursday", clear: true })).toMatchObject({ id: "g7", call: null });
     expect(setGroupCall).toHaveBeenLastCalledWith({ groupId: "g7", sfu: null });
     expect((await show(ctx)).call).toBeNull();
+  });
+
+  it("--e2ee turns sealed call media on with the node or alone, --no-e2ee off, and group show prints call.e2ee", async () => {
+    const { ctx, setGroupCall } = community();
+    await expect(callApi(ctx, "group.call", { group: "Thursday", e2ee: true })).rejects.toMatchObject({ code: "refused", message: "Thursday has no call node: ghostly group call Thursday --sfu <https origin> --e2ee" });
+    expect(setGroupCall).not.toHaveBeenCalled();
+    expect(await callApi(ctx, "group.call", { group: "Thursday", sfu: SFU, e2ee: true })).toMatchObject({ call: { sfu: SFU, e2ee: true } });
+    expect(setGroupCall).toHaveBeenLastCalledWith({ groupId: "g7", sfu: SFU, e2ee: true });
+    // The node named again without a word on e2ee: the engine keeps it on.
+    await callApi(ctx, "group.call", { group: "Thursday", sfu: SFU });
+    expect(setGroupCall).toHaveBeenLastCalledWith({ groupId: "g7", sfu: SFU });
+    expect((await show(ctx)).call).toEqual({ sfu: SFU, e2ee: true });
+    expect(await callApi(ctx, "group.call", { group: "Thursday", e2ee: false })).toMatchObject({ call: { sfu: SFU, e2ee: false } });
+    expect(setGroupCall).toHaveBeenLastCalledWith({ groupId: "g7", sfu: SFU, e2ee: false });
+    await callApi(ctx, "group.call", { group: "Thursday", e2ee: true });
+    expect(setGroupCall).toHaveBeenLastCalledWith({ groupId: "g7", sfu: SFU, e2ee: true });
+    await expect(callApi(ctx, "group.call", { group: "Thursday", e2ee: "yes" })).rejects.toMatchObject({ code: "bad_request", message: "e2ee must be true or false" });
   });
 
   it("refuses a member who is not the admin, and a private group, before the engine signs anything", async () => {
@@ -483,13 +504,17 @@ describe("group call", () => {
     expect(setGroupCall).toHaveBeenLastCalledWith({ groupId: "g7", sfu: "https://call.example.com:8443" });
   });
 
-  it("takes --sfu or --clear, one of them", () => {
+  it("takes --sfu or --clear, one of them, and --e2ee or --no-e2ee with --sfu or alone", () => {
     const command = COMMANDS["group call"];
     const params = (argv: string[]) => { const parsed = parseArgs(argv, command.options ?? {}, idSlot(command)); return command.params!(parsed, positionals(command, parsed.positionals)); };
     expect(params(["Thursday", "--sfu", SFU])).toEqual({ group: "Thursday", sfu: SFU });
     expect(params(["Thursday", "--clear"])).toEqual({ group: "Thursday", clear: true });
     expect(() => params(["Thursday"])).toThrow("Missing --sfu: ghostly group call <group> --sfu <https origin> | --clear");
     expect(() => params(["Thursday", "--sfu", SFU, "--clear"])).toThrow("--clear removes the call node: not with --sfu");
+    expect(params(["Thursday", "--sfu", SFU, "--e2ee"])).toEqual({ group: "Thursday", sfu: SFU, e2ee: true });
+    expect(params(["Thursday", "--no-e2ee"])).toEqual({ group: "Thursday", e2ee: false });
+    expect(() => params(["Thursday", "--clear", "--e2ee"])).toThrow("--clear removes the call node: not with --e2ee or --no-e2ee");
+    expect(() => params(["Thursday", "--e2ee", "--no-e2ee"])).toThrow("--e2ee or --no-e2ee, not both");
   });
 });
 

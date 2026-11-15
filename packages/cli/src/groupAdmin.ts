@@ -201,8 +201,15 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
     const out = outOf(group);
     if (out) throw new CliError("refused", out);
     if (!group.isAdmin) throw new CliError("refused", `Only the admin of ${group.name} sets its call node`);
-    const sfu = bool(params, "clear") ? null : callNode(str(params, "sfu", true), str(params, "group", true), group.id);
-    await node(ctx).setGroupCall({ groupId: group.id, sfu });
+    const ref = str(params, "group", true), raw = str(params, "sfu");
+    const e2ee = params.e2ee === undefined || params.e2ee === null ? undefined : bool(params, "e2ee");
+    let sfu: string | null;
+    if (bool(params, "clear")) sfu = null;
+    else if (raw !== undefined || e2ee === undefined) sfu = callNode(str(params, "sfu", true), ref, group.id);
+    // `--e2ee` alone turns sealed media on or off for the node the group names already.
+    else if (group.call) sfu = group.call.sfu;
+    else throw new CliError("refused", `${group.name} has no call node: ghostly group call ${shellWord(ref, group.id)} --sfu <https origin>${e2ee ? " --e2ee" : ""}`);
+    await node(ctx).setGroupCall({ groupId: group.id, sfu, ...(sfu !== null && e2ee !== undefined && { e2ee }) });
     return view(ctx, group.id, params);
   },
   async "profile.picture"(ctx, params) {

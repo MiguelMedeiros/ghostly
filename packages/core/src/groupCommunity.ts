@@ -901,7 +901,7 @@ export class CommunitySession {
   /** The group's picture, if it has one. */
   get picture(): string | undefined { return groupMetaPicture(this.state.meta); }
   /** The node that forwards the group's calls, while the statement I keep names one that holds (WISP 602). */
-  get call(): { sfu: string } | undefined { return groupMetaBody(this.state.meta).call; }
+  get call(): { sfu: string; e2ee?: 1 } | undefined { return groupMetaBody(this.state.meta).call; }
   /**
    * Members of any epoch in the window: whom a frame may come from. A side commit's roster counts only while its branch
    * could still win (`mayWin`): one let in only on a branch that lost is not in the roster anyone sees, and the main
@@ -2813,12 +2813,18 @@ export class CommunitySession {
     });
   }
 
-  /** Names (or, with null, removes) the node that forwards the group's calls (WISP 602): only the admin, beside the name and picture. */
-  setCall(sfu: string | null, now = Date.now()): Promise<void> {
+  /**
+   * Names (or, with null, removes) the node that forwards the group's calls (WISP 602): only the admin, beside the name
+   * and picture. `e2ee` turns sealed call media on or off (§ End-to-end encryption); left out, the group keeps what it
+   * had, so naming the node again does not turn it off.
+   */
+  setCall(sfu: string | null, e2ee?: boolean, now = Date.now()): Promise<void> {
     return this.serialize(async () => {
       this.requireMember();
       if (!this.isAdmin) throw new Error("Only the admin can set the group's call node");
-      const body = encodeGroupMetaBody({ ...groupMetaBody(this.state.meta), call: sfu === null ? undefined : { sfu } });
+      const before = groupMetaBody(this.state.meta);
+      const sealed = e2ee ?? before.call?.e2ee === 1;
+      const body = encodeGroupMetaBody({ ...before, call: sfu === null ? undefined : sealed ? { sfu, e2ee: 1 } : { sfu } });
       if (body !== this.state.meta?.body) await this.publishMeta(body, now);
     });
   }
