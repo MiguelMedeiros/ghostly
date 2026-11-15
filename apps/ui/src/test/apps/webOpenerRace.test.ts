@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { memoryHost } from "../../lib/apps/memoryHost";
 import { stopRunningApps } from "../../lib/apps/open";
-import { chatApp, registerAppSlot } from "../../lib/apps/running";
+import { chatApp, noteChoice, registerAppSlot, updateChatApp } from "../../lib/apps/running";
 import { webOpener } from "../../lib/apps/webOpener";
 import type { AppEntry } from "../../lib/platform";
 
@@ -62,6 +62,26 @@ describe("two apps opened in one chat at once (web)", () => {
     expect(started).toEqual(["Notes"]);
     expect(stopped).toEqual([]);
     expect(chatApp(LINK)?.ref).toBe(FAST);
+    expect(chatApp(LINK)?.stopped).toBeUndefined();
+  });
+
+  it("Back to the app already running there (the resume bar) is the newest choice: a slower Open finishing later starts nothing", async () => {
+    let release!: () => void;
+    const open = opener(new Promise<void>((resolve) => { release = resolve; }));
+    // Notes runs in the chat, and the person went Back from it.
+    await open(FAST, LINK);
+    updateChatApp(LINK, { shown: false });
+    // Open on Chess's card (its files downloading), then "Back to Notes" (ChatAppResume) while it is on its way.
+    const late = open(SLOW, LINK);
+    noteChoice(LINK);
+    updateChatApp(LINK, { shown: true });
+    release();
+    const result = await late;
+    expect(started).toEqual(["Notes"]);
+    expect(stopped).toEqual([]);
+    expect(result).toBe("shown");
+    expect(chatApp(LINK)?.ref).toBe(FAST);
+    expect(chatApp(LINK)?.shown).toBe(true);
     expect(chatApp(LINK)?.stopped).toBeUndefined();
   });
 
