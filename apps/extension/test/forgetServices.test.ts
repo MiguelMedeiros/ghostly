@@ -13,10 +13,10 @@ const pageEngine = vi.hoisted(() => {
   const listeners = new Set<() => void>();
   type Link = { myPubKeyZ32: string; peerPubKeyZ32: string; peerServices: { id: string; type: string }[] | null };
   return {
-    state: null as null | { links: Link[] },
+    state: null as null | { links: Link[]; edges?: Link[] },
     subscribe(listener: () => void) { listeners.add(listener); return () => listeners.delete(listener); },
     linkByPeer: () => undefined,
-    send(links: Link[]) { pageEngine.state = { links }; for (const listener of [...listeners]) listener(); },
+    send(links: Link[], edges?: Link[]) { pageEngine.state = { links, edges }; for (const listener of [...listeners]) listener(); },
     reset() { pageEngine.state = null; listeners.clear(); },
   };
 });
@@ -134,6 +134,14 @@ describe("what a contact's app kept in its viewer tab", () => {
     // Delete chat clears no more origins than that.
     await forgetServicesOf({ tag });
     expect(removed()).toHaveLength(MAX_SERVICES + 1);
+  });
+
+  it("notes the apps a group member lists too: one opens from their chat in the group as from a contact's", async () => {
+    const { forgetServicesOf } = await page();
+    const me = OTHER_PEER;
+    pageEngine.send([], [{ myPubKeyZ32: me, peerPubKeyZ32: PEER, peerServices: [{ id: SERVICE, type: "http" }] }]);
+    await forgetServicesOf({ tag: viewerTag(me) });
+    expect(removed()).toEqual([[{ origins: [origin(PEER, viewerTag(me))] }, KEPT]]);
   });
 
   it("a viewer tab whose debugger was cancelled still closes before its origin is cleared", async () => {

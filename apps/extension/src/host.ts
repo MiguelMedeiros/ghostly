@@ -28,7 +28,7 @@ const openedViewers = openedServices<OpenedViewer>(
 );
 
 /**
- * Every app each chat lists, noted as the list comes (`peerServices`): an app opened before the opened-apps list was
+ * Every app each chat and group member lists, noted as the list comes (`peerServices`): an app opened before the opened-apps list was
  * kept is on no list, and Delete chat, Clear all data and Delete profile no longer know the chat's apps by then.
  * Clearing an origin no app ever opened clears nothing. Each one once per page: the list comes with every state. All
  * of a state's together: one at a time, a page's first state would read the whole list once per app. Only web apps
@@ -37,9 +37,11 @@ const openedViewers = openedServices<OpenedViewer>(
  */
 const listedNoted = new Set<string>();
 engine.subscribe(() => {
-  const links = engine.state?.links;
+  const state = engine.state;
   // A page left behind by a switch in another tab may still hold the other profile's chats.
-  if (!links || !pageProfileIsCurrent()) return;
+  if (!state?.links || !pageProfileIsCurrent()) return;
+  // A group member's apps open from their chat in the group (`linkByPeer`) as a contact's do.
+  const links = [...state.links, ...(state.edges ?? [])];
   const profile = activeProfileId();
   const listed: OpenedViewer[] = [];
   for (const link of links) {
