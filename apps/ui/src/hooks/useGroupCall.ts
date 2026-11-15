@@ -8,13 +8,13 @@ import type { GroupCallParticipant, GroupCallState } from "../components/GroupCa
 /*
  * A group call through the group's node (WISP 602): joins the LiveKit room the node's pass names, and gives the call
  * window everyone in it, who speaks, and your microphone, camera and screen. livekit-client is loaded only here, at
- * the join, so the app's first load does not carry it.
+ * the join, so the app's first load does not carry it; nor its E2EE worker, which a sealed call starts.
  */
 
 /** What the hook uses of livekit-client. Tests pass a fake through `loadLivekit` (no WebRTC in the test DOM). */
-export type LivekitModule = Pick<typeof import("livekit-client"), "Room" | "RoomEvent" | "Track">;
+export type LivekitModule = typeof import("./groupCallLivekit");
 
-const loadLivekitClient = (): Promise<LivekitModule> => import("livekit-client");
+const loadLivekitClient = (): Promise<LivekitModule> => import("./groupCallLivekit");
 
 /** The node's pass, as its reply gives it (WISP 602): where the room is, the token, and TURN when it sends some. */
 export interface GroupCallJoin {
@@ -23,7 +23,19 @@ export interface GroupCallJoin {
   iceServers?: RTCIceServer[];
 }
 
+/** The group's call key for one epoch (WISP 602 § End-to-end encryption): the engine's `groupCallKey`, as bytes. */
+export interface GroupCallSeal {
+  epoch: number;
+  key: Uint8Array;
+}
+
 export interface UseGroupCallOptions extends GroupCallJoin {
+  /**
+   * Set when the group's call says `e2ee: 1`: the media is sealed end to end with this key, and the room is never
+   * joined unsealed. Null: the key is not here (yet), so the room is not joined. A new epoch's key is set in the call
+   * as it comes. Left out: the call is not sealed.
+   */
+  e2ee?: GroupCallSeal | null;
   /**
    * "Hide my IP from contacts": the media goes through the pass's TURN servers alone (`iceTransportPolicy: "relay"`),
    * and a pass without one is not joined (`groupCallRelayConfig`).
@@ -55,6 +67,12 @@ export interface GroupCall extends GroupCallState {
 /** Why a room is not joined with "Hide my IP from contacts" on: the node's pass names no TURN server to go through. */
 export const NO_RELAY = "The call node gave no TURN server, and Hide my IP from contacts is on";
 
+/** Why a sealed call is not joined: this browser cannot seal call media (no Insertable Streams, no RTCRtpScriptTransform). */
+export const NO_SEALING = "This browser can't seal call media end to end, and this group's call asks for it";
+
+/** Why a sealed call is not joined: the group's call key for this epoch is not on this device yet. */
+export const NO_CALL_KEY = "This group's call key is not here yet";
+
 /**
  * The room's WebRTC configuration under "Hide my IP from contacts", as a 1:1 call's (`callRtcConfig`): the pass's TURN
  * servers alone, and the relay policy, so no candidate but the relay's reaches the node. No server: nothing to join by.
@@ -75,6 +93,10 @@ const EMPTY: GroupCallState = { participants: [], activeSpeaker: null, local: NO
 interface Session {
   lk?: LivekitModule;
   room?: Room;
+  /** A sealed call's key provider, the epoch of the key set in it, and its E2EE worker. */
+  keys?: InstanceType<LivekitModule["ExternalE2EEKeyProvider"]>;
+  epoch?: number;
+  worker?: Worker;
   ended: boolean;
   screen: MediaStreamTrack | null;
   screenEnded: (() => void) | null;
@@ -130,7 +152,10 @@ async function endSession(session: Session): Promise<void> {
   session.ended = true;
   await stopScreen(session);
   const room = session.room;
-  if (!room) return;
+  if (!room) {
+    session.worker?.terminate();
+    return;
+  }
   const tracks = [...room.localParticipant.trackPublications.values()].map((p: LocalTrackPublication) => p.track);
   try {
     await room.disconnect(true);
@@ -144,13 +169,26 @@ async function endSession(session: Session): Promise<void> {
       // a track that would not stop is already ended
     }
   }
+  session.worker?.terminate();
+}
+
+/** The key's own bytes, as LiveKit takes raw key material (HKDF, not the passphrase's PBKDF2). */
+const keyBytes = (key: Uint8Array): ArrayBuffer => new Uint8Array(key).buffer;
+
+/** Sets the newest epoch's key in a sealed call once it differs from the one set (WISP 602: the new one at an epoch move). */
+async function rekey(session: Session, seal: GroupCallSeal | null | undefined): Promise<void> {
+  if (!session.keys || !seal || seal.epoch === session.epoch || session.ended) return;
+  session.epoch = seal.epoch;
+  await session.keys.setKey(keyBytes(seal.key));
 }
 
 /**
  * Joins the room at `url` with `token` while both are set, with the microphone on and the camera off, or muted past
- * `GROUP_CALL_MUTED_ABOVE` people. A new url or token leaves the old room first; unmounting leaves it too.
+ * `GROUP_CALL_MUTED_ABOVE` people. A new url or token leaves the old room first; unmounting leaves it too. With
+ * `e2ee` set, the room is joined sealed with LiveKit's E2EE (a shared key from `ExternalE2EEKeyProvider`), or not at
+ * all: never unsealed. Sealing turned on or off for the group joins the room again.
  */
-export function useGroupCall({ url, token, iceServers, relayOnly = false, loadLivekit }: UseGroupCallOptions): GroupCall {
+export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, loadLivekit }: UseGroupCallOptions): GroupCall {
   const [state, setState] = useState<GroupCallState>(EMPTY);
   const [status, setStatus] = useState<GroupCallStatus>("idle");
   const [error, setError] = useState<GroupCallError | null>(null);
@@ -162,6 +200,9 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, loadLi
   relay.current = relayOnly;
   const load = useRef(loadLivekit);
   load.current = loadLivekit;
+  const seal = useRef(e2ee);
+  seal.current = e2ee;
+  const sealed = e2ee !== undefined;
 
   useEffect(() => {
     if (!url || !token) return;
@@ -178,12 +219,26 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, loadLi
         const rtcConfig = relay.current ? groupCallRelayConfig(servers) : servers?.length ? { iceServers: servers } : undefined;
         // Nothing to relay through: joining would hand the node this device's address.
         if (relay.current && !rtcConfig?.iceServers?.length) throw new Error(NO_RELAY);
+        // A sealed call without its key is not joined: in the room the media would go unsealed, or not be heard.
+        if (sealed && !seal.current) throw new Error(NO_CALL_KEY);
         const lk = await (load.current ?? loadLivekitClient)();
         if (!live) return;
+        let encryption: { keyProvider: InstanceType<LivekitModule["ExternalE2EEKeyProvider"]>; worker: Worker } | undefined;
+        if (sealed) {
+          if (!lk.isE2EESupported()) throw new Error(NO_SEALING);
+          const keyProvider = new lk.ExternalE2EEKeyProvider();
+          s.keys = keyProvider;
+          await rekey(s, seal.current);
+          if (!live || s.ended) return;
+          s.worker = lk.e2eeWorker();
+          encryption = { keyProvider, worker: s.worker };
+        }
         // No adaptive stream: the window draws the raw tracks in its own elements, which LiveKit would take as hidden.
-        const room = new lk.Room({ adaptiveStream: false, dynacast: true });
+        const room = new lk.Room({ adaptiveStream: false, dynacast: true, ...(encryption && { encryption }) });
         s.lk = lk;
         s.room = room;
+        // Sealed before connecting, so no track ever goes out unsealed; a room that will not seal is not joined.
+        if (encryption) await room.setE2EEEnabled(true);
         s.refresh = () => {
           if (live && !s.ended) setState(snapshot(room, lk));
         };
@@ -202,6 +257,8 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, loadLi
           await endSession(s);
           return;
         }
+        // The group moved to a new epoch while joining.
+        await rekey(s, seal.current);
         setStatus("connected");
         s.refresh();
         if (!joinsMuted(room.remoteParticipants.size + 1)) {
@@ -226,7 +283,14 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, loadLi
       void endSession(s);
       if (session.current === s) session.current = null;
     };
-  }, [url, token]);
+  }, [url, token, sealed]);
+
+  // The group moved to a new epoch: its key goes into the call; everyone in the room does the same (WISP 602).
+  const sealEpoch = e2ee?.epoch;
+  useEffect(() => {
+    const s = session.current;
+    if (s) void rekey(s, seal.current).catch(() => { /* the room keeps the key it had */ });
+  }, [sealEpoch]);
 
   const active = () => {
     const s = session.current;

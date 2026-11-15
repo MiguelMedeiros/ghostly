@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GROUP_CALL_MUTED_ABOVE, joinsMuted, NO_RELAY, useGroupCall, type LivekitModule, type UseGroupCallOptions } from "../../hooks/useGroupCall";
+import { GROUP_CALL_MUTED_ABOVE, joinsMuted, NO_CALL_KEY, NO_RELAY, NO_SEALING, useGroupCall, type LivekitModule, type UseGroupCallOptions } from "../../hooks/useGroupCall";
 import { chooseDevice } from "../../lib/mediaDevices";
 import { FakeTrack } from "../../../../../packages/react/test/fakes";
 
@@ -126,8 +126,12 @@ class FakeRoom {
   readonly disconnect = vi.fn(async (_stopTracks?: boolean) => {
     this.emit(RoomEvent.Disconnected);
   });
-  constructor(readonly options: unknown) {
+  /** LiveKit's E2EE switch: `steps` records it against the connect, as a sealed join must turn it on first. */
+  readonly setE2EEEnabled = vi.fn(async (_on: boolean) => { steps.push("e2ee"); });
+  constructor(readonly options: { encryption?: { keyProvider: FakeKeyProvider; worker: FakeWorker } } & Record<string, unknown>) {
     FakeRoom.rooms.push(this);
+    const connect = this.connect.getMockImplementation()!;
+    this.connect.mockImplementation(async (...args) => { steps.push("connect"); return connect(...args); });
   }
   on(event: string, listener: () => void) {
     if (!this.listeners.has(event)) this.listeners.set(event, new Set());
@@ -159,7 +163,34 @@ class FakeRoom {
   }
 }
 
-const fakeLivekit = { Room: FakeRoom, RoomEvent, Track: { Source } } as unknown as LivekitModule;
+/** The order a sealed join goes in: the key set, E2EE on, then the connect. */
+let steps: string[] = [];
+
+/** LiveKit's shared-key provider (`ExternalE2EEKeyProvider`): the raw bytes of every key set in it, in order. */
+class FakeKeyProvider {
+  static providers: FakeKeyProvider[] = [];
+  readonly keys: number[][] = [];
+  readonly setKey = vi.fn(async (key: string | ArrayBuffer) => {
+    if (typeof key === "string") throw new Error("a passphrase: the call key goes in as raw bytes");
+    this.keys.push([...new Uint8Array(key)]);
+    steps.push("key");
+  });
+  constructor() { FakeKeyProvider.providers.push(this); }
+}
+
+class FakeWorker {
+  static workers: FakeWorker[] = [];
+  readonly terminate = vi.fn();
+  constructor() { FakeWorker.workers.push(this); }
+}
+
+/** Whether the next join's browser can seal media (livekit-client's `isE2EESupported`). */
+let sealing = true;
+
+const fakeLivekit = {
+  Room: FakeRoom, RoomEvent, Track: { Source }, ExternalE2EEKeyProvider: FakeKeyProvider,
+  isE2EESupported: () => sealing, e2eeWorker: () => new FakeWorker(),
+} as unknown as LivekitModule;
 const loadLivekit = vi.fn(async () => fakeLivekit);
 
 const room = () => FakeRoom.rooms[FakeRoom.rooms.length - 1];
@@ -185,6 +216,10 @@ function displayMedia() {
 
 afterEach(() => {
   FakeRoom.rooms = [];
+  FakeKeyProvider.providers = [];
+  FakeWorker.workers = [];
+  steps = [];
+  sealing = true;
   FakeRoom.waiting = [];
   FakeRoom.micFails = null;
   loadLivekit.mockClear();
@@ -404,10 +439,77 @@ describe("useGroupCall", () => {
     expect(loadLivekit).not.toHaveBeenCalled();
   });
 
-  it("loads livekit-client only at the join, never at the module's import", () => {
-    const source = readFileSync(join(fileURLToPath(import.meta.url), "../../../hooks/useGroupCall.ts"), "utf8");
-    const statics = source.match(/^import\s+(?!type\b)[^;]*from\s+["']livekit-client["']/gm);
+  it("loads livekit-client and its E2EE worker only at the join, never at the module's import", () => {
+    const read = (file: string) => readFileSync(join(fileURLToPath(import.meta.url), "../../../hooks", file), "utf8");
+    const source = read("useGroupCall.ts");
+    const statics = source.match(/^import\s+(?!type\b)[^;]*from\s+["'](?:livekit-client|\.\/groupCallLivekit)["']/gm);
     expect(statics).toBeNull();
-    expect(source).toContain('import("livekit-client")');
+    expect(source).toContain('import("./groupCallLivekit")');
+    // The module loaded at the join is where livekit-client and the worker come from.
+    const lazy = read("groupCallLivekit.ts");
+    expect(lazy).toMatch(/from "livekit-client";/);
+    expect(lazy).toContain('new Worker(new URL("livekit-client/e2ee-worker", import.meta.url), { type: "module" })');
+  });
+});
+
+describe("useGroupCall, a sealed call (WISP 602 § End-to-end encryption)", () => {
+  const key = (epoch: number, fill: number) => ({ epoch, key: new Uint8Array(32).fill(fill) });
+
+  it("joins with LiveKit's E2EE: the shared key provider with the call key's raw bytes and the E2EE worker, sealed before connecting", async () => {
+    const { result } = await joined({ e2ee: key(4, 7) });
+    expect(FakeKeyProvider.providers).toHaveLength(1);
+    const [provider] = FakeKeyProvider.providers;
+    expect(provider.keys).toEqual([Array(32).fill(7)]);
+    expect(room().options.encryption).toEqual({ keyProvider: provider, worker: FakeWorker.workers[0] });
+    expect(room().options).toMatchObject({ adaptiveStream: false });
+    expect(room().setE2EEEnabled).toHaveBeenCalledWith(true);
+    expect(steps).toEqual(["key", "e2ee", "connect"]);
+    expect(result.current.status).toBe("connected");
+  });
+
+  it("sets the new epoch's key in the call when the group moves on, without joining again", async () => {
+    const hook = await joined({ e2ee: key(4, 7) });
+    const [provider] = FakeKeyProvider.providers;
+    hook.rerender({ url: "wss://call.example", token: "pass", loadLivekit, e2ee: key(5, 9) });
+    await waitFor(() => expect(provider.keys).toEqual([Array(32).fill(7), Array(32).fill(9)]));
+    // The same epoch again (a new object for the same key) sets nothing.
+    hook.rerender({ url: "wss://call.example", token: "pass", loadLivekit, e2ee: key(5, 9) });
+    await act(async () => {});
+    expect(provider.keys).toHaveLength(2);
+    expect(FakeRoom.rooms).toHaveLength(1);
+    expect(room().connect).toHaveBeenCalledTimes(1);
+    expect(hook.result.current.status).toBe("connected");
+  });
+
+  it("a browser that can't seal call media joins nothing, and says why", async () => {
+    sealing = false;
+    const { result } = renderHook(() => useGroupCall({ url: "wss://call.example", token: "pass", e2ee: key(4, 7), loadLivekit }));
+    await waitFor(() => expect(result.current.status).toBe("failed"));
+    expect(result.current.error).toMatchObject({ action: "join", message: NO_SEALING });
+    expect(FakeRoom.rooms).toHaveLength(0);
+    expect(FakeWorker.workers).toHaveLength(0);
+  });
+
+  it("without the group's call key (null) joins nothing, and says why", async () => {
+    const { result } = renderHook(() => useGroupCall({ url: "wss://call.example", token: "pass", e2ee: null, loadLivekit }));
+    await waitFor(() => expect(result.current.status).toBe("failed"));
+    expect(result.current.error).toMatchObject({ action: "join", message: NO_CALL_KEY });
+    expect(loadLivekit).not.toHaveBeenCalled();
+    expect(FakeRoom.rooms).toHaveLength(0);
+  });
+
+  it("leaving ends the E2EE worker with the room", async () => {
+    const { result } = await joined({ e2ee: key(4, 7) });
+    await act(() => result.current.leave());
+    expect(room().disconnect).toHaveBeenCalledWith(true);
+    expect(FakeWorker.workers[0].terminate).toHaveBeenCalled();
+  });
+
+  it("without e2ee the room is joined as before: no encryption, no key provider, no worker", async () => {
+    await joined();
+    expect(room().options).toEqual({ adaptiveStream: false, dynacast: true });
+    expect(room().setE2EEEnabled).not.toHaveBeenCalled();
+    expect(FakeKeyProvider.providers).toHaveLength(0);
+    expect(FakeWorker.workers).toHaveLength(0);
   });
 });

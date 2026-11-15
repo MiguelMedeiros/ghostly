@@ -1,9 +1,10 @@
-import { parseEngineError } from "@ghostly/core";
+import { fromBase64Url, parseEngineError } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import type { Translate } from "../contexts/I18nContext";
 import { rawError } from "./errorText";
 import type { Problem } from "./problemText";
+import { NO_CALL_KEY, NO_SEALING } from "../hooks/useGroupCall";
 
 /*
  * A group call's pass from the group's node (WISP 602 § The reply), asked through the engine (`groupCallToken`), which
@@ -25,6 +26,8 @@ export interface GroupCallPass {
 /** The group's call, as its admin signed it in the metadata (WISP 602 § The group names its node). */
 export interface GroupCallField {
   sfu: string;
+  /** 1: the group's call media is sealed end to end (WISP 602 § End-to-end encryption); anything else is off. */
+  e2ee?: 1;
 }
 
 /** The group's call, when it has one: only a group the admin gave a call node shows Join call. */
@@ -36,6 +39,25 @@ export function groupCallOf(group: GroupView): GroupCallField | undefined {
 export function askGroupCallPass(groupId: string): Promise<GroupCallPass> {
   const call = engine.call as unknown as (method: "groupCallToken", params: { groupId: string }) => Promise<GroupCallPass>;
   return call.call(engine, "groupCallToken", { groupId });
+}
+
+/** Whether the group's call asks for sealed media: then no app joins it unsealed (WISP 602 § End-to-end encryption). */
+export const groupCallSealed = (group: GroupView): boolean => groupCallOf(group)?.e2ee === 1;
+
+/**
+ * Whether this browser can seal call media, as livekit-client's `isE2EESupported` reads it (Insertable Streams or
+ * RTCRtpScriptTransform), without loading livekit-client: the button reads it before any join.
+ */
+export function canSealCallMedia(): boolean {
+  if (typeof window === "undefined") return false;
+  const w = window as unknown as { RTCRtpScriptTransform?: unknown; RTCRtpSender?: { prototype: { createEncodedStreams?: unknown } } };
+  return typeof w.RTCRtpScriptTransform !== "undefined" || typeof w.RTCRtpSender?.prototype.createEncodedStreams !== "undefined";
+}
+
+/** The group's call key for its newest epoch, from the engine (`groupCallKey`), as bytes; null while it isn't here. */
+export async function askGroupCallKey(groupId: string): Promise<{ epoch: number; key: Uint8Array } | null> {
+  const sealed = await engine.call("groupCallKey", { groupId });
+  return sealed ? { epoch: sealed.epoch, key: fromBase64Url(sealed.key) } : null;
 }
 
 /** Asked again this long before a pass runs out. */
@@ -61,4 +83,11 @@ export function groupCallProblem(cause: unknown, t: Translate): Problem {
   const code: string | undefined = detail ? parseEngineError(detail)?.code : undefined;
   const refused = REFUSED_CODES.has(code ?? "") || (!!detail && REFUSED.some((r) => r.test(detail)));
   return { tone: "error", title: t(refused ? "calls.group.refused" : "calls.group.unreachable"), ...(detail && { detail }) };
+}
+
+/** Why a sealed call was not joined, when it was for its seal (`useGroupCall`): no way to seal here, or no key yet. */
+export function groupCallSealProblem(message: string | undefined, t: Translate): Problem | null {
+  if (message === NO_SEALING) return { tone: "error", title: t("calls.group.noSealing"), info: t("calls.group.noSealingInfo") };
+  if (message === NO_CALL_KEY) return { tone: "error", title: t("calls.group.noCallKey"), info: t("calls.group.noCallKeyInfo") };
+  return null;
 }
