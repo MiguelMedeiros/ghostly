@@ -275,6 +275,8 @@ export class DhtDelivery {
    * one any more), not at the next keep-alive four minutes on. Any envelope that goes out replaces it.
    */
   private withdrawal?: { until: number; attempts: number; next: number };
+  /** When the last withdrawal's envelope went (its `lastPublish`), for `withdrawalWaits`. */
+  private withdrewAt = -1;
   /** The sequence of the last envelope of the contact that was past its expiry (traced once). */
   private expiredSeen = 0;
   private controlDue = 0;
@@ -803,9 +805,8 @@ export class DhtDelivery {
    * one's place on the relays, so a contact who looks later finds no text. Resolves once the state without it is saved;
    * the new envelope goes after. One that does not go (no relay reachable) is tried again within seconds (`withdrawal`):
    * a reader takes the withdrawn envelope until its expiry and the clock skew allowed past it (`DHT_EXPIRY_SKEW_MS`).
-   * Inside the publication spacing it waits for it (`withdrawalWaits`), and the text that takes the floor meanwhile goes
-   * in the same envelope: deleting 10 texts queued for an away contact one after the other put 10 envelopes on every
-   * relay in under 2 s, each replaced a moment later (bug hunt, 2026-11-15).
+   * It goes at once, spacing or not: the deleted text is out of reach from then on. The text that takes the floor next
+   * waits out the spacing instead (`withdrawalWaits`).
    */
   async withdraw(wireId: string): Promise<void> {
     const expires = await this.serialize(async () => {
@@ -815,18 +816,20 @@ export class DhtDelivery {
       return pending.attempts > 0 && pending.expires > this.clock() ? pending.expires : 0;
     });
     if (expires) void this.serialize(async () => {
-      this.withdrawal = { until: Math.max(this.withdrawal?.until ?? 0, expires + DHT_EXPIRY_SKEW_MS), attempts: 0, next: 0 };
-      if (!this.withdrawalWaits()) { try { await this.publish(true); } catch { /* tried again with a text's backoff (`withdrawal`) */ } }
+      this.withdrawal = { until: expires + DHT_EXPIRY_SKEW_MS, attempts: 0, next: 0 };
+      try { await this.publish(true); } catch { /* tried again with a text's backoff (`withdrawal`) */ }
+      this.withdrewAt = this.lastPublish;
       this.schedule();
     });
   }
   /**
-   * A withdrawal still to go (`withdrawal`) came within the publication spacing: it goes once the spacing allows
-   * (`schedule`), with whatever text holds the floor by then, not in an envelope of its own now.
+   * The last envelope was a withdrawal's, inside the publication spacing: the text that takes the floor now goes once
+   * the spacing allows (`schedule`), not in an envelope of its own at once. Deleted then, it never went, so it costs
+   * no withdrawal: deleting 10 texts queued for an away contact one after the other, each one's withdrawal and the next
+   * text's envelope put 10 envelopes on every relay in under 2 s, each replaced a moment later (bug hunt, 2026-11-15).
    */
   private withdrawalWaits(): boolean {
-    const now = this.clock(), withdrawal = this.withdrawal;
-    return !!withdrawal && withdrawal.until > now && withdrawal.attempts < MAX_ATTEMPTS && now - this.lastPublish < 4_000;
+    return this.withdrewAt === this.lastPublish && this.clock() - this.lastPublish < 4_000;
   }
   /** The id of what awaits its receipt on the floor now, if anything does. */
   get pendingId(): string | undefined {
@@ -1349,9 +1352,12 @@ export class DhtDelivery {
     // So does a withdrawal still to replace on the relays (`withdrawal`), at its backoff.
     const withdrawal = this.withdrawal, now = Date.now();
     const retry = withdrawal && withdrawal.until > now && withdrawal.attempts < MAX_ATTEMPTS ? Math.max(0, withdrawal.next - now, this.lastPublish + 4_000 - now, held) : Infinity;
+    // So does a text that took the floor just after a withdrawal and has not gone yet (`withdrawalWaits`).
+    const pending = this.state.pending;
+    const waiting = pending && pending.attempts === 0 && pending.expires > now ? Math.max(0, this.lastPublish + 4_000 - now, held) : Infinity;
     // So does a read it held back, never sooner than a second after.
     const readHeld = this.readHeldUntil > 0 ? Math.max(1_000, this.readHeldUntil - Date.now()) : Infinity;
-    this.timer = setTimeout(() => void this.tick(), Math.min(held > 0 ? Math.min(this.pollMs, held) : this.pollMs, due, retry, readHeld));
+    this.timer = setTimeout(() => void this.tick(), Math.min(held > 0 ? Math.min(this.pollMs, held) : this.pollMs, due, retry, waiting, readHeld));
   }
 }
 export const DHT_TEXT_REFUSED = "Your contact's app does not accept text over the DHT. It is sent when you are live.";

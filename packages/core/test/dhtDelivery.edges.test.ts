@@ -560,10 +560,7 @@ describe("DHT delivery: sending and lifecycle", () => {
     expect(h.last().confirmed).toBeUndefined();
     expect(JSON.stringify(h.last())).not.toContain("sk-1");
     expect(h.bob.holds(ID)).toBe(false);
-    // The text went a moment ago: its replacement waits out the publication spacing.
-    await vi.advanceTimersByTimeAsync(3_900);
-    expect(h.transport.publish.mock.calls.length).toBe(published);
-    await vi.advanceTimersByTimeAsync(100);
+    await vi.advanceTimersByTimeAsync(0);
     expect(h.transport.publish.mock.calls.length).toBe(published + 1);
     expect(h.openPublished()[6]).toBeNull();
     // Nothing more carries it, retries included.
@@ -589,8 +586,7 @@ describe("DHT delivery: sending and lifecycle", () => {
     const published = h.transport.publish.mock.calls.length;
     h.transport.publish.mockRejectedValueOnce(new Error("No Pkarr relay reachable"));
     await h.bob.withdraw(ID);
-    // Once the publication spacing allows.
-    await vi.advanceTimersByTimeAsync(4_000);
+    await vi.advanceTimersByTimeAsync(0);
     expect(h.transport.publish.mock.calls.length).toBe(published + 1);
     // Within a text's first backoff (4 s), not the keep-alive's four minutes.
     await vi.advanceTimersByTimeAsync(5_000);
@@ -623,7 +619,8 @@ describe("DHT delivery: sending and lifecycle", () => {
   });
 
   it("deleting texts on the floor one after the other, each followed by the next text, waits out the publication spacing", async () => {
-    const h = setup(); await h.bob.start();
+    // A chat in the background, read every 30 s once no text of its awaits a receipt.
+    const h = setup({ pollMs: null }); await h.bob.start();
     const id = (i: number) => "q".repeat(21) + String.fromCharCode(97 + i);
     expect(await h.bob.send("text 0", Date.now(), id(0))).toBeNull();
     // Retried at 4 s, then at 12 s: the floor is quiet at 10 s.
@@ -631,15 +628,22 @@ describe("DHT delivery: sending and lifecycle", () => {
     const published = h.transport.publish.mock.calls.length;
     for (let i = 0; i < 10; i++) {
       await h.bob.withdraw(id(i));
-      if (i === 0) { await vi.advanceTimersByTimeAsync(0); expect(h.transport.publish.mock.calls.length, "the first goes at once").toBe(published + 1); }
+      await vi.advanceTimersByTimeAsync(0);
+      // Every withdrawal of a text that went goes at once: only the first one's did.
+      expect(h.transport.publish.mock.calls.length, `withdrawal ${i}`).toBe(published + 1);
+      expect(h.openPublished()[6], `withdrawal ${i}`).toBeNull();
       expect(await h.bob.send(`text ${i + 1}`, Date.now(), id(i + 1))).toBeNull();
       await vi.advanceTimersByTimeAsync(100);
     }
-    // The first withdrawal after a quiet floor goes at once, and the text after it; the rest wait for the spacing.
-    expect(h.transport.publish.mock.calls.length - published).toBeLessThanOrEqual(2);
-    await vi.advanceTimersByTimeAsync(4_000);
-    expect(h.transport.publish.mock.calls.length - published).toBeLessThanOrEqual(3);
+    // The text left goes once the spacing allows, in one envelope.
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(h.transport.publish.mock.calls.length - published).toBe(2);
     expect((h.openPublished()[6] as unknown[])[0], "the last envelope holds the text left, no withdrawn one").toBe(id(10));
+    // Deleted now, it is withdrawn at once again.
+    await h.bob.withdraw(id(10));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.transport.publish.mock.calls.length - published).toBe(3);
+    expect(h.openPublished()[6]).toBeNull();
     await h.bob.stop();
   });
 
