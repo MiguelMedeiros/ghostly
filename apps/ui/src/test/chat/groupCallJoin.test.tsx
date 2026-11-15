@@ -59,6 +59,8 @@ class FakeRoom {
   static rooms: FakeRoom[] = [];
   /** Who is already in the next room joined. */
   static others: ReturnType<typeof remote>[] = [];
+  /** The next room's connect waits on it, when set. */
+  static connecting: Promise<void> | null = null;
   readonly remoteParticipants = new Map(FakeRoom.others.map((p) => [p.identity, p]));
   readonly activeSpeakers = [];
   private readonly listeners = new Map<string, (...args: unknown[]) => void>();
@@ -67,12 +69,17 @@ class FakeRoom {
     trackPublications: new Map(), getTrackPublication: () => undefined,
     setMicrophoneEnabled: vi.fn(async function (this: { isMicrophoneEnabled: boolean }, on: boolean) { this.isMicrophoneEnabled = on; }),
   };
-  readonly connect = vi.fn(async (_url: string, _token: string, _options?: unknown) => {});
+  readonly connect = vi.fn(async (_url: string, _token: string, _options?: unknown) => { if (FakeRoom.connecting) await FakeRoom.connecting; });
   readonly disconnect = vi.fn(async () => this.listeners.get("disconnected")?.());
   constructor() { FakeRoom.rooms.push(this); }
   on(event: string, listener: (...args: unknown[]) => void) { this.listeners.set(event, listener); return this; }
   /** The node closing the room on this device, with LiveKit's reason (`DisconnectReason`). */
   drop(reason: number) { this.listeners.get("disconnected")?.(reason); }
+  /** Someone comes into the room, as LiveKit says it. */
+  arrive(person: ReturnType<typeof remote>) {
+    this.remoteParticipants.set(person.identity, person);
+    this.listeners.get("ParticipantConnected")?.();
+  }
 }
 const RoomEvent = new Proxy({}, { get: (_, name) => (name === "Disconnected" ? "disconnected" : String(name)) });
 const loadLivekit = async () => ({ Room: FakeRoom, RoomEvent, Track: { Source: {} } }) as unknown as LivekitModule;
@@ -85,6 +92,7 @@ function joinButton(group = community()) {
 afterEach(() => {
   FakeRoom.rooms = [];
   FakeRoom.others = [];
+  FakeRoom.connecting = null;
   endOtherCalls(Symbol("none"));
   vi.useRealTimers();
 });
@@ -265,6 +273,27 @@ describe("Join call in a group's header", () => {
     expect(tileOf(other)).toHaveTextContent("Ana ⁦(…ana222)⁩");
     expect(tileOf(other)).not.toHaveTextContent("Miguel");
     expect(tileOf(stranger)).toHaveTextContent("Not in this group (…zzz333)");
+  });
+
+  it("says Connected to a screen reader once in the room, not while connecting, and not the people already there as joining", async () => {
+    const ana = "ana".padEnd(52, "a"), bo = "bo".padEnd(52, "b");
+    const members = [{ key: ME, role: "member", me: true, online: true, missing: 0 }, ...[[ana, "Ana"], [bo, "Bo"]].map(([key, nick]) => ({ key, role: "member", me: false, online: true, missing: 0, nick }))];
+    FakeRoom.others = [remote(ana, "Ana")];
+    let connect!: () => void;
+    FakeRoom.connecting = new Promise<void>((resolve) => { connect = resolve; });
+    answerPass(() => pass());
+    const { user } = joinButton(community({ members } as Partial<GroupView>));
+    await user.click(screen.getByTestId("group-call-join"));
+    await waitFor(() => expect(FakeRoom.rooms[0]?.connect).toHaveBeenCalled());
+    const news = () => [...screen.getByTestId("group-call-news").querySelectorAll("p")].map((p) => p.textContent);
+    expect(news()).toEqual([]);
+
+    await act(async () => { connect(); });
+    await waitFor(() => expect(screen.getAllByTestId("group-call-tile")).toHaveLength(2));
+    expect(news()).toEqual(["Connected"]);
+
+    act(() => FakeRoom.rooms[0].arrive(remote(bo, "Bo")));
+    await waitFor(() => expect(news()).toEqual(["Bo joined"]));
   });
 });
 
