@@ -11,6 +11,14 @@
 @custom-variant short (@media (max-height: 500px));
 
 @theme {
+  /* Tailwind's breakpoints in px, as the app's own media queries and its JS layout queries are (`MOBILE_QUERY` is
+     767px, hooks/useIsMobile.ts). In rem they followed the browser's font size: at Very large (24px) a 1024px window was
+     under `md` but not a phone to JS, and showed the list and the chat side by side with the phone's CSS on both. */
+  --breakpoint-sm: 640px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1280px;
+  --breakpoint-2xl: 1536px;
   /* Tailwind's spinner and pulse, which never end by themselves: here they do. A dot that pulses while a contact is
      being reached rests after half a minute, a spinner after two (whatever it waits for is not coming), so a chat
      left open on a contact who is away does not keep the window drawing. They start again when their state does. */
@@ -1257,7 +1265,7 @@ html .toast-place.toast-place-page[data-at="top"] {
  * squeezed its bubbles to a third of it, and a video into a tall black box.
  */
 .message-row-x { padding-inline: 63px; }
-@media (width < 48rem) { .message-row-x { padding-inline: 10px; } }
+@media (width < 768px) { .message-row-x { padding-inline: 10px; } }
 @container message-list (width < 36rem) { .message-row-x { padding-inline: 10px; } }
 
 /*
@@ -1266,7 +1274,7 @@ html .toast-place.toast-place-page[data-at="top"] {
  * line long enough to wrap pushed it against the screen's edge, which cut the 44px a thumb needs to 33. The row keeps
  * those 22px on both sides (the line stays centred, and in Arabic the ⋮ is on the left with the same room).
  */
-@media (width < 48rem) { .message-row-x.system-row-x { padding-inline: 22px; } }
+@media (width < 768px) { .message-row-x.system-row-x { padding-inline: 22px; } }
 @container message-list (width < 36rem) { .message-row-x.system-row-x { padding-inline: 22px; } }
 
 /*
@@ -1275,7 +1283,7 @@ html .toast-place.toast-place-page[data-at="top"] {
  * the room and the name's colour alone tells who wrote.
  */
 .sender-avatar { width: 28px; height: 28px; flex-shrink: 0; align-self: flex-end; margin-inline-end: 2px; }
-@media (width < 48rem) { .sender-avatar { width: 24px; height: 24px; } }
+@media (width < 768px) { .sender-avatar { width: 24px; height: 24px; } }
 @container message-list (width < 36rem) { .sender-avatar { width: 24px; height: 24px; } }
 @media (width < 22rem) { .sender-avatar { display: none; } }
 @container message-list (width < 22rem) { .sender-avatar { display: none; } }
@@ -1739,7 +1747,7 @@ button[data-held] { opacity: 0.4; }
 /* A thumb's 44px on a phone, for a control drawn smaller there: where a tap lands grows past its box, centred on it, and
    it looks the same. Its own box must not clip (no overflow-hidden, no ::after of its own), nor what holds it. One
    placed with `absolute` (a × in a tile's corner) stays where it is: it already holds its ::after. */
-@media (width < 48rem) {
+@media (width < 768px) {
   .tap-target:not(.absolute) { position: relative; }
   .tap-target::after { content: ""; position: absolute; top: 50%; left: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
 }
@@ -1785,7 +1793,7 @@ button[data-held] { opacity: 0.4; }
   padding-left: max(1rem, env(safe-area-inset-left));
   padding-right: max(1rem, env(safe-area-inset-right));
 }
-@media (width < 48rem) {
+@media (width < 768px) {
   .picture-viewer-area { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
 }
 .picture-viewer-close {
