@@ -1,4 +1,5 @@
 import { screen, within } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GroupCallView, type GroupCallParticipant, type GroupCallState } from "../../components/GroupCallView";
 import { FakeTrack } from "../../../../../packages/react/test/fakes";
@@ -139,6 +140,27 @@ describe("the group call window", () => {
     expect(screen.getByTestId("group-call-leave")).toBeInTheDocument();
     await user.click(screen.getByTestId("group-call-minimize"));
     expect(onReturnToChat).toHaveBeenCalledOnce();
+  });
+
+  it.each([[false, "whole screen"], [true, "small window"]])("gives the focus back to what opened it when the call is left (pinned %s: %s)", async (pinned) => {
+    function Host() {
+      const [on, setOn] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOn(true)}>Join call</button>
+          {on && <GroupCallView call={state(2)} groupName="Community" canShareScreen pinned={pinned}
+            onToggleMic={vi.fn()} onToggleCamera={vi.fn()} onToggleScreen={vi.fn()} onLeave={() => setOn(false)} />}
+        </>
+      );
+    }
+    const { user } = renderApp(<Host />);
+    const join = screen.getByRole("button", { name: "Join call" });
+    await user.click(join);
+    if (!pinned) expect(screen.getByTestId("group-call")).toHaveFocus();
+    screen.getByTestId("group-call-leave").focus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("group-call")).toBeNull();
+    expect(join).toHaveFocus();
   });
 
   it("shrinks into the small window by its button, which shows the shared screen, and grows back", async () => {
