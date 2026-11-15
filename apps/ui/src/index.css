@@ -535,6 +535,15 @@ html[data-standalone="true"] {
   left: calc(1rem + env(safe-area-inset-left));
 }
 
+/* The group call's tiles (its grid, or the shared screen and the faces beside it): 1rem from the sides past the notch
+   or Dynamic Island of a phone on its side, where the window is the wide layout and 16 px put a tile's muted mark under
+   it. They end 1rem above the controls, which a phone lifts over its home bar (see below). */
+.call-tiles {
+  padding-left: calc(1rem + env(safe-area-inset-left));
+  padding-right: calc(1rem + env(safe-area-inset-right));
+  padding-bottom: 8rem;
+}
+
 .call-mini .call-resize {
   top: 8px;
   left: 8px;
@@ -987,6 +996,12 @@ html[data-standalone="true"] {
 
   .call-controls {
     bottom: calc(2.5rem + env(safe-area-inset-bottom));
+  }
+
+  /* The group call's tiles end 1rem above those controls (72 px, hang up's height). A fixed 8rem left a home bar's
+     34 px under them: the muted mark and "You" sat on the microphone button. */
+  .call-tiles {
+    padding-bottom: calc(2.5rem + 72px + 1rem + env(safe-area-inset-bottom));
   }
 
   /* An incoming call takes the whole screen, answer buttons within thumb reach. */
