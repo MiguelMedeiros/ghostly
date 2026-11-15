@@ -306,6 +306,27 @@ describe("GroupEdits on its own", () => {
     edits.stop();
   });
 
+  it("a copy of an edit taken already (another hub's) takes no room in the member's window: a burst of EDIT_RECEIVE_LIMIT shows at once", async () => {
+    vi.useFakeTimers();
+    for (const copies of [2, 3]) {
+      const burst = Array.from({ length: EDIT_RECEIVE_LIMIT }, (_, n) => bobs(n));
+      const { edits, messages, tick } = setup(burst);
+      const results: string[] = [];
+      for (let n = 0; n < EDIT_RECEIVE_LIMIT; n++) {
+        for (let copy = 0; copy < copies; copy++) results.push(await edits.receive("g1", bob, { id: bobs(n).id, e: 1, ts: n, m: `done ${n}` }));
+      }
+      // Each one at once, its copies stale; but the last one's, which come with the window full of real edits and wait.
+      expect(results.filter(r => r === "applied")).toHaveLength(EDIT_RECEIVE_LIMIT);
+      expect(results.slice(0, -copies).filter(r => r !== "applied").every(r => r === "stale")).toBe(true);
+      expect(messages.map(m => m.text)).toEqual(burst.map((_, n) => `done ${n}`));
+      expect(await edits.receive("g1", bob, { id: bobs(0).id, e: 2, ts: 99, m: "one more" })).toBe("waiting");
+      // Taken with the next window, the waiting copy found stale gives its room back to the one behind it.
+      tick(10_000); await vi.advanceTimersByTimeAsync(10_000);
+      expect(messages[0].text).toBe("one more");
+      edits.stop();
+    }
+  });
+
   it("holds GROUP_EDITS_HELD edits a group at most, the oldest going first, and none of a member who left meanwhile", async () => {
     vi.useFakeTimers();
     const rowsOfBob = Array.from({ length: GROUP_EDITS_HELD + 2 }, (_, n) => bobs(n));
