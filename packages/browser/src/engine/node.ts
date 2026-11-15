@@ -6584,6 +6584,17 @@ export class GhostlyNode implements EngineImplementation {
     return fetchGroupCallToken({ sfu, g: groupId, k: me.key, seed: identityFromSeedB64(me.seedB64).seed, name: this.sharedNick });
   }
 
+  /**
+   * The key that seals the group's call media end to end for its newest epoch (WISP 602 § End-to-end encryption), as
+   * base64url of its 32 bytes, with that epoch. Null until the epoch's secret arrives, once I am out of the group, and
+   * in a group that is not a community (only a community's epochs give one). A page asks again when the group's
+   * `epoch` moves, and sets the new key in its call.
+   */
+  groupCallKey({ groupId }: { groupId: string }): { epoch: number; key: string } | null {
+    const sealed = typeof groupId === "string" ? this.groups.communities.session(groupId)?.callKey() : null;
+    return sealed ? { epoch: sealed.epoch, key: toBase64Url(sealed.key) } : null;
+  }
+
   /** Rejects when the signal cannot go now (no live session): it is kept and goes on the next one while fresh. */
   async setCallSignal({ linkId, signal }: { linkId: string; signal: string | null }): Promise<void> {
     // A page answered, declined or called in that chat: the contact's offer is not one waiting to ring any more.

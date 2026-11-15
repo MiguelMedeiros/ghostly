@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { createPublicKey, verify as nodeVerify } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createIdentity, fromBase64Url, identityFromSeedB64, publicKeyFromZ32, rosterHas, type GroupMeta, type Roster } from "@ghostly/core";
+import { createIdentity, fromBase64Url, identityFromSeedB64, publicKeyFromZ32, rosterHas, toBase64Url, type GroupMeta, type Roster } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import type { Groups } from "../src/engine/groups";
 import { GROUP_CALL_RETRY_MS, fetchGroupCallToken, groupCallSfu, signGroupCallRequest } from "../src/engine/groupCall";
@@ -181,5 +181,34 @@ describe("the engine's groupCallToken", () => {
     await expect(node.groupCallToken({ groupId })).rejects.toThrow("This group has no calls: its admin has not set a call server");
     await expect(node.groupCallToken({ groupId: "AAAAAAAAAAAAAAAAAAAAAA" })).rejects.toThrow("You are not in this group, so you can't join its call");
     expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("the engine's groupCallKey (WISP 602 § End-to-end encryption)", () => {
+  it("hands a community member the session's call key for the newest epoch, base64url, and the next one after the epoch moves", async () => {
+    const { node, inner } = await started();
+    const { groupId } = await node.createGroup({ name: "Plaza", profile: "community" });
+    const session = inner.groups.communities.session(groupId)!;
+    const first = node.groupCallKey({ groupId })!;
+    const own = session.callKey()!;
+    expect(first).toEqual({ epoch: own.epoch, key: toBase64Url(own.key) });
+    expect(fromBase64Url(first.key)).toHaveLength(32);
+    expect(first.epoch).toBe(node.getState().groups.find(gv => gv.id === groupId)!.epoch);
+
+    await node.rotateGroup({ groupId });
+    const next = node.groupCallKey({ groupId })!;
+    expect(next.epoch).toBe(first.epoch + 1);
+    expect(next.key).not.toBe(first.key);
+    expect(next).toEqual({ epoch: session.callKey()!.epoch, key: toBase64Url(session.callKey()!.key) });
+    // The page learns the move from the group's view, which carries the same epoch.
+    expect(node.getState().groups.find(gv => gv.id === groupId)!.epoch).toBe(next.epoch);
+  });
+
+  it("is null in a private group, in a group I am not in, and for a group id that is not a string", async () => {
+    const { node } = await started();
+    const { groupId } = await node.createGroup({ name: "Plaza", profile: "mesh" });
+    expect(node.groupCallKey({ groupId })).toBeNull();
+    expect(node.groupCallKey({ groupId: "AAAAAAAAAAAAAAAAAAAAAA" })).toBeNull();
+    expect(node.groupCallKey({ groupId: 7 as unknown as string })).toBeNull();
   });
 });

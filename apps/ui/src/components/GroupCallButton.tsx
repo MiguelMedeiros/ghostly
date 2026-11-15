@@ -5,12 +5,13 @@ import type { GroupView } from "@ghostly/browser/shared/types";
 import { useI18n } from "../contexts/I18nContext";
 import { useSettings } from "../contexts/SettingsContext";
 import { useBackCloses, useBackdropDismiss, useQuestionDialog } from "../hooks/useDismiss";
-import { groupCallRelayConfig, useGroupCall, type LivekitModule } from "../hooks/useGroupCall";
+import { groupCallRelayConfig, NO_CALL_KEY, NO_SEALING, useGroupCall, type GroupCallSeal, type LivekitModule } from "../hooks/useGroupCall";
 import { useGroupCallSupport } from "../hooks/useGroupCallSupport";
 import { useHandler } from "../hooks/useHandler";
 import { useCallService } from "../lib/callService";
 import { askGroupCallPass, groupCallOf, groupCallProblem, PASS_REFRESH_LEAD_S, passRefreshInMs, type GroupCallPass } from "../lib/groupCallPass";
 import { focus } from "../lib/connection";
+import { askGroupCallKey, canSealCallMedia, groupCallSealed, groupCallSealProblem } from "../lib/groupCallPass";
 import { useEngineValue } from "../lib/engineState";
 import { working } from "../lib/focus";
 import { authorName } from "../lib/groups";
@@ -21,6 +22,9 @@ import { Notice } from "./ui/Notice";
 
 /** A refresh the node did not answer is asked again this much later, while the pass still holds. */
 const REFRESH_RETRY_MS = 30_000;
+/** A sealed call's key not yet here for the epoch the group names (its secret on the way) is asked again this often, so many times. */
+const KEY_RETRY_MS = 2_000;
+const KEY_RETRIES = 15;
 
 /**
  * The group's call nodes (`${groupId} ${sfu}`) this app, while open, was told to join with "Hide my IP from contacts"
@@ -60,10 +64,25 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
   const [askIp, setAskIp] = useState(false);
   const [noRelay, setNoRelay] = useState(false);
   const support = useGroupCallSupport();
-  const blocked = !support.supported || (relayOnly && noRelay);
+  // A group whose call is sealed end to end (WISP 602): joined only with its key, never unsealed; a browser that
+  // can't seal call media leaves Join call off, and says why.
+  const sealed = groupCallSealed(group);
+  const [canSeal] = useState(canSealCallMedia);
+  const unsealable = sealed && !canSeal;
+  const [seal, setSeal] = useState<GroupCallSeal | null>(null);
+  const blocked = !support.supported || (relayOnly && noRelay) || unsealable;
   const noRelayProblem: Problem = { tone: "error", title: t("calls.group.noRelay"), info: t("calls.group.noRelayInfo") };
+  const noSealingProblem = groupCallSealProblem(NO_SEALING, t)!;
   const unsupported: Problem | null = support.reason === null ? null : { tone: "error", title: support.reason };
-  const call = useGroupCall({ url: joined?.url ?? "", token: joined?.token ?? "", iceServers: joined?.iceServers, relayOnly, loadLivekit });
+  const call = useGroupCall({ url: joined?.url ?? "", token: joined?.token ?? "", iceServers: joined?.iceServers, relayOnly, e2ee: sealed ? seal : undefined, loadLivekit });
+  /** The group's call key for its newest epoch, before a sealed join; says why when it isn't here. */
+  const takeKey = async (): Promise<boolean> => {
+    setAsking(true);
+    const key = await askGroupCallKey(groupId).catch(() => null).finally(() => setAsking(false));
+    setSeal(key);
+    if (!key) setProblem(groupCallSealProblem(NO_CALL_KEY, t));
+    return !!key;
+  };
 
   useEffect(() => { if (!relayOnly) setNoRelay(false); }, [relayOnly]);
 
@@ -77,6 +96,8 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
   };
   const join = useHandler(async () => {
     setProblem(null);
+    if (unsealable) return setProblem(noSealingProblem);
+    if (sealed && !(await takeKey())) return;
     const kept = held.current;
     if (kept && kept.sfu === sfu && kept.until - Date.now() > PASS_REFRESH_LEAD_S * 1000) return enter(kept.pass);
     setAsking(true);
@@ -102,7 +123,7 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
   const press = () => {
     if (asking) return;
     if (unsupported) return setProblem(problem ? null : unsupported);
-    if (blocked) return setProblem(noRelayProblem);
+    if (blocked) return setProblem(unsealable ? noSealingProblem : noRelayProblem);
     if (relayOnly && !joinedShowingIp.has(ipShownTo)) setAskIp(true);
     else go();
   };
@@ -129,6 +150,23 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
     return () => { live = false; clearTimeout(timer); };
   }, [joined, groupId]);
 
+  // A sealed call follows the group's epoch: each new one's key goes into the room (WISP 602 § End-to-end encryption).
+  // The group's view can name the epoch a moment before its secret is here: the key is asked again until it is.
+  const epoch = group.epoch;
+  useEffect(() => {
+    if (!joined || !sealed) return;
+    let live = true, tries = 0;
+    let timer: ReturnType<typeof setTimeout>;
+    const ask = async () => {
+      const key = await askGroupCallKey(groupId).catch(() => null);
+      if (!live) return;
+      if (key) setSeal((had) => (had?.epoch === key.epoch ? had : key));
+      if ((!key || (epoch !== undefined && key.epoch < epoch)) && ++tries < KEY_RETRIES) timer = setTimeout(ask, KEY_RETRY_MS);
+    };
+    void ask();
+    return () => { live = false; clearTimeout(timer); };
+  }, [joined, sealed, epoch, groupId]);
+
   // On the app's calls while in the room: a 1:1 call answered meanwhile ("End and answer") leaves it.
   const on = !!joined && (call.status === "connecting" || call.status === "connected");
   useEffect(() => {
@@ -148,7 +186,7 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
 
   // The room closed (the node dropped you) or would not take you: the window goes, and a failed join says why.
   useEffect(() => {
-    if (call.status === "failed") setProblem(groupCallProblem(call.error?.cause ?? call.error?.message, t));
+    if (call.status === "failed") setProblem(groupCallSealProblem(call.error?.message, t, call.error?.cause) ?? groupCallProblem(call.error?.cause ?? call.error?.message, t));
     if (call.status === "failed" || call.status === "left") setJoined(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only the status moving there ends it
   }, [call.status]);

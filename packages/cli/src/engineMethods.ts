@@ -202,6 +202,7 @@ export const ENGINE_PARAMS: Readonly<Record<string, string>> = {
   renameGroup: "{ groupId, name }",
   setGroupCall: "{ groupId, sfu, e2ee? }",
   groupCallToken: "{ groupId }",
+  groupCallKey: "{ groupId }",
   forgetGroup: "{ groupId }",
   setGroupManage: "{ groupId, on }",
   deviceEnrollInvite: "{ name }",
@@ -313,12 +314,13 @@ export const SECRET_RESULTS: ReadonlySet<string> = new Set([
  * Calls whose answer holds one secret among what a script needs: the CLI prints it `<hidden>` unless `--show-secret`,
  * as `wallet receive` leaves it out. A Cashu mint quote's id is not locked to a key: whoever holds it can mint the
  * ecash its invoice pays for. A group call's pass (`token`) lets whoever holds it into the call as this member until
- * it expires, and the node's TURN servers come with their passwords, as `settings get` hides them. `a[].b` is the `b`
- * of each entry in the list `a`.
+ * it expires, and the node's TURN servers come with their passwords, as `settings get` hides them. A group's call key
+ * (`groupCallKey`) opens the group's sealed call media. `a[].b` is the `b` of each entry in the list `a`.
  */
 const SECRET_FIELDS: Readonly<Record<string, readonly string[]>> = {
   walletReceiveLightning: ["quote"],
   groupCallToken: ["token", "iceServers[].credential"],
+  groupCallKey: ["key"],
 };
 
 export function hideSecretFields(method: string, result: unknown, showSecret = false): unknown {
