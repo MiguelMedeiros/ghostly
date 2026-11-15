@@ -53,6 +53,16 @@ describe("a share into the app", () => {
       expect(shareText(share({ text: "https://a.example/p\nvia app", url: "https://a.example/p" }))).toBe("https://a.example/p\nvia app");
     });
 
+    it("a text where the link turns up at every character is read at once, not once per place (any website can post one)", () => {
+      const started = performance.now();
+      expect(shareText(share({ text: "(".repeat(60_000), url: "(" })).startsWith("(".repeat(60_000))).toBe(true);
+      expect(shareText(share({ text: '"a'.repeat(30_000), url: "a" })).startsWith('"a'.repeat(30_000))).toBe(true);
+      expect(performance.now() - started).toBeLessThan(1_000);
+      // Read once past many places it turns up inside other words, the link standing on its own is still found.
+      const text = `${"x/https://a.example/p ".repeat(40)}see https://a.example/p.`;
+      expect(shareText(share({ text, url: "https://a.example/p" }))).toBe(text);
+    });
+
     it("the picker previews the start of a long text, never half a character, and the draft gets it whole", () => {
       expect(sharePreview(share({ text: "Look", url: "https://a.example" }))).toBe("Look\nhttps://a.example");
       // A pair astride the preview's end is left out whole.
