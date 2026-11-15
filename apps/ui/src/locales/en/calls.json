@@ -22,10 +22,17 @@
   "ended": "Call ended",
   "endsCurrent": "Answering ends your current call",
   "group": {
+    "endAndJoin": "End and join",
+    "endOtherBody": "Joining the group's call ends the call you're on.",
+    "endOtherTitle": "End your call?",
     "info": "It goes through the group's node. Anyone in the group can talk, show their camera and share their screen. Past 8 people you join muted.",
+    "join": "Join call",
     "leave": "Leave call",
     "muted": "Muted",
-    "screenOf": "{{name}}'s screen"
+    "refused": "You're not let into this call yet",
+    "retry": "Try again",
+    "screenOf": "{{name}}'s screen",
+    "unreachable": "Couldn't reach the group's call"
   },
   "incomingAudio": "Incoming audio call...",
   "incomingVideo": "Incoming video call...",
