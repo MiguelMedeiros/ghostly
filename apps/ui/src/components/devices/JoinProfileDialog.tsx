@@ -191,7 +191,13 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
       onClose={() => { if (fromChoose.current) setStep("choose"); else onClose(); }} />;
   }
 
-  const close = () => { if (view?.step === "done" || view?.step === "unfinished") void reloadIntoGate({ keepUnlocked: lockPassedNow() }); else onClose(); };
+  // While it finishes × and Escape do nothing: the grant is stored and this device is a standby already, which only this
+  // dialog opens (its end reloads into the gate); closed, the page went on as the profile it was, and "Not finished" was
+  // said nowhere. The engine ends the step on its own.
+  const close = () => {
+    if (view?.step === "finishing") return;
+    if (view?.step === "done" || view?.step === "unfinished") void reloadIntoGate({ keepUnlocked: lockPassedNow() }); else onClose();
+  };
   const titles = TITLES[noun];
   const title = step === "choose" ? t("devices.join.already")
     : step === "home" ? t("devices.join.homeTitle")

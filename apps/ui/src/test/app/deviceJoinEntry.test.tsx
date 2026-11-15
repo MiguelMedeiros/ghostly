@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDeviceInvite, turnName } from "@ghostly/core";
+import type { EnrollView } from "@ghostly/browser/devices/enroll";
 import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import { JoinDialog } from "../../components/JoinDialog";
 import { ProfileSwitcherMenu } from "../../components/ProfileSwitcher";
@@ -502,6 +503,30 @@ describe("a profile made for a code", () => {
       await waitFor(() => expect(reload).toHaveBeenCalled(), { timeout: 4_000 });
       expect(JSON.parse(sessionStorage.getItem(HANDOVER)!)).toMatchObject({ profile: activeProfileId(), hash });
       expect(nameStepPending()).toBe(false);
+    } finally { Reflect.deleteProperty(navigator, "storage"); }
+  });
+
+  it("while it finishes, Escape and the × do nothing: this device is a standby already, and only the dialog opens that screen", async () => {
+    const reload = catchReload();
+    sessionStorage.setItem(JOIN_REQUEST, JSON.stringify({ id: activeProfileId(), code: code(), start: "go", name: "Pixel" }));
+    fakeEngine.on("deviceEnrollJoin", () => ({ role: "joiner", step: "connecting" }));
+    let view: EnrollView = { role: "joiner", step: "finishing", device: "MacBook" };
+    fakeEngine.on("deviceEnrollView", () => view);
+    Object.defineProperty(navigator, "storage", { configurable: true, value: { persisted: async () => true, persist: async () => true } });
+    try {
+      const { user } = renderApp(<JoinHost />);
+      await screen.findByText("Finishing…", {}, { timeout: 3_000 });
+      screen.getByTestId("device-join").dispatchEvent(new Event("cancel", { cancelable: true }));
+      await user.click(screen.getByRole("button", { name: "Close" }));
+      expect(screen.getByTestId("device-join")).toBeInTheDocument();
+      // The grant is stored: there is nothing to cancel.
+      expect(fakeEngine.callsTo("deviceEnrollCancel")).toEqual([]);
+      view = { role: "joiner", step: "unfinished", device: "MacBook" };
+      // Its end is said, and closing it then opens the standby screen.
+      expect(await screen.findByTestId("device-join-done", {}, { timeout: 3_000 })).toHaveAttribute("data-step", "unfinished");
+      expect(reload).not.toHaveBeenCalled();
+      await user.click(screen.getByRole("button", { name: "Close" }));
+      await waitFor(() => expect(reload).toHaveBeenCalled());
     } finally { Reflect.deleteProperty(navigator, "storage"); }
   });
 
