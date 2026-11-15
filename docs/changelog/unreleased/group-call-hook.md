@@ -1,4 +1,0 @@
----
-section: For developers / Calls
----
-- The web UI can join a group call through the group's node, not reachable yet: it joins with the microphone on and the camera off (muted past 8 people), turns the microphone, camera and screen share on and off, and leaves. The call's code loads only when a call starts. A group shows it once its node turns group calls on. A group whose call asks for sealed media (`e2ee: 1`) is joined only sealed end to end, with the group's call key, set anew at each new epoch, and takes only media its sender sealed (a track in the clear is never subscribed or played); a browser that can't seal call media, or a device without the key yet, doesn't join and says why. Once in a sealed room, the app checks that its own media is sealed (the E2EE worker on, each track it sends through it) and otherwise leaves the room at once, stops every track and says why; `e2ee: true` reads as on too.
