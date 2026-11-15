@@ -29,12 +29,16 @@ class Mesh {
   /** Members whose app predates metadata: `group-meta` never reaches them, and their syncs say nothing of it. */
   readonly old = new Set<string>();
   readonly sent: { from: string; to: string; frame: GroupEdgeFrame }[] = [];
+  /** Members whose frames are held, not handed (as `Net.away`): the test hands them in the order it wants. */
+  readonly away = new Map<string, { from: string; frame: GroupEdgeFrame }[]>();
   private pending: Promise<unknown>[] = [];
   add(state: GroupState): GroupSession {
     const session: GroupSession = new GroupSession(state, {
       save: async s => { this.saved.set(session.myKey, s); },
       send: (to, frame) => {
         this.sent.push({ from: session.myKey, to, frame: clone(frame) });
+        const held = this.away.get(to);
+        if (held) { held.push({ from: session.myKey, frame: clone(frame) }); return; }
         const target = this.sessions.get(to);
         if (target && !(this.old.has(to) && frame.t === "group-meta")) this.pending.push(target.handle(session.myKey, clone(frame)));
       },
@@ -390,6 +394,70 @@ describe("group name, group-mesh/1", () => {
     await bob.rename("Book club");
     await mesh.settle();
     expect(carol.name).toBe("Book club");
+  });
+
+  /**
+   * Bob away while Alice renames the group, then made the admin: the commit reaches him before her statement.
+   * `before` is what he held when he went away, `away` what Alice changes then: the statement returned is her last.
+   */
+  async function promotedBeforeSync(before?: (alice: GroupSession) => Promise<void>, away = (alice: GroupSession, _carol: GroupSession) => alice.rename("Book club")) {
+    const mesh = new Mesh();
+    const alice = mesh.add(GroupSession.create("Ghosts"));
+    const bob = await admit(mesh, alice), carol = await admit(mesh, alice);
+    await before?.(alice);
+    await mesh.settle();
+    mesh.away.set(bob.myKey, []);
+    await away(alice, carol);
+    await alice.transferAdmin(bob.myKey);
+    await mesh.settle();
+    const held = mesh.away.get(bob.myKey)!;
+    mesh.away.delete(bob.myKey);
+    for (const { from, frame } of held.filter(h => h.frame.t !== "group-meta")) await bob.handle(from, frame);
+    await mesh.settle();
+    expect(bob.isAdmin).toBe(true);
+    return { mesh, alice, bob, carol, statement: held.filter(h => h.frame.t === "group-meta").pop()! };
+  }
+
+  it("a new admin who did not have the name yet takes the former admin's statement and signs it again, so a picture change keeps it", async () => {
+    const { mesh, alice, bob, carol, statement } = await promotedBeforeSync();
+    expect(bob.name).toBe("Ghosts");
+    await bob.handle(statement.from, statement.frame);
+    await mesh.settle();
+    expect([alice.name, bob.name, carol.name]).toEqual(["Book club", "Book club", "Book club"]);
+    expect(bob.state.meta!.by).toBe(bob.myKey);
+    // Signed again as it was: no statement of his without the name is kept to hand on.
+    expect(bob.state.metaPast).toBeUndefined();
+    await bob.setPicture(RED);
+    await mesh.settle();
+    for (const m of [alice, bob, carol]) expect([m.name, m.picture]).toEqual(["Book club", RED]);
+  });
+
+  it("a new admin who signed an older statement again takes the former admin's later one and keeps the change it made since", async () => {
+    const { mesh, alice, bob, carol, statement } = await promotedBeforeSync(alice => alice.rename("Book club"), async (alice, carol) => {
+      await alice.setHub(carol.myKey, "exclude");
+      await alice.rename("Thursday");
+    });
+    // Bob signed again what he held: the first name, no hubs.
+    expect([bob.name, bob.hubPolicy.no]).toEqual(["Book club", []]);
+    await bob.setPicture(RED);
+    await bob.handle(statement.from, statement.frame);
+    await mesh.settle();
+    for (const m of [alice, bob, carol]) expect([m.name, m.picture, m.hubPolicy.no]).toEqual(["Thursday", RED, [carol.myKey]]);
+    // His line for the name credits Alice, who renamed it.
+    expect(mesh.names.filter(n => n.at === bob.myKey).pop()).toEqual({ at: bob.myKey, by: alice.myKey, name: "Thursday" });
+  });
+
+  it("a new admin takes the former admin's statement only for a while after the role moved, and no one else's", async () => {
+    const { mesh, bob, carol, statement } = await promotedBeforeSync();
+    // Carol, never the admin, signs a name under a commit of the chain: refused.
+    const carolSeed = identityFromSeedB64(carol.state.seedB64).seed;
+    await bob.handle(carol.myKey, clone(handMade(bob, carolSeed, carol.myKey, encodeGroupMetaBody({ name: "Pwned" }), { e: bob.epoch - 1 })));
+    expect(bob.name).toBe("Ghosts");
+    // Alice's, ten minutes and more after Bob became the admin: refused.
+    later(10 * 60_000 + 1);
+    await bob.handle(statement.from, statement.frame);
+    await mesh.settle();
+    expect([bob.name, carol.name]).toEqual(["Ghosts", "Book club"]);
   });
 });
 
