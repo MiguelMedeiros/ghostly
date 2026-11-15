@@ -338,16 +338,24 @@ function within<T>(ms: number, work: Promise<T>, mint: string): Promise<T> {
 const SWAP_REQUESTS = ["/v1/swap", "/v1/restore", "/v1/checkstate"];
 /** A Lightning payment's request (`completeMelt`): `meltOverdue` holds its coins until it can no longer land. */
 const MELT_REQUEST = "/v1/melt/bolt11";
+/**
+ * What `settleQuote` asks under the mint's lock once an invoice is paid: where the quote stands, and its ecash. Its
+ * outputs are written down first, so a request cut short is asked again next round (NUT-09 once issued).
+ */
+const MINT_REQUEST = "/v1/mint/bolt11";
+const MINT_QUOTE_STATE = /\/v1\/mint\/quote\/bolt11\/[^/]+$/;
 
 /** How long a request to this path may last, its retries included; undefined: cashu-ts' defaults. */
 function requestLimit(pathname: string): number | undefined {
   if (SWAP_REQUESTS.some((path) => pathname.endsWith(path))) return CASHU_REQUEST_TIMEOUT_MS;
+  if (pathname.endsWith(MINT_REQUEST) || MINT_QUOTE_STATE.test(pathname)) return CASHU_REQUEST_TIMEOUT_MS;
   if (pathname.endsWith(MELT_REQUEST)) return MELT_REQUEST_TIMEOUT_MS;
   return undefined;
 }
 
 /**
- * Each of `SWAP_REQUESTS` ends within `CASHU_REQUEST_TIMEOUT_MS`, and a melt's within `MELT_REQUEST_TIMEOUT_MS`, retries
+ * Each of `SWAP_REQUESTS` and a paid invoice's (`MINT_REQUEST`, `MINT_QUOTE_STATE`) ends within
+ * `CASHU_REQUEST_TIMEOUT_MS`, and a melt's within `MELT_REQUEST_TIMEOUT_MS`, retries
  * included. cashu-ts' `requestTimeout` is per try, and NUT-19 tries a cached endpoint again after a timeout, each try
  * with a timeout of its own, for as long as the mint's `ttl` (endless when it gives none): one deadline for the whole
  * request ends them all, and a caller's abort is never retried. Past it the request failed with no answer
