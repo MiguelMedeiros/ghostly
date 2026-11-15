@@ -131,7 +131,9 @@ The route answers `OPTIONS` (the browser's preflight) with `204` and `Access-Con
 
 The media is DTLS-SRTP between each member and the node, which forwards it. The node is a member and could read the group's messages anyway; still, a group may want its call media sealed from the server too.
 
-This is optional in this revision. A group turns it on with `"e2ee": 1` in `call`, signed by the admin like the rest. Any other value, or none, is off. Every member of a group reads the same statement, so a room never has members with it on and members with it off. An app that cannot seal call media does not join a call whose `call` says `e2ee: 1` and says why.
+This is optional in this revision. A group turns it on with `"e2ee": 1` in `call`, signed by the admin like the rest. A reader takes `true` as on too, the same as `1`, so a body that writes it as a JSON flag never leaves a call unsealed; a writer writes `1`, and an app that keeps or writes a body again writes `1`. Any other value, or none, is off. Every member of a group reads the same statement, so a room never has members with it on and members with it off. An app that cannot seal call media does not join a call whose `call` turns it on and says why.
+
+An app in a call that is sealed checks, once it is in the room, that its own media is sealed: its E2EE worker runs, its SFU client's end-to-end encryption is on, and each track it sends goes through that worker. If any of these fails, it leaves the room at once, stops every track it captured, and says why. It never stays in a sealed call unsealed.
 
 When it is on, the key is:
 

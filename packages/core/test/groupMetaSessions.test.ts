@@ -5,7 +5,7 @@ import { epochKeys } from "../src/groupCrypto";
 import { commitHash } from "../src/groupCommits";
 import { GroupSession, type GroupEdgeFrame, type GroupState } from "../src/groupSession";
 import { CommunitySession, communityCommitHash, type CommunityFrame, type CommunityState } from "../src/groupCommunity";
-import { encodeGroupMetaBody, groupCallSfu, parseGroupMetaBody, signGroupMeta, wrapGroupMeta, type GroupMetaChange, type GroupMetaFrame } from "../src/groupMeta";
+import { encodeGroupMetaBody, groupCallE2ee, groupCallSfu, groupMetaBody, parseGroupMetaBody, signGroupMeta, wrapGroupMeta, type GroupMeta, type GroupMetaChange, type GroupMetaFrame } from "../src/groupMeta";
 // covers: groups.picture.protocol, groups.picture.set, groups.picture.late-joiner, groups.rename.protocol
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
@@ -721,10 +721,22 @@ describe("group call node, group-community/1 (WISP 602)", () => {
     expect(encodeGroupMetaBody(read!)).toBe(sealed);
     expect(JSON.parse(encodeGroupMetaBody({ ...read, name: "Friday" }))).toEqual({ name: "Friday", call: { sfu: SFU, e2ee: 1 } });
     expect(JSON.parse(encodeGroupMetaBody({ ...read, pic: RED }))).toEqual({ name: "Thursday", pic: RED, call: { sfu: SFU, e2ee: 1 } });
-    for (const off of [0, 2, 7, "1", true, null, [1], { on: 1 }]) {
+    for (const off of [0, 2, 7, "1", "true", false, null, [1], { on: 1 }]) {
       expect(parseGroupMetaBody(JSON.stringify({ call: { sfu: SFU, e2ee: off } })), JSON.stringify(off)).toEqual({ call: { sfu: SFU } });
       expect(encodeGroupMetaBody({ call: { sfu: SFU, e2ee: off as never } }), JSON.stringify(off)).toBe(JSON.stringify({ call: { sfu: SFU } }));
     }
+  });
+
+  it("reads e2ee: true as on, as 1, and writes it again as 1 (WISP 602 § End-to-end encryption)", () => {
+    for (const on of [1, true]) expect(groupCallE2ee(on), String(on)).toBe(true);
+    for (const off of [0, false, "1", "true", null, undefined, 2]) expect(groupCallE2ee(off), String(off)).toBe(false);
+    const flagged = JSON.stringify({ name: "Thursday", call: { sfu: SFU, e2ee: true } });
+    const read = parseGroupMetaBody(flagged);
+    expect(read).toEqual({ name: "Thursday", call: { sfu: SFU, e2ee: 1 } });
+    expect(encodeGroupMetaBody(read!)).toBe(JSON.stringify({ name: "Thursday", call: { sfu: SFU, e2ee: 1 } }));
+    expect(encodeGroupMetaBody({ call: { sfu: SFU, e2ee: true as never } })).toBe(JSON.stringify({ call: { sfu: SFU, e2ee: 1 } }));
+    // A statement whose body says it as a flag: its session's call is sealed.
+    expect(groupMetaBody({ body: flagged } as GroupMeta).call).toEqual({ sfu: SFU, e2ee: 1 });
   });
 
   it("an admin's rename or picture change keeps sealed call media on for every member", async () => {
