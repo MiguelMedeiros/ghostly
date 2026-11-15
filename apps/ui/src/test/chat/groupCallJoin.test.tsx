@@ -238,6 +238,23 @@ describe("Join call with Hide my IP from contacts on", () => {
     await waitFor(() => expect(FakeRoom.rooms[1]?.connect).toHaveBeenCalled());
   });
 
+  it("asks again when the admin names another call node: the yes was for the node it was given for", async () => {
+    answerPass(() => pass({ iceServers: [TURN] }));
+    const group = community({ id: "group-new-node" });
+    const { user, rerender } = hideIp(group);
+    await user.click(screen.getByTestId("group-call-join"));
+    await user.click(screen.getByTestId("group-call-hide-ip-confirm"));
+    await waitFor(() => expect(FakeRoom.rooms[0]?.connect).toHaveBeenCalled());
+    await user.click(screen.getByTestId("group-call-leave"));
+
+    const moved = { ...group, call: { sfu: "https://call.example.com" } };
+    act(() => fakeEngine.update({ groups: [moved] }));
+    rerender(<GroupCallButton group={moved} loadLivekit={loadLivekit} />);
+    await user.click(screen.getByTestId("group-call-join"));
+    expect(screen.getByTestId("group-call-hide-ip")).toBeInTheDocument();
+    expect(FakeRoom.rooms).toHaveLength(1);
+  });
+
   it("stays off, saying why, when the node gives no relay to go through", async () => {
     answerPass(() => pass({ iceServers: [{ urls: "stun:sfu.ghostly.test:3478" }] }));
     const { user } = hideIp(community({ id: "group-no-relay" }));
