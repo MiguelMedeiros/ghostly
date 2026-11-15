@@ -241,6 +241,22 @@ describe("the Apps page's chat picker (openAppInChat)", () => {
     await openAppInChat(installed(), "link-1");
     expect(sent).toHaveBeenCalledTimes(2);
   });
+
+  it("its opened card failed, then an Open of it that a newer one in the chat overtook: no card, as it never started", async () => {
+    run = { status: "ok" };
+    const opener = vi.fn(async () => {});
+    setAppOpener(opener);
+    sent.mockImplementationOnce(() => ({ error: "Contact is not reachable" }) as unknown as { error: null });
+    await expect(openAppInChat(installed(), "link-1")).rejects.toThrow("Contact is not reachable");
+    // Open on it (slow), then on another app: the other one runs there, and this one started nothing.
+    opener.mockImplementation(async () => "superseded" as never);
+    await openAppInChat(installed(), "link-1");
+    expect(sent).toHaveBeenCalledTimes(1);
+    // Its card is still owed: shown again there once it runs, it goes then.
+    opener.mockImplementation(async () => "shown" as never);
+    await openAppInChat(installed(), "link-1");
+    expect(sent).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("the card an app sends when it is opened in a chat", () => {

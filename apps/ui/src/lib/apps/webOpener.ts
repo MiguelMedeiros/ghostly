@@ -50,7 +50,7 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
   const alone = new Map<string, HTMLElement>();
   const open: AppOpener = (ref, linkId, options) => start(ref, linkId, options);
   /** `replace`: Open again on a stopped layer, which goes only once the app can start, so a failure is said there. */
-  const start = async (ref: string, linkId: string | null | undefined, options: Parameters<AppOpener>[2], replace?: () => void): Promise<void | "shown"> => {
+  const start = async (ref: string, linkId: string | null | undefined, options: Parameters<AppOpener>[2], replace?: () => void): Promise<void | "shown" | "superseded"> => {
     const engine = apps();
     if (!engine) throw new Error("Apps cannot run in this app");
     const host: AppsPlatform = linkedFiles ? { ...engine, linkedFiles } : engine;
@@ -92,9 +92,10 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
     if (linkId && slot) {
       // Another open pressed in this chat after this one, and past its own checks while this one was on its way (its
       // files downloading, the runner checked), or "Back to <app>" on the one running there, is what the person wants
-      // now: this one starts nothing, never stopping the app they chose, and tells the contact nothing. A newer one
-      // refused meanwhile (revoked, offline, locked) chose nothing: this one still opens.
-      if (!isNewestChoice(linkId, turn)) return "shown";
+      // now: this one starts nothing, never stopping the app they chose, and tells the contact nothing, not even an
+      // "opened" card it still owes there (`sendOpenedCard`): it is not what runs. A newer one refused meanwhile
+      // (revoked, offline, locked) chose nothing: this one still opens.
+      if (!isNewestChoice(linkId, turn)) return "superseded";
       const there = chatApp(linkId);
       // Open again on a stopped app that the person closed meanwhile (Close, Back): it stays closed.
       if (options?.again !== undefined && there?.running !== options.again) throw new Error("closed while it opened again");

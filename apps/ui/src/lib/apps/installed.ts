@@ -153,11 +153,12 @@ const unsent = new Set<string>();
 
 /**
  * Tells the contact that `app` opened in `linkId` with the "opened" card, after `openApp` resolved `shown`: one already
- * running there, shown again, sends none, unless its card failed when it opened. Resolves the send's error, if any.
+ * running there, shown again, sends none, unless its card failed when it opened. One a newer open there overtook
+ * (`superseded`) started nothing and sends none: its failed card waits for it to run there. Resolves the send's error, if any.
  */
-export async function sendOpenedCard(linkId: string, app: InstalledAppView, shown: "shown" | void): Promise<string | null> {
+export async function sendOpenedCard(linkId: string, app: InstalledAppView, shown: "shown" | "superseded" | void): Promise<string | null> {
   const key = `${linkId}\n${app.ref}`;
-  if (shown === "shown" && !unsent.has(key)) return null;
+  if (shown === "superseded" || (shown === "shown" && !unsent.has(key))) return null;
   const failed = await sendAppCard(linkId, app, true);
   if (failed) unsent.add(key); else unsent.delete(key);
   return failed;
