@@ -34,7 +34,7 @@ function paddingInside(at: string, selector: string): number | undefined {
   return undefined;
 }
 
-const NARROW = ["@media (width < 48rem)", "@container message-list (width < 36rem)"];
+const NARROW = ["@media (width < 768px)", "@container message-list (width < 36rem)"];
 
 describe("a system line's ⋮ on a phone", () => {
   it("has its reach read from the ⋮'s classes", () => {

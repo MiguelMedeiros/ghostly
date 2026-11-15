@@ -1,6 +1,6 @@
 # WISP numbering and compatibility
 
-All 61 specifications have the document status Draft; each says in its header what is implemented, and the [index](README.md) lists them all. Family numbering was approved on 2026-09-22. This migration is editorial: wire capability names, versions, storage keys and implemented protocol behavior are unchanged.
+All 62 specifications have the document status Draft; each says in its header what is implemented, and the [index](README.md) lists them all. Family numbering was approved on 2026-09-22. This migration is editorial: wire capability names, versions, storage keys and implemented protocol behavior are unchanged.
 
 ## Independent families
 
@@ -75,6 +75,7 @@ Generated from [numbering.json](numbering.json); edit that source instead of thi
 | none | [503](503-group-files.md) |
 | 15 | [600](600-media.md) |
 | 601 | [601](601-webrtc-media.md) |
+| none | [602](602-group-calls.md) |
 | 16 | [700](700-local-services.md) |
 | 701 | [701](701-http-services.md) |
 | 20 | [800](800-invite-join.md) |

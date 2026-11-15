@@ -21,6 +21,12 @@
   "endAndAnswer": "结束并接听",
   "ended": "通话结束",
   "endsCurrent": "接听将结束当前通话",
+  "group": {
+    "info": "通话经过群组的节点。群组中的任何人都可以发言、开启摄像头和共享屏幕。超过 8 人时，你加入时为静音。",
+    "leave": "离开通话",
+    "muted": "已静音",
+    "screenOf": "{{name}} 的屏幕"
+  },
   "incomingAudio": "语音来电...",
   "incomingVideo": "视频来电...",
   "mediaDenied": "无法使用麦克风或摄像头",

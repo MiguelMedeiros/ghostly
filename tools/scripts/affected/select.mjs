@@ -120,6 +120,7 @@ export const UNIT_PROJECTS = [
       "{native/transports/Cargo.toml,native/transports/iroh-web/**,packages/iroh-web/pkg/**}": ["irohWebBuild"],
       "{packages/cli/vite.config.ts,packages/cli/vitest.config.ts,packages/cli/test/support/cli.ts}": ["affected"],
       "{packages/cli/vite.config.ts,e2e/fixtures/chess/**}": ["storeKeys"],
+      "{eslint.config.mjs,tools/eslint/**}": ["eslintRules"],
       // Each workspace's src and manifest (and the shared UI's src, the root's), listed by git: no path in its text.
       "{packages/*/src/**,packages/*/package.json,apps/extension/src/**,apps/extension/package.json,apps/mini/*/src/**,apps/mini/*/package.json,apps/web/src/**,apps/web/package.json,apps/ui/src/**}": ["workspaceDepsDeclared"],
     },
@@ -196,7 +197,7 @@ export function unitGroupOf(name, count) {
 export const LINT = {
   scope: ["apps/ui/src/**", "packages/**", "apps/extension/src/**", "apps/extension/test/*.ts", "apps/web/src/**", "apps/mini/**", "e2e/**"],
   ext: /\.(?:[cm]?[jt]sx?)$/,
-  whole: ["eslint.config.mjs"],
+  whole: ["eslint.config.mjs", "tools/eslint/**"],
 };
 
 /**

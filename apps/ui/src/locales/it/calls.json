@@ -21,6 +21,12 @@
   "endAndAnswer": "Chiudi e rispondi",
   "ended": "Chiamata terminata",
   "endsCurrent": "Rispondere chiude la chiamata in corso",
+  "group": {
+    "info": "Passa dal nodo del gruppo. Chiunque nel gruppo può parlare, mostrare la fotocamera e condividere lo schermo. Oltre 8 persone entri senza microfono.",
+    "leave": "Esci dalla chiamata",
+    "muted": "Microfono disattivato",
+    "screenOf": "Schermo di {{name}}"
+  },
   "incomingAudio": "Chiamata vocale in arrivo...",
   "incomingVideo": "Videochiamata in arrivo...",
   "mediaDenied": "Nessun accesso a microfono o fotocamera",

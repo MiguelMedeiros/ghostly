@@ -21,6 +21,12 @@
   "endAndAnswer": "Encerrar e atender",
   "ended": "Chamada encerrada",
   "endsCurrent": "Atender encerra sua chamada atual",
+  "group": {
+    "info": "Passa pelo nó do grupo. Qualquer pessoa do grupo pode falar, mostrar a câmera e compartilhar a tela. Com mais de 8 pessoas, você entra no mudo.",
+    "leave": "Sair da chamada",
+    "muted": "No mudo",
+    "screenOf": "Tela de {{name}}"
+  },
   "incomingAudio": "Chamada de áudio recebida...",
   "incomingVideo": "Chamada de vídeo recebida...",
   "mediaDenied": "Sem acesso ao microfone ou à câmera",
