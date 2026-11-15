@@ -479,6 +479,17 @@ describe("group call", () => {
     await expect(callApi(ctx, "group.call", { group: "Thursday", e2ee: "yes" })).rejects.toMatchObject({ code: "bad_request", message: "e2ee must be true or false" });
   });
 
+  it("an empty --sfu with --e2ee or --no-e2ee is refused as it is alone, not read as no --sfu", async () => {
+    // `--sfu "$NODE" --no-e2ee` with NODE unset: before, the group's old node was signed again and the command answered 0.
+    const { ctx, setGroupCall } = community();
+    await callApi(ctx, "group.call", { group: "Thursday", sfu: SFU });
+    setGroupCall.mockClear();
+    for (const e2ee of [true, false]) {
+      await expect(callApi(ctx, "group.call", { group: "Thursday", sfu: "", e2ee }), String(e2ee)).rejects.toMatchObject({ code: "bad_request", message: "sfu is required" });
+    }
+    expect(setGroupCall).not.toHaveBeenCalled();
+  });
+
   it("refuses a member who is not the admin, and a private group, before the engine signs anything", async () => {
     const { ctx, setGroupCall } = community(false);
     await expect(callApi(ctx, "group.call", { group: "Thursday", sfu: SFU })).rejects.toMatchObject({ code: "refused", message: "Only the admin of Thursday sets its call node" });

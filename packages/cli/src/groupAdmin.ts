@@ -212,7 +212,8 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
     if (bool(params, "clear") && raw !== undefined) throw new CliError("bad_request", "clear removes the call node: not with sfu");
     if (bool(params, "clear") && e2ee !== undefined) throw new CliError("bad_request", "clear removes the call node: not with e2ee");
     if (bool(params, "clear")) sfu = null;
-    else if (raw !== undefined || e2ee === undefined) sfu = callNode(str(params, "sfu", true), ref, group.id);
+    // An empty `--sfu` ("$NODE" unset) is refused with `--e2ee` too: before, it read as no --sfu and signed the old node again.
+    else if ((params.sfu !== undefined && params.sfu !== null) || e2ee === undefined) sfu = callNode(str(params, "sfu", true), ref, group.id);
     // `--e2ee` alone turns sealed media on or off for the node the group names already.
     else if (group.call) sfu = group.call.sfu;
     else throw new CliError("refused", `${group.name} has no call node: ghostly group call ${shellWord(ref, group.id)} --sfu <https origin>${e2ee ? " --e2ee" : ""}`);
