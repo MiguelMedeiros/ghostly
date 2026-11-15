@@ -80,6 +80,14 @@ const REFUSED = [/\b403\b/, /\bforbidden\b/i, /\bnot let in\b/i];
 /** The engine's own words for it: the node did not let this member in, or this device is not in the group. */
 const REFUSED_CODES = new Set(["groupCallRefused", "groupCallNotMember"]);
 
+/** Whether the node refused the pass (its one `403`), rather than could not be reached. */
+export function passRefused(cause: unknown): boolean {
+  const detail = rawError(cause) || undefined;
+  // A string: the engine's group-call codes come with its token slice, and until then no text parses to them.
+  const code: string | undefined = detail ? parseEngineError(detail)?.code : undefined;
+  return REFUSED_CODES.has(code ?? "") || (!!detail && REFUSED.some((r) => r.test(detail)));
+}
+
 /**
  * Why the call did not start: the node refused the pass (not on its roster yet, as a member just let in is), or the
  * node or its room could not be reached. The engine's English goes behind the ⓘ.
@@ -88,10 +96,7 @@ export function groupCallProblem(cause: unknown, t: Translate): Problem {
   const detail = rawError(cause) || undefined;
   // Hide my IP turned on during the call, and the pass had no TURN server to join again through.
   if (detail === NO_RELAY) return { tone: "error", title: t("calls.group.noRelay"), info: t("calls.group.noRelayInfo") };
-  // A string: the engine's group-call codes come with its token slice, and until then no text parses to them.
-  const code: string | undefined = detail ? parseEngineError(detail)?.code : undefined;
-  const refused = REFUSED_CODES.has(code ?? "") || (!!detail && REFUSED.some((r) => r.test(detail)));
-  return { tone: "error", title: t(refused ? "calls.group.refused" : "calls.group.unreachable"), ...(detail && { detail }) };
+  return { tone: "error", title: t(passRefused(cause) ? "calls.group.refused" : "calls.group.unreachable"), ...(detail && { detail }) };
 }
 
 /**

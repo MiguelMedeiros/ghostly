@@ -225,6 +225,49 @@ describe("the group call window", () => {
   });
 });
 
+describe("muted by the group's admin (WISP 602 § Moderation)", () => {
+  const byAdmin = (over: Partial<NonNullable<GroupCallParticipant["byAdmin"]>>) => ({ mic: false, camera: false, screen: false, ...over });
+
+  it("marks another member's tile as muted by the admin, by name, apart from a member who muted themselves", () => {
+    view(state(0, { participants: [person("ana", { mic: false, byAdmin: byAdmin({ mic: true }) }), person("bo", { mic: false })] }));
+    const byId = (id: string) => tiles().find((t) => t.dataset.identity === id)!;
+    const ana = within(byId("ana")).getByTestId("group-call-muted");
+    expect(ana).toHaveAccessibleName("Muted by the admin");
+    expect(ana).toHaveAttribute("data-by-admin", "true");
+    expect(within(byId("bo")).getByTestId("group-call-muted")).toHaveAccessibleName("Muted");
+    expect(within(byId("bo")).getByTestId("group-call-muted")).toHaveAttribute("data-by-admin", "false");
+  });
+
+  it("keeps your mic, camera and screen off while taken, each saying why, with the details behind an ⓘ", async () => {
+    const { user, handlers } = view(state(1, { local: person("me", { mic: false, byAdmin: byAdmin({ mic: true, camera: true, screen: true }) }) }));
+    const mic = screen.getByTestId("group-call-mic");
+    expect(mic).toHaveAccessibleName("Muted by the admin");
+    expect(mic).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByTestId("group-call-camera")).toHaveAccessibleName("Turned off by the admin");
+    expect(screen.getByTestId("group-call-screen")).toHaveAccessibleName("Turned off by the admin");
+    await user.click(mic);
+    await user.click(screen.getByTestId("group-call-camera"));
+    await user.click(screen.getByTestId("group-call-screen"));
+    expect([handlers.onToggleMic, handlers.onToggleCamera, handlers.onToggleScreen].map((f) => f.mock.calls.length)).toEqual([0, 0, 0]);
+    // Your own tile says it too.
+    expect(within(tiles()[0]).getByTestId("group-call-muted")).toHaveAccessibleName("Muted by the admin");
+
+    expect(screen.queryByTestId("group-call-by-admin-text")).toBeNull();
+    await user.click(screen.getByTestId("group-call-by-admin-info"));
+    expect(screen.getByTestId("group-call-by-admin-text")).toHaveTextContent("You can turn it on again once they allow it.");
+    expect(await axeViolations(screen.getByTestId("group-call"))).toEqual([]);
+  });
+
+  it("given back, the mic is yours again: named Unmute and pressed through, with no ⓘ", async () => {
+    const { user, handlers } = view(state(1, { local: person("me", { mic: false, byAdmin: byAdmin({}) }) }));
+    expect(screen.getByTestId("group-call-mic")).toHaveAccessibleName("Unmute");
+    expect(screen.getByTestId("group-call-mic")).not.toHaveAttribute("aria-disabled");
+    expect(screen.queryByTestId("group-call-by-admin-info")).toBeNull();
+    await user.click(screen.getByTestId("group-call-mic"));
+    expect(handlers.onToggleMic).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("what a screen reader hears", () => {
   it("says Connected once in the room, then who joins and leaves, several in one line, and not who speaks or mutes", () => {
     const handlers = { onToggleMic: vi.fn(), onToggleCamera: vi.fn(), onToggleScreen: vi.fn(), onLeave: vi.fn() };
