@@ -695,6 +695,7 @@
     "noneAnsweredNext": "تحقّق من اتصالك، ثم أعد المحاولة.",
     "notAddress": "ليس عنوان مرحّل: {{address}}",
     "useHttps": "استخدم \u2066https://\u2069 في عنوان المرحّل: {{address}}",
+    "useShorter": "استخدم عنوان مرحّل أقصر: {{address}}",
     "useWss": "استخدم \u2066wss://\u2069 في عنوان المرحّل"
   },
   "services": {

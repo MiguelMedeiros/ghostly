@@ -691,6 +691,7 @@
     "noneAnsweredNext": "Verifique sua conexão e tente de novo.",
     "notAddress": "Não é um endereço de relay: {{address}}",
     "useHttps": "Use https:// no endereço do relay: {{address}}",
+    "useShorter": "Use um endereço de relay mais curto: {{address}}",
     "useWss": "Use wss:// no endereço do relay"
   },
   "services": {
