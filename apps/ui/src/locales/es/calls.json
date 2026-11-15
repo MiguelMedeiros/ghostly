@@ -22,6 +22,7 @@
   "ended": "Llamada finalizada",
   "endsCurrent": "Contestar finaliza tu llamada actual",
   "group": {
+    "byAdminInfo": "El admin del grupo te lo desactivó en esta llamada. Puedes activarlo de nuevo cuando lo permita.",
     "endAndJoin": "Terminar y unirse",
     "endOtherBody": "Unirte a la llamada del grupo termina la llamada en la que estás.",
     "endOtherTitle": "¿Terminar tu llamada?",
@@ -37,6 +38,7 @@
     "left": "{{name}} salió",
     "leftMany": "{{names}} salieron",
     "muted": "Silenciado",
+    "mutedByAdmin": "Silenciado por el admin",
     "noCallKey": "Aún no puedes unirte: la clave de la llamada no ha llegado",
     "noCallKeyInfo": "Las llamadas de este grupo están cifradas de extremo a extremo, y su clave aún no ha llegado a este dispositivo. Vuelve a intentarlo en un momento.",
     "noRelay": "No puedes unirte con Ocultar mi IP activado",
@@ -46,7 +48,10 @@
     "notMember": "No está en este grupo (…{{key}})",
     "notSealed": "No se pudo cifrar esta llamada, así que saliste",
     "notSealedInfo": "Ya en la sala, esta app no pudo cifrar lo que envías, así que saliste antes de que algo saliera sin cifrar. Vuelve a intentarlo o usa un navegador reciente.",
+    "offByAdmin": "Desactivado por el admin",
     "refused": "Aún no tienes acceso a esta llamada",
+    "removed": "El admin te sacó de esta llamada",
+    "removedInfo": "El nodo del grupo no te deja volver a esta llamada sin el permiso del admin. Sigues en el grupo.",
     "retry": "Reintentar",
     "screenOf": "Pantalla de {{name}}",
     "unreachable": "No se pudo llegar a la llamada del grupo"

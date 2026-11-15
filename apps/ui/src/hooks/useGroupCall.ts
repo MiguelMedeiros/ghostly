@@ -59,6 +59,8 @@ export interface GroupCallError {
 export interface GroupCall extends GroupCallState {
   status: GroupCallStatus;
   error: GroupCallError | null;
+  /** The status is "left" because the group's admin took you out of the room (WISP 602 § Moderation), not by your own Leave. */
+  removedByAdmin: boolean;
   toggleMic: () => Promise<void>;
   toggleCamera: () => Promise<void>;
   toggleScreen: () => Promise<void>;
@@ -126,6 +128,22 @@ export const GROUP_CALL_MUTED_ABOVE = 8;
 /** Whether someone joining a room of `count` people (themselves included) starts muted. */
 export const joinsMuted = (count: number): boolean => count > GROUP_CALL_MUTED_ABOVE;
 
+/** LiveKit's protocol numbers for the sources an admin can take away (its `TrackSource`, as `canPublishSources` holds them). */
+const PROTO_SOURCE = { mic: 2, camera: 1, screen: 3 } as const;
+
+/** LiveKit's `DisconnectReason.PARTICIPANT_REMOVED`: the node took this device out of the room (`RemoveParticipant`). */
+const PARTICIPANT_REMOVED = 4;
+
+/**
+ * What the group's admin took away from someone in this call (WISP 602 § Moderation): a source left out of their
+ * `canPublishSources`. An empty list is LiveKit's "every source".
+ */
+function heldOf(p: Participant): NonNullable<GroupCallParticipant["byAdmin"]> {
+  const allowed = p.permissions?.canPublishSources ?? [];
+  const held = (source: keyof typeof PROTO_SOURCE) => allowed.length > 0 && !allowed.includes(PROTO_SOURCE[source]);
+  return { mic: held("mic"), camera: held("camera"), screen: held("screen") };
+}
+
 const NOBODY: GroupCallParticipant = { identity: "", name: "", mic: false, camera: false, screen: false, speaking: false, tracks: {} };
 const EMPTY: GroupCallState = { participants: [], activeSpeaker: null, local: NOBODY };
 
@@ -172,6 +190,7 @@ function personOf(p: Participant, lk: LivekitModule, local: boolean, sealed: boo
     camera: p.isCameraEnabled,
     screen: p.isScreenShareEnabled,
     speaking: p.isSpeaking,
+    byAdmin: heldOf(p),
     // Your own voice is never handed out: nothing can play it back to you.
     tracks: local
       ? { camera: track(Source.Camera), screen: track(Source.ScreenShare) }
@@ -200,6 +219,27 @@ async function stopScreen(session: Session): Promise<void> {
     // already gone from the room (it ended the share itself, or the room is closed)
   }
   track.stop();
+}
+
+/**
+ * Stops what the admin took away from you (WISP 602 § Moderation): the node already mutes it in the room, and this
+ * device stops capturing it too. Given back, it stays off until you turn it on.
+ */
+async function dropHeld(session: Session, room: Room, lk: LivekitModule): Promise<void> {
+  const me = room.localParticipant;
+  const held = heldOf(me);
+  if (held.screen) await stopScreen(session);
+  const { Source } = lk.Track;
+  for (const source of [held.mic && Source.Microphone, held.camera && Source.Camera]) {
+    const track = source ? me.getTrackPublication(source)?.track : undefined;
+    if (!track) continue;
+    try {
+      await me.unpublishTrack(track.mediaStreamTrack, true);
+    } catch {
+      // already gone from the room
+    }
+    track.stop();
+  }
 }
 
 /** Leaves the room and stops every local track; safe to call twice. */
@@ -263,6 +303,7 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
   const [state, setState] = useState<GroupCallState>(EMPTY);
   const [status, setStatus] = useState<GroupCallStatus>("idle");
   const [error, setError] = useState<GroupCallError | null>(null);
+  const [removedByAdmin, setRemovedByAdmin] = useState(false);
   const session = useRef<Session | null>(null);
   // Read at the join: a new array for the same pass is not a new call.
   const ice = useRef(iceServers);
@@ -299,6 +340,7 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
     setState(EMPTY);
     setStatus("connecting");
     setError(null);
+    setRemovedByAdmin(false);
 
     void (async () => {
       try {
@@ -357,11 +399,20 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
           room.on(E.LocalTrackPublished, () => void s.sealedStill());
           if (E.ParticipantEncryptionStatusChanged) room.on(E.ParticipantEncryptionStatusChanged, () => void s.sealedStill());
         }
-        room.on(E.Disconnected, () => {
-          // The node closed the room or dropped you: the call is over here too.
+        // The admin took a source away from you, or gave it back: what was taken stops here too, and every tile shows it.
+        if (E.ParticipantPermissionsChanged) {
+          room.on(E.ParticipantPermissionsChanged, (_before: unknown, who: Participant) => {
+            if (who !== room.localParticipant) return s.refresh();
+            void dropHeld(s, room, lk).then(() => s.sealedStill() && s.refresh());
+          });
+        }
+        room.on(E.Disconnected, (reason?: number) => {
+          // The node closed the room or dropped you: the call is over here too. Your own Leave ended the session first.
           if (s.ended) return;
           void endSession(s);
-          if (live) setStatus("left");
+          if (!live) return;
+          setRemovedByAdmin(reason === PARTICIPANT_REMOVED);
+          setStatus("left");
         });
         const connectOptions = { ...(rtcConfig && { rtcConfig }), ...(encryption && { autoSubscribe: false }) };
         await room.connect(url, token, Object.keys(connectOptions).length ? connectOptions : undefined);
@@ -386,7 +437,9 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
         await rekey(s, seal.current);
         setStatus("connected");
         s.refresh();
-        if (kept ? kept.mic : !joinsMuted(room.remoteParticipants.size + 1)) {
+        // A pass that leaves the microphone or camera out (the admin muted you before you joined) opens neither.
+        const held = heldOf(room.localParticipant);
+        if (!held.mic && (kept ? kept.mic : !joinsMuted(room.remoteParticipants.size + 1))) {
           try {
             await room.localParticipant.setMicrophoneEnabled(true, { deviceId: preferredDevice("audioinput") });
           } catch (cause) {
@@ -396,7 +449,7 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
           if (!s.sealedStill()) return;
           s.refresh();
         }
-        if (kept?.camera && live && !s.ended) {
+        if (kept?.camera && !held.camera && live && !s.ended) {
           try {
             await room.localParticipant.setCameraEnabled(true, { deviceId: preferredDevice("videoinput") });
           } catch (cause) {
@@ -436,6 +489,8 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
     const s = active();
     if (!s) return;
     const on = !s.room.localParticipant.isMicrophoneEnabled;
+    // Taken away by the admin: it stays off until they allow it (the room would refuse it anyway).
+    if (on && heldOf(s.room.localParticipant).mic) return;
     try {
       await s.room.localParticipant.setMicrophoneEnabled(on, on ? { deviceId: preferredDevice("audioinput") } : undefined);
       if (on && !s.ended) setError(null);
@@ -449,6 +504,7 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
     const s = active();
     if (!s) return;
     const on = !s.room.localParticipant.isCameraEnabled;
+    if (on && heldOf(s.room.localParticipant).camera) return;
     try {
       await s.room.localParticipant.setCameraEnabled(on, on ? { deviceId: preferredDevice("videoinput") } : undefined);
       if (on && !s.ended) setError(null);
@@ -466,6 +522,7 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
       s.refresh();
       return;
     }
+    if (heldOf(s.room.localParticipant).screen) return;
     const media = typeof navigator !== "undefined" ? navigator.mediaDevices : undefined;
     if (typeof media?.getDisplayMedia !== "function") {
       setError({ action: "screen", message: screenShareErrorMessage({ name: "NotSupportedError" }) ?? "" });
@@ -513,5 +570,5 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
     setStatus("left");
   }, []);
 
-  return { ...state, status, error, toggleMic, toggleCamera, toggleScreen, leave };
+  return { ...state, status, error, removedByAdmin, toggleMic, toggleCamera, toggleScreen, leave };
 }

@@ -34,7 +34,13 @@ const RoomEvent = {
   Reconnected: "reconnected",
   Disconnected: "disconnected",
   ParticipantEncryptionStatusChanged: "participantEncryptionStatusChanged",
+  ParticipantPermissionsChanged: "participantPermissionsChanged",
 } as const;
+
+/** LiveKit's protocol numbers for the sources (`TrackSource`), as `canPublishSources` lists them. */
+const Proto = { camera: 1, microphone: 2, screen_share: 3, screen_share_audio: 4 } as const;
+/** LiveKit's `DisconnectReason`s the hook tells apart: your own leave, and the node's `RemoveParticipant`. */
+const DisconnectReason = { CLIENT_INITIATED: 1, PARTICIPANT_REMOVED: 4 } as const;
 
 class FakeLocalTrack {
   readonly stop = vi.fn(() => this.mediaStreamTrack.stop());
@@ -62,6 +68,8 @@ class FakePublication {
 class FakeParticipant {
   name?: string;
   isSpeaking = false;
+  /** LiveKit's: what the token, or the node since, lets this participant publish. An empty list is every source. */
+  permissions?: { canPublish: boolean; canPublishSources: number[] };
   readonly trackPublications = new Map<string, FakePublication>();
   constructor(readonly identity: string, name?: string) {
     this.name = name;
@@ -219,6 +227,24 @@ class FakeRoom {
   part(identity: string) {
     this.remoteParticipants.delete(identity);
     this.emit(RoomEvent.ParticipantDisconnected);
+  }
+  /**
+   * The node's `UpdateParticipant` (WISP 602 § Moderation): `p` may publish only `sources` from now on, and what it
+   * published from the others is muted (`MutePublishedTrack`), as LiveKit tells everyone in the room.
+   */
+  permit(p: FakeParticipant, sources: number[]) {
+    const before = p.permissions;
+    p.permissions = { canPublish: true, canPublishSources: sources };
+    for (const pub of p.trackPublications.values()) {
+      const proto = Proto[pub.source as keyof typeof Proto];
+      if (sources.length && !sources.includes(proto)) pub.isMuted = true;
+    }
+    this.emit(RoomEvent.ParticipantPermissionsChanged, before, p);
+  }
+  /** The room closing on this device, as LiveKit says it (`Disconnected` with its reason). */
+  drop(reason: number) {
+    this.connected = false;
+    this.emit(RoomEvent.Disconnected, reason);
   }
   speakers(...people: FakeParticipant[]) {
     for (const p of [this.localParticipant, ...this.remoteParticipants.values()]) p.isSpeaking = people.includes(p);
@@ -561,6 +587,103 @@ describe("useGroupCall", () => {
     // The call's key provider (it extends livekit-client's) comes with it, never on its own.
     expect(lazy).toContain('export { GroupCallKeyProvider } from "./groupCallKeys";');
     expect(lazy).toContain('new Worker(new URL("livekit-client/e2ee-worker", import.meta.url), { type: "module" })');
+  });
+});
+
+describe("useGroupCall, moderated by the group's admin (WISP 602 § Moderation)", () => {
+  const ALL_BUT_MIC = [Proto.camera, Proto.screen_share, Proto.screen_share_audio];
+  const EVERY = [Proto.camera, Proto.microphone, Proto.screen_share, Proto.screen_share_audio];
+
+  it("losing the microphone stops it here and marks it as the admin's; given back, it stays off until you turn it on", async () => {
+    const { result } = await joined();
+    const me = room().localParticipant;
+    const mic = me.getTrackPublication(Source.Microphone)!.track!.mediaStreamTrack as unknown as FakeTrack;
+    expect(result.current.local).toMatchObject({ mic: true, byAdmin: { mic: false, camera: false, screen: false } });
+
+    await act(async () => room().permit(me, ALL_BUT_MIC));
+    await waitFor(() => expect(mic.stop).toHaveBeenCalled());
+    expect(me.getTrackPublication(Source.Microphone)).toBeUndefined();
+    expect(result.current.local).toMatchObject({ mic: false, byAdmin: { mic: true, camera: false, screen: false } });
+    // The button does nothing while it is taken: LiveKit would refuse the publish (403) anyway.
+    me.setMicrophoneEnabled.mockClear();
+    await act(() => result.current.toggleMic());
+    expect(me.setMicrophoneEnabled).not.toHaveBeenCalled();
+    expect(result.current.error).toBeNull();
+
+    await act(async () => room().permit(me, EVERY));
+    expect(result.current.local).toMatchObject({ mic: false, byAdmin: { mic: false } });
+    expect(me.setMicrophoneEnabled).not.toHaveBeenCalled();
+    await act(() => result.current.toggleMic());
+    expect(me.setMicrophoneEnabled).toHaveBeenLastCalledWith(true, expect.anything());
+    expect(result.current.local.mic).toBe(true);
+  });
+
+  it("a camera or screen taken away goes off and does not come back from its button", async () => {
+    const { screen, getDisplayMedia } = displayMedia();
+    const { result } = await joined();
+    const me = room().localParticipant;
+    await act(() => result.current.toggleCamera());
+    await act(() => result.current.toggleScreen());
+    const camera = me.getTrackPublication(Source.Camera)!.track!.mediaStreamTrack as unknown as FakeTrack;
+    expect(result.current.local).toMatchObject({ camera: true, screen: true });
+
+    await act(async () => room().permit(me, [Proto.microphone]));
+    await waitFor(() => expect(result.current.local).toMatchObject({ mic: true, camera: false, screen: false, byAdmin: { mic: false, camera: true, screen: true } }));
+    expect(camera.stop).toHaveBeenCalled();
+    expect(screen.stop).toHaveBeenCalled();
+    me.setCameraEnabled.mockClear();
+    getDisplayMedia.mockClear();
+    await act(() => result.current.toggleCamera());
+    await act(() => result.current.toggleScreen());
+    expect(me.setCameraEnabled).not.toHaveBeenCalled();
+    expect(getDisplayMedia).not.toHaveBeenCalled();
+  });
+
+  it("joins without the microphone when the pass leaves it out (muted before joining)", async () => {
+    FakeRoom.atJoin = (r) => { r.localParticipant.permissions = { canPublish: true, canPublishSources: ALL_BUT_MIC }; };
+    const { result } = renderHook(() => useGroupCall({ url: "wss://call.example", token: "pass", loadLivekit }));
+    await waitFor(() => expect(result.current.status).toBe("connected"));
+    await act(async () => {});
+    expect(room().localParticipant.setMicrophoneEnabled).not.toHaveBeenCalled();
+    expect(result.current.local).toMatchObject({ mic: false, byAdmin: { mic: true } });
+  });
+
+  it("shows another member's microphone as muted by the admin, and not once it is allowed again", async () => {
+    const { result } = await joined();
+    let ana!: FakeParticipant;
+    act(() => {
+      ana = room().join("ana", "Ana");
+      ana.publish(Source.Microphone, "audio");
+      room().emit(RoomEvent.TrackSubscribed);
+    });
+    expect(result.current.participants[0]).toMatchObject({ mic: true, byAdmin: { mic: false } });
+    act(() => room().permit(ana, ALL_BUT_MIC));
+    expect(result.current.participants[0]).toMatchObject({ mic: false, byAdmin: { mic: true } });
+    act(() => room().permit(ana, EVERY));
+    expect(result.current.participants[0]).toMatchObject({ mic: false, byAdmin: { mic: false } });
+    // Nothing of yours stops for someone else's mute.
+    expect(result.current.local.mic).toBe(true);
+  });
+
+  it("removed by the admin: the call is left, every track stopped, and it says the admin did it", async () => {
+    const { result } = await joined();
+    const mic = room().localParticipant.getTrackPublication(Source.Microphone)!.track!.mediaStreamTrack as unknown as FakeTrack;
+    expect(result.current.removedByAdmin).toBe(false);
+    await act(async () => room().drop(DisconnectReason.PARTICIPANT_REMOVED));
+    expect(result.current.status).toBe("left");
+    expect(result.current.removedByAdmin).toBe(true);
+    expect(mic.stop).toHaveBeenCalled();
+  });
+
+  it("never says removed for your own Leave, or for a room that closed for another reason", async () => {
+    const own = await joined();
+    await act(() => own.result.current.leave());
+    expect(own.result.current).toMatchObject({ status: "left", removedByAdmin: false });
+    own.unmount();
+
+    const closed = await joined();
+    await act(async () => room().drop(DisconnectReason.CLIENT_INITIATED));
+    expect(closed.result.current).toMatchObject({ status: "left", removedByAdmin: false });
   });
 });
 
