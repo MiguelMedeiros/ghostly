@@ -48,8 +48,11 @@ export interface GroupMetaBody {
   pic?: string;
   /** Private groups: members the admin pins as hubs, and excludes (WISP 902 · Group Mesh § Hubs). Apps from before ignore it. */
   hubs?: MeshHubPolicy;
-  /** Community groups: the node that forwards the group's calls (WISP 602 § The group names its node). Apps from before ignore it. */
-  call?: { sfu: string };
+  /**
+   * Community groups: the node that forwards the group's calls (WISP 602 § The group names its node), and `e2ee: 1` when
+   * the admin turned on sealed call media (WISP 602 § End-to-end encryption). Apps from before ignore it.
+   */
+  call?: { sfu: string; e2ee?: 1 };
 }
 
 /** Longest call node origin a group may name, in characters (WISP 602). */
@@ -136,7 +139,7 @@ export function encodeGroupMetaBody(body: GroupMetaBody): string {
   if (body.call) {
     const sfu = groupCallSfu(body.call.sfu);
     if (!sfu) throw new Error("A group's call node is an https origin");
-    out.call = { sfu };
+    out.call = body.call.e2ee === 1 ? { sfu, e2ee: 1 } : { sfu };
   }
   return JSON.stringify(out);
 }
@@ -165,7 +168,8 @@ export function parseGroupMetaBody(body: string): GroupMetaBody | null {
   // A `call` that does not hold is no `call` (WISP 602): the group has no calls, its name and picture still show.
   const call = (parsed as Record<string, unknown>).call;
   const sfu = call && typeof call === "object" ? groupCallSfu((call as Record<string, unknown>).sfu) : undefined;
-  if (sfu) out.call = { sfu };
+  // Sealing is on only for exactly `1`; any other value is off (WISP 602 § End-to-end encryption), and kept as off.
+  if (sfu) out.call = (call as Record<string, unknown>).e2ee === 1 ? { sfu, e2ee: 1 } : { sfu };
   return out;
 }
 
