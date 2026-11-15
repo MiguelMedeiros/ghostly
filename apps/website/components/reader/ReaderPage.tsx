@@ -70,7 +70,7 @@ export async function ReaderPage({ reference, requested }: { reference: Referenc
       .filter((x) => x.group === g.id)
       .map((x) => ({ id: x.id, slug: x.slug, number: x.number, name: x.name, child: Boolean(x.parent), assigned: x.assigned })),
   })).filter((g) => g.items.length > 0);
-  const sourceUrl = `${REPO_URL}/blob/dev/${reference.sourcePath}`;
+  const sourceUrl = `${REPO_URL}/blob/main/${reference.sourcePath}`;
 
   return (
     <Shell>
