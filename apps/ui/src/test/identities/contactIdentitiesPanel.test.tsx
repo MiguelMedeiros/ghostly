@@ -333,9 +333,12 @@ describe("ContactIdentitiesPanel", () => {
       expect(engine.callsTo("loadPublicGraph")).toEqual([]);
     });
 
-    it("the panel closed asks nothing", () => {
-      renderApp(<p>no panel</p>).engine.update(withReceived([pubky()]));
-      expect(screen.queryByTestId("contact-activity")).not.toBeInTheDocument();
+    it("the panel closed asks nothing", async () => {
+      const { engine } = renderApp(<p>no panel</p>);
+      act(() => engine.update(withReceived([pubky()])));
+      await act(async () => {});
+      expect(engine.callsTo("loadPublicPosts")).toEqual([]);
+      expect(engine.callsTo("loadPublicGraph")).toEqual([]);
     });
 
     it("shows the engine's error for the chat", () => {

@@ -1129,8 +1129,10 @@ describe("MessageBubble: deleting", () => {
     expect(options("text a")).toHaveFocus();
   });
 
-  it("offers no delete where the chat cannot be edited", () => {
-    bubble({ text: "kept" });
+  it("offers no delete where the chat cannot be edited", async () => {
+    const { user } = bubble({ text: "kept" });
+    await user.click(screen.getByTestId("message-options"));
+    expect(screen.getByTestId("message-menu")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delete message" })).not.toBeInTheDocument();
   });
 });

@@ -51,8 +51,11 @@ export function TakeoverDialog({ device, password: asks, restored, ownSet, onClo
       else if (key === "devices.takeover.fail.name") focusToRetype(nameInput.current);
     } finally { setBusy(false); }
   };
+  // While the check runs × and Escape do nothing: closing would not stop the takeover (the page still reloads as the
+  // active device), and a refusal or a wrong password would be said nowhere.
+  const close = () => { if (!busy) onClose(); };
   return (
-    <DeviceDialog title={device ? fillNames(t("devices.takeover.title"), { device }) : t("devices.takeover.titleUnnamed")} onClose={onClose} testId="takeover-dialog">
+    <DeviceDialog title={device ? fillNames(t("devices.takeover.title"), { device }) : t("devices.takeover.titleUnnamed")} onClose={close} testId="takeover-dialog">
       <div className="space-y-2">
         <p className="flex items-start gap-1.5 text-text-secondary">
           <span className="min-w-0">{restored ? t("devices.takeover.hintRestored") : fillNames(t("devices.takeover.hint"), { device: other })}</span>
