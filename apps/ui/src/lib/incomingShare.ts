@@ -214,17 +214,28 @@ export function keepShareFor(chat: string, share: IncomingShare): void {
   forChat.set(chat, [share, ...forChat.get(chat) ?? []]);
 }
 
+/** How many places `carriesLink` reads, and how far past the link: a sentence's punctuation and closing brackets. */
+const MAX_LINK_LOOKS = 64;
+const MAX_LINK_TAIL = 64;
+
 /**
  * Whether `text` carries `url` as a link of its own: after the text's start, a space or an opening bracket or quote,
  * and ending where a bubble's link would (`linkEnd`: "https://a.example/p." or "(https://a.example/p)" carry it).
  * A longer address that starts with it ("https://a.example/p2") or holds it ("…?u=https://a.example/p") does not.
+ * Any website can post a share, of megabytes: only the first `MAX_LINK_LOOKS` places it turns up are read, each up to
+ * `MAX_LINK_TAIL` characters past it (a word longer than that is not taken for it), so the text is never read once per
+ * place. Past those, the link goes in once more, which says nothing wrong.
  */
 function carriesLink(text: string, url: string): boolean {
-  const word = /\S*/y;
-  for (let at = text.indexOf(url); at >= 0; at = text.indexOf(url, at + 1)) {
+  const word = new RegExp(`\\S{0,${url.length + MAX_LINK_TAIL}}`, "y");
+  const own = linkEnd(url);
+  let looks = 0;
+  for (let at = text.indexOf(url); at >= 0 && looks < MAX_LINK_LOOKS; at = text.indexOf(url, at + 1), looks += 1) {
     if (at > 0 && !/[\s\p{Ps}\p{Pi}"']/u.test(text[at - 1]!)) continue;
     word.lastIndex = at;
-    if (linkEnd(word.exec(text)![0]) === linkEnd(url)) return true;
+    const found = word.exec(text)![0];
+    if (/\S/.test(text[at + found.length] ?? "")) continue;
+    if (linkEnd(found) === own) return true;
   }
   return false;
 }
