@@ -139,8 +139,10 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
     else go();
   };
   // Not believed from the node: each tile is named by the group's roster, a key outside it said to be so.
-  const nameOf = (identity: string) => group.members.some((m) => m.key === identity)
-    ? authorName(group, identity, t) : t("calls.group.notMember", { key: identity.slice(-6) });
+  const inGroup = (identity: string) => group.members.some((m) => m.key === identity);
+  const nameOf = (identity: string) => inGroup(identity) ? authorName(group, identity, t) : t("calls.group.notMember", { key: identity.slice(-6) });
+  // Only the group's admin moderates its call; the node checks it again on its roster.
+  const moderator = group.isAdmin ? { groupId, inGroup } : undefined;
 
   useEffect(() => {
     if (!joined) return;
@@ -230,7 +232,7 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
           {!blocked && <button type="button" onClick={() => void join()} data-testid="group-call-retry" className={`min-h-8 rounded-md px-2 font-semibold text-accent hover:bg-surface-hover max-md:min-h-11 ${focus}`}>{t("calls.group.retry")}</button>}
         </div>
       </div>}
-      {joined && <GroupCallView call={call} groupName={group.name || t("group.chat.unnamed")} canShareScreen={canShareScreen} nameOf={nameOf} raised={raised}
+      {joined && <GroupCallView call={call} groupName={group.name || t("group.chat.unnamed")} canShareScreen={canShareScreen} nameOf={nameOf} raised={raised} moderator={moderator}
         onToggleMic={() => void call.toggleMic()} onToggleCamera={() => void call.toggleCamera()} onToggleScreen={() => void call.toggleScreen()} onLeave={leave} />}
       {askIp && <HideIpDialog onClose={() => setAskIp(false)} onConfirm={() => { setAskIp(false); joinedShowingIp.add(ipShownTo); go(); }} />}
       {askEnd && <EndOtherCallDialog onClose={() => setAskEnd(false)} onConfirm={() => { setAskEnd(false); endOtherCalls(key); void join(); }} />}

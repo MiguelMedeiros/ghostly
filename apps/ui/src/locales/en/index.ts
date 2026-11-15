@@ -15,6 +15,7 @@ import connection from "./connection.json";
 import devices from "./devices.json";
 import errors from "./errors.json";
 import group from "./group.json";
+import groupCallModeration from "./groupCallModeration.json";
 import home from "./home.json";
 import identities from "./identities.json";
 import invite from "./invite.json";
@@ -56,6 +57,7 @@ export default {
   devices,
   errors,
   group,
+  groupCallModeration,
   home,
   identities,
   invite,
