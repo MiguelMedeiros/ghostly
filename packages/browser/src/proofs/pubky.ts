@@ -3,7 +3,7 @@ import {
   type HomeserverEndpoint,
 } from "@ghostly/core";
 import type { AuthFlow, GrantAuthFlow, Session } from "@synonymdev/pubky";
-import { englishSay, type ApprovalRequest, type IdentityFetch, type ProviderSay } from "./contract";
+import { englishSay, SignerTimeout, type ApprovalRequest, type IdentityFetch, type ProviderSay } from "./contract";
 import { assertPublicHost, chosenResolver, type DohResolverId } from "./domain";
 import { getBrowserHost, type PubkyCookieSession } from "../host";
 import { PUBKY_RELAYS } from "./pubkyRelays";
@@ -92,7 +92,7 @@ export async function readPubkyFile(key: string, path: `/pub/${string}`, fetch: 
 export const PUBKY_CLIENT_ID = "ghostly.tools";
 export const PASSPORT_ORIGIN = "https://passport.pubky.app";
 /** How long one request waits: Pubky's relay keeps a message about five minutes. */
-const APPROVAL_TIMEOUT = 5 * 60_000;
+export const PUBKY_APPROVAL_TIMEOUT = 5 * 60_000;
 const POLL_EVERY = 1_000;
 
 /**
@@ -168,7 +168,7 @@ function firstApproval(requests: readonly PendingRequest[], signal: AbortSignal,
       settle();
     };
     const cancel = () => end(() => reject(signal.reason));
-    const timer = setTimeout(() => end(() => reject(new Error("Nobody approved the request in time. Start again for a new one."))), timeoutMs);
+    const timer = setTimeout(() => end(() => reject(new SignerTimeout("Nobody approved the request in time. Start again for a new one."))), timeoutMs);
     if (signal.aborted) cancel(); else signal.addEventListener("abort", cancel, { once: true });
     const pause = () => new Promise<void>(done => {
       const wake = () => { clearTimeout(t); wakers.delete(wake); done(); };
@@ -314,7 +314,7 @@ async function approveAndWork<T>(options: PubkyApprovalOptions, work: (session: 
   const { signal } = options;
   let session: Session, viaCookie: boolean;
   try {
-    const first = await firstApproval([grant, cookie], signal, options.timeoutMs ?? APPROVAL_TIMEOUT, settled);
+    const first = await firstApproval([grant, cookie], signal, options.timeoutMs ?? PUBKY_APPROVAL_TIMEOUT, settled);
     session = first.session;
     viaCookie = first.request === cookie;
   } finally {
