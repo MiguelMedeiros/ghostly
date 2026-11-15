@@ -151,8 +151,17 @@ describe("a one-shot group join", () => {
     }
   });
 
-  it("through a daemon, answers at once as before", async () => {
-    expect(await callApi(oneShot("daemon").ctx, "group.join", { link: LINK })).toEqual({ group: "g9" });
+  // Found in a bug hunt: through a daemon it answered {"group": id} only, so a script could not tell in from knocking
+  // without a second `group show`. The daemon goes on knocking: it answers at once, with the stage it is at now.
+  it("through a daemon, answers at once with whether it is in and at what stage", async () => {
+    vi.useFakeTimers();
+    try {
+      const answer = callApi(oneShot("daemon").ctx, "group.join", { link: LINK });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(await Promise.race([answer, Promise.resolve("still waiting")])).toEqual({ group: "g9", joined: false, stage: "knocking" });
+      const active = { ...knocking("knocking"), status: "active", invitation: undefined } as unknown as GroupView;
+      expect(await callApi(oneShot("daemon", active).ctx, "group.join", { link: LINK })).toEqual({ group: "g9", joined: true, stage: null });
+    } finally { vi.useRealTimers(); }
   });
 
   // Found in a bug hunt: an accepted contact's invitation to the group, still waiting for its welcome, keeps its place
@@ -178,11 +187,11 @@ describe("a one-shot group join of a link for a group id already held", () => {
   const code = encodeGroupEntryLink({ g: id, host });
   const url = `https://ghostly.tools/#/join/${code}`;
   const inGroup = { id, name: "Crew", createdAt: 1, profile: "mesh", status: "active", isAdmin: false, canSend: true, lastMessageAt: 0, invited: [], memberLinks: {}, members: [] } as unknown as GroupView;
-  function held(before: GroupView, after: GroupView) {
+  function held(before: GroupView, after: GroupView, mode: "one-shot" | "daemon" = "one-shot") {
     let groups = [before];
     const getState = () => ({ links: [], groups, settings: {}, transport: {} }) as unknown as EngineState;
     const node = { getState, joinGroupByLink: vi.fn(async () => { groups = [after]; return { groupId: id }; }) };
-    return { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "one-shot", version: "test" } as unknown as ApiContext;
+    return { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode, version: "test" } as unknown as ApiContext;
   }
   const pick = `keep the one you are in (ghostly engine keepGroup '{"groupId":"${id}"}') or take the link's instead (ghostly engine switchGroup '{"groupId":"${id}","to":"<its link, from group show --show-secret>"}')`;
 
@@ -190,6 +199,12 @@ describe("a one-shot group join of a link for a group id already held", () => {
     const answer = await callApi(held(inGroup, { ...inGroup, others: [{ link: code }] }), "group.join", { link: url });
     expect(answer).toMatchObject({ group: id, joined: false, stage: null });
     expect(answer).toEqual({ group: id, joined: false, stage: null,
+      warning: `Not joined: you are in a group under this link's id already, and only a group's welcome says whose a link is, so the link was kept beside that group and knocks nowhere. ghostly group show ${id} lists it under "others": ${pick}` });
+  });
+
+  // Found in a bug hunt: through a daemon it answered {"group": id} only, and nothing said the link was only kept.
+  it("through a daemon, another's link kept beside the group held: says so, as the one-shot does", async () => {
+    expect(await callApi(held(inGroup, { ...inGroup, others: [{ link: code }] }, "daemon"), "group.join", { link: url })).toEqual({ group: id, joined: false, stage: null,
       warning: `Not joined: you are in a group under this link's id already, and only a group's welcome says whose a link is, so the link was kept beside that group and knocks nowhere. ghostly group show ${id} lists it under "others": ${pick}` });
   });
 
