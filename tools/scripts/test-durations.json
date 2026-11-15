@@ -719,7 +719,7 @@
   "packages/cli/test/startCost.test.ts": 0.1,
   "packages/cli/test/startReads.test.ts": 3.6,
   "packages/cli/test/statusCards.test.ts": 5,
-  "packages/cli/test/stdout.test.ts": 13.4,
+  "packages/cli/test/stdout.test.ts": 5.4,
   "packages/cli/test/storage.test.ts": 11.1,
   "packages/cli/test/storageNoSqlite.test.ts": 0,
   "packages/cli/test/textSecretGuard.test.ts": 12,
