@@ -4,11 +4,11 @@ import { CommunityWorld } from "./communityWorld";
 
 /**
  * The node a community group's calls go through (WISP 602 § The group names its node), through the real community
- * engine on headless peers: the admin names it, every member's view carries it, a rename keeps it, clearing it clears
- * it.
+ * engine on headless peers: the admin names it, every member's view carries it, a rename keeps it, sealed call media
+ * goes on and off, clearing it clears it.
  */
 describe("a group's call node on headless community engines", { timeout: 120_000 }, () => {
-  it("set by the admin and seen by a member, kept through a rename, cleared for everyone; refused to a member", async () => {
+  it("set by the admin and seen by a member, kept through a rename, sealed and unsealed, cleared for everyone; refused to a member", async () => {
     const SFU = "https://call.example.com";
     const world = new CommunityWorld();
     const alice = world.add("alice"), bob = world.add("bob");
@@ -24,6 +24,14 @@ describe("a group's call node on headless community engines", { timeout: 120_000
     await world.until(() => world.view(bob, id)?.call?.sfu === SFU, 60_000);
     await alice.groups.rename(id, "Thursday call");
     await world.until(() => world.view(bob, id)?.name === "Thursday call", 60_000);
+    expect(world.view(bob, id)?.call).toEqual({ sfu: SFU });
+    // Sealed call media on; the node named again without a word on it keeps it on.
+    await alice.groups.setCall(id, SFU, true);
+    await world.until(() => world.view(bob, id)?.call?.e2ee === 1, 60_000);
+    await alice.groups.setCall(id, SFU);
+    expect(world.view(alice, id)?.call).toEqual({ sfu: SFU, e2ee: 1 });
+    await alice.groups.setCall(id, SFU, false);
+    await world.until(() => world.view(bob, id)?.call?.e2ee === undefined, 60_000);
     expect(world.view(bob, id)?.call).toEqual({ sfu: SFU });
     await alice.groups.setCall(id, null);
     await world.until(() => world.view(bob, id)?.call === undefined, 60_000);
