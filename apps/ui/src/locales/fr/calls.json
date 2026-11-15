@@ -55,6 +55,7 @@
   "mute": "Couper le son",
   "needLive": "Les appels nécessitent une liaison directe",
   "noAnswer": "Pas de réponse",
+  "noGroupOnLinux": "Les appels de groupe ne sont pas encore sur Linux. Rejoignez-les depuis app.ghostly.tools dans un navigateur",
   "noPath": "L'appel n'a pas pu se connecter",
   "noPathGuide": "Comment régler ça",
   "noPathNext": "Un VPN ou un pare-feu, le vôtre ou celui de votre contact, peut bloquer les appels. Un serveur TURN les fait passer.",

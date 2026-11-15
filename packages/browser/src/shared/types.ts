@@ -445,6 +445,8 @@ export interface GroupView {
   canSend: boolean;
   /** The group's picture (a JPEG data URL the engine checked), set by its admin; absent for none. */
   picture?: string;
+  /** The node that forwards a community group's calls, as its admin's statement names it (WISP 602); absent for none. */
+  call?: { sfu: string };
   /**
    * A private group past 16 members that runs on hubs (WISP 902 · Group Mesh § Hubs): `hub` when I am one. Absent for
    * the full mesh.

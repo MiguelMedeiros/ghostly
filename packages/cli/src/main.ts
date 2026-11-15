@@ -213,10 +213,10 @@ export function oneChatOnly(method: string, params: Record<string, unknown>): bo
 
 /**
  * What a member says in one group, over that group's own edges: no 1:1 chat carries any of it. The admin's name,
- * picture, hubs and fresh secret too (the group's metadata or a commit). Not `group.remove` (the one removed hears it
+ * picture, call node, hubs and fresh secret too (the group's metadata or a commit). Not `group.remove` (the one removed hears it
  * over the chat that invited them) nor `group.admin` (the new admin takes back the invitations still out).
  */
-const GROUP_EDGES_ONLY: ReadonlySet<string> = new Set(["group.send", "group.edit", "group.react", "group.typing", "group.rename", "group.picture", "group.hub", "group.rotate"]);
+const GROUP_EDGES_ONLY: ReadonlySet<string> = new Set(["group.send", "group.edit", "group.react", "group.typing", "group.rename", "group.picture", "group.call", "group.hub", "group.rotate"]);
 
 /**
  * A command about one group that goes over its edges only (`GROUP_EDGES_ONLY`): a one-shot for it leaves the saved 1:1
@@ -1438,8 +1438,10 @@ async function listenCommand(argv: string[]): Promise<void> {
     const stop = stopper(async () => { following.close(); await handle.stop(); });
     quit = (code) => { following.close(); process.exit(code); };
     onReaderGone(stop);
-    await following.subscribed;
+    // Before the subscription's answer is awaited: the events it replays can come in the same read, and the first one's
+    // hook started before the await went on. A SIGTERM then ended the listen on the spot and left the hook running.
     onStopSignals(stop);
+    await following.subscribed;
     return;
   }
   const [{ keepServing, serve }, { callApi }] = await Promise.all([engineHost(), engineApi()]);

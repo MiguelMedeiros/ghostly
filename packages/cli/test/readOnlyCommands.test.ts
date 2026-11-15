@@ -38,7 +38,7 @@ const ONLINE = [
   "button press", "button update", "chat connect", "chat disconnect", "chat transport", "chat verify", "chat wait",
   "forward", "invite create", "invite join", "message delete", "message retry", "pin", "react", "routine send", "routine update", "task send",
   "task update", "usage send",
-  "group accept", "group admin", "group create", "group decline", "group forget", "group hub", "group invite", "group join", "group leave",
+  "group accept", "group admin", "group call", "group create", "group decline", "group forget", "group hub", "group invite", "group join", "group leave",
   "group link", "group picture", "group react", "group remove", "group rename", "group rotate",
   "file accept", "file cancel", "file decline", "file pause", "file request", "file resend", "file resume", "file save", "file send", "file wait",
   "chat pay", "chat pay-request", "chat request", "lightning default", "lightning rename", "pay", "payment check", "payment reclaim",
