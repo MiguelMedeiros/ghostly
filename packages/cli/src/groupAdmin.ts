@@ -80,6 +80,8 @@ export async function pictureFrom(path: string): Promise<string> {
 }
 
 async function picture(params: Params): Promise<string | null> {
+  // Refused as the command line refuses `--clear` with a <jpeg>: before, `clear` won and the picture went, exit 0.
+  if (bool(params, "clear") && str(params, "path") !== undefined) throw new CliError("bad_request", "clear removes the picture: not with path");
   if (bool(params, "clear")) return null;
   return pictureFrom(str(params, "path", true));
 }
@@ -204,6 +206,9 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
     const ref = str(params, "group", true), raw = str(params, "sfu");
     const e2ee = params.e2ee === undefined || params.e2ee === null ? undefined : bool(params, "e2ee");
     let sfu: string | null;
+    // Refused as the command line refuses them with `--clear`: before, `clear` won and the node went, exit 0.
+    if (bool(params, "clear") && raw !== undefined) throw new CliError("bad_request", "clear removes the call node: not with sfu");
+    if (bool(params, "clear") && e2ee !== undefined) throw new CliError("bad_request", "clear removes the call node: not with e2ee");
     if (bool(params, "clear")) sfu = null;
     else if (raw !== undefined || e2ee === undefined) sfu = callNode(str(params, "sfu", true), ref, group.id);
     // `--e2ee` alone turns sealed media on or off for the node the group names already.
