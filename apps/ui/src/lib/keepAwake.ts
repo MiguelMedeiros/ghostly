@@ -6,7 +6,7 @@ import type { HandoffView } from "@ghostly/browser/devices/handoff";
 import type { FileTransferView } from "@ghostly/browser/shared/types";
 import { DEVICE_SET_EVENT } from "./devices";
 import { useEngineValue } from "./engineState";
-import { androidApp } from "./touchOnly";
+import { keepAwakeHoldsDevices } from "../desktop/androidKeepAwake";
 
 /*
  * "Keep this computer awake" (WISP 06 § User experience, Profile, Devices): on a Desktop with a standby device, a switch
@@ -30,7 +30,7 @@ export function keepAwakeSupported(): boolean {
 
 /** Whether the devices can hold it too (the switch, a handoff): the desktop app. Android holds nothing for them. */
 export function keepAwakeForDevices(): boolean {
-  return keepAwakeSupported() && !androidApp();
+  return keepAwakeSupported() && keepAwakeHoldsDevices();
 }
 
 function readSetting(): boolean {
