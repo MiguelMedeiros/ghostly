@@ -201,6 +201,7 @@ export const ENGINE_PARAMS: Readonly<Record<string, string>> = {
   setGroupPicture: "{ groupId, picture }",
   renameGroup: "{ groupId, name }",
   setGroupCall: "{ groupId, sfu }",
+  groupCallToken: "{ groupId }",
   forgetGroup: "{ groupId }",
   setGroupManage: "{ groupId, on }",
   deviceEnrollInvite: "{ name }",
