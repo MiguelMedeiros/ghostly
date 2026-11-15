@@ -21,10 +21,6 @@ const IMPORTERS = ["apps/ui", "apps/web", "apps/extension", "packages"];
  * must have landed. Past it, the module is held to the rule again, so the list never keeps one for good.
  */
 const AWAITING_CALLER: Record<string, string> = {
-  // Group calls: the group header's Join call opens it.
-  [`${UI}/components/GroupCallView.tsx`]: "2026-11-22",
-  // Group calls: the group call window's wiring (useGroupCall into GroupCallView) imports it.
-  [`${UI}/hooks/useGroupCall.ts`]: "2026-11-22",
   // Group calls: the group header's Join call button reads it (disabled with the reason on the Linux Desktop).
   [`${UI}/hooks/useGroupCallSupport.ts`]: "2026-11-22",
 };

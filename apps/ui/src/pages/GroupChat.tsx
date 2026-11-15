@@ -17,6 +17,8 @@ import { LeaveGroupDialog } from "../components/LeaveGroupDialog";
 import { GroupShareDialog } from "../components/GroupLinkPanel";
 import { GroupLinkAskDialog } from "../components/GroupLinkAskDialog";
 import { GroupConnection } from "../components/GroupConnection";
+import { GroupCallButton } from "../components/GroupCallButton";
+import { groupCallOf } from "../lib/groupCallPass";
 import { useNoLinksHint } from "../hooks/useNoLinksHint";
 import { TasksButton } from "../components/chat/TasksButton";
 import { useJumpTo } from "../hooks/useJumpTo";
@@ -902,6 +904,8 @@ export function GroupChat() {
         </div>
         <div className="flex items-center gap-1">
           {group.status === "active" && <GroupConnection group={group} />}
+          {/* Only in a group whose admin named a call node (WISP 602); another group opened ends this one's call. */}
+          {group.status === "active" && groupCallOf(group) && <GroupCallButton key={group.id} group={group} />}
           {/* Only while a bot's card is here (WISP 405 · Status Cards). */}
           <TasksButton rows={cardRows} nameOf={author => nameOf("peer", author) ?? `…${author.slice(-6)}`} faceOf={memberFace} />
           {canShare && !narrow && <button ref={shareRef} onClick={() => void openShare()} data-testid="group-share" title={t("group.chat.shareHint")} aria-label={t("group.chat.shareLink")}

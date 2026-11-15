@@ -22,10 +22,17 @@
   "ended": "Chiamata terminata",
   "endsCurrent": "Rispondere chiude la chiamata in corso",
   "group": {
+    "endAndJoin": "Chiudi ed entra",
+    "endOtherBody": "Entrare nella chiamata del gruppo chiude la chiamata in corso.",
+    "endOtherTitle": "Chiudere la chiamata?",
     "info": "Passa dal nodo del gruppo. Chiunque nel gruppo può parlare, mostrare la fotocamera e condividere lo schermo. Oltre 8 persone entri senza microfono.",
+    "join": "Entra nella chiamata",
     "leave": "Esci dalla chiamata",
     "muted": "Microfono disattivato",
-    "screenOf": "Schermo di {{name}}"
+    "refused": "Non hai ancora accesso a questa chiamata",
+    "retry": "Riprova",
+    "screenOf": "Schermo di {{name}}",
+    "unreachable": "Impossibile raggiungere la chiamata del gruppo"
   },
   "incomingAudio": "Chiamata vocale in arrivo...",
   "incomingVideo": "Videochiamata in arrivo...",

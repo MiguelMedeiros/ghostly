@@ -22,10 +22,17 @@
   "ended": "通话结束",
   "endsCurrent": "接听将结束当前通话",
   "group": {
+    "endAndJoin": "结束并加入",
+    "endOtherBody": "加入群组通话会结束你当前的通话。",
+    "endOtherTitle": "结束当前通话？",
     "info": "通话经过群组的节点。群组中的任何人都可以发言、开启摄像头和共享屏幕。超过 8 人时，你加入时为静音。",
+    "join": "加入通话",
     "leave": "离开通话",
     "muted": "已静音",
-    "screenOf": "{{name}} 的屏幕"
+    "refused": "你暂时还不能加入此通话",
+    "retry": "重试",
+    "screenOf": "{{name}} 的屏幕",
+    "unreachable": "无法连接到群组通话"
   },
   "incomingAudio": "语音来电...",
   "incomingVideo": "视频来电...",

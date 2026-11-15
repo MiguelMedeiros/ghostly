@@ -22,10 +22,17 @@
   "ended": "Appel terminé",
   "endsCurrent": "Répondre met fin à votre appel en cours",
   "group": {
+    "endAndJoin": "Raccrocher et rejoindre",
+    "endOtherBody": "Rejoindre l'appel du groupe met fin à votre appel en cours.",
+    "endOtherTitle": "Mettre fin à votre appel ?",
     "info": "Il passe par le nœud du groupe. Tout membre peut parler, montrer sa caméra et partager son écran. Au-delà de 8 personnes, vous arrivez en sourdine.",
+    "join": "Rejoindre l'appel",
     "leave": "Quitter l'appel",
     "muted": "En sourdine",
-    "screenOf": "Écran de {{name}}"
+    "refused": "Vous n'avez pas encore accès à cet appel",
+    "retry": "Réessayer",
+    "screenOf": "Écran de {{name}}",
+    "unreachable": "Impossible de joindre l'appel du groupe"
   },
   "incomingAudio": "Appel audio entrant...",
   "incomingVideo": "Appel vidéo entrant...",

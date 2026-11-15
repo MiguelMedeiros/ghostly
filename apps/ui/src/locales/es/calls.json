@@ -22,10 +22,17 @@
   "ended": "Llamada finalizada",
   "endsCurrent": "Contestar finaliza tu llamada actual",
   "group": {
+    "endAndJoin": "Terminar y unirse",
+    "endOtherBody": "Unirte a la llamada del grupo termina la llamada en la que estás.",
+    "endOtherTitle": "¿Terminar tu llamada?",
     "info": "Pasa por el nodo del grupo. Cualquiera del grupo puede hablar, mostrar su cámara y compartir su pantalla. Con más de 8 personas entras silenciado.",
+    "join": "Unirse a la llamada",
     "leave": "Salir de la llamada",
     "muted": "Silenciado",
-    "screenOf": "Pantalla de {{name}}"
+    "refused": "Aún no tienes acceso a esta llamada",
+    "retry": "Reintentar",
+    "screenOf": "Pantalla de {{name}}",
+    "unreachable": "No se pudo llegar a la llamada del grupo"
   },
   "incomingAudio": "Llamada de voz entrante...",
   "incomingVideo": "Videollamada entrante...",
