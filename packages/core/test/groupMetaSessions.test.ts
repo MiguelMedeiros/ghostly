@@ -714,6 +714,40 @@ describe("group call node, group-community/1 (WISP 602)", () => {
     expect(() => encodeGroupMetaBody({ call: { sfu: "https://call.example.com/sfu" } })).toThrow("A group's call node is an https origin");
   });
 
+  it("keeps sealed call media (e2ee: 1) through a read and a write, and reads any other value as off (WISP 602 § End-to-end encryption)", () => {
+    const sealed = JSON.stringify({ name: "Thursday", call: { sfu: SFU, e2ee: 1 } });
+    const read = parseGroupMetaBody(sealed);
+    expect(read).toEqual({ name: "Thursday", call: { sfu: SFU, e2ee: 1 } });
+    expect(encodeGroupMetaBody(read!)).toBe(sealed);
+    expect(JSON.parse(encodeGroupMetaBody({ ...read, name: "Friday" }))).toEqual({ name: "Friday", call: { sfu: SFU, e2ee: 1 } });
+    expect(JSON.parse(encodeGroupMetaBody({ ...read, pic: RED }))).toEqual({ name: "Thursday", pic: RED, call: { sfu: SFU, e2ee: 1 } });
+    for (const off of [0, 2, 7, "1", true, null, [1], { on: 1 }]) {
+      expect(parseGroupMetaBody(JSON.stringify({ call: { sfu: SFU, e2ee: off } })), JSON.stringify(off)).toEqual({ call: { sfu: SFU } });
+      expect(encodeGroupMetaBody({ call: { sfu: SFU, e2ee: off as never } }), JSON.stringify(off)).toBe(JSON.stringify({ call: { sfu: SFU } }));
+    }
+  });
+
+  it("an admin's rename or picture change keeps sealed call media on for every member", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob");
+    await net.meet(alice, bob);
+    // Nothing in this app writes `e2ee: 1` yet: the admin's statement is signed by hand, as a later app would.
+    const s = bob.session, key = epochKeys(fromBase64Url(s.state.secrets[s.topHash]), s.id, s.epoch).message;
+    const aliceSeed = identityFromSeedB64(alice.session.state.seedB64).seed;
+    const body = JSON.stringify({ name: "Thursday", call: { sfu: SFU, e2ee: 1 } });
+    const statement = wrapGroupMeta(signGroupMeta({ g: s.id, e: s.epoch, h: s.topHash, r: 50, ts: 1 }, body, aliceSeed, alice.session.myKey), s.topHash, key, true);
+    for (const member of [alice, bob]) expect(await member.session.handle(bob.session.myKey, clone(statement))).toBe(true);
+    expect([alice.session.call, bob.session.call]).toEqual([{ sfu: SFU, e2ee: 1 }, { sfu: SFU, e2ee: 1 }]);
+    await alice.session.rename("Friday");
+    await net.settle();
+    expect([bob.session.name, bob.session.call]).toEqual(["Friday", { sfu: SFU, e2ee: 1 }]);
+    await alice.session.setPicture(RED);
+    await net.settle();
+    expect([bob.session.name, bob.session.picture, bob.session.call]).toEqual(["Friday", RED, { sfu: SFU, e2ee: 1 }]);
+    expect(parseGroupMetaBody(bob.session.state.meta!.body)?.call).toEqual({ sfu: SFU, e2ee: 1 });
+  });
+
   it("the admin sets it for every member, a rename and a picture keep it, a member is refused, and clearing it clears it", async () => {
     const net = new Net();
     const alice = net.create("alice");
