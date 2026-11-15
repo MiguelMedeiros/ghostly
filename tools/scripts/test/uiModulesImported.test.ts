@@ -20,10 +20,7 @@ const IMPORTERS = ["apps/ui", "apps/web", "apps/extension", "packages"];
  * A module built ahead of its caller, in a feature that lands in slices: the date by which the slice that imports it
  * must have landed. Past it, the module is held to the rule again, so the list never keeps one for good.
  */
-const AWAITING_CALLER: Record<string, string> = {
-  // Group calls: the group header's Join call opens it.
-  [`${UI}/components/GroupCallView.tsx`]: "2026-11-22",
-};
+const AWAITING_CALLER: Record<string, string> = {};
 
 const isTest = (file: string) => /(?:^|\/)(?:test|tests|__tests__)\/|\.(?:test|spec)\.[cm]?[jt]sx?$/.test(file);
 const tracked = (...paths: string[]) =>
