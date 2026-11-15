@@ -59,11 +59,6 @@ export function setFaceChoice(peerKey: string, choice: FaceChoice | undefined): 
   window.dispatchEvent(new Event(FACE_EVENT));
 }
 
-/** Forgets a contact's choice with their chat. */
-export function forgetFaceChoice(peerKey: string): void {
-  try { localStorage.removeItem(faceKey(peerKey)); } catch { /* storage unavailable */ }
-}
-
 const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
 
 // Every row of the chat list reads its contact's choice: they share one window listener, which calls a contact's own.
