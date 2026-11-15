@@ -3,7 +3,7 @@
  * its caches, the services worker) goes when the chat is deleted, the profile's data is cleared or the profile is
  * deleted. The origin is named from the chat's key: a later chat never opens it again, so nothing else would clear it.
  */
-import { viewerTag } from "@ghostly/core";
+import { MAX_SERVICES, viewerTag } from "@ghostly/core";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import { openedServices as openedList, type ForgetServices, type Opened } from "../../../ui/src/lib/openedServices";
 import { serviceLabel } from "./opener";
@@ -29,7 +29,9 @@ const listed = new Set<string>();
 /**
  * Notes every app each chat lists (`peerServices`), as the list comes: one this device opened before the list was kept
  * (it noted only those it opened from then on) goes with the chat, its data or its profile too. Only a contact who
- * comes back online lists theirs again, so only theirs are found.
+ * comes back online lists theirs again, so only theirs are found. No more for a chat than one list holds
+ * (`MAX_SERVICES`): a contact may list new apps at any time, and the list is local storage the whole origin shares,
+ * each entry a bridge Delete chat loads at once.
  */
 export async function noteListed(profile: string, links: readonly Pick<LinkView, "myPubKeyZ32" | "peerPubKeyZ32" | "peerServices">[]): Promise<void> {
   for (const link of links) {
@@ -39,7 +41,10 @@ export async function noteListed(profile: string, links: readonly Pick<LinkView,
       if (listed.has(key)) continue;
       listed.add(key);
       const tag = viewerTag(link.myPubKeyZ32);
-      opened.note({ profile, tag, label: await serviceLabel(tag, link.peerPubKeyZ32, service.id) });
+      const label = await serviceLabel(tag, link.peerPubKeyZ32, service.id);
+      // Counted right before it is noted, with no wait between: two states noted at once never both pass the count.
+      if (opened.list().filter((o) => o.profile === profile && o.tag === tag).length >= MAX_SERVICES) continue;
+      opened.note({ profile, tag, label });
     }
   }
 }
