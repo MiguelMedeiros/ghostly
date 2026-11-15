@@ -11,6 +11,7 @@ import { fromBase64Url, type X401CertificateCheck } from "@ghostly/core";
  * Node has no path validator outside a TLS handshake, so what else RFC 5280 asks of a path is read here from each
  * certificate's DER: a CA's path length and DNS name constraints (the root's too), the leaf's key usage
  * (`digitalSignature`), an extended key usage that leaves servers out, and a critical extension this check does not know.
+ * Only tests import it yet: `x401 fetch` (WISP 3xx, not built yet) wires it when it reads a signed request.
  */
 export function x401CertificateCheck(roots: readonly string[] = defaultRoots()): X401CertificateCheck {
   let trusted: X509Certificate[] | undefined;

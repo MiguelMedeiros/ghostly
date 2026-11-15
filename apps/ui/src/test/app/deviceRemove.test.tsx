@@ -429,6 +429,21 @@ describe("the standby screen after a removal", () => {
     expect(screen.getByTestId("device-remove-here-go")).toHaveTextContent("Remove");
   });
 
+  it("Escape and the × do nothing while Remove this profile here runs, so a failure that comes later is still said", async () => {
+    let refuse = () => {};
+    vi.mocked(removeProfileHere).mockReset().mockReturnValue(new Promise<void>((_, reject) => { refuse = () => reject(new Error("This profile is open in another window. Close it, then try again.")); }));
+    const { user } = renderApp(<DeviceStandby gate={{ state: "removed", activeDevice: "Desktop" }} />);
+    await user.click(screen.getByTestId("device-standby-remove-here"));
+    await user.type(screen.getByTestId("device-remove-here-name"), "Personal");
+    await user.click(screen.getByTestId("device-remove-here-go"));
+    expect(screen.getByTestId("device-remove-here-go")).toHaveTextContent("Removing…");
+    screen.getByTestId("device-remove-here").dispatchEvent(new Event("cancel", { cancelable: true }));
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.getByTestId("device-remove-here")).toBeInTheDocument();
+    act(() => refuse());
+    expect(await screen.findByTestId("device-remove-here-error")).toBeInTheDocument();
+  });
+
   it("a device still in the set, or one that may get back in, has no Remove this profile here", () => {
     for (const gate of [{ state: "standby" as const, activeDevice: "Desktop" }, { state: "moving" as const, activeDevice: "Desktop" }, { state: "superseded" as const, activeDevice: "Desktop" }]) {
       const view = renderApp(<DeviceStandby gate={gate} />);

@@ -106,7 +106,7 @@ describe("Send on the Cashu card: scan, paste or picture, review, pay", () => {
     await user.click(screen.getByRole("tab", { name: "Send" }));
     await user.upload(screen.getByLabelText("Choose image"), picture());
     await user.click(await screen.findByTestId("wallet-pay-confirm"));
-    expect(await screen.findByTestId("wallet-error")).toBeInTheDocument();
+    expect(await screen.findByTestId("wallet-error")).toHaveTextContent("Route not found");
     expect(screen.getByTestId("wallet-pay-review")).toBeInTheDocument();
     expect(screen.queryByTestId("wallet-send-result")).not.toBeInTheDocument();
   });

@@ -44,7 +44,7 @@ describe("the away panel", () => {
 
   it("an unnamed home device is another device; without a platform there is nothing to read", () => {
     renderApp(<WalletAway wallet={{ type: "bark", name: "Bark", home: { device: "" } }} />);
-    expect(screen.getByTestId("wallet-away")).toBeInTheDocument();
+    expect(screen.getByTestId("wallet-away")).toHaveTextContent("On the device that holds it");
     expect(screen.queryByTestId("wallet-away-backup")).not.toBeInTheDocument();
   });
 });
