@@ -116,9 +116,9 @@ it("Cancel sending once the retry handed the text to the link: it may be out, so
   const { t, first } = await race("handed", (c, id) => { answer = c.node.deleteMessage({ linkId: c.linkId, messageId: id }); });
   // It says so, where it said nothing and the CLI answered `everyone: false`, "the contact keeps theirs".
   expect(answer).toEqual({ everyone: true });
-  // The relay took it: the contact has it. Its removal is on its way (WISP 400: said once the chat is live, as any
-  // Delete for everyone's), where it used to be gone here with nothing left to take it back.
-  expect(t.got("cancel me")).toBe(true);
+  // The relay took it: the contact may have read it there before the floor dropped it (a newer envelope without it
+  // took its place). Its removal is on its way (WISP 400: said once the chat is live, as any Delete for everyone's),
+  // where it used to be gone here with nothing left to take it back.
   await vi.waitFor(() => expect(t.node.removalPending({ linkId: t.linkId, messageId: first })).toBe(true), { timeout: 5_000, interval: 100 });
   expect(await t.row(first)).toBeUndefined();
   expect(await t.deleted(first)).toBe(true);

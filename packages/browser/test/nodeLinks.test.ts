@@ -70,6 +70,9 @@ vi.mock("@ghostly/core", async (importOriginal) => {
     // Its choice, wallets aside: Lightning too, which it has no wallet of (peerAllowsPayment leaves it out).
     peerChoosesPayment = vi.fn((m: string) => m === "cashu" || m === "lightning");
     allowsPayment = vi.fn(() => true);
+    /** Nothing of mine waits on the DHT floor here. */
+    dhtHolds = vi.fn(() => false);
+    withdrawDht = vi.fn(async () => {});
     constructor(readonly options: GhostLinkOptions) { links.push(this as never); }
   }
   return { ...actual, GhostLink: RecordedLink };
