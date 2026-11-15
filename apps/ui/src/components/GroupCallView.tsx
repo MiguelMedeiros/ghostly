@@ -16,6 +16,8 @@ import { callWindowShown } from "../lib/serviceWindows";
 import { mediaProblemKeys } from "../lib/mediaProblemText";
 import { openAppSettings } from "../desktop/androidCameraRefusal";
 import { DeviceMenu, DeviceNoticeBar } from "./CallOverlay";
+import { useCallModeration, type GroupCallModerator } from "../hooks/useCallModeration";
+import { ModerationProblem, RemovedFromCall, TileModerationMenu } from "./GroupCallModerationMenu";
 
 /** One person in a group call, as `useGroupCall` gives them: what they send, and the tracks to show and play. */
 export interface GroupCallParticipant {
@@ -59,6 +61,8 @@ interface GroupCallViewProps {
   nameOf?: (identity: string) => string;
   /** Moves each time Join call is pressed while in the call: the small window opens whole again. */
   raised?: number;
+  /** You are the group's admin: each other member's tile has a menu to mute or remove them (WISP 602 § Moderation). */
+  moderator?: GroupCallModerator;
 }
 
 const MINI_KEY = "ghostly_group_call_mini";
@@ -172,7 +176,7 @@ function MutedMark({ label }: { label: string }) {
 }
 
 /** A face (camera or avatar) or a shared screen, with the name and a muted mark; the active speaker wears a ring. */
-function Tile({ person, you, kind, speaking, name, face }: { person: GroupCallParticipant; you: boolean; kind: "face" | "screen"; speaking: boolean; name: ReactNode; face: string }) {
+function Tile({ person, you, kind, speaking, name, face, menu }: { person: GroupCallParticipant; you: boolean; kind: "face" | "screen"; speaking: boolean; name: ReactNode; face: string; menu?: ReactNode }) {
   const { t } = useI18n();
   const track = kind === "screen" ? person.tracks.screen : person.camera ? person.tracks.camera : null;
   return (
@@ -196,6 +200,7 @@ function Tile({ person, you, kind, speaking, name, face }: { person: GroupCallPa
         {kind === "face" && !person.mic && <MutedMark label={t("calls.group.muted")} />}
         <span dir="auto" className="min-w-0 truncate rounded-md bg-black/60 px-1.5 py-0.5 text-xs text-white">{name}</span>
       </div>
+      {menu}
     </div>
   );
 }
@@ -204,8 +209,9 @@ function Tile({ person, you, kind, speaking, name, face }: { person: GroupCallPa
  * A group call through the group's node: everyone's tile in a grid, the active speaker ringed, and a shared screen
  * large with the faces beside it. Drawn from `useGroupCall`'s state, passed in; it imports no LiveKit.
  */
-export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, onToggleScreen, onLeave, canShareScreen = false, pinned = false, onReturnToChat, layer, devices = null, connected = true, error = null, nameOf: groupNameOf, raised = 0 }: GroupCallViewProps) {
+export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, onToggleScreen, onLeave, canShareScreen = false, pinned = false, onReturnToChat, layer, devices = null, connected = true, error = null, nameOf: groupNameOf, raised = 0, moderator }: GroupCallViewProps) {
   const { t } = useI18n();
+  const moderation = useCallModeration(moderator, connected);
   // Each new error is said anew (its own alert), and goes after a few seconds; a failed join has no window to say it in.
   const [said, setSaid] = useState({ error, id: 0, over: false });
   if (said.error !== error) setSaid({ error, id: said.id + 1, over: false });
@@ -274,8 +280,11 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
   const presenter = everyone.find((p) => p.identity === order[order.length - 1]) ?? null;
   // The other screens are tiles beside the faces.
   const otherScreens = order.slice(0, -1).map((id) => everyone.find((p) => p.identity === id)!);
+  // The admin's menu, on the others' faces in the whole window: the small one has no room for it.
+  const menuOf = (p: GroupCallParticipant) => moderation && !mini && p !== local
+    ? <TileModerationMenu identity={p.identity} name={shown(p)} moderation={moderation} host={box} /> : undefined;
   const faces = everyone.map((p) => (
-    <Tile key={p.identity} person={p} you={p === local} kind="face" speaking={p.identity === activeSpeaker} name={nameOf(p)} face={shown(p)} />
+    <Tile key={p.identity} person={p} you={p === local} kind="face" speaking={p.identity === activeSpeaker} name={nameOf(p)} face={shown(p)} menu={menuOf(p)} />
   ));
   const screenTiles = otherScreens.map((p) => (
     <Tile key={`${p.identity}-screen`} person={p} you={p === local} kind="screen" speaking={false} name={fillNames(t("calls.group.screenOf"), { name: nameOf(p) })} face={shown(p)} />
@@ -331,6 +340,7 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
               className="grid h-5 w-5 shrink-0 cursor-pointer place-items-center rounded-full text-text-muted transition-colors hover:text-accent aria-expanded:text-accent">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5" /><path d="M12 11v5.5M12 7.5v.01" /></svg>
             </button>
+            {moderation && <RemovedFromCall moderation={moderation} nameOf={(identity) => (groupNameOf ? groupNameOf(identity) : identity)} host={box} />}
           </div>
           {info && <p id={infoId} data-testid="group-call-info-text" className="mx-auto max-w-md px-4 pb-2 text-center text-xs text-text-secondary break-words">{t("calls.group.info")}</p>}
           {presenter ? (
@@ -363,6 +373,8 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
           )}
         </p>
       )}
+
+      {!mini && <ModerationProblem moderation={moderation} />}
 
       {/* A headset unplugged, the chosen microphone back: said over the controls, in the whole window (the small one has no room). */}
       {!mini && devices?.notice && <DeviceNoticeBar devices={devices} />}
