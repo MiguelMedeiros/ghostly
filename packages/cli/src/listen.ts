@@ -613,14 +613,19 @@ export function followDaemon(address: DaemonAddress, client: DaemonClient, handl
     if (current) current.resume(); else reconnect(0);
   });
   // A feed that took no event yet goes on after the last seq the daemon had when it subscribed: one that restarts
-  // otherwise subscribes it from its own now, past what it journaled before the reconnect (its daemon.started).
-  const follow = (c: DaemonClient) => c.subscribe(feed.since, feed.take, () => {
-    if (current !== c) return;
-    current = null;
-    reconnect(1000);
-  }).then((answer) => {
-    if (feed.since === undefined && typeof answer?.lastSeq === "number") feed.since = answer.lastSeq;
-    return answer;
-  });
+  // otherwise subscribes it from its own now, past what it journaled before the reconnect (its daemon.started). So does
+  // one started past the daemon's last event (a cursor from a backup, `startAt`): it waited at the cursor's number, and
+  // the daemon replays nothing up to it. Not once it took an event since: that is where it is.
+  const follow = (c: DaemonClient) => {
+    const asked = feed.since;
+    return c.subscribe(asked, feed.take, () => {
+      if (current !== c) return;
+      current = null;
+      reconnect(1000);
+    }).then((answer) => {
+      if (typeof answer?.lastSeq === "number" && feed.since === asked && (asked === undefined || asked > answer.lastSeq)) feed.since = answer.lastSeq;
+      return answer;
+    });
+  };
   return { subscribed: follow(client), close: () => { clearTimeout(holding); current?.close(); } };
 }
