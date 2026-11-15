@@ -329,6 +329,16 @@ describe("a mic, camera or screen that did not come on", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(/^could not publish the track$/);
   });
 
+  it("draws only its title in the small window, beside the corner button, and still says where to allow it", () => {
+    withError(micRefused(), { pinned: true });
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("No access to the mic Allow access in your browser or system settings.");
+    // Centred over the whole width with its next step, it began above a phone's 190 × 136 window and the corner button covered it.
+    expect(alert).toHaveClass("call-group-error");
+    expect(within(alert).getByText("No access to the mic")).not.toHaveClass("sr-only");
+    expect(within(alert).getByText("Allow access in your browser or system settings.", { exact: false })).toHaveClass("sr-only");
+  });
+
   it("is said in the app's language", () => {
     withError(micRefused(), {}, "pt");
     expect(screen.getByRole("alert")).toHaveTextContent("Sem acesso ao microfonePermita o acesso nos ajustes do navegador ou do sistema.");
