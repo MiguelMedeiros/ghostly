@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
-import { viewerTag } from "@ghostly/core";
+import { MAX_SERVICES, viewerTag } from "@ghostly/core";
 import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
 import { serviceLabel } from "../../../../web/src/svc/opener";
 import { BRIDGE_PAGE, parseServicesHost, serviceOrigin } from "../../../../web/src/svc/protocol";
@@ -69,6 +69,33 @@ it("notes every app a chat lists, never one it cannot open, and clears each with
   await vi.advanceTimersByTimeAsync(0);
   expect([...document.querySelectorAll("iframe")].map((frame) => frame.src).sort())
     .toEqual(labels.map((label) => `${serviceOrigin(host, label)}${BRIDGE_PAGE}`).sort());
+  await vi.runAllTimersAsync();
+  await forgetting;
+});
+
+it("notes no more of a chat's listed apps than one list holds, however many new ones its contact lists", async () => {
+  const { webHost: web, emit } = await webHost();
+  // A contact lists at most MAX_SERVICES apps at a time, but a new list of new ones at any time.
+  for (let round = 0; round < 20; round++) {
+    const peerServices = Array.from({ length: MAX_SERVICES }, (_, i) => ({ id: `app-${round}-${i}`, type: "http" as const }));
+    emit([linkView({ id: "ana", myPubKeyZ32: ME, peerPubKeyZ32: ANA, peerServices })]);
+  }
+  const tag = viewerTag(ME);
+  const { openedServices, noteOpened } = await import("../../../../web/src/svc/forget");
+  await vi.waitFor(() => expect(openedServices()).toHaveLength(MAX_SERVICES));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(openedServices()).toHaveLength(MAX_SERVICES);
+
+  // One the person opens is still noted: what it keeps goes with the chat.
+  const opened = { profile: "", tag, label: await serviceLabel(tag, ANA, "opened") };
+  noteOpened(opened);
+  expect(openedServices()).toContainEqual(opened);
+
+  // Delete chat loads no more bridges at once than that.
+  vi.useFakeTimers();
+  const forgetting = web.forgetServices!({ tag });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(document.querySelectorAll("iframe")).toHaveLength(MAX_SERVICES + 1);
   await vi.runAllTimersAsync();
   await forgetting;
 });
