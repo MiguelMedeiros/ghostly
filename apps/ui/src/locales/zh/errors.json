@@ -691,6 +691,7 @@
     "noneAnsweredNext": "请检查网络连接，然后重试。",
     "notAddress": "这不是中继地址：{{address}}",
     "useHttps": "请使用 https:// 中继地址：{{address}}",
+    "useShorter": "请使用更短的中继地址：{{address}}",
     "useWss": "请使用 wss:// 中继地址"
   },
   "services": {

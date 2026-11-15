@@ -1,4 +1,3 @@
-import { sha256 } from "@noble/hashes/sha2.js";
 import type { BreezSdk } from "@breeztech/breez-sdk-spark/web";
 import { breezDatabase, dropBreezDatabase } from "./breezDatabases";
 
@@ -45,7 +44,6 @@ export function loadBreezSdk(): Promise<BreezSdkModule> {
   })().catch((error) => { loading = undefined; throw error; });
 }
 
-const hex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 export const breezNetwork = (network: string): BreezNetwork => (network === "bitcoin" ? "mainnet" : "regtest");
 
 /**
@@ -63,8 +61,9 @@ const open = new Map<string, { wallet: Promise<BreezWallet>; refs: number }>();
 
 /**
  * Opens the Breez wallet of this seed on this network, or shares the one already open (the Spark rail and the
- * Breez Lightning source of the same seed are one wallet). `release` gives this user's share back; the last one
- * disconnects the SDK. `storage`: the database it opened, which `forgetBreez` deletes when the wallet is removed.
+ * Breez Lightning source of the same seed are one wallet, even when they carry different API keys: the instance
+ * open keeps the key it opened with). `release` gives this user's share back; the last one disconnects the SDK.
+ * `storage`: the database it opened, which `forgetBreez` deletes when the wallet is removed.
  */
 export async function openBreez(
   params: { network: string; mnemonic: string; apiKey?: string },
@@ -72,13 +71,12 @@ export async function openBreez(
   storage: BreezStorageName = breezDatabase,
 ): Promise<{ wallet: BreezWallet; release: () => Promise<void>; storage: string }> {
   const name = await storage(params.network, params.mnemonic);
-  const key = `${name}|${params.apiKey ? hex(sha256(new TextEncoder().encode(params.apiKey))).slice(0, 8) : ""}`;
-  let entry = open.get(key);
+  let entry = open.get(name);
   if (!entry) {
     const wallet = sdk().then((module) => module.connect({ network: breezNetwork(params.network), mnemonic: params.mnemonic, apiKey: params.apiKey, storage: name }));
     entry = { wallet, refs: 0 };
-    open.set(key, entry);
-    wallet.catch(() => { if (open.get(key) === entry) open.delete(key); });
+    open.set(name, entry);
+    wallet.catch(() => { if (open.get(name) === entry) open.delete(name); });
   }
   entry.refs++;
   const held = entry;
@@ -93,14 +91,14 @@ export async function openBreez(
       if (released) return;
       released = true;
       if (--held.refs > 0) return;
-      if (open.get(key) === held) open.delete(key);
+      if (open.get(name) === held) open.delete(name);
       await Promise.race([wallet.disconnect(), new Promise((resolve) => setTimeout(resolve, DISCONNECT_MS))]);
     },
   };
 }
 
 /** Whether a wallet of this storage is open here (the Spark rail and a Breez card of one seed share it). */
-export const breezOpen = (storage: string) => [...open.keys()].some((key) => key.startsWith(`${storage}|`));
+export const breezOpen = (storage: string) => open.has(storage);
 
 /**
  * A wallet was removed: its Breez databases go, unless another user in this profile still has them open (a Breez

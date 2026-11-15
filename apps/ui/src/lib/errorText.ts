@@ -273,7 +273,7 @@ const RULES: readonly Rule[] = [
   exact("Could not share the screen. Try again.", "calls.share.failed", "calls.share.failedNext"),
   exact("Your contact's app cannot show a screen in this call", "calls.share.contactCannot"),
   exact("Screen sharing is not available on Linux yet", "calls.share.notOnLinux"),
-  // Why a group's call button is off on the Linux Desktop (apps/ui/src/desktop/nativeCalls.ts `groupCallSupport`).
+  // Why a group's call button is off on the Linux Desktop (apps/ui/src/desktop/groupCallSupport.ts).
   exact("Group calls aren't on Linux yet: join from app.ghostly.tools in a browser", "calls.noGroupOnLinux"),
   exact("All native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now.", "errors.transport.slotsFull", "errors.transport.slotsFullNext"),
   // Its listener, which did not start or stopped (packages/browser/src/platform: hyperdhtRelay.ts, irohWeb.ts; the
@@ -768,6 +768,8 @@ const RULES: readonly Rule[] = [
   // list's line may hold spaces ("relay .example.org").
   { match: /^Use an https:\/\/ relay address: (?<address>\S+)$/, key: "errors.relays.useHttps" },
   { match: /^Not a relay address: (?<address>.+)$/, key: "errors.relays.notAddress" },
+  // An Iroh or HyperDHT relay past what a contact reads (`relayUrlTooLong`): a relay address, one too long.
+  { match: /^Use a shorter relay address: (?<address>\S+)$/, key: "errors.relays.useShorter" },
   // The rest of what Settings, Network refuses before or on Save (packages/browser/src/shared: hyperdhtRelay.ts,
   // pushRelay.ts, ice.ts; engine/node.ts updateSettings). The field it is about is marked there, so no line names it.
   { match: /^Enter a relay address \((?<example>(?:https|wss):\/\/)…\)$/, key: "errors.relays.enterAddress" },

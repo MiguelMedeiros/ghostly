@@ -956,7 +956,7 @@ export class Communities {
   // message dated after it.
   async setPicture(groupId: string, picture: string | null): Promise<void> { await this.require(groupId).setPicture(picture, this.now()); }
   async rename(groupId: string, name: string): Promise<void> { await this.require(groupId).rename(name, this.now()); }
-  async setCall(groupId: string, sfu: string | null): Promise<void> { await this.require(groupId).setCall(sfu, this.now()); }
+  async setCall(groupId: string, sfu: string | null, e2ee?: boolean): Promise<void> { await this.require(groupId).setCall(sfu, e2ee, this.now()); }
   /** A new link (the old one reaches nobody), or none. */
   async replaceLink(groupId: string, off = false): Promise<string> {
     const s = this.require(groupId);

@@ -307,6 +307,9 @@ worker.addEventListener("message", (event) => {
   }
   if (message.type === "share-keep") {
     if (PUSH_PROFILE !== null || !message.item || typeof message.item !== "object") return;
+    // Those it counted as not kept are told to the next page all the same, with any dropped here.
+    const lost = message.dropped;
+    if (typeof lost === "number" && Number.isSafeInteger(lost) && lost > 0) dropped += lost;
     // The worker stays up while it waits again, as a share just posted does.
     event.waitUntil(new Promise<void>((resolve) => hold(message.item, resolve, true)));
     return;

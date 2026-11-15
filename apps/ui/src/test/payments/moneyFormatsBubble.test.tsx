@@ -67,6 +67,17 @@ describe("a pasted Bitcoin address or bitcoin: link", () => {
     expect(fakeEngine.callsTo("approvePayment")).toHaveLength(0);
   });
 
+  // The code pressed goes: the keys go to its QR button, not the page, whose next Tab starts from the top.
+  it("hiding the QR code by pressing it hands the keys to the QR button", async () => {
+    const { user } = bubble(`bitcoin:${bcrt1q()}?amount=0.0002`);
+    const card = screen.getByTestId("onchain-bubble");
+    await user.click(within(card).getByRole("button", { name: "QR" }));
+    within(card).getByTitle("Hide the QR code").focus();
+    await user.keyboard("{Enter}");
+    expect(within(card).queryByTitle("Hide the QR code")).toBeNull();
+    expect(within(card).getByRole("button", { name: "QR" })).toHaveFocus();
+  });
+
   it("says Real money for a mainnet address, and asks for the amount when the address carries none", async () => {
     wallets({ mainnet: { bitcoin: { ...regtestBitcoin, network: "bitcoin" } } });
     const { user } = bubble(`my address ${BC1Q}`);

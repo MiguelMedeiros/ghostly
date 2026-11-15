@@ -4996,7 +4996,11 @@ export class GhostlyNode implements EngineImplementation {
     // Never left this device: deleting it here is all there is, unless the outbox's retry of it handed it to the link
     // meanwhile (`Outbox.cancel`, which also keeps it from going from now on): then it may be out, and its removal goes.
     const going = this.outboxes.get(linkId)?.cancel(messageId) ?? false;
-    if (!wireId || (message.delivery === "waiting" && !going)) { await this.forgetMessage(linkId, messageId, message); return { error: null }; }
+    // A waiting file of mine whose offer went on the DHT floor may be in the contact's chat (its bubble waits there for
+    // the bytes): it left, and its removal goes, or the contact kept it as "Cancelled by the sender" (agents#5945). So
+    // may one whose offer is being said there now (a relay publication of seconds): its row says so only once it is done.
+    const onFloor = !!message.file && (message.fileOnFloor === "sent" || message.fileOnFloor === "seen" || this.floorSaying.has(message.file.id));
+    if (!wireId || (message.delivery === "waiting" && !going && !onFloor)) { await this.forgetMessage(linkId, messageId, message); return { error: null }; }
     const removal: Removal = { id: messageId, wireId, e: removalNumber(message.edit?.seq), at: Date.now(), pending: true };
     live.stored = { ...live.stored, removals: withRemoval(live.stored.removals, removal) };
     const written = this.writeDeletions(linkId, { removals: live.stored.removals });
@@ -5087,6 +5091,10 @@ export class GhostlyNode implements EngineImplementation {
     void this.hold.forget(linkId, messageId).catch(() => {});
 
     const message = await db.getMessage(linkId, messageId);
+    // A text of mine still on the DHT floor, or an edit of it, leaves it (`withdrawDht`): the floor went on saying it for
+    // minutes to a contact whose removal never goes there, and the chat's row kept its words. Awaited last, once the row
+    // is gone: the floor's queue may hold a read of the away contact's mailbox (3 to 10 s), which the row waited out.
+    const withdrawn = message?.sender === "me" && message.wireId && live.link?.dhtHolds(message.wireId) ? live.link.withdrawDht(message.wireId).catch(() => {}) : undefined;
     // A row of the contact's in the joined line's words that goes here was stored first: no later one is that line.
     if (message && contactJoinRow(message) && !live.stored.group && !live.stored.peerSpoke) {
       this.contactSpoke.add(live);
@@ -5122,6 +5130,7 @@ export class GhostlyNode implements EngineImplementation {
     if (removed) this.quoteSweeps.add(linkId, messageId, replyRef(message ?? { id: messageId, linkId }));
     await this.messagesChanged(linkId, [messageId]);
     this.emitState();
+    await withdrawn;
   }
 
   /**
@@ -5359,7 +5368,10 @@ export class GhostlyNode implements EngineImplementation {
     const link = live.link, file = message.file, linkId = live.stored.id;
     if (!link || !file || message.fileOnFloor || !this.fileFloorReady(live, message)) return;
     const offer = GhostlyNode.floorOffer(linkId, file), at = Date.now();
-    const error = await link.announceFile(offer, message.timestamp, GhostlyNode.wireReply(message), message.forwarded);
+    this.floorSaying.add(file.id);
+    let error: string | null;
+    try { error = await link.announceFile(offer, message.timestamp, GhostlyNode.wireReply(message), message.forwarded); }
+    finally { this.floorSaying.delete(file.id); }
     const said = !error && link.dhtPendingId === dhtFileId(offer.wireId);
     if (!said && error !== DHT_FILE_TOO_LARGE) return;
     const noted = await db.patchMessage(linkId, message.id, current => current.delivery !== "waiting" || current.fileOnFloor ? null
@@ -5372,12 +5384,17 @@ export class GhostlyNode implements EngineImplementation {
     await this.messagesChanged(linkId, [message.id]);
   }
 
+  /** The waiting files whose offer is being said on the DHT floor right now (`sayFileOnFloor`), by file id. */
+  private readonly floorSaying = new Set<string>();
+
   /**
-   * A file of mine said on the floor and deleted here before it went live: the floor stops saying it, and the next
-   * session that carries files/3 tells the contact's bubble it was cancelled (`sayWithdrawnFiles`).
+   * A file of mine said on the floor and deleted here before it went live: the floor stops saying it (`withdrawDht`: a
+   * new envelope without it takes its place, as for a text; only settled, the relays kept its offer for minutes and a
+   * contact who read them then got its bubble), and the next session that carries files/3 tells a bubble the contact
+   * already has that it was cancelled (`sayWithdrawnFiles`).
    */
   private async withdrawFloorFile(live: LiveLink, wireId: string): Promise<void> {
-    void live.link?.settleDht(dhtFileId(wireId)).catch(() => {});
+    await live.link?.withdrawDht(dhtFileId(wireId)).catch(() => {});
     live.stored = { ...live.stored, withdrawnFiles: [...(live.stored.withdrawnFiles ?? []).filter(id => id !== wireId), wireId].slice(-64) };
     await db.patchLink(live.stored.id, { withdrawnFiles: live.stored.withdrawnFiles });
   }
@@ -6552,7 +6569,7 @@ export class GhostlyNode implements EngineImplementation {
   setGroupPicture({ groupId, picture }: { groupId: string; picture: string | null }): Promise<void> { return this.groups.setPicture(groupId, picture); }
   renameGroup({ groupId, name }: { groupId: string; name: string }): Promise<void> { return this.groups.rename(groupId, name); }
   /** The admin of a community group names the node that forwards its calls, or removes it with null (WISP 602). */
-  setGroupCall({ groupId, sfu }: { groupId: string; sfu: string | null }): Promise<void> { return this.groups.setCall(groupId, sfu); }
+  setGroupCall({ groupId, sfu, e2ee }: { groupId: string; sfu: string | null; e2ee?: boolean }): Promise<void> { return this.groups.setCall(groupId, sfu, e2ee); }
   forgetGroup({ groupId }: { groupId: string }): Promise<void> { this.groupEdits.forget(groupId); return this.groups.forget(groupId); }
 
   /**
@@ -7151,12 +7168,14 @@ export class GhostlyNode implements EngineImplementation {
   }
   /**
    * Back to the Cashu mints (a caller from before cards): the card named, else the default for receiving, is removed,
-   * and the Cashu card becomes the default for receiving.
+   * and the Cashu card becomes the default for receiving. A card at home on another device is removed there, never
+   * from here (as `walletRemove`).
    */
   async lightningClearSource(params?: { network?: WalletNetwork; card?: string }) {
     const network = this.net(params?.network), cards = this.lightnings[network];
     await cards.start();
     const id = params?.card ?? cards.receivingId;
+    refuseAway(`lightning:${network}:${id}`, this.walletView.networks?.[network].lightnings?.find((c) => c.card === id)?.name || WALLET_NAMES.lightning);
     if (id !== CASHU_CARD) await cards.remove(id);
     if (!cards.has(CASHU_CARD) && this.networkMints(network).length) await cards.add(CASHU_MINT_SOURCE, {});
     if (cards.has(CASHU_CARD) && this.networkMints(network).length) await cards.setReceive(CASHU_CARD);

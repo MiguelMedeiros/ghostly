@@ -464,7 +464,13 @@ const WALLETS: Record<string, Method> = {
     const paymentId = str(params, "payment", true);
     const card = cardParam(params);
     const request = s.payments[paymentId];
-    if (!request || request.linkId !== link.id || request.kind !== "request") throw new CliError("not_found", `No request ${paymentId} in this chat`);
+    // Said as `payment check` says it: the id quoted, where this chat's payments are listed, and a payment of this chat
+    // that is no request named as what it is (it read "No request", as if nothing had that id).
+    const listed = `(ghostly payment list --chat ${link.id})`;
+    if (request?.linkId === link.id && request.kind !== "request") {
+      throw new CliError("not_found", `${JSON.stringify(paymentId)} is ${request.direction === "out" ? "a payment you sent" : "a payment you received"}, not a request: chat pay-request pays a request the contact made of you ${listed}`);
+    }
+    if (!request || request.linkId !== link.id) throw new CliError("not_found", `No request ${JSON.stringify(paymentId)} in this chat ${listed}`);
     // One I made is the contact's to pay: the engine knew it only as "Unknown payment request" (engine, exit 1).
     if (request.direction !== "in") throw new CliError("bad_request", `${JSON.stringify(paymentId)} is your own request: the contact pays it`);
     // The request says which network it is paid on: real money or test coins, never the choice of the payer.

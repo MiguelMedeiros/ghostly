@@ -170,6 +170,31 @@ describe("Settings, Network: Iroh relays", () => {
     expect(field).toHaveAccessibleDescription("Não é um endereço de relay: relay.example.org");
     expect(field).toHaveFocus();
   });
+
+  // A relay address past what a contact reads (`relayUrl`) is one: "not a relay address" sent the person looking for a
+  // typo in it. Said as what to do, in the app's language, for the Iroh list and the HyperDHT relay alike.
+  it("asks for a shorter address when a relay is too long for contacts, not that it is no relay address", async () => {
+    const { engine, user } = renderApp(<NetworkSettings />, { language: "pt" });
+    act(() => engine.update({ transport, settings: { relays: RELAYS } }));
+    engine.on("updateSettings", ({ settings }) => {
+      const problem = (settings as { irohRelays?: string[] }).irohRelays?.map(irohRelayProblem).find(Boolean);
+      if (problem) throw new Error(problem);
+    });
+    const long = `https://${"a".repeat(60)}.example.com/${"p".repeat(60)}`;
+    const field = screen.getByTestId("network-iroh-relays");
+    await user.clear(field);
+    await user.type(field, long);
+    await user.click(screen.getByTestId("network-save"));
+    expect(field).toHaveAccessibleDescription(`Use um endereço de relay mais curto: ${long}`);
+    expect(field).toHaveFocus();
+    await user.clear(field);
+    await user.type(field, DEFAULTS.join("\n"));
+    const hyperdht = screen.getByTestId("network-hyperdht-relay");
+    const longWss = `wss://${"a".repeat(60)}.example.com/${"p".repeat(60)}`;
+    await user.type(hyperdht, longWss);
+    await user.click(screen.getByTestId("network-save"));
+    expect(hyperdht).toHaveAccessibleDescription(`Use um endereço de relay mais curto: ${longWss}`);
+  });
 });
 
 describe("Settings, Network: push relay", () => {

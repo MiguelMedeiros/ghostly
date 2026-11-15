@@ -339,14 +339,6 @@ export async function verifyPassword(
   return constantTimeEqual(await pbkdf2(password, salt, iterations), expected);
 }
 
-export const TIMEOUT_OPTIONS = [
-  { value: 1, label: "1 minute" },
-  { value: 5, label: "5 minutes" },
-  { value: 15, label: "15 minutes" },
-  { value: 30, label: "30 minutes" },
-  { value: 60, label: "1 hour" },
-] as const;
-
 export const LANGUAGE_OPTIONS: { value: Language; label: string; native: string }[] = [
   { value: "en", label: "English", native: "English" },
   { value: "pt", label: "Portuguese", native: "Português" },
@@ -356,12 +348,6 @@ export const LANGUAGE_OPTIONS: { value: Language; label: string; native: string 
   { value: "zh", label: "Chinese", native: "中文" },
   { value: "ja", label: "Japanese", native: "日本語" },
   { value: "ar", label: "Arabic", native: "العربية" },
-];
-
-export const THEME_OPTIONS: { value: Theme; label: string }[] = [
-  { value: "dark", label: "Dark" },
-  { value: "light", label: "Light" },
-  { value: "system", label: "System" },
 ];
 
 export const COLOR_SCHEME_OPTIONS: { value: ColorScheme; labelKey: string }[] = [

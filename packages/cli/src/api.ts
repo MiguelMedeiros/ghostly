@@ -758,7 +758,8 @@ const METHODS: Record<string, Method> = {
     const reachesGroup = (name: string) => { try { return "group" in findChatOrGroup(state(ctx).links, state(ctx).groups, name); } catch { return false; } };
     let link: ReturnType<typeof chatOf>;
     try {
-      link = notAGroup(ctx, params, () => chatOf(ctx, params), (shown, id) => `ghostly message delete ${groupPrefixed(typed) === null && reachesGroup(typed) ? shown : shellWord(groupPrefixed(typed) === null ? `group:${typed}` : typed, `group:${id}`)} ${ref === "<message>" ? ref : shellWord(ref, "<message>")} --everyone`);
+      // `--purge` stays in the command offered: pasted without it, the text stayed in the profile's folder up to an hour.
+      link = notAGroup(ctx, params, () => chatOf(ctx, params), (shown, id) => `ghostly message delete ${groupPrefixed(typed) === null && reachesGroup(typed) ? shown : shellWord(groupPrefixed(typed) === null ? `group:${typed}` : typed, `group:${id}`)} ${ref === "<message>" ? ref : shellWord(ref, "<message>")} --everyone${purge ? " --purge" : ""}`);
     } catch (error) {
       // Another member's message: only its author deletes it, so the `--everyone` offered was then refused as not mine,
       // a second command to learn it cannot be deleted at all. A history that cannot be read keeps that hint.

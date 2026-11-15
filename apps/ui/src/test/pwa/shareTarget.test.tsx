@@ -42,6 +42,17 @@ describe("a share into the app", () => {
       expect(shareText(share())).toBe("");
     });
 
+    it("its link is kept when the text carries only a longer address that starts with it", () => {
+      expect(shareText(share({ text: "Compare with https://example.com/page2", url: "https://example.com/page" })))
+        .toBe("Compare with https://example.com/page2\nhttps://example.com/page");
+      expect(shareText(share({ text: "See https://x.example/?u=https://a.example", url: "https://a.example" })))
+        .toBe("See https://x.example/?u=https://a.example\nhttps://a.example");
+      // The link as the text's own, with the punctuation or bracket a sentence puts around it, is not repeated.
+      expect(shareText(share({ text: "Look at https://a.example/p.", url: "https://a.example/p" }))).toBe("Look at https://a.example/p.");
+      expect(shareText(share({ text: "Look (https://a.example/p)", url: "https://a.example/p" }))).toBe("Look (https://a.example/p)");
+      expect(shareText(share({ text: "https://a.example/p\nvia app", url: "https://a.example/p" }))).toBe("https://a.example/p\nvia app");
+    });
+
     it("the picker previews the start of a long text, never half a character, and the draft gets it whole", () => {
       expect(sharePreview(share({ text: "Look", url: "https://a.example" }))).toBe("Look\nhttps://a.example");
       // A pair astride the preview's end is left out whole.

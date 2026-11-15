@@ -25,12 +25,18 @@ export const commands: Record<string, Command> = {
     },
   },
   "group call": {
-    method: "group.call", usage: "group call <group> --sfu <https origin> | --clear [--show-secret]", summary: "Name the node a community group's calls go through, or --clear (admin)", args: ["group"],
-    options: { ...showSecret, sfu: { type: "string", description: "The node's https origin, e.g. https://call.example.com" }, clear: { type: "boolean", description: "The group has no calls" } },
+    method: "group.call", usage: "group call <group> --sfu <https origin> [--e2ee | --no-e2ee] | --e2ee | --no-e2ee | --clear [--show-secret]",
+    summary: "Name the node a community group's calls go through, turn sealed call media on or off, or --clear (admin)", args: ["group"],
+    options: {
+      ...showSecret, sfu: { type: "string", description: "The node's https origin, e.g. https://call.example.com" },
+      e2ee: { type: "boolean", eitherWay: true, description: "Seal the call media end to end (--no-e2ee: off); left out, the group keeps what it had" },
+      clear: { type: "boolean", description: "The group has no calls" },
+    },
     params: ({ options }, a) => {
-      if (options.sfu === undefined && options.clear !== true) throw new CliError("usage", "Missing --sfu: ghostly group call <group> --sfu <https origin> | --clear");
+      if (options.sfu === undefined && options.clear !== true && options.e2ee === undefined) throw new CliError("usage", "Missing --sfu: ghostly group call <group> --sfu <https origin> | --clear");
       if (options.sfu !== undefined && options.clear === true) throw new CliError("usage", "--clear removes the call node: not with --sfu");
-      return { group: a.group, ...(options.clear === true ? { clear: true } : { sfu: options.sfu }), ...secret(options) };
+      if (options.e2ee !== undefined && options.clear === true) throw new CliError("usage", "--clear removes the call node: not with --e2ee or --no-e2ee");
+      return { group: a.group, ...(options.clear === true ? { clear: true } : options.sfu !== undefined ? { sfu: options.sfu } : {}), ...(options.e2ee !== undefined && { e2ee: options.e2ee === true }), ...secret(options) };
     },
   },
   "group create": {

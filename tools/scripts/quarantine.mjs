@@ -17,7 +17,10 @@ const root = resolve(here, "../..");
 const LIST = "tools/scripts/quarantine.json";
 const MAX_DAYS = 7;
 const MARK = /\/\/\s*quarantine:\s*#(\d+)\s+until\s+(\S+)/;
-const TAG = /["'`]@quarantine["'`]/;
+// The tag as a whole word of a string: a tag, or a word of a test's or a describe's title. The gate's filter
+// (e2e/support/quarantine.ts) drops that same word from titles and tags joined by spaces, so this counts every test it
+// drops. A longer tag (@quarantine-later, @quarantine:x) is neither dropped nor counted.
+const TAG = /(?<=^|[\s"'`])@quarantine(?=$|[\s"'`])/;
 const NEAR = 5;
 
 const plusDays = (day, days) => new Date(Date.parse(`${day}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
@@ -82,10 +85,11 @@ export function fileEntries(list, exists) {
 
 const readList = () => JSON.parse(readFileSync(join(root, LIST), "utf8"));
 
-function specs(dir) {
+/** The e2e's TypeScript files, helpers included (a tag kept in a helper's constant reaches its tests), all but the filter. */
+export function e2eSources(dir = "e2e") {
   return readdirSync(join(root, dir), { recursive: true })
     .map((name) => `${dir}/${String(name).replaceAll("\\", "/")}`)
-    .filter((path) => path.endsWith(".spec.ts") && !path.includes("node_modules/"));
+    .filter((path) => path.endsWith(".ts") && !path.includes("node_modules/") && path !== `${dir}/support/quarantine.ts`);
 }
 
 /** Each issue's state, from the issues repository (GHOSTLY_FLAKE_REPO) with GHOSTLY_FLAKE_TOKEN. */
@@ -105,7 +109,7 @@ async function issueStates(numbers, token, repo) {
 
 async function check() {
   const unit = fileEntries(readList(), (path) => existsSync(join(root, path)));
-  const e2e = specs("e2e").map((file) => specMarks(file, readFileSync(join(root, file), "utf8")));
+  const e2e = e2eSources().map((file) => specMarks(file, readFileSync(join(root, file), "utf8")));
   const entries = [...unit.entries, ...e2e.flatMap((m) => m.entries)];
   const token = process.env.GHOSTLY_FLAKE_TOKEN;
   const repo = process.env.GHOSTLY_FLAKE_REPO || "MiguelMedeiros/ghostly-agents";
