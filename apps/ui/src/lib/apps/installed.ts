@@ -91,9 +91,12 @@ export function useInstalledApps(enabled: boolean): readonly InstalledAppView[] 
   return list;
 }
 
-/** Reads the list when the first screen that shows it does. */
+/**
+ * Reads the list when the first screen that shows it does, and again when one shows after a read that failed: storage
+ * that failed once (a full disk freed since) was otherwise never asked again until an update check or Try again.
+ */
 function useFirstRead(enabled: boolean): void {
-  useEffect(() => { if (enabled && apps === null && !loading) void refreshInstalledApps(); }, [enabled]);
+  useEffect(() => { if (enabled && (apps === null || failed != null) && !loading) void refreshInstalledApps(); }, [enabled]);
 }
 
 /**
