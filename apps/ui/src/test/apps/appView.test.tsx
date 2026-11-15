@@ -255,7 +255,7 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
 
     // Opened again from the chat (its card, or + → Apps): the same app, not a new one.
     await user.click(within(app).getByTestId("mini-app-back"));
-    let again: "shown" | void = undefined;
+    let again: "shown" | "superseded" | void = undefined;
     await act(async () => { again = await open(REF, "link-1"); });
     expect(app).toBeVisible();
     expect(started).toHaveLength(1);

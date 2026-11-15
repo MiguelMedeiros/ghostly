@@ -60,18 +60,18 @@ describe("Back to <app> while another app opens in the chat (web)", () => {
     await act(() => open(NOTES, LINK));
     const app = screen.getByTestId("mini-app");
     await user.click(within(app).getByTestId("mini-app-back"));
-    let late!: Promise<void | "shown">;
+    let late!: Promise<void | "shown" | "superseded">;
     act(() => { late = open(CHESS, LINK); });
     await user.click(screen.getByTestId("mini-app-resume"));
     expect(app).toBeVisible();
 
     release();
-    let result: void | "shown" = undefined;
+    let result: void | "shown" | "superseded" = undefined;
     await act(async () => { result = await late; });
     // Nothing new started: Notes was not stopped, and the contact is not told Chess opened.
     expect(started).toEqual(["Notes"]);
     expect(stopped).toEqual([]);
-    expect(result).toBe("shown");
+    expect(result).toBe("superseded");
     await waitFor(() => expect(chatApp(LINK)?.ref).toBe(NOTES));
     expect(chatApp(LINK)?.shown).toBe(true);
     expect(within(app).getByTitle("Notes")).toBeInTheDocument();

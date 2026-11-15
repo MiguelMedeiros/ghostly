@@ -16,9 +16,10 @@ export interface OpenAppOptions { runAnyway?: boolean; again?: unknown }
 /**
  * Opens `ref` in the 1:1 chat `linkId`, or alone when it is null. Rejects when it cannot start (revoked, removed, no runner…).
  * Resolves "shown" when it already ran there and was shown again: nothing new started, so the contact is not told again.
- * So does one in a chat that a newer open there overtook (the web): it starts nothing, and the newer one stays.
+ * Resolves "superseded" when a newer open in that chat overtook it (the web): it starts nothing, the newer one stays,
+ * and the contact is told nothing of it.
  */
-export type AppOpener = (ref: string, linkId: string | null, options?: OpenAppOptions) => Promise<"shown" | void>;
+export type AppOpener = (ref: string, linkId: string | null, options?: OpenAppOptions) => Promise<"shown" | "superseded" | void>;
 
 let opener: AppOpener | null = null;
 const listeners = new Set<() => void>();
@@ -28,7 +29,7 @@ export function setAppOpener(next: AppOpener | null): void {
   for (const listener of [...listeners]) listener();
 }
 
-export function openApp(ref: string, linkId: string | null = null, options: OpenAppOptions = {}): Promise<"shown" | void> {
+export function openApp(ref: string, linkId: string | null = null, options: OpenAppOptions = {}): Promise<"shown" | "superseded" | void> {
   return opener ? opener(ref, linkId, options) : Promise.reject(new Error("Apps cannot run in this app"));
 }
 
