@@ -3,6 +3,10 @@ import globals from "globals";
 import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
+import ghostly from "./tools/eslint/index.mjs";
+
+/** The UI's tests: the ghostly/* rules guard what Tailwind and the bundler read, never these. */
+const UI_TESTS = ["apps/ui/src/test/**", "apps/ui/src/**/*.test.{ts,tsx}"];
 
 export default tseslint.config(
   { ignores: ["dist", "node_modules"] },
@@ -49,6 +53,31 @@ export default tseslint.config(
     rules: {
       "no-restricted-syntax": ["error", { selector: "JSXOpeningElement[name.name='select']", message: "Use Select from apps/ui/src/components/ui/Select.tsx." }],
     },
+  },
+  {
+    files: ["apps/ui/src/**/*.{ts,tsx}"],
+    ignores: UI_TESTS,
+    plugins: { ghostly },
+    rules: { "ghostly/no-group-has": "error", "ghostly/on-accent-ink": "error" },
+  },
+  {
+    // externalLink.ts is where the new window is asked for, the one place allowed to spell `_blank`.
+    files: ["apps/ui/src/**/*.{ts,tsx}"],
+    ignores: [...UI_TESTS, "apps/ui/src/lib/externalLink.ts"],
+    plugins: { ghostly },
+    rules: { "ghostly/no-blank-target": "error" },
+  },
+  {
+    // Tailwind reads the stylesheets too: no-group-has reads their lines as comments (the `text` processor).
+    files: ["apps/ui/src/**/*.{css,html}"],
+    ignores: UI_TESTS,
+    plugins: { ghostly },
+    processor: "ghostly/text",
+  },
+  {
+    files: ["apps/ui/src/**/*.{css,html}/*.js"],
+    plugins: { ghostly },
+    rules: { "ghostly/no-group-has": "error" },
   },
   {
     // Component tests and their harness are never hot-reloaded.
