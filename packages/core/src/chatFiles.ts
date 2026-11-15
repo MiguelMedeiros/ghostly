@@ -1319,8 +1319,10 @@ export class ChatFiles {
         return;
       }
       case "pf-done": {
-        // Checked out there. Said again to the offer of a new session too, after which this side is no longer verifying.
-        if (record.state !== "verifying" && record.confirmed !== record.file.size) return;
+        // Checked out there. Said again to the offer of a new session too, after which this side is no longer verifying,
+        // and to one sent again from the start (Send again on a file that failed here once the contact had it whole):
+        // ignored, the file was offered every 30 s for good, a done one there never anything else.
+        if (record.state !== "verifying" && record.state !== "offered" && record.confirmed !== record.file.size) return;
         record.confirmed = record.file.size;
         this.end(outgoing, "done");
         return;
