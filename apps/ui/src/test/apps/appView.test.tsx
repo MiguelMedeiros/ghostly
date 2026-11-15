@@ -374,6 +374,7 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
       const watch = new MutationObserver((records) => { for (const record of records) dropped.push(...record.removedNodes); });
       watch.observe(app, { childList: true, subtree: true });
       act(() => { phone = false; for (const change of changes) change(); });
+      for (const record of watch.takeRecords()) dropped.push(...record.removedNodes);
       watch.disconnect();
       expect(app).toHaveAttribute("data-place", "wide");
       expect(dropped).not.toContain(back);
