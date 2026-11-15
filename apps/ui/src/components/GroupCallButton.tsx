@@ -6,7 +6,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { useBackCloses, useBackdropDismiss, useQuestionDialog } from "../hooks/useDismiss";
 import { groupCallRelayConfig, NO_CALL_KEY, NO_SEALING, useGroupCall, type GroupCallSeal, type LivekitModule } from "../hooks/useGroupCall";
 import { useHandler } from "../hooks/useHandler";
-import { askGroupCallPass, groupCallProblem, PASS_REFRESH_LEAD_S, passRefreshInMs, type GroupCallPass } from "../lib/groupCallPass";
+import { askGroupCallPass, groupCallOf, groupCallProblem, PASS_REFRESH_LEAD_S, passRefreshInMs, type GroupCallPass } from "../lib/groupCallPass";
 import { focus } from "../lib/connection";
 import { askGroupCallKey, canSealCallMedia, groupCallSealed, groupCallSealProblem } from "../lib/groupCallPass";
 import { useEngineValue } from "../lib/engineState";
@@ -38,8 +38,14 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
   const [key] = useState(() => Symbol("group call"));
   /** The pass the room was joined with: it stays while in the room, since a new token would leave and join again. */
   const [joined, setJoined] = useState<GroupCallPass | null>(null);
-  /** The newest pass, asked again before it runs out, for joining again after a drop without asking the node. */
-  const held = useRef<{ pass: GroupCallPass; until: number } | null>(null);
+  /**
+   * The newest pass, asked again before it runs out, for joining again after a drop without asking the node. Only while
+   * the group's node is still the one it came from: the admin naming another one makes the next Join call ask that one.
+   */
+  const held = useRef<{ pass: GroupCallPass; until: number; sfu: string | undefined } | null>(null);
+  const sfu = groupCallOf(group)?.sfu;
+  const sfuNow = useRef(sfu);
+  sfuNow.current = sfu;
   const [asking, setAsking] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
   const [askEnd, setAskEnd] = useState(false);
@@ -70,7 +76,7 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
 
   useEffect(() => { if (!relayOnly) setNoRelay(false); }, [relayOnly]);
 
-  const hold = (pass: GroupCallPass) => { held.current = { pass, until: Date.now() + pass.expiresIn * 1000 }; };
+  const hold = (pass: GroupCallPass, from: string | undefined) => { held.current = { pass, until: Date.now() + pass.expiresIn * 1000, sfu: from }; };
   const enter = (pass: GroupCallPass) => {
     if (!relayOnly || groupCallRelayConfig(pass.iceServers).iceServers?.length) return setJoined(pass);
     setNoRelay(true);
@@ -81,11 +87,12 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
     if (unsealable) return setProblem(noSealingProblem);
     if (sealed && !(await takeKey())) return;
     const kept = held.current;
-    if (kept && kept.until - Date.now() > PASS_REFRESH_LEAD_S * 1000) return enter(kept.pass);
+    if (kept && kept.sfu === sfu && kept.until - Date.now() > PASS_REFRESH_LEAD_S * 1000) return enter(kept.pass);
     setAsking(true);
     try {
+      const from = sfu;
       const pass = await askGroupCallPass(groupId);
-      hold(pass);
+      hold(pass, from);
       enter(pass);
     } catch (cause) {
       setProblem(groupCallProblem(cause, t));
@@ -117,9 +124,10 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
     let timer: ReturnType<typeof setTimeout>;
     const ask = async () => {
       try {
+        const from = sfuNow.current;
         const pass = await askGroupCallPass(groupId);
         if (!live) return;
-        hold(pass);
+        hold(pass, from);
         timer = setTimeout(ask, passRefreshInMs(pass.expiresIn));
       } catch {
         if (live) timer = setTimeout(ask, REFRESH_RETRY_MS);
@@ -171,7 +179,9 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
           <path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
         </svg>
       </button>
-      {problem && <div id={`${id}-problem`} data-testid="group-call-problem" className="absolute end-0 top-full z-40 mt-2 w-[min(18rem,calc(100vw-1rem))] rounded-xl border border-border bg-panel-header p-3 shadow-xl">
+      {/* On a phone Join call is not the header's last button: from its edge the box ran past the screen's side. It
+          lies across the width under the header there, as the connection panels do. */}
+      {problem && <div id={`${id}-problem`} data-testid="group-call-problem" className="absolute end-0 top-full max-md:fixed max-md:inset-x-2 max-md:top-[calc(3.5rem_+_env(safe-area-inset-top))] max-md:w-auto z-40 mt-2 w-[min(18rem,calc(100vw-1rem))] rounded-xl border border-border bg-panel-header p-3 shadow-xl">
         <Notice problem={problem} testId="group-call-problem-notice" />
         <div className="mt-2 flex justify-end gap-2 text-xs">
           <button type="button" onClick={() => { setProblem(null); button.current?.focus(); }} className={`min-h-8 rounded-md px-2 text-text-secondary hover:bg-surface-hover max-md:min-h-11 ${focus}`}>{t("common.close")}</button>

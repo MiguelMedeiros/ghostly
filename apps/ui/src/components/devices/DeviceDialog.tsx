@@ -1,6 +1,7 @@
-import { useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "../../contexts/I18nContext";
+import { composingKey } from "../../hooks/useComposition";
 import { useBackCloses } from "../../hooks/useDismiss";
 import { InfoButton } from "../layout/Section";
 
@@ -25,8 +26,15 @@ export function DeviceDialog({ title, onClose, testId, children }: { title: Reac
     setShown(true);
     return () => { element.close(); if (previous?.isConnected) previous.focus(); };
   }, []);
+  // Escape is taken at its keydown, so the browser makes no close request of it: a `cancel` can be refused only once,
+  // and the next Escape closed the dialog while it stays open here (a check, a removal that is running). An input
+  // method's Escape stays the input method's.
+  const escape = (event: KeyboardEvent<HTMLDialogElement>) => {
+    if (event.key !== "Escape" || event.defaultPrevented || composingKey(event.nativeEvent, null)) return;
+    event.preventDefault(); onClose();
+  };
   return createPortal(
-    <dialog ref={dialog} data-testid={testId} onCancel={(event) => { event.preventDefault(); onClose(); }} aria-labelledby={`${id}-title`}
+    <dialog ref={dialog} data-testid={testId} onKeyDown={escape} onCancel={(event) => { event.preventDefault(); onClose(); }} aria-labelledby={`${id}-title`}
       className="m-auto w-[calc(100%_-_2rem)] max-w-sm max-h-[85dvh] overflow-y-auto rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
       <div className="mb-4 flex items-center justify-between gap-3">
         <h2 id={`${id}-title`} className="text-base font-semibold min-w-0 break-words">{title}</h2>

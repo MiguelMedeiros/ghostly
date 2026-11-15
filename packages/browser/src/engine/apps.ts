@@ -99,11 +99,6 @@ const STAGED = { max: 4, ms: 10 * 60 * 1000 } as const;
 const BUNDLES_KEPT = { min: 2, ms: 60 * 1000 } as const;
 /** URLs the engine remembers it read whole and refused (`Apps.refusedReads`). */
 const REFUSED_READS_KEPT = 256;
-/**
- * Listing URLs the update check keeps as peeked with nothing to take (`Apps.listingMisses`), the oldest going first: a
- * store that lists new URLs at each index would grow them at every check.
- */
-export const LISTING_MISSES_KEPT = 1024;
 /** The first bytes of a bundle: magic, the manifest's length and the largest manifest. */
 const PEEK_BYTES = APP_BUNDLE_MAGIC.length + 4 + APP_BUNDLE_LIMITS.manifestBytes;
 /** What a peek reads first: the magic, the length and any usual manifest (about 1 KiB). A longer one is read to its end after. */
@@ -722,14 +717,17 @@ export class Apps {
   /**
    * Listing URLs whose peek showed nothing to take (`<store> <ref> <url>` → `<index digest> <listed digest> <pin>
    * <installed digest> <waiting digest>`): the same index listing the same, for the same app, is not peeked again at
-   * every check. At most `LISTING_MISSES_KEPT`, the oldest going first; a store's go when it is removed.
+   * every check. Only the ones the last check read or wrote stay (`listingsRead`): a store that lists new URLs at each
+   * index does not grow them, and none the index still lists goes (with a count kept, the oldest going first, a check
+   * of more than that dropped each before it was read, and peeked every one again). A store's go when it is removed.
    */
   private readonly listingMisses = new Map<string, string>();
+  /** The `listingMisses` the update check running now read or wrote; null outside a check. */
+  private listingsRead: Set<string> | null = null;
 
   private missListing(missed: string, seen: string): void {
-    this.listingMisses.delete(missed);
     this.listingMisses.set(missed, seen);
-    for (const old of this.listingMisses.keys()) { if (this.listingMisses.size <= LISTING_MISSES_KEPT) break; this.listingMisses.delete(old); }
+    this.listingsRead?.add(missed);
   }
   /**
    * URLs whose whole read the update check, or a fetch of missing files, refused (a file hash that does not hold, a bad
@@ -2033,14 +2031,18 @@ export class Apps {
     // (a bundle write refused on a full disk) is left out, as one uninstalled meanwhile is: a throw would end the check
     // while the other workers still run, and the next check would start beside them.
     this.revocationSplits = new Map();
+    const read = new Set<string>();
+    this.listingsRead = read;
     try {
       const out = (await Promise.all(pooled(apps, APP_CHECK_PARALLEL, (app) => this.checkApp(app, stores).catch(() => null)))).filter((r) => r !== null);
+      for (const missed of this.listingMisses.keys()) if (!read.has(missed)) this.listingMisses.delete(missed);
       // Each one judged with the revocations this profile kept as they are now, read once for every app (up to 1024 of
       // every app: once per app, a check read them again for each one).
       const kept = out.length ? await this.keptValue() : null;
       return await Promise.all(out.map(async ({ app, outcome }) => ({ ref: app.ref, outcome, run: await this.runCheckOf(app, stores, kept) })));
     } finally {
       this.revocationSplits = null;
+      this.listingsRead = null;
     }
   }
 
@@ -2085,7 +2087,8 @@ export class Apps {
       const seen = `${s.digest} ${listing.digest} ${pinned ?? ""} ${app.digest} ${app.pending?.digest ?? ""}`;
       for (const url of listingUrls(listing.urls)) {
         const missed = `${s.key} ${app.ref} ${url}`;
-        if (candidates.has(url) || (s.digest !== undefined && this.listingMisses.get(missed) === seen)) continue;
+        if (candidates.has(url)) continue;
+        if (s.digest !== undefined && this.listingMisses.get(missed) === seen) { this.listingsRead?.add(missed); continue; }
         candidates.set(url, { sequence: listing.sequence, ...(pinned !== undefined && { digest: listing.digest }), peek: true, ...(s.digest !== undefined && { miss: [missed, seen] as [string, string] }) });
       }
     }
