@@ -31,7 +31,9 @@ const asks = (method: string) => fakeEngine.calls.filter((c) => (c.method as str
 class FakeKeyProvider {
   static providers: FakeKeyProvider[] = [];
   readonly keys: number[][] = [];
-  readonly setKey = vi.fn(async (key: ArrayBuffer) => { this.keys.push([...new Uint8Array(key)]); });
+  /** The call's own provider (`GroupCallKeyProvider`): each epoch's key in its own slot. */
+  readonly setEpochKey = vi.fn(async (_epoch: number, key: ArrayBuffer) => { this.keys.push([...new Uint8Array(key)]); });
+  readonly dispose = vi.fn();
   constructor() { FakeKeyProvider.providers.push(this); }
 }
 
@@ -60,7 +62,7 @@ class FakeRoom {
 const RoomEvent = new Proxy({}, { get: (_, name) => (name === "Disconnected" ? "disconnected" : String(name)) });
 const worker = { terminate: vi.fn() };
 const loadLivekit = async () => ({
-  Room: FakeRoom, RoomEvent, Track: { Source: {} }, ExternalE2EEKeyProvider: FakeKeyProvider, isE2EESupported: () => true, e2eeWorker: () => worker,
+  Room: FakeRoom, RoomEvent, Track: { Source: {} }, GroupCallKeyProvider: FakeKeyProvider, isE2EESupported: () => true, e2eeWorker: () => worker,
 }) as unknown as LivekitModule;
 
 function joinButton(group = community()) {
