@@ -76,8 +76,13 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
 
   // No room beside the chat (a tablet held upright, a narrow window): the app covers it, as a full-screen app does.
   const narrow = useChatAppNarrow(linkId);
+  // Whether the page was last measured on a phone, where it is not measured: a window just widened past a phone's width
+  // has its page measured only after that render, and the app stays over the chat until then. Drawn beside it for that
+  // one render, Back went and came back, and the focus was left in the panel instead of on Back.
+  const [measuredOnPhone, setMeasuredOnPhone] = useState(phone);
   useEffect(() => {
     const pane = root.current?.parentElement;
+    setMeasuredOnPhone(phone);
     if (phone || !pane) { setChatAppNarrow(linkId, false); return; }
     // 0: not laid out (a chat kept loaded off screen): as it was, measured again as it shows. Cleared there, each time the
     // person left the chat and came back the whole chat was drawn twice, and laid out once beside the app for nothing.
@@ -95,8 +100,9 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
   const shown = !!app?.shown;
   const full = app?.view === "full";
   // Back to the chat: on a phone, and for a full-screen app or one with no room beside the chat at every width.
-  const withBack = phone || full || narrow;
-  const wide = !phone && (full || narrow || !!app?.wide);
+  const over = narrow || measuredOnPhone;
+  const withBack = phone || full || over;
+  const wide = !phone && (full || over || !!app?.wide);
   const title = app?.title ?? "";
   const modal = shown && phone;
 
