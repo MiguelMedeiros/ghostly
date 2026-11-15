@@ -3,6 +3,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import type { BuiltInAppOffer, InstalledAppView } from "@ghostly/browser/engine/apps";
 import { appCardId, appCardUrl, statusCardText, type AppCard } from "@ghostly/core";
 import { dropAppIconsExcept } from "./icons";
+import { kept } from "./kept";
 import { appsRunning, openApp, readingApps, stopTakenDown, type OpenAppOptions } from "./open";
 
 /*
@@ -30,24 +31,13 @@ engine.onAppsChecked(() => { if (apps !== null || loading || appsRunning()) void
 /** How many reads were asked: of two on their way at once, the one asked last is what shows. */
 let asked = 0;
 
+/** An app is the same app from one read to the next by its ref. */
+const byRef = (app: { ref: string }) => app.ref;
 /**
- * `next` with each app that reads as before kept as the object held, and the list held when every app is: each Apps
- * page visit (in every tab) reads the list again, and what did not change draws nothing again, no app card included.
- * An app's `checkedAt` is left out: an update check that found nothing new still stamps it, and nothing here reads it,
- * so the object held keeps its older stamp.
+ * What of an installed app is compared from one read to the next: all but its `checkedAt`. An update check that found
+ * nothing new still stamps it, and nothing here reads it, so the object held keeps its older stamp.
  */
-function kept<T extends { ref: string }>(held: readonly T[] | null, next: readonly T[]): readonly T[] {
-  if (!held) return next;
-  const before = new Map(held.map((a) => [a.ref, a]));
-  let same = held.length === next.length;
-  const out = next.map((a, i) => {
-    const old = before.get(a.ref);
-    const view = old && JSON.stringify({ ...old, checkedAt: undefined }) === JSON.stringify({ ...a, checkedAt: undefined }) ? old : a;
-    if (view !== held[i]) same = false;
-    return view;
-  });
-  return same ? held : out;
-}
+const withoutStamp = <T extends object>(app: T) => ({ ...app, checkedAt: undefined });
 
 /** Reads the list again. */
 export function refreshInstalledApps(): Promise<void> {
@@ -59,7 +49,7 @@ export function refreshInstalledApps(): Promise<void> {
   const read: Promise<void> = engine.call("appList").then(async (list) => {
     const offered = await builtIns;
     if (mine !== asked) return loading ?? undefined;
-    offers = kept(offers, offered); apps = kept(apps, list); failed = null; tell(); stopTakenDown(list, at);
+    offers = kept(offers, offered, byRef, withoutStamp); apps = kept(apps, list, byRef, withoutStamp); failed = null; tell(); stopTakenDown(list, at);
     dropAppIconsExcept(list.map((a) => a.ref));
   }, (e: unknown) => { if (mine !== asked) return loading ?? undefined; apps ??= []; failed = e; tell(); }).finally(() => { if (loading === read) loading = null; });
   loading = read;
