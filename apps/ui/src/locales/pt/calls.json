@@ -22,10 +22,17 @@
   "ended": "Chamada encerrada",
   "endsCurrent": "Atender encerra sua chamada atual",
   "group": {
+    "endAndJoin": "Encerrar e entrar",
+    "endOtherBody": "Entrar na chamada do grupo encerra a chamada em que você está.",
+    "endOtherTitle": "Encerrar sua chamada?",
     "info": "Passa pelo nó do grupo. Qualquer pessoa do grupo pode falar, mostrar a câmera e compartilhar a tela. Com mais de 8 pessoas, você entra no mudo.",
+    "join": "Entrar na chamada",
     "leave": "Sair da chamada",
     "muted": "No mudo",
-    "screenOf": "Tela de {{name}}"
+    "refused": "Você ainda não tem acesso a esta chamada",
+    "retry": "Tentar de novo",
+    "screenOf": "Tela de {{name}}",
+    "unreachable": "Não foi possível alcançar a chamada do grupo"
   },
   "incomingAudio": "Chamada de áudio recebida...",
   "incomingVideo": "Chamada de vídeo recebida...",
