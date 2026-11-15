@@ -3,7 +3,7 @@ import type { LocalTrackPublication, Participant, Room } from "livekit-client";
 import { callRtcConfig } from "@ghostly/core";
 import { screenShareErrorMessage } from "@ghostly/react";
 import { preferredDevice } from "../lib/mediaDevices";
-import type { GroupCallParticipant, GroupCallState } from "../lib/groupCallState";
+import type { GroupCallParticipant, GroupCallState } from "../components/GroupCallView";
 
 /*
  * A group call through the group's node (WISP 602): joins the LiveKit room the node's pass names, and gives the call

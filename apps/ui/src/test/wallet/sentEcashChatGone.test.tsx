@@ -71,7 +71,7 @@ describe("ecash sent in a deleted chat, on the Wallet page", () => {
     engine.update({ wallet: testWallet(87, [{ type: "cashu", kind: "sent", amount: 13, paymentId: "p1", chatGone: true }]) });
     engine.on("reclaimPayment", () => { throw new Error("Nothing to reclaim"); });
     await user.click(await screen.findByTestId("wallet-sent-ecash-take-back"));
-    expect(await screen.findByTestId("wallet-sent-ecash-error")).toBeInTheDocument();
+    expect(await screen.findByTestId("wallet-sent-ecash-error")).toHaveTextContent("Nothing to take back");
     expect(screen.getByTestId("wallet-sent-ecash-item")).toBeInTheDocument();
   });
 
