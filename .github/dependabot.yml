@@ -133,7 +133,7 @@ updates:
   # for the HyperDHT relay, a line that had already reached its end). A move to the next long-term
   # release is made by hand.
   - package-ecosystem: docker
-    directories: [/apps/web, /apps/website, /e2e/infra/atproto, /infra/services/hyperdht-relay]
+    directories: [/apps/web, /apps/website, /e2e/infra/atproto, /e2e/infra/sfu-token, /infra/services/hyperdht-relay]
     schedule: { interval: weekly, day: monday }
     target-branch: dev
     ignore:

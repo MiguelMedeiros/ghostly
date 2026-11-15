@@ -21,6 +21,7 @@
     "image-host": {"title":"A remote https image host (picture links)","fake":"stubbed with context.route"},
     "iroh-relay": {"title":"An Iroh relay (iroh-relay 1.3, dev mode, plain HTTP on loopback)","env":"GHOSTLY_IROH_RELAY_URL"},
     "keyserver": {"title":"keys.openpgp.org (OpenPGP key lookup)"},
+    "livekit-sfu": {"title":"A LiveKit SFU (livekit-server 1.13, dev mode) and a mock of a node's WISP 602 group-token route that gives passes into it, with a roster a test sets","env":"GHOSTLY_SFU_URL","stack":"e2e/infra (ghostly-e2e-livekit, ghostly-e2e-sfu-token)"},
     "lnd-regtest": {"title":"Two LND nodes on regtest with a channel","env":"GHOSTLY_LND_REGTEST","stack":"e2e/support/lnd-regtest"},
     "lnurl-server": {"title":"An LNURL-pay / Lightning address server","fake":"e2e/support/lnurl.ts"},
     "mainline-dht": {"title":"The Mainline DHT (BEP44), reached directly over UDP","env":"TEST_DHT_NETWORK"},
