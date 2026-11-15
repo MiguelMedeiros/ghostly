@@ -45,6 +45,19 @@ export function openedServices<T extends Opened>(valid: (entry: Record<string, u
       if (entries.length > before) save(entries);
     },
     /**
+     * As `note`, for apps a chat only lists: none past `max` of its profile and chat on the list, as a contact may list
+     * new ones at any time. One opened is noted (`note`) whatever the count.
+     */
+    noteUpTo(max: number, ...listed: T[]): void {
+      const entries = list();
+      const before = entries.length;
+      for (const one of listed) {
+        if (entries.some((o) => same(o, one))) continue;
+        if (entries.filter((o) => o.profile === one.profile && o.tag === one.tag).length < max) entries.push(one);
+      }
+      if (entries.length > before) save(entries);
+    },
+    /**
      * Clears the origins of the apps opened from one chat (`tag`) or by one profile (`profile`), one at a time or, with
      * `atOnce`, all together, and takes each one cleared off the list. One `clear` did not clear (false, or it threw)
      * stays on it, for the profile's next clear.
