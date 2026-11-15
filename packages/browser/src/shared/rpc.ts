@@ -466,8 +466,17 @@ export interface EngineApi {
   setGroupPicture(params: { groupId: string; picture: string | null }): void;
   /** The admin renames the group (1 to 64 characters, one line); the picture stays. */
   renameGroup(params: { groupId: string; name: string }): void;
-  /** The admin of a community group names the node that forwards its calls (an https origin, WISP 602), or removes it with null. */
-  setGroupCall(params: { groupId: string; sfu: string | null }): void;
+  /**
+   * The admin of a community group names the node that forwards its calls (an https origin, WISP 602), or removes it with
+   * null. `e2ee` turns sealed call media on or off; left out, the group keeps what it had.
+   */
+  setGroupCall(params: { groupId: string; sfu: string | null; e2ee?: boolean }): void;
+  /**
+   * A pass into the group's call from the node its admin named in the group's `call` (WISP 602 · Group Calls), asked
+   * with my member key; a 403 is asked again for ~10 s, as a node may not have taken my admission yet. Rejects with an
+   * engine error a page says in one line: no call, not a member, refused, busy, unreachable, timed out.
+   */
+  groupCallToken(params: { groupId: string }): { url: string; token: string; room: string; identity: string; expiresIn: number; iceServers?: RTCIceServer[] };
   /** Forgets the group and its history on this device (leaving first when still in it). */
   forgetGroup(params: { groupId: string }): void;
   /**

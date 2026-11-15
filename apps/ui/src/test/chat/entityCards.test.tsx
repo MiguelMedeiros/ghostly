@@ -341,8 +341,12 @@ describe("Nostr cards", () => {
   it("draws what the person wrote in its own direction: their name, about and note", async () => {
     const pubkey = hex(), id = hex();
     const profile = bubble(`nostr:${npubEncode(pubkey)}`, { language: "ar" });
-    profile.engine.on("nostrLookup", () => ({ fetchedAt: 0, relays: ["wss://relay.one.example"], found: true, profile: { name: "Alice (dev)", about: "مرحبا بكم!", hasPicture: false, eventAt: 0, eventId: "e" } }));
+    profile.engine.on("nostrLookup", () => ({ fetchedAt: 0, relays: ["wss://relay.one.example"], found: true, profile: { name: "Alice (dev)", handle: "alice", nip05: "_@example.com", about: "مرحبا بكم!", hasPicture: false, eventAt: 0, eventId: "e" } }));
     await profile.user.click(screen.getByTestId("entity-nostr-load"));
+    // In Arabic "@alice · npub…" was drawn with its "@" past the npub, "_@example.com" with its "_@" past NIP-05
+    // (measured in Chromium): each is a run of its own.
+    expect((await screen.findByText("@alice")).tagName).toBe("BDI");
+    expect(screen.getByText("_@example.com")).toHaveAttribute("dir", "ltr");
     // In the app's direction, "Alice (dev)" in Arabic was drawn "(Alice (dev", an Arabic about in English with its "!" at the far end.
     const title = (await screen.findByTestId("entity-nostr-title")).closest("p")!;
     expect(title).toHaveAttribute("dir", "auto");

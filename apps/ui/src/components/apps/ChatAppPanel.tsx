@@ -275,13 +275,15 @@ function TabTrap({ root }: { root: RefObject<HTMLElement | null> }) {
 /**
  * On a phone, an app the person went Back from: still running, one tap away, under the chat's header. While it serves
  * a file to the contact, it says so here too (WISP 1200 § A read lane to the contact): the panel's header is hidden.
- * One that stopped meanwhile (a takedown, the watchdog) says "Stopped" here, and why once it is shown.
+ * One that stopped meanwhile (a takedown, the watchdog) says "Stopped" here, and why once it is shown; a screen reader
+ * is told why as it stops, the focus left in the chat.
  */
 export function ChatAppResume({ linkId }: { linkId: string }) {
   const { t } = useI18n();
   const app = useChatApp(linkId);
   if (!app || app.shown) return null;
   return (
+    <>
     <button type="button" data-testid="mini-app-resume" data-serving={app.serving || undefined} onClick={() => updateChatApp(linkId, { shown: true })}
       className="flex w-full items-center gap-2 px-4 py-2 bg-panel-header border-b border-border text-[13px] font-medium text-accent hover:bg-surface-hover cursor-pointer shrink-0 text-start">
       <AppGlyph size={16} />
@@ -300,5 +302,10 @@ export function ChatAppResume({ linkId }: { linkId: string }) {
       </span>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="rtl:-scale-x-100"><path d="m9 18 6-6-6-6" /></svg>
     </button>
+    {/* Why it stopped, said politely while the person stays in the chat: the panel's own line is hidden with it, and the
+        way back's "Stopped" was only drawn. A line that is there, empty, since the way back showed, as a live region must
+        be before what it says; the focus stays where the person is. */}
+    <span role="status" data-testid="mini-app-resume-said" className="sr-only">{app.stopped ? takedownText(app.title, app.stopped, t) : null}</span>
+    </>
   );
 }

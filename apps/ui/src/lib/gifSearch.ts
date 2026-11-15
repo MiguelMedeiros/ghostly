@@ -230,8 +230,16 @@ export function searchGifs(query: string): Promise<GifAnswer> {
  * any answer still on its way. Other profiles' searches and the Archive's wait stay: the wait is this IP's.
  */
 export function forgetGifSearches(): void {
-  const prefix = keyOf("");
-  forgotten.add(getPrefix());
+  forgetGifSearchesOf(getPrefix());
+}
+
+/**
+ * Forgets the searches of the profile whose storage prefix is `profilePrefix` (`prefixOf`), as `forgetGifSearches`
+ * does this profile's: Delete profile, from another profile whose page this same tab ran it in.
+ */
+export function forgetGifSearchesOf(profilePrefix: string): void {
+  const prefix = `${profilePrefix}\n`;
+  forgotten.add(profilePrefix);
   for (const key of onTheirWay.keys()) if (key.startsWith(prefix)) onTheirWay.delete(key);
   const { kept, until, strikes } = load();
   for (const key of [...kept.keys()]) if (key.startsWith(prefix)) kept.delete(key);

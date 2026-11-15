@@ -13,6 +13,7 @@ import { lockRetryAt, tryLockPassword, waitMessage } from "./lockAttempts";
 import { pushPlatform } from "./wakePush";
 import { linkedFilesDatabase } from "./apps/webFiles";
 import { resetIncomingShare } from "./incomingShare";
+import { forgetGifSearchesOf } from "./gifSearch";
 
 /**
  * What deleting a profile would take away, read from its own storage without starting it. `wallets`: the kinds of
@@ -366,4 +367,6 @@ async function dropProfile(id: string, owned: (key: string) => boolean): Promise
   await forgetDevice(dbName).catch(() => {});
   // What another profile's peek saw of it (its contacts' keys, link and message ids), and its notice.
   clearPeek(id);
+  // Its GIF searches, which the tab's session keeps across a profile switch.
+  forgetGifSearchesOf(prefixOf(id));
 }
