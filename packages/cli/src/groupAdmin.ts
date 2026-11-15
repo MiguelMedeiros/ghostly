@@ -88,7 +88,8 @@ async function picture(params: Params): Promise<string | null> {
 
 /**
  * The node a group's calls go through (WISP 602): an https origin in its one spelling, refused here before anything is
- * signed. A URL that names an https origin in another spelling (a path, a trailing `/`, capitals) is told that origin.
+ * signed. A URL that names an https origin in another spelling (a path, a trailing `/`, capitals, `:443`) is told that
+ * origin, and an origin past the limit is told the limit: before, both were told of a path, query or `/` it may not have.
  */
 function callNode(raw: string, ref: string, groupId: string): string {
   const sfu = groupCallSfu(raw);
@@ -96,11 +97,12 @@ function callNode(raw: string, ref: string, groupId: string): string {
   let origin: string | undefined;
   try {
     const url = new URL(raw);
-    if (url.protocol === "https:" && url.origin.length <= MAX_GROUP_CALL_SFU) origin = url.origin;
+    if (url.protocol === "https:") origin = url.origin;
   } catch { /* no URL at all */ }
-  throw new CliError("bad_request", origin
-    ? `${JSON.stringify(raw)} is not an origin (no path, query or trailing /): ghostly group call ${shellWord(ref, groupId)} --sfu ${origin}`
-    : `${JSON.stringify(raw)} is not an https origin: a call node is like https://call.example.com`);
+  const quoted = JSON.stringify(raw);
+  if (!origin) throw new CliError("bad_request", `${quoted} is not an https origin: a call node is like https://call.example.com`);
+  if (origin.length > MAX_GROUP_CALL_SFU) throw new CliError("bad_request", `${quoted} is too long: a call node is an https origin of at most ${MAX_GROUP_CALL_SFU} characters`);
+  throw new CliError("bad_request", `${quoted} is not in its one spelling (lower case, no default port, path, query or trailing /): ghostly group call ${shellWord(ref, groupId)} --sfu ${origin}`);
 }
 
 /**
