@@ -1287,7 +1287,7 @@ describe("the engine passthrough", () => {
 
   it("a call that deletes chats or groups asks for yes, as the commands made for it do", async () => {
     const { ctx, node } = fake();
-    const calls = { clearProfileData: vi.fn(), removeLink: vi.fn(), leaveGroup: vi.fn(async () => ({})), forgetGroup: vi.fn(), deviceRemove: vi.fn() };
+    const calls = { clearProfileData: vi.fn(), removeLink: vi.fn(), leaveGroup: vi.fn(async () => ({})), forgetGroup: vi.fn(), switchGroup: vi.fn(), deviceRemove: vi.fn() };
     Object.assign(node, calls, { removalsPending: () => [] });
     for (const [method, call] of Object.entries(calls)) {
       await expect(callApi(ctx, "engine.call", { method, params: {} }), method).rejects.toMatchObject({ code: "confirm", message: expect.stringContaining("--yes") });

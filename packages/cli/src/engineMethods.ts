@@ -296,6 +296,7 @@ export const DESTRUCTIVE_CALLS: ReadonlyMap<string, string> = new Map([
   ["removeLink", "deletes a chat's keys and history on this device"],
   ["leaveGroup", "deletes a group's history and files on this device"],
   ["forgetGroup", "deletes a group's history on this device"],
+  ["switchGroup", "leaves the group held under this id and deletes its history on this device"],
   ["deviceRemove", "takes a device off this profile"],
 ]);
 

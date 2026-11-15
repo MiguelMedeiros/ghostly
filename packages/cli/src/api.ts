@@ -293,7 +293,7 @@ async function letIn(ctx: ApiContext, groupId: string, link: string, held: Group
   const own = held?.entryLink ? decodeGroupEntryLink(held.entryLink) : null;
   if (held?.status === "active" && opened && own?.host !== opened.host) {
     const kept = seen(state(ctx))?.others?.some((o) => "link" in o && decodeGroupEntryLink(o.link)?.host === opened.host);
-    const pick = `keep the one you are in (ghostly engine keepGroup '{"groupId":"${groupId}"}') or take the link's instead (ghostly engine switchGroup '{"groupId":"${groupId}","to":"<its link, from group show --show-secret>"}')`;
+    const pick = `keep the one you are in (ghostly engine keepGroup '{"groupId":"${groupId}"}') or take the link's instead, which leaves the one you are in and deletes its history on this device (ghostly engine switchGroup '{"groupId":"${groupId}","to":"<its link, from group show --show-secret>"}' --yes)`;
     return { group: groupId, joined: false, stage: null, warning: kept
       ? `Not joined: you are in a group under this link's id already, and only a group's welcome says whose a link is, so the link was kept beside that group and knocks nowhere. ghostly group show ${id} lists it under "others": ${pick}`
       : `Not joined: you are in a group under this link's id already, and as many other groups as are kept already wait beside it to be picked, so the link was not kept. ghostly group show ${id} lists them under "others": ${pick}, then open the link again` };
