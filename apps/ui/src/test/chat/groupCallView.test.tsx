@@ -4,6 +4,10 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+const tauri = vi.hoisted(() => ({ invoke: vi.fn(async (_command: string) => undefined) }));
+vi.mock("@tauri-apps/api/core", async (importOriginal) => ({ ...await importOriginal<object>(), invoke: tauri.invoke }));
+
 import { GroupCallView, type GroupCallParticipant, type GroupCallState } from "../../components/GroupCallView";
 import type { CallDevices, DeviceNotice } from "../../hooks/useCallDevices";
 import type { GroupCallError } from "../../hooks/useGroupCall";
@@ -309,6 +313,30 @@ describe("a mic, camera or screen that did not come on", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // The Android app said "Allow … in Android's settings" with no way there, as the 1:1 call's notice offers: once
+  // Android no longer asks ("Don't allow" twice), only its settings allow the microphone again.
+  it("in the Android app, opens the app's page in Android's settings, as the 1:1 call does", async () => {
+    const agent = navigator.userAgent;
+    Object.defineProperty(navigator, "userAgent", { value: "Mozilla/5.0 (Linux; Android 15; sdk_gphone64_x86_64) AppleWebKit/537.36 Chrome/124.0 Mobile Safari/537.36", configurable: true });
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+    try {
+      const { user } = withError(micRefused());
+      const alert = screen.getByRole("alert");
+      expect(alert).toHaveTextContent("No access to the micAllow the microphone (and camera) in Android's settings for Ghostly.");
+      await user.click(within(alert).getByRole("button", { name: "Open settings" }));
+      expect(tauri.invoke).toHaveBeenCalledWith("open_app_settings");
+      expect(await axeViolations(screen.getByTestId("group-call"))).toEqual([]);
+    } finally {
+      Object.defineProperty(navigator, "userAgent", { value: agent, configurable: true });
+      delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+    }
+  });
+
+  it("offers no Open settings in a browser", () => {
+    withError(micRefused());
+    expect(within(screen.getByRole("alert")).queryByRole("button")).toBeNull();
   });
 
   it("says nothing for a failed join: the call's button says that one", () => {
