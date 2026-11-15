@@ -109,7 +109,7 @@
   /* Its width is its chat's, not the window's: the Discard question below asks it how much room it has. */
   container: voice-bar / inline-size;
 }
-@media (max-width: 767px) { .voice-bar { inset-inline-end: 56px; } }
+@media (width < 768px) { .voice-bar { inset-inline-end: 56px; } }
 /* A phone held in one hand: the timer and "slide to cancel" are all that fit, as in WhatsApp. */
 @media (max-width: 479px) { .voice-hold-live { display: none; } }
 .voice-bar-dot {

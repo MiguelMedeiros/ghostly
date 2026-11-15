@@ -18,7 +18,7 @@ const listeners = new Set<() => void>();
 vi.mock("../../hooks/useIsMobile", async () => {
   const { useEffect, useState } = await import("react");
   return {
-    MOBILE_QUERY: "(max-width: 767px)",
+    MOBILE_QUERY: "(width < 768px)",
     useIsMobile: () => {
       const [value, setValue] = useState(mobile);
       useEffect(() => { const on = () => setValue(mobile); listeners.add(on); return () => { listeners.delete(on); }; }, []);
