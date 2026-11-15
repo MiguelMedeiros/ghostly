@@ -33,7 +33,8 @@ export const commands: Record<string, Command> = {
       clear: { type: "boolean", description: "The group has no calls" },
     },
     params: ({ options }, a) => {
-      if (options.sfu === undefined && options.clear !== true && options.e2ee === undefined) throw new CliError("usage", "Missing --sfu: ghostly group call <group> --sfu <https origin> | --clear");
+      // Every form the usage line takes: before, only --sfu and --clear, though `--e2ee` alone seals the node set already.
+      if (options.sfu === undefined && options.clear !== true && options.e2ee === undefined) throw new CliError("usage", "Missing --sfu, --e2ee, --no-e2ee or --clear: ghostly group call <group> --sfu <https origin> [--e2ee | --no-e2ee] | --e2ee | --no-e2ee | --clear");
       if (options.sfu !== undefined && options.clear === true) throw new CliError("usage", "--clear removes the call node: not with --sfu");
       if (options.e2ee !== undefined && options.clear === true) throw new CliError("usage", "--clear removes the call node: not with --e2ee or --no-e2ee");
       return { group: a.group, ...(options.clear === true ? { clear: true } : options.sfu !== undefined ? { sfu: options.sfu } : {}), ...(options.e2ee !== undefined && { e2ee: options.e2ee === true }), ...secret(options) };
