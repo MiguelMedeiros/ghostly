@@ -187,6 +187,29 @@ describe("Join call in a group's header", () => {
     expect(screen.getByTestId("group-call")).toBeInTheDocument();
   });
 
+  it("Join call pressed while in the call opens its window whole again, and stays in the room it joined", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let n = 0;
+    answerPass(() => pass({ token: `pass-${++n}` }));
+    const { user } = joinButton();
+    await user.click(screen.getByTestId("group-call-join"));
+    await waitFor(() => expect(FakeRoom.rooms[0]?.connect).toHaveBeenCalled());
+    // The next pass, asked before this one runs out, is held for a join after a drop.
+    await act(async () => { await vi.advanceTimersByTimeAsync(541_000); });
+    expect(passAsks()).toHaveLength(2);
+    await user.click(screen.getByTestId("group-call-minimize"));
+    expect(screen.getByTestId("group-call")).toHaveAttribute("data-mini", "true");
+    // From the small window, the header's Join call is in reach.
+    await user.click(screen.getByTestId("group-call-join"));
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    // Not joined again with the newer pass held: everyone saw this member leave and come back.
+    expect(FakeRoom.rooms).toHaveLength(1);
+    expect(FakeRoom.rooms[0].disconnect).not.toHaveBeenCalled();
+    expect(passAsks()).toHaveLength(2);
+    expect(screen.getByTestId("group-call")).toHaveAttribute("data-mini", "false");
+    localStorage.removeItem("ghostly_group_call_mini");
+  });
+
   it("on a 1:1 call, Join call asks to end it first; a 1:1 call answered later ends the group's", async () => {
     answerPass(() => pass());
     const other = Symbol("1:1 call"), hangUp = vi.fn();

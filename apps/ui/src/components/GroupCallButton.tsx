@@ -120,8 +120,12 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
     if (otherCallOn(key)) setAskEnd(true);
     else void join();
   };
+  // Pressed while in the call (its small window leaves the header in reach): the window opens whole again. Joining
+  // anew would take the newer pass held, so the room was left and joined again in front of everyone.
+  const [raised, setRaised] = useState(0);
   const press = () => {
     if (asking) return;
+    if (joined) return setRaised((n) => n + 1);
     if (unsupported) return setProblem(problem ? null : unsupported);
     if (blocked) return setProblem(unsealable ? noSealingProblem : noRelayProblem);
     if (relayOnly && !joinedShowingIp.has(ipShownTo)) setAskIp(true);
@@ -213,7 +217,7 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
           {!blocked && <button type="button" onClick={() => void join()} data-testid="group-call-retry" className={`min-h-8 rounded-md px-2 font-semibold text-accent hover:bg-surface-hover max-md:min-h-11 ${focus}`}>{t("calls.group.retry")}</button>}
         </div>
       </div>}
-      {joined && <GroupCallView call={call} groupName={group.name || t("group.chat.unnamed")} canShareScreen={canShareScreen} nameOf={nameOf}
+      {joined && <GroupCallView call={call} groupName={group.name || t("group.chat.unnamed")} canShareScreen={canShareScreen} nameOf={nameOf} raised={raised}
         onToggleMic={() => void call.toggleMic()} onToggleCamera={() => void call.toggleCamera()} onToggleScreen={() => void call.toggleScreen()} onLeave={leave} />}
       {askIp && <HideIpDialog onClose={() => setAskIp(false)} onConfirm={() => { setAskIp(false); joinedShowingIp.add(ipShownTo); go(); }} />}
       {askEnd && <EndOtherCallDialog onClose={() => setAskEnd(false)} onConfirm={() => { setAskEnd(false); endOtherCalls(key); void join(); }} />}
