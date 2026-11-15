@@ -51,7 +51,7 @@ async function joinGroup(peer: Peer, link: string): Promise<void> {
   await expect(peer.page.getByTestId("group-chat")).toHaveAttribute("data-status", "active", { timeout: 180_000 });
 }
 
-test("three members join a community group's call, see and hear each other, see a shared screen; an outsider gets no pass", { tag: ["@feature:groups.call.join", "@feature:groups.call.screen", "@feature:groups.call.refused"] }, async ({ peer, relay }, testInfo) => {
+test("three members join a community group's call, see and hear each other, see a shared screen; an outsider gets no pass", { tag: ["@feature:calls.group", "@feature:calls.group.room", "@feature:calls.group.screen"] }, async ({ peer, relay }, testInfo) => {
   const started = Date.now();
   const node = new HeadlessBot();
   try {
@@ -105,7 +105,7 @@ test("three members join a community group's call, see and hear each other, see 
 
     // Dan is a member, but not in the node's roster: no pass, and one line that says so.
     await dan.page.getByTestId("group-call-join").click();
-    await expect(dan.page.getByText(REFUSED)).toBeVisible({ timeout: 60_000 });
+    await expect(dan.page.getByTestId("group-call-problem-notice")).toContainText(REFUSED, { timeout: 60_000 });
     await expect(dan.page.getByTestId("group-call-tile")).toHaveCount(0);
     await expect(tile(ana, d, "face")).toHaveCount(0);
 
