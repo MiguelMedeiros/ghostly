@@ -374,9 +374,10 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
 
       {shownError && errorShown && (
         <p key={said.id} role="alert" data-testid="group-call-error" data-action={shownError.action}
-          className="call-share-error absolute bottom-32 max-md:bottom-[calc(8.5rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-10 w-max max-w-[calc(100%-2rem)] rounded-lg bg-black/70 px-3 py-2 text-center text-xs text-white">
+          className="call-share-error call-group-error absolute bottom-32 max-md:bottom-[calc(8.5rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-10 w-max max-w-[calc(100%-2rem)] rounded-lg bg-black/70 px-3 py-2 text-center text-xs text-white">
           <span className="block font-medium">{errorShown.title}</span>
-          {errorShown.next && <span className="block">{errorShown.next}</span>}
+          {/* The small window has no room for it (index.css): there it is only said. */}
+          {errorShown.next && (mini ? <span className="sr-only"> {errorShown.next}</span> : <span className="block">{errorShown.next}</span>)}
           {errorShown.android && (
             <button type="button" data-testid="group-call-error-settings" onClick={() => void openAppSettings()}
               className="relative mt-1 cursor-pointer rounded underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent before:absolute before:-inset-y-3 before:-inset-x-2 before:content-['']">
