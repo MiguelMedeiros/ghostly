@@ -207,7 +207,9 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
           const again = document.createElement("button");
           again.type = "button";
           again.setAttribute("data-testid", "mini-app-open-again");
-          again.className = "mx-auto min-h-11 rounded border border-accent px-4 py-1 text-sm font-medium text-accent hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent";
+          // Dimmed with the wait cursor while it opens again (aria-disabled), as in a chat's panel: busy for a screen
+          // reader only, it looked as though the press did nothing.
+          again.className = "mx-auto min-h-11 rounded border border-accent px-4 py-1 text-sm font-medium text-accent hover:bg-surface-hover cursor-pointer aria-disabled:cursor-wait aria-disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent";
           again.textContent = openAgainLabel();
           const failed = document.createElement("p");
           failed.setAttribute("role", "alert");

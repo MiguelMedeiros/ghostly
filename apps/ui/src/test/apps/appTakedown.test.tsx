@@ -350,6 +350,23 @@ describe("an app the watchdog stopped", () => {
     expect(screen.queryByTestId("mini-app-stopped")).not.toBeInTheDocument();
   });
 
+  // Pressed, it waits for the app's files and the runner: busy for a screen reader only, it looked pressed for nothing
+  // and a press meanwhile did nothing. It dims and shows the wait, as Open again in a chat's panel does.
+  it("alone: Open again shows it is busy while it opens again, as in a chat's panel", async () => {
+    open = aloneOpener();
+    await open(REF, null);
+    started[0]!.stop("unresponsive");
+    let release!: () => void;
+    entryWaits = new Promise<void>((resolve) => { release = resolve; });
+    const again = within(screen.getByTestId("mini-app")).getByRole("button", { name: "Open again" });
+    expect(again).toHaveClass("cursor-pointer", "aria-disabled:cursor-wait", "aria-disabled:opacity-60");
+    again.click();
+    expect(again).toHaveAttribute("aria-disabled", "true");
+    expect(again).toHaveAttribute("aria-busy", "true");
+    release();
+    await waitFor(() => expect(started).toHaveLength(2));
+  });
+
   it("an app stopped for anything else offers no Open again", async () => {
     setAppOpener(open);
     chatPanel();
