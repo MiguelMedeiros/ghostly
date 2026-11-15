@@ -1438,8 +1438,10 @@ async function listenCommand(argv: string[]): Promise<void> {
     const stop = stopper(async () => { following.close(); await handle.stop(); });
     quit = (code) => { following.close(); process.exit(code); };
     onReaderGone(stop);
-    await following.subscribed;
+    // Before the subscription's answer is awaited: the events it replays can come in the same read, and the first one's
+    // hook started before the await went on. A SIGTERM then ended the listen on the spot and left the hook running.
     onStopSignals(stop);
+    await following.subscribed;
     return;
   }
   const [{ keepServing, serve }, { callApi }] = await Promise.all([engineHost(), engineApi()]);
