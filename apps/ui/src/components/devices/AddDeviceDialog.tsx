@@ -174,8 +174,13 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
     : view.step === "confirm" ? <>{fillNames(t("devices.add.found"), { device: view.device })} <span dir="ltr">{`${view.digits.slice(0, 3)} ${view.digits.slice(3)}`}</span></>
     : view.step === "done" ? fillNames(t("devices.add.done"), { device: view.device }) : "";
 
+  // From They match until the device is added or the enrollment failed, × and Escape do nothing: the grant may have gone
+  // out, and closing would cancel it, leaving "Not finished" on both devices. The engine ends the step on its own.
+  const granting = view?.role === "inviter" && (view.step === "adding" || (view.step === "confirm" && busy));
+  const close = () => { if (!granting) onClose(); };
+
   return (
-    <DeviceDialog title={t("devices.add.title")} onClose={onClose} testId="device-add">
+    <DeviceDialog title={t("devices.add.title")} onClose={close} testId="device-add">
       <Toast toast={notice.toast} onDismiss={notice.dismiss} place="dialog" testId="device-add-notice" />
       <div ref={body} tabIndex={-1} className="space-y-3 focus:outline-none">
       <p role="status" className="sr-only" data-testid="device-add-spoken">{spoken}</p>
