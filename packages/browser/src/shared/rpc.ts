@@ -474,6 +474,11 @@ export interface EngineApi {
    * engine error a page says in one line: no call, not a member, refused, busy, unreachable, timed out.
    */
   groupCallToken(params: { groupId: string }): { url: string; token: string; room: string; identity: string; expiresIn: number; iceServers?: RTCIceServer[] };
+  /**
+   * The key that seals the group's call media for its newest epoch (WISP 602 § End-to-end encryption): base64url of
+   * 32 bytes, and that epoch. Null until the epoch's secret arrives, once out of the group, or in a private group.
+   */
+  groupCallKey(params: { groupId: string }): { epoch: number; key: string } | null;
   /** Forgets the group and its history on this device (leaving first when still in it). */
   forgetGroup(params: { groupId: string }): void;
   /**
