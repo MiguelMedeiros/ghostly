@@ -3,9 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { engine } from "@ghostly/browser/platform/engine";
 import { clearAllData } from "../../lib/clearData";
 import { busyUntil, earlierGifs, keptGifs, searchGifs } from "../../lib/gifSearch";
+import { deleteProfile } from "../../lib/profileData";
+import { namespaceOf, registerProfile } from "../../lib/profiles";
 import { setStorageProfile } from "../../lib/storage";
 
-// covers: app.clear-data, chat.paired.gifs.busy
+// covers: app.clear-data, chat.paired.gifs.busy, profiles.delete
 
 vi.mock("@ghostly/browser/shared/fileBytes", async (importOriginal) => ({ ...await importOriginal<object>(), removeFileBytes: vi.fn(async () => {}) }));
 vi.mock("../../lib/wakePush", async (importOriginal) => ({ ...await importOriginal<object>(), pushPlatform: () => null }));
@@ -80,5 +82,26 @@ describe("Clear all data forgets the profile's GIF searches (WISP 04)", () => {
     expect(after.earlierGifs("mine")).toBeNull();
     (await import("../../lib/storage")).setStorageProfile("otherprofile");
     expect(after.earlierGifs("anything")).toMatchObject({ query: "theirs" });
+  });
+});
+
+describe("Delete profile forgets that profile's GIF searches (WISP 04)", () => {
+  it("the tab's session no longer holds them, and the running profile's stay", async () => {
+    gifCities();
+    const work = "abcdefghij";
+    registerProfile(work, "Work");
+    // A profile switch reloads the same tab: the session keeps what the other profile searched.
+    setStorageProfile(namespaceOf(work));
+    await searchGifs("secretwords");
+    setStorageProfile("");
+    await searchGifs("mine");
+
+    await deleteProfile(work);
+
+    expect(sessionStorage.getItem("ghostly_gif_search") ?? "").not.toContain("secretwords");
+    expect(earlierGifs("anything")).toMatchObject({ query: "mine" });
+    const after = await reload();
+    (await import("../../lib/storage")).setStorageProfile(namespaceOf(work));
+    expect(after.earlierGifs("anything")).toBeNull();
   });
 });
