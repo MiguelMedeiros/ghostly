@@ -3215,6 +3215,10 @@ export class GhostLink {
   dhtWentNowhere(id: string): boolean { return !!this.dht?.wentNowhereFor(id); }
   /** What went on the DHT floor under this id needs no more retries there (it went live, or was withdrawn). */
   async settleDht(id: string): Promise<void> { await this.dht?.acknowledge(id); }
+  /** Whether the DHT floor holds this text of mine, or an edit of it, awaiting its receipt or not (`DhtDelivery.holds`). */
+  dhtHolds(wireId: string): boolean { return !!this.dht?.holds(wireId); }
+  /** A text of mine deleted here leaves the DHT floor, an edit of it waiting there too (`DhtDelivery.withdraw`). */
+  async withdrawDht(wireId: string): Promise<void> { await this.dht?.withdraw(wireId); }
 
   /** Publishes a `_call` signal; a connected peer also gets it right away over the data link. */
   async setCallSignal(signal: string | null): Promise<void> {

@@ -9,6 +9,7 @@ import { createLink } from "../src/invite";
 import { PRESENCE_WINDOW } from "../src/link";
 import { ACTIVE_DHT_POLL_MS, DhtDelivery, DHT_EXPIRY_SKEW_MS, DHT_ISSUED_BACK_MS, DHT_MESSAGE_TTL, DHT_TEXT_REFUSED, LEAVING_DHT_FAST_MS, LIVE_POLL_MS, emptyDhtDeliveryState, type DhtDeliveryState, type DhtDeliveryView } from "../src/dhtDelivery";
 import { setLinkTraceSink } from "../src/linkTrace";
+import { dhtEditId } from "../src/pairedEdits";
 import type { PairingCredentials } from "../src/pairedSession";
 import type { GhostRecord, SignedPacket } from "../src/pkarr";
 import { DiscoveryBudgetError } from "../src/transport";
@@ -542,6 +543,39 @@ describe("DHT delivery: sending and lifecycle", () => {
     await h.bob.acknowledge(ID);
     expect(h.last().pending).toBeUndefined();
     expect(h.last().confirmed).toBe(ID);
+    await h.bob.stop();
+  });
+
+  it("withdrawing a deleted text drops it, not as confirmed, and the next envelope goes without it", async () => {
+    const h = setup(); await h.bob.start();
+    expect(await h.bob.send("the token: sk-1", Date.now(), ID)).toBeNull();
+    expect((h.openPublished()[6] as unknown[])[2]).toBe("the token: sk-1");
+    expect(h.bob.holds(ID2)).toBe(false);
+    await h.bob.withdraw(ID2);
+    expect(h.last().pending?.message[0]).toBe(ID);
+    expect(h.bob.holds(ID)).toBe(true);
+    const published = h.transport.publish.mock.calls.length;
+    await h.bob.withdraw(ID);
+    expect(h.last().pending).toBeUndefined();
+    expect(h.last().confirmed).toBeUndefined();
+    expect(JSON.stringify(h.last())).not.toContain("sk-1");
+    expect(h.bob.holds(ID)).toBe(false);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.transport.publish.mock.calls.length).toBe(published + 1);
+    expect(h.openPublished()[6]).toBeNull();
+    // Nothing more carries it, retries included.
+    await vi.advanceTimersByTimeAsync(DHT_MESSAGE_TTL);
+    for (const call of h.transport.publish.mock.calls.slice(published)) expect(JSON.parse(decrypt(call[1][0].value, h.envelopeKey))[0][6]).toBeNull();
+    await h.bob.stop();
+  });
+
+  it("withdrawing a message also withdraws an edit of it waiting on the floor", async () => {
+    const h = setup(); await h.bob.start();
+    expect(await h.bob.send("new words: sk-2", Date.now(), dhtEditId(ID, 1), undefined, [ID, 1])).toBeNull();
+    expect(h.bob.holds(ID)).toBe(true);
+    await h.bob.withdraw(ID);
+    expect(h.last().pending).toBeUndefined();
+    expect(JSON.stringify(h.last())).not.toContain("sk-2");
     await h.bob.stop();
   });
 
