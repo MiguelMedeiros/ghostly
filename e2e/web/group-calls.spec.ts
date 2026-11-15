@@ -370,6 +370,9 @@ test.describe("group call moderation", () => {
       await joinGroup(ana, link);
       await expect.poll(async () => (await shown()).members.length, { timeout: 180_000, intervals: [2_000] }).toBe(2);
       const a = (await shown()).members.find((m) => !m.me)!.key;
+      // She has the node's statement naming the call node before the role moves: made the admin before her first sync,
+      // she takes the role commit first and then refuses the former admin's statement, and the group's call is lost.
+      await expect(ana.page.getByTestId("group-call-join")).toBeVisible({ timeout: 120_000 });
       await node.run("group", "admin", group, a);
       await expect(ana.page.getByTestId("group-event").filter({ hasText: "You are now the admin" })).toHaveCount(1, { timeout: 60_000 });
 
