@@ -263,7 +263,8 @@ export function MessageInput({
   const translatesSend = useTranslatesWhatISend(draftId);
   // Hide my IP from contacts: reading a link's page tells its site this device's address, and a pasted link may be a
   // contact's server. With it on no preview is made; the link goes as text (a picture link someone sent is not read either).
-  const relayOnly = useEngineValue((state) => state?.settings.relayOnly === true);
+  // Until the engine's first state it counts as on: a kept draft's link would otherwise be read before the engine says.
+  const relayOnly = useEngineValue((state) => !state || state.settings.relayOnly === true);
   const linkPreview = useLinkPreviewDraft(text, linkPreviews && !disabled && !relayOnly, edit?.preview);
 
   // Ready to type when the chat opens, where that costs nothing: on a touch screen the keyboard would come up over
