@@ -19,7 +19,10 @@ import { Notice } from "./ui/Notice";
 /** A refresh the node did not answer is asked again this much later, while the pass still holds. */
 const REFRESH_RETRY_MS = 30_000;
 
-/** The groups whose call this app, while open, was told to join with "Hide my IP from contacts" on: it asks once each. */
+/**
+ * The group's call nodes (`${groupId} ${sfu}`) this app, while open, was told to join with "Hide my IP from contacts"
+ * on: it asks once each, and again for another node the admin names.
+ */
 const joinedShowingIp = new Set<string>();
 
 /**
@@ -30,6 +33,7 @@ const joinedShowingIp = new Set<string>();
 export function GroupCallButton({ group, loadLivekit }: { group: GroupView; loadLivekit?: () => Promise<LivekitModule> }) {
   const { t } = useI18n();
   const groupId = group.id;
+  const ipShownTo = `${groupId} ${group.call?.sfu ?? ""}`;
   const id = useId();
   const [key] = useState(() => Symbol("group call"));
   /** The pass the room was joined with: it stays while in the room, since a new token would leave and join again. */
@@ -90,7 +94,7 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
   const press = () => {
     if (asking) return;
     if (blocked) return setProblem(noRelayProblem);
-    if (relayOnly && !joinedShowingIp.has(groupId)) setAskIp(true);
+    if (relayOnly && !joinedShowingIp.has(ipShownTo)) setAskIp(true);
     else go();
   };
   // Not believed from the node: each tile is named by the group's roster, a key outside it said to be so.
@@ -152,7 +156,7 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
       </div>}
       {joined && <GroupCallView call={call} groupName={group.name || t("group.chat.unnamed")} canShareScreen={canShareScreen} nameOf={nameOf}
         onToggleMic={() => void call.toggleMic()} onToggleCamera={() => void call.toggleCamera()} onToggleScreen={() => void call.toggleScreen()} onLeave={leave} />}
-      {askIp && <HideIpDialog onClose={() => setAskIp(false)} onConfirm={() => { setAskIp(false); joinedShowingIp.add(groupId); go(); }} />}
+      {askIp && <HideIpDialog onClose={() => setAskIp(false)} onConfirm={() => { setAskIp(false); joinedShowingIp.add(ipShownTo); go(); }} />}
       {askEnd && <EndOtherCallDialog onClose={() => setAskEnd(false)} onConfirm={() => { setAskEnd(false); endOtherCalls(key); void join(); }} />}
     </div>
   );
