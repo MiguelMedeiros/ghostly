@@ -31,15 +31,17 @@ vi.mock("../../components/apps/AppIcon", async (importOriginal) => {
 
 const KEY = "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiego";
 const listing = (store: number, n: number): AppListing => ({ ref: `ghostly:app/${KEY}${store}/app${n}`, sequence: 1, digest: `d${n}`, urls: [], title: `App ${store}.${n}`, tagline: "" } as AppListing);
-// A new object at each read, as the engine answers: equal, never the same.
+// A new object at each read, as the engine answers: equal, never the same, and stamped with the time of that read (the
+// engine stamps every store it reads, one that reads as before too).
+let reads: number;
 const store = (n: number, listings: number): AppStoreSummary => ({
   key: `${KEY}${n}`, fingerprint: "yz7m oxuc bd4u 8aqt", url: `https://raw.githubusercontent.com/ana/store${n}/HEAD/ghostly-store.json`, preloaded: false,
-  name: `Store ${n}`, kind: "curated", sequence: 4, expires: 4_000_000_000, expired: false, fetchedAt: 1,
+  name: `Store ${n}`, kind: "curated", sequence: 4, expires: 4_000_000_000, expired: false, fetchedAt: reads,
   apps: Array.from({ length: listings }, (_, i) => listing(n, i + 1)), removed: [],
 });
 // Two stores open by themselves (a few listings each: 5 + 4 rows), one closed (60 listings).
 let sizes: [number, number, number];
-const stores = () => sizes.map((size, i) => store(i + 1, size));
+const stores = () => { reads++; return sizes.map((size, i) => store(i + 1, size)); };
 
 let checked: () => void;
 beforeEach(() => {
@@ -49,6 +51,7 @@ beforeEach(() => {
   fakeEngine.appRunner = "/app-frame.html";
   setAppOpener(vi.fn(async () => {}));
   sizes = [5, 4, 60];
+  reads = 0;
   checked = () => {};
   fakeEngine.on("appList", () => []).on("appBuiltIns", () => []).on("appStoreList", () => stores())
     .on("appCheckUpdates", () => new Promise((resolve) => { checked = () => resolve([]); }))
@@ -99,6 +102,18 @@ describe("the Apps page's store listing rows", () => {
     await waitFor(() => expect(screen.queryByTestId("toast")).toBeNull());
     expect({ card, closed: drawn.rows }).toEqual({ card: 0, closed: 0 });
     expect(screen.getAllByTestId("app-listing")).toHaveLength(9);
+  });
+
+  it("says a store is read once it is, even when it lists nothing", async () => {
+    sizes = [5, 4, 0];
+    // The third store not read yet at the page's first read: no time.
+    fakeEngine.on("appStoreList", () => stores().map((s, i) => (i === 2 && reads === 1 ? { ...s, fetchedAt: undefined } : s)));
+    await opened();
+    const empty = () => screen.getAllByTestId("app-store")[2];
+    expect(within(empty()).getByText("Not read yet")).toBeInTheDocument();
+    await checkEnds();
+    expect(within(empty()).queryByText("Not read yet")).toBeNull();
+    expect(within(empty()).getByText("0 apps")).toBeInTheDocument();
   });
 
   it("draws again only the rows of the store whose list changed", async () => {
