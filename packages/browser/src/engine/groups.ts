@@ -2670,8 +2670,8 @@ export class Groups {
     }
     if (session?.status === "active" && frame && typeof frame === "object" && (frame as { t?: unknown }).t === "group-here") { this.heardHere(groupId, session, peerKey, frame as Record<string, unknown>); return; }
     if (session?.status === "active" && frame && typeof frame === "object" && (frame as { t?: unknown }).t === "group-reach") {
-      if (this.hubs.enabled) this.hubs.reached(groupId, session, peerKey, frame as Record<string, unknown>, this.now());
-      this.host.emit();
+      // A hub says it at least once a minute: one taken builds this group's view again, one left aside nothing.
+      if (this.hubs.enabled && this.hubs.reached(groupId, session, peerKey, frame as Record<string, unknown>, this.now())) this.host.emit(undefined, groupId);
       return;
     }
     if (!session) return;
