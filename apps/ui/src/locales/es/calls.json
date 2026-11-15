@@ -23,7 +23,11 @@
   "endsCurrent": "Contestar finaliza tu llamada actual",
   "group": {
     "info": "Pasa por el nodo del grupo. Cualquiera del grupo puede hablar, mostrar su cámara y compartir su pantalla. Con más de 8 personas entras silenciado.",
+    "joined": "{{name}} se unió",
+    "joinedMany": "{{names}} se unieron",
     "leave": "Salir de la llamada",
+    "left": "{{name}} salió",
+    "leftMany": "{{names}} salieron",
     "muted": "Silenciado",
     "screenOf": "Pantalla de {{name}}"
   },

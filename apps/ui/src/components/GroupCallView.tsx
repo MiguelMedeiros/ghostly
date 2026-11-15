@@ -3,7 +3,8 @@ import { createPortal } from "react-dom";
 import { CORNERS, useFloatingBox } from "../hooks/useFloatingBox";
 import type { CallDevices } from "../hooks/useCallDevices";
 import { applySpeaker } from "../lib/mediaDevices";
-import { useI18n } from "../contexts/I18nContext";
+import { useI18n, type Translate, type TranslationKey } from "../contexts/I18nContext";
+import { listText } from "../lib/listText";
 import { useBackCloses, useTabTrap } from "../hooks/useDismiss";
 import { initial } from "../lib/initial";
 import { fillNames } from "../lib/fillNodes";
@@ -44,6 +45,8 @@ interface GroupCallViewProps {
   onReturnToChat?: () => void;
   layer?: HTMLElement | null;
   devices?: CallDevices | null;
+  /** In the room (`useGroupCall`'s status "connected"): said once, and who comes and goes after it is said too. */
+  connected?: boolean;
 }
 
 const MINI_KEY = "ghostly_group_call_mini";
@@ -63,6 +66,39 @@ function useShareOrder(sharing: string[]): string[] {
   const next = [...kept, ...sharing.filter((id) => !kept.includes(id))];
   order.current = next;
   return next;
+}
+
+/**
+ * What a screen reader hears as the call moves on: "Connected" once in the room, then who joined and who left, several
+ * at once in one line ("Ana, Bo joined"), and those who left on a line of their own. The people already there when you join are not read out one by one, and the active speaker and
+ * others' mics are left out: they change every few seconds.
+ */
+function useCallNews(participants: GroupCallParticipant[], connected: boolean, t: Translate): string[] {
+  const [news, setNews] = useState<string[]>([]);
+  const seen = useRef<Map<string, string> | null>(null);
+  const people = participants.map((p) => `${p.identity}\n${p.name}`).join("\n\n");
+  useEffect(() => {
+    if (!connected) {
+      seen.current = null;
+      setNews([]);
+      return;
+    }
+    const before = seen.current;
+    const now = new Map(participants.map((p) => [p.identity, p.name]));
+    seen.current = now;
+    if (!before) {
+      setNews([t("calls.connected")]);
+      return;
+    }
+    const joined = [...now].filter(([id]) => !before.has(id)).map(([, name]) => name);
+    const left = [...before].filter(([id]) => !now.has(id)).map(([, name]) => name);
+    const said = (names: string[], one: TranslationKey, many: TranslationKey) =>
+      names.length === 0 ? [] : [names.length === 1 ? t(one, { name: names[0]! }) : t(many, { names: listText(names, t) })];
+    const lines = [...said(joined, "calls.group.joined", "calls.group.joinedMany"), ...said(left, "calls.group.left", "calls.group.leftMany")];
+    if (lines.length) setNews(lines);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `people` stands for the participants
+  }, [connected, people, t]);
+  return news;
 }
 
 /** A track drawn in a <video>, muted: the sound plays from the participant's own <audio>. */
@@ -139,7 +175,7 @@ function Tile({ person, you, kind, speaking, name }: { person: GroupCallParticip
  * A group call through the group's node: everyone's tile in a grid, the active speaker ringed, and a shared screen
  * large with the faces beside it. Drawn from `useGroupCall`'s state, passed in; it imports no LiveKit.
  */
-export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, onToggleScreen, onLeave, canShareScreen = false, pinned = false, onReturnToChat, layer, devices = null }: GroupCallViewProps) {
+export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, onToggleScreen, onLeave, canShareScreen = false, pinned = false, onReturnToChat, layer, devices = null, connected = true }: GroupCallViewProps) {
   const { t } = useI18n();
   const infoId = useId();
   const [info, setInfo] = useState(false);
@@ -172,6 +208,7 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
   }, [mini, box]);
 
   const { local, participants, activeSpeaker } = call;
+  const news = useCallNews(participants, connected, t);
   const everyone = [local, ...participants];
   const nameOf = (p: GroupCallParticipant) => (p === local ? t("calls.you") : p.name);
   const order = useShareOrder(everyone.filter((p) => p.screen && p.tracks.screen).map((p) => p.identity));
@@ -213,6 +250,8 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
           {mini ? <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" /> : <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" />}
         </svg>
       </button>
+
+      <div role="status" className="sr-only" data-testid="group-call-news">{news.map((line) => <p key={line}>{line}</p>)}</div>
 
       {participants.map((p) => p.tracks.audio && <TrackAudio key={p.identity} track={p.tracks.audio} speaker={devices?.speaker} />)}
 

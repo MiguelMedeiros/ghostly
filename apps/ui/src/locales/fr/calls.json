@@ -23,7 +23,11 @@
   "endsCurrent": "Répondre met fin à votre appel en cours",
   "group": {
     "info": "Il passe par le nœud du groupe. Tout membre peut parler, montrer sa caméra et partager son écran. Au-delà de 8 personnes, vous arrivez en sourdine.",
+    "joined": "{{name}} a rejoint l'appel",
+    "joinedMany": "{{names}} ont rejoint l'appel",
     "leave": "Quitter l'appel",
+    "left": "{{name}} a quitté l'appel",
+    "leftMany": "{{names}} ont quitté l'appel",
     "muted": "En sourdine",
     "screenOf": "Écran de {{name}}"
   },
