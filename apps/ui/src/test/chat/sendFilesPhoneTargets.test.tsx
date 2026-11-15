@@ -63,7 +63,7 @@ describe("Send files on a phone", () => {
   });
 
   it("a .tap-target placed with absolute stays where it is: the phone rule makes only the others relative", () => {
-    const phone = INDEX_CSS.match(/@media \(width < 48rem\) \{\n((?: {2}[^\n]*\n)*?\s*\.tap-target::after[^\n]*\n)\}/)?.[1] ?? "";
+    const phone = INDEX_CSS.match(/@media \(width < 768px\) \{\n((?: {2}[^\n]*\n)*?\s*\.tap-target::after[^\n]*\n)\}/)?.[1] ?? "";
     expect(phone).toMatch(/\.tap-target::after \{/);
     expect(phone).toMatch(/\.tap-target:not\(\.absolute\) \{ position: relative; \}/);
     expect(phone).not.toMatch(/\.tap-target \{[^}]*position/);
