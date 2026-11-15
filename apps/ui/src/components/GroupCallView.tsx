@@ -153,10 +153,15 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
       // only a preference
     }
   };
+  // The sizes of the 1:1 call's small window (CallOverlay): on a touch screen its five buttons need 264 × 168.
+  const phone = window.innerWidth < 768;
+  const touch = typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches;
   const miniWindow = useFloatingBox(
     "ghostly_group_call_window_box",
-    () => ({ x: window.innerWidth - 364, y: window.innerHeight - 316, w: 340, h: 220 }),
-    { enabled: mini, minWidth: 190, minHeight: 128 },
+    () => (phone
+      ? touch ? { x: window.innerWidth - 280, y: window.innerHeight - 272, w: 264, h: 168 } : { x: window.innerWidth - 206, y: window.innerHeight - 240, w: 190, h: 136 }
+      : { x: window.innerWidth - 364, y: window.innerHeight - 316, w: 340, h: 220 }),
+    { enabled: mini, minWidth: touch ? 264 : 190, minHeight: touch ? 168 : 128 },
   );
   const box = miniWindow.boxProps.ref;
   useEffect(callWindowShown, []);
