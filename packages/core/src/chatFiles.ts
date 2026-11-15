@@ -1194,6 +1194,8 @@ export class ChatFiles {
     // meanwhile is not a second check.
     incoming.verifying = true;
     await incoming.writing;
+    // Taken again meanwhile (the sender stopped it, then offered it again): this check is the old transfer's.
+    if (entry.in !== incoming) return;
     if (transferEnded(record) || record.state !== "active" || incoming.stored < record.file.size) {
       incoming.verifying = false;
       if (!transferEnded(record) && record.state === "active") this.send({ t: "pf-accept", id: record.id, offset: incoming.stored });
@@ -1204,7 +1206,9 @@ export class ChatFiles {
     let ok: boolean;
     try { const target = await incoming.target; await target.flush(); ok = await target.verify(digest); } catch { ok = false; }
     incoming.verifying = false;
-    if (transferEnded(record)) return;
+    // The check runs beside the session's frames: the sender's abort and a new offer may have taken the file up again
+    // from the start. Its answer was the old bytes', and ended the new transfer done with what had come of it.
+    if (transferEnded(record) || entry.in !== incoming) return;
     if (ok) {
       record.digest = digest;
       record.confirmed = record.file.size;
