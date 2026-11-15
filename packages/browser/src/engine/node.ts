@@ -1123,11 +1123,10 @@ export class GhostlyNode implements EngineImplementation {
   private readonly groupWakeLimiter = new GroupWakeLimiter();
   /** `group-wake` frames read per edge, a handful a minute. */
   private readonly groupWakeReceived = new Map<string, RateWindow>();
+  /** A request only moves a counter: the counts go out with the next state, at most once a `REQUEST_COUNTS_MS`. */
   private readonly requestCounts = new Map<string, number>();
   /** One per service and contact that was served: aborted once that contact may no longer reach it (`servicesChanged`). */
   private readonly serviceGrants = new Map<string, { serviceId: string; peerPubKeyZ32: string; revoke: AbortController }>();
-  /** A request only moves a counter: the counts go out with the next state, at most once a `REQUEST_COUNTS_MS`. */
-  private requestCountsTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly transfers = new Map<string, FileTransferView>();
   /**
    * Views that go in the next state sent, and then away (`GroupFilesHost.brief`): dropped once a state carried them,
@@ -2959,7 +2958,6 @@ export class GhostlyNode implements EngineImplementation {
     if(this.paymentTimer)clearTimeout(this.paymentTimer);
     clearTimeout(this.awaitingTimer);
     clearTimeout(this.walletChangeTimer);
-    clearTimeout(this.requestCountsTimer);
     clearInterval(this.staleReviewTimer);
     if (this.spareTimer) clearTimeout(this.spareTimer);
     for (const timer of this.reactionTimers.values()) clearTimeout(timer);
@@ -8651,7 +8649,8 @@ export class GhostlyNode implements EngineImplementation {
       const target = parseLocalTarget(service.target);
       this.requestCounts.set(id, (this.requestCounts.get(id) ?? 0) + 1);
       // A page loading its assets asks many times a second: one state a second carries the counts, not one per request.
-      this.requestCountsTimer ??= setTimeout(() => { this.requestCountsTimer = undefined; this.emitState(); }, REQUEST_COUNTS_MS);
+      // The counts are no chat's nor group's (`services`, read fresh in every state): every view stays as it was.
+      this.scheduleState(REQUEST_COUNTS_MS);
       const key = `${id} ${peerPubKeyZ32}`;
       let grant = this.serviceGrants.get(key);
       if (!grant) this.serviceGrants.set(key, grant = { serviceId: id, peerPubKeyZ32, revoke: new AbortController() });
@@ -8859,7 +8858,8 @@ export class GhostlyNode implements EngineImplementation {
               void this.shareGroupWake(linkId).catch(() => {});
             }
           }
-          this.emitState();
+          // The edge's own change: its group's view alone is built again (`pushedState`), not every chat's and group's.
+          this.chatChanged(linkId);
         },
         // The member's packet says what its app runs here: one with no WebRTC is reached over a native transport, and
         // this side starts its endpoints for it (and says how to dial them in its own packet). Kept for the next start.
@@ -8882,7 +8882,7 @@ export class GhostlyNode implements EngineImplementation {
           live.peerSaidAt = undefined;
           void db.patchLink(linkId, patch).catch(() => {});
           if (!this.keepsGroupNative(live.stored)) this.groupNativeWaiting.delete(linkId);
-          this.emitState();
+          this.chatChanged(linkId);
         },
         ...(entry ? {} : {
           onPaymentRequest: (request: PaymentRequest) => member() ? this.desk.onPaymentRequest(linkId, request) : undefined,
@@ -8904,8 +8904,9 @@ export class GhostlyNode implements EngineImplementation {
           // name, and taking that would drop the member's name and set it again on every drop and reopen.
           if (!entry && presence.nick && !live.link?.isDataLinkOpen) this.groups.edgeNick(group, peer, presence.nick);
           if (!entry) this.edgeRtcPresence(linkId, presence);
-          if (!same) this.emitState(); },
-        onPairingState: state => { live.pairing = state; this.emitState(); },
+          // Every member's packet, read again at each of its republishes: only its own group's view is built again.
+          if (!same) this.chatChanged(linkId); },
+        onPairingState: state => { live.pairing = state; this.chatChanged(linkId); },
         onDirectEvidence: evidence => {
           this.directPath.note(peer, evidence);
           if (evidence !== "open" && evidence !== "closed") void this.edgeWithoutRtc(linkId);
@@ -8936,11 +8937,11 @@ export class GhostlyNode implements EngineImplementation {
           // the joiner again (its packet still looks online), spending an offer and fast polls on nobody.
           if (entry && state !== "open" && live.entryDone) void this.closeGroupLink(linkId).catch(() => {});
           if (state !== "open" && live.pairing?.status !== "error") live.pairing = { status: "connecting" };
-          this.emitState();
+          this.chatChanged(linkId);
         },
         // Said on every read: the pages hear only of a change.
-        onStatus: status => { if (status !== live.status) { live.status = status; this.emitState(); } },
-        onDiscoveryError: error => { if ((error ?? undefined) !== live.discoveryError) { live.discoveryError = error ?? undefined; this.emitState(); } },
+        onStatus: status => { if (status !== live.status) { live.status = status; this.chatChanged(linkId); } },
+        onDiscoveryError: error => { if ((error ?? undefined) !== live.discoveryError) { live.discoveryError = error ?? undefined; this.chatChanged(linkId); } },
       },
     });
     traceJoin(group, "link.start", { role });

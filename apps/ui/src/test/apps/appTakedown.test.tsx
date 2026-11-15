@@ -355,6 +355,7 @@ describe("an app the watchdog stopped", () => {
     chatPanel();
     await act(() => open(REF, "link-1"));
     act(() => started[0]!.stop("protocol"));
+    expect(screen.getByTestId("mini-app-stopped")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Open again" })).not.toBeInTheDocument();
   });
 });
