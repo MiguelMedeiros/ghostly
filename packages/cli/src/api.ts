@@ -735,7 +735,17 @@ const METHODS: Record<string, Method> = {
     // a contact's key as a group's: the command offered names the group by `group:` unless the name alone reaches it.
     const ref = str(params, "message") ?? "<message>", typed = str(params, "chat", true);
     const reachesGroup = (name: string) => { try { return "group" in findChatOrGroup(state(ctx).links, state(ctx).groups, name); } catch { return false; } };
-    const link = notAGroup(ctx, params, () => chatOf(ctx, params), (shown, id) => `ghostly message delete ${groupPrefixed(typed) === null && reachesGroup(typed) ? shown : shellWord(groupPrefixed(typed) === null ? `group:${typed}` : typed, `group:${id}`)} ${ref === "<message>" ? ref : shellWord(ref, "<message>")} --everyone`);
+    let link: ReturnType<typeof chatOf>;
+    try {
+      link = notAGroup(ctx, params, () => chatOf(ctx, params), (shown, id) => `ghostly message delete ${groupPrefixed(typed) === null && reachesGroup(typed) ? shown : shellWord(groupPrefixed(typed) === null ? `group:${typed}` : typed, `group:${id}`)} ${ref === "<message>" ? ref : shellWord(ref, "<message>")} --everyone`);
+    } catch (error) {
+      // Another member's message: only its author deletes it, so the `--everyone` offered was then refused as not mine,
+      // a second command to learn it cannot be deleted at all. A history that cannot be read keeps that hint.
+      const group = error instanceof CliError ? error.details?.group : undefined;
+      const theirs = typeof group === "string" && ref !== "<message>" ? await messageOf(ctx, `group:${group}`, ref).catch(() => undefined) : undefined;
+      if (theirs && theirs.sender !== "me") throw new CliError("not_found", `${JSON.stringify(typed)} is a group, and ${JSON.stringify(ref)} is another member's message in it: only its author deletes a group's message, for everyone`, { group });
+      throw error;
+    }
     const messageId = str(params, "message", true);
     const message = await node(ctx).getMessage(link.id, messageId);
     if (!message) throw noMessage(messageId, { group: false, ref: str(params, "chat", true) });
