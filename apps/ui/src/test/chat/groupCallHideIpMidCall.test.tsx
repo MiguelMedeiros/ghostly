@@ -78,6 +78,24 @@ describe("Hide my IP from contacts turned on during a group call", () => {
     expect(screen.queryByTestId("group-call-problem")).toBeNull();
   });
 
+  it("joins again with the newest pass, not the first one that ran out", async () => {
+    hideIp(false);
+    let n = 0;
+    // A 2 s pass: the button asks for the next one at four fifths of it.
+    answerPass(() => ({ ...pass([TURN]), token: `pass-${++n}`, expiresIn: 2 }));
+    const group = community("group-mid-call-long");
+    fakeEngine.update({ groups: [group] });
+    const view = renderApp(<GroupCallButton group={group} loadLivekit={loadLivekit} />);
+    await view.user.click(screen.getByTestId("group-call-join"));
+    await waitFor(() => expect(FakeRoom.rooms[0]?.connect).toHaveBeenCalledWith("wss://sfu.ghostly.test", "pass-1", expect.anything()));
+    await waitFor(() => expect(n).toBe(2), { timeout: 4_000 });
+    hideIp(true);
+    await waitFor(() => expect(FakeRoom.rooms[1]?.connect).toHaveBeenCalled());
+    expect(FakeRoom.rooms[1].connect).toHaveBeenCalledWith("wss://sfu.ghostly.test", "pass-2", {
+      rtcConfig: { iceServers: [{ ...TURN, urls: [TURN.urls] }], iceTransportPolicy: "relay" },
+    });
+  }, 10_000);
+
   it("ends the call with the Hide my IP line when the node's pass has no relay", async () => {
     await inCall("group-mid-call-no-relay", [STUN]);
     hideIp(true);
