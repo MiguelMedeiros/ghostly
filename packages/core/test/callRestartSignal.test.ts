@@ -121,7 +121,11 @@ describe("waiting for a restart's candidates", () => {
   });
 
   it("resolves at once when the description already has this round's candidates, as before when not asked", async () => {
-    await waitForIceGathering(gatheredBefore(SOME) as unknown as RTCPeerConnection, 2000, { fresh: true });
-    await waitForIceGathering(gatheredBefore(NONE) as unknown as RTCPeerConnection, 2000);
+    for (const [sdp, options] of [[SOME, { fresh: true }], [NONE, undefined]] as const) {
+      let done = false;
+      void waitForIceGathering(gatheredBefore(sdp) as unknown as RTCPeerConnection, 2000, options).then(() => { done = true; });
+      await Promise.resolve();
+      expect(done).toBe(true);
+    }
   });
 });

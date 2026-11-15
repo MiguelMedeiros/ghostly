@@ -689,7 +689,7 @@ describe("GroupChat: out of the group", () => {
     engine.on("declineGroupInvitation", () => { throw new Error("No invitation to decline"); });
     await user.click(within(screen.getByTestId("group-notice")).getByRole("button", { name: "Cancel joining" }));
     expect(await within(screen.getByTestId("group-notice")).findByRole("alert")).toBeInTheDocument();
-    expect(screen.getByTestId("group-chat")).toBeInTheDocument();
+    expect(within(screen.getByTestId("group-notice")).getByTestId("group-rejoin-cancel")).toBeInTheDocument();
   });
 
   it("names the status when the engine gave no reason, in the notice too", () => {
