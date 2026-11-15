@@ -600,7 +600,7 @@ export function DeviceMenu({ devices, overVideo, host }: { devices: CallDevices;
 
 /** A device went away and the default took over (or none could), the chosen one is back (with the way to switch to it), or one chosen could not be used.
  *  On a phone its buttons take a tap on 44 px (`.tap-target`): the ×'s grows into the 12 px gap, up to Switch back. */
-function DeviceNoticeBar({ devices }: { devices: CallDevices }) {
+export function DeviceNoticeBar({ devices }: { devices: CallDevices }) {
   const { t } = useI18n();
   const notice = devices.notice!;
   const name = notice.name || t(KIND_NAME[notice.kind]);
