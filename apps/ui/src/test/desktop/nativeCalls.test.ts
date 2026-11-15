@@ -42,8 +42,9 @@ vi.mock("@tauri-apps/api/core", () => ({
   },
 }));
 
-const { GROUP_CALLS_NOT_ON_LINUX, NativePeerConnection, SCREEN_UNAVAILABLE, askedDevice, bytesOf, connectionStateOf, deviceList, deviceName, groupCallSupport, isJpeg, nativeCallMedia, nativeCallOptions, nativeDevices, ownIceServers } = await import("../../desktop/nativeCalls");
+const { NativePeerConnection, SCREEN_UNAVAILABLE, askedDevice, bytesOf, connectionStateOf, deviceList, deviceName, isJpeg, nativeCallMedia, nativeCallOptions, nativeDevices, ownIceServers } = await import("../../desktop/nativeCalls");
 const { callRtcConfig, keepsToRelays } = await import("@ghostly/core");
+const { GROUP_CALLS_NOT_ON_LINUX, groupCallSupport } = await import("../../desktop/groupCallSupport");
 const { useGroupCallSupport } = await import("../../hooks/useGroupCallSupport");
 const { errorText } = await import("../../lib/errorText");
 const { translateWith } = await import("../../locales/translate");
