@@ -8,7 +8,7 @@ import { usePlatformValue } from "../../hooks/useServicesPlatform";
 import { servicesPlatform } from "../../lib/platform";
 import { Button, Notice, Row, Section, Switch } from "../wallet/ui";
 import { Menu, MenuItem, MenuSeparator } from "../Menu";
-import { hasStandby, keepAwakeSupported, useKeepAwakeSetting } from "../../lib/keepAwake";
+import { hasStandby, keepAwakeForDevices, useKeepAwakeSetting } from "../../lib/keepAwake";
 import { AddDeviceDialog } from "./AddDeviceDialog";
 import { DeviceGlyph } from "./DeviceGlyph";
 import { HandoffProgress, MoveDialog } from "./Handoff";
@@ -171,8 +171,8 @@ export function DevicesSection() {
         </Row>
       )}
       {thisActive && view?.secretOffer && refused.dismiss && <div className="px-4 py-3"><Notice problem={refused.dismiss} testId="device-secret-offer-error" /></div>}
-      {/* On a Desktop with a standby device (WISP 06 § User experience): this device's own switch, never the profile's. */}
-      {keepAwakeSupported() && hasStandby(view) && (
+      {/* On a Desktop with a standby device (WISP 06 § User experience): this device's own switch, never the profile's. Not on Android, where it would hold nothing. */}
+      {keepAwakeForDevices() && hasStandby(view) && (
         <Row label={t("devices.section.keepAwake")} info={t("devices.section.keepAwakeHint")} testId="device-keep-awake">
           <Switch checked={keepAwake} onChange={setKeepAwake} label={t("devices.section.keepAwake")} testId="device-keep-awake-switch" />
         </Row>
