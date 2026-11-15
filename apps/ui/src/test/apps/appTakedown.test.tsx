@@ -535,6 +535,35 @@ describe("an app in a chat the person went Back from, that stops", () => {
     });
   }
 
+  // The person is in the chat, the app behind Back: its way back turning to "Stopped" was drawn only, so a screen reader
+  // heard nothing while the panel's own line is hidden with it. Said politely, in a line there since the way back showed.
+  for (const where of ["phone", "narrow"]) {
+    for (const reason of ["revoked", "unresponsive"]) {
+      it(`${where}, ${reason}: why is said while the person stays in the chat, the focus left there`, async () => {
+        const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) { return where === "narrow" && this.classList.contains("chat-pane") ? 604 : 0; });
+        try {
+          const { user } = chatPanel(where === "phone");
+          await act(() => open(REF, "link-1"));
+          await user.click(within(screen.getByTestId("mini-app")).getByTestId("mini-app-back"));
+          const field = screen.getByRole("textbox", { name: "Message" });
+          await user.click(field);
+          const column = document.querySelector<HTMLElement>(".chat-column")!;
+          const said = within(column).getByRole("status");
+          expect(said).toBeEmptyDOMElement();
+          if (reason === "revoked") await checked({ status: "revoked" });
+          else act(() => started[0]!.stop(reason));
+          expect(within(column).getByRole("status")).toBe(said);
+          expect(said).toHaveTextContent(reason === "revoked" ? "\u2068Chess\u2069 was stopped: its publisher revoked this version" : /^\u2068Chess\u2069 stopped responding and was closed/);
+          expect(document.activeElement).toBe(field);
+          // Not a second name for the way back: it still reads "Back to Chess, Stopped".
+          expect(screen.getByTestId("mini-app-resume")).toHaveAccessibleName(/^Back to Chess ?, Stopped$/);
+        } finally {
+          width.mockRestore();
+        }
+      });
+    }
+  }
+
   // Shown again already stopped, the line comes with its words, which a live region does not read: the focus goes to
   // Back, and Back is described by why, on a phone and with no room beside the chat.
   for (const where of ["phone", "narrow"]) {
