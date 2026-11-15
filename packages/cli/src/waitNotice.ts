@@ -112,5 +112,11 @@ export function waitNotice(method: string, given: Record<string, unknown>, mode:
   const what = group !== undefined ? `a member's edge in group ${group} to take it`
     : params.wait === "sent" ? `it to go out to ${chat}`
     : `${chat}'s app to confirm it`;
+  // A daemon's file send waits only once the file is copied into the profile: a Ctrl-C before that stops the send (files.ts
+  // `stageWhileAsked`), and the command cannot tell which it was. It said "it still goes", and a large file never went.
+  if (method === "file.send" && mode === "daemon") return {
+    waiting: `waiting for it to go out to ${chat} (${upTo}; it still goes once the daemon has copied it into the profile, before that Ctrl-C stops the send)`,
+    stopped: `if the daemon was still copying it into the profile, it is not sent (send it again); if not, it is kept here and ${goesOn(mode)}`,
+  };
   return { waiting: `waiting for ${what} (${upTo}, it still goes)`, stopped: `it is kept here and ${goesOn(mode)}` };
 }

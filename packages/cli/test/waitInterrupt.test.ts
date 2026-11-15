@@ -143,7 +143,16 @@ describe("what a wait says", () => {
       stopped: "the daemon copies big.iso in and sends it to bob",
     });
     expect(waitNotice("file.send", { chat: "group:crew", path: "/f", name: "notes.txt", wait: "none" }, "daemon")?.waiting).toBe("copying notes.txt into the profile before it goes to group crew (Ctrl-C stops waiting, it still goes)");
-    // One that waits for the contact says that wait, as before.
-    expect(waitNotice("file.send", { chat: "bob", path: "/f", wait: "sent" }, "daemon")?.waiting).toBe("waiting for it to go out to bob (up to 300 s; Ctrl-C stops waiting, it still goes)");
+  });
+
+  it("through a daemon, a file send that waits for the contact says a Ctrl-C during the copy stops the send", () => {
+    // It said "it still goes" from the start; a Ctrl-C while a large file was still copied in stopped the send, and the
+    // file never went (files.ts `stageWhileAsked`).
+    expect(waitNotice("file.send", { chat: "bob", path: "/f", wait: "sent" }, "daemon")).toEqual({
+      waiting: "waiting for it to go out to bob (up to 300 s; Ctrl-C stops waiting; it still goes once the daemon has copied it into the profile, before that Ctrl-C stops the send)",
+      stopped: "if the daemon was still copying it into the profile, it is not sent (send it again); if not, it is kept here and still goes by itself while this profile is online",
+    });
+    // A one-shot's copy is its own process's: what it says is as before.
+    expect(waitNotice("file.send", { chat: "bob", path: "/f", wait: "sent" }, "one-shot")?.waiting).toBe("waiting for it to go out to bob (up to 300 s; Ctrl-C stops waiting, it still goes)");
   });
 });
