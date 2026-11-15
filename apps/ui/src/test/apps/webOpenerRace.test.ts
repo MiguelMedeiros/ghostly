@@ -68,8 +68,8 @@ describe("two apps opened in one chat at once (web)", () => {
     await expect(open(FAST, LINK)).resolves.toBeUndefined();
     expect(chatApp(LINK)?.ref).toBe(FAST);
     release();
-    // Nothing new started: the contact is not told it opened.
-    await expect(first).resolves.toBe("shown");
+    // Nothing new started, and it is not the app shown there: the contact is not told it opened, even if its card is owed.
+    await expect(first).resolves.toBe("superseded");
     expect(started).toEqual(["Notes"]);
     expect(stopped).toEqual([]);
     expect(chatApp(LINK)?.ref).toBe(FAST);
@@ -90,7 +90,7 @@ describe("two apps opened in one chat at once (web)", () => {
     const result = await late;
     expect(started).toEqual(["Notes"]);
     expect(stopped).toEqual([]);
-    expect(result).toBe("shown");
+    expect(result).toBe("superseded");
     expect(chatApp(LINK)?.ref).toBe(FAST);
     expect(chatApp(LINK)?.shown).toBe(true);
     expect(chatApp(LINK)?.stopped).toBeUndefined();
