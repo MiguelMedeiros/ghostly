@@ -33,6 +33,8 @@ let asked = 0;
 /**
  * `next` with each app that reads as before kept as the object held, and the list held when every app is: each Apps
  * page visit (in every tab) reads the list again, and what did not change draws nothing again, no app card included.
+ * An app's `checkedAt` is left out: an update check that found nothing new still stamps it, and nothing here reads it,
+ * so the object held keeps its older stamp.
  */
 function kept<T extends { ref: string }>(held: readonly T[] | null, next: readonly T[]): readonly T[] {
   if (!held) return next;
@@ -40,7 +42,7 @@ function kept<T extends { ref: string }>(held: readonly T[] | null, next: readon
   let same = held.length === next.length;
   const out = next.map((a, i) => {
     const old = before.get(a.ref);
-    const view = old && JSON.stringify(old) === JSON.stringify(a) ? old : a;
+    const view = old && JSON.stringify({ ...old, checkedAt: undefined }) === JSON.stringify({ ...a, checkedAt: undefined }) ? old : a;
     if (view !== held[i]) same = false;
     return view;
   });
