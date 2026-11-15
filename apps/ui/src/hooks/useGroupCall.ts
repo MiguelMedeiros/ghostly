@@ -97,6 +97,8 @@ interface Session {
   keys?: InstanceType<LivekitModule["ExternalE2EEKeyProvider"]>;
   epoch?: number;
   worker?: Worker;
+  /** Joined under "Hide my IP from contacts" (the relay policy). */
+  relayed: boolean;
   ended: boolean;
   screen: MediaStreamTrack | null;
   screenEnded: (() => void) | null;
@@ -203,7 +205,8 @@ function admit(pub: RemoteTrackPublication): void {
 
 /**
  * Joins the room at `url` with `token` while both are set, with the microphone on and the camera off, or muted past
- * `GROUP_CALL_MUTED_ABOVE` people. A new url or token leaves the old room first; unmounting leaves it too. With
+ * `GROUP_CALL_MUTED_ABOVE` people. A new url or token leaves the old room first; unmounting leaves it too. `relayOnly`
+ * turned on during a call joins the room again under the relay policy, with the microphone and camera as they were. With
  * `e2ee` set, the room is joined sealed with LiveKit's E2EE (a shared key from `ExternalE2EEKeyProvider`), or not at
  * all: never unsealed. Sealing turned on or off for the group joins the room again.
  */
@@ -222,11 +225,25 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
   const seal = useRef(e2ee);
   seal.current = e2ee;
   const sealed = e2ee !== undefined;
+  // "Hide my IP from contacts" turned on in a room joined without it: the room is joined again, relay only. A room's
+  // ICE policy is set at its join, and the direct path it found would stay until a rejoin.
+  const [rejoin, setRejoin] = useState(0);
+  const carry = useRef<{ mic: boolean; camera: boolean } | null>(null);
+
+  useEffect(() => {
+    const s = session.current;
+    if (!relayOnly || !s || s.ended || s.relayed) return;
+    const me = s.room?.localParticipant;
+    carry.current = me ? { mic: me.isMicrophoneEnabled, camera: me.isCameraEnabled } : null;
+    setRejoin((n) => n + 1);
+  }, [relayOnly]);
 
   useEffect(() => {
     if (!url || !token) return;
     let live = true;
-    const s: Session = { ended: false, screen: null, screenEnded: null, screenAsking: false, refresh: () => {} };
+    const kept = carry.current;
+    carry.current = null;
+    const s: Session = { relayed: relay.current, ended: false, screen: null, screenEnded: null, screenAsking: false, refresh: () => {} };
     session.current = s;
     setState(EMPTY);
     setStatus("connecting");
@@ -235,9 +252,9 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
     void (async () => {
       try {
         const servers = ice.current;
-        const rtcConfig = relay.current ? groupCallRelayConfig(servers) : servers?.length ? { iceServers: servers } : undefined;
+        const rtcConfig = s.relayed ? groupCallRelayConfig(servers) : servers?.length ? { iceServers: servers } : undefined;
         // Nothing to relay through: joining would hand the node this device's address.
-        if (relay.current && !rtcConfig?.iceServers?.length) throw new Error(NO_RELAY);
+        if (s.relayed && !rtcConfig?.iceServers?.length) throw new Error(NO_RELAY);
         // A sealed call without its key is not joined: in the room the media would go unsealed, or not be heard.
         if (sealed && !seal.current) throw new Error(NO_CALL_KEY);
         const lk = await (load.current ?? loadLivekitClient)();
@@ -294,12 +311,20 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
         await rekey(s, seal.current);
         setStatus("connected");
         s.refresh();
-        if (!joinsMuted(room.remoteParticipants.size + 1)) {
+        if (kept ? kept.mic : !joinsMuted(room.remoteParticipants.size + 1)) {
           try {
             await room.localParticipant.setMicrophoneEnabled(true, { deviceId: preferredDevice("audioinput") });
           } catch (cause) {
             // In the call all the same, muted: the person sees why and can try the button.
             if (live) setError({ action: "mic", message: messageOf(cause), cause });
+          }
+          s.refresh();
+        }
+        if (kept?.camera && live && !s.ended) {
+          try {
+            await room.localParticipant.setCameraEnabled(true, { deviceId: preferredDevice("videoinput") });
+          } catch (cause) {
+            if (live) setError({ action: "camera", message: messageOf(cause), cause });
           }
           s.refresh();
         }
@@ -316,7 +341,7 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
       void endSession(s);
       if (session.current === s) session.current = null;
     };
-  }, [url, token, sealed]);
+  }, [url, token, sealed, rejoin]);
 
   // The group moved to a new epoch: its key goes into the call; everyone in the room does the same (WISP 602).
   const sealEpoch = e2ee?.epoch;

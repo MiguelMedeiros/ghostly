@@ -1385,7 +1385,7 @@ async function listenCommand(argv: string[]): Promise<void> {
   const cursor = here(parsed.options.cursor);
   // Before the profile opens: a cursor that cannot be written is no per-event warning.
   checkCursor(cursor);
-  const since = startAt(sinceOf(parsed.options), cursor, (line) => process.stderr.write(line + "\n"));
+  const starting = startAt(sinceOf(parsed.options), cursor, (line) => process.stderr.write(line + "\n")), since = starting.from;
   // Kept for the whole listen (a model loads once); its process ends with this one.
   const translator = await translatorFor(parsed.options.translate, g.home);
   // A cursor that can no longer be written (a full disk) stops the listener, with the error and its exit code: run on,
@@ -1441,7 +1441,8 @@ async function listenCommand(argv: string[]): Promise<void> {
     // Before the subscription's answer is awaited: the events it replays can come in the same read, and the first one's
     // hook started before the await went on. A SIGTERM then ended the listen on the spot and left the hook running.
     onStopSignals(stop);
-    await following.subscribed;
+    const answer = await following.subscribed as { lastSeq?: unknown } | null;
+    if (typeof answer?.lastSeq === "number") starting.known(answer.lastSeq);
     return;
   }
   const [{ keepServing, serve }, { callApi }] = await Promise.all([engineHost(), engineApi()]);
@@ -1485,6 +1486,7 @@ async function listenCommand(argv: string[]): Promise<void> {
     off = host.ctx.hub.onEvent(feed.take);
   };
   const feed = new Feed(handle, since, () => { off?.(); off = null; }, open);
+  starting.known(host.ctx.hub.lastSeq);
   open(since);
   host.ctx.hub.emit("daemon.started", `daemon.started:${process.pid}:${Date.now()}`, { pid: process.pid, version: VERSION, listen: true });
 }

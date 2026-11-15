@@ -200,7 +200,7 @@ export const ENGINE_PARAMS: Readonly<Record<string, string>> = {
   rotateGroup: "{ groupId }",
   setGroupPicture: "{ groupId, picture }",
   renameGroup: "{ groupId, name }",
-  setGroupCall: "{ groupId, sfu }",
+  setGroupCall: "{ groupId, sfu, e2ee? }",
   groupCallToken: "{ groupId }",
   groupCallKey: "{ groupId }",
   forgetGroup: "{ groupId }",

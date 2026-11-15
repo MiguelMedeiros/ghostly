@@ -755,24 +755,70 @@ describe("listen with an allowlist and --turns", () => {
     const dir = mkdtempSync(join(tmpdir(), "ghostly-listen-"));
     const said: string[] = [];
     const say = (line: string) => said.push(line);
+    // Where it starts, and what stderr says once the journal's last event (50 here) is known.
+    const start = (since: number | undefined, cursor: string | undefined, lastSeq = 50) => {
+      const starting = startAt(since, cursor, say);
+      starting.known(lastSeq);
+      return starting.from;
+    };
     // A first start (no file yet): --since is the place.
-    expect(startAt(0, join(dir, "first"), say)).toBe(0);
-    expect(startAt(undefined, join(dir, "first"), say)).toBeUndefined();
+    expect(start(0, join(dir, "first"))).toBe(0);
+    expect(start(undefined, join(dir, "first"))).toBeUndefined();
     expect(said).toEqual([]);
     // A restart: the cursor's number, and stderr says --since was passed over.
     writeFileSync(join(dir, "kept"), "41\n");
-    expect(startAt(0, join(dir, "kept"), say)).toBe(41);
+    expect(start(0, join(dir, "kept"))).toBe(41);
     expect(said).toEqual([`ghostly: ${join(dir, "kept")} holds event 41: starting after it, not after --since 0`]);
     said.length = 0;
-    expect(startAt(41, join(dir, "kept"), say)).toBe(41);
-    expect(startAt(undefined, join(dir, "kept"), say)).toBe(41);
-    expect(startAt(7, undefined, say)).toBe(7);
+    expect(start(41, join(dir, "kept"))).toBe(41);
+    expect(start(undefined, join(dir, "kept"))).toBe(41);
+    expect(start(undefined, join(dir, "kept"), 41)).toBe(41);
+    expect(start(7, undefined)).toBe(7);
     expect(said).toEqual([]);
+    // Past the journal's last event: new events, said with or without --since.
+    expect(start(0, join(dir, "kept"), 40)).toBe(41);
+    expect(start(undefined, join(dir, "kept"), 40)).toBe(41);
+    expect(said).toEqual(Array(2).fill(`ghostly: ${join(dir, "kept")} holds event 41, past this profile's last event (40): starting with new events`));
+    said.length = 0;
     // A cursor that holds no number is refused, and --since still starts it (the refusal says so).
     writeFileSync(join(dir, "garbage"), "abc\n");
-    expect(() => startAt(undefined, join(dir, "garbage"), say)).toThrow("holds no event number");
-    expect(startAt(3, join(dir, "garbage"), say)).toBe(3);
+    expect(() => start(undefined, join(dir, "garbage"))).toThrow("holds no event number");
+    expect(start(3, join(dir, "garbage"))).toBe(3);
+    expect(said).toEqual([]);
   });
+
+  // A profile restored from a backup, a journal reset, a cursor copied from another profile: the listen starts with new
+  // events. It said "starting after it" (with --since), or nothing (without), then wrote a lower number over the file.
+  it("a cursor past the journal's last event says it starts with new events, with or without --since", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ghostly-listen-"));
+    const cursor = join(dir, "cursor");
+    expect((await ghostly(["--home", dir, "profile", "create", "bot", "--use"])).code).toBe(0);
+    const past = /holds event 999999, past this profile's last event \((\d+)\): starting with new events\n/;
+    for (const since of [["--since", "0"], []]) {
+      writeFileSync(cursor, "999999\n");
+      const listen = new Running(["--home", dir, "listen", "--cursor", cursor, ...since]);
+      try {
+        const started = await listen.waitFor((line) => line.type === "daemon.started");
+        expect(listen.stderr).toMatch(past);
+        expect(Number(past.exec(listen.stderr)![1])).toBe((started.seq as number) - 1);
+        expect(listen.stderr).not.toMatch("starting after it");
+        await vi.waitFor(() => expect(readFileSync(cursor, "utf8")).toBe(`${started.seq}\n`), { timeout: 10_000, interval: 100 });
+      } finally {
+        await listen.stop();
+      }
+    }
+    // Through a daemon: its last event, as it answers the subscription.
+    expect((await ghostly(["--home", dir, "daemon", "--detach"])).code).toBe(0);
+    writeFileSync(cursor, "999999\n");
+    const listen = new Running(["--home", dir, "listen", "--cursor", cursor, "--since", "0"]);
+    try {
+      await vi.waitFor(() => expect(listen.stderr).toMatch(past), { timeout: 30_000, interval: 100 });
+      expect(listen.stderr).not.toMatch("starting after it");
+    } finally {
+      await listen.stop();
+      await ghostly(["--home", dir, "daemon", "stop"]);
+    }
+  }, 90_000);
 
   it("an output that wants a drain holds the next event until it drains; the events wait as `behind`", async () => {
     const lines: string[] = [];

@@ -1779,9 +1779,12 @@ export class Groups {
     if (this.isCommunity(groupId)) return this.communities.rename(groupId, name);
     await this.session(groupId).rename(name);
   }
-  /** The admin names (or, with null, removes) the node that forwards the group's calls: community groups only (WISP 602). */
-  async setCall(groupId: string, sfu: string | null): Promise<void> {
-    if (this.isCommunity(groupId)) return this.communities.setCall(groupId, sfu);
+  /**
+   * The admin names (or, with null, removes) the node that forwards the group's calls: community groups only (WISP 602).
+   * `e2ee` turns sealed call media on or off; left out, the group keeps what it had.
+   */
+  async setCall(groupId: string, sfu: string | null, e2ee?: boolean): Promise<void> {
+    if (this.isCommunity(groupId)) return this.communities.setCall(groupId, sfu, e2ee);
     this.session(groupId);
     throw new Error("Only a community group has calls through a node");
   }

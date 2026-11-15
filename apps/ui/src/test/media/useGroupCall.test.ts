@@ -282,6 +282,43 @@ describe("useGroupCall", () => {
     expect(FakeRoom.rooms).toHaveLength(0);
   });
 
+  it("Hide my IP turned on during the call joins the room again through the TURN alone, mic and camera as they were", async () => {
+    const turn = { urls: "turn:turn.example:3478", username: "u", credential: "c" };
+    const iceServers = [{ urls: "stun:stun.example:3478" }, turn];
+    const hook = await joined({ iceServers });
+    const direct = room();
+    await act(() => hook.result.current.toggleMic());
+    await act(() => hook.result.current.toggleCamera());
+    const directTracks = [...direct.localParticipant.trackPublications.values()].map((p) => p.track!.mediaStreamTrack as unknown as FakeTrack);
+
+    hook.rerender({ url: "wss://call.example", token: "pass", iceServers, relayOnly: true, loadLivekit });
+    await waitFor(() => expect(FakeRoom.rooms).toHaveLength(2));
+    // the direct path goes at once: its room is left and its tracks stopped
+    expect(direct.disconnect).toHaveBeenCalledWith(true);
+    for (const track of directTracks) expect(track.stop).toHaveBeenCalled();
+    await waitFor(() => expect(hook.result.current.status).toBe("connected"));
+    expect(room().connect).toHaveBeenCalledWith("wss://call.example", "pass", { rtcConfig: { iceServers: [{ ...turn, urls: [turn.urls] }], iceTransportPolicy: "relay" } });
+    await waitFor(() => expect(hook.result.current.local).toMatchObject({ mic: false, camera: true }));
+    expect(room().localParticipant.setMicrophoneEnabled).not.toHaveBeenCalledWith(true, expect.anything());
+
+    // turned off again: the relay is kept, nothing joins again
+    hook.rerender({ url: "wss://call.example", token: "pass", iceServers, relayOnly: false, loadLivekit });
+    await act(async () => {});
+    expect(FakeRoom.rooms).toHaveLength(2);
+    expect(room().disconnect).not.toHaveBeenCalled();
+  });
+
+  it("Hide my IP turned on during the call, with a pass without TURN, leaves the room and says why", async () => {
+    const iceServers = [{ urls: "stun:stun.example:3478" }];
+    const hook = await joined({ iceServers });
+    const direct = room();
+    hook.rerender({ url: "wss://call.example", token: "pass", iceServers, relayOnly: true, loadLivekit });
+    await waitFor(() => expect(hook.result.current.status).toBe("failed"));
+    expect(direct.disconnect).toHaveBeenCalledWith(true);
+    expect(hook.result.current.error).toMatchObject({ action: "join", message: NO_RELAY });
+    expect(FakeRoom.rooms).toHaveLength(1);
+  });
+
   it(`joins muted past ${GROUP_CALL_MUTED_ABOVE} people, and with the microphone on at ${GROUP_CALL_MUTED_ABOVE}`, async () => {
     FakeRoom.waiting = Array.from({ length: GROUP_CALL_MUTED_ABOVE }, (_, i) => `p${i}`);
     const crowded = await joined();
