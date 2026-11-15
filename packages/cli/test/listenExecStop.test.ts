@@ -75,7 +75,8 @@ describe("listen --exec stopped while its hook runs", { timeout: 120_000 }, () =
         const [pid, seq] = await until(() => starts()[0], 30_000, "the hook's start");
         expect(alive(pid)).toBe(true);
         listen.child.kill(stopSignal);
-        await listen.exited(30_000);
+        // Exit 0: the stop ran. A listen that had no handler yet was ended by the signal itself, its hook left running.
+        expect(await listen.exited(30_000), listen.stderr).toBe(0);
         // No orphan: the hook is gone with the listen, and it never finished.
         expect(await gone(pid), `the hook ${pid} still runs after the listen stopped\n${listen.stderr}`).toBe(true);
         expect(Number(readFileSync(cursor, "utf8").trim())).toBeLessThan(seq);
@@ -87,8 +88,9 @@ describe("listen --exec stopped while its hook runs", { timeout: 120_000 }, () =
         expect(again).not.toBe(pid);
         expect(alive(pid)).toBe(false);
         expect(readFileSync(log, "utf8")).not.toContain("done ");
+        // Stopped as its hook starts: a replayed event, whose hook can start before the subscription's answer is awaited.
         listen.child.kill("SIGTERM");
-        await listen.exited(30_000);
+        expect(await listen.exited(30_000), listen.stderr).toBe(0);
         expect(await gone(again), `the hook ${again} still runs after the listen stopped\n${listen.stderr}`).toBe(true);
       } finally {
         await listen.stop();

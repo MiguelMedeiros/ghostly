@@ -172,6 +172,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Could not share the screen. Try again.", "packages/react/src/useWebRTC.ts"],
   ["Your contact's app cannot show a screen in this call", "packages/react/src/useWebRTC.ts"],
   ["Screen sharing is not available on Linux yet", "apps/ui/src/desktop/nativeCalls.ts"],
+  ["Group calls aren't on Linux yet: join from app.ghostly.tools in a browser", "apps/ui/src/desktop/nativeCalls.ts"],
   ["Your contact's app cannot take calls", `${CORE}/ghostlink.ts`],
   ["Your contact needs an updated Ghostly for calls", `${CORE}/ghostlink.ts`],
   ["Calls are not available in this app", `${CORE}/ghostlink.ts`],

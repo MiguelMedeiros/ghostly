@@ -2,16 +2,17 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import { createIdentity, encodeGroupEntryLink } from "@ghostly/core";
 import type { EngineState, GroupView, StoredMessage } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
 import { parseArgs } from "../src/args";
-import { COMMANDS, TEXT_COMMANDS } from "../src/commands";
+import { COMMANDS, TEXT_COMMANDS, idSlot, positionals } from "../src/commands";
 import { EventHub, type GhostlyEvent } from "../src/events";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 import { pageOf } from "./support/messagePage";
 import { groupViewOf } from "./support/chatView";
 import { groupJson, groupMessageJson } from "../src/views";
-// covers: headless.groups, headless.group-admin, groups.rename
+// covers: headless.groups, headless.group-admin, headless.group-call, groups.rename
 
 /**
  * What a bot in a group reads: who wrote a message (the roster names mesh and community senders), the id of what it
@@ -152,6 +153,56 @@ describe("a one-shot group join", () => {
 
   it("through a daemon, answers at once as before", async () => {
     expect(await callApi(oneShot("daemon").ctx, "group.join", { link: LINK })).toEqual({ group: "g9" });
+  });
+
+  // Found in a bug hunt: an accepted contact's invitation to the group, still waiting for its welcome, keeps its place
+  // and the link is only noted beside it; nothing knocks, so it waited the full 60 s and said nobody had let it in.
+  it("a contact's invitation to the group, accepted, its welcome not in: answers at once that the welcome comes with the profile running", async () => {
+    vi.useFakeTimers();
+    try {
+      const accepted = { ...knocking("knocking"), invitation: { linkId: "c1", contact: "Alice", admin: "ak", members: 3, accepted: true } } as unknown as GroupView;
+      const answer = callApi(oneShot("one-shot", accepted).ctx, "group.join", { link: LINK });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(await Promise.race([answer, Promise.resolve("still waiting")])).toEqual({ group: "g9", joined: false, stage: null,
+        warning: "Not in yet: you accepted Alice's invitation to this group, and its welcome has not arrived; the link was kept beside it, and knocks nowhere. The welcome arrives only while this profile is running: keep it running (ghostly daemon --detach), then ghostly group show g9" });
+    } finally { vi.useRealTimers(); }
+  });
+});
+
+describe("a one-shot group join of a link for a group id already held", () => {
+  // Found in a bug hunt: in a group under the link's id already, the engine only keeps the link beside it (unless it is
+  // my own group's link) and knocks nowhere, yet the one-shot answered `"joined": true` at once, no warning, and a
+  // second group waited under the id that only `group show`'s `others` said.
+  const id = "AbCdEfGhIjKlMnOpQrStUv";
+  const host = createIdentity().pubKeyZ32;
+  const code = encodeGroupEntryLink({ g: id, host });
+  const url = `https://ghostly.tools/#/join/${code}`;
+  const inGroup = { id, name: "Crew", createdAt: 1, profile: "mesh", status: "active", isAdmin: false, canSend: true, lastMessageAt: 0, invited: [], memberLinks: {}, members: [] } as unknown as GroupView;
+  function held(before: GroupView, after: GroupView) {
+    let groups = [before];
+    const getState = () => ({ links: [], groups, settings: {}, transport: {} }) as unknown as EngineState;
+    const node = { getState, joinGroupByLink: vi.fn(async () => { groups = [after]; return { groupId: id }; }) };
+    return { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "one-shot", version: "test" } as unknown as ApiContext;
+  }
+  const pick = `keep the one you are in (ghostly engine keepGroup '{"groupId":"${id}"}') or take the link's instead (ghostly engine switchGroup '{"groupId":"${id}","to":"<its link, from group show --show-secret>"}')`;
+
+  it("another's link, kept beside the group held: joined false at once, and says how to pick between them", async () => {
+    const answer = await callApi(held(inGroup, { ...inGroup, others: [{ link: code }] }), "group.join", { link: url });
+    expect(answer).toMatchObject({ group: id, joined: false, stage: null });
+    expect(answer).toEqual({ group: id, joined: false, stage: null,
+      warning: `Not joined: you are in a group under this link's id already, and only a group's welcome says whose a link is, so the link was kept beside that group and knocks nowhere. ghostly group show ${id} lists it under "others": ${pick}` });
+  });
+
+  it("another's link with no room left beside it: joined false, and says it was not kept", async () => {
+    const full = { ...inGroup, others: [1, 2, 3, 4].map((n) => ({ linkId: `c${n}`, contact: "", name: "Other", members: 2 })) } as GroupView;
+    const answer = await callApi(held(full, full), "group.join", { link: code });
+    expect(answer).toMatchObject({ group: id, joined: false, stage: null });
+    expect((answer as { warning: string }).warning).toBe(`Not joined: you are in a group under this link's id already, and as many other groups as are kept already wait beside it to be picked, so the link was not kept. ghostly group show ${id} lists them under "others": ${pick}, then open the link again`);
+  });
+
+  it("my own group's link, as its admin: in, as before", async () => {
+    const mine = { ...inGroup, isAdmin: true, entryLink: code } as GroupView;
+    expect(await callApi(held(mine, mine), "group.join", { link: url })).toEqual({ group: id, joined: true, stage: null });
   });
 });
 
@@ -365,6 +416,66 @@ describe("group remove", () => {
     expect(await remove("Ana")).not.toHaveProperty("warning");
     node.getState = () => ({ links: [], groups: [group], settings: {}, transport: {} }) as unknown as EngineState;
     expect((await remove("bokey")).warning).toMatch(/^They can still join again/);
+  });
+});
+
+describe("group call", () => {
+  const SFU = "https://call.example.com";
+  const thursday = { ...group, id: "g7", name: "Thursday", profile: "community", entryLink: undefined } as unknown as GroupView;
+  /** A community whose view names the node the last `setGroupCall` set, as the engine's does once the statement is signed. */
+  function community(admin = true) {
+    const { ctx, node } = fake();
+    let call: { sfu: string } | undefined;
+    const setGroupCall = vi.fn(async ({ sfu }: { groupId: string; sfu: string | null }) => { call = sfu === null ? undefined : { sfu }; });
+    Object.assign(node, { setGroupCall, getState: () => ({ links: [], groups: [{ ...thursday, isAdmin: admin, ...(call && { call }) }, group], settings: {}, transport: {} }) as unknown as EngineState });
+    return { ctx, setGroupCall };
+  }
+  const show = async (ctx: ApiContext) => await callApi(ctx, "group.get", { group: "Thursday" }) as Record<string, unknown>;
+
+  it("the admin sets it and group show prints call.sfu; --clear removes it", async () => {
+    const { ctx, setGroupCall } = community();
+    expect((await show(ctx)).call).toBeNull();
+    expect(await callApi(ctx, "group.call", { group: "Thursday", sfu: SFU })).toMatchObject({ id: "g7", call: { sfu: SFU } });
+    expect(setGroupCall).toHaveBeenLastCalledWith({ groupId: "g7", sfu: SFU });
+    expect((await show(ctx)).call).toEqual({ sfu: SFU });
+    expect(await callApi(ctx, "group.call", { group: "Thursday", clear: true })).toMatchObject({ id: "g7", call: null });
+    expect(setGroupCall).toHaveBeenLastCalledWith({ groupId: "g7", sfu: null });
+    expect((await show(ctx)).call).toBeNull();
+  });
+
+  it("refuses a member who is not the admin, and a private group, before the engine signs anything", async () => {
+    const { ctx, setGroupCall } = community(false);
+    await expect(callApi(ctx, "group.call", { group: "Thursday", sfu: SFU })).rejects.toMatchObject({ code: "refused", message: "Only the admin of Thursday sets its call node" });
+    await expect(callApi(ctx, "group.call", { group: "Thursday", clear: true })).rejects.toMatchObject({ code: "refused" });
+    await expect(callApi(ctx, "group.call", { group: "Crew", sfu: SFU })).rejects.toMatchObject({ code: "refused", message: "Crew is a private group: only a community group has calls through a node" });
+    expect(setGroupCall).not.toHaveBeenCalled();
+  });
+
+  it("refuses anything but an https origin in its one spelling before signing, naming the origin when there is one", async () => {
+    const { ctx, setGroupCall } = community();
+    for (const [sfu, message] of [
+      ["http://call.example.com", "\"http://call.example.com\" is not an https origin: a call node is like https://call.example.com"],
+      ["wss://call.example.com", "\"wss://call.example.com\" is not an https origin: a call node is like https://call.example.com"],
+      ["call.example.com", "\"call.example.com\" is not an https origin: a call node is like https://call.example.com"],
+      [`https://${"a".repeat(200)}.com`, `"https://${"a".repeat(200)}.com" is not an https origin: a call node is like https://call.example.com`],
+      ["https://call.example.com/sfu", "\"https://call.example.com/sfu\" is not an origin (no path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
+      ["https://call.example.com/", "\"https://call.example.com/\" is not an origin (no path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
+      ["https://Call.Example.com:443", "\"https://Call.Example.com:443\" is not an origin (no path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
+      ["https://call.example.com?x=1", "\"https://call.example.com?x=1\" is not an origin (no path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
+    ] as const) await expect(callApi(ctx, "group.call", { group: "Thursday", sfu }), sfu).rejects.toMatchObject({ code: "bad_request", message });
+    expect(setGroupCall).not.toHaveBeenCalled();
+    // A port that is not the default one is part of the origin.
+    await callApi(ctx, "group.call", { group: "Thursday", sfu: "https://call.example.com:8443" });
+    expect(setGroupCall).toHaveBeenLastCalledWith({ groupId: "g7", sfu: "https://call.example.com:8443" });
+  });
+
+  it("takes --sfu or --clear, one of them", () => {
+    const command = COMMANDS["group call"];
+    const params = (argv: string[]) => { const parsed = parseArgs(argv, command.options ?? {}, idSlot(command)); return command.params!(parsed, positionals(command, parsed.positionals)); };
+    expect(params(["Thursday", "--sfu", SFU])).toEqual({ group: "Thursday", sfu: SFU });
+    expect(params(["Thursday", "--clear"])).toEqual({ group: "Thursday", clear: true });
+    expect(() => params(["Thursday"])).toThrow("Missing --sfu: ghostly group call <group> --sfu <https origin> | --clear");
+    expect(() => params(["Thursday", "--sfu", SFU, "--clear"])).toThrow("--clear removes the call node: not with --sfu");
   });
 });
 

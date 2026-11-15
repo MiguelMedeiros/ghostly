@@ -5,7 +5,7 @@ import { concatBytes, fromBase64Url, isZ32Key, randomBytes, toBase64Url, utf8Dec
 import { identityFromSeedB64, publicKeyFromZ32, sign, verify } from "./identity";
 import { sanitizeNick, unwrapPasted } from "./text";
 import {
-  confirmationMatches, confirmationTag, decryptText, encryptText, epochKeys, newEpochSecret, openPair, openSecret, sealPair, sealSecret, sha256Hex,
+  confirmationMatches, confirmationTag, decryptText, encryptText, epochKeys, groupCallKey, newEpochSecret, openPair, openSecret, sealPair, sealSecret, sha256Hex,
   type SealedSecret,
 } from "./groupCrypto";
 import { engineError } from "./engineErrors";
@@ -878,6 +878,11 @@ export class CommunitySession {
   get others(): string[] { return this.roster.map(([k]) => k).filter(k => k !== this.myKey); }
   get isMember(): boolean { return this.state.status === "active" && rosterHas(this.roster, this.myKey); }
   get canSend(): boolean { return this.isMember && !!this.state.secrets[this.topHash]; }
+  /** The call key of the newest epoch (WISP 602), or null until its secret arrives or once I am out. */
+  callKey(): { epoch: number; key: Uint8Array } | null {
+    const secret = this.isMember && this.state.secrets[this.topHash];
+    return secret ? { epoch: this.epoch, key: groupCallKey(fromBase64Url(secret), this.id, this.epoch) } : null;
+  }
   /** The entry key of the group's link, or "" when it is off. */
   get entryKey(): string { return this.state.entry.key; }
   /**
@@ -895,6 +900,8 @@ export class CommunitySession {
   role(key: string): GroupRole | undefined { return this.roster.find(([k]) => k === key)?.[1]; }
   /** The group's picture, if it has one. */
   get picture(): string | undefined { return groupMetaPicture(this.state.meta); }
+  /** The node that forwards the group's calls, while the statement I keep names one that holds (WISP 602). */
+  get call(): { sfu: string } | undefined { return groupMetaBody(this.state.meta).call; }
   /**
    * Members of any epoch in the window: whom a frame may come from. A side commit's roster counts only while its branch
    * could still win (`mayWin`): one let in only on a branch that lost is not in the roster anyone sees, and the main
@@ -2802,6 +2809,16 @@ export class CommunitySession {
       this.requireMember();
       if (!this.isAdmin) throw new Error("Only the admin can rename the group");
       const body = encodeGroupMetaBody({ ...groupMetaBody(this.state.meta), name });
+      if (body !== this.state.meta?.body) await this.publishMeta(body, now);
+    });
+  }
+
+  /** Names (or, with null, removes) the node that forwards the group's calls (WISP 602): only the admin, beside the name and picture. */
+  setCall(sfu: string | null, now = Date.now()): Promise<void> {
+    return this.serialize(async () => {
+      this.requireMember();
+      if (!this.isAdmin) throw new Error("Only the admin can set the group's call node");
+      const body = encodeGroupMetaBody({ ...groupMetaBody(this.state.meta), call: sfu === null ? undefined : { sfu } });
       if (body !== this.state.meta?.body) await this.publishMeta(body, now);
     });
   }

@@ -48,6 +48,7 @@
   "mute": "静音",
   "needLive": "通话需要直连",
   "noAnswer": "无人接听",
+  "noGroupOnLinux": "Linux 上暂不支持群组通话：请在浏览器中打开 app.ghostly.tools 加入",
   "noPath": "通话无法连接",
   "noPathGuide": "如何解决",
   "noPathNext": "你或联系人的 VPN 或防火墙可能阻止了通话。TURN 服务器可以让通话接通。",
