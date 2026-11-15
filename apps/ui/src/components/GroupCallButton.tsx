@@ -3,9 +3,11 @@ import { createPortal } from "react-dom";
 import { endOtherCalls, otherCallOn, setCallOn } from "@ghostly/react";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { useI18n } from "../contexts/I18nContext";
+import { useSettings } from "../contexts/SettingsContext";
 import { useBackCloses, useBackdropDismiss, useQuestionDialog } from "../hooks/useDismiss";
 import { groupCallRelayConfig, useGroupCall, type LivekitModule } from "../hooks/useGroupCall";
 import { useHandler } from "../hooks/useHandler";
+import { useCallService } from "../lib/callService";
 import { askGroupCallPass, groupCallOf, groupCallProblem, PASS_REFRESH_LEAD_S, passRefreshInMs, type GroupCallPass } from "../lib/groupCallPass";
 import { focus } from "../lib/connection";
 import { useEngineValue } from "../lib/engineState";
@@ -127,6 +129,15 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
     setCallOn(key, leave);
     return () => setCallOn(key, null);
   }, [on, key, leave]);
+
+  // The Android app keeps the call going out of sight, as a 1:1 call (lib/callService.ts): from the microphone first
+  // on (Android 14 and up start a microphone service only with its permission granted) to the call's end, muted or
+  // not, since from the background Android would refuse to start it again. No group's name while the app lock is on.
+  const { settings } = useSettings();
+  const [heard, setHeard] = useState(false);
+  useEffect(() => { if (!on) setHeard(false); else if (call.local.mic) setHeard(true); }, [on, call.local.mic]);
+  useCallService(on && heard ? { name: group.name || t("group.chat.unnamed"), video: call.local.camera } : null, leave,
+    settings.lockScreen.enabled && !!settings.lockScreen.passwordHash);
 
   // The room closed (the node dropped you) or would not take you: the window goes, and a failed join says why.
   useEffect(() => {
