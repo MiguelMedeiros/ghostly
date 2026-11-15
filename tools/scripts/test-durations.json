@@ -90,7 +90,7 @@
   "packages/browser/test/briefViews.test.ts": 0,
   "packages/browser/test/cancelWaitingRace.test.ts": 29.7,
   "packages/browser/test/cardIndex.test.ts": 0.1,
-  "packages/browser/test/cardRestore.test.ts": 63.6,
+  "packages/browser/test/cardRestore.test.ts": 39.5,
   "packages/browser/test/cashuAdapter.integration.test.ts": 0,
   "packages/browser/test/cashuMintContract.test.ts": 0,
   "packages/browser/test/cashuNeverSwapped.test.ts": 0.3,
