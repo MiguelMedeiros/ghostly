@@ -172,7 +172,7 @@ describe("Join call in a group whose call is sealed end to end", () => {
     expect(room.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalled();
     expect(screen.queryByTestId("group-call")).toBeNull();
     await user.click(screen.getByTestId("group-call-problem-notice-info"));
-    expect(screen.getByTestId("group-call-problem-notice-why")).toHaveTextContent("You left so nothing went out unsealed.");
+    expect(screen.getByTestId("group-call-problem-notice-why")).toHaveTextContent("so you left before anything went out unsealed.");
     expect(screen.getByTestId("group-call-problem-notice-details")).toHaveTextContent("no E2EE manager on the room");
   });
 
