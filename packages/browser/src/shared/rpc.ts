@@ -466,6 +466,8 @@ export interface EngineApi {
   setGroupPicture(params: { groupId: string; picture: string | null }): void;
   /** The admin renames the group (1 to 64 characters, one line); the picture stays. */
   renameGroup(params: { groupId: string; name: string }): void;
+  /** The admin of a community group names the node that forwards its calls (an https origin, WISP 602), or removes it with null. */
+  setGroupCall(params: { groupId: string; sfu: string | null }): void;
   /** Forgets the group and its history on this device (leaving first when still in it). */
   forgetGroup(params: { groupId: string }): void;
   /**

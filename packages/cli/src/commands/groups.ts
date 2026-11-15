@@ -24,6 +24,15 @@ export const commands: Record<string, Command> = {
       return a.mode === "on" ? { on: true, from: options.from } : { on: false };
     },
   },
+  "group call": {
+    method: "group.call", usage: "group call <group> --sfu <https origin> | --clear [--show-secret]", summary: "Name the node a community group's calls go through, or --clear (admin)", args: ["group"],
+    options: { ...showSecret, sfu: { type: "string", description: "The node's https origin, e.g. https://call.example.com" }, clear: { type: "boolean", description: "The group has no calls" } },
+    params: ({ options }, a) => {
+      if (options.sfu === undefined && options.clear !== true) throw new CliError("usage", "Missing --sfu: ghostly group call <group> --sfu <https origin> | --clear");
+      if (options.sfu !== undefined && options.clear === true) throw new CliError("usage", "--clear removes the call node: not with --sfu");
+      return { group: a.group, ...(options.clear === true ? { clear: true } : { sfu: options.sfu }), ...secret(options) };
+    },
+  },
   "group create": {
     method: "group.create", usage: "group create <name...> [--mesh] [--force]", summary: "A community (a link anyone can open) or, with --mesh, a private group of up to 32",
     args: ["name..."], options: { mesh: { type: "boolean", description: "A private mesh of contacts instead of a community" }, force: nameForce },
