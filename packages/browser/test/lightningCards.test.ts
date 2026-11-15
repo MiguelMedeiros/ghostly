@@ -414,4 +414,15 @@ describe("the engine", () => {
     await expect(node.lightningSetSource({ providerId: "fake-node", values: { alias: "Office" }, network: "testnet" })).rejects.toThrow("Laptop");
     expect(node["lightnings"].testnet.receivingId).toBe(home.card);
   });
+
+  it("from before cards: Back to the mints never removes a card at home on another device, named or the default (as Remove)", async () => {
+    const node = await engine();
+    const office = await node.walletCreate({ type: "lightning", network: "testnet", providerId: "fake-node", values: { alias: "Office" } });
+    const home = await node.walletCreate({ type: "lightning", network: "testnet", providerId: "fake-node", values: { alias: "Home" } });
+    await node.lightningSetReceive({ network: "testnet", card: office.card! });
+    setAwayWallets(new Map([[office.id, "Laptop"]]));
+    await expect(node.lightningClearSource({ network: "testnet", card: office.card })).rejects.toThrow("Laptop");
+    await expect(node.lightningClearSource({ network: "testnet" }), "the default is the away card").rejects.toThrow("Laptop");
+    expect(lightningWallets(node).map(([id]) => id)).toEqual(["lightning:testnet:cashu", office.id, home.id]);
+  });
 });
