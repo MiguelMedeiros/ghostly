@@ -221,6 +221,33 @@ describe("the group call window", () => {
   });
 });
 
+describe("what a screen reader hears", () => {
+  it("says Connected once in the room, then who joins and leaves, several in one line, and not who speaks or mutes", () => {
+    const handlers = { onToggleMic: vi.fn(), onToggleCamera: vi.fn(), onToggleScreen: vi.fn(), onLeave: vi.fn() };
+    const draw = (call: GroupCallState, connected: boolean) => <GroupCallView call={call} groupName="Community" connected={connected} {...handlers} />;
+    const people = (...ids: string[]) => ids.map((id) => person(id));
+    const { rerender } = renderApp(draw(state(0), false));
+    const news = () => [...screen.getByRole("status").querySelectorAll("p")].map((p) => p.textContent);
+    expect(news()).toEqual([]);
+
+    // The people already there when you get in are not read out one by one.
+    rerender(draw(state(0, { participants: people("ana", "bo") }), true));
+    expect(news()).toEqual(["Connected"]);
+
+    rerender(draw(state(0, { participants: people("ana", "bo", "cy") }), true));
+    expect(news()).toEqual(["Cy joined"]);
+
+    rerender(draw(state(0, { participants: [person("ana", { mic: false }), person("bo", { speaking: true }), person("cy")], activeSpeaker: "bo", local: person("me", { mic: false }) }), true));
+    expect(news()).toEqual(["Cy joined"]);
+
+    rerender(draw(state(0, { participants: people("cy", "dee", "eli") }), true));
+    expect(news()).toEqual(["Dee, Eli joined", "Ana, Bo left"]);
+
+    rerender(draw(state(0, { participants: people("dee") }), true));
+    expect(news()).toEqual(["Cy, Eli left"]);
+  });
+});
+
 describe("a mic, camera or screen that did not come on", () => {
   const refused = (name: string) => Object.assign(new Error("Permission denied"), { name });
   const micRefused = (): GroupCallError => ({ action: "mic", message: "Permission denied", cause: refused("NotAllowedError") });
