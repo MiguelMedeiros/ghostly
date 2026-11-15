@@ -1103,6 +1103,43 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     await until(() => state(w.a, "out", "chk-0004") === "done" && state(w.b, "in", "chk-0004") === "done");
   });
 
+  it("a check the sender's abort ended has no say over the file offered again meanwhile: not done empty, its bytes kept", async () => {
+    // `read`: the check had read the whole file before the abort removed it (a file on disk is still read through the
+    // open handle), so it matches; otherwise it reads what is there then, and does not.
+    for (const read of [true, false]) {
+      const id = read ? "chk-0005" : "chk-0006", size = 50_000;
+      let cut = false;
+      const w = wire({ drop: () => cut });
+      const disk = new Disk(false);
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      disk.checking = gate;
+      if (read) {
+        const open = disk.target.bind(disk);
+        disk.target = () => {
+          const target = open();
+          return { ...target, verify: async (sum) => { const digest = disk.hash.copy().digest("base64url"); await gate; return digest === sum; } };
+        };
+      }
+      w.b.disks.set(id, disk);
+      w.attach();
+      send(w, file(id, size));
+      await until(() => state(w.b, "in", id) === "verifying");
+      // From here the receiver alone, as its contact's frames reach it: the sender stops the file, then offers it again.
+      cut = true;
+      await w.b.files.handle({ t: "pf-abort", id });
+      expect(state(w.b, "in", id)).toBe("cancelled");
+      await w.b.files.handle({ t: "pf-offer", id, name: `${id}.bin`, mime: "application/octet-stream", size, ts: 1_700_000_000_000 });
+      await until(() => state(w.b, "in", id) === "active");
+      w.b.files.handle({ t: "pf-data", id, offset: 0, data: b64(pattern(0, 1_000)) });
+      await until(() => disk.length === 1_000);
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(state(w.b, "in", id)).toBe("active");
+      expect(disk.length).toBe(1_000);
+    }
+  });
+
   it("a digest that does not match deletes the file on arrival and says so on both sides", async () => {
     const w = wire();
     w.attach();
