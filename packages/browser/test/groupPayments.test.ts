@@ -112,6 +112,27 @@ describe("mergeGroupPay: forward only, the initiator describes it", () => {
     expect(merge(described, note({ to: B, f: A }), B), "another payee for the same id").toBeUndefined();
   });
 
+  it("a request to one member is claimed by that member alone; nobody changes who pays", () => {
+    const toB = merge(undefined, note(), A)!;
+    expect(merge(toB, note({ f: "*", st: "sent", by: C }), C), "a claim on a request made to B").toBeUndefined();
+    expect(merge(toB, note({ f: "*" }), A), "the request made to the group later").toBeUndefined();
+    expect(merge(toB, note({ f: B, st: "sent", by: B }), B)).toMatchObject({ claims: [B] });
+    // A claim that arrived before the payee's note keeps waiting, but the request to B leaves only B's.
+    const early = merge(merge(undefined, note({ f: "*", st: "sent", by: C }), C), note({ st: "sent", by: B }), B)!;
+    expect(early.claims).toEqual([B, C].sort());
+    const described = merge(early, note(), A)!;
+    expect(described).toMatchObject({ from: B, claims: [B] });
+    expect(described.undescribed).toBeUndefined();
+    expect(merge(merge(undefined, note({ f: "*", st: "sent", by: C }), C), note(), A)!.claims, "C's claim alone").toBeUndefined();
+    // A member who did not know the request was to the group says it paid it as itself.
+    expect(merge(merge(undefined, note({ f: "*" }), A), note({ f: C, st: "sent", by: C }), C)).toMatchObject({ from: "*", claims: [C] });
+    // A payment's payer is its own: another member does not take it over.
+    const sent = merge(undefined, note({ k: "pay", f: B, to: A, st: "sent", id: "pay-00001" }), B)!;
+    expect(merge(sent, note({ k: "pay", f: C, to: A, st: "sent", id: "pay-00001" }), C), "another payer for the same id").toBeUndefined();
+    const paidFirst = merge(undefined, note({ k: "pay", f: B, to: A, st: "paid", id: "pay-00001" }), A)!;
+    expect(merge(paidFirst, note({ k: "pay", f: C, to: A, st: "sent", id: "pay-00001" }), C), "nor before the payer's note arrives").toBeUndefined();
+  });
+
   it("a direct payment: sent, then paid by the payee's word", () => {
     const sent = merge(undefined, note({ k: "pay", f: B, to: A, st: "sent", id: "pay-00001" }), B)!;
     expect(sent).toMatchObject({ kind: "payment", state: "sent" });
