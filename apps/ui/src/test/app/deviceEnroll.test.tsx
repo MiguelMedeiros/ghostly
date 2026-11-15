@@ -274,6 +274,35 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     expect(await screen.findByTestId("device-add-code")).toBeInTheDocument();
   }, 20_000);
 
+  it("once the device is added or the enrollment failed, its state is not read again while the dialog stays open", async () => {
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: await hashPassword("a long password"), timeoutMinutes: 5 } }));
+    const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
+    engine.on("deviceEnrollInvite", () => waiting);
+    engine.on("deviceHandoffVerifier", () => undefined);
+    let view: EnrollView = waiting;
+    engine.on("deviceEnrollView", () => view);
+    await user.type(screen.getByTestId("device-add-password"), "a long password");
+    await user.click(screen.getByTestId("device-add-next"));
+    await screen.findByTestId("device-add-code");
+    /** The reads of the enrollment's state over three of its half-second rounds. */
+    const readsOver = async () => {
+      const before = engine.callsTo("deviceEnrollView").length;
+      await new Promise((resolve) => setTimeout(resolve, 1_600));
+      return engine.callsTo("deviceEnrollView").length - before;
+    };
+    view = { role: "inviter", step: "failed", reason: "expired" };
+    await screen.findByTestId("device-add-failed", {}, { timeout: 3_000 });
+    expect(await readsOver()).toBe(0);
+    // Try again: the new code's enrollment is read again until it ends, here with the device added.
+    view = waiting;
+    await user.click(screen.getByTestId("device-add-again"));
+    await screen.findByTestId("device-add-code");
+    expect(await readsOver()).toBeGreaterThanOrEqual(2);
+    view = { role: "inviter", step: "done", device: "Phone", published: true };
+    await screen.findByTestId("device-add-done", {}, { timeout: 3_000 });
+    expect(await readsOver()).toBe(0);
+  }, 20_000);
+
   it("says the two devices could not connect, in place of the code, when the engine ends it so", async () => {
     localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: await hashPassword("a long password"), timeoutMinutes: 5 } }));
     const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
@@ -332,8 +361,10 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     engine.on("deviceEnrollInvite", () => { throw new Error("enroll-offline: You are offline"); });
     await user.click(screen.getByTestId("device-add-again"));
     expect(await screen.findByTestId("device-add-error")).toHaveTextContent("You are offline.");
+    // No enrollment runs, so nothing is read: what the engine still answers never comes back over the reason.
     const reads = engine.callsTo("deviceEnrollView").length;
-    await waitFor(() => expect(engine.callsTo("deviceEnrollView").length).toBeGreaterThan(reads + 1), { timeout: 3_000 });
+    await new Promise((resolve) => setTimeout(resolve, 1_600));
+    expect(engine.callsTo("deviceEnrollView")).toHaveLength(reads);
     expect(screen.queryByTestId("device-add-failed")).toBeNull();
     expect(screen.getByTestId("device-add-again")).toBeInTheDocument();
   }, 20_000);
