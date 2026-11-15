@@ -2,6 +2,7 @@
 // It runs every check of WISP 602 § What the node checks, with a roster a test sets (PUT /test/roster/<g>) or the
 // environment gives (SFU_TOKEN_ROSTERS), and answers with a LiveKit access token signed by the dev key. node:crypto
 // only. It also serves a page with LiveKit's browser client (/smoke) for the stack's smoke spec.
+import { createRequire } from "node:module";
 import { createHmac, createPublicKey, verify } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -130,7 +131,7 @@ export function startTokenService({ port = 0, host = "127.0.0.1", origin, liveki
     }
     if (path === "/smoke") return res.writeHead(200, { "content-type": "text/html" }).end(SMOKE);
     if (path === "/livekit-client.umd.js") {
-      const file = await Promise.resolve().then(() => readFile(fileURLToPath(import.meta.resolve("livekit-client/dist/livekit-client.umd.js")))).catch(() => null);
+      const file = await Promise.resolve().then(() => readFile(createRequire(import.meta.url).resolve("livekit-client"))).catch(() => null);
       return file ? res.writeHead(200, { "content-type": "text/javascript" }).end(file) : send(res, 404, { error: "livekit-client is not installed here" });
     }
     send(res, 404, { error: "not found" });
