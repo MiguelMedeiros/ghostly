@@ -138,10 +138,10 @@ describe("delete --everyone in a group waits for an edge, as group react does", 
     expect(looks).toBe(3);
   });
 
-  it("a one-shot no edge took in time: a timeout (exit 4) that says it stays in the group and goes with a later command", async () => {
+  it("a one-shot no edge took in time: a timeout (exit 4) that says the message is gone here and its removal goes with a later command", async () => {
     const { ctx } = inGroup("one-shot", () => 0);
     await expect(callApi(ctx, "chat.delete", { chat: "Crew", message: "mine:0:2", everyone: true, timeout: 1 })).rejects.toMatchObject({
-      code: "timeout", message: expect.stringMatching(/no member's edge took it yet .*next command/), details: { messageId: "mine:0:2", edits: 3 },
+      code: "timeout", message: expect.stringMatching(/the message is gone here and no member's edge took its removal yet .*next command/), details: { messageId: "mine:0:2", edits: 3, deleted: "mine:0:2" },
     });
   });
 
