@@ -84,20 +84,8 @@ export async function ReaderPage({ reference, requested }: { reference: Referenc
         </nav>
 
         <div className="reader-layout">
-          <aside className="reader-side">
-            <IntentLink className="reader-glossary" href={`/wisps#glossary`}>
-              {t.glossary} →
-            </IntentLink>
-            {/* Without scripts the groups cannot be opened, so every one of them is shown. */}
-            <noscript>
-              <style>{".reader-group-panel{grid-template-rows:1fr!important;visibility:visible!important}.reader-all-toggle,.reader-group-chevron{display:none!important}"}</style>
-            </noscript>
-            <WispNav groups={groups} current={w?.slug} t={{ all: t.all, expandAll: t.expandAll, collapseAll: t.collapseAll }} />
-            <IntentLink className="reader-glossary reader-roadmap" href="/roadmap">
-              {t.roadmap} →
-            </IntentLink>
-          </aside>
-
+          {/* The list of WISPs comes after the article: under it on a phone, where Tab then reaches the article first.
+              On a wide screen the grid puts the list in the first column (reader.css). */}
           <article className="reader-main">
             <header className="reader-head">
               {w && (
@@ -262,6 +250,20 @@ export async function ReaderPage({ reference, requested }: { reference: Referenc
               </IntentLink>
             </footer>
           </article>
+
+          <aside className="reader-side">
+            <IntentLink className="reader-glossary" href={`/wisps#glossary`}>
+              {t.glossary} →
+            </IntentLink>
+            {/* Without scripts the groups cannot be opened, so every one of them is shown. */}
+            <noscript>
+              <style>{".reader-group-panel{grid-template-rows:1fr!important;visibility:visible!important}.reader-all-toggle,.reader-group-chevron{display:none!important}"}</style>
+            </noscript>
+            <WispNav groups={groups} current={w?.slug} t={{ all: t.all, expandAll: t.expandAll, collapseAll: t.collapseAll }} />
+            <IntentLink className="reader-glossary reader-roadmap" href="/roadmap">
+              {t.roadmap} →
+            </IntentLink>
+          </aside>
         </div>
       </div>
     </Shell>
