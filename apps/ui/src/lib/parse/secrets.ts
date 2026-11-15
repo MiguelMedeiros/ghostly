@@ -194,6 +194,12 @@ function hasMnemonic(tokens: string[] | null, seed: SeedWords): boolean {
   const index = seed.index();
   let budget = CHECKSUM_BUDGET, slowBudget = SLOW_CHECKSUM_BUDGET;
   let run: number[] = [];
+  const slow = seed.slowChecksum;
+  /**
+   * A run's inner windows for the slow checksum, tried once every run's ends were: a seed pasted in a message is where
+   * the words on no list (or the message) start or stop its run. Tried in order, 267 seed words before one spent them.
+   */
+  const inner: number[][] = [];
   const seedLike = (start: number, length: number) => {
     const window = run.slice(start, start + length);
     const counts = new Map<number, number>();
@@ -202,8 +208,12 @@ function hasMnemonic(tokens: string[] | null, seed: SeedWords): boolean {
     const [most, times] = [...counts].reduce((a, b) => (b[1] > a[1] ? b : a));
     if (times > length / 2 && (run[start - 1] === most || run[start + length] === most)) return false;
     if (seed.checksumHolds(window)) return true;
-    const slow = seed.slowChecksum;
-    return slow !== undefined && length === slow.length && slowBudget-- > 0 && slow.holds(window);
+    if (slow === undefined || length !== slow.length) return false;
+    if (start > 0 && start + length < run.length) {
+      if (inner.length < SLOW_CHECKSUM_BUDGET) inner.push(window);
+      return false;
+    }
+    return slowBudget-- > 0 && slow.holds(window);
   };
   const check = () => {
     if (run.length >= shortest) {
@@ -222,7 +232,7 @@ function hasMnemonic(tokens: string[] | null, seed: SeedWords): boolean {
     if (at !== undefined) run.push(at);
     else if (check()) return true;
   }
-  return check();
+  return check() || inner.some((window) => slowBudget-- > 0 && slow!.holds(window));
 }
 
 /**
