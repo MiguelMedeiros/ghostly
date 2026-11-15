@@ -49,6 +49,25 @@ describe("the group call grid", () => {
     expect(bo).toHaveTextContent("Bo");
   });
 
+  it("reads each tile to a screen reader by its name alone, not the avatar's letter before it", () => {
+    view(state(0, { participants: [person("ana", { mic: false })] }));
+    // The text a screen reader reads: every text node outside an aria-hidden part, and the muted mark by its name.
+    const spoken = (el: Element) => {
+      const words: string[] = [];
+      const walk = (node: Node) => {
+        if (node instanceof Element && node.getAttribute("aria-hidden") === "true") return;
+        if (node instanceof Element && node.getAttribute("role") === "img") return void words.push(node.getAttribute("aria-label") ?? "");
+        if (node.nodeType === Node.TEXT_NODE) words.push(node.textContent ?? "");
+        node.childNodes.forEach(walk);
+      };
+      walk(el);
+      return words.filter(Boolean).join(" ");
+    };
+    const [you, ana] = tiles();
+    expect(spoken(you)).toBe("You");
+    expect(spoken(ana)).toBe("Muted Ana");
+  });
+
   it("marks who is muted, and rings the active speaker alone", () => {
     const { rerenderWith } = view(state(0, { participants: [person("ana", { mic: false }), person("bo", { speaking: true })], activeSpeaker: "bo" }));
     const byId = (id: string) => tiles().find((t) => t.dataset.identity === id)!;
