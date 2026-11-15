@@ -2,6 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import { createIdentity, encodeGroupEntryLink } from "@ghostly/core";
 import type { EngineState, GroupView, StoredMessage } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
 import { parseArgs } from "../src/args";
@@ -152,6 +153,56 @@ describe("a one-shot group join", () => {
 
   it("through a daemon, answers at once as before", async () => {
     expect(await callApi(oneShot("daemon").ctx, "group.join", { link: LINK })).toEqual({ group: "g9" });
+  });
+
+  // Found in a bug hunt: an accepted contact's invitation to the group, still waiting for its welcome, keeps its place
+  // and the link is only noted beside it; nothing knocks, so it waited the full 60 s and said nobody had let it in.
+  it("a contact's invitation to the group, accepted, its welcome not in: answers at once that the welcome comes with the profile running", async () => {
+    vi.useFakeTimers();
+    try {
+      const accepted = { ...knocking("knocking"), invitation: { linkId: "c1", contact: "Alice", admin: "ak", members: 3, accepted: true } } as unknown as GroupView;
+      const answer = callApi(oneShot("one-shot", accepted).ctx, "group.join", { link: LINK });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(await Promise.race([answer, Promise.resolve("still waiting")])).toEqual({ group: "g9", joined: false, stage: null,
+        warning: "Not in yet: you accepted Alice's invitation to this group, and its welcome has not arrived; the link was kept beside it, and knocks nowhere. The welcome arrives only while this profile is running: keep it running (ghostly daemon --detach), then ghostly group show g9" });
+    } finally { vi.useRealTimers(); }
+  });
+});
+
+describe("a one-shot group join of a link for a group id already held", () => {
+  // Found in a bug hunt: in a group under the link's id already, the engine only keeps the link beside it (unless it is
+  // my own group's link) and knocks nowhere, yet the one-shot answered `"joined": true` at once, no warning, and a
+  // second group waited under the id that only `group show`'s `others` said.
+  const id = "AbCdEfGhIjKlMnOpQrStUv";
+  const host = createIdentity().pubKeyZ32;
+  const code = encodeGroupEntryLink({ g: id, host });
+  const url = `https://ghostly.tools/#/join/${code}`;
+  const inGroup = { id, name: "Crew", createdAt: 1, profile: "mesh", status: "active", isAdmin: false, canSend: true, lastMessageAt: 0, invited: [], memberLinks: {}, members: [] } as unknown as GroupView;
+  function held(before: GroupView, after: GroupView) {
+    let groups = [before];
+    const getState = () => ({ links: [], groups, settings: {}, transport: {} }) as unknown as EngineState;
+    const node = { getState, joinGroupByLink: vi.fn(async () => { groups = [after]; return { groupId: id }; }) };
+    return { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "one-shot", version: "test" } as unknown as ApiContext;
+  }
+  const pick = `keep the one you are in (ghostly engine keepGroup '{"groupId":"${id}"}') or take the link's instead (ghostly engine switchGroup '{"groupId":"${id}","to":"<its link, from group show --show-secret>"}')`;
+
+  it("another's link, kept beside the group held: joined false at once, and says how to pick between them", async () => {
+    const answer = await callApi(held(inGroup, { ...inGroup, others: [{ link: code }] }), "group.join", { link: url });
+    expect(answer).toMatchObject({ group: id, joined: false, stage: null });
+    expect(answer).toEqual({ group: id, joined: false, stage: null,
+      warning: `Not joined: you are in a group under this link's id already, and only a group's welcome says whose a link is, so the link was kept beside that group and knocks nowhere. ghostly group show ${id} lists it under "others": ${pick}` });
+  });
+
+  it("another's link with no room left beside it: joined false, and says it was not kept", async () => {
+    const full = { ...inGroup, others: [1, 2, 3, 4].map((n) => ({ linkId: `c${n}`, contact: "", name: "Other", members: 2 })) } as GroupView;
+    const answer = await callApi(held(full, full), "group.join", { link: code });
+    expect(answer).toMatchObject({ group: id, joined: false, stage: null });
+    expect((answer as { warning: string }).warning).toBe(`Not joined: you are in a group under this link's id already, and as many other groups as are kept already wait beside it to be picked, so the link was not kept. ghostly group show ${id} lists them under "others": ${pick}, then open the link again`);
+  });
+
+  it("my own group's link, as its admin: in, as before", async () => {
+    const mine = { ...inGroup, isAdmin: true, entryLink: code } as GroupView;
+    expect(await callApi(held(mine, mine), "group.join", { link: url })).toEqual({ group: id, joined: true, stage: null });
   });
 });
 
