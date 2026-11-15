@@ -76,6 +76,29 @@ it("a text near the bound leaves room for fewer reactions, never none of the tex
   await a.stop(); await b.stop();
 });
 
+it("a reaction waiting behind a text that leaves it no room keeps the text's backoff", async () => {
+  vi.useFakeTimers();
+  const gaps = async (reaction: boolean) => {
+    const h = setup();
+    const a = h.make(0), b = h.make(1);
+    await a.start(); await b.start(); await vi.advanceTimersByTimeAsync(10_000);
+    // The contact goes away: the text waits on the floor, retried at its backoff until it expires.
+    await b.stop();
+    if (reaction) h.pending[0] = [{ id: ID("m"), e: "👨‍👩‍👧‍👦", n: 1 }];
+    expect(await a.send("x".repeat(256), Date.now(), ID("t"))).toBeNull();
+    h.publish.mockClear();
+    // The send published the text (at 0).
+    const at: number[] = [0], sent = Date.now();
+    h.publish.mockImplementation(async () => { at.push(Date.now() - sent); });
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    await a.stop();
+    return at.slice(1).map((t, i) => Math.round((t - at[i]) / 1_000));
+  };
+  const without = await gaps(false), withReaction = await gaps(true);
+  expect(without.slice(0, 4)).toEqual([4, 8, 16, 32]);
+  expect(withReaction.slice(0, without.length)).toEqual(without);
+});
+
 it("a reader without reactions reads the text and skips the rest", async () => {
   vi.useFakeTimers(); const h = setup({ reactions: [true, false] });
   const a = h.make(0), b = h.make(1);
