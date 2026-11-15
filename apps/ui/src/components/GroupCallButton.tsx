@@ -105,7 +105,9 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
           <path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
         </svg>
       </button>
-      {problem && <div id={`${id}-problem`} data-testid="group-call-problem" className="absolute end-0 top-full z-40 mt-2 w-[min(18rem,calc(100vw-1rem))] rounded-xl border border-border bg-panel-header p-3 shadow-xl">
+      {/* On a phone Join call is not the header's last button: from its edge the box ran past the screen's side. It
+          lies across the width under the header there, as the connection panels do. */}
+      {problem && <div id={`${id}-problem`} data-testid="group-call-problem" className="absolute end-0 top-full max-md:fixed max-md:inset-x-2 max-md:top-[calc(3.5rem_+_env(safe-area-inset-top))] max-md:w-auto z-40 mt-2 w-[min(18rem,calc(100vw-1rem))] rounded-xl border border-border bg-panel-header p-3 shadow-xl">
         <Notice problem={problem} testId="group-call-problem-notice" />
         <div className="mt-2 flex justify-end gap-2 text-xs">
           <button type="button" onClick={() => { setProblem(null); button.current?.focus(); }} className={`min-h-8 rounded-md px-2 text-text-secondary hover:bg-surface-hover max-md:min-h-11 ${focus}`}>{t("common.close")}</button>
