@@ -36,5 +36,5 @@ export function ComposerSheetHead({ title, who, titleId, before }: { title: Reac
   );
 }
 
-/** The arrow of an action that goes on to the chosen card. */
-export const ForwardArrow = () => <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+/** The arrow of an action that goes on to the chosen card: mirrored where the app reads right to left, to point on. */
+export const ForwardArrow = () => <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" className="rtl:-scale-x-100"><path d="M3 8h10M9 4l4 4-4 4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>;
