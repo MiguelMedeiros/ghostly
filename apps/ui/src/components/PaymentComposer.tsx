@@ -433,7 +433,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
     >
       {side === "cards" ? <>
         <ComposerSheetHead title={modes || (sendUnavailable ? t("payments.composer.request") : t("payments.mode.pay"))} who={fillNames(t("payments.composer.with"), { name: who })} before={onBack && <button type="button" className="deck-flip-turn" data-testid="payment-recipient-change" aria-label={t("payments.composer.chooseOther")} title={t("payments.composer.chooseOther")} onClick={onBack}>
-          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" className="rtl:-scale-x-100"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </button>} />
         {!cards.length && state ? <div className="payment-none" data-testid="payment-no-wallet">
             <p className="composer-sheet-hint">{fillNames(t("payments.composer.noWallet.text"), { name: who })}</p>
