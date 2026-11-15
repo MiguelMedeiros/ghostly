@@ -290,6 +290,15 @@ describe("help", () => {
     expect(piped).toMatch(/^ {2}identity add <provider> \[subject\] .* \[--timeout s\]$/m);
   });
 
+  // `group join`'s help said nothing of its one-shot wait: a script or a piped run waited a silent minute.
+  it("a join that waits without a daemon says so in its help, as long as it waits", async () => {
+    for (const [words, wait] of [[["invite", "join"], "without a daemon it waits up to 60 s for the inviter"], [["group", "join"], "without a daemon it waits up to 60 s to be let in"]] as const) {
+      const { code, stdout } = await ghostly(["help", ...words], { env: { COLUMNS: "" } });
+      expect(code, words.join(" ")).toBe(0);
+      expect(stdout, words.join(" ")).toContain(wait);
+    }
+  });
+
   it("bare ghostly in a new Ghostly folder starts with the first steps", async () => {
     const dir = home("first-steps");
     const first = await ghostly(["--home", dir]);
