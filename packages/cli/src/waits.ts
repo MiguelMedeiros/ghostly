@@ -30,7 +30,7 @@ export const goesOn = (ctx: ApiContext, chat?: string) => chat !== undefined && 
 const stopped = (ctx: ApiContext) => ctx.stopping?.aborted === true;
 
 /** How a wait that ends short of its aim begins: its time ran out, or the daemon stopped under it. */
-const ended = (ctx: ApiContext, ms: number) => stopped(ctx) ? "The daemon stopped before the wait ended" : `Timed out after ${Math.round(ms / 1000)} s`;
+export const ended = (ctx: ApiContext, ms: number) => stopped(ctx) ? "The daemon stopped before the wait ended" : `Timed out after ${Math.round(ms / 1000)} s`;
 
 /** A timed-out wait's details, and `reason: "daemon-stopped"` when the daemon's stop ended it. */
 const known = (ctx: ApiContext, details: Record<string, unknown>) => stopped(ctx) ? { ...details, reason: "daemon-stopped" } : details;
