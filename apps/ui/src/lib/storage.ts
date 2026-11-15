@@ -31,17 +31,6 @@ export function getRandomGhostName(): string {
   return GHOST_NAMES[draw[0]! % GHOST_NAMES.length];
 }
 
-export function getGhostName(peerKey: string): string {
-  let hash = 0;
-  for (let i = 0; i < peerKey.length; i++) {
-    const char = peerKey.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash;
-  }
-  const index = Math.abs(hash) % GHOST_NAMES.length;
-  return GHOST_NAMES[index];
-}
-
 let _profile = "";
 
 export function setStorageProfile(profile: string): void {
