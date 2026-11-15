@@ -315,7 +315,9 @@ refused without it. A group's entry link lets anyone who reads it join: `group s
 commands, `group.created` events and `engine getState` print it as `<hidden>`; `--show-secret`, `group create` and
 `group link` print it. A pending chat's invite code lets whoever reads it take the chat: every command that prints a
 chat (`chat list`, `chat show`, `chat rename`, …) and `engine getState` print it as `<hidden>`; `invite create` and
-`chat list` or `chat show` with `--show-secret` print it.
+`chat list` or `chat show` with `--show-secret` print it. A group call's pass lets whoever holds it into the call as
+you until it expires: `engine groupCallToken` prints its `token` and its TURN servers' `credential` as `<hidden>`
+unless `--show-secret`.
 
 ## Events
 
