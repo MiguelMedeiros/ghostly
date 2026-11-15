@@ -924,6 +924,9 @@ export class DhtDelivery {
     // (`LinkSession.publishOnce`). With 500 contacts away, about 500 envelopes a minute were built for none that went.
     const held = this.options.transport.publishHeld?.(identity.pubKeyZ32, options);
     if (held) { await this.heldBack(held, now, { lastPublish: this.lastPublish, controlDue: this.controlDue }, undefined, undefined); throw held; }
+    // Counted before the state is saved and the envelope sealed, as a text's attempt is: one that fails there waits its
+    // backoff too, not the next timer turn (each one a read of the mailbox and a view update).
+    if (withdrawal) this.withdrawal = { ...withdrawal, attempts: withdrawal.attempts + 1, next: now + backoff(withdrawal.attempts) };
     const fittedEnvelope = this.fitted(this.sequence + 1, issued, expires, pending?.message ?? null, receipt?.id ?? null, pending?.reply, pending?.edit, pending?.forwarded, pending?.file);
     const { body, reactions } = fittedEnvelope;
     const reactionsWereDue = this.reactionsDue;
@@ -946,7 +949,6 @@ export class DhtDelivery {
     this.lastPublish = now; this.controlDue = now + (ownInvite ? UNUSED_INVITE_UPKEEP_MS : 4 * 60_000);
     traceLink(this.from, "dht-publish", { mode: this.mode, seq: body[1], ...(identity !== this.identity && { pinned: true }), ...(records[0]?.label === "_dr" && { ratchet: true }) });
     if (pending) this.lastPublished = DhtDelivery.facts(body, records, identity.pubKeyZ32);
-    if (withdrawal) this.withdrawal = { ...withdrawal, attempts: withdrawal.attempts + 1, next: now + backoff(withdrawal.attempts) };
     try { await this.options.transport.publish(identity, records, options); }
     catch (error) {
       this.reactionsDue ||= reactionsWereDue;
