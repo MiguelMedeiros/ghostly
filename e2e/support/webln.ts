@@ -1,5 +1,5 @@
 import type { WebLNProvider } from "../../packages/browser/src/engine/paymentAdapters/providers/webln";
-import { createWallet, expect, type Peer } from "./fixtures";
+import { createWallet, expect, openApp, type Peer } from "./fixtures";
 
 const METHODS = ["enable", "getInfo", "makeInvoice", "sendPayment", "getBalance", "lookupInvoice"] as const;
 
@@ -20,8 +20,7 @@ export async function installWebln(peer: Peer, wallet: WebLNProvider): Promise<v
     page.webln = Object.fromEntries(methods.map((m) => [m, (...args: unknown[]) => page.__ghostlyWebln(m, args)]));
     window.dispatchEvent(new Event("webln:ready"));
   }, has);
-  await peer.page.reload();
-  await expect(peer.page.getByTitle("New Chat")).toBeVisible();
+  await openApp(peer.page, peer.name, () => peer.page.reload());
 }
 
 /** Adds a Testnet Lightning card through the browser wallet (Wallets → New), its panel open. */
