@@ -103,6 +103,7 @@ describe("problemLine: a problem where only a line fits", () => {
     ["https://example.com/.well-known/ghostly.json was not found", /proof file was not found/],
     ["This signature was made by another key (0123ABCD), not the public key given.", /made by another key\. Not the public key you gave\./],
     ["That signature was made by SHA256:AbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcdefg, not the key you entered (SHA256:x)", /made by another key\. Not the key you entered\./],
+    ["The statement file was saved as UTF-16 or with a byte order mark: save it as UTF-8 and sign it again", /saved in another encoding\. Save it as UTF-8 without a byte order mark \(BOM\), then sign it again\./],
     ["GitHub: octo-cat does not list the key that signed (SHA256:AbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcdefg)", /octo-cat doesn't list the key that signed/],
     ["Enter at least one relay address (https://…)", /at least one relay/],
     ["The TXT record at _ghostly.example.com names another Ghostly key: this proof was replaced or removed", /TXT record names another Ghostly key\. The record must hold this proof's value\./],
