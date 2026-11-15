@@ -5,7 +5,8 @@ import { CORNERS, useFloatingBox } from "../hooks/useFloatingBox";
 import type { CallDevices } from "../hooks/useCallDevices";
 import type { GroupCallError } from "../hooks/useGroupCall";
 import { applySpeaker } from "../lib/mediaDevices";
-import { useI18n, type Translate } from "../contexts/I18nContext";
+import { useI18n, type Translate, type TranslationKey } from "../contexts/I18nContext";
+import { listText } from "../lib/listText";
 import { useBackCloses, useTabTrap } from "../hooks/useDismiss";
 import { useFocusKept } from "../hooks/useFocusKept";
 import { initial } from "../lib/initial";
@@ -49,6 +50,8 @@ interface GroupCallViewProps {
   onReturnToChat?: () => void;
   layer?: HTMLElement | null;
   devices?: CallDevices | null;
+  /** In the room (`useGroupCall`'s status "connected"): said once, and who comes and goes after it is said too. */
+  connected?: boolean;
   /** `useGroupCall`'s last error: a refused mic, camera or screen share is said for a few seconds, or until the next try. */
   error?: GroupCallError | null;
   /** Someone's name by their key, as the group knows them: the node's own name for them is not believed. */
@@ -85,6 +88,39 @@ function useShareOrder(sharing: string[]): string[] {
   const next = [...kept, ...sharing.filter((id) => !kept.includes(id))];
   order.current = next;
   return next;
+}
+
+/**
+ * What a screen reader hears as the call moves on: "Connected" once in the room, then who joined and who left, several
+ * at once in one line ("Ana, Bo joined"), and those who left on a line of their own. The people already there when you join are not read out one by one, and the active speaker and
+ * others' mics are left out: they change every few seconds.
+ */
+function useCallNews(participants: GroupCallParticipant[], connected: boolean, t: Translate): string[] {
+  const [news, setNews] = useState<string[]>([]);
+  const seen = useRef<Map<string, string> | null>(null);
+  const people = participants.map((p) => `${p.identity}\n${p.name}`).join("\n\n");
+  useEffect(() => {
+    if (!connected) {
+      seen.current = null;
+      setNews([]);
+      return;
+    }
+    const before = seen.current;
+    const now = new Map(participants.map((p) => [p.identity, p.name]));
+    seen.current = now;
+    if (!before) {
+      setNews([t("calls.connected")]);
+      return;
+    }
+    const joined = [...now].filter(([id]) => !before.has(id)).map(([, name]) => name);
+    const left = [...before].filter(([id]) => !now.has(id)).map(([, name]) => name);
+    const said = (names: string[], one: TranslationKey, many: TranslationKey) =>
+      names.length === 0 ? [] : [names.length === 1 ? t(one, { name: names[0]! }) : t(many, { names: listText(names, t) })];
+    const lines = [...said(joined, "calls.group.joined", "calls.group.joinedMany"), ...said(left, "calls.group.left", "calls.group.leftMany")];
+    if (lines.length) setNews(lines);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `people` stands for the participants
+  }, [connected, people, t]);
+  return news;
 }
 
 /** A track drawn in a <video>, muted: the sound plays from the participant's own <audio>. */
@@ -162,7 +198,7 @@ function Tile({ person, you, kind, speaking, name, face }: { person: GroupCallPa
  * A group call through the group's node: everyone's tile in a grid, the active speaker ringed, and a shared screen
  * large with the faces beside it. Drawn from `useGroupCall`'s state, passed in; it imports no LiveKit.
  */
-export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, onToggleScreen, onLeave, canShareScreen = false, pinned = false, onReturnToChat, layer, devices = null, error = null, nameOf: groupNameOf }: GroupCallViewProps) {
+export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, onToggleScreen, onLeave, canShareScreen = false, pinned = false, onReturnToChat, layer, devices = null, connected = true, error = null, nameOf: groupNameOf }: GroupCallViewProps) {
   const { t } = useI18n();
   // Each new error is said anew (its own alert), and goes after a few seconds; a failed join has no window to say it in.
   const [said, setSaid] = useState({ error, id: 0, over: false });
@@ -218,6 +254,8 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
   useFocusKept(box, () => box.current?.querySelector<HTMLElement>("[data-testid=call-devices]") ?? null);
 
   const { local, participants, activeSpeaker } = call;
+  // Who comes and goes is said by the group's own name for them too, not the node's.
+  const news = useCallNews(groupNameOf ? participants.map((p) => ({ ...p, name: groupNameOf(p.identity) })) : participants, connected, t);
   const everyone = [local, ...participants];
   // Everyone else by the group's own name for their key (WISP 602 § The reply): the node's name is not theirs to vouch for.
   const shown = (p: GroupCallParticipant) => (p === local || !groupNameOf ? p.name : groupNameOf(p.identity));
@@ -261,6 +299,8 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
           {mini ? <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" /> : <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" />}
         </svg>
       </button>
+
+      <div role="status" className="sr-only" data-testid="group-call-news">{news.map((line) => <p key={line}>{line}</p>)}</div>
 
       {participants.map((p) => p.tracks.audio && <TrackAudio key={p.identity} track={p.tracks.audio} speaker={devices?.speaker} />)}
 
