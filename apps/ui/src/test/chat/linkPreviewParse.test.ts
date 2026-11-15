@@ -71,6 +71,18 @@ describe("which link gets a preview", () => {
       expect(isLocalHost(host), host).toBe(false);
   });
 
+  it("no IPv6 address outside global unicast, nor one that tunnels to an IPv4 address", () => {
+    // As a link's URL spells them: `new URL()` writes an IPv6 host in short hex, with no dotted IPv4 part.
+    const hostOf = (literal: string) => new URL(`http://[${literal}]/`).hostname;
+    for (const literal of ["2002:c0a8:101::1", "2002::1", "2001:0:4136:e378:8000:63bf:3fff:fdd2", "2001::1", "2::1", "20::1", "200::1", "3ff::1", "2001:db8::1", "::ffff:192.168.1.1", "64:ff9b::a00:1"])
+      expect(isLocalHost(hostOf(literal)), literal).toBe(true);
+    for (const literal of ["2606:4700::1111", "2001:4860:4860::8888", "2a00:1450:4001::1", "2c0f:fb50:4002::1"])
+      expect(isLocalHost(hostOf(literal)), literal).toBe(false);
+    // And as a caller may hand it, unbracketed or in full.
+    expect(isLocalHost("2001:0000:4136:e378:8000:63bf:3fff:fdd2")).toBe(true);
+    expect(isLocalHost("2002:C0A8:0101:0000:0000:0000:0000:0001")).toBe(true);
+  });
+
   it("the first web link that is not a picture, a place, or still being typed", () => {
     expect(previewableLink("see https://news.example/a and https://other.example/b")).toBe("https://news.example/a");
     expect(previewableLink("https://i.example/cat.gif then https://news.example/a")).toBe("https://news.example/a");
