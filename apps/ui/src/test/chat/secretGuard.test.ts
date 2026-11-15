@@ -571,6 +571,20 @@ describe("how long it takes", () => {
     }
   });
 
+  it("still finds an Electrum seed after a long run of seed words, or many shorter ones", () => {
+    // The run's inner windows spent the few hundred checksums first: 267 seed words before it were enough to miss it.
+    // Now as far as BIP39's own checksums reach (about 830 seed words in one run).
+    const ELECTRUM_STANDARD = "capital captain car carbon card cargo carpet carry cart case cash casino";
+    const words = noSeedRun.split(" ");
+    const runsOf24 = Array.from({ length: 40 }, (_, i) => words.slice(i * 24, i * 24 + 24).join(" ")).join(" the ");
+    for (const before of [words.slice(0, 300).join(" "), words.slice(0, 800).join(" "), runsOf24]) {
+      hmacCalls.count = 0;
+      expect(findSecret(`${before} and my electrum seed: ${ELECTRUM_STANDARD}`)).toEqual({ kind: "mnemonic" });
+      expect(hmacCalls.count).toBeLessThanOrEqual(256);
+      expect(findSecret(`${ELECTRUM_STANDARD}, then ${before}`)).toEqual({ kind: "mnemonic" });
+    }
+  });
+
   it("a numbered word between two runs of spaces is read in well under a frame", () => {
     // Each run made the numbered-list reading try every split of it: 1.6 KB took a second, 16 KiB minutes.
     expect(time(`1${" ".repeat(800)}a${" ".repeat(800)}x`)).toBeLessThan(50);
