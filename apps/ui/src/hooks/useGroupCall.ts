@@ -132,8 +132,8 @@ const EMPTY: GroupCallState = { participants: [], activeSpeaker: null, local: NO
 interface Session {
   lk?: LivekitModule;
   room?: Room;
-  /** A sealed call's key provider, the epoch of the key set in it, and its E2EE worker. */
-  keys?: InstanceType<LivekitModule["ExternalE2EEKeyProvider"]>;
+  /** A sealed call's key provider (each epoch's key in its own slot), the epoch of the key set in it, and its E2EE worker. */
+  keys?: InstanceType<LivekitModule["GroupCallKeyProvider"]>;
   epoch?: number;
   worker?: Worker;
   /** Joined under "Hide my IP from contacts" (the relay policy). */
@@ -207,6 +207,7 @@ async function endSession(session: Session): Promise<void> {
   if (session.ended) return;
   session.ended = true;
   await stopScreen(session);
+  session.keys?.dispose();
   const room = session.room;
   if (!room) {
     session.worker?.terminate();
@@ -231,11 +232,15 @@ async function endSession(session: Session): Promise<void> {
 /** The key's own bytes, as LiveKit takes raw key material (HKDF, not the passphrase's PBKDF2). */
 const keyBytes = (key: Uint8Array): ArrayBuffer => new Uint8Array(key).buffer;
 
-/** Sets the newest epoch's key in a sealed call once it differs from the one set (WISP 602: the new one at an epoch move). */
+/**
+ * Sets the newest epoch's key in a sealed call once it differs from the one set (WISP 602: the new one at an epoch
+ * move), in its own slot (`GroupCallKeyProvider`): this device seals with it from then on, and still opens the frames
+ * of members on the epoch before for a moment, so an epoch move drops nobody who already has the new key.
+ */
 async function rekey(session: Session, seal: GroupCallSeal | null | undefined): Promise<void> {
   if (!session.keys || !seal || seal.epoch === session.epoch || session.ended) return;
   session.epoch = seal.epoch;
-  await session.keys.setKey(keyBytes(seal.key));
+  await session.keys.setEpochKey(seal.epoch, keyBytes(seal.key));
 }
 
 /**
@@ -251,8 +256,8 @@ function admit(pub: RemoteTrackPublication): void {
  * Joins the room at `url` with `token` while both are set, with the microphone on and the camera off, or muted past
  * `GROUP_CALL_MUTED_ABOVE` people. A new url or token leaves the old room first; unmounting leaves it too. `relayOnly`
  * turned on during a call joins the room again under the relay policy, with the microphone and camera as they were. With
- * `e2ee` set, the room is joined sealed with LiveKit's E2EE (a shared key from `ExternalE2EEKeyProvider`), or not at
- * all: never unsealed. Sealing turned on or off for the group joins the room again.
+ * `e2ee` set, the room is joined sealed with LiveKit's E2EE (a shared key per epoch, `GroupCallKeyProvider`), or not
+ * at all: never unsealed. Sealing turned on or off for the group joins the room again.
  */
 export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, loadLivekit, sealWaitMs = SEAL_WAIT_MS }: UseGroupCallOptions): GroupCall {
   const [state, setState] = useState<GroupCallState>(EMPTY);
@@ -305,10 +310,10 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
         if (sealed && !seal.current) throw new Error(NO_CALL_KEY);
         const lk = await (load.current ?? loadLivekitClient)();
         if (!live) return;
-        let encryption: { keyProvider: InstanceType<LivekitModule["ExternalE2EEKeyProvider"]>; worker: Worker } | undefined;
+        let encryption: { keyProvider: InstanceType<LivekitModule["GroupCallKeyProvider"]>; worker: Worker } | undefined;
         if (sealed) {
           if (!lk.isE2EESupported()) throw new Error(NO_SEALING);
-          const keyProvider = new lk.ExternalE2EEKeyProvider();
+          const keyProvider = new lk.GroupCallKeyProvider();
           s.keys = keyProvider;
           await rekey(s, seal.current);
           if (!live || s.ended) return;

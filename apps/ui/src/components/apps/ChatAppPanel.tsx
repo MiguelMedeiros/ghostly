@@ -6,7 +6,7 @@ import { useBackCloses, useTabTrap } from "../../hooks/useDismiss";
 import { takedownText, useAppOpener } from "../../lib/apps/open";
 import { appErrorText } from "../../lib/apps/errors";
 import { ChatOnScreen } from "../../lib/chatOnScreen";
-import { chatApp, registerAppSlot, setChatApp, setChatAppNarrow, updateChatApp, useChatApp, useChatAppNarrow, type AppContact } from "../../lib/apps/running";
+import { chatApp, noteChoice, registerAppSlot, setChatApp, setChatAppNarrow, updateChatApp, useChatApp, useChatAppNarrow, type AppContact } from "../../lib/apps/running";
 import { PeerAvatar } from "../Avatar";
 import { ChatConnection } from "../ChatConnection";
 import { AppGlyph } from "./AppIcon";
@@ -76,8 +76,13 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
 
   // No room beside the chat (a tablet held upright, a narrow window): the app covers it, as a full-screen app does.
   const narrow = useChatAppNarrow(linkId);
+  // Whether the page was last measured on a phone, where it is not measured: a window just widened past a phone's width
+  // has its page measured only after that render, and the app stays over the chat until then. Drawn beside it for that
+  // one render, Back went and came back, and the focus was left in the panel instead of on Back.
+  const [measuredOnPhone, setMeasuredOnPhone] = useState(phone);
   useEffect(() => {
     const pane = root.current?.parentElement;
+    setMeasuredOnPhone(phone);
     if (phone || !pane) { setChatAppNarrow(linkId, false); return; }
     // 0: not laid out (a chat kept loaded off screen): as it was, measured again as it shows. Cleared there, each time the
     // person left the chat and came back the whole chat was drawn twice, and laid out once beside the app for nothing.
@@ -95,8 +100,9 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
   const shown = !!app?.shown;
   const full = app?.view === "full";
   // Back to the chat: on a phone, and for a full-screen app or one with no room beside the chat at every width.
-  const withBack = phone || full || narrow;
-  const wide = !phone && (full || narrow || !!app?.wide);
+  const over = narrow || measuredOnPhone;
+  const withBack = phone || full || over;
+  const wide = !phone && (full || over || !!app?.wide);
   const title = app?.title ?? "";
   const modal = shown && phone;
 
@@ -282,9 +288,12 @@ export function ChatAppResume({ linkId }: { linkId: string }) {
   const { t } = useI18n();
   const app = useChatApp(linkId);
   if (!app || app.shown) return null;
+  // The person's newest choice in this chat: another app's Open still on its way here (its files downloading) starts
+  // nothing once it finishes, instead of stopping this one and taking its place.
+  const resume = () => { noteChoice(linkId); updateChatApp(linkId, { shown: true }); };
   return (
     <>
-    <button type="button" data-testid="mini-app-resume" data-serving={app.serving || undefined} onClick={() => updateChatApp(linkId, { shown: true })}
+    <button type="button" data-testid="mini-app-resume" data-serving={app.serving || undefined} onClick={resume}
       className="flex w-full items-center gap-2 px-4 py-2 bg-panel-header border-b border-border text-[13px] font-medium text-accent hover:bg-surface-hover cursor-pointer shrink-0 text-start">
       <AppGlyph size={16} />
       <span className="min-w-0 flex-1">

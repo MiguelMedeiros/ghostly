@@ -1,15 +1,15 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { BuiltInAppOffer, InstalledAppView } from "@ghostly/browser/engine/apps";
 import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
 import { useI18n } from "../../contexts/I18nContext";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
-import { Button } from "../wallet/ui";
+import { Button, Notice } from "../wallet/ui";
 import { AppIcon } from "./AppIcon";
 import { AppInstallDialog } from "./AppInstallDialog";
-import { appStopped, refreshInstalledApps, sendOpenedCard, useBuiltInApps, useInstalledApps } from "../../lib/apps/installed";
+import { appStopped, refreshInstalledApps, sendOpenedCard, useBuiltInApps, useInstalledApps, useInstalledAppsFailure } from "../../lib/apps/installed";
 import { openApp } from "../../lib/apps/open";
 import { chatAppOver } from "../../lib/apps/running";
-import { appErrorText } from "../../lib/apps/errors";
+import { appErrorText, appErrorView } from "../../lib/apps/errors";
 
 /** Open is offered for an app that may run, and for one whose files are missing here (a restored profile): opening it fetches them. */
 const opens = (app: InstalledAppView) => !appStopped(app);
@@ -34,6 +34,17 @@ export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, on
   const nav = useAppNavigation();
   const installed = useInstalledApps(true);
   const builtIns = useBuiltInApps(true);
+  const failure = useInstalledAppsFailure(true);
+  const failureView = failure != null ? appErrorView(failure, t) : null;
+  // Try again worked: the button went with its line, so the focus goes to the list's first control, not the page.
+  const [retried, setRetried] = useState(false);
+  useEffect(() => {
+    if (!retried || failure != null) return;
+    setRetried(false);
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    (ref.current?.querySelector<HTMLElement>("button:not(:disabled)") ?? ref.current)?.focus({ preventScroll: true });
+  }, [retried, failure, installed]);
   // A built-in app chosen for the first time: its install screen, then it opens with this contact.
   const [first, setFirst] = useState<BuiltInAppOffer | null>(null);
   const backdrop = useBackdropDismiss(onClose);
@@ -81,8 +92,16 @@ export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, on
           {waiting && <p className="text-xs text-text-secondary mt-1" data-testid="chat-apps-waiting">{waiting}</p>}
         </div>
         <div className="bg-surface rounded-xl divide-y divide-border">
+          {/* A list that could not be read (storage: a private window, a full disk) is no proof of none: said, with Try
+              again, as the Apps page says it. */}
+          {failureView && (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3" data-testid="chat-apps-error">
+              <Notice tone="error" testId="chat-apps-error-line" details={failureView.info} className="text-xs min-w-0 flex-[1_1_12rem]">{failureView.text}</Notice>
+              <Button className="ms-auto" onClick={() => { setRetried(true); void refreshInstalledApps(); }}>{t("apps.page.tryAgain")}</Button>
+            </div>
+          )}
           {installed === null ? <p className="px-4 py-3 text-xs text-text-muted">{t("apps.page.loading")}</p>
-            : installed.length === 0 && builtIns.length === 0 ? <p className="px-4 py-3 text-xs text-text-muted" data-testid="chat-apps-none">{t("apps.composer.none")}</p>
+            : installed.length === 0 && builtIns.length === 0 ? failure == null && <p className="px-4 py-3 text-xs text-text-muted" data-testid="chat-apps-none">{t("apps.composer.none")}</p>
               // Open goes under the name when both don't fit (a large text size on a phone): two apps' Opens stay told apart.
               : installed.map((app) => (
                 <div key={app.ref} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3" data-testid="chat-app" data-ref={app.ref}>

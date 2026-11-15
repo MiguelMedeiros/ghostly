@@ -141,11 +141,13 @@ When it is on, the key is:
 callKey = HKDF-SHA256(ikm = epoch secret, salt = utf8(g + "/" + e), info = utf8("ghostly-group-call/1 " + room), length = 32)
 ```
 
-where the epoch secret is the 32-byte secret of the newest commit on the member's main branch and `e` that commit's epoch number in decimal: the same secret and salt as the group's message keys (`epochKeys`), under its own `info`, so a call key is never a message key. Each member sets it into LiveKit's external key provider (shared-key mode), and sets the new one when the group moves to a new epoch. A member taken out of the group (`leave`, `remove`) gets no later epoch's secret ([903](903-group-community.md#membership-chain)), so it cannot derive the key of the epoch after.
+where the epoch secret is the 32-byte secret of the newest commit on the member's main branch and `e` that commit's epoch number in decimal: the same secret and salt as the group's message keys (`epochKeys`), under its own `info`, so a call key is never a message key. Each member sets it into LiveKit's shared key ring (shared-key mode, no ratchet, a ring of 16) at slot `e mod 16`, and seals with that slot from then on; LiveKit writes the slot in each frame's last byte, and a member opens a frame with the key in the slot the frame names. When the group moves to a new epoch, a member sets the new key in its slot and keeps the key of the epoch it was on for 10 seconds, so frames still sealed with it (in flight, or from members whose commit is still on its way) open; then it overwrites that slot with a random key, and any older slot at once. Two epochs 16 apart share a slot: a call never has both in use. A member taken out of the group (`leave`, `remove`) gets no later epoch's secret ([903](903-group-community.md#membership-chain)), so it cannot derive the key of the epoch after; while it is still in the room (§ Removal), what it sends with the key it holds opens for the others for those 10 seconds after they move, and no longer.
 
 ## Removal
 
-A member taken out of the roster gets no new token: check 5 refuses it. A participant already in the room may stay until its token expires; the node may remove it from the room when it takes the commit, and this revision does not require it.
+A member taken out of the roster gets no new token: check 5 refuses it. That does not end a stay already begun: the token is checked only when a participant joins, and LiveKit sends a connected participant fresh tokens, which its client also uses to reconnect, so a participant already in the room stays until it leaves or the node removes it. `expiresIn` bounds only a new join.
+
+So the node SHOULD remove from `"g_" + g` every participant whose identity is no longer in its roster of `g`, as soon as it takes the commit that takes that key out (with LiveKit, `RoomService.RemoveParticipant` with that identity). A node that cannot tell yet whether a key is in the roster (its roster could not be read) keeps the participant and asks again later. Ghostly's own app leaves the call by itself when its group is no longer active; this is for a client that does not, or one that missed the commit.
 
 ## Compatibility
 
@@ -157,7 +159,6 @@ The node learns who joins the call, when, from which address, and the name it gi
 
 ## Open decisions
 
-- Removing a removed member's live participant from the room at once, not when its token expires.
 - Turning end-to-end encryption on by default once every client that can join supports it.
 - Group calls in `group-mesh/1` groups.
 

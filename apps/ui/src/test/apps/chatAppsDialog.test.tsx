@@ -260,3 +260,45 @@ describe("the card an app sends when it is opened in a chat", () => {
     lists.mockImplementation(() => [installed()]);
   });
 });
+
+describe("the chat's Apps when the installed apps could not be read", () => {
+  const STORAGE = "storage: The operation failed for reasons unrelated to the database itself";
+  let failing: boolean;
+  beforeEach(() => {
+    run = { status: "ok" };
+    failing = true;
+    lists.mockImplementation(() => { if (failing) throw new Error(STORAGE); return [installed()]; });
+  });
+  afterEach(() => lists.mockImplementation(() => [installed()]));
+
+  it("says so, with Try again, never \"No apps installed yet.\", and Try again shows the apps", async () => {
+    const { user } = renderApp(<ChatAppsDialog linkId="link-1" name="Ana" onClose={() => {}} />);
+    const line = await screen.findByTestId("chat-apps-error");
+    expect(line).toHaveTextContent("This browser can't keep apps here (private browsing?). Try a normal window.");
+    expect(within(line).getByRole("alert")).toBeInTheDocument();
+    expect(screen.queryByTestId("chat-apps-none")).toBeNull();
+
+    failing = false;
+    await user.click(within(line).getByRole("button", { name: "Try again" }));
+    await screen.findByTestId("chat-app");
+    expect(screen.queryByTestId("chat-apps-error")).toBeNull();
+    // The button went with its line: the focus is on the list's first Open, not the page.
+    expect(screen.getByTestId("chat-app-open")).toHaveFocus();
+  });
+
+  it("says it in the person's language", async () => {
+    renderApp(<ChatAppsDialog linkId="link-1" name="Ana" onClose={() => {}} />, { language: "pt" });
+    expect(await screen.findByTestId("chat-apps-error")).toHaveTextContent("Este navegador não consegue guardar apps aqui");
+  });
+
+  it("opened again after the read failed, reads the list again: storage that works again shows the apps", async () => {
+    const first = renderApp(<ChatAppsDialog linkId="link-1" name="Ana" onClose={() => {}} />);
+    await screen.findByTestId("chat-apps-error");
+    first.unmount();
+    failing = false;
+    renderApp(<ChatAppsDialog linkId="link-1" name="Ana" onClose={() => {}} />);
+    await screen.findByTestId("chat-app");
+    expect(screen.queryByTestId("chat-apps-error")).toBeNull();
+    expect(lists).toHaveBeenCalledTimes(2);
+  });
+});

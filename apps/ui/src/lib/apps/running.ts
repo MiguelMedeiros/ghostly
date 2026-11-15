@@ -92,6 +92,24 @@ export function setChatApp(linkId: string, app: ChatApp | null): void {
   changed();
 }
 
+/**
+ * How many times the person chose what runs in each chat: an Open (`webOpener.ts`), or "Back to <app>" on the one
+ * running there (`ChatAppResume`). An open that finishes after a newer choice in its chat starts nothing.
+ */
+const choices = new Map<string, number>();
+
+/** The person chose what runs in the chat `linkId` now: an open still on its way there is older, and starts nothing. */
+export function noteChoice(linkId: string): number {
+  const turn = (choices.get(linkId) ?? 0) + 1;
+  choices.set(linkId, turn);
+  return turn;
+}
+
+/** Whether `turn` (from `noteChoice`) is still the person's newest choice in the chat `linkId`. */
+export function isNewestChoice(linkId: string, turn: number): boolean {
+  return choices.get(linkId) === turn;
+}
+
 /** Shows or hides the app in `linkId`, or puts it over the whole chat (`wide`). */
 export function updateChatApp(linkId: string, patch: Partial<Pick<ChatApp, "shown" | "wide" | "serving">>): void {
   const app = apps.get(linkId);
