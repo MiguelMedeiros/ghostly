@@ -43,7 +43,7 @@ function nostrSigner(id: "nip07" | "nip46"): InAppSigner<NostrEvent> {
     fields: id === "nip46" ? [{ name: "bunker", label: "Signer connection link", kind: "secret", placeholder: "bunker://…" }] : undefined,
     platforms: id === "nip07" ? ["web", "desktop"] : undefined,
     available: id === "nip07" ? () => !!extensionSigner() : undefined,
-    run: (ctx, work) => withNostrSigner({ bunker: id === "nip46" ? ctx.values.bunker : undefined, signal: ctx.signal, onAuth: ctx.onAuthUrl }, signer => {
+    run: (ctx, work) => withNostrSigner({ bunker: id === "nip46" ? ctx.values.bunker : undefined, signal: ctx.signal, onAuth: ctx.onAuthUrl, timeoutMs: ctx.waitMs }, signer => {
       const session: SignerSession<NostrEvent> = {
         subject: async () => normalizeNostrKey(await signer.getPublicKey()),
         sign: async statement => {
