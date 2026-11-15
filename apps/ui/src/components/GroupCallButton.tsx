@@ -5,6 +5,7 @@ import type { GroupView } from "@ghostly/browser/shared/types";
 import { useI18n } from "../contexts/I18nContext";
 import { useBackCloses, useBackdropDismiss, useQuestionDialog } from "../hooks/useDismiss";
 import { groupCallRelayConfig, useGroupCall, type LivekitModule } from "../hooks/useGroupCall";
+import { useGroupCallSupport } from "../hooks/useGroupCallSupport";
 import { useHandler } from "../hooks/useHandler";
 import { askGroupCallPass, groupCallProblem, PASS_REFRESH_LEAD_S, passRefreshInMs, type GroupCallPass } from "../lib/groupCallPass";
 import { focus } from "../lib/connection";
@@ -25,7 +26,8 @@ const joinedShowingIp = new Set<string>();
 /**
  * Join call in the header of a group with a call node (WISP 602): asks the node for a pass, joins its room
  * (`useGroupCall`) and opens the call's window. One call at a time: on a 1:1 call, it asks to end that one first; a
- * 1:1 call answered while this one is on ends it (`callRegistry`).
+ * 1:1 call answered while this one is on ends it (`callRegistry`). Where this app cannot join a group call (the Linux
+ * Desktop, `useGroupCallSupport`), it shows off, with an ⓘ saying where to join from.
  */
 export function GroupCallButton({ group, loadLivekit }: { group: GroupView; loadLivekit?: () => Promise<LivekitModule> }) {
   const { t } = useI18n();
@@ -45,8 +47,10 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
   const relayOnly = useEngineValue((state) => state?.settings.relayOnly === true);
   const [askIp, setAskIp] = useState(false);
   const [noRelay, setNoRelay] = useState(false);
-  const blocked = relayOnly && noRelay;
+  const support = useGroupCallSupport();
+  const blocked = !support.supported || (relayOnly && noRelay);
   const noRelayProblem: Problem = { tone: "error", title: t("calls.group.noRelay"), info: t("calls.group.noRelayInfo") };
+  const unsupported: Problem | null = support.reason === null ? null : { tone: "error", title: support.reason };
   const call = useGroupCall({ url: joined?.url ?? "", token: joined?.token ?? "", iceServers: joined?.iceServers, relayOnly, loadLivekit });
 
   useEffect(() => { if (!relayOnly) setNoRelay(false); }, [relayOnly]);
@@ -82,6 +86,7 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
   };
   const press = () => {
     if (asking) return;
+    if (unsupported) return setProblem(problem ? null : unsupported);
     if (blocked) return setProblem(noRelayProblem);
     if (relayOnly && !joinedShowingIp.has(groupId)) setAskIp(true);
     else go();
@@ -125,7 +130,7 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
 
   const canShareScreen = typeof navigator !== "undefined" && typeof navigator.mediaDevices?.getDisplayMedia === "function";
   return (
-    <div className="relative shrink-0">
+    <div className="relative flex shrink-0 items-center">
       <button ref={button} type="button" onClick={press} {...working(asking)} {...(blocked && { "aria-disabled": true })} data-testid="group-call-join"
         title={t("calls.group.join")} aria-label={t("calls.group.join")} aria-describedby={problem ? `${id}-problem` : undefined}
         className={`flex cursor-pointer items-center justify-center rounded-full p-2 text-text-secondary transition-colors hover:bg-surface-hover hover:text-accent aria-disabled:opacity-40 max-md:h-[44px] max-md:w-[44px] max-md:p-0 ${focus}`}>
@@ -133,6 +138,7 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
           <path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
         </svg>
       </button>
+      {unsupported && <InfoButton open={!!problem} onToggle={press} controls={`${id}-problem`} testId="group-call-unsupported-info" />}
       {/* On a phone Join call is not the header's last button: from its edge the box ran past the screen's side. It
           lies across the width under the header there, as the connection panels do. */}
       {problem && <div id={`${id}-problem`} data-testid="group-call-problem" className="absolute end-0 top-full max-md:fixed max-md:inset-x-2 max-md:top-[calc(3.5rem_+_env(safe-area-inset-top))] max-md:w-auto z-40 mt-2 w-[min(18rem,calc(100vw-1rem))] rounded-xl border border-border bg-panel-header p-3 shadow-xl">
