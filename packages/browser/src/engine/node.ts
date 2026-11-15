@@ -5091,9 +5091,10 @@ export class GhostlyNode implements EngineImplementation {
     void this.hold.forget(linkId, messageId).catch(() => {});
 
     const message = await db.getMessage(linkId, messageId);
-    // A text of mine still on the DHT floor, or an edit of it, leaves it before its row goes (`withdrawDht`): the floor
-    // went on saying it for minutes to a contact whose removal never goes there, and the chat's row kept its words.
-    if (message?.sender === "me" && message.wireId && live.link?.dhtHolds(message.wireId)) await live.link.withdrawDht(message.wireId).catch(() => {});
+    // A text of mine still on the DHT floor, or an edit of it, leaves it (`withdrawDht`): the floor went on saying it for
+    // minutes to a contact whose removal never goes there, and the chat's row kept its words. Awaited last, once the row
+    // is gone: the floor's queue may hold a read of the away contact's mailbox (3 to 10 s), which the row waited out.
+    const withdrawn = message?.sender === "me" && message.wireId && live.link?.dhtHolds(message.wireId) ? live.link.withdrawDht(message.wireId).catch(() => {}) : undefined;
     // A row of the contact's in the joined line's words that goes here was stored first: no later one is that line.
     if (message && contactJoinRow(message) && !live.stored.group && !live.stored.peerSpoke) {
       this.contactSpoke.add(live);
@@ -5129,6 +5130,7 @@ export class GhostlyNode implements EngineImplementation {
     if (removed) this.quoteSweeps.add(linkId, messageId, replyRef(message ?? { id: messageId, linkId }));
     await this.messagesChanged(linkId, [messageId]);
     this.emitState();
+    await withdrawn;
   }
 
   /**
