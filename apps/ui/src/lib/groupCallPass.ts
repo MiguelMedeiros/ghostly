@@ -2,6 +2,7 @@ import { parseEngineError } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import type { Translate } from "../contexts/I18nContext";
+import { NO_RELAY } from "../hooks/useGroupCall";
 import { rawError } from "./errorText";
 import type { Problem } from "./problemText";
 
@@ -57,6 +58,8 @@ const REFUSED_CODES = new Set(["groupCallRefused", "groupCallNotMember"]);
  */
 export function groupCallProblem(cause: unknown, t: Translate): Problem {
   const detail = rawError(cause) || undefined;
+  // Hide my IP turned on during the call, and the pass had no TURN server to join again through.
+  if (detail === NO_RELAY) return { tone: "error", title: t("calls.group.noRelay"), info: t("calls.group.noRelayInfo") };
   // A string: the engine's group-call codes come with its token slice, and until then no text parses to them.
   const code: string | undefined = detail ? parseEngineError(detail)?.code : undefined;
   const refused = REFUSED_CODES.has(code ?? "") || (!!detail && REFUSED.some((r) => r.test(detail)));
