@@ -277,6 +277,8 @@ const ONE_SHOT_JOIN_S = 60;
  * In a group under the link's id already (`held`, before the join), the link is only kept beside it unless it is this
  * profile's own group's (the engine's `joinByLink`): nothing knocks, and it answered `"joined": true` for a link whose
  * group it never joined, with a second group waiting under the id that only `group show`'s `others` said.
+ * Through a daemon the knock goes on after the answer, so it waits for nothing; it answered `{"group": id}` only, with
+ * neither whether it was in nor a word about a link only kept beside a group held.
  */
 async function letIn(ctx: ApiContext, groupId: string, link: string, held: GroupView | undefined): Promise<Record<string, unknown>> {
   const seen = (s: EngineState) => s.groups.find((g) => g.id === groupId);
@@ -295,6 +297,10 @@ async function letIn(ctx: ApiContext, groupId: string, link: string, held: Group
     return { group: groupId, joined: false, stage: null, warning: kept
       ? `Not joined: you are in a group under this link's id already, and only a group's welcome says whose a link is, so the link was kept beside that group and knocks nowhere. ghostly group show ${id} lists it under "others": ${pick}`
       : `Not joined: you are in a group under this link's id already, and as many other groups as are kept already wait beside it to be picked, so the link was not kept. ghostly group show ${id} lists them under "others": ${pick}, then open the link again` };
+  }
+  if (ctx.mode !== "one-shot") {
+    const now = seen(state(ctx));
+    return { group: groupId, joined: now?.status === "active", stage: now?.invitation?.stage ?? null };
   }
   const done = (g: GroupView | undefined) => !g || g.status === "active" || JOIN_STOPS.has(g.invitation?.stage ?? "");
   const group = await waitForState(ctx, (s) => { const g = seen(s); return done(g) ? { g } : undefined; }, ONE_SHOT_JOIN_S * 1000, `group ${groupId} to let this profile in`)
@@ -876,7 +882,7 @@ const METHODS: Record<string, Method> = {
     let groupId: string;
     const link = str(params, "link", true);
     // What was held before the join: a group already active under the link's id only gets the link noted beside it.
-    const before = ctx.mode === "one-shot" ? state(ctx).groups : [];
+    const before = state(ctx).groups;
     try {
       ({ groupId } = await node(ctx).joinGroupByLink({ link }));
     } catch (error) {
@@ -884,7 +890,7 @@ const METHODS: Record<string, Method> = {
       if (error instanceof Error && error.message === "This is not a link to a group") throw new CliError("bad_request", error.message);
       throw error;
     }
-    return ctx.mode === "one-shot" ? letIn(ctx, groupId, link, before.find((g) => g.id === groupId)) : { group: groupId };
+    return letIn(ctx, groupId, link, before.find((g) => g.id === groupId));
   },
   async "group.list"(ctx, params) {
     const showSecret = bool(params, "showSecret");
