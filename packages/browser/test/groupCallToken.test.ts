@@ -99,6 +99,14 @@ describe("asking the node", () => {
     await expect(ask(once(async () => Response.json({ url: "wss://x", token: "t", room: "g_other", identity: me.pubKeyZ32, expiresIn: 600 })))).rejects.toThrow(failed);
     await expect(ask(once(async () => Response.json({ url: "https://x", token: "t", room: `g_${g}`, identity: me.pubKeyZ32, expiresIn: 600 })))).rejects.toThrow(failed);
   });
+
+  it("a ws:// address is taken only on this machine: LiveKit puts the pass in the address, so elsewhere it would go out in clear", async () => {
+    const reply = (url: string) => vi.fn(async () => Response.json({ url, token: "t", room: `g_${g}`, identity: me.pubKeyZ32, expiresIn: 600 })) as unknown as typeof fetch;
+    for (const url of ["ws://sfu.ghostly.test", "ws://192.168.1.20:7880", "ws://127.0.0.1.example.org", "ws://[::2]:7880"])
+      await expect(ask(reply(url)), url).rejects.toThrow("call.ghostly.test could not start the group's call. Try again later.");
+    for (const url of ["wss://sfu.ghostly.test", "ws://127.0.0.1:47120", "ws://localhost:7880", "ws://[::1]:7880"])
+      await expect(ask(reply(url)), url).resolves.toMatchObject({ url });
+  });
 });
 
 interface Inner { groups: Groups & { sessions: Map<string, { state: { meta?: GroupMeta }; roster: Roster }> } }

@@ -59,12 +59,23 @@ export function signGroupCallRequest(sfu: string, fields: { g: string; k: string
   return { v: 1, g: fields.g, k: fields.k, room, ts: fields.ts, n: fields.n, ...(fields.name ? { name: fields.name } : {}), sig };
 }
 
+/**
+ * Where a pass may send its LiveKit client: `wss://`, or `ws://` to this machine (a node for tests or development), as a
+ * relay's address. LiveKit puts the token in the address, so a `ws://` one elsewhere would hand the pass to the path.
+ */
+function passUrlHolds(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "wss:" || (parsed.protocol === "ws:" && ["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname));
+  } catch { return false; }
+}
+
 /** The reply's pass, or null when it is not one for this room and key. */
 export function parseGroupCallPass(raw: unknown, room: string, identity: string): GroupCallPass | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
   if (typeof r.url !== "string" || typeof r.token !== "string" || !r.token || r.room !== room || r.identity !== identity) return null;
-  try { if (!["wss:", "ws:"].includes(new URL(r.url).protocol)) return null; } catch { return null; }
+  if (!passUrlHolds(r.url)) return null;
   if (typeof r.expiresIn !== "number" || !Number.isFinite(r.expiresIn) || r.expiresIn <= 0) return null;
   const iceServers = Array.isArray(r.iceServers) ? r.iceServers.flatMap(iceServer) : undefined;
   return { url: r.url, token: r.token, room, identity, expiresIn: Math.min(r.expiresIn, MAX_EXPIRES_IN), ...(iceServers?.length ? { iceServers } : {}) };
