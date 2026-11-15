@@ -48,7 +48,7 @@ Content-Type: application/json
 |---|---|
 | `v` | `1` |
 | `g` | The group id, base64url without padding, 22 characters ([903 § Identity](903-group-community.md#identity-and-declaration)). |
-| `k` | The member's key in this group, z-base32, 52 characters, in its one canonical spelling, as `GroupMemberView.key` and `ghostly group show --json` print it. |
+| `k` | The member's key in this group, z-base32, 52 characters, in its one canonical spelling, as `GroupMemberView.key` and `ghostly group show <group>` print it. |
 | `room` | `"g_" + g`, 24 characters. |
 | `ts` | Unix time in seconds, an integer, on the member's clock. |
 | `n` | 16 random bytes, base64url without padding (22 characters), new for each request. |
