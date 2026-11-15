@@ -5,6 +5,7 @@ import type { GroupView } from "@ghostly/browser/shared/types";
 import { useI18n } from "../contexts/I18nContext";
 import { useBackCloses, useBackdropDismiss, useQuestionDialog } from "../hooks/useDismiss";
 import { groupCallRelayConfig, useGroupCall, type LivekitModule } from "../hooks/useGroupCall";
+import { useGroupCallSupport } from "../hooks/useGroupCallSupport";
 import { useHandler } from "../hooks/useHandler";
 import { askGroupCallPass, groupCallOf, groupCallProblem, PASS_REFRESH_LEAD_S, passRefreshInMs, type GroupCallPass } from "../lib/groupCallPass";
 import { focus } from "../lib/connection";
@@ -51,8 +52,11 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
   const relayOnly = useEngineValue((state) => state?.settings.relayOnly === true);
   const [askIp, setAskIp] = useState(false);
   const [noRelay, setNoRelay] = useState(false);
-  const blocked = relayOnly && noRelay;
+  // The Linux Desktop's WebView has no WebRTC: Join call stays off there and sends the person to the web app.
+  const support = useGroupCallSupport();
+  const blocked = !support.supported || (relayOnly && noRelay);
   const noRelayProblem: Problem = { tone: "error", title: t("calls.group.noRelay"), info: t("calls.group.noRelayInfo") };
+  const blockedProblem: Problem = support.reason !== null ? { tone: "error", title: support.reason } : noRelayProblem;
   const call = useGroupCall({ url: joined?.url ?? "", token: joined?.token ?? "", iceServers: joined?.iceServers, relayOnly, loadLivekit });
 
   useEffect(() => { if (!relayOnly) setNoRelay(false); }, [relayOnly]);
@@ -89,7 +93,7 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
   };
   const press = () => {
     if (asking) return;
-    if (blocked) return setProblem(noRelayProblem);
+    if (blocked) return setProblem(blockedProblem);
     if (relayOnly && !joinedShowingIp.has(groupId)) setAskIp(true);
     else go();
   };

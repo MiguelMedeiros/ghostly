@@ -206,6 +206,29 @@ describe("Join call in a group's header", () => {
   });
 });
 
+describe("Join call on the Linux Desktop, whose WebView has no WebRTC", () => {
+  const tauri = window as unknown as { __TAURI_INTERNALS__?: object };
+  afterEach(() => {
+    delete tauri.__TAURI_INTERNALS__;
+    Reflect.deleteProperty(navigator, "userAgent");
+  });
+
+  it("shows off and says to join from the web app, without asking the node for a pass", async () => {
+    Object.defineProperty(navigator, "userAgent", { value: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko)", configurable: true });
+    tauri.__TAURI_INTERNALS__ = {};
+    answerPass(() => pass());
+    const { user } = joinButton();
+    expect(screen.getByTestId("group-call-join")).toHaveAttribute("aria-disabled", "true");
+    await user.click(screen.getByTestId("group-call-join"));
+    expect(screen.getByTestId("group-call-problem-notice-title")).toHaveTextContent("Group calls aren't on Linux yet: join from app.ghostly.tools in a browser");
+    expect(screen.getByTestId("group-call-join")).toHaveAccessibleDescription(/Group calls aren't on Linux yet/);
+    expect(screen.queryByTestId("group-call-retry")).toBeNull();
+    expect(passAsks()).toHaveLength(0);
+    expect(FakeRoom.rooms).toHaveLength(0);
+    expect(screen.queryByTestId("group-call")).toBeNull();
+  });
+});
+
 describe("Join call with Hide my IP from contacts on", () => {
   const TURN = { urls: "turn:turn.sfu.ghostly.test:3478", username: "u", credential: "c" };
   const hideIp = (group: GroupView) => {
