@@ -204,6 +204,26 @@ describe("Join call in a group's header", () => {
     expect(FakeRoom.rooms[0].disconnect).toHaveBeenCalled();
   });
 
+  it("a 1:1 call answered while the pass is asked for: Join call asks to end it before joining, with the pass it got", async () => {
+    let give!: (p: GroupCallPass) => void;
+    answerPass(() => new Promise<GroupCallPass>((resolve) => { give = resolve; }));
+    const { user } = joinButton();
+    await user.click(screen.getByTestId("group-call-join"));
+    await waitFor(() => expect(passAsks()).toHaveLength(1));
+    // Answered in a chat meanwhile, with no group call on yet to end.
+    const other = Symbol("1:1 call"), hangUp = vi.fn();
+    setCallOn(other, hangUp);
+    await act(async () => { give(pass()); });
+    expect(await screen.findByTestId("group-call-end-other")).toBeInTheDocument();
+    expect(screen.queryByTestId("group-call")).toBeNull();
+    expect(FakeRoom.rooms).toHaveLength(0);
+    expect(hangUp).not.toHaveBeenCalled();
+    await user.click(screen.getByTestId("group-call-end-other-confirm"));
+    expect(hangUp).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(FakeRoom.rooms[0]?.connect).toHaveBeenCalledWith("wss://sfu.ghostly.test", "pass-1", undefined));
+    expect(passAsks()).toHaveLength(1);
+  });
+
   it("names each tile by the group's own names, whatever name the node gave, and says who is not in the group", async () => {
     const ana = "ana".padEnd(46, "a") + "ana111", other = "ana".padEnd(46, "b") + "ana222", stranger = "zz".padEnd(46, "z") + "zzz333";
     const members = [{ key: ME, role: "member", me: true, online: true, missing: 0 }, ...[ana, other].map((key) => ({ key, role: "member", me: false, online: true, missing: 0, nick: "Ana" }))];
