@@ -768,6 +768,8 @@ const RULES: readonly Rule[] = [
   // list's line may hold spaces ("relay .example.org").
   { match: /^Use an https:\/\/ relay address: (?<address>\S+)$/, key: "errors.relays.useHttps" },
   { match: /^Not a relay address: (?<address>.+)$/, key: "errors.relays.notAddress" },
+  // An Iroh or HyperDHT relay past what a contact reads (`relayUrlTooLong`): a relay address, one too long.
+  { match: /^Use a shorter relay address: (?<address>\S+)$/, key: "errors.relays.useShorter" },
   // The rest of what Settings, Network refuses before or on Save (packages/browser/src/shared: hyperdhtRelay.ts,
   // pushRelay.ts, ice.ts; engine/node.ts updateSettings). The field it is about is marked there, so no line names it.
   { match: /^Enter a relay address \((?<example>(?:https|wss):\/\/)…\)$/, key: "errors.relays.enterAddress" },

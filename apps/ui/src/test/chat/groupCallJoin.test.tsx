@@ -101,6 +101,22 @@ describe("Join call in a group's header", () => {
     expect(passAsks()).toHaveLength(1);
   });
 
+  it("after the admin names another node, Join call asks it for a pass, not the old node's still held", async () => {
+    answerPass(() => pass());
+    const group = community();
+    const { user, rerender } = joinButton(group);
+    await user.click(screen.getByTestId("group-call-join"));
+    await waitFor(() => expect(FakeRoom.rooms[0]?.connect).toHaveBeenCalledWith("wss://sfu.ghostly.test", "pass-1", undefined));
+    await user.click(screen.getByTestId("group-call-leave"));
+    const moved = community({ call: { sfu: "https://call.example.com" } } as Partial<GroupView>);
+    answerPass(() => pass({ url: "wss://call.example.com", token: "pass-2" }));
+    fakeEngine.update({ groups: [moved] });
+    rerender(<GroupCallButton group={moved} loadLivekit={loadLivekit} />);
+    await user.click(screen.getByTestId("group-call-join"));
+    await waitFor(() => expect(FakeRoom.rooms[1]?.connect).toHaveBeenCalledWith("wss://call.example.com", "pass-2", undefined));
+    expect(passAsks()).toHaveLength(2);
+  });
+
   it("a refused pass says so in one line, Try again asks again and joins", async () => {
     answerPass(() => { throw new Error("The call node refused the pass (403)"); });
     const { user } = joinButton();
@@ -221,6 +237,23 @@ describe("Join call with Hide my IP from contacts on", () => {
     await user.click(screen.getByTestId("group-call-join"));
     expect(screen.queryByTestId("group-call-hide-ip")).toBeNull();
     await waitFor(() => expect(FakeRoom.rooms[1]?.connect).toHaveBeenCalled());
+  });
+
+  it("asks again when the admin names another call node: the yes was for the node it was given for", async () => {
+    answerPass(() => pass({ iceServers: [TURN] }));
+    const group = community({ id: "group-new-node" });
+    const { user, rerender } = hideIp(group);
+    await user.click(screen.getByTestId("group-call-join"));
+    await user.click(screen.getByTestId("group-call-hide-ip-confirm"));
+    await waitFor(() => expect(FakeRoom.rooms[0]?.connect).toHaveBeenCalled());
+    await user.click(screen.getByTestId("group-call-leave"));
+
+    const moved = { ...group, call: { sfu: "https://call.example.com" } };
+    act(() => fakeEngine.update({ groups: [moved] }));
+    rerender(<GroupCallButton group={moved} loadLivekit={loadLivekit} />);
+    await user.click(screen.getByTestId("group-call-join"));
+    expect(screen.getByTestId("group-call-hide-ip")).toBeInTheDocument();
+    expect(FakeRoom.rooms).toHaveLength(1);
   });
 
   it("stays off, saying why, when the node gives no relay to go through", async () => {

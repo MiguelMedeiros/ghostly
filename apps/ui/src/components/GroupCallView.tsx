@@ -252,7 +252,7 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
           </div>
           {info && <p id={infoId} data-testid="group-call-info-text" className="mx-auto max-w-md px-4 pb-2 text-center text-xs text-text-secondary break-words">{t("calls.group.info")}</p>}
           {presenter ? (
-            <div data-testid="group-call-stage" className="flex-1 min-h-0 flex max-md:flex-col gap-2 px-4 pb-32">
+            <div data-testid="group-call-stage" className="call-tiles flex-1 min-h-0 flex max-md:flex-col gap-2">
               <div className="flex-1 min-w-0 min-h-0 grid">
                 <Tile person={presenter} you={presenter === local} kind="screen" speaking={false} name={fillNames(t("calls.group.screenOf"), { name: nameOf(presenter) })} face={shown(presenter)} />
               </div>
@@ -261,7 +261,7 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
               </div>
             </div>
           ) : (
-            <div data-testid="group-call-grid" className="flex-1 min-h-0 grid gap-2 px-4 pb-32 auto-rows-fr" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
+            <div data-testid="group-call-grid" className="call-tiles flex-1 min-h-0 grid gap-2 auto-rows-fr" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
               {faces}
             </div>
           )}

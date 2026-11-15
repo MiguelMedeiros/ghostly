@@ -1515,6 +1515,8 @@ describe("settings", () => {
       // A relay address with the wrong scheme (irohWeb.ts irohRelayProblem, hyperdhtRelay.ts hyperdhtRelayProblem).
       [{ irohRelays: ["ftp://x"] }, "Use an https:// relay address: ftp://x", "irohRelays: use an https:// relay address: ftp://x"],
       [{ hyperdhtRelay: "ftp://x" }, "Use a wss:// relay address", "hyperdhtRelay: use a wss:// relay address"],
+      // One past what a contact reads (pairedTransports.ts relayUrlTooLong).
+      [{ irohRelays: ["https://x.example/long"] }, "Use a shorter relay address: https://x.example/long", "irohRelays: use a shorter relay address: https://x.example/long"],
     ];
     for (const [patch, engine, said] of refusals) {
       node.updateSettings.mockRejectedValueOnce(new Error(engine));

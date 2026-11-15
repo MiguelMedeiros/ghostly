@@ -23,7 +23,7 @@ export const GROUP_CALL_RETRY_MS = [3_000, 7_000] as const;
 /** How long one request may take. */
 export const GROUP_CALL_TIMEOUT_MS = 10_000;
 /** The most of a reply read: a pass with a few TURN servers is a couple of kilobytes. */
-const MAX_REPLY_CHARS = 64 * 1024;
+const MAX_REPLY_BYTES = 64 * 1024;
 const MAX_NAME = 64;
 const MAX_SFU = 200;
 /** WISP 602: a pass lets one join for at most an hour. */
@@ -116,7 +116,11 @@ export async function fetchGroupCallToken(ask: GroupCallAsk): Promise<GroupCallP
     const request = signGroupCallRequest(ask.sfu, { g: ask.g, k: ask.k, ts: Math.floor(now() / 1000), n: toBase64Url(randomBytes(16)), name }, ask.seed);
     let response: Response;
     try {
-      response = await doFetch(`${ask.sfu}/sfu/group-token`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request), signal: AbortSignal.timeout(GROUP_CALL_TIMEOUT_MS) });
+      // No redirect: one would send my key, name and signed request to a host the group never named.
+      response = await doFetch(`${ask.sfu}/sfu/group-token`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request), signal: AbortSignal.timeout(GROUP_CALL_TIMEOUT_MS),
+        redirect: "error", credentials: "omit", referrerPolicy: "no-referrer", cache: "no-store",
+      });
     } catch (error) {
       throw (error as { name?: string } | null)?.name === "TimeoutError" ? engineError("hostTimedOut", { host }) : engineError("hostUnreachable", { host });
     }
@@ -127,9 +131,32 @@ export async function fetchGroupCallToken(ask: GroupCallAsk): Promise<GroupCallP
     if (response.status === 403) throw engineError("groupCallRefused", { host });
     if (response.status === 429) throw engineError("groupCallBusy", { host });
     let raw: unknown = null;
-    if (response.ok) try { const text = await response.text(); raw = text.length <= MAX_REPLY_CHARS ? JSON.parse(text) : null; } catch { raw = null; }
+    if (response.ok) try { const text = await readCapped(response, MAX_REPLY_BYTES); raw = text === null ? null : JSON.parse(text); } catch { raw = null; }
     const pass = parseGroupCallPass(raw, room, ask.k);
     if (!pass) throw engineError("groupCallFailed", { host });
     return pass;
   }
+}
+
+/**
+ * The reply's text, or null past `max` bytes: read as it comes and stopped there, so a node's endless (or gzip-bombed)
+ * reply never sits whole in the engine's memory.
+ */
+async function readCapped(response: Response, max: number): Promise<string | null> {
+  if (Number(response.headers.get("content-length")) > max) { await response.body?.cancel().catch(() => {}); return null; }
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (let next = await reader.read(); !next.done; next = await reader.read()) {
+      size += next.value.byteLength;
+      if (size > max) return null;
+      chunks.push(next.value);
+    }
+  } finally { await reader.cancel().catch(() => {}); }
+  const all = new Uint8Array(size);
+  let at = 0;
+  for (const chunk of chunks) { all.set(chunk, at); at += chunk.byteLength; }
+  return new TextDecoder().decode(all);
 }

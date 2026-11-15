@@ -53,7 +53,8 @@ it("refuses a relay address a contact would drop with the whole descriptor, and 
   const long = [`https://${"a".repeat(60)}.example.com/${"p".repeat(60)}`, `http://127.0.0.1:3340/${"p".repeat(101)}`];
   const wasm = fakeWasm();
   for (const bad of long) {
-    expect(irohRelayProblem(bad)).toBe(`Not a relay address: ${bad}`);
+    // Said as what to do: it is a relay address, one too long (not a typo to look for in it).
+    expect(irohRelayProblem(bad)).toBe(`Use a shorter relay address: ${bad}`);
     const endpoint = await createIrohWebEndpoint(seed, { load: wasm.load, relays: [bad] });
     expect(checkedDescriptors({ "iroh/1": endpoint.descriptor })["iroh/1"]).toBeUndefined();
     await endpoint.close();

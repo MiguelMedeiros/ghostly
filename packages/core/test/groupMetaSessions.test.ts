@@ -732,7 +732,7 @@ describe("group call node, group-community/1 (WISP 602)", () => {
     const alice = net.create("alice");
     const bob = await net.admit(alice, "bob");
     await net.meet(alice, bob);
-    // Nothing in this app writes `e2ee: 1` yet: the admin's statement is signed by hand, as a later app would.
+    // The admin's statement signed by hand, as another app would write it.
     const s = bob.session, key = epochKeys(fromBase64Url(s.state.secrets[s.topHash]), s.id, s.epoch).message;
     const aliceSeed = identityFromSeedB64(alice.session.state.seedB64).seed;
     const body = JSON.stringify({ name: "Thursday", call: { sfu: SFU, e2ee: 1 } });
@@ -765,5 +765,34 @@ describe("group call node, group-community/1 (WISP 602)", () => {
     await alice.session.setCall(null);
     await net.settle();
     expect([alice.session.call, bob.session.call, bob.session.name]).toEqual([undefined, undefined, "Thursday"]);
+  });
+
+  it("the admin turns sealed call media on and off, and naming the node again keeps it as it was", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob");
+    await net.meet(alice, bob);
+    const OTHER = "https://call2.example.com";
+    await alice.session.setCall(SFU, true);
+    await net.settle();
+    expect([alice.session.call, bob.session.call]).toEqual([{ sfu: SFU, e2ee: 1 }, { sfu: SFU, e2ee: 1 }]);
+    // The node named again, or another one, without a word on e2ee: before, its statement left `e2ee` out (off).
+    await alice.session.setCall(OTHER);
+    await net.settle();
+    expect(bob.session.call).toEqual({ sfu: OTHER, e2ee: 1 });
+    expect(parseGroupMetaBody(bob.session.state.meta!.body)?.call).toEqual({ sfu: OTHER, e2ee: 1 });
+    await alice.session.setCall(OTHER, false);
+    await net.settle();
+    expect(bob.session.call).toEqual({ sfu: OTHER });
+    await alice.session.setCall(SFU);
+    await net.settle();
+    expect(bob.session.call).toEqual({ sfu: SFU });
+    await expect(bob.session.setCall(SFU, true)).rejects.toThrow("Only the admin");
+    // Cleared, the group has no call; a node named later starts with sealed media off.
+    await alice.session.setCall(SFU, true);
+    await alice.session.setCall(null);
+    await alice.session.setCall(SFU);
+    await net.settle();
+    expect(bob.session.call).toEqual({ sfu: SFU });
   });
 });

@@ -645,6 +645,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Enter a relay address (wss://…)", `${BROWSER}/shared/hyperdhtRelay.ts`],
   ["Use a wss:// relay address", `${BROWSER}/shared/hyperdhtRelay.ts`],
   ["Not a relay address: wss://relay.example.org/?key=1", `${BROWSER}/shared/hyperdhtRelay.ts`, "Not a relay address: ${url}"],
+  [`Use a shorter relay address: wss://${"a".repeat(121)}`, `${BROWSER}/shared/hyperdhtRelay.ts`, "Use a shorter relay address: ${url}"],
+  [`Use a shorter relay address: https://${"a".repeat(121)}`, `${BROWSER}/platform/irohWeb.ts`, "Use a shorter relay address: ${value}"],
   ["Enter a relay address (https://…)", `${BROWSER}/shared/pushRelay.ts`],
   ["Leave the user and password out of the address", `${BROWSER}/shared/pushRelay.ts`],
   ["Use at most five Iroh relays", `${BROWSER}/engine/node.ts`],

@@ -7,7 +7,7 @@ import { useBackCloses, useBackdropDismiss, useQuestionDialog } from "../hooks/u
 import { groupCallRelayConfig, useGroupCall, type LivekitModule } from "../hooks/useGroupCall";
 import { useGroupCallSupport } from "../hooks/useGroupCallSupport";
 import { useHandler } from "../hooks/useHandler";
-import { askGroupCallPass, groupCallProblem, PASS_REFRESH_LEAD_S, passRefreshInMs, type GroupCallPass } from "../lib/groupCallPass";
+import { askGroupCallPass, groupCallOf, groupCallProblem, PASS_REFRESH_LEAD_S, passRefreshInMs, type GroupCallPass } from "../lib/groupCallPass";
 import { focus } from "../lib/connection";
 import { useEngineValue } from "../lib/engineState";
 import { working } from "../lib/focus";
@@ -20,7 +20,10 @@ import { Notice } from "./ui/Notice";
 /** A refresh the node did not answer is asked again this much later, while the pass still holds. */
 const REFRESH_RETRY_MS = 30_000;
 
-/** The groups whose call this app, while open, was told to join with "Hide my IP from contacts" on: it asks once each. */
+/**
+ * The group's call nodes (`${groupId} ${sfu}`) this app, while open, was told to join with "Hide my IP from contacts"
+ * on: it asks once each, and again for another node the admin names.
+ */
 const joinedShowingIp = new Set<string>();
 
 /**
@@ -32,12 +35,19 @@ const joinedShowingIp = new Set<string>();
 export function GroupCallButton({ group, loadLivekit }: { group: GroupView; loadLivekit?: () => Promise<LivekitModule> }) {
   const { t } = useI18n();
   const groupId = group.id;
+  const ipShownTo = `${groupId} ${group.call?.sfu ?? ""}`;
   const id = useId();
   const [key] = useState(() => Symbol("group call"));
   /** The pass the room was joined with: it stays while in the room, since a new token would leave and join again. */
   const [joined, setJoined] = useState<GroupCallPass | null>(null);
-  /** The newest pass, asked again before it runs out, for joining again after a drop without asking the node. */
-  const held = useRef<{ pass: GroupCallPass; until: number } | null>(null);
+  /**
+   * The newest pass, asked again before it runs out, for joining again after a drop without asking the node. Only while
+   * the group's node is still the one it came from: the admin naming another one makes the next Join call ask that one.
+   */
+  const held = useRef<{ pass: GroupCallPass; until: number; sfu: string | undefined } | null>(null);
+  const sfu = groupCallOf(group)?.sfu;
+  const sfuNow = useRef(sfu);
+  sfuNow.current = sfu;
   const [asking, setAsking] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
   const [askEnd, setAskEnd] = useState(false);
@@ -55,7 +65,7 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
 
   useEffect(() => { if (!relayOnly) setNoRelay(false); }, [relayOnly]);
 
-  const hold = (pass: GroupCallPass) => { held.current = { pass, until: Date.now() + pass.expiresIn * 1000 }; };
+  const hold = (pass: GroupCallPass, from: string | undefined) => { held.current = { pass, until: Date.now() + pass.expiresIn * 1000, sfu: from }; };
   const enter = (pass: GroupCallPass) => {
     if (!relayOnly || groupCallRelayConfig(pass.iceServers).iceServers?.length) return setJoined(pass);
     setNoRelay(true);
@@ -64,11 +74,12 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
   const join = useHandler(async () => {
     setProblem(null);
     const kept = held.current;
-    if (kept && kept.until - Date.now() > PASS_REFRESH_LEAD_S * 1000) return enter(kept.pass);
+    if (kept && kept.sfu === sfu && kept.until - Date.now() > PASS_REFRESH_LEAD_S * 1000) return enter(kept.pass);
     setAsking(true);
     try {
+      const from = sfu;
       const pass = await askGroupCallPass(groupId);
-      hold(pass);
+      hold(pass, from);
       enter(pass);
     } catch (cause) {
       setProblem(groupCallProblem(cause, t));
@@ -88,7 +99,7 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
     if (asking) return;
     if (unsupported) return setProblem(problem ? null : unsupported);
     if (blocked) return setProblem(noRelayProblem);
-    if (relayOnly && !joinedShowingIp.has(groupId)) setAskIp(true);
+    if (relayOnly && !joinedShowingIp.has(ipShownTo)) setAskIp(true);
     else go();
   };
   // Not believed from the node: each tile is named by the group's roster, a key outside it said to be so.
@@ -101,9 +112,10 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
     let timer: ReturnType<typeof setTimeout>;
     const ask = async () => {
       try {
+        const from = sfuNow.current;
         const pass = await askGroupCallPass(groupId);
         if (!live) return;
-        hold(pass);
+        hold(pass, from);
         timer = setTimeout(ask, passRefreshInMs(pass.expiresIn));
       } catch {
         if (live) timer = setTimeout(ask, REFRESH_RETRY_MS);
@@ -150,7 +162,7 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
       </div>}
       {joined && <GroupCallView call={call} groupName={group.name || t("group.chat.unnamed")} canShareScreen={canShareScreen} nameOf={nameOf}
         onToggleMic={() => void call.toggleMic()} onToggleCamera={() => void call.toggleCamera()} onToggleScreen={() => void call.toggleScreen()} onLeave={leave} />}
-      {askIp && <HideIpDialog onClose={() => setAskIp(false)} onConfirm={() => { setAskIp(false); joinedShowingIp.add(groupId); go(); }} />}
+      {askIp && <HideIpDialog onClose={() => setAskIp(false)} onConfirm={() => { setAskIp(false); joinedShowingIp.add(ipShownTo); go(); }} />}
       {askEnd && <EndOtherCallDialog onClose={() => setAskEnd(false)} onConfirm={() => { setAskEnd(false); endOtherCalls(key); void join(); }} />}
     </div>
   );

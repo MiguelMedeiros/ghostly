@@ -4996,7 +4996,10 @@ export class GhostlyNode implements EngineImplementation {
     // Never left this device: deleting it here is all there is, unless the outbox's retry of it handed it to the link
     // meanwhile (`Outbox.cancel`, which also keeps it from going from now on): then it may be out, and its removal goes.
     const going = this.outboxes.get(linkId)?.cancel(messageId) ?? false;
-    if (!wireId || (message.delivery === "waiting" && !going)) { await this.forgetMessage(linkId, messageId, message); return { error: null }; }
+    // A waiting file of mine whose offer went on the DHT floor may be in the contact's chat (its bubble waits there for
+    // the bytes): it left, and its removal goes, or the contact kept it as "Cancelled by the sender" (agents#5945).
+    const onFloor = !!message.file && (message.fileOnFloor === "sent" || message.fileOnFloor === "seen");
+    if (!wireId || (message.delivery === "waiting" && !going && !onFloor)) { await this.forgetMessage(linkId, messageId, message); return { error: null }; }
     const removal: Removal = { id: messageId, wireId, e: removalNumber(message.edit?.seq), at: Date.now(), pending: true };
     live.stored = { ...live.stored, removals: withRemoval(live.stored.removals, removal) };
     const written = this.writeDeletions(linkId, { removals: live.stored.removals });
@@ -6555,7 +6558,7 @@ export class GhostlyNode implements EngineImplementation {
   setGroupPicture({ groupId, picture }: { groupId: string; picture: string | null }): Promise<void> { return this.groups.setPicture(groupId, picture); }
   renameGroup({ groupId, name }: { groupId: string; name: string }): Promise<void> { return this.groups.rename(groupId, name); }
   /** The admin of a community group names the node that forwards its calls, or removes it with null (WISP 602). */
-  setGroupCall({ groupId, sfu }: { groupId: string; sfu: string | null }): Promise<void> { return this.groups.setCall(groupId, sfu); }
+  setGroupCall({ groupId, sfu, e2ee }: { groupId: string; sfu: string | null; e2ee?: boolean }): Promise<void> { return this.groups.setCall(groupId, sfu, e2ee); }
   forgetGroup({ groupId }: { groupId: string }): Promise<void> { this.groupEdits.forget(groupId); return this.groups.forget(groupId); }
 
   /**
@@ -7154,12 +7157,14 @@ export class GhostlyNode implements EngineImplementation {
   }
   /**
    * Back to the Cashu mints (a caller from before cards): the card named, else the default for receiving, is removed,
-   * and the Cashu card becomes the default for receiving.
+   * and the Cashu card becomes the default for receiving. A card at home on another device is removed there, never
+   * from here (as `walletRemove`).
    */
   async lightningClearSource(params?: { network?: WalletNetwork; card?: string }) {
     const network = this.net(params?.network), cards = this.lightnings[network];
     await cards.start();
     const id = params?.card ?? cards.receivingId;
+    refuseAway(`lightning:${network}:${id}`, this.walletView.networks?.[network].lightnings?.find((c) => c.card === id)?.name || WALLET_NAMES.lightning);
     if (id !== CASHU_CARD) await cards.remove(id);
     if (!cards.has(CASHU_CARD) && this.networkMints(network).length) await cards.add(CASHU_MINT_SOURCE, {});
     if (cards.has(CASHU_CARD) && this.networkMints(network).length) await cards.setReceive(CASHU_CARD);
