@@ -20,7 +20,7 @@ import { RateWindow, validEditNumber, validRemovalNumber } from "./pairedEdits";
 import { CATCH_UP_PAUSE_MS, CATCH_UP_SLICE, CatchUpAnswers, type CatchUpHandled } from "./catchUp";
 import {
   encodeGroupMetaBody, groupDisplayName, groupMetaBody, groupMetaChange, groupMetaNewer, groupMetaPicture, groupMetaToHand, keepPastGroupMeta, nextGroupMetaRevision, groupMetaTag, groupName, openGroupMeta, parseGroupMetaFrame, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
-  type GroupMeta, type GroupMetaChange, type GroupMetaFrame, type GroupMetaStatement,
+  type GroupMeta, type GroupMetaBody, type GroupMetaChange, type GroupMetaFrame, type GroupMetaStatement,
 } from "./groupMeta";
 
 /**
@@ -134,6 +134,12 @@ export const COMMUNITY_LIMITS = {
  * frame of the answer keeps it open, since it goes a slice at a time. As a private group's.
  */
 const ANSWER_WINDOW_MS = 5_000;
+
+/**
+ * After the admin role moved to me: how long I still take the statement of the admin I took it from (WISP 903
+ * § Metadata), one that was on its way while the commit reached me first. Past it, condition 4 holds as for anyone.
+ */
+export const COMMUNITY_TAKEOVER_META_MS = 10 * 60_000;
 
 /** What every member should know about who can read what, and what the link does, in the words the apps show. */
 export const GROUP_READ_NOTE_COMMUNITY = `Anyone with the group's link can join, and any member can let people in. Everyone in the group can read everything sent while they are a member; someone removed cannot read what comes after, someone who joins later cannot read what came before. Members who were away get the last ${COMMUNITY_LIMITS.store} messages from whoever is there when they return.`;
@@ -744,6 +750,13 @@ export class CommunitySession {
   private saveTimer: ReturnType<typeof setTimeout> | undefined;
   /** Metadata frames naming a commit or a secret I do not have yet, one signed by the admin and one by anyone else (`waitMeta`): tried again when the chain or my secrets move. */
   private pendingMeta: { admin?: WaitingMeta; other?: WaitingMeta } = {};
+  /** The admin as of the last `metaFollowsChain`. In memory only. */
+  private adminSeen: string | undefined;
+  /**
+   * After the admin role moved to me (`metaFollowsChain`): whom from, until when I take their statement, and the last
+   * one of theirs I signed again (what I held then, until one of theirs comes). In memory only.
+   */
+  private takeover: { from: string; until: number; base: GroupMeta | undefined } | undefined;
   /** The store's frames the app holds with their messages (`storeKey` → message id): in memory here, not in what is saved. */
   private readonly onRows = new Map<string, string>();
   /** The oldest epoch whose seen marks are kept, as of the last `pruneSeen`. In memory only. */
@@ -772,6 +785,7 @@ export class CommunitySession {
     });
     this.rebuild();
     this.pruneSeen();
+    this.adminSeen = this.admin;
     // A branch kept under the older rule (longest first) may be the better one now: it keeps an admin change mine dropped.
     if ((state.status === "active" || state.status === "lost") && this.bestBranch().tip !== this.topHash) void this.serialize(() => this.chooseBranch());
   }
@@ -2833,20 +2847,22 @@ export class CommunitySession {
    * Signs a body under my current commit, keeps it and sends it to everyone (hubs relay it). Inside `serialize`. Like a
    * commit, only with admin work on and a good turn read (WISP 06 § Forced takeover): refused otherwise, or, `quiet`,
    * not made. Its revision is never under the floor (WISP 06 § Raised counters).
+   * `taken`: a former admin's statement signed again (`signAgainTaken`): the line credits them, and the one held is not
+   * kept to hand on when it was no change (an older statement signed again).
    */
-  private async publishMeta(body: string, now: number, quiet = false): Promise<void> {
+  private async publishMeta(body: string, now: number, quiet = false, taken?: { by: string; replaces: boolean }): Promise<void> {
     const refused = !this.adminWork ? new Error(GROUP_ADMIN_OFF_ERROR)
       : this.hooks.adminTurn && !(await this.hooks.adminTurn()) ? engineError("groupTurnUnconfirmed") : undefined;
     if (refused) { if (quiet) return; throw refused; }
     const before = this.state.meta;
     const meta = signGroupMeta({ g: this.id, e: this.epoch, h: this.topHash, r: nextGroupMetaRevision(before, this.epoch, this.hooks.seqFloor?.()), ts: now }, body, this.identity.seed, this.myKey);
     this.state.meta = meta;
-    this.state.metaPast = keepPastGroupMeta(this.state.metaPast, before, meta);
+    if (!taken?.replaces) this.state.metaPast = keepPastGroupMeta(this.state.metaPast, before, meta);
     await this.persist();
     const frame = this.metaFrame(meta);
     if (frame) this.hooks.broadcast(frame);
     const change = groupMetaChange(before, meta, this.state.name);
-    if (change) this.hooks.metaChanged?.(this.myKey, change, meta.ts);
+    if (change) this.hooks.metaChanged?.(taken?.by ?? this.myKey, change, meta.ts);
     this.hooks.changed();
   }
 
@@ -2871,24 +2887,26 @@ export class CommunitySession {
    * A metadata statement (from its author's edge or a hub's): kept when it is newer than mine, its
    * commit is on my main branch, its signer was the admin after that commit and is the admin now,
    * its signature holds, and it opens under the epoch it names into metadata Ghostly shows. Returns
-   * whether it was new, so a hub relays it. One naming what I do not have yet waits for the chain.
+   * whether it was new, so a hub relays it. One naming what I do not have yet waits for the chain. Just after the admin
+   * role moved to me, the former admin's is signed again as mine (`takesOver`).
    */
   private async receiveMeta(from: string, raw: unknown): Promise<boolean> {
     const frame = parseGroupMetaFrame(raw);
     if (!frame || frame.statement.g !== this.id || typeof frame.k !== "string" || !this.isRecentMember(from)) return false;
-    const s = frame.statement;
-    if (!groupMetaNewer(s, this.state.meta)) return false;
+    const s = frame.statement, taking = this.takesOver(s);
+    if (!taking && !groupMetaNewer(s, this.state.meta)) return false;
     const at = this.mainIndex.get(s.h);
     if (at === undefined) {
       if (s.e >= this.epoch - COMMUNITY_LIMITS.window) this.waitMeta(from, raw, s);
       return false;
     }
-    if (at !== s.e || rosterAdmin(this.rosterAt(s.h) ?? []) !== s.by || this.admin !== s.by || !verifyGroupMetaSignature(s)) return false;
+    if (at !== s.e || rosterAdmin(this.rosterAt(s.h) ?? []) !== s.by || (!taking && this.admin !== s.by) || !verifyGroupMetaSignature(s)) return false;
     // The epoch it is sealed under: a commit I know and hold the secret of, or one that may still come.
     const secret = this.state.secrets[frame.k], sealedUnder = this.known.get(frame.k);
     if (!secret || !sealedUnder) { this.waitMeta(from, raw, s); return false; }
     const opened = openGroupMeta(frame, epochKeys(fromBase64Url(secret), this.id, sealedUnder.e).message);
     if (!opened) return false;
+    if (taking) { await this.signAgainTaken(opened.meta, opened.body); return false; }
     const before = this.state.meta;
     this.state.meta = opened.meta;
     this.state.metaPast = keepPastGroupMeta(this.state.metaPast, before, opened.meta);
@@ -2899,6 +2917,31 @@ export class CommunitySession {
     if (change) this.hooks.metaChanged?.(this.metaAuthor(before, s, at), change, opened.meta.ts);
     this.hooks.changed();
     return true;
+  }
+
+  /**
+   * Whether I take a statement though its signer is no longer the admin (WISP 903 § Metadata): I am the admin since
+   * moments ago, they were the admin before me, and it is later than the one of theirs I signed again. A member who had
+   * not synced when the role moved to them signed again what they held (or nothing), and the statement on its way would
+   * be refused for good: a rename of theirs, or a member back from away, would then lose the group's call node.
+   */
+  private takesOver(s: GroupMetaStatement): boolean {
+    const t = this.takeover;
+    return !!t && this.isAdmin && s.by === t.from && (this.hooks.clock?.() ?? Date.now()) <= t.until && groupMetaNewer(s, t.base);
+  }
+
+  /**
+   * The former admin's statement, taken (`takesOver`): signed again as mine, each field I changed since keeping my
+   * value. Dated as theirs, and credited to them, when I changed nothing; what I held was then no change to hand on.
+   */
+  private async signAgainTaken(meta: GroupMeta, theirs: GroupMetaBody): Promise<void> {
+    const t = this.takeover!, base = groupMetaBody(t.base), mine = groupMetaBody(this.state.meta);
+    t.base = meta;
+    const pick = <K extends keyof GroupMetaBody>(k: K) => JSON.stringify(mine[k]) === JSON.stringify(base[k]) ? theirs[k] : mine[k];
+    const body = encodeGroupMetaBody({ name: pick("name"), pic: pick("pic"), hubs: pick("hubs"), call: pick("call") });
+    if (body === this.state.meta?.body) return;
+    const changed = encodeGroupMetaBody(mine) !== encodeGroupMetaBody(base);
+    await this.publishMeta(body, changed ? this.hooks.clock?.() ?? Date.now() : meta.ts, true, { by: meta.by, replaces: !changed });
   }
 
   /**
@@ -2936,6 +2979,13 @@ export class CommunitySession {
    * went with a branch that lost a fork, the name and picture signed again as mine under the main branch.
    */
   private async metaFollowsChain(): Promise<void> {
+    if (this.admin !== this.adminSeen) {
+      // The role moved to me: what the admin before me signed may still be on its way (`takesOver`).
+      const from = this.adminSeen;
+      this.takeover = this.isAdmin && from && from !== this.myKey
+        ? { from, until: (this.hooks.clock?.() ?? Date.now()) + COMMUNITY_TAKEOVER_META_MS, base: this.state.meta } : undefined;
+      this.adminSeen = this.admin;
+    }
     const { admin, other } = this.pendingMeta;
     this.pendingMeta = {};
     for (const pending of [admin, other]) if (pending && await this.receiveMeta(pending.from, pending.frame)) this.hooks.relay?.(pending.frame as GroupMetaFrame);
