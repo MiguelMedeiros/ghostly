@@ -81,3 +81,44 @@ it("a contact that chose DHT only gets every text of a burst from this side, whi
     await vi.waitFor(async () => expect((await db.getMessages(linkId)).filter(m => m.sender === "me").map(m => m.delivery)).toEqual(["delivered", "delivered", "delivered"]), { timeout: 12000 });
   } finally { await contact.stop(); await node.shutdown(); if (linkId) await db.deleteLink(linkId); vi.unstubAllGlobals(); }
 }, 70000);
+
+it("a text deleted while the profile is offline leaves the saved floor: back online, the contact never gets it (agents#6005)", async () => {
+  await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true });
+  vi.stubGlobal("RTCPeerConnection", undefined);
+  const packets = new Map<string, SignedPacket>();
+  const transport = { publish: async (identity: Parameters<typeof createRelayPayload>[0], records: Parameters<typeof createRelayPayload>[1]) => {
+    packets.set(identity.pubKeyZ32, parseRelayPayload(identity.pubKeyZ32, createRelayPayload(identity, records)));
+  }, resolve: async (key: string) => packets.get(key) ?? null, describe: () => ({ protocol: "signed packet fixture", relays: [] }) };
+  const native = vi.fn();
+  const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() }, { transport, automaticWallets: false, nativeTransports: { "iroh/1": native, "hyperdht/1": native } });
+  const invitation = createLink(); let linkId = "";
+  const received = vi.fn();
+  const contact = new DhtDelivery({ params: invitation.invite, mode: "dht", credentials: { seedB64: createIdentity().seedB64 }, transport,
+    save: async () => {}, pin: async () => {}, message: async m => { received(m); }, receipt: async () => {}, changed: () => {}, pollMs: 100 });
+  const saved = async () => (await db.getLinks()).find(l => l.id === linkId)?.dhtDeliveryState;
+  try {
+    await node.start();
+    ({ linkId } = await node.ensureLink({ ...invitation.mine, profile: "paired-chat/1", deliveryMode: "dht" }));
+    // Paired over the floor first, then the contact goes away: what follows waits there for its receipt.
+    await contact.start();
+    expect((await node.sendMessage({ linkId, text: "hello", timestamp: Date.now() })).error).toBeNull();
+    await vi.waitFor(async () => expect((await db.getMessages(linkId)).map(m => m.delivery)).toEqual(["delivered"]), { timeout: 20000 });
+    await contact.stop();
+    expect((await node.sendMessage({ linkId, text: "deleted while offline", timestamp: Date.now() })).error).toBeNull();
+    const message = (await db.getMessages(linkId)).find(m => m.text === "deleted while offline")!;
+    expect((await saved())?.pending?.message[2]).toBe("deleted while offline");
+    // Offline: the chat's link is stopped, so the floor's state is all that holds the text.
+    await node.updateSettings({ settings: { online: false } });
+    node.deleteMessage({ linkId, messageId: message.id });
+    await vi.waitFor(async () => expect(await db.getMessages(linkId)).toHaveLength(1));
+    await vi.waitFor(async () => expect((await saved())?.pending).toBeUndefined());
+    // Back online: nothing publishes the text again, and the envelope the relays held is replaced at once, not after
+    // the start's quiet.
+    await node.updateSettings({ settings: { online: true } });
+    await new Promise(resolve => setTimeout(resolve, 3_000));
+    await contact.start();
+    await new Promise(resolve => setTimeout(resolve, 2_000));
+    expect(received.mock.calls.map(([m]) => m.text)).not.toContain("deleted while offline");
+    expect((await saved())?.pending).toBeUndefined();
+  } finally { await contact.stop(); await node.shutdown(); if (linkId) await db.deleteLink(linkId); vi.unstubAllGlobals(); }
+}, 45000);
