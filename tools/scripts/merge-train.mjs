@@ -139,6 +139,33 @@ export const MAX_WAIT = 15 * 60_000;
 export const HOLD_HELP = 30 * 60_000;
 /** The most pages of 100 the train reads of one list (comments, events, pull requests, jobs). */
 const PAGES_READ = 10;
+/**
+ * How many pull requests in line the train reads at once. Each costs ~5 requests (events, CI's runs and jobs, comments,
+ * mergeability) at ~0.5 s each, so one at a time a line of 10 took ~30 s a run, and every run grew with the line; a few
+ * at once stays far below GitHub's limit on concurrent requests.
+ */
+export const READS_AT_ONCE = 4;
+
+/**
+ * Runs `work` on each item, at most `limit` at once, started in the items' order. After a failure nothing new starts;
+ * the ones already going end before the first error is thrown, so no read outlives the run that asked it.
+ */
+export async function inTurns(items, limit, work) {
+  let next = 0;
+  let failed = null;
+  const worker = async () => {
+    while (!failed && next < items.length) {
+      const item = items[next++];
+      try {
+        await work(item);
+      } catch (e) {
+        failed ??= { e };
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  if (failed) throw failed.e;
+}
 const POSITION = "<!-- merge-train:position -->";
 const HEAD = /<!-- merge-train:head (\w+) -->/;
 const STATE = /<!-- merge-train:batch (\{.*?\}) -->/g;
@@ -699,7 +726,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   const open = await gh.pulls(base);
   const batches = open.filter((p) => isBatch(p, base, login)).sort((a, b) => a.number - b.number);
   const queued = open.filter((p) => !isBatch(p, base, login) && (inLine(p.labels) || also.includes(p.number)));
-  for (const p of queued) {
+  await inTurns(queued, READS_AT_ONCE, async (p) => {
     const events = (p.events = await gh.events(p.number));
     p.queuedAt = queuedAt(events, p.createdAt, p.labels);
     p.priority = p.labels.includes(LABEL.priority);
@@ -720,11 +747,11 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     // reviewed head) or the latest `queue` may be missing. That is a doubt, not "none yet": it waits, and gets no new comment.
     if (events.truncated) p.unread = "events";
     else if (!p.sticky && said.truncated) p.unread = "comments";
-  }
+  });
   // An account that may edit any comment can rewrite the train's own: its marks count only while the train wrote it
   // last. GitHub names a comment's last editor over GraphQL only, so one read asks it for every position comment.
   const writers = await gh.lastEditors(queued.map((p) => p.sticky?.node_id).filter(Boolean));
-  for (const p of queued) {
+  await inTurns(queued, READS_AT_ONCE, async (p) => {
     const events = p.events;
     // Edited by another login: it speaks for nobody, and the pull request counts as queued again (as below).
     if (p.sticky && writers.get(p.sticky.node_id) !== login) {
@@ -744,7 +771,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       const forced = events.filter((e) => e.event === "head_ref_force_pushed").map((e) => e.created_at).sort().at(-1);
       if (p.pushedAt && forced && Date.parse(forced) > Date.parse(p.pushedAt)) p.pushedAt = forced;
     }
-  }
+  });
   // Queued again after the train dropped it, as its comment says: the drop label no longer holds, and left on it would
   // read as still dropped next to its place in line. The train's own, so it takes it off (a drop adds it back).
   for (const p of queued) {
@@ -976,14 +1003,14 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   // Whether a queued pull request that cannot board conflicts with its base (`waiting` says so first). Asked only of one
   // that waits for a reason the conflict comes before, so a green one costs no request; GitHub answers `unknown` while
   // it still works the mergeability out, so that is asked once more, a moment later.
-  for (const p of queued.filter((p) => !gone.has(p.number) && !onHold(p) && !p.draft && waiting(p))) {
+  await inTurns(queued.filter((p) => !gone.has(p.number) && !onHold(p) && !p.draft && waiting(p)), READS_AT_ONCE, async (p) => {
     let state = (await gh.pull(p.number)).mergeState;
     if (state === "unknown") {
       await pause(2000);
       state = (await gh.pull(p.number)).mergeState;
     }
     p.conflict = state === "dirty";
-  }
+  });
 
   let inFlight = null;
   /** CI Success on the base itself while a red batch or lone pull request waits for it: every position comment says so. */
