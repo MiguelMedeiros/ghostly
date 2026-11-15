@@ -543,7 +543,8 @@ describe("group call", () => {
     const params = (argv: string[]) => { const parsed = parseArgs(argv, command.options ?? {}, idSlot(command)); return command.params!(parsed, positionals(command, parsed.positionals)); };
     expect(params(["Thursday", "--sfu", SFU])).toEqual({ group: "Thursday", sfu: SFU });
     expect(params(["Thursday", "--clear"])).toEqual({ group: "Thursday", clear: true });
-    expect(() => params(["Thursday"])).toThrow("Missing --sfu: ghostly group call <group> --sfu <https origin> | --clear");
+    // Every form the usage line takes, `--e2ee` or `--no-e2ee` alone too: before, only --sfu and --clear (agents#6029).
+    expect(() => params(["Thursday"])).toThrow("Missing --sfu, --e2ee, --no-e2ee or --clear: ghostly group call <group> --sfu <https origin> [--e2ee | --no-e2ee] | --e2ee | --no-e2ee | --clear");
     expect(() => params(["Thursday", "--sfu", SFU, "--clear"])).toThrow("--clear removes the call node: not with --sfu");
     expect(params(["Thursday", "--sfu", SFU, "--e2ee"])).toEqual({ group: "Thursday", sfu: SFU, e2ee: true });
     expect(params(["Thursday", "--no-e2ee"])).toEqual({ group: "Thursday", e2ee: false });
