@@ -6,6 +6,7 @@ import type { HandoffView } from "@ghostly/browser/devices/handoff";
 import type { FileTransferView } from "@ghostly/browser/shared/types";
 import { DEVICE_SET_EVENT } from "./devices";
 import { useEngineValue } from "./engineState";
+import { androidApp } from "./touchOnly";
 
 /*
  * "Keep this computer awake" (WISP 06 § User experience, Profile, Devices): on a Desktop with a standby device, a switch
@@ -22,9 +23,14 @@ const CHECK_EVERY_MS = 5_000;
 
 const host = () => { try { return getBrowserHost(); } catch { return null; } };
 
-/** Whether this app can keep its computer awake (the desktop app). */
+/** Whether this app can keep its computer awake (the desktop app; the Android app, for files only). */
 export function keepAwakeSupported(): boolean {
   return typeof host()?.keepAwake === "function";
+}
+
+/** Whether the devices can hold it too (the switch, a handoff): the desktop app. Android holds nothing for them. */
+export function keepAwakeForDevices(): boolean {
+  return keepAwakeSupported() && !androidApp();
 }
 
 function readSetting(): boolean {
@@ -82,17 +88,18 @@ export const useFilesMoving = (): boolean => useEngineValue((state) => filesMovi
 
 /**
  * Holds the computer awake while `keepAwakeWanted` says so or a file is on its way, and lets go when neither is so or
- * the app goes away. Nothing where the app cannot (a web page, the extension). Mounted wherever the profile runs, the
- * standby screen too.
+ * the app goes away. Nothing where the app cannot (a web page, the extension), and files alone in the Android app: the
+ * device set and the handoff are not read there. Mounted wherever the profile runs, the standby screen too.
  */
 export function useComputerAwake(): void {
   const supported = keepAwakeSupported();
+  const forDevices = keepAwakeForDevices();
   const [setting] = useKeepAwakeSetting();
   const [devices, setWanted] = useState(false);
   const files = useFilesMoving();
   const wanted = devices || files;
   useEffect(() => {
-    if (!supported) return;
+    if (!forDevices) return;
     let live = true;
     let timer: ReturnType<typeof setInterval> | undefined;
     // The page read a device set since this started: an answer of `single` asked for before it is out of date.
@@ -124,7 +131,7 @@ export function useComputerAwake(): void {
     start();
     window.addEventListener(DEVICE_SET_EVENT, seen);
     return () => { live = false; stop(); window.removeEventListener(DEVICE_SET_EVENT, seen); };
-  }, [supported, setting]);
+  }, [forDevices, setting]);
   // Told again when files start or stop under a hold the devices keep: Android holds its "Sending files" service for
   // files alone.
   useEffect(() => {
