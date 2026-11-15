@@ -1,5 +1,5 @@
 import { endpoints } from "../infra/env.mjs";
-import { expect, openProfilePage, test, type Peer } from "../support/fixtures";
+import { expect, test, type Peer } from "../support/fixtures";
 import { HeadlessBot } from "../support/headless";
 
 /**
@@ -38,14 +38,6 @@ async function routeSfu(peer: Peer): Promise<void> {
   });
 }
 
-async function setName(peer: Peer, name: string): Promise<void> {
-  await openProfilePage(peer.page);
-  await peer.page.getByTestId("account-nickname").fill(name);
-  await expect(peer.page.getByTestId("account-nickname")).toHaveValue(name);
-  await peer.page.goBack();
-  await expect(peer.page.getByTitle("New Chat")).toBeVisible();
-}
-
 async function joinGroup(peer: Peer, link: string): Promise<void> {
   await peer.page.goto(link.includes("#") ? "/" + link.slice(link.indexOf("#")) : `/#/join/${link}`);
   await expect(peer.page.getByTestId("group-chat")).toHaveAttribute("data-status", "active", { timeout: 180_000 });
@@ -62,31 +54,34 @@ test("three members join a community group's call, see and hear each other, see 
 
     const [ana, bia, cleo, dan] = await Promise.all(["Ana", "Bia", "Cleo", "Dan"].map((name) => peer(name)));
     for (const p of [ana, bia, cleo, dan]) await routeSfu(p);
-    await Promise.all([ana, bia, cleo, dan].map((p) => setName(p, p.name)));
-    await Promise.all([ana, bia, cleo, dan].map((p) => joinGroup(p, link)));
+    const callers = [ana, bia, cleo];
+    await Promise.all(callers.map((p) => joinGroup(p, link)));
 
-    // Each member's key, by the name the node has for it.
-    type Shown = { id: string; call?: { sfu?: string }; members: { key: string; name: string | null }[] };
-    let shown = (await node.run("group", "show", group)) as unknown as Shown;
-    await expect.poll(async () => {
-      shown = (await node.run("group", "show", group)) as unknown as Shown;
-      return shown.members.map((m) => m.name).filter((name) => name && name !== "Thursday node").sort();
-    }, { timeout: 180_000, intervals: [2_000] }).toEqual(["Ana", "Bia", "Cleo", "Dan"]);
-    expect(shown.call?.sfu).toBe(endpoints.sfu.origin);
-    const [a, b, c, d] = ["Ana", "Bia", "Cleo", "Dan"].map((name) => shown.members.find((m) => m.name === name)!.key);
-    // The node's roster, as it knows it from the chain: everyone but Dan, who joined after the node last looked.
-    const roster = await fetch(`${endpoints.sfu.token}/test/roster/${shown.id}`, { method: "PUT", body: JSON.stringify({ [a]: "Ana", [b]: "Bia", [c]: "Cleo" }) });
+    // The node's roster, as it knows it from the chain once the three are in: Dan joins after it last looked.
+    type Shown = { id: string; call: { sfu: string } | null; members: { key: string; me: boolean }[] };
+    const shown = async () => (await node.run("group", "show", group)) as unknown as Shown;
+    await expect.poll(async () => (await shown()).members.length, { timeout: 180_000, intervals: [2_000] }).toBe(4);
+    const before = await shown();
+    expect(before.call?.sfu).toBe(endpoints.sfu.origin);
+    const keys = before.members.filter((m) => !m.me).map((m) => m.key);
+    const roster = await fetch(`${endpoints.sfu.token}/test/roster/${before.id}`, { method: "PUT", body: JSON.stringify(Object.fromEntries(keys.map((k) => [k, "Member"]))) });
     expect(roster.status).toBe(204);
+    await joinGroup(dan, link);
 
-    // Join call is in the header of a group that names an SFU; it opens the call window.
-    for (const p of [ana, bia, cleo]) await p.page.getByTestId("group-call-join").click();
-    const callers = [[ana, a], [bia, b], [cleo, c]] as const;
-    for (const [p] of callers) {
+    // Join call is in the header once the group's call field reaches the member; it opens the call window.
+    for (const p of callers) {
+      await expect(p.page.getByTestId("group-call-join")).toBeVisible({ timeout: 120_000 });
+      await p.page.getByTestId("group-call-join").click();
+    }
+    for (const p of callers) {
       await expect(p.page.getByTestId("group-call")).toBeVisible({ timeout: 30_000 });
       await expect(p.page.locator('[data-testid="group-call-tile"][data-kind="face"]')).toHaveCount(3, { timeout: 60_000 });
     }
+    // Each member's key: the identity of its own tile, the one named You.
+    const [a, b, c] = await Promise.all(callers.map(async (p) => (await p.page.locator('[data-testid="group-call-tile"][data-kind="face"]').filter({ has: p.page.getByText("You", { exact: true }) }).getAttribute("data-identity"))!));
+    expect(new Set([a, b, c])).toEqual(new Set(keys));
     // Everyone hears everyone: each remote microphone plays in its own <audio>, and nobody shows the muted mark.
-    for (const [p] of callers) {
+    for (const p of callers) {
       await expect.poll(() => p.page.getByTestId("group-call-audio").evaluateAll((els) => (els as HTMLAudioElement[]).filter((el) => el.srcObject && !el.paused).length), { timeout: 30_000 }).toBe(2);
       await expect(p.page.getByTestId("group-call-muted")).toHaveCount(0);
     }
@@ -104,10 +99,11 @@ test("three members join a community group's call, see and hear each other, see 
     for (const p of [ana, bia]) await expect(tile(p, c, "face")).toHaveCount(0, { timeout: 30_000 });
 
     // Dan is a member, but not in the node's roster: no pass, and one line that says so.
+    await expect(dan.page.getByTestId("group-call-join")).toBeVisible({ timeout: 120_000 });
     await dan.page.getByTestId("group-call-join").click();
     await expect(dan.page.getByTestId("group-call-problem-notice")).toContainText(REFUSED, { timeout: 60_000 });
     await expect(dan.page.getByTestId("group-call-tile")).toHaveCount(0);
-    await expect(tile(ana, d, "face")).toHaveCount(0);
+    await expect(ana.page.locator('[data-testid="group-call-tile"][data-kind="face"]')).toHaveCount(2);
 
     testInfo.annotations.push({ type: "run time", description: `${Math.round((Date.now() - started) / 1000)} s` });
   } catch (error) {
