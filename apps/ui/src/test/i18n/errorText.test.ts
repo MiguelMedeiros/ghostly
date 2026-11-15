@@ -628,6 +628,20 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["No DID document at https://example.org/.well-known/did.json", `${BROWSER}/proofs/did.ts`, "`No DID document at ${documentUrl}`"],
   ["https://example.org/.well-known/did.json is not JSON", `${BROWSER}/proofs/did.ts`, "`${documentUrl} is not JSON`"],
   ["This DID lists no Ed25519, secp256k1 or P-256 key for authentication or assertionMethod, so it cannot sign", `${BROWSER}/proofs/providers/did.ts`],
+  // What the Add dialog refuses for a Nostr, OpenPGP, DID, Pubky, AT Protocol or sign-in proof.
+  ["Enter a Nostr public key: npub1… or 64 hex characters", `${BROWSER}/proofs/providers/nostr.ts`],
+  ["That is not a signed Nostr event", `${BROWSER}/proofs/providers/nostr.ts`],
+  ["The signer did not sign the exact Ghostly statement", `${BROWSER}/proofs/providers/nostr.ts`],
+  ["Use the full fingerprint, not a key ID: gpg --fingerprint shows it.", `${BROWSER}/proofs/providers/openpgp.ts`],
+  ["Enter your key's fingerprint: 40 hex characters (gpg --fingerprint).", `${BROWSER}/proofs/providers/openpgp.ts`],
+  ["Paste your public key too: the second command prints it (-----BEGIN PGP PUBLIC KEY BLOCK-----).", `${BROWSER}/proofs/providers/openpgp.ts`],
+  ["That is this profile's own Ghostly DID: your contacts already see your Ghostly identity. Add another DID.", `${BROWSER}/proofs/providers/did.ts`],
+  ["Publishing works for did:web only: sign the statement instead", `${BROWSER}/proofs/providers/did.ts`],
+  ["The did.json has no Ghostly service for this proof: it was removed, or not added yet", `${BROWSER}/proofs/providers/did.ts`],
+  ["That is another Pubky identity: approve with the one this proof is for", `${BROWSER}/proofs/providers/pubky.ts`],
+  ["Not an AT Protocol account (did:plc or did:web)", `${BROWSER}/proofs/providers/atproto.ts`],
+  ["Your server only offers full access to your account. Try again to approve that; Ghostly only deletes this one record.", `${BROWSER}/proofs/providers/atproto.ts`],
+  ["This provider is not set up in this Ghostly build.", `${BROWSER}/proofs/providers/oidc.ts`],
   ["Enter at least one relay address (https://…)", `${BROWSER}/engine/node.ts`],
   ["Enter at least one relay address (wss://…)", `${BROWSER}/nostr/relay.ts`],
   ["Add a TURN server first", `${BROWSER}/engine/node.ts`],
@@ -743,6 +757,12 @@ describe("errors in the app's language", () => {
     const raw = "Not enough space on this device (QuotaExceededError)";
     expect(problemText(new Error(raw), t)).toEqual({ tone: "error", title: t("errors.app.noRoom"), next: t("errors.app.noRoomNext"), detail: raw });
     expect(problemText(new Error(raw), t).title).not.toBe(t("errors.generic"));
+  });
+
+  it.each(LANGUAGES)("an AT Protocol server that offers only full access says so in %s, not \"Something went wrong\"", (language) => {
+    const t = translators[language];
+    const raw = "Your server only offers full access to your account. Try again to approve that; Ghostly only deletes this one record.";
+    expect(problemText(new Error(raw), t)).toEqual({ tone: "error", title: t("errors.proof.atprotoFullAccess"), next: t("errors.proof.atprotoFullAccessNext") });
   });
 
   it.each(LANGUAGES)("a forward's copy Desktop's disk had no room for says so in %s, the system's English behind the ⓘ", (language) => {
