@@ -60,7 +60,7 @@ describe("relay copies of a daemon whose contacts are away", { timeout: 180_000 
     });
     await node.start();
     for (let m = 0; m < 10; m++) await vi.advanceTimersByTimeAsync(MIN);
-    // Before: 15 of the 50 on both, and no more after 40 minutes.
+    // Before: 15 of the 50 on both (38 once background reads were paced), and no more after 40 minutes.
     const linkKeys = rows.map((row) => identityFromSeedB64(row.seedB64).pubKeyZ32);
     for (const relay of RELAYS) expect(linkKeys.filter((key) => !stored.get(relay)!.has(key))).toEqual([]);
   });
