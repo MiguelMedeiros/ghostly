@@ -192,7 +192,9 @@ const ADMIN_ONLY: ReadonlySet<CommunityKind> = new Set(["remove", "role", "rotat
  * A leave among the last `COMMUNITY_LIMITS.memberLeaves` commits that ends an admission a member other than the admin
  * signed counts as one more, whether or not the admin was there since: the key leaves the roster as it was, and a
  * member that lets in keys it made up and commits their own leaves would otherwise fill the history with two commits
- * for each one the admin lets in at the door.
+ * for each one the admin lets in at the door. "The admin" there is the admin when that admission went in: the people a
+ * former admin let in at the door are no member's admissions, and before, once the role was handed on (as it is when
+ * the admin leaves), as many of them leaving as the bound shut every member's door.
  */
 export function memberAdmissions(admin: string | undefined, before: Iterable<CommunityCommit>): number {
   let n = 0, run = true, seen = 0;
@@ -204,6 +206,8 @@ export function memberAdmissions(admin: string | undefined, before: Iterable<Com
     if (c.k === "add" && c.s && leavers.delete(c.s) && c.by !== admin) n++;
     if (recent && c.k === "leave" && c.s) leavers.add(c.s);
     if (!run && !recent && !leavers.size) break;
+    // Before a hand-over, the admin was the one who signed it.
+    if (c.k === "role") admin = c.by;
   }
   return n;
 }
