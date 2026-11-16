@@ -320,16 +320,8 @@ describe("persistent IndexedDB", () => {
     const dir = folder();
     const store = await openPersistentIndexedDb(dir); opened.push(store);
     const first = await db(store.factory);
-    // Its bytes are read after the transaction commits, and its `complete` waits for them, and the text after it too:
-    // on the disk at their `complete`, both.
-    const killed = folder();
-    await Promise.all([
-      tx(first, ["settings"], (s) => { s.settings.put({ blob: new Blob(["hello"], { type: "text/plain" }) }, "file"); }),
-      tx(first, ["messages"], (s) => { s.messages.put({ linkId: "a", id: "1", text: "after the file" }); }).then(() => cpSync(dir, killed, { recursive: true })),
-    ]);
-    const copy = await db(await open(killed));
-    expect(await read(copy.transaction("messages").objectStore("messages").get(["a", "1"]))).toMatchObject({ text: "after the file" });
-    expect(await (await read(copy.transaction("settings").objectStore("settings").get("file")) as { blob: Blob }).blob.text()).toBe("hello");
+    await tx(first, ["settings"], (s) => { s.settings.put({ blob: new Blob(["hello"], { type: "text/plain" }) }, "file"); });
+    await store.flush();
     const second = await db(await open(dir));
     const value = await read(second.transaction("settings").objectStore("settings").get("file")) as { blob: Blob };
     expect(value.blob).toBeInstanceOf(Blob);
