@@ -34,7 +34,7 @@ describe("the clipboard guard of a contact's app on the web", () => {
     expect(CLIPBOARD_GUARD_SCRIPT).not.toMatch(/[\\`]|\$\{|<\/script/i);
     // It finds the WebRTC guard's srcdoc copy by its start, when both run.
     expect(`<script>${VIEWER_GUARD_SCRIPT}`.startsWith("<script>(function noWebRtc(")).toBe(true);
-    for (const name of ["execCommand", "paste", "eventPhase", "isTrusted", "contentWindow", "contentDocument", "getSVGDocument", "attachShadow", "setHTMLUnsafe", "parseHTMLUnsafe", "writeln", "shadowrootmode"]) expect(CLIPBOARD_GUARD_SCRIPT).toContain(name);
+    for (const name of ["execCommand", "paste", "eventPhase", "isTrusted", "contentWindow", "contentDocument", "getSVGDocument", "attachShadow", "setHTMLUnsafe", "parseHTMLUnsafe", "writeln", "shadowrootmode", "appendChild", "insertAdjacentHTML", "outerHTML", "insertNode", "surroundContents"]) expect(CLIPBOARD_GUARD_SCRIPT).toContain(name);
   });
 
   it("goes first in a page with the WebRTC guard after it, and the contact's policy takes both hashes", async () => {

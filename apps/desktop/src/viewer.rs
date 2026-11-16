@@ -425,7 +425,7 @@ const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
         if (name === "paste" || ((name === "copy" || name === "cut") && !tapping())) return false;
         const args = [name];
         for (let i = 1; i < arguments.length; i++) args[i] = arguments[i];
-        return apply(run, this, args);
+        try { return apply(run, this, args); } finally { sweep(); }
       };
       define(proto, "execCommand", { value: guarded, writable: false, enumerable: exec.enumerable, configurable: false });
       const types = w.trustedTypes;
@@ -565,6 +565,31 @@ const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
             return got;
           };
           try { define(owner, name, found); } catch (e) {}
+        }
+      }
+      const inserts = [
+        [w.Node, ["appendChild", "insertBefore", "replaceChild"]],
+        [w.Element, ["append", "prepend", "before", "after", "replaceWith", "replaceChildren", "insertAdjacentElement", "insertAdjacentHTML", "setHTMLUnsafe", "setHTML", "innerHTML", "outerHTML"]],
+        [w.CharacterData, ["before", "after", "replaceWith"]],
+        [w.DocumentType, ["before", "after", "replaceWith"]],
+        [w.Document, ["append", "prepend", "replaceChildren", "write", "writeln", "body"]],
+        [w.Range, ["insertNode", "surroundContents"]],
+        [w.HTMLTableElement, ["caption", "tHead", "tFoot"]],
+        [w.HTMLSelectElement, ["add"]],
+        [w.HTMLOptionsCollection, ["add"]],
+      ];
+      for (let k = 0; k < inserts.length; k++) {
+        const owner = inserts[k][0] && inserts[k][0].prototype;
+        const names = inserts[k][1];
+        for (let n = 0; n < names.length; n++) {
+          const found = owner && describe(owner, names[n]);
+          const key = found && found.set ? "set" : "value";
+          if (!found || typeof found[key] !== "function") continue;
+          const real = found[key];
+          found[key] = function () {
+            try { return apply(real, this, arguments); } finally { sweep(); }
+          };
+          try { define(owner, names[n], found); } catch (e) {}
         }
       }
       const inShadow = w.DocumentFragment.prototype.querySelectorAll;
