@@ -4287,6 +4287,7 @@ export class GhostlyNode implements EngineImplementation {
     // Not live: the contact's app may be closed. Wake it, if it shared how; it then connects and takes this message.
     if (delivery !== "stream") this.wakePeer(live);
     // A card rides with the row; the DHT floor and a hold carry its text alone (WISP 405 · Status Cards).
+    let tooBig: string | undefined;
     if (delivery === "stream" || (delivery === "dht" && bytes <= DHT_TEXT_BYTES)) {
       const validationError = link.validateText(trimmed, timestamp, wireId, reply && pairedWireReply(reply));
       if (!validationError) {
@@ -4297,6 +4298,8 @@ export class GhostlyNode implements EngineImplementation {
         return { error: null, messageId: id };
       }
       if (/Payment tokens|does not match/.test(validationError)) return { error: validationError, refused: true };
+      // Within 256 bytes, but not within the packet once sealed: the floor never carries it, whatever goes before it.
+      if (/packet budget/.test(validationError)) tooBig = validationError;
     }
     if (this.holdingFor(live) && bytes <= HOLD_LIMITS.maxTextBytes) {
       // Longer than the DHT carries, and both sides allow held items: it waits in this device's storage, sealed for them.
@@ -4306,6 +4309,8 @@ export class GhostlyNode implements EngineImplementation {
       void this.hold.hold(linkId, { kind: "text", id: wireId, messageId: id, bytes, timestamp }).catch(() => {});
       return { error: null, messageId: id };
     }
+    // Kept, it waited for good as behind an earlier text, and the ones written after it went first: it is shortened.
+    if (tooBig) return { error: tooBig, refused: true };
     const reason = delivery === "dht" && bytes <= DHT_TEXT_BYTES ? "Waits for the text before it to be confirmed."
       : delivery === "dht" ? `Longer than the ${DHT_TEXT_BYTES} bytes the DHT carries: it is sent when you are live.`
       : "Sent when your contact is reachable.";

@@ -680,15 +680,18 @@ export class DhtDelivery {
     if (edit !== undefined && (reply !== undefined || !ID.test(edit[0]) || !validEditNumber(edit[1]))) return "Invalid message.";
     if (utf8Encode(text).length > DHT_TEXT_BYTES) return DHT_TEXT_TOO_LONG;
     if (/cashu[AB][A-Za-z0-9_-]+/i.test(text)) return "Payment tokens cannot be sent through DHT delivery.";
-    const now = this.clock(), pending = this.state.pending;
-    if (pending && pending.expires > now && pending.message[0] !== id) return "One DHT text can await a receipt at a time. Wait for its receipt or expiry before sending another.";
-    if (pending?.message[0] === id && pending.expires > now && pending.attempts >= MAX_ATTEMPTS) return "DHT retry budget exhausted. Wait for expiry before retrying this message.";
-    const next = pending?.message[0] === id && pending.expires > now ? pending : { message: [id, timestamp, text] as Message, expires: now + DHT_MESSAGE_TTL, attempts: 0, next: now, ...(reply && { reply }), ...(edit && { edit }) };
+    const now = this.clock(), pending = this.state.pending, mine = pending?.message[0] === id && pending.expires > now ? pending : undefined;
+    const next = mine ?? { message: [id, timestamp, text] as Message, expires: now + DHT_MESSAGE_TTL, attempts: 0, next: now, ...(reply && { reply }), ...(edit && { edit }) };
     // Validate the complete encrypted DNS packet before accepting local intent. A text near the bound goes without the
     // id of the message it replies to when both do not fit: the text is what matters. An edit never goes without its
-    // element: it would read as a new message.
+    // element: it would read as a new message. Asked before the one-at-a-time rule: a text the packet never carries,
+    // though within 256 bytes, would otherwise wait behind the one awaiting its receipt, and then for good.
     const error = this.packetError(next.message, next.expires, next.reply, next.edit);
-    return error && next.reply ? this.packetError(next.message, next.expires) : error;
+    const tooBig = error && next.reply ? this.packetError(next.message, next.expires) : error;
+    if (tooBig) return tooBig;
+    if (pending && pending.expires > now && !mine) return "One DHT text can await a receipt at a time. Wait for its receipt or expiry before sending another.";
+    if (mine && mine.attempts >= MAX_ATTEMPTS) return "DHT retry budget exhausted. Wait for expiry before retrying this message.";
+    return null;
   }
   /**
    * Measured, not built (`bodyFits`): the outbox asks it of every waiting text at each look, and a text that waits as no
