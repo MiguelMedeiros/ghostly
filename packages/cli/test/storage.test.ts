@@ -24,8 +24,16 @@ vi.mock("node:fs", async (original) => {
       const go = () => fs.fsync(fd, (error) => (disk.syncMs ? setTimeout(() => end(error), disk.syncMs) : end(error)));
       if (disk.held) void disk.held.then(go); else go();
     },
-    renameSync: (from: string, to: string) => { if (faults.rename) throw new Error("ENOSPC: no space left on device"); fs.renameSync(from, to); },
+    renameSync: (from: string, to: string) => {
+      if (faults.next[0] === "rename") faults.next.shift();
+      else if (!faults.rename) return fs.renameSync(from, to);
+      throw new Error("ENOSPC: no space left on device");
+    },
     writeSync: (fd: number, bytes: Buffer, at = 0) => {
+      if (faults.next[0] === "write") {
+        faults.next.shift();
+        throw Object.assign(new Error("ENOSPC: no space left on device, write"), { code: "ENOSPC", errno: -28, syscall: "write" });
+      }
       if (faults.full) {
         // A disk filling up: it takes what fits, then refuses the rest.
         if (bytes.length - at >= 2) return fs.writeSync(fd, bytes, at, (bytes.length - at) >> 1);
@@ -40,9 +48,9 @@ vi.mock("node:fs", async (original) => {
 
 /**
  * What the disk does wrong when a test asks: a rename that fails, one write that takes only half of its bytes, a full
- * disk, a sync off the thread that fails.
+ * disk, a sync off the thread that fails. `next`: the calls that fail once each, in this order (the others between go).
  */
-const faults = vi.hoisted(() => ({ rename: false, short: false, full: false, sync: false }));
+const faults = vi.hoisted(() => ({ rename: false, short: false, full: false, sync: false, next: [] as ("rename" | "write")[] }));
 /**
  * How long a sync off the thread takes, at least: a slow disk's (a test's own; 0, as fast as this one is), and what it
  * waits for first, when a test holds it. And the syncs done.
@@ -1657,6 +1665,33 @@ describe("messages kept in rows.db", () => {
         });
         await Promise.all([ratchet, text]);
       } finally { disk.syncMs = 0; }
+      const again = await start(killed);
+      expect(await read(again.d.transaction("links").objectStore("links").get("other"))).toEqual({ id: "other", text: "a text heard" });
+    });
+
+    it("a queued write the disk refuses completes once the store is folded into a snapshot that holds it", async () => {
+      const dir = folder();
+      const { d } = await start(dir);
+      await save(d, "the old root key");
+      age(dir, HOUR);
+      const lines: string[] = [];
+      const errors = vi.spyOn(process.stderr, "write").mockImplementation((line) => { lines.push(String(line)); return true; });
+      // The fold the state queues fails (its rename), so the text is on no disk yet; then its own entry fails too. The
+      // next fold has room.
+      faults.next = ["rename", "write"];
+      disk.syncMs = 50;
+      const killed = folder();
+      try {
+        const ratchet = save(d, "the new root key");
+        const text = new Promise<void>((resolve, reject) => {
+          const t = d.transaction("links", "readwrite");
+          t.objectStore("links").put({ id: "other", text: "a text heard" });
+          t.oncomplete = () => { cpSync(dir, killed, { recursive: true }); resolve(); };
+          t.onabort = t.onerror = () => reject(t.error);
+        });
+        await Promise.all([ratchet, text]);
+      } finally { faults.next = []; disk.syncMs = 0; errors.mockRestore(); }
+      expect(lines).toEqual([expect.stringContaining("storage write failed: ENOSPC"), expect.stringContaining("storage write failed: ENOSPC")]);
       const again = await start(killed);
       expect(await read(again.d.transaction("links").objectStore("links").get("other"))).toEqual({ id: "other", text: "a text heard" });
     });
