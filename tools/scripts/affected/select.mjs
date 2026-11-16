@@ -116,8 +116,7 @@ export const UNIT_PROJECTS = [
       "rust-toolchain.toml": ["rustToolchain"],
       "Cargo.toml": ["androidNativeWorkflow"],
       // Its postinstall: matched even when its "scripts" alone changed (a change elsewhere in it runs everything).
-      "package.json": ["releaseInstallScripts", "webAppsTestFlag"],
-      "{native/transports/Cargo.toml,native/transports/iroh-web/**,packages/iroh-web/pkg/**}": ["irohWebBuild"],
+      "package.json": ["releaseInstallScripts", "webAppsTestFlag"],      "{native/transports/Cargo.toml,native/transports/iroh-web/**,packages/iroh-web/pkg/**}": ["irohWebBuild"],
       "{packages/cli/vite.config.ts,packages/cli/vitest.config.ts,packages/cli/test/support/cli.ts}": ["affected"],
       "{packages/cli/vite.config.ts,e2e/fixtures/chess/**}": ["storeKeys"],
       "{eslint.config.mjs,tools/eslint/**}": ["eslintRules"],
