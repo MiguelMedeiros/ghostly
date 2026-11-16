@@ -311,7 +311,8 @@ Lightning backend (a regtest or e2e stack) is declared with `GHOSTLY_TEST_MINTS=
 
 Nothing prints a seed, a key, a wallet phrase or ecash unless asked with `--show-secret`: `settings get` masks
 credentials, and engine calls that answer with secrets (`exportLinks`, `walletExport`, the wallets' backups) are
-refused without it. A group's entry link lets anyone who reads it join: `group show`, `group list`, the admin
+refused without it; over the socket, `engine.call` takes `showSecret: true` for them, and hides what `ghostly engine`
+hides without it. A group's entry link lets anyone who reads it join: `group show`, `group list`, the admin
 commands, `group.created` events and `engine getState` print it as `<hidden>`; `--show-secret`, `group create` and
 `group link` print it. A pending chat's invite code lets whoever reads it take the chat: every command that prints a
 chat (`chat list`, `chat show`, `chat rename`, …) and `engine getState` print it as `<hidden>`; `invite create` and

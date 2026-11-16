@@ -6,7 +6,7 @@ import { groupPayLineId, groupPayNoteId } from "@ghostly/browser/shared/groupPay
 import { DEFAULT_IROH_RELAYS } from "@ghostly/browser/platform/irohWeb";
 import { FORWARD_MESSAGES, FORWARD_TARGETS } from "@ghostly/browser/engine/forwards";
 import { findSecret, guardText, secretWords } from "./secretGuard";
-import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
+import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS, engineParamsProblem, hideSecretFields } from "./engineMethods";
 import { asCliError, CliError } from "./errors";
 import { shellWord } from "./shellWord";
 import {
@@ -1081,6 +1081,9 @@ const METHODS: Record<string, Method> = {
     }
     const deletes = DESTRUCTIVE_CALLS.get(method);
     if (deletes && !bool(params, "yes")) throw new CliError("confirm", `${method} ${deletes}; pass --yes (yes: true over the socket) to go on`);
+    // README § Secrets holds for a bot on the socket as for `ghostly engine`: a reply it logs keeps no seed or invite.
+    const showSecret = bool(params, "showSecret");
+    if (SECRET_RESULTS.has(method) && !showSecret) throw new CliError("confirm", `${method} answers with secrets: pass --show-secret (showSecret: true over the socket) to see them`);
     if (method === "clearProfileData") return clearProfile(ctx, bool(params, "force"));
     // A call given less than it takes failed with JavaScript's own TypeError, or did nothing and answered null.
     const takes = ENGINE_PARAMS[method] ?? READ_PARAMS[method];
@@ -1097,7 +1100,7 @@ const METHODS: Record<string, Method> = {
     }
     if (args && ENGINE_SENDS.has(method) && !bool(params, "force")) await guardEngineSend(ctx, method, args);
     if (method === "getMessages") return node(ctx).getMessages(str(args ?? {}, "linkId", true));
-    if (method === "getState") return state(ctx);
+    if (method === "getState") return showSecret ? state(ctx) : hideStateSecrets(state(ctx));
     // Someone chose the chat on screen: an invite's mark no longer clears it.
     if (method === "setActiveLink") inviteShown.get(ctx)?.();
     const target = (node(ctx) as unknown as Record<string, (p?: unknown) => unknown>)[method];
@@ -1115,7 +1118,7 @@ const METHODS: Record<string, Method> = {
       }
       // A transport chosen during a hold ends it, as `chat transport` does: its time running out takes nothing back.
       if ((method === "setChatTransport" || method === "setDeliveryMode") && typeof args?.linkId === "string") await releaseHold(ctx, args.linkId, "lifted", true);
-      return result;
+      return hideSecretFields(method, result, showSecret);
     } catch (error) {
       // A value of the wrong kind (a number for a text, a missing key of a typed object) ends as JavaScript reading what is
       // not there. Not every TypeError: Node's `fetch failed` is the network.

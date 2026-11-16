@@ -1516,7 +1516,7 @@ async function engineCommand(argv: string[]): Promise<void> {
   const confirmReal = parsed.options["confirm-real"] === true;
   if (confirmReal && params && typeof params === "object") (params as Record<string, unknown>).confirmedReal = true;
   const yes = parsed.options.yes === true;
-  let result = await withSession(g, (s) => s.call("engine.call", { method, params, confirmReal, yes, force: parsed.options.force === true }), { offline: ENGINE_READS.includes(method) });
+  let result = await withSession(g, (s) => s.call("engine.call", { method, params, confirmReal, yes, showSecret, force: parsed.options.force === true }), { offline: ENGINE_READS.includes(method) });
   if (method === "getState" && !showSecret && result && typeof result === "object") {
     const { hideStateSecrets } = await engineApi();
     result = hideStateSecrets(result as Parameters<typeof hideStateSecrets>[0]);
