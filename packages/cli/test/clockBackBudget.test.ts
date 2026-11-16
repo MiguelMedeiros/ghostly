@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DAEMON_WATCH_PEER_IDLE_MS, createIdentity } from "@ghostly/core";
+import { BACKGROUND_REQUESTS_PER_MINUTE, BACKGROUND_WRITES_SHARE, DAEMON_WATCH_PEER_IDLE_MS, REQUESTS_PER_MINUTE, createIdentity } from "@ghostly/core";
 import { GhostlyNode } from "@ghostly/browser/engine/node";
 import { db } from "@ghostly/browser/engine/db";
 import { STORES, transact } from "@ghostly/browser/shared/idb";
@@ -20,6 +20,14 @@ import { DhtBackgroundBudget, RelaysAndDht, type Mainline } from "../src/runtime
 
 const MIN = 60_000;
 const RELAYS = ["https://relay-one.test", "https://relay-two.test"];
+/**
+ * What the budget leaves the background on each relay in a minute (`heldFor` in core's relay.ts, at the default budget):
+ * its background share, and of it what the background writes leave to reads. The away contacts' reads and their chats'
+ * upkeep are all background requests here.
+ */
+const BACKGROUND_SHARE = Math.min(BACKGROUND_REQUESTS_PER_MINUTE, Math.ceil(REQUESTS_PER_MINUTE * 2 / 3));
+const READS_SHARE = BACKGROUND_SHARE - Math.max(1, Math.floor(BACKGROUND_SHARE * BACKGROUND_WRITES_SHARE));
+const mean = (list: number[]) => list.reduce((sum, n) => sum + n, 0) / list.length;
 
 const chat = (i: number) => ({ id: `chat-${i}`, profile: "paired-chat/1", createdAt: 1, label: `c${i}`, seedB64: createIdentity().seedB64,
   encKeyB64: createIdentity().seedB64, peerPubKeyZ32: createIdentity().pubKeyZ32, participationSeed: createIdentity().seedB64,
@@ -45,10 +53,10 @@ async function daemon(contacts: number) {
   await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true });
   const rows = Array.from({ length: contacts }, (_, i) => chat(i));
   for (const row of rows) await db.putLink(row);
-  /** Every relay read: the key read. */
-  const gets: string[] = [];
+  /** Every relay read: the key read. Every relay write: when. */
+  const gets: string[] = [], puts: number[] = [];
   const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    if ((init?.method ?? "GET") === "GET") gets.push(new URL(String(input)).pathname.slice(1));
+    if ((init?.method ?? "GET") === "GET") gets.push(new URL(String(input)).pathname.slice(1)); else puts.push(Date.now());
     await new Promise((r) => setTimeout(r, 50));
     return init?.method === "PUT" ? new Response(null, { status: 204 }) : new Response(null, { status: 404 });
   }) as typeof fetch;
@@ -57,29 +65,35 @@ async function daemon(contacts: number) {
     transport, automaticWallets: false, nativeTransports: {}, singleDevice: true, staysOnline: true, watchPeerIdleMs: DAEMON_WATCH_PEER_IDLE_MS,
   });
   await node.start();
-  return { rows, gets, node };
+  return { rows, gets, puts, node };
 }
 
 describe("a daemon after the device clock is set back", { timeout: 120_000 }, () => {
   it.each([["not set back", 0], ["set back an hour", 60 * MIN]])("50 contacts away, clock %s at minute 5: every contact is read in the next 15 minutes", async (_, back) => {
-    const { rows, gets } = await daemon(50);
+    const { rows, gets, puts } = await daemon(50);
     await vi.advanceTimersByTimeAsync(5 * MIN);
     vi.setSystemTime(Date.now() - back);
-    const from = gets.length, perMinute: number[] = [];
+    const from = gets.length, perMinute: number[] = [], writesPerMinute: number[] = [];
     for (let m = 0; m < 15; m++) {
-      const before = gets.length;
+      const before = gets.length, writesBefore = puts.length;
       await vi.advanceTimersByTimeAsync(MIN);
       perMinute.push(gets.length - before);
+      writesPerMinute.push(puts.length - writesBefore);
     }
     const read = new Set(gets.slice(from));
-    // Before: 3-4 of the 50 after an hour back, 0-8 relay reads a minute (47-60 with no step). The minute of the step
+    // Before: 3-4 of the 50 after an hour back, 0-8 relay reads a minute. The minute of the step
     // counts as just spent, at most.
     expect(rows.filter((row) => read.has(row.peerPubKeyZ32)).length).toBeGreaterThanOrEqual(48);
-    // The rate, and no minute stalled. Not more than 30 in every single minute: the minutes are fake but the reads wait on
+    // The rate, from the budget's shares, and no minute stalled. The reads get at least what the background writes leave
+    // them (10 a relay), and with the writes they spend the background's whole share (20 a relay). Not a fixed 30 reads:
+    // since the chats' upkeep held back has its share again (#7760) the reads go at 29-33 a minute, steady
+    // clock or not, and a run of 29.9 failed. Not every single minute either: the minutes are fake but the reads wait on
     // real work, so on a loaded runner one minute's reads spill into the next (26-29 then 58-60 under a 40% CPU quota).
-    const later = perMinute.slice(2);
-    expect(later.reduce((sum, n) => sum + n, 0) / later.length).toBeGreaterThan(30);
-    expect(Math.min(...later)).toBeGreaterThan(10);
+    const later = perMinute.slice(2), writes = writesPerMinute.slice(2);
+    const seen = `reads ${perMinute.join(",")}, writes ${writesPerMinute.join(",")}`;
+    expect(mean(later), seen).toBeGreaterThan(RELAYS.length * READS_SHARE);
+    expect(mean(later.map((n, i) => n + writes[i]!)), seen).toBeGreaterThanOrEqual(RELAYS.length * BACKGROUND_SHARE);
+    expect(Math.min(...later), seen).toBeGreaterThan(10);
   });
 
   it("set back an hour: a chat opened reads its contact at once", async () => {
