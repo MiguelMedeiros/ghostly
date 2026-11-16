@@ -181,6 +181,29 @@ describe("identity signers on Node", () => {
     } finally { vi.useRealTimers(); await fixture.close(); }
   });
 
+  // Approved just before --timeout ended, the engine's check of the proof (a NIP-05 lookup takes up to 30 s) failed after
+  // it: its reason was read as "Timed out … waiting … to approve", and --timeout as the way out.
+  it("a proof approved in time that the engine then refuses says why, not a timeout", async () => {
+    const { ctx, node } = fake();
+    node.beginIdentityProof.mockImplementation(async ({ provider, subject }: { provider: string; subject: string }) => ({
+      draftId: "late", binding: { v: 1, provider, subject, key: "y".repeat(52), issuedAt: 1_800_000_000, expiresAt: 1_800_086_400, nonce: "A".repeat(22) },
+    }));
+    const signer = IDENTITY_PROVIDERS.find((p) => p.id === "domain")!.signers.find((s) => s.id === "nip05-nip46") as InAppSigner<unknown>;
+    let waited: AbortSignal | undefined;
+    const run = vi.spyOn(signer, "run").mockImplementation(async (sctx, work) => {
+      waited = sctx.signal;
+      return work({ subject: async () => "example.com", sign: async () => ({ method: "nip05" }) } as never);
+    });
+    node.completeIdentityProof.mockImplementation(() => new Promise((_, reject) => {
+      waited!.addEventListener("abort", () => reject(new Error("example.com lists another Nostr key for _")), { once: true });
+    }));
+    try {
+      await expect(callApi(ctx, "identity.add", { provider: "domain", signer: "nip05-nip46", fields: { domain: "example.com", bunker: `bunker://${"a".repeat(64)}?relay=wss://relay.test` }, timeout: 5 }))
+        .rejects.toThrow("example.com lists another Nostr key for _");
+    } finally { run.mockRestore(); }
+    expect(node.cancelIdentityProof).toHaveBeenCalledWith({ draftId: "late" });
+  }, 15_000);
+
   // Pubky's relay keeps a request five minutes: --timeout 600 waited 300 s and ended as `engine`.
   it("refuses a --timeout longer than the Pubky relay keeps the request, before the signer runs", async () => {
     const { ctx } = fake();
