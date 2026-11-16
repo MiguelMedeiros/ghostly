@@ -120,3 +120,29 @@ test("a Fedimint wallet stays on its home device: On <device> on the new one, ne
   await expect(desktop.page.getByTestId("wallet-away")).toHaveCount(0);
   await expect(walletCard(desktop.page, "fedimint-testnet")).not.toContainText("Elsewhere", { timeout: 120_000 });
 });
+
+test("removing a Fedimint wallet's home device says so first, on both devices", { tag: ["@gated", "@feature:devices.remove"] }, async ({ peer }) => {
+  test.skip(process.env.GHOSTLY_FEDIMINT_REGTEST !== "1", "Requires e2e/infra's federation (npm run e2e:infra:up) and GHOSTLY_FEDIMINT_REGTEST=1");
+  test.setTimeout(14 * 60_000);
+  const { invite } = JSON.parse(execFileSync(process.execPath, ["e2e/support/fedimint-regtest/regtest.mjs", "ready"], { encoding: "utf8", stdio: "pipe" }).trim()) as { invite: string };
+  const [desktop, phone] = await Promise.all([peer("desktop", { offlineMainnet: true }), peer("phone", { offlineMainnet: true })]);
+  await createWallet(desktop, "fedimint", "testnet", { invite, timeout: 120_000 });
+  await enrollDevice(desktop, phone);
+  await pull(phone, desktop);
+
+  // On the phone, Remove names the wallet at home on the desktop and its loss before the Remove button.
+  await phone.page.goto("/#/profile");
+  await phone.page.getByTestId("device-row").filter({ hasNotText: "Phone" }).first().getByTestId("device-menu").click();
+  await phone.page.getByTestId("device-remove-open").click();
+  const dialog = phone.page.getByTestId("device-remove");
+  await expect(dialog.getByTestId("device-remove-homes")).toContainText("Testnet Fedimint lives on");
+  await expect(dialog.getByTestId("device-remove-homes")).toContainText("Here it is recovered from its federation");
+  await dialog.getByTestId("device-remove-go").click();
+  await expect(phone.page.getByTestId("device-removed")).toContainText("Removed", { timeout: 60_000 });
+
+  // On the desktop, removed: Remove this profile here names it too, since its client file is only there.
+  await desktop.page.reload();
+  await untilShown(desktop.page, desktop.page.getByTestId("device-standby").and(desktop.page.locator("[data-state=removed]")), { timeout: 180_000 });
+  await desktop.page.getByTestId("device-standby-remove-here").click();
+  await expect(desktop.page.getByTestId("device-remove-here-homes")).toContainText("Testnet Fedimint lives on this device.");
+});
