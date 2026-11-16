@@ -110,6 +110,9 @@ export function useCallDevices(webrtc: CallMediaControls): CallDevices | null {
   const choosing = useRef(false);
   /** A switch is under way: the device checks wait for it instead of starting another. */
   const busy = useRef(false);
+  /** The devices changed while a switch was under way: they are checked again once it ends, with what it left on. */
+  const missed = useRef(false);
+  const [recheck, setRecheck] = useState(0);
   /** What was told this call (`<kind>:<id>` a device offered back, `<kind>:missing` a loss), so each is told once. */
   const offered = useRef(new Set<string>());
 
@@ -121,12 +124,20 @@ export function useCallDevices(webrtc: CallMediaControls): CallDevices | null {
       // The call goes on with what it had.
     } finally {
       busy.current = false;
+      if (missed.current) {
+        missed.current = false;
+        setRecheck((n) => n + 1);
+      }
     }
   }, []);
 
   /** After the devices changed: falls back from a device that went away, offers one that came back. */
   const check = useCallback(async (next: DeviceList) => {
-    if (busy.current || !next.named) return;
+    if (busy.current) {
+      missed.current = true;
+      return;
+    }
+    if (!next.named) return;
     const { webrtc: call, micNow: mic, cameraNow: camera, audioTrack: audio, videoTrack: video, speaker: sink, cameraOn: showing } = state.current;
     const gone = (kind: DeviceKind, id: string | undefined, track?: MediaStreamTrack) =>
       track?.readyState === "ended" || (!followsSystem(id) && !next[kind].some((d) => d.id === id));
@@ -195,7 +206,7 @@ export function useCallDevices(webrtc: CallMediaControls): CallDevices | null {
     }
   }, [run, setNotice]);
 
-  // The devices, while a call is on: now, and at every plug and unplug.
+  // The devices, while a call is on: now, at every plug and unplug, and after a switch that one came during.
   useEffect(() => {
     if (!active) return;
     let live = true;
@@ -212,7 +223,7 @@ export function useCallDevices(webrtc: CallMediaControls): CallDevices | null {
       live = false;
       stop();
     };
-  }, [active, check]);
+  }, [active, check, recheck]);
 
   // An unplugged microphone or camera may end its track before the device list says anything.
   useEffect(() => {
