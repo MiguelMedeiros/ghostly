@@ -61,7 +61,11 @@ it("notes every app a chat lists, never one it cannot open, and clears each with
   const tag = viewerTag(ME);
   const labels = [await serviceLabel(tag, ANA, "album"), await serviceLabel(tag, ANA, "wiki")];
   const { openedServices } = await import("../../../../web/src/svc/forget");
-  await vi.waitFor(() => expect(openedServices()).toEqual(labels.map((label) => ({ profile: "", tag, label }))));
+  // Each state notes its own way through the list, a label (a digest) at a time, so the second can note wiki before
+  // the first notes album: the list is a set of origins to clear (filtered, never shown, cleared all at once), so only
+  // which entries it holds, each once, is checked, not their order.
+  const byLabel = (a: { label: string }, b: { label: string }) => a.label.localeCompare(b.label);
+  await vi.waitFor(() => expect(openedServices().sort(byLabel)).toEqual(labels.map((label) => ({ profile: "", tag, label })).sort(byLabel)));
 
   // Delete chat: the bridge on each origin is asked to clear it.
   vi.useFakeTimers();
