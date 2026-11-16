@@ -1459,6 +1459,36 @@ describe("admissions by members while the admin is away", { timeout: 120_000 }, 
     expect(bob.session.roster).toHaveLength(3 + rounds);
   });
 
+  it("the people a former admin let in leaving after the hand-over do not hold the members' door", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob"), carol = await net.admit(alice, "carol");
+    await net.meet(bob, carol);
+    const g = alice.session.id;
+    // Alice, the admin, lets people in at the door: as many as the bound.
+    const joined: { s: string; seed: Uint8Array; h: string }[] = [];
+    for (let i = 0; i < bound; i++) {
+      const { seed, pubKeyZ32: s } = createIdentity();
+      await alice.session.admit(s);
+      joined.push({ s, seed, h: communityCommitHash(alice.session.top) });
+    }
+    await net.settle();
+    await alice.session.transferAdmin(bob.session.myKey);
+    await net.settle();
+    expect(carol.session.admin).toBe(bob.session.myKey);
+    // They leave (Bob, the admin now, commits their leaves).
+    for (const { s, seed, h } of joined) {
+      bob.session.state.pendingLeaves = [{ s, ls: toBase64Url(sign(leaveStatement(g, s), seed)), ls3: toBase64Url(sign(leaveStatement3(g, s, h), seed)) }];
+      expect(await bob.session.commitPendingLeaves()).toBe(1);
+    }
+    await net.settle();
+    expect(carol.session.roster).toHaveLength(3);
+    // No member let any of them in: Carol's door is open, at her app and at every member's.
+    await carol.session.admit(madeUp());
+    await net.settle();
+    expect(bob.session.roster).toHaveLength(4);
+  });
+
   it("the admin removing a member takes out everyone that member let in, and whom those let in, and no one else", async () => {
     const net = new Net();
     const alice = net.create("alice");
