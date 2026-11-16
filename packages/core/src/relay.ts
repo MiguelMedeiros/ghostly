@@ -381,6 +381,13 @@ const READ_STARVED_MS = 60_000;
 /** How long a read that let an older one go first waits before it asks again. */
 const TURN_WAIT_MS = 1_000;
 /**
+ * A background read the budget held back far down the turns asks again no later than this (`backgroundTurnIn`). The
+ * requests past the background share go to a read held back long (`READ_STARVED_MS`) that is there when one frees: asked
+ * only at its estimated turn, a web app with 200 chats away read each contact every 7 to 8 minutes, not every 6, and
+ * one with 100 left half the writes' share unused at 20 s.
+ */
+const BACKGROUND_TURN_MAX_MS = 15_000;
+/**
  * Once a group's read found a relay's minute full, the groups' reads there are spread over the minute for a minute
  * (`GROUP_RATION_MS`): at most a sixth of it in any 10 s (5 on a relay of 30), the key read longest ago first. A sliding
  * minute that demand keeps full hands out its requests in bursts: the minute is spent in 25 to 35 s as requests age
@@ -1273,6 +1280,8 @@ export class RelayTransport implements PkarrTransport {
     // budget held the read (a relay that failed it says nothing of them: an inviter's placeholder under its contact's
     // key would hide the outage)…
     const known = down ? this.newest.get(pubKeyZ32) : newerPacket(this.newest.get(pubKeyZ32), this.written.get(pubKeyZ32));
+    // A background read held back comes again at its own turn, not when the budget frees the next request.
+    if (!down && budgetWait < Infinity) budgetWait = Math.max(budgetWait, this.backgroundTurnIn(pubKeyZ32, who, Date.now()));
     if (resting && known) {
       if (down && !keptOnFailure) throw new RelaysFailedError(known);
       if (!down && budgetWait < Infinity) this.heldBackUntil(pubKeyZ32, Date.now() + budgetWait);
@@ -1776,6 +1785,33 @@ export class RelayTransport implements PkarrTransport {
       if (now - Math.max(turn.askedAt, held.until) < READ_TURN_MS && this.heldFor(relay, turn.who, now, other, false) === 0) return true;
     }
     return false;
+  }
+
+  /**
+   * How long until a background read of `key` the budget held back is likely to have its turn: the background reads of
+   * keys ahead of it in turn (read longer ago, still asking; `turnAhead`), one after the other at the relays' background
+   * share. Told only when the budget frees the next request, every held key asked again then, and lost it to the key
+   * whose turn it was: a daemon whose 50 contacts were away asked about 600 times a minute for some 50 reads, and one
+   * with 200 three times as often after four hours as after 15 minutes (bug hunts, 2026-11-06 and 2026-11-14).
+   */
+  private backgroundTurnIn(key: string, who: Asker, now: number): number {
+    if (!who.background || !isTurnRead(who)) return 0;
+    const mine = this.keyTurns.get(key);
+    if (!mine) return 0;
+    const since = (k: string) => this.heldBack.get(k)?.since ?? now;
+    const mineSince = since(key);
+    let ahead = 0, read = 0;
+    for (const [other, turn] of this.keyTurns) {
+      if (other !== key && turn.who.background && now - turn.servedAt < 60_000) read++;
+      if (other === key || !turn.waiting || !turn.who.background || staleTurn(turn, now)) continue;
+      // Read longer ago, or as long ago (never, or the clock's same millisecond) and held back longer; then by key.
+      if (turn.servedAt < mine.servedAt || (turn.servedAt === mine.servedAt && (since(other) < mineSince || (since(other) === mineSince && other < key)))) ahead++;
+    }
+    if (ahead === 0) return 0;
+    // As fast as the relays' background share reads, or as background keys were read in the last minute if faster (a key
+    // held back long reads past the share, `READ_STARVED_MS`).
+    const perMinute = this.relays.reduce((sum, relay) => sum + Math.min(this.backgroundPerMinute, Math.ceil(this.limitOf(relay) * 2 / 3)), 0);
+    return Math.min(BACKGROUND_TURN_MAX_MS, Math.ceil(ahead * 60_000 / Math.max(1, perMinute, read)));
   }
 
   /** A 1:1 chat's read of `key` the budget has held back for `READ_STARVED_MS` without a break. */
