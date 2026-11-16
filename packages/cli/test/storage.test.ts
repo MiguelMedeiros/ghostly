@@ -320,8 +320,16 @@ describe("persistent IndexedDB", () => {
     const dir = folder();
     const store = await openPersistentIndexedDb(dir); opened.push(store);
     const first = await db(store.factory);
-    await tx(first, ["settings"], (s) => { s.settings.put({ blob: new Blob(["hello"], { type: "text/plain" }) }, "file"); });
-    await store.flush();
+    // Its bytes are read after the transaction commits, and its `complete` waits for them, and the text after it too:
+    // on the disk at their `complete`, both.
+    const killed = folder();
+    await Promise.all([
+      tx(first, ["settings"], (s) => { s.settings.put({ blob: new Blob(["hello"], { type: "text/plain" }) }, "file"); }),
+      tx(first, ["messages"], (s) => { s.messages.put({ linkId: "a", id: "1", text: "after the file" }); }).then(() => cpSync(dir, killed, { recursive: true })),
+    ]);
+    const copy = await db(await open(killed));
+    expect(await read(copy.transaction("messages").objectStore("messages").get(["a", "1"]))).toMatchObject({ text: "after the file" });
+    expect(await (await read(copy.transaction("settings").objectStore("settings").get("file")) as { blob: Blob }).blob.text()).toBe("hello");
     const second = await db(await open(dir));
     const value = await read(second.transaction("settings").objectStore("settings").get("file")) as { blob: Blob };
     expect(value.blob).toBeInstanceOf(Blob);
@@ -1635,6 +1643,30 @@ describe("messages kept in rows.db", () => {
       expect(again.recovered).toBe(true);
       expect(onDisk(killed, "journal.bin")).not.toContain("the old root key");
       expect(onDisk(killed, "snapshot.bin")).not.toContain("the old root key");
+    });
+
+    it("a write that commits while the fold waits in the queue completes once it is on the disk: a process killed at its `complete` keeps it", async () => {
+      const dir = folder();
+      const { d } = await start(dir);
+      await save(d, "the old root key");
+      age(dir, HOUR);
+      // This state's entry, with the snapshot an hour old, puts a fold in the queue; it waits for that entry's sync (a
+      // busy disk's).
+      disk.syncMs = 50;
+      const killed = folder();
+      try {
+        const ratchet = save(d, "the new root key");
+        // A text heard meanwhile: the engine tells the contact it has it at this `complete`. A kill there leaves the folder as it is.
+        const text = new Promise<void>((resolve, reject) => {
+          const t = d.transaction("links", "readwrite");
+          t.objectStore("links").put({ id: "other", text: "a text heard" });
+          t.oncomplete = () => { cpSync(dir, killed, { recursive: true }); resolve(); };
+          t.onabort = t.onerror = () => reject(t.error);
+        });
+        await Promise.all([ratchet, text]);
+      } finally { disk.syncMs = 0; }
+      const again = await start(killed);
+      expect(await read(again.d.transaction("links").objectStore("links").get("other"))).toEqual({ id: "other", text: "a text heard" });
     });
 
     it("a young snapshot is not written again: a command's close stays cheap", async () => {
