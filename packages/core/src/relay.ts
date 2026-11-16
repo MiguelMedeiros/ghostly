@@ -1059,11 +1059,12 @@ export class RelayTransport implements PkarrTransport {
       } catch (error) {
         if (!isDiscoveryBudgetError(error) && !(error instanceof RelayLeftAloneError)) failed.add(relay);
         nowhere[i] = isDiscoveryBudgetError(error) || error instanceof RelayLeftAloneError || (error instanceof RelayNoAnswerError && !error.sent);
-        // An older packet of the key waiting for this relay (`catchUpLater`) waits on with this one in its place. Dropped
-        // when the newer one was tried, a background write that the budget held on every relay left the key with no copy
-        // waiting there: 10 of a daemon's 50 chats' packets never reached a relay in 20 minutes.
-        const pending = this.catchUp.get(slot);
-        if (pending && isDiscoveryBudgetError(error)) this.catchUpLater(relay, pubKeyZ32, payload, timestamp, pending.who);
+        // An older packet of the key waiting for this relay (`catchUpLater`) waits on with this one in its place, as this
+        // one asks (a chat's upkeep in the background). Dropped when the newer one was tried, a background write that the
+        // budget held on every relay left the key with no copy waiting there: 10 of a daemon's 50 chats' packets never
+        // reached a relay in 20 minutes. Kept as the older one asked, a daemon's 600 first packets at its start went as
+        // chats' writes, and took every request for 10 minutes.
+        if (this.catchUp.has(slot) && isDiscoveryBudgetError(error)) this.catchUpLater(relay, pubKeyZ32, payload, timestamp, asker(options, true));
         throw error;
       }
       // Out here: no older packet of the key waits for this relay any more.
