@@ -215,6 +215,14 @@ export class CallManager {
     // on a connection that has started: it refuses a remote offer with new ICE credentials ("Invalid ICE settings
     // from remote SDP") and cannot make one. A call whose path is lost ends as before (`MEDIA_GRACE_MS`).
     if (signal.t === "r" || (signal.t === "a" && signal.re !== undefined)) return;
+    // The contact starting over (WISP 601, "Offering again"): their app died with no hang-up and calls again while the
+    // call placed here is on. Only an offer later than their answer reaches here (`lastSignal`). The call ends as
+    // `remote-hangup` and sends nothing (a hang-up would end their new call as declined), and their offer rings.
+    if (signal.t === "o" && call?.state === "connected" && call.direction === "out") {
+      this.lastSignal.set(chat, signal.ts);
+      void this.yieldTo(call, signal, "remote-hangup");
+      return;
+    }
     // A connected call only hears a hang-up (and picture changes, which are no business of an audio-only side).
     if (call?.state === "connected" && signal.t !== "h" && signal.t !== "v") return;
     if (signal.t === "o" && !call) {
@@ -268,11 +276,12 @@ export class CallManager {
   }
 
   /**
-   * The contact's offer won a glare: our call ends as `crossed`, sending nothing (a hang-up would end the contact's
-   * call, and clearing our signal could drop an answer we are about to give), and the contact's call rings here.
+   * The contact's offer won a glare (`crossed`), or came from their app starting over on a connected call
+   * (`remote-hangup`): our call ends, sending no hang-up (it would end the contact's call; a glare's also keeps our
+   * signal, as clearing it could drop an answer we are about to give), and the contact's call rings here.
    */
-  private async yieldTo(call: Call, offer: CallSignal): Promise<void> {
-    await this.end(call, "crossed", false);
+  private async yieldTo(call: Call, offer: CallSignal, reason: EndReason = "crossed"): Promise<void> {
+    await this.end(call, reason, false);
     // Something newer (the contact's hang-up) came while ours ended, or another call started: nothing rings.
     if (this.lastSignal.get(call.chat) !== offer.ts || this.byChat(call.chat) || this.stopping) return;
     this.incoming(call.chat, offer);
