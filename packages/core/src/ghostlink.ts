@@ -1,5 +1,5 @@
 import type { RatchetBox } from "./ratchet";
-import { DhtDelivery, type DeliveryMode, type DhtDeliveryState, type DhtDeliveryView , type DhtPacketFacts } from "./dhtDelivery";
+import { DhtDelivery, DHT_PACKET_BUDGET, DHT_TEXT_TOO_LONG, type DeliveryMode, type DhtDeliveryState, type DhtDeliveryView , type DhtPacketFacts } from "./dhtDelivery";
 import type { DhtFileAnnouncement, DhtFileOffer } from "./dhtFiles";
 import { PairedFiles } from "./pairedFiles";
 import { TransportSwitch, allowedTransports, type SwitchPlan } from "./transportSwitch";
@@ -3835,6 +3835,17 @@ export class GhostLink {
     if (edit.rm) return "A removal goes when you are live";
     if (dht && this.dht && this.textDelivery === "dht") return this.dht.send(edit.m, edit.ts, dhtEditId(edit.id, edit.e), undefined, [edit.id, edit.e]);
     return "Edits go when you are live";
+  }
+  /**
+   * Why the DHT floor can never carry this edit, or null (WISP 403 § Edits): it goes there as a text with the edit's
+   * element, which must fit the packet once sealed, as a text must (`validateText`). One past the 256 bytes never fits
+   * it either, and says so with the same reason. Null off the floor, and for what only makes it wait there (a text
+   * awaiting its receipt): that one goes in its turn.
+   */
+  dhtEditTooBig(edit: WireEdit): string | null {
+    if (this.isDataLinkOpen || this.textDelivery !== "dht") return null;
+    const error = this.dht!.validate(edit.m, edit.ts, dhtEditId(edit.id, edit.e), undefined, [edit.id, edit.e]);
+    return error === DHT_PACKET_BUDGET || error === DHT_TEXT_TOO_LONG ? DHT_PACKET_BUDGET : null;
   }
   /** Confirms an edit of the contact's that waited for its message (`onMessageEdit` returned false). */
   confirmEdit(id: string, e: number): void {
