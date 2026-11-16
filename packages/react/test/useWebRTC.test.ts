@@ -1723,14 +1723,17 @@ describe("a call ringing in another chat while one is on (End and answer)", () =
     expect(other.addCallEventMessage).not.toHaveBeenCalled();
   });
 
-  it("the same contact offering again during the call is not a second call: it is ignored, as before", async () => {
-    const { call } = await onACall();
+  it("the same contact offering again during the call we placed is them starting over: ours ends with no hang-up, theirs rings", async () => {
+    const { call, pc } = await onACall();
 
     call.receive(remote.offer(Date.now() + 1));
 
-    expect(call.result.current.callState).toBe("connected");
-    expect(call.result.current.otherCallOn).toBe(false);
-    expect(call.addCallEventMessage).not.toHaveBeenCalledWith("call_received", expect.anything(), undefined, expect.anything());
+    expect(call.result.current.callState).toBe("incoming");
+    expect(pc.close).toHaveBeenCalledOnce();
+    // Our offer is cleared, and no hang-up is sent: it would end their new call there as declined.
+    expect(call.publishedKinds()).toEqual(["o", null]);
+    expect(call.addCallEventMessage).toHaveBeenCalledWith("call_ended", false, expect.any(Number));
+    expect(call.addCallEventMessage).toHaveBeenCalledWith("call_received", false, undefined, expect.any(Number));
   });
 
   it("a chat that goes away with its call on no longer counts as on", async () => {

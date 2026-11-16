@@ -1524,6 +1524,17 @@ export function useWebRTC({
       return;
     }
 
+    // The contact starting over (WISP 601, "On a call already"): their app died with no hang-up and calls again, while
+    // our call they answered is still on. Only a later offer reaches here (`lastProcessedSignalRef` passed their
+    // answer). Our call ends with its line and sends nothing (a hang-up would end their new call as declined), and
+    // their offer rings.
+    if (signal.t === "o" && callStateRef.current === "connected" && !answeredRef.current) {
+      lastProcessedSignalRef.current = signal.ts;
+      hangUp(false);
+      ringOffer(signal);
+      return;
+    }
+
     if (callStateRef.current === "connected") {
       if (signal.t !== "h" && signal.t !== "v") {
         return;
