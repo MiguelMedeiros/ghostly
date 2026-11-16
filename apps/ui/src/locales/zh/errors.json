@@ -51,6 +51,8 @@
     "unreachableNext": "请检查地址：它应当是一个 Cashu 铸币厂。"
   },
   "chat": {
+    "dhtTooLong": "对 DHT 来说太长",
+    "dhtTooLongNext": "请缩短，或在直接连接后再发送。",
     "editTooMany": "这条消息无法再编辑",
     "editTooManyNext": "一条消息最多可编辑 {{max}} 次。",
     "forwardNone": "没有可转发的消息",

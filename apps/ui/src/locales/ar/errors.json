@@ -51,6 +51,8 @@
     "unreachableNext": "تحقق من العنوان: يجب أن يكون دار سك Cashu."
   },
   "chat": {
+    "dhtTooLong": "أطول من أن يُرسل عبر DHT",
+    "dhtTooLongNext": "اختصره، أو أرسله حين تتصلان مباشرة.",
     "editTooMany": "لا يمكن تعديل هذه الرسالة مرة أخرى",
     "editTooManyNext": "تقبل الرسالة {{max}} تعديلًا كحد أقصى.",
     "forwardNone": "لا شيء لإعادة توجيهه",
