@@ -143,6 +143,8 @@ export const IDENTITY_METHODS: Record<string, Method> = {
       if (typeof params.timeout === "number" && params.timeout > most) throw new CliError("bad_request", `timeout must be a number from 5 to ${most}: ${signer.label} waits at most ${most} s for an approval`);
       const seconds = num(params, "timeout", Math.min(300, most), { min: 5, max: most });
       const signal = AbortSignal.timeout(seconds * 1000);
+      // Signed: what fails after it is the engine's check of the proof (a NIP-05 lookup takes up to 30 s), not the wait.
+      let signed = false;
       const proof = await signer.run({
         values, signal, waitMs: seconds * 1000,
         // A link or code to approve with holds the request's secret (contract.ts): to the listeners live, never the journal.
@@ -154,7 +156,9 @@ export const IDENTITY_METHODS: Record<string, Method> = {
       }, async (session) => {
         const { draftId, binding } = await begin(ctx, p, await session.subject(), params);
         try {
-          return await node(ctx).completeIdentityProof({ draftId, evidence: await session.sign(identityStatement(binding)) });
+          const evidence = await session.sign(identityStatement(binding));
+          signed = true;
+          return await node(ctx).completeIdentityProof({ draftId, evidence });
         } catch (error) {
           try { await node(ctx).cancelIdentityProof({ draftId }); } catch { /* already gone */ }
           throw error;
@@ -162,7 +166,7 @@ export const IDENTITY_METHODS: Record<string, Method> = {
       }).catch((error: unknown) => {
         // The signer gives up with the signal's own words ("The operation was aborted due to timeout"), or its own wait's
         // at the same time ("Signer timed out"): an engine failure to a bot.
-        if (!(signal.aborted || error instanceof SignerTimeout) || error instanceof CliError) throw error;
+        if (signed || !(signal.aborted || error instanceof SignerTimeout) || error instanceof CliError) throw error;
         throw new CliError("timeout", `Timed out after ${seconds} s waiting for ${signer.label} to approve the ${p.label} proof: --timeout <seconds> waits longer`);
       });
       return { done: true, proof: proofJson(proof) };
