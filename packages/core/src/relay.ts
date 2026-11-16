@@ -419,6 +419,12 @@ export const FRESH_READ_MS = 500;
 /** A relay that missed a key's newest packet gets it (`catchUpLater`) no sooner than this, and tries again this often. */
 const CATCH_UP_MIN_MS = 1_000;
 const CATCH_UP_RETRY_MS = 5_000;
+/**
+ * The longest another background write is told to wait behind the packets queued for a relay (`catchUpLater`): the
+ * link and the DHT floor try again within a minute anyway, and longer kept a chat's upkeep off a relay with a long queue
+ * for most of the presence window.
+ */
+const CATCH_UP_BEHIND_MAX_MS = 60_000;
 /** A catch-up put waits behind every link's request: a background write. A group edge's offer or answer goes as its own (`putEverywhere`). */
 const CATCH_UP_ASKER: Asker = { background: true, group: false, urgent: false, door: false, write: true, signal: false, watch: false, watchWrite: false, departed: false, awaited: false, resume: false, back: false };
 /** Keys whose last relay is remembered for their next read (`resolve`): a profile's links and lookups, with room. */
@@ -1074,8 +1080,9 @@ export class RelayTransport implements PkarrTransport {
         if (this.catchUp.has(slot) && isDiscoveryBudgetError(error)) this.catchUpLater(relay, pubKeyZ32, payload, timestamp, asker(options, true));
         throw error;
       }
-      // Out here: no older packet of the key waits for this relay any more.
-      if (response.ok) this.dropCatchUp(relay, pubKeyZ32);
+      // Out here: no older packet of the key waits for this relay any more. A newer one queued while this relay was slow
+      // to answer stays (`catchUpLater`): dropped, the relay kept this older packet until the key's next publish.
+      if (response.ok && (this.catchUp.get(slot)?.timestamp ?? 0n) <= timestamp) this.dropCatchUp(relay, pubKeyZ32);
       // The relay answered that it did not take it. A server error (5xx) says nothing of what it kept.
       nowhere[i] = response.status >= 400 && response.status < 500;
       if (response.status >= 500 || response.status === 428) failed.add(relay);
@@ -1411,7 +1418,8 @@ export class RelayTransport implements PkarrTransport {
   /**
    * A relay whose budget (this client's, or its own rate limit) held a packet back that another relay took: it gets
    * that packet when it frees a request, as a background write (`who`: a group edge's offer or answer as its own, also
-   * after that relay failed it). Only the newest per key and relay; a newer packet put everywhere drops it. Without this,
+   * after that relay failed it). Only the newest per key and relay, until that relay takes this packet or a newer one (one
+   * the budget holds there takes its place). Without this,
    * that relay kept the key's older packet for good, and an app that restarted and read it first found a contact's offer
    * long answered, answered it again, and waited on it (bug hunt r7a).
    */
@@ -1600,10 +1608,10 @@ export class RelayTransport implements PkarrTransport {
       const writesLeft = writesShare - recentBackgroundWrites.length;
       if (writesLeft > 0) wait = Math.max(wait, over(recent, Math.max(1, limit - writesLeft)), over(recentBackground, Math.max(1, backgroundShare - writesLeft)));
     }
-    // And another background write waits behind them, for about as long as they take at that share: a link's upkeep
-    // tried again at every request that freed, and the same 30 chats took every one while the queue kept the others'.
-    // One the DHT took joins the queue (`putLater`).
-    if (who.background && who.write && !who.catchUp && caughtUp) wait = Math.max(wait, Math.ceil(caughtUp * 60_000 / writesShare));
+    // And another background write waits behind them, for about as long as they take at that share, a minute at most: a
+    // link's upkeep tried again at every request that freed, and the same 30 chats took every one while the queue kept
+    // the others'. One the DHT took joins the queue (`putLater`).
+    if (who.background && who.write && !who.catchUp && caughtUp) wait = Math.max(wait, Math.min(CATCH_UP_BEHIND_MAX_MS, Math.ceil(caughtUp * 60_000 / writesShare)));
     if (who.background && !starved) {
       wait = Math.max(wait, over(recentBackground, backgroundShare));
       // Background writes leave the rest of that share to background reads (`BACKGROUND_WRITES_SHARE`).
