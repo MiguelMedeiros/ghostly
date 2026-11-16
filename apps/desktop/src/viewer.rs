@@ -411,6 +411,66 @@ const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
           };
         } catch (e) {}
       }
+      if (types && w.URL && w.Blob && !describe(w, "ghostlyWorkerGuard")) {
+        try {
+          define(w, "ghostlyWorkerGuard", { value: true });
+          const construct = w.Reflect.construct;
+          const json = w.JSON.stringify;
+          const later = w.setTimeout;
+          const Blob = w.Blob;
+          const sized = describe(Blob.prototype, "size").get;
+          const make = w.URL.createObjectURL;
+          const revoke = w.URL.revokeObjectURL;
+          const policy = "if (self.trustedTypes && !self.trustedTypes.defaultPolicy) { try { self.trustedTypes.createPolicy('default', { createHTML: (s) => s, createScript: (s) => s, createScriptURL: (s) => s }); } catch (e) {} }";
+          const script = (code) => apply(make, null, [new Blob([code], { type: "text/javascript" })]);
+          const known = { __proto__: null };
+          let first = null;
+          w.URL.createObjectURL = function createObjectURL(object) {
+            const made = apply(make, this, arguments);
+            try { apply(sized, object, []); known[made] = { blob: object, inner: null, classic: null, module: null }; } catch (e) {}
+            return made;
+          };
+          w.URL.revokeObjectURL = function revokeObjectURL(url) {
+            try {
+              const key = text(url);
+              const entry = known[key];
+              if (entry) {
+                delete known[key];
+                const ours = [entry.inner, entry.classic, entry.module];
+                apply(later, w, [() => { for (let i = 0; i < 3; i++) { if (ours[i] !== null) apply(revoke, null, [ours[i]]); } }, 60000]);
+              }
+            } catch (e) {}
+            return apply(revoke, this, arguments);
+          };
+          const start = (url, options) => {
+            const entry = known[text(url)];
+            if (!entry) return url;
+            const kind = options && typeof options === "object" && options.type === "module" ? "module" : "classic";
+            if (entry[kind] === null) {
+              if (entry.inner === null) entry.inner = apply(make, null, [entry.blob]);
+              if (kind === "module" && first === null) first = script(policy);
+              entry[kind] = script(kind === "module" ? "import " + json(first) + "; import " + json(entry.inner) + ";" : policy + " importScripts(" + json(entry.inner) + ");");
+            }
+            return entry[kind];
+          };
+          const makers = ["Worker", "SharedWorker"];
+          for (let i = 0; i < makers.length; i++) {
+            const Real = w[makers[i]];
+            if (typeof Real !== "function") continue;
+            const started = function (url) {
+              if (new.target === undefined) return apply(Real, this, arguments);
+              const args = [];
+              for (let j = 0; j < arguments.length; j++) args[j] = arguments[j];
+              if (args.length > 0) { try { args[0] = start(url, args[1]); } catch (e) {} }
+              return construct(Real, args, new.target);
+            };
+            define(started, "name", { value: makers[i] });
+            started.prototype = Real.prototype;
+            define(Real.prototype, "constructor", { value: started, writable: true, enumerable: false, configurable: true });
+            w[makers[i]] = started;
+          }
+        } catch (e) {}
+      }
       const reopen = proto.open;
       proto.open = function () {
         const got = apply(reopen, this, arguments);
