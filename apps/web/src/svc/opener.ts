@@ -326,7 +326,7 @@ export function outsideLink(url: unknown, host: ServicesHost): string | null {
   let link: URL;
   try { link = new URL(url); } catch { return null; }
   if ((link.protocol !== "http:" && link.protocol !== "https:") || link.href.length > 4096) return null;
-  const name = link.hostname.toLowerCase().replace(/\.$/, "");
+  const name = link.hostname.toLowerCase().replace(/\.+$/, "");
   if (isLocalHost(name) || name === host.suffix || name.endsWith(`.${host.suffix}`) || name === location.hostname) return null;
   return link.href;
 }

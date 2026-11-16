@@ -151,7 +151,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Native channel did not reach the application", "apps/ui/src/desktop/nativeTransports.ts"],
   // A dial past the contact's two channels: its endpoint destroys the stream, and the dialer's stream reads a reset
   // (libudx's own words, measured on a local HyperDHT testnet).
-  ["connection reset by peer", "native/transports/hyperdht/endpoint.mjs", "if (stopped || channels.size >= 2) { socket.destroy();"],
+  ["connection reset by peer", "native/transports/hyperdht/endpoint.mjs", "if (stopped || (incoming && liveIn.size >= MAX_CHANNELS)) { socket.destroy();"],
   ["PEER_NOT_FOUND: Peer not found", "node_modules/hyperdht/lib/errors.js", "static PEER_NOT_FOUND(msg = 'Peer not found')"],
   // A contact's app that is seen but does not answer (frozen, asleep): its record is fresh, the dial fails after ~4 s.
   ["PEER_CONNECTION_FAILED: Could not connect to peer", "node_modules/hyperdht/lib/errors.js", "static PEER_CONNECTION_FAILED(msg = 'Could not connect to peer')"],

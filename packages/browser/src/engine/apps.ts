@@ -1785,7 +1785,12 @@ export class Apps {
    */
   private async readStopping(version: AppVersion, urls: string[]): Promise<SignedAppRevocation[]> {
     const read = (await this.readRevocations(version.ref, urls)) ?? [];
-    const stops = stopping([version], read);
+    await this.keepStopping(version, read);
+    return read;
+  }
+  /** Keeps those of these verified revocations that stop `version`, with the profile's and on the installed app. */
+  private async keepStopping(version: AppVersion, revocations: readonly SignedAppRevocation[]): Promise<void> {
+    const stops = stopping([version], revocations);
     if (stops.length) {
       const tx = (await openDb()).transaction(STORES.settings, "readwrite");
       keepRevocations(tx.objectStore(STORES.settings), version.ref, stops);
@@ -1794,7 +1799,6 @@ export class Apps {
       const installed = await this.app(version.ref);
       if (installed) await this.keepOnRecord(installed, stops);
     }
-    return read;
   }
 
   private async stage(bundle: AppBundle, bytes: Uint8Array, from: string, fromStore?: string, carried = false): Promise<AppPreview> {
@@ -1806,6 +1810,9 @@ export class Apps {
     const read = carried ? [] : await this.readStopping(version, [from, ...(manifest.sources ?? [])]);
     const revocations = [...await this.keptRevocationsOf(version.ref), ...read];
     const [installed, stores] = await Promise.all([this.app(version.ref), this.stores()]);
+    // What a store's index revokes of it is kept too (the person is shown it revoked): the store removed, or its next index
+    // without it, does not let this version install, as `keepStoreRevocations` does for an installed app.
+    await this.keepStopping(version, stores.flatMap((s) => s.index?.revoked ?? []));
     // What Install will answer: a clash with the update waiting is one too.
     const decision = installDecision(installed, version);
     const install = decision === "other-app" ? "new" : decision;

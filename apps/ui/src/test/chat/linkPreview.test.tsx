@@ -1,10 +1,12 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LinkPreview } from "@ghostly/core";
+import { engine } from "@ghostly/browser/platform/engine";
 import { MessageInput } from "../../components/MessageInput";
 import { MessageBubble } from "../../components/MessageBubble";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { forgetLinkPreviews } from "../../lib/linkPreviewFetch";
+import { setSessionDraft } from "../../lib/storage";
 import { renderApp } from "../render";
 import { fakeEngine } from "../fakeEngine";
 
@@ -123,6 +125,20 @@ describe("a link preview in the composer", () => {
     expect(fetch).not.toHaveBeenCalled();
     send();
     await waitFor(() => expect(onSend).toHaveBeenCalledWith("look https://their-server.example/page"));
+  });
+
+  it("asks nothing for a kept draft's link before the engine says whether Hide my IP is on", async () => {
+    engine.state = null;
+    setSessionDraft("chat-kept", "look https://their-server.example/page");
+    const fetch = sites();
+    renderApp(<LockScreenProvider><MessageInput onSend={onSend} linkPreviews draftId="chat-kept" /></LockScreenProvider>);
+    expect(field().value).toBe("look https://their-server.example/page");
+    await new Promise(resolve => setTimeout(resolve, 800));
+    expect(fetch).not.toHaveBeenCalled();
+    // Once the engine says it is off, the preview is made.
+    act(() => fakeEngine.update({ settings: { relayOnly: false } }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    expect(String(fetch.mock.calls[0][0])).toBe("https://their-server.example/page");
   });
 
   it("of a message being edited goes with the edit while its link stays: saved at once, or the site failing now", async () => {

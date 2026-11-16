@@ -193,7 +193,7 @@ describe("a one-shot group join of a link for a group id already held", () => {
     const node = { getState, joinGroupByLink: vi.fn(async () => { groups = [after]; return { groupId: id }; }) };
     return { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode, version: "test" } as unknown as ApiContext;
   }
-  const pick = `keep the one you are in (ghostly engine keepGroup '{"groupId":"${id}"}') or take the link's instead (ghostly engine switchGroup '{"groupId":"${id}","to":"<its link, from group show --show-secret>"}')`;
+  const pick = `keep the one you are in (ghostly engine keepGroup '{"groupId":"${id}"}') or take the link's instead, which leaves the one you are in and deletes its history on this device (ghostly engine switchGroup '{"groupId":"${id}","to":"<its link, from group show --show-secret>"}' --yes)`;
 
   it("another's link, kept beside the group held: joined false at once, and says how to pick between them", async () => {
     const answer = await callApi(held(inGroup, { ...inGroup, others: [{ link: code }] }), "group.join", { link: url });

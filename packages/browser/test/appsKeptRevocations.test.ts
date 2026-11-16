@@ -4,7 +4,7 @@ import { canonicalJsonBytes, readAppRevocationShape, signAppRevocation } from "@
 import type * as core from "@ghostly/core";
 import { APP_REVOCATIONS_KEY } from "../src/engine/apps";
 import { PROFILE_SETTINGS_KEYS, STORES, store as dbStore, wrap } from "../src/shared/idb";
-import { BUNDLE_URL, FakeNet, PUBLISHER, REPO, STORE_URL, apps, appRows, bundle, emptyProfile, keyOf, listing, revocation, signer, storeFiles } from "./appsSupport";
+import { BUNDLE_URL, FakeNet, PINNED_URL, PUBLISHER, REPO, STORE_URL, apps, appRows, bundle, emptyProfile, keyOf, listing, revocation, signer, storeFiles } from "./appsSupport";
 // covers: apps.engine.installed
 
 vi.mock("@ghostly/core", async (importOriginal) => {
@@ -119,6 +119,38 @@ describe("revocations an app's uninstall leaves", () => {
     expect(await store.runCheck({ ref: v2.ref })).toEqual({ status: "ok" });
     expect(await appRows()).toEqual([expect.objectContaining({ digest: v2.digest, revocations: [revoked] })]);
     expect(PROFILE_SETTINGS_KEYS).toContain(APP_REVOCATIONS_KEY);
+  });
+});
+
+describe("a store's revocation shown on the install screen of an app not installed", () => {
+  // A contact's card at a pinned commit, with no `ghostly-revoke.json` beside it: the store's index is the only place read.
+  async function shownRevoked() {
+    const v1 = await bundle();
+    net.put(PINNED_URL, v1.bytes);
+    await net.putStore(await storeFiles({ apps: [], revoked: [await revocation(v1.ref, [v1.digest], "Leaked key")] }));
+    const store = apps(net);
+    await store.addStore({ url: STORE_URL });
+    const card = { ref: v1.ref, url: PINNED_URL, sequence: v1.sequence, digest: v1.digest };
+    const preview = await store.preview({ card });
+    expect(preview.run).toEqual({ status: "revoked", reason: "Leaked key" });
+    return { v1, store, card, preview };
+  }
+
+  it("the store removed: Install of that screen is refused", async () => {
+    const { v1, store, preview } = await shownRevoked();
+    await store.removeStore({ key: (await store.listStores())[0]!.key });
+    await expect(store.install({ stage: preview.stage, digest: v1.digest, grant: ["chat"] })).rejects.toThrow(/^revoked/);
+    expect(await appRows()).toEqual([]);
+  });
+
+  it("the store's next index without it: a new screen shows it revoked and Install is refused", async () => {
+    const { v1, store, card } = await shownRevoked();
+    await net.putStore(await storeFiles({ sequence: 2, apps: [] }));
+    await store.refreshStores();
+    const again = await store.preview({ card });
+    expect(again.run).toEqual({ status: "revoked", reason: "Leaked key" });
+    await expect(store.install({ stage: again.stage, digest: v1.digest, grant: ["chat"] })).rejects.toThrow(/^revoked/);
+    expect(await appRows()).toEqual([]);
   });
 });
 

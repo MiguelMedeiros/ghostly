@@ -49,6 +49,20 @@ describe("a backup that fails", () => {
   });
 });
 
+describe("a backup's start", () => {
+  it("removes a half-written backup beside --out that a process gone since left, and not a live one's", async () => {
+    const paths = profile("backup-partial-dead");
+    const out = join(paths.dir, "out.ghostly-backup");
+    // As an older CLI named it, and as this one does; a live process's (this one's parent) stays.
+    writeFileSync(`${out}.partial-999999999`, "STORE", { mode: 0o600 });
+    writeFileSync(`${out}.partial-999999999-0a1b2c3d4e5f`, "STORE", { mode: 0o600 });
+    writeFileSync(`${out}.partial-${process.ppid}-0a1b2c3d4e5f`, "LIVE", { mode: 0o600 });
+    writeFileSync(join(paths.dir, "other.partial-999999999-0a1b2c3d4e5f"), "OTHER", { mode: 0o600 });
+    await backup(paths, { exportSnapshot: async (path) => writeFileSync(path, "STORE", { mode: 0o600 }) });
+    expect(readdirSync(paths.dir).sort()).toEqual(["db", "files", "other.partial-999999999-0a1b2c3d4e5f", `out.ghostly-backup`, `out.ghostly-backup.partial-${process.ppid}-0a1b2c3d4e5f`]);
+  });
+});
+
 describe("a profile's start", { timeout: 120_000 }, () => {
   const env = { ...isolatedNetworkEnv(), GHOSTLY_WEBRTC: "0" };
   const before: Record<string, string | undefined> = {};
@@ -70,9 +84,15 @@ describe("a profile's start", { timeout: 120_000 }, () => {
   });
 });
 
-describe("a one-shot backup stopped with Ctrl-C", { timeout: 120_000 }, () => {
-  it("leaves neither the store in db/ nor the half-written backup beside --out", async () => {
-    const dir = home("backup-interrupt");
+describe("a one-shot backup stopped", { timeout: 120_000 }, () => {
+  // Ctrl-C exits 130 with the `interrupted` error; a service manager's stop, `timeout` and a dropped SSH session
+  // (SIGTERM, SIGHUP) still end it by that signal, as before, its files removed first.
+  it.each([
+    ["SIGINT", 130, null],
+    ["SIGTERM", null, "SIGTERM"],
+    ["SIGHUP", null, "SIGHUP"],
+  ] as const)("by %s leaves neither the store in db/ nor the half-written backup beside --out", async (signal, code, ended) => {
+    const dir = home(`backup-interrupt-${signal}`);
     const paths = profilePaths(dir, "default");
     ok(await ghostly(["--home", dir, "status"]));
     mkdirSync(paths.files, { recursive: true });
@@ -94,8 +114,9 @@ describe("a one-shot backup stopped with Ctrl-C", { timeout: 120_000 }, () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
     expect(readdirSync(paths.db).some((name) => name.startsWith("backup-store-"))).toBe(true);
-    run.child.kill("SIGINT");
-    expect(await run.exited(20_000)).toBe(130);
+    run.child.kill(signal);
+    expect(await run.exited(20_000)).toBe(code);
+    expect(run.child.signalCode).toBe(ended);
     expect(readdirSync(paths.db).filter((name) => name.startsWith("backup-store-"))).toEqual([]);
     expect(readdirSync(outDir)).toEqual([]);
   });

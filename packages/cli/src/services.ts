@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { GhostlyHttpError, LIMITS, parseLocalTarget, type ClientRequest, type ClientResponse, type LocalFetch } from "@ghostly/core";
+import { GhostlyHttpError, LIMITS, parseLocalTarget, VIEWER_PERMISSIONS_POLICY, type ClientRequest, type ClientResponse, type LocalFetch } from "@ghostly/core";
 import { bool, chatOf, node, num, ownChatOf, settingsOf, shownName, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError } from "./errors";
 import { isLive } from "./views";
@@ -130,6 +130,12 @@ export const OPENED_SERVICE_CSP_RELAY_ONLY = "default-src 'self' data: blob: 'un
  */
 export const OPENED_SERVICE_DROPPED_HEADERS = ["content-security-policy-report-only", "reporting-endpoints", "report-to", "nel", "link"];
 
+/**
+ * A contact's headers that would set the page's browser features (camera, microphone, location, a device): the
+ * viewer's own `VIEWER_PERMISSIONS_POLICY` takes their place, as in the extension's viewer (core `withViewerPolicy`).
+ */
+const OPENED_SERVICE_FEATURE_HEADERS = ["permissions-policy", "feature-policy"];
+
 /** The directives of a contact's policy that send reports to a URL it names, dropped from it. */
 export const OPENED_SERVICE_DROPPED_DIRECTIVES = ["report-uri", "report-to"];
 
@@ -212,7 +218,7 @@ async function proxy(request: IncomingMessage, response: ServerResponse, chunks:
     const out: Record<string, string | string[]> = {};
     for (const [name, value] of answer.headers) {
       const lower = name.toLowerCase();
-      if (lower === "transfer-encoding" || lower === "connection" || OPENED_SERVICE_DROPPED_HEADERS.includes(lower)) continue;
+      if (lower === "transfer-encoding" || lower === "connection" || OPENED_SERVICE_DROPPED_HEADERS.includes(lower) || OPENED_SERVICE_FEATURE_HEADERS.includes(lower)) continue;
       if (lower === "set-cookie") {
         const cookie = hostOnlyCookie(value);
         if (!cookie) continue;
@@ -224,6 +230,7 @@ async function proxy(request: IncomingMessage, response: ServerResponse, chunks:
       } else out[lower] = value;
     }
     out["content-security-policy"] = [...((out["content-security-policy"] as string[] | undefined) ?? []), policy];
+    out["permissions-policy"] = VIEWER_PERMISSIONS_POLICY;
     response.writeHead(answer.status, out);
     // Streamed, not gathered: past the cap (or when the contact drops it) the body stops and the connection closes.
     await pipeline(Readable.from(answer.body, { objectMode: false }), response);
