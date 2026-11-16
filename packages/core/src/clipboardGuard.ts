@@ -24,7 +24,10 @@
  *   window;
  * - runs in a frame's window before the page holds it, as the WebRTC guard does (`VIEWER_GUARD_SCRIPT`): what a frame
  *   element hands out is guarded first, the frames of the document and of its shadow trees are gone over as one loads
- *   (an empty frame's first load fires as it is put in the page) and as the page changes, each `srcdoc` frame gets
+ *   (an empty frame's first load fires as it is put in the page) and as the page changes, the document's frames as
+ *   each call that puts nodes in a page returns (`appendChild`, `append`, `innerHTML`, `insertNode`, `document.write`
+ *   and the like, an `execCommand`), so the window of a frame read by its index in the task that put it in is guarded
+ *   before the page holds it, whatever its answer, each `srcdoc` frame gets
  *   this script first, a declarative shadow root the page's script would make is refused, and with `VIEWER_GUARD_CSP`
  *   a `javascript:` URL is refused (its own Trusted Types default policy; one passes every other string on as it is,
  *   or, once the page made its own `default` policy, to that one's rules: the page's `createPolicy("default")` gets the
@@ -38,8 +41,8 @@
  * watches is marked (`ghostlyClipboardGuard`, fixed in place): the bridge reads that to know the guard ran in the page
  * it shows. It uses nothing the page can change after it ran (the page's own code runs later, in the same realm).
  *
- * A fence, not a wall, as the WebRTC guard's own: a frame's window read by its index (`window[0]`) before it loads,
- * inside a shadow tree written in the HTML the page itself sends, is out of its sight.
+ * A fence, not a wall, as the WebRTC guard's own: a frame inside a shadow tree written in the HTML the page itself
+ * sends is out of its sight.
  * No backslash, `${` or backtick in it.
  */
 export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
@@ -182,7 +185,7 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
         if (name === "paste" || ((name === "copy" || name === "cut") && !tapping())) return false;
         const args = [name];
         for (let i = 1; i < arguments.length; i++) args[i] = arguments[i];
-        return apply(run, this, args);
+        try { return apply(run, this, args); } finally { sweep(); }
       };
       define(proto, "execCommand", { value: guarded, writable: false, enumerable: exec.enumerable, configurable: false });
       const types = w.trustedTypes;
@@ -324,6 +327,31 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
           try { define(owner, name, found); } catch (e) {}
         }
       }
+      const inserts = [
+        [w.Node, ["appendChild", "insertBefore", "replaceChild"]],
+        [w.Element, ["append", "prepend", "before", "after", "replaceWith", "replaceChildren", "insertAdjacentElement", "insertAdjacentHTML", "setHTMLUnsafe", "setHTML", "innerHTML", "outerHTML"]],
+        [w.CharacterData, ["before", "after", "replaceWith"]],
+        [w.DocumentType, ["before", "after", "replaceWith"]],
+        [w.Document, ["append", "prepend", "replaceChildren", "write", "writeln", "body"]],
+        [w.Range, ["insertNode", "surroundContents"]],
+        [w.HTMLTableElement, ["caption", "tHead", "tFoot"]],
+        [w.HTMLSelectElement, ["add"]],
+        [w.HTMLOptionsCollection, ["add"]],
+      ];
+      for (let k = 0; k < inserts.length; k++) {
+        const owner = inserts[k][0] && inserts[k][0].prototype;
+        const names = inserts[k][1];
+        for (let n = 0; n < names.length; n++) {
+          const found = owner && describe(owner, names[n]);
+          const key = found && found.set ? "set" : "value";
+          if (!found || typeof found[key] !== "function") continue;
+          const real = found[key];
+          found[key] = function () {
+            try { return apply(real, this, arguments); } finally { sweep(); }
+          };
+          try { define(owner, names[n], found); } catch (e) {}
+        }
+      }
       const inShadow = w.DocumentFragment.prototype.querySelectorAll;
       if (attachShadow) {
         elements.attachShadow = function () {
@@ -338,4 +366,4 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
 })(window)`;
 
 /** `CLIPBOARD_GUARD_SCRIPT`'s hash, as a CSP source: the bridge's policy and a contact's own are given it. */
-export const CLIPBOARD_GUARD_HASH = "'sha256-ZIUer015gpdSl+NHTw8K4XFujxpTKEB2a6nNrV84YS4='";
+export const CLIPBOARD_GUARD_HASH = "'sha256-otlgKHUvFu/SctDIUGBYsgiP2XeWMyAeQI0guhG/Wr4='";

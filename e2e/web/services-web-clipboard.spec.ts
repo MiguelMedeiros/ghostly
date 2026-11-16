@@ -31,7 +31,7 @@ const PAGE = `<!doctype html><title>Pay</title><body style="margin:0">
 <script>
   const log = {}, t = document.getElementById("t");
   const out = () => { document.getElementById("log").textContent = JSON.stringify(log); };
-  const write = (text, realm = window) => { t.value = text; t.select(); try { return realm.Document.prototype.execCommand.call(document, "copy"); } catch (e) { return e.name; } };
+  const write = (text, realm = window) => { t.value = text; t.select(); try { return (typeof realm === "function" ? realm : realm.Document.prototype.execCommand).call(document, "copy"); } catch (e) { return e.name; } };
   log.load = write("bc1q-CONTACT-load");
   // What the person's own tap sets off copies; the same events fired by the app's script do not.
   let submits = 0, pending = "", flipping = "";
@@ -48,7 +48,10 @@ const PAGE = `<!doctype html><title>Pay</title><body style="margin:0">
   flipAs("changeLoad");
   // Another realm's execCommand on this document: an empty frame of its own (read by its index) and the bridge's.
   document.body.appendChild(document.createElement("iframe"));
-  const realms = { frame: window[0], parent: window.parent };
+  // The execCommand of frames on their way to a page, taken by their index in the task that put them in: one whose
+  // answer leaves it on its first, empty page (204), one that loads an HTML page of the app.
+  for (const path of ["/empty", "/inner"]) { const frame = document.createElement("iframe"); frame.src = path; document.body.append(frame); }
+  const realms = { frame: window[0], empty: window[1].Document.prototype.execCommand, inner: window[2].Document.prototype.execCommand, parent: window.parent };
   // A frame that commits a page the guard cannot go into (not HTML) and never loads: its execCommand, taken before
   // the guard's look at the frame's load.
   let held = "none";
@@ -57,7 +60,7 @@ const PAGE = `<!doctype html><title>Pay</title><body style="margin:0">
     slow.onload = null;
     slow.src = "/slow";
     const look = () => {
-      try { if (window[1].location.pathname === "/slow") { held = window[1].Document.prototype.execCommand; return; } } catch (e) { held = e.name; return; }
+      try { if (window[3].location.pathname === "/slow") { held = window[3].Document.prototype.execCommand; return; } } catch (e) { held = e.name; return; }
       setTimeout(look, 2);
     };
     look();
@@ -99,6 +102,7 @@ test("a contact's app writes the clipboard only in the person's tap on its copy 
       response.end("<!doctype html><p>Opaque</p>");
       return;
     }
+    if (request.url === "/empty") { response.writeHead(204); response.end(); return; }
     if (request.url === "/inner") {
       response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       response.end("<!doctype html><p>Inner</p>");
@@ -154,8 +158,8 @@ test("a contact's app writes the clipboard only in the person's tap on its copy 
     const seen = await log();
     info.annotations.push({ type: "clipboard writes", description: JSON.stringify(seen) });
     const late = ["submitLoad", "changeLoad", "submitTimer0", "changeFrame", "submitTimer", "changeTimer", "submitPromise", "changeMessage"];
-    expect(Object.keys(seen)).toEqual(expect.arrayContaining(["timer500", "timer2000", "timer4500", "frame", "parent", "slow", ...late]));
-    expect(seen).toMatchObject({ load: false, timer500: false, timer2000: false, timer4500: false, frame: false, parent: false });
+    expect(Object.keys(seen)).toEqual(expect.arrayContaining(["timer500", "timer2000", "timer4500", "frame", "empty", "inner", "parent", "slow", ...late]));
+    expect(seen).toMatchObject({ load: false, timer500: false, timer2000: false, timer4500: false, frame: false, empty: false, inner: false, parent: false });
     // The never-loading frame's page is of an origin of its own: its window is out of the app's reach.
     expect(seen.slow).toBe("SecurityError");
     expect(seen).toMatchObject(Object.fromEntries(late.map((name) => [name, false])));
