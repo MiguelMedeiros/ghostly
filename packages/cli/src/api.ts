@@ -1,4 +1,4 @@
-import { AWAITING_PEER_MS, decodeGroupEntryLink, inviteLink, LIMITS, MENTION_EVERYONE, normalizeRelayUrl, ownInviteRefusal, relayUrlProblem, replySnippet, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type TypingKind } from "@ghostly/core";
+import { AWAITING_PEER_MS, DHT_TEXT_BYTES, decodeGroupEntryLink, inviteLink, LIMITS, MENTION_EVERYONE, normalizeRelayUrl, ownInviteRefusal, relayUrlProblem, replySnippet, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type TypingKind } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
 import { DEFAULT_HYPERDHT_RELAY } from "@ghostly/browser/shared/hyperdhtRelay";
@@ -317,6 +317,21 @@ async function letIn(ctx: ApiContext, groupId: string, link: string, held: Group
   return { group: groupId, joined, stage, warning: `Not in yet: no member's app has let you in. A member's app lets you in only while this profile is running: ${show}` };
 }
 
+/**
+ * Why a text that waits will not go by itself, or undefined: longer than the 256 bytes the DHT carries, in a chat on
+ * the DHT only (this side's choice, the contact's, or both). It goes once the chat is live, which neither side's app
+ * tries while either keeps it on the DHT only, so it is said with what ends that, or to shorten it.
+ */
+function dhtOnlyWait(link: LinkView, text: string, ref: string): string | undefined {
+  const mine = link.deliveryMode === "dht", theirs = link.dhtDelivery?.peerMode === "dht";
+  if ((!mine && !theirs) || new TextEncoder().encode(text.trim()).length <= DHT_TEXT_BYTES) return undefined;
+  const switchBack = `ghostly chat transport ${shellWord(ref, "<chat>")} auto`;
+  const who = mine && theirs ? `you and the contact keep this chat on the DHT only: it goes once both choose a live transport (${switchBack}), or shorten it`
+    : mine ? `this chat is on the DHT only: it goes once you choose a live transport (${switchBack}), or shorten it`
+    : "the contact keeps this chat on the DHT only: it goes once they choose a live transport, or shorten it";
+  return `Longer than the ${DHT_TEXT_BYTES} bytes the DHT carries, and ${who}`;
+}
+
 const METHODS: Record<string, Method> = {
   ...WALLET_METHODS,
   ...FILE_METHODS,
@@ -506,10 +521,14 @@ const METHODS: Record<string, Method> = {
     }
     if (!result.messageId) throw new CliError("bad_request", "Nothing to send");
     let message = await node(ctx).getMessage(link.id, result.messageId);
-    if (wait !== "none") message = await waitForMessage(ctx, link.id, result.messageId, wait, ms);
+    // Past the 256 bytes the DHT carries, in a chat on the DHT only: it waits for a live session, which comes only once
+    // the chat leaves DHT only. A one-shot sat 30 s, then answered `timeout` saying it goes with the next command.
+    const dhtOnly = message?.delivery === "waiting" ? dhtOnlyWait(link, text, str(params, "chat", true)) : undefined;
+    if (wait !== "none" && !(dhtOnly && params.wait === undefined)) message = await waitForMessage(ctx, link.id, result.messageId, wait, ms);
     return {
       chat: link.id, messageId: result.messageId, delivery: message?.delivery ?? null, ...(card ? { buttons: card.id, card, pressable: pressable(link) } : {}),
       ...(unjoined && message?.delivery === "waiting" && { note: `Nobody joined this chat yet: the message goes once they join${ctx.mode === "one-shot" ? " while this profile is online (`ghostly daemon --detach`)" : ""}` }),
+      ...(dhtOnly && message?.delivery === "waiting" && { note: dhtOnly }),
     };
   },
   /**
