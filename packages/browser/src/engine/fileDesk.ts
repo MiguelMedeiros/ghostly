@@ -279,7 +279,7 @@ export class FileDesk {
   /** A files/3 transfer of this chat's under way on its session: offered, moving, or being checked. */
   moving(linkId: string): boolean {
     const files = this.chats.get(linkId)?.files;
-    return !!files?.live && files.records().some((r) => r.state === "offered" || r.state === "active" || r.state === "verifying");
+    return !!files?.live && files.underWay();
   }
 
   /**
@@ -439,12 +439,13 @@ export class FileDesk {
     return file.size <= FILE_LIMITS.askAboveBytes && taken + file.size <= FILE_LIMITS.autoAcceptBytesPerPeer ? "accept" : "ask";
   }
 
-  /** Bytes still to come of the files taken here (every chat's, not ended): the room they will take. */
+  /**
+   * Bytes still to come of the files taken here (every chat's, not ended): the room they will take. Read from each
+   * chat's unfinished files only: copying every record each chat ever had cost every offer ~10 ms at 100,000 files.
+   */
   private stillComing(): number {
     let due = 0;
-    for (const chat of this.chats.values()) {
-      for (const r of chat.files.records()) if (r.direction === "in" && r.state !== "asking" && !transferEnded(r)) due += Math.max(0, r.file.size - r.confirmed);
-    }
+    for (const chat of this.chats.values()) due += chat.files.stillToCome();
     return due;
   }
 
@@ -452,8 +453,7 @@ export class FileDesk {
   autoTaken(linkId: string): number {
     const chat = this.chats.get(linkId);
     if (!chat) return 0;
-    return chat.files.records().filter((r) => r.direction === "in" && !r.consented && r.state !== "asking" && !["failed", "declined", "cancelled"].includes(r.state))
-      .reduce((sum, r) => sum + r.file.size, 0);
+    return chat.files.takenUnasked();
   }
 
   /** Where a received file is written: from what is durably there, cut back to that if more was written after. */
