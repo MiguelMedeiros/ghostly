@@ -1,6 +1,8 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
-import { STORES, transact } from "../src/shared/idb";
+import { STORES, store, transact, wrap } from "../src/shared/idb";
+import { dropDataKey, setDataKey } from "../src/engine/dataKey";
+import { isSealedField } from "../src/shared/profileKey";
 import { ProviderSources, RETRY_MAX_MS, SUSTAINED_MS, retryDelay } from "../src/engine/paymentAdapters/providers/sources";
 import { SourceConfigError, SourceUnreachableError, providerDescriptorProblems, type ProviderDescriptor, type ProviderNetwork, type ProviderSettings } from "../src/engine/paymentAdapters/providers/types";
 // covers: wallet.onchain.sources, wallet.lightning.sources
@@ -251,5 +253,26 @@ describe("Change server", () => {
     expect(providerDescriptorProblems(d("url"))).toEqual([]);
     const bad = { ...descriptor(new Server()), fields: [{ name: "f", label: "F", kind: "url", suggestions: [{ value: 1 }] }] } as unknown as ProviderDescriptor<unknown>;
     expect(providerDescriptorProblems(bad)).toContain("field f has malformed suggestions");
+  });
+});
+
+describe("a source's secrets under the profile's data key (WISP 04, Encrypted profile)", () => {
+  it("are version 2 with no device key, connect again after a restart, and stay through a change of server", async () => {
+    setDataKey(await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]));
+    try {
+      const server = new Server();
+      const fields: ProviderDescriptor<Node>["fields"] = [{ name: "server", label: "Server", kind: "url", changeable: true }, { name: "key", label: "Key", kind: "secret" }];
+      const { s } = await saved(server, { server: "https://a.example", key: "a-node-secret" }, { fields });
+      const record = await wrap<Record<string, unknown>>((await store(STORES.settings, "readonly")).get("onchainSource-testnet"));
+      expect(isSealedField(record.secrets)).toBe(true);
+      expect(record).not.toHaveProperty("deviceKey");
+      expect(JSON.stringify(record)).not.toContain("a-node-secret");
+      await s.ensureReady();
+      expect(s.active?.secret).toBe("a-node-secret");
+      expect(await s.secret("key")).toBe("a-node-secret");
+      expect(await s.holds("node", { config: { server: "https://a.example" }, secrets: { key: "a-node-secret" } })).toBe(true);
+      await s.reconfigure({ server: "https://b.example" });
+      expect(s.active).toMatchObject({ server: "https://b.example", secret: "a-node-secret" });
+    } finally { dropDataKey(); }
   });
 });

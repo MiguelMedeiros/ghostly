@@ -20,6 +20,8 @@ const FIELDS: Record<string, readonly string[]> = {
   [STORES.quotes]: ["outputs"],
   [STORES.intents]: ["prepared.swap", "prepared.token"],
 };
+/** Every store of the peer database with phase 1 fields: what turning encryption on or off walks (`profileEncryption.ts`). */
+export const SEALED_STORES: readonly string[] = [...Object.keys(FIELDS), STORES.proofs];
 /** A group removed and invited again keeps the group it was (`previous`), with secrets of its own. */
 const NESTED: Record<string, string> = { [STORES.groups]: "previous" };
 
