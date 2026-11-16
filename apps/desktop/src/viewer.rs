@@ -55,8 +55,9 @@ const SERVICE_CSP_RELAY_ONLY: &str = "default-src 'self' data: blob: 'unsafe-inl
 /// of the window (`initialization_script_for_all_frames`): it deletes the WebRTC constructors, opens new
 /// windows with `noopener`, and guards a frame's window before the page holds it (what a frame element
 /// hands out, the frames of a document as one loads or the page changes, each `srcdoc`), for a frame the
-/// WebView did not run it in. The same text as `VIEWER_GUARD_SCRIPT` in `packages/core/src/viewerGuard.ts`,
-/// which says what a script in the page cannot do.
+/// WebView did not run it in, and starts a worker made from a `blob:` URL of the page's from a script that makes a
+/// pass-through Trusted Types `default` policy in it first. The same text as `VIEWER_GUARD_SCRIPT` in
+/// `packages/core/src/viewerGuard.ts`, which says what a script in the page cannot do.
 const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
   "use strict";
   try {
@@ -171,6 +172,65 @@ const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
         return root;
       };
     }
+    if (w.trustedTypes && w.URL && w.Blob && !describe(w, "ghostlyWorkerGuard")) {
+      try {
+        define(w, "ghostlyWorkerGuard", { value: true });
+        const construct = Reflect.construct;
+        const json = JSON.stringify;
+        const later = w.setTimeout;
+        const Blob = w.Blob;
+        const sized = describe(Blob.prototype, "size").get;
+        const make = w.URL.createObjectURL;
+        const revoke = w.URL.revokeObjectURL;
+        const policy = "if (self.trustedTypes && !self.trustedTypes.defaultPolicy) { try { self.trustedTypes.createPolicy('default', { createHTML: (s) => s, createScript: (s) => s, createScriptURL: (s) => s }); } catch (e) {} }";
+        const script = (code) => apply(make, null, [new Blob([code], { type: "text/javascript" })]);
+        const known = { __proto__: null };
+        let first = null;
+        w.URL.createObjectURL = function createObjectURL(object) {
+          const made = apply(make, this, arguments);
+          try { apply(sized, object, []); known[made] = { blob: object, inner: null, classic: null, module: null }; } catch (e) {}
+          return made;
+        };
+        w.URL.revokeObjectURL = function revokeObjectURL(url) {
+          try {
+            const key = text(url);
+            const entry = known[key];
+            if (entry) {
+              delete known[key];
+              const ours = [entry.inner, entry.classic, entry.module];
+              apply(later, w, [() => { for (let i = 0; i < 3; i++) { if (ours[i] !== null) apply(revoke, null, [ours[i]]); } }, 60000]);
+            }
+          } catch (e) {}
+          return apply(revoke, this, arguments);
+        };
+        const start = (url, options) => {
+          const entry = known[text(url)];
+          if (!entry) return url;
+          const kind = options && typeof options === "object" && options.type === "module" ? "module" : "classic";
+          if (entry[kind] === null) {
+            if (entry.inner === null) entry.inner = apply(make, null, [entry.blob]);
+            if (kind === "module" && first === null) first = script(policy);
+            entry[kind] = script(kind === "module" ? "import " + json(first) + "; import " + json(entry.inner) + ";" : policy + " importScripts(" + json(entry.inner) + ");");
+          }
+          return entry[kind];
+        };
+        for (const name of ["Worker", "SharedWorker"]) {
+          const Real = w[name];
+          if (typeof Real !== "function") continue;
+          const started = function (url) {
+            if (new.target === undefined) return apply(Real, this, arguments);
+            const args = [];
+            for (let i = 0; i < arguments.length; i++) args[i] = arguments[i];
+            if (args.length > 0) { try { args[0] = start(url, args[1]); } catch (e) {} }
+            return construct(Real, args, new.target);
+          };
+          define(started, "name", { value: name });
+          started.prototype = Real.prototype;
+          define(Real.prototype, "constructor", { value: started, writable: true, enumerable: false, configurable: true });
+          w[name] = started;
+        }
+      } catch (e) {}
+    }
     apply(listen, home, ["load", sweep, true]);
     watch(home, w.Document.prototype.querySelectorAll);
   } catch (e) {}
@@ -181,6 +241,15 @@ const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
 /// to the guard's policy before it runs. `VIEWER_GUARD_CSP` in `packages/core/src/viewerGuard.ts`.
 const SERVICE_GUARD_CSP: &str =
     "frame-src 'self'; object-src 'self'; require-trusted-types-for 'script'";
+
+/// `SERVICE_GUARD_CSP` for a worker's own script (its request's `Sec-Fetch-Dest`): no Trusted Types. No guard runs in
+/// a worker to make the `default` policy, so Trusted Types there would refuse its every `importScripts`, `eval` and
+/// `new Function`, and a worker has no `javascript:` URL or WebRTC to keep. `VIEWER_WORKER_GUARD_CSP` in
+/// `packages/core/src/viewerGuard.ts`.
+const SERVICE_WORKER_GUARD_CSP: &str = "frame-src 'self'; object-src 'self'";
+
+/// The `Sec-Fetch-Dest` of a worker's own script: its answer's policy is the worker's.
+const WORKER_DESTINATIONS: [&str; 3] = ["worker", "sharedworker", "serviceworker"];
 
 /// The contact's headers that are not passed on: each makes the WebView send
 /// something to a place it names, outside `connect-src` (violation and
@@ -703,7 +772,23 @@ pub async fn handle<R: tauri::Runtime>(
         }
     }
     if relay_only {
-        policies.push(SERVICE_GUARD_CSP.to_string());
+        let worker = request
+            .headers()
+            .get("sec-fetch-dest")
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|destination| {
+                WORKER_DESTINATIONS
+                    .iter()
+                    .any(|worker| worker.eq_ignore_ascii_case(destination))
+            });
+        policies.push(
+            if worker {
+                SERVICE_WORKER_GUARD_CSP
+            } else {
+                SERVICE_GUARD_CSP
+            }
+            .to_string(),
+        );
     }
     policies.push(
         if relay_only {
@@ -1406,6 +1491,64 @@ mod routing_tests {
         );
     }
 
+    /// With Hide my IP on, a worker's own script is sent without Trusted Types: no guard runs in a worker to make
+    /// the `default` policy, so every `importScripts` and `eval` there would be refused. A page keeps them.
+    #[test]
+    fn with_hide_my_ip_on_a_workers_script_gets_no_trusted_types() {
+        // covers: settings.network.relay-only
+        let app = app();
+        bind_relay_only(&app);
+        let asked = requests(&app);
+        for (destination, guard) in [
+            (Some("worker"), SERVICE_WORKER_GUARD_CSP),
+            (Some("SharedWorker"), SERVICE_WORKER_GUARD_CSP),
+            (Some("serviceworker"), SERVICE_WORKER_GUARD_CSP),
+            (Some("document"), SERVICE_GUARD_CSP),
+            (Some("iframe"), SERVICE_GUARD_CSP),
+            (Some("script"), SERVICE_GUARD_CSP),
+            (None, SERVICE_GUARD_CSP),
+        ] {
+            let mut sent = request("GET", &format!("{SCHEME}://atlas.{PEER}.{TAG}/w.js"), b"");
+            if let Some(destination) = destination {
+                sent.headers_mut()
+                    .insert("sec-fetch-dest", destination.parse().unwrap());
+            }
+            let pending =
+                tauri::async_runtime::spawn(handle(app.handle().clone(), "svc-1".into(), sent));
+            let carried = asked.recv_timeout(Duration::from_secs(5)).unwrap();
+            respond(
+                app.handle(),
+                carried["id"].as_u64().unwrap(),
+                ServiceResponse {
+                    status: 200,
+                    headers: vec![("content-type".into(), "text/javascript".into())],
+                    body_b64: STANDARD.encode(b"importScripts('lib.js')"),
+                },
+            );
+            let response = tauri::async_runtime::block_on(pending).unwrap();
+            assert_eq!(
+                response.headers()["content-security-policy"],
+                format!("{guard}, {SERVICE_CSP_RELAY_ONLY}").as_str(),
+                "{destination:?}"
+            );
+        }
+        assert!(!SERVICE_WORKER_GUARD_CSP.contains("trusted-types"));
+    }
+
+    fn bind_relay_only(app: &tauri::App<MockRuntime>) {
+        app.state::<ViewerState>().windows.lock().unwrap().insert(
+            "svc-1".into(),
+            Bound {
+                peer: PEER.into(),
+                service: "atlas".into(),
+                site: format!("{PEER}.{TAG}"),
+                unreachable: UNREACHABLE.into(),
+                relay_only: true,
+                rules_in: true,
+            },
+        );
+    }
+
     /// The WebRTC guard every frame of a window opened with Hide my IP on runs, and the policy sent with it,
     /// are the extension's and the web runner's, word for word.
     #[test]
@@ -1417,6 +1560,13 @@ mod routing_tests {
         )));
         assert!(core.contains(&format!(
             "export const VIEWER_GUARD_CSP = \"{SERVICE_GUARD_CSP}\";"
+        )));
+        assert!(core.contains(&format!(
+            "export const VIEWER_WORKER_GUARD_CSP = \"{SERVICE_WORKER_GUARD_CSP}\";"
+        )));
+        assert!(core.contains(&format!(
+            "const WORKER_DESTINATIONS = new Set([{}]);",
+            WORKER_DESTINATIONS.map(|d| format!("\"{d}\"")).join(", ")
         )));
         assert!(SERVICE_GUARD.starts_with("(function noWebRtc(w) {"));
     }

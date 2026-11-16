@@ -16,7 +16,14 @@ import type { HeaderList } from "./frames";
  *   refuses `javascript:` URLs (its own Trusted Types default policy: one passes every other string on as it is);
  * - refuses a declarative shadow root the page's script would make (`setHTMLUnsafe`, `Document.parseHTMLUnsafe`,
  *   `document.write`, a write split in two too): its `srcdoc` frames would be out of the guard's sight;
- * - listens for frames' loads again after `document.open()`, which takes every listener of the document away.
+ * - listens for frames' loads again after `document.open()`, which takes every listener of the document away;
+ * - starts a worker made from a `blob:` URL of the page's own (`URL.createObjectURL` in that window) from a script of its
+ *   own that makes a pass-through Trusted Types `default` policy there first and then runs the page's (`importScripts`;
+ *   for a module worker, a static `import` of the policy's module, then of the page's): such a worker takes the page's
+ *   policy, Trusted Types included, and no guard runs in it to make one. A `SharedWorker` made twice from one blob gets
+ *   the same script, so it is the same worker; the page's revoke of the blob's URL drops the guard's own a minute later.
+ *   A `data:` worker, and a blob made in another window, in a worker or already revoked, run as they were. Once per
+ *   window, whichever guard runs first (`ghostlyWorkerGuard`, `CLIPBOARD_GUARD_SCRIPT` does the same).
  * It uses nothing the page can change after it ran (the page's own code runs later, in the same realm).
  *
  * What a script put in the page cannot do, so where the viewer does not run it per document this is not a guarantee:
@@ -139,13 +146,72 @@ export const VIEWER_GUARD_SCRIPT = `(function noWebRtc(w) {
         return root;
       };
     }
+    if (w.trustedTypes && w.URL && w.Blob && !describe(w, "ghostlyWorkerGuard")) {
+      try {
+        define(w, "ghostlyWorkerGuard", { value: true });
+        const construct = Reflect.construct;
+        const json = JSON.stringify;
+        const later = w.setTimeout;
+        const Blob = w.Blob;
+        const sized = describe(Blob.prototype, "size").get;
+        const make = w.URL.createObjectURL;
+        const revoke = w.URL.revokeObjectURL;
+        const policy = "if (self.trustedTypes && !self.trustedTypes.defaultPolicy) { try { self.trustedTypes.createPolicy('default', { createHTML: (s) => s, createScript: (s) => s, createScriptURL: (s) => s }); } catch (e) {} }";
+        const script = (code) => apply(make, null, [new Blob([code], { type: "text/javascript" })]);
+        const known = { __proto__: null };
+        let first = null;
+        w.URL.createObjectURL = function createObjectURL(object) {
+          const made = apply(make, this, arguments);
+          try { apply(sized, object, []); known[made] = { blob: object, inner: null, classic: null, module: null }; } catch (e) {}
+          return made;
+        };
+        w.URL.revokeObjectURL = function revokeObjectURL(url) {
+          try {
+            const key = text(url);
+            const entry = known[key];
+            if (entry) {
+              delete known[key];
+              const ours = [entry.inner, entry.classic, entry.module];
+              apply(later, w, [() => { for (let i = 0; i < 3; i++) { if (ours[i] !== null) apply(revoke, null, [ours[i]]); } }, 60000]);
+            }
+          } catch (e) {}
+          return apply(revoke, this, arguments);
+        };
+        const start = (url, options) => {
+          const entry = known[text(url)];
+          if (!entry) return url;
+          const kind = options && typeof options === "object" && options.type === "module" ? "module" : "classic";
+          if (entry[kind] === null) {
+            if (entry.inner === null) entry.inner = apply(make, null, [entry.blob]);
+            if (kind === "module" && first === null) first = script(policy);
+            entry[kind] = script(kind === "module" ? "import " + json(first) + "; import " + json(entry.inner) + ";" : policy + " importScripts(" + json(entry.inner) + ");");
+          }
+          return entry[kind];
+        };
+        for (const name of ["Worker", "SharedWorker"]) {
+          const Real = w[name];
+          if (typeof Real !== "function") continue;
+          const started = function (url) {
+            if (new.target === undefined) return apply(Real, this, arguments);
+            const args = [];
+            for (let i = 0; i < arguments.length; i++) args[i] = arguments[i];
+            if (args.length > 0) { try { args[0] = start(url, args[1]); } catch (e) {} }
+            return construct(Real, args, new.target);
+          };
+          define(started, "name", { value: name });
+          started.prototype = Real.prototype;
+          define(Real.prototype, "constructor", { value: started, writable: true, enumerable: false, configurable: true });
+          w[name] = started;
+        }
+      } catch (e) {}
+    }
     apply(listen, home, ["load", sweep, true]);
     watch(home, w.Document.prototype.querySelectorAll);
   } catch (e) {}
 })(window)`;
 
 /** `VIEWER_GUARD_SCRIPT`'s hash, as a CSP source: a contact's own policy that would refuse it is given it (`allowingViewerGuard`). */
-export const VIEWER_GUARD_HASH = "'sha256-P3jYgJwfoJ/cAS31rQz7Tk99bBwsSeN2wDDqJubDMZw='";
+export const VIEWER_GUARD_HASH = "'sha256-DweV0mr/eyHFWESxtsRrzk0i6VjF4GSCokjozAiXkbQ='";
 
 /**
  * With the guard, where it is put in the page and not run by the viewer in every frame: frames only from the app's own
