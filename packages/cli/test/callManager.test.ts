@@ -1262,6 +1262,24 @@ describe("two call managers", { timeout: 60_000 }, () => {
     await b.calls.stopAll();
   });
 
+  it("a contact whose app died and who calls again starts over: the call placed here ends, sends no hang-up, and their call rings", async () => {
+    const { a, b } = pairOfManagers();
+    b.calls.setAuto({ on: true, from: [], rate: 16000 });
+    await a.calls.start("chat-ab", {});
+    await Promise.all([a, b].map((side) => until(() => side.events.find((e) => e.type === "call.connected")))).catch(diagnose(a, b));
+    // The contact's new call, later than their answer (WISP 601 "Offering again"): their app gave no hang-up.
+    const [offer] = signalsOf(b, "a").map((s) => JSON.parse(s!));
+    a.calls.onSignal("chat-ab", heardCallSignal(JSON.stringify({ ...offer, t: "o", ts: offer.ts + 1000 }), Date.now()));
+    await until(() => a.events.find((e) => e.type === "call.incoming")).catch(diagnose(a, b));
+    expect(a.events.map((e) => e.type)).toEqual(["call.outgoing", "call.connected", "call.ended", "call.incoming"]);
+    expect(a.events.find((e) => e.type === "call.ended")).toMatchObject({ direction: "out", reason: "remote-hangup" });
+    // A hang-up would end their new call there as declined.
+    expect(signalsOf(a, "h")).toEqual([]);
+    expect(a.calls.list()).toMatchObject([{ direction: "in", state: "ringing" }]);
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
   /** Both sides call each other at once; the side whose offer lost is the one that ends its call as `crossed`. */
   async function glare(a: Side, b: Side) {
     await Promise.allSettled([a.calls.start("chat-ab", {}), b.calls.start("chat-ba", {})]);
