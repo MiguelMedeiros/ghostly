@@ -10,7 +10,8 @@ import { RETIRE_READ_MS } from "./arkWallet";
 import { ModeChanged, ModeGate, WrongNetworkError, networkLabel } from "./modeGate";
 import { walletKey } from "./walletNetworks";
 import { viewNews } from "./viewNews";
-import { intentRepository, newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from "./persistence";
+import { intentRepository, sealSeed, unsealSeed } from "./persistence";
+import { openRecordSecret, recordSealer, type RecordSecret } from "../dataKey";
 import type { SavedIntent } from "./coordinator";
 
 export interface BarkWalletView {
@@ -38,7 +39,10 @@ export interface BarkWalletView {
  * `scan`: the wallet was restored (a Bark backup, a profile backup, a phrase typed in) into an empty database, and
  * has yet to finish its one on-chain scan for addresses its phrase used before. Cleared once the scan finished.
  */
-interface StoredBark { config: BarkConfig; seed: EncryptedSeed; deviceKey: string; scan?: true }
+/** `deviceKey`: the key of a version 1 seed; one sealed under the profile's data key has none. */
+interface StoredBark { config: BarkConfig; seed: RecordSecret; deviceKey?: string; scan?: true }
+/** A seed is bound to its wallet's own key (`barkWallet-mode-<network>`), and stays so once that wallet is retired. */
+const SEED = "bark.seed";
 export interface BarkCreate { network: BarkNetwork; provider: string; explorer: string; mnemonic?: string }
 
 /**
@@ -137,7 +141,6 @@ export class BarkWallet {
     const mnemonic = params.mnemonic?.trim() || generateMnemonic(wordlist);
     if (!validateMnemonic(mnemonic, wordlist)) throw new Error("Invalid recovery phrase");
     const replaced = this.saved && await this.retirable("This Bark wallet already has funds or payments; it will not be replaced");
-    const deviceKey = newDeviceKey();
     const draft: BarkConfig = { network: params.network, provider, explorer, serverKey: "", walletId: crypto.randomUUID() };
     let adapter: BarkAdapter | undefined;
     try {
@@ -145,7 +148,7 @@ export class BarkWallet {
       const serverKey = await this.gate.within(this.serverKey(draft, mnemonic));
       const config = { ...draft, serverKey };
       adapter = await this.gate.within(BarkAdapter.connect(config, mnemonic, { sdk: await this.sdk(), restore: !!params.mnemonic }), (a) => a.dispose());
-      const saved: StoredBark = { config, seed: await sealSeed(mnemonic, deviceKey), deviceKey, ...(params.mnemonic ? { scan: true as const } : {}) };
+      const saved: StoredBark = { config, ...await this.sealed(mnemonic), ...(params.mnemonic ? { scan: true as const } : {}) };
       await this.save(saved, replaced || undefined);
       this.saved = saved;
     } catch (error) {
@@ -191,8 +194,8 @@ export class BarkWallet {
   }
   private async open() {
     if (!this.saved || this.adapter) return;
-    const mnemonic = await unsealSeed(this.saved.seed, this.saved.deviceKey);
-    this.adapter = await this.gate.within(BarkAdapter.connect(this.saved.config, mnemonic, { sdk: await this.sdk(), restore: !!this.saved.scan }), (a) => a.dispose());
+    const mnemonic = await this.mnemonic(this.saved);
+    this.adapter =await this.gate.within(BarkAdapter.connect(this.saved.config, mnemonic, { sdk: await this.sdk(), restore: !!this.saved.scan }), (a) => a.dispose());
     this.view = { ...this.view, locked: false }; this.watchScan(this.adapter); await this.refresh();
   }
   /** Shutting down: nothing reconnects afterwards. */
@@ -251,7 +254,13 @@ export class BarkWallet {
   async board(): Promise<string> { const pending = await this.require().board(); await this.refresh(); return pending.txid; }
   async target(): Promise<PaymentTarget> { const adapter = this.require(); return { method: "bark", network: adapter.config.network, provider: adapter.config.provider, asset: "BTC", unit: "sat", address: await adapter.requestAddress(), expiresAt: Date.now() + 15 * 60 * 1000 }; }
   require() { if (!this.adapter) throw new Error("Wait for your Bark wallet to connect"); return this.adapter; }
-  async backup() { if (!this.saved) throw new Error("No Bark wallet to back up"); return { mnemonic: await unsealSeed(this.saved.seed, this.saved.deviceKey), config: this.saved.config }; }
+  async backup() { if (!this.saved) throw new Error("No Bark wallet to back up"); return { mnemonic: await this.mnemonic(this.saved), config: this.saved.config }; }
+  /** Sealed as the profile wants it now: beside a device key, or under its data key. */
+  private async sealed(mnemonic: string): Promise<Pick<StoredBark, "seed" | "deviceKey">> {
+    const sealer = recordSealer({ store: STORES.settings, key: this.key });
+    return { seed: await sealer.seal(mnemonic, SEED), ...sealer.beside };
+  }
+  private mnemonic(saved: StoredBark) { return openRecordSecret(saved.seed, saved.deviceKey, { store: STORES.settings, key: this.key, field: SEED }); }
   /**
    * The phrase, the server and the payments, sealed with a password the person chooses. Bark keeps no copy of
    * the wallet's coins to restore from: with the phrase, the server hands back what it holds for this wallet.
@@ -276,8 +285,7 @@ export class BarkWallet {
     // A new local database: the server's recovery scan fills it from the phrase on first open, and the on-chain scan
     // (once, `scan`) finds the on-chain addresses the phrase used before.
     const config: BarkConfig = { ...payload.config, walletId: crypto.randomUUID() };
-    const deviceKey = newDeviceKey();
-    const saved: StoredBark = { config, seed: await sealSeed(payload.mnemonic, deviceKey), deviceKey, scan: true };
+    const saved: StoredBark = { config, ...await this.sealed(payload.mnemonic), scan: true };
     await this.save(saved, replaced || undefined, payload.intents.map((intent) => ({ ...intent, review: { ...intent.review, state: ["pending", "submitted", "unknown"].includes(intent.review.state) ? "unknown" : intent.review.state } })));
     this.saved = saved; this.view = this.idle(config); this.changed();
   }); }
