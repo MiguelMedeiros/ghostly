@@ -1049,7 +1049,7 @@ describe("a headless caller starting over on a second offer", () => {
     expect(call.addCallEventMessage.mock.calls.filter(([type]) => type === "call_connected")).toHaveLength(1);
   });
 
-  it("an offer is not a restart for a call we placed, nor for one whose connection came up", async () => {
+  it("an offer is not a restart for a call we placed, nor for one whose connection came up: that one is the caller starting over", async () => {
     const call = renderCall();
     const { pc } = await offered(call);
     call.receive(remote.answer(Date.now() + 1));
@@ -1065,8 +1065,11 @@ describe("a headless caller starting over on a second offer", () => {
     act(() => { answeredPc.setIceState("connected"); answeredPc.setConnectionState("connected"); });
     other.receive(remote.offer(Date.now() + 3));
     await settle();
-    expect(answeredPc.close).not.toHaveBeenCalled();
-    expect(other.result.current.callState).toBe("connected");
+    // Not answered on a new connection: the call ends here with no hang-up, and the offer rings as a new call.
+    expect(FakePeerConnection.instances).toHaveLength(2);
+    expect(answeredPc.close).toHaveBeenCalledOnce();
+    expect(other.result.current.callState).toBe("incoming");
+    expect(other.publishedKinds()).toEqual(["a", null]);
   });
 });
 
