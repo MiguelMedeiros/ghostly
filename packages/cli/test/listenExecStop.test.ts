@@ -24,7 +24,20 @@ afterAll(async () => {
   relay?.server.close();
 }, 30_000);
 
-const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+/** A zombie is not alive: it ended, and only waits for its new parent to reap it. */
+const alive = (pid: number) => {
+  try { process.kill(pid, 0); } catch { return false; }
+  try { return readFileSync(`/proc/${pid}/stat`, "utf8").split(") ").at(-1)?.[0] !== "Z"; } catch { return true; }
+};
+/**
+ * Gone within a moment. The hook's pid is its shell's, a grandchild of the listen (`sh -c` runs it in a shell of its
+ * own): the listen leaves once that `sh -c` exits, and the shell, killed with it, can still be dying, or a zombie the
+ * process it was handed to has not reaped yet. A hook left running on its own (`sleep 30`) is still there.
+ */
+const gone = async (pid: number, ms = 5_000) => {
+  for (const until = Date.now() + ms; Date.now() < until;) { if (!alive(pid)) return true; await new Promise((resolve) => setTimeout(resolve, 50)); }
+  return !alive(pid);
+};
 
 async function until<T>(read: () => T | undefined, ms: number, what: string): Promise<T> {
   const end = Date.now() + ms;
@@ -62,9 +75,10 @@ describe("listen --exec stopped while its hook runs", { timeout: 120_000 }, () =
         const [pid, seq] = await until(() => starts()[0], 30_000, "the hook's start");
         expect(alive(pid)).toBe(true);
         listen.child.kill(stopSignal);
-        await listen.exited(30_000);
+        // Exit 0: the stop ran. A listen that had no handler yet was ended by the signal itself, its hook left running.
+        expect(await listen.exited(30_000), listen.stderr).toBe(0);
         // No orphan: the hook is gone with the listen, and it never finished.
-        expect(alive(pid), `the hook ${pid} still runs after the listen stopped\n${listen.stderr}`).toBe(false);
+        expect(await gone(pid), `the hook ${pid} still runs after the listen stopped\n${listen.stderr}`).toBe(true);
         expect(Number(readFileSync(cursor, "utf8").trim())).toBeLessThan(seq);
         expect(listen.stderr).toContain(`ghostly: stopped while --exec ran on event ${seq} (chat.created): ended it, and the event is handed again at the next start`);
         // The restarted listen hands the event again, once, with no other hook of it running.
@@ -74,9 +88,10 @@ describe("listen --exec stopped while its hook runs", { timeout: 120_000 }, () =
         expect(again).not.toBe(pid);
         expect(alive(pid)).toBe(false);
         expect(readFileSync(log, "utf8")).not.toContain("done ");
+        // Stopped as its hook starts: a replayed event, whose hook can start before the subscription's answer is awaited.
         listen.child.kill("SIGTERM");
-        await listen.exited(30_000);
-        expect(alive(again)).toBe(false);
+        expect(await listen.exited(30_000), listen.stderr).toBe(0);
+        expect(await gone(again), `the hook ${again} still runs after the listen stopped\n${listen.stderr}`).toBe(true);
       } finally {
         await listen.stop();
         if (withDaemon) await ghostly(["--home", dir, "daemon", "stop"], { env });

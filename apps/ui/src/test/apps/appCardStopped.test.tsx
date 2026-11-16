@@ -131,6 +131,34 @@ describe("an app card whose app stops while Open has the focus", () => {
 });
 
 /*
+ * The same on the Apps page: an installed app's row whose app stops while its Open has the focus. Open goes, and the
+ * focus goes to the row's name, which now says "Stopped", not to the page.
+ */
+describe("an Apps page row whose app stops while Open has the focus", () => {
+  async function stopWith(next: InstalledAppView["run"], focus: "open" | "elsewhere") {
+    run = { status: "ok" };
+    renderApp(<><button type="button" data-testid="elsewhere">Elsewhere</button><Apps /></>, { route: "/apps" });
+    const row = await screen.findByTestId("installed-app");
+    (focus === "open" ? within(row).getByTestId("installed-app-open") : screen.getByTestId("elsewhere")).focus();
+    run = next;
+    await act(() => refreshInstalledApps());
+    expect(within(row).getByTestId("installed-app-hint")).toHaveTextContent(/^Stopped$/);
+    expect(within(row).queryByTestId("installed-app-open")).not.toBeInTheDocument();
+    return row;
+  }
+
+  it.each([["revoked", { status: "revoked" } as const], ["removed by a store", REMOVED]])("%s: the focus goes to the row's name, Stopped", async (_name, next) => {
+    const row = await stopWith(next, "open");
+    expect(document.activeElement).toBe(within(row).getByRole("button", { name: "Chess 1.2.0 Stopped: details" }));
+  });
+
+  it("the focus elsewhere is left where it is", async () => {
+    await stopWith(REMOVED, "elsewhere");
+    expect(document.activeElement).toBe(screen.getByTestId("elsewhere"));
+  });
+});
+
+/*
  * An Open the engine refused as removed by a store, the card having read the list before that store's removal: the
  * card says so and offers Run anyway. From then on the card follows the installed app, as the Apps page does: the
  * store allowing it again leaves Open alone; its publisher revoking it leaves no Run anyway.

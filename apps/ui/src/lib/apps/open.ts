@@ -16,8 +16,10 @@ export interface OpenAppOptions { runAnyway?: boolean; again?: unknown }
 /**
  * Opens `ref` in the 1:1 chat `linkId`, or alone when it is null. Rejects when it cannot start (revoked, removed, no runner…).
  * Resolves "shown" when it already ran there and was shown again: nothing new started, so the contact is not told again.
+ * Resolves "superseded" when a newer open in that chat overtook it (the web): it starts nothing, the newer one stays,
+ * and the contact is told nothing of it.
  */
-export type AppOpener = (ref: string, linkId: string | null, options?: OpenAppOptions) => Promise<"shown" | void>;
+export type AppOpener = (ref: string, linkId: string | null, options?: OpenAppOptions) => Promise<"shown" | "superseded" | void>;
 
 let opener: AppOpener | null = null;
 const listeners = new Set<() => void>();
@@ -27,7 +29,7 @@ export function setAppOpener(next: AppOpener | null): void {
   for (const listener of [...listeners]) listener();
 }
 
-export function openApp(ref: string, linkId: string | null = null, options: OpenAppOptions = {}): Promise<"shown" | void> {
+export function openApp(ref: string, linkId: string | null = null, options: OpenAppOptions = {}): Promise<"shown" | "superseded" | void> {
   return opener ? opener(ref, linkId, options) : Promise.reject(new Error("Apps cannot run in this app"));
 }
 
@@ -45,13 +47,17 @@ export function useAppOpener(): AppOpener | null {
  */
 export type AppTakedown = { why: "revoked" } | { why: "removed"; store: string } | { why: "failed" } | { why: "unresponsive" } | { why: "offline" } | { why: "focus" };
 
-/** "Chess was stopped: its maker revoked this version", where the app ran. */
-export function takedownText(title: string, takedown: AppTakedown, t: Translate): string {
+/**
+ * "Chess was stopped: its maker revoked this version", where the app ran. The line takes the page's direction, so the
+ * app's title and the store's name are isolated in their own (as `removedLine` does).
+ */
+export function takedownText(name: string, takedown: AppTakedown, t: Translate): string {
+  const title = `\u2068${name}\u2069`;
   if (takedown.why === "failed") return t("apps.view.stoppedFailed", { title });
   if (takedown.why === "offline") return t("apps.view.stoppedOffline", { title });
   if (takedown.why === "unresponsive") return t("apps.view.stoppedUnresponsive", { title });
   if (takedown.why === "focus") return t("apps.view.stoppedFocus", { title });
-  return takedown.why === "revoked" ? t("apps.view.stoppedRevoked", { title }) : t("apps.view.stoppedRemoved", { title, store: takedown.store });
+  return takedown.why === "revoked" ? t("apps.view.stoppedRevoked", { title }) : t("apps.view.stoppedRemoved", { title, store: `\u2068${takedown.store}\u2069` });
 }
 
 /** An app running now, as its opener registered it: its ref, the version it runs, whether the person chose Run anyway, and how to stop it. */
@@ -60,6 +66,8 @@ export interface RunningAppEntry {
   /** The digest its entry had: the installed one may be another by now. */
   digest: string;
   runAnyway: boolean;
+  /** The chat it runs in (null: alone), where its opener has nothing that goes with the chat (a Desktop window). */
+  linkId?: string | null;
   /** Stops the app and says why where it ran. */
   takeDown(takedown: AppTakedown): void;
   /** Stops the app and says nothing: the person uninstalled it. */
@@ -104,6 +112,29 @@ export function stopRunningApps(): void {
   for (const entry of [...running]) entry.stop();
 }
 
+/** How many times each chat was deleted (`stopAppsIn`): an open still on its way in it when it goes never starts. */
+const deletions = new Map<string, number>();
+
+/**
+ * Stops every app still running in the chat `linkId` and says nothing: the chat was deleted, and the engine refuses its
+ * storage and its frames from now on. The web's panel went with the chat already; a Desktop app window has no panel.
+ */
+export function stopAppsIn(linkId: string): void {
+  deletions.set(linkId, (deletions.get(linkId) ?? 0) + 1);
+  for (const entry of [...running]) if (entry.linkId === linkId) entry.stop();
+}
+
+/**
+ * Read by an opener before its first wait, as `lockedSince`: the returned function says whether the chat `linkId` was
+ * deleted since (never, for an app alone). A Desktop app is registered only once its window is there, so a deletion in
+ * between stops nothing of it: the opener asks after every wait, and stops what it made.
+ */
+export function chatDeletedSince(linkId: string | null): () => boolean {
+  if (linkId === null) return () => false;
+  const at = deletions.get(linkId) ?? 0;
+  return () => (deletions.get(linkId) ?? 0) !== at;
+}
+
 const inputListeners = new Set<() => void>();
 
 /**
@@ -120,21 +151,58 @@ export function onAppInput(listener: () => void): () => void {
 }
 
 type RunOf = { status: string; by?: readonly { name: string }[] };
+type InstalledApps = readonly { ref: string; digest: string; run: RunOf; stopped?: readonly { digest: string; run: RunOf }[] }[];
+
+/** Why `ref` at `digest` must not run by `apps`: taken down, or "uninstalled"; null when it may. */
+function takedownOf(apps: InstalledApps, ref: string, digest: string, runAnyway: boolean): AppTakedown | "uninstalled" | null {
+  const app = apps.find((a) => a.ref === ref);
+  if (!app) return "uninstalled";
+  const run = app.digest === digest ? app.run : app.stopped?.find((v) => v.digest === digest)?.run;
+  if (run?.status === "revoked") return { why: "revoked" };
+  if (run?.status === "removed" && !runAnyway) return { why: "removed", store: run.by?.[0]?.name ?? "" };
+  return null;
+}
+
+/** How many reads of the installed apps were asked, and the newest one read (`stopTakenDown`) with its number. */
+let reads = 0;
+let lastRead: { at: number; apps: InstalledApps } | null = null;
+
+/** Called as a read of the installed apps is asked: its number, for `stopTakenDown`. */
+export function readingApps(): number {
+  return ++reads;
+}
 
 /**
  * After the installed apps were read again (an update check, the scheduled one included): every running app whose
  * version is revoked, or removed by a store without Run anyway, is stopped, and says why. The version is the one that
  * runs: after an update, `stopped` holds what the engine found of the one it started with. One no longer
- * installed (the person uninstalled it, on this page or another) is stopped too.
+ * installed (the person uninstalled it, on this page or another) is stopped too. `at`: the read's number
+ * (`readingApps`), which an app still opening compares with its own (`takenDownSince`).
  */
-export function stopTakenDown(apps: readonly { ref: string; digest: string; run: RunOf; stopped?: readonly { digest: string; run: RunOf }[] }[]): void {
+export function stopTakenDown(apps: InstalledApps, at: number = readingApps()): void {
+  if (!lastRead || at > lastRead.at) lastRead = { at, apps };
   for (const entry of [...running]) {
-    const app = apps.find((a) => a.ref === entry.ref);
-    if (!app) { entry.stop(); continue; }
-    const run = app.digest === entry.digest ? app.run : app.stopped?.find((v) => v.digest === entry.digest)?.run;
-    if (run?.status === "revoked") entry.takeDown({ why: "revoked" });
-    else if (run?.status === "removed" && !entry.runAnyway) entry.takeDown({ why: "removed", store: run.by?.[0]?.name ?? "" });
+    const why = takedownOf(apps, entry.ref, entry.digest, entry.runAnyway);
+    if (why === "uninstalled") entry.stop();
+    else if (why) entry.takeDown(why);
   }
+}
+
+/**
+ * Read by an opener before its first wait, as `lockedSince`: an app is registered only once its entry is there (and on
+ * Desktop its window), so a read in between stops nothing of it. After its last wait the opener asks with the version
+ * the engine gave it, and one a read asked since found revoked, removed (without Run anyway) or uninstalled throws, in
+ * the engine's words: it stops what it made and does not start the app. A read asked before is older than the engine's check.
+ */
+export function takenDownSince(): (ref: string, digest: string, runAnyway: boolean) => void {
+  const at = reads;
+  return (ref, digest, runAnyway) => {
+    if (!lastRead || lastRead.at <= at) return;
+    const why = takedownOf(lastRead.apps, ref, digest, runAnyway);
+    if (why === "uninstalled") throw new Error("not-installed: This app is not installed");
+    if (why?.why === "revoked") throw new Error("revoked: Its publisher revoked this version");
+    if (why?.why === "removed") throw new Error(`removed: Removed by ${why.store}`);
+  };
 }
 
 /**

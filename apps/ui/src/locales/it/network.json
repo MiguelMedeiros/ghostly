@@ -14,6 +14,7 @@
   "protocolDirect": "Raggiunge la {{dht}} direttamente (UDP) e i relay {{pkarr}} (HTTP)",
   "protocolRelays": "Raggiunge la {{dht}} tramite i relay {{pkarr}} (HTTP)",
   "pushRelay": "Relay push (facoltativo)",
+  "pushRelayBusy": "L'ultimo risveglio tramite questo relay è stato rifiutato: era al suo limite (HTTP {{http}}). Torna a svegliare i contatti appena ha spazio.",
   "pushRelayHint": "Per svegliare i contatti da un browser. Vuoto: nessuno.",
   "pushRelayInfo": "Un browser non può inviare a un servizio push; lo fa questo relay. Vede il tuo indirizzo IP e quando svegli qualcuno, mai il messaggio.",
   "pushRelayRefused": "L'ultimo risveglio tramite questo relay non è riuscito: non ha risposto come un relay push (HTTP {{http}}). I contatti con l'app chiusa non vengono svegliati tramite lui.",

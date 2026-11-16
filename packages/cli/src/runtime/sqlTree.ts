@@ -142,6 +142,16 @@ export class TreeFile {
     try { fsyncSync(fd); } finally { closeSync(fd); }
   }
 
+  /**
+   * rows.db written again whole (VACUUM), with nothing but its rows: `secure_delete` zeroes the cell a delete frees, not
+   * the copies a page's rebalancing left in its unused space, where a text gone from every row was still found after a
+   * few thousand writes. A second or two for a profile of 100,000 messages, the thread held: only when asked
+   * (`message delete --purge`).
+   */
+  scrub(): void {
+    this.db.exec("VACUUM");
+  }
+
   /** Trees whose store or index is gone from the schema (deleted, a database removed) go, with their entries. */
   sweep(keep: ReadonlySet<number>): void {
     const ids = (this.db.prepare("SELECT id FROM trees").all() as { id: number }[]).map((row) => Number(row.id)).filter((id) => !keep.has(id));
@@ -433,7 +443,8 @@ export class SqlTree {
 /**
  * rows.db, owner-only (SQLite makes its WAL files with the database's mode), in WAL with NORMAL: the journal makes a
  * transaction durable, and `sync` runs before a snapshot takes the journal's place. With `secure_delete` SQLite zeroes
- * what a delete frees: a message or chat deleted is not left readable in the file's free pages after the fold.
+ * what a delete frees: a message or chat deleted is not left readable in the file's free pages after the fold (but for
+ * a copy a page's rebalancing left behind, now and then: `TreeFile.scrub`).
  */
 export function openTreeFile(sqlite: typeof import("node:sqlite"), path: string, constraintError: new () => Error): TreeFile {
   closeSync(openSync(path, "a", 0o600));

@@ -1,5 +1,5 @@
-import type { StoredMessage } from "@ghostly/browser/shared/types";
-import { noMessage, nobodyJoinedChat, node, state, type ApiContext } from "./apiKit";
+import type { GroupView, StoredMessage } from "@ghostly/browser/shared/types";
+import { groupById, noMessage, nobodyJoinedChat, node, type ApiContext, type Method } from "./apiKit";
 import { CliError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import { goesOn as goesOnIn } from "./waitNotice";
@@ -30,7 +30,7 @@ export const goesOn = (ctx: ApiContext, chat?: string) => chat !== undefined && 
 const stopped = (ctx: ApiContext) => ctx.stopping?.aborted === true;
 
 /** How a wait that ends short of its aim begins: its time ran out, or the daemon stopped under it. */
-const ended = (ctx: ApiContext, ms: number) => stopped(ctx) ? "The daemon stopped before the wait ended" : `Timed out after ${Math.round(ms / 1000)} s`;
+export const ended = (ctx: ApiContext, ms: number) => stopped(ctx) ? "The daemon stopped before the wait ended" : `Timed out after ${Math.round(ms / 1000)} s`;
 
 /** A timed-out wait's details, and `reason: "daemon-stopped"` when the daemon's stop ended it. */
 const known = (ctx: ApiContext, details: Record<string, unknown>) => stopped(ctx) ? { ...details, reason: "daemon-stopped" } : details;
@@ -56,29 +56,86 @@ export async function waitForRemoval(ctx: ApiContext, chat: string, messageId: s
   }
 }
 
+/** How long `purgeMessage` waits for the engine to take the message's row out: it does so in a few milliseconds. */
+const PURGE_WAIT_MS = 5_000;
+
+/**
+ * `message delete --purge`: once the message's row is gone (the engine takes it out on later turns, its files first),
+ * the replies that quote it lose its line (a delete here leaves it in their rows, one for everyone to a sweep within
+ * 10 s), then the store's journal is folded into a fresh snapshot now, not within the hour of the fold that comes by
+ * itself: what the message said leaves rows.db, `db/journal.bin` and rows.db's WAL before the command answers. For a
+ * secret pasted into a chat; every delete folding would rewrite the snapshot each time. `message`: its row, read
+ * before the delete.
+ */
+export async function purgeMessage(ctx: ApiContext, message: StoredMessage): Promise<void> {
+  const { linkId: chat, id: messageId } = message;
+  const until = performance.now() + PURGE_WAIT_MS;
+  let gone = !(await node(ctx).getMessage(chat, messageId));
+  while (!gone && performance.now() < until) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    gone = !(await node(ctx).getMessage(chat, messageId));
+  }
+  if (gone) await node(ctx).forgetQuotesOf(message);
+  await ctx.runtime.store.compact({ scrub: true });
+  if (!gone) throw new CliError("timeout", `Timed out after ${PURGE_WAIT_MS / 1000} s: the message is deleted, but what it said may stay in the profile's store until its next fold (within the hour)`, { messageId, deleted: messageId });
+}
+
+/**
+ * `message delete --purge` that the delete answers no to (`not_found`, `refused`): the store folds all the same, so
+ * the error says so in its words and `details.purged`. A message no longer here (the contact deleted it for everyone,
+ * or a delete here without `--purge` took it) and another member's group message (only its author deletes it, and
+ * once they do it is gone here) answered no and folded nothing: what a deleted copy said stayed in `db/journal.bin`
+ * and rows.db's WAL until the fold within the hour. A usage mistake (`bad_request`) folds nothing.
+ */
+export function foldsAnyway(method: Method): Method {
+  return async (ctx, params, call) => {
+    try { return await method(ctx, params, call); } catch (error) {
+      if (params.purge !== true || !(error instanceof CliError) || (error.code !== "not_found" && error.code !== "refused")) throw error;
+      await ctx.runtime.store.compact({ scrub: true });
+      // Said first: a refusal may end in a command to paste (`... is a group, not a chat: ghostly message delete ...`).
+      throw new CliError(error.code, `The store was folded anyway, so a deleted copy of it is gone from the profile's folder. ${error.message}`, { ...error.details, purged: true });
+    }
+  };
+}
+
 /**
  * A private group with no member but me (they all left, or nobody accepted an invitation yet): what I send there now
  * reaches nobody, not even a member who joins later (a joiner reads nothing from before). A community's roster may not
  * list every member yet, so only a private group counts.
  */
-export const nobodyElseIn = (ctx: ApiContext, groupId: string): boolean => {
-  const group = state(ctx).groups?.find((g) => g.id === groupId);
-  return group?.profile === "mesh" && !group.members.some((m) => !m.me);
-};
+export const nobodyElseIn = (ctx: ApiContext, groupId: string): boolean => alone(groupIn(ctx, groupId));
+
+/** A group as the engine shows it, built alone: `getState()` builds a view of every chat, once per poll. */
+const groupIn = (ctx: ApiContext, groupId: string): GroupView | undefined => groupById(ctx, groupId);
+
+const alone = (group: GroupView | undefined): boolean => group?.profile === "mesh" && !group.members.some((m) => !m.me);
+
+/**
+ * Why I am no longer in a group (removed, say), or null while I am. A member removed while away learns it only after
+ * it is back, so what it sent in between is never taken, and from then on nothing goes. A community's `lost` is not
+ * out: it asks to be let in again by itself.
+ */
+export const outOf = (group: GroupView | undefined): string | null =>
+  group?.status && group.status !== "active" && group.status !== "lost" ? group.statusReason ?? "You are not in this group" : null;
 
 /**
  * Waits until an edge took my group message, or its edit number `edit`, or my reaction to it numbered `reaction`, or my
  * pin numbered `pin` (WISP 902: a group has no receipts, so this is as far as the author sees): a member's edge in a
  * private group, an edge to one of my hubs in a community. In a private group with nobody else in it, 0 at once: no
  * edge will ever take it, and the wait sat its whole time, then said "it goes when one opens" and exited 4, which a
- * bot retries, sending it again each time.
+ * bot retries, sending it again each time. Refused as soon as I learn I am out of the group: it sat its whole time
+ * there too and said the same, though nothing goes any more.
  */
 export async function waitForGroupFrame(ctx: ApiContext, groupId: string, messageId: string, edit: number | { reaction: number } | { pin: number } | undefined, ms: number): Promise<number> {
   const until = performance.now() + ms;
   const which = typeof edit === "object" ? edit : edit ? { edit } : {};
   for (;;) {
     const taken = node(ctx).groupTaken({ groupId, messageId, ...which });
-    if (taken > 0 || nobodyElseIn(ctx, groupId)) return taken;
+    if (taken > 0) return taken;
+    const group = groupIn(ctx, groupId);
+    if (alone(group)) return taken;
+    const out = outOf(group);
+    if (out) throw new CliError("refused", `${out}: no member took it, and it no longer goes`, { messageId, ...("edit" in which ? { edits: which.edit } : which) });
     if (performance.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: no member's edge took it yet (it stays in the group and goes when one opens). It ${goesOn(ctx)}`, known(ctx, { messageId, ...("edit" in which ? { edits: which.edit } : which) }));
     await new Promise((resolve) => setTimeout(resolve, 250));
   }

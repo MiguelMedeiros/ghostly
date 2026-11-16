@@ -5,6 +5,7 @@
  * - `runtime.sendMessage` reaches every `onMessage` listener; the first one to
  *   call `sendResponse` answers, a listener keeps the channel open only by
  *   returning `true`, and nobody answering rejects the way Chrome does.
+ *   `runtime.connect` with no `onConnect` listener disconnects the caller's end.
  * - Listeners remember which context registered them (`background`,
  *   `offscreen`, `page`), so a service-worker restart drops exactly the
  *   worker's listeners and in-memory state while `storage.session`, tabs and
@@ -94,6 +95,8 @@ export interface FakeWorld {
   onCreateDocument: () => Promise<void>;
   /** Makes the next `debugger.attach` fail, as it does when DevTools is already attached. */
   failDebuggerAttach: string | null;
+  /** Makes every `browsingData.remove` fail with this message. */
+  failBrowsingData: string | null;
   manifest: chrome.runtime.Manifest;
   permissionsGranted: boolean;
   /** The host patterns Chrome holds for the extension now: a granted `permissions.request` adds, `permissions.remove` takes away. */
@@ -160,6 +163,7 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
     offscreenDocument: false,
     onCreateDocument: async () => {},
     failDebuggerAttach: null as string | null,
+    failBrowsingData: null as string | null,
     manifest,
     permissionsGranted: true,
     hostAccess: new Set<string>(),
@@ -353,6 +357,15 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
         }));
       },
     },
+    /** Present only with the manifest's `browsingData` permission, as in Chrome. */
+    browsingData: manifest.permissions?.includes("browsingData")
+      ? {
+          async remove(options: chrome.browsingData.RemovalOptions, dataToRemove: chrome.browsingData.DataTypeSet) {
+            record("browsingData.remove", options, dataToRemove);
+            if (world.failBrowsingData) throw new Error(world.failBrowsingData);
+          },
+        }
+      : undefined,
     notifications: undefined as unknown,
     permissions: {
       onAdded: event<(permissions: chrome.permissions.Permissions) => void>(),
@@ -420,6 +433,9 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
   };
   world.restartServiceWorker = () => {
     for (const e of world.events) e.dropContext("background");
+    // The ports the worker opened go with it: the other end hears it.
+    const worker = chromeApi.runtime.getURL("background.js");
+    for (const { caller, receiver } of world.ports) if (receiver.sender?.url === worker) caller.disconnect();
   };
   world.alarms = new Map();
   world.fireAlarm = (name) => {
@@ -437,7 +453,9 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
     mine.peer = theirs;
     theirs.peer = mine;
     world.ports.push({ caller: mine, receiver: theirs });
-    onConnect.dispatch(theirs as never);
+    // As Chrome: with no `onConnect` listener anywhere ("Receiving end does not exist"), the caller's end disconnects.
+    if (!onConnect.hasListeners()) theirs.disconnect();
+    else onConnect.dispatch(theirs as never);
     return mine;
   };
   world.sendMessageFrom = (sender, message) => {

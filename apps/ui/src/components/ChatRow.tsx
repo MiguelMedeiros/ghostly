@@ -35,7 +35,9 @@ import type { UsageEntry } from "../lib/usage";
 import { UsagePill } from "./chat/UsageMeter";
 import type { WorkingEntry } from "../lib/working";
 import { WorkingDot, WorkingGap } from "./chat/WorkingMark";
+import { unreadDot } from "./unreadDot";
 import { REORDER_KEYS } from "../hooks/useRowReorder";
+import { useEngineValue } from "../lib/engineState";
 
 /*
  * The rows of the chat list, drawn the way messengers draw theirs: the name and the time on one line, the last
@@ -60,11 +62,14 @@ const ROW = { compact: "min-h-[66px] py-2.5", comfortable: "min-h-[80px] py-3" }
  */
 const USAGE_COLUMN = "flex min-w-[105px] items-center justify-between gap-1.5";
 
-/** Where my last message is, with the chat's marks: a clock, one tick, two ticks or the red circle. */
-export function DeliveryMark({ delivery, live }: { delivery?: ChatMessage["delivery"]; live?: DhtOnlyBy }) {
+/**
+ * Where my last message is, with the chat's marks: a clock, one tick, two ticks or the red circle. `acked`: a message
+ * without a delivery state (a compatibility chat's text) that the contact's acknowledgement covers, as its bubble says.
+ */
+export function DeliveryMark({ delivery, acked, live }: { delivery?: ChatMessage["delivery"]; acked?: boolean; live?: DhtOnlyBy }) {
   const words = useDeliveryWords();
-  const shape = deliveryShape(delivery);
-  const state = delivery ?? "sent";
+  const shape = deliveryShape(delivery, acked);
+  const state = delivery ?? (acked ? "delivered" : "sent");
   return (
     <span role="img" data-testid="chat-row-delivery" data-delivery={state} aria-label={words.label(state, live)}
       className={`inline-flex shrink-0 align-middle -mt-0.5 ${shape === "sent" || shape === "delivered" ? "me-0.5" : "me-1"} ${shape === "failed" ? "text-danger" : shape === "delivered" ? "text-link" : "text-text-muted"}`}>
@@ -107,7 +112,7 @@ function rowLabel(t: Translate, name: string, state: (string | false | undefined
 
 /** A button in the row's actions: a round target that lights up under the pointer, and in the accent while it is on. */
 const rowAction = (hover = "hover:text-accent") =>
-  `flex h-7 w-7 items-center justify-center rounded-full text-text-secondary transition-colors cursor-pointer hover:bg-text-primary/10 ${hover} aria-pressed:text-accent aria-expanded:bg-text-primary/10 aria-expanded:text-accent data-[muted]:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent`;
+  `flex h-7 w-7 items-center justify-center rounded-full text-text-secondary transition-colors cursor-pointer hover:bg-text-primary/10 ${hover} data-[pinned]:text-accent aria-expanded:bg-text-primary/10 aria-expanded:text-accent data-[muted]:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent`;
 
 /**
  * The row's actions, laid over its marks and time (RowText's `timeCover`). Pointer devices only: a phone opens the
@@ -309,6 +314,12 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
   const installed = useInstalledApps(appCards && p.lastMessage?.card?.kind === "app");
   // A file of mine waiting in a DHT-only chat waits for a live connection, as its bubble says.
   const live = waitsForLive(p.lastMessage?.sender === "me" ? p.lastMessage : undefined, useDhtOnly(p.peerPubKey));
+  // A text of mine with no delivery state: delivered once the contact's acknowledgement covers it, by the link its
+  // bubble reads (platform/useChat.ts). Only that yes or no draws the row again.
+  const acked = useEngineValue(state => {
+    const m = p.lastMessage;
+    return m?.sender === "me" && !m.delivery && (state?.links.find(l => l.peerPubKeyZ32 === p.peerPubKey)?.peerAck ?? 0) >= m.timestamp;
+  });
   const previewId = useId();
   useChosenProfile(p.peerPubKey);
   const meter = p.usage && <UsagePill entry={p.usage} testId="chat-row-usage" />;
@@ -379,7 +390,7 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
           ? <span data-testid="chat-row-note" className="text-text-muted">{p.note}</span>
           : p.lastMessage
           ? <span className={p.unread > 0 ? "text-text-secondary font-medium" : "text-text-muted"}>
-              {p.lastMessage.sender === "me" && <DeliveryMark delivery={p.lastMessage.delivery} live={live} />}
+              {p.lastMessage.sender === "me" && <DeliveryMark delivery={p.lastMessage.delivery} acked={acked} live={live} />}
               {p.lastMessage.systemEvent?.type === "join" ? joinPreview(p, p.lastMessage.systemEvent.pubKey, t)
                 : refused !== undefined ? refused
                 : p.lastMessage.callEvent ? callEventText(t, p.lastMessage.callEvent.type, p.lastMessage.callEvent.hasVideo, callLineCount(p.lastMessage.callEvent)) ?? p.lastMessage.text
@@ -398,7 +409,8 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
           // the hand is under the pointer all the way: it keeps its marks and time, not buttons that cannot be used.
           !p.reorder?.dragging && <RowActions active={p.active}>
             <RowMute chat={p.chatId} />
-            <button type="button" title={pinLabel} aria-label={pinLabel} aria-pressed={p.pinned} data-testid="chat-row-pin"
+            {/* Named for what it does next (Pin, Unpin), so it is no toggle: "Unpin chat, pressed" read as unpinned. */}
+            <button type="button" title={pinLabel} aria-label={pinLabel} data-pinned={p.pinned || undefined} data-testid="chat-row-pin"
               onClick={e => { e.stopPropagation(); p.onTogglePin(); }} className={rowAction()}>
               <PinIcon active={p.pinned} />
             </button>
@@ -490,7 +502,7 @@ const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen
             {/* Hidden from a screen reader, as the dot: the row's button says both (rowLabel). */}
             {mention && <span aria-hidden="true" data-testid="group-row-mention" data-muted={mentionQuiet || undefined} title={t("mentions.unread")}
               className={`flex h-5 w-5 items-center justify-center rounded-full text-[12px] font-bold leading-none ${mentionQuiet ? "bg-text-secondary text-sidebar-bg" : "bg-accent text-on-accent"}`}>@</span>}
-            <span aria-hidden="true" data-testid="group-row-unread" data-muted={muted || undefined} className={`w-2.5 h-2.5 rounded-full ${muted ? "bg-text-secondary" : "bg-accent"}`} />
+            <span aria-hidden="true" data-testid="group-row-unread" data-muted={muted || undefined} className={`w-2.5 h-2.5 ${unreadDot(muted)}`} />
           </span>}
         />
         {/* Taken back: nothing to answer, only to clear away (it says nothing to whoever took it back). */}

@@ -12,6 +12,7 @@ import { signPairedSignal } from "../src/pairedSignal";
 import { createChannelPair } from "./helpers";
 import { SESSION_RECEIVE_PENDING } from "../src/pairedSession";
 import { IDENTITY_FRAME_LIMIT, IDENTITY_FRAME_WINDOW_MS } from "../src/identityProofs";
+import { CALL_RATE_WINDOW_MS, CALL_RECEIVE_LIMIT } from "../src/pairedCalls";
 
 // covers: chat.paired.session, chat.paired.send, chat.paired.receipts, chat.paired.reconnect, chat.paired.nickname-sync, chat.legacy.send, core.liveness, core.capabilities, transport.switch, payments.chat.frames
 
@@ -1044,10 +1045,11 @@ describe("legacy data link frames", () => {
     const pkarr = vi.spyOn(t.a.session, "sendMessage").mockResolvedValue(null);
     const call = vi.spyOn(t.a.session, "setCallSignal").mockResolvedValue();
     expect(await t.a.sendMessage("hi", 3)).toBeNull();
-    await t.a.setCallSignal("ring");
-    await vi.waitFor(() => expect(onCallSignal).toHaveBeenCalledWith("ring"));
+    const ring = JSON.stringify({ t: "h", ts: Date.now() });
+    await t.a.setCallSignal(ring);
+    await vi.waitFor(() => expect(onCallSignal).toHaveBeenCalledWith(expect.stringContaining(ring.slice(0, -1))));
     expect(onMessage).toHaveBeenCalledWith({ text: "hi", timestamp: 3, via: "datalink" });
-    expect(call).toHaveBeenCalledWith("ring");
+    expect(call).toHaveBeenCalledWith(ring);
     expect(pkarr).not.toHaveBeenCalled();
     const long = "x".repeat(16 * 1024 / 4 + 1);
     await t.a.sendMessage(long, 4);
@@ -1081,6 +1083,29 @@ describe("legacy data link frames", () => {
     expect(onMessage).not.toHaveBeenCalled();
     expect(onCallSignal).not.toHaveBeenCalled();
     expect(onPaymentRequest).not.toHaveBeenCalled();
+    expect(t.b.isDataLinkOpen).toBe(true);
+  });
+
+  it("takes at most the call receive limit of signals per window, counted before they are read, and none twice", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const onCallSignal = vi.fn();
+    const t = legacyPair([{}, { events: { onCallSignal } }]);
+    t.attach();
+    const base = Date.now();
+    const signal = (i: number) => JSON.stringify({ t: "h", ts: base + i });
+    for (let i = 0; i <= CALL_RECEIVE_LIMIT; i++) t.toB({ t: "call", s: signal(i) });
+    await vi.waitFor(() => expect(onCallSignal).toHaveBeenCalledTimes(CALL_RECEIVE_LIMIT));
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(onCallSignal).toHaveBeenCalledTimes(CALL_RECEIVE_LIMIT);
+    // The next window takes them again; one already heard is not news, and a malformed one is not handed on.
+    vi.setSystemTime(Date.now() + CALL_RATE_WINDOW_MS);
+    t.toB({ t: "call", s: signal(CALL_RECEIVE_LIMIT - 1) });
+    t.toB({ t: "call", s: "not a signal" });
+    t.toB({ t: "call", s: signal(CALL_RECEIVE_LIMIT) });
+    await vi.waitFor(() => expect(onCallSignal).toHaveBeenCalledTimes(CALL_RECEIVE_LIMIT + 1));
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(onCallSignal).toHaveBeenCalledTimes(CALL_RECEIVE_LIMIT + 1);
+    expect(onCallSignal).toHaveBeenLastCalledWith(expect.stringContaining(`"ts":${base + CALL_RECEIVE_LIMIT}`));
     expect(t.b.isDataLinkOpen).toBe(true);
   });
 

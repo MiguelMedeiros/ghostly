@@ -1,7 +1,7 @@
 import { createLink } from "@ghostly/core";
 import type { Page } from "@playwright/test";
 import { fileURLToPath } from "node:url";
-import { chat, expect, say, test } from "../support/fixtures";
+import { chat, createWallet, expect, say, test, useFakeProviders } from "../support/fixtures";
 import { iosKeyboard, keyboard } from "../support/keyboard";
 import { pair } from "../support/paired";
 import { optionsOf } from "../support/select";
@@ -199,6 +199,82 @@ test("a phone on its side: an open select's list stays clear of the notch", { ta
   expect(box.x + box.width).toBeLessThanOrEqual(LANDSCAPE.width - SIDE);
   expect(box.y + box.height).toBeLessThanOrEqual(LANDSCAPE.height - HOME);
   await expect(options.first()).toBeVisible();
+});
+
+/**
+ * What a panel from the end edge shows clear of the safe area: nothing past the end inset, under the top one (an
+ * installed iPad's status bar) or in the home indicator's band. The insets differ on each side, so the end the page's
+ * direction puts it at is the one checked.
+ */
+async function clearOfInsets(page: Page, panel: string, targets: string[], insets: { left: number; right: number; top: number; bottom: number }) {
+  const rtl = await page.locator("html").getAttribute("dir") === "rtl";
+  const end = rtl ? insets.left : insets.right;
+  const box = (await page.getByTestId(panel).boundingBox())!;
+  // At its end edge, as wide as before plus the inset: the content keeps its 400px.
+  expect(rtl ? box.x : box.x + box.width).toBe(rtl ? 0 : LANDSCAPE.width);
+  expect(box.width).toBe(400 + end);
+  for (const id of targets) {
+    const target = (await page.getByTestId(panel).getByTestId(id).boundingBox())!;
+    if (rtl) expect(target.x).toBeGreaterThanOrEqual(end);
+    else expect(target.x + target.width).toBeLessThanOrEqual(LANDSCAPE.width - end);
+    expect(target.y).toBeGreaterThanOrEqual(insets.top);
+    expect(target.y + target.height).toBeLessThanOrEqual(LANDSCAPE.height - insets.bottom);
+  }
+}
+
+/** Uneven on purpose: a panel that pads the wrong side's inset is caught. And a status bar's 24px on top. */
+const PANEL_INSETS = { left: 47, right: SIDE, top: 24, bottom: HOME };
+
+for (const language of ["en", "ar"] as const) {
+  test(`a phone on its side (${language}): a message's details keep the close button and Copy JSON clear of the notch and the home indicator`, { tag: ["@feature:app.mobile-layout", "@feature:chat.paired.message-details"] }, async ({ peer }) => {
+    // The panel is a portal on the body, outside #root's side insets: its ✕ sat 16px from the screen's edge, under
+    // the Dynamic Island's band, and Copy JSON in the home indicator's.
+    const { page } = await peer(`side-details-${language}`, { mobile: true, viewport: LANDSCAPE });
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: PANEL_INSETS });
+    const mine = createLink().mine;
+    await page.evaluate(({ mine, language }) => {
+      const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+      localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language }));
+      const id = crypto.randomUUID().replaceAll("-", "");
+      const messages = [{ id: "m0", sender: "peer", timestamp: Date.now() - 60_000, text: "Where did this come from?" }];
+      localStorage.setItem(`ghostly_${id}`, JSON.stringify({ id, mySeedB64: mine.seedB64, peerPubKeyB64: mine.peerPubKeyZ32, encKeyB64: mine.encKeyB64, messages, createdAt: Date.now() - 120_000 }));
+      localStorage.setItem(`ghostly_join_${id}`, "true");
+      location.hash = `/chat/${id}`;
+    }, { mine, language });
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("dir", language === "ar" ? "rtl" : "ltr");
+    const row = page.locator(".chat-wallpaper [data-message-row]").filter({ hasText: "Where did this come from?" });
+    await expect(row).toBeVisible();
+    await row.hover();
+    await row.getByTestId("message-options").click({ force: true });
+    await page.getByTestId("message-details").click();
+    const panel = page.getByTestId("message-details");
+    await expect(panel).toHaveAttribute("data-side", "end");
+    await expect(panel).toHaveAttribute("data-loaded", "yes");
+    // Its slide in over (it stays in getAnimations(), filled).
+    await panel.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
+    await clearOfInsets(page, "message-details", ["message-details-close", "message-details-copy-all"], PANEL_INSETS);
+  });
+}
+
+test("a phone on its side: a wallet total's breakdown keeps its close button clear of the notch", { tag: ["@feature:app.mobile-layout", "@feature:wallet.balance.total"] }, async ({ peer }) => {
+  // The same panel from the end edge as a message's details, with the same escape from #root's insets.
+  const alice = await peer("side-wallet-total");
+  const page = alice.page;
+  await useFakeProviders(alice);
+  await createWallet(alice, "lightning", "testnet", { provider: "fake-lightning", fill: async (form) => {
+    await form.getByLabel("Name").fill("Node A");
+    await form.getByLabel("Access token").fill("token-a");
+    await form.getByTestId("provider-save").click();
+  } });
+  await expect(page.getByTestId("wallet-total-bitcoin-amount")).toHaveText(/^100,000\s*test sats$/, { timeout: 30_000 });
+  await page.setViewportSize(LANDSCAPE);
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: PANEL_INSETS });
+  await page.getByTestId("wallet-total-bitcoin").click();
+  await expect(page.getByTestId("wallet-total-breakdown")).toHaveAttribute("data-side", "end");
+  await clearOfInsets(page, "wallet-total-breakdown", ["wallet-total-close", "wallet-total-rows"], PANEL_INSETS);
 });
 
 for (const screen of [{ name: "a small phone", width: 667, height: 375, keyboard: 200 }, { name: "two panes", ...LANDSCAPE, keyboard: 240 }]) {

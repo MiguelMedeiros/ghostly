@@ -43,6 +43,20 @@ describe("The dependency scan's allowlist", () => {
     expect(report.accepted(finding("lru", "RUSTSEC-2026-0253"))).toBe(false);
   });
 
+  it("counts an entry with no day, or one that is not a YYYY-MM-DD date, as expired: it accepts nothing", () => {
+    const entries = [entry("glib", "RUSTSEC-2024-0429"), entry("paste", "RUSTSEC-2024-0436", "31/12/2026"), entry("zip", "RUSTSEC-2026-0367", "2026-12-32")];
+    const findings = entries.map((e) => finding(e.package, e.id));
+    const report = allowlistReport(entries, findings, today);
+    expect(report.expired.map((e: Entry) => e.package)).toEqual(["glib", "paste", "zip"]);
+    for (const f of findings) expect(report.accepted(f), f.name).toBe(false);
+    expect(report.unused).toEqual([]);
+  });
+
+  it("holds every entry of the allowlist to a YYYY-MM-DD day", () => {
+    const { accepted } = JSON.parse(readFileSync(join(root, ".github/security-allowlist.json"), "utf8")) as { accepted: Entry[] };
+    expect(accepted.filter((a) => !/^\d{4}-\d{2}-\d{2}$/.test(a.until ?? "")).map((a) => `${a.package} ${a.id}`)).toEqual([]);
+  });
+
   it("names only packages some scanned lockfile has", () => {
     const names = new Set(LOCKFILES.flatMap(({ ecosystem, file }: { ecosystem: string; file: string }) => (ecosystem === "npm" ? npmPackages(file) : cargoPackages(file))).map((p: { name: string }) => p.name));
     const { accepted } = JSON.parse(readFileSync(join(root, ".github/security-allowlist.json"), "utf8")) as { accepted: Entry[] };

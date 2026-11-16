@@ -11,8 +11,21 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 // The options the host is made with, as they are.
 vi.mock("@ghostly/browser/inPageHost", () => ({ createInPageHost: (options: unknown) => options }));
+// The profile's chats, as the engine sends them while it starts.
+const fakeEngine = vi.hoisted(() => {
+  const listeners = new Set<() => void>();
+  return {
+    state: null as null | { transfersRestored?: boolean; links: { myPubKeyZ32: string }[]; edges?: { myPubKeyZ32: string }[] },
+    subscribe(listener: () => void) { listeners.add(listener); return () => listeners.delete(listener); },
+    linkByPeer: () => undefined,
+    send(state: NonNullable<typeof fakeEngine.state>) { fakeEngine.state = state; for (const listener of [...listeners]) listener(); },
+    reset() { fakeEngine.state = null; listeners.clear(); },
+  };
+});
+vi.mock("@ghostly/browser/platform/engine", async (original) => ({ ...(await original<object>()), engine: fakeEngine }));
 
 import { invoke } from "@tauri-apps/api/core";
+import { viewerTag } from "@ghostly/core";
 import { createDesktopHost } from "../../desktop/host";
 import { OPENED_KEY } from "../../lib/openedServices";
 
@@ -37,7 +50,10 @@ const OTHER = "b".repeat(52);
 const TAG_A = "ybndrfg8ejkmcpqx";
 const TAG_B = "ot1uwisza345h769";
 
-beforeEach(() => localStorage.clear());
+beforeEach(() => {
+  localStorage.clear();
+  fakeEngine.reset();
+});
 afterEach(() => {
   called.mockReset();
   called.mockImplementation(async () => undefined);
@@ -67,7 +83,8 @@ describe("Desktop forgets what a contact's app kept", () => {
     called.mockImplementation(async (command) => (command === "forget_service_origins" ? [true] : undefined));
     expect(desktop.forgetServices, "Desktop forgets them").toBeTypeOf("function");
     await desktop.forgetServices!({ tag: TAG_A });
-    expect(forgotten()).toEqual([[{ service: "keeper", peer: PEER, tag: TAG_A }], [{ service: "notes", peer: PEER, tag: TAG_A }]]);
+    // Then the whole chat: an app it opened before the list was kept is on no list.
+    expect(forgotten()).toEqual([[{ service: "keeper", peer: PEER, tag: TAG_A }], [{ service: "notes", peer: PEER, tag: TAG_A }], [{ tag: TAG_A }]]);
     expect(listed()).toEqual([{ profile: "", tag: TAG_B, service: "keeper", peer: OTHER }]);
     // The last one goes with the profile, and the list with it: it names contacts.
     await desktop.forgetServices!({ profile: "" });
@@ -81,14 +98,49 @@ describe("Desktop forgets what a contact's app kept", () => {
     await desktop.openService(OTHER, "maps", TAG_A);
     called.mockImplementation(async (command, args) => {
       if (command !== "forget_service_origins") return undefined;
-      const [{ service }] = args!.origins as { service: string }[];
+      const [{ service }] = args!.origins as { service?: string }[];
       if (service === "notes") throw new Error("Window: no display");
-      // A platform that clears none yet (macOS, Windows) answers false.
-      return [service !== "keeper"];
+      // A platform that clears none yet answers false.
+      return [service !== "keeper" && service !== undefined];
     });
     await desktop.forgetServices!({ tag: TAG_A });
-    expect(forgotten()).toHaveLength(3);
-    expect((listed() as { service: string }[]).map((o) => o.service)).toEqual(["keeper", "notes"]);
+    expect(forgotten()).toHaveLength(4);
+    expect(listed()).toEqual([
+      { profile: "", tag: TAG_A, service: "keeper", peer: PEER },
+      { profile: "", tag: TAG_A, service: "notes", peer: PEER },
+      { profile: "", tag: TAG_A },
+    ]);
+  });
+
+  it("notes each chat of the profile once at start, so an app opened before the list was kept goes with Delete chat", async () => {
+    const [ME_A, ME_B, ME_GROUP] = ["me-a", "me-b", "me-group"];
+    // An app of the chat with A was opened by an older version: nothing on the list names it.
+    const desktop = host();
+    fakeEngine.send({ links: [{ myPubKeyZ32: ME_A }] });
+    expect(listed(), "not before every chat is loaded").toBeNull();
+    fakeEngine.send({ transfersRestored: true, links: [{ myPubKeyZ32: ME_A }, { myPubKeyZ32: ME_B }], edges: [{ myPubKeyZ32: ME_GROUP }] });
+    const tags = [ME_A, ME_B, ME_GROUP].map(viewerTag);
+    expect(listed()).toEqual(tags.map((tag) => ({ profile: "", tag })));
+
+    called.mockImplementation(async (command) => (command === "forget_service_origins" ? [true] : undefined));
+    await desktop.forgetServices!({ tag: tags[0] });
+    expect(forgotten(), "Rust clears every origin of the chat").toEqual([[{ tag: tags[0] }]]);
+    expect(listed()).toEqual(tags.slice(1).map((tag) => ({ profile: "", tag })));
+
+    // Once per profile: a later start notes no chat again.
+    localStorage.removeItem(OPENED_KEY);
+    host();
+    fakeEngine.send({ transfersRestored: true, links: [{ myPubKeyZ32: ME_A }] });
+    expect(listed()).toBeNull();
+  });
+
+  it("has Rust clear every chat it noted with the profile's data", async () => {
+    const desktop = host();
+    fakeEngine.send({ transfersRestored: true, links: [{ myPubKeyZ32: "me-a" }] });
+    called.mockImplementation(async (command) => (command === "forget_service_origins" ? [true] : undefined));
+    await desktop.forgetServices!({ profile: "" });
+    expect(forgotten()).toEqual([[{ tag: viewerTag("me-a") }]]);
+    expect(listed()).toBeNull();
   });
 
   it("never forgets another profile's", async () => {

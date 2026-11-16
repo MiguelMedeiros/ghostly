@@ -5,7 +5,7 @@ import { RELEASES_URL } from "../../ui/src/lib/settings";
 import { builtInAppOption } from "../../ui/src/lib/apps/builtIns";
 import { popupWindow } from "@ghostly/browser/proofs/oidc/popup";
 import { atprotoPopupWindow } from "@ghostly/browser/proofs/atproto/popup";
-import { DHT_POLL_INTERVALS, GhostlyHttpError, RelayTransport } from "@ghostly/core";
+import { DHT_POLL_INTERVALS, GhostlyHttpError, RelayTransport, viewerTag } from "@ghostly/core";
 import type { NodeOptions } from "@ghostly/browser/engine/node";
 import { defaultWalletsAllowed } from "@ghostly/browser/platform/walletSetupSwitch";
 import { engine } from "@ghostly/browser/platform/engine";
@@ -75,24 +75,66 @@ function servicesUnderTest(): boolean {
  */
 const openServices = !!servicesHost && serviceWorkersHere() && servicesUnderTest();
 /**
- * What the contacts' apps a deleted profile opened kept on their origins, where Delete profile could not reach them
- * (offline, the services host down): cleared at each start and each return online (`forgetServicesOfGone`). Nothing
- * of it loads while no app was ever noted.
+ * The `viewerTag` of each chat this page's profile has, once the engine has loaded them all (`transfersRestored`): a
+ * state it sends while it starts may list only some. Before that, undefined. A group's edges count too.
+ */
+function chatTags(): string[] | undefined {
+  const state = engine.state;
+  if (!state?.transfersRestored) return undefined;
+  return [...state.links, ...(state.edges ?? [])].map((link) => viewerTag(link.myPubKeyZ32));
+}
+/**
+ * What the contacts' apps a deleted profile or chat opened kept on their origins, where Delete profile or Delete chat
+ * could not reach them (offline, the services host down, the tab closed during the clear): cleared at each start
+ * (a deleted chat's once the chats are loaded) and each return online (`forgetServicesOfGone`,
+ * `forgetServicesOfChatsGone`). Nothing of it loads while no app was ever noted.
  */
 let forgettingGone = false;
+let forgetAgain = false;
 function forgetServicesOfDeleted(): void {
   const host = servicesHost;
   try {
-    if (!host || forgettingGone || !navigator.onLine || !localStorage.getItem(OPENED_KEY)) return;
+    if (!host || !navigator.onLine || !localStorage.getItem(OPENED_KEY)) return;
   } catch { return; }
+  // The chats loaded during a sweep: one more after it, with them.
+  if (forgettingGone) { forgetAgain = true; return; }
   forgettingGone = true;
   void import("./svc/forget")
-    .then(({ forgetServicesOfGone }) => forgetServicesOfGone(host, listProfiles().map((p) => p.id)))
+    .then(async ({ forgetServicesOfGone, forgetServicesOfChatsGone }) => {
+      await forgetServicesOfGone(host, listProfiles().map((p) => p.id));
+      const tags = chatTags();
+      if (tags) await forgetServicesOfChatsGone(host, activeProfileId(), tags);
+    })
     .catch(() => {})
-    .finally(() => { forgettingGone = false; });
+    .finally(() => {
+      forgettingGone = false;
+      if (forgetAgain) { forgetAgain = false; forgetServicesOfDeleted(); }
+    });
 }
 forgetServicesOfDeleted();
 addEventListener("online", forgetServicesOfDeleted);
+if (servicesHost) {
+  const stopWaiting = engine.subscribe(() => {
+    if (!chatTags()) return;
+    stopWaiting();
+    forgetServicesOfDeleted();
+  });
+}
+/**
+ * Every app a chat lists, noted as the list comes (`noteListed`): one opened here before the opened-apps list was kept
+ * is on no list, and would keep what it stored after Delete chat, Clear all data and Delete profile. Nothing of it
+ * loads while no chat lists one.
+ */
+if (openServices) {
+  engine.subscribe(() => {
+    const state = engine.state;
+    if (!state) return;
+    const links = [...state.links, ...(state.edges ?? [])].filter((link) => link.peerServices?.some((s) => s.type === "http"));
+    if (!links.length) return;
+    const profile = activeProfileId();
+    void import("./svc/forget").then(({ noteListed }) => noteListed(profile, links)).catch(() => {});
+  });
+}
 /**
  * Hide my IP from contacts is on: a contact's app does not open here. No policy this page sends keeps a Chromium browser
  * from connecting to a server a frame in the app points at (its "Preload pages" connects before the policy refuses the
@@ -179,11 +221,15 @@ export const webHost = createInPageHost({
     await openServiceView({
       host: servicesHost, tag, peer: peerPubKeyZ32, service: serviceId, title, relayOnly,
       send: (request) => offline() ? Promise.reject(new GhostlyHttpError("offline", "Your contact is offline")) : node.request(peerPubKeyZ32, serviceId, request),
-      presence: { offline, watch: (changed) => engine.subscribe(changed) },
+      // Try again reaches the contact now, as the chat's Reconnect does.
+      presence: { offline, watch: (changed) => engine.subscribe(changed), connect: async () => { const link = engine.linkByPeer(peerPubKeyZ32); if (link) await engine.call("connect", { linkId: link.id }); } },
       words: {
         unreachable: t("services.window.unreachable"), failed: t("services.window.failed"), close: t("common.close"), callOn: t("services.window.callOn", { app: title }),
         tooSlow: t("services.window.tooSlow", { app: title }), offline: t("services.window.offline", { app: title }), retry: t("services.window.retry"),
+        loading: t("services.window.loading", { app: title }),
+        reaching: t("services.window.reaching"), stillOffline: t("services.window.stillOffline", { app: title }),
         blocked: t("services.window.blocked", { app: title }), unguarded: t("services.window.unguarded", { app: title }),
+        openLink: (site) => t("services.window.openLink", { site }),
         ...serviceFraming(title, chatNamesForPeer(peerPubKeyZ32), peerPubKeyZ32, t),
         hostError: (headers) => hostErrorText(headers, title, t),
       },

@@ -6,6 +6,7 @@ import { parseArgs } from "../src/args";
 import { COMMANDS, idSlot, positionals } from "../src/commands";
 import { chatOnly } from "../src/main";
 import { CliError, EXIT } from "../src/errors";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.usage
 
 /** `usage send` (WISP 405 § Usage) against an engine that keeps what it is sent. */
@@ -17,7 +18,7 @@ function fake() {
   let n = 0;
   const card = (raw: unknown) => { const checked = checkStatusCard(raw); if ("error" in checked) throw new Error(checked.error); return checked.card; };
   const node = {
-    getState: () => ({
+    chatView: chatViewOf, getState: () => ({
       links: [link("chat-one", { label: "Miguel" }), link("chat-two", { label: "Ana" }), link("old-chat", { label: "Old", profile: undefined }), link("invite", { peerPubKeyZ32: "" })],
       groups: [], settings: {}, transport: {},
     }) as unknown as EngineState,

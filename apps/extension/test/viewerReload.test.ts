@@ -45,6 +45,12 @@ describe("a contact's app open when the extension reloads", () => {
     expect(world.tabs.has(viewer)).toBe(false);
   });
 
+  it("is closed when an earlier version left it on a document of the app's origin, with no binding", async () => {
+    const left = await world.chrome.tabs.create({ url: `blob:https://${SERVICE}.${PEER}.${TAG}.invalid/0b7e2f4c-5a1d-4e8b-9c3f-2d6a1b0e7f45` });
+    await reloadExtension(world);
+    expect(world.tabs.has(left.id!)).toBe(false);
+  });
+
   it("is closed by the next lock when the reload left it open", async () => {
     const viewer = await openViewer(world);
     // The new worker found no target list (it failed): the next closer still finds the tab.

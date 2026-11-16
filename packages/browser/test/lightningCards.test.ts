@@ -5,6 +5,7 @@ import { STORES, openDb, store, transact, wrap } from "../src/shared/idb";
 import { TEST_MINT } from "../src/shared/mints";
 import type { CashuWallet } from "../src/engine/wallet";
 import { GhostlyNode } from "../src/engine/node";
+import { setAwayWallets } from "../src/engine/paymentAdapters/away";
 import { sealSeed, newDeviceKey } from "../src/engine/paymentAdapters/persistence";
 import { CASHU_MINT_SOURCE, cashuMint } from "../src/engine/paymentAdapters/providers/cashuMint";
 import type { LightningProviderDescriptor } from "../src/engine/paymentAdapters/providers/lightning";
@@ -57,7 +58,7 @@ beforeEach(async () => {
   await transact([STORES.settings, STORES.intents, STORES.payments], (s) => { s[STORES.settings].clear(); s[STORES.intents].clear(); s[STORES.payments].clear(); });
   lightningJournalWritten();
 });
-afterEach(async () => { for (const r of registries.splice(0)) await r.stop(); vi.restoreAllMocks(); });
+afterEach(async () => { setAwayWallets(new Map()); for (const r of registries.splice(0)) await r.stop(); vi.restoreAllMocks(); });
 
 describe("the one source a network had becomes its first card", () => {
   const sealed = { iv: "aXY", salt: "c2FsdA", data: "b3BhcXVl" };
@@ -162,6 +163,44 @@ describe("several cards on one network", () => {
     expect(registry.views().map((v) => v.name)).toEqual(["Cashu", "Hub (NWC)", "Hub (NWC) 2"]);
   });
 
+  it("adding a card unseals no other card's secrets while those are connected: a 600,000-iteration key each was +320 ms per card", async () => {
+    const relay = "wss%3A%2F%2Frelay.example", secret = "cd".repeat(32);
+    const uri = (n: number) => `nostr+walletconnect://${n.toString(16).padStart(2, "0").repeat(32)}?relay=${relay}&secret=${secret}`;
+    const nwcFake: LightningProviderDescriptor = { ...nwc, create: async () => new FakeLightningProvider({ alias: "Hub via relay.example", settleMs: 600_000 }) };
+    const registry = new LightningCards("testnet", { descriptors: () => [cashuMint, nwcFake], host: () => ({ platform: "web" }), events: { changed: vi.fn(), received: vi.fn(), resolved: vi.fn() }, hasMints: () => true });
+    registries.push(registry);
+    await registry.start();
+    for (const n of [1, 2, 3]) await registry.add("nwc", { uri: uri(n) });
+    await registry.ensureReady();
+    const unsealed = vi.spyOn(crypto.subtle, "decrypt");
+    await registry.add("nwc", { uri: uri(4) });
+    await expect(registry.add("nwc", { uri: uri(2) })).rejects.toThrow("That wallet is already your card “Hub (NWC) 2”");
+    expect(unsealed.mock.calls.length, "secrets unsealed").toBe(0);
+    expect(registry.views().map((v) => v.name)).toEqual(["Cashu", "Hub (NWC)", "Hub (NWC) 2", "Hub (NWC) 3", "Hub (NWC) 4"]);
+  });
+
+  it("a handoff's facts unseal no connected card's secrets; a card not connected is still read from its sealed ones", async () => {
+    const lnd: LightningProviderDescriptor = { ...fakeNode, id: "lnd", label: "LND", fields: [...fakeNode.fields, { name: "certificate", label: "Certificate", kind: "secret", optional: true }] };
+    const registry = new LightningCards("testnet", { descriptors: () => [cashuMint, lnd], host: () => ({ platform: "web" }), events: { changed: vi.fn(), received: vi.fn(), resolved: vi.fn() }, hasMints: () => true });
+    registries.push(registry);
+    await registry.start();
+    const pinning = [];
+    for (const alias of ["a", "b", "c"]) pinning.push(await registry.add("lnd", { alias, certificate: `cert-${alias}` }));
+    await registry.add("lnd", { alias: "plain" });
+    await registry.ensureReady();
+    const unsealed = vi.spyOn(crypto.subtle, "decrypt");
+    expect((await registry.handoffFacts()).pinned).toEqual(pinning.map((id) => `lightning:testnet:${id}`));
+    expect(unsealed.mock.calls.length, "secrets unsealed").toBe(0);
+
+    // The same cards read again after a restart, none connected yet: each pinning one is unsealed once.
+    await registry.stop();
+    const again = new LightningCards("testnet", { descriptors: () => [cashuMint, lnd], host: () => ({ platform: "web" }), events: { changed: vi.fn(), received: vi.fn(), resolved: vi.fn() }, hasMints: () => true });
+    registries.push(again);
+    await again.start();
+    expect((await again.handoffFacts()).pinned).toEqual(pinning.map((id) => `lightning:testnet:${id}`));
+    expect(unsealed.mock.calls.length, "secrets unsealed").toBe(3);
+  });
+
   it("names: the source's short name, a number when taken, renamable, unique", async () => {
     const { registry } = cards();
     await registry.start();
@@ -175,6 +214,22 @@ describe("several cards on one network", () => {
     await expect(registry.rename(a, "home lnd")).rejects.toThrow("Another card has that name");
     await expect(registry.rename(a, " ")).rejects.toThrow("Enter a name");
     await expect(registry.rename(a, "x".repeat(33))).rejects.toThrow("At most 32 characters");
+  });
+
+  it("names: invisible and direction characters from the wallet or typed in do not make a name that reads like another", async () => {
+    const { registry } = cards();
+    await registry.start();
+    const name = (card: string) => registry.views().find((v) => v.card === card)?.name;
+    const hub = await registry.add("fake-node", { alias: "Alby Hub" });
+    const twin = await registry.add("fake-node", { alias: "Alby\u200b Hub\ufeff" });
+    const flipped = await registry.add("fake-node", { alias: "\u202eHome\u2066" });
+    expect(name(hub)).toBe("Alby Hub (Fake node)");
+    expect(name(twin)).toBe("Alby Hub (Fake node) 2");
+    expect(name(flipped)).toBe("Home (Fake node)");
+    await expect(registry.rename(twin, "Alby\u200b Hub (Fake\u200d node)")).rejects.toThrow("Another card has that name");
+    await expect(registry.rename(twin, "\u200b\u202e\u200c")).rejects.toThrow("Enter a name");
+    await registry.rename(twin, "Office\u2067 LND\u061c");
+    expect(name(twin)).toBe("Office LND");
   });
 
   it("names: a long wallet name is cut after a whole word with …; only an NWC name loses its \" via \" part", async () => {
@@ -208,6 +263,31 @@ describe("several cards on one network", () => {
     expect(registry.has(CASHU_CARD)).toBe(true);
     mints = true;
     expect(registry.views()).toMatchObject([{ card: CASHU_CARD, receive: true }]);
+  });
+
+  it("the default for receiving never goes to a card at home on another device: a removed one hands it to a card here, else the mints'", async () => {
+    const { registry } = cards();
+    await registry.start();
+    const office = await registry.add("fake-node", { alias: "Office" });
+    const home = await registry.add("fake-node", { alias: "Home" });
+    const shop = await registry.add("fake-node", { alias: "Shop" });
+    setAwayWallets(new Map([[`lightning:testnet:${office}`, "Laptop"]]));
+    await registry.setReceive(home);
+    await registry.remove(home);
+    expect(registry.receivingId, "the first card of their own here").toBe(shop);
+    await registry.remove(shop);
+    expect(registry.receivingId, "only the away card is left of their own: the mints' card").toBe(CASHU_CARD);
+  });
+
+  it("the mints' card the default of a network whose mints are gone: the first card shown here takes it, not an away one first in line", async () => {
+    const { registry } = cards();
+    await registry.start();
+    const away = await registry.add("fake-node", { alias: "Office" });
+    const here = await registry.add("fake-node", { alias: "Home" });
+    await registry.setReceive(CASHU_CARD);
+    setAwayWallets(new Map([[`lightning:testnet:${away}`, "Laptop"]]));
+    mints = false;
+    expect(registry.receivingId).toBe(here);
   });
 });
 
@@ -323,5 +403,26 @@ describe("the engine", () => {
     await expect(node.lightningSetSource({ providerId: CASHU_MINT_SOURCE, values: {}, network: "testnet", card: made.card })).rejects.toThrow("A card keeps its source");
     await node.lightningClearSource({ network: "testnet" });
     expect(node.getState().wallet.networks!.testnet.lightnings).toMatchObject([{ card: CASHU_CARD, receive: true }]);
+  });
+
+  it("from before cards: a source set with no card that is a card at home on another device does not make it the default", async () => {
+    const node = await engine();
+    const office = await node.walletCreate({ type: "lightning", network: "testnet", providerId: "fake-node", values: { alias: "Office" } });
+    const home = await node.walletCreate({ type: "lightning", network: "testnet", providerId: "fake-node", values: { alias: "Home" } });
+    await node.lightningSetReceive({ network: "testnet", card: home.card! });
+    setAwayWallets(new Map([[office.id, "Laptop"]]));
+    await expect(node.lightningSetSource({ providerId: "fake-node", values: { alias: "Office" }, network: "testnet" })).rejects.toThrow("Laptop");
+    expect(node["lightnings"].testnet.receivingId).toBe(home.card);
+  });
+
+  it("from before cards: Back to the mints never removes a card at home on another device, named or the default (as Remove)", async () => {
+    const node = await engine();
+    const office = await node.walletCreate({ type: "lightning", network: "testnet", providerId: "fake-node", values: { alias: "Office" } });
+    const home = await node.walletCreate({ type: "lightning", network: "testnet", providerId: "fake-node", values: { alias: "Home" } });
+    await node.lightningSetReceive({ network: "testnet", card: office.card! });
+    setAwayWallets(new Map([[office.id, "Laptop"]]));
+    await expect(node.lightningClearSource({ network: "testnet", card: office.card })).rejects.toThrow("Laptop");
+    await expect(node.lightningClearSource({ network: "testnet" }), "the default is the away card").rejects.toThrow("Laptop");
+    expect(lightningWallets(node).map(([id]) => id)).toEqual(["lightning:testnet:cashu", office.id, home.id]);
   });
 });

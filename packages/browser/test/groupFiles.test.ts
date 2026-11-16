@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { GROUP_FILE_LIMITS, fileMessageText, groupFileFallback, type GroupFileMeta } from "@ghostly/core";
 import { CommunityWorld, RELAY_NETWORK, type NetworkModel, type Peer } from "./communityWorld";
 import { groupFileId, type GroupFileStore, type GroupFileWriter } from "../src/engine/groupFiles";
 import type { StoredFile } from "../src/shared/idb";
 import { waitingGroupFile } from "../src/shared/storedFiles";
 import type { FileTransferView } from "../src/shared/types";
+vi.mock("../../core/src/identity", async importOriginal => (await import("../../core/test/support/verifyOnce")).verifyOnce(await importOriginal()));
 // covers: groups.files, groups.files.wire
 
 /**
@@ -281,6 +282,27 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     const data = t.seen.filter(s => s.frame.t === "pf-data");
     expect(data.length).toBeGreaterThanOrEqual(12);
     expect(data.every(s => s.frame.data instanceof Uint8Array)).toBe(true);
+  });
+
+  it("while a file arrives, its progress asks for a state at a 1:1 file's pace (250 ms), not within 50 ms of each part", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
+    // Each state Bob's engine asks for, with the wait it asks for and what his file's row shows then.
+    const asked: { delayMs: number | undefined; view: FileTransferView | undefined }[] = [];
+    const emit = bob.host.emit.bind(bob.host);
+    bob.host.emit = (delayMs?: number) => {
+      asked.push({ delayMs, view: [...t.files.get(bob)!.transfers.values()].find(v => v.direction === "in") });
+      emit();
+    };
+    const bytes = pattern(300_000, 5);
+    const { messageId } = await t.send(alice, id, bytes);
+    await t.world.until(() => t.done(bob, id, messageId), 60_000);
+    expect(t.got(bob, id, messageId).bytes).toEqual(bytes);
+    const progress = asked.filter(a => a.view?.state === "transferring" && !a.view.stage && a.view.transferred > 0);
+    expect(progress.length).toBeGreaterThanOrEqual(3);
+    for (const a of progress) expect(a.delayMs).toBe(250);
+    // Its other steps (asked, done) are not held back.
+    expect(asked.some(a => a.view?.state === "done" && a.delayMs === undefined)).toBe(true);
   });
 
   it("the pace and not being in the group are known before the bytes are copied in, as the announcement answers them", async () => {

@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
-import { GhostLink, createIdentity, createLink, encodeFileData, fromBase64Url, type BoundChannel, type NativeEndpoint, type PairingState } from "@ghostly/core";
+import { GhostLink, checkedDescriptors, createIdentity, createLink, encodeFileData, fromBase64Url, type BoundChannel, type NativeEndpoint, type PairingState } from "@ghostly/core";
 import { createRelayedHyperEndpoint, hyperKeyPair, relayUrlProblem } from "../src/platform/hyperdhtRelay";
 // covers: transport.hyperdht-relay, transport.hyperdht, transport.relayed
 
@@ -69,14 +69,29 @@ it("accepts only wss:// relays, and ws:// to this machine", () => {
   expect(relayUrlProblem("not a url")).toMatch(/relay address/);
   // Only the server's address: the endpoint tells it to every contact as its relay.
   for (const bad of ["wss://alice:hunter2@relay.example", "wss://alice@relay.example", "wss://relay.example/?token=s3cr3t", "wss://relay.example/?",
-    "wss://relay.example/#s3cr3t", "ws://alice:hunter2@127.0.0.1:49443/", `wss://relay.example/${"a".repeat(256)}`])
+    "wss://relay.example/#s3cr3t", "ws://alice:hunter2@127.0.0.1:49443/"])
     expect(relayUrlProblem(bad)).toBe(`Not a relay address: ${bad}`);
+  // A relay address all the same, one too long: said as what to do, not as a typo to look for in it.
+  for (const long of [`wss://relay.example/${"a".repeat(256)}`, `wss://${"a".repeat(121)}`, `ws://127.0.0.1:49443/${"a".repeat(101)}`])
+    expect(relayUrlProblem(long)).toBe(`Use a shorter relay address: ${long}`);
+  // A login is refused for what it is, however long the address.
+  expect(relayUrlProblem(`wss://alice@relay.example/${"a".repeat(256)}`)).toBe(`Not a relay address: wss://alice@relay.example/${"a".repeat(256)}`);
 });
 
 it("never names a relay with a login or a token in its descriptor, saved before that was refused", async () => {
   const url = relay.url.replace("ws://", "ws://alice:hunter2@") + "/?token=s3cr3t";
   await expect(createRelayedHyperEndpoint(seed(), url)).rejects.toThrow("Not a relay address");
 });
+
+it("names its relay as a contact reads it: a scheme pasted in capitals goes as wss://, an address a contact drops is refused", async () => {
+  // A contact keeps a descriptor only with a relay `relayUrl` reads, and drops the whole descriptor otherwise.
+  for (const bad of ["wss://relay.example/my relay", "ws://LOCALHOST:49443"]) expect(relayUrlProblem(bad)).toBe(`Not a relay address: ${bad}`);
+  expect(relayUrlProblem(`wss://${"a".repeat(121)}`)).toBe(`Use a shorter relay address: wss://${"a".repeat(121)}`);
+  expect(relayUrlProblem("WSS://relay.example")).toBeNull();
+  const endpoint = await web(relay.url.replace("ws://", "WS://"));
+  expect(endpoint.descriptor).toMatchObject({ relay: relay.url });
+  expect(checkedDescriptors({ "hyperdht/1": endpoint.descriptor })["hyperdht/1"]).toEqual(endpoint.descriptor);
+}, 30_000);
 
 it("gives the Desktop's key for the same seed, and says it is relayed", async () => {
   const seedB64 = seed();

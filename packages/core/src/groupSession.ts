@@ -12,7 +12,7 @@ import {
 } from "./groupCommits";
 import {
   encodeGroupMetaBody, groupDisplayName, groupMetaBody, groupName, groupMetaChange, groupMetaNewer, groupMetaPicture, groupMetaToHand, keepPastGroupMeta, nextGroupMetaRevision, parseGroupMetaBody, groupMetaTag, openGroupMeta, parseGroupMetaFrame, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
-  type GroupMeta, type GroupMetaChange, type GroupMetaFrame, type GroupMetaStatement,
+  type GroupMeta, type GroupMetaBody, type GroupMetaChange, type GroupMetaFrame, type GroupMetaStatement,
 } from "./groupMeta";
 import { MENTION_LIMITS, validMentions, wireMentions, type GroupMention } from "./groupMentions";
 import { groupReplyAuthor, readReply, REPLY_LIMITS, wireReply, type WireReply } from "./replies";
@@ -327,6 +327,11 @@ const ANSWER_WINDOW_MS = 5_000;
  */
 const UNNAMED_KEPT_MS = 60_000;
 /**
+ * After the admin role moved to me: how long I still take the statement of the admin I took it from (WISP 902
+ * § Metadata), one that was on its way while the commit reached me first. Past it, only the admin's is taken, as for anyone.
+ */
+export const GROUP_TAKEOVER_META_MS = 10 * 60_000;
+/**
  * One member's messages (or edits) taken: its whole log handed back at once twice over (`AUTHOR_BURST`: an edge opening
  * hears it, with what the member says live beside it, and the edits its app says again), then
  * `GROUP_LIMITS.messagesPerAuthor` and `messageBytesPerAuthor` per `messageWindowMs`, as a community's `MessagePace`.
@@ -585,6 +590,13 @@ export class GroupSession {
   private queue = Promise.resolve();
   /** Metadata frames that name a commit or an epoch I do not have yet, one signed by the admin and one by anyone else (`waitMeta`): tried again when the chain moves. */
   private pendingMeta: { admin?: WaitingMeta; other?: WaitingMeta } = {};
+  /** The admin as of the last `metaFollowsChain`. In memory only. */
+  private adminSeen: string | undefined;
+  /**
+   * After the admin role moved to me (`metaFollowsChain`): whom from, until when I take their statement, and the last
+   * one of theirs I signed again (what I held then, until one of theirs comes). In memory only.
+   */
+  private takeover: { from: string; until: number; base: GroupMeta | undefined } | undefined;
   /** While `handle` runs: the frames it took that a hub passes on (`handle`'s result). */
   private passOn: GroupEdgeFrame[] | null = null;
   /** The frames kept to hand on that the app holds with its messages, oldest first; undefined when the state holds them all. */
@@ -669,6 +681,7 @@ export class GroupSession {
     this.provisional = new Set((state.provisional ?? []).slice(-GROUP_LIMITS.provisional));
     for (const [key, record] of Object.entries(state.names ?? {})) this.nickAt.set(key, record.v);
     this.chainMovedAt = this.clock();
+    this.adminSeen = this.admin;
   }
   private clock(): number { return this.hooks.clock?.() ?? Date.now(); }
 
@@ -889,7 +902,16 @@ export class GroupSession {
   }
   private persist(): Promise<void> {
     if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = undefined; }
-    return this.hooks.save(structuredClone(this.state));
+    return this.hooks.save(this.copy());
+  }
+  /**
+   * The state as a save takes it: the session goes on changing its own. The chain carries the whole roster at every
+   * commit and is never compacted (1.4 ms a deep copy at 271 commits in a group of 31, 0.1 ms for the rest), and a
+   * commit on it is signed and never changes: the copy shares the commits, in an array of its own.
+   */
+  private copy(): GroupState {
+    const { chain, ...rest } = this.state;
+    return { ...structuredClone(rest), chain: chain.slice() };
   }
   /**
    * A save within `GROUP_LIMITS.saveWithinMs`, for what a received message, commit or secret changes (what was seen,
@@ -903,7 +925,7 @@ export class GroupSession {
     this.saveTimer = setTimeout(() => {
       this.saveTimer = undefined;
       // Between two frames, never in the middle of one being handled.
-      void this.serialize(() => this.hooks.save(structuredClone(this.state))).catch(() => {});
+      void this.serialize(() => this.hooks.save(this.copy())).catch(() => {});
     }, GROUP_LIMITS.saveWithinMs);
   }
   /** Writes what is waiting to be saved now (before a restart, in tests). */
@@ -969,6 +991,8 @@ export class GroupSession {
       this.requireAdmin();
       if (!rosterHas(this.roster, memberKey) || memberKey === this.myKey) throw new Error("Not a member");
       await this.commit("remove", memberKey, now, left);
+      // The admin before me, removed (not leaving, the case `takesOver` is for): what they sign is no longer taken.
+      if (!left && memberKey === this.takeover?.from) this.takeover = undefined;
     });
   }
 
@@ -1030,8 +1054,15 @@ export class GroupSession {
     if (this.state.relay?.length) this.state.relay = this.state.relay.filter(f => this.handsOn(f.s));
     if (this.onRows?.length) this.onRows = this.onRows.filter(f => this.handsOn(f.s));
     // An author out of the roster edits nothing any more, but its removals stand: a member away when one was said still
-    // takes it from me (WISP 902 § Edits).
-    if (this.state.relayEdits?.length) this.state.relayEdits = this.state.relayEdits.filter(f => rosterHas(this.roster, f.s) || this.isRemovalEdit(f));
+    // takes it from me (WISP 902 § Edits). One I carry unread (of an epoch before I was let in) may be one: kept, for the
+    // members of that epoch to tell.
+    if (this.state.relayEdits?.length) this.state.relayEdits = this.state.relayEdits.filter(f => rosterHas(this.roster, f.s) || this.carriedUnread(f) || this.isRemovalEdit(f));
+  }
+
+  /** An edit of an epoch I was not a member of (let in after it): kept and handed on unread (WISP 902 § Edits, "Carried unread"). */
+  private carriedUnread(frame: GroupEditFrame): boolean {
+    const commit = this.state.chain[frame.e];
+    return !!commit && !rosterHas(commit.m, this.myKey);
   }
 
   /** Whether a kept edit is a removal (WISP 400 § Delete for everyone): its box, under its epoch's key, says `rm`. */
@@ -1326,6 +1357,19 @@ export class GroupSession {
     this.state.sent.push(frame);
     let bytes = this.state.sent.reduce((sum, f) => sum + f.c.length, 0);
     while (this.state.sent.length > GROUP_LIMITS.outlog || bytes > GROUP_LIMITS.outlogBytes) bytes -= this.state.sent.shift()!.c.length;
+  }
+
+  /**
+   * My message `id` was deleted for everyone: its frame, and each copy said again, keep their place in my log (`nextSeq`,
+   * `couldRead`, the removal's copies) and lose what they said. The log is in the saved state beside the epochs' secrets,
+   * so the text stayed readable from the profile until 32 later sends pushed it out (`message delete --purge` promises
+   * it leaves the folder). Saved soon, as a community's `forget`; `flush` writes it now.
+   */
+  forget(id: string): void {
+    if (!this.state.sent.some(f => f.c && this.messageIdOf(f) === id)) return;
+    this.state.sent = this.state.sent.map(f => !f.c || this.messageIdOf(f) !== id ? f
+      : { t: f.t, g: f.g, e: f.e, s: f.s, n: f.n, ts: f.ts, nn: "", c: "", sig: "", ...(f.o ? { o: f.o } : {}) });
+    this.persistSoon();
   }
 
   /**
@@ -1869,9 +1913,11 @@ export class GroupSession {
     if (!held && !this.paced(this.editPace, raw.s, raw.c.length + 400, raw.s !== from && (this.awaitsAnswer(from) || waited))) return;
     // Of an epoch from before I was let in (a hub let in after the message): nothing for me to read, but the author's
     // signed word for the members who can, kept and passed on as is while the author is in the roster. Hubs change, and
-    // most members of that epoch reach the author only through whoever is a hub now.
+    // most members of that epoch reach the author only through whoever is a hub now. An author out of the roster: kept
+    // all the same, unread, since it may be a removal (a member hands on only those of a leaver), and handed at catch-up
+    // to the members of that epoch, who tell.
     if (!rosterHas(commit.m, this.myKey)) {
-      if (member && this.keepEdit(raw)) { this.persistSoon(); this.took(cleanEdit(raw)); }
+      if (this.keepEdit(raw)) { this.persistSoon(); if (member) this.took(cleanEdit(raw)); }
       return;
     }
     const secret = this.secret(raw.e);
@@ -2239,7 +2285,8 @@ export class GroupSession {
     // once to each member, counted once sent (`answers`), not here: an answer that takes this one's place before it
     // goes still has them.
     const handed = this.leaversHanded.get(from);
-    const gone = (this.state.relayEdits ?? []).filter(f => !rosterHas(this.roster, f.s) && readable(f) && !handed?.has(editKey(f)));
+    // A hub I count on gets them unread too: it carries them to the members of their epoch, whose only edge it may be.
+    const gone = (this.state.relayEdits ?? []).filter(f => !rosterHas(this.roster, f.s) && (readable(f) || (carrier && !!this.state.chain[f.e])) && !handed?.has(editKey(f)));
     answer.push(...gone.slice(-GROUP_LIMITS.handOnEdits));
     // Or last, those after every message.
     answer.push(...metas.map(m => m.frame));
@@ -2267,8 +2314,8 @@ export class GroupSession {
     const lacks = missingIn(frame, to);
     return this.state.sent.filter(sent => this.state.chain[sent.e] && rosterHas(this.state.chain[sent.e].m, to) && lacks(sent) && !this.isRemoved(sent));
   }
-  /** A frame of a message deleted for everyone (`hooks.removed`): handed to nobody, its removal is what they get. */
-  private isRemoved(f: GroupMessageFrame): boolean { return !!this.hooks.removed?.(this.messageIdOf(f)); }
+  /** A frame of a message deleted for everyone (`hooks.removed`, or one of mine `forget` emptied): handed to nobody, its removal is what they get. */
+  private isRemoved(f: GroupMessageFrame): boolean { return !f.c || !!this.hooks.removed?.(this.messageIdOf(f)); }
 
   // -- metadata (WISP 902 § Metadata) ---------------------------------------
 
@@ -2312,15 +2359,17 @@ export class GroupSession {
   /**
    * Signs a body under my current commit, keeps it and sends it to every member. Inside `serialize`. Like a commit, only
    * with admin work on and a good turn read (WISP 06 § Forced takeover): refused otherwise, or, `quiet`, not made.
+   * `taken`: a former admin's statement signed again (`signAgainTaken`): the line credits them, and the one held is not
+   * kept to hand on when it was no change (an older statement signed again).
    */
-  private async publishMeta(body: string, now: number, quiet = false): Promise<void> {
+  private async publishMeta(body: string, now: number, quiet = false, taken?: { by: string; replaces: boolean }): Promise<void> {
     const refused = this.hooks.adminWork?.() === false ? new Error(GROUP_ADMIN_OFF_ERROR)
       : this.hooks.adminTurn && !(await this.hooks.adminTurn()) ? engineError("groupTurnUnconfirmed") : undefined;
     if (refused) { if (quiet) return; throw refused; }
     const before = this.state.meta;
     const meta = signGroupMeta({ g: this.id, e: this.epoch, h: commitHash(this.top), r: nextGroupMetaRevision(before, this.epoch, this.seqFloor()), ts: now }, body, this.identity.seed, this.myKey);
     this.state.meta = meta;
-    this.state.metaPast = keepPastGroupMeta(this.state.metaPast, before, meta);
+    if (!taken?.replaces) this.state.metaPast = keepPastGroupMeta(this.state.metaPast, before, meta);
     await this.persist();
     const secret = this.secret(this.epoch);
     if (secret) {
@@ -2328,7 +2377,7 @@ export class GroupSession {
       for (const key of this.others) this.hooks.send(key, frame);
     }
     const change = groupMetaChange(before, meta, this.state.name);
-    if (change) this.hooks.metaChanged?.(this.myKey, change, meta.ts);
+    if (change) this.hooks.metaChanged?.(taken?.by ?? this.myKey, change, meta.ts);
     this.hooks.changed();
   }
 
@@ -2348,20 +2397,22 @@ export class GroupSession {
   /**
    * A metadata statement: kept when it is newer than mine, its commit is on my chain, its signer was
    * the admin of that commit and is the admin now, its signature holds, and it opens under the epoch
-   * it names into metadata Ghostly shows. One naming what I do not have yet waits for the chain.
+   * it names into metadata Ghostly shows. One naming what I do not have yet waits for the chain. Just after the admin
+   * role moved to me, the former admin's is signed again as mine (`takesOver`).
    */
   private async receiveMeta(from: string, raw: unknown): Promise<void> {
     const frame = parseGroupMetaFrame(raw);
     if (!frame || frame.statement.g !== this.id || typeof frame.k !== "number" || !rosterHas(this.roster, from)) return;
-    const s = frame.statement;
-    if (!groupMetaNewer(s, this.state.meta)) return;
+    const s = frame.statement, taking = this.takesOver(s);
+    if (!taking && !groupMetaNewer(s, this.state.meta)) return;
     if (s.e > this.epoch || frame.k > this.epoch) { this.waitMeta(from, raw, s); return; }
     const commit = this.state.chain[s.e];
-    if (commitHash(commit) !== s.h || rosterAdmin(commit.m) !== s.by || this.admin !== s.by || !verifyGroupMetaSignature(s)) return;
+    if (commitHash(commit) !== s.h || rosterAdmin(commit.m) !== s.by || (!taking && this.admin !== s.by) || !verifyGroupMetaSignature(s)) return;
     const secret = this.secret(frame.k);
     if (!secret) { this.waitMeta(from, raw, s); return; }
     const opened = openGroupMeta(frame, epochKeys(secret, this.id, frame.k).message);
     if (!opened) return;
+    if (taking) { await this.signAgainTaken(opened.meta, opened.body); return; }
     const before = this.state.meta;
     this.state.meta = opened.meta;
     this.state.metaPast = keepPastGroupMeta(this.state.metaPast, before, opened.meta);
@@ -2372,6 +2423,31 @@ export class GroupSession {
     if (change) this.hooks.metaChanged?.(this.metaAuthor(before, s), change, opened.meta.ts);
     this.hooks.changed();
     this.took({ t: "group-meta", ...s, k: frame.k as number, nn: frame.nn, c: frame.c });
+  }
+
+  /**
+   * Whether I take a statement though its signer is no longer the admin (WISP 902 § Metadata): I am the admin since
+   * moments ago, they were the admin before me, and it is later than the one of theirs I signed again. A member who had
+   * not synced when the role moved to them signed again what they held (or nothing), and the statement on its way would
+   * be refused for good: their next rename, picture or hubs change would then be built on the older body.
+   */
+  private takesOver(s: GroupMetaStatement): boolean {
+    const t = this.takeover;
+    return !!t && this.isAdmin && s.by === t.from && this.clock() <= t.until && groupMetaNewer(s, t.base);
+  }
+
+  /**
+   * The former admin's statement, taken (`takesOver`): signed again as mine, each field I changed since keeping my
+   * value. Dated as theirs, and credited to them, when I changed nothing; what I held was then no change to hand on.
+   */
+  private async signAgainTaken(meta: GroupMeta, theirs: GroupMetaBody): Promise<void> {
+    const t = this.takeover!, base = groupMetaBody(t.base), mine = groupMetaBody(this.state.meta);
+    t.base = meta;
+    const pick = <K extends keyof GroupMetaBody>(k: K) => JSON.stringify(mine[k]) === JSON.stringify(base[k]) ? theirs[k] : mine[k];
+    const body = encodeGroupMetaBody({ name: pick("name"), pic: pick("pic"), hubs: pick("hubs"), call: pick("call") });
+    if (body === this.state.meta?.body) return;
+    const changed = encodeGroupMetaBody(mine) !== encodeGroupMetaBody(base);
+    await this.publishMeta(body, changed ? this.clock() : meta.ts, true, { by: meta.by, replaces: !changed });
   }
 
   /**
@@ -2401,6 +2477,12 @@ export class GroupSession {
 
   /** After the chain or my secrets moved: the waiting statement, and, if I became the admin, the name and picture signed again as mine. */
   private async metaFollowsChain(): Promise<void> {
+    if (this.admin !== this.adminSeen) {
+      // The role moved to me: what the admin before me signed may still be on its way (`takesOver`).
+      const from = this.adminSeen;
+      this.takeover = this.isAdmin && from && from !== this.myKey ? { from, until: this.clock() + GROUP_TAKEOVER_META_MS, base: this.state.meta } : undefined;
+      this.adminSeen = this.admin;
+    }
     const { admin, other } = this.pendingMeta;
     this.pendingMeta = {};
     for (const pending of [admin, other]) if (pending) await this.receiveMeta(pending.from, pending.frame);

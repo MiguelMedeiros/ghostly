@@ -3,11 +3,14 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { aloneMark, appTrainIn, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, gateOf, gitLayer, HOLD, HOLD_HELP, holdBatch, holdText, isBatch, LABEL, listBases, MAX_WAIT, MIN_BATCH, localBases, missedWakes, order, ordinal, pickBatch, PLANNED_JOBS, positionText, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting, vouchedAt, wakeIn } from "../merge-train.mjs";
+import { aloneMark, appTrainIn, inTurns, READS_AT_ONCE, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, failedJobs, gateOf, gitLayer, HOLD, HOLD_HELP, holdBatch, holdText, isBatch, LABEL, listBases, MAX_WAIT, MIN_BATCH, localBases, missedWakes, order, ordinal, pickBatch, PLANNED_JOBS, positionText, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting, vouchedAt, wakeIn } from "../merge-train.mjs";
 
 type Pr = { number: number; title: string; body: string; draft: boolean; sha: string; branch: string; fork: boolean; labels: string[]; createdAt: string; closedAt?: string; open: boolean; base: string; merged?: boolean; author?: string; nodeId?: string; editor?: string };
 const green = [{ name: "CI Success", status: "completed", conclusion: "success", started_at: "2026-10-08T00:00:00Z", id: 1 }];
 const red = [{ name: "CI Success", status: "completed", conclusion: "failure", started_at: "2026-10-08T00:00:00Z", id: 1 }];
+/** A red run as CI ends one: a job failed (its log at `html_url`), so CI Success did. */
+const LINT_LOG = "https://github.com/MiguelMedeiros/ghostly/actions/runs/7/job/70";
+const redRun = [{ name: "Frontend lint and types", status: "completed", conclusion: "failure", html_url: LINT_LOG, id: 2 }, { name: "Web unit tests", status: "completed", conclusion: "success", id: 3 }, ...red];
 const running = [{ name: "CI Success", status: "in_progress", conclusion: null, started_at: "2026-10-08T00:00:00Z", id: 1 }];
 const fastGreen = [{ name: "CI Success (draft)", status: "completed", conclusion: "success", id: 1 }];
 const fastRed = [{ name: "CI Success (draft)", status: "completed", conclusion: "failure", id: 1 }];
@@ -233,7 +236,7 @@ function fakeRepo() {
       Object.assign(p, { open: false, merged: true });
       return { ok: true };
     },
-    landPull: async (base: string, _n: number, sha: string) => git.land(base, sha),
+    landPull: async (base: string, p: Pr) => git.land(base, p.sha),
     /** A rebase onto the tip: a new head that sits on it, unless the head already does and nothing forces new commits. */
     rebase: async (base: string, p: Pr, { force = false } = {}) => {
       if (moved.has(p.number)) return { baseSha: tips[base], dropped: "moved" };
@@ -265,9 +268,9 @@ function fakeRepo() {
   /** CI ends on every open batch and on every head the train rebased: red when it holds one of `bad`. */
   const settle = (bad: number[] = []) => {
     for (const p of pulls.values()) {
-      if (p.open && rebased.has(p.sha)) runs.set(p.sha, bad.includes(p.number) ? red : green);
+      if (p.open && rebased.has(p.sha)) runs.set(p.sha, bad.includes(p.number) ? redRun : green);
       if (!p.open || !readState(p.body)) continue;
-      runs.set(p.sha, readState(p.body).prs.some((m: { number: number }) => bad.includes(m.number)) ? red : green);
+      runs.set(p.sha, readState(p.body).prs.some((m: { number: number }) => bad.includes(m.number)) ? redRun : green);
     }
   };
   const batch = () => [...pulls.values()].find((p) => p.open && readState(p.body));
@@ -298,6 +301,11 @@ describe("the line", () => {
     expect(queuedAt([], "2026-10-01T00:00:00Z")).toBe("2026-10-01T00:00:00Z");
     // queue:priority alone puts a pull request in the line, so the time it was given counts too.
     expect(queuedAt([at("queue:priority", "2026-10-08T02:00:00Z"), at("bug", "2026-10-08T09:00:00Z")], "x")).toBe("2026-10-08T02:00:00Z");
+    // With queue on it, only queue's times count: queue:priority given (and taken off) since moves it nowhere.
+    const both = [at("queue", "2026-10-08T01:00:00Z"), at("queue:priority", "2026-10-08T03:00:00Z")];
+    expect(queuedAt(both, "x", ["queue"])).toBe("2026-10-08T01:00:00Z");
+    expect(queuedAt(both, "x", ["queue", "queue:priority"])).toBe("2026-10-08T01:00:00Z");
+    expect(queuedAt(both, "x", ["queue:priority"])).toBe("2026-10-08T03:00:00Z");
   });
 
   it("takes the head as vouched for when queue was added; queue:priority's time only for one in line by it alone", () => {
@@ -385,6 +393,37 @@ describe("the line", () => {
   });
 });
 
+describe("work in turns", () => {
+  it("starts the items in order, at most `limit` at once", async () => {
+    const started: number[] = [];
+    let going = 0;
+    let most = 0;
+    await inTurns([1, 2, 3, 4, 5, 6, 7], 3, async (n: number) => {
+      started.push(n);
+      most = Math.max(most, ++going);
+      await new Promise((r) => setTimeout(r, 8 - n));
+      going--;
+    });
+    expect(started).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(most).toBe(3);
+  });
+
+  it("starts nothing after a failure, and throws it once the ones going have ended", async () => {
+    const ended: number[] = [];
+    const failing = inTurns([1, 2, 3, 4, 5], 2, async (n: number) => {
+      if (n === 1) throw new Error("one");
+      await new Promise((r) => setTimeout(r, 5));
+      ended.push(n);
+    });
+    await expect(failing).rejects.toThrow("one");
+    expect(ended).toEqual([2]);
+  });
+
+  it("does nothing for no items", async () => {
+    await expect(inTurns([], 4, async () => { throw new Error("never"); })).resolves.toBeUndefined();
+  });
+});
+
 describe("a run of the train", () => {
   it("takes a pull request with queue:priority and no queue as in the line, first", async () => {
     const repo = fakeRepo();
@@ -399,6 +438,19 @@ describe("a run of the train", () => {
     lone.add(41, { priorityOnly: true });
     await lone.run();
     expect(lone.landed).toEqual(["#41"]);
+  });
+
+  it("keeps the place of a pull request given queue:priority and then not, since it kept queue all along", async () => {
+    const repo = fakeRepo();
+    for (const n of [21, 22, 23]) repo.add(n, { ci: running });
+    repo.events.get(21)!.push(
+      { event: "labeled", label: { name: LABEL.priority }, created_at: "2026-10-08T01:00:00Z" },
+      { event: "unlabeled", label: { name: LABEL.priority }, created_at: "2026-10-08T01:05:00Z" },
+    );
+    await repo.run();
+    expect(repo.comments.get(21)![0].body).toMatch(/1st\*\*\. /);
+    expect(repo.comments.get(22)![0].body).toMatch(/2nd\*\*\. /);
+    expect(repo.comments.get(23)![0].body).toMatch(/3rd\*\*\. /);
   });
 
   it("boards the twelve oldest green pull requests and tells everyone in line where they are", async () => {
@@ -463,7 +515,7 @@ describe("a run of the train", () => {
 
   describe("a pull request that merges cleanly onto dev but conflicts with one ahead of it in the batch", () => {
     const waitsFor = (n: number, batch: number | string) =>
-      `Merge train: in line for \`dev\`: **1st**. Waiting for the next batch: it merges cleanly onto \`dev\` by itself, but conflicts with #${n} in batch #${batch}, ahead of it, so it boards once that batch is done (merging \`origin/dev\` into it now changes nothing). It keeps its place.`;
+      `Merge train: in line for \`dev\`: **1st**. Waiting for the next batch: it merges cleanly onto \`dev\` by itself, but conflicts with #${n} in batch #${batch}, ahead of it (merging \`origin/dev\` into it now changes nothing). Once #${n} is on \`dev\`, it conflicts with \`dev\` and leaves the line with \`queue:conflict\`: then merge \`origin/dev\` into it, push, and add \`queue\` again once CI is green. If batch #${batch} ends without it on \`dev\`, it keeps its place and boards the next batch.`;
     const said = (repo: ReturnType<typeof fakeRepo>, n: number) => repo.comments.get(n)!.map((c) => c.body.replace(/^<!--[^\n]*\n/, ""));
 
     it("keeps its queue and its place, names the one it conflicts with, and boards right after it lands", async () => {
@@ -499,9 +551,12 @@ describe("a run of the train", () => {
       const repo = fakeRepo();
       for (const n of [11, 12]) repo.add(n);
       repo.clashes.set(12, [11]);
-      await repo.run();
+      const first = await repo.run();
       expect(repo.members()).toEqual([11]);
       expect(repo.pulls.get(12)!.labels).toEqual([LABEL.queue]);
+      // Its comment says what comes next, not that it boards once the batch is done (2026-11-13, a real git: with #11
+      // on dev, #12 conflicts with dev by construction, since #11 alone was what it conflicted with).
+      expect(said(repo, 12)).toEqual([waitsFor(11, first.inFlight!)]);
       // #11 on dev now: #12 conflicts with dev itself, which merging origin/dev into it resolves.
       repo.conflicts.add(12);
       repo.settle();
@@ -512,6 +567,12 @@ describe("a run of the train", () => {
       expect(repo.comments.get(12)!.map((c) => c.body)).toEqual([
         "Merge train: this pull request conflicts with `dev`, so it left the line. Rebase it onto `origin/dev` (or merge `origin/dev` into it), push, and add `queue` again once CI is green.",
       ]);
+    });
+
+    it("names all the ones ahead it conflicts with, and what happens once they land", () => {
+      const text = positionText("dev", { number: 12, sha: "a".repeat(40), labels: [LABEL.queue], ci: "success", behind: { batch: 9000, with: [11, 13] } }, 1, null);
+      expect(text).toContain("conflicts with #11 #13 in batch #9000, ahead of it (merging `origin/dev` into it now changes nothing). Once they are on `dev`, it conflicts with `dev`");
+      expect(text).toContain("If batch #9000 ends without them on `dev`, it keeps its place and boards the next batch.");
     });
 
     it("lets the one first in line go: queue:priority ahead, the other waits whichever was queued first", async () => {
@@ -574,11 +635,33 @@ describe("a run of the train", () => {
     repo.mergeStates.set(12, ["unknown", "unknown", "dirty"]);
     const pauses: number[] = [];
     await repo.run({ pause: async (ms: number) => void pauses.push(ms) });
-    expect(repo.pullReads).toEqual([11, 11, 12, 12]);
+    // Both are read at once (`inTurns`), so their reads interleave.
+    expect([...repo.pullReads].sort()).toEqual([11, 11, 12, 12]);
     expect(pauses).toEqual([2000, 2000]);
     expect(repo.comments.get(11)![0].body).toMatch(conflictSaid);
     // Still unknown after the second ask: today's reason, and the next run asks again.
     expect(repo.comments.get(12)![0].body).toMatch(/2nd\*\*\. Waiting: CI Success has not passed on its last commit yet\. It keeps its place\.$/);
+  });
+
+  it("reads the pull requests in line a few at a time, not one after another", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12, 13, 14, 15, 16]) repo.add(n, { ci: running });
+    // Every read of a pull request's events takes a moment: how many are asked at once.
+    const events = repo.gh.events;
+    let going = 0;
+    let most = 0;
+    repo.gh.events = async (n: number) => {
+      most = Math.max(most, ++going);
+      await new Promise((r) => setTimeout(r, 5));
+      going--;
+      return events(n);
+    };
+    const log: string[] = [];
+    await repo.run({ log });
+    expect(most).toBe(READS_AT_ONCE);
+    // The same line as one at a time: all six read, each in its place.
+    expect(log[0]).toBe("dev: 6 in line, 0 batch(es) open.");
+    for (const [i, n] of [11, 12, 13, 14, 15, 16].entries()) expect(repo.comments.get(n)![0].body).toContain(`**${ordinal(i + 1)}**.`);
   });
 
   it("reads no mergeable state for a pull request that boards, or one that waits on a draft or a hold", async () => {
@@ -632,6 +715,8 @@ describe("a run of the train", () => {
     expect(repo.landed).toEqual(["#11", "#12", "#14"]);
     expect(repo.pulls.get(13)!.labels).toEqual([LABEL.failed]);
     expect(repo.comments.get(13)!.at(-1)!.body).toMatch(/failed twice in a batch with only this pull request on `dev`/);
+    // Which job to open, linked to its log: the batch's page is one more step away, and CI Success alone says nothing.
+    expect(repo.comments.get(13)!.at(-1)!.body).toContain(`; red: [\`Frontend lint and types\`](${LINT_LOG})). Fix it,`);
   });
 
   it("boards ready pull requests on a green fast tier while their own full CI runs, and cancels those runs", async () => {
@@ -1870,6 +1955,19 @@ describe("a green batch landing on dev", () => {
     expect(pending.repo.merges).toEqual([]);
   });
 
+  it("takes the position comment off a pull request whose `queue` a person took off while it was aboard", async () => {
+    const { repo, b } = await greenBatch([11, 12, 13, 14]);
+    repo.runs.set(repo.pulls.get(b)!.sha, running);
+    const placed = (n: number) => repo.comments.get(n)!.filter((c) => c.body.startsWith("<!-- merge-train:position -->"));
+    expect(placed(12)).toHaveLength(1);
+    repo.pulls.get(12)!.labels = [];
+    expect((await repo.run()).closed).toEqual([b]);
+    expect(last(repo, b)).toMatch(/#12 changed or left the line/);
+    expect(placed(12)).toEqual([]); // no "in batch #N, waiting for its CI" for good
+    expect(repo.members()).toEqual([11, 13, 14]);
+    for (const n of [11, 13, 14]) expect(placed(n)).toHaveLength(1);
+  });
+
   it("falls back to the rebase merge of the batch, with a warning, while the train may not merge past dev's rule", async () => {
     const { repo, b } = await greenBatch([11, 12], { behind: true });
     repo.rules.bypass = false;
@@ -2095,6 +2193,62 @@ describe("one pull request alone", () => {
     expect(repo.pulls.get(11)!.sha).toBe(repo.alone(11)!.sha);
   });
 
+  it("keeps a lone pull request in line when the push of a second rebase fails: the train's first rebase stays vouched for", async () => {
+    // Its mark named the second rebase, which the branch never got: the next run read the first one as an author's push.
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    await repo.run();
+    const first = repo.pulls.get(11)!.sha;
+    expect(first).not.toBe("h11");
+    repo.settle();
+    repo.tips.dev = "dev1";
+    const push = repo.git.pushHead;
+    repo.git.pushHead = async () => ({ ok: false, message: "fatal: unable to access 'https://github.com/…': Could not resolve host: github.com" });
+    const r = await repo.run();
+    expect(r.log.join("\n")).toMatch(/Could not push the rebase of #11/);
+    expect(repo.pulls.get(11)!.sha).toBe(first);
+    expect(repo.alone(11)!.sha).not.toBe(first);
+    repo.git.pushHead = push;
+    const again = await repo.run();
+    expect(again.dropped).toEqual([]);
+    expect(again.inFlight).toBe(11);
+    expect(repo.pulls.get(11)!.sha).toBe(repo.alone(11)!.sha);
+    expect(repo.pulls.get(11)!.labels).toContain(LABEL.queue);
+    // An author's push on top of it still leaves the line.
+    repo.git.pushHead = async () => ({ ok: false, message: "fatal: unable to access" });
+    repo.settle();
+    repo.tips.dev = "dev2";
+    await repo.run();
+    repo.pulls.get(11)!.sha = "h11b";
+    repo.runs.set("h11b", green);
+    expect((await repo.run()).dropped).toEqual([11]);
+  });
+
+  it("pushes the second run again when the push of a red lone pull request's second rebase failed, and blames it only after that run", async () => {
+    // Its head stayed on the train's first rebase, red: not in flight (the mark names the second one) and not boardable
+    // (red), it sat in line under "CI Success is red" with no second run and no `queue:failed`.
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    await repo.run();
+    const first = repo.pulls.get(11)!.sha;
+    repo.settle([11]);
+    const push = repo.git.pushHead;
+    repo.git.pushHead = async () => ({ ok: false, message: "fatal: unable to access 'https://github.com/…': Could not resolve host: github.com" });
+    await repo.run();
+    expect(repo.pulls.get(11)!.sha).toBe(first);
+    expect(repo.alone(11)).toMatchObject({ retried: true, from: first });
+    repo.git.pushHead = push;
+    const again = await repo.run();
+    expect(again.inFlight).toBe(11);
+    const second = repo.pulls.get(11)!.sha;
+    expect(second).not.toBe(first);
+    expect(repo.alone(11)).toMatchObject({ sha: second, retried: true });
+    expect(repo.pulls.get(11)!.labels).toContain(LABEL.queue);
+    repo.settle([11]);
+    expect((await repo.run()).failed).toEqual([11]);
+    expect(repo.pulls.get(11)!.labels).toEqual([LABEL.failed]);
+  });
+
   it("takes a lone pull request that changes a workflow out of the line when GitHub refuses the push of its rebase", async () => {
     // Else every run rebased it, was refused and kept it in flight, and nothing on it said why.
     const repo = fakeRepo();
@@ -2142,6 +2296,7 @@ describe("one pull request alone", () => {
     expect(r.opened).toEqual([]);
     expect(repo.pulls.get(11)!.labels).toEqual([LABEL.failed]);
     expect(repo.comments.get(11)!.map((c) => c.body)).toEqual([expect.stringMatching(/failed twice with only this pull request on `dev`/)]);
+    expect(repo.comments.get(11)![0].body).toContain(`; red: [\`Frontend lint and types\`](${LINT_LOG})). Fix it,`);
   });
 
   it("lands a flake on its second run", async () => {
@@ -2215,6 +2370,30 @@ describe("one pull request alone", () => {
     expect(repo.pulls.get(11)!.sha).toBe(head);
     await repo.run({ now: Date.parse("2026-10-08T00:30:00Z"), maxWait: 0 });
     expect(repo.pulls.get(11)!.sha).not.toBe(head);
+  });
+
+  it("pushes a fresh commit at once for one back from a closed batch at the tip, whose own CI the batch cancelled", async () => {
+    const repo = fakeRepo();
+    const at = (min: number) => Date.parse("2026-10-08T00:00:00Z") + min * 60_000;
+    repo.add(31, { ci: running }); // holds dev's tip
+    repo.drafts.set("h31", fastGreen);
+    repo.going.set("h31", [777]);
+    repo.add(32, { behind: true });
+    repo.add(33, { behind: true });
+    await repo.run({ now: at(0), maxWait: 0 });
+    expect(repo.members()).toEqual([31, 32, 33]);
+    expect(repo.cancelled).toEqual([777]);
+    // The batch closes without landing it (the others lost `queue`): #31 is back with its own run cancelled.
+    repo.runs.set("h31", [{ ...running[0], status: "completed", conclusion: "cancelled" }]);
+    for (const n of [32, 33]) repo.pulls.get(n)!.labels = [];
+    const r = await repo.run({ now: at(1), maxWait: 0 });
+    expect(r.inFlight).toBe(31);
+    // No run is going on h31 and none would start there: a new head starts one, without waiting CI_START_TIMEOUT.
+    expect(repo.pulls.get(31)!.sha).not.toBe("h31");
+    expect(repo.pushes).toEqual([`fix-31=${repo.pulls.get(31)!.sha}`]);
+    expect(repo.alone(31)?.sha).toBe(repo.pulls.get(31)!.sha);
+    repo.settle();
+    expect((await repo.run({ now: at(6), maxWait: 0 })).merged).toEqual([31]);
   });
 
   it.each(["sibling", "events"])("takes a lone pull request whose runs never count out of flight (%s), so the line goes on", async (why) => {
@@ -3039,6 +3218,20 @@ describe("CI on a commit", () => {
     expect(ciState([forged, run("CI Success", "completed", "failure", "2026-10-07T12:00:00Z", 6)])).toBe("failure");
   });
 
+  it("names the jobs that turned CI Success red: failed or timed out, the newest of each name, never the gate", () => {
+    const failed = failedJobs([
+      run("Frontend lint and types", "completed", "failure"),
+      { ...run("CLI on Linux ARM64", "completed", "failure", "2026-10-07T10:00:00Z", 2), html_url: "https://example.test/job/2" },
+      run("CLI on Linux ARM64", "completed", "success", "2026-10-07T11:00:00Z", 3), // a rerun that passed
+      run("E2E", "completed", "timed_out", "2026-10-07T10:00:00Z", 4),
+      run("Security", "completed", "skipped"),
+      run("Web unit tests", "completed", "cancelled"),
+      run("CI Success", "completed", "failure", "2026-10-07T10:00:00Z", 9),
+    ]);
+    expect(failed).toEqual([{ name: "Frontend lint and types", url: null }, { name: "E2E", url: null }]);
+    expect(failedJobs([run("CI Success", "completed", "failure")])).toEqual([]);
+  });
+
   it("is CI's own run: the newest run of this repository's ci.yml on exactly that commit", () => {
     const wf = (id: number, path = ".github/workflows/ci.yml", repo = "o/r", head_sha = "abc") => ({ id, path, head_sha, repository: { full_name: repo } });
     expect(ciRun([wf(1), wf(3), wf(2)], "o/r", "abc")?.id).toBe(3);
@@ -3405,6 +3598,14 @@ describe("a green pull request run that is not the pull request's own", () => {
     repo.earlier.delete("h21");
     expect((await repo.run()).merged).toEqual([]);
     expect(repo.comments.get(21)![0].body).toMatch(/Waiting: another pull request from its branch \(#22 into `epic\/x`\) ran CI on the same commit/);
+  });
+
+  it("pushes no fresh commit for one alone at the tip on its fast tier whose runs are not its own: its sibling runs that one too", async () => {
+    const repo = sharedHead();
+    repo.earlier.delete("h21");
+    repo.drafts.set("h21", fastGreen);
+    expect((await repo.run()).inFlight).toBe(21);
+    expect(repo.pushes).toEqual([]);
   });
 
   it("does not count a green pull request run from another branch on the same commit", async () => {
@@ -4212,6 +4413,12 @@ describe("building a batch with git", () => {
       // Alone, the same: #2 from its branch, #3 nowhere.
       expect(await layer.rebase("dev", prs[1])).toMatchObject({ sha: expect.any(String) });
       expect(await layer.rebase("dev", prs[2])).toEqual({ baseSha: git(["rev-parse", "dev"]), dropped: "missing" });
+      // An epic's lone landing, the same: #2 fast-forwards from its branch; #3 is refused, not thrown, so its batch way
+      // drops it and the line goes on (it threw on every run, and nothing behind it boarded).
+      git(["branch", "-q", "epic/x", "dev"]);
+      expect(await layer.landPull("epic/x", prs[1])).toEqual({ ok: true });
+      expect(git(["rev-parse", "epic/x"])).toBe(prs[1].sha);
+      expect(await layer.landPull("epic/x", prs[2])).toEqual({ ok: false, message: "git could not fetch the head of #3" });
       layer.close();
     } finally {
       rmSync(root, { recursive: true, force: true });

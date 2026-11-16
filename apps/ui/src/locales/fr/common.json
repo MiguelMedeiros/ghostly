@@ -5,7 +5,7 @@
   "chatCreated": "Discussion créée le {{date}}",
   "close": "Fermer",
   "confirm": "Confirmer",
-  "copied": "Copié !",
+  "copied": "Copié !",
   "copy": "Copier",
   "deck": {
     "next": "Carte suivante",
@@ -15,8 +15,7 @@
   "delete": "Supprimer",
   "deleteChatCallOn": "Un appel est en cours dans cette conversation. Raccrochez d’abord, puis supprimez-la.",
   "deleteChatLocal": "La conversation et son historique seront supprimés de cet appareil, pas chez votre contact.",
-  "deleteChatTitle": "Supprimer la conversation ?",
-  "error": "Erreur",
+  "deleteChatTitle": "Supprimer la conversation ?",
   "goHome": "Aller à l’accueil",
   "loading": "Chargement...",
   "moreInfo": "Plus d'infos",
@@ -26,7 +25,7 @@
     "title": "En attente"
   },
   "notCopied": "Non copié",
-  "quotedName": "« {{name}} »",
+  "quotedName": "« {{name}} »",
   "save": "Enregistrer",
   "size": {
     "b": "{{n}} o",
@@ -35,7 +34,6 @@
     "mb": "{{n}} Mo",
     "tb": "{{n}} To"
   },
-  "success": "Succès",
   "unnamedContact": "Contact · {{key}}",
   "unnamedContactShort": "Contact",
   "viewPhoto": "Voir la photo de {{name}}"

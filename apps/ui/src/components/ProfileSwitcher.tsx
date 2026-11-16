@@ -9,6 +9,7 @@ import { useAppNavigation } from "../hooks/useAppNavigation";
 import { useBackCloses } from "../hooks/useDismiss";
 import { InstallMenuItem } from "./InstallApp";
 import { openJoinAnother } from "../lib/devices";
+import { listText } from "../lib/listText";
 import { StatusMenuItem } from "./StatusPicker";
 
 const LockIcon = () => (
@@ -104,10 +105,10 @@ export function ProfileSwitcherMenu({ variant, glances, onClose }: {
         const unread = glance?.unread ?? 0, fresh = glance?.fresh ?? 0;
         const status = glance?.locked ? t("profileSwitcher.locked")
           : glance?.standby ? t("profileSwitcher.standby")
-          : [fresh ? t("profileSwitcher.new") : "", unread ? t("profileSwitcher.unread", { count: unread }) : ""].filter(Boolean).join(", ");
+          : listText([fresh ? t("profileSwitcher.new") : "", unread ? t("profileSwitcher.unread", { count: unread }) : ""].filter(Boolean), t);
         return (
           <button key={entry.id || "default"} type="button" role="menuitemradio" aria-checked="false" data-testid="profile-switcher-item"
-            aria-label={`${t("profileSwitcher.switchTo", { name: entry.name })}${status ? `, ${status}` : ""}`}
+            aria-label={listText([t("profileSwitcher.switchTo", { name: entry.name }), ...(status ? [status] : [])], t)}
             onClick={() => switchTo(other)} className={`${itemClass} min-h-12 py-1.5`}>
             <span className="shrink-0 rounded-full" style={{ boxShadow: `0 0 0 2px ${THEME_COLOR[themeOf(entry.id)]}66` }}>
               <ProfileBadge entry={entry} size={32} avatar={glance?.avatar} />

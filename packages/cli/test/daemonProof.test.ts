@@ -38,7 +38,8 @@ async function impostor(socket: string, answer: (line: Line) => object | null, g
     s.on("data", (chunk) => { bytes += chunk.length; });
     const first = greet();
     if (first !== null) s.write((typeof first === "string" ? first : JSON.stringify(first)) + "\n");
-    createInterface({ input: s }).on("line", (text) => {
+    // A client that ends with the greeting unread resets the connection: readline passes that on as its own error.
+    createInterface({ input: s }).on("error", () => {}).on("line", (text) => {
       lines.push(text);
       let line: Line = {};
       try { line = JSON.parse(text) as Line; } catch { /* kept as it came */ }
@@ -116,7 +117,7 @@ describe.skipIf(process.platform === "win32")("a listener that is not this profi
     const seen = await impostor(paths.socket, answersEverything, () => ({ greeting: { pid: process.pid, at: Date.now(), proof: "00".repeat(32) } }));
 
     const status = error(await ghostly(["--home", dir, "daemon", "status"]), "refused", 1);
-    expect(status.message).toContain("ghostly daemon restart");
+    expect(status.message).toContain("remove that file");
     const token = "cashuBo2FteBtodHRwczovL3Rlc3RudXQuY2FzaHUuc3BhY2VhdWNzYXRhdIGiYWlIAJofKTJT5B5hcIOkYWEQYXN4QGZha2U";
     error(await ghostly(["--home", dir, "wallet", "redeem"], { input: token + "\n" }), "refused", 1);
 
@@ -247,6 +248,26 @@ describe.skipIf(process.platform === "win32")("a listener that is not this profi
     expect(existsSync(daemonSecretPath(dir))).toBe(false);
   });
 
+  it("answers a request line that is JSON but no object, and the lines written with it", async () => {
+    // Before: `null` threw in the line handler (an uncaught exception in the log) and the requests written in the same
+    // chunk were never answered, so a client waited on them for good.
+    const { dir, socket } = profileAt("not-object");
+    const served = await serve({ ctx: { runtime: { paths: { dir, socket } }, hub: quietHub } } as unknown as Host);
+    cleanups.push(() => served.close());
+    const raw = connect(socket);
+    cleanups.push(() => { raw.destroy(); });
+    const answers: { id?: unknown; result?: unknown; error?: { code: string; message: string } }[] = [];
+    const got = new Promise<void>((resolve) => createInterface({ input: raw }).on("line", (line) => {
+      answers.push(JSON.parse(line) as (typeof answers)[number]);
+      if (answers.length === 6) resolve();
+    }));
+    raw.write(`null\n[]\n5\n"x"\n${JSON.stringify({ id: 1, method: "daemon.hello", params: { nonce: "ab".repeat(16) } })}\n`);
+    await got;
+    const refused = { id: null, error: { code: "bad_request", message: "A request is a JSON object: {\"id\", \"method\", \"params\"}" } };
+    expect(answers.slice(1, 5)).toEqual([refused, refused, refused, refused]);
+    expect(answers[5]).toMatchObject({ id: 1, result: { proof: expect.any(String) } });
+  });
+
   it("daemon stop still ends an older release's daemon, which does not greet, through the process that holds the profile", async () => {
     const dir = join(root, "old-daemon");
     createProfile(dir, "default");
@@ -264,13 +285,19 @@ describe.skipIf(process.platform === "win32")("a listener that is not this profi
     expect(seen.bytes()).toBe(0);
   });
 
-  it("daemon stop with nobody holding the profile refuses what answers on its socket, having written nothing", async () => {
+  it("with nobody holding the profile, what answers on its socket is refused by every daemon command, which names the way out, having written nothing", async () => {
     const dir = join(root, "squatted");
     createProfile(dir, "default");
     const paths = profilePaths(dir, "default");
     writeFileSync(daemonSecretPath(paths.dir), "ab".repeat(32) + "\n", { mode: 0o600 });
     const seen = await impostor(paths.socket, (line) => ({ id: line.id ?? null, result: { pid: 1 } }), () => ({ greeting: { pid: 1, at: Date.now(), proof: "00".repeat(32) } }));
-    error(await ghostly(["--home", dir, "daemon", "stop", "--timeout", "2"]), "refused", 1);
+    // A restart that pointed back at `daemon restart`, and a start that said a daemon ran, left no way out.
+    for (const args of [["status"], ...[["status"], ["stop"], ["restart"], [], ["--detach"]].map((sub) => ["daemon", ...sub, "--timeout", "2"])]) {
+      const failure = error(await ghostly(["--home", dir, ...args]), "refused", 1);
+      expect(failure.message, args.join(" ")).toContain("no ghostly process holds the profile");
+      expect(failure.message, args.join(" ")).toContain(paths.socket);
+      expect(failure.message, args.join(" ")).not.toContain("ghostly daemon restart");
+    }
     expect(seen.bytes()).toBe(0);
   });
 });

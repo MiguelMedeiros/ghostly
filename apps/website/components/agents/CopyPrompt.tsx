@@ -49,7 +49,7 @@ export function CopyPrompt({ text, label, copy, copied }: { text: string; label:
           {c.done ? `✓ ${copied}` : copy}
         </button>
       </div>
-      <pre id={PROMPT_ID} className="ag-prompt-text" aria-label={label} tabIndex={0} data-testid="agent-prompt">
+      <pre id={PROMPT_ID} className="ag-prompt-text" role="region" aria-label={label} tabIndex={0} data-testid="agent-prompt">
         <code>{text}</code>
       </pre>
     </div>

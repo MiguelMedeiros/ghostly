@@ -44,6 +44,8 @@ services:
   s3: *node
   mint: *small
   iroh-relay: *small
+  livekit: *node
+  sfu-token: *small
   fedimintd: *node
   fedimint-lnd: *node
   fedimint-lnd-peer: *node

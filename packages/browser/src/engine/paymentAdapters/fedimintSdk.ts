@@ -1,4 +1,4 @@
-import type { BitcoinNetwork } from "@ghostly/core";
+import { stripHidden, type BitcoinNetwork } from "@ghostly/core";
 
 /**
  * The part of the Fedimint web SDK (`@fedimint/core`, WebAssembly client in a worker) Ghostly uses, behind an
@@ -149,6 +149,8 @@ async function browserTransport() {
 }
 
 const text = (value: unknown, max = 200) => typeof value === "string" ? value.slice(0, max) : undefined;
+/** A federation's or a guardian's name: without the characters that hide text or reorder it, so it reads as what it is. */
+const name = (value: unknown, max: number) => typeof value === "string" ? text(stripHidden(value).replace(/\s+/g, " ").trim(), max) : undefined;
 const errorText = (error: unknown) => error instanceof Error ? error.message : typeof error === "string" ? error : JSON.stringify(error);
 
 export function federationInfo(federationId: string, config: unknown): FederationInfo {
@@ -160,8 +162,8 @@ export function federationInfo(federationId: string, config: unknown): Federatio
   const version = c?.global?.consensus_version;
   return {
     federationId,
-    name: text(c?.global?.meta?.federation_name, 80),
-    guardians: endpoints.slice(0, 64).map(([peer, e]) => ({ name: text(e?.name, 80) || `Guardian ${peer}`, url: text(e?.url, 300) ?? "" })),
+    name: name(c?.global?.meta?.federation_name, 80) || undefined,
+    guardians: endpoints.slice(0, 64).map(([peer, e]) => ({ name: name(e?.name, 80) || `Guardian ${peer}`, url: text(e?.url, 300) ?? "" })),
     consensusVersion: `${Number(version?.major ?? 0)}.${Number(version?.minor ?? 0)}`,
     network,
     modules: [...new Set(modules.map((m) => (typeof m?.kind === "string" ? m.kind.slice(0, 32) : "")).filter(Boolean))],

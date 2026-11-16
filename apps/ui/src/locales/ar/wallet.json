@@ -194,7 +194,6 @@
   "cashu": {
     "add": "إضافة",
     "addMintPlaceholder": "أضف دار سك: \u2066https://…\u2069",
-    "amountSats": "{{amount}} sats",
     "askingMint": "جارٍ سؤال دار السك…",
     "backupCopied": "نُسخت النسخة الاحتياطية. من يملك هذه الرموز يملك الـ sats.",
     "contactHint": "تدفع لجهة اتصال؟ استخدم ⚡ في المحادثة.",
@@ -208,7 +207,7 @@
       "perProofTest": "{{fee}} sat تجريبي لكل إثبات (نحو 1 sat تجريبي لكل دفعة)"
     },
     "history": {
-      "fee": "رسوم {{amount}}",
+      "fee": "رسوم {{amount}} {{unit}}",
       "feesPaid": "الرسوم المدفوعة: {{amount}} {{unit}}",
       "movements": "{{count}} حركات",
       "movementsOne": "حركة واحدة",
@@ -414,7 +413,7 @@
     "cashuMints": "دور السك في Cashu",
     "cashuSettings": "إعدادات Cashu",
     "commentFor": "تعليق إلى {{to}} (اختياري)",
-    "confirmWhat": "{{amount}} sats (مع رسوم تصل إلى {{fee}})",
+    "confirmWhat": "{{amount}} {{unit}} (مع رسوم تصل إلى {{fee}} {{feeUnit}})",
     "connecting": "جارٍ الاتصال بالمصدر…",
     "domainLine": "{{answered}} {{limits}}",
     "done": "تم",

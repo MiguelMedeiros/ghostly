@@ -14,6 +14,7 @@ import { EventHub, type GhostlyEvent } from "../src/events";
 import { toTurn } from "../src/listen";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 import { messageJson } from "../src/views";
+import { chatViewOf, groupViewOf } from "./support/chatView";
 // covers: headless.buttons
 
 /** `send --button`, `group send --button` and `button update` (WISP 406 · Message Buttons), and `button.pressed`. */
@@ -32,7 +33,7 @@ function fake(links: LinkView[] = [link("chat-one", { label: "Alice", sessionOff
     return id;
   };
   const node = {
-    getState: () => ({ links, groups: [group()], settings: {}, transport: {} }) as unknown as EngineState,
+    chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links, groups: [group()], settings: {}, transport: {} }) as unknown as EngineState,
     getMessages: vi.fn(async (linkId: string) => of(linkId).map((m) => ({ ...m }))),
     getMessage: vi.fn(async (linkId: string, id: string) => { const m = of(linkId).find((x) => x.id === id); return m && { ...m }; }),
     groupMessages: vi.fn(async ({ groupId }: { groupId: string }) => of(`group:${groupId}`).map((m) => ({ ...m }))),
@@ -186,6 +187,29 @@ describe("button update", () => {
     await callApi(ctx, "button.update", { chat: "Alice", message: "me_1", text: seed, force: true });
     expect(rows("chat-one")[0]).toMatchObject({ text: seed });
     expect(params("button update", ["Alice", "me_1", "--text", "x", "--force"])).toMatchObject({ text: "x", force: true });
+  });
+
+  it("refuses a blank new text before the engine is asked: the question keeps its words", async () => {
+    // The engine fills a card's blank text with its fallback line, so `--chosen yes --text "  "` (an empty variable
+    // with a space) turned the question into "Reply: Yes / No" on both sides, answered with exit 0.
+    const { ctx, node, rows } = fake();
+    await callApi(ctx, "chat.send", { chat: "Alice", text: "Ship it?", buttons: [{ id: "yes", label: "Yes" }, { id: "no", label: "No" }] });
+    await expect(callApi(ctx, "button.update", { chat: "Alice", message: "me_1", chosen: "yes", text: "  " })).rejects.toMatchObject({ code: "bad_request", message: /blank/ });
+    await expect(callApi(ctx, "button.update", { chat: "Alice", message: "me_1", text: "\n\t" })).rejects.toMatchObject({ code: "bad_request" });
+    expect(node.editMessage).not.toHaveBeenCalled();
+    expect(rows("chat-one")[0]).toMatchObject({ text: "Ship it?" });
+  });
+
+  it("refuses a new text past 16 KiB as edit does, with its size, before the secret guard reads it", async () => {
+    const { ctx, node } = fake();
+    await callApi(ctx, "chat.send", { chat: "Alice", text: "Want it?", buttons: [{ id: "yes", label: "Yes" }] });
+    await callApi(ctx, "group.send", { group: "Sala", text: "Deploy?", mentions: [], buttons: [{ id: "go", label: "Go" }] });
+    // A seed past the limit: the size is said, not "looks like a secret" (a --force would not send it either).
+    const long = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about " + "é".repeat(8193);
+    const bytes = new TextEncoder().encode(long).length;
+    for (const [chat, message] of [["Alice", "me_1"], ["Sala", "me_2"]])
+      await expect(callApi(ctx, "button.update", { chat, message, text: long })).rejects.toMatchObject({ code: "bad_request", message: expect.stringMatching(/exceeds 16384 UTF-8 bytes/), details: { bytes, max: 16384 } });
+    expect(node.editMessage).not.toHaveBeenCalled();
   });
 
   it("finds the message by the id both sides know too, and in a group", async () => {

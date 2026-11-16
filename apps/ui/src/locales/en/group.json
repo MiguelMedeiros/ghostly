@@ -156,6 +156,7 @@
     "blockedNext": "Make someone admin, or wait for a member.",
     "body": "The group and its history go from this device. You will not read what is said after, and to come back someone has to let you in again.",
     "bodyCommunity": "The group and its history go from this device. You will not read what is said after, and to come back, open the group's link again.",
+    "bodyLast": "You are the only member: the group and its history end here, and nobody can join it again.",
     "forgetBody": "Deleting the group from this device also leaves it.",
     "forgetTitle": "Delete {{name}}?",
     "forgetTitleUnnamed": "Delete this group?",
@@ -263,6 +264,7 @@
   },
   "readNote": "Everyone in the group can read everything sent while they are a member. Someone removed keeps what they already received and cannot read what comes after; someone who joins later cannot read what came before. Messages go to each member; whoever was away gets what they missed from any member who has it (the group's last {{count}} messages) when they meet again.",
   "readNoteCommunity": "Anyone with the group's link can join, and any member can let people in. Everyone in the group can read everything sent while they are a member; someone removed cannot read what comes after, someone who joins later cannot read what came before. Members who were away get the last {{count}} messages from whoever is there when they return.",
+  "readNoteCommunityOff": "The link is off: nobody can join with it, and only the admin can let people in again, with a new link. Everyone in the group can read everything sent while they are a member; someone removed cannot read what comes after, someone who joins later cannot read what came before. Members who were away get the last {{count}} messages from whoever is there when they return.",
   "remove": {
     "body": "They won't get the group's new messages.",
     "linkHint": "They can still join again with the group's link: a new link keeps them out.",

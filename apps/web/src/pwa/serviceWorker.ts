@@ -171,10 +171,11 @@ export function listenForShares(peerLock?: string): void {
     if (message?.type === "share-where") { here(); return; }
     if (message?.type !== "share" || !message.item) return;
     const { item } = message;
-    // The page restarts with it still in the picker (a profile switch): the worker holds it again for the next page.
-    const carry = () => {
+    // The page restarts with it still in the picker (a profile switch): the worker holds it again for the next page,
+    // with the count of those not kept that it shows.
+    const carry = (lost?: number) => {
       if (!workers.controller) return false;
-      tell(workers.controller, { type: "share-keep", item });
+      tell(workers.controller, { type: "share-keep", item, ...(typeof lost === "number" && lost > 0 && { dropped: lost }) });
       return true;
     };
     // Any website can post to the share target: a share waits behind one already in the picker, never in its place.

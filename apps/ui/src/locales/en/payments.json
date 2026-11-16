@@ -35,6 +35,10 @@
       "amountMismatch": "The invoice does not match the requested amount",
       "feeAbove": "The Lightning fee (up to {{fee}} {{unit}}) is above your maximum"
     },
+    "expiredNext": {
+      "mine": "ask again with a new request",
+      "theirs": "ask your contact for a new request"
+    },
     "externalNote": {
       "ark": "Paid from any Ark wallet. Your contact's wallet marks it paid once it sees the money.",
       "bitcoin": "Paid from any Bitcoin wallet. Your contact's wallet marks it paid once it sees the money, after one confirmation.",
@@ -58,6 +62,7 @@
     "preparing": "Preparing…",
     "review": "Review payment",
     "state": {
+      "checking": "Checking the payment…",
       "closed": "Closed",
       "lightningPending": "Lightning payment pending…",
       "payment": {
@@ -67,6 +72,7 @@
         "settled": "Received"
       },
       "request": {
+        "expired": "Expired",
         "failed": "Failed",
         "pending": "Waiting for payment",
         "settled": "Paid"
@@ -229,11 +235,17 @@
     "sendUnavailable": "A request to the group is paid by one member; to pay someone, choose them instead",
     "status": {
       "claimedPaid": "{{names}} paid · waiting for {{to}}'s wallet",
+      "claimedPaidByMe": "You paid · waiting for {{to}}'s wallet",
+      "claimedPaidToMe": "{{names}} paid · waiting for your wallet",
+      "claimedPaidWithMe": "You and {{names}} paid · waiting for {{to}}'s wallet",
       "closed": "Closed",
       "paid": "Paid",
       "paidBy": "Paid by {{name}}",
+      "paidByMe": "Paid by you",
       "saysPaid": "{{names}} says they paid · waiting for {{to}}'s wallet",
+      "saysPaidToMe": "{{names}} says they paid · waiting for your wallet",
       "sent": "Sent · waiting for {{name}}",
+      "sentToMe": "Sent · waiting for your wallet",
       "takenBack": "Taken back",
       "waiting": "Waiting for payment"
     },
@@ -241,9 +253,16 @@
     "theGroup": "the group",
     "title": {
       "asked": "{{to}} asked {{from}}",
+      "askedByMe": "You asked {{from}}",
       "askedGroup": "{{to}} asked the group",
+      "askedGroupByMe": "You asked the group",
+      "askedMe": "{{to}} asked you",
       "paying": "{{from}} is paying {{to}}",
-      "sent": "{{from}} sent {{to}}"
+      "payingByMe": "You are paying {{to}}",
+      "payingMe": "{{from}} is paying you",
+      "sent": "{{from}} sent {{to}}",
+      "sentByMe": "You sent {{to}}",
+      "sentToMe": "{{from}} sent you"
     },
     "why": {
       "noPayments": "Their app takes no payments in groups (it needs an update), or they turned every way off",
@@ -257,7 +276,7 @@
     "alreadySpent": "Already spent",
     "anyAmount": "Any amount",
     "checking": "Checking…",
-    "confirmWhat": "{{amount}} sats (plus a fee of up to {{fee}})",
+    "confirmWhat": "{{amount}} {{unit}} (plus a fee of up to {{fee}} {{feeUnit}})",
     "copied": "Copied",
     "ecashRequest": "Ecash payment request",
     "ecashToken": "Ecash token",
@@ -286,9 +305,11 @@
     "otherUnitToken": "A {{unit}} token",
     "paid": "Paid ✓",
     "pay": "Pay",
-    "payWithFee": "Pay {{amount}} + up to {{fee}} fee",
+    "payWithFee": "Pay {{amount}} {{unit}} + up to {{fee}} fee",
     "paying": "Paying…",
     "paysThrough": "Pays through {{domain}}",
+    "pending": "Payment pending…",
+    "pendingAtCard": "Payment pending at {{card}}…",
     "pendingAtMint": "Payment pending at the mint…",
     "qrTooLong": "Too long for a QR code: copy it instead.",
     "redeem": "Redeem",

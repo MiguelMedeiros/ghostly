@@ -77,6 +77,18 @@ describe("the chat list's rows (compact, the default)", () => {
     expect(markOf("Gus")).toHaveAccessibleName("Waiting for your contact to be online");
   });
 
+  it("marks my last text of a compatibility chat delivered once the contact's acknowledgement covers it, as its bubble does", () => {
+    saveSession(chat("k", { profile: undefined, nick: "Kim", messages: [message({ sender: "me", text: "on my way", timestamp: 5000 })] }));
+    const { engine } = list();
+    const markOf = () => within(rowOf("Kim")).getByTestId("chat-row-delivery");
+    expect(markOf()).toHaveAccessibleName("Sent");
+    act(() => engine.update({ links: [linkView({ id: "k", peerPubKeyZ32: key("k"), peerAck: 4999 })] }));
+    expect(markOf()).toHaveAccessibleName("Sent");
+    act(() => engine.update({ links: [linkView({ id: "k", peerPubKeyZ32: key("k"), peerAck: 5000 })] }));
+    expect(markOf()).toHaveAccessibleName("Delivered");
+    expect(markOf()).toHaveAttribute("data-delivery", "delivered");
+  });
+
   it("puts no delivery mark on the contact's message, and counts what is unread beside it", () => {
     saveSession(chat("e", { nick: "Eve", messages: [message({ text: "one" }), message({ text: "two" }), message({ text: "three" })] }));
     list();
@@ -173,9 +185,12 @@ describe("the chat list's rows (compact, the default)", () => {
     expect(status.compareDocumentPosition(time) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(status.closest(".contact-row")).toContainElement(time);
     expect(row.querySelector("p")!.parentElement).not.toContainElement(mark);
-    // The same layer holds its Unpin button, over the mark and the time, and says it is pressed.
+    // The same layer holds its Unpin button, over the mark and the time, in the accent. Named for what it does next,
+    // never a toggle too: "Unpin chat, pressed" read as unpinned already.
     const unpin = within(within(row).getByTestId("chat-row-actions")).getByRole("button", { name: "Unpin chat" });
-    expect(unpin).toHaveAttribute("aria-pressed", "true");
+    expect(unpin).not.toHaveAttribute("aria-pressed");
+    expect(unpin).toHaveClass("data-[pinned]:text-accent");
+    expect(unpin).toHaveAttribute("data-pinned");
     expect(unpin).toHaveAttribute("title", "Unpin chat");
     expect(within(row).getAllByRole("button", { name: /pin chat/i })).toEqual([unpin]);
     // Pinning does not open the chat.
@@ -184,7 +199,9 @@ describe("the chat list's rows (compact, the default)", () => {
     await user.click(unpin);
     expect(isSessionPinned("g")).toBe(false);
     expect(within(rowOf("Gus")).queryByTestId("chat-row-pinned")).not.toBeInTheDocument();
-    expect(within(rowOf("Gus")).getByRole("button", { name: "Pin chat" })).toHaveAttribute("aria-pressed", "false");
+    const pin = within(rowOf("Gus")).getByRole("button", { name: "Pin chat" });
+    expect(pin).not.toHaveAttribute("aria-pressed");
+    expect(pin).not.toHaveAttribute("data-pinned");
   });
 
   it("pins and unpins from the keyboard, the layer showing while a button in it has keyboard focus", async () => {
@@ -199,10 +216,10 @@ describe("the chat list's rows (compact, the default)", () => {
     expect(isSessionPinned("k")).toBe(true);
     const unpin = await within(rowOf("Kim")).findByRole("button", { name: "Unpin chat" });
     expect(unpin).toHaveFocus();
-    expect(unpin).toHaveAttribute("aria-pressed", "true");
+    expect(unpin).toHaveAttribute("data-pinned");
     await user.keyboard(" ");
     expect(isSessionPinned("k")).toBe(false);
-    expect(within(rowOf("Kim")).getByRole("button", { name: "Pin chat" })).toHaveAttribute("aria-pressed", "false");
+    expect(within(rowOf("Kim")).getByRole("button", { name: "Pin chat" })).not.toHaveAttribute("data-pinned");
   });
 
   it("opens from the keyboard: each row is a stop named for the chat and described by its last line, Enter or Space opens it", async () => {

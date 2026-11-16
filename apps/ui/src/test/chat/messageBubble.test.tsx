@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { useState } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi, afterEach } from "vitest";
 import { MessageBubble } from "../../components/MessageBubble";
 import { forgetPictureLinks } from "../../lib/pictureLink";
 import { previewText } from "../../lib/chatList";
@@ -12,6 +12,9 @@ import type { ChatMessage } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { REGTEST_INVOICE } from "../payments/fixtures";
 import { renderApp } from "../render";
+import type { MessageReaction } from "@ghostly/browser/shared/types";
+import { fileURLToPath } from "node:url";
+import { ErrorBoundary } from "../../components/ErrorBoundary";
 
 // covers: chat.paired.links, chat.paired.image-links, chat.paired.receipts, chat.paired.delete-message, chat.paired.message-details, chat.paired.join-notice, payments.lightning.invoice-card, payments.cashu.token-card, chat.waiting
 
@@ -1129,8 +1132,300 @@ describe("MessageBubble: deleting", () => {
     expect(options("text a")).toHaveFocus();
   });
 
-  it("offers no delete where the chat cannot be edited", () => {
-    bubble({ text: "kept" });
+  it("offers no delete where the chat cannot be edited", async () => {
+    const { user } = bubble({ text: "kept" });
+    await user.click(screen.getByTestId("message-options"));
+    expect(screen.getByTestId("message-menu")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delete message" })).not.toBeInTheDocument();
+  });
+});
+
+// covers: app.theme.bubbles
+describe("MessageBubble: theme colours", () => {
+  // A real bolt11 for 21u (2,100 sat), from packages/browser/test/uiHelpers.test.ts.
+  const INVOICE = "lnbc21u1p42mkf2dqqpp56q3d9mfahf0974jqwy0yyfrg7zxksgxk7ufcc084yydhfx43daqqsp59g4z52329g4z52329g4z52329g4z52329g4z52329g4z52329g4q9qrsgqcqzyskhkhqar4dqgqfmarvdttr8x2nrp4txtamfupfftrnn4hmrp7s8ayen7hp2ye58jq8zu65rch9eplpxkhf3pf2nvuynhqxvkw5f7a2vgq486x8x";
+  const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
+  const message = (patch: Partial<ChatMessage> = {}): ChatMessage => ({ id: "m1", text: "hello", sender: "peer", timestamp: 1_700_000_000_000, ...patch });
+
+  /**
+   * A fixed colour in a bubble reads on one theme's bubble and not another's (dark text on a dark bubble was the
+   * light theme's bug). Everything in a bubble takes theme tokens; the chip over a picture is the one exception, since
+   * it sits on the picture, not the bubble. How readable the tokens are is measured in e2e/web/bubble-contrast.spec.ts.
+   */
+  const FIXED = /(?:^|\s)(?:[a-z-]+:)*(?:text|bg|fill|stroke|border|decoration)-\[(?:#|hsla?\(|rgba?\()/;
+
+  function fixedColours(root: HTMLElement): string[] {
+    return [...root.querySelectorAll<Element>("[data-message-bubble], [data-message-bubble] *")]
+      .filter((el) => !el.closest("[data-picture-time]"))
+      .map((el) => el.getAttribute("class") ?? "")
+      .filter((classes) => FIXED.test(classes));
+  }
+
+  it.each([
+    ["a text with a link", { text: "see https://ghostly.tools/menu first" }],
+    ["a text from the contact, with a name", { text: "hello", nick: "Bob" }],
+    ["a text of mine, delivered", { text: "hi", sender: "me", delivery: "delivered" }],
+    ["a text of mine, not delivered", { text: "hi", sender: "me", delivery: "failed", deliveryError: "no route" }],
+    ["a Lightning invoice", { text: `pay me ${INVOICE}` }],
+    ["a picture of mine", { text: PNG, sender: "me" }],
+    ["a picture from the contact, behind a click", { text: "https://cdn.example.com/cat.jpg" }],
+  ] as [string, Partial<ChatMessage>][])("%s: the bubble is the theme's, and nothing in it has a fixed colour", (_, patch) => {
+    const { container } = renderApp(<MessageBubble message={message(patch)} peerPubKey="peer" />);
+    const bubble = container.querySelector<HTMLElement>("[data-message-bubble]")!;
+    const mine = patch.sender === "me";
+    expect(bubble.closest("[data-message-row]")).toHaveAttribute("data-sender", mine ? "me" : "peer");
+    expect(bubble).toHaveClass(mine ? "bg-sent-bg" : "bg-received-bg");
+    expect(bubble.querySelector("svg path")).toHaveClass(mine ? "fill-sent-bg" : "fill-received-bg");
+    expect(fixedColours(container)).toEqual([]);
+  });
+
+  it("the Ctrl+double-click details take the bubble's colour too", async () => {
+    const meta = { dhtKey: "k".repeat(40), dnsRecords: ["a"], relays: [] } as unknown as ChatMessage["meta"];
+    const { container, user } = renderApp(<MessageBubble message={message({ meta })} peerPubKey="peer" />);
+    await user.keyboard("{Control>}");
+    await user.dblClick(container.querySelector("[data-message-bubble]")!);
+    await user.keyboard("{/Control}");
+    const panel = await screen.findByTestId("message-details");
+    expect(within(panel).getByTestId("message-details-excerpt")).toHaveClass("bg-received-bg");
+    expect(container.querySelector("[data-message-bubble]")).toHaveClass("outline-accent");
+    expect(fixedColours(container)).toEqual([]);
+    expect(fixedColours(panel)).toEqual([]);
+  });
+});
+
+// covers: chat.paired.message-details, app.i18n
+describe("Message details: the message's text keeps its own direction", () => {
+  /**
+   * Message details shows the message under its title, after its kind ("نص" in Arabic). The kind and the text shared one
+   * `dir="auto"` line, so the kind chose the line's direction: in the Arabic app "hello world 42!" read "!hello world 42",
+   * and in the English one an Arabic text's question mark went to its wrong end. The text is laid out in its own
+   * direction, as its bubble does; the kind follows the app's.
+   */
+  async function excerpt(text: string, language: "ar" | "en") {
+    const { container, user } = renderApp(<MessageBubble message={{ id: "m1", text, sender: "peer", timestamp: 1_700_000_000_000 }} peerPubKey="peer" />, { language });
+    await user.keyboard("{Control>}");
+    await user.dblClick(container.querySelector("[data-message-bubble]")!);
+    await user.keyboard("{/Control}");
+    return within(await screen.findByTestId("message-details")).getByTestId("message-details-excerpt");
+  }
+
+  it.each([
+    ["an English text in the Arabic app", "hello world 42!", "ar"],
+    ["an Arabic text in the English app", "مرحبا يا صديقي؟", "en"],
+  ] as const)("%s", async (_, text, language) => {
+    const shown = await excerpt(text, language);
+    const words = within(shown).getByText(text);
+    expect(words).toHaveAttribute("dir", "auto");
+    // Nothing of the app's own words shares the text's line: the kind is outside it.
+    expect(words).not.toContainElement(within(shown).getByTestId("message-details-kind"));
+    expect(shown).not.toHaveAttribute("dir");
+  });
+});
+
+// covers: chat.paired.links
+// A link ends where the sentence around it takes over: its trailing punctuation, and a closing bracket it did
+// not open, stay text. Before, "Read https://ghostly.tools/docs." linked to ".../docs." — a page that does not exist.
+describe("MessageBubble links", () => {
+  it.each([
+    ["a full stop", "Read https://ghostly.tools/docs.", "https://ghostly.tools/docs"],
+    ["a comma", "See https://ghostly.tools/docs, then reply", "https://ghostly.tools/docs"],
+    ["brackets", "the docs (https://ghostly.tools/docs) say so", "https://ghostly.tools/docs"],
+    ["a question mark and a quote", 'Did you read "https://ghostly.tools/docs"?', "https://ghostly.tools/docs"],
+    ["a bracket the link opened", "https://en.wikipedia.org/wiki/Ghost_(disambiguation)", "https://en.wikipedia.org/wiki/Ghost_(disambiguation)"],
+    ["a query string", "https://ghostly.tools/docs?page=2&x=1.", "https://ghostly.tools/docs?page=2&x=1"],
+  ])("handles %s", (_, text, href) => {
+    renderApp(<MessageBubble message={{ id: "m1", text, sender: "peer", timestamp: 1_700_000_000_000 }} />);
+    expect(screen.getByRole("link")).toHaveAttribute("href", href);
+    expect(screen.getByRole("link")).toHaveTextContent(href);
+  });
+
+  it("keeps the punctuation it leaves out as text", () => {
+    const { container } = renderApp(<MessageBubble message={{ id: "m1", text: "Read https://ghostly.tools/docs.", sender: "peer", timestamp: 1_700_000_000_000 }} />);
+    expect(container).toHaveTextContent("Read https://ghostly.tools/docs.");
+  });
+});
+
+// covers: chat.reactions, chat.waiting
+describe("a message's control that goes away under the keyboard focus", () => {
+  /*
+   * A control of a message that its own press takes out of the page (my reaction's chip taken back, the red mark once
+   * the message is sent again) had the focus: it stays on the message, so Tab goes on from there, not from the page's top.
+   */
+  const r = (e: string, n = 1, at = n): MessageReaction => ({ e, n, at });
+  const message = (patch: Partial<ChatMessage> = {}): ChatMessage => ({ id: "m1", text: "lunch at noon?", sender: "peer", timestamp: 1_700_000_000_000, ...patch });
+  const row = (container: HTMLElement) => container.querySelector<HTMLElement>("[data-message-row]")!;
+
+  it("my reaction taken back from its chip leaves the focus on the message", async () => {
+    const bubble = (reactions: ChatMessage["reactions"]) => <MessageBubble message={message({ reactions })} peerPubKey="peer" onReact={() => {}} reactionName={() => "Alice"} />;
+    const { user, container, rerender } = renderApp(bubble({ me: r("❤️") }));
+    const chip = screen.getByTestId("reaction-chip");
+    chip.focus();
+    await user.keyboard("{Enter}");
+    // The engine takes it back: the chip, alone of its emoji, goes.
+    rerender(bubble({ me: r("", 2) }));
+    expect(screen.queryByTestId("reaction-chip")).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(row(container));
+    // A stop of its own only while it holds that focus.
+    act(() => row(container).blur());
+    expect(row(container)).not.toHaveAttribute("tabindex");
+  });
+
+  it("the red mark of a message sent again leaves the focus on the message", async () => {
+    const bubble = (delivery: ChatMessage["delivery"]) => <MessageBubble message={message({ sender: "me", delivery })} peerPubKey="peer" />;
+    const { user, engine, container, rerender } = renderApp(bubble("failed"));
+    act(() => engine.update({ links: [linkView()] }));
+    engine.on("retryMessage", () => undefined);
+    screen.getByRole("button", { name: "Not sent. Send again" }).focus();
+    await user.keyboard("{Enter}");
+    expect(engine.callsTo("retryMessage")).toHaveLength(1);
+    // On its way again: the mark is no button any more.
+    rerender(bubble("sending"));
+    expect(screen.getByTestId("message-delivery").tagName).toBe("SPAN");
+    expect(document.activeElement).toBe(row(container));
+  });
+
+  it("a focus the person moved elsewhere meanwhile is left where it is", async () => {
+    const bubble = (reactions: ChatMessage["reactions"]) => <><MessageBubble message={message({ reactions })} peerPubKey="peer" onReact={() => {}} reactionName={() => "Alice"} /><textarea data-testid="composer" /></>;
+    const { user, rerender } = renderApp(bubble({ me: r("❤️") }));
+    screen.getByTestId("reaction-chip").focus();
+    await user.keyboard("{Enter}");
+    screen.getByTestId("composer").focus();
+    rerender(bubble({ me: r("", 2) }));
+    expect(document.activeElement).toBe(screen.getByTestId("composer"));
+  });
+});
+
+// covers: app.mobile-layout, chat.paired.join-notice
+describe("a system line's ⋮ on a phone", () => {
+  /**
+   * On a phone a system line's ⋮ (a contact joined, a call, a refused payment) takes a thumb's 44 px: its hit area reaches
+   * past its box towards the row's end. The row kept only the 10 px every row keeps there, so a line long enough to wrap
+   * (the contact joined, in Japanese, at 375 px) put the ⋮ against the screen's edge, which cut its hit area to 33 px
+   * wide. A system row keeps the whole reach on a phone, on both sides (the ⋮ is on the left in Arabic). jsdom draws no
+   * layout: what is read here is the rule and the class; e2e/web/phone-touch-targets.spec.ts measures it in a browser.
+   */
+  const here = fileURLToPath(import.meta.url);
+  const CSS = readFileSync(join(here, "../../../index.css"), "utf8");
+  const BUBBLE = readFileSync(join(here, "../../../components/MessageBubble.tsx"), "utf8");
+
+  /** How far past its box a system line's ⋮ (`align="right"`) takes taps on a phone, from `MessageMenu`'s classes. */
+  const reach = Number(BUBBLE.match(/max-md:before:-end-\[(\d+)px\]/)?.[1]);
+
+  /** The px `padding-inline` a rule for `selector` sets inside the at-rule whose prelude starts with `at`, if any. */
+  function paddingInside(at: string, selector: string): number | undefined {
+    for (const block of CSS.split(at).slice(1)) {
+      const rule = block.match(/^[^{]*\{\s*([^{}]+)\{([^}]*)\}/);
+      if (rule?.[1]!.trim() !== selector) continue;
+      const value = rule[2]!.match(/padding-inline\s*:\s*(\d+)px/)?.[1];
+      if (value) return Number(value);
+    }
+    return undefined;
+  }
+
+  const NARROW = ["@media (width < 768px)", "@container message-list (width < 36rem)"];
+
+  it("has its reach read from the ⋮'s classes", () => {
+    expect(reach).toBeGreaterThan(10);
+  });
+
+  for (const at of NARROW) {
+    it(`keeps the room its hit area reaches past it, on both sides of a system row (${at})`, () => {
+      const rows = paddingInside(at, ".message-row-x");
+      expect(rows, "every row's room on a phone").toBe(10);
+      const system = paddingInside(at, ".message-row-x.system-row-x");
+      expect(system, "a system row's room on a phone").toBeDefined();
+      expect(system!).toBeGreaterThanOrEqual(reach);
+    });
+  }
+
+  it("is in a row that keeps that room, for every system line MessageBubble draws", () => {
+    const rows = BUBBLE.match(/data-sender="system" className=\{`[^`]*`\}/g) ?? [];
+    expect(rows.length).toBeGreaterThanOrEqual(3);
+    for (const row of rows) expect(row).toMatch(/\bmessage-row-x system-row-x\b/);
+  });
+
+  const base = { id: "s1", sender: "system", timestamp: 1_700_000_000_000 } as const;
+  const lines: [string, ChatMessage][] = [
+    ["a contact joined", { ...base, text: "👋 joined", systemEvent: { type: "join", pubKey: "yb1q3k9mfahf0974jqwy0yyfrg7zxksgxk7ufcc0" } }],
+    ["a call", { ...base, text: "Missed audio call", callEvent: { type: "call_missed", hasVideo: false } }],
+  ];
+  it.each(lines)("draws %s in such a row, with its ⋮", (_, message) => {
+    renderApp(<MessageBubble message={message} peerPubKey="peer" />);
+    const options = screen.getByTestId("message-options");
+    const row = options.closest<HTMLElement>("[data-message-row]")!;
+    expect(row.dataset.sender).toBe("system");
+    expect(row).toHaveClass("message-row-x", "system-row-x");
+  });
+
+  it("leaves a contact's bubble in a row of the usual room", () => {
+    renderApp(<MessageBubble message={{ id: "m1", text: "hello", sender: "peer", timestamp: 1_700_000_000_000 }} peerPubKey="peer" />);
+    expect(screen.getByTestId("message-options").closest("[data-message-row]")).not.toHaveClass("system-row-x");
+  });
+});
+
+describe("a contact request's text in the chat (WISP 8xx § Accept)", () => {
+  const message = (patch: Partial<ChatMessage> = {}): ChatMessage => ({ id: "m1", text: "Hi, it's me", sender: "peer", timestamp: 1_700_000_000_000, ...patch });
+
+  it("says Not confirmed until the requester's app confirmed it, and nothing once it did", () => {
+    const { rerender } = renderApp(<MessageBubble message={message({ unconfirmed: true })} peerPubKey="peer" />);
+    const mark = screen.getByTestId("message-unconfirmed");
+    expect(mark).toHaveTextContent("Not confirmed");
+    expect(mark).toHaveAttribute("title", "Sent with a contact request. Their app has not confirmed yet that it sent this.");
+    rerender(<MessageBubble message={message()} peerPubKey="peer" />);
+    expect(screen.queryByTestId("message-unconfirmed")).toBeNull();
+  });
+});
+
+// covers: chat.rich.time, chat.rich.code, chat.paired.links
+describe("a message that cannot be drawn, and what a peer can put in one", () => {
+  /*
+   * What a peer puts in one message stays in that message's bubble: a bubble that throws shows a note where it was,
+   * and the app-wide "Something went wrong" never takes the chat down.
+   */
+  const SENT = Date.UTC(2026, 8, 25, 12);
+  const message = (patch: Partial<ChatMessage>): ChatMessage => ({ id: "m1", text: "hi", sender: "peer", timestamp: SENT, ...patch });
+  const chat = (...messages: ChatMessage[]) => renderApp(
+    <ErrorBoundary>{messages.map(m => <MessageBubble key={m.id} message={m} peerPubKey="peer" />)}</ErrorBoundary>,
+  );
+
+  afterEach(() => vi.restoreAllMocks());
+
+  describe("one message that cannot be drawn", () => {
+    it("shows a note in its place, and the rest of the chat as it is", () => {
+      // React reports the error it caught; the boundary logs it too.
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      chat(message({ id: "bad", text: { not: "text" } as never }), message({ id: "good", text: "still here" }));
+      expect(screen.getByTestId("message-unshowable")).toHaveTextContent("This message could not be shown.");
+      expect(screen.getByTestId("message-text")).toHaveTextContent("still here");
+      expect(screen.queryByTestId("app-error")).toBeNull();
+    });
+  });
+
+  describe("what a peer can put in a message", () => {
+    it("a sending time no date holds leaves the time as text", () => {
+      chat(message({ text: "see you at 14:00 UTC", timestamp: Number.MAX_SAFE_INTEGER }));
+      expect(screen.getByTestId("message-text")).toHaveTextContent("see you at 14:00 UTC");
+      expect(screen.queryByTestId("rich-time")).toBeNull();
+      expect(screen.queryByTestId("message-unshowable")).toBeNull();
+      expect(screen.queryByTestId("app-error")).toBeNull();
+    });
+
+    it("a direction override cannot make a link show another address", () => {
+      chat(message({ text: "look ‮ https://evil.example/‮moc.elgoog.www//:sptth" }));
+      const link = screen.getByRole("link");
+      expect(link).toHaveAttribute("dir", "ltr");
+      expect(link.parentElement?.tagName).toBe("BDI");
+      expect(link.textContent).toBe("https://evil.example/%E2%80%AEmoc.elgoog.www//:sptth");
+    });
+
+    it("deeply nested JSON shows as written, at once", () => {
+      const deep = "[".repeat(8191) + "1" + "]".repeat(8191);
+      const start = performance.now();
+      chat(message({ text: deep }));
+      expect(performance.now() - start).toBeLessThan(1000);
+      expect(screen.queryByTestId("rich-codeblock")).toBeNull();
+      expect(screen.getByTestId("message-text").textContent).toBe(deep);
+    });
   });
 });

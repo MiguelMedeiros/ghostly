@@ -98,6 +98,36 @@ describe("Remove, on the active device", () => {
     expect(await screen.findByTestId("device-remove-error")).toHaveTextContent("Something else is changing your devices.");
   });
 
+  it("Remove keeps the keyboard focus while it goes, takes no second press, and keeps it when refused", async () => {
+    let refuse!: (error: Error) => void;
+    const { user, engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => activeSet());
+    engine.on("deviceRemove", () => new Promise((_, reject) => { refuse = reject; }));
+    await user.click((await screen.findAllByTestId("device-menu"))[0]);
+    await user.click(screen.getByTestId("device-remove-open"));
+    const go = screen.getByTestId("device-remove-go");
+    const lost = screen.getByTestId("device-remove-lost");
+    act(() => go.focus());
+    await user.keyboard("{Enter}");
+    expect(engine.callsTo("deviceRemove")).toHaveLength(1);
+    // Busy, not disabled: a disabled button would drop the focus to the page, and leave it there on a refusal.
+    expect(go).toHaveFocus();
+    expect(go).toBeEnabled();
+    expect(go).toHaveAttribute("aria-busy", "true");
+    expect(lost).toBeEnabled();
+    expect(lost).toHaveAttribute("aria-disabled", "true");
+    await user.keyboard("{Enter}");
+    await user.click(lost);
+    expect(engine.callsTo("deviceRemove")).toHaveLength(1);
+    expect(screen.queryByTestId("device-lost")).toBeNull();
+    act(() => go.focus());
+    await act(async () => { refuse(new Error("remove-busy: The profile is moving. Try again after it.")); });
+    expect(await screen.findByTestId("device-remove-error")).toHaveTextContent("Something else is changing your devices.");
+    expect(go).not.toHaveAttribute("aria-busy");
+    expect(lost).not.toHaveAttribute("aria-disabled");
+    expect(go).toHaveFocus();
+  });
+
   it("Lost or stolen shows the checklist first, then removes the device", async () => {
     const { user, engine } = renderApp(<DevicesSection />);
     engine.on("deviceSet", () => activeSet());
@@ -109,6 +139,68 @@ describe("Remove, on the active device", () => {
     expect(screen.getByTestId("device-lost-chats")).toHaveTextContent("Pair each chat again");
     await user.click(screen.getByTestId("device-lost-remove"));
     await waitFor(() => expect(engine.callsTo("deviceRemove")).toEqual([{ key: PHONE }]));
+  });
+
+  it("the checklist before a removal has Back to Remove, not a Done that ends with the device still in the set", async () => {
+    const { user, engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => activeSet());
+    await user.click((await screen.findAllByTestId("device-menu"))[0]);
+    await user.click(screen.getByTestId("device-remove-open"));
+    await user.click(screen.getByTestId("device-remove-lost"));
+    expect(screen.queryByTestId("device-lost-done")).toBeNull();
+    await user.click(screen.getByTestId("device-lost-back"));
+    expect(screen.getByTestId("device-remove")).toHaveTextContent("Remove Phone?");
+    expect(engine.callsTo("deviceRemove")).toEqual([]);
+  });
+
+  it("while Removing… runs, × and Escape do nothing, and a refusal is said in the dialog", async () => {
+    const { user, engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => activeSet());
+    let refuse!: () => void;
+    engine.on("deviceRemove", () => new Promise((_, reject) => { refuse = () => reject(new Error("remove-busy: The profile is moving. Try again after it.")); }));
+    await user.click((await screen.findAllByTestId("device-menu"))[0]);
+    await user.click(screen.getByTestId("device-remove-open"));
+    await user.click(screen.getByTestId("device-remove-go"));
+    await screen.findByTestId("device-remove-busy");
+    const dialog = screen.getByTestId("device-remove");
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    act(() => { dialog.dispatchEvent(new Event("cancel", { cancelable: true })); });
+    expect(screen.getByTestId("device-remove")).toBe(dialog);
+    act(() => refuse());
+    expect(await screen.findByTestId("device-remove-error")).toHaveTextContent("Something else is changing your devices.");
+  });
+
+  it("while Removing… runs, Escape pressed again does not close it either, as a browser would close a modal dialog", async () => {
+    // A browser's Escape on a modal <dialog> (HTML § close requests): its `cancel` may be prevented once; the next Escape
+    // with no click between is not cancelable, and the dialog closes, whatever the page wants. Chromium 158, Firefox 159
+    // and WebKit 27 all do this. Before, the second Escape closed it under the person while React still held it open.
+    let prevented = false;
+    const escape = (event: KeyboardEvent) => {
+      const open = document.querySelector<HTMLDialogElement>("dialog[open]");
+      if (event.key !== "Escape" || event.defaultPrevented || !open) return;
+      if (!open.dispatchEvent(new Event("cancel", { cancelable: !prevented }))) { prevented = true; return; }
+      open.close();
+    };
+    window.addEventListener("keydown", escape);
+    try {
+      const { user, engine } = renderApp(<DevicesSection />);
+      engine.on("deviceSet", () => activeSet());
+      let refuse!: () => void;
+      engine.on("deviceRemove", () => new Promise((_, reject) => { refuse = () => reject(new Error("remove-busy: The profile is moving. Try again after it.")); }));
+      await user.click((await screen.findAllByTestId("device-menu"))[0]);
+      await user.click(screen.getByTestId("device-remove-open"));
+      await user.click(screen.getByTestId("device-remove-go"));
+      await screen.findByTestId("device-remove-busy");
+      const dialog = screen.getByTestId<HTMLDialogElement>("device-remove");
+      await user.keyboard("{Escape}{Escape}{Escape}");
+      expect(dialog.open).toBe(true);
+      act(() => refuse());
+      expect(await screen.findByTestId("device-remove-error")).toHaveTextContent("Something else is changing your devices.");
+      expect(dialog.open).toBe(true);
+      // Once it answered, Escape closes it.
+      await user.keyboard("{Escape}");
+      await waitFor(() => expect(screen.queryByTestId("device-remove")).toBeNull());
+    } finally { window.removeEventListener("keydown", escape); }
   });
 
   it("shows who has not taken the new secret yet, and makes a new device secret on request", async () => {
@@ -368,6 +460,21 @@ describe("the standby screen after a removal", () => {
     await user.click(screen.getByTestId("device-remove-here-go"));
     expect(await screen.findByTestId("device-remove-here-error")).toBeInTheDocument();
     expect(screen.getByTestId("device-remove-here-go")).toHaveTextContent("Remove");
+  });
+
+  it("Escape and the × do nothing while Remove this profile here runs, so a failure that comes later is still said", async () => {
+    let refuse = () => {};
+    vi.mocked(removeProfileHere).mockReset().mockReturnValue(new Promise<void>((_, reject) => { refuse = () => reject(new Error("This profile is open in another window. Close it, then try again.")); }));
+    const { user } = renderApp(<DeviceStandby gate={{ state: "removed", activeDevice: "Desktop" }} />);
+    await user.click(screen.getByTestId("device-standby-remove-here"));
+    await user.type(screen.getByTestId("device-remove-here-name"), "Personal");
+    await user.click(screen.getByTestId("device-remove-here-go"));
+    expect(screen.getByTestId("device-remove-here-go")).toHaveTextContent("Removing…");
+    screen.getByTestId("device-remove-here").dispatchEvent(new Event("cancel", { cancelable: true }));
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.getByTestId("device-remove-here")).toBeInTheDocument();
+    act(() => refuse());
+    expect(await screen.findByTestId("device-remove-here-error")).toBeInTheDocument();
   });
 
   it("a device still in the set, or one that may get back in, has no Remove this profile here", () => {

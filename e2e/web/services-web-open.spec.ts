@@ -19,8 +19,8 @@ import { choose } from "../support/select";
 test.describe.configure({ timeout: 5 * 60_000 });
 
 /**
- * A small web app on the bot's machine: a page, a script it loads, an API it posts to, a cookie it sets, and a worker
- * that loads a script of its own and evaluates one. Its script also tries a server on the person's machine (`local`,
+ * A small web app on the bot's machine: a page, a script it loads, an API it posts to, a cookie it sets, and two
+ * workers (one from a script of the app's, one from a blob) that load a script of their own and evaluate one. Its script also tries a server on the person's machine (`local`,
  * a port on 127.0.0.1), outside its own origin.
  */
 async function demoApp(local: number): Promise<{ server: Server; port: number; seen: { method: string; path: string; cookie?: string }[] }> {
@@ -32,11 +32,14 @@ async function demoApp(local: number): Promise<{ server: Server; port: number; s
       seen.push({ method: request.method ?? "", path: request.url ?? "", cookie: request.headers.cookie });
       if (request.url === "/") {
         response.writeHead(200, { "content-type": "text/html; charset=utf-8", "set-cookie": "visit=1; Path=/; HttpOnly", "x-frame-options": "DENY" });
-        response.end(`<!doctype html><title>Demo</title><h1 id="title">Hello from the demo</h1><p id="out">…</p><p id="popup">…</p><p id="local">…</p><p id="worker">…</p><script src="/app.js"></script>`);
+        response.end(`<!doctype html><title>Demo</title><h1 id="title">Hello from the demo</h1><p id="out">…</p><p id="popup">…</p><p id="local">…</p><p id="worker">…</p><p id="blob-worker">…</p><a id="docs" href="https://docs.example/guide" target="_blank">Docs</a> <a id="news" href="https://docs.example/news" target="_new">News</a> <a id="near" href="http://127.0.0.1:${local}/near" target="_blank">Near</a><script src="/app.js"></script>`);
       } else if (request.url === "/app.js") {
         response.writeHead(200, { "content-type": "text/javascript" });
         response.end(`document.getElementById("popup").textContent = window.open("/popup") ? "opened" : "refused";
           new Worker("/worker.js").onmessage = (event) => { document.getElementById("worker").textContent = event.data; };
+          const inline = URL.createObjectURL(new Blob(['try { importScripts("' + location.origin + '/lib.js"); postMessage(eval("self.lib + 2")); } catch (e) { postMessage(e.name); }'], { type: "text/javascript" }));
+          new Worker(inline).onmessage = (event) => { document.getElementById("blob-worker").textContent = event.data; };
+          URL.revokeObjectURL(inline);
           fetch("http://127.0.0.1:${local}/local", { mode: "no-cors" }).then(() => "reached", () => "refused").then((said) => { document.getElementById("local").textContent = said; });
           fetch("/api/echo?x=1", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ hello: "ghost" }) })
           .then((r) => r.json()).then((j) => { document.getElementById("out").textContent = JSON.stringify({ ...j, origin: location.origin, storage: (() => { try { return Object.keys(localStorage); } catch (e) { return "refused"; } })() }); });`);
@@ -109,11 +112,38 @@ test("a person on the web opens the web app a bot shares, on an origin of its ow
     expect(app.seen.map((r) => `${r.method} ${r.path}`)).toEqual(expect.arrayContaining(["GET /", "GET /app.js", "POST /api/echo?x=1"]));
     // Its worker runs its scripts: Trusted Types, there for the app's pages, would refuse them in a worker.
     await expect(demo.locator("#worker")).toHaveText("42");
+    // So does one it makes from a blob of its own (and revokes at once), which takes the page's policy, Trusted Types
+    // included: the guard starts it from a script that makes the default policy there first.
+    await expect(demo.locator("#blob-worker")).toHaveText("43");
     // It opens no window of its own: one would be a tab on its origin, outliving the view and the lock.
     await expect(demo.locator("#popup")).toHaveText("refused");
     expect(app.seen.map((r) => r.path)).not.toContain("/popup");
     // It talks to its own origin only, as on Desktop and in the extension: not to a service on this machine.
     await expect(demo.locator("#local")).toHaveText("refused");
+    // A link it opens in a new tab, tapped, opens in a tab of the browser's own with no opener, as Desktop opens it in
+    // the system browser: the view's sandbox alone dropped it with no word. One to this machine opens nowhere.
+    const context = person.page.context();
+    await context.route("https://docs.example/**", (route) => route.fulfill({ contentType: "text/html", body: "<title>Docs</title>docs" }));
+    // Past the 5 s the tap on Open keeps Ghostly's page active: a link asked for meanwhile is not one tapped in the app.
+    await person.page.waitForTimeout(5_500);
+    const tab = context.waitForEvent("page");
+    await demo.locator("#docs").click();
+    const docs = await tab;
+    await expect(docs).toHaveURL("https://docs.example/guide");
+    expect(await docs.evaluate(() => window.opener)).toBeNull();
+    await docs.close();
+    // Past the 2 s a view waits between two links. One to a name no window has (`_new`) opens a new one too.
+    await person.page.waitForTimeout(2_500);
+    const newsTab = context.waitForEvent("page");
+    await demo.locator("#news").click();
+    const news = await newsTab;
+    await expect(news).toHaveURL("https://docs.example/news");
+    await news.close();
+    const pages = context.pages().length;
+    await person.page.waitForTimeout(2_500);
+    await demo.locator("#near").click();
+    await person.page.waitForTimeout(2_000);
+    expect(context.pages()).toHaveLength(pages);
     expect(localSeen).toEqual([]);
     // The app's own storage is untouched by it, and the app still holds its chat.
     expect((await person.page.evaluate(() => Object.keys(localStorage))).filter((key) => !key.startsWith("ghostly-test-")).length).toBeGreaterThan(0);

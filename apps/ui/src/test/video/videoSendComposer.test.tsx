@@ -257,7 +257,7 @@ describe("a video chosen to send", () => {
     await user.upload(screen.getByTestId("media-input"), chosen);
 
     await waitFor(() => expect(onSendFile).toHaveBeenCalledWith(chosen));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Sent IMG_0001.MOV as it is: this device can't convert it.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Sent \u2068IMG_0001.MOV\u2069 as it is: this device can't convert it.");
   });
 
   it("other files go straight away, the converter never loaded", async () => {
@@ -322,6 +322,6 @@ describe("a video still converting when the chat is left", () => {
     await waitFor(() => expect(onSendFile).toHaveBeenCalledTimes(1));
 
     renderApp(inChat());
-    expect(await screen.findByRole("alert")).toHaveTextContent("Sent IMG_0001.MOV as it is: this device can't convert it.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Sent \u2068IMG_0001.MOV\u2069 as it is: this device can't convert it.");
   });
 });

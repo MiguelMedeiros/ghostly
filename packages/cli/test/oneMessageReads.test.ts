@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { EngineState, GroupView, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
+import { chatViewOf, groupViewOf } from "./support/chatView";
 // covers: headless.forward, headless.chat
 
 /**
@@ -16,7 +17,7 @@ function fake() {
   const rows: StoredMessage[] = [row("chat-one", "peer_1"), row("chat-one", "peer_2"), row("group:g1", "k:0:1"), row("chat-two", "me_fwd", { sender: "me", delivery: "sent" }),
     row("chat-one", "me_1", { sender: "me", wireId: "W1", delivery: "delivered" }), row("group:g1", "mine:0:2", { sender: "me" })];
   const node = {
-    getState: () => ({ links: [link("chat-one", "Alice"), link("chat-two", "Bob")], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
+    chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [link("chat-one", "Alice"), link("chat-two", "Bob")], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
     getMessages: vi.fn(async (linkId: string) => rows.filter((m) => m.linkId === linkId)),
     groupMessages: vi.fn(async ({ groupId }: { groupId: string }) => rows.filter((m) => m.linkId === `group:${groupId}`)),
     getMessage: vi.fn(async (linkId: string, id: string) => rows.find((m) => m.linkId === linkId && m.id === id)),
@@ -30,9 +31,10 @@ function fake() {
     }),
     forwardMessages: vi.fn(async ({ to, messageIds }: { to: string[]; messageIds: string[] }) => ({ results: to.map(() => ({ messageIds: ["me_fwd"], sent: messageIds, error: null })) })),
   };
-  const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
+  const store = { compact: vi.fn(async (_options?: { scrub?: boolean }) => {}) };
+  const ctx = { runtime: { server: { node }, store, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
   const whole = () => node.getMessages.mock.calls.length + node.groupMessages.mock.calls.length;
-  return { ctx, node, whole };
+  return { ctx, node, store, whole };
 }
 
 describe("delete", () => {
@@ -62,7 +64,25 @@ describe("delete", () => {
     await expect(callApi(ctx, "chat.delete", { chat: "Nobody", message: "mine:0:2" })).rejects.toMatchObject({ code: "not_found", message: 'No chat "Nobody" (ghostly chat list)' });
     expect(node.deleteMessage).not.toHaveBeenCalled();
     const { COMMANDS } = await import("../src/commands");
-    expect(COMMANDS["message delete"]!.usage).toBe("message delete <chat|group> <message> [--everyone [--wait none|confirmed|sent] [--timeout s]]");
+    expect(COMMANDS["message delete"]!.usage).toBe("message delete <chat|group> <message> [--everyone [--wait none|confirmed|sent] [--timeout s]] [--purge]");
+  });
+
+  it("another member's message in a group says only its author deletes it, not a --everyone that is then refused as not mine", async () => {
+    const { ctx, node, store } = fake();
+    for (const chat of ["Crew", "g1", "group:g1"])
+      for (const purge of [false, true]) {
+        const said = `"${chat}" is a group, and "k:0:1" is another member's message in it: only its author deletes a group's message, for everyone`;
+        // `--purge` folds the store all the same (`foldsAnyway`), and the error says so.
+        await expect(callApi(ctx, "chat.delete", { chat, message: "k:0:1", ...(purge && { purge }) })).rejects.toMatchObject(purge
+          ? { code: "not_found", message: `The store was folded anyway, so a deleted copy of it is gone from the profile's folder. ${said}`, details: { group: "g1", purged: true } }
+          : { code: "not_found", message: said, details: { group: "g1" } });
+      }
+    expect(store.compact).toHaveBeenCalledTimes(3);
+    expect(store.compact).toHaveBeenCalledWith({ scrub: true });
+    // The --everyone that was offered says the same thing in its own words.
+    await expect(callApi(ctx, "chat.delete", { chat: "Crew", message: "k:0:1", everyone: true })).rejects.toMatchObject({ code: "not_found", message: expect.stringMatching(/only your own/) });
+    expect(node.deleteMessage).not.toHaveBeenCalled();
+    expect(node.removeMessage).not.toHaveBeenCalled();
   });
 });
 
@@ -124,10 +144,10 @@ describe("delete --everyone in a group waits for an edge, as group react does", 
     expect(looks).toBe(3);
   });
 
-  it("a one-shot no edge took in time: a timeout (exit 4) that says it stays in the group and goes with a later command", async () => {
+  it("a one-shot no edge took in time: a timeout (exit 4) that says the message is gone here and its removal goes with a later command", async () => {
     const { ctx } = inGroup("one-shot", () => 0);
     await expect(callApi(ctx, "chat.delete", { chat: "Crew", message: "mine:0:2", everyone: true, timeout: 1 })).rejects.toMatchObject({
-      code: "timeout", message: expect.stringMatching(/no member's edge took it yet .*next command/), details: { messageId: "mine:0:2", edits: 3 },
+      code: "timeout", message: expect.stringMatching(/the message is gone here and no member's edge took its removal yet .*next command/), details: { messageId: "mine:0:2", edits: 3, deleted: "mine:0:2" },
     });
   });
 
@@ -235,5 +255,20 @@ describe("forward to a group waits for an edge, as group send does", () => {
     expect(chatOnly("chat.forward", { chat: "Alice", messages: ["peer_1"], to: ["Crew"] })).toBe(false);
     expect(chatOnly("chat.pin", { chat: "Crew", message: "k:0:1" })).toBe(false);
     expect(chatOnly("chat.react", { chat: "Alice", message: "peer_1", emoji: "👍" })).toBe(true);
+  });
+
+  it("a one-shot starts the groups' sessions for a group's file named with its group: it travels over the group's edges", async () => {
+    const { chatOnly, oneChatOnly } = await import("../src/main");
+    const file = "group-g1-in-AAAAAAAAAAAAAAAA";
+    expect(chatOnly("file.wait", { chat: "Crew", file })).toBe(false);
+    expect(chatOnly("file.save", { chat: "Crew", file, wait: true })).toBe(false);
+    expect(chatOnly("file.action", { chat: "Crew", file, action: "accept" })).toBe(false);
+    expect(chatOnly("file.action", { chat: "Crew", file, action: "request" })).toBe(false);
+    // As without its group (no chat named), and the other 1:1 chats stay unstarted.
+    expect(chatOnly("file.wait", { file })).toBe(false);
+    expect(oneChatOnly("file.wait", { chat: "Crew", file })).toBe(true);
+    // A 1:1 chat's file needs no group.
+    expect(chatOnly("file.wait", { chat: "Alice", file: "chat-one-in-AAAAAAAAAAAAAAAA" })).toBe(true);
+    expect(chatOnly("file.action", { chat: "Alice", file: "chat-one-in-AAAAAAAAAAAAAAAA", action: "accept" })).toBe(true);
   });
 });

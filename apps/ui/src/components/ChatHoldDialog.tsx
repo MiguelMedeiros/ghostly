@@ -8,6 +8,7 @@ import { problemLine, problemText } from "../lib/problemText";
 import { sizeIn } from "../lib/sizeText";
 import { fillNames } from "../lib/fillNodes";
 import type { Translate } from "../locales/translate";
+import { FocusSafeButton } from "./ui/FocusSafeButton";
 
 const mb = (bytes: number, t: Translate) => sizeIn(bytes / 1024 / 1024, "mb", t, bytes < 1024 * 1024 ? 2 : 1, true);
 
@@ -48,7 +49,9 @@ export function ChatHoldDialog({ peer, name, onSave, onClose }: { peer: PeerLink
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 animate-fade-in" {...backdrop}>
       <div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="chat-hold-title" data-testid="chat-hold" className="focus:outline-none w-full max-w-md max-h-full overflow-y-auto bg-panel-header border border-border rounded-2xl shadow-2xl p-5 space-y-4">
-        <div>
+        {/* The contact's name (one long word, a nickname of 20 W's) breaks anywhere: unbroken, the dialog scrolled
+            sideways on a phone, and in Arabic the title's start was drawn off the dialog. */}
+        <div className="[overflow-wrap:anywhere]">
           <h2 id="chat-hold-title" className="text-lg font-medium text-text-primary">{t("chat.hold.title", { name })}</h2>
           <p className="text-xs text-text-muted mt-1">{t("chat.hold.intro", { name, days })}</p>
         </div>
@@ -74,11 +77,11 @@ export function ChatHoldDialog({ peer, name, onSave, onClose }: { peer: PeerLink
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm bg-surface-alt text-text-primary border border-border hover:bg-surface-hover cursor-pointer">{t("common.cancel")}</button>
           {/* Busy while it saves, not disabled: that would drop a keyboard's focus to the page, and keep it there on a refusal. */}
-          <button type="button" data-testid="chat-hold-save" disabled={enabled === initial && !busy} aria-disabled={busy || undefined} aria-busy={busy || undefined}
+          <FocusSafeButton type="button" data-testid="chat-hold-save" disabled={enabled === initial && !busy} aria-disabled={busy || undefined} aria-busy={busy || undefined}
             onClick={() => { if (busy) return; setBusy(true); setError(""); void onSave(enabled).then(onClose, (e) => { setError(problemLine(e, t)); setBusy(false); }); }}
             className="px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-on-accent hover:bg-accent-hover cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:cursor-not-allowed">
             {busy ? t("chat.hold.saving") : t("common.save")}
-          </button>
+          </FocusSafeButton>
         </div>
       </div>
     </div>

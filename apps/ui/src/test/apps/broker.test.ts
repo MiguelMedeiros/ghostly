@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { MINI_APP_LIMITS } from "@ghostly/core/miniApp";
-import { BROKER_REQUESTS, createBroker, PICK_AFTER_CANCEL_MS, PING_EVERY_MS, STOP_REQUESTS_PER_SECOND, UNRESPONSIVE_AFTER_MS, hasLoneSurrogate, isJsonValue, jsonValueOf, runnerFor, watchApp, withoutLoneSurrogates, type AppLaunch, type AppStopReason } from "../../lib/apps/broker";
+import { BROKER_REQUESTS, createBroker, PICK_AFTER_CANCEL_MS, PING_EVERY_MS, STOP_REQUESTS_PER_SECOND, UNRESPONSIVE_AFTER_MS, hasLoneSurrogate, jsonValueOf, runnerFor, watchApp, withoutLoneSurrogates, type AppLaunch, type AppStopReason } from "../../lib/apps/broker";
 import { memoryAppId, memoryHost } from "../../lib/apps/memoryHost";
 
 // covers: apps.web-sandbox
@@ -336,6 +336,37 @@ describe("requests", () => {
     expect(posted.slice(-requests.length).map((p) => p.message)).toEqual(requests.map(([, , error], i) => ({ id: 100 + i, ok: false, error })));
   });
 
+  it("checks each number and member of a request within the limits once, not once per walk", async () => {
+    // A storage.set of 32k zeros took 4-8 ms on the page's thread, an object of 6k members up to 12 ms: each number was
+    // asked whether it was binary data, then checked twice, and each member defined one by one.
+    const { broker, host, posted, run } = setup();
+    run();
+    const numbers = Array.from({ length: 1_000 }, (_, i) => i);
+    const members = Object.fromEntries(numbers.map((i) => [`k${i}`, i]));
+    // Counted by hand, as JSON.stringify above.
+    const { isView } = ArrayBuffer;
+    const { isFinite } = Number;
+    const { defineProperty } = Object;
+    const count = { isView: 0, isFinite: 0, defineProperty: 0 };
+    ArrayBuffer.isView = ((value: unknown) => { count.isView++; return isView(value); }) as typeof isView;
+    Number.isFinite = ((value: unknown) => { count.isFinite++; return isFinite(value); }) as typeof isFinite;
+    Object.defineProperty = ((...args: Parameters<typeof defineProperty>) => { count.defineProperty++; return defineProperty(...args); }) as typeof defineProperty;
+    try {
+      broker.message({ id: 1, type: "storage.set", args: ["numbers", numbers] });
+      broker.message({ id: 2, type: "storage.set", args: ["members", members] });
+    } finally {
+      ArrayBuffer.isView = isView;
+      Number.isFinite = isFinite;
+      Object.defineProperty = defineProperty;
+    }
+    expect(count.isView).toBeLessThan(10);
+    expect(count.isFinite).toBe(2 * numbers.length);
+    expect(count.defineProperty).toBe(0);
+    await vi.waitFor(() => expect(posted.filter((p) => p.message.id === 1 || p.message.id === 2).map((p) => p.message.ok)).toEqual([true, true]));
+    expect(host.stored.get(`${REF} ${LINK}`)?.get("numbers")).toEqual(numbers);
+    expect(host.stored.get(`${REF} ${LINK}`)?.get("members")).toEqual(members);
+  });
+
   it("answers at most 50 requests a second, malformed ones counted", async () => {
     const { broker, host, run, posted, clock } = setup();
     run();
@@ -356,7 +387,7 @@ describe("requests", () => {
     const { broker, host, run, posted, stops, clock } = setup();
     run();
     clock.t += 1_001;
-    for (let id = 1; id <= STOP_REQUESTS_PER_SECOND; id++) broker.message({ id, type: "storage.keys", args: [] });
+    for (let id = 1; id <= STOP_REQUESTS_PER_SECOND; id++) broker.message({ id, type: "storage.get", args: ["k"] });
     expect(stops).toEqual([]);
     expect(broker.phase).toBe("running");
     // The one over: read by nothing (a getter on it would throw), the app stopped, its chat closed.
@@ -365,11 +396,11 @@ describe("requests", () => {
     expect(stops).toEqual(["protocol"]);
     expect(broker.phase).toBe("stopped");
     const before = posted.length;
-    for (let id = 1_000; id < 2_000; id++) broker.message({ id, type: "storage.keys", args: [] });
+    for (let id = 1_000; id < 2_000; id++) broker.message({ id, type: "storage.get", args: ["k"] });
     await new Promise((done) => setTimeout(done, 0));
     expect(posted.length).toBe(before);
     expect(posted.filter((p) => p.message.error === "too-fast").length).toBe(STOP_REQUESTS_PER_SECOND - MINI_APP_LIMITS.requestsPerSecond);
-    expect(host.calls.filter((c) => c.op === "storage.keys").length).toBe(MINI_APP_LIMITS.requestsPerSecond);
+    expect(host.calls.filter((c) => c.op === "storage.get").length).toBe(MINI_APP_LIMITS.requestsPerSecond);
     expect(host.calls.filter((c) => c.op === "chat.close").length).toBe(1);
     expect(stops).toEqual(["protocol"]);
   });
@@ -482,6 +513,32 @@ describe("requests", () => {
     await vi.waitFor(() => expect(posted.find((p) => p.message.id === 100)?.message).toMatchObject({ ok: true }));
   });
 
+  it("storage.keys answers count in the same budget, by their JSON with its escapes", async () => {
+    // A full scope of 256-byte keys of control characters: one byte each kept, six each as JSON, ~3.7 MB a list.
+    // Uncounted, 50 lists a second made the page (and on Desktop the main thread) write ~185 MB of JSON a second.
+    const { host, broker, run, posted, clock } = setup();
+    run();
+    const keys = Array.from({ length: 2_400 }, (_, i) => String(i).padStart(4, "0") + "\u0001".repeat(MINI_APP_LIMITS.storageKeyBytes - 4));
+    for (const key of keys) await host.storage.set(REF, LINK, key, 1);
+    const listJson = JSON.stringify(keys).length;
+    expect(listJson).toBeGreaterThan(3_600_000);
+    clock.t += 1_001;
+    for (let id = 1; id <= 50; id++) broker.message({ id, type: "storage.keys", args: [] });
+    await vi.waitFor(() => expect(posted.filter((p) => (p.message.id as number) >= 1).length).toBe(50));
+    const answers = posted.filter((p) => (p.message.id as number) >= 1).map((p) => p.message);
+    // Each list that starts under 16 MiB is answered whole: five, the rest refused unread.
+    const lists = Math.ceil(MINI_APP_LIMITS.fileBytesPerSecond / listJson);
+    expect(answers.filter((a) => a.ok === true).length).toBe(lists);
+    expect(answers.filter((a) => a.error === "too-fast").length).toBe(50 - lists);
+    expect(host.calls.filter((c) => c.op === "storage.keys").length).toBe(lists);
+    const written = answers.reduce((sum, a) => sum + JSON.stringify(a).length, 0);
+    expect(written).toBeLessThan(MINI_APP_LIMITS.fileBytesPerSecond + listJson + 50 * 100);
+    // A second later the budget is whole again.
+    clock.t += 1_001;
+    broker.message({ id: 100, type: "storage.keys", args: [] });
+    await vi.waitFor(() => expect(posted.find((p) => p.message.id === 100)?.message).toMatchObject({ ok: true }));
+  });
+
   it("close ends the app, and closes it in the chat", async () => {
     const { host, run, ask, stops } = setup();
     run();
@@ -543,7 +600,7 @@ describe("chat", () => {
     expect(JSON.stringify(stored.get("flat"))).toBe(JSON.stringify(flat));
     expect(JSON.stringify(host.sent[host.sent.length - 1]!.data)).toBe(JSON.stringify(nested));
     // Plain JSON still, with no prototype of the app's anywhere in it.
-    expect(isJsonValue(stored.get("dict"))).toBe(true);
+    expect(jsonValueOf(stored.get("dict"))).toEqual(stored.get("dict"));
     expect(Object.getPrototypeOf((stored.get("dict") as { words: object }).words)).toBe(Object.prototype);
   });
 
@@ -593,15 +650,8 @@ describe("chat", () => {
   });
 });
 
-it("isJsonValue takes plain JSON only", () => {
-  expect(isJsonValue({ a: [1, "x", null, true, { b: 2 }] })).toBe(true);
-  for (const bad of [undefined, Number.POSITIVE_INFINITY, () => 1, new Date(), new Map(), Symbol("x"), 1n]) expect(isJsonValue(bad)).toBe(false);
-  let deep: unknown = 1;
-  for (let i = 0; i < 100; i++) deep = [deep];
-  expect(isJsonValue(deep)).toBe(false);
-});
-
 it("jsonValueOf writes a value as JSON.stringify does, or refuses it", () => {
+  expect(jsonValueOf({ a: [1, "x", null, true, { b: 2 }] })).toEqual({ a: [1, "x", null, true, { b: 2 }] });
   expect(jsonValueOf({ a: 1, b: undefined, c: [undefined, { d: undefined }] })).toEqual({ a: 1, c: [null, {}] });
   const proto = JSON.parse('{"__proto__":{"x":1},"y":[{"__proto__":2}]}') as unknown;
   expect(JSON.stringify(jsonValueOf(proto))).toBe(JSON.stringify(proto));
@@ -1167,8 +1217,8 @@ describe("a lone surrogate (half an emoji)", () => {
     for (const fine of ["\u{1F600}", `${half}${low}`, { "\u{1F600}": ["\u{1F600}"] }, 1, null, new Uint8Array([0xd8, 0x3d])]) expect(hasLoneSurrogate(fine)).toBe(false);
     expect(typeof jsonValueOf({ a: half })).toBe("symbol");
     expect(typeof jsonValueOf({ [half]: 1 })).toBe("symbol");
-    expect(isJsonValue([low])).toBe(false);
-    expect(isJsonValue({ [low]: 1 })).toBe(false);
+    expect(typeof jsonValueOf([low])).toBe("symbol");
+    expect(typeof jsonValueOf({ [low]: 1 })).toBe("symbol");
     expect(jsonValueOf({ a: "\u{1F600}" })).toEqual({ a: "\u{1F600}" });
     // Nothing to replace: the very same value, its bytes and transfer list untouched.
     const bytes = new ArrayBuffer(4);

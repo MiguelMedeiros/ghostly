@@ -77,6 +77,11 @@ const chatOf = (groupId: string) => `group:${groupId}`;
 const said = (m: StoredMessage): GroupEdit => m.removed ? { id: m.id, e: m.edit!.seq, ts: m.edit!.at, m: m.text, rm: true }
   : { id: m.id, e: m.edit!.seq, ts: m.edit!.at, m: m.text, ...(m.mentions?.length && { k: m.mentions }), ...(m.card && { sc: m.card }) };
 const resendKey = (groupId: string, member: string) => `${groupId}\n${member}`;
+/**
+ * A row of mine in a private group written under a member key I no longer hold: removed, then invited back, I came in
+ * with a new key, and the group knows my lines from before by the old one. Its session refuses their edits.
+ */
+const underOldKey = (message: StoredMessage, membership: { me: string; community: boolean }) => !membership.community && !message.id.startsWith(`${membership.me}:`);
 
 export class GroupEdits {
   private readonly now: () => number;
@@ -130,7 +135,7 @@ export class GroupEdits {
     if (typeof messageId !== "string" || typeof raw !== "string") return refuse("No message to edit");
     const chat = chatOf(groupId);
     const message = await this.find(chat, messageId);
-    if (!message || !canEditInGroup(message)) return refuse("Only your own text messages can be edited");
+    if (!message || !canEditInGroup(message) || underOldKey(message, membership)) return refuse("Only your own text messages can be edited");
     const text = raw.trim();
     if (!text) return refuse("An edit cannot be empty. Delete the message instead.");
     if (isJoinNotice(text)) return refuse("An edit cannot read as a join notice.");
@@ -161,10 +166,11 @@ export class GroupEdits {
    */
   async removeMine(groupId: string, messageId: string): Promise<GroupEditResult> {
     const refuse = (error: string) => ({ error, refused: true });
-    if (!this.host.membership(groupId)) return refuse(this.notMember(groupId));
+    const membership = this.host.membership(groupId);
+    if (!membership) return refuse(this.notMember(groupId));
     const chat = chatOf(groupId);
     const message = typeof messageId === "string" ? await this.find(chat, messageId) : undefined;
-    if (!message || message.removed || message.sender !== "me" || !GROUP_MESSAGE_ID.test(message.id)) return refuse("Only your own messages can be deleted for everyone");
+    if (!message || message.removed || message.sender !== "me" || !GROUP_MESSAGE_ID.test(message.id) || underOldKey(message, membership)) return refuse("Only your own messages can be deleted for everyone");
     if (!canRemove(message)) return refuse("A payment, a request or a notice cannot be deleted for everyone");
     const e = removalNumber(message.edit?.seq);
     await this.host.removeMine(chat, message, { id: message.id, e, at: this.now(), pending: true });
@@ -400,7 +406,9 @@ export class GroupEdits {
     this.keptMine.delete(key);
     if (this.stopped || edge === undefined || !membership || membership.community || !membership.members.has(to)) return;
     const mine = paced && kept?.edge === edge ? kept.mine : (await (this.host.history ? this.host.history(chat) : this.host.messages(chat)))
-      .filter(m => m.sender === "me" && m.edit && !m.edit.pending && canEditInGroup(m))
+      // Not those under a member key I held before I was removed and invited back: the group refuses them, and each
+      // took a place in the pace ahead of my edits since.
+      .filter(m => m.sender === "me" && m.edit && !m.edit.pending && canEditInGroup(m) && !underOldKey(m, membership))
       .sort((a, b) => a.edit!.at - b.edit!.at || (a.id < b.id ? -1 : 1));
     const last = this.heard.get(key);
     const after = (m: StoredMessage) => !last || m.edit!.at > last.at || (m.edit!.at === last.at && m.id > last.id);

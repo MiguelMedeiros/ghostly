@@ -15,6 +15,7 @@ const fake = vi.hoisted(() => ({
   nodes: [] as { events: Events }[],
   stored: new Map<string, StoredMessage[]>(),
   reads: [] as string[],
+  pages: [] as string[],
   gate: null as Promise<void> | null,
 }));
 
@@ -30,6 +31,7 @@ vi.mock("../src/engine/node", () => ({
       return list;
     }
     async messagePage({ linkId, limit = 50 }: { linkId: string; limit?: number }) {
+      fake.pages.push(linkId);
       const list = fake.stored.get(linkId) ?? [];
       return { messages: list.slice(-limit), more: list.length > limit };
     }
@@ -100,9 +102,9 @@ describe("a client that attaches with each chat's newest page", () => {
     ]);
   });
 
-  it("gets a newest page of a group it never asked for when its first change comes, not its whole history", async () => {
-    // The groups are not in a page's attach: the first message of each one read its whole history and sent it as JSON,
-    // to every tab, though no tab showed it. 1.3 MiB at 5,000 rows, for each group, on each tab opened or reloaded.
+  it("gets only what changed in a group it never asked for, not its newest page, and its whole history when it asks", async () => {
+    // The groups are not in a page's attach: the first message of each one read its newest page (up to 400 rows) and sent
+    // it as JSON, to every tab, after each reload, though no tab showed it. The page reads a group when it shows it.
     const GROUP = "group:g1";
     fake.stored.clear();
     fake.stored.set(GROUP, history(GROUP, 5_000));
@@ -113,36 +115,55 @@ describe("a client that attaches with each chat's newest page", () => {
     await flush();
     expect(page.history()).toEqual([]);
     fake.reads = [];
+    fake.pages = [];
     fake.stored.get(GROUP)!.push(row(GROUP, 5_000));
     events.onMessageChanges!(GROUP, { messages: [row(GROUP, 5_000)], deleted: [] });
     await flush();
     expect(fake.reads).toEqual([]);
-    expect(page.history()).toEqual([{ kind: "messages", linkId: GROUP, messages: fake.stored.get(GROUP)!.slice(-50), more: true }]);
+    expect(fake.pages).toEqual([]);
+    expect(page.history()).toEqual([{ kind: "message-changes", linkId: GROUP, messages: [row(GROUP, 5_000)], deleted: [] }]);
 
-    // From then on what changes in it comes on top of that page, and its whole history when the page opens it.
     events.onMessageChanges!(GROUP, { messages: [row(GROUP, 5_001)], deleted: [] });
     await flush();
     expect(page.history().at(-1)).toEqual({ kind: "message-changes", linkId: GROUP, messages: [row(GROUP, 5_001)], deleted: [] });
     expect(fake.reads).toEqual([]);
+    expect(fake.pages).toEqual([]);
+    // Its whole history when the page opens it, and from then on what changes on top of it.
     await server.history(page, GROUP);
     expect(fake.reads).toEqual([GROUP]);
     expect(page.history().at(-1)).toEqual({ kind: "messages", linkId: GROUP, messages: fake.stored.get(GROUP) });
+    events.onMessageChanges!(GROUP, { messages: [row(GROUP, 5_002)], deleted: [] });
+    await flush();
+    expect(page.history().at(-1)).toEqual({ kind: "message-changes", linkId: GROUP, messages: [row(GROUP, 5_002)], deleted: [] });
+    expect(fake.reads).toEqual([GROUP]);
   });
 
   it("sends each client what it attached for when a chat it does not have changes", async () => {
     const GROUP = "group:g1";
     fake.stored.clear();
     fake.stored.set(GROUP, history(GROUP, 120));
+    fake.stored.set("chat", history("chat", 120));
     const server = new EngineServer();
     const events = fake.nodes.at(-1)!.events;
     const tab = client(), whole = client();
-    server.attach(tab, undefined, { newest: 50 });
+    // The tab was sent no chat (the stored chats have them, unchanged since its mark).
+    server.attach(tab, undefined, { newest: 50, since: { epoch: server.epoch, mark: server.historyMark } });
     server.attach(whole);
     await flush();
     events.onMessageChanges!(GROUP, { messages: [row(GROUP, 119)], deleted: [] });
+    events.onMessageChanges!("chat", { messages: [row("chat", 119)], deleted: [] });
     await flush();
-    expect(tab.history()).toEqual([{ kind: "messages", linkId: GROUP, messages: fake.stored.get(GROUP)!.slice(-50), more: true }]);
-    expect(whole.history()).toEqual([{ kind: "messages", linkId: GROUP, messages: fake.stored.get(GROUP) }]);
+    // A group only what changed; a chat its newest page, which the stored chats mirror.
+    expect(tab.history()).toEqual([
+      { kind: "message-changes", linkId: GROUP, messages: [row(GROUP, 119)], deleted: [] },
+      { kind: "messages", linkId: "chat", messages: fake.stored.get("chat")!.slice(-50), more: true },
+    ]);
+    expect(whole.history()).toEqual([
+      { kind: "messages", linkId: "chat", messages: fake.stored.get("chat") },
+      { kind: "message-changes", linkId: "chat", messages: [row("chat", 119)], deleted: [] },
+      // Read whole: it comes once read, after the chat's change.
+      { kind: "messages", linkId: GROUP, messages: fake.stored.get(GROUP) },
+    ]);
   });
 
   it("sends a client that attaches as before every chat's whole history", async () => {

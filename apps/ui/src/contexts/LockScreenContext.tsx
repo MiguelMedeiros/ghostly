@@ -8,7 +8,6 @@ import {
   type ReactNode,
 } from "react";
 import { flushSync } from "react-dom";
-import { getBrowserHost, type BrowserHost } from "@ghostly/browser/host";
 import { useSettings } from "./SettingsContext";
 import { hashPassword, needsRehash } from "../lib/settings";
 import { lockRetryAt, tryLockPassword } from "../lib/lockAttempts";
@@ -17,6 +16,7 @@ import { takeUnlockHandover } from "../lib/lockHandover";
 import { onAppInput, stopRunningApps } from "../lib/apps/open";
 import { closeServiceWindows } from "../lib/serviceWindows";
 import { pauseForLock } from "../lib/nowPlaying";
+import { lockSecuresWindow } from "../lib/secureWindow";
 
 interface LockScreenContextValue {
   isLocked: boolean;
@@ -35,6 +35,9 @@ interface LockScreenContextValue {
   ringing: readonly LockedCall[];
   /** A chat says its call rings; the function it returns says it stopped. */
   offerCall: (call: LockedCall) => () => void;
+  /** How a chat's call just ended ("Missed audio call"), said by the lock screen while it is up (`useSayOnLockScreen`). */
+  callEndSaid: string;
+  sayCallEnd: (text: string) => void;
 }
 
 /**
@@ -86,6 +89,7 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
   const [retryAt, setRetryAt] = useState<number | null>(() => lockRetryAt(activeProfileId()));
   const [covered, setCovered] = useState(false);
   const [ringing, setRinging] = useState<readonly LockedCall[]>([]);
+  const [callEndSaid, sayCallEnd] = useState("");
   const offerCall = useCallback((call: LockedCall) => {
     setRinging((current) => [...current.filter((c) => c.id !== call.id), call]);
     return () => setRinging((current) => current.filter((c) => c !== call));
@@ -107,11 +111,7 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
 
   // Android's app switcher takes its picture of the app before the page hears it is going, so the cover below comes
   // too late for it: while the lock is on, the app keeps out of that picture altogether (the host, where it can).
-  useEffect(() => {
-    let host: BrowserHost;
-    try { host = getBrowserHost(); } catch { return; }
-    void host.hideFromSwitcher?.(lockActive).catch(() => {});
-  }, [lockActive]);
+  useEffect(() => lockSecuresWindow(lockActive), [lockActive]);
 
   // The lock as stored, not as this page last had it: a password set in another tab locks this one too.
   const lockHere = useCallback(() => {
@@ -268,7 +268,7 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
   ]);
 
   return (
-    <LockScreenContext.Provider value={{ isLocked, hasUnlocked, covered, passedNow, retryAt, lock, unlock, resetTimer, ringing, offerCall }}>
+    <LockScreenContext.Provider value={{ isLocked, hasUnlocked, covered, passedNow, retryAt, lock, unlock, resetTimer, ringing, offerCall, callEndSaid, sayCallEnd }}>
       {children}
     </LockScreenContext.Provider>
   );
@@ -312,4 +312,16 @@ export function useRingOnLockScreen(call: LockedCall | null): void {
     if (!offerCall || !key || !shown) return;
     return offerCall({ ...shown, answer: () => latest.current?.answer(), decline: () => latest.current?.decline() });
   }, [offerCall, key]);
+}
+
+/**
+ * Says how this chat's call ended (`text`, the chat's own `callEndSaid`) on the lock screen while it is up (`locked`).
+ * The lock screen is a modal dialog: a screen reader hears nothing outside it, the chat's region included, so a call
+ * that rang there and stopped (missed, or the contact hung up) left only its card gone, the focus back on the password.
+ */
+export function useSayOnLockScreen(text: string, locked: boolean): void {
+  const say = useContext(LockScreenContext)?.sayCallEnd;
+  useEffect(() => {
+    if (locked) say?.(text);
+  }, [say, text, locked]);
 }

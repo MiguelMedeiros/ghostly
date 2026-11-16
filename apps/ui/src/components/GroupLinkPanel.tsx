@@ -12,6 +12,8 @@ import { useI18n } from "../contexts/I18nContext";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
 import { GroupLinkAskDialog } from "./GroupLinkAskDialog";
+import { NAME, withName } from "./apps/aroundName";
+import { isolate } from "../lib/ownStatus";
 
 function ShareIcon() {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 16V3m0 0L7 8m5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" /></svg>;
@@ -66,7 +68,8 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
   const share = async () => {
     setError(null);
     try {
-      const outcome = await shareLink(url, group.name ? t("group.link.shareTitle", { name: group.name }) : t("group.link.shareTitleUnnamed"), shareButton.current);
+      // The group's name isolated in the title the share sheet shows, a line in the app's direction.
+      const outcome = await shareLink(url, group.name ? t("group.link.shareTitle", { name: isolate(group.name) }) : t("group.link.shareTitleUnnamed"), shareButton.current);
       if (outcome !== "cancelled") flash(outcome);
     } catch { setError({ tone: "error", title: t("group.link.shareFailed") }); }
   };
@@ -78,18 +81,21 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
     {!large && <h3 className="text-xs font-bold uppercase tracking-wider text-accent">{t("group.link.title")}</h3>}
     <p className="mt-1 text-sm text-text-muted">{group.isAdmin ? t("group.link.off") : t("group.link.offMember")}</p>
     {group.isAdmin && <button ref={enableButton} disabled={full} aria-disabled={busy || undefined} onClick={() => { if (!busy) void run(() => engine.call("enableGroupLink", { groupId: group.id }), true); }} data-testid="group-link-enable"
-      className="mt-2 min-h-9 rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40 aria-disabled:opacity-40">{full ? t("group.link.fullShort") : t("group.link.enable")}</button>}
+      className="mt-2 min-h-9 rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] disabled:opacity-40 aria-disabled:opacity-40">{full ? t("group.link.fullShort") : t("group.link.enable")}</button>}
     {error && <Notice problem={error} className="mt-2 text-xs" />}
   </div>;
 
   const field = <input readOnly dir="ltr" value={url} aria-label={t("group.link.title")} data-testid="group-link-url" onFocus={e => e.currentTarget.select()}
     className={`min-w-0 flex-1 rounded-lg bg-input-bg px-3 font-mono text-text-secondary focus:outline-none focus:ring-1 focus:ring-accent ${large ? "py-2.5 text-xs" : "py-1.5 text-[11px]"}`} />;
+  // Copy and Share are drawn by their fill: a border in forced colors only, where the fill is gone (as devices/DeviceDialog's primaryButton).
+  // Large, they share a row from their own width up (flex-auto), so at a larger text size the second goes under the
+  // first rather than past the dialog's edge.
   const copyButton = <button onClick={() => void copy()} data-testid="group-link-copy"
-    className={`inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg font-semibold ${large ? "min-h-11 flex-1 bg-surface-alt px-4 text-sm text-text-primary hover:bg-surface-hover" : "bg-surface-alt px-2.5 py-1.5 text-xs text-text-primary hover:bg-surface-hover max-md:min-h-11 max-md:px-3"}`}>
+    className={`inline-flex items-center justify-center gap-1.5 rounded-lg font-semibold forced-colors:border forced-colors:border-[color:ButtonText] ${large ? "min-h-11 flex-auto bg-surface-alt px-4 text-sm text-text-primary hover:bg-surface-hover" : "shrink-0 bg-surface-alt px-2.5 py-1.5 text-xs text-text-primary hover:bg-surface-hover max-md:min-h-11 max-md:px-3"}`}>
     <CopyIcon /><span>{said === "copied" ? t("group.link.copied") : t("common.copy")}</span>
   </button>;
   const shareButtonEl = <button ref={shareButton} onClick={() => void share()} data-testid="group-link-share"
-    className={`inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-accent font-semibold text-panel-header hover:bg-accent-hover ${large ? "min-h-11 flex-1 px-4 text-sm" : "px-2.5 py-1.5 text-xs max-md:min-h-11 max-md:px-3"}`}>
+    className={`inline-flex items-center justify-center gap-1.5 rounded-lg bg-accent font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] ${large ? "min-h-11 flex-auto px-4 text-sm" : "shrink-0 px-2.5 py-1.5 text-xs max-md:min-h-11 max-md:px-3"}`}>
     <ShareIcon /><span>{said === "shared" ? t("group.link.shared") : t("group.link.share")}</span>
   </button>;
   // For every member who sees the panel, not the admin alone: a community group's member hands its link out too.
@@ -114,7 +120,7 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
   if (large) return <div className="flex flex-col gap-3" data-testid="group-link" data-state="on">
     {qr}
     <div className="flex">{field}</div>
-    <div className="flex gap-2">{shareButtonEl}{copyButton}</div>
+    <div className="flex flex-wrap gap-2">{shareButtonEl}{copyButton}</div>
     <p data-testid="group-link-note" className={`rounded-lg bg-surface-alt/80 p-3 text-xs leading-relaxed ${full ? "text-warn-ink" : "text-text-secondary"}`}>{note}</p>
     {adminControls}
     {error && <Notice problem={error} className="text-center text-xs" />}
@@ -170,7 +176,7 @@ export function GroupShareDialog({ group, created = false, onClose, returnFocus 
     className="m-auto w-[calc(100%_-_2rem)] max-w-sm max-h-[92dvh] overflow-y-auto scroll-pb-20 rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
     <div className="mb-4 text-center">
       <GroupAvatar picture={group.picture} size={64} testId="group-share-avatar" className="mx-auto mb-3 bg-accent/15" />
-      <h2 id={`${id}-title`} className="break-words text-lg font-semibold">{created ? (group.name ? t("group.share.ready", { name: group.name }) : t("group.share.readyUnnamed")) : (group.name ? t("group.share.title", { name: group.name }) : t("group.share.titleUnnamed"))}</h2>
+      <h2 id={`${id}-title`} className="break-words text-lg font-semibold">{created ? (group.name ? withName(t("group.share.ready", { name: NAME }), group.name) : t("group.share.readyUnnamed")) : (group.name ? withName(t("group.share.title", { name: NAME }), group.name) : t("group.share.titleUnnamed"))}</h2>
       <p className="mt-1 text-sm text-text-muted">{created ? t("group.share.createdHint") : t("group.share.hint")}</p>
     </div>
     <GroupLinkPanel group={group} large />

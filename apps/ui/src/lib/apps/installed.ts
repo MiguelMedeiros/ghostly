@@ -2,7 +2,9 @@ import { useEffect, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { BuiltInAppOffer, InstalledAppView } from "@ghostly/browser/engine/apps";
 import { appCardId, appCardUrl, statusCardText, type AppCard } from "@ghostly/core";
-import { appsRunning, openApp, stopTakenDown, type OpenAppOptions } from "./open";
+import { dropAppIconsExcept } from "./icons";
+import { kept } from "./kept";
+import { appsRunning, openApp, readingApps, stopTakenDown, type OpenAppOptions } from "./open";
 
 /*
  * The apps installed in this profile, as the engine lists them (`appList`, no request), shared by every screen that
@@ -29,33 +31,26 @@ engine.onAppsChecked(() => { if (apps !== null || loading || appsRunning()) void
 /** How many reads were asked: of two on their way at once, the one asked last is what shows. */
 let asked = 0;
 
+/** An app is the same app from one read to the next by its ref. */
+const byRef = (app: { ref: string }) => app.ref;
 /**
- * `next` with each app that reads as before kept as the object held, and the list held when every app is: each Apps
- * page visit (in every tab) reads the list again, and what did not change draws nothing again, no app card included.
+ * What of an installed app is compared from one read to the next: all but its `checkedAt`. An update check that found
+ * nothing new still stamps it, and nothing here reads it, so the object held keeps its older stamp.
  */
-function kept<T extends { ref: string }>(held: readonly T[] | null, next: readonly T[]): readonly T[] {
-  if (!held) return next;
-  const before = new Map(held.map((a) => [a.ref, a]));
-  let same = held.length === next.length;
-  const out = next.map((a, i) => {
-    const old = before.get(a.ref);
-    const view = old && JSON.stringify(old) === JSON.stringify(a) ? old : a;
-    if (view !== held[i]) same = false;
-    return view;
-  });
-  return same ? held : out;
-}
+const withoutStamp = <T extends object>(app: T) => ({ ...app, checkedAt: undefined });
 
 /** Reads the list again. */
 export function refreshInstalledApps(): Promise<void> {
   // An engine from before built-in apps (the extension's, another tab's) has no `appBuiltIns`: none offered.
   const builtIns = engine.call("appBuiltIns").catch((): BuiltInAppOffer[] => []);
   const mine = ++asked;
+  const at = readingApps();
   // One that a later read overtook waits for that one, so what is awaited is the list as it is now.
   const read: Promise<void> = engine.call("appList").then(async (list) => {
     const offered = await builtIns;
     if (mine !== asked) return loading ?? undefined;
-    offers = kept(offers, offered); apps = kept(apps, list); failed = null; tell(); stopTakenDown(list);
+    offers = kept(offers, offered, byRef, withoutStamp); apps = kept(apps, list, byRef, withoutStamp); failed = null; tell(); stopTakenDown(list, at);
+    dropAppIconsExcept(list.map((a) => a.ref));
   }, (e: unknown) => { if (mine !== asked) return loading ?? undefined; apps ??= []; failed = e; tell(); }).finally(() => { if (loading === read) loading = null; });
   loading = read;
   return read;
@@ -68,6 +63,7 @@ export function forgetInstalledApps(): void {
   loading = null;
   failed = null;
   asked++;
+  unsent.clear();
 }
 
 /** Why the last read of the installed apps failed, or null when it did not: the Apps page says it, not "No apps yet." */
@@ -87,9 +83,12 @@ export function useInstalledApps(enabled: boolean): readonly InstalledAppView[] 
   return list;
 }
 
-/** Reads the list when the first screen that shows it does. */
+/**
+ * Reads the list when the first screen that shows it does, and again when one shows after a read that failed: storage
+ * that failed once (a full disk freed since) was otherwise never asked again until an update check or Try again.
+ */
 function useFirstRead(enabled: boolean): void {
-  useEffect(() => { if (enabled && apps === null && !loading) void refreshInstalledApps(); }, [enabled]);
+  useEffect(() => { if (enabled && (apps === null || failed != null) && !loading) void refreshInstalledApps(); }, [enabled]);
 }
 
 /**
@@ -149,13 +148,28 @@ export async function sendAppCard(linkId: string, app: InstalledAppView, opened:
   return result.error;
 }
 
+/** The "opened" cards that did not go out, by chat and app: the same app shown again there sends it then. */
+const unsent = new Set<string>();
+
+/**
+ * Tells the contact that `app` opened in `linkId` with the "opened" card, after `openApp` resolved `shown`: one already
+ * running there, shown again, sends none, unless its card failed when it opened. One a newer open there overtook
+ * (`superseded`) started nothing and sends none: its failed card waits for it to run there. Resolves the send's error, if any.
+ */
+export async function sendOpenedCard(linkId: string, app: InstalledAppView, shown: "shown" | "superseded" | void): Promise<string | null> {
+  const key = `${linkId}\n${app.ref}`;
+  if (shown === "superseded" || (shown === "shown" && !unsent.has(key))) return null;
+  const failed = await sendAppCard(linkId, app, true);
+  if (failed) unsent.add(key); else unsent.delete(key);
+  return failed;
+}
+
 /**
  * Opens `app` in the 1:1 chat `linkId` and tells the contact with the "opened" card: the chat's + → Apps, and the
  * Apps page's chat picker for an app that runs in a chat. Opened first: an app that cannot start there sends no card,
- * and one already running there, shown again, sends none either.
+ * and one already running there, shown again, sends none either (unless its card failed: `sendOpenedCard`).
  */
 export async function openAppInChat(app: InstalledAppView, linkId: string, options?: OpenAppOptions): Promise<void> {
-  if (await openApp(app.ref, linkId, options) === "shown") return;
-  const failed = await sendAppCard(linkId, app, true);
+  const failed = await sendOpenedCard(linkId, app, await openApp(app.ref, linkId, options));
   if (failed) throw new Error(failed);
 }

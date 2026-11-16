@@ -178,7 +178,6 @@
   "cashu": {
     "add": "追加",
     "addMintPlaceholder": "ミントを追加：https://…",
-    "amountSats": "{{amount}} sats",
     "askingMint": "ミントに問い合わせ中…",
     "backupCopied": "バックアップをコピーしました。このトークンを持つ人が sats を持ちます。",
     "contactHint": "連絡先に支払いますか？チャットの ⚡ を使ってください。",
@@ -192,7 +191,7 @@
       "perProofTest": "プルーフごとに {{fee}} テスト sat（支払い 1 回あたり約 1 テスト sat）"
     },
     "history": {
-      "fee": "手数料 {{amount}}",
+      "fee": "手数料 {{amount}} {{unit}}",
       "feesPaid": "支払った手数料：{{amount}} {{unit}}",
       "movements": "{{count}} 件の取引",
       "movementsOne": "1 件の取引",
@@ -384,7 +383,7 @@
     "cashuMints": "Cashu のミント",
     "cashuSettings": "Cashu の設定",
     "commentFor": "{{to}} へのコメント（任意）",
-    "confirmWhat": "{{amount}} sats（最大 {{fee}} の手数料を追加）",
+    "confirmWhat": "{{amount}} {{unit}}（最大 {{fee}} {{feeUnit}} の手数料を追加）",
     "connecting": "ソースに接続中…",
     "domainLine": "{{answered}}{{limits}}",
     "done": "完了",

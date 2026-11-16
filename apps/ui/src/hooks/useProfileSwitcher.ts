@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent } from "react";
+import { isAltLetterKey } from "../lib/appCommands";
 import { changesGlance, profileGlance, recounted, type ProfileGlance } from "../lib/profileData";
 import { currentProfile, listProfiles, onOwnThemeSaved, type ProfileEntry } from "../lib/profiles";
 import { PEEK_EVENT } from "../lib/profilePeek";
@@ -19,7 +20,8 @@ export function openProfileSwitcher(): void {
 export const SWITCHER_SHORTCUT = "Alt+Shift+P";
 const isMac = () => typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 export const shortcutLabel = () => (isMac() ? "⌥⇧P" : SWITCHER_SHORTCUT);
-const isShortcut = (e: globalThis.KeyboardEvent) => e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && e.code === "KeyP";
+// The key that types P, as Ctrl+N's (appCommands.ts): on Dvorak the key at a US keyboard's P types L (the rail's).
+const isShortcut = (e: globalThis.KeyboardEvent) => e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && isAltLetterKey(e, "p");
 
 export interface OtherProfile { entry: ProfileEntry; glance?: ProfileGlance }
 

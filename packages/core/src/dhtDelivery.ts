@@ -269,6 +269,14 @@ export class DhtDelivery {
   private announceTimer: ReturnType<typeof setTimeout> | null = null;
   private chain = Promise.resolve();
   private lastPublish = 0;
+  /**
+   * A withdrawn text's envelope may still be on the relays, and the one to replace it has not gone (`withdraw`): it is
+   * tried again with a text's backoff, `MAX_ATTEMPTS` times at most, until `until` (when no reader takes the withdrawn
+   * one any more), not at the next keep-alive four minutes on. Any envelope that goes out replaces it.
+   */
+  private withdrawal?: { until: number; attempts: number; next: number };
+  /** When the last withdrawal's envelope went (its `lastPublish`), for `withdrawalWaits`. */
+  private withdrewAt = -1;
   /** The sequence of the last envelope of the contact that was past its expiry (traced once). */
   private expiredSeen = 0;
   private controlDue = 0;
@@ -310,6 +318,8 @@ export class DhtDelivery {
   private namedRev?: number;
   /** A reaction of this side waits to ride on an envelope, or the contact's reactions wait to be said taken. */
   private reactionsDue = false;
+  /** The text on the floor whose envelope left the reactions no room (its id): they wait for the ones its backoff publishes. */
+  private crowdedBy?: string;
   constructor(private readonly options: {
     params: LinkParams; mode: DeliveryMode; state?: DhtDeliveryState;
     credentials: PairingCredentials; transport: PkarrTransport;
@@ -654,6 +664,7 @@ export class DhtDelivery {
     if (receipt && (receipt.expires > now + DHT_MESSAGE_TTL || (receipt.next ?? 0) > now + BACKOFF_MAX_MS))
       this.state = { ...this.state, receipt: { ...receipt, expires: bounded(receipt.expires, now, DHT_MESSAGE_TTL), ...(receipt.next !== undefined && { next: bounded(receipt.next, now, BACKOFF_MAX_MS) }) } };
     this.peerNewAt = bounded(this.peerNewAt, now); this.lastPublish = bounded(this.lastPublish, now);
+    if (this.withdrawal) this.withdrawal = { ...this.withdrawal, until: bounded(this.withdrawal.until, now, DHT_MESSAGE_TTL + DHT_EXPIRY_SKEW_MS), next: bounded(this.withdrawal.next, now, BACKOFF_MAX_MS) };
     this.networkBackAt = bounded(this.networkBackAt, now); this.pinnedProbeAt = bounded(this.pinnedProbeAt, now);
     this.controlDue = bounded(this.controlDue, now, Math.max(4 * 60_000, UNUSED_INVITE_UPKEEP_MS, this.options.firstControlAfterMs ?? 0));
     this.budgetUntil = bounded(this.budgetUntil, now, BUDGET_HOLD_MAX_MS);
@@ -709,6 +720,7 @@ export class DhtDelivery {
       if (next.forwarded && !this.roomForHops(next.message, next.expires, next.reply, next.forwarded)) { const { forwarded: _dropped, ...alone } = next; next = alone; }
       if (next.reply && this.packetError(next.message, next.expires, next.reply)) { const { reply: _dropped, ...alone } = next; next = alone; }
       await this.persist({ ...this.state, pending: next }); this.changed();
+      if (this.withdrawalWaits()) { this.schedule(); return null; }
       // The next read comes at the pace for a text awaiting its receipt.
       try { await this.publish(true); this.schedule(); return null; }
       catch (error) {
@@ -775,6 +787,7 @@ export class DhtDelivery {
       const next = this.fileEnvelope(file, timestamp, reply, forwarded);
       if (typeof next === "string") return next;
       await this.persist({ ...this.state, pending: next }); this.changed();
+      if (this.withdrawalWaits()) { this.schedule(); return null; }
       try { await this.publish(true); }
       catch (error) {
         if (!isDiscoveryBudgetError(error)) { this.errors.publish = `DHT publication failed: ${String(error instanceof Error ? error.message : error)}. Bounded retry continues until expiry.`; this.changed(); }
@@ -782,6 +795,43 @@ export class DhtDelivery {
       this.schedule();
       return null;
     });
+  }
+  /** Whether the floor holds this text of mine, or an edit of it (`pending`), whatever its retries or expiry. */
+  holds(wireId: string): boolean {
+    const pending = this.state.pending;
+    return !!pending && (pending.message[0] === wireId || pending.edit?.[0] === wireId);
+  }
+  /**
+   * A text of mine (or an edit of it) deleted here while it waits on the floor leaves it: the state no longer holds it
+   * (nor as `confirmed`: no receipt came), and, while its envelope was still in effect, a new one without it takes that
+   * one's place on the relays, so a contact who looks later finds no text. Resolves once the state without it is saved;
+   * the new envelope goes after. One that does not go (no relay reachable) is tried again within seconds (`withdrawal`):
+   * a reader takes the withdrawn envelope until its expiry and the clock skew allowed past it (`DHT_EXPIRY_SKEW_MS`).
+   * It goes at once, spacing or not: the deleted text is out of reach from then on. The text that takes the floor next
+   * waits out the spacing instead (`withdrawalWaits`).
+   */
+  async withdraw(wireId: string): Promise<void> {
+    const expires = await this.serialize(async () => {
+      const pending = this.state.pending;
+      if (!pending || (pending.message[0] !== wireId && pending.edit?.[0] !== wireId)) return 0;
+      await this.persist({ ...this.state, pending: undefined }); this.changed();
+      return pending.attempts > 0 && pending.expires > this.clock() ? pending.expires : 0;
+    });
+    if (expires) void this.serialize(async () => {
+      this.withdrawal = { until: expires + DHT_EXPIRY_SKEW_MS, attempts: 0, next: 0 };
+      try { await this.publish(true); } catch { /* tried again with a text's backoff (`withdrawal`) */ }
+      this.withdrewAt = this.lastPublish;
+      this.schedule();
+    });
+  }
+  /**
+   * The last envelope was a withdrawal's, inside the publication spacing: the text that takes the floor now goes once
+   * the spacing allows (`schedule`), not in an envelope of its own at once. Deleted then, it never went, so it costs
+   * no withdrawal: deleting 10 texts queued for an away contact one after the other, each one's withdrawal and the next
+   * text's envelope put 10 envelopes on every relay in under 2 s, each replaced a moment later (bug hunt, 2026-11-15).
+   */
+  private withdrawalWaits(): boolean {
+    return this.withdrewAt === this.lastPublish && this.clock() - this.lastPublish < 4_000;
   }
   /** The id of what awaits its receipt on the floor now, if anything does. */
   get pendingId(): string | undefined {
@@ -815,7 +865,7 @@ export class DhtDelivery {
    */
   async announceReactions(): Promise<void> {
     if (!this.options.reactions?.().length) return;
-    this.reactionsDue = true;
+    this.reactionsDue = true; this.crowdedBy = undefined;
     await this.serialize(async () => { try { await this.publish(); } catch { /* the next envelope carries them */ } });
     if (this.reactionsDue) this.schedule();
   }
@@ -865,7 +915,10 @@ export class DhtDelivery {
     // envelope stays in the mailbox until the next one, and every publication spends a request on each relay.
     const receiptDue = !!receipt && !receipt.settled && (receipt.next ?? 0) <= now;
     const reseal = this.resealDue;
-    const keepAlive = !force && (!pending || pending.next > now) && !receiptDue && !this.reactionsDue && !reseal;
+    // A withdrawal still to replace on the relays (`withdrawal`) is no keep-alive: it goes with its backoff, as a chat's write.
+    const withdrawal = this.withdrawal && this.withdrawal.until > now && this.withdrawal.attempts < MAX_ATTEMPTS ? this.withdrawal : undefined;
+    if (!withdrawal) this.withdrawal = undefined;
+    const keepAlive = !force && (!pending || pending.next > now) && !receiptDue && !this.reactionsPress && !reseal && !(withdrawal && withdrawal.next <= now);
     // The invite was taken from this side: its mailbox is the joiner's every copy of the invite derives, and a keep-alive
     // there would only cover the envelope of whoever joined first. Nothing goes until the invite turns out not taken, a
     // look-up that pinned the inviter first or not: pinned, the keep-alive went every 4-6 minutes for good (agents#1592).
@@ -889,12 +942,16 @@ export class DhtDelivery {
     // (`LinkSession.publishOnce`). With 500 contacts away, about 500 envelopes a minute were built for none that went.
     const held = this.options.transport.publishHeld?.(identity.pubKeyZ32, options);
     if (held) { await this.heldBack(held, now, { lastPublish: this.lastPublish, controlDue: this.controlDue }, undefined, undefined); throw held; }
+    // Counted before the state is saved and the envelope sealed, as a text's attempt is: one that fails there waits its
+    // backoff too, not the next timer turn (each one a read of the mailbox and a view update).
+    if (withdrawal) this.withdrawal = { ...withdrawal, attempts: withdrawal.attempts + 1, next: now + backoff(withdrawal.attempts) };
     const fittedEnvelope = this.fitted(this.sequence + 1, issued, expires, pending?.message ?? null, receipt?.id ?? null, pending?.reply, pending?.edit, pending?.forwarded, pending?.file);
     const { body, reactions } = fittedEnvelope;
     const reactionsWereDue = this.reactionsDue;
     // A text that left no room: the reactions go on the next envelope. Once some went, the rest wait for the contact
     // to say those were taken (the engine announces the rest then).
     this.reactionsDue = !reactions && !!this.options.reactions?.().length;
+    this.crowdedBy = this.reactionsDue && pending ? pending.message[0] : undefined;
     // Persist the sequence (set aside, a block at a time) and attempt count first. A crash cannot reuse them or
     // reset the retransmission budget/absolute message deadline.
     const sequence = body[1];
@@ -914,9 +971,11 @@ export class DhtDelivery {
     try { await this.options.transport.publish(identity, records, options); }
     catch (error) {
       this.reactionsDue ||= reactionsWereDue;
-      if (isDiscoveryBudgetError(error)) await this.heldBack(error, now, before, pending, receipt);
+      // Held back by the budget, it was no attempt: it goes when the budget frees a request.
+      if (isDiscoveryBudgetError(error)) { if (withdrawal) this.withdrawal = withdrawal; await this.heldBack(error, now, before, pending, receipt); }
       throw error;
     }
+    this.withdrawal = undefined;
     this.namedRev = body[8] ?? undefined;
     if (options?.signal) this.leavingOut = false;
     if (identity === this.identity) this.unsealedOut = !this.options.credentials.peerKey;
@@ -924,6 +983,14 @@ export class DhtDelivery {
   }
   /** The contact is pinned and this side's envelope in the invite's mailbox is still unsealed (`unsealedOut`). */
   private get resealDue(): boolean { return this.unsealedOut && !!this.options.credentials.peerKey; }
+  /**
+   * Reactions due (`reactionsDue`) that force an envelope of their own: not while the text that left them no room
+   * (`crowdedBy`) is still retried, or each publication spends one of its attempts 4 s apart instead of at its backoff.
+   */
+  private get reactionsPress(): boolean {
+    const pending = this.state.pending, now = Date.now();
+    return this.reactionsDue && !(pending && pending.message[0] === this.crowdedBy && pending.expires > now && pending.attempts < MAX_ATTEMPTS);
+  }
   /**
    * The relays' request budget held the envelope back: nothing went out, so it was no attempt (a text keeps its eight),
    * and what it carried (a text, a receipt, a new mode) goes the moment the budget frees a request: the text and the
@@ -1090,7 +1157,7 @@ export class DhtDelivery {
     const theirs = this.options.reaction ? readDhtReactions(reactions) : [];
     for (const reaction of theirs) await this.options.reaction?.(reaction);
     const newest = theirs.reduce((max, r) => Math.max(max, r.n), 0);
-    if (theirs.length) this.reactionsDue = true;
+    if (theirs.length) { this.reactionsDue = true; this.crowdedBy = undefined; }
     const confirmed = receipt && this.state.pending?.message[0] === receipt ? receipt : this.state.confirmed;
     if (mode !== this.state.peerMode) traceLink(this.from, "dht-peer-mode", { peerMode: mode });
     if (peerPinned !== this.state.peerPinned) traceLink(this.from, "dht-peer-pinned", { peerPinned });
@@ -1294,10 +1361,16 @@ export class DhtDelivery {
     // Reactions to carry, or to say taken, go once the publication spacing allows, not at the next read.
     // So does the envelope sealed to a contact just pinned (`resealDue`), live too, where the next read is minutes away;
     // after a failed one, at the chat's pace, and never before the budget frees a request.
-    const due = this.reactionsDue || (this.resealDue && !this.errors.publish) ? Math.max(0, this.lastPublish + 4_000 - Date.now(), held) : Infinity;
+    const due = this.reactionsPress || (this.resealDue && !this.errors.publish) ? Math.max(0, this.lastPublish + 4_000 - Date.now(), held) : Infinity;
+    // So does a withdrawal still to replace on the relays (`withdrawal`), at its backoff.
+    const withdrawal = this.withdrawal, now = Date.now();
+    const retry = withdrawal && withdrawal.until > now && withdrawal.attempts < MAX_ATTEMPTS ? Math.max(0, withdrawal.next - now, this.lastPublish + 4_000 - now, held) : Infinity;
+    // So does a text that took the floor just after a withdrawal and has not gone yet (`withdrawalWaits`).
+    const pending = this.state.pending;
+    const waiting = pending && pending.attempts === 0 && pending.expires > now ? Math.max(0, this.lastPublish + 4_000 - now, held) : Infinity;
     // So does a read it held back, never sooner than a second after.
     const readHeld = this.readHeldUntil > 0 ? Math.max(1_000, this.readHeldUntil - Date.now()) : Infinity;
-    this.timer = setTimeout(() => void this.tick(), Math.min(held > 0 ? Math.min(this.pollMs, held) : this.pollMs, due, readHeld));
+    this.timer = setTimeout(() => void this.tick(), Math.min(held > 0 ? Math.min(this.pollMs, held) : this.pollMs, due, retry, waiting, readHeld));
   }
 }
 export const DHT_TEXT_REFUSED = "Your contact's app does not accept text over the DHT. It is sent when you are live.";

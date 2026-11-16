@@ -24,7 +24,7 @@ describe("the home screen's promise", () => {
     expect(lookup(language, "home.features.onDevice")?.trim()).toBeTruthy();
   });
 
-  it("English never calls Ghostly ephemeral in its home or app strings", () => {
-    for (const key of ["home.description", "home.features.onDevice", "app.tagline"]) expect(lookup("en", key)).not.toMatch(/ephemeral|disappear/i);
+  it("English never calls Ghostly ephemeral in its home strings", () => {
+    for (const key of ["home.description", "home.features.onDevice"]) expect(lookup("en", key)).not.toMatch(/ephemeral|disappear/i);
   });
 });

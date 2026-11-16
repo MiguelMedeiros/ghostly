@@ -1,3 +1,4 @@
+import { dropLoneJoiners, hasVisible, stripHidden } from "@ghostly/core";
 import { STORES, transact } from "../../../shared/idb";
 import type { WalletMode } from "../../../shared/mints";
 import { CASHU_MINT_SOURCE } from "./cashuMint";
@@ -94,9 +95,21 @@ const ALIAS_IN_NAME = 20;
  * ends, with "…", never in the middle of a word.
  */
 export function defaultCardName(providerId: string, alias: string | undefined, short: string): string {
-  const own = (alias && providerId === nwc.id ? nwcWalletName(alias) : alias ?? "").replace(/\s+/g, " ").trim();
+  const own = cleanName(alias && providerId === nwc.id ? nwcWalletName(alias) : alias ?? "");
   return own ? `${cutAtWord(own, ALIAS_IN_NAME)} (${short})` : short;
 }
+
+/**
+ * A card's name as shown: no invisible or direction-changing character (one from the wallet's service could make a
+ * name read like another card's, or reorder the source's name after it), white space collapsed; "" with nothing visible.
+ */
+function cleanName(name: string): string {
+  const clean = dropLoneJoiners(stripHidden(name.replace(/\s+/g, " "))).replace(/\s+/g, " ").trim();
+  return hasVisible(clean) ? clean : "";
+}
+
+/** What two names that read alike share: a name stored before `cleanName` may still hold what it drops. */
+const nameKey = (name: string) => cleanName(name).toLowerCase();
 
 /** `text` in at most `max` UTF-16 units (the unit `rename` counts), cut after a whole word with "…" when longer. */
 function cutAtWord(text: string, max: number): string {
@@ -168,10 +181,13 @@ export class LightningCards {
   /** The cards a person sees: the Cashu card only while the network has mints. In the order they were added. */
   private shown(): StoredLightningCard[] { return this.stored.cards.filter((c) => c.id !== CASHU_CARD || this.options.hasMints()); }
 
-  /** The default for receiving, or the first card shown when that one is not (the Cashu card of a network with no mints). */
+  /**
+   * The default for receiving, or the first card shown here when that one is not (the Cashu card of a network with no
+   * mints): a card at home on another device cannot receive here.
+   */
   get receivingId(): string {
     const shown = this.shown();
-    return shown.find((c) => c.id === this.stored.receive)?.id ?? shown[0]?.id ?? this.stored.receive;
+    return shown.find((c) => c.id === this.stored.receive)?.id ?? shown.find((c) => this.isHere(c.id))?.id ?? shown[0]?.id ?? this.stored.receive;
   }
   get receiving(): LightningService { return this.services.get(this.receivingId) ?? [...this.services.values()][0]; }
 
@@ -259,14 +275,15 @@ export class LightningCards {
 
   /** A name no other card of the network has: "LND", then "LND 2". */
   private freeName(name: string): string {
-    const taken = new Set(this.stored.cards.map((c) => c.name.toLowerCase()));
-    if (!taken.has(name.toLowerCase())) return name;
-    for (let n = 2; ; n++) if (!taken.has(`${name} ${n}`.toLowerCase())) return `${name} ${n}`;
+    const taken = new Set(this.stored.cards.map((c) => nameKey(c.name)));
+    if (!taken.has(nameKey(name))) return name;
+    for (let n = 2; ; n++) if (!taken.has(nameKey(`${name} ${n}`))) return `${name} ${n}`;
   }
 
   /**
    * Removes a card: its source and sealed secrets go (refused while a payment through it has not ended). The default
-   * for receiving moves to the first card of the person's own left, else the mints' card. A network left with no card gets the Cashu card back, as before cards.
+   * for receiving moves to the first card of the person's own left on this device (one at home on another device
+   * cannot receive here), else the mints' card. A network left with no card gets the Cashu card back, as before cards.
    */
   remove(id: string): Promise<void> {
     return this.serial(async () => {
@@ -285,7 +302,7 @@ export class LightningCards {
         await added.start();
       }
       const shown = cards.filter((c) => c.id !== CASHU_CARD || this.options.hasMints());
-      const next = shown.find((c) => c.id !== CASHU_CARD) ?? shown[0] ?? cards[0];
+      const next = shown.find((c) => c.id !== CASHU_CARD && this.isHere(c.id)) ?? shown.find((c) => c.id === CASHU_CARD) ?? shown[0] ?? cards[0];
       const receive = this.stored.receive === id || !cards.some((c) => c.id === this.stored.receive) ? next.id : this.stored.receive;
       await this.save({ cards, receive });
       if (added) void added.ensureReady();
@@ -303,11 +320,11 @@ export class LightningCards {
   /** Renames a card: 1 to 32 characters, unique on its network. */
   rename(id: string, name: string): Promise<void> {
     return this.serial(async () => {
-      const clean = name.replace(/\s+/g, " ").trim();
+      const clean = cleanName(name);
       if (!clean) throw new Error("Enter a name");
       if (clean.length > NAME_MAX) throw new Error(`At most ${NAME_MAX} characters`);
       if (!this.services.has(id)) throw new Error("That Lightning card is gone");
-      if (this.stored.cards.some((c) => c.id !== id && c.name.toLowerCase() === clean.toLowerCase())) throw new Error("Another card has that name");
+      if (this.stored.cards.some((c) => c.id !== id && nameKey(c.name) === nameKey(clean))) throw new Error("Another card has that name");
       await this.save({ ...this.stored, cards: this.stored.cards.map((c) => (c.id === id ? { ...c, name: clean } : c)) });
     });
   }
@@ -358,7 +375,8 @@ export class LightningCards {
   }
 
   /** The cards whose source is opened on this device: not one at home on another device (WISP 06 § Wallets that stay home). */
-  private here(): LightningService[] { return [...this.services].filter(([id]) => awayFrom(`lightning:${this.network}:${id}`) === undefined).map(([, s]) => s); }
+  private here(): LightningService[] { return [...this.services].filter(([id]) => this.isHere(id)).map(([, s]) => s); }
+  private isHere(id: string): boolean { return awayFrom(`lightning:${this.network}:${id}`) === undefined; }
   async reconcile() { await Promise.all(this.here().map((s) => s.reconcile())); }
   /** The screen shows this invoice of ours: the card that made it asks about it at the fast pace a while longer. */
   async watch(invoice: string): Promise<boolean> { return (await Promise.all(this.here().map((s) => s.watch(invoice)))).some(Boolean); }

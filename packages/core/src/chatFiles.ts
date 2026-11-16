@@ -188,7 +188,9 @@ export interface FileTransferRecord {
   abortedBySender?: boolean;
   /**
    * In: taken, by the person or within the app's limits. An offer that expired unanswered never was, so offered again
-   * it is refused, never taken without asking.
+   * it is refused, never taken without asking. Out: the receiver took it (`pf-accept`), so the offer's week no longer
+   * ends it (`sweep`): a file paused or cut off for more than a week failed "Not delivered in time" when it went on,
+   * and its part there was deleted.
    */
   agreed?: boolean;
 }
@@ -493,6 +495,7 @@ interface Outgoing {
    * an older generation, and does not keep the next session's pump from starting.
    */
   pumping?: number;
+  /** The file read ahead (a MiB), while it sends: one paused or cut off holds none (32 paused held 32 MiB). */
   block?: { start: number; bytes: Uint8Array };
   timer?: ReturnType<typeof setTimeout>;
   /** A pump that paused on a refused frame starts again. */
@@ -710,7 +713,7 @@ export class ChatFiles {
     this.moving.clear(); this.held.clear();
     this.host.uplink?.leave(this);
     for (const entry of this.entries.values()) {
-      if (entry.out) { entry.out.generation++; clearTimeout(entry.out.timer); clearTimeout(entry.out.wake); entry.out.next = entry.record.confirmed; }
+      if (entry.out) { entry.out.generation++; clearTimeout(entry.out.timer); clearTimeout(entry.out.wake); entry.out.next = entry.record.confirmed; entry.out.block = undefined; }
       if (entry.in) { clearTimeout(entry.in.timer); clearTimeout(entry.in.ackTimer); entry.in.ackTimer = undefined; }
       if (entry.in && !transferEnded(entry.record)) void this.checkpoint(entry);
     }
@@ -726,6 +729,8 @@ export class ChatFiles {
     for (const entry of this.entries.values()) {
       const { record } = entry;
       if (!["queued", "offered", "asking"].includes(record.state) || record.since + FILE_LIMITS.offerTtlMs > now) continue;
+      // Taken there: what it waits for now is the receiver's to end (its own week to arrive, `pf-refuse`).
+      if (record.direction === "out" && record.agreed) continue;
       if (record.direction === "in" && record.state === "queued" && (entry.in?.starting || this.moved(entry) > 0)) continue;
       this.end(entry, "failed", record.direction === "in" ? "The offer expired" : record.state === "queued" ? "Not delivered in time" : "Not accepted in time");
       // Ended here, it ends there too: the receiver's week began when the offer arrived, later, and it still showed Accept.
@@ -788,17 +793,19 @@ export class ChatFiles {
     return out.source;
   }
 
-  private async chunkAt(entry: Entry, offset: number): Promise<Uint8Array> {
+  private async chunkAt(entry: Entry, offset: number, generation: number): Promise<Uint8Array> {
     const out = entry.out!, size = entry.record.file.size;
     const length = Math.min(FILE_LIMITS.chunkBytes, size - offset);
-    const block = out.block;
+    let block = out.block;
     if (!block || offset < block.start || offset + length > block.start + block.bytes.length) {
       const bytes = await (await this.source(entry)).read(offset, Math.min(FILE_LIMITS.readBytes, size - offset));
       if (!bytes.length) throw new Error("The file is shorter than it says");
-      out.block = { start: offset, bytes };
+      block = { start: offset, bytes };
+      // Kept only while it still sends: a read that ends after a pause would hold its MiB until the file ended.
+      if (generation === out.generation) out.block = block;
     }
-    const at = offset - out.block!.start;
-    return out.block!.bytes.subarray(at, at + length);
+    const at = offset - block.start;
+    return block.bytes.subarray(at, at + length);
   }
 
   /** Whether this file's own window lets it send more. */
@@ -846,7 +853,7 @@ export class ChatFiles {
     try {
       while (this.shouldPump(entry) && generation === out.generation) {
         const offset = out.next;
-        const chunk = await this.chunkAt(entry, offset);
+        const chunk = await this.chunkAt(entry, offset, generation);
         const room = this.host.writable?.();
         if (room) await room;
         if (generation !== out.generation || !this.shouldPump(entry) || out.next !== offset) break;
@@ -1014,6 +1021,10 @@ export class ChatFiles {
           if (!(await this.retakeAgreed(existing))) return;
           break;
         case "asking": this.send({ t: "pf-wait", id, why: "consent" }); return;
+        // Being checked (a new session's offer, while the old one's still waits on it): the check answers, `pf-done` or
+        // `pf-refuse`. Taken up again, it read as arriving at 100% for the rest of the check, with Pause and Ask again.
+        // One that was being checked when the app stopped is taken up again: its check starts over.
+        case "verifying": if (existing.in?.verifying) return; break;
       }
       if (record.state === "paused" && record.pausedBy === "me") { this.send({ t: "pf-wait", id, why: "paused" }); return; }
       if (paused) {
@@ -1179,16 +1190,25 @@ export class ChatFiles {
     if (record.state !== "active" || incoming.verifying || !incoming.target) return;
     if (frame.size !== record.file.size || typeof frame.digest !== "string" || !DIGEST.test(frame.digest)) return;
     const digest = frame.digest;
-    await incoming.writing;
-    if (transferEnded(record) || record.state !== "active") return;
-    if (incoming.stored < record.file.size) { this.send({ t: "pf-accept", id: record.id, offset: incoming.stored }); return; }
+    // Set before the writes are waited for: the check runs beside the session's frames (`handle`), and a second `pf-sum`
+    // meanwhile is not a second check.
     incoming.verifying = true;
+    await incoming.writing;
+    // Taken again meanwhile (the sender stopped it, then offered it again): this check is the old transfer's.
+    if (entry.in !== incoming) return;
+    if (transferEnded(record) || record.state !== "active" || incoming.stored < record.file.size) {
+      incoming.verifying = false;
+      if (!transferEnded(record) && record.state === "active") this.send({ t: "pf-accept", id: record.id, offset: incoming.stored });
+      return;
+    }
     record.state = "verifying";
     this.changed(entry);
     let ok: boolean;
     try { const target = await incoming.target; await target.flush(); ok = await target.verify(digest); } catch { ok = false; }
     incoming.verifying = false;
-    if (transferEnded(record)) return;
+    // The check runs beside the session's frames: the sender's abort and a new offer may have taken the file up again
+    // from the start. Its answer was the old bytes', and ended the new transfer done with what had come of it.
+    if (transferEnded(record) || entry.in !== incoming) return;
     if (ok) {
       record.digest = digest;
       record.confirmed = record.file.size;
@@ -1223,7 +1243,10 @@ export class ChatFiles {
     if (frame.t === "pf-offer") return this.onOffer(frame);
     const incoming = this.entries.get(key("in", id)), outgoing = this.entries.get(key("out", id));
     if (frame.t === "pf-data") { if (incoming) this.onData(incoming, frame); return; }
-    if (frame.t === "pf-sum") { if (incoming) await this.onSum(incoming, frame); return; }
+    // Not waited for: the check reads the whole file again (a 4 GiB one about 20 s at 200 MiB/s), and the session's
+    // frames come in one queue. Waited for, every text, pong and other file of the chat waited behind it, and a check
+    // longer than the contact's three pings (45 s) had the session dropped as dead.
+    if (frame.t === "pf-sum") { if (incoming) void this.onSum(incoming, frame); return; }
     if (frame.t === "pf-abort") {
       if (incoming && !transferEnded(incoming.record)) {
         await this.discardStored(incoming);
@@ -1251,6 +1274,7 @@ export class ChatFiles {
         out.next = frame.offset;
         this.refill = 0;
         record.state = "active";
+        record.agreed = true;
         record.pausedBy = record.waitingFor = undefined;
         this.changed(outgoing);
         this.wakeHeld();
@@ -1266,9 +1290,15 @@ export class ChatFiles {
           : record.state === "asking" && record.waitingFor === (frame.why === "busy" ? "busy" : "consent")) return;
         out.generation++;
         out.next = record.confirmed;
+        out.block = undefined;
         clearTimeout(out.timer);
         if (frame.why === "paused") { record.state = "paused"; record.pausedBy = "peer"; }
-        else { record.state = "asking"; record.waitingFor = frame.why === "busy" ? "busy" : "consent"; }
+        else {
+          record.state = "asking";
+          record.waitingFor = frame.why === "busy" ? "busy" : "consent";
+          // Asked about again there (taken again after it ended): unanswered, it ends with the offer's week again.
+          if (record.waitingFor === "consent") record.agreed = undefined;
+        }
         this.changed(outgoing);
         this.wakeHeld();
         return;
@@ -1289,8 +1319,10 @@ export class ChatFiles {
         return;
       }
       case "pf-done": {
-        // Checked out there. Said again to the offer of a new session too, after which this side is no longer verifying.
-        if (record.state !== "verifying" && record.confirmed !== record.file.size) return;
+        // Checked out there. Said again to the offer of a new session too, after which this side is no longer verifying,
+        // and to one sent again from the start (Send again on a file that failed here once the contact had it whole):
+        // ignored, the file was offered every 30 s for good, a done one there never anything else.
+        if (record.state !== "verifying" && record.state !== "offered" && record.confirmed !== record.file.size) return;
         record.confirmed = record.file.size;
         this.end(outgoing, "done");
         return;
@@ -1381,7 +1413,7 @@ export class ChatFiles {
     if (sentWhole(record)) return;
     record.state = "paused";
     record.pausedBy = "me";
-    if (entry.out) { entry.out.generation++; entry.out.next = record.confirmed; clearTimeout(entry.out.timer); this.send(this.offerFrame(record, true)); }
+    if (entry.out) { entry.out.generation++; entry.out.next = record.confirmed; entry.out.block = undefined; clearTimeout(entry.out.timer); this.send(this.offerFrame(record, true)); }
     else { this.send({ t: "pf-wait", id, why: "paused" }); void this.checkpoint(entry); this.startNext(); }
     this.changed(entry);
     if (entry.out) this.wakeHeld();
@@ -1417,7 +1449,7 @@ export class ChatFiles {
     const entry = this.entry("out", id), { record } = entry;
     if (record.state !== "failed") return;
     // The digest is taken again from the source: the one sent last time may be what was wrong.
-    Object.assign(record, { state: "queued", confirmed: 0, error: undefined, digest: undefined, since: this.now() });
+    Object.assign(record, { state: "queued", confirmed: 0, error: undefined, digest: undefined, agreed: undefined, since: this.now() });
     clearTimeout(entry.out!.timer); clearTimeout(entry.out!.wake);
     entry.out = { next: 0, sent: 0, generation: entry.out!.generation + 1, sends: [] };
     this.changed(entry);

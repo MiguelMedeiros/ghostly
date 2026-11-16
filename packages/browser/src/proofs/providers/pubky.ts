@@ -2,7 +2,7 @@ import {
   isPubkyKey, isPubkyProofFolder, newPubkyProofFolder, normalizePubkyKey, pubkyProofCapability, pubkyProofFile, pubkyProofPath,
 } from "@ghostly/core";
 import { englishSay, type IdentityPlatform, type IdentityProofProvider, type InAppSigner } from "../contract";
-import { readPubkyFile, withPubkyApproval, type PubkyApprovalOptions } from "../pubky";
+import { PUBKY_APPROVAL_TIMEOUT, readPubkyFile, withPubkyApproval, type PubkyApprovalOptions } from "../pubky";
 
 /**
  * A Pubky identity (WISP 302, docs/wisps/302-pubky.md), proven by publication: Pubky Ring and Pubky Passport sign
@@ -33,13 +33,15 @@ export interface PubkyIdentityOptions {
 export function createPubkyIdentityProvider(options: PubkyIdentityOptions = {}): IdentityProofProvider<PubkyEvidence> {
   const approve = <T>(capability: `/pub/${string}/:w`, ctx: Parameters<InAppSigner<PubkyEvidence>["run"]>[0], work: Parameters<typeof withPubkyApproval<T>>[1]) => {
     if (!ctx.onApproval) throw new Error("This screen cannot show a Pubky request");
-    return withPubkyApproval({ ...options.approval, capability, signal: ctx.signal, onApproval: ctx.onApproval, onProgress: ctx.onProgress, say: ctx.say }, work);
+    const wait = ctx.waitMs ? { timeoutMs: Math.min(ctx.waitMs, PUBKY_APPROVAL_TIMEOUT) } : {};
+    return withPubkyApproval({ ...options.approval, ...wait, capability, signal: ctx.signal, onApproval: ctx.onApproval, onProgress: ctx.onProgress, say: ctx.say }, work);
   };
 
   const signer: InAppSigner<PubkyEvidence> = {
     id: "pubky-auth", kind: "in-app",
     label: "Pubky Ring or Pubky Passport",
     action: "Continue",
+    maxWaitMs: PUBKY_APPROVAL_TIMEOUT,
     description: "One request: approve it in Pubky Passport in your browser, or scan it with Pubky Ring. Ghostly only asks to write one small file to a new folder of your homeserver.",
     run(ctx, work) {
       const folder = newPubkyProofFolder();

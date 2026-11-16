@@ -17,6 +17,8 @@ import { Select } from "./ui/Select";
 import { ButtonGroup, Field, FieldGrid, InputGroup, Truncate } from "./layout";
 import { said } from "../lib/notices";
 import { fillNames } from "../lib/fillNodes";
+import { listText } from "../lib/listText";
+import { isolate } from "../lib/ownStatus";
 import { exactText } from "../lib/exactText";
 
 const EMPTY_S3: S3Config = { endpoint: "", region: "us-east-1", bucket: "", prefix: "ghostly", accessKeyId: "", secretAccessKey: "" };
@@ -156,14 +158,15 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
     const entry = await restoreForTakeover(target.opened, target.guard, watch);
     setRestorePass(""); setGuarded(null);
     if (canSwitch) switchProfile(entry.id, { route: "/" });
-    else setDone(t("profile.backups.restored", { name: entry.name }));
+    else setDone(t("profile.backups.restored", { name: isolate(entry.name) }));
   });
   /** `replacing`: the original, which the profile page of the copy then offers to remove, with its usual checks. */
   const finish = async (opened: OpenedProfileBackup, replacing: ProfileEntry | undefined, watch: ReturnType<typeof start>) => {
     const entry = await restoreOpenedBackup(opened, watch, unchecked.current.has(opened) ? markUncheckedRestore : undefined);
     setRestorePass(""); setSameDevice(null);
     if (canSwitch) switchProfile(entry.id, { route: replacing ? `/profile?replace=${encodeURIComponent(replacing.id)}` : "/profile" });
-    else setDone(t("profile.backups.restored", { name: entry.name }));
+    // The name isolated in a line in the page's direction: "Club!" read "!Club" in Arabic.
+    else setDone(t("profile.backups.restored", { name: isolate(entry.name) }));
   };
   // Replace needs the copy running and the original removable: never the first profile.
   const replaceable = canSwitch ? sameDevice?.originals.find((entry) => entry.id) : undefined;
@@ -246,8 +249,8 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
           )}
           {guarded.guard.case === "tombstone" && (
             <InputGroup>
-              <input data-testid="restore-own-name" className={input} autoComplete="off" spellCheck={false} placeholder={t("devices.restore.tombstoneConfirm", { name: guarded.opened.name })}
-                aria-label={t("devices.restore.tombstoneConfirm", { name: guarded.opened.name })} value={ownName} onChange={(e) => setOwnName(e.target.value)} />
+              <input data-testid="restore-own-name" className={input} autoComplete="off" spellCheck={false} placeholder={t("devices.restore.tombstoneConfirm", { name: `\u2068${guarded.opened.name}\u2069` })}
+                aria-label={t("devices.restore.tombstoneConfirm", { name: `\u2068${guarded.opened.name}\u2069` })} value={ownName} onChange={(e) => setOwnName(e.target.value)} />
               <Button variant="primary" data-testid="restore-own-go" loading={busy} disabled={ownName.trim() !== guarded.opened.name.trim()} onClick={() => void underProgress("restore", true, (watch) => afterGuard(guarded.opened, watch))}>{t("devices.restore.tombstoneGo")}</Button>
               <Button data-testid="restore-guard-cancel" disabled={busy} onClick={() => setGuarded(null)}>{t("common.cancel")}</Button>
             </InputGroup>
@@ -262,7 +265,7 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
       )}
       {open === "restore" && sameDevice && (
         // The original is on this device: both would answer contacts as the same person. The person chooses.
-        <Field testId="restore-same-device" label={<span className="font-semibold">{t("profile.backups.sameDevice.title", { names: sameDevice.originals.map((entry) => `“${entry.name}”`).join(", ") })}</span>}
+        <Field testId="restore-same-device" label={<span className="font-semibold">{t("profile.backups.sameDevice.title", { names: listText(sameDevice.originals.map((entry) => `“${isolate(entry.name)}”`), t) })}</span>}
           hint={t("profile.backups.sameDevice.hint")} info={t("profile.backups.sameDevice.info")}>
           {firstOnly && <Notice>{t("profile.backups.sameDevice.firstProfile")}</Notice>}
           <ButtonGroup>

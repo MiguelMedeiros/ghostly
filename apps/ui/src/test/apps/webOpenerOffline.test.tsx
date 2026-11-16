@@ -2,6 +2,7 @@ import { screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { appErrorText } from "../../lib/apps/errors";
 import { takedownText } from "../../lib/apps/open";
+import { chatApp, registerAppSlot, updateChatApp } from "../../lib/apps/running";
 import { forgetRunnerCheck } from "../../lib/apps/runnerCheck";
 import { webOpener } from "../../lib/apps/webOpener";
 import type { AppsPlatform } from "../../lib/platform";
@@ -83,13 +84,36 @@ describe("opening an app on the web while offline", () => {
     expect(appErrorText(error, pt)).not.toBe(appErrorText(error, en));
   });
 
+  it("an app running in a chat, hidden, is shown again offline: no entry read, no runner asked", async () => {
+    const fetchSpy = vi.fn(async () => new Response("", { headers: { "content-security-policy": POLICY } }));
+    vi.stubGlobal("fetch", fetchSpy);
+    const platform = host(["internet"]);
+    const entry = vi.spyOn(platform, "entry");
+    const openApp = webOpener({ apps: () => platform, nameIn: () => undefined, closeLabel: () => "Close" });
+    registerAppSlot("link-1", { box: document.createElement("div"), sessionId: "s1", contact: { name: "Bob", named: true } });
+    try {
+      await openApp("pub/chess", "link-1");
+      updateChatApp("link-1", { shown: false });
+      online = false;
+      entry.mockClear();
+      fetchSpy.mockClear();
+      await expect(openApp("pub/chess", "link-1")).resolves.toBe("shown");
+      expect(chatApp("link-1")?.shown).toBe(true);
+      expect(entry).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(started).toHaveLength(1);
+    } finally {
+      registerAppSlot("link-1", null);
+    }
+  });
+
   it("a start that timed out while offline does not send the person to the app's maker", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("", { headers: { "content-security-policy": POLICY } })));
     await opener(["internet"])("pub/chess", null);
     online = false;
     started[0]!.stop("timeout");
     const said = within(screen.getByTestId("mini-app")).getByRole("status");
-    expect(said).toHaveTextContent(en("apps.view.stoppedOffline", { title: "Chess" }));
+    expect(said).toHaveTextContent(en("apps.view.stoppedOffline", { title: "\u2068Chess\u2069" }));
     expect(said).not.toHaveTextContent("tell its maker");
   });
 });

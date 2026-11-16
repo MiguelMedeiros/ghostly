@@ -70,6 +70,9 @@ vi.mock("@ghostly/core", async (importOriginal) => {
     // Its choice, wallets aside: Lightning too, which it has no wallet of (peerAllowsPayment leaves it out).
     peerChoosesPayment = vi.fn((m: string) => m === "cashu" || m === "lightning");
     allowsPayment = vi.fn(() => true);
+    /** Nothing of mine waits on the DHT floor here. */
+    dhtHolds = vi.fn(() => false);
+    withdrawDht = vi.fn(async () => {});
     constructor(readonly options: GhostLinkOptions) { links.push(this as never); }
   }
   return { ...actual, GhostLink: RecordedLink };
@@ -173,7 +176,7 @@ describe("a chat as the contact drives it", () => {
     const chat = row();
     const { node, linkOf } = await started(chat);
     const { events } = linkOf(chat.id).options;
-    const emits = vi.spyOn(node as never as { emitState(): void }, "emitState");
+    const emits = vi.spyOn(node as never as { scheduleState(): void }, "scheduleState");
     const read = (lastPacketAt: number) => events.onPresence({ online: true, lastPacketAt, seenAt: 5, nick: "Bob", services: [{ id: "web", type: "http" }] });
     read(10);
     expect(emits).toHaveBeenCalledTimes(1);
@@ -194,6 +197,20 @@ describe("a chat as the contact drives it", () => {
     expect(emits).toHaveBeenCalledTimes(1);
     events.onRtt(55);
     expect(emits).toHaveBeenCalledTimes(2);
+  });
+
+  it("an attempt to go live that ended names its chat, and builds no other chat's view", async () => {
+    const a = row(), b = row();
+    const { node, linkOf } = await started(a, b);
+    const unnamed = vi.spyOn(node as never as { emitState(): void }, "emitState");
+    const named = vi.spyOn(node as never as { chatChanged(linkId: string): void }, "chatChanged");
+    // A contact that looks online but is not reached: each dial that ends says so, every 20 s to 3 min.
+    const attempt = { at: Date.now(), side: "dialled" as const, failed: [{ transport: "iroh/1" as const, error: "unreachable" }], retryAt: Date.now() + 20_000 };
+    (linkOf(b.id) as never as { liveAttempt: unknown }).liveAttempt = attempt;
+    linkOf(b.id).options.events.onLiveAttempt!(attempt);
+    expect(unnamed).not.toHaveBeenCalled();
+    expect(named.mock.calls).toEqual([[b.id]]);
+    expect(node.getState().links.find((link) => link.id === b.id)!.liveAttempt).toEqual(attempt);
   });
 
   it("an acknowledgement moves a legacy chat's read mark, never a paired one's", async () => {
@@ -278,7 +295,7 @@ describe("a chat as the contact drives it", () => {
     const chat = row();
     const { node, linkOf } = await started(chat);
     const { events } = linkOf(chat.id).options;
-    const emit = vi.spyOn(node as unknown as { emitState(): void }, "emitState");
+    const emit = vi.spyOn(node as unknown as { scheduleState(): void }, "scheduleState");
     events.onPoll({ polling: true, nextInMs: 0 });
     expect(node.getState().links[0].poll.polling, "the first sync under way").toBe(true);
     events.onStatus("error");
@@ -438,6 +455,32 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
       node.wake({ network: true });
       node["retryNative"]();
       await vi.waitFor(() => expect(linkOf().registerEndpoint).toHaveBeenCalledTimes(2));
+    });
+
+    it("a listener started again with its seed already stored writes no link row", async () => {
+      // A CLI daemon with its Iroh relay out of reach (bug hunt, 2026-11-08): with 30 chats or more the failed starts'
+      // retries kept the queue busy, one every 10 s, and each wrote its chat's whole row back unchanged, a disk sync
+      // each: nearly every write of a daemon whose contacts were away.
+      const chat = row({ ...paired() });
+      await db.putLink(chat);
+      const iroh = vi.fn(async () => endpoint());
+      iroh.mockRejectedValueOnce(new Error("Iroh relay unreachable"));
+      const events = { onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() };
+      const node = new GhostlyNode(events, { automaticWallets: false, transport: fixture, nativeTransports: { "iroh/1": iroh } });
+      nodes.push(node);
+      await node.start();
+      await vi.waitFor(() => expect(node["nativeFailed"].has(chat.id)).toBe(true));
+      const seed = (await db.getLinks()).find((l) => l.id === chat.id)?.transportSeeds?.["iroh/1"];
+      expect(seed).toBeTruthy();
+      const patches = vi.spyOn(db, "patchLink");
+      onTestFinished(() => { patches.mockRestore(); });
+      iroh.mockRejectedValueOnce(new Error("Iroh relay unreachable"));
+      await node["ensureNativeEndpoints"](chat.id);
+      expect(iroh).toHaveBeenCalledTimes(2);
+      await node["ensureNativeEndpoints"](chat.id);
+      expect(iroh).toHaveBeenCalledTimes(3);
+      expect(iroh.mock.calls.map((call) => (call as unknown[])[0])).toEqual([seed, seed, seed]);
+      expect(patches.mock.calls.filter(([, patch]) => "transportSeeds" in patch)).toEqual([]);
     });
 
     it("the chat live most recently takes one first, among chats live when the app quit", async () => {
@@ -1493,8 +1536,10 @@ describe("text in a chat", () => {
     await vi.waitFor(async () => expect(await gone()).toBe(true));
     // Whatever was going to happen to it has happened by now.
     await new Promise((resolve) => setTimeout(resolve, 100));
-    // Withdrawn: the floor stops saying it, and the chat keeps its id for the next session.
-    expect(settleDht).toHaveBeenCalledWith(dhtFileId(wireId));
+    // Withdrawn: a new envelope without it takes its place on the floor (not only settled there), and the chat keeps
+    // its id for the next session.
+    expect(link.withdrawDht).toHaveBeenCalledWith(dhtFileId(wireId));
+    expect(settleDht).not.toHaveBeenCalled();
     expect((await saved(chat.id))?.withdrawnFiles).toEqual([wireId]);
     expect(await gone()).toBe(true);
     expect((await saved(chat.id))?.deletedIds).toContain(messageId);
@@ -1514,6 +1559,37 @@ describe("text in a chat", () => {
 
   it("Cancel sending once a waiting file's offer was said on the DHT floor withdraws it", async () => {
     await cancelOnFloor("said before the cancel");
+  });
+
+  /**
+   * Delete for everyone while a waiting file's offer is being said on the DHT floor (its publication takes seconds, the
+   * moment right after sending a wrong file): the delete read a row with no `fileOnFloor` yet and took the file for one
+   * that never left, so no removal went, and the contact's chat kept its bubble and name as "Cancelled by the sender".
+   */
+  it("Delete for everyone while a waiting file's offer is being said on the DHT floor sends its removal", async () => {
+    const chat = row();
+    const { node, linkOf } = await started(chat);
+    vi.spyOn(node["desk"], "replay").mockResolvedValue();
+    const link = linkOf(chat.id), wireId = `floor${crypto.randomUUID().slice(0, 8)}`, messageId = "me_7";
+    let removed: Promise<unknown> | undefined;
+    const announceFile = vi.fn(async (offer: { wireId: string }) => {
+      removed = node.removeMessage({ linkId: chat.id, messageId });
+      await removed;
+      Object.assign(link, { dhtPendingId: dhtFileId(offer.wireId) });
+      return null;
+    });
+    Object.assign(link, { isDataLinkOpen: false, supportsFiles: false, fileAnnounceError: () => null, announceFile, settleDht: vi.fn(async () => {}), sendFilesFrame: vi.fn(() => true) });
+    node.sendFile({ linkId: chat.id, file: { id: `${chat.id}-out-${wireId}`, name: "a.txt", size: 1, mime: "text/plain" }, timestamp: 7 });
+    await vi.waitFor(async () => expect((await db.getMessage(chat.id, messageId))?.delivery).toBe("waiting"));
+    void node.sendMessage({ linkId: chat.id, text: "after it", timestamp: 8 });
+    await vi.waitFor(async () => expect((await db.getMessages(chat.id)).filter((m) => m.delivery === "waiting")).toHaveLength(2));
+    link.options.events.onDhtDelivery({ peerMode: "dht" } as never);
+    await vi.waitFor(() => expect(announceFile).toHaveBeenCalledOnce());
+    expect(await removed).toEqual({ error: null });
+    await vi.waitFor(async () => expect(await db.getMessage(chat.id, messageId)).toBeUndefined());
+    // Its removal goes to the contact once live, as for one deleted for everyone after its offer was said.
+    expect(node.removalPending({ linkId: chat.id, messageId })).toBe(true);
+    expect((await saved(chat.id))?.removals?.map((r) => r.wireId)).toEqual([wireId]);
   });
 
   // covers: groups.files
@@ -1569,6 +1645,20 @@ describe("text in a chat", () => {
     expect(await node.sendMessage({ linkId: chat.id, text: "x".repeat(600), timestamp: 9 })).toEqual({ error: null, messageId: expect.stringMatching(/^me_/) });
     expect(node.getState().links[0].peerAck).toBe(9);
     expect((await db.getMessages(chat.id))[0]).toMatchObject({ id: "me_9", via: "datalink" });
+  });
+
+  it("a legacy chat's read mark never goes back: the contact's record still carrying an older acknowledgement leaves a delivered text delivered", async () => {
+    const chat = row({ profile: undefined, participationSeed: undefined });
+    const { node, linkOf } = await started(chat);
+    const link = linkOf(chat.id);
+    link.options.events.onPeerAck(1000);
+    link.isDataLinkOpen = true;
+    await node.sendMessage({ linkId: chat.id, text: "hi", timestamp: 5000 });
+    expect(node.getState().links[0].peerAck).toBe(5000);
+    link.options.events.onPeerAck(1000);
+    expect(node.getState().links[0].peerAck).toBe(5000);
+    link.options.events.onPeerAck(6000);
+    expect(node.getState().links[0].peerAck).toBe(6000);
   });
 
   it("for an away contact that allows it, a text is held in storage, and never above the held-text limit", async () => {
@@ -1928,6 +2018,20 @@ describe("what arrives from held storage", () => {
     expect(stored!.blob).toBeUndefined();
     expect(stored!.bytes).toBe("idb");
     expect(await (await storedBlob(stored!, "text/plain"))!.text()).toBe("held");
+  });
+
+  it("a held file counts against the same per-contact budget as files taken live, files/3 ones included", async () => {
+    const chat = row();
+    const { node } = await started(chat);
+    const host = node["hold"]["host"] as { receiveFile(linkId: string, wire: object, bytes: Uint8Array, digest: string): Promise<string | null> };
+    const MiB = 1024 * 1024;
+    const wire = (wireId: string) => ({ wireId, name: "h.bin", size: 8 * MiB, mime: "application/octet-stream", timestamp: 5 });
+    // 495 MiB of files/3 files taken without asking: the file desk counts them, not the chat's received bytes.
+    const taken = vi.spyOn(node["fileDesk"], "autoTaken").mockReturnValue(495 * MiB);
+    expect(await host.receiveFile(chat.id, wire("over"), bytes("held"), "d")).toBe("no room for more files");
+    expect(await db.getMessages(chat.id)).toEqual([]);
+    taken.mockReturnValue(0);
+    expect(await host.receiveFile(chat.id, wire("room"), bytes("held"), "d")).toBeNull();
   });
 
   it("a held file, received or sent, says done in one state and then leaves the states: a device up for days carries none", async () => {

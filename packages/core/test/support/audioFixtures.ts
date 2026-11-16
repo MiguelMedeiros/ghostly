@@ -115,6 +115,39 @@ export const taggedVorbis = () => {
   const comment = Buffer.concat([Buffer.from([3]), latin("vorbis"), vorbisComment(true)]);
   return oggStream(0x99, [Buffer.concat([Buffer.from([1]), latin("vorbis"), Buffer.alloc(23, 1)]), comment, Buffer.concat([Buffer.from([5]), latin("vorbis"), Buffer.alloc(300, 2)]), ...OPUS_PACKETS]);
 };
+/**
+ * FLAC in Ogg, as `ffmpeg -c copy` writes a FLAC into an `.oga`: its first packet the mapping's header with the stream
+ * info, then one metadata block a packet (a Vorbis comment, a picture, the last one flagged), then its frames.
+ */
+export const taggedOggFlac = () => {
+  const head = Buffer.concat([latin("\x7fFLAC"), Buffer.from([1, 0, 0, 2]), latin("fLaC"), flacBlock(0, false, Buffer.alloc(34, 3))]);
+  const picture = flacBlock(6, true, Buffer.concat([u32be(3), u32be(9), latin("image/png"), u32be(PLACE.length), latin(PLACE), Buffer.alloc(20)]));
+  return oggStream(0x77, [head, flacBlock(4, false, vorbisComment(false)), picture, FLAC_FRAMES, FLAC_FRAMES]);
+};
+/** An Ogg Theora video with a Vorbis sound track: Theora's comment header (Vorbis's, no framing bit) names the place too. */
+export const taggedTheora = () => {
+  const comment = Buffer.concat([latin("\x81theora"), vorbisComment(false)]);
+  const theora = oggStream(0x55, [Buffer.concat([latin("\x80theora"), Buffer.alloc(35, 1)]), comment, Buffer.concat([latin("\x82theora"), Buffer.alloc(200, 2)]), ...OPUS_PACKETS]);
+  return Buffer.concat([theora, taggedVorbis()]);
+};
+
+/**
+ * An RF64 (or BW64) WAV: `ds64` first with the sizes, `data`'s size all ones there; a broadcast `bext` before the sound
+ * and an INFO list after it say where.
+ */
+export const taggedRf64 = (magic: "RF64" | "BW64" = "RF64") => {
+  const u64le = (n: number) => { const b = Buffer.alloc(8); b.writeBigUInt64LE(BigInt(n)); return b; };
+  const inam = chunk("INAM", latin(`${PLACE}\0`));
+  const rest = Buffer.concat([chunk("fmt ", Buffer.alloc(16, 1)), chunk("bext", Buffer.concat([latin(`Recorder at ${PLACE}`.padEnd(256, "\0")), Buffer.alloc(346)]))]);
+  const data = Buffer.concat([latin("data"), u32le(0xffffffff), WAV_DATA]);
+  const after = chunk("LIST", Buffer.concat([latin("INFO"), inam]));
+  const ds64Size = 28, riffSize = 4 + 8 + ds64Size + rest.length + data.length + after.length;
+  const ds64 = chunk("ds64", Buffer.concat([u64le(riffSize), u64le(WAV_DATA.length), u64le(WAV_DATA.length / 2), u32le(0)]));
+  return Buffer.concat([latin(magic), u32le(0xffffffff), latin("WAVE"), ds64, rest, data, after]);
+};
+
+/** An MP3 cut from a stream: junk before its first frame, then its frames, an APEv2 and an ID3v1 tag. */
+export const junkFirstMp3 = () => Buffer.concat([Buffer.alloc(300), Buffer.from([0x12, 0x34]), MP3_FRAMES, apev2(), id3v1()]);
 
 /** Matroska/WebM: an element of `id` (its bytes as written) holding `parts`; `unknown` writes its size as unknown. */
 const ebml = (id: number[], parts: Buffer[], unknown = false) => {
@@ -140,6 +173,30 @@ export const taggedWebm = () => {
   // Tags after the cluster: a cluster of unknown size ends where an element that is not its child starts.
   const tagsAt = seekHead(0).length + info.length + tracks.length + cluster.length;
   return Buffer.concat([head, ebml([0x18, 0x53, 0x80, 0x67], [seekHead(tagsAt), info, tracks, cluster, tags], true)]);
+};
+
+/** Xiph lacing, as Matroska keeps a Vorbis or Theora track's headers in its CodecPrivate: their count less one, each size but the last's, them. */
+const xiphLaced = (packets: Buffer[]) => Buffer.concat([Buffer.from([packets.length - 1]),
+  ...packets.slice(0, -1).map((p) => Buffer.from([...Array<number>(Math.floor(p.length / 255)).fill(255), p.length % 255])), ...packets]);
+/** Each codec's CodecPrivate with comments that say where: Vorbis's and Theora's headers Xiph-laced, FLAC's metadata blocks (a Vorbis comment, a picture). */
+export const CODEC_PRIVATES = {
+  A_VORBIS: () => xiphLaced([Buffer.concat([latin("\x01vorbis"), Buffer.alloc(23, 1)]), Buffer.concat([latin("\x03vorbis"), vorbisComment(true), Buffer.alloc(300, 0x41)]),
+    Buffer.concat([latin("\x05vorbis"), Buffer.alloc(300, 2)])]),
+  V_THEORA: () => xiphLaced([Buffer.concat([latin("\x80theora"), Buffer.alloc(35, 1)]), Buffer.concat([latin("\x81theora"), vorbisComment(false)]), Buffer.concat([latin("\x82theora"), Buffer.alloc(200, 2)])]),
+  A_FLAC: () => Buffer.concat([latin("fLaC"), flacBlock(0, false, Buffer.alloc(34, 3)), flacBlock(4, false, vorbisComment(false)),
+    flacBlock(6, true, Buffer.concat([u32be(3), u32be(9), latin("image/png"), u32be(PLACE.length), latin(PLACE), Buffer.alloc(20)]))]),
+} as const;
+/**
+ * A Matroska file whose one track is `codec` with `codecPrivate` (a muxer copies an Ogg's or a FLAC's headers there,
+ * comments and all), its CodecID after its CodecPrivate when `privateFirst`.
+ */
+export const xiphWebm = (codec: keyof typeof CODEC_PRIVATES, codecPrivate: Buffer = CODEC_PRIVATES[codec](), privateFirst = false) => {
+  const head = ebml([0x1a, 0x45, 0xdf, 0xa3], [str([0x42, 0x82], "matroska")]);
+  const info = ebml([0x15, 0x49, 0xa9, 0x66], [ebml([0x2a, 0xd7, 0xb1], [Buffer.from([0x0f, 0x42, 0x40])])]);
+  const id = str([0x86], codec), cp = ebml([0x63, 0xa2], [codecPrivate]);
+  const tracks = ebml([0x16, 0x54, 0xae, 0x6b], [ebml([0xae], [ebml([0xd7], [Buffer.from([1])]), ...(privateFirst ? [cp, id] : [id, cp])])]);
+  const cluster = ebml([0x1f, 0x43, 0xb6, 0x75], [ebml([0xe7], [Buffer.from([0])]), ebml([0xa3], [WEBM_BLOCK])]);
+  return Buffer.concat([head, ebml([0x18, 0x53, 0x80, 0x67], [info, tracks, cluster])]);
 };
 
 /** An M4A: a movie with a sound track alone (`soun`), a `©xyz` in its `udta`. */

@@ -1,0 +1,9 @@
+{
+  "name": "ghostly-e2e-sfu-token",
+  "private": true,
+  "description": "The e2e stack's WISP 602 group-token mock (server.mjs); LiveKit's browser client for its smoke page only, at the app's version (the group-call spec's outsider runs the app's E2EE).",
+  "type": "module",
+  "dependencies": {
+    "livekit-client": "2.24.0"
+  }
+}

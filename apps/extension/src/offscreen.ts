@@ -7,7 +7,7 @@ import type { PeerServer } from "@ghostly/browser/devices/linkOnly";
 import type { ClientMessage } from "@ghostly/browser/shared/rpc";
 import { setDatabaseName } from "@ghostly/browser/shared/idb";
 import { defaultWalletsAllowed } from "@ghostly/browser/platform/walletSetupSwitch";
-import { UI_PORT, type EngineStatus, type HttpRequestReply, type RuntimeMessage } from "./messages";
+import { uiPortMark, VIEWER_PORT, type EngineStatus, type HttpRequest, type HttpRequestReply, type RuntimeMessage, type ViewerAsk, type ViewerReply } from "./messages";
 import { activeNamespace, databaseFor, peerLockFor } from "./profile";
 import { activeProfileId } from "../../ui/src/lib/profiles";
 import { fromOwnPage } from "./shared/sender";
@@ -71,7 +71,7 @@ const server = new Promise<PeerServer>((resolve, reject) => {
       running = peer;
       // A message that came with no tab open: the peer tells the person, as a tab would have (attentionNotices.ts).
       const engine = engineOf(peer);
-      if (engine) engine.unheardAttention = (event) => void import("./attentionNotices").then(({ noticeUnheard }) => noticeUnheard(event, engine.node.getState().links)).catch(() => {});
+      if (engine) engine.unheardAttention = (event) => void import("./attentionNotices").then(({ noticeUnheard }) => noticeUnheard(event, () => engine.node.getState().links)).catch(() => {});
       // Only in `vite build --mode e2e` (test/attacks.mjs plays a malicious peer through it); gone from real builds.
       if (import.meta.env.MODE === "e2e") Object.assign(globalThis, { __ghostly: running });
       // Heard before any `ping` waits on it, so a ping that comes once it failed knows.
@@ -89,9 +89,16 @@ server.catch(() => {});
 
 // Only the extension's own pages and its worker are heard, on a port or in a message (`fromOwnPage`).
 chrome.runtime.onConnect.addListener((port) => {
-  if (port.name !== UI_PORT) return;
+  // A page's port carries the mark its pages last mirrored (`uiPortName`): no chat unchanged since is sent again. Each tab
+  // opened or reloaded got every chat's newest 400 rows, 51 MiB of JSON at 300 chats, though it had them all.
+  const page = port.name === VIEWER_PORT ? null : uiPortMark(port.name);
+  if (!page && port.name !== VIEWER_PORT) return;
   if (!fromOwnPage(port.sender)) {
     port.disconnect();
+    return;
+  }
+  if (!page) {
+    serveViewers(port);
     return;
   }
   // TODO(apps, WISP 1200 § Per client, Extension): this port carries JSON, so the app calls that answer bytes (`appFile`,
@@ -101,7 +108,7 @@ chrome.runtime.onConnect.addListener((port) => {
   // Listeners go on at once, so nothing a page sends while the peer waits for its lock is lost.
   withPeer((s) => {
     const engine = engineOf(s);
-    if (engine) engine.attach(client, undefined, { newest: ATTACH_NEWEST });
+    if (engine) engine.attach(client, undefined, { newest: ATTACH_NEWEST, marks: true, since: page.since });
     else s.attach(client);
   });
   port.onDisconnect.addListener(() => withPeer((s) => s.detach(client)));
@@ -129,7 +136,23 @@ function withPeer(act: (peer: PeerServer) => void): void {
   else void server.then(act, () => {});
 }
 
-async function handleHttpRequest(message: Extract<RuntimeMessage, { type: "http-request" }>): Promise<HttpRequestReply> {
+/**
+ * The worker's requests for a contact's app in its tab, on a port of their own: only this document hears them. One
+ * that comes once the peer stopped for good, or once a page made another profile the one in use, gets no answer of
+ * this peer's (`null`): the worker starts the next one as a `ping` would have it do, which closes the tab (a switch).
+ */
+function serveViewers(port: chrome.runtime.Port): void {
+  port.onMessage.addListener(({ id, request }: ViewerAsk) => {
+    void server.then((s) => s.ready.catch(() => {}), () => {})
+      .then(() => (stoppedForGood() || activeNamespace() !== profile ? null : handleHttpRequest(request)))
+      .then((reply) => {
+        // The worker went away meanwhile (Chrome stopped it): nobody is left to answer.
+        try { port.postMessage({ id, reply } satisfies ViewerReply); } catch { /* port closed */ }
+      });
+  });
+}
+
+async function handleHttpRequest(message: HttpRequest): Promise<HttpRequestReply> {
   try {
     const peer = engineOf(await server);
     if (!peer) return { ok: false, code: "offline", message: "This profile is not active on this device" };
@@ -198,6 +221,9 @@ let clearing: Promise<void> | null = null;
  * data" stopped is not stopped again: nothing it held is written over the emptied database. One clearing stops once
  * its clear is over: a switch in another tab no longer leaves its database half emptied.
  */
+/** Stopping, cleared, or its start failed a while ago (`FAILED_KEPT_MS`): the worker replaces this document. */
+const stoppedForGood = () => cleared || stopping !== null || (failedAt !== null && Date.now() - failedAt >= FAILED_KEPT_MS);
+
 const stopPeer = () => (stopping ??= cleared ? Promise.resolve() : clearing ?? (running ? running.stop() : server.then((s) => s.stop())).catch(() => {}));
 
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendResponse) => {
@@ -209,8 +235,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
     // A peer that stopped for good says so, and the worker starts another in its place: one whose start failed too, so
     // the person who freed some space and pressed Try again gets a new start, not this one again until Chrome restarts.
     void server.then((s) => s.ready.catch(() => {}), () => {}).then(() => {
-      const failed = failedAt !== null && Date.now() - failedAt >= FAILED_KEPT_MS;
-      sendResponse({ profile, active: activeNamespace(), activeId: activeProfileId(), stopped: cleared || stopping !== null || failed } satisfies EngineStatus);
+      sendResponse({ profile, active: activeNamespace(), activeId: activeProfileId(), stopped: stoppedForGood() } satisfies EngineStatus);
     });
     return true;
   }
@@ -218,10 +243,6 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
     // Its contacts see it leave, if that takes a moment; a peer that hangs does not hold up the switch.
     const grace = clearing && !cleared ? CLEAR_GRACE_MS : STOP_GRACE_MS;
     void Promise.race([stopPeer(), new Promise((resolve) => setTimeout(resolve, grace))]).then(() => sendResponse(true));
-    return true;
-  }
-  if (message.type === "http-request") {
-    void handleHttpRequest(message).then(sendResponse);
     return true;
   }
   if (message.type === "local-access-removed") {

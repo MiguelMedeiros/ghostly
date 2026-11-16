@@ -25,8 +25,10 @@ const wentOut=(review:Review)=>review.state==='submitted'||review.state==='settl
  * anything is sent. Nothing leaves the wallet until that confirmation. `onSent`, when given, is called once an approved
  * payment has gone out (`wentOut`: even when it came back already), so a chat's sheet can close and leave its status
  * to the chat's bubble; one that failed before it went, or whose outcome is not known, stays here with its error.
+ * `to`: whom a chat's payment goes to, said in place of its address (a Cashu payment's is only an id: the request's, or
+ * the contact's key).
  */
-export function PaymentReview({review:initial,wallet,onClose,onSent}:{review:Review;wallet:WalletPlatform;onClose:()=>void;onSent?:()=>void}) {
+export function PaymentReview({review:initial,wallet,onClose,onSent,to}:{review:Review;wallet:WalletPlatform;onClose:()=>void;onSent?:()=>void;to?:string}) {
  const {t}=useI18n();
  // `running`: the button pressed (Approve, Cancel, Check), busy while it works; the others wait, disabled.
  const [saved,setReview]=useState(initial),[running,setRunning]=useState<'approve'|'cancel'|'check'|null>(null),busy=running!==null,[error,setError]=useState<Problem|null>(null),[confirming,setConfirming]=useState(false),[feeWhy,setFeeWhy]=useState(false);
@@ -55,7 +57,7 @@ export function PaymentReview({review:initial,wallet,onClose,onSent}:{review:Rev
   <p className="text-xs text-text-secondary" data-testid="review-rail">{railLine(t,review.method,review.network)}</p>
   <p className="text-xs text-text-secondary" data-testid="review-money">{real?t('payments.review.money.mainnet'):t('payments.review.money.testnet')}</p>
   <dl className="text-xs text-text-secondary space-y-2 break-all">
-   <div><dt className="text-text-muted">{t('payments.review.destination')}</dt><dd className="font-mono">{review.address}</dd></div>
+   <div><dt className="text-text-muted">{t('payments.review.destination')}</dt>{to?<dd data-testid="review-destination"><bdi>{to}</bdi></dd>:<dd className="font-mono" data-testid="review-destination">{review.address}</dd>}</div>
    <div><dt className="text-text-muted">{token?t('payments.review.gasLimit'):t('payments.review.fee')}</dt><dd>{token?`${formatTokenAmount(review.fee,18,t.language)} / ${formatTokenAmount(review.feeCap,18,t.language)} ETH`:`${formatAmount(review.fee,t.language)} / ${formatAmount(review.feeCap,t.language)} ${unitFor(t,unit,review.feeCap)}`}</dd></div>
    {!token&&<div><dt className="text-text-muted">{t('payments.review.total')}</dt><dd>{formatAmount(review.amount+review.fee, t.language)} {unitFor(t,unit,review.amount+review.fee)}</dd></div>}
    <div><dt className="text-text-muted">{t('payments.review.status')}</dt><dd aria-live="polite" data-testid="review-status">{paymentStateLabel(t,status)}</dd></div>

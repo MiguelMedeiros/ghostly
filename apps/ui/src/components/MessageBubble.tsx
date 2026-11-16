@@ -31,7 +31,8 @@ import { Notice } from "./ui/Notice";
 import { useDhtOnly, waitsForLive } from "../lib/delivery";
 import { useEngineValue } from "../lib/engineState";
 import { useFocusKept } from "../hooks/useFocusKept";
-import { useTransfer } from "../hooks/useServicesPlatform";
+import { useTransfer, useTransferValue } from "../hooks/useServicesPlatform";
+import { servicesPlatform } from "../lib/platform";
 import { holdRow } from "../hooks/useRowWindow";
 import type { ChatFile, ChatMessage } from "../lib/types";
 import { callEventText } from "../lib/callLines";
@@ -358,7 +359,8 @@ function SentTranslationLine({ sent, showing, onToggle }: { sent: SentOriginal; 
     <div dir={dir} data-testid="message-sent-translation" className="mt-[2px] chat-text-note text-text-primary/65 italic">
       <span>{t("chat.sentTranslation.line", { language: languageName(sent.to, language) })}</span>
       <span aria-hidden="true"> · </span>
-      <button type="button" data-testid="message-show-original" aria-pressed={showing} onClick={onToggle} className="italic cursor-pointer hover:underline">
+      {/* Named for what it does next, so it is no toggle: "Show translation, pressed" read with the original shown. */}
+      <button type="button" data-testid="message-show-original" onClick={onToggle} className="italic cursor-pointer hover:underline">
         {t(showing ? "chat.translated.showTranslation" : "chat.translated.showOriginal")}
       </button>
     </div>
@@ -465,7 +467,7 @@ function isOnlyEmojis(text: string): boolean {
 function TailSvg({ side }: { side: "left" | "right" }) {
   if (side === "right") {
     return (
-      <span className="absolute top-0 -end-[8px] rtl:-scale-x-100 block w-[8px] h-[13px] overflow-hidden">
+      <span className="bubble-tail absolute top-0 -end-[8px] rtl:-scale-x-100 block w-[8px] h-[13px] overflow-hidden">
         <svg viewBox="0 0 8 13" width="8" height="13" className="block" aria-hidden="true" focusable="false">
           <path d="M5 0H0V13C0 13 1.8 8.5 5 4.5C6.4 2.7 8 1 8 1L5 0Z" className="fill-sent-bg" />
         </svg>
@@ -473,7 +475,7 @@ function TailSvg({ side }: { side: "left" | "right" }) {
     );
   }
   return (
-    <span className="absolute top-0 -start-[8px] rtl:-scale-x-100 block w-[8px] h-[13px] overflow-hidden">
+    <span className="bubble-tail absolute top-0 -start-[8px] rtl:-scale-x-100 block w-[8px] h-[13px] overflow-hidden">
       <svg viewBox="0 0 8 13" width="8" height="13" className="block" aria-hidden="true" focusable="false">
         <path d="M3 0H8V13C8 13 6.2 8.5 3 4.5C1.6 2.7 0 1 0 1L3 0Z" className="fill-received-bg" />
       </svg>
@@ -996,12 +998,14 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   // The original in place of the sent text, with its own mention places: the message's are the translation's.
   const original = sent && showingOriginal ? sent.original.trim() : undefined;
   const originalMarks = useMemo(() => original === undefined ? undefined : originalMentions(original, message.text, message.mentions), [original, message.text, message.mentions]);
-  const { platform, transfer } = useTransfer(isMe ? message.file?.id : undefined);
   // A file of mine whose bytes did not go has the red mark, not ticks beside its "Not sent". While they move, the
   // message keeps its own mark: the bytes' progress is the file's to show (held files travel by hold/1, not files/3).
   // One whose copy into this device failed never left it: the red mark too, but nothing to send again.
-  const fileRetry = !!message.file && canRetryFile(message.file, transfer, platform);
-  const fileUnsent = !!message.file && fileNeverSent(transfer);
+  // So only a transfer that failed is read here: read while it moved, each step of its progress drew the whole
+  // message again (its mark, reactions and menu), up to 20 a second.
+  const failedTransfer = useTransferValue(isMe ? message.file?.id : undefined, (transfer) => (transfer?.state === "failed" ? transfer : null));
+  const fileRetry = !!message.file && canRetryFile(message.file, failedTransfer, servicesPlatform);
+  const fileUnsent = !!message.file && fileNeverSent(failedTransfer);
   const fileFailed = fileRetry || fileUnsent;
   const shown = fileFailed ? "failed" as const : message.delivery;
   // A file waiting in a DHT-only chat waits for a live connection, not for the contact to be online.
@@ -1015,7 +1019,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
    */
   const retry = async () => {
     setRefused(null);
-    if (fileRetry) { await platform!.retryFile!(message.file!.id).catch(refuse(shown)); return; }
+    if (fileRetry) { await servicesPlatform!.retryFile!(message.file!.id).catch(refuse(shown)); return; }
     const link = engine.linkByPeer(peerPubKey);
     if (!link) return;
     await engine.call("retryMessage", { linkId: link.id, messageId: message.id }).catch((error: unknown) => {
@@ -1360,7 +1364,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           </div>
         ) : message.paymentId ? (
           <div className="clearfix">
-            <PaymentBubble paymentId={message.paymentId} peerPubKey={peerPubKey} fallbackText={message.text} mine={isMe} />
+            {/* Whom a payment of mine went to is the chat's contact; my own name is over mine in a group. */}
+            <PaymentBubble paymentId={message.paymentId} peerPubKey={peerPubKey} fallbackText={message.text} mine={isMe} contact={(isMe ? contactName : own) || undefined} />
             {timestampEl}
           </div>
         ) : message.file?.voice ? (
@@ -1442,7 +1447,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
             {hiddenIp && <span data-testid="picture-hidden-ip" className="block text-[12px] text-text-secondary">{t("chat.pictureHiddenIp")}</span>}
             {/* No box of its own: with no card the time still floats beside the last line of text. */}
             <div dir={dir} className="contents">
-              <EntityCards text={message.text} mine={isMe} from={message.nick || peerNick || undefined} peerPubKey={peerPubKey} />
+              <EntityCards text={message.text} mine={isMe} forwarded={!!message.forwarded} from={message.nick || peerNick || undefined} peerPubKey={peerPubKey} />
               <MessageLinkCards text={message.text} preview={message.preview} />
             </div>
             {sent && <SentTranslationLine sent={sent} showing={showingOriginal} onToggle={toggleOriginal} />}

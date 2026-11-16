@@ -1,0 +1,1 @@
+§ Apps as a bot: `app.unserve` on a daemon also closes the app in every chat it was open in (the contact hears `close`). It only removed it from `apps.json`, so the app stayed open: the contact's messages still came as `app.message`, and `app.close` refused it as not served.

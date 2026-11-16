@@ -35,13 +35,13 @@ describe("what a file's status line says", () => {
     ["moving, no speed yet", t({}), "62% of 4.2 GB"],
     ["no connection", t({ stage: "waiting" }), "Waiting for connection · 62% done"],
     ["no connection, nothing moved", t({ stage: "waiting", transferred: 0 }), "Waiting for connection · 4.2 GB"],
-    ["sent, the contact decides", t({ stage: "asking", direction: "out", transferred: 0 }), "Waiting for Ana to accept · 4.2 GB"],
+    ["sent, the contact decides", t({ stage: "asking", direction: "out", transferred: 0 }), "Waiting for \u2068Ana\u2069 to accept · 4.2 GB"],
     ["received, this person decides", t({ stage: "asking", direction: "in", transferred: 0 }), "4.2 GB · waiting for your answer"],
-    ["sent, the contact's turn", t({ stage: "queued", direction: "out" }), "Queued by Ana · 62% done"],
+    ["sent, the contact's turn", t({ stage: "queued", direction: "out" }), "Queued by \u2068Ana\u2069 · 62% done"],
     ["paused here", t({ stage: "paused", pausedBy: "me" }), "Paused · 62% of 4.2 GB"],
-    ["paused by the contact", t({ stage: "paused", pausedBy: "peer" }), "Paused by Ana · 62% of 4.2 GB"],
+    ["paused by the contact", t({ stage: "paused", pausedBy: "peer" }), "Paused by \u2068Ana\u2069 · 62% of 4.2 GB"],
     ["checking", t({ stage: "verifying" }), "Checking the file… 4.2 GB"],
-    ["sent, arrived, the contact checks it", t({ stage: "verifying", direction: "out", transferred: f.size }), "Arrived, Ana is checking it… 4.2 GB"],
+    ["sent, arrived, the contact checks it", t({ stage: "verifying", direction: "out", transferred: f.size }), "Arrived, \u2068Ana\u2069 is checking it… 4.2 GB"],
     ["copying before the offer", t({ stage: "preparing" }), "Preparing… 62% of 4.2 GB"],
     ["declined", { state: "failed", transferred: 0, size: f.size, error: "Declined by your contact" } as FileTransferState, "Declined"],
     ["cancelled", { state: "failed", transferred: 0, size: f.size, error: "Cancelled by the sender" } as FileTransferState, "Cancelled"],
@@ -131,7 +131,8 @@ describe("FileBubble: files/3", () => {
   it("an offer of a name with nothing to break at wraps inside the bubble", () => {
     const name = `report_${"x".repeat(150)}.bin`;
     show({ state: "transferring", stage: "asking", direction: "in", transferred: 0, size: 4.2 * GB }, { name });
-    const line = screen.getByText(`Ana wants to send ${name} (4.2 GB).`);
+    const line = screen.getByTestId("file-offer").querySelector("p")!;
+    expect(line).toHaveTextContent(`Ana wants to send ${name} (4.2 GB).`);
     // jsdom lays nothing out: the line must be allowed to break inside the name (e2e/web/file-offer-layout.spec.ts measures it).
     expect(line.className).toContain("[overflow-wrap:anywhere]");
   });
@@ -160,7 +161,7 @@ describe("FileBubble: files/3", () => {
   it("a file sent from here that arrived whole has no Cancel: too late, the contact keeps it; one arriving here still has", () => {
     const whole = { state: "transferring", direction: "out", transferred: 4.2 * GB, size: 4.2 * GB } as const;
     const view = show({ ...whole, stage: "verifying" }, { id: "chat1-out-late" });
-    expect(screen.getByTestId("file-status")).toHaveTextContent("Arrived, Ana is checking it… 4.2 GB");
+    expect(screen.getByTestId("file-status")).toHaveTextContent("Arrived, \u2068Ana\u2069 is checking it… 4.2 GB");
     expect(screen.queryByTestId("file-cancel")).toBeNull();
     // Offered again after a quiet spell, or waiting for a connection, every byte still there. No Pause either: paused,
     // it could be cancelled.
@@ -505,5 +506,16 @@ describe("a moving file's progress bar", () => {
     const bar = screen.getByRole("progressbar", { name: "movie.mkv" });
     expect(bar).toHaveAttribute("aria-valuenow", "50");
     expect(bar.getAttribute("aria-valuetext")?.replace(/\u00a0/g, " ")).toMatch(/^50% de 4[.,]2 GB$/);
+  });
+});
+
+// A long name cut with … at its end hid what the file is on a phone (a tooltip is no help there): it wraps, its end kept.
+describe("a long file name", () => {
+  it("wraps onto more lines and keeps its extension in sight", () => {
+    show(null, { name: "Payment receipt.pdf (signed copy for your records).exe", size: 1024 });
+    const name = screen.getByTestId("file-name");
+    expect(name).toHaveTextContent("Payment receipt.pdf (signed copy for your records).exe");
+    expect(name).not.toHaveClass("truncate");
+    expect(name.className).toContain("[overflow-wrap:anywhere]");
   });
 });

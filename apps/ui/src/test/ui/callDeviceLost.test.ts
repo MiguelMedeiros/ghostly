@@ -74,6 +74,36 @@ describe("a call's device unplugged mid-call", () => {
     expect(result.current?.notice).toMatchObject({ kind: "videoinput", type: "gone", name: "Camera c1" });
   });
 
+  it("falls back from the camera and the microphone of one webcam that went together", async () => {
+    const { webrtc, mic, camera } = call(false);
+    mic.readyState = "ended";
+    camera.readyState = "ended";
+    const { result } = await unplug(webrtc, devices(["c1", "c2"], ["m1", "m2"]), devices(["c2"], ["m2"]));
+    expect(webrtc.switchMicrophone).toHaveBeenCalledWith(null);
+    expect(webrtc.switchCamera).toHaveBeenCalledWith(null);
+    expect(result.current?.notice).toMatchObject({ kind: "audioinput", type: "lost", name: "Mic m1" });
+  });
+
+  it("plays on the default when a headset's microphone and speaker went together", async () => {
+    localStorage.setItem("ghostly_media_devices", JSON.stringify({ audiooutput: { id: "s1", label: "Headset" } }));
+    // An engine that can pick a speaker (Chromium).
+    const proto = HTMLMediaElement.prototype as { setSinkId?: unknown };
+    const had = Object.prototype.hasOwnProperty.call(proto, "setSinkId");
+    if (!had) proto.setSinkId = () => Promise.resolve();
+    try {
+      const { webrtc, mic } = call(false);
+      mic.readyState = "ended";
+      const withSpeakers = (list: DeviceList, speakers: string[]): DeviceList => ({ ...list, audiooutput: speakers.map((id) => ({ id, label: id === "s1" ? "Headset" : `Speaker ${id}` })) });
+      const { result } = await unplug(webrtc, withSpeakers(devices(["c1"], ["m1", "m2"]), ["s1", "s2"]), withSpeakers(devices(["c1"], ["m2"]), ["s2"]));
+      expect(webrtc.switchMicrophone).toHaveBeenCalledWith(null);
+      expect(result.current?.speaker).toBeUndefined();
+      expect(result.current?.notice).toMatchObject({ kind: "audioinput", type: "lost", name: "Mic m1" });
+    } finally {
+      if (!had) delete proto.setSinkId;
+      localStorage.clear();
+    }
+  });
+
   it("does not say the default took over when the only microphone went", async () => {
     const { webrtc, mic } = call(true);
     mic.readyState = "ended";

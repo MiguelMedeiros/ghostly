@@ -3,7 +3,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupEdgeView, GroupView } from "@ghostly/browser/shared/types";
 import { useOutsideDismiss } from "../hooks/useDismiss";
 import { edgeDot, edgeLabel, edgeReconnects, edgeWaits, groupTransports, memberName, sameNamed } from "../lib/groups";
-import { dots, focus, type ConnectionKind } from "../lib/connection";
+import { dots, focus, reachDot, type ConnectionKind } from "../lib/connection";
 import { ConnectionIcon } from "./ConnectionIcon";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { agoIn } from "../lib/relativeTime";
@@ -11,7 +11,7 @@ import { rawError } from "../lib/errorText";
 import { problemText, relayCause, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
 import { useOnline } from "../hooks/useOnline";
-import { useEngineValue } from "../lib/engineState";
+import { useEngineReconnecting, useEngineValue } from "../lib/engineState";
 import { useMinuteClock } from "../hooks/useMinuteClock";
 import { useNoLinksHint } from "../hooks/useNoLinksHint";
 import { focusLost, working } from "../lib/focus";
@@ -52,21 +52,24 @@ export function GroupConnection({ group }: { group: GroupView }) {
   // Group links go over WebRTC, or a native transport where one side has none: an app with neither reaches no member,
   // however long it tries. (Ghostly Desktop on Linux has no WebRTC, and runs Iroh and HyperDHT.)
   const noLinks = groupLinks === false && others.length > 0;
-  const kind: GroupKind = !online ? "offline" : others.length === 0 ? "waiting" : noLinks ? "failure"
+  // An extension tab that lost its peer (the Reconnecting notice): the edges it was last told of are stale. The group is
+  // said to be on its way until the peer is back.
+  const peerLost = useEngineReconnecting();
+  const kind: GroupKind = !online ? "offline" : peerLost ? "waiting" : others.length === 0 ? "waiting" : noLinks ? "failure"
     : community ? (reachable > 0 ? "connected" : failing ? "failure" : "waiting")
     : reachable === others.length ? "connected" : reachable > 0 ? "partial" : failing ? "failure" : "waiting";
   const reconnectingLabel = reconnecting > 1 ? t("group.connection.reconnectingTo", { count: reconnecting }) : t("group.connection.reconnecting");
-  const label = !online ? t("group.connection.offline") : others.length === 0 ? t("group.connection.onlyYou")
+  const label = !online ? t("group.connection.offline") : peerLost ? t("connection.state.connectingDots") : others.length === 0 ? t("group.connection.onlyYou")
     : noLinks ? t("group.connection.noWebrtc")
     : community ? (reachable > 0 ? t("group.connection.community") : failing || !linked.length ? t("group.connection.nobody") : reconnecting ? reconnectingLabel : t("group.connection.communityConnecting"))
     : reachable === 0 ? (reconnecting ? reconnectingLabel : connecting ? t("group.connection.connecting") : t("group.connection.nobody"))
     : reconnecting ? t("group.connection.reachableReconnecting", { reachable, total: others.length, state: reconnectingLabel })
     : t("group.connection.reachable", { reachable, total: others.length });
   // The icon breathes while the app reconnects by itself (and only then: a group at rest stays still).
-  const pulsing = online && !noLinks && reconnecting > 0 && !(community && reachable > 0);
+  const pulsing = online && !peerLost && !noLinks &&reconnecting > 0 && !(community && reachable > 0);
   const dot = kind === "partial" ? "bg-amber-500" : dots[kind];
   // Over what the reachable members are live: the icon takes the mark of the transport they share.
-  const carried = online ? groupTransports(community ? linked : group.members, t) : undefined;
+  const carried = online && !peerLost ? groupTransports(community ? linked : group.members, t) : undefined;
   const iconKind: ConnectionKind = kind === "partial" ? "connected" : kind;
   const close = () => { setMenuOpen(false); trigger.current?.focus(); };
   useOutsideDismiss(root, menuOpen, () => setMenuOpen(false));
@@ -97,11 +100,11 @@ export function GroupConnection({ group }: { group: GroupView }) {
         aria-label={t("group.connection.labelWith", { state: label })} aria-describedby={`${id}-tip`} aria-expanded={menuOpen} aria-controls={`${id}-popover`}
         onPointerEnter={e => { if (e.pointerType !== "touch") setTip(true); }} onPointerLeave={() => setTip(false)}
         onFocus={e => { if (e.currentTarget.matches(":focus-visible")) setTip(true); }} onBlur={() => setTip(false)}
-        className={`relative flex cursor-pointer items-center justify-center rounded-full p-2 transition-colors max-md:h-11 max-md:w-11 max-md:p-0 hover:bg-surface-hover ${focus} ${kind === "failure" ? "text-danger" : kind === "offline" ? "text-text-muted hover:text-accent" : "text-text-secondary hover:text-accent"}`}>
+        className={`relative flex cursor-pointer items-center justify-center rounded-full p-2 transition-colors max-md:h-[44px] max-md:w-[44px] max-md:p-0 hover:bg-surface-hover ${focus} ${kind === "failure" ? "text-danger" : kind === "offline" ? "text-text-muted hover:text-accent" : "text-text-secondary hover:text-accent"}`}>
         <span className={`flex ${pulsing ? "motion-safe:animate-pulse" : ""}`} data-testid="group-connection-icon">
           <ConnectionIcon kind={iconKind} transport={carried?.transport} size={18} weight={2} />
         </span>
-        {dot && <span aria-hidden="true" data-testid="group-connection-dot" className={`pointer-events-none absolute end-1 top-1 h-2 w-2 rounded-full ring-2 ring-panel-header max-md:end-2 max-md:top-2 ${dot} ${kind === "waiting" && connecting || pulsing ? "motion-safe:animate-pulse" : ""}`} />}
+        {dot && <span aria-hidden="true" data-testid="group-connection-dot" className={`pointer-events-none absolute end-1 top-1 h-2 w-2 rounded-full ring-2 ring-panel-header forced-colors:ring-[color:Canvas] max-md:end-2 max-md:top-2 ${reachDot(dot)} ${kind === "waiting" && (connecting || peerLost) || pulsing ? "motion-safe:animate-pulse" : ""}`} />}
       </button>
       {menuOpen && <div role="dialog" id={`${id}-popover`} aria-label={t("group.connection.label")} className="absolute end-0 top-full max-md:fixed max-md:inset-x-2 max-md:top-[calc(3.5rem_+_env(safe-area-inset-top))] max-md:w-auto z-40 mt-2 w-[min(21rem,calc(100vw-1rem))] max-h-[70dvh] overflow-y-auto rounded-xl border border-border bg-panel-header p-4 text-xs leading-5 text-text-muted shadow-xl">
         <div className="flex items-center gap-2 font-medium text-text-primary" data-testid="group-connection-state">
@@ -118,7 +121,7 @@ export function GroupConnection({ group }: { group: GroupView }) {
             return <li key={m.key} data-testid="group-connection-member" data-key={m.key} data-state={m.edge?.state ?? "none"} tabIndex={-1}
               className={`rounded-lg bg-surface-hover px-2.5 py-1.5 focus:outline-none ${focus}`}>
               <div className="flex min-h-8 items-center gap-2">
-                <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${edgeDot(m)}`} />
+                <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${reachDot(edgeDot(m))}`} />
                 <span className="min-w-0 flex-1">
                   {/* The name a member typed, in its own direction: in Arabic a long English one is cut at its end, not its start. */}
                   <span dir="auto" className="block truncate text-text-primary">{memberName(m, t, sameNamed(group.members))}</span>

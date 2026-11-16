@@ -21,7 +21,9 @@
  * `--tag newest` reads the release tags from the remote, leaving out the commit under test, as the web suite does
  * (compat-latest-release.mjs), and takes the newest whose release publishes its package. A tag whose release is still a
  * draft, or still building, has no public SHA256SUMS.txt (404): the release before it is taken, where the web suite,
- * which builds from the tag, takes the tag itself.
+ * which builds from the tag, takes the tag itself. A tag whose package is in the cache is taken with no request. The tag
+ * it takes is kept in the cache (`newest`): where the tags or the releases cannot be read (github.com not answering),
+ * that release is taken again, from the cache, and the reason printed, rather than failing the run.
  *
  * Linux x64 only (the release's amd64 package). E2E_COMPAT_CACHE moves the cache. Prints the binary.
  * Ends with status 3 and the reason when no tool on this machine unpacks the package: the spec skips on it.
@@ -48,9 +50,11 @@ const sumOf = (sums, name) => sums.split("\n").map((line) => line.trim().split(/
 /**
  * The first of these tags (newest first) whose release publishes its Linux package, with that release's
  * SHA256SUMS.txt; null when none does. `sums(tag)` is the file, or null where the release has none in public.
+ * A tag whose package is in the cache already (`cached(tag)`) was published: taken with no request, its sums null.
  */
-export async function newestPublished(tags, sums, log = () => {}) {
+export async function newestPublished(tags, sums, log = () => {}, cached = () => false) {
   for (const tag of tags) {
+    if (cached(tag)) return { tag, sums: null };
     const text = await sums(tag);
     if (text !== null && sumOf(text, packageOf(tag))) return { tag, sums: text };
     log(text === null ? `${tag} has no published release (a draft, or still building): trying the release before it` : `${tag}'s release has no ${packageOf(tag)}: trying the release before it`);
@@ -172,19 +176,32 @@ async function main(args) {
   const token = local ? undefined : tokenOf();
   const files = releaseFiles({ token, log: (line) => console.error(line) });
   if (token) console.error("A GitHub token is set: release files come through the GitHub API");
+  const cache = resolve(process.env.E2E_COMPAT_CACHE ?? join(homedir(), ".cache", "ghostly", "compat"));
+  const rootOf = (tag) => join(cache, `desktop-${tag}`);
+  const binaryOf = (tag) => join(rootOf(tag), "usr", "bin", "ghostly");
+  const cached = (tag) => !args.includes("--force") && existsSync(join(rootOf(tag), ".fetched")) && existsSync(binaryOf(tag));
+  // The newest release fetched last time: it changes once a day at most, so a run that cannot reach GitHub takes it.
+  const newestFile = join(cache, "newest");
   let sums;
   if (tag === "newest") {
-    const found = await newestPublished(remoteReleases(), files.sums, (line) => console.error(line));
+    let found;
+    try {
+      found = await newestPublished(await remoteReleases({ log: (line) => console.error(line) }), files.sums, (line) => console.error(line), cached);
+    } catch (error) {
+      const last = existsSync(newestFile) ? readFileSync(newestFile, "utf8").trim() : "";
+      if (!/^v\d+\.\d+\.\d+$/.test(last) || !cached(last)) throw error;
+      console.error(`origin's release tags could not be read (${error instanceof Error ? error.message : String(error)}): ${last}, the newest release fetched before, from the cache`);
+      found = { tag: last, sums: null };
+    }
     if (!found) throw new Error("No release on origin publishes its Linux package");
     ({ tag, sums } = found);
   }
   if (!/^v\d+\.\d+\.\d+$/.test(tag)) throw new Error(`Not a release tag: ${tag}`);
-  const cache = resolve(process.env.E2E_COMPAT_CACHE ?? join(homedir(), ".cache", "ghostly", "compat"));
-  const root = join(cache, `desktop-${tag}`);
-  const binary = join(root, "usr", "bin", "ghostly");
+  const root = rootOf(tag);
+  const binary = binaryOf(tag);
   const done = join(root, ".fetched");
 
-  if (local || args.includes("--force") || !existsSync(done) || !existsSync(binary)) {
+  if (local || !cached(tag)) {
     try {
       await fetchRelease();
     } catch (error) {
@@ -193,6 +210,7 @@ async function main(args) {
       process.exit(3);
     }
   }
+  if (option("--tag") === "newest") writeFileSync(newestFile, `${tag}\n`);
   console.log(binary);
 
   async function fetchRelease() {

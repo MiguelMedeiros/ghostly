@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { GhostLink, RESUME_WAIT_MS } from "../src/ghostlink";
+import { GhostLink, RELAYED_FIRST_MS, RESUME_WAIT_MS } from "../src/ghostlink";
 import { identityFromSeedB64 } from "../src/identity";
 import { RELAY_POLL_INTERVALS } from "../src/link";
 import type { PairedTransport } from "../src/pairedTransports";
@@ -113,4 +113,51 @@ it("back over WebRTC on Automatic, resumed on Iroh first: with the contact's Iro
   expect(await until(() => !!(offered = offeredOf(goes)), 60_000), "a WebRTC offer goes out").toBeLessThan(Infinity);
   expect(native.dialFailures, "the Iroh dial went first").toBeGreaterThan(0);
   expect(offered?.resume).toBe(true);
+}, 240_000);
+
+it("back on Automatic with the contact's Iroh out of reach, the chat is live over WebRTC in seconds, not after Iroh's connect timeout", async () => {
+  // The web and CLI Iroh gives up a dial that reaches nobody after its 20 s connect timeout (irohWeb.ts `connectMs`):
+  // measured on the real wasm against a killed, a blackholed and a contact-less relay alike.
+  native.dialFailMs = 20_000;
+  const { inviter, joiner } = invitationWhere("inviter");
+  let goes = startApp("goes", inviter, { side: joiner, name: "stays" }, { endpoints: ["iroh/1"], automatic: true });
+  const stays = startApp("stays", joiner, { side: inviter, name: "goes" }, { endpoints: ["iroh/1"], automatic: true });
+  expect(await until(() => goes.link.isDataLinkOpen && stays.link.isDataLinkOpen, 120_000), "live at first").toBeLessThan(Infinity);
+  await run(5_000);
+
+  native.kill("goes"); killRtc("goes");
+  goes.stopped = goes.link.stop(false);
+  await run(3_000);
+  native.offRelay.add("stays");
+  goes = startApp("goes", inviter, { side: joiner, name: "stays" }, { resume: "webrtc/1", endpoints: ["iroh/1"], automatic: true });
+  const took = await until(() => goes.link.isDataLinkOpen && stays.link.isDataLinkOpen, 120_000);
+  console.log(`IROH_FIRST_RELAY_DOWN: live again ${took / 1000} s after the restart, on ${transportOf(goes)}`);
+  expect(native.dialFailures, "the Iroh dial went first").toBeGreaterThan(0);
+  expect(took).toBeLessThan(RELAYED_FIRST_MS + 8_000);
+  expect(transportOf(goes)).toBe("webrtc/1");
+}, 240_000);
+
+it("back on Automatic while the contact still holds the dead HyperDHT session, its WebRTC answer outlives that session's close", async () => {
+  // The contact answers the offer over the session it holds (`rtcOverHeld`); that session's idle timeout ended it a
+  // moment later, and closed the answer with it, as if it were a transport change's candidate: the app back waited
+  // out its offer's 90 s, live 139 s after the restart.
+  native.dialFailMs = 20_000;
+  const { inviter, joiner } = invitationWhere("inviter");
+  let goes = startApp("goes", inviter, { side: joiner, name: "stays" }, { endpoints: ["iroh/1", "hyperdht/1"], automatic: true });
+  const stays = startApp("stays", joiner, { side: inviter, name: "goes" }, { endpoints: ["iroh/1", "hyperdht/1"], automatic: true });
+  expect(await until(() => goes.link.isDataLinkOpen && stays.link.isDataLinkOpen, 120_000), "live at first").toBeLessThan(Infinity);
+  await run(5_000);
+  expect(transportOf(stays), "the contact holds a native session").toBe("hyperdht/1");
+
+  native.kill("goes"); killRtc("goes");
+  goes.stopped = goes.link.stop(false);
+  await run(3_000);
+  // The contact's endpoints out of reach from the app back: Iroh's dial goes ahead, HyperDHT's fails 20 s on, and the
+  // WebRTC offer that follows reaches the contact a few seconds before its held session's idle timeout.
+  native.offRelay.add("stays");
+  goes = startApp("goes", inviter, { side: joiner, name: "stays" }, { resume: "webrtc/1", endpoints: ["iroh/1", "hyperdht/1"], automatic: true });
+  const took = await until(() => goes.link.isDataLinkOpen && stays.link.isDataLinkOpen, 120_000);
+  console.log(`HELD_NATIVE_CLOSE: live again ${took / 1000} s after the restart, on ${transportOf(goes)}`);
+  expect(took).toBeLessThan(35_000);
+  expect(transportOf(goes)).toBe("webrtc/1");
 }, 240_000);

@@ -2,13 +2,14 @@ import Link from "next/link";
 import { Shell } from "@/components/site/Shell";
 import { APP_URL, NO_INTERNET, PERMISSIONS, VIEWS, apps, clientLabel } from "@/content/apps";
 import { ICON_DRAWN } from "@/lib/appIcon";
+import { linkText } from "@/lib/linkText";
 import type { StoreApp } from "@/lib/storeRead";
 import { AppIcon } from "./AppIcon";
 import "@/app/apps.css";
 
 const ExternalLink = ({ href }: { href: string }) => (
   <a className="link-arrow ap-url" href={href} rel="noopener noreferrer nofollow">
-    {href.replace(/^https:\/\//, "")} ↗
+    {linkText(href)} ↗
   </a>
 );
 
@@ -98,10 +99,15 @@ export function AppPage({ app, store }: { app: StoreApp; store: string }) {
                 {t.install.open}
               </a>
             </p>
-            <p className="note">{t.install.link}</p>
-            <pre className="ap-code" tabIndex={0}>
-              <code>{app.url}</code>
-            </pre>
+            {/* Only a link Apps, Add reads as pasted (lib/storeRead.ts `link`); with none, the button above is the way in. */}
+            {app.link && (
+              <>
+                <p className="note">{t.install.link}</p>
+                <pre className="ap-code" tabIndex={0}>
+                  <code>{app.link}</code>
+                </pre>
+              </>
+            )}
           </section>
         </div>
 

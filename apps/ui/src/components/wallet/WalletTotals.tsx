@@ -89,7 +89,7 @@ function TotalBreakdown({ id, currency, total, onClose }: { id: string; currency
   return createPortal(<>
     <div aria-hidden="true" data-testid="wallet-total-backdrop" className="fixed inset-0 z-50 bg-black/30 animate-fade-in" />
     <div ref={ref} id={id} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titleId} data-testid="wallet-total-breakdown" data-currency={currency} data-network={total.network} data-side={phone ? "bottom" : "end"}
-      className={`fixed z-50 flex flex-col bg-surface border-border shadow-2xl outline-none ${phone ? "inset-x-0 bottom-0 max-h-[88vh] rounded-t-2xl border-t pb-safe" : "inset-y-0 end-0 w-[min(400px,100vw)] border-s"}`}>
+      className={`fixed z-50 flex flex-col bg-surface border-border shadow-2xl outline-none ${phone ? "inset-x-0 bottom-0 max-h-[88vh] rounded-t-2xl border-t pb-safe" : "end-panel inset-y-0 end-0 border-s"}`}>
       <div className="relative flex items-start gap-3 px-4 pt-3 pb-2 border-b border-border shrink-0">
         {phone && <div aria-hidden="true" className="absolute top-1.5 inset-x-0 mx-auto h-1 w-9 rounded-full bg-border-bright" />}
         <div className="min-w-0 flex-1 pt-1">

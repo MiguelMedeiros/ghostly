@@ -1,9 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
 
 /**
- * On a phone a draft's list of WISPs goes under the article, but it comes first in the HTML. With the stylesheet cached
- * the browser can paint while the article is still arriving: the list was then alone at the top, and jumped off the
- * screen when the article came (a layout shift of 0.5 to 0.75 on a slow connection). The list waits for the article's end.
+ * On a phone a draft's list of WISPs goes under the article. It came first in the HTML: with the stylesheet cached the
+ * browser could paint while the article was still arriving, the list alone at the top, then jumping off the screen when
+ * the article came (a layout shift of 0.5 to 0.75 on a slow connection), and Tab went down to the list before the
+ * article. The list now comes after the article in the HTML, and the grid puts it beside the article on a wide screen.
  */
 
 const DRAFT = "/wisps/301-nostr";
@@ -41,10 +42,29 @@ test.describe("on a phone", () => {
     const [side, foot] = await Promise.all([page.locator(".reader-side").boundingBox(), page.locator(".reader-foot").boundingBox()]);
     expect(side!.y).toBeGreaterThanOrEqual(foot!.y + foot!.height);
   });
+
+  // Tab follows what the eye reads: from the breadcrumb into the article, not first down to the list under it.
+  test("Tab goes from the breadcrumb into the article, and to the list of WISPs after it", async ({ page }) => {
+    await page.goto(DRAFT);
+    await page.locator(".reader-crumbs a").last().focus();
+    await page.keyboard.press("Tab");
+    await expect(page.locator(".reader-main :focus")).toHaveCount(1);
+    await page.locator(".reader-foot a").last().focus();
+    await page.keyboard.press("Tab");
+    await expect(page.locator(".reader-side :focus")).toHaveCount(1);
+  });
 });
 
-test("on a wide screen the list of WISPs is beside the article as soon as it is there", async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 900 });
-  await openCut(page, '<article class="reader-main"');
-  await expect(page.locator(".reader-side")).toBeVisible();
+test.describe("on a wide screen", () => {
+  test.use({ viewport: { width: 1280, height: 900 } });
+
+  test("the list of WISPs is beside the article, and Tab reaches it first, as the eye does", async ({ page }) => {
+    await page.goto(DRAFT);
+    const [side, main] = await Promise.all([page.locator(".reader-side").boundingBox(), page.locator(".reader-main").boundingBox()]);
+    expect(side!.x + side!.width).toBeLessThanOrEqual(main!.x);
+    expect(side!.y).toBeLessThan(main!.y + 50);
+    await page.locator(".reader-crumbs a").last().focus();
+    await page.keyboard.press("Tab");
+    await expect(page.locator(".reader-side :focus")).toHaveCount(1);
+  });
 });

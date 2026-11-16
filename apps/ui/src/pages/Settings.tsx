@@ -127,6 +127,7 @@ export function Settings() {
   const { t, languageNotLoaded, retryLanguage } = useI18n();
   const { lock } = useLockScreen();
   const update = useUpdate();
+  const chosenLanguageName = LANGUAGE_OPTIONS.find((option) => option.value === settings.language)?.native ?? settings.language;
   const install = useInstallState();
   // Wake-up push (WISP 401 § Wake-up push): the installed web app only.
   const canWake = !!pushPlatform();
@@ -292,7 +293,8 @@ export function Settings() {
     focusPasswordOpener.current = null;
     if (opener && focusLost()) (opener === "edit" ? passwordEdit : lockSwitch).current?.focus();
   }, [showPasswordForm]);
-  const [storageInfo, setStorageInfo] = useState({ used: 0, keys: 0 });
+  // Counted as the page opens, so the Desktop's count below sees no change (that is Delete all chats, recounted twice more).
+  const [storageInfo, setStorageInfo] = useState(getStorageUsage);
   // Whether the browser may clear this device's storage (lib/storagePersistence). Nothing on Desktop: no browser evicts it.
   const { protection, estimate } = useStorageProtection();
   // The Desktop's own count (lib/desktopStorage): its WebView's storage plus the profile's files on disk.
@@ -359,7 +361,6 @@ export function Settings() {
   const wakeAwayDevice = wakeAway ? devices?.devices.find((device) => device.key === wakeAwayKey)?.name : undefined;
 
   useEffect(() => {
-    setStorageInfo(getStorageUsage());
     setChatCount(listSessions().length);
     getVersion().then(setAppVersion).catch(() => setAppVersion("0.0.0"));
   }, []);
@@ -658,10 +659,20 @@ export function Settings() {
         <TextSizeSetting />
         <Row label={t("settings.language")}
           hint={languageNotLoaded ? (
-            <span role="status" data-testid="settings-language-not-loaded">
-              {t("settings.languageNotLoaded", { language: LANGUAGE_OPTIONS.find((option) => option.value === settings.language)?.native ?? settings.language })}{" "}
-              <button type="button" onClick={retryLanguage} className="underline text-accent cursor-pointer">{t("settings.languageRetry")}</button>
-            </span>
+            // A new version found: a deploy replaced this build, whose language files are gone from the server, so asking
+            // again never brings them. Its Reload is offered here, where a phone shows no update banner.
+            update.update?.apply === "reload" ? (
+              <span role="status" data-testid="settings-language-not-loaded">
+                {t("settings.languageNeedsUpdate", { language: chosenLanguageName })} {t("updates.applyHint")}{" "}
+                <button type="button" onClick={() => void update.install()} aria-busy={update.stage === "installing" || undefined}
+                  className="underline text-accent cursor-pointer">{t("updates.reload")}</button>
+              </span>
+            ) : (
+              <span role="status" data-testid="settings-language-not-loaded">
+                {t("settings.languageNotLoaded", { language: chosenLanguageName })}{" "}
+                <button type="button" onClick={retryLanguage} className="underline text-accent cursor-pointer">{t("settings.languageRetry")}</button>
+              </span>
+            )
           ) : undefined}>
           <Select fit aria-label={t("settings.language")} data-testid="settings-language" value={settings.language} onChange={handleLanguageChange}
             options={LANGUAGE_OPTIONS.map((option) => ({ value: option.value, label: option.native, description: option.label === option.native ? undefined : option.label }))} />
@@ -693,9 +704,11 @@ export function Settings() {
             </Row>
           );
         })}
+        {/* The extension's peer shows them with every Ghostly tab closed too (apps/extension/src/attentionNotices.ts). */}
         <Row label={t("settings.systemNotifications")} testId="settings-system-notifications-row"
           hint={<span role="status">{noticePermission === "denied" ? t(deniedHint[noticePlace()])
-            : noticePermission === "unavailable" ? t("settings.noticesUnavailable") : noticePermission === "misplaced" ? t("settings.noticesMisplaced") : t("settings.noticesRunning")}</span>}>
+            : noticePermission === "unavailable" ? t("settings.noticesUnavailable") : noticePermission === "misplaced" ? t("settings.noticesMisplaced")
+            : t(noticePlace() === "extension" ? "settings.noticesRunningExtension" : "settings.noticesRunning")}</span>}>
           {noticePermission === "denied" && systemSettings && (
             <Button data-testid="settings-notification-settings" onClick={() => void openNoticeSettings()}>{t("settings.noticesOpenSettings")}</Button>
           )}

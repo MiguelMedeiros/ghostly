@@ -1,7 +1,9 @@
 import "fake-indexeddb/auto";
-import { act, screen } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Chat } from "../../pages/Chat";
+import { LockScreen } from "../../components/LockScreen";
+import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { saveSession } from "../../lib/storage";
 import type { CallEventType } from "../../lib/types";
 import { renderApp } from "../render";
@@ -18,6 +20,8 @@ const hook = vi.hoisted(() => ({
   callState: "idle",
   noPath: false,
   noAnswer: false,
+  mediaProblem: null as null | "denied",
+  mediaProblemOf: "both" as "mic" | "camera" | "both",
   line: null as null | ((type: CallEventType, hasVideo: boolean) => string | void),
 }));
 vi.mock("../../hooks/useWebRTC", async () => {
@@ -26,7 +30,7 @@ vi.mock("../../hooks/useWebRTC", async () => {
     useWebRTC: (options: Parameters<typeof real.useWebRTC>[0]) => {
       const webrtc = real.useWebRTC(options);
       hook.line = options.addCallEventMessage as typeof hook.line;
-      return { ...webrtc, callState: hook.callState, noPath: hook.noPath, noAnswer: hook.noAnswer };
+      return { ...webrtc, callState: hook.callState, noPath: hook.noPath, noAnswer: hook.noAnswer, mediaProblem: hook.mediaProblem, mediaProblemOf: hook.mediaProblemOf };
     },
   };
 });
@@ -50,7 +54,7 @@ async function ends(view: ReturnType<typeof renderApp>, type: CallEventType, has
  * chat's call lines are not read out (MessageAnnouncer). The line the call left is said, once, as it ends.
  */
 describe("a call's end, said to a screen reader", () => {
-  beforeEach(() => { save(); Object.assign(hook, { callState: "idle", noPath: false, noAnswer: false, line: null }); });
+  beforeEach(() => { localStorage.clear(); save(); Object.assign(hook, { callState: "idle", noPath: false, noAnswer: false, mediaProblem: null, mediaProblemOf: "both", line: null }); });
 
   it("says the contact declined our call, hung up, or stopped calling", async () => {
     hook.callState = "offering";
@@ -91,6 +95,37 @@ describe("a call's end, said to a screen reader", () => {
     hook.noPath = true;
     await ends(view, "call_failed");
     expect(spoken()).toHaveTextContent("");
+  });
+
+  it("says how a call that went on without the camera ended, while the camera's notice is up; a microphone's failure says it itself", async () => {
+    // A video call whose camera was refused goes on as a voice call: its notice is not why the call ended.
+    hook.callState = "offering";
+    hook.mediaProblem = "denied";
+    hook.mediaProblemOf = "camera";
+    const view = renderApp(<Chat {...props} visible />);
+    await ends(view, "call_rejected");
+    expect(spoken()).toHaveTextContent("Audio call declined");
+
+    // A call that could not use the microphone failed for it: its notice says so.
+    hook.callState = "offering";
+    hook.mediaProblemOf = "mic";
+    view.rerender(<Chat {...props} visible />);
+    await ends(view, "call_failed");
+    expect(spoken()).toHaveTextContent("");
+  });
+
+  it("says it on the lock screen when the call rang there: the chat's own region is outside its modal dialog", async () => {
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: "x", timeoutMinutes: 5 } }));
+    const locked = () => <LockScreenProvider><LockScreen /><Chat {...props} visible={false} /></LockScreenProvider>;
+    hook.callState = "incoming";
+    const view = renderApp(locked());
+    const dialog = screen.getByRole("dialog", { name: "Ghostly is locked" });
+    await act(async () => { hook.line!("call_missed", true); });
+    hook.callState = "idle";
+    view.rerender(locked());
+    await act(async () => {});
+    expect(within(dialog).getByTestId("lock-call-end-spoken")).toHaveAttribute("role", "status");
+    expect(within(dialog).getByTestId("lock-call-end-spoken")).toHaveTextContent("Missed video call");
   });
 
   it("is in the person's language", async () => {

@@ -1,8 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { closeSync, existsSync, fstatSync, fsync, fsyncSync, ftruncateSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeSync } from "node:fs";
-import { open } from "node:fs/promises";
+import { open, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
-import { deserialize, serialize } from "node:v8";
+import { DefaultSerializer, deserialize, serialize } from "node:v8";
 import { IDBFactory, IDBKeyRange, IDBTransaction } from "fake-indexeddb";
 import { loadSqlite, openRowFile, rowRecords, type RowFile } from "./rows";
 import { handOut, openTreeFile, openTreeReader, rollback, SqlTree, type TreeFile } from "./sqlTree";
@@ -147,10 +147,17 @@ const FOLLOWS = "__ghostly_journal__";
 const SEQ = "__ghostly_entry__";
 /** How long `close` waits for the transactions still running: one left open for good does not keep the process. */
 const CLOSE_WAIT_MS = 5_000;
-/** Records of rows.db an export reads in one turn of the event loop: a few milliseconds' worth. */
+/** Records an export reads and serializes in one turn of the event loop, then writes: a few milliseconds' worth. */
 const EXPORT_PAGE = 256;
 /** How long a relaxed transaction's entry may wait for a sync when no other transaction brings one. */
 const RELAXED_SYNC_MS = 1_000;
+/**
+ * How long the trees' layers wait for the ones after them before they go to SQLite, all in one SQLite transaction. One
+ * per journal entry (a message's send, each of its delivery steps, its read) rewrote the pages each touched: ~80 KB of
+ * rows.db's WAL per message, and a checkpoint on the daemon's thread (30-150 ms) every ~50 messages. The journal holds
+ * them meanwhile, and reads find them in their layers.
+ */
+const APPLY_MS = 250;
 const BLOB = "__ghostlyBlob";
 const RANGE = "__ghostlyRange";
 const PROBE = "__ghostly_storage_probe__";
@@ -161,8 +168,11 @@ export interface PersistentIndexedDb {
   readonly recovered: boolean;
   /** Waits for writes that carried a Blob (read asynchronously) to reach the disk. */
   flush(): Promise<void>;
-  /** Folds the journal into a fresh snapshot. */
-  compact(): Promise<void>;
+  /**
+   * Folds the journal into a fresh snapshot. `scrub`: rows.db is written again whole first, so that nothing deleted is
+   * left in its pages (`TreeFile.scrub`).
+   */
+  compact(options?: { scrub?: boolean }): Promise<void>;
   /** Flushes, marks the journal closed (or folds it, once it is long), and stops writing: the process is about to leave. */
   close(): Promise<void>;
   /** Bytes of the journal now, for tests and `ghostly status`. */
@@ -219,6 +229,9 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   let unsynced: (() => void)[] = [];
   /** The syncs running off the thread, one after another, until no `complete` waits for one. */
   let syncing: Promise<void> | null = null;
+  /** The last journal entry whose layers wait for `applying` to take them to SQLite. */
+  let applyUpTo = 0;
+  let applying: ReturnType<typeof setTimeout> | null = null;
   /** The journal holds a chat's ratchet state, and with the next one it holds a key already used. */
   let holdsRatchet = false;
   /** The journal holds a delete of a chat or a message (or a settings write), and what came before it with it. */
@@ -335,6 +348,9 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
         if (trees) { trees.complete(this._rollbackLog, ++seq); written(seq); }
       } else {
         const ops = pending.get(this._rollbackLog);
+        // Nothing journaled, yet its trees' layer may be open: a put a unique index refused, written and undone. Left
+        // open, it stays this transaction's, and every later write to the store would throw.
+        if (!ops?.length) trees?.abort(this._rollbackLog);
         if (ops?.length) entry = ++seq;
         const appended = ops?.length ? append(ops, this.durability === "relaxed", entry, this._rollbackLog) : null;
         if (appended && appended !== "unsynced") return refuse(this, appended.error, event);
@@ -403,12 +419,20 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   }
 
   /**
-   * The journal has entry `entry`: the trees' layers up to it go to SQLite. One that fails stays in memory, where reads
-   * find it, and goes with the next entry, or before the next snapshot (which fails without it).
+   * The journal has entry `entry`: the trees' layers up to it go to SQLite within `APPLY_MS`, with the entries written
+   * meanwhile. One that fails stays in memory, where reads find it, and goes with the next entry, or before the next
+   * snapshot (which fails without it). A process that dies first replays them from the journal.
    */
   function written(entry: number) {
     if (!trees || !writing) return;
-    try { trees.apply(entry); } catch (error) { failed(error); }
+    applyUpTo = Math.max(applyUpTo, entry);
+    applying ??= setTimeout(applyNow, APPLY_MS).unref();
+  }
+
+  function applyNow() {
+    if (applying) { clearTimeout(applying); applying = null; }
+    if (!trees || !writing) return;
+    try { trees.apply(applyUpTo); } catch (error) { failed(error); }
   }
 
   /** Whether a store's records are in the trees already. */
@@ -471,7 +495,7 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
    * `sync`: "now", synced before this returns; "shared", synced by the caller through `shareSync`; "lazy", a relaxed
    * transaction's entry. A sync blocks the whole process for milliseconds, and what such a transaction wrote can be
    * made again (the event set's note of a message it already reported): written, it outlives the process; a power cut
-   * may take its last second.
+   * may take its last second. Its sync, a second later, runs off the thread as a shared one does.
    */
   function writeEntry(entry: Buffer, sync: "now" | "shared" | "lazy" = "now"): boolean {
     const lazy = sync === "lazy";
@@ -491,7 +515,9 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
       if (journalFd !== null && whole >= 0) try { ftruncateSync(journalFd, whole); } catch { /* the snapshot at close makes it whole */ }
       throw error;
     }
-    if (lazy) relaxed ??= setTimeout(() => { try { syncNow(); } catch (error) { failed(error); } }, RELAXED_SYNC_MS).unref();
+    // Off the thread too: synced in place, the second's relaxed entries held the whole daemon for as long as a busy
+    // disk took to take them, 1 to 2 s at a time while a file came in, and texts, one-shots and the links waited.
+    if (lazy) relaxed ??= setTimeout(() => { relaxed = null; shareSync(() => {}); }, RELAXED_SYNC_MS).unref();
     holdsRatchet ||= entry.includes(RATCHET);
     if (statSync(journalPath).size > COMPACT_BYTES || ratchetDue() || deleteDue()) void enqueue(writeSnapshot);
     return true;
@@ -538,76 +564,127 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     while (syncing) await syncing;
   }
 
-  async function writeSnapshot() {
+  async function writeSnapshot(scrub = false) {
     const dirty = schemaDirty;
     schemaDirty = false;
-    try { await snapshotToDisk(); } catch (error) {
+    try { await snapshotToDisk(scrub); } catch (error) {
       schemaDirty ||= dirty;
       throw error;
     }
   }
 
+  /** A store's part of a snapshot, all but its records. */
+  function storeMeta(store: RawStore): Omit<SnapshotStore, "records"> {
+    const live = [...store.rawIndexes.values()].filter((index) => !index.deleted);
+    return {
+      name: store.name, keyPath: store.keyPath, autoIncrement: store.autoIncrement, keyGenerator: store.keyGenerator?.num ?? null,
+      indexes: live.map(({ name, keyPath, multiEntry, unique }) => ({ name, keyPath, multiEntry, unique })),
+    };
+  }
+
+  /** What is held, as a snapshot of format 3: the stores kept on disk say only that they are. */
+  async function capture(journalName: string): Promise<Snapshot> {
+    const snapshot: Snapshot = { format: 1, journal: journalName, databases: [] };
+    const held: SnapshotStore[] = [];
+    for (const db of raw._databases.values()) {
+      if (db.name === PROBE) continue;
+      const stores: SnapshotStore[] = [];
+      for (const store of db.rawObjectStores.values()) {
+        if (store.deleted) continue;
+        if (disk(store)) {
+          if (!onTrees(store)) toDisk(store);
+          stores.push({ ...storeMeta(store), records: [], onDisk: true });
+          snapshot.format = 3;
+          continue;
+        }
+        const saved: SnapshotStore = { ...storeMeta(store), records: [] };
+        for (const record of store.records.values()) saved.records.push([record.key, record.value]);
+        stores.push(saved);
+        held.push(saved);
+      }
+      snapshot.databases.push({ name: db.name, version: db.version, stores });
+    }
+    for (const store of held) for (const record of store.records) record[1] = await blobsToDisk(record[1]);
+    return snapshot;
+  }
+
   /**
-   * What is held, as a snapshot. `inline`: every value in it (format 1, `exportSnapshot`); otherwise the stores kept on
-   * disk say only that they are (format 3).
+   * The whole store as a snapshot of format 1 (every value inline, `rows.db` read), written to `file` as it is read: a
+   * page of records serialized and written at a time. Built whole and serialized in one turn, an export of 400,000
+   * messages held the store as objects and its serialized copy at once (+340 MB) and the daemon for 390 ms.
    */
-  async function capture(journalName: string | undefined, inline: boolean): Promise<Snapshot> {
-    const snapshot: Snapshot = { format: 1, ...(journalName !== undefined && { journal: journalName }), databases: [] };
+  async function exportTo(file: FileHandle) {
     // Everything is taken in this turn, one point in time: the records held in memory (their Blobs read after), and
     // the stores in rows.db as a reader of it now with their finished transactions' layers, read a page at a time after.
     // An export of 100,000 messages read them all in one turn: the daemon answered nothing for 1.1-1.7 s.
-    const held: SnapshotStore[] = [];
-    const later: [SnapshotStore, SqlTree][] = [];
+    const databases: { name: string; version: number; stores: { meta: Omit<SnapshotStore, "records">; records: RawRecord[] | SqlTree }[] }[] = [];
     let reader: TreeFile | null = null;
     try {
       for (const db of raw._databases.values()) {
         if (db.name === PROBE) continue;
-        const stores: SnapshotStore[] = [];
+        const stores: (typeof databases)[number]["stores"] = [];
         for (const store of db.rawObjectStores.values()) {
           if (store.deleted) continue;
-          const live = [...store.rawIndexes.values()].filter((index) => !index.deleted);
-          const meta = {
-            name: store.name, keyPath: store.keyPath, autoIncrement: store.autoIncrement, keyGenerator: store.keyGenerator?.num ?? null,
-            indexes: live.map(({ name, keyPath, multiEntry, unique }) => ({ name, keyPath, multiEntry, unique })),
-          };
-          if (!inline && disk(store)) {
-            if (!onTrees(store)) toDisk(store);
-            stores.push({ ...meta, records: [], onDisk: true });
-            snapshot.format = 3;
-            continue;
-          }
-          const saved: SnapshotStore = { ...meta, records: [] };
-          stores.push(saved);
-          if (onTrees(store)) {
-            reader ??= openTreeReader(sqlite!, rowsPath, classes.constraintError);
-            later.push([saved, (store.records.records as unknown as SqlTree).at(reader)]);
-          } else {
-            for (const record of store.records.values()) saved.records.push([record.key, record.value]);
-            held.push(saved);
-          }
+          if (!onTrees(store)) { stores.push({ meta: storeMeta(store), records: Array.from(store.records.values(), ({ key, value }) => ({ key, value })) }); continue; }
+          reader ??= openTreeReader(sqlite!, rowsPath, classes.constraintError);
+          stores.push({ meta: storeMeta(store), records: (store.records.records as unknown as SqlTree).at(reader) });
         }
-        snapshot.databases.push({ name: db.name, version: db.version, stores });
+        databases.push({ name: db.name, version: db.version, stores });
       }
-      for (const store of held) for (const record of store.records) record[1] = await blobsToDisk(record[1]);
-      for (const [saved, tree] of later) {
-        for (const record of tree.getAllRecords()) {
-          if (saved.records.push([record.key, record.value]) % EXPORT_PAGE === 0) await new Promise((resolve) => setImmediate(resolve));
+      const out = new SnapshotWriter(file);
+      out.begin("o");
+      out.value("format", 1);
+      out.key("databases");
+      out.begin("A", databases.length);
+      for (const db of databases) {
+        out.begin("o");
+        out.value("name", db.name);
+        out.value("version", db.version);
+        out.key("stores");
+        out.begin("A", db.stores.length);
+        for (const { meta, records } of db.stores) {
+          out.begin("o");
+          for (const [key, value] of Object.entries(meta)) out.value(key, value);
+          out.key("records");
+          // The count first, as v8 writes an array: a tree's from the same reader, at the same point in time.
+          const count = Array.isArray(records) ? records.length : records.size();
+          out.begin("A", count);
+          let written = 0;
+          for (const record of Array.isArray(records) ? records : records.getAllRecords()) {
+            let value = Array.isArray(records) ? await blobsToDisk(record.value) : record.value;
+            // A chat's ratchet (WISP 4xx) is this profile's alone, here: a backup never carries it, so a restored copy
+            // seals with keys of its own, never the ones this profile goes on using.
+            if (meta.name === "links" && value && typeof value === "object" && "ratchetState" in value) {
+              const { ratchetState: _ratchet, ...link } = value as Record<string, unknown>;
+              value = link;
+            }
+            out.item([record.key, value]);
+            if (++written % EXPORT_PAGE === 0) await out.flush();
+          }
+          if (written !== count) throw new Error("The store changed while it was exported: try again");
+          out.end("A", count);
+          out.end("o", Object.keys(meta).length + 1);
         }
+        out.end("A", db.stores.length);
+        out.end("o", 3);
       }
+      out.end("A", databases.length);
+      out.end("o", 2);
+      await out.flush();
     } finally { reader?.db.close(); }
-    return snapshot;
   }
 
-  async function snapshotToDisk() {
+  async function snapshotToDisk(scrub = false) {
     // The journal is closed and removed below: not while a sync runs on it.
     await synced();
     const name = randomBytes(8).toString("hex");
-    const snapshot = await capture(name, false);
+    const snapshot = await capture(name);
     if (trees) {
       // Every finished transaction goes to the trees, and to the disk, before the snapshot takes the journal's place:
       // also one whose entry waits behind this snapshot in the queue (the snapshot may hold what it did elsewhere). Its
       // entry, written after, is then one SQLite holds, which a replay skips.
       trees.apply(seq);
+      if (scrub) trees.scrub();
       trees.sync();
     }
     const temporary = snapshotPath + ".tmp";
@@ -667,12 +744,12 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     factory,
     recovered: !replayed.closed,
     flush: () => queue,
-    async compact() {
+    async compact(options) {
       // After the transactions running now: the fold is whole.
       await settled();
       // The caller reads the snapshot next (a backup): a fold that failed is its failure, not a line on stderr.
       let thrown: { error: unknown } | null = null;
-      await enqueue(() => writeSnapshot().catch((error: unknown) => { thrown = { error }; throw error; }));
+      await enqueue(() => writeSnapshot(options?.scrub).catch((error: unknown) => { thrown = { error }; throw error; }));
       if (thrown) throw (thrown as { error: unknown }).error;
     },
     async close() {
@@ -680,6 +757,8 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
       if (!writing) return;
       await settled();
       await enqueue(leave);
+      // rows.db up to date at close: the next start has nothing of the journal to put in it again.
+      applyNow();
       writing = false;
       if (journalFd !== null) { closeSync(journalFd); journalFd = null; }
       trees?.db.close();
@@ -687,20 +766,9 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     journalBytes,
     async exportSnapshot(path: string) {
       await settled();
-      const snapshot = await capture(undefined, true);
-      // A chat's ratchet (WISP 4xx) is this profile's alone, here: a backup never carries it, so a restored copy seals with
-      // keys of its own, never the ones this profile goes on using.
-      for (const db of snapshot.databases) for (const store of db.stores) {
-        if (store.name !== "links") continue;
-        store.records = store.records.map(([key, value]) => {
-          if (!value || typeof value !== "object" || !("ratchetState" in value)) return [key, value];
-          const { ratchetState: _ratchet, ...link } = value as Record<string, unknown>;
-          return [key, link];
-        });
-      }
       // Written and synced off the thread: 215 ms of the export of 100,000 messages, in one turn when it was sync.
       const file = await open(path, "w", 0o600);
-      try { await file.writeFile(serialize(snapshot)); await file.sync(); } finally { await file.close(); }
+      try { await exportTo(file); await file.sync(); } finally { await file.close(); }
     },
   };
 }
@@ -708,6 +776,106 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
 /** Writes every byte: one write may take only a part (a disk nearly full). */
 function writeAll(fd: number, bytes: Buffer) {
   for (let at = 0; at < bytes.length; ) at += writeSync(fd, bytes, at);
+}
+
+/**
+ * A value v8 would serialize whole, written in pieces: the objects and arrays around the records begun and ended here
+ * by hand, as v8 itself writes them, and the records serialized a page at a time, each page's bytes to `file`. A reader
+ * gets what `deserialize` of `serialize(value)` gives (the bytes differ at most by v8's alignment padding before a
+ * two-byte string, which it skips): any ghostly reads it.
+ *
+ * A serializer keeps every object it wrote (an object met again is written as the number it had): one for the whole
+ * export held every record of it, as the snapshot built whole did. Each page has its own, so a reader's numbers are not
+ * its numbers, and no value it writes may meet an object twice: one that would (`meetsTwice`, rare in a store's records)
+ * is written as a copy in which each meeting is an object of its own (`unshared`).
+ */
+class SnapshotWriter {
+  private serializer = new DefaultSerializer();
+  private seen = new Set<object>();
+
+  constructor(private readonly file: FileHandle) { this.serializer.writeHeader(); }
+
+  /** An object ("o") or an array ("A", of `length` items). */
+  begin(tag: "o" | "A", length?: number) {
+    this.tag(tag);
+    if (length !== undefined) this.serializer.writeUint32(length);
+  }
+
+  /** An object's end, with how many properties it has; an array's, with no other property and its length. */
+  end(tag: "o" | "A", count: number) {
+    this.tag(tag === "o" ? "{" : "$");
+    if (tag === "A") this.serializer.writeUint32(0);
+    this.serializer.writeUint32(count);
+  }
+
+  key(name: string) { this.serializer.writeValue(name); }
+
+  value(name: string, value: unknown) {
+    this.key(name);
+    this.item(value);
+  }
+
+  /** An array's item (a record), or an object's value. */
+  item(value: unknown) {
+    if (meetsTwice(value, this.seen)) {
+      value = unshared(value);
+      // Never written with a number this page's reader does not have: a wrong object, read back without a word.
+      if (meetsTwice(value, this.seen)) throw new Error("A record of the store could not be written to a backup");
+    }
+    this.serializer.writeValue(value);
+  }
+
+  /** What is serialized so far, to the file; the next page has a serializer of its own. */
+  async flush() {
+    const bytes = this.serializer.releaseBuffer();
+    this.serializer = new DefaultSerializer();
+    this.seen = new Set();
+    // Every byte: one write may take only a part (a disk nearly full).
+    for (let at = 0; at < bytes.length; ) at += (await this.file.write(bytes, at)).bytesWritten;
+  }
+
+  private tag(tag: string) { this.serializer.writeRawBytes(Buffer.from(tag, "latin1")); }
+}
+
+/**
+ * Whether serializing `value` meets an object twice, or one in `seen` (met before by the same serializer): within a
+ * value, an object held in two places, or in itself. Every object v8 walks into is walked here (an object's or an
+ * array's own enumerable properties, a Map's and a Set's entries, an error's cause); the others hold none.
+ */
+function meetsTwice(value: unknown, seen: Set<object>): boolean {
+  if (value === null || typeof value !== "object") return false;
+  if (seen.has(value)) return true;
+  seen.add(value);
+  if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer || value instanceof Date || value instanceof RegExp) return false;
+  if (value instanceof Map) { for (const [k, v] of value) if (meetsTwice(k, seen) || meetsTwice(v, seen)) return true; return false; }
+  if (value instanceof Set) { for (const item of value) if (meetsTwice(item, seen)) return true; return false; }
+  if (value instanceof Error && meetsTwice((value as { cause?: unknown }).cause, seen)) return true;
+  for (const key of Object.keys(value)) if (meetsTwice((value as Record<string, unknown>)[key], seen)) return true;
+  return false;
+}
+
+/**
+ * `value` with each place that holds an object holding a copy of its own: what a reader of it gets is the same, but for
+ * which of its parts are one object. One that holds itself has no such copy, and is refused.
+ */
+function unshared(value: unknown, path = new Set<object>()): unknown {
+  if (value === null || typeof value !== "object") return value;
+  if (path.has(value)) throw new Error("A record of the store holds itself: it cannot be written to a backup");
+  if (Buffer.isBuffer(value)) return Buffer.from(value);
+  if (value instanceof DataView) return new DataView(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
+  if (ArrayBuffer.isView(value)) return (value as Uint8Array).slice();
+  if (value instanceof ArrayBuffer) return value.slice(0);
+  if (value instanceof Date) return new Date(value);
+  if (value instanceof RegExp) return new RegExp(value);
+  if (value instanceof Error) return structuredClone(value);
+  path.add(value);
+  try {
+    if (value instanceof Map) return new Map([...value].map(([k, v]) => [unshared(k, path), unshared(v, path)]));
+    if (value instanceof Set) return new Set([...value].map((item) => unshared(item, path)));
+    const out: Record<string, unknown> = Array.isArray(value) ? new Array(value.length) as never : {};
+    for (const key of Object.keys(value)) out[key] = unshared((value as Record<string, unknown>)[key], path);
+    return out;
+  } finally { path.delete(value); }
 }
 
 /** A journal entry as it is on disk: its length, then its bytes. */

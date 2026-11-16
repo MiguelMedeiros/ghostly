@@ -49,6 +49,11 @@ export interface FileDeskDeps {
   place?(linkId: string): number;
   transfers: Map<string, FileTransferView>;
   changed(delayMs?: number): void;
+  /**
+   * A transfer's progress in this chat, and nothing else of it: the next state (after `changed`'s 250 ms) builds this
+   * chat's view again, not every chat's. Absent: `changed(250)`.
+   */
+  progressed?(linkId: string): void;
   /** The state to the app now, not after `changed`'s wait: for a transfer the app must have before its message. */
   flush?(): void;
   /** A transfer ended, either way: its local file id and how (for the message's details). */
@@ -124,8 +129,8 @@ export type FileDeskAction = "accept" | "decline" | "pause" | "resume" | "cancel
 export class FileDesk {
   private readonly chats = new Map<string, Chat>();
   private readonly speeds = new Map<string, Speed>();
-  /** By local id: when its bytes last moved (for the stall rule). */
-  private readonly moved = new Map<string, { at: number }>();
+  /** By local id: when its bytes last moved (for the stall rule), and whether it then waited on a person. */
+  private readonly moved = new Map<string, { at: number; waiting?: boolean }>();
   /** Unfinished when the app started, and not moved since. */
   private readonly restored = new Set<string>();
   /** A look again when a transfer would count as stuck, by local id. */
@@ -428,8 +433,19 @@ export class FileDesk {
     if (!again && !said && await this.deps.messageExists?.(linkId, `peer_${file.id}`)) return { refuse: "invalid" };
     const room = await (await fileBytes()).room().catch(() => null);
     if (room !== null && file.size > room) return { refuse: "no-room", room };
+    // Beside what the files already taken still need: one that fits only without them is asked about.
+    if (room !== null && file.size + this.stillComing() > room) return "ask";
     const taken = this.deps.receivedBytes(linkId) + this.autoTaken(linkId);
     return file.size <= FILE_LIMITS.askAboveBytes && taken + file.size <= FILE_LIMITS.autoAcceptBytesPerPeer ? "accept" : "ask";
+  }
+
+  /** Bytes still to come of the files taken here (every chat's, not ended): the room they will take. */
+  private stillComing(): number {
+    let due = 0;
+    for (const chat of this.chats.values()) {
+      for (const r of chat.files.records()) if (r.direction === "in" && r.state !== "asking" && !transferEnded(r)) due += Math.max(0, r.file.size - r.confirmed);
+    }
+    return due;
   }
 
   /** files/3 files this contact sent that were taken without asking and are kept (or on their way). */
@@ -484,6 +500,8 @@ export class FileDesk {
   private changed(linkId: string, record: FileTransferRecord, transferred: number, progress: boolean): void {
     const chat = this.chat(linkId);
     const said = record.direction === "in" ? chat.announced.get(record.id) : undefined;
+    // Bytes moving on a transfer already shown: its view (`transfers`) and its chat's are all that change.
+    const moving = progress && !said && (record.direction === "out" || chat.local.has(record.id));
     if (said) {
       // The offer of a file said on the floor: it takes over the bubble that waited for it, in its place. What the
       // offer says is what the file is.
@@ -538,7 +556,8 @@ export class FileDesk {
       }
     }
     if (record.state === "done" && record.direction === "in") this.deps.wireIds(linkId)?.add(record.id);
-    this.deps.changed(progress ? 250 : 50);
+    if (moving && this.deps.progressed) this.deps.progressed(linkId);
+    else this.deps.changed(progress ? 250 : 50);
   }
 
   /**
@@ -634,12 +653,17 @@ export class FileDesk {
    * Whether a transfer is stuck (`transferStalled`): not moved for `FILE_LIMITS.stallMs`, or not since the app started.
    * Only bytes moving count (`progress`: confirmed by the receiver, stored here), not a session saying again where it
    * stands. A stall is nothing happening, so a timer looks again when it would be one.
+   *
+   * Time it waits on a person (an offer not answered yet, a pause) is not time stuck: its quiet spell starts when it goes
+   * on. Before, a file accepted after its offer waited a minute read as stuck at once, "Ask again" beside it, for as
+   * long as it waited its turn behind other files.
    */
   private stalled(linkId: string, id: string, record: FileTransferRecord, progress: boolean): boolean {
     if (transferEnded(record)) { this.unwatch(id); return false; }
     const now = elapsed();
-    if (progress || !this.moved.has(id)) this.moved.set(id, { at: now });
-    if (progress) this.restored.delete(id);
+    const waiting = record.state === "asking" || record.state === "paused";
+    if (progress || waiting || !this.moved.has(id) || this.moved.get(id)!.waiting) this.moved.set(id, { at: now, ...(waiting && { waiting }) });
+    if (progress || waiting) this.restored.delete(id);
     const movedAt = this.moved.get(id)!.at;
     const stalled = transferStalled(record, movedAt, this.restored.has(id), now);
     // Only what can be stuck is looked at again (not an offer waiting for an answer, nor a pause).

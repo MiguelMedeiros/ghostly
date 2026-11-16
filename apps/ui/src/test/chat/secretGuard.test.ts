@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { entropyToMnemonic } from "@scure/bip39";
+import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { wordlist as french } from "@scure/bip39/wordlists/french.js";
 import { wordlist as italian } from "@scure/bip39/wordlists/italian.js";
 import { wordlist as japanese } from "@scure/bip39/wordlists/japanese.js";
@@ -10,6 +11,14 @@ import { wordlist as traditionalChinese } from "@scure/bip39/wordlists/tradition
 import { decodeCashu, findSecret } from "../../lib/parse/secrets";
 // The lists the composer loads as it opens.
 import "../../lib/parse/seedLists";
+
+/** Electrum's checksum is an HMAC-SHA512: counted, to see how many windows it was tried on. */
+const hmacCalls = vi.hoisted(() => ({ count: 0 }));
+vi.mock("@noble/hashes/hmac.js", async (original) => {
+  const real = await original<typeof import("@noble/hashes/hmac.js")>();
+  const hmac = Object.assign((...args: Parameters<typeof real.hmac>) => { hmacCalls.count++; return real.hmac(...args); }, real.hmac);
+  return { ...real, hmac };
+});
 
 // covers: app.composer.secret-guard
 
@@ -93,6 +102,53 @@ describe("what the guard asks about", () => {
     const typo = MNEMONICS[0].replace("yellow", "yard");
     expect(findSecret(`${typo} zoo`)).toBeNull(); // checksum fails and the run is not the whole message
     expect(findSecret(typo)).toEqual({ kind: "mnemonic" });
+  });
+
+  /**
+   * Electrum's own test vector (electrum/tests/test_mnemonic.py, segwit) and twelve words in a row of the list that make
+   * a standard one: neither passes BIP39's checksum.
+   */
+  const ELECTRUM = {
+    segwit: "wild father tree among universe such mobile favorite target dynamic credit identify",
+    standard: "capital captain car carbon card cargo carpet carry cart case cash casino",
+  };
+
+  it.each(Object.entries(ELECTRUM))("an Electrum %s seed, alone or after other words", (_, seed) => {
+    for (const text of [seed, `my electrum seed is ${seed}`, `restore with ${seed} please`]) {
+      expect(findSecret(text)).toEqual({ kind: "mnemonic" });
+    }
+  });
+
+  it("a seed by each word's first four letters, as a metal backup stamps it", () => {
+    for (const mnemonic of [MNEMONICS[0], MNEMONICS[4], ABANDON]) {
+      const short = mnemonic.split(" ").map((w) => w.slice(0, 4)).join(" ");
+      for (const text of [short, short.toUpperCase(), `my seed: ${short}`, `stamped ${short} on steel`]) {
+        expect(findSecret(text)).toEqual({ kind: "mnemonic" });
+      }
+    }
+    // A run with a word mistyped, inside other text, is let through as a full-length one is.
+    expect(findSecret(`note: ${MNEMONICS[0].replace("yellow", "yard").split(" ").map((w) => w.slice(0, 4)).join(" ")}`)).toBeNull();
+  });
+
+  /**
+   * BIP39's test vectors for entropy 0x00 (24 bytes: "abandon" 17 times, "agent") and 0x68a79e…ce7c (32 bytes), whose
+   * runs with the labels' "word" in them, or read across two columns, fail their checksum.
+   */
+  const ZEROS = entropyToMnemonic(new Uint8Array(24), wordlist);
+  const HAMSTER = entropyToMnemonic(Uint8Array.from("68a79eaca2324873eacc50cb9c6eca8cc68ea5d936f98787c60c7ebc74e6ce7c".match(/../g)!, (b) => parseInt(b, 16)), wordlist).split(" ");
+
+  it.each([
+    ["under a header, labelled \"Word n:\"", `Recovery phrase\n${ZEROS.split(" ").map((w, i) => `Word ${i + 1}: ${w}`).join("\n")}`],
+    ["labelled \"Word n:\" on one line", ZEROS.split(" ").map((w, i) => `word ${i + 1}: ${w}`).join(" ")],
+    ["in two columns, as a Ledger card is filled in", `Recovery phrase (24 words)\n${HAMSTER.slice(0, 12)
+      .map((w, i) => `${i + 1}. ${w}    ${i + 13}. ${HAMSTER[i + 12]}`).join("\n")}`],
+    ["numbered out of order, after a line naming how many words", `Here are your 12 words\n${MNEMONICS[0].split(" ")
+      .map((w, i) => [i + 1, w] as const).reverse().map(([n, w]) => `${n}) ${w}`).join("\n")}`],
+    ["by first four letters in two columns", `Seed\n${MNEMONICS[4].split(" ").slice(0, 12)
+      .map((w, i) => `${i + 1} ${w.slice(0, 4)}  ${i + 13} ${MNEMONICS[4].split(" ")[i + 12].slice(0, 4)}`).join("\n")}`],
+    ["an Electrum seed under a header, numbered", `Electrum\n${ELECTRUM.standard.split(" ").map((w, i) => `${i + 1}. ${w}`).join("\n")}`],
+  ])("a seed written as a list %s", (_, text) => {
+    expect(findSecret(text)).toEqual({ kind: "mnemonic" });
   });
 
   /**
@@ -444,6 +500,15 @@ describe("what it lets through", () => {
     expect(findSecret("so we sang: about above absent absorb abstract absurd abuse access accident account accuse achieve, ok")).toBeNull();
     expect(findSecret(`note: ${MNEMONICS[0].replace("yellow", "yard")}`)).toBeNull();
   });
+
+  it("a numbered list whose items start with seed words, or prose of short words", () => {
+    const todo = ["Add tests", "Update the docs", "Remove old code", "Check the build", "Fix lint", "Review it", "Merge",
+      "Ship it", "Tell the team", "Close the issue", "Wait a day", "Watch the logs", "Rest"];
+    expect(findSecret(todo.map((item, i) => `${i + 1}. ${item}`).join("\n"))).toBeNull();
+    // Twelve numbered seed words in a row, each with more on its line, are a list of things, not a seed.
+    expect(findSecret(MNEMONICS[0].split(" ").map((w, i) => `${i + 1}. ${w} is fine`).join("\n"))).toBeNull();
+    expect(findSecret("that boat was huge, but this time we also went over the hill with a dog and a cat")).toBeNull();
+  });
 });
 
 describe("how long it takes", () => {
@@ -469,8 +534,61 @@ describe("how long it takes", () => {
     ["cashu-shaped text", `cashuB${"A".repeat(MAX)}`.slice(0, MAX)],
     ["hex with a zero-width space every few digits", "abcdef01\u200b".repeat(MAX / 9)],
     ["seed words with a soft hyphen in each", "zo\u00ado ".repeat(MAX / 5)],
+    ["a numbered word and a line of spaces", `1 a${" ".repeat(MAX - 4)}x`],
   ])("a 16 KiB message of %s is read in well under a frame", (_, text) => {
     expect(time(text)).toBeLessThan(50);
+  });
+
+  /**
+   * English seed words in a row, none of whose windows any list takes for a seed: each word is taken only once the
+   * last 25 with it are no seed, so every checksum of the budget is tried and fails. A contact can send this.
+   */
+  const noSeedRun = (() => {
+    const words: string[] = [];
+    let bytes = 0;
+    for (let next = 0; bytes < MAX - 9; next++) {
+      const word = wordlist[(next * 7) % wordlist.length];
+      // After a word on no list, so the tail is never a whole message of seed words.
+      if (findSecret(`the ${[...words.slice(-24), word].join(" ")}`)) continue;
+      words.push(word);
+      bytes += word.length + 1;
+    }
+    return words.join(" ");
+  })();
+
+  it("a 16 KiB run of seed words with no seed in it is read in well under a frame", () => {
+    expect(findSecret(noSeedRun)).toBeNull();
+    expect(time(noSeedRun)).toBeLessThan(50);
+  });
+
+  it("tries Electrum's checksum, an HMAC-SHA512, on a few hundred windows of a message at most", () => {
+    // It was tried on every 12-word window of the budget: 60 to 120 ms of the daemon's thread per message forwarded.
+    for (const text of [noSeedRun, `\u200b${noSeedRun}`]) {
+      hmacCalls.count = 0;
+      expect(findSecret(text)).toBeNull();
+      // With a zero-width space before it, the same words were read again as the text reads without it.
+      expect(hmacCalls.count).toBeLessThanOrEqual(256);
+    }
+  });
+
+  it("still finds an Electrum seed after a long run of seed words, or many shorter ones", () => {
+    // The run's inner windows spent the few hundred checksums first: 267 seed words before it were enough to miss it.
+    // Now as far as BIP39's own checksums reach (about 830 seed words in one run).
+    const ELECTRUM_STANDARD = "capital captain car carbon card cargo carpet carry cart case cash casino";
+    const words = noSeedRun.split(" ");
+    const runsOf24 = Array.from({ length: 40 }, (_, i) => words.slice(i * 24, i * 24 + 24).join(" ")).join(" the ");
+    for (const before of [words.slice(0, 300).join(" "), words.slice(0, 800).join(" "), runsOf24]) {
+      hmacCalls.count = 0;
+      expect(findSecret(`${before} and my electrum seed: ${ELECTRUM_STANDARD}`)).toEqual({ kind: "mnemonic" });
+      expect(hmacCalls.count).toBeLessThanOrEqual(256);
+      expect(findSecret(`${ELECTRUM_STANDARD}, then ${before}`)).toEqual({ kind: "mnemonic" });
+    }
+  });
+
+  it("a numbered word between two runs of spaces is read in well under a frame", () => {
+    // Each run made the numbered-list reading try every split of it: 1.6 KB took a second, 16 KiB minutes.
+    expect(time(`1${" ".repeat(800)}a${" ".repeat(800)}x`)).toBeLessThan(50);
+    expect(time(`1${" ".repeat(MAX / 2 - 2)}a${" ".repeat(MAX / 2 - 2)}x`)).toBeLessThan(50);
   });
 
   it("folds a text once for the other languages' lists, not once per list", () => {

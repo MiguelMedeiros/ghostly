@@ -290,12 +290,28 @@ describe("help", () => {
     expect(piped).toMatch(/^ {2}identity add <provider> \[subject\] .* \[--timeout s\]$/m);
   });
 
+  // `group join`'s help said nothing of its one-shot wait: a script or a piped run waited a silent minute.
+  it("a join that waits without a daemon says so in its help, as long as it waits", async () => {
+    for (const [words, wait] of [[["invite", "join"], "without a daemon it waits up to 60 s for the inviter"], [["group", "join"], "without a daemon it waits up to 60 s to be let in"]] as const) {
+      const { code, stdout } = await ghostly(["help", ...words], { env: { COLUMNS: "" } });
+      expect(code, words.join(" ")).toBe(0);
+      expect(stdout, words.join(" ")).toContain(wait);
+    }
+  });
+
   it("bare ghostly in a new Ghostly folder starts with the first steps", async () => {
     const dir = home("first-steps");
     const first = await ghostly(["--home", dir]);
     expect(first.code).toBe(0);
     expect(first.stdout).toMatch(/^First steps:\n {2}\$ ghostly invite create/m);
     expect(first.stdout).toContain("$ ghostly daemon --detach");
+    // The join pipes the invite in: `invite join -` typed at a terminal is refused, the secret kept off a TTY.
+    expect(first.stdout).toContain(`$ printf '%s' "$INVITE" | ghostly invite join `);
+    expect(first.stdout).not.toContain("invite join -");
+    // Each step's words start in one column, as the list's do.
+    const steps = first.stdout.split("\n").filter((line) => line.startsWith("  $ "));
+    expect(steps).toHaveLength(4);
+    expect(new Set(steps.map((line) => /^.*? {3,}(?=\S)/.exec(line)?.[0].length))).toEqual(new Set([steps[0].length - "make an invite for a contact".length]));
     expect(first.stdout).toContain("Usage: ghostly <command>");
     expect((await ghostly(["help", "--home", dir])).stdout).not.toContain("First steps");
     expect((await ghostly(["--home", dir, "profile", "create", "bot"])).code).toBe(0);

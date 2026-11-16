@@ -11,6 +11,7 @@ import { openPersistentIndexedDb } from "../src/runtime/storage";
 import { COMMANDS, idSlot, positionals } from "../src/commands";
 import { chatOnly } from "../src/main";
 import { CARD_UPDATE_GAP_MS, flushCardUpdates, mergeCard } from "../src/statusCards";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.status-cards
 
 /** `task send` and `task update` (WISP 405 · Status Cards) against an engine that keeps what it is sent. */
@@ -35,7 +36,7 @@ function fake(mode: "daemon" | "one-shot" = "daemon", out: { delivery?: StoredMe
   const emit = (event: GhostlyEvent) => { for (const listener of listeners) listener(event); };
   const card = (raw: unknown) => { const checked = checkStatusCard(raw); if ("error" in checked) throw new Error(checked.error); return checked.card; };
   const node = {
-    getState: () => ({ links: [link("chat-one", { label: "Coordinator" })], groups: [group()], settings: {}, transport: {} }) as unknown as EngineState,
+    chatView: chatViewOf, getState: () => ({ links: [link("chat-one", { label: "Coordinator" })], groups: [group()], settings: {}, transport: {} }) as unknown as EngineState,
     getMessages: vi.fn(async (linkId: string) => of(linkId).map((m) => ({ ...m }))),
     getMessage: vi.fn(async (linkId: string, id: string) => { const m = of(linkId).find((x) => x.id === id); return m && { ...m }; }),
     groupMessages: vi.fn(async ({ groupId }: { groupId: string }) => of(`group:${groupId}`).map((m) => ({ ...m }))),
@@ -332,6 +333,30 @@ describe("the secret guard on cards", () => {
     await expect(callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "Deploy", step: broken("​") }, force: true })).resolves.toMatchObject({ task: "t1", card: { step: nsec } });
   });
 
+  it("refuses a --text past 16 KiB as send does, with its size, before the guard reads it: every card command, chat and group", async () => {
+    vi.useFakeTimers();
+    const { ctx, node } = fake("one-shot");
+    await callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "Deploy" }, wait: "none" });
+    await callApi(ctx, "routine.send", { chat: "Sala de Máquinas", card: { id: "r1", name: "Nightly", schedule: "every day 01:00" } });
+    node.sendMessage.mockClear(); node.sendGroupMessage.mockClear();
+    // A seed past the limit: the size is said, not "looks like a secret" (a --force would not send it either).
+    const text = `${seed} ${"é".repeat(8193)}`;
+    const bytes = new TextEncoder().encode(text).length;
+    const tooLong = { code: "bad_request", message: expect.stringMatching(/exceeds 16384 UTF-8 bytes/), details: { bytes, max: 16384 } };
+    for (const chat of ["Coordinator", "Sala de Máquinas"]) {
+      await expect(callApi(ctx, "task.send", { chat, card: { title: "Deploy" }, text })).rejects.toMatchObject(tooLong);
+      await expect(callApi(ctx, "routine.send", { chat, card: { name: "Nightly", schedule: "every day 01:00" }, text })).rejects.toMatchObject(tooLong);
+      await expect(callApi(ctx, "usage.send", { chat, card: { left: 40 }, text })).rejects.toMatchObject(tooLong);
+    }
+    await expect(callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { status: "done" }, text })).rejects.toMatchObject(tooLong);
+    await expect(callApi(ctx, "routine.update", { chat: "Sala de Máquinas", routine: "r1", card: {}, text })).rejects.toMatchObject(tooLong);
+    // `--all` says it once, with its size, not once per chat.
+    await expect(callApi(ctx, "usage.send", { all: true, card: { left: 40 }, text })).rejects.toMatchObject(tooLong);
+    expect(node.sendMessage).not.toHaveBeenCalled();
+    expect(node.sendGroupMessage).not.toHaveBeenCalled();
+    expect(node.editMessage).not.toHaveBeenCalled();
+  });
+
   it("takes --force on every card command", () => {
     for (const [name, argv] of [["task send", ["c", "--title", "t"]], ["task update", ["c", "t1"]], ["routine send", ["c", "--name", "n", "--schedule", "daily"]], ["routine update", ["c", "r1"]], ["usage send", ["c", "--left", "50"]]] as const)
       expect(params(name, [...argv, "--force"])).toMatchObject({ force: true });
@@ -421,6 +446,24 @@ describe("task update", () => {
     await vi.advanceTimersByTimeAsync(CARD_UPDATE_GAP_MS);
     expect(await callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { status: "done", progress: 100 } })).toMatchObject({ queued: false, edits: 2 });
     expect(rows("chat-one")[0]!.card).toMatchObject({ status: "done", progress: 100, step: "Engine" });
+  });
+
+  it("an update merged into the next goes with the newest update's text, not the first's", async () => {
+    const { ctx, node } = fake("daemon");
+    vi.useFakeTimers();
+    await callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "Fix" } });
+    await callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { progress: 10 }, text: "Working: 10%" });
+    await callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { status: "done", progress: 100 }, text: "Done!" });
+    await vi.advanceTimersByTimeAsync(CARD_UPDATE_GAP_MS);
+    // Before, the card said done and its text "Working: 10%" (what an app without cards and a notification show).
+    expect(node.editMessage).toHaveBeenCalledTimes(1);
+    expect(node.editMessage.mock.calls[0]![0]).toMatchObject({ text: "Done!", card: { status: "done", progress: 100 } });
+    // One with no --text after one with it: the engine writes the text from the card, not the older words.
+    await callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { step: "Ship" }, text: "Shipping" });
+    await callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { step: "Shipped" } });
+    await vi.advanceTimersByTimeAsync(CARD_UPDATE_GAP_MS);
+    expect(node.editMessage).toHaveBeenCalledTimes(2);
+    expect(node.editMessage.mock.calls[1]![0]).toMatchObject({ text: "", card: { step: "Shipped" } });
   });
 
   it("sends an update still waiting for its time when the daemon stops, and never calls it confirmed before it went", async () => {

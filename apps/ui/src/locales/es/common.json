@@ -16,7 +16,6 @@
   "deleteChatCallOn": "Hay una llamada en este chat. Termínala primero y luego elimina el chat.",
   "deleteChatLocal": "Se eliminarán el chat y su historial de este dispositivo, no la copia de tu contacto.",
   "deleteChatTitle": "¿Eliminar chat?",
-  "error": "Error",
   "goHome": "Ir al inicio",
   "loading": "Cargando...",
   "moreInfo": "Más información",
@@ -35,7 +34,6 @@
     "mb": "{{n}} MB",
     "tb": "{{n}} TB"
   },
-  "success": "Éxito",
   "unnamedContact": "Contacto · {{key}}",
   "unnamedContactShort": "Contacto",
   "viewPhoto": "Ver foto de {{name}}"

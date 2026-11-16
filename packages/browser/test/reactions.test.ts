@@ -675,6 +675,38 @@ describe("the reactions store", () => {
     expect(whole.mock.calls).toEqual([["chat"]]);
     expect(numbers.at(-1)).toBe(9_503);
   });
+
+  it("in a private group I was removed from and invited back to, refuses to change or take back a reaction of mine from before", async () => {
+    // Back with a new member key, the members keep my reaction from before under the old one. Changed here, it went out
+    // under the new key: they showed both, and taken back here it stayed for them.
+    const rows = [
+      row({ id: "event:1:joined:100", event: "joined", text: "You joined.", timestamp: 100 }),
+      row({ id: "a:1:0", member: "a", text: "before", reactions: { me: { e: "👍", n: 200, at: 200 } } }),
+      row({ id: "a:1:1", member: "a", text: "taken back before", reactions: { me: { e: "", n: 250, at: 250 } } }),
+      row({ id: "event:4:joined:300", event: "joined", text: "You joined again", timestamp: 300 }),
+      row({ id: "a:4:0", member: "a", text: "after", reactions: { me: { e: "🎉", n: 400, at: 400 } } }),
+      row({ id: "event:4:joined:500", event: "joined", member: "c", text: "Carol joined", timestamp: 500 }),
+    ];
+    const { reactions, host } = memory(rows);
+    let key = "me-2";
+    Object.assign(host, { message: async (chat: string, id: string) => rows.find(r => r.linkId === chat && r.id === id), memberKey: () => key });
+    const whole = vi.spyOn(host, "messages");
+    const mine = async (id: string, emoji: string) => { const out = await reactions.mine("group:g", id, emoji); return "error" in out ? out.error : out.reaction.e; };
+    const refusal = "Your reaction to this message went out before you were invited back, and stays as it is";
+    expect(await mine("a:1:0", "❤️")).toBe(refusal);
+    expect(await mine("a:1:0", "")).toBe(refusal);
+    expect(rows[1].reactions?.me).toEqual({ e: "👍", n: 200, at: 200 });
+    // One taken back before goes out anew, and those of this membership change as ever.
+    expect(await mine("a:1:1", "👀")).toBe("👀");
+    expect(await mine("a:4:0", "❤️")).toBe("❤️");
+    expect(await mine("a:4:0", "")).toBe("");
+    expect(whole).toHaveBeenCalledOnce();
+    // Removed and invited back once more: what I did under the last key is from before too.
+    rows.push(row({ id: "event:7:joined:9000", event: "joined", text: "You joined again", timestamp: 9_000 }));
+    key = "me-3";
+    expect(await mine("a:1:1", "")).toBe(refusal);
+    expect(whole).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("a private group's edge that opens", () => {

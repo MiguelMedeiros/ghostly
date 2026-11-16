@@ -76,12 +76,20 @@ function stopWait(ctx: ApiContext, linkId: string): void {
   timersOf(ctx).delete(linkId);
 }
 
+/**
+ * The longest a hold's timer waits before it reads the wall clock again. Timers run on a clock that stops while the
+ * machine sleeps: one timer for the whole hold, after a sleep past its end, kept the chat on DHT only for as long again
+ * as the hold had left when the machine went to sleep, while `holdOf` no longer reported it.
+ */
+const HOLD_CHECK_MS = 60_000;
+
 function schedule(ctx: ApiContext, linkId: string, until: number): void {
   stopWait(ctx, linkId);
   const timer = setTimeout(() => {
     timersOf(ctx).delete(linkId);
-    expire(ctx, linkId);
-  }, Math.max(0, until - Date.now()));
+    if (until > Date.now()) schedule(ctx, linkId, until);
+    else expire(ctx, linkId);
+  }, Math.min(HOLD_CHECK_MS, Math.max(0, until - Date.now())));
   // A one-shot leaves when its command is done; the next start takes the hold back.
   timer.unref?.();
   timersOf(ctx).set(linkId, () => clearTimeout(timer));

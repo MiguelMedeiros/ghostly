@@ -22,9 +22,10 @@ describe("service add's target", () => {
     ["http://localhost:4773/#frag", /^bad_request: The target cannot contain a query or fragment/],
     ["http://user:pw@127.0.0.1:4773", /^bad_request: Credentials in the target URL are not supported/],
     ["ftp://127.0.0.1:4773", /^bad_request: Only http and https targets are supported/],
-    ["http://127.0.0.2:4773", /^refused: /],
-    ["https://example.com", /^refused: Only a web app on this machine/],
-    ["nope", /^bad_request: Not a URL/],
+    ["http://127.0.0.2:4773", /^refused: Only services on this machine can be shared \(localhost, 127\.0\.0\.1 or \[::1\]\): http:\/\/127\.0\.0\.2:4773\/$/],
+    ["https://example.com", /^refused: Only services on this machine can be shared \(localhost, 127\.0\.0\.1 or \[::1\]\)/],
+    ["nope", /^refused: Only services on this machine/],
+    ["http://[", /^bad_request: Not a valid URL: http:\/\/\[$/],
     // agents#1907: port 0 is no port a web app listens on, so every contact who opened it got a failure.
     ["http://127.0.0.1:0", /^bad_request: Port 0 is not a port a web app can listen on: http:\/\/127\.0\.0\.1:0\/$/],
     ["http://localhost:0/app", /^bad_request: Port 0 is not a port/],
@@ -43,5 +44,12 @@ describe("service add's target", () => {
   it("a target on this machine is added", async () => {
     expect(await add("http://127.0.0.1:4773/app")).toBe("ok");
     expect(added).toEqual(["http://127.0.0.1:4773/app"]);
+  });
+
+  // A target without its scheme, as the engine takes it (`localhost:3400`): `new URL` read `localhost:` as the scheme
+  // and refused it as "only 127.0.0.1, localhost", and `127.0.0.1:8080` was "Not a URL".
+  it.each(["localhost:8080", "127.0.0.1:8080/app", "[::1]:8080"])("%s, without http://, is added", async (target) => {
+    expect(await add(target)).toBe("ok");
+    expect(added.at(-1)).toBe(target);
   });
 });
