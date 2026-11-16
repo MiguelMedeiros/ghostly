@@ -1493,6 +1493,24 @@ describe("DHT-only delivery", () => {
     expect(link.textDelivery).toBe("unavailable");
   });
 
+  it("an edit the DHT packet cannot carry with its element says so at once, though its text alone fits as a text", async () => {
+    const { link } = dhtLink();
+    const edit = (m: string) => ({ id: newId(), e: 1, ts: Date.now(), m });
+    // Off the floor nothing is asked: an edit goes on the live session.
+    expect(link.dhtEditTooBig(edit("x".repeat(256)))).toBeNull();
+    await link.setDeliveryMode("dht");
+    // The longest ASCII text the packet carries now, measured as the floor does: the same bytes as an edit go with its
+    // element (the message's id and the edit's number), and no longer fit. It waited for good, said nowhere.
+    let bound = 256;
+    while (link.validateText("x".repeat(bound), Date.now(), newId())) bound--;
+    expect(bound).toBeGreaterThan(200);
+    for (const text of ["x".repeat(bound), "é".repeat(Math.floor(bound / 2)), "x".repeat(257)]) {
+      expect(link.dhtEditTooBig(edit(text)), `${utf8Encode(text).length} bytes`).toBe("Text and authentication exceed the DHT packet budget. Shorten the message.");
+    }
+    // A short one fits.
+    expect(link.dhtEditTooBig(edit("a short edit"))).toBeNull();
+  });
+
   it("confirming a DHT contact needs the current comparison code", async () => {
     const { link, credentials, verifyPeer, onPairingState } = dhtLink(createIdentity().pubKeyZ32);
     await link.setDeliveryMode("dht");

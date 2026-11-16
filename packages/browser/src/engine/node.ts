@@ -392,6 +392,8 @@ export const cardRestoreTiming = { everyMs: CARD_RESTORE_EVERY_MS };
 const RTT_SAVE_MS = 5 * 60_000;
 /** A reaction said on the live session and not confirmed is said again after this long. */
 const REACTION_RESEND_MS = 30_000;
+/** An edit the DHT packet cannot carry, in a chat that goes live (`editMessage`): kept, it waits for the live session. */
+const DHT_EDIT_WAITS = "Too long for the DHT packet as an edit: it goes when you are live.";
 /** How long a deleted chat's session stays up once the ends of its moving files are said, so they get there (as a yield's goodbye). */
 const FILES_END_MS = 300;
 /** A link event that only asks something and acts on nothing: a deleted chat's link may still ask it (`whileChat`). */
@@ -4475,7 +4477,7 @@ export class GhostlyNode implements EngineImplementation {
    * (`editsFor`) once the chat is live and both sides offer edit/1. Only texts, at most `MAX_EDITS_PER_MESSAGE` times each,
    * and never empty (deleting is for that). What an edit says is checked like a message: its length, its preview.
    */
-  async editMessage(params: { linkId: string; messageId: string; text: string; preview?: LinkPreview; mentions?: GroupMention[]; card?: unknown }): Promise<{ error: string | null; refused?: boolean; messageId?: string }> {
+  async editMessage(params: { linkId: string; messageId: string; text: string; preview?: LinkPreview; mentions?: GroupMention[]; card?: unknown }): Promise<{ error: string | null; refused?: boolean; messageId?: string; note?: string }> {
     const { linkId } = params;
     const refuse = (error: string) => ({ error, refused: true });
     // A card's update (WISP 405 · Status Cards): the whole new card, and its fallback text unless one is given.
@@ -4510,13 +4512,19 @@ export class GhostlyNode implements EngineImplementation {
     if (seq > most) return refuse(`This message was edited ${most} times, the most one takes.`);
     // As a send is (`pairedMessageFits`): within 16 KiB, an edit's frame can still pass what the contact's session takes.
     if (!pairedEditFits({ id: "A".repeat(22), e: seq, ts: Date.now(), m: text, ...(card && { sc: card }) })) return refuse(PAIRED_FRAME_TOO_LARGE);
-    const edited = withEdit(message, { seq, at: Date.now(), text, preview, card, pending: true });
+    const at = Date.now();
+    // On the DHT floor an edit goes as a text with its element (WISP 403 § Edits), which the packet may not carry: it
+    // waited there for good with no reason said, and the contact kept the old text. A chat that never goes live (DHT
+    // only, on either side) refuses it as a text is refused; otherwise it goes once live, and the answer says so.
+    const tooBig = !card && message.wireId && this.takesDhtEdits(live) ? live.link?.dhtEditTooBig({ id: message.wireId, e: seq, ts: at, m: text }) : null;
+    if (tooBig && GhostlyNode.dhtByChoice(live)) return refuse(tooBig);
+    const edited = withEdit(message, { seq, at, text, preview, card, pending: true });
     await db.patchMessage(linkId, message.id, () => ({ text: edited.text, edit: edited.edit, preview: edited.preview, card: edited.card }));
     await this.messagesChanged(linkId, [message.id]);
     const edits = this.editsFor(linkId);
     edits.edited(message.id);
     void edits.flush().catch(() => {});
-    return { error: null, messageId: message.id };
+    return { error: null, messageId: message.id, ...(tooBig && { note: DHT_EDIT_WAITS }) };
   }
 
   /**
