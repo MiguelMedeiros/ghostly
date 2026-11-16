@@ -86,6 +86,8 @@ export const ENGINE_ERRORS = {
   fedimintRedeemUnheard: "Could not hear from the federation about these notes: if they don't show in your balance soon, paste them again",
   fedimintRealOnTestnet: "This federation holds real bitcoin: it belongs in a Mainnet Fedimint wallet",
   fedimintTestOnMainnet: "This federation is on {chain}, a test network: it belongs in a Testnet Fedimint wallet",
+  fedimintEncrypted: "Fedimint does not work on an encrypted profile",
+  encryptWithFedimint: "This profile has a Fedimint federation: leave each federation, or remove the Fedimint wallet, before encrypting it",
   walletAway: "{wallet} can't be used here. Use it on {device}.",
   walletAwayUnnamed: "{wallet} can't be used here: its home is another device.",
   // Web apps shared with a contact.

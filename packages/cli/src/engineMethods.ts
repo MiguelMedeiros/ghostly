@@ -5,6 +5,8 @@
  * keeps the two equal. The device calls (WISP 06): a CLI profile is always on one device, so they answer `single` or refuse.
  */
 export const ENGINE_PARAMS: Readonly<Record<string, string>> = {
+  // A CLI engine never waits for it: the CLI opens an encrypted profile before the engine starts (profileKey.ts).
+  unlockProfile: "{ passphrase }",
   usdtCreate: "UsdtCreate",
   usdtUnlock: "{ password, network? }",
   usdtReveal: "{ password?, network? }",

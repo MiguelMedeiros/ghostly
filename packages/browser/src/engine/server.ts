@@ -210,14 +210,18 @@ export class EngineServer implements PeerServer {
       }
     }
     try {
-      // A group's newest page and its history are reads of the store: they answer once the groups are loaded, not after
-      // every chat's whole history is read and every link started. A group shown at start stayed empty until then.
-      await (readsGroupHistory(request) ? Promise.race([this.ready, this.node.groupsRead]) : this.ready);
-      const method = this.node[request.method] as (params: unknown) => unknown;
-      if (typeof method !== "function") throw new Error(`Unknown method: ${request.method}`);
-      // Limited mode (WISP 06): only what reads history, writes messages and changes settings.
-      if (this.node.limited && !LIMITED_MODE_METHODS.has(String(request.method))) throw new Error(LIMITED_MODE_ERROR);
-      if (tell) response.result = await method.call(this.node, params);
+      // The passphrase the start waits for (WISP 04, Encrypted profile): answered while every other call waits for it.
+      if (request.method === "unlockProfile") response.result = await this.node.unlockProfile(params as { passphrase: string });
+      else {
+        // A group's newest page and its history are reads of the store: they answer once the groups are loaded, not after
+        // every chat's whole history is read and every link started. A group shown at start stayed empty until then.
+        await (readsGroupHistory(request) ? Promise.race([this.ready, this.node.groupsRead]) : this.ready);
+        const method = this.node[request.method] as (params: unknown) => unknown;
+        if (typeof method !== "function") throw new Error(`Unknown method: ${request.method}`);
+        // Limited mode (WISP 06): only what reads history, writes messages and changes settings.
+        if (this.node.limited && !LIMITED_MODE_METHODS.has(String(request.method))) throw new Error(LIMITED_MODE_ERROR);
+        if (tell) response.result = await method.call(this.node, params);
+      }
     } catch (error) {
       response.error = errorLine(error);
     }

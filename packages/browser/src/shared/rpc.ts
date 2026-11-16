@@ -20,6 +20,8 @@ import type { GroupCallModerationResult } from "../engine/groupCall";
 
 /** UI → engine calls. The extension carries them over a runtime port, the web app calls the peer in the same page. */
 export interface EngineApi {
+  /** The passphrase of an encrypted profile, while its start waits for it (WISP 04): answered before the start ends. */
+  unlockProfile(params:{passphrase:string}):void;
   usdtCreate(params:UsdtCreate):void;
   usdtUnlock(params:{password:string;network?:WalletNetwork}):void;
   usdtReveal(params:{password?:string;network?:WalletNetwork}):string;
