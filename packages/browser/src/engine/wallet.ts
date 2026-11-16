@@ -344,17 +344,25 @@ const MELT_REQUEST = "/v1/melt/bolt11";
  */
 const MINT_REQUEST = "/v1/mint/bolt11";
 const MINT_QUOTE_STATE = /\/v1\/mint\/quote\/bolt11\/[^/]+$/;
+/**
+ * What `melt` and `settleMelt` ask under the mint's lock: where a Lightning payment's quote stands, and the keysets its
+ * change may be on. Nothing is paid on a read: one cut short is asked again (`melt` before it pays, `pollMelts` after).
+ */
+const MELT_QUOTE_STATE = /\/v1\/melt\/quote\/bolt11\/[^/]+$/;
+const KEYSET_REQUESTS = /\/v1\/(keysets|keys(\/[^/]+)?)$/;
 
 /** How long a request to this path may last, its retries included; undefined: cashu-ts' defaults. */
 function requestLimit(pathname: string): number | undefined {
   if (SWAP_REQUESTS.some((path) => pathname.endsWith(path))) return CASHU_REQUEST_TIMEOUT_MS;
   if (pathname.endsWith(MINT_REQUEST) || MINT_QUOTE_STATE.test(pathname)) return CASHU_REQUEST_TIMEOUT_MS;
+  if (MELT_QUOTE_STATE.test(pathname) || KEYSET_REQUESTS.test(pathname)) return CASHU_REQUEST_TIMEOUT_MS;
   if (pathname.endsWith(MELT_REQUEST)) return MELT_REQUEST_TIMEOUT_MS;
   return undefined;
 }
 
 /**
- * Each of `SWAP_REQUESTS` and a paid invoice's (`MINT_REQUEST`, `MINT_QUOTE_STATE`) ends within
+ * Each of `SWAP_REQUESTS`, a paid invoice's (`MINT_REQUEST`, `MINT_QUOTE_STATE`) and a melt's reads (`MELT_QUOTE_STATE`,
+ * `KEYSET_REQUESTS`) ends within
  * `CASHU_REQUEST_TIMEOUT_MS`, and a melt's within `MELT_REQUEST_TIMEOUT_MS`, retries
  * included. cashu-ts' `requestTimeout` is per try, and NUT-19 tries a cached endpoint again after a timeout, each try
  * with a timeout of its own, for as long as the mint's `ttl` (endless when it gives none): one deadline for the whole

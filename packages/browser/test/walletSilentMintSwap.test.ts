@@ -14,7 +14,8 @@ import type { StoredPayment, StoredProof, StoredQuote } from "../src/shared/type
  * then said the payment was not made. Swaps and the questions after one now give up within the swap's own timeout, so
  * the same answer comes within a minute. A paid invoice's ecash request, and the question where its quote stands, held
  * the mint's lock as long (50 min when the mint lists the request under NUT-19): every payment at that mint waited
- * behind it. Real cashu-ts in front of an in-memory Testnet mint (BDHKE, real keys).
+ * behind it, and so did a Lightning payment's question where its melt quote stands, at Pay and for a pending melt at
+ * every round. Real cashu-ts in front of an in-memory Testnet mint (BDHKE, real keys).
  */
 const MINT = TEST_MINT;
 const json = { "content-type": "application/json" };
@@ -29,6 +30,8 @@ function fakeMint() {
   const spent = new Set<string>();
   const signed = new Map<string, { id: string; amount: number; C_: string }>();
   const quotes = new Map<string, { amount: number; state: string }>();
+  /** Melt quotes, by id: a Lightning payment of `request`; a melt leaves it pending. */
+  const melts = new Map<string, { request: string; amount: number; state: string }>();
   /** Paths the mint takes and never answers: the request ends only when its caller gives up on it. */
   const silent = new Set<string>();
   const asked: string[] = [];
@@ -61,6 +64,22 @@ function fakeMint() {
       if (quote.state !== "PAID") return refuse(20002, "Quote not paid");
       quote.state = "ISSUED";
       return answer({ signatures: sign(body.outputs as Output[]) });
+    }
+    const meltQuote = (id: string) => {
+      const melt = melts.get(id)!;
+      return answer({ quote: id, request: melt.request, amount: melt.amount, unit: "sat", fee_reserve: 2, state: melt.state, expiry: 4_000_000_000, change: [] });
+    };
+    if (path === "/v1/melt/quote/bolt11") {
+      const request = String(body.request);
+      melts.set(`mq${melts.size + 1}`, { request, amount: Number(request.match(/^lnbcrt(\d+)n/)![1]) / 10, state: "UNPAID" });
+      return meltQuote(`mq${melts.size}`);
+    }
+    if (path.startsWith("/v1/melt/quote/bolt11/")) return meltQuote(path.slice("/v1/melt/quote/bolt11/".length));
+    if (path === "/v1/melt/bolt11") {
+      // Taken, and the payment never settles while the test looks.
+      for (const p of body.inputs as Proof[]) spent.add(Y(p.secret));
+      melts.get(String(body.quote))!.state = "PENDING";
+      return meltQuote(String(body.quote));
     }
     if (path === "/v1/swap") {
       const inputs = body.inputs as Proof[];
@@ -233,4 +252,46 @@ describe("a paid invoice at a mint that takes its ecash request and never answer
       expect(await balance()).toBe(100 - 27 + 50);
     }, 30_000);
   }
+});
+
+describe("a Lightning payment at a mint that answers its quote and never answers where it stands", () => {
+  const invoice = () => fakeInvoice(10, new Uint8Array(32).fill(2));
+
+  it("Pay holds no other payment at that mint for minutes, and says the mint did not answer", async () => {
+    const wallet = new CashuWallet(() => [MINT], events());
+    wallets.push(wallet);
+    const { quote } = await wallet.quoteInvoice(invoice());
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
+    mint.silent([`/v1/melt/quote/bolt11/${quote}`]);
+    const paid: { value?: unknown } = {};
+    wallet.payQuote(quote, MINT).then((value) => { paid.value = value; }, (error: unknown) => { paid.value = error; });
+    await elapse(2_000);
+    const { outbox, ended } = pay(wallet, 27);
+    await elapse(60_000);
+    expect(ended.value, "the chat payment went out within a minute").toMatchObject({ token: expect.any(String) });
+    expect(outbox).toHaveBeenCalledOnce();
+    expect(String(paid.value)).toContain("did not answer within 30 s");
+    expect(mint.asked).not.toContain("/v1/melt/bolt11");
+  }, 30_000);
+
+  it("a melt it left pending holds no other payment at that mint for minutes when the app starts", async () => {
+    const paying = new CashuWallet(() => [MINT], events());
+    const { quote } = await paying.quoteInvoice(invoice());
+    expect(await paying.payQuote(quote, MINT)).toBe(false);
+    await paying.stop();
+
+    const wallet = new CashuWallet(() => [MINT], events());
+    wallets.push(wallet);
+    await wallet.checkMint(MINT);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
+    mint.silent([`/v1/melt/quote/bolt11/${quote}`]);
+    const before = mint.asked.length;
+    wallet.start();
+    await elapse(2_000);
+    const { outbox, ended } = pay(wallet, 27);
+    await elapse(60_000);
+    expect(ended.value, "the chat payment went out within a minute").toMatchObject({ token: expect.any(String) });
+    expect(outbox).toHaveBeenCalledOnce();
+    expect(mint.asked.slice(before)).toContain(`/v1/melt/quote/bolt11/${quote}`);
+  }, 30_000);
 });
