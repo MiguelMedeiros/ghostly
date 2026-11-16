@@ -56,5 +56,5 @@ export const commands: Record<string, Command> = {
       return { ...status, ...(options.force === true && { force: true }) };
     },
   },
-  "status show": { method: "status.get", usage: "status show", summary: "This profile's status (status set), or null when it has none" },
+  "status show": { method: "status.get", usage: "status show", summary: "This profile's status (status set), or null when it has none, and its presence: active while a daemon shows it online (settings set daemonPresence true), else null" },
 };

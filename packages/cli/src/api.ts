@@ -352,7 +352,9 @@ const METHODS: Record<string, Method> = {
    * at once on a live session, else on each chat's next one. A new one replaces the one before, whole.
    */
   async "status.get"(ctx) {
-    return statusJson(node(ctx).getOwnStatus().status);
+    const own = node(ctx).getOwnStatus();
+    // The presence contacts see (`settings set daemonPresence true`, said only by a daemon), null when none is said.
+    return { ...statusJson(own.status), presence: own.sharePresence ? own.presence ?? null : null };
   },
   async "status.set"(ctx, params) {
     const until = params.until === undefined ? undefined : num(params, "until", 0, { min: 1, whole: true });
