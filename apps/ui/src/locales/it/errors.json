@@ -51,6 +51,8 @@
     "unreachableNext": "Controlla l'indirizzo: deve essere un mint Cashu."
   },
   "chat": {
+    "dhtTooLong": "Troppo lungo per la DHT",
+    "dhtTooLongNext": "Accorcialo, o invialo quando siete connessi direttamente.",
     "editTooMany": "Questo messaggio non si può più modificare",
     "editTooManyNext": "Un messaggio accetta al massimo {{max}} modifiche.",
     "forwardNone": "Niente da inoltrare",

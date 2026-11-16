@@ -297,6 +297,8 @@ const RULES: readonly Rule[] = [
   // A send or an edit a chat refused (engine/node.ts sendMessage, editMessage, replyRef; platform/useChat.ts).
   { match: /^Message exceeds (?<max>\d+) UTF-8 bytes\.$/, key: "errors.chat.tooLong", next: "errors.chat.tooLongNext" },
   exact("Message too long once encoded. Shorten it or send it as a file.", "errors.chat.tooLong", "errors.chat.tooLongNext"),
+  // A text within the DHT's 256 bytes that its envelope, ratchet and receipt still do not fit (core dhtDelivery.ts).
+  exact("Text and authentication exceed the DHT packet budget. Shorten the message.", "errors.chat.dhtTooLong", "errors.chat.dhtTooLongNext"),
   { match: /^This message was edited (?<max>\d+) times, the most one takes\.$/, key: "errors.chat.editTooMany", next: "errors.chat.editTooManyNext" },
   { match: /^That message (?:is not in this chat, or )?cannot be replied to$/, key: "errors.chat.replyGone", next: "errors.chat.replyGoneNext" },
   // A forward of a message deleted meanwhile, or of none (engine/node.ts forwardMessages).
