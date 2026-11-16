@@ -6,7 +6,7 @@ import { traceLink } from "./linkTrace";
 import type { TurnConditions, TurnSourceAnswer, TurnSourcePut } from "./turnRead";
 
 /** Who asks, for the budget: a 1:1 chat's link comes before a group's, and both before background looks. */
-interface Asker { background: boolean; group: boolean; urgent: boolean; door: boolean; write: boolean; signal: boolean; watch: boolean; watchWrite: boolean; departed: boolean; awaited: boolean; resume: boolean; back: boolean }
+interface Asker { background: boolean; group: boolean; urgent: boolean; door: boolean; write: boolean; signal: boolean; watch: boolean; watchWrite: boolean; departed: boolean; awaited: boolean; resume: boolean; back: boolean; catchUp?: boolean }
 const asker = (options: PkarrRequestOptions, write: boolean): Asker =>
   ({ background: !!options.background, group: !!options.group, urgent: !!options.urgent, door: !!options.door, write, signal: !!options.signal, watch: !!options.watch && !write, watchWrite: !!options.watch && write, departed: !!options.departed && !write, awaited: !!options.awaited && !write, resume: !!options.resume && !write, back: !!options.back });
 /** A 1:1 chat's request: neither a group's nor a background one. */
@@ -647,6 +647,8 @@ export class RelayTransport implements PkarrTransport {
   private readonly lastPut = new Map<string, bigint>();
   /** Per relay and key, the newest packet that relay held back for its budget while another relay took it (`catchUpLater`). */
   private readonly catchUp = new Map<string, { relay: string; key: string; payload: Uint8Array; timestamp: bigint; who: Asker }>();
+  /** Per relay, how many packets wait in `catchUp` for it: background reads leave them their share (`heldFor`). */
+  private readonly catchUpWaiting = new Map<string, number>();
   private catchUpTimer: ReturnType<typeof setTimeout> | null = null;
   /**
    * Per key whose reads the budget held back since its last read went out: when a request frees for it
@@ -1011,8 +1013,6 @@ export class RelayTransport implements PkarrTransport {
     this.readAt.delete(pubKeyZ32);
     // Published now: its next read is no longer one of a key nobody has (`HEDGE_MISSING_MS`).
     this.missing.delete(pubKeyZ32);
-    // A newer packet goes everywhere now: none waiting for a relay that refused an older one.
-    for (const relay of this.relays) this.catchUp.delete(`${relay} ${pubKeyZ32}`);
     const waitingBefore = new Map(this.writeWaiting);
     const writer = firstWriter(asker(options, true));
     // Out on one relay: the link will not try again, so a relay that refused it has no write to wait for.
@@ -1059,8 +1059,15 @@ export class RelayTransport implements PkarrTransport {
       } catch (error) {
         if (!isDiscoveryBudgetError(error) && !(error instanceof RelayLeftAloneError)) failed.add(relay);
         nowhere[i] = isDiscoveryBudgetError(error) || error instanceof RelayLeftAloneError || (error instanceof RelayNoAnswerError && !error.sent);
+        // An older packet of the key waiting for this relay (`catchUpLater`) waits on with this one in its place. Dropped
+        // when the newer one was tried, a background write that the budget held on every relay left the key with no copy
+        // waiting there: 10 of a daemon's 50 chats' packets never reached a relay in 20 minutes.
+        const pending = this.catchUp.get(slot);
+        if (pending && isDiscoveryBudgetError(error)) this.catchUpLater(relay, pubKeyZ32, payload, timestamp, pending.who);
         throw error;
       }
+      // Out here: no older packet of the key waits for this relay any more.
+      if (response.ok) this.dropCatchUp(relay, pubKeyZ32);
       // The relay answered that it did not take it. A server error (5xx) says nothing of what it kept.
       nowhere[i] = response.status >= 400 && response.status < 500;
       if (response.status >= 500 || response.status === 428) failed.add(relay);
@@ -1404,8 +1411,19 @@ export class RelayTransport implements PkarrTransport {
     if ((this.lastPut.get(slot) ?? 0n) > timestamp) return;
     const pending = this.catchUp.get(slot);
     if (pending && pending.timestamp >= timestamp) return;
-    this.catchUp.set(slot, { relay, key, payload, timestamp, who });
+    this.keepCatchUp(slot, { relay, key, payload, timestamp, who });
     this.scheduleCatchUp(CATCH_UP_MIN_MS);
+  }
+
+  private keepCatchUp(slot: string, item: { relay: string; key: string; payload: Uint8Array; timestamp: bigint; who: Asker }): void {
+    if (!this.catchUp.has(slot)) this.catchUpWaiting.set(item.relay, (this.catchUpWaiting.get(item.relay) ?? 0) + 1);
+    this.catchUp.set(slot, item);
+  }
+
+  private dropCatchUp(relay: string, key: string): void {
+    if (!this.catchUp.delete(`${relay} ${key}`)) return;
+    const left = (this.catchUpWaiting.get(relay) ?? 1) - 1;
+    if (left > 0) this.catchUpWaiting.set(relay, left); else this.catchUpWaiting.delete(relay);
   }
 
   private scheduleCatchUp(inMs: number): void {
@@ -1418,15 +1436,16 @@ export class RelayTransport implements PkarrTransport {
     for (const [slot, item] of [...this.catchUp]) {
       if (this.catchUp.get(slot) !== item) continue;
       const coolingDown = (this.networkCooldown.get(`PUT ${item.relay}`) ?? 0) - Date.now();
-      const wait = Math.max(this.heldFor(item.relay, item.who), this.rateLimitedFor(item.relay), this.breaker.blockedFor(item.relay), coolingDown);
+      const who: Asker = { ...item.who, catchUp: true };
+      const wait = Math.max(this.heldFor(item.relay, who), this.rateLimitedFor(item.relay), this.breaker.blockedFor(item.relay), coolingDown);
       if (wait > 0) { next = Math.min(next, wait); continue; }
-      this.catchUp.delete(slot);
+      this.dropCatchUp(item.relay, item.key);
       try {
-        const response = await this.put(item.relay, item.key, item.payload, undefined, item.who);
+        const response = await this.put(item.relay, item.key, item.payload, undefined, who);
         // The relay still putting an earlier packet (428) or rate limiting (429): again later, unless a newer one came.
-        if ((response.status === 428 || response.status === 429) && !this.catchUp.has(slot)) { this.catchUp.set(slot, item); next = Math.min(next, CATCH_UP_RETRY_MS); }
+        if ((response.status === 428 || response.status === 429) && !this.catchUp.has(slot)) { this.keepCatchUp(slot, item); next = Math.min(next, CATCH_UP_RETRY_MS); }
       } catch (error) {
-        if (isDiscoveryBudgetError(error) && !this.catchUp.has(slot)) { this.catchUp.set(slot, item); next = Math.min(next, error.retryInMs); }
+        if (isDiscoveryBudgetError(error) && !this.catchUp.has(slot)) { this.keepCatchUp(slot, item); next = Math.min(next, error.retryInMs); }
       }
     }
     if (this.catchUp.size) this.scheduleCatchUp(Math.max(CATCH_UP_MIN_MS, next === Infinity ? CATCH_UP_RETRY_MS : next));
@@ -1558,13 +1577,27 @@ export class RelayTransport implements PkarrTransport {
     const groupOver = within(this.spentGroupOver.get(relay) ?? [], now, GROUP_OVER_PACE_MS);
     this.spentGroupOver.set(relay, groupOver);
     if (isGroupSignal(who) && !who.write && recent.length >= limit && groupOver.length > 0) wait = Math.max(wait, groupOver[groupOver.length - 1] + GROUP_OVER_PACE_MS - now);
+    // On a relay with a small share of its own (5), background requests keep to two thirds of it, as on a smaller
+    // budget: they would otherwise take the whole minute there, and leave nothing for a link's write.
+    const backgroundShare = Math.min(this.backgroundPerMinute, Math.ceil(limit * 2 / 3));
+    const writesShare = Math.max(1, Math.floor(backgroundShare * BACKGROUND_WRITES_SHARE));
+    // Packets this relay held back while another path took them (`catchUpLater`): background reads, starved ones too,
+    // leave what is left of the background writes' share to them. Without it, a daemon whose 50 contacts were away
+    // read them with every request the budget freed (each read starved in turn), and 35 of its 50 chats' packets never
+    // reached the relays in 40 minutes, where the web app and the extension read them (bug hunt, 2026-11-06).
+    const caughtUp = this.catchUpWaiting.get(relay) ?? 0;
+    if (who.background && !who.write && caughtUp) {
+      const writesLeft = writesShare - recentBackgroundWrites.length;
+      if (writesLeft > 0) wait = Math.max(wait, over(recent, Math.max(1, limit - writesLeft)), over(recentBackground, Math.max(1, backgroundShare - writesLeft)));
+    }
+    // And another background write waits behind them, for about as long as they take at that share: a link's upkeep
+    // tried again at every request that freed, and the same 30 chats took every one while the queue kept the others'.
+    // One the DHT took joins the queue (`putLater`).
+    if (who.background && who.write && !who.catchUp && caughtUp) wait = Math.max(wait, Math.ceil(caughtUp * 60_000 / writesShare));
     if (who.background && !starved) {
-      // On a relay with a small share of its own (5), background requests keep to two thirds of it, as on a smaller
-      // budget: they would otherwise take the whole minute there, and leave nothing for a link's write.
-      const backgroundShare = Math.min(this.backgroundPerMinute, Math.ceil(limit * 2 / 3));
       wait = Math.max(wait, over(recentBackground, backgroundShare));
       // Background writes leave the rest of that share to background reads (`BACKGROUND_WRITES_SHARE`).
-      if (who.write) wait = Math.max(wait, over(recentBackgroundWrites, Math.max(1, Math.floor(backgroundShare * BACKGROUND_WRITES_SHARE))));
+      if (who.write) wait = Math.max(wait, over(recentBackgroundWrites, writesShare));
       // A link signaling: background takes a smaller share until it stops, or until enough of its own age out. A
       // community door's bell does not: the links it signals for are often the ones its last admission opened.
       const signaling = this.urgentAt + SIGNALING_WINDOW_MS - now;
