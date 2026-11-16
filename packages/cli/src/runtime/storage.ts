@@ -16,7 +16,8 @@ import { handOut, openTreeFile, openTreeReader, rollback, SqlTree, type TreeFile
  * - every committed read-write transaction appends its puts, deletes and clears to `journal.bin` and is fsynced
  *   before the transaction's `complete` event reaches the engine (a Cashu proof saved is a proof on disk); one opened
  *   with `durability: "relaxed"` is appended at once and synced with the next one, or within a second. The sync runs
- *   off the thread, and the transactions that commit while one runs share the next (`shareSync`);
+ *   off the thread, and the transactions that commit while one runs share the next (`shareSync`). One that commits
+ *   while a fold or a Blob's entry waits in the store's queue is written behind it, and completes then;
  * - a schema change (an upgrade, a deleted database) writes a whole new `snapshot.bin` instead;
  * - at start the snapshot is loaded and the journal replayed. A short journal that is whole stays as it is, and so
  *   does the snapshot; a long one, or one whose last entry was cut short, is folded into a fresh snapshot first;
@@ -229,6 +230,8 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   let unsynced: (() => void)[] = [];
   /** The syncs running off the thread, one after another, until no `complete` waits for one. */
   let syncing: Promise<void> | null = null;
+  /** The `complete`s of transactions whose entries wait in the queue (`append`). */
+  let held = 0;
   /** The last journal entry whose layers wait for `applying` to take them to SQLite. */
   let applyUpTo = 0;
   let applying: ReturnType<typeof setTimeout> | null = null;
@@ -352,16 +355,17 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
         // open, it stays this transaction's, and every later write to the store would throw.
         if (!ops?.length) trees?.abort(this._rollbackLog);
         if (ops?.length) entry = ++seq;
-        const appended = ops?.length ? append(ops, this.durability === "relaxed", entry, this._rollbackLog) : null;
-        if (appended && appended !== "unsynced") return refuse(this, appended.error, event);
-        waits = appended === "unsynced";
+        const appended = ops?.length ? append(ops, this.durability === "relaxed", entry, this._rollbackLog, () => dispatch.call(this, event)) : null;
+        if (appended && typeof appended === "object") return refuse(this, appended.error, event);
+        waits = appended !== null;
+        if (appended === "unsynced") shareSync(() => { written(entry); dispatch.call(this, event); });
       }
       pending.delete(this._rollbackLog);
       if (schemaDirty) void enqueue(writeSnapshot);
       if (waits) {
-        // Its entry is in the journal, not yet on the disk: the engine hears `complete` once a sync covers it. The store
-        // has its writes already, so the transactions waiting for this one start now, and their entries share that sync.
-        shareSync(() => { written(entry); dispatch.call(this, event); });
+        // Its entry is not on the disk yet: in the journal, until a sync covers it, or in the queue, behind a fold or
+        // a Blob's write. The engine hears `complete` once it is. The store has its writes already, so the transactions
+        // waiting for this one start now.
         (this.db._rawDatabase as unknown as SchedulingDatabase).processTransactions(event);
         return true;
       }
@@ -384,8 +388,11 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
    * A committed transaction's entry, numbered `entry` (its first op says so, where there are trees), from the
    * transaction whose rollback log is `owner`. Written at once, it may fail (a full disk): the reason is given back,
    * and the transaction is to be refused, not completed. "unsynced": written, and its `complete` waits for a sync.
+   * "queued": written behind what the queue holds (a fold, a Blob's entry), and `complete` called once it is: what
+   * completed before was on no disk while the fold waited for the sync in flight, and a process killed then lost a
+   * text the engine had told the contact it held.
    */
-  function append(ops: Op[], lazy: boolean, entry: number, owner: unknown[]): { error: unknown } | "unsynced" | null {
+  function append(ops: Op[], lazy: boolean, entry: number, owner: unknown[], complete: () => void): { error: unknown } | "unsynced" | "queued" | null {
     holdsDelete ||= ops.some(deletes);
     if (trees) ops = [{ db: SEQ, store: "", kind: "clear", seq: entry }, ...ops];
     if (queued === 0 && !ops.some((op) => op.kind === "put" && hasBlob(op.value))) {
@@ -398,8 +405,18 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
       return null;
     }
     trees?.complete(owner, entry);
-    void enqueue(async () => { if (writeEntry(serialize(await Promise.all(ops.map(async (op) => (op.kind === "put" ? { ...op, value: await blobsToDisk(op.value) } : op)))), lazy ? "lazy" : "now")) written(entry); });
-    return null;
+    held++;
+    void enqueue(async () => {
+      try {
+        if (writeEntry(serialize(await Promise.all(ops.map(async (op) => (op.kind === "put" ? { ...op, value: await blobsToDisk(op.value) } : op)))), lazy ? "lazy" : "now")) written(entry);
+      } catch (error) {
+        // Too late to refuse it (the transactions after it ran on what it wrote): the store is folded into a whole
+        // snapshot before its `complete` goes, as when a sync fails.
+        failed(error);
+        await writeSnapshot().catch(failed);
+      }
+    }).then(() => { held--; complete(); });
+    return "queued";
   }
 
   /**
@@ -533,7 +550,7 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
    * (5 ms on a Mac's SSD, where it flushes the drive's cache), one per transaction: 8 sends at once went no faster than
    * 1, and every other call waited behind them. It runs off the thread now, and every entry written while it runs
    * goes with the next one. One that fails leaves what the journal has unsure: the store is folded into a whole
-   * snapshot before the `complete`s go (they go even if that fails, as a Blob's entry written late does).
+   * snapshot before the `complete`s go (they go even if that fails, as a queued entry's does).
    */
   function shareSync(done: () => void) {
     unsynced.push(done);
@@ -731,9 +748,9 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     }
   }
 
-  /** Whether a transaction is running or waiting to, or for the sync that tells the engine it completed. */
+  /** Whether a transaction is running or waiting to, or for the sync or the queued write that tells the engine it completed. */
   function busy() {
-    return syncing !== null || [...raw._databases.values()].some((db) => db.transactions.some((transaction) => (transaction as RawTransaction)._state !== "finished"));
+    return syncing !== null || held > 0 || [...raw._databases.values()].some((db) => db.transactions.some((transaction) => (transaction as RawTransaction)._state !== "finished"));
   }
 
   const installed = globalThis as unknown as Record<string, unknown>;

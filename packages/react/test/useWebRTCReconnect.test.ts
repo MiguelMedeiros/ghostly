@@ -434,6 +434,31 @@ describe("the side that answered the call", () => {
     expect(call.result.current.reconnecting).toBe(false);
     expect(call.addCallEventMessage.mock.calls.filter(([type]) => type === "call_ended")).toHaveLength(1);
   });
+
+  it("a caller whose app died and who calls again starts over: the call ends here, sends no hang-up, and their call rings", async () => {
+    const call = renderCall();
+    const stream = await answered(call);
+    const connection = pc();
+    await pass(10_000);
+    act(() => connection.setIceState("disconnected"));
+    await pass(1000);
+
+    call.receive(remote.offer(Date.now()));
+
+    expect(call.result.current.callState).toBe("incoming");
+    expect(call.result.current.reconnecting).toBe(false);
+    expect(connection.closed).toBe(true);
+    expect(FakePeerConnection.instances).toHaveLength(1);
+    expect(stream.getTracks().every((t) => t.readyState === "ended")).toBe(true);
+    expect(call.addCallEventMessage).toHaveBeenCalledWith("call_ended", false, 11_000);
+    expect(call.addCallEventMessage.mock.calls.filter(([type]) => type === "call_received")).toHaveLength(2);
+    // A hang-up would end their new call there as declined.
+    expect(signals(call).map((s) => s.t)).toEqual(["a"]);
+    // Nothing of the old call fires later to end the new one.
+    await pass(RECONNECT_TIMEOUT_MS);
+    expect(call.result.current.callState).toBe("incoming");
+    expect(signals(call).map((s) => s.t)).toEqual(["a"]);
+  });
 });
 
 describe("a restart offer with no call on", () => {
