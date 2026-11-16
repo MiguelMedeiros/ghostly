@@ -215,10 +215,12 @@ export class CallManager {
     // on a connection that has started: it refuses a remote offer with new ICE credentials ("Invalid ICE settings
     // from remote SDP") and cannot make one. A call whose path is lost ends as before (`MEDIA_GRACE_MS`).
     if (signal.t === "r" || (signal.t === "a" && signal.re !== undefined)) return;
-    // The contact starting over (WISP 601, "Offering again"): their app died with no hang-up and calls again while the
-    // call placed here is on. Only an offer later than their answer reaches here (`lastSignal`). The call ends as
-    // `remote-hangup` and sends nothing (a hang-up would end their new call as declined), and their offer rings.
-    if (signal.t === "o" && call?.state === "connected" && call.direction === "out") {
+    // The contact starting over (WISP 601, "Offering again"): their app died with no hang-up and calls again while our
+    // call is on, placed or answered here. Only an offer later than their answer, or their offer, reaches here
+    // (`lastSignal`); a connected call's media is up, and a caller restarts one that is up with `r`, never `o`. The
+    // call ends as `remote-hangup` and sends nothing (a hang-up would end their new call as declined), and their offer
+    // rings.
+    if (signal.t === "o" && call?.state === "connected") {
       this.lastSignal.set(chat, signal.ts);
       void this.yieldTo(call, signal, "remote-hangup");
       return;
