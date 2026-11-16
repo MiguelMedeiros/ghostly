@@ -193,7 +193,7 @@ describe("a one-shot group join of a link for a group id already held", () => {
     const node = { getState, joinGroupByLink: vi.fn(async () => { groups = [after]; return { groupId: id }; }) };
     return { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode, version: "test" } as unknown as ApiContext;
   }
-  const pick = `keep the one you are in (ghostly engine keepGroup '{"groupId":"${id}"}') or take the link's instead (ghostly engine switchGroup '{"groupId":"${id}","to":"<its link, from group show --show-secret>"}')`;
+  const pick = `keep the one you are in (ghostly engine keepGroup '{"groupId":"${id}"}') or take the link's instead, which leaves the one you are in and deletes its history on this device (ghostly engine switchGroup '{"groupId":"${id}","to":"<its link, from group show --show-secret>"}' --yes)`;
 
   it("another's link, kept beside the group held: joined false at once, and says how to pick between them", async () => {
     const answer = await callApi(held(inGroup, { ...inGroup, others: [{ link: code }] }), "group.join", { link: url });
@@ -503,15 +503,23 @@ describe("group call", () => {
 
   it("refuses anything but an https origin in its one spelling before signing, naming the origin when there is one", async () => {
     const { ctx, setGroupCall } = community();
+    // A valid https origin of 202 characters, as the hunt typed it.
+    const longOrigin = `https://${"a".repeat(60)}.${"b".repeat(60)}.${"c".repeat(60)}.example.com`;
     for (const [sfu, message] of [
       ["http://call.example.com", "\"http://call.example.com\" is not an https origin: a call node is like https://call.example.com"],
       ["wss://call.example.com", "\"wss://call.example.com\" is not an https origin: a call node is like https://call.example.com"],
       ["call.example.com", "\"call.example.com\" is not an https origin: a call node is like https://call.example.com"],
-      [`https://${"a".repeat(200)}.com`, `"https://${"a".repeat(200)}.com" is not an https origin: a call node is like https://call.example.com`],
-      ["https://call.example.com/sfu", "\"https://call.example.com/sfu\" is not an origin (no path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
-      ["https://call.example.com/", "\"https://call.example.com/\" is not an origin (no path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
-      ["https://Call.Example.com:443", "\"https://Call.Example.com:443\" is not an origin (no path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
-      ["https://call.example.com?x=1", "\"https://call.example.com?x=1\" is not an origin (no path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
+      // Before: told "not an https origin" (no word of the limit), and capitals or :443 of a path, query or trailing /.
+      [`https://${"a".repeat(200)}.com`, `"https://${"a".repeat(200)}.com" is too long: a call node is an https origin of at most 200 characters`],
+      [longOrigin, `"${longOrigin}" is too long: a call node is an https origin of at most 200 characters`],
+      ["HTTPS://Call.Example.com", "\"HTTPS://Call.Example.com\" is not in its one spelling (lower case, no default port, path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
+      ["https://call.example.com:443", "\"https://call.example.com:443\" is not in its one spelling (lower case, no default port, path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
+      // A short origin under a long path is told that origin, not the limit.
+      [`https://call.example.com/${"p".repeat(200)}`, `"https://call.example.com/${"p".repeat(200)}" is not in its one spelling (lower case, no default port, path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com`],
+      ["https://call.example.com/sfu", "\"https://call.example.com/sfu\" is not in its one spelling (lower case, no default port, path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
+      ["https://call.example.com/", "\"https://call.example.com/\" is not in its one spelling (lower case, no default port, path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
+      ["https://Call.Example.com:443", "\"https://Call.Example.com:443\" is not in its one spelling (lower case, no default port, path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
+      ["https://call.example.com?x=1", "\"https://call.example.com?x=1\" is not in its one spelling (lower case, no default port, path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
     ] as const) await expect(callApi(ctx, "group.call", { group: "Thursday", sfu }), sfu).rejects.toMatchObject({ code: "bad_request", message });
     expect(setGroupCall).not.toHaveBeenCalled();
     // A port that is not the default one is part of the origin.
@@ -535,7 +543,8 @@ describe("group call", () => {
     const params = (argv: string[]) => { const parsed = parseArgs(argv, command.options ?? {}, idSlot(command)); return command.params!(parsed, positionals(command, parsed.positionals)); };
     expect(params(["Thursday", "--sfu", SFU])).toEqual({ group: "Thursday", sfu: SFU });
     expect(params(["Thursday", "--clear"])).toEqual({ group: "Thursday", clear: true });
-    expect(() => params(["Thursday"])).toThrow("Missing --sfu: ghostly group call <group> --sfu <https origin> | --clear");
+    // Every form the usage line takes, `--e2ee` or `--no-e2ee` alone too: before, only --sfu and --clear (agents#6029).
+    expect(() => params(["Thursday"])).toThrow("Missing --sfu, --e2ee, --no-e2ee or --clear: ghostly group call <group> --sfu <https origin> [--e2ee | --no-e2ee] | --e2ee | --no-e2ee | --clear");
     expect(() => params(["Thursday", "--sfu", SFU, "--clear"])).toThrow("--clear removes the call node: not with --sfu");
     expect(params(["Thursday", "--sfu", SFU, "--e2ee"])).toEqual({ group: "Thursday", sfu: SFU, e2ee: true });
     expect(params(["Thursday", "--no-e2ee"])).toEqual({ group: "Thursday", e2ee: false });

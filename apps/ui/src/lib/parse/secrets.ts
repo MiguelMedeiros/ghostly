@@ -29,6 +29,8 @@ interface SeedWords {
   /** A message that is nothing but this many of these words counts, checksum or not. */
   wholeMessage: number[];
   checksumHolds: (indices: number[]) => boolean;
+  /** One that costs far more, tried on runs of `length` words, on `SLOW_CHECKSUM_BUDGET` of them per message at most. */
+  slowChecksum?: { length: number; holds: (indices: number[]) => boolean };
 }
 
 const englishWords = (text: string) => text.toLowerCase().match(/[a-z]+/g);
@@ -48,8 +50,6 @@ function lazyIndex(list: readonly string[], spell: (word: string) => string): ()
 }
 
 const MNEMONIC_LENGTHS = [12, 15, 18, 21, 24];
-/** BIP39's checksum, or Electrum's: its seeds are 12 words of the same list with a version where the checksum is. */
-const englishChecksumHolds = (indices: number[]) => bip39ChecksumHolds(indices) || electrumVersionHolds(indices);
 const BIP39: SeedWords = {
   index: lazyIndex(wordlist, (word) => word),
   words: englishWords,
@@ -59,7 +59,9 @@ const BIP39: SeedWords = {
    * checksum of its own, which BIP39's caught only by chance, about 3 in 10).
    */
   wholeMessage: [...MNEMONIC_LENGTHS, 16],
-  checksumHolds: englishChecksumHolds,
+  checksumHolds: bip39ChecksumHolds,
+  /** Electrum's: its seeds are 12 words of the same list with a version where BIP39's checksum is. */
+  slowChecksum: { length: 12, holds: electrumVersionHolds },
 };
 /**
  * The English list by each word's first four letters, as a metal backup stamps it and Trezor and Coldcard take it
@@ -97,8 +99,13 @@ export function addSeedLists(lists: readonly (readonly string[])[], moneroLists:
     checksumHolds: moneroChecksum(list, prefix),
   }))];
 }
-/** Checksums tried per message and word list at most: a 16 KiB run of seed words stays a few milliseconds. */
+/** Checksums tried per message and word list at most: a 16 KiB run of seed words that holds no seed stays ~25 ms. */
 const CHECKSUM_BUDGET = 4096;
+/**
+ * Slow checksums tried per message and word list at most: Electrum's is an HMAC-SHA512, and tried on every 12 words of
+ * the budget it took 60 to 120 ms per 16 KiB run of seed words that holds none (a contact's text forwarded, 30 at once).
+ */
+const SLOW_CHECKSUM_BUDGET = 256;
 
 const NSEC = /\bnsec1[02-9ac-hj-np-z]{58}(?![02-9ac-hj-np-z])/i;
 const EXTENDED_PRIVATE = /\b[xtyzuvYZUV]prv[1-9A-HJ-NP-Za-km-z]{100,}/;
@@ -139,14 +146,19 @@ const base58check = createBase58check(sha256);
 export function findSecret(text: string): SecretFinding | null {
   const visible = text.replace(INVISIBLE, "");
   const readings = visible === text ? [text] : [text, visible];
+  let asWritten: Map<SeedWords["words"], string[] | null> | undefined;
   if (readings.some((reading) => {
     // A text's words are read once per way of reading them, not once per list: the other languages' 13 lists share one.
     const words = new Map<SeedWords["words"], string[] | null>();
+    const first = (asWritten ??= words);
     const listed = numbered(reading);
     const listedWords = new Map<SeedWords["words"], string[] | null>();
     return seeds.some((seed) => {
       if (!words.has(seed.words)) words.set(seed.words, seed.words(reading));
-      if (hasMnemonic(words.get(seed.words)!, seed)) return true;
+      const read = words.get(seed.words)!;
+      // The same words as the text as written (its invisible characters were between them): read already. A zero-width
+      // space before a long run of seed words read it twice, twice the time.
+      if (!(words !== first && sameWords(read, first.get(seed.words)!)) && hasMnemonic(read, seed)) return true;
       if (!listed) return false;
       if (!listedWords.has(seed.words)) {
         const read = seed.words(listed.words.join(" "));
@@ -163,6 +175,8 @@ export function findSecret(text: string): SecretFinding | null {
   return tokens.find((found) => found?.kind === "cashu" && found.amount !== null) ?? tokens.find((found) => found) ?? null;
 }
 
+const sameWords = (a: string[] | null, b: string[] | null) => a === b || (a !== null && b !== null && a.length === b.length && a.every((word, i) => word === b[i]));
+
 /**
  * 12 to 24 words in a row from the English BIP39 list whose checksum holds, anywhere in the text; or a message that
  * is nothing but 12, 15, 16, 18, 21 or 24 of those words (a seed with one word mistyped is still most of a seed). The
@@ -178,8 +192,14 @@ function hasMnemonic(tokens: string[] | null, seed: SeedWords): boolean {
   const shortest = Math.min(...seed.lengths);
   if (!tokens || tokens.length < shortest) return false;
   const index = seed.index();
-  let budget = CHECKSUM_BUDGET;
+  let budget = CHECKSUM_BUDGET, slowBudget = SLOW_CHECKSUM_BUDGET;
   let run: number[] = [];
+  const slow = seed.slowChecksum;
+  /**
+   * A run's inner windows for the slow checksum, tried once every run's ends were: a seed pasted in a message is where
+   * the words on no list (or the message) start or stop its run. Tried in order, 267 seed words before one spent them.
+   */
+  const inner: number[][] = [];
   const seedLike = (start: number, length: number) => {
     const window = run.slice(start, start + length);
     const counts = new Map<number, number>();
@@ -187,7 +207,13 @@ function hasMnemonic(tokens: string[] | null, seed: SeedWords): boolean {
     if (counts.size === 1) return false;
     const [most, times] = [...counts].reduce((a, b) => (b[1] > a[1] ? b : a));
     if (times > length / 2 && (run[start - 1] === most || run[start + length] === most)) return false;
-    return seed.checksumHolds(window);
+    if (seed.checksumHolds(window)) return true;
+    if (slow === undefined || length !== slow.length) return false;
+    if (start > 0 && start + length < run.length) {
+      if (inner.length < SLOW_CHECKSUM_BUDGET) inner.push(window);
+      return false;
+    }
+    return slowBudget-- > 0 && slow.holds(window);
   };
   const check = () => {
     if (run.length >= shortest) {
@@ -206,7 +232,7 @@ function hasMnemonic(tokens: string[] | null, seed: SeedWords): boolean {
     if (at !== undefined) run.push(at);
     else if (check()) return true;
   }
-  return check();
+  return check() || inner.some((window) => slowBudget-- > 0 && slow!.holds(window));
 }
 
 /**

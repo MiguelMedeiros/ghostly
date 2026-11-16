@@ -23,6 +23,13 @@ const DRAINED_AT = 64 * 1024
  * link comes first; on a slow one this finds the queue at `DRAINED_AT` before it runs dry.
  */
 const DRAIN_POLL_MS = 10
+/** The channels dialled in whose preface came that an endpoint holds at once. */
+const MAX_CHANNELS = 2
+/**
+ * Streams dialled in that have not sent the preface yet. They hold none of the MAX_CHANNELS: a new one past this many
+ * drops the oldest of them, so streams that stall can never keep the contact's out.
+ */
+const MAX_UNPREFACED = 4
 
 /**
  * What a connection's stream still holds: secret-stream's queue and the UDX stream's under it. Both are streamx
@@ -95,6 +102,10 @@ export async function createHyperEndpoint(seed, options = {}) {
   const channels = new Set()
   /** The channels whose contact's preface came: the chat is live on them. */
   const live = new Set()
+  /** The channels dialled in whose preface came: only these count against MAX_CHANNELS. */
+  const liveIn = new Set()
+  /** The streams dialled in still waiting for their preface, oldest first. */
+  const unprefaced = new Set()
   /** Every stream this endpoint dialled that is not closed yet: the node stays when the endpoint closes, they do not. */
   const dialled = new Set()
   let quiet = false
@@ -113,9 +124,18 @@ export async function createHyperEndpoint(seed, options = {}) {
     announcing(server, !want)
   }
 
-  /** `onChannel`: hears the channel as soon as it counts against the limit (a dial that stalls is dropped from it). */
-  async function attach(socket, onChannel) {
-    if (stopped || channels.size >= 2) { socket.destroy(); throw new Error('Native connection limit reached') }
+  /**
+   * `onChannel`: hears the channel as soon as it is held (a dial that stalls is dropped from it). `incoming`: the stream
+   * was dialled in, and takes one of MAX_CHANNELS only once its preface came. This side's own dials are not counted:
+   * one always goes out.
+   */
+  async function attach(socket, onChannel, incoming = false) {
+    if (stopped || (incoming && liveIn.size >= MAX_CHANNELS)) { socket.destroy(); throw new Error('Native connection limit reached') }
+    if (incoming && unprefaced.size >= MAX_UNPREFACED) {
+      const [oldest] = unprefaced
+      unprefaced.delete(oldest); oldest.destroy()
+    }
+    if (incoming) unprefaced.add(socket)
     let reader = null
     let closeHandler = null
     let closed = false
@@ -142,6 +162,9 @@ export async function createHyperEndpoint(seed, options = {}) {
         const header = Buffer.alloc(4); header.writeUInt32BE((binary ? BINARY : 0) + payload.length)
         socket.write(Buffer.concat([header, payload]))
       },
+      // No frame comes from the contact while paused: secret-stream then pauses the UDX stream under it.
+      pause() { socket.pause() },
+      resume() { socket.resume() },
       drained() {
         if (this.bufferedAmount <= DRAINED_AT) return Promise.resolve()
         if (closed) return Promise.reject(new Error('Native channel closed'))
@@ -174,7 +197,7 @@ export async function createHyperEndpoint(seed, options = {}) {
     // The contact ended its side (its channel closed): this one ends too, so the stream closes now, not on its timer.
     socket.on('end', () => socket.end())
     socket.on('close', () => {
-      closed = true; pending = []; clearTimeout(timer); channels.delete(channel)
+      closed = true; pending = []; clearTimeout(timer); channels.delete(channel); liveIn.delete(channel); unprefaced.delete(socket)
       if (live.delete(channel)) liveChanged()
       rejectOpen(new Error('Native channel closed')); closeHandler?.()
     })
@@ -204,6 +227,11 @@ export async function createHyperEndpoint(seed, options = {}) {
         if (!preface) {
           if (text !== PREFACE) { socket.destroy(new Error('Unexpected application protocol')); return }
           preface = true; clearTimeout(timer)
+          if (incoming) {
+            unprefaced.delete(socket)
+            if (liveIn.size >= MAX_CHANNELS) { socket.destroy(new Error('Native connection limit reached')); return }
+            liveIn.add(channel)
+          }
           live.add(channel); liveChanged()
           resolveOpen({ channel, binding: { transport: 'hyperdht/1', context: socket.handshakeHash.toString('hex'),
             identities: [socket.publicKey.toString('hex'), socket.remotePublicKey.toString('hex')].sort() } })
@@ -217,7 +245,7 @@ export async function createHyperEndpoint(seed, options = {}) {
   }
 
   server = node.createServer(socket => {
-    void attach(socket).then(bound => {
+    void attach(socket, null, true).then(bound => {
       if (stopped) bound.channel.close()
       else if (incomingHandler) incomingHandler(bound)
       else waiting.push(bound)
@@ -235,8 +263,8 @@ export async function createHyperEndpoint(seed, options = {}) {
     async connect(address) {
       if (stopped || !address || !/^[a-f0-9]{64}$/.test(address.publicKey)) throw new Error('Invalid HyperDHT endpoint')
       const remote = Buffer.from(address.publicKey, 'hex')
-      // A dial whose stream opened and carried nothing is made again (`redial.mjs`): it is dropped from the limit at
-      // once, so the next one has its place even while another channel is live. The wait follows the stream's RTT.
+      // A dial whose stream opened and carried nothing is made again (`redial.mjs`): it is dropped from the channels at
+      // once. The wait follows the stream's RTT.
       return redial(() => {
         const socket = node.connect(remote, { keyPair })
         dialled.add(socket)

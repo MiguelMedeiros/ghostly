@@ -124,6 +124,30 @@ describe("problemLine: a problem where only a line fits", () => {
     expect(problemLine("This signature was made by another key, not the public key given.", pt)).toBe(`${pt("errors.proof.otherKey")}. ${pt("errors.proof.otherKeyPgpNext")}`);
   });
 
+  /** Add's refusals for an SSH key proof (packages/browser/src/proofs/providers/ssh.ts, core sshsig.ts): English in every language until 2026-11-15. */
+  const SSH_REFUSALS: [string, string][] = [
+    ["Paste your public key (the one line in ~/.ssh/id_ed25519.pub) or its SHA256: fingerprint", "That is not an SSH public key. Paste the one line in ~/.ssh/id_ed25519.pub, or its SHA256: fingerprint."],
+    ['Unsupported SSH key type "ssh-dss"', "This kind of SSH key can't be used. Use an Ed25519, ECDSA or RSA key."],
+    ["Unsupported SSH key type", "This kind of SSH key can't be used. Use an Ed25519, ECDSA or RSA key."],
+    ["RSA keys must be 2048-16384 bits", "This RSA key is too small or too large. Use an RSA key of 2048 to 16384 bits, or an Ed25519 key."],
+    ["Enter a GitHub username", "Enter a GitHub username"],
+    ["Enter a GitLab username", "Enter a GitLab username"],
+    ["Paste the whole signature, from -----BEGIN SSH SIGNATURE----- to -----END SSH SIGNATURE-----", "That is not the whole signature. Paste it from -----BEGIN SSH SIGNATURE----- to -----END SSH SIGNATURE-----."],
+    ['That signature is for "git", not "ghostly": run the command with -n ghostly', "This signature was made for \"git\", not for Ghostly. Run the command again with -n ghostly."],
+    ["The signature is not over this statement: copy the command again and sign exactly what it shows", "The signature is not over this statement. Copy the command again and sign exactly what it shows."],
+  ];
+
+  it.each(SSH_REFUSALS)("an SSH key proof's refusal is said in the app's language, with what to do: %s", (text, line) => {
+    expect(problemLine(new Error(text), english)).toBe(line);
+    for (const language of LANGUAGES.filter(l => l !== "en")) {
+      const t = translateWith(LOCALES[language], language);
+      const said = problemLine(new Error(text), t);
+      expect(said, language).not.toBe(line);
+      expect(said, language).not.toContain(t("errors.generic"));
+      expect(said, language).not.toContain("{{");
+    }
+  });
+
   it("an Iroh relay refused for plain http:// is the reason alone, with no \"Something went wrong\" in front", () => {
     const refused = new Error("Use an https:// relay address: http://relay.example.org/");
     expect(problemLine(refused, english)).toBe("Use an https:// relay address: http://relay.example.org/");

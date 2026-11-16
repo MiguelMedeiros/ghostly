@@ -189,17 +189,30 @@ test("a contact's app makes no WebRTC connection of its own in the web app while
       if (ENGINE[name] && ENGINE[name] !== browser.browserType().name()) continue;
       for (const on of [false, true]) {
         relayOnly = on;
-        packets = 0;
-        const tab = await context.newPage();
-        await tab.goto(`http://127.0.0.1:${PAGE_PORT}/bridge/${index}`, { waitUntil: "load" });
+        const open = async () => {
+          packets = 0;
+          const tab = await context.newPage();
+          await tab.goto(`http://127.0.0.1:${PAGE_PORT}/bridge/${index}`, { waitUntil: "load" });
+          return tab;
+        };
         if (on) {
+          const tab = await open();
           // The same page reached the server within this time with the setting off, a moment ago.
           await tab.waitForTimeout(2_500);
           expect(packets, `Hide my IP on, ${name}: the contact's STUN server is never reached`).toBe(0);
-        } else {
-          await expect.poll(() => packets, { message: `Hide my IP off, ${name}: as before, the connection is made`, timeout: 15_000 }).toBeGreaterThan(0);
+          await tab.close();
+          continue;
         }
-        await tab.close();
+        // The control: the case reaches the server with the setting off. Now and then, about once in a few hundred
+        // cases and any case, a runner's Chromium sends nothing from a fresh tab in 15 s, so the case gets up to three
+        // tabs. The arm above, which must send nothing, still gets one.
+        let reached = false;
+        for (let tab = 0; tab < 3 && !reached; tab++) {
+          const page = await open();
+          reached = await expect.poll(() => packets, { timeout: 15_000 }).toBeGreaterThan(0).then(() => true, () => false);
+          await page.close();
+        }
+        expect(reached, `Hide my IP off, ${name}: as before, the connection is made`).toBe(true);
       }
     }
   } finally {

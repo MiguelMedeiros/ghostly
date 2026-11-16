@@ -1,14 +1,20 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { mediaProblem, SCREEN_SHARE_ERROR_MS } from "@ghostly/react";
 import { CORNERS, useFloatingBox } from "../hooks/useFloatingBox";
 import type { CallDevices } from "../hooks/useCallDevices";
+import type { GroupCallError } from "../hooks/useGroupCall";
 import { applySpeaker } from "../lib/mediaDevices";
-import { useI18n } from "../contexts/I18nContext";
+import { useI18n, type Translate, type TranslationKey } from "../contexts/I18nContext";
+import { listText } from "../lib/listText";
 import { useBackCloses, useTabTrap } from "../hooks/useDismiss";
 import { useFocusKept } from "../hooks/useFocusKept";
 import { initial } from "../lib/initial";
 import { fillNames } from "../lib/fillNodes";
+import { errorText } from "../lib/errorText";
 import { callWindowShown } from "../lib/serviceWindows";
+import { mediaProblemKeys } from "../lib/mediaProblemText";
+import { openAppSettings } from "../desktop/androidCameraRefusal";
 import { DeviceMenu, DeviceNoticeBar } from "./CallOverlay";
 
 /** One person in a group call, as `useGroupCall` gives them: what they send, and the tracks to show and play. */
@@ -45,11 +51,33 @@ interface GroupCallViewProps {
   onReturnToChat?: () => void;
   layer?: HTMLElement | null;
   devices?: CallDevices | null;
+  /** In the room (`useGroupCall`'s status "connected"): said once, and who comes and goes after it is said too. */
+  connected?: boolean;
+  /** `useGroupCall`'s last error: a refused mic, camera or screen share is said for a few seconds, or until the next try. */
+  error?: GroupCallError | null;
   /** Someone's name by their key, as the group knows them: the node's own name for them is not believed. */
   nameOf?: (identity: string) => string;
+  /** Moves each time Join call is pressed while in the call: the small window opens whole again. */
+  raised?: number;
 }
 
 const MINI_KEY = "ghostly_group_call_mini";
+
+/**
+ * Why your mic, camera or screen did not come on, as the 1:1 call says it: a title, and the next step when there is one.
+ * Refused in the Android app, `android`: the line opens Android's settings, as the 1:1 call's notice does.
+ */
+function errorLines(error: GroupCallError, t: Translate): { title: string; next?: string; android?: boolean } {
+  if (error.action === "mic" || error.action === "camera") {
+    const problem = mediaProblem(error.cause);
+    if (problem === "denied" || problem === "unavailable") {
+      const { title, next, android } = mediaProblemKeys(problem, error.action);
+      return { title: t(title), next: t(next), android };
+    }
+  }
+  // The screen share's line (`screenShareErrorMessage`), or an error the table knows; else as it came.
+  return { title: errorText(error.message, t) };
+}
 
 /** Columns for `n` tiles: as square as it goes, so 4 is 2 × 2, 9 is 3 × 3 and 25 is 5 × 5. */
 function gridColumns(n: number): number {
@@ -66,6 +94,39 @@ function useShareOrder(sharing: string[]): string[] {
   const next = [...kept, ...sharing.filter((id) => !kept.includes(id))];
   order.current = next;
   return next;
+}
+
+/**
+ * What a screen reader hears as the call moves on: "Connected" once in the room, then who joined and who left, several
+ * at once in one line ("Ana, Bo joined"), and those who left on a line of their own. The people already there when you join are not read out one by one, and the active speaker and
+ * others' mics are left out: they change every few seconds.
+ */
+function useCallNews(participants: GroupCallParticipant[], connected: boolean, t: Translate): string[] {
+  const [news, setNews] = useState<string[]>([]);
+  const seen = useRef<Map<string, string> | null>(null);
+  const people = participants.map((p) => `${p.identity}\n${p.name}`).join("\n\n");
+  useEffect(() => {
+    if (!connected) {
+      seen.current = null;
+      setNews([]);
+      return;
+    }
+    const before = seen.current;
+    const now = new Map(participants.map((p) => [p.identity, p.name]));
+    seen.current = now;
+    if (!before) {
+      setNews([t("calls.connected")]);
+      return;
+    }
+    const joined = [...now].filter(([id]) => !before.has(id)).map(([, name]) => name);
+    const left = [...before].filter(([id]) => !now.has(id)).map(([, name]) => name);
+    const said = (names: string[], one: TranslationKey, many: TranslationKey) =>
+      names.length === 0 ? [] : [names.length === 1 ? t(one, { name: names[0]! }) : t(many, { names: listText(names, t) })];
+    const lines = [...said(joined, "calls.group.joined", "calls.group.joinedMany"), ...said(left, "calls.group.left", "calls.group.leftMany")];
+    if (lines.length) setNews(lines);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `people` stands for the participants
+  }, [connected, people, t]);
+  return news;
 }
 
 /** A track drawn in a <video>, muted: the sound plays from the participant's own <audio>. */
@@ -143,8 +204,18 @@ function Tile({ person, you, kind, speaking, name, face }: { person: GroupCallPa
  * A group call through the group's node: everyone's tile in a grid, the active speaker ringed, and a shared screen
  * large with the faces beside it. Drawn from `useGroupCall`'s state, passed in; it imports no LiveKit.
  */
-export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, onToggleScreen, onLeave, canShareScreen = false, pinned = false, onReturnToChat, layer, devices = null, nameOf: groupNameOf }: GroupCallViewProps) {
+export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, onToggleScreen, onLeave, canShareScreen = false, pinned = false, onReturnToChat, layer, devices = null, connected = true, error = null, nameOf: groupNameOf, raised = 0 }: GroupCallViewProps) {
   const { t } = useI18n();
+  // Each new error is said anew (its own alert), and goes after a few seconds; a failed join has no window to say it in.
+  const [said, setSaid] = useState({ error, id: 0, over: false });
+  if (said.error !== error) setSaid({ error, id: said.id + 1, over: false });
+  const shownError = said.error === error && !said.over && error?.action !== "join" ? error : null;
+  useEffect(() => {
+    if (!shownError) return;
+    const timer = setTimeout(() => setSaid((s) => (s.error === shownError ? { ...s, over: true } : s)), SCREEN_SHARE_ERROR_MS);
+    return () => clearTimeout(timer);
+  }, [shownError]);
+  const errorShown = shownError && errorLines(shownError, t);
   const infoId = useId();
   const [info, setInfo] = useState(false);
   const [miniPreference, setMiniState] = useState(() => localStorage.getItem(MINI_KEY) === "1");
@@ -157,6 +228,10 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
       // only a preference
     }
   };
+  // Join call pressed again while in the call: the small window opens whole, as its own button does.
+  useEffect(() => {
+    if (raised) setMini(false);
+  }, [raised]);
   // The sizes of the 1:1 call's small window (CallOverlay): on a touch screen its five buttons need 264 × 168.
   const phone = window.innerWidth < 768;
   const touch = typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches;
@@ -189,6 +264,8 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
   useFocusKept(box, () => box.current?.querySelector<HTMLElement>("[data-testid=call-devices]") ?? null);
 
   const { local, participants, activeSpeaker } = call;
+  // Who comes and goes is said by the group's own name for them too, not the node's.
+  const news = useCallNews(groupNameOf ? participants.map((p) => ({ ...p, name: groupNameOf(p.identity) })) : participants, connected, t);
   const everyone = [local, ...participants];
   // Everyone else by the group's own name for their key (WISP 602 § The reply): the node's name is not theirs to vouch for.
   const shown = (p: GroupCallParticipant) => (p === local || !groupNameOf ? p.name : groupNameOf(p.identity));
@@ -233,6 +310,8 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
         </svg>
       </button>
 
+      <div role="status" className="sr-only" data-testid="group-call-news">{news.map((line) => <p key={line}>{line}</p>)}</div>
+
       {participants.map((p) => p.tracks.audio && <TrackAudio key={p.identity} track={p.tracks.audio} speaker={devices?.speaker} />)}
 
       {mini ? (
@@ -269,6 +348,20 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
             </div>
           )}
         </>
+      )}
+
+      {shownError && errorShown && (
+        <p key={said.id} role="alert" data-testid="group-call-error" data-action={shownError.action}
+          className="call-share-error absolute bottom-32 max-md:bottom-[calc(8.5rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-10 w-max max-w-[calc(100%-2rem)] rounded-lg bg-black/70 px-3 py-2 text-center text-xs text-white">
+          <span className="block font-medium">{errorShown.title}</span>
+          {errorShown.next && <span className="block">{errorShown.next}</span>}
+          {errorShown.android && (
+            <button type="button" data-testid="group-call-error-settings" onClick={() => void openAppSettings()}
+              className="relative mt-1 cursor-pointer rounded underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent before:absolute before:-inset-y-3 before:-inset-x-2 before:content-['']">
+              {t("settings.noticesOpenSettings")}
+            </button>
+          )}
+        </p>
       )}
 
       {/* A headset unplugged, the chosen microphone back: said over the controls, in the whole window (the small one has no room). */}

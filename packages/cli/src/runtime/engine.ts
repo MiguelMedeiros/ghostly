@@ -13,6 +13,7 @@ import { nodeLocalFetch } from "../services";
 import { nodeFedimintSdk } from "./fedimint";
 import { installFileFetch } from "./fileFetch";
 import { nodeHoldFetch } from "./holdFetch";
+import { nodePublicFetch } from "./publicFetch";
 import { nodePublicRelay } from "./irohRelay";
 import { nodePushSend } from "./pushSend";
 import { openPersistentIndexedDb, type PersistentIndexedDb } from "./storage";
@@ -365,6 +366,8 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     pushSend: (request) => nodePushSend(request),
     // Held items are read from the contact's storage on public addresses only (./holdFetch.ts).
     holdFetch: nodeHoldFetch(),
+    // A contact's identity proof and public data are read on public addresses only, as a held item (./publicFetch.ts).
+    identityFetch: nodePublicFetch(),
     // libdatachannel keeps only its own candidates out of the offer under `iceTransportPolicy: "relay"`: its ICE still
     // checks from this machine's sockets. With Hide my IP from contacts on, chats and group edges go over the relays.
     webrtcIgnoresRelayOnly: true,

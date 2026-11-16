@@ -454,6 +454,10 @@ export const FILE_METHODS: Record<string, Method> = {
       try { await node(ctx).fileAction({ linkId, fileId, action }); } catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); }
       return { ...where, file: fileId, action, transfer: state(ctx).transfers[fileId] ?? null };
     }
+    // No longer here (its sender deleted it for everyone, its message was deleted here) or never was: no transfer and
+    // no record. Said as `file save` and `file wait` say it; `request` read the missing transfer as "all here" before,
+    // and the other actions answered the engine's "No such file transfer".
+    if (!state(ctx).transfers[fileId] && !(await fileStore.get(fileId).catch(() => undefined))) throw noFile(fileId);
     if (action === "resend" || action === "request") {
       const outgoing = fileId.startsWith(`${linkId}-out-`);
       if (outgoing !== (action === "resend")) throw new CliError("bad_request", outgoing ? "A file sent from here is sent again: file resend" : "A received file is asked for again: file request");

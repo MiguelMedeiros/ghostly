@@ -10,7 +10,7 @@
  * stopped there, and its place says why until the person closes it (WISP 1200 § Takedowns).
  */
 import { runnerFor, startApp, type AppStopReason, type AppView, type RunningApp } from "./broker";
-import { appSlot, chatApp, setChatApp, updateChatApp } from "./running";
+import { appSlot, chatApp, isNewestChoice, noteChoice, pressTurn, setChatApp, updateChatApp } from "./running";
 import { runnerPolicy } from "./runnerCheck";
 import { CHAT_CLOSED, LOCKED, lockedSince, registerRunningApp, takenDownSince, type AppOpener, type AppTakedown } from "./open";
 import type { AppsPlatform, LinkedFilesHost } from "../platform";
@@ -48,20 +48,19 @@ function warnStop(title: string, reason: AppStopReason): AppTakedown | null {
 export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, openAgainLabel, errorText, nameIn, onStop, linkedFiles }: WebOpenerOptions): AppOpener {
   /** The layer of each app open alone, by app and chat: the same one opened again is shown as it is. */
   const alone = new Map<string, HTMLElement>();
-  /** How many opens were asked in each chat: one that finishes after a newer one was asked there starts nothing. */
-  const asked = new Map<string, number>();
   const open: AppOpener = (ref, linkId, options) => start(ref, linkId, options);
   /** `replace`: Open again on a stopped layer, which goes only once the app can start, so a failure is said there. */
-  const start = async (ref: string, linkId: string | null | undefined, options: Parameters<AppOpener>[2], replace?: () => void): Promise<void | "shown"> => {
+  const start = async (ref: string, linkId: string | null | undefined, options: Parameters<AppOpener>[2], replace?: () => void): Promise<void | "shown" | "superseded"> => {
     const engine = apps();
     if (!engine) throw new Error("Apps cannot run in this app");
     const host: AppsPlatform = linkedFiles ? { ...engine, linkedFiles } : engine;
-    const turn = linkId ? (asked.get(linkId) ?? 0) + 1 : 0;
-    if (linkId) asked.set(linkId, turn);
+    // Each open is a press in its chat, in the order pressed; it becomes the person's newest choice there, as "Back to
+    // <app>" is, only once nothing can refuse it (`noteChoice` below): a refused one chose nothing.
+    const turn = linkId ? pressTurn(linkId) : 0;
     // The same app still running in that chat (hidden by Back) is only shown again: no entry read, no runner asked, so
     // it comes back offline too.
     const already = linkId && options?.again === undefined && appSlot(linkId) ? chatApp(linkId) : undefined;
-    if (linkId && already?.ref === ref && !already.stopped) { updateChatApp(linkId, { shown: true }); return "shown"; }
+    if (linkId && already?.ref === ref && !already.stopped) { noteChoice(linkId, turn); updateChatApp(linkId, { shown: true }); return "shown"; }
     // The profile locking while it opens (its files downloading, the runner checked) stops nothing yet: it never starts.
     const locked = lockedSince();
     // Taken down or uninstalled while it opens: not running yet, so the read that found it stops nothing of it.
@@ -91,12 +90,17 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
     const slot = linkId ? appSlot(linkId) : undefined;
     if (linkId && !slot) throw new Error(CHAT_CLOSED);
     if (linkId && slot) {
-      // Another open asked in this chat while this one was on its way (its files downloading, the runner checked) is
-      // what the person wants now: this one starts nothing, never stopping the newer one, and tells the contact nothing.
-      if (asked.get(linkId) !== turn) return "shown";
+      // Another open pressed in this chat after this one, and past its own checks while this one was on its way (its
+      // files downloading, the runner checked), or "Back to <app>" on the one running there, is what the person wants
+      // now: this one starts nothing, never stopping the app they chose, and tells the contact nothing, not even an
+      // "opened" card it still owes there (`sendOpenedCard`): it is not what runs. A newer one refused meanwhile
+      // (revoked, offline, locked) chose nothing: this one still opens.
+      if (!isNewestChoice(linkId, turn)) return "superseded";
       const there = chatApp(linkId);
       // Open again on a stopped app that the person closed meanwhile (Close, Back): it stays closed.
       if (options?.again !== undefined && there?.running !== options.again) throw new Error("closed while it opened again");
+      // Nothing refuses it now: it is the person's newest choice here, and an older open still on its way starts nothing.
+      noteChoice(linkId, turn);
       if (there?.ref === ref && !there.stopped) { updateChatApp(linkId, { shown: true }); return "shown"; }
       if (there && !there.stopped) there.running.stop();
       let running: RunningApp | null = null;

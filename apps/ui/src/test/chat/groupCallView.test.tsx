@@ -4,8 +4,13 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+const tauri = vi.hoisted(() => ({ invoke: vi.fn(async (_command: string) => undefined) }));
+vi.mock("@tauri-apps/api/core", async (importOriginal) => ({ ...await importOriginal<object>(), invoke: tauri.invoke }));
+
 import { GroupCallView, type GroupCallParticipant, type GroupCallState } from "../../components/GroupCallView";
 import type { CallDevices, DeviceNotice } from "../../hooks/useCallDevices";
+import type { GroupCallError } from "../../hooks/useGroupCall";
 import { EMPTY_DEVICES } from "../../lib/mediaDevices";
 import { FakeTrack } from "../../../../../packages/react/test/fakes";
 import { axeViolations } from "../axe";
@@ -217,6 +222,126 @@ describe("the group call window", () => {
     expect(tiles().map((t) => [t.dataset.identity, t.dataset.kind])).toEqual([["ana", "screen"]]);
     await user.click(screen.getByTestId("group-call-minimize"));
     expect(screen.getByTestId("group-call")).toHaveAttribute("data-mini", "false");
+  });
+});
+
+describe("what a screen reader hears", () => {
+  it("says Connected once in the room, then who joins and leaves, several in one line, and not who speaks or mutes", () => {
+    const handlers = { onToggleMic: vi.fn(), onToggleCamera: vi.fn(), onToggleScreen: vi.fn(), onLeave: vi.fn() };
+    const draw = (call: GroupCallState, connected: boolean) => <GroupCallView call={call} groupName="Community" connected={connected} {...handlers} />;
+    const people = (...ids: string[]) => ids.map((id) => person(id));
+    const { rerender } = renderApp(draw(state(0), false));
+    const news = () => [...screen.getByRole("status").querySelectorAll("p")].map((p) => p.textContent);
+    expect(news()).toEqual([]);
+
+    // The people already there when you get in are not read out one by one.
+    rerender(draw(state(0, { participants: people("ana", "bo") }), true));
+    expect(news()).toEqual(["Connected"]);
+
+    rerender(draw(state(0, { participants: people("ana", "bo", "cy") }), true));
+    expect(news()).toEqual(["Cy joined"]);
+
+    rerender(draw(state(0, { participants: [person("ana", { mic: false }), person("bo", { speaking: true }), person("cy")], activeSpeaker: "bo", local: person("me", { mic: false }) }), true));
+    expect(news()).toEqual(["Cy joined"]);
+
+    rerender(draw(state(0, { participants: people("cy", "dee", "eli") }), true));
+    expect(news()).toEqual(["Dee, Eli joined", "Ana, Bo left"]);
+
+    rerender(draw(state(0, { participants: people("dee") }), true));
+    expect(news()).toEqual(["Cy, Eli left"]);
+  });
+});
+
+describe("a mic, camera or screen that did not come on", () => {
+  const refused = (name: string) => Object.assign(new Error("Permission denied"), { name });
+  const micRefused = (): GroupCallError => ({ action: "mic", message: "Permission denied", cause: refused("NotAllowedError") });
+  const withError = (error: GroupCallError | null, props: Partial<Parameters<typeof GroupCallView>[0]> = {}, language?: "pt") => {
+    const handlers = { onToggleMic: vi.fn(), onToggleCamera: vi.fn(), onToggleScreen: vi.fn(), onLeave: vi.fn() };
+    const draw = (next: GroupCallError | null) => <GroupCallView call={state(2, { local: person("me", { mic: false }) })} groupName="Community" canShareScreen {...handlers} {...props} error={next} />;
+    const result = renderApp(draw(error), language && { language });
+    return { ...result, setError: (next: GroupCallError | null) => result.rerender(draw(next)) };
+  };
+
+  it("says a mic refused at the join as an alert, with where to allow it", async () => {
+    withError(micRefused());
+    const alert = screen.getByRole("alert");
+    expect(alert).toBe(screen.getByTestId("group-call-error"));
+    expect(alert).toHaveTextContent("No access to the micAllow access in your browser or system settings.");
+    expect(screen.getByRole("dialog", { name: "Community" })).toContainElement(alert);
+    expect(await axeViolations(screen.getByTestId("group-call"))).toEqual([]);
+  });
+
+  it("says a camera not found, and a screen share refused or not supported, in the 1:1 call's words", () => {
+    const { setError } = withError({ action: "camera", message: "Requested device not found", cause: refused("NotFoundError") });
+    expect(screen.getByRole("alert")).toHaveTextContent("No camera found, so video is offConnect one, or close the app using it.");
+    setError({ action: "screen", message: "Screen sharing is blocked. Allow screen recording for this app in your system's privacy settings.", cause: refused("NotAllowedError") });
+    expect(screen.getByRole("alert")).toHaveTextContent("Screen sharing is blocked. Allow screen recording for this app in your system's privacy settings.");
+    setError({ action: "screen", message: "Screen sharing is not available here" });
+    expect(screen.getByRole("alert")).toHaveTextContent(/^Screen sharing is not available here$/);
+  });
+
+  it("says one it does not know as it came, and in the small window too", () => {
+    withError({ action: "mic", message: "could not publish the track", cause: new Error("could not publish the track") }, { pinned: true });
+    expect(screen.getByTestId("group-call")).toHaveAttribute("data-mini", "true");
+    expect(screen.getByRole("alert")).toHaveTextContent(/^could not publish the track$/);
+  });
+
+  it("is said in the app's language", () => {
+    withError(micRefused(), {}, "pt");
+    expect(screen.getByRole("alert")).toHaveTextContent("Sem acesso ao microfonePermita o acesso nos ajustes do navegador ou do sistema.");
+  });
+
+  it("goes after a few seconds, is said anew at the next failed try, and goes when a try works", () => {
+    vi.useFakeTimers();
+    try {
+      const { setError } = withError(micRefused());
+      const first = screen.getByRole("alert");
+      act(() => { vi.advanceTimersByTime(7900); });
+      expect(screen.getByRole("alert")).toBe(first);
+      act(() => { vi.advanceTimersByTime(200); });
+      expect(screen.queryByRole("alert")).toBeNull();
+
+      // Pressed again, refused again: the same words, a new alert a screen reader says.
+      setError(micRefused());
+      const again = screen.getByRole("alert");
+      expect(again).toHaveTextContent("No access to the mic");
+      setError(micRefused());
+      expect(screen.getByRole("alert")).not.toBe(again);
+
+      setError(null);
+      expect(screen.queryByRole("alert")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // The Android app said "Allow … in Android's settings" with no way there, as the 1:1 call's notice offers: once
+  // Android no longer asks ("Don't allow" twice), only its settings allow the microphone again.
+  it("in the Android app, opens the app's page in Android's settings, as the 1:1 call does", async () => {
+    const agent = navigator.userAgent;
+    Object.defineProperty(navigator, "userAgent", { value: "Mozilla/5.0 (Linux; Android 15; sdk_gphone64_x86_64) AppleWebKit/537.36 Chrome/124.0 Mobile Safari/537.36", configurable: true });
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+    try {
+      const { user } = withError(micRefused());
+      const alert = screen.getByRole("alert");
+      expect(alert).toHaveTextContent("No access to the micAllow the microphone (and camera) in Android's settings for Ghostly.");
+      await user.click(within(alert).getByRole("button", { name: "Open settings" }));
+      expect(tauri.invoke).toHaveBeenCalledWith("open_app_settings");
+      expect(await axeViolations(screen.getByTestId("group-call"))).toEqual([]);
+    } finally {
+      Object.defineProperty(navigator, "userAgent", { value: agent, configurable: true });
+      delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+    }
+  });
+
+  it("offers no Open settings in a browser", () => {
+    withError(micRefused());
+    expect(within(screen.getByRole("alert")).queryByRole("button")).toBeNull();
+  });
+
+  it("says nothing for a failed join: the call's button says that one", () => {
+    withError({ action: "join", message: "could not connect" });
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });
 

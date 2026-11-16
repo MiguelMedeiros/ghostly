@@ -150,12 +150,24 @@ export function parseArgs(argv: readonly string[], spec: Record<string, OptionSp
 function unknownOption(arg: string, all: Record<string, OptionSpec>, parsing: ParseFor | undefined, help = parsing ? `ghostly help ${parsing.command}` : undefined): CliError {
   const names = Object.entries(all).flatMap(([name, o]) => (o.type === "boolean" ? [name, `no-${name}`] : [name]));
   const near = nearest(arg.replace(/^--?/, ""), names);
+  const privateKey = /PRIVATE KEY/.test(arg);
   const hints = [
     ...(near ? [`did you mean --${near}?`] : []),
+    ...(privateKey ? ["never paste a private key anywhere: Ghostly only needs the public key;"] : []),
     ...(parsing?.text && /^-[^-]/.test(arg) ? ["put -- before text that starts with a dash;"] : []),
     ...(help ? [help] : []),
   ];
-  return new CliError("usage", `Unknown option ${arg}${parsing ? ` for ghostly ${parsing.command}` : ""}${hints.length ? ` (${hints.join(" ")})` : ""}`);
+  return new CliError("usage", `Unknown option ${shownOption(arg, privateKey)}${parsing ? ` for ghostly ${parsing.command}` : ""}${hints.length ? ` (${hints.join(" ")})` : ""}`);
+}
+
+/**
+ * An unknown option as its refusal names it: a pasted private key (a PEM or OpenPGP block starts with dashes), a word
+ * with a line break or one longer than any option's name is described, not printed (docs/CLI.md "Secrets stay hidden").
+ * A seed, an nsec, a hex key or a Cashu token is longer than 40 characters too.
+ */
+function shownOption(arg: string, privateKey: boolean): string {
+  if (privateKey) return "(a private key)";
+  return arg.length > 40 || /[\r\n]/.test(arg) ? `(a ${arg.length}-character word)` : arg;
 }
 
 /**

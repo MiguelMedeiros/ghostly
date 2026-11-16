@@ -92,6 +92,36 @@ export function setChatApp(linkId: string, app: ChatApp | null): void {
   changed();
 }
 
+/**
+ * Each chat's presses, in the order pressed: an Open (`webOpener.ts`), or "Back to <app>" on the one running there
+ * (`ChatAppResume`). An Open counts as the person's choice only once nothing can refuse it any more (`noteChoice`):
+ * one refused (revoked, offline, locked) chose nothing, so an older one still on its way there still opens.
+ */
+const pressed = new Map<string, number>();
+/** The newest press that counted as the person's choice in each chat (`noteChoice`). */
+const choices = new Map<string, number>();
+
+/** An Open pressed in the chat `linkId`: its place in the order pressed, not a choice yet (`noteChoice`). */
+export function pressTurn(linkId: string): number {
+  const turn = (pressed.get(linkId) ?? 0) + 1;
+  pressed.set(linkId, turn);
+  return turn;
+}
+
+/**
+ * The person chose what runs in the chat `linkId` now (`turn`, from `pressTurn`; a new press when not given): an open
+ * pressed before it, still on its way there, starts nothing. Call it only once `isNewestChoice(linkId, turn)`.
+ */
+export function noteChoice(linkId: string, turn = pressTurn(linkId)): number {
+  choices.set(linkId, turn);
+  return turn;
+}
+
+/** Whether no press after `turn` (from `pressTurn`) counted as the person's choice in the chat `linkId` yet. */
+export function isNewestChoice(linkId: string, turn: number): boolean {
+  return (choices.get(linkId) ?? 0) <= turn;
+}
+
 /** Shows or hides the app in `linkId`, or puts it over the whole chat (`wide`). */
 export function updateChatApp(linkId: string, patch: Partial<Pick<ChatApp, "shown" | "wide" | "serving">>): void {
   const app = apps.get(linkId);

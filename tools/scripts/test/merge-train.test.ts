@@ -3,7 +3,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { aloneMark, appTrainIn, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, failedJobs, gateOf, gitLayer, HOLD, HOLD_HELP, holdBatch, holdText, isBatch, LABEL, listBases, MAX_WAIT, MIN_BATCH, localBases, missedWakes, order, ordinal, pickBatch, PLANNED_JOBS, positionText, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting, vouchedAt, wakeIn } from "../merge-train.mjs";
+import { aloneMark, appTrainIn, inTurns, READS_AT_ONCE, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, failedJobs, gateOf, gitLayer, HOLD, HOLD_HELP, holdBatch, holdText, isBatch, LABEL, listBases, MAX_WAIT, MIN_BATCH, localBases, missedWakes, order, ordinal, pickBatch, PLANNED_JOBS, positionText, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting, vouchedAt, wakeIn } from "../merge-train.mjs";
 
 type Pr = { number: number; title: string; body: string; draft: boolean; sha: string; branch: string; fork: boolean; labels: string[]; createdAt: string; closedAt?: string; open: boolean; base: string; merged?: boolean; author?: string; nodeId?: string; editor?: string };
 const green = [{ name: "CI Success", status: "completed", conclusion: "success", started_at: "2026-10-08T00:00:00Z", id: 1 }];
@@ -393,6 +393,37 @@ describe("the line", () => {
   });
 });
 
+describe("work in turns", () => {
+  it("starts the items in order, at most `limit` at once", async () => {
+    const started: number[] = [];
+    let going = 0;
+    let most = 0;
+    await inTurns([1, 2, 3, 4, 5, 6, 7], 3, async (n: number) => {
+      started.push(n);
+      most = Math.max(most, ++going);
+      await new Promise((r) => setTimeout(r, 8 - n));
+      going--;
+    });
+    expect(started).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(most).toBe(3);
+  });
+
+  it("starts nothing after a failure, and throws it once the ones going have ended", async () => {
+    const ended: number[] = [];
+    const failing = inTurns([1, 2, 3, 4, 5], 2, async (n: number) => {
+      if (n === 1) throw new Error("one");
+      await new Promise((r) => setTimeout(r, 5));
+      ended.push(n);
+    });
+    await expect(failing).rejects.toThrow("one");
+    expect(ended).toEqual([2]);
+  });
+
+  it("does nothing for no items", async () => {
+    await expect(inTurns([], 4, async () => { throw new Error("never"); })).resolves.toBeUndefined();
+  });
+});
+
 describe("a run of the train", () => {
   it("takes a pull request with queue:priority and no queue as in the line, first", async () => {
     const repo = fakeRepo();
@@ -604,11 +635,33 @@ describe("a run of the train", () => {
     repo.mergeStates.set(12, ["unknown", "unknown", "dirty"]);
     const pauses: number[] = [];
     await repo.run({ pause: async (ms: number) => void pauses.push(ms) });
-    expect(repo.pullReads).toEqual([11, 11, 12, 12]);
+    // Both are read at once (`inTurns`), so their reads interleave.
+    expect([...repo.pullReads].sort()).toEqual([11, 11, 12, 12]);
     expect(pauses).toEqual([2000, 2000]);
     expect(repo.comments.get(11)![0].body).toMatch(conflictSaid);
     // Still unknown after the second ask: today's reason, and the next run asks again.
     expect(repo.comments.get(12)![0].body).toMatch(/2nd\*\*\. Waiting: CI Success has not passed on its last commit yet\. It keeps its place\.$/);
+  });
+
+  it("reads the pull requests in line a few at a time, not one after another", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12, 13, 14, 15, 16]) repo.add(n, { ci: running });
+    // Every read of a pull request's events takes a moment: how many are asked at once.
+    const events = repo.gh.events;
+    let going = 0;
+    let most = 0;
+    repo.gh.events = async (n: number) => {
+      most = Math.max(most, ++going);
+      await new Promise((r) => setTimeout(r, 5));
+      going--;
+      return events(n);
+    };
+    const log: string[] = [];
+    await repo.run({ log });
+    expect(most).toBe(READS_AT_ONCE);
+    // The same line as one at a time: all six read, each in its place.
+    expect(log[0]).toBe("dev: 6 in line, 0 batch(es) open.");
+    for (const [i, n] of [11, 12, 13, 14, 15, 16].entries()) expect(repo.comments.get(n)![0].body).toContain(`**${ordinal(i + 1)}**.`);
   });
 
   it("reads no mergeable state for a pull request that boards, or one that waits on a draft or a hold", async () => {

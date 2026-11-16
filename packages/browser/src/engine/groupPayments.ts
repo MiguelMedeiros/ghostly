@@ -69,9 +69,15 @@ const fieldsOf = (frame: GroupPayFrame): Omit<GroupPayNote, "state" | "by" | "cl
   ...(frame.x ? { test: true } : {}), ...(frame.m ? { memo: frame.m } : {}), ...(frame.a ? { ask: true } : {}), createdAt: frame.ts,
 });
 
-/** Whether `author`'s `frame` may count for the note kept so far: one about another payment under the same id never does. */
+/**
+ * Whether `author`'s `frame` may count for the note kept so far: one about another payment under the same id never
+ * does. Who pays is the note's too: a request made to one member is claimed by that member alone, and a member who did
+ * not know a request was made to the group claims it as itself. A request nobody described yet takes any claim: the
+ * payee's description keeps only those that fit (mergeGroupPay).
+ */
 const believed = (current: GroupPayNote | undefined, frame: GroupPayFrame, author: string, members: ReadonlySet<string>): boolean =>
-  mayAuthor(frame, author, members, current) && (!current || (current.kind === (frame.k === "req" ? "request" : "payment") && current.to === frame.to));
+  mayAuthor(frame, author, members, current) && (!current || (current.kind === (frame.k === "req" ? "request" : "payment") && current.to === frame.to
+    && (current.from === frame.f || (frame.k === "req" && (!!current.undescribed || (current.from === "*" && author !== frame.to))))));
 
 /**
  * The note after `author` said `frame`, or undefined when that changes nothing (or may not be believed). What a
@@ -87,6 +93,11 @@ export function mergeGroupPay(current: GroupPayNote | undefined, frame: GroupPay
   // still `undescribed` stays out of the group's history (GroupPayments.write), so no member is shown asking for or
   // sending what another member made up in their name.
   if (author === initiator) next = (({ undescribed: _, ...rest }) => rest)({ ...next, ...fields });
+  // A request made to one member: only that member's claim, of those that came before the payee's note, stays.
+  if (author === initiator && next.from !== "*" && next.claims?.some(k => k !== next.from)) {
+    const claims = next.claims.filter(k => k === next.from);
+    next = claims.length ? { ...next, claims } : (({ claims: _, ...rest }) => rest)(next);
+  }
   if (frame.k === "req" && author !== frame.to) {
     // A payer's word about its own payment: a claim, not the request's state.
     const claims = frame.st === "sent" ? [...new Set([...(next.claims ?? []), author])].sort() : (next.claims ?? []).filter(k => k !== author);
@@ -128,10 +139,12 @@ export function authoredNote(p: PaymentView, at: Placement, all: readonly Paymen
     ...(testOf(p, federationNetwork) ? { x: 1 as const } : {}), ...(p.memo ? { m: p.memo.slice(0, 140) } : {}), ...(p.ask ? { a: 1 as const } : {}), ts: p.createdAt };
   if (p.kind === "request" && p.direction === "out") {
     // Mine to be paid: open until paid, and who paid it when my wallet knows (ecash comes in on the payer's edge);
-    // never from a member's claim, which is only its word.
+    // never from a member's claim, which is only its word. Only ecash that could have settled it names its payer: in full,
+    // from the mint it was settled in, never notes (a group's request names no federation).
     const from = p.group ? "*" : at.peer;
     if (!from) return null;
-    const payment = all.find(x => x.kind === "payment" && x.direction === "in" && x.requestId === p.id && x.state === "settled");
+    const payment = all.find(x => x.kind === "payment" && x.direction === "in" && x.requestId === p.id && x.state === "settled"
+      && !x.federation && x.amount >= p.amount && (!p.mint || x.mint === p.mint));
     const by = !p.group ? from : payment ? memberOf(payment.linkId) : undefined;
     const st = p.state === "settled" ? "paid" : p.state === "failed" || p.state === "reclaimed" ? "closed" : "open";
     return { ...base, k: "req", f: from, to: at.me, st, ...(st === "paid" && by ? { by } : {}) };

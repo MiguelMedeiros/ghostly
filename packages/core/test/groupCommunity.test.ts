@@ -1420,6 +1420,45 @@ describe("admissions by members while the admin is away", { timeout: 120_000 }, 
     expect(COMMUNITY_LIMITS.memberAdmissions).toBe(bound);
   });
 
+  it("a key a member let in that leaves soon after counts too, and the admin's admission does not clear it", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob"), mallory = await net.admit(alice, "mallory");
+    await net.meet(bob, mallory);
+    alice.online = false;
+    const g = mallory.session.id;
+    // Mallory lets in a key it made up, then commits that key's own leave: the roster stays as it was.
+    const churn = async () => {
+      const { seed, pubKeyZ32: s } = createIdentity();
+      await mallory.session.admit(s);
+      const h = communityCommitHash(mallory.session.top);
+      mallory.session.state.pendingLeaves = [{ s, ls: toBase64Url(sign(leaveStatement(g, s), seed)), ls3: toBase64Url(sign(leaveStatement3(g, s, h), seed)) }];
+      expect(await mallory.session.commitPendingLeaves()).toBe(1);
+    };
+    const pairs = async () => {
+      let n = 0;
+      for (; n < bound; n++) { try { await churn(); } catch (e) { expect(String(e)).toMatch(/admin/); break; } }
+      await net.settle();
+      return n;
+    };
+    expect(await pairs()).toBe(bound / 2);
+    expect(bob.session.roster).toHaveLength(3);
+    const past = forge(mallory, mallory.session.top, mallory.session.roster, { k: "add", s: madeUp() }).commit;
+    expect(await bob.session.handle(mallory.session.myKey, commitFrame(past))).toBe(false);
+    // The admin back lets the next ones in at the door: the leaves still count, so each admission opens the members'
+    // door only for what they leave of the bound, and once as many keys left as the bound, not at all.
+    alice.online = true;
+    await net.meet(alice, bob); await net.meet(alice, mallory);
+    let left = bound / 2, rounds = 0;
+    for (let n = 1; n; rounds++) { await net.admit(alice, `door${rounds}`); left += n = await pairs(); }
+    expect(left).toBe(bound);
+    expect(rounds).toBeLessThan(8);
+    await expect(mallory.session.admit(madeUp())).rejects.toThrow(/admin/);
+    const again = forge(mallory, mallory.session.top, mallory.session.roster, { k: "add", s: madeUp() }).commit;
+    expect(await bob.session.handle(mallory.session.myKey, commitFrame(again))).toBe(false);
+    expect(bob.session.roster).toHaveLength(3 + rounds);
+  });
+
   it("the admin removing a member takes out everyone that member let in, and whom those let in, and no one else", async () => {
     const net = new Net();
     const alice = net.create("alice");

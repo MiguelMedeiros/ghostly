@@ -15,7 +15,7 @@ import {
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
 import { checkShownName } from "./profiles";
-import { nobodyElseIn, outOf, purgeMessage, waitForConfirmed, waitForEdit, waitForGroupFrame, waitForMessage, waitForRemoval } from "./waits";
+import { ended, goesOn, nobodyElseIn, outOf, purgeMessage, waitForConfirmed, waitForEdit, waitForGroupFrame, waitForMessage, waitForRemoval } from "./waits";
 import { STATUS_CARD_METHODS, secretIn } from "./statusCards";
 import { BUTTON_METHODS, buttonsCard, pressable } from "./buttons";
 import { forgetHold, HOLD_MAX_MINUTES, holdChat, holdOf, releaseHold } from "./holds";
@@ -293,7 +293,7 @@ async function letIn(ctx: ApiContext, groupId: string, link: string, held: Group
   const own = held?.entryLink ? decodeGroupEntryLink(held.entryLink) : null;
   if (held?.status === "active" && opened && own?.host !== opened.host) {
     const kept = seen(state(ctx))?.others?.some((o) => "link" in o && decodeGroupEntryLink(o.link)?.host === opened.host);
-    const pick = `keep the one you are in (ghostly engine keepGroup '{"groupId":"${groupId}"}') or take the link's instead (ghostly engine switchGroup '{"groupId":"${groupId}","to":"<its link, from group show --show-secret>"}')`;
+    const pick = `keep the one you are in (ghostly engine keepGroup '{"groupId":"${groupId}"}') or take the link's instead, which leaves the one you are in and deletes its history on this device (ghostly engine switchGroup '{"groupId":"${groupId}","to":"<its link, from group show --show-secret>"}' --yes)`;
     return { group: groupId, joined: false, stage: null, warning: kept
       ? `Not joined: you are in a group under this link's id already, and only a group's welcome says whose a link is, so the link was kept beside that group and knocks nowhere. ghostly group show ${id} lists it under "others": ${pick}`
       : `Not joined: you are in a group under this link's id already, and as many other groups as are kept already wait beside it to be picked, so the link was not kept. ghostly group show ${id} lists them under "others": ${pick}, then open the link again` };
@@ -740,14 +740,25 @@ const METHODS: Record<string, Method> = {
       if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
       // Gone here at once: the fold need not wait for the contact or an edge.
       if (purge) await purgeMessage(ctx, message);
+      // A wait that ends short: the message is gone here all the same (out of the folder with `--purge`), so its timeout
+      // says so and names it as the answer would. The group's said "it stays in the group", as for an edit, and neither
+      // said the purge ran: a script saw exit 4, and its retry was refused as "No message … of yours".
+      const goneHere = async <T>(wait: () => Promise<T>, text?: string): Promise<T> => {
+        try { return await wait(); } catch (error) {
+          if (!(error instanceof CliError) || error.code !== "timeout") throw error;
+          throw new CliError("timeout", text ?? error.message, { ...error.details, deleted: message.id, ...purged });
+        }
+      };
       // `messageId`, as every command that makes or changes a message names it; `deleted` kept for callers that read
       // it (agents#1582).
       if (target.group) {
         const e = result.e;
-        const edges = !e ? 0 : wait === "sent" ? await waitForGroupFrame(ctx, target.id, message.id, e, ms) : node(ctx).groupTaken({ groupId: target.id, messageId: message.id, edit: e });
+        const edges = !e ? 0 : wait === "sent"
+          ? await goneHere(() => waitForGroupFrame(ctx, target.id, message.id, e, ms), `${ended(ctx, ms)}: the message is gone here and no member's edge took its removal yet (it goes when one opens). Its removal ${goesOn(ctx)}`)
+          : node(ctx).groupTaken({ groupId: target.id, messageId: message.id, edit: e });
         return { group: target.id, messageId: message.id, deleted: message.id, everyone: true, sent: edges > 0, edges, ...purged };
       }
-      if (wait === "confirmed") await waitForRemoval(ctx, target.linkId, message.id, ms);
+      if (wait === "confirmed") await goneHere(() => waitForRemoval(ctx, target.linkId, message.id, ms));
       return { chat: target.id, messageId: message.id, deleted: message.id, everyone: true, confirmed: !node(ctx).removalPending({ linkId: target.linkId, messageId: message.id }), ...purged };
     }
     // A group's message is deleted for everyone only (the apps forget none on one device): a group named without the

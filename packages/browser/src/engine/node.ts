@@ -38,6 +38,7 @@ import { ContactLinks } from './contactLinks';
 import { ContactAsks } from './contactAsks';
 import { NostrSocial, effectiveNostrSettings } from './nostrSocial';
 import { PublicProfiles, type ProfileSubject } from './publicProfiles';
+import { boundedIdentityFetch } from '../proofs/verify';
 import { PublicActivity } from './publicActivity';
 import { normalizeNostrRelays } from '../nostr/relay';
 import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrNoteView, NostrPublishResult } from '../nostr/types';
@@ -439,6 +440,11 @@ interface LiveLink {
   files: LinkFiles;
   /** The files of mine said on the DHT floor and not seen there yet, by floor id; read once in a run (`floorFilesOf`). */
   floorFiles?: Promise<Map<string, string>>;
+  /**
+   * Something of mine left the DHT floor while no link ran (`withdrawFromFloor`), and its envelope may still be on the
+   * relays: the chat's next link puts its first envelope out at once, not after the start's quiet (`STARTUP_QUIET_MS`).
+   */
+  floorReplace?: boolean;
   /** The chat's connection story (paired chats), made from `stored.transportLog` on first use. */
   transportLog?: TransportLog;
   /** When a round trip alone last wrote the story to disk (`noteRtt`), and whether one shown since is not on disk yet. */
@@ -704,6 +710,11 @@ export interface NodeOptions {
    * one that connects only to public addresses, which a page cannot check (it has no resolver).
    */
   holdFetch?: typeof fetch;
+  /**
+   * How an identity's proof and public data are read (WISP 300, PUBLIC-PROFILES.md) at the addresses a contact's proof
+   * names. Default: `fetch`. The CLI passes one that connects only to public addresses, which a page cannot check.
+   */
+  identityFetch?: typeof fetch;
   /** How to reach Pkarr. Default: HTTP relays, the only way out of a browser. */
   transport?: PkarrTransport;
   pollIntervals?: PollIntervals;
@@ -1510,6 +1521,7 @@ export class GhostlyNode implements EngineImplementation {
     },
     linkIds: () => [...this.links.keys()],
     online: () => this.networkOn,
+    fetcher: (...request) => (this.options.identityFetch ?? globalThis.fetch)(...request),
     relayOnly: () => this.settings.relayOnly === true,
     emit: () => { this.emitState(); this.did.changed(); void this.publicProfiles.prune().catch(() => {}); this.publicActivity.prune(); },
     redraw: linkId => this.chatChanged(linkId),
@@ -1665,6 +1677,7 @@ export class GhostlyNode implements EngineImplementation {
   private readonly publicProfiles = new PublicProfiles({
     enabled: () => this.settings.publicProfiles !== false,
     online: () => this.networkOn,
+    fetch: boundedIdentityFetch({ online: () => this.networkOn, fetcher: (...request) => (this.options.identityFetch ?? globalThis.fetch)(...request) }),
     emit: () => this.emitState(),
     eligible: () => this.profileSubjects(),
     nostrRelays: () => effectiveNostrSettings(this.settings.nostr).relays,
@@ -1676,6 +1689,7 @@ export class GhostlyNode implements EngineImplementation {
   private readonly publicActivity = new PublicActivity({
     enabled: () => this.settings.publicProfiles !== false,
     online: () => this.networkOn,
+    fetch: boundedIdentityFetch({ online: () => this.networkOn, fetcher: (...request) => (this.options.identityFetch ?? globalThis.fetch)(...request) }),
     eligible: () => this.profileSubjects(),
     nostrRelays: () => effectiveNostrSettings(this.settings.nostr).relays,
     own: () => this.ownProfileSubjects(),
@@ -4093,6 +4107,7 @@ export class GhostlyNode implements EngineImplementation {
     if (filesEnded) setTimeout(() => void live.link?.stop(true), FILES_END_MS);
     else void live.link?.stop(true);
     void live.caps?.stop();
+    this.unshareServicesOf(live.stored.peerPubKeyZ32);
     this.identities.forget(linkId);
     this.nostrSocial.forgetLink(linkId);
     this.hold.forgetLink(linkId);
@@ -5094,7 +5109,7 @@ export class GhostlyNode implements EngineImplementation {
     // A text of mine still on the DHT floor, or an edit of it, leaves it (`withdrawDht`): the floor went on saying it for
     // minutes to a contact whose removal never goes there, and the chat's row kept its words. Awaited last, once the row
     // is gone: the floor's queue may hold a read of the away contact's mailbox (3 to 10 s), which the row waited out.
-    const withdrawn = message?.sender === "me" && message.wireId && live.link?.dhtHolds(message.wireId) ? live.link.withdrawDht(message.wireId).catch(() => {}) : undefined;
+    const withdrawn = message?.sender === "me" && message.wireId && (!live.link || live.link.dhtHolds(message.wireId)) ? this.withdrawFromFloor(live, message.wireId) : undefined;
     // A row of the contact's in the joined line's words that goes here was stored first: no later one is that line.
     if (message && contactJoinRow(message) && !live.stored.group && !live.stored.peerSpoke) {
       this.contactSpoke.add(live);
@@ -5388,13 +5403,29 @@ export class GhostlyNode implements EngineImplementation {
   private readonly floorSaying = new Set<string>();
 
   /**
+   * A text of mine, or a file's offer, deleted here leaves the DHT floor (`withdrawDht`). With no link running (the
+   * profile offline, the chat not started yet), the floor's saved state lets go of it instead: kept there, the next
+   * start published it again to the away contact, and `--purge` left its words in the chat's row (agents#6005). Its
+   * envelope may still be on the relays: the chat's next link puts its first one out at once (`floorReplace`).
+   */
+  private async withdrawFromFloor(live: LiveLink, floorId: string): Promise<void> {
+    if (live.link) { await live.link.withdrawDht(floorId).catch(() => {}); return; }
+    const state = live.stored.dhtDeliveryState, pending = state?.pending;
+    if (!state || !pending || (pending.message[0] !== floorId && pending.edit?.[0] !== floorId)) return;
+    const { pending: _withdrawn, ...kept } = state;
+    live.stored = { ...live.stored, dhtDeliveryState: kept };
+    if (pending.attempts > 0 && pending.expires > Date.now()) live.floorReplace = true;
+    await db.patchLink(live.stored.id, { dhtDeliveryState: kept }).catch(() => {});
+  }
+
+  /**
    * A file of mine said on the floor and deleted here before it went live: the floor stops saying it (`withdrawDht`: a
    * new envelope without it takes its place, as for a text; only settled, the relays kept its offer for minutes and a
    * contact who read them then got its bubble), and the next session that carries files/3 tells a bubble the contact
    * already has that it was cancelled (`sayWithdrawnFiles`).
    */
   private async withdrawFloorFile(live: LiveLink, wireId: string): Promise<void> {
-    await live.link?.withdrawDht(dhtFileId(wireId)).catch(() => {});
+    await this.withdrawFromFloor(live, dhtFileId(wireId));
     live.stored = { ...live.stored, withdrawnFiles: [...(live.stored.withdrawnFiles ?? []).filter(id => id !== wireId), wireId].slice(-64) };
     await db.patchLink(live.stored.id, { withdrawnFiles: live.stored.withdrawnFiles });
   }
@@ -7538,6 +7569,20 @@ export class GhostlyNode implements EngineImplementation {
     this.servicesChanged();
   }
 
+  /**
+   * A deleted chat's contact loses the services shared with it, unless another chat with the same key is left. Kept,
+   * the grant had no chat to be turned off from, and the same invite joined again (the same key) was served again.
+   */
+  private unshareServicesOf(peerPubKeyZ32: string): void {
+    if (!peerPubKeyZ32 || [...this.links.values()].some(({ stored }) => !stored.group && stored.peerPubKeyZ32 === peerPubKeyZ32)) return;
+    const granted = this.services.filter((s) => s.sharedWith?.includes(peerPubKeyZ32));
+    for (const service of granted) {
+      service.sharedWith = service.sharedWith!.filter((k) => k !== peerPubKeyZ32);
+      void db.putService(service);
+    }
+    if (granted.length) this.servicesChanged();
+  }
+
   setServiceEnabled({ serviceId, enabled }: { serviceId: string; enabled: boolean }): void {
     const service = this.services.find((s) => s.id === serviceId);
     if (!service || service.enabled === enabled) return;
@@ -9214,8 +9259,9 @@ export class GhostlyNode implements EngineImplementation {
         await db.patchLink(linkId, { dhtDeliveryState: state });
         live.stored = { ...live.stored, dhtDeliveryState: state };
       },
-        // Started again: the first control envelope goes after the links' first packets (a text or a receipt at once).
-        firstControlAfterMs: STARTUP_QUIET_MS,
+        // Started again: the first control envelope goes after the links' first packets (a text or a receipt at once),
+        // or at once in the place of one the relays may still hold with something withdrawn meanwhile (`floorReplace`).
+        firstControlAfterMs: live.floorReplace ? 0 : STARTUP_QUIET_MS,
         ...(this.options.peerDhtPollMs ? { peerDhtPollMs: this.options.peerDhtPollMs } : {}),
         // The capability record's revision rides every envelope; a newer one from the contact is read (WISP 03).
         capsRev: () => live.caps?.rev, peerCapsRev: rev => live.caps?.peerRev(rev),
@@ -9557,6 +9603,8 @@ export class GhostlyNode implements EngineImplementation {
       }, () => this.links.get(linkId) === live),
     });
     const link = live.link;
+    // Said once: this link's first envelope takes the place of the one a withdrawal while no link ran left (`floorReplace`).
+    live.floorReplace = undefined;
     // Kept by the link across its sessions: said on each one whose contact offers status/1 (a new link says none).
     const said = stored.profile && !stored.group ? this.statusToSay() : {};
     if (said.presence || said.status) link.setStatus(said);

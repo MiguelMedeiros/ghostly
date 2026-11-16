@@ -31,7 +31,9 @@ const asks = (method: string) => fakeEngine.calls.filter((c) => (c.method as str
 class FakeKeyProvider {
   static providers: FakeKeyProvider[] = [];
   readonly keys: number[][] = [];
-  readonly setKey = vi.fn(async (key: ArrayBuffer) => { this.keys.push([...new Uint8Array(key)]); });
+  /** The call's own provider (`GroupCallKeyProvider`): each epoch's key in its own slot. */
+  readonly setEpochKey = vi.fn(async (_epoch: number, key: ArrayBuffer) => { this.keys.push([...new Uint8Array(key)]); });
+  readonly dispose = vi.fn();
   constructor() { FakeKeyProvider.providers.push(this); }
 }
 
@@ -60,7 +62,7 @@ class FakeRoom {
 const RoomEvent = new Proxy({}, { get: (_, name) => (name === "Disconnected" ? "disconnected" : String(name)) });
 const worker = { terminate: vi.fn() };
 const loadLivekit = async () => ({
-  Room: FakeRoom, RoomEvent, Track: { Source: {} }, ExternalE2EEKeyProvider: FakeKeyProvider, isE2EESupported: () => true, e2eeWorker: () => worker,
+  Room: FakeRoom, RoomEvent, Track: { Source: {} }, GroupCallKeyProvider: FakeKeyProvider, isE2EESupported: () => true, e2eeWorker: () => worker,
 }) as unknown as LivekitModule;
 
 function joinButton(group = community()) {
@@ -76,6 +78,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   FakeRoom.rooms = [];
   FakeRoom.noManager = false;
   FakeKeyProvider.providers = [];
@@ -113,6 +116,34 @@ describe("Join call in a group whose call is sealed end to end", () => {
     expect(FakeRoom.rooms).toHaveLength(1);
     expect(FakeRoom.rooms[0].disconnect).not.toHaveBeenCalled();
     expect(screen.getByTestId("group-call")).toBeInTheDocument();
+  });
+
+  it("an epoch's secret that comes after the key's last ask still goes into the call, once the group's view says it is here", async () => {
+    canSeal();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let key: ReturnType<typeof callKey> | null = callKey(1, 5);
+    fakeEngine.on("groupCallKey", () => key);
+    const { user, rerender } = joinButton();
+    await user.click(screen.getByTestId("group-call-join"));
+    await waitFor(() => expect(FakeRoom.rooms[0]?.connect).toHaveBeenCalled());
+    const [provider] = FakeKeyProvider.providers;
+    // A member taken out: the commit is here (epoch 2), this member's own fresh secret not yet (no call key).
+    key = null;
+    const waiting = community({ epoch: 2, canSend: false });
+    act(() => fakeEngine.update({ groups: [waiting] }));
+    rerender(<GroupCallButton group={waiting} loadLivekit={loadLivekit} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(40_000); });
+    const asked = asks("groupCallKey").length;
+    // The secret comes past every retry: the epoch is the same, the view now says the epoch can be read.
+    key = callKey(2, 6);
+    const keyed = community({ epoch: 2, canSend: true });
+    act(() => fakeEngine.update({ groups: [keyed] }));
+    rerender(<GroupCallButton group={keyed} loadLivekit={loadLivekit} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    await waitFor(() => expect(provider.keys).toEqual([Array(32).fill(5), Array(32).fill(6)]));
+    expect(asks("groupCallKey").length).toBe(asked + 1);
+    expect(FakeRoom.rooms).toHaveLength(1);
+    expect(FakeRoom.rooms[0].disconnect).not.toHaveBeenCalled();
   });
 
   it("in a browser that can't seal call media, Join call is off with the reason behind its ⓘ, and nothing is asked or joined", async () => {
