@@ -71,14 +71,25 @@ export function appErrorCode(error: unknown): string | null {
   return /^([a-z][a-z-]*): /.exec(text)?.[1] ?? null;
 }
 
+/** At most this many characters of a refusal's own words behind an ⓘ. */
+const REFUSED_INFO_MAX = 200;
+
+/** A refusal's words for an ⓘ: control and direction characters as spaces, cut to `REFUSED_INFO_MAX` with an ellipsis. */
+function refusedInfo(words: string): string {
+  // eslint-disable-next-line no-control-regex
+  const line = words.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g, " ");
+  return line.length > REFUSED_INFO_MAX ? `${line.slice(0, REFUSED_INFO_MAX - 1)}…` : line;
+}
+
 /** An error as a dialog shows it: its line, and the ⓘ's text when it has one. */
 export interface AppErrorView { text: string; info?: string }
 
 export function appErrorView(error: unknown, t: Translate): AppErrorView {
   const code = appErrorCode(error);
   const info = code ? INFO[code] : undefined;
-  // A refusal the app has no words for: what was refused (a bound, a hash, the format) is behind the ⓘ, as it came.
-  const refused = code && !KEYS[code] ? (error instanceof Error ? error.message : String(error)).slice(code.length + 2) : undefined;
+  // A refusal the app has no words for: what was refused (a bound, a hash, the format) is behind the ⓘ, as it came,
+  // on one line and bounded: it is shown inside Ghostly's own box.
+  const refused = code && !KEYS[code] ? refusedInfo((error instanceof Error ? error.message : String(error)).slice(code.length + 2)) : undefined;
   return { text: appErrorText(error, t), ...(info ? { info: t(info) } : refused ? { info: refused } : {}) };
 }
 

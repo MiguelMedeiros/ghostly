@@ -83,4 +83,13 @@ describe("app errors", () => {
       expect(appErrorView(damaged, t).text, name).not.toMatch(/apps\.errors|stored files/);
     }
   });
+
+  it("a refusal's own words behind the ⓘ are one line and bounded", () => {
+    const view = appErrorView(new Error(`bad-field: This is not an app Ghostly can install (${"x\n".repeat(30_000)})`), translateWith(locales.en));
+    expect(view.info?.length).toBe(200);
+    expect(view.info).not.toMatch(/[\n\r]/);
+    expect(view.info?.endsWith("…")).toBe(true);
+    expect(appErrorView(new Error("bad-field: This is not an app Ghostly can install (name is not valid)"), translateWith(locales.en)).info)
+      .toBe("This is not an app Ghostly can install (name is not valid)");
+  });
 });

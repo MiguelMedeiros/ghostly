@@ -398,6 +398,18 @@ function fail(code: string, words: string): never {
 }
 
 /**
+ * Refusals of a bundle whose detail is the bundle's own text (a file path, key names), not Ghostly's words: said
+ * without it, as a dialog shows the detail behind its ⓘ inside Ghostly's own box.
+ */
+const BUNDLE_WORDS: ReadonlySet<string> = new Set(["bad-path", "unknown-key", "path-collision", "files-unsorted", "file-hash"]);
+
+/** A bundle refused by `readAppBundleAsync`, as the engine throws it. */
+function refuseBundle(read: { reason: string; detail?: string }): never {
+  const detail = read.detail && !BUNDLE_WORDS.has(read.reason) ? ` (${read.detail})` : "";
+  fail(read.reason, `This is not an app Ghostly can install${detail}`);
+}
+
+/**
  * The key, in `STORES.settings`, of what the person did about the apps that come with Ghostly (one of
  * `PROFILE_SETTINGS_KEYS`: "Clear all data" drops it, and the profile is offered them as a new one is).
  */
@@ -952,7 +964,7 @@ export class Apps {
     try { bytes = await this.host.readBuiltIn(app); } catch { fail("not-carried", "This build does not carry this app"); }
     if (!(bytes instanceof Uint8Array) || bytes.length > APP_BUNDLE_LIMITS.bundleBytes) fail("not-carried", "This build does not carry this app");
     const read = await readAppBundleAsync(bytes);
-    if (!read.ok) fail(read.reason, `This is not an app Ghostly can install${read.detail ? ` (${read.detail})` : ""}`);
+    if (!read.ok) refuseBundle(read);
     if (read.bundle.digest !== app.digest || versionOf(read.bundle.manifest, read.bundle.digest).ref !== builtInRef(app)) fail("unlisted", "The app this build carries is not the one it names");
     return { bundle: read.bundle, bytes };
   }
@@ -1376,7 +1388,7 @@ export class Apps {
     const read = (async () => {
       const bytes = await this.host.fetch(url, { maxBytes: APP_BUNDLE_LIMITS.bundleBytes });
       const read = await readAppBundleAsync(bytes);
-      if (!read.ok) fail(read.reason, `This is not an app Ghostly can install${read.detail ? ` (${read.detail})` : ""}`);
+      if (!read.ok) refuseBundle(read);
       return { bundle: read.bundle, bytes };
     })().finally(() => { this.bundleReads.delete(url); });
     this.bundleReads.set(url, read);
