@@ -468,6 +468,11 @@ jobs:
       - name: Web first load is one file
         run: npm run check:web-first-load
 
+      # Every file the service worker installs is in the build: one missing and nginx's 404 fails the install, which
+      # vite preview hides (see tools/scripts/check-web-precache.mjs).
+      - name: Web service worker names only built files
+        run: npm run check:web-precache
+
       # The adapter SDK, the way an outside author gets it: packed into a tarball, installed into
       # packages/sdk/examples/adapter (not a workspace member), whose adapters must pass the contract suites.
       - name: SDK tarball and the example built on it
