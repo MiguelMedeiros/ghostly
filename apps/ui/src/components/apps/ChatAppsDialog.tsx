@@ -9,6 +9,7 @@ import { AppInstallDialog } from "./AppInstallDialog";
 import { appStopped, refreshInstalledApps, sendOpenedCard, useBuiltInApps, useInstalledApps, useInstalledAppsFailure } from "../../lib/apps/installed";
 import { openApp } from "../../lib/apps/open";
 import { chatAppOver } from "../../lib/apps/running";
+import { useTryAgain } from "../../lib/apps/tryAgain";
 import { appErrorText, appErrorView } from "../../lib/apps/errors";
 
 /** Open is offered for an app that may run, and for one whose files are missing here (a restored profile): opening it fetches them. */
@@ -38,6 +39,7 @@ export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, on
   const failureView = failure != null ? appErrorView(failure, t) : null;
   // Try again worked: the button went with its line, so the focus goes to the list's first control, not the page.
   const [retried, setRetried] = useState(false);
+  const retry = useTryAgain(() => { setRetried(true); return refreshInstalledApps(); });
   useEffect(() => {
     if (!retried || failure != null) return;
     setRetried(false);
@@ -96,8 +98,8 @@ export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, on
               again, as the Apps page says it. */}
           {failureView && (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3" data-testid="chat-apps-error">
-              <Notice tone="error" testId="chat-apps-error-line" details={failureView.info} className="text-xs min-w-0 flex-[1_1_12rem]">{failureView.text}</Notice>
-              <Button className="ms-auto" onClick={() => { setRetried(true); void refreshInstalledApps(); }}>{t("apps.page.tryAgain")}</Button>
+              <Notice key={retry.tries} tone="error" testId="chat-apps-error-line" details={failureView.info} className="text-xs min-w-0 flex-[1_1_12rem]">{failureView.text}</Notice>
+              <Button className="ms-auto" loading={retry.busy} onClick={retry.again}>{t("apps.page.tryAgain")}</Button>
             </div>
           )}
           {installed === null ? <p className="px-4 py-3 text-xs text-text-muted">{t("apps.page.loading")}</p>
