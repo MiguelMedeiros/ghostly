@@ -15,6 +15,7 @@ import { runnerPolicy } from "./runnerCheck";
 import { CHAT_CLOSED, LOCKED, lockedSince, registerRunningApp, takenDownSince, type AppOpener, type AppTakedown } from "./open";
 import type { AppsPlatform, LinkedFilesHost } from "../platform";
 import { openLayer } from "../layerHistory";
+import { ownDirection } from "../ownDirection";
 
 export interface WebOpenerOptions {
   apps: () => AppsPlatform | null | undefined;
@@ -232,7 +233,12 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
               if (!overlay.isConnected) return;
               again.removeAttribute("aria-busy");
               again.removeAttribute("aria-disabled");
-              if (errorText) failed.textContent = errorText(error);
+              if (!errorText) return;
+              // An English error shown as it came keeps its own direction in Arabic, as the chat panel's line does.
+              const text = errorText(error);
+              const dir = ownDirection(text);
+              if (dir) failed.dir = dir; else failed.removeAttribute("dir");
+              failed.textContent = text;
             });
           });
           said.after(again, failed);
