@@ -161,6 +161,22 @@ describe("the worker's policy", () => {
       expect(serviceWorkerFiles([], bundle).precache).toContain("/assets/pubky-abc.js");
     });
 
+    it("starts where the app's page does: Vite drops an entry that is nothing but imports and names its `main` chunk in index.html", () => {
+      // As the plugin reads it after `vite:build-html`: no entry chunk for the app, only the sign-in page's.
+      const bundle = [
+        ...BUNDLE.filter((file) => file.fileName !== "assets/index-abc.js"),
+        chunk("assets/main-abc.js", null, ["assets/vendor-abc.js"],
+          ["assets/Wallet-abc.js", "assets/Chat-abc.js", "assets/pubky-abc.js", "assets/handoff-abc.js", "assets/keet-identity-key-abc.js", "assets/fr-abc.js", "assets/ja-abc.js"]),
+        chunk("assets/rolldown-runtime-abc.js", null),
+        chunk("assets/oidcCallback-abc.js", "/home/me/ghostly/apps/web/oidc-callback.html", [], [], true),
+        { type: "asset", fileName: "index.html", source: `<script type="module" crossorigin src="/assets/main-abc.js"></script>\n<link rel="modulepreload" crossorigin href="/assets/rolldown-runtime-abc.js">` },
+      ];
+      const { precache, languages } = serviceWorkerFiles(["manifest.json"], bundle);
+      expect(precache).toEqual(["/", "/assets/cashu-ts-abc.js", "/assets/Chat-abc.js", "/assets/handoff-abc.js", "/assets/index-abc.css", "/assets/main-abc.js",
+        "/assets/oidcCallback-abc.js", "/assets/rolldown-runtime-abc.js", "/assets/sodium-abc.js", "/assets/vendor-abc.js", "/assets/Wallet-abc.js", "/manifest.json"]);
+      expect(languages).toEqual({ fr: ["/assets/fr-abc.js"], ja: ["/assets/ja-abc.js"] });
+    });
+
     const LANGUAGES = { fr: ["/assets/fr-abc.js"], ja: ["/assets/ja-abc.js", "/assets/ja-extra-abc.js"], pt: ["/assets/pt-abc.js"] };
     const PRECACHE = ["/", "/assets/index-abc.js"];
 
