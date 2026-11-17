@@ -44,7 +44,8 @@ it("on the DHT floor, a text within 256 bytes that its packet cannot carry is re
 
   for (const bytes of [256, 252]) {
     const refused = error(await as(alice, "send", "bob", "x".repeat(bytes), "--wait", "none"), "refused", 1);
-    expect(refused.message, `${bytes} bytes`).toContain("DHT packet budget");
+    // As the apps and a text past 256 bytes say it: too long for the DHT, about how much fits, and what ends it.
+    expect(refused.message, `${bytes} bytes`).toBe("Too long for the DHT (a text fits about 248 bytes there once sealed): you and the contact keep this chat on the DHT only: send it once both choose a live transport (ghostly chat transport bob auto), or shorten it");
   }
   ok(await as(alice, "send", "bob", "after the long one", "--wait", "delivered", "--timeout", "90"));
   // Nothing of it waits here, and nothing of it went (the pairing's "joined" aside).
