@@ -1,4 +1,6 @@
+import { writeFileSync } from "node:fs";
 import type { Server } from "node:http";
+import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running, type Result } from "./support/cli";
 // covers: chat.dht.delivery, headless.chat
@@ -36,6 +38,24 @@ function saysWhy(result: Result) {
 function forwardSaysWhy(answer: Record<string, unknown>) {
   const [result] = answer.results as Record<string, unknown>[];
   expect(result).toMatchObject({ kind: "chat", error: null, note: expect.stringContaining("you and the contact keep this chat on the DHT only: it goes once both choose a live transport (ghostly chat transport bob auto), or shorten it") });
+}
+
+/**
+ * The same wait on a terminal, ended with Ctrl-C: its notice said "it still goes" and Ctrl-C that it is kept and "still
+ * goes by itself" (or with the next command), neither true while the chat stays on the DHT only. Both say the note.
+ */
+async function interruptedSaysWhy(dir: string) {
+  const tty = join(dir, "tty-stderr.cjs");
+  writeFileSync(tty, "Object.defineProperty(process.stderr, \"isTTY\", { value: true });\n");
+  const send = new Running(["--home", dir, "send", "bob", waited, "--wait", "sent", "--timeout", "60"], { ...env, NODE_OPTIONS: `--require "${tty}"` });
+  running.push(send);
+  const note = "Longer than the 256 bytes the DHT carries, and you and the contact keep this chat on the DHT only: it goes once both choose a live transport (ghostly chat transport bob auto), or shorten it";
+  await expect.poll(() => send.stderr, { timeout: 30_000, interval: 100 }).toContain("ghostly: waiting for it to go out to bob (up to 60 s; Ctrl-C stops waiting). " + note + "\n");
+  send.child.kill("SIGINT");
+  expect(await send.exited(15_000)).toBe(130);
+  expect(send.stderr).toContain("ghostly: stopped waiting (Ctrl-C): it is kept here. " + note + "\n");
+  expect(send.stderr).not.toMatch(/still goes|next command|daemon --detach/);
+  expect(send.lines).toEqual([{ error: { code: "interrupted", message: "Stopped waiting (Ctrl-C): it is kept here. " + note, details: { method: "chat.send" } } }]);
 }
 
 beforeAll(async () => {
@@ -77,6 +97,7 @@ it("a text past 256 bytes in a DHT-only chat answers at once (or at an explicit 
   const forwardWait = await as(alice, "forward", "bob", kept.messageId as string, "--to", "bob", "--wait", "sent", "--timeout", "2");
   saysWhy(forwardWait);
   forwardSaysWhy((forwardWait.json.error as { details: Record<string, unknown> }).details);
+  await interruptedSaysWhy(alice);
 
   // A one-shot: no 30 s wait for a send that cannot come, no timeout.
   await daemons.get(alice)!.stop();
@@ -86,6 +107,7 @@ it("a text past 256 bytes in a DHT-only chat answers at once (or at an explicit 
   expect(oneShot.delivery).toBe("waiting");
   expect(oneShot.note).toContain("you and the contact keep this chat on the DHT only");
   for (const wait of ["sent", "delivered"]) saysWhy(await as(alice, "send", "bob", waited, "--wait", wait, "--timeout", "2"));
+  await interruptedSaysWhy(alice);
 
   // What the note says ends the wait does: both choose a live transport, and every text, the forwarded ones too, reaches the contact.
   const back = new Running(["--home", alice, "daemon"], env);
@@ -95,7 +117,7 @@ it("a text past 256 bytes in a DHT-only chat answers at once (or at an explicit 
   ok(await as(bob, "chat", "transport", "alice", "auto"));
   ok(await as(alice, "chat", "wait", "bob", "--until", "live", "--timeout", "90"));
   await expect.poll(async () => (ok(await as(bob, "chat", "history", "alice", "--limit", "10")).messages as { text: string; from: string }[])
-    .filter((m) => m.from === "peer" && (m.text === long || m.text === waited)).length, { timeout: 60_000, interval: 1_000 }).toBe(8);
+    .filter((m) => m.from === "peer" && (m.text === long || m.text === waited)).length, { timeout: 60_000, interval: 1_000 }).toBe(10);
 });
 
 /** When a hold ends, as the CLI says it: this machine's hour and minute, with the day when it is not today. */
