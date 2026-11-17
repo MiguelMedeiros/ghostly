@@ -1,5 +1,7 @@
 {
   "added": "{{app}} añadida. Elige quién puede abrirla en Personas.",
+  "allowNamed": "Permitir {{app}}",
+  "allowNext": "Permitir pide al navegador acceso a {{host}}, en todos los puertos. Quitar todas las apps en {{host}} lo devuelve.",
   "fromContacts": "De tus contactos",
   "fromContactsEmpty": "Aquí aparecen las apps que comparten tus contactos.",
   "ghostlyOnline": "Ghostly en línea",
@@ -29,6 +31,7 @@
   "shareLocal": "Compartir un servicio local",
   "shareNamed": "Compartir {{app}}",
   "status": {
+    "needsAccess": "Aún no permitido en este navegador: tus contactos no pueden abrir {{app}}",
     "notShared": "Todavía sin compartir con nadie",
     "offline": "No accesible mientras estés desconectado",
     "sharedCount": "Compartido con {{count}} contactos",

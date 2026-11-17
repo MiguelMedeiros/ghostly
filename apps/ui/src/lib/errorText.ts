@@ -134,7 +134,8 @@ const RULES: readonly Rule[] = [
   exact("This device has no room left to save this", "errors.app.noRoomToSave", "errors.app.noRoomToSaveNext"),
   // A call refused in limited mode (packages/browser/src/engine/node.ts LIMITED_MODE_ERROR): the banner's own words, and what to do.
   exact("Ghostly could not check which device is active yet. This works once it can.", "devices.limited.title", "errors.app.limitedNext"),
-  exact("Ghostly needs your permission to reach that local address", "errors.app.localAddress"),
+  // A no in the host's question (Chrome's prompt, Desktop's dialog), from Share or a card's Allow: it can be asked again.
+  exact("Ghostly needs your permission to reach that local address", "errors.app.localAddress", "errors.app.localAddressNext"),
   // The Share form's address checks (packages/core http.ts parseLocalTarget; the CLI matches the English) and its name
   // check (engine/node.ts addService): what is wrong, then what to type.
   exact("Not a valid URL", "errors.services.badAddress", "errors.services.addressNext"),
