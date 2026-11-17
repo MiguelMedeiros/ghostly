@@ -7839,8 +7839,8 @@ export class GhostlyNode implements EngineImplementation {
   /** Groups whose admin work is off on this device since a forced takeover or a restore. */
   private groupAdminOff = new Set<string>();
   private readonly saved = new SavedMessages(() => this.emitState());
-  /** The chat list's search over the chats' histories (`chatsFound`): each chat read once, and again after it changes. */
-  private readonly chatSearch = new ChatTextSearch(linkId => db.getMessages(linkId));
+  /** The chat list's search over the chats' histories (`chatsFound`): each chat read once, then the rows that change. */
+  private readonly chatSearch = new ChatTextSearch(linkId => db.getMessages(linkId), (linkId, ids) => db.getMessagesById(linkId, ids));
 
   /**
    * Raises the counters a copy from older state must raise, once (`devices/raise.ts`): the raise a forced takeover wrote
@@ -10526,7 +10526,7 @@ export class GhostlyNode implements EngineImplementation {
    * the whole history. A host that takes whole histories only (no `onMessageChanges`) gets the whole history, as before.
    */
   private async messagesChanged(linkId: string, ids: readonly string[]): Promise<void> {
-    this.chatSearch.changed(linkId);
+    this.chatSearch.changed(linkId, ids);
     await this.pinnedRowCame(linkId, ids);
     // The chat list's reaction line quotes its message: an edit of that message changes the quote too, and a delete (here
     // or for everyone) takes the line back to the reaction before it that still stands.
