@@ -313,6 +313,9 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
       forwarding++
       try {
         const response = await fetch(request.endpoint, { method: 'POST', headers: request.headers, body: request.body, redirect: 'error', signal: AbortSignal.timeout(10_000) })
+        // Only the status is read. The body is dropped now: the timeout above ends at the headers, and a body the push
+        // service stalls would otherwise hold its connection (and a file descriptor) for as long as the far end keeps it.
+        response.body?.cancel().catch(() => {})
         // The push service refused the request itself (a token it does not accept, a subscription gone, a malformed
         // push): it woke nobody, so the subscription's count is given back and only the sender's address has spent one.
         if (refusedPush(response.status)) subscriptions.giveBack(request.subscription, taken)
