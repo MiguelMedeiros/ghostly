@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { BuiltInAppOffer, InstalledAppView } from "@ghostly/browser/engine/apps";
 import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
 import { useI18n } from "../../contexts/I18nContext";
+import { fillNames } from "../../lib/fillNodes";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
 import { Button, Notice } from "../wallet/ui";
 import { AppIcon } from "./AppIcon";
@@ -91,7 +92,7 @@ export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, on
         {/* The contact's name (one long word, a nickname of 20 W's) breaks anywhere: unbroken, the sheet scrolled
             sideways on a phone, and in Arabic the name's end was drawn off the screen. */}
         <div className="[overflow-wrap:anywhere]">
-          <h2 id="chat-apps-title" className="text-lg font-medium text-text-primary">{t("apps.composer.title", { name })}</h2>
+          <h2 id="chat-apps-title" className="text-lg font-medium text-text-primary">{fillNames(t("apps.composer.title"), { name })}</h2>
           {waiting && <p className="text-xs text-text-secondary mt-1" data-testid="chat-apps-waiting">{waiting}</p>}
         </div>
         <div className="bg-surface rounded-xl divide-y divide-border">
