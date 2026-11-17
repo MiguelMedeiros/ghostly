@@ -20,7 +20,7 @@ import { STATUS_CARD_METHODS, secretIn } from "./statusCards";
 import { BUTTON_METHODS, buttonsCard, pressable } from "./buttons";
 import { forgetHold, HOLD_MAX_MINUTES, holdChat, holdEnds, holdOf, releaseHold } from "./holds";
 import { endTyping, keepOneShot, keepTyping, ONE_SHOT_LIVE_GRACE_MS, sayTyping, typingStatus } from "./typing";
-import { GROUP_ADMIN_METHODS, noMember, withUrl } from "./groupAdmin";
+import { GROUP_ADMIN_METHODS, moreThanOneMember, noMember, withUrl } from "./groupAdmin";
 import { withStoredIds } from "./turnRefs";
 import { IDENTITY_METHODS } from "./identities";
 import { X401_METHODS } from "./x401";
@@ -154,9 +154,12 @@ const codePoints = (text: string, index: number) => [...text.slice(0, index)].le
 
 /**
  * Mentions for a group message: each ref (a member key, a unique prefix of one, a member's name, or `everyone`) must
- * be written in the text as `@<name>` (or `@<key prefix>`, `@everyone`); the first such place is the mention.
+ * be written in the text as `@<name>` (or `@<key prefix>`, `@everyone`); the first such place is the mention. A ref
+ * more than one member answers to, none does, or this profile itself (`myName`: reads its own name, only for a ref no
+ * member answers to) is refused as `group remove` refuses it: before, its own name was "No member", and two members
+ * of one name gave no key. `groupRef`: the group as the command named it, for the refusal's hint.
  */
-export function mentionsFor(text: string, refs: readonly string[], group: GroupView): GroupMention[] {
+export function mentionsFor(text: string, refs: readonly string[], group: GroupView, myName?: () => string | undefined, groupRef?: string): GroupMention[] {
   const out: GroupMention[] = [];
   for (const ref of refs) {
     let key: string, spelled: string[];
@@ -166,8 +169,8 @@ export function mentionsFor(text: string, refs: readonly string[], group: GroupV
       // A member's key is that member, whatever another member calls itself.
       const byKey = group.members.filter((m) => !m.me && m.key === ref);
       const matches = byKey.length ? byKey : group.members.filter((m) => !m.me && (m.key.startsWith(ref) || m.nick?.trim().toLowerCase() === lower));
-      if (matches.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one member`);
-      if (!matches.length) throw noMember(group, ref);
+      if (matches.length > 1) throw moreThanOneMember(group, ref, matches, groupRef);
+      if (!matches.length) throw noMember(group, ref, myName?.(), groupRef);
       key = matches[0].key;
       spelled = [matches[0].nick?.trim(), ref, key.slice(0, 8)].filter((s): s is string => !!s);
     }
@@ -1022,7 +1025,7 @@ const METHODS: Record<string, Method> = {
       const secret = findSecret(text);
       if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; send it with --force if you mean to`, { kind: secret.kind });
     }
-    const mentions = mentionsFor(text, list(params, "mentions"), group);
+    const mentions = mentionsFor(text, list(params, "mentions"), group, () => settingsOf(ctx).nick, str(params, "group", true));
     const replyTo = str(params, "reply");
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
     const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
@@ -1057,7 +1060,7 @@ const METHODS: Record<string, Method> = {
       const secret = findSecret(text);
       if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; edit with --force if you mean to`, { kind: secret.kind });
     }
-    const mentions = mentionsFor(text, list(params, "mentions"), group);
+    const mentions = mentionsFor(text, list(params, "mentions"), group, () => settingsOf(ctx).nick, str(params, "group", true));
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
     const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
     const linkId = `group:${group.id}`;
