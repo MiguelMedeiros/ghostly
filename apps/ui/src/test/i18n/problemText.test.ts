@@ -66,8 +66,21 @@ describe("problemText: an error in a few words, its English behind the ⓘ", () 
   });
 
   it("says a known error in the language, whole, with no English beside it", () => {
-    expect(problemText("Lost the Ghostly peer", english)).toEqual({ tone: "error", title: "Lost the Ghostly peer" });
-    expect(problemText(new Error("Lost the Ghostly peer"), pt)).toEqual({ tone: "error", title: pt("errors.app.lostPeer") });
+    expect(problemText("Ghostly is starting…", english)).toEqual({ tone: "error", title: "Ghostly is starting…" });
+    expect(problemText(new Error("Ghostly is starting…"), pt)).toEqual({ tone: "error", title: pt("errors.app.starting") });
+  });
+
+  it("says a call cut by the extension's peer going away in the tab's words, with what may have happened and what to do", () => {
+    // An extension tab whose peer went away mid-call (an offscreen restart, Clear all data, a profile switch elsewhere):
+    // the engine's word "peer" is no word of the tab's, and the old peer may have done it before it went.
+    expect(problemText("Lost the Ghostly peer", english)).toEqual({
+      tone: "error", title: "This tab lost Ghostly before this was done", next: "It may be done already. Check once Ghostly is back, then try again.",
+    });
+    expect(problemText(new Error("Lost the Ghostly peer"), pt)).toEqual({ tone: "error", title: pt("errors.app.lostPeer"), next: pt("errors.app.lostPeerNext") });
+    for (const language of LANGUAGES) {
+      const t = translateWith(LOCALES[language], language);
+      expect(t("errors.app.lostPeer"), language).not.toMatch(/peer|pair|par\b|نظير|ピア|节点/i);
+    }
   });
 
   it("never shows an unknown technical error as the line: a generic title, the English behind the ⓘ", () => {
