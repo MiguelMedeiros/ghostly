@@ -1312,6 +1312,81 @@ describe("messages kept in rows.db", () => {
     expect(gone.filter((text) => bytes.includes(`${text} `))).toEqual([]);
   });
 
+  it("scrubs asked at once (`message delete --purge` x 6) write rows.db again once or twice, and each one's delete is gone", async () => {
+    // Each wrote rows.db whole on the thread: ten at once held a daemon of 100,000 messages 15 s.
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    opened.push(store);
+    const d = await db(store.factory);
+    await tx(d, ["messages"], (s) => { for (let i = 0; i < 6; i++) s.messages.put({ linkId: "chat", id: `m${i}`, text: `purged-${i}-secret` }); });
+    await store.compact();
+    const scrubs = vi.spyOn(TreeFile.prototype, "scrub");
+    try {
+      await Promise.all(Array.from({ length: 6 }, (_, i) => tx(d, ["messages"], (s) => s.messages.delete(["chat", `m${i}`])).then(() => store.compact({ scrub: true }))));
+      expect(scrubs.mock.calls.length).toBeLessThanOrEqual(2);
+    } finally { scrubs.mockRestore(); }
+    d.close();
+    const bytes = readFileSync(join(dir, "rows.db"));
+    for (let i = 0; i < 6; i++) expect(bytes.includes(`purged-${i}-secret`), `m${i}`).toBe(false);
+  });
+
+  /** A store whose messages m0…m{n-1} say `purged-<i>-secret`, folded, and whether rows.db still holds message i's text. */
+  const purgeable = async (n: number) => {
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    opened.push(store);
+    const d = await db(store.factory);
+    await tx(d, ["messages"], (s) => { for (let i = 0; i < n; i++) s.messages.put({ linkId: "chat", id: `m${i}`, text: `purged-${i}-secret` }); });
+    await store.compact();
+    return { store, d, gone: (i: number) => !readFileSync(join(dir, "rows.db")).includes(`purged-${i}-secret`) };
+  };
+
+  it("a scrub asked after the one before answered scrubs again: its delete is gone from rows.db too", async () => {
+    const { store, d, gone } = await purgeable(2);
+    await tx(d, ["messages"], (s) => s.messages.delete(["chat", "m0"]));
+    await store.compact({ scrub: true });
+    await tx(d, ["messages"], (s) => s.messages.delete(["chat", "m1"]));
+    await store.compact({ scrub: true });
+    d.close();
+    expect([gone(0), gone(1)]).toEqual([true, true]);
+  });
+
+  it("a scrub asked while another's snapshot is written does not join it: that one captured the store before its delete", async () => {
+    const { store, d, gone } = await purgeable(1);
+    let reached!: () => void, release!: () => void;
+    const begun = new Promise<void>((resolve) => { reached = resolve; });
+    disk.snapshotSync = () => { disk.snapshotSync = null; reached(); return new Promise<void>((resolve) => { release = resolve; }); };
+    try {
+      const first = store.compact({ scrub: true });
+      await begun;
+      // Its `complete` waits behind the fold (a write committed meanwhile is on the disk only after it): not awaited here.
+      const deleted = tx(d, ["messages"], (s) => s.messages.delete(["chat", "m0"]));
+      const second = store.compact({ scrub: true });
+      // Its settle gives up (CLOSE_WAIT_MS) while the first is still held: it asks while that one runs.
+      const now = Date.now.bind(Date);
+      const clock = vi.spyOn(Date, "now").mockImplementation(() => now() + 6_000);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      clock.mockRestore();
+      release();
+      await Promise.all([first, deleted, second]);
+    } finally { disk.snapshotSync = null; }
+    d.close();
+    expect(gone(0)).toBe(true);
+  });
+
+  it("a scrub that failed is not joined by the purges after it: the next one scrubs", async () => {
+    const { store, d, gone } = await purgeable(3);
+    const scrubs = vi.spyOn(TreeFile.prototype, "scrub").mockImplementationOnce(() => { throw new Error("disk full"); });
+    try {
+      const results = await Promise.allSettled([0, 1].map((i) => tx(d, ["messages"], (s) => s.messages.delete(["chat", `m${i}`])).then(() => store.compact({ scrub: true }))));
+      expect(results[0]!.status).toBe("rejected");
+    } finally { scrubs.mockRestore(); }
+    await tx(d, ["messages"], (s) => s.messages.delete(["chat", "m2"]));
+    await store.compact({ scrub: true });
+    d.close();
+    expect([gone(0), gone(1), gone(2)]).toEqual([true, true, true]);
+  });
+
   it("a deleted chat and its messages leave the journal once the snapshot is an hour old, at a start, a write or a close", async () => {
     const chats = (factory: IDBFactory) => new Promise<IDBDatabase>((resolve, reject) => {
       const request = factory.open("ghostly", 1);
