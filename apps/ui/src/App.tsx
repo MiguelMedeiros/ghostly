@@ -263,6 +263,9 @@ export function App() {
           <Fragment key="chats">{chats("row-start-3 col-start-1 flex flex-col min-w-0 min-h-0")}</Fragment>
           {!inChat && (
             <div key="page" className="row-start-3 col-start-1 flex flex-col min-w-0 min-h-0">
+              {/* Shows on a phone only (the list beside the page says it here), but stays in the tree as there: a turn
+                  to two panes (or back) keeps the open page mounted. */}
+              {!inGroup && <ReconnectingBanner onPage />}
               <Outlet />
             </div>
           )}
