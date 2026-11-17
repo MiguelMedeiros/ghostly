@@ -2,11 +2,12 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { IdentityCheckUnavailable } from "@ghostly/core";
 import type { EngineState } from "@ghostly/browser/shared/types";
 import { SignerTimeout, type InAppSigner } from "@ghostly/browser/proofs/contract";
 import { IDENTITY_PROVIDERS } from "@ghostly/browser/proofs/registry";
 import { callApi, type ApiContext } from "../src/api";
-import { EXIT } from "../src/errors";
+import { asCliError, EXIT } from "../src/errors";
 import { EventHub, type GhostlyEvent } from "../src/events";
 // @ts-expect-error Native fixture is deliberately directly executable JavaScript.
 import { startTestBunker } from "../../browser/test/helpers/nostrBunker.mjs";
@@ -179,6 +180,85 @@ describe("identity signers on Node", () => {
       });
       expect(node.cancelIdentityProof).toHaveBeenCalledWith({ draftId: "nip46" });
     } finally { vi.useRealTimers(); await fixture.close(); }
+  });
+
+  // The signer approved at once, the engine's check ran past --timeout and then refused the proof: the answer was
+  // `timeout`, "waiting to approve, --timeout waits longer", hiding why it was refused. The CLI's deadline is a signal
+  // fired here by hand, so the test needs no wait; the loopback bunker answers every request.
+  describe("a check that ends after --timeout", () => {
+    const binding = (provider: string, subject: string) => ({ draftId: "late", binding: { v: 1, provider, subject, key: "y".repeat(52), issuedAt: 1_800_000_000, expiresAt: 1_800_086_400, nonce: "A".repeat(22) } });
+    /** `identity add` whose deadline (`--timeout 7`) fires as the engine's check starts; `check` then ends it. */
+    async function lateCheck(params: Record<string, unknown>, check: () => Promise<unknown>) {
+      const { ctx, node } = fake();
+      node.beginIdentityProof.mockImplementation(async ({ provider, subject }: { provider: string; subject: string }) => binding(provider, subject));
+      const deadline = new AbortController();
+      const timeout = AbortSignal.timeout.bind(AbortSignal);
+      const spy = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => (ms === 7_000 ? deadline.signal : timeout(ms)));
+      node.completeIdentityProof.mockImplementation(async () => {
+        deadline.abort(new DOMException("The operation was aborted due to timeout", "TimeoutError"));
+        return check();
+      });
+      try {
+        const outcome = await callApi(ctx, "identity.add", { ...params, timeout: 7 }).then(() => undefined, (error: unknown) => error);
+        return { outcome, node, deadline };
+      } finally { spy.mockRestore(); }
+    }
+
+    it("a Nostr or NIP-05 remote signer's proof refused after it keeps the refusal's words and code", async () => {
+      const cases = [
+        ["nostr", "nip46", {}, "The event is not signed by that key"],
+        ["domain", "nip05-nip46", { domain: "example.com" }, "example.com does not list this key under _ in /.well-known/nostr.json"],
+      ] as const;
+      for (const [provider, signer, fields, why] of cases) {
+        const fixture = await startTestBunker(0);
+        try {
+          const { outcome, node, deadline } = await lateCheck({ provider, signer, fields: { ...fields, bunker: fixture.bunker } }, async () => { throw new Error(why); });
+          expect(deadline.signal.aborted).toBe(true);
+          expect(fixture.methods).toContain("sign_event");
+          expect(asCliError(outcome).toJSON()).toEqual({ code: "engine", message: why });
+          expect(node.cancelIdentityProof).toHaveBeenCalledWith({ draftId: "late" });
+        } finally { await fixture.close(); }
+      }
+    });
+
+    it("a check that could not run after it is that, not a timeout", async () => {
+      const fixture = await startTestBunker(0);
+      try {
+        const { outcome } = await lateCheck({ provider: "domain", signer: "nip05-nip46", fields: { domain: "example.com", bunker: fixture.bunker } }, async () => {
+          throw new IdentityCheckUnavailable("example.com could not be reached");
+        });
+        expect(outcome).toBeInstanceOf(IdentityCheckUnavailable);
+        expect(asCliError(outcome).toJSON()).toEqual({ code: "engine", message: "example.com could not be reached" });
+      } finally { await fixture.close(); }
+    });
+
+    it("a Pubky proof refused after it keeps the refusal's words", async () => {
+      const signer = IDENTITY_PROVIDERS.find((p) => p.id === "pubky")!.signers.find((s) => s.kind === "in-app") as InAppSigner<unknown>;
+      // Approved before the deadline: the work runs with the session, its file written, then the check refuses.
+      const run = vi.spyOn(signer, "run").mockImplementation((_, work) => work({ subject: async () => "o".repeat(52), sign: async () => ({ folder: "f" }) }));
+      try {
+        const { outcome } = await lateCheck({ provider: "pubky" }, async () => { throw new Error("The proof file is not on the homeserver"); });
+        expect(asCliError(outcome).toJSON()).toEqual({ code: "engine", message: "The proof file is not on the homeserver" });
+      } finally { run.mockRestore(); }
+    });
+
+    it("a signer that has not answered when it fires is still a timeout", async () => {
+      const { ctx, node } = fake();
+      node.beginIdentityProof.mockImplementation(async ({ provider, subject }: { provider: string; subject: string }) => binding(provider, subject));
+      const fixture = await startTestBunker(0, { hold: () => new Promise(() => {}) });
+      const deadline = new AbortController();
+      const timeout = AbortSignal.timeout.bind(AbortSignal);
+      const spy = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => (ms === 7_000 ? deadline.signal : timeout(ms)));
+      try {
+        const outcome = callApi(ctx, "identity.add", { provider: "nostr", signer: "nip46", fields: { bunker: fixture.bunker }, timeout: 7 }).catch((error: unknown) => error);
+        while (!fixture.methods.includes("sign_event")) await new Promise((r) => setImmediate(r));
+        deadline.abort(new DOMException("The operation was aborted due to timeout", "TimeoutError"));
+        expect(await outcome).toMatchObject({
+          code: "timeout", message: "Timed out after 7 s waiting for Remote signer (NIP-46) to approve the Nostr proof: --timeout <seconds> waits longer",
+        });
+        expect(node.completeIdentityProof).not.toHaveBeenCalled();
+      } finally { spy.mockRestore(); await fixture.close(); }
+    });
   });
 
   // Pubky's relay keeps a request five minutes: --timeout 600 waited 300 s and ended as `engine`.
