@@ -39,17 +39,38 @@ export function findMember(group: GroupView, ref: string, myName?: string, byKey
     }
     return matches[0];
   }
-  throw matches.length ? new CliError("bad_request", `${JSON.stringify(ref)} names more than one member`) : noMember(group, ref, myName);
+  throw matches.length ? moreThanOneMember(group, ref, matches) : noMember(group, ref, myName);
+}
+
+/** How many of the members a ref names the words list (all of them are in `details.matches`). */
+const SHOWN_MATCHES = 5;
+
+/** Where a group's members and their keys are listed: `ghostly group show <group>`. */
+const memberList = (group: GroupView) => `ghostly group show ${shellWord(group.name, group.id)}`;
+
+/**
+ * A ref more than one member answers to (two members who call themselves "Bia", a prefix of two keys): refused as a
+ * ref that names more than one chat or group is, with each one's key and name in `details.matches`. The words name
+ * them too, by name and key prefix, and where their keys are listed: before, it was only "names more than one
+ * member", and a person or a bot had to guess that a key is taken and go find it.
+ */
+export function moreThanOneMember(group: GroupView, ref: string, matches: readonly GroupView["members"][number][]): CliError {
+  const shown = matches.slice(0, SHOWN_MATCHES).map((m) => `${m.nick?.trim() || "no name"} (${m.key.slice(0, 8)}…)`).join(", ");
+  const more = matches.length > SHOWN_MATCHES ? ` and ${matches.length - SHOWN_MATCHES} more` : "";
+  return new CliError("bad_request", `${JSON.stringify(ref)} names more than one member of ${group.name}: ${shown}${more}. Use its key (${memberList(group)})`, {
+    matches: matches.map((m) => ({ key: m.key, name: m.nick?.trim() || null })),
+  });
 }
 
 /**
  * A ref no other member answers to. When it is this profile's own key (or a prefix of it), or its own name, it says
- * so: "No member" read as if this profile were not in the group.
+ * so: "No member" read as if this profile were not in the group. Otherwise it says where the members are listed, as
+ * `No group "x" (ghostly group list)` does.
  */
 export function noMember(group: GroupView, ref: string, myName?: string): CliError {
   const mine = !!myName?.trim() && myName.trim().toLowerCase() === ref.toLowerCase();
   if (mine || group.members.some((m) => m.me && m.key.startsWith(ref))) return new CliError("bad_request", `${JSON.stringify(ref)} is you: name another member of ${group.name}`);
-  return new CliError("not_found", `No member ${JSON.stringify(ref)} in ${group.name}`);
+  return new CliError("not_found", `No member ${JSON.stringify(ref)} in ${group.name} (${memberList(group)})`);
 }
 
 /**
