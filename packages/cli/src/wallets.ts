@@ -8,6 +8,7 @@ import { CASHU_MINT_SOURCE } from "@ghostly/browser/engine/paymentAdapters/provi
 import { CliError, type ErrorCode } from "./errors";
 import { ADDRESS_TYPES, CHAT_METHODS, PAY_METHODS, WALLET_TYPES } from "./words";
 import { findSecret, secretWords } from "./secretGuard";
+import { shellWord } from "./shellWord";
 
 /**
  * Wallets and payments (WISP 1100, phase 2): the app's wallet deck and a chat's payment sheet, as methods. Test
@@ -262,6 +263,18 @@ function walletRefusal(error: unknown): unknown {
   return code ? new CliError(code, error.message) : error;
 }
 
+/**
+ * `wallet redeem` of ecash from a mint that is not one of the wallet's: the engine names the mint's host only and no
+ * way on. Its words, then the command that adds the whole mint URL (the token's), for one who trusts that mint: a mint
+ * holds the sats, so it is offered, never done. Shell-quoted as any hint's word; a URL no quoting survives is not printed.
+ */
+function mintNotAdded(error: unknown): CliError | undefined {
+  if (!(error instanceof Error) || !/^Ecash from \S+ is not accepted$/.test(error.message)) return undefined;
+  const mint = (error as { mint?: unknown }).mint;
+  if (typeof mint !== "string") return undefined;
+  return new CliError("engine", `${error.message}: its mint is not one of yours (if you trust it to hold your sats: ghostly wallet add-mint ${shellWord(mint, "<the token's mint URL>")})`);
+}
+
 const WALLETS: Record<string, Method> = {
   async "wallet.list"(ctx, params) {
     await federationsOpen(ctx);
@@ -354,7 +367,7 @@ const WALLETS: Record<string, Method> = {
   },
 
   async "wallet.redeem"(ctx, params) {
-    return node(ctx).walletReceiveToken({ token: str(params, "token", true).trim() });
+    return node(ctx).walletReceiveToken({ token: str(params, "token", true).trim() }).catch((error: unknown) => { throw mintNotAdded(error) ?? error; });
   },
 
   async "wallet.mint.add"(ctx, params) {
