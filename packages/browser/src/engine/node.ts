@@ -4110,6 +4110,7 @@ export class GhostlyNode implements EngineImplementation {
     this.reactionNotes.delete(linkId);
     this.reactionNotesBefore.delete(linkId);
     this.reactionNotesWhole.delete(linkId);
+    this.chatSearch.forget(linkId);
     if (filesEnded) setTimeout(() => void live.link?.stop(true), FILES_END_MS);
     else void live.link?.stop(true);
     void live.caps?.stop();
