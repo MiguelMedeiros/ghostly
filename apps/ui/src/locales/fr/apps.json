@@ -22,6 +22,7 @@
     "revokedNext": "Elle reste arrêtée jusqu'à ce que son éditeur publie une nouvelle version, ou vous pouvez la désinstaller.",
     "runAnyway": "Lancer quand même",
     "stopped": "Arrêtée",
+    "stoppedSaid": "{{title}} s'est arrêtée.",
     "uninstall": "Désinstaller",
     "uninstallText": "Ses fichiers et ses données dans toutes les discussions sont supprimés. Exportez d'abord les données pour les garder.",
     "uninstallTitle": "Désinstaller {{title}} ?",
