@@ -485,6 +485,24 @@ describe("hooks", () => {
       stderr.mockRestore();
     }
   });
+
+  it("a stop that ends a hook without --cursor does not promise the event again: it says how to get it", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const handle = eventHandler({ types: [], print: false, write: () => {}, stopMs: 100, exec: "sleep 20" });
+      const event = received("c1", "p", "slow");
+      handle(event);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await handle.stop();
+      await handle.idle();
+      const said = stderr.mock.calls.map(([text]) => String(text)).join("");
+      // Nothing keeps where it stopped: the next start begins at the journal's end.
+      expect(said).not.toContain("handed again at the next start");
+      expect(said).toContain(`ghostly: stopped while --exec ran on event ${event.seq} (message.received): ended it; with no --cursor it is not handed again (start with --since ${event.seq - 1} to run it again)\n`);
+    } finally {
+      stderr.mockRestore();
+    }
+  });
 });
 
 describe("the allowlist", () => {

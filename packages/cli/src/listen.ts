@@ -431,8 +431,8 @@ export interface EventHandler {
   /**
    * Takes no more events and resolves once no hook runs: one at work gets `EXEC_STOP_MS` to end on its own (the cursor
    * then moves past its event), else it and what it started are sent SIGTERM, then SIGKILL, and the cursor stays before
-   * its event, handed again at the next start. Before, a stop left the hook running on its own, and the restarted listen
-   * ran that event's hook a second time alongside it.
+   * its event, handed again at the next start (without a cursor, stderr says how to get it: `--since`). Before, a stop
+   * left the hook running on its own, and the restarted listen ran that event's hook a second time alongside it.
    */
   stop(): Promise<void>;
 }
@@ -532,7 +532,12 @@ export function eventHandler(options: ListenOptions): EventHandler {
       return;
     }
     hook.stopped = true;
-    process.stderr.write(`ghostly: stopped while --exec ran on event ${hook.event.seq} (${hook.event.type}): ended it, and the event is handed again at the next start\n`);
+    // Only a cursor keeps where it stopped: without one the next start begins at the journal's end, and the event is
+    // reached again only from the place before it.
+    const { seq, type } = hook.event;
+    process.stderr.write(options.cursor
+      ? `ghostly: stopped while --exec ran on event ${seq} (${type}): ended it, and the event is handed again at the next start\n`
+      : `ghostly: stopped while --exec ran on event ${seq} (${type}): ended it; with no --cursor it is not handed again (start with --since ${seq - 1} to run it again)\n`);
     hook.signal("SIGTERM");
     if (!(await within(hook.ended, stopMs))) { hook.signal("SIGKILL"); await hook.ended; }
   };
