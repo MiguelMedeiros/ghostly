@@ -134,7 +134,7 @@ import { deviceNetworkOf, saveDeviceNetwork } from "../devices/network";
 import { EnrollCodeError, EnrollInviter, EnrollJoiner, EnrollRefusal, ghostLinkEnrollChannel, recoverEnrollment, type EnrollView, type OpenEnrollChannel } from "../devices/enroll";
 import { DeviceLinks, deviceSetView, type DeviceSetView } from "../devices/links";
 import { amendDevice, enrollDevice, forgetDevice, moveDevice, readDeviceRecord } from "../devices/store";
-import { HandoffGiver, type BusyReport, type HandoffStay, type HandoffView } from "../devices/handoff";
+import { HandoffGiver, type BusyReport, type HandoffStay, type HandoffView, type QuiesceCancel } from "../devices/handoff";
 import { WALLET_SDK_PINS, handoffProfileHost, handoffSelf } from "../devices/handoffHost";
 import { handoffLinks, profileRecords } from "../devices/handoffStandby";
 import { handoffPakeReady, isHandoffVerifier, makeHandoffVerifier, provesHandoffPassword, type HandoffVerifier } from "../devices/handoffPake";
@@ -8469,7 +8469,7 @@ export class GhostlyNode implements EngineImplementation {
       busy: (taker) => this.handoffBusy(taker),
       setChanging: () => this.deviceSetChanging(),
       staying: (taker) => this.handoffStaying(taker),
-      quiesce: (patch, taker) => this.quiesceForHandoff(patch, taker),
+      quiesce: (patch, taker, cancel) => this.quiesceForHandoff(patch, taker, cancel),
     });
     this.handoffGiver = giver;
     links.setHandoff({ receive: (from, frame) => void giver.receive(from, frame), linkChanged: (key, live) => giver.linkChanged(key, live), stop: () => giver.stop() });
@@ -8603,7 +8603,7 @@ export class GhostlyNode implements EngineImplementation {
    * away, and the new active device dials them as a restarted one does), `releasing` is written with the handoff's
    * note, and the pages start again into the gate, where pass 2 reads the frozen database.
    */
-  private async quiesceForHandoff(patch: Parameters<typeof moveDevice>[2], taker?: HandoffTakerFacts): Promise<BusyReport | null> {
+  private async quiesceForHandoff(patch: Parameters<typeof moveDevice>[2], taker?: HandoffTakerFacts, cancel?: QuiesceCancel): Promise<BusyReport | null> {
     const profile = databaseName();
     // Reviews not yet approved are cancelled, and what they reserved goes back (WISP 06 § Shape, step 4): nothing
     // `pending` moves, and an on-chain review, signed when it was made, never reaches a frozen copy.
@@ -8620,6 +8620,8 @@ export class GhostlyNode implements EngineImplementation {
     // The giver's last check was before the awaits above: a call that started ringing meanwhile keeps the profile here,
     // and nothing is stopped (WISP 06 § States and events).
     if (this.callHere()) return { why: "call" };
+    // Cancel pressed on the giver's Ready step during the reads above: nothing stops, and the device goes on as it was.
+    if (cancel?.asked()) return null;
     this.gatedOut = true;
     await this.shutdown({ quiet: true });
     // The plan once more, now that nothing can arrive any more: Mainnet ecash that landed between the last look and the
@@ -8642,6 +8644,9 @@ export class GhostlyNode implements EngineImplementation {
     // A profile with none leaves none: what the record held before is not the profile's any more.
     const verifier = await this.handoffVerifier().then((value) => ({ verifier: value ?? undefined }), () => ({}));
     await moveDevice(profile, "releasing", { ...patch, ...verifier, breezDatabases: breezDatabases.length ? breezDatabases : undefined });
+    // A Cancel pressed while it stopped: the record is `active` again before the pages start again, so the reload starts
+    // this device as the active one and no pass 2 follows.
+    await cancel?.undo().catch(() => {});
     this.events.onDeviceGate?.({ state: "releasing", reload: true });
     return null;
   }
