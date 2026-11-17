@@ -146,6 +146,17 @@ function readBundleFile(path: string): Uint8Array {
   return new Uint8Array(readFileSync(path));
 }
 
+/** A URL as an answer says it: its query and fragment, where a private repository's token rides, as `?…`. */
+function saidUrl(url: string): string {
+  try {
+    const at = new URL(url);
+    const hidden = at.search !== "" || at.hash !== "";
+    at.search = "";
+    at.hash = "";
+    return hidden ? `${at.href}?…` : at.href;
+  } catch { return url; }
+}
+
 /**
  * A bundle at an https URL, as a client fetches one: `https:` only, no user or password, jsDelivr only at a full
  * commit (WISP 1200 · Manifest, "Every URL"); every redirect is held to the same rule, and the download stops past
@@ -160,29 +171,29 @@ async function fetchBundle(url: string): Promise<Uint8Array> {
   for (let hop = 0; ; hop++) {
     if (!isAppUrl(at)) {
       throw new CliError(hop ? "refused" : "usage", hop
-        ? `${url} redirects to ${at}, which a client does not read (https only, no user or password, jsDelivr only at a full commit)`
+        ? `${saidUrl(url)} redirects to ${saidUrl(at)}, which a client does not read (https only, no user or password, jsDelivr only at a full commit)`
         : `Not a URL a client reads: https only, at most ${APP_BUNDLE_LIMITS.url} characters, no user or password, and jsDelivr only as https://cdn.jsdelivr.net/gh/<owner>/<repo>@<40-hex commit>/<path>`);
     }
     if (hop && new URL(at).host !== new URL(url).host && !isAppFetchUrl(at)) {
-      throw new CliError("refused", `${url} redirects to ${at}, on another host: a redirect stays on ${new URL(url).host} or goes to ${APP_FETCH_HOSTS.join(" or ")}`);
+      throw new CliError("refused", `${saidUrl(url)} redirects to ${saidUrl(at)}, on another host: a redirect stays on ${new URL(url).host} or goes to ${APP_FETCH_HOSTS.join(" or ")}`);
     }
     let response: Response;
     try {
       response = await fetch(at, { redirect: "manual", signal });
     } catch (error) {
-      if (error instanceof Error && error.name === "TimeoutError") throw new CliError("timeout", `${at} did not answer in ${FETCH_TIMEOUT_MS / 1000} s`);
-      throw new CliError("unavailable", `Could not read ${at}: ${error instanceof Error ? error.message : String(error)}`);
+      if (error instanceof Error && error.name === "TimeoutError") throw new CliError("timeout", `${saidUrl(at)} did not answer in ${FETCH_TIMEOUT_MS / 1000} s`);
+      throw new CliError("unavailable", `Could not read ${saidUrl(at)}: ${error instanceof Error ? error.message : String(error)}`);
     }
     if (response.status >= 300 && response.status < 400 && response.headers.get("location")) {
       await response.body?.cancel();
-      if (hop >= MAX_REDIRECTS) throw new CliError("refused", `${url} redirects more than ${MAX_REDIRECTS} times`);
+      if (hop >= MAX_REDIRECTS) throw new CliError("refused", `${saidUrl(url)} redirects more than ${MAX_REDIRECTS} times`);
       at = new URL(response.headers.get("location")!, at).href;
       continue;
     }
-    if (response.status === 404 || response.status === 410) { await response.body?.cancel(); throw new CliError("not_found", `${at} answered ${response.status}`); }
-    if (!response.ok || !response.body) { await response.body?.cancel(); throw new CliError("unavailable", `${at} answered ${response.status}`); }
+    if (response.status === 404 || response.status === 410) { await response.body?.cancel(); throw new CliError("not_found", `${saidUrl(at)} answered ${response.status}`); }
+    if (!response.ok || !response.body) { await response.body?.cancel(); throw new CliError("unavailable", `${saidUrl(at)} answered ${response.status}`); }
     const limit = APP_BUNDLE_LIMITS.bundleBytes;
-    const tooLarge = (bytes: number | string) => refused(`${url} is not a valid bundle`, { reason: "too-large", detail: `${bytes} bytes` });
+    const tooLarge = (bytes: number | string) => refused(`${saidUrl(url)} is not a valid bundle`, { reason: "too-large", detail: `${bytes} bytes` });
     const length = Number(response.headers.get("content-length"));
     if (Number.isFinite(length) && length > limit) { await response.body.cancel(); throw tooLarge(length); }
     const chunks: Uint8Array[] = [];
@@ -198,8 +209,8 @@ async function fetchBundle(url: string): Promise<Uint8Array> {
       }
     } catch (error) {
       if (error instanceof CliError) throw error;
-      if (error instanceof Error && error.name === "TimeoutError") throw new CliError("timeout", `${at} did not finish in ${FETCH_TIMEOUT_MS / 1000} s`);
-      throw new CliError("unavailable", `Could not read ${at}: ${error instanceof Error ? error.message : String(error)}`);
+      if (error instanceof Error && error.name === "TimeoutError") throw new CliError("timeout", `${saidUrl(at)} did not finish in ${FETCH_TIMEOUT_MS / 1000} s`);
+      throw new CliError("unavailable", `Could not read ${saidUrl(at)}: ${error instanceof Error ? error.message : String(error)}`);
     }
     const out = new Uint8Array(total);
     let offset = 0;
@@ -257,9 +268,10 @@ function besideUrl(url: string): string[] {
  */
 export async function checkedBundle(source: string): Promise<{ bundle: AppBundle; bytes: Uint8Array; url?: string }> {
   const isUrl = /^[a-z][a-z0-9+.-]*:\/\//i.test(source);
+  const said = isUrl ? saidUrl(source) : source;
   const bytes = isUrl ? await fetchBundle(source) : readBundleFile(userPath(source));
   const read = readAppBundle(bytes);
-  if (!read.ok) throw refused(`${source} is not a valid bundle`, read);
+  if (!read.ok) throw refused(`${said} is not a valid bundle`, read);
   const m = read.bundle.manifest;
   const version = { ref: appRef(m.publisher, m.name), sequence: m.sequence, digest: read.bundle.digest };
   // The `sources` are the publisher's words: beside them only on the hosts a client reads from (isAppFetchUrl), never a
@@ -272,7 +284,7 @@ export async function checkedBundle(source: string): Promise<{ bundle: AppBundle
   for (const [i, file] of [...files].entries()) {
     const revocation = appRevocationFor(version, lists[i]!);
     if (revocation) {
-      throw refused(`${source} is a version its publisher revoked in ${file}: a client stops it`, { reason: "revoked", ...(revocation.statement.reason !== undefined && { detail: revocation.statement.reason }) }, { file });
+      throw refused(`${said} is a version its publisher revoked in ${file}: a client stops it`, { reason: "revoked", ...(revocation.statement.reason !== undefined && { detail: revocation.statement.reason }) }, { file });
     }
   }
   return { bundle: read.bundle, bytes, ...(isUrl && { url: source }) };
