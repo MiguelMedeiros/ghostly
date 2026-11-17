@@ -524,11 +524,11 @@ export function notInYet(group: GroupView, ref: string, decline = false): string
 
 /**
  * The engine's refusal of a group this profile is not in yet ("You are not in this group", "Group not found"), said as
- * `notInYet` says it, with the same code; any other error as it is.
+ * `notInYet` says it, `refused` as the admin commands say it (`group send` said `unavailable`); any other error as it is.
  */
 export function notInYetError(group: GroupView, ref: string, error: CliError, decline = false): CliError {
   const said = /^(You are not in this group( yet)?|Group not found)$/.test(error.message) ? notInYet(group, ref, decline) : undefined;
-  return said ? new CliError(error.code, said, error.details) : error;
+  return said ? new CliError("refused", said, error.details) : error;
 }
 
 /**

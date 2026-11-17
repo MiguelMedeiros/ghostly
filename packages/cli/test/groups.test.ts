@@ -623,25 +623,26 @@ describe("a group not joined yet, said the same by every command", () => {
     return ctx;
   }
 
-  it("names the way in, or out for leave, keeping each command's code", async () => {
+  it("names the way in, or out for leave, all refused", async () => {
     for (const [held, ref, message, out] of [
       [invited, "Lab group", "You are not in Lab group yet: ghostly group accept 'Lab group' joins it", "You are not in Lab group yet: ghostly group decline 'Lab group' turns it down"],
       [knocking, knocking.id, "You are not in this group yet: you opened its link, and no member's app has let you in", `You are not in this group yet: ghostly group decline ${knocking.id} turns it down`],
     ] as const) {
       const ctx = notIn(held);
-      await expect(callApi(ctx, "group.send", { group: ref, text: "hi" }), ref).rejects.toMatchObject({ code: "unavailable", message });
+      await expect(callApi(ctx, "group.send", { group: ref, text: "hi" }), ref).rejects.toMatchObject({ code: "refused", message });
       await expect(callApi(ctx, "group.react", { group: ref, message: "m1", emoji: "👍" }), ref).rejects.toMatchObject({ code: "refused", message });
       await expect(callApi(ctx, "chat.pin", { chat: `group:${held.id}`, message: "m1" }), ref).rejects.toMatchObject({ code: "refused", message: message.replace(`'${ref}'`, `group:${held.id}`) });
       await expect(callApi(ctx, "group.typing", { group: ref }), ref).rejects.toMatchObject({ code: "refused", message });
       await expect(callApi(ctx, "group.rotate", { group: ref }), ref).rejects.toMatchObject({ code: "refused", message });
-      await expect(callApi(ctx, "group.leave", { group: ref, yes: true }), ref).rejects.toMatchObject({ code: "engine", message: out });
+      // Refused before --yes is asked: nothing would be deleted.
+      for (const yes of [true, false]) await expect(callApi(ctx, "group.leave", { group: ref, yes }), ref).rejects.toMatchObject({ code: "refused", message: out });
     }
   });
 
   it("an admin alone online is told the command that hands the role on", async () => {
     const { ctx, node } = fake();
     Object.assign(node, { leaveGroup: vi.fn(async () => { throw new Error("You are the admin and nobody else in the group is online to take over. Try again when a member is, or make someone the admin first."); }) });
-    await expect(callApi(ctx, "group.leave", { group: "Crew", yes: true })).rejects.toMatchObject({ code: "engine",
+    await expect(callApi(ctx, "group.leave", { group: "Crew", yes: true })).rejects.toMatchObject({ code: "unavailable",
       message: "You are the admin and nobody else in Crew is online to take over: try again when a member is, or make one the admin first (ghostly group admin Crew <member key>)" });
   });
 
@@ -650,9 +651,9 @@ describe("a group not joined yet, said the same by every command", () => {
     const link = `https://ghostly.tools/#/join/${encodeGroupEntryLink({ g: id, host: createIdentity().pubKeyZ32 })}`;
     const answer = (error: Error) => ({ getState: () => ({ links: [], groups: [], settings: {}, transport: {} }) as unknown as EngineState, joinGroupByLink: vi.fn(async () => { throw error; }) });
     const ctx = (node: ReturnType<typeof answer>) => ({ runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" }) as unknown as ApiContext;
-    await expect(callApi(ctx(answer(new Error("You are out of this group and its history is still here. Delete it from this device to join with a link."))), "group.join", { link })).rejects.toMatchObject({ code: "engine",
+    await expect(callApi(ctx(answer(new Error("You are out of this group and its history is still here. Delete it from this device to join with a link."))), "group.join", { link })).rejects.toMatchObject({ code: "refused",
       message: `You are out of this group and its history is still here: ghostly group forget ${id} --yes deletes it from this device, then join with the link` });
-    await expect(callApi(ctx(answer(new Error("You have an invitation to this group. Answer it first."))), "group.join", { link })).rejects.toMatchObject({ code: "engine",
+    await expect(callApi(ctx(answer(new Error("You have an invitation to this group. Answer it first."))), "group.join", { link })).rejects.toMatchObject({ code: "refused",
       message: `You have an invitation to this group: answer it first (ghostly group accept ${id} or ghostly group decline ${id})` });
   });
 });

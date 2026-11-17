@@ -1098,8 +1098,11 @@ const METHODS: Record<string, Method> = {
   },
   async "group.leave"(ctx, params) {
     const group = groupOf(ctx, params);
-    if (!bool(params, "yes")) throw new CliError("confirm", "Leaving a group deletes its history and files on this device; pass --yes (yes: true over the socket) to go on");
     const ref = str(params, "group", true);
+    // Not in yet: nothing to leave, and nothing deleted by being refused, so no --yes is asked first.
+    const yet = notInYet(group, ref, true);
+    if (yet) throw new CliError("refused", yet);
+    if (!bool(params, "yes")) throw new CliError("confirm", "Leaving a group deletes its history and files on this device; pass --yes (yes: true over the socket) to go on");
     const { admin } = await node(ctx).leaveGroup({ groupId: group.id }).catch((error) => { throw leaveRefused(group, ref, error); });
     // The member who became the admin, named from the roster read before leaving: the group is gone from the state now.
     const next = admin ? group.members.find((m) => m.key === admin) : undefined;
@@ -1308,30 +1311,27 @@ export function groupSendRefused(error: string): CliError {
 const ADMIN_ALONE = "You are the admin and nobody else in the group is online to take over. Try again when a member is, or make someone the admin first.";
 
 /**
- * `group leave` the engine refused, said with the CLI's next step: an invitation not joined yet answered "Group not
- * found" of a group `group show` lists (its way out is `group decline`), and an admin alone online "make someone the
- * admin", the app's words. The code stays the engine's.
+ * `group leave` the engine refused, said with the CLI's next step: an admin alone online "make someone the admin", the
+ * app's words. `unavailable`: it goes once a member is online. Before, `engine`, which a bot may take for a failure.
  */
 function leaveRefused(group: GroupView, ref: string, error: unknown): unknown {
-  if (!(error instanceof Error)) return error;
-  const shown = shellWord(ref, group.id);
-  if (error.message === ADMIN_ALONE) return new CliError("engine", `You are the admin and nobody else in ${groupCalled(group)} is online to take over: try again when a member is, or make one the admin first (ghostly group admin ${shown} <member key>)`);
-  const yet = error.message === "Group not found" ? notInYet(group, ref, true) : undefined;
-  return yet ? new CliError("engine", yet) : error;
+  if (!(error instanceof Error) || error.message !== ADMIN_ALONE) return error;
+  return new CliError("unavailable", `You are the admin and nobody else in ${groupCalled(group)} is online to take over: try again when a member is, or make one the admin first (ghostly group admin ${shellWord(ref, group.id)} <member key>)`);
 }
 
 /**
  * `group join` the engine refused for a group held here under the link's id, in the app's words ("Delete it from this
- * device", its menu item), said with the CLI's command. The code stays the engine's.
+ * device", its menu item), said with the CLI's command. `refused`: it never passes until the person does that. Before,
+ * `engine`, which a bot may retry.
  */
 function joinRefused(link: string, error: unknown): unknown {
   if (!(error instanceof Error)) return error;
   const id = (decodeCommunityLink(link) ?? decodeGroupEntryLink(link))?.g ?? "<group>";
   if (error.message === "You are out of this group and its history is still here. Delete it from this device to join with a link.") {
-    return new CliError("engine", `You are out of this group and its history is still here: ghostly group forget ${id} --yes deletes it from this device, then join with the link`);
+    return new CliError("refused", `You are out of this group and its history is still here: ghostly group forget ${id} --yes deletes it from this device, then join with the link`);
   }
   if (error.message === "You have an invitation to this group. Answer it first.") {
-    return new CliError("engine", `You have an invitation to this group: answer it first (ghostly group accept ${id} or ghostly group decline ${id})`);
+    return new CliError("refused", `You have an invitation to this group: answer it first (ghostly group accept ${id} or ghostly group decline ${id})`);
   }
   return error;
 }
