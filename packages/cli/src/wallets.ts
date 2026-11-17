@@ -10,6 +10,7 @@ import { CliError, type ErrorCode } from "./errors";
 import { ADDRESS_TYPES, CHAT_METHODS, PAY_METHODS, WALLET_TYPES } from "./words";
 import { findSecret, secretWords } from "./secretGuard";
 import { shellWord } from "./shellWord";
+import { isLocalHost } from "../../../apps/ui/src/lib/localHost";
 
 /**
  * Wallets and payments (WISP 1100, phase 2): the app's wallet deck and a chat's payment sheet, as methods. Test
@@ -322,6 +323,22 @@ function mintNotAdded(error: unknown): CliError | undefined {
   return new CliError("engine", `${error.message}: its mint is not one of yours (if you trust it to hold your sats: ghostly wallet add-mint ${shellWord(mint, "<the token's mint URL>")})`);
 }
 
+/**
+ * The mints `mintNotAdded` offers no `add-mint` for. A token is what a contact sends, and the way out reads as the
+ * app's advice: never a command `wallet add-mint` refuses (plain http off this machine), nor one that makes a server
+ * on this machine or the local network a mint the wallet then talks to. One who runs such a mint types its URL.
+ */
+function mintNotOffered(error: unknown): CliError | undefined {
+  const mint = error instanceof Error && /^Ecash from \S+ is not accepted$/.test(error.message) ? (error as { mint?: unknown }).mint : undefined;
+  if (typeof mint !== "string") return undefined;
+  const words = (error as Error).message;
+  try { normalizeMintUrl(mint); } catch (refusal) {
+    return new CliError("engine", `${words}: its mint is not one of yours, and not one a wallet can add (${(refusal as Error).message})`);
+  }
+  if (!isLocalHost(new URL(mint).hostname)) return undefined;
+  return new CliError("engine", `${words}: its mint is not one of yours, and it is on this machine or a local network (add a mint there only if you run it yourself)`);
+}
+
 const WALLETS: Record<string, Method> = {
   async "wallet.list"(ctx, params) {
     await federationsOpen(ctx);
@@ -414,7 +431,7 @@ const WALLETS: Record<string, Method> = {
   },
 
   async "wallet.redeem"(ctx, params) {
-    return node(ctx).walletReceiveToken({ token: await tokenShape(params) }).catch((error: unknown) => { throw mintNotAdded(error) ?? error; });
+    return node(ctx).walletReceiveToken({ token: await tokenShape(params) }).catch((error: unknown) => { throw mintNotOffered(error) ?? mintNotAdded(error) ?? error; });
   },
 
   async "wallet.mint.add"(ctx, params) {
