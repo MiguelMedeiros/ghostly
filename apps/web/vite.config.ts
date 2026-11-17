@@ -78,8 +78,12 @@ export default defineConfig({
       // gzipped on its own (about 66 KB more on the wire) and asked for by a modulepreload apiece, and a deploy changes
       // nearly all of them anyway. What loads later (menu pages, wallets, a call's window) keeps its own chunks. The
       // sign-in page shares only `popup` with it (and the preload polyfill both entries carry), never the app.
+      // The packages it runs on load, the runtime and Vite's preload helper are `vendor`, beside it: a later chunk names
+      // the file it imports from, hash and all, so OpenPGP or Keet's proofs importing them from `main` were renamed, and
+      // downloaded again, at every deploy of the app's own code (tools/scripts/check-web-first-load.mjs).
       output: { codeSplitting: { groups: [
-        { name: "popup", test: /\/proofs\/oidc\/popup\.ts$|modulepreload-polyfill/, priority: 2 },
+        { name: "popup", test: /\/proofs\/oidc\/popup\.ts$|modulepreload-polyfill/, priority: 3 },
+        { name: "vendor", tags: ["$initial"], test: /\/node_modules\/|^\0rolldown\/|^\0vite\/preload-helper/, priority: 2 },
         { name: "main", tags: ["$initial"], test: (id: string) => !/oidc-callback\.html|\/oidcCallback\.ts$/.test(id), priority: 1 },
       ] } },
     },
