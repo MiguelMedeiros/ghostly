@@ -1,5 +1,5 @@
 import { CliError } from "../errors";
-import { type Command, groupWait, here, picture, refs, showSecret, secret, cursor, pageLimit, reaction, timeout, typingFor, typingKind } from "./shared";
+import { type Command, groupWait, here, picture, refs, showSecret, secret, cursor, pageLimit, reaction, timeout, typingFor, typingKind, typingWords } from "./shared";
 
 const nameForce = { type: "boolean", description: "Use the name even if it looks like a seed, a key or ecash" } as const;
 const forced = (options: Record<string, unknown>) => (options.force === true ? { force: true } : {});
@@ -126,6 +126,6 @@ export const commands: Record<string, Command> = {
       status: { type: "string", description: "A short line shown instead, e.g. \"Reading the thread…\" (40 characters, no links)" },
       for: { type: "number", description: "Keep saying it for this many seconds (up to 600), until a send or --stop" },
     },
-    params: ({ options }, { group }) => ({ group, stop: options.stop === true, kind: options.kind, status: options.status, for: typingFor(options) }),
+    params: ({ options }, { group }) => ({ group, stop: options.stop === true, ...typingWords(options), for: typingFor(options) }),
   },
 };

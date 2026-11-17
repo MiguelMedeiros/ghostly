@@ -6,6 +6,7 @@ import { CRON_LINE, ITEM_STATES, PR_CHECKS, PR_STATES, ROUTINE_STATES, RUN_RESUL
 import { decimalNumber, type OptionSpec, type Parsed } from "../args";
 import { CliError, localFileError } from "../errors";
 import { userPath } from "../profiles";
+import { typingStatus } from "../typing";
 
 /**
  * The commands that are one API method each: how the command line becomes the method's parameters. Commands with
@@ -169,6 +170,22 @@ export function typingFor(options: Parsed["options"]): number | undefined {
   if (typeof seconds !== "number" || !(seconds >= 1 && seconds <= 600)) throw new CliError("usage", `--for takes a number of seconds from 1 to 600, not ${JSON.stringify(seconds)}`);
   if (options.stop === true) throw new CliError("usage", "--for keeps it on: not with --stop");
   return seconds;
+}
+
+/**
+ * `--kind` and `--status` of the typing commands, checked before the profile opens as `status set` checks its text: a
+ * usage error (exit 2) that names the option, and a status too long gives its count. Before, the API answered after the
+ * profile opened (`bad_request`, exit 1) in its socket words ("status: at most 40 characters"). A blank `--status` is
+ * no status, as `--status ""` already was.
+ */
+export function typingWords(options: Parsed["options"]): { kind?: string; status?: string } {
+  const status = typeof options.status === "string" && options.status.trim() ? options.status : undefined;
+  if (options.stop === true) {
+    const given = options.kind !== undefined ? "--kind" : status !== undefined ? "--status" : undefined;
+    if (given) throw new CliError("usage", `${given} goes with a start, not with --stop`);
+  }
+  typingStatus(status, "--status", "usage");
+  return { kind: options.kind as string | undefined, status };
 }
 
 /**
