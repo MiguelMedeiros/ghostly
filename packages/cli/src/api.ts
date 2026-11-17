@@ -153,8 +153,26 @@ function chatName(params: Params, name: string): string | undefined {
 const codePoints = (text: string, index: number) => [...text.slice(0, index)].length;
 
 /**
+ * What can't follow a whole `@name`: a letter, a mark, a digit or "_". The app's composer ends a token the same way
+ * (`composeMentions`, letters, digits and "_"); a mark is part of the letter before it ("@Al" + U+0301 is "@Ál").
+ */
+const NAME_CHAR = String.raw`[\p{L}\p{M}\p{N}_]`;
+
+/**
+ * Where `@name` first stands in `text`, without regard to case, or null. `whole`: only where no name character
+ * follows it, so `@Al` is not the start of `@Alice`. The regex's case folding keeps each character's length, so the
+ * match is a place in the text as written: one found in `text.toLowerCase()` came a character late after a letter
+ * that lowercases longer ("İ").
+ */
+function mentionIn(text: string, name: string, whole: boolean): RegExpExecArray | null {
+  const literal = name.replace(/[\\^$.*+?()[\]{}|/]/g, "\\$&");
+  return new RegExp(`@${literal}${whole ? `(?!${NAME_CHAR})` : ""}`, "iu").exec(text);
+}
+
+/**
  * Mentions for a group message: each ref (a member key, a unique prefix of one, a member's name, or `everyone`) must
- * be written in the text as `@<name>` (or `@<key prefix>`, `@everyone`); the first such place is the mention. A ref
+ * be written in the text as `@<name>` (or `@<key>`, `@<key prefix>`, `@everyone`); the first such place that stands
+ * whole is the mention (with none whole, the first place one starts a longer word, as before). A ref
  * more than one member answers to, none does, or this profile itself (`myName`: reads its own name, only for a ref no
  * member answers to) is refused as `group remove` refuses it: before, its own name was "No member", and two members
  * of one name gave no key. `groupRef`: the group as the command named it, for the refusal's hint.
@@ -172,11 +190,12 @@ export function mentionsFor(text: string, refs: readonly string[], group: GroupV
       if (matches.length > 1) throw moreThanOneMember(group, ref, matches, groupRef);
       if (!matches.length) throw noMember(group, ref, myName?.(), groupRef);
       key = matches[0].key;
-      spelled = [matches[0].nick?.trim(), ref, key.slice(0, 8)].filter((s): s is string => !!s);
+      spelled = [matches[0].nick?.trim(), ref, key, key.slice(0, 8)].filter((s): s is string => !!s);
     }
-    const found = spelled.map((name) => ({ name, index: text.toLowerCase().indexOf("@" + name.toLowerCase()) })).find((f) => f.index >= 0);
+    const first = (whole: boolean) => spelled.map((name) => mentionIn(text, name, whole)).find((m) => m !== null);
+    const found = first(true) ?? first(false);
     if (!found) throw new CliError("bad_request", `Write @${spelled[0]} in the text to mention ${ref}`);
-    out.push({ k: key, o: codePoints(text, found.index), l: [..."@" + found.name].length });
+    out.push({ k: key, o: codePoints(text, found.index), l: [...found[0]].length });
   }
   return out;
 }
