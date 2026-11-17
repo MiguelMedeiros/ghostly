@@ -46,7 +46,10 @@ const TIP_MS = 2500;
  */
 export function DeliveryStatus({ delivery, acked = false, onPicture = false, onRetry, live, group, error }: {
   delivery?: ChatMessage["delivery"];
-  /** Why it was not sent (the message's `deliveryError`): said on the mark when the person must wait for something. */
+  /**
+   * Why it was not sent (the message's `deliveryError`): said on the mark when the person must wait for something, and
+   * what a waiting text waits for when it is not the contact being online (`useDeliveryWords`).
+   */
   error?: string;
   /** A waiting file in a DHT-only chat: it waits for a live connection, and who chose DHT only. */
   live?: DhtOnlyBy;
@@ -125,7 +128,7 @@ export function DeliveryStatus({ delivery, acked = false, onPicture = false, onR
           <DeliveryIcon shape={shape} cutout={onPicture ? "#0b141a" : undefined} />
         </button>
       ) : (
-        <span role="img" {...common} aria-label={words.label(state, live)}
+        <span role="img" {...common} aria-label={words.label(state, live, error)}
           onClick={(e) => { e.stopPropagation(); if (press.current?.fired) { press.current = null; return; } press.current = null; show(true); }}>
           <DeliveryIcon shape={shape} cutout={onPicture ? "#0b141a" : undefined} />
         </span>
@@ -134,7 +137,7 @@ export function DeliveryStatus({ delivery, acked = false, onPicture = false, onR
         <span role="tooltip" id={tipId} data-testid="message-delivery-tip"
           className="absolute bottom-full end-0 mb-1.5 z-20 w-max max-w-[15rem] whitespace-normal rounded-md border border-border bg-surface-alt px-2 py-1 text-start text-[11.5px] leading-snug text-text-primary shadow-lg pointer-events-none animate-fade-in">
           {/* Not sent, with nothing to send again (a file that never left this device): no "Tap to send again". */}
-          {full ?? (state === "failed" && !onRetry ? words.label(state) : words.hint(state, live, group))}
+          {full ?? (state === "failed" && !onRetry ? words.label(state) : words.hint(state, live, group, error))}
         </span>
       )}
     </span>
