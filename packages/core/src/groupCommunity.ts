@@ -710,6 +710,11 @@ function isMessageFrame(v: unknown): v is CommunityMessageFrame {
     Number.isSafeInteger(f.ts) && (f.ts as number) > 0 && typeof f.nn === "string" && f.nn.length === 32 && B64.test(f.nn) &&
     typeof f.c === "string" && f.c.length <= MAX_TEXT_BOX && B64.test(f.c) && typeof f.sig === "string" && f.sig.length === 86 && B64.test(f.sig);
 }
+/** A message frame's own fields alone: whatever else came beside them is outside its author's signature, so no member's word, and is neither kept nor handed on. */
+function messageFields(f: CommunityMessageFrame): CommunityMessageFrame {
+  const { t, v, g, e, h, s, n, ts, nn, c, sig } = f;
+  return { t, v, g, e, h, s, n, ts, nn, c, sig };
+}
 
 /**
  * One member's view of a community group: the branch it follows and the ones it knows, the
@@ -2254,7 +2259,7 @@ export class CommunitySession {
       const recorded = inRecord.get(storeKey(frame));
       if (recorded && frame.s === this.myKey && recorded.sig !== frame.sig) { this.hooks.forgetFrame?.(id); continue; }
       this.onRows.set(storeKey(frame), id);
-      if (!recorded) this.state.store.push(frame);
+      if (!recorded) this.state.store.push(messageFields(frame));
     }
     this.state.store.sort((a, b) => a.ts - b.ts);
     this.trimStore();
@@ -2496,17 +2501,17 @@ export class CommunitySession {
    * once: the mark says it is passed on as it came.
    */
   passOn(frame: object): object {
-    if ((frame as { t?: unknown }).t !== "group-msg") return frame;
-    const { lv: _mark, ...rest } = frame as Record<string, unknown>;
-    return this.cameLive.has(frame) ? { ...rest, lv: this.myKey } : rest;
+    if (!isMessageFrame(frame)) return frame;
+    const fields = messageFields(frame);
+    return this.cameLive.has(frame) ? { ...fields, lv: this.myKey } : fields;
   }
 
   /** `waited`: it waited for a commit or a secret (`replayWaiting`), so it is not live. */
   private async receiveMessage(from: string, input: unknown, waited = false): Promise<boolean> {
     if (!isMessageFrame(input)) return false;
     // The live mark is the hop's, never the frame's: it is not kept, stored or handed on as it came.
-    const { lv: mark, ...unmarked } = input as CommunityMessageFrame & { lv?: unknown };
-    const raw = unmarked as CommunityMessageFrame;
+    const mark = (input as { lv?: unknown }).lv;
+    const raw = messageFields(input);
     if (raw.s === this.myKey) { this.ownFrame(raw); return false; }
     const now = this.hooks.clock?.() ?? Date.now();
     // Straight from its author, outside its answer to my sync; or handed on at once by the member at the other end,
