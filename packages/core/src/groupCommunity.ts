@@ -797,6 +797,8 @@ export class CommunitySession {
     });
     this.rebuild();
     this.pruneSeen();
+    // A reply to a message deleted for everyone while this device ran an app from before `unquote`.
+    if (hooks.removed && this.unquote(id => hooks.removed!(id))) this.persistSoon();
     this.adminSeen = this.admin;
     // A branch kept under the older rule (longest first) may be the better one now: it keeps an admin change mine dropped.
     if ((state.status === "active" || state.status === "lost") && this.bestBranch().tip !== this.topHash) void this.serialize(() => this.chooseBranch());
@@ -2170,11 +2172,48 @@ export class CommunitySession {
   forget(id: string): void {
     const author = id.slice(0, id.indexOf(":"));
     const kept = this.state.store.filter(f => f.s !== author || this.storedId(f) !== id);
-    if (kept.length === this.state.store.length) return;
-    const left = new Set(kept.map(storeKey));
-    for (const f of this.state.store) if (!left.has(storeKey(f))) this.onRows.delete(storeKey(f));
-    this.state.store = kept;
-    this.persistSoon();
+    const dropped = kept.length !== this.state.store.length;
+    if (dropped) {
+      const left = new Set(kept.map(storeKey));
+      for (const f of this.state.store) if (!left.has(storeKey(f))) this.onRows.delete(storeKey(f));
+      this.state.store = kept;
+    }
+    if (this.unquote(quoted => quoted === id) || dropped) this.persistSoon();
+  }
+
+  /**
+   * The frames whose reply quotes a message deleted for everyone (`gone`): the line of it (`r.s`) is sealed with them,
+   * and opens with the epoch secret this profile keeps. Mine is sealed again with an empty line, in its place, time and
+   * reply, and signed again: a member who holds the first drops it as seen, one who missed it gets the reply without
+   * the line. A member's I cannot sign again: it goes, and its author hands it on. Either way the row that held the
+   * first gives it up; mine is saved with the state from then on.
+   */
+  private unquote(gone: (id: string) => boolean): boolean {
+    let changed = false;
+    const store: CommunityMessageFrame[] = [];
+    for (const f of this.state.store) {
+      const key = this.messageKey(f);
+      const plain = key ? decryptText(key, messageAad(f), f.nn, f.c) : null;
+      let parsed: unknown = null;
+      try { parsed = plain === null ? null : JSON.parse(plain); } catch { /* not a payload */ }
+      const r = isObject(parsed) ? parsed.r : undefined;
+      if (!isObject(r) || typeof r.i !== "string" || r.s === "" || !gone(r.i)) { store.push(f); continue; }
+      changed = true;
+      const row = this.onRows.get(storeKey(f));
+      if (row !== undefined) { this.onRows.delete(storeKey(f)); this.hooks.forgetFrame?.(row); }
+      if (f.s !== this.myKey) continue;
+      const { n: nn, c } = encryptText(key!, messageAad(f), JSON.stringify({ ...(parsed as Record<string, unknown>), r: { ...r, s: "" } }));
+      const unsigned = { g: f.g, e: f.e, h: f.h, s: f.s, n: f.n, ts: f.ts, nn, c };
+      store.push({ t: "group-msg", v: 2, ...unsigned, sig: toBase64Url(sign(messageSigned(unsigned), this.identity.seed)) });
+    }
+    if (changed) this.state.store = store;
+    return changed;
+  }
+
+  /** The key a stored frame is sealed with, when I hold its epoch's secret. */
+  private messageKey(f: CommunityMessageFrame): Uint8Array | undefined {
+    const found = this.commitByShort(f.e, f.h), secret = found && this.state.secrets[found.hash];
+    return secret ? epochKeys(fromBase64Url(secret), this.id, f.e).message : undefined;
   }
 
   /** The id of the message a stored frame is, by its first place when it was said again (and I can open it). */
@@ -2207,12 +2246,15 @@ export class CommunitySession {
   /** The frames the app's rows hold, into the store: oldest first by when they were written, with what the record kept from before. */
   private takeRows(rows: readonly { id: string; frame: CommunityMessageFrame }[]): void {
     if (!rows.length) return;
-    const inRecord = new Set(this.state.store.map(storeKey));
+    const inRecord = new Map(this.state.store.map(f => [storeKey(f), f]));
     for (const { id, frame } of rows) {
-      this.onRows.set(storeKey(frame), id);
-      if (!inRecord.has(storeKey(frame))) this.state.store.push(frame);
       // My counter goes above a row of mine an older app stored before it was killed mid-send, its counter unsaved.
       if (frame.s === this.myKey && frame.h === shortHash(this.state.seqH) && frame.n >= this.state.seq && frame.n < OWN_FRAME_LIMIT) this.state.seq = frame.n + 1;
+      // Mine sealed again since (`unquote`), the app stopped before the row gave the first up: the record's stands.
+      const recorded = inRecord.get(storeKey(frame));
+      if (recorded && frame.s === this.myKey && recorded.sig !== frame.sig) { this.hooks.forgetFrame?.(id); continue; }
+      this.onRows.set(storeKey(frame), id);
+      if (!recorded) this.state.store.push(frame);
     }
     this.state.store.sort((a, b) => a.ts - b.ts);
     this.trimStore();
