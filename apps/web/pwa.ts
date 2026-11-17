@@ -22,7 +22,10 @@ export function serviceWorker(buildId: string): Plugin {
       const dir = fileURLToPath(new URL("./public", import.meta.url));
       publicFiles = (await readdir(dir, { withFileTypes: true })).filter((entry) => entry.isFile()).map((entry) => entry.name);
     },
-    async generateBundle(_options, bundle) {
+    // After Vite's own: `vite:build-html` deletes an entry chunk that is nothing but imports (the `main` group took its
+    // code) and names those imports in index.html instead. Read before that, the list held a file the build never
+    // writes, and one 404 fails the worker's install.
+    generateBundle: { order: "post", async handler(_options, bundle) {
       const { precache, languages, lazy } = serviceWorkerFiles(publicFiles, Object.values(bundle));
       // The commit, and what was built from it: a rebuild of the same commit that changed a file is a new cache too.
       const version = `${buildId}-${createHash("sha256").update(precache.join("\n")).update(JSON.stringify(languages)).digest("hex").slice(0, 8)}`;
@@ -40,6 +43,6 @@ export function serviceWorker(buildId: string): Plugin {
       const chunk = (Array.isArray(output) ? output : [output]).flatMap((o) => ("output" in o ? o.output : [])).find((o) => o.type === "chunk");
       if (!chunk || chunk.type !== "chunk") throw new Error("The service worker did not build");
       this.emitFile({ type: "asset", fileName: "sw.js", source: chunk.code });
-    },
+    } },
   };
 }
