@@ -116,6 +116,7 @@
     "recheck": "Vérifier à nouveau",
     "recheckNote": "Vérifier à nouveau recherche une révocation par son propriétaire.",
     "recheckNoteRepeat": "Vérifier à nouveau recherche une révocation par son propriétaire et refait la vérification.",
+    "rechecked": "Vérifié à nouveau : {{status}}",
     "revoked": "{{status}} : son propriétaire l'a retirée et a publié une révocation",
     "shareYours": "Partagez les vôtres avec le + de la discussion.",
     "sharedBy": "Partagées par {{name}}",

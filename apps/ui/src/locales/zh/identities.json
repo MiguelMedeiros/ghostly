@@ -116,6 +116,7 @@
     "recheck": "重新检查",
     "recheckNote": "重新检查会查找所有者发布的撤销。",
     "recheckNoteRepeat": "重新检查会查找所有者发布的撤销，并再次执行检查。",
+    "rechecked": "已重新检查：{{status}}",
     "revoked": "{{status}}：所有者已将其移除并发布了撤销",
     "shareYours": "你可以通过聊天中的 + 共享自己的身份。",
     "sharedBy": "{{name}} 共享的",

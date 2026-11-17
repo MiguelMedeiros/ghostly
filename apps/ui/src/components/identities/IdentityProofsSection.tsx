@@ -209,7 +209,11 @@ export function IdentityProofsSection({ onAdd }: { onAdd?: () => void }) {
                 <Button disabled={revoking === p.id} onClick={e => { handOff.current = { from: e.currentTarget, to: [REMOVE] }; removeAbort.current?.abort(); setRemoving(null); setRemoval({}); }}>{t("identities.mine.keep")}</Button>
               </> : <Button data-testid="identity-proof-remove" onClick={() => setRemoving(p.id)}>{t("identities.mine.remove")}</Button>}
             </Row>
-            {removing === p.id && <Block testId="identity-proof-remove-notes"><Notice>{t("identities.mine.removeNote")}{localOf(p.provider)?.unpublish ? ` ${localOf(p.provider)!.unpublish!.description}` : ""}</Notice>
+            {removing === p.id && <Block testId="identity-proof-remove-notes">
+              {/* The take-down's step below, said out loud (a server is written to, an approval may be asked): there
+                  from Remove on, so its first words are heard. */}
+              <p role="status" data-testid="identity-proof-remove-live" className="sr-only">{busyHere ? removal.progress : ""}</p>
+              <Notice>{t("identities.mine.removeNote")}{localOf(p.provider)?.unpublish ? ` ${localOf(p.provider)!.unpublish!.description}` : ""}</Notice>
               {approval && takingDown === p.id && <ApprovalPanel request={approval} onCancel={() => removeAbort.current?.abort()} />}
               {removal.progress && busyHere && <Notice testId="identity-proof-remove-progress">{removal.progress}</Notice>}
               {removal.failed === p.id && !busyHere && <p className="text-xs text-text-muted">{t("identities.mine.takeDownFailed")}</p>}

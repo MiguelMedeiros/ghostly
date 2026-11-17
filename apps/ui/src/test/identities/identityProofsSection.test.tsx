@@ -300,6 +300,24 @@ describe("IdentityProofsSection", () => {
       run.mockRestore();
     });
 
+    it("says the record's take-down out loud, in a status line there before it starts", async () => {
+      const { user, engine } = renderApp(<IdentityProofsSection />);
+      engine.on("removeIdentityProof", () => undefined);
+      let progress!: (line: string) => void;
+      const run = vi.spyOn(atproto.unpublish!, "run").mockImplementation((_proof, ctx) => { progress = ctx.onProgress; return new Promise<void>(() => {}); });
+      act(() => engine.update({ identityProofs: [bluesky()] }));
+      await user.click(cards()[0]);
+      await user.click(screen.getByTestId("identity-proof-remove"));
+      const live = screen.getByTestId("identity-proof-remove-live");
+      expect(live).toHaveAttribute("role", "status");
+      expect(live).toHaveTextContent(/^$/);
+      await user.click(screen.getByTestId("identity-proof-remove-confirm"));
+      act(() => progress("Deleting the record on pds.example.com…"));
+      expect(live).toHaveTextContent("Deleting the record on pds.example.com…");
+      expect(screen.getByTestId("identity-proof-remove-live")).toBe(live);
+      run.mockRestore();
+    });
+
     it("when the record cannot be deleted, says so and can remove the proof without it", async () => {
       const { user, engine } = renderApp(<IdentityProofsSection />);
       engine.on("removeIdentityProof", () => undefined);

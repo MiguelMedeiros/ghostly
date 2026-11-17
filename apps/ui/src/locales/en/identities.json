@@ -116,6 +116,7 @@
     "recheck": "Check again",
     "recheckNote": "Check again looks for a revocation by its owner.",
     "recheckNoteRepeat": "Check again looks for a revocation by its owner and repeats the check.",
+    "rechecked": "Checked again: {{status}}",
     "revoked": "{{status}}: its owner removed it and published a revocation",
     "shareYours": "Share yours from the + in the chat.",
     "sharedBy": "Shared by {{name}}",

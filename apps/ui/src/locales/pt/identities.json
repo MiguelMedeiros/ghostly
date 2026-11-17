@@ -116,6 +116,7 @@
     "recheck": "Verificar de novo",
     "recheckNote": "Verificar de novo procura uma revogação feita pelo dono.",
     "recheckNoteRepeat": "Verificar de novo procura uma revogação feita pelo dono e repete a verificação.",
+    "rechecked": "Verificado de novo: {{status}}",
     "revoked": "{{status}}: o dono a removeu e publicou uma revogação",
     "shareYours": "Compartilhe as suas pelo + na conversa.",
     "sharedBy": "Compartilhadas por {{name}}",

@@ -116,6 +116,7 @@
     "recheck": "Verifica di nuovo",
     "recheckNote": "Verifica di nuovo cerca una revoca da parte del proprietario.",
     "recheckNoteRepeat": "Verifica di nuovo cerca una revoca da parte del proprietario e ripete la verifica.",
+    "rechecked": "Verificato di nuovo: {{status}}",
     "revoked": "{{status}}: il proprietario l'ha rimossa e ha pubblicato una revoca",
     "shareYours": "Condividi le tue dal + nella chat.",
     "sharedBy": "Condivise da {{name}}",

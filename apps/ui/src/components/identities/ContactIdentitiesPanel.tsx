@@ -239,9 +239,13 @@ function TheirCardBack({ t, entry, linkId, name, nostr, turning, onCards }: { t:
   const { r, card } = entry;
   const provider = providerOf(r.provider);
   const [busy, setBusy] = useState(""), [error, setError] = useState("");
-  const act = (key: string, work: () => Promise<unknown>) => { setBusy(key); setError(""); void work().catch(e => setError(problemLine(e, t))).finally(() => setBusy("")); };
+  /** Check again answered (not thrown): the status line below says what it found, out loud too. */
+  const [rechecked, setRechecked] = useState(false);
+  const act = (key: string, work: () => Promise<unknown>) => { setBusy(key); setError(""); setRechecked(false); void work().catch(e => setError(problemLine(e, t))).finally(() => setBusy("")); };
   const ok = card.status === "verified" || card.status === "expiring";
   const canCheck = r.status !== "withdrawn" && r.status !== "revoked" && r.status !== "previous-key";
+  const status = r.status === "unconfirmed" ? (r.error ? fillNames(t("identities.contact.unconfirmedWhy", { status: card.statusLabel }), { error: receivedRefusal(r.error, t) }) : t("identities.contact.unconfirmed", { status: card.statusLabel }))
+    : r.status === "revoked" ? t("identities.contact.revoked", { status: card.statusLabel }) : card.statusLabel;
   return (
     <div className="id-card-back contact-card-back" data-testid="chat-identity-back" data-provider={r.provider} data-status={card.status}>
       <div className="id-card-back-band">
@@ -273,12 +277,16 @@ function TheirCardBack({ t, entry, linkId, name, nostr, turning, onCards }: { t:
           <dt>{t("identities.contact.validity")}</dt>
           <dd>{card.validity}</dd>
           <dt>{t("identities.contact.status")}</dt>
-          <dd data-testid="chat-identity-received-status" data-status={card.status}>{r.status === "unconfirmed" ? (r.error ? fillNames(t("identities.contact.unconfirmedWhy", { status: card.statusLabel }), { error: receivedRefusal(r.error, t) }) : t("identities.contact.unconfirmed", { status: card.statusLabel }))
-            : r.status === "revoked" ? t("identities.contact.revoked", { status: card.statusLabel }) : card.statusLabel}</dd>
+          <dd data-testid="chat-identity-received-status" data-status={card.status}>{status}</dd>
         </dl>
+        {/* Check again said out loud (it runs over the network, seconds): Checking…, then what it found, confirmed or
+            not; a thrown error is the alert's below. Always there, so its first words are heard. */}
+        {canCheck && <p role="status" data-testid="chat-identity-recheck-live" className="sr-only">
+          {busy === "recheck" ? t("identities.contact.checking") : rechecked ? (ok ? t("identities.contact.rechecked", { status: card.statusLabel }) : status) : ""}
+        </p>}
         <div className="flex flex-wrap gap-2">
           {canCheck && <FocusSafeButton type="button" className="contact-card-action" data-testid="chat-identity-recheck" disabled={turning} aria-disabled={!!busy || undefined}
-            onClick={() => { if (!busy) act("recheck", () => engine.call("recheckIdentityProof", { linkId, id: r.id })); }}>{busy === "recheck" ? t("identities.contact.checking") : t("identities.contact.recheck")}</FocusSafeButton>}
+            onClick={() => { if (!busy) act("recheck", () => engine.call("recheckIdentityProof", { linkId, id: r.id }).then(() => setRechecked(true))); }}>{busy === "recheck" ? t("identities.contact.checking") : t("identities.contact.recheck")}</FocusSafeButton>}
           {provider?.lookupDisplay && ok && <FocusSafeButton type="button" className="contact-card-action" data-testid="chat-identity-lookup" disabled={turning} aria-disabled={!!busy || undefined}
             onClick={() => { if (!busy) act("lookup", () => engine.call("lookupIdentityDisplay", { linkId, id: r.id })); }}>{busy === "lookup" ? t("identities.contact.lookingUp") : r.provider === "openpgp" ? t("identities.contact.lookupOpenpgp") : provider.lookupLabel ?? t("identities.contact.showProfile")}</FocusSafeButton>}
         </div>

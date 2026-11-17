@@ -116,6 +116,7 @@
     "recheck": "Comprobar de nuevo",
     "recheckNote": "Comprobar de nuevo busca una revocación de su dueño.",
     "recheckNoteRepeat": "Comprobar de nuevo busca una revocación de su dueño y repite la comprobación.",
+    "rechecked": "Comprobado de nuevo: {{status}}",
     "revoked": "{{status}}: su dueño la quitó y publicó una revocación",
     "shareYours": "Comparte las tuyas desde el + del chat.",
     "sharedBy": "Compartidas por {{name}}",
