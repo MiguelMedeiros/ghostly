@@ -69,7 +69,7 @@ it("lets a new address in on a relay its first few addresses filled, each client
     expect(await upgrade(relay, "10.0.1.1")).toBe(101);
     await vi.waitFor(() => expect(gone()).toHaveLength(1));
     expect(held.indexOf(gone()[0])).toBeLessThan(clientsPerAddress);
-    expect(reasons).toContain("dropped room");
+    expect(reasons).toContain(`dropped room: the oldest client of the address holding the most, for a newcomer on a relay full at ${clients} clients (GHOSTLY_RELAY_CLIENTS)`);
     await vi.waitFor(() => expect(relay.stats().clients).toBe(clients - 1));
 
     // A household behind one address gets in too: the slot that came free, then one in place of another address's
