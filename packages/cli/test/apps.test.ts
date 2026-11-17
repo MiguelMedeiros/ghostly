@@ -639,6 +639,10 @@ describe("app verify <url>", () => {
       () => new Response(stream([bundle]), { status: 200, headers: { "content-length": String(16 * 1024 * 1024 + 1) } }),
       () => new Response(null, { status: 302, headers: { location: "https://other.example/app.ghostlyapp" } }),
       () => new Response(null, { status: 302, headers: { location: "?token=GHSAT0AAAAAPRIVATEREPOTOKEN&again=1" } }),
+      () => new Response(null, { status: 302, headers: { location: "http://raw.githubusercontent.com/x?token=GHSAT0AAAAAPRIVATEREPOTOKEN" } }),
+      () => new Response(null, { status: 302, headers: { location: "https://ana:GHSAT0AAAAAPRIVATEREPOTOKEN@raw.githubusercontent.com/x" } }),
+      () => { throw new DOMException("The operation timed out.", "TimeoutError"); },
+      () => new Response(new ReadableStream<Uint8Array>({ pull(c) { c.error(new DOMException("The operation timed out.", "TimeoutError")); } }), { status: 200 }),
     ];
     for (const answer of answers) {
       vi.stubGlobal("fetch", async () => answer());
@@ -646,6 +650,9 @@ describe("app verify <url>", () => {
       expect(refusal?.message).toContain("https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp?…");
       expect(JSON.stringify([refusal?.message, refusal?.details])).not.toMatch(/PRIVATEREPOTOKEN|#x/);
     }
+    // A redirect's user and password are said as "…@".
+    vi.stubGlobal("fetch", async () => new Response(null, { status: 302, headers: { location: "https://ana:GHSAT0AAAAAPRIVATEREPOTOKEN@raw.githubusercontent.com/x" } }));
+    await expect(verifyApp(url)).rejects.toThrow("redirects to https://…@raw.githubusercontent.com/x, which a client does not read");
   });
 
   it("refuses a version its publisher revoked in the ghostly-revoke.json beside the URL; none there is no error", async () => {

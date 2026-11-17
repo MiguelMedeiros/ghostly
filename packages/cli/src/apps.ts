@@ -146,14 +146,21 @@ function readBundleFile(path: string): Uint8Array {
   return new Uint8Array(readFileSync(path));
 }
 
-/** A URL as an answer says it: its query and fragment, where a private repository's token rides, as `?…`. */
+/**
+ * A URL as an answer says it: its query and fragment, where a private repository's token rides, as `?…`, and a user
+ * or password (a redirect's) as `…@`.
+ */
 function saidUrl(url: string): string {
   try {
     const at = new URL(url);
-    const hidden = at.search !== "" || at.hash !== "";
+    const query = at.search !== "" || at.hash !== "";
+    const user = at.username !== "" || at.password !== "";
     at.search = "";
     at.hash = "";
-    return hidden ? `${at.href}?…` : at.href;
+    at.username = "";
+    at.password = "";
+    const said = user ? at.href.replace("//", "//…@") : at.href;
+    return query ? `${said}?…` : said;
   } catch { return url; }
 }
 
