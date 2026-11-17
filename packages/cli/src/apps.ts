@@ -99,7 +99,9 @@ function makeKey(kind: KeyKind): LoadedKey {
 /**
  * A --key that is a symbolic link to nothing (a key on a drive that is not mounted) or a ring of links: `existsSync`
  * follows the link and says no, so the run makes a key, which is never written over the link. Before, Node's raw
- * "EEXIST: file already exists" when it was written. The words name the link, where it leads, and that no key was made.
+ * "EEXIST: file already exists" when it was written, as `engine`. `not_found` (exit 3), as `localFileError` names a
+ * path that leads nowhere (ENOENT, ELOOP); checked before the key is read or made, so it also comes before the "No key
+ * file" of a run that follows a bundle or an index.
  */
 function refuseKeyLink(path: string): void {
   let target: string;
@@ -109,9 +111,9 @@ function refuseKeyLink(path: string): void {
   } catch { return; } // nothing there: the key is made at the path
   let code: unknown;
   try { statSync(path); return; } catch (error) { code = (error as { code?: unknown }).code; }
-  if (code === "ELOOP") throw new CliError("engine", `${path} is a symbolic link whose links go round in a loop (to ${target}): no key was made. Fix the link, or name another --key`);
+  if (code === "ELOOP") throw new CliError("not_found", `${path} is a symbolic link whose links go round in a loop (to ${target}): no key was made. Fix the link, or name another --key`);
   if (code === "ENOENT" || code === "ENOTDIR") {
-    throw new CliError("engine", `${path} is a symbolic link to ${target}, which is not there (a drive that is not mounted?): no key was made. Make the link's target reachable, or name another --key`);
+    throw new CliError("not_found", `${path} is a symbolic link to ${target}, which is not there (a drive that is not mounted?): no key was made. Make the link's target reachable, or name another --key`);
   }
 }
 
@@ -522,6 +524,7 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
   }
 
   let key: LoadedKey;
+  refuseKeyLink(keyPath);
   if (existsSync(keyPath)) key = readKey(keyPath, "publisher");
   else if (previous) {
     throw new CliError("not_found", `No key file ${keyPath}: ${out} is signed by ${appFingerprint(previous.publisher)}, and only that key publishes its next version`);
@@ -732,6 +735,7 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
   }
 
   let key: LoadedKey;
+  refuseKeyLink(keyPath);
   if (existsSync(keyPath)) key = readKey(keyPath, "store");
   else if (index.key !== undefined) throw new CliError("not_found", `No key file ${keyPath}: the index names the store key ${typeof index.key === "string" ? appFingerprint(index.key) : JSON.stringify(index.key)}`);
   else if (unread) throw unread;

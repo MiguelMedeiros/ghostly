@@ -8,8 +8,8 @@ import { error, ghostly, ok } from "./support/cli";
 /*
  * `app publish` and `store sign` with a --key that is a symbolic link to nothing (a key on a drive that is not
  * mounted): the link is no key, so the run would make one, and the key was never written over the link. Before, Node's
- * raw "EEXIST: file already exists". The answer names the link and where it leads, and says no key was made; the
- * link and its target are left as they were.
+ * raw "EEXIST: file already exists" as `engine`. The answer is `not_found` (exit 3), names the link and where it leads,
+ * and says no key was made; the link and its target are left as they were.
  */
 
 const tmp = () => mkdtempSync(join(tmpdir(), "ghostly-key-link-"));
@@ -35,7 +35,7 @@ describe.skipIf(process.platform === "win32")("--key on a symbolic link to nothi
     const dir = join(tmp(), "demo");
     ok(await ghostly(["app", "init", dir]));
     const { link, target } = danglingLink("publisher.key");
-    const refusal = error(await ghostly(["app", "publish", dir, "--key", link]), "engine", 1);
+    const refusal = error(await ghostly(["app", "publish", dir, "--key", link]), "not_found", 3);
     expect(refusal.message).toBe(`${link} is a symbolic link to ${target}, which is not there (a drive that is not mounted?): no key was made. Make the link's target reachable, or name another --key`);
     expect(refusal.message).not.toContain("EEXIST");
     expectUntouched(link, target);
@@ -47,11 +47,21 @@ describe.skipIf(process.platform === "win32")("--key on a symbolic link to nothi
     const { key: _key, ...unsigned } = JSON.parse(storeVectors.valid[0].index) as Record<string, unknown>;
     writeFileSync(join(dir, "index.json"), JSON.stringify(unsigned));
     const { link, target } = danglingLink("store.key");
-    const refusal = error(await ghostly(["store", "sign", join(dir, "index.json"), "--key", link]), "engine", 1);
+    const refusal = error(await ghostly(["store", "sign", join(dir, "index.json"), "--key", link]), "not_found", 3);
     expect(refusal.message).toBe(`${link} is a symbolic link to ${target}, which is not there (a drive that is not mounted?): no key was made. Make the link's target reachable, or name another --key`);
     expectUntouched(link, target);
     expect(existsSync(join(dir, "ghostly-store.json"))).toBe(false);
     expect(existsSync(join(dir, "ghostly-store.sig"))).toBe(false);
+  }, 60_000);
+
+  it("names the link before the key a bundle already there asks for", async () => {
+    const dir = join(tmp(), "demo");
+    ok(await ghostly(["app", "init", dir]));
+    ok(await ghostly(["app", "publish", dir, "--key", join(tmp(), "publisher.key")]));
+    const { link, target } = danglingLink("publisher.key");
+    const refusal = error(await ghostly(["app", "publish", dir, "--key", link]), "not_found", 3);
+    expect(refusal.message).toBe(`${link} is a symbolic link to ${target}, which is not there (a drive that is not mounted?): no key was made. Make the link's target reachable, or name another --key`);
+    expectUntouched(link, target);
   }, 60_000);
 
   it("names a ring of links as a loop", async () => {
@@ -59,7 +69,7 @@ describe.skipIf(process.platform === "win32")("--key on a symbolic link to nothi
     ok(await ghostly(["app", "init", dir]));
     const link = join(tmp(), "publisher.key");
     symlinkSync(link, link);
-    const refusal = error(await ghostly(["app", "publish", dir, "--key", link]), "engine", 1);
+    const refusal = error(await ghostly(["app", "publish", dir, "--key", link]), "not_found", 3);
     expect(refusal.message).toBe(`${link} is a symbolic link whose links go round in a loop (to ${link}): no key was made. Fix the link, or name another --key`);
     expect(lstatSync(link).isSymbolicLink()).toBe(true);
   }, 60_000);
