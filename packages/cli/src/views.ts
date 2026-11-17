@@ -1,6 +1,7 @@
 import { groupMemberOfLink, groupPayLineId, groupPayTwin } from "@ghostly/browser/shared/groupPayNotes";
 import type { GroupPayNote, GroupView, LinkView, MessageFile, PaymentView, PinView, StoredMessage } from "@ghostly/browser/shared/types";
 import type { StatusCard } from "@ghostly/core";
+import { shellWord } from "./shellWord";
 
 /**
  * The JSON shapes the CLI and the daemon answer with. They are the contract bots code against (WISP 1100), kept
@@ -309,6 +310,18 @@ export function groupPayTwins(messages: readonly StoredMessage[], notes: Readonl
 }
 
 /**
+ * A link join reads `status: "invited"` though nobody invited it: its `note` says that it knocks at the link and how to
+ * stop it. Nothing for anything else.
+ */
+function knockNote(group: GroupView): { note: string } | undefined {
+  if (group.status || !group.invitation?.viaLink) return undefined;
+  const id = shellWord(group.id, group.id);
+  return { note: group.invitation.unanswered
+    ? `You opened its link and nobody let you in: ghostly group accept ${id} knocks again, ghostly group decline ${id} drops it`
+    : `You opened its link and knock until a member's app lets you in (stage says how far): ghostly group decline ${id} stops it` };
+}
+
+/**
  * A group as the CLI prints it. The entry link lets anyone who reads it join, so it is `<hidden>` unless asked for
  * (`--show-secret`, or `group link`); null when the group has none.
  */
@@ -331,6 +344,7 @@ export function groupJson(group: GroupView, showSecret = false) {
     // A join nobody answered (the knocks stopped: `group accept` knocks again) and an invitation its sender took back
     // (`group accept` refuses it) said, as the app's card does: before, both read as a live "invited", stage "knocked".
     invitation: group.invitation ? { chat: group.invitation.linkId, accepted: group.invitation.accepted, viaLink: !!group.invitation.viaLink, stage: group.invitation.stage ?? null,
+      ...knockNote(group),
       ...(group.invitation.unanswered ? { unanswered: true } : {}), ...(group.invitation.takenBack ? { takenBack: true } : {}) } : null,
     // Other groups that came under this id (a contact's invitation, with the chat it came over, or a link opened): kept
     // beside it until the person picks (`engine keepGroup {groupId}`, or `engine switchGroup {groupId, to: <chat or link>}`).

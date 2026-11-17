@@ -212,6 +212,10 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
       await node(ctx).disableGroupLink({ groupId: group.id });
       return { group: group.id, link: null };
     }
+    // A community member asking for a link the admin turned off: the engine's "Only the admin can replace or turn off
+    // the group's link" answered what it had not asked. Said as the app says it (`group.link.offMember`).
+    if (group.profile === "community" && !group.isAdmin && !group.entryLink && !reset)
+      throw new CliError("refused", "The admin turned the link off: nobody can join with it, and the link shared before will not work again. Only the admin can make a new one.");
     const { link } = await node(ctx).enableGroupLink({ groupId: group.id, ...(reset ? { reset: true } : {}) });
     return withUrl(group.id, link);
   },
