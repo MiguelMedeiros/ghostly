@@ -152,6 +152,17 @@ describe("FileBubble: files/3", () => {
     expect(screen.getByTestId("file-decline")).not.toBeDisabled();
   });
 
+  it("Accept refused for the files still coming says so, with the room left, beside the room line that says it does not fit", async () => {
+    // As the engine shows it: the room left beside a file still coming (13.4 MB of 38.9 MB free), below the file's size.
+    show({ state: "transferring", stage: "asking", direction: "in", transferred: 0, size: 27_262_976, room: 14_050_000 });
+    expect(screen.getByTestId("file-room")).toHaveTextContent("Not enough space: 13.4 MB free on this device");
+    fakeEngine.on("fileAction", () => { throw new Error("No room on this device for this file beside the files still coming (13.4 MB left of 38.9 MB free)"); });
+    fireEvent.click(screen.getByTestId("file-accept"));
+    fireEvent.click(await screen.findByTestId("file-why"));
+    expect(screen.getByTestId("file-why-text")).toHaveTextContent("No room beside the files still coming. 13.4 MB left of 38.9 MB free. Wait for them to arrive, or cancel one, then try again.");
+    expect(screen.getByTestId("file-accept")).not.toBeDisabled();
+  });
+
   it("a moving transfer pauses and cancels; paused here it resumes; paused by the contact it does not", async () => {
     const view = show({ state: "transferring", direction: "out", transferred: GB, size: 4.2 * GB, rate: 1024 ** 2 }, { id: "chat1-out-xyz" });
     fireEvent.click(screen.getByTestId("file-pause"));

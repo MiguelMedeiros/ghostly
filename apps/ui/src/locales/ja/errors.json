@@ -202,6 +202,8 @@
     "gone": "このファイルはもうここにありません",
     "incomplete": "このファイルは不完全です。一部が欠けています",
     "noRoom": "相手のデバイスに空きがありません",
+    "noRoomBesideComing": "受信中のファイルの分を除くと空き容量がありません",
+    "noRoomBesideComingNext": "空き {{free}} のうち残り {{left}}。届くのを待つか、どれかをキャンセルしてから、もう一度お試しください。",
     "noRoomHere": "この端末に空き容量がありません",
     "noRoomHereNext": "空き容量を作ってから、もう一度頼んでください。",
     "noRoomNext": "空き {{free}}。",
