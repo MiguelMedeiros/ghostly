@@ -14,6 +14,19 @@ const parseRef = (ref: string | undefined): MintRef => {
 };
 
 /**
+ * The wallet's refusal, said as nothing spent. Its `engineCode` and `values` stay on it, as on a chat payment's
+ * `NoEcashError`: a host reads why by them (the CLI's `refused` for a melt the mint refused, `unavailable` for a mint
+ * that did not answer the quote). Its words are the wallet's.
+ */
+function nothingSpent(error: unknown): NothingSpentError {
+  const spent = new NothingSpentError(error instanceof Error ? error.message : String(error));
+  const { engineCode, values } = (error ?? {}) as { engineCode?: unknown; values?: unknown };
+  if (engineCode !== undefined) Object.assign(spent, { engineCode });
+  if (values !== undefined) Object.assign(spent, { values });
+  return spent;
+}
+
+/**
  * Lightning through the Cashu mints: invoices are mint quotes that turn into ecash once paid, and
  * invoices are paid by melting ecash. The default source, and what Lightning was before sources.
  *
@@ -92,13 +105,13 @@ export class CashuMintLightning implements LightningProvider {
       quote ??= await this.wallet.quoteInvoice(invoice, this.mode);
       if (quote.feeReserve > maxFee) throw engineError("lightningFeeTooHigh", { fee: quote.feeReserve });
     } catch (error) {
-      throw new NothingSpentError(error instanceof Error ? error.message : String(error));
+      throw nothingSpent(error);
     }
     this.quotes.delete(key);
     const ref = JSON.stringify({ mint: quote.mint, quote: quote.quote });
     let paid: boolean;
     try { paid = await this.wallet.payQuote(quote.quote, quote.mint, note); }
-    catch (error) { throw new NothingSpentError(error instanceof Error ? error.message : String(error)); }
+    catch (error) { throw nothingSpent(error); }
     return paid ? { state: "paid" as const, ref } : { state: "pending" as const, ref };
   }
 

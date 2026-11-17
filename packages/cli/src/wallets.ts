@@ -250,6 +250,8 @@ const WALLET_REFUSALS: [RegExp, ErrorCode][] = [
   [/^Nothing to (reclaim|take back)$/, "refused"],
   [/^This request is no longer open$/, "refused"],
   [/^This invoice is already paid$/, "refused"],
+  // Paid again while its first payment is pending: never paid twice. Before, `engine`, which a bot may retry.
+  [/^This invoice is already being paid$/, "refused"],
 ];
 
 const WALLET_NAMES: Record<WalletType, string> = { cashu: "Cashu", lightning: "Lightning", arkade: "Arkade", bark: "Bark", spark: "Spark", bitcoin: "Bitcoin", fedimint: "Fedimint", usdt: "USDT" };
@@ -282,12 +284,13 @@ function walletRefusal(error: unknown): unknown {
  * `wallet redeem` of ecash from a mint that is not one of the wallet's: the engine names the mint's host only and no
  * way on. Its words, then the command that adds the whole mint URL (the token's), for one who trusts that mint: a mint
  * holds the sats, so it is offered, never done. Shell-quoted as any hint's word; a URL no quoting survives is not printed.
+ * `refused` (sending it again changes nothing), `details.reason` `mint_not_added` and the URL in `details.mint`.
  */
 function mintNotAdded(error: unknown): CliError | undefined {
   if (!(error instanceof Error) || !/^Ecash from \S+ is not accepted$/.test(error.message)) return undefined;
   const mint = (error as { mint?: unknown }).mint;
   if (typeof mint !== "string") return undefined;
-  return new CliError("engine", `${error.message}: its mint is not one of yours (if you trust it to hold your sats: ghostly wallet add-mint ${shellWord(mint, "<the token's mint URL>")})`);
+  return new CliError("refused", `${error.message}: its mint is not one of yours (if you trust it to hold your sats: ghostly wallet add-mint ${shellWord(mint, "<the token's mint URL>")})`, { reason: "mint_not_added", mint });
 }
 
 const WALLETS: Record<string, Method> = {

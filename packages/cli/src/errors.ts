@@ -79,6 +79,8 @@ export function asCliError(error: unknown): CliError {
  */
 const ENGINE_CODES: Record<string, ErrorCode> = {
   mintUnreachable: "unavailable", lnurlUnreachable: "unavailable", hostUnreachable: "unavailable", networkUnreachable: "unavailable", usdtRpcUnavailable: "unavailable", mintFailedInvoice: "unavailable",
+  // A mint that failed `pay`'s quote or `wallet faucet` (a 500, no answer): try again later, as `wallet receive`'s.
+  mintFailedQuote: "unavailable", mintFailedFaucet: "unavailable",
   hostTimedOut: "timeout", networkTimedOut: "timeout",
   invalidMintUrl: "bad_request", mintNotHttps: "bad_request", invalidMaxFee: "bad_request",
   notEnoughSats: "refused", notEnoughForFee: "refused", mintsNoAnyAmount: "refused", ecashAlreadySpent: "refused", ecashFeeTakesAll: "refused", lightningRefused: "refused", contactNoWallet: "refused", contactNoPayments: "refused",
