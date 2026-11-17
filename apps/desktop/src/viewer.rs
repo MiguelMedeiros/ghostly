@@ -744,7 +744,8 @@ fn external_target(url: &url::Url, site: &str, service: &str) -> Option<String> 
 }
 
 /// Whether a link names this machine or the local network: an address that is not public (loopback, private,
-/// link-local, …), `localhost` and its subdomains, an mDNS `.local` name, a router's `.lan` name, or a name of one label (`router`, `nas`)
+/// link-local, …), a name under a local suffix (`localhost`, mDNS `.local`, a router's `.lan` or `.home`, a company's
+/// `.corp`: `local_names::LOCAL_SUFFIXES`), or a name of one label (`router`, `nas`)
 /// that only a local resolver answers. The contact's page runs on the contact's side; opening such a link in the
 /// person's browser sends it with the browser's cookies, past the browser's own guard for local addresses
 /// (WebView2 opens one from script, with no click). A public name that resolves to a local address is not caught here.
@@ -754,12 +755,7 @@ fn is_local_host(url: &url::Url) -> bool {
         Some(url::Host::Ipv6(ip)) => !crate::link_preview::is_public(ip.into()),
         Some(url::Host::Domain(name)) => {
             let name = name.trim_end_matches('.').to_ascii_lowercase();
-            !name.contains('.')
-                || name.ends_with(".localhost")
-                || name.ends_with(".local")
-                || name.ends_with(".internal")
-                || name.ends_with(".lan")
-                || name.ends_with(".home.arpa")
+            !name.contains('.') || crate::local_names::under_local_suffix(&name)
         }
         None => true,
     }
@@ -1468,6 +1464,10 @@ mod tests {
             "http://nas.home.arpa/",
             "http://router.lan/",
             "http://NAS.Lan./",
+            "http://router.home/",
+            "http://nas.localdomain/",
+            "http://hr.intranet/",
+            "http://files.corp/",
         ] {
             assert_eq!(outside(local), None, "{local}");
         }
