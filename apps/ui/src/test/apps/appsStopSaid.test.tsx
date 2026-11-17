@@ -66,7 +66,12 @@ describe("the Apps page, when a check stops an installed app", () => {
       await act(async () => { fakeEngine.emit({ kind: "apps-checked" }); });
       await waitFor(() => expect(screen.queryByTestId("installed-app-open")).not.toBeInTheDocument());
     };
-    return { ...view, said, stop };
+    const allow = async () => {
+      chess = { status: "ok" };
+      await act(async () => { fakeEngine.emit({ kind: "apps-checked" }); });
+      await waitFor(() => expect(screen.getByTestId("installed-app-open")).toBeInTheDocument());
+    };
+    return { ...view, said, stop, allow };
   }
 
   it("says the app stopped and why, politely, in a status there since the page opened", async () => {
@@ -94,6 +99,37 @@ describe("the Apps page, when a check stops an installed app", () => {
     await act(async () => { fakeEngine.emit({ kind: "apps-checked" }); });
     await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
     expect(said.textContent).toBe(text);
+  });
+
+  it("says it again when the app, allowed to run again, stops a second time for the same reason", async () => {
+    const { said, stop, allow } = await page();
+    await stop(REMOVED);
+    expect(said).toHaveTextContent(SAID_REMOVED);
+    await allow();
+    // Emptied as it may run again: the same words set again were no change, and nothing was said the second time.
+    expect(said).toBeEmptyDOMElement();
+    await stop(REMOVED);
+    expect(said).toHaveTextContent(SAID_REMOVED);
+  });
+
+  it("says it again when the app, uninstalled and installed again, stops for the same reason", async () => {
+    let list = [app("chess", "Chess", { status: "ok" })];
+    fakeEngine.on("appList", () => list);
+    renderApp(<Apps />, { route: "/apps" });
+    expect(await screen.findByTestId("installed-app-open")).toBeInTheDocument();
+    const said = screen.getByTestId("apps-stop-said");
+    const check = async (next: InstalledAppView[]) => {
+      list = next;
+      await act(async () => { fakeEngine.emit({ kind: "apps-checked" }); });
+      await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    };
+    await check([app("chess", "Chess", REMOVED)]);
+    expect(said).toHaveTextContent(SAID_REMOVED);
+    await check([]);
+    expect(said).toBeEmptyDOMElement();
+    await check([app("chess", "Chess", { status: "ok" })]);
+    await check([app("chess", "Chess", REMOVED)]);
+    expect(said).toHaveTextContent(SAID_REMOVED);
   });
 
   it("leaves it to the app's own screen when that screen is open", async () => {
@@ -130,6 +166,34 @@ describe("an installed app's screen", () => {
     const runLine = within(dialog).getByTestId("app-run-line");
     expect(runLine.id).not.toBe("");
     expect(dialog).toHaveAttribute("aria-describedby", runLine.id);
+  });
+
+  it("on its Uninstall question when a check finds it revoked: says so there too", async () => {
+    let list = [app("chess", "Chess", { status: "ok" })];
+    fakeEngine.on("appList", () => list);
+    const { user } = renderApp(<Shown />);
+    await screen.findByTestId("app-details");
+    await user.click(screen.getByTestId("app-uninstall-open"));
+    const question = await screen.findByTestId("app-uninstall");
+    list = [app("chess", "Chess", REVOKED)];
+    await act(() => refreshInstalledApps());
+    expect(within(question).getByTestId("app-stop-said")).toHaveTextContent(SAID_REVOKED);
+  });
+
+  it("allowed to run again: never says a bare \"stopped\" on the way", async () => {
+    let list = [app("chess", "Chess", { status: "ok" })];
+    fakeEngine.on("appList", () => list);
+    renderApp(<Shown />);
+    const said = within(await screen.findByTestId("app-details")).getByTestId("app-stop-said");
+    const heard: string[] = [];
+    const watch = new MutationObserver(() => heard.push(said.textContent ?? ""));
+    watch.observe(said, { childList: true, characterData: true, subtree: true });
+    list = [app("chess", "Chess", REVOKED)];
+    await act(() => refreshInstalledApps());
+    list = [app("chess", "Chess", { status: "ok" })];
+    await act(() => refreshInstalledApps());
+    watch.disconnect();
+    expect(heard.filter(Boolean)).toEqual([SAID_REVOKED]);
   });
 
   it("opened on an app already revoked: described by its run line, with nothing said on opening", async () => {
