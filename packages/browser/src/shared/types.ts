@@ -1176,13 +1176,22 @@ export interface ReactionNote {
   /** Who reacted: `me`, `peer`, or a group member's key. */
   by: string;
   emoji: string;
-  /** A line of the message it went to. */
+  /** A line of the message it went to: an app card's never with its bundle's link (`withoutAppLink`). */
   snippet: string;
   /** The message was mine. */
   mine: boolean;
   /** The message's id here: an edit of it changes `snippet`. */
   message?: string;
+  /**
+   * A group's note: what the message is where its text is only an English fallback, so the chat list (which holds no
+   * group's rows) says it in the reader's language: a voice message's or a video's length (milliseconds), an app card's
+   * name. Absent for any other message, on a 1:1 chat's (the list reads its row), and on notes made before it.
+   */
+  kind?: ReactionNoteKind;
 }
+
+/** `ReactionNote.kind`: a voice message, a video, or an app card (WISP 405 § An app) by its ref, title and version. */
+export type ReactionNoteKind = { voice: number } | { video: number } | { app: { ref: string; title: string; version?: string } };
 
 /** How a message was edited (WISP 400 § Edits). */
 export interface MessageEdit {

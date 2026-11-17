@@ -1,6 +1,6 @@
-import { REACTION_LIMITS, ReactionWindow, nextReactionNumber, reactionEmoji, reactionIsNewer, replySnippet, type WireReaction } from "@ghostly/core";
+import { REACTION_LIMITS, ReactionWindow, nextReactionNumber, reactionEmoji, reactionIsNewer, replySnippet, withoutAppLink, type WireReaction } from "@ghostly/core";
 import { replyRef } from "../shared/replies";
-import type { ReactionNote, StoredMessage, WaitingReaction } from "../shared/types";
+import type { ReactionNote, ReactionNoteKind, StoredMessage, WaitingReaction } from "../shared/types";
 
 /*
  * Reactions to messages (WISP 400 § Reactions), as the engine keeps them: on the message's row, one per person, the
@@ -68,13 +68,33 @@ export function latestReaction(messages: readonly StoredMessage[]): ReactionNote
 }
 
 function note(message: StoredMessage, by: string, emoji: string, at: number): ReactionNote {
-  return { at, by, emoji, snippet: replySnippet(message.text), mine: message.sender === "me", message: message.id };
+  const kind = noteKind(message);
+  return { at, by, emoji, snippet: noteSnippet(message), mine: message.sender === "me", message: message.id, ...(kind && { kind }) };
+}
+
+/** A note's line of its message: its text's, an app card's without its bundle's link. */
+const noteSnippet = (message: StoredMessage) => replySnippet(withoutAppLink(message.text, message.card));
+
+/**
+ * What a note's message is where its text is only an English fallback (`ReactionNote.kind`), for the chat list. A
+ * group's only: the list holds a 1:1 chat's rows and reads it there, and a 1:1 chat's note is kept on its saved session.
+ */
+function noteKind(message: StoredMessage): ReactionNoteKind | undefined {
+  if (!isGroup(message.linkId)) return undefined;
+  const { card, file } = message;
+  if (card?.kind === "app") return { app: { ref: card.ref, title: card.title, ...(card.version && { version: card.version }) } };
+  if (file?.voice) return { voice: file.voice.duration };
+  if (file?.video) return { video: file.video.duration };
+  return undefined;
 }
 
 /** The note again after its message changed (an edit): its line is the message's text now. Undefined when nothing changed. */
 export function noteAfterChange(current: ReactionNote, message: StoredMessage): ReactionNote | undefined {
-  const snippet = replySnippet(message.text);
-  return snippet === current.snippet ? undefined : { ...current, snippet };
+  const snippet = noteSnippet(message), kind = noteKind(message);
+  if (snippet === current.snippet && JSON.stringify(kind) === JSON.stringify(current.kind)) return undefined;
+  const next: ReactionNote = { ...current, snippet };
+  if (kind) next.kind = kind; else delete next.kind;
+  return next;
 }
 
 /** The note as its message's row has it now, when that reaction still stands there (not replaced, not taken back). */
