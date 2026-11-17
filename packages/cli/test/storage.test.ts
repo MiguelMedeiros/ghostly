@@ -55,7 +55,20 @@ const faults = vi.hoisted(() => ({ rename: false, short: false, full: false, syn
  * How long a sync off the thread takes, at least: a slow disk's (a test's own; 0, as fast as this one is), and what it
  * waits for first, when a test holds it. And the syncs done.
  */
-const disk = vi.hoisted(() => ({ syncMs: 0, held: null as Promise<void> | null, synced: 0 }));
+const disk = vi.hoisted(() => ({ syncMs: 0, held: null as Promise<void> | null, synced: 0, snapshotSync: null as (() => Promise<void>) | null }));
+/** A fold's snapshot is synced through its own file handle: `disk.snapshotSync`, when a test sets it, runs first. */
+vi.mock("node:fs/promises", async (original) => {
+  const fsp = await original<typeof import("node:fs/promises")>();
+  return {
+    ...fsp,
+    open: async (...args: Parameters<typeof fsp.open>) => {
+      const handle = await fsp.open(...args);
+      if (!String(args[0]).endsWith("snapshot.bin.tmp")) return handle;
+      const sync = handle.sync.bind(handle);
+      return Object.assign(handle, { sync: async () => { await disk.snapshotSync?.(); return sync(); } });
+    },
+  };
+});
 
 const opened: PersistentIndexedDb[] = [];
 // A store left open keeps journaling every later test's transactions (the classes it hooks are shared): close them.
@@ -1431,6 +1444,55 @@ describe("messages kept in rows.db", () => {
     age(close);
     await closing.close();
     expect(held(close)).toEqual([]);
+  });
+
+  it("a chat delete or a settings write that commits while the fold's snapshot is written still leaves the disk once that snapshot is an hour old", async () => {
+    const profile = (factory: IDBFactory) => new Promise<IDBDatabase>((resolve, reject) => {
+      const request = factory.open("ghostly", 1);
+      request.onupgradeneeded = () => {
+        request.result.createObjectStore("links", { keyPath: "id" });
+        request.result.createObjectStore("settings");
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const held = (dir: string, word: string) => readdirSync(dir).filter((name) => readFileSync(join(dir, name)).includes(word));
+    const age = (dir: string) => { const then = (Date.now() - 2 * 60 * 60_000) / 1000; utimesSync(join(dir, "snapshot.bin"), then, then); };
+    const left: Record<string, string[]> = {};
+    try {
+      // `chat remove` deletes the chat's row; `x401 credential remove` writes the settings again without the secret.
+      // "after": the same once the fold is done, which was folded as it is now before the fold was written off the thread.
+      for (const when of ["during", "after"] as const) for (const what of ["chat", "settings"] as const) {
+        const dir = folder();
+        const store = await openPersistentIndexedDb(dir);
+        opened.push(store);
+        const d = await profile(store.factory);
+        await tx(d, ["links", "settings"], (s) => { s.links.put({ id: "chat-1", seed: "gone-chat" }); s.settings.put({ x401: "gone-settings" }, "settings"); });
+        // The fold's snapshot, taken with both, waits to be synced until the delete has committed.
+        let release = () => {};
+        const writing = new Promise<void>((reached) => {
+          disk.snapshotSync = () => { reached(); return new Promise<void>((go) => { release = go; }); };
+        });
+        const folding = store.compact();
+        await writing;
+        if (when === "after") { release(); await folding; }
+        const removing = tx(d, ["links", "settings"], (s) => { if (what === "chat") s.links.delete("chat-1"); else s.settings.put({}, "settings"); });
+        // Committed: a transaction started after it reads what it did (its `complete` waits for the fold).
+        const now = d.transaction(["links", "settings"]);
+        expect(await read(what === "chat" ? now.objectStore("links").get("chat-1") : now.objectStore("settings").get("settings"))).toEqual(what === "chat" ? undefined : {});
+        release();
+        await folding;
+        await removing;
+        disk.snapshotSync = null;
+        expect(held(dir, `gone-${what}`)).toEqual(["snapshot.bin"]);
+        // An hour on, the next write folds the delete in.
+        age(dir);
+        await tx(d, ["links"], (s) => { s.links.put({ id: "chat-2" }); });
+        await store.flush();
+        left[`${what} ${when} the fold`] = held(dir, `gone-${what}`);
+      }
+    } finally { disk.snapshotSync = null; }
+    expect(left).toEqual({ "chat during the fold": [], "settings during the fold": [], "chat after the fold": [], "settings after the fold": [] });
   });
 
   it("a put a unique index refuses in a store kept on disk leaves the store writable by the next transaction", async () => {
