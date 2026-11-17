@@ -213,6 +213,43 @@ describe("revocations kept while the app is installed", () => {
   });
 });
 
+describe("a store's revocation of a later version, read before the app was installed", () => {
+  // The store's index revokes v2 while v1 is not installed yet; its next index drops it, and nothing beside a copy of v2
+  // (a contact's card at a mirror) or beside v1's URL revokes it.
+  async function installedAfterTheRead() {
+    const v1 = await bundle();
+    const v2 = await bundle({ sequence: 2 });
+    net.put(BUNDLE_URL, v1.bytes);
+    await net.putStore(await storeFiles({ apps: [listing(v1)], revoked: [await revocation(v1.ref, [v2.digest], "Bad v2")] }));
+    const store = apps(net);
+    await store.addStore({ url: STORE_URL });
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    await store.refreshStores();
+    await net.putStore(await storeFiles({ sequence: 2, apps: [listing(v1)] }));
+    await store.refreshStores();
+    return { v1, v2, store };
+  }
+
+  it("a copy of the revoked version is shown revoked and not installed", async () => {
+    const { v1, v2, store } = await installedAfterTheRead();
+    net.put(MIRROR_URL, v2.bytes);
+    const preview = await store.preview({ card: { ref: v2.ref, url: MIRROR_URL, sequence: v2.sequence, digest: v2.digest } });
+    expect(preview.run).toEqual({ status: "revoked", reason: "Bad v2" });
+    await expect(store.install({ stage: preview.stage, digest: v2.digest, grant: ["chat"] })).rejects.toThrow(/^revoked/);
+    expect(await appRows()).toEqual([expect.objectContaining({ digest: v1.digest })]);
+  });
+
+  it("the store's next index listing it: the update check does not install it", async () => {
+    const { v1, v2, store } = await installedAfterTheRead();
+    net.put(MIRROR_URL, v2.bytes);
+    await net.putStore(await storeFiles({ sequence: 3, apps: [listing(v2, [MIRROR_URL])] }));
+    await store.refreshStores();
+    expect((await store.checkUpdates()).map((r) => r.outcome)).not.toContain("updated");
+    expect(await appRows()).toEqual([expect.objectContaining({ digest: v1.digest })]);
+  });
+});
+
 describe("how many are kept", () => {
   it("another publisher's install screens, revoking their own apps up to the cap, push out none of this publisher's", async () => {
     const v1 = await bundle();

@@ -1016,7 +1016,8 @@ export class Apps {
    * one `app` leaves out on purpose (the check's, of a version gone) was on `was` already. So is what the person's stores
    * revoke of the versions written, as held at the write: a version fetched while a store's index revoked it was not on
    * the record `keepStoreRevocations` read. A store removed since keeps no index: what it revoked of this app is among
-   * the ones this profile kept (`APP_REVOCATIONS_KEY`), judged here too.
+   * the ones this profile kept (`APP_REVOCATIONS_KEY`), judged here too. Every revocation of this app the stores hold
+   * is kept there at the write.
    */
   private async putAppIfUnchanged(app: InstalledApp, was: InstalledApp | undefined): Promise<boolean> {
     const stores = await this.records();
@@ -1031,6 +1032,9 @@ export class Apps {
       app = withRevocations(app, (now?.revocations ?? []).filter((r) => !had.has(canonicalJson(r))));
       const revoked = [...stores.values()].flatMap((s) => (s.removed ? [] : s.index?.revoked ?? []));
       app = withRevocations(app, stopping(this.versionsOf(app), [...revoked, ...keptRevocations(kept.result, app.ref).mine]));
+      // Those of its other versions are kept with the profile's, as `keepStoreRevocations` does for an app installed when
+      // the index was read: one installed after it, the store's next index without them, would install a version revoked.
+      keepRevocations(tx.objectStore(STORES.settings), app.ref, revoked.filter((r) => r.statement.app === app.ref));
       const { store: pin, ...unpinned } = app;
       tx.objectStore(STORES.apps).put(pin !== undefined && stores.get(pin)?.removed ? unpinned : app);
       put = true;
