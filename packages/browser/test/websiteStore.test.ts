@@ -464,6 +464,9 @@ describe("the site leaves out a version its publisher revoked, as the app does b
     served[revokeAt("mal-2")] = filler;
     const more = await buildAppBundle({ ...base("mal", "mal"), sources: [1, 2].map((n) => at(`mal-${n}`)) }, [page("mal")], m);
     served[at("mal")] = more.bytes;
+    const relisted = await signAppStore({ ...index, apps: [{ ...index.apps[0], digest: more.digest }, index.apps[1]] }, signerOf("store"));
+    served[sync.STORE_URL] = relisted.indexBytes;
+    served[sync.STORE_URL.replace(/\.json$/, ".sig")] = relisted.sigBytes;
     const again = await sync.fromStore(fetcher) as { revocations: Record<string, string>; problems: string[] };
     expect(again.problems).toEqual([`${revokeAt("mal-2")}: over the ${sync.LIMITS.revocationsTotalBytes / 2} bytes one publisher's revocation files may take`]);
     expect(Object.keys(again.revocations)).toContain(revokeAt("vic"));
