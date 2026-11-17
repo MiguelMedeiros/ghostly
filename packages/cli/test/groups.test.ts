@@ -610,6 +610,9 @@ describe("a group not joined yet, said the same by every command", () => {
   const invited = { id: "g2", name: "Lab group", createdAt: 1, profile: "mesh", isAdmin: false, canSend: false, lastMessageAt: 0, invited: [], memberLinks: {}, members: [],
     invitation: { linkId: "chat-ana", contact: "anakey", admin: "anakey", members: 2, accepted: false } } as unknown as GroupView;
   const knocking = { ...invited, id: "ZmoZar972sOso_z8IAP0ng", name: "", invitation: { linkId: "l1", contact: "", admin: "anakey", members: 0, accepted: true, viaLink: true, stage: "knocking" } } as unknown as GroupView;
+  // Its admin left, forgot it or handed the role on: `group accept` answers "This invitation was taken back", and only
+  // `group decline` drops it from `group list`. Before, it was told `ghostly group accept` like a live one.
+  const takenBack = { ...invited, invitation: { ...invited.invitation, takenBack: true } } as unknown as GroupView;
   function notIn(held: GroupView) {
     const { ctx, node } = fake();
     node.getState = () => ({ links: [], groups: [group, held], settings: {}, transport: {} }) as unknown as EngineState;
@@ -627,6 +630,7 @@ describe("a group not joined yet, said the same by every command", () => {
     for (const [held, ref, message, out] of [
       [invited, "Lab group", "You are not in Lab group yet: ghostly group accept 'Lab group' joins it", "You are not in Lab group yet: ghostly group decline 'Lab group' turns it down"],
       [knocking, knocking.id, "You are not in this group yet: you opened its link, and no member's app has let you in", `You are not in this group yet: ghostly group decline ${knocking.id} turns it down`],
+      [takenBack, "Lab group", "Its invitation to Lab group was taken back: ghostly group decline 'Lab group' drops it", "You are not in Lab group yet: ghostly group decline 'Lab group' turns it down"],
     ] as const) {
       const ctx = notIn(held);
       await expect(callApi(ctx, "group.send", { group: ref, text: "hi" }), ref).rejects.toMatchObject({ code: "unavailable", message });
@@ -652,8 +656,10 @@ describe("a group not joined yet, said the same by every command", () => {
     const ctx = (node: ReturnType<typeof answer>) => ({ runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" }) as unknown as ApiContext;
     await expect(callApi(ctx(answer(new Error("You are out of this group and its history is still here. Delete it from this device to join with a link."))), "group.join", { link })).rejects.toMatchObject({ code: "engine",
       message: `You are out of this group and its history is still here: ghostly group forget ${id} --yes deletes it from this device, then join with the link` });
+    // The engine says this only of an invitation taken back (a live one goes on with the link), which `group accept`
+    // refuses: before, the line offered `ghostly group accept` first.
     await expect(callApi(ctx(answer(new Error("You have an invitation to this group. Answer it first."))), "group.join", { link })).rejects.toMatchObject({ code: "engine",
-      message: `You have an invitation to this group: answer it first (ghostly group accept ${id} or ghostly group decline ${id})` });
+      message: `Its invitation to this group was taken back: ghostly group decline ${id} drops it, then join with the link` });
   });
 });
 
