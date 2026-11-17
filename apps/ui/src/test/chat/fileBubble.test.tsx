@@ -137,10 +137,19 @@ describe("FileBubble: files/3", () => {
     expect(line.className).toContain("[overflow-wrap:anywhere]");
   });
 
-  it("an offer larger than the room here cannot be accepted", () => {
+  it("an offer larger than the room shown still takes Accept, which reads the room again: refused, it says why and keeps waiting", async () => {
     show({ state: "transferring", stage: "asking", direction: "in", transferred: 0, size: 4.2 * GB, room: 1 * GB });
     expect(screen.getByTestId("file-room")).toHaveTextContent("Not enough space: 1.0 GB free on this device");
-    expect(screen.getByTestId("file-accept")).toBeDisabled();
+    // The room shown may be old (space made since): Accept is not turned off, and the engine reads the room again.
+    expect(screen.getByTestId("file-accept")).not.toBeDisabled();
+    fakeEngine.on("fileAction", () => { throw new Error("No room on this device for this file (1.0 GB free)"); });
+    fireEvent.click(screen.getByTestId("file-accept"));
+    await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))).toEqual({ linkId: "chat1", fileId: file().id, action: "accept" }));
+    fireEvent.click(await screen.findByTestId("file-why"));
+    expect(screen.getByTestId("file-why-text")).toHaveTextContent("No room on this device. Free some space, then try again.");
+    // Still offered: it can be taken once there is room, or declined.
+    expect(screen.getByTestId("file-accept")).not.toBeDisabled();
+    expect(screen.getByTestId("file-decline")).not.toBeDisabled();
   });
 
   it("a moving transfer pauses and cancels; paused here it resumes; paused by the contact it does not", async () => {

@@ -113,4 +113,16 @@ describe("file actions on an ended 1:1 transfer", () => {
       expect(node.fileAction).not.toHaveBeenCalled();
     }
   });
+
+  it("accept of an offer larger than the room left now is refused with the room (it keeps waiting); before, it started and failed part way", async () => {
+    const { ctx, node } = world({ [IN]: { state: "transferring", stage: "asking", transferred: 0, size: 24_465_408, direction: "in", room: 16_228_352 } as FileTransferView });
+    // As the engine's `FileDesk.accept` refuses it.
+    node.fileAction.mockRejectedValueOnce(Object.assign(new Error("No room on this device for this file (15.5 MB free)"), { room: 16_228_352 }));
+    await expect(callApi(ctx, "file.action", { file: IN, action: "accept" })).rejects.toMatchObject({
+      code: "refused", message: "No room on this device for this file (15.5 MB free)", details: { reason: "no_room", room: 16_228_352 },
+    });
+    // Any other engine error goes on as it came (the daemon's `asCliError` names it, as before).
+    node.fileAction.mockRejectedValueOnce(new Error("No such file transfer"));
+    await expect(callApi(ctx, "file.action", { file: IN, action: "accept" })).rejects.not.toHaveProperty("code");
+  });
 });
