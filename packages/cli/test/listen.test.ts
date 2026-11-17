@@ -791,7 +791,8 @@ describe("listen with an allowlist and --turns", () => {
     chmodSync(join(dir, "unreadable"), 0o000);
     mkdirSync(join(dir, "folder"));
     for (const since of [undefined, 0]) {
-      expect(() => start(since, join(dir, "unreadable"))).toThrow(`Not allowed to write or read ${join(dir, "unreadable")}`);
+      // Not as root, which reads a mode-000 file.
+      if (process.getuid?.() !== 0) expect(() => start(since, join(dir, "unreadable"))).toThrow(`Not allowed to write or read ${join(dir, "unreadable")}`);
       expect(() => start(since, join(dir, "folder"))).toThrow(`${join(dir, "folder")} is a folder: name a file`);
     }
     expect(said).toEqual([]);
