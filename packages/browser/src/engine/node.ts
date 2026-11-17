@@ -7852,7 +7852,7 @@ export class GhostlyNode implements EngineImplementation {
     if (wasOnline && !this.networkOn) await this.hold.stop();
     // A profile with a device set: its standbys go through these relays and servers, and stay off with the network.
     const gate = knownDeviceGate();
-    if (((gate && gate.state !== "single") || this.deviceLinks) && (["online", "relays", "readRelays", "irohRelays", "iceServers", "pushRelay", "hyperdhtRelay"] as const).some((key) => key in settings)) {
+    if (((gate && gate.state !== "single") || this.deviceLinks) && (["online", "relays", "readRelays", "irohRelays", "iceServers", "pushRelay", "hyperdhtRelay", "relayOnly"] as const).some((key) => key in settings)) {
       await this.syncDeviceNetwork().catch(() => {});
     }
     this.emitState();

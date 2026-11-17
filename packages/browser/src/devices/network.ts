@@ -13,7 +13,7 @@ import type { DeviceNetwork, DeviceRecord } from "./state";
  */
 
 /** The network settings a standby needs, out of the profile's settings. */
-export function deviceNetworkOf(settings: Pick<Settings, "online" | "relays" | "readRelays" | "irohRelays" | "iceServers" | "pushRelay" | "hyperdhtRelay">): DeviceNetwork {
+export function deviceNetworkOf(settings: Pick<Settings, "online" | "relays" | "readRelays" | "irohRelays" | "iceServers" | "pushRelay" | "hyperdhtRelay" | "relayOnly">): DeviceNetwork {
   return {
     ...(settings.online === false ? { off: true } : {}),
     ...(settings.relays?.length ? { relays: [...settings.relays] } : {}),
@@ -25,6 +25,8 @@ export function deviceNetworkOf(settings: Pick<Settings, "online" | "relays" | "
     ...(settings.iceServers?.length ? { iceServers: settings.iceServers.map((server) => ({ ...server })) } : {}),
     // A standby web app wakes another device through it (WISP 06 § Push and the phone): a page may not post to a push service.
     ...(settings.pushRelay ? { pushRelay: settings.pushRelay } : {}),
+    // A standby Desktop's links read at the pace the engine's would (`GhostlyNode.pollIntervals`): its DHT stays closed.
+    ...(settings.relayOnly === true ? { relayOnly: true } : {}),
   };
 }
 
