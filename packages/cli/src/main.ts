@@ -1907,6 +1907,10 @@ export const APP_WORDS: Readonly<Record<string, string>> = {
   "message react": "react <chat> <message> <emoji>",
   "message pin": "pin <chat> <message>",
   "message forward": "forward <chat> <message> --to <chat>",
+  // A group's pins are `pin <group>`, as a chat's are, and its members are in `group show`.
+  "group pin": "pin <group> <message>",
+  "group unpin": "pin <group> --remove",
+  "group members": "group show <group>",
 };
 
 /** The app's search (in a chat and in the chat list), which the CLI does not have: `chat history` and jq do it. */
@@ -1917,6 +1921,7 @@ const SEARCH = ["search", "chat search"];
  * credential`) are answered with the group's commands, as `ghostly help chat` lists them; before, it was only "Unknown
  * command: chat". The longest group the words name answers: `x401 credential frob` lists add, list and remove.
  * A word near one of them is a typo: `chat lst` and `sned hi` say the command meant (`chat list`, `send`) and its help.
+ * A word another command does the work of (`group pin`, `DONE_ELSEWHERE`) names that command.
  */
 export function unknownCommand(first: string | undefined, second?: string, third?: string): CliError {
   const asked = [first, second, third].filter((word): word is string => !!word);

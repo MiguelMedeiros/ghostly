@@ -296,7 +296,10 @@ key), which every answer and event carries. What the CLI does when names meet:
 - A group you are in wins over an invitation with the same name or id prefix; an invitation is found by its id, and
   by a name or prefix none of your groups has.
 - A member's whole key is that member, whatever another member calls itself. A prefix or a name that fits two members
-  is refused.
+  is refused (exit 1, `bad_request`, `details.matches` with each one's `key` and `name`), naming them by name and key
+  prefix: use its key, which `ghostly group show <group>` lists. A ref no member answers to says so and points there
+  too (exit 3, `not_found`); your own name or key says it is you (exit 1, `bad_request`), in `--mention` as in `group
+  remove`.
 
 Safety rules the CLI enforces:
 
