@@ -235,6 +235,13 @@ describe("[text](url) links", () => {
     expect(link("[paypal\u034f.com](https://evil.example/)")).toMatchObject({ data: { showUrl: true } });
   });
 
+  it("reads a combining mark as part of the host it sits in, as a browser does", () => {
+    for (const label of ["paypal\u0332.com", "paypal.c\u0332om", "wiki\u0307.com", "paypal\u0320.com", "paypal.\u0332com", "paypal.co\u0332m"]) {
+      expect(labelMisleads(label, "https://evil.example/login"), label).toBe(true);
+    }
+    expect(link("[paypal.c\u0332om](https://evil.example/login)")).toMatchObject({ data: { showUrl: true } });
+  });
+
   it("shows the address when formatting splits the text's host, as the bubble joins it again", () => {
     for (const label of [
       "paypal.**com**", "paypal._com_", "paypal.*com*", "paypal.__com__", "paypal.~~com~~", "paypal.||com||",

@@ -19,10 +19,14 @@ function hostOf(url: string): string | null {
   }
 }
 
-/** Something in a label that reads as a web address or a domain: "ghostly.tools", "https://a.example/x", "1.2.3.4". */
-const ADDRESS = /(?:[a-z][a-z\d+.-]{0,20}:\/\/)?[\p{L}\p{N}][\p{L}\p{N}-]{0,62}(?:\.[\p{L}\p{N}][\p{L}\p{N}-]{0,62}){1,8}/giu;
+/**
+ * Something in a label that reads as a web address or a domain: "ghostly.tools", "https://a.example/x", "1.2.3.4".
+ * A combining mark NFKC leaves alone is part of the label it sits in, as a browser reads it ("paypal.c̲om").
+ */
+const ADDRESS =
+  /(?:[a-z][a-z\d+.-]{0,20}:\/\/)?[\p{L}\p{N}][\p{L}\p{N}\p{M}-]{0,62}(?:\.\p{M}*[\p{L}\p{N}][\p{L}\p{N}\p{M}-]{0,62}){1,8}/giu;
 /** Ends in a top-level domain (letters), or is an IPv4 address. "v1.2", "3.14" and "e.g." are not hosts. */
-const LOOKS_LIKE_HOST = /\.\p{L}[\p{L}\p{N}-]{1,62}$|^\d{1,3}(?:\.\d{1,3}){3}$/u;
+const LOOKS_LIKE_HOST = /\.\p{M}*\p{L}[\p{L}\p{N}\p{M}-]{1,62}$|^\d{1,3}(?:\.\d{1,3}){3}$/u;
 /** File extensions no top-level domain uses: "report.pdf", "Node.js" and "package.json" are names, not hosts. */
 const NOT_A_TLD = /\.(?:[cm]?js|jsx|tsx?|json|css|html?|txt|log|csv|png|jpe?g|gif|svg|webp|toml|ya?ml|lock|wasm|pdf|rb|go)$/i;
 /** Extensions that are country domains too (Moldova, Paraguay…): a file only as a path's last part ("docs/CHAT.md"). */
