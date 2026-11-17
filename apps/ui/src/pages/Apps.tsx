@@ -465,6 +465,8 @@ export function Apps() {
     if (!before) return;
     const stopped = installed.filter((a) => appStopped(a) && before.get(a.ref) === false && a.ref !== details);
     if (stopped.length) setStopSaid(stopped.map((a) => stoppedSaid(a.title, a.run, t)).join(" "));
+    // One that may run again empties the line, so the same app stopping again for the same reason is a change, and said.
+    else if (installed.some((a) => !appStopped(a) && before.get(a.ref) === true)) setStopSaid("");
   }, [installed, details, t]);
 
   // A store that reads as before stays the object held, and the list held when all do: the update check and each
