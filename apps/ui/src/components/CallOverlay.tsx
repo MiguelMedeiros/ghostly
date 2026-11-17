@@ -547,7 +547,7 @@ const NOTICE_TEXT = { lost: "calls.devices.lost", gone: "calls.devices.gone", fa
  * the window (`overVideo`) the call is drawn over it, and so is its menu: at the menus' usual height it opened under both.
  * It hangs in the whole window (`host`), which a screen reader reads alone; on the page's body it was out of its reach.
  */
-function DeviceMenu({ devices, overVideo, host }: { devices: CallDevices; overVideo: boolean; host: RefObject<HTMLElement | null> | null }) {
+export function DeviceMenu({ devices, overVideo, host }: { devices: CallDevices; overVideo: boolean; host: RefObject<HTMLElement | null> | null }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLDivElement>(null);
@@ -600,7 +600,7 @@ function DeviceMenu({ devices, overVideo, host }: { devices: CallDevices; overVi
 
 /** A device went away and the default took over (or none could), the chosen one is back (with the way to switch to it), or one chosen could not be used.
  *  On a phone its buttons take a tap on 44 px (`.tap-target`): the ×'s grows into the 12 px gap, up to Switch back. */
-function DeviceNoticeBar({ devices }: { devices: CallDevices }) {
+export function DeviceNoticeBar({ devices }: { devices: CallDevices }) {
   const { t } = useI18n();
   const notice = devices.notice!;
   const name = notice.name || t(KIND_NAME[notice.kind]);

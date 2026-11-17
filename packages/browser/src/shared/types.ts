@@ -415,8 +415,10 @@ export interface GroupView {
    * while that chat was up: the answer is offered again. Through a link (`viaLink`): nobody answered it for an hour of
    * this run (`JOIN_GIVE_UP_MS`), so the knocks stopped; accepting knocks again.
    * `takenBack`: who sent it took it back (the group is gone from its app, or the admin role from it): nothing to answer.
+   * `kept`: an invitation to a group this device was in (removed, or left): that group and its history are kept under it,
+   * and come back if it is declined.
    */
-  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; unanswered?: boolean; takenBack?: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number; othersKnocked?: boolean; since?: number; admittedAt?: number; full?: { n: number; max: number } };
+  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; unanswered?: boolean; takenBack?: boolean; kept?: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number; othersKnocked?: boolean; since?: number; admittedAt?: number; full?: { n: number; max: number } };
   /**
    * Other groups that came under this one's id (a contact's invitation, or a link opened) while it was here: kept beside
    * it until the person picks the real one (`keepGroup`, `switchGroup` with the other's `linkId` or `link`).
@@ -445,6 +447,12 @@ export interface GroupView {
   canSend: boolean;
   /** The group's picture (a JPEG data URL the engine checked), set by its admin; absent for none. */
   picture?: string;
+  /**
+   * The node that forwards a community group's calls, as its admin's statement names it (WISP 602); absent for none.
+   * `e2ee: 1` when the group asks for sealed call media (WISP 602 § End-to-end encryption): an app that cannot seal
+   * does not join.
+   */
+  call?: { sfu: string; e2ee?: 1 };
   /**
    * A private group past 16 members that runs on hubs (WISP 902 · Group Mesh § Hubs): `hub` when I am one. Absent for
    * the full mesh.
@@ -1170,13 +1178,22 @@ export interface ReactionNote {
   /** Who reacted: `me`, `peer`, or a group member's key. */
   by: string;
   emoji: string;
-  /** A line of the message it went to. */
+  /** A line of the message it went to: an app card's never with its bundle's link (`withoutAppLink`). */
   snippet: string;
   /** The message was mine. */
   mine: boolean;
   /** The message's id here: an edit of it changes `snippet`. */
   message?: string;
+  /**
+   * A group's note: what the message is where its text is only an English fallback, so the chat list (which holds no
+   * group's rows) says it in the reader's language: a voice message's or a video's length (milliseconds), an app card's
+   * name. Absent for any other message, on a 1:1 chat's (the list reads its row), and on notes made before it.
+   */
+  kind?: ReactionNoteKind;
 }
+
+/** `ReactionNote.kind`: a voice message, a video, or an app card (WISP 405 § An app) by its ref, title and version. */
+export type ReactionNoteKind = { voice: number } | { video: number } | { app: { ref: string; title: string; version?: string } };
 
 /** How a message was edited (WISP 400 § Edits). */
 export interface MessageEdit {

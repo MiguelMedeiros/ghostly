@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GhostLink, REACTION_LIMITS, createIdentity, createLink, identityFromSeedB64, type PairingState, type WireReaction } from "@ghostly/core";
 import { FEEDBACK_KEPT, GhostlyNode, type NodeEvents } from "../src/engine/node";
 import { db } from "../src/engine/db";
-import { Reactions, latestReaction, noteIfStanding } from "../src/engine/reactions";
+import { Reactions, latestReaction, noteAfterChange, noteIfStanding } from "../src/engine/reactions";
 import { STORES, fileStore, transact } from "../src/shared/idb";
 import type { AttentionEvent } from "../src/shared/rpc";
 import type { StoredMessage, WaitingReaction } from "../src/shared/types";
@@ -134,6 +134,21 @@ describe("reacting over the live link", () => {
     for (const messageId of ["me_other", "O".repeat(22), "nope", ""]) expect((await t.node.react({ linkId: t.id, messageId, emoji: "👍" })).error).toBeTruthy();
     expect((await t.node.react({ linkId: "no-such-chat", messageId: original.id, emoji: "👍" })).error).toBeTruthy();
     expect(await t.pending()).toEqual([]);
+  });
+
+  it("reactions of mine naming ids no message goes by read the chat whole once in a run, not each", async () => {
+    // Each read the chat's whole history for the id both sides know: 0.6-0.8 s a call at 100,000 messages. Now once,
+    // for the rows that go by another id than their own.
+    const t = await setup();
+    await t.contact.sendMessage("hi");
+    const original = await t.row("hi");
+    const whole = vi.spyOn(db, "getMessages");
+    const errors = [];
+    for (const messageId of ["me_typo", "Z".repeat(22), "Y".repeat(22), "nope"]) errors.push((await t.node.react({ linkId: t.id, messageId, emoji: "👍" })).error);
+    expect(whole.mock.calls.filter(([chat]) => chat === t.id)).toHaveLength(1);
+    expect(errors).toEqual(Array(4).fill("That message is not in this chat, or takes no reaction"));
+    whole.mockRestore();
+    expect((await t.node.react({ linkId: t.id, messageId: original.id, emoji: "👍" })).error).toBeNull();
   });
 
   it("a contact's reaction lands on the row under `peer`, the latest number winning, and mine stays mine", async () => {
@@ -621,6 +636,30 @@ describe("the reactions store", () => {
     expect(noteIfStanding({ ...shown, by: "c" }, message)).toBeUndefined();
   });
 
+  it("a note says what its message is where its text is only an English fallback, and never quotes an app card's link", () => {
+    const voice = row({ id: "k:0:1", text: "🎤 Voice message (0:07)", file: { id: "f1", name: "voice.webm", size: 9, mime: "audio/webm", voice: { duration: 7_000, peaks: [1, 2] } }, reactions: { a: { e: "❤️", n: 1, at: 10 } } });
+    expect(latestReaction([voice])).toEqual({ at: 10, by: "a", emoji: "❤️", snippet: "🎤 Voice message (0:07)", mine: false, message: "k:0:1", kind: { voice: 7_000 } });
+    const video = row({ id: "k:0:2", text: "🎬 Video (0:12)", file: { id: "f2", name: "clip.mp4", size: 9, mime: "video/mp4", video: { duration: 12_000, width: 2, height: 2 } }, reactions: { a: { e: "👍", n: 2, at: 20 } } });
+    expect(latestReaction([video])?.kind).toEqual({ video: 12_000 });
+    const url = "https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp";
+    const card = { kind: "app" as const, id: "c", ref: "k/chess", digest: "d", sequence: 1, title: "Chess", version: "1.2.0", url, opened: true as const };
+    const app = row({ id: "k:0:3", text: `🧩 Opened Chess 1.2.0 in this chat (Ghostly app)\n${url}`, card, reactions: { a: { e: "😂", n: 3, at: 30 } } });
+    const note = latestReaction([app])!;
+    expect(note).toMatchObject({ snippet: "🧩 Opened Chess 1.2.0 in this chat (Ghostly app)", kind: { app: { ref: "k/chess", title: "Chess", version: "1.2.0" } } });
+    expect(JSON.stringify(note)).not.toContain("https://");
+    // A plain text says nothing more; an edit of it to a card's message gets the card's kind.
+    const text = row({ id: "k:0:4", text: "lunch?", reactions: { a: { e: "👍", n: 4, at: 40 } } });
+    const plain = latestReaction([text])!;
+    expect(plain).not.toHaveProperty("kind");
+    expect(noteAfterChange(plain, text)).toBeUndefined();
+    expect(noteAfterChange(plain, { ...app, id: "k:0:4" })).toMatchObject({ snippet: note.snippet, kind: note.kind });
+    expect(noteAfterChange(note, { ...text, id: "k:0:3" })).not.toHaveProperty("kind");
+    // A 1:1 chat's note says only its line: the chat list reads its row, and keeps the note on the chat's saved session.
+    const paired = latestReaction([{ ...voice, linkId: "l", id: "peer_x" }])!;
+    expect(paired).not.toHaveProperty("kind");
+    expect(latestReaction([{ ...app, linkId: "l", id: "me_x" }])!.snippet).toBe(note.snippet);
+  });
+
   it("numbers mine past what waits to be confirmed, even when the clock goes back", async () => {
     const rows = [row({ linkId: "l", id: `peer_${"A".repeat(22)}` })];
     const { reactions } = memory(rows);
@@ -674,6 +713,27 @@ describe("the reactions store", () => {
     expect(await mine("chat", "me_BBBBBBBBBBBBBBBB", "🙏")).toBe("BBBBBBBBBBBBBBBB");
     expect(whole.mock.calls).toEqual([["chat"]]);
     expect(numbers.at(-1)).toBe(9_503);
+  });
+
+  it("a reaction of mine finds a row by the id it goes by under another (the host's `unkeyed`), and one no row goes by reads no history", async () => {
+    const rows = [
+      row({ linkId: "chat", id: "me_BBBBBBBBBBBBBBBB", sender: "me", text: "mine" }),
+      row({ linkId: "chat", id: "peer_1", text: "their file", wireId: "fileWireId01" }),
+      row({ linkId: "other", id: "peer_2", text: "another chat's", wireId: "otherWire001" }),
+    ];
+    const { reactions, host } = memory(rows);
+    // What the host keeps of the chat's rows by another id: one of them deleted since.
+    const unkeyed = new Map([["fileWireId01", "peer_1"], ["goneWireId01", "peer_9"]]);
+    Object.assign(host, { message: async (chat: string, id: string) => rows.find(r => r.linkId === chat && r.id === id), unkeyed: (chat: string) => chat === "chat" ? Promise.resolve(unkeyed) : undefined });
+    const whole = vi.spyOn(host, "messages");
+    const mine = async (id: string) => { const out = await reactions.mine("chat", id, "👍"); return "error" in out ? out.error : out.reaction.id; };
+    // My highest number in the chat is read from its history once, as before.
+    expect(await mine("BBBBBBBBBBBBBBBB")).toBe("BBBBBBBBBBBBBBBB");
+    whole.mockClear();
+    expect(await mine("fileWireId01")).toBe("fileWireId01");
+    for (const id of ["me_typo", "neverWasHere", "goneWireId01", "otherWire001"]) expect(await mine(id)).toBe("That message is not in this chat, or takes no reaction");
+    expect(whole).not.toHaveBeenCalled();
+    expect(rows.map(r => r.reactions?.me?.e)).toEqual(["👍", "👍", undefined]);
   });
 
   it("in a private group I was removed from and invited back to, refuses to change or take back a reaction of mine from before", async () => {

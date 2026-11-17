@@ -46,6 +46,11 @@ describe("help", () => {
     expect(send.stdout).toContain("everything after it is the text, options included");
     expect((await ghostly(["help", "group", "send"])).stdout).toContain("Put options before --.");
     expect(daemon.stdout).not.toContain("Put options before --.");
+    // A refusal and a default the README gave and the help did not.
+    expect((await ghostly(["help", "file", "accept"])).stdout).toContain("refused when it does not fit in the room left on this device, and it keeps waiting");
+    // What `paid: false` means: before, neither the help nor the README said.
+    expect((await ghostly(["help", "pay"])).stdout.replace(/\s+/g, " ")).toContain("paid false: not settled yet (pending at the mint or the card's source, or its answer lost); it settles by itself, is never paid twice");
+    expect((await ghostly(["help", "identity", "add"])).stdout).toMatch(/--timeout <n>\s+Seconds to wait for an approval \(default 300, 5 to 3600; Pubky at most 300\)/);
   });
 
   it("an unknown command is a usage error; plain help is the whole list", async () => {
@@ -288,6 +293,15 @@ describe("help", () => {
     const piped = (await ghostly(["help"], { env: { COLUMNS: "" } })).stdout;
     expect(piped).toMatch(/^ {2}settings set <key> <json-value> \[--force\] {2,}Change one: relays, .* a TURN password stays out of ps$/m);
     expect(piped).toMatch(/^ {2}identity add <provider> \[subject\] .* \[--timeout s\]$/m);
+  });
+
+  // `group join`'s help said nothing of its one-shot wait: a script or a piped run waited a silent minute.
+  it("a join that waits without a daemon says so in its help, as long as it waits", async () => {
+    for (const [words, wait] of [[["invite", "join"], "without a daemon it waits up to 60 s for the inviter"], [["group", "join"], "without a daemon it waits up to 60 s to be let in"]] as const) {
+      const { code, stdout } = await ghostly(["help", ...words], { env: { COLUMNS: "" } });
+      expect(code, words.join(" ")).toBe(0);
+      expect(stdout, words.join(" ")).toContain(wait);
+    }
   });
 
   it("bare ghostly in a new Ghostly folder starts with the first steps", async () => {

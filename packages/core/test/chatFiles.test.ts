@@ -919,6 +919,28 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     expect(w.a.files.resend("mine-001")).toBe(false);
   });
 
+  it("a sent file that failed after its contact had it whole ends done when sent again: the contact answers the offer that it is done", async () => {
+    let lose = true;
+    const w = wire({ drop: (frame) => lose && frame.t === "pf-done" });
+    w.attach();
+    let unreadable = false;
+    // Past the sender's read-ahead: going back to 0 reads the file again.
+    const size = FILE_LIMITS.readBytes + 50_000, src = source(size);
+    w.a.sources.set("redo-001", { read: (offset, length) => (unreadable ? Promise.reject(new Error("The object can not be found here.")) : src.read(offset, length)), digest: () => src.digest() });
+    w.a.files.offer(file("redo-001", size));
+    await until(() => state(w.b, "in", "redo-001") === "done");
+    // Its pf-done lost, an earlier ask of the receiver's (its idle nudge) comes after it, while the file cannot be read.
+    unreadable = true;
+    await w.a.files.handle({ t: "pf-accept", id: "redo-001", offset: 0 });
+    await until(() => state(w.a, "out", "redo-001") === "failed");
+    expect(state(w.b, "in", "redo-001")).toBe("done");
+    lose = unreadable = false;
+    // Send again: offered from the start, the receiver says it is done. Ignored, the file was offered every 30 s for good.
+    expect(w.a.files.resend("redo-001")).toBe(true);
+    await until(() => state(w.a, "out", "redo-001") === "done", 2_000);
+    expect(w.a.records.get("out:redo-001")).toMatchObject({ confirmed: size });
+  });
+
   it("a lost chunk (a transport switch) makes the receiver say where it stands, and the sender goes back", async () => {
     let lost = false;
     const w = wire({ keepBytes: true, drop: (frame) => {
@@ -1101,6 +1123,43 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     expect(state(w.b, "in", "chk-0004")).toBe("verifying");
     release();
     await until(() => state(w.a, "out", "chk-0004") === "done" && state(w.b, "in", "chk-0004") === "done");
+  });
+
+  it("a check the sender's abort ended has no say over the file offered again meanwhile: not done empty, its bytes kept", async () => {
+    // `read`: the check had read the whole file before the abort removed it (a file on disk is still read through the
+    // open handle), so it matches; otherwise it reads what is there then, and does not.
+    for (const read of [true, false]) {
+      const id = read ? "chk-0005" : "chk-0006", size = 50_000;
+      let cut = false;
+      const w = wire({ drop: () => cut });
+      const disk = new Disk(false);
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      disk.checking = gate;
+      if (read) {
+        const open = disk.target.bind(disk);
+        disk.target = () => {
+          const target = open();
+          return { ...target, verify: async (sum) => { const digest = disk.hash.copy().digest("base64url"); await gate; return digest === sum; } };
+        };
+      }
+      w.b.disks.set(id, disk);
+      w.attach();
+      send(w, file(id, size));
+      await until(() => state(w.b, "in", id) === "verifying");
+      // From here the receiver alone, as its contact's frames reach it: the sender stops the file, then offers it again.
+      cut = true;
+      await w.b.files.handle({ t: "pf-abort", id });
+      expect(state(w.b, "in", id)).toBe("cancelled");
+      await w.b.files.handle({ t: "pf-offer", id, name: `${id}.bin`, mime: "application/octet-stream", size, ts: 1_700_000_000_000 });
+      await until(() => state(w.b, "in", id) === "active");
+      w.b.files.handle({ t: "pf-data", id, offset: 0, data: b64(pattern(0, 1_000)) });
+      await until(() => disk.length === 1_000);
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(state(w.b, "in", id)).toBe("active");
+      expect(disk.length).toBe(1_000);
+    }
   });
 
   it("a digest that does not match deletes the file on arrival and says so on both sides", async () => {

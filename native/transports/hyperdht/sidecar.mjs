@@ -18,6 +18,11 @@ const MAX_LINE = 512 * 1024
  * the Desktop, each one a trip to the page.
  */
 const SEND_ROOM = 64 * 1024
+/**
+ * Bytes of a connection's frames the host may hold that its page has not taken yet (`took`): past it, the connection's
+ * socket is paused, so a contact faster than the page waits on its own stream instead of in the host's memory.
+ */
+const RECEIVE_CREDIT = 512 * 1024
 const emit = value => process.stdout.write(JSON.stringify(value) + '\n')
 const message = error => error instanceof Error ? error.message : String(error)
 // GHOSTLY_HYPERDHT_BOOTSTRAP ("host:port,…") replaces the public bootstrap nodes: a private network, or the
@@ -33,6 +38,8 @@ function attach(record, bound, incoming) {
   if (record.stopped) { bound.channel.close(); return 0 }
   const id = ++next
   record.connections.set(id, bound.channel)
+  const handed = { bytes: 0, sizes: [], paused: false }
+  record.handed.set(id, handed)
   emit({ type: 'open', endpoint: record.id, id, binding: bound.binding, incoming })
   // A binary message (WISP 103 § Frames) goes on the line as `bytes`, in base64; text as `text`.
   bound.channel.onMessage = data => {
@@ -41,12 +48,17 @@ function attach(record, bound, incoming) {
         : null
     if (!frame) return
     const line = JSON.stringify(frame)
+    const size = Buffer.byteLength(line)
     // A line the host would not read stops the whole runtime there: only this connection closes.
-    if (Buffer.byteLength(line) > MAX_LINE) { bound.channel.close(); return }
+    if (size > MAX_LINE) { bound.channel.close(); return }
     process.stdout.write(line + '\n')
+    handed.bytes += size
+    handed.sizes.push(size)
+    if (handed.bytes >= RECEIVE_CREDIT && !handed.paused) { handed.paused = true; bound.channel.pause?.() }
   }
   bound.channel.onClose = () => {
     record.full.delete(id)
+    record.handed.delete(id)
     if (record.connections.delete(id)) emit({ type: 'closed', endpoint: record.id, id })
   }
   return id
@@ -57,7 +69,8 @@ function start(id, seedB64) {
     emit({ type: 'error', endpoint: id, command: 'start', message: 'Native endpoint limit reached' }); return
   }
   // `full`: the connections whose socket the host was told is full, until it hears `room`.
-  const record = { id, connections: new Map(), full: new Set(), queued: 0, stopped: false, endpoint: null }
+  // `handed`: what each connection's page was handed and has not taken (`took`), and whether its socket is paused.
+  const record = { id, connections: new Map(), full: new Set(), handed: new Map(), queued: 0, stopped: false, endpoint: null }
   endpoints.set(id, record)
   record.starting = (async () => {
     const seed = Buffer.from(String(seedB64), 'base64url')
@@ -96,10 +109,11 @@ function queue(record, command) {
   record.chain = record.chain.then(() => { if (!record.stopped) run(record, command) }).finally(() => { record.queued-- })
 }
 
-/** A send or a close, on a started endpoint. */
+/** A send, a close, or the page's word that it took frames, on a started endpoint. */
 function run(record, command) {
   try {
-    if (command.type === 'send') {
+    if (command.type === 'took') took(record, command)
+    else if (command.type === 'send') {
       const channel = record.connections.get(command.id)
       if (!channel) throw new Error('Native channel is closed')
       channel.send(typeof command.bytes === 'string' ? new Uint8Array(Buffer.from(command.bytes, 'base64')) : command.text)
@@ -110,6 +124,14 @@ function run(record, command) {
     const send = command.type === 'send' ? { id: command.id, seq: command.seq } : {}
     emit({ type: 'error', endpoint: record.id, command: command.type, ...send, message: message(error) })
   }
+}
+
+/** The page took `frames` more of the connection's frames, oldest first: its socket goes on once they are within credit. */
+function took(record, command) {
+  const handed = record.handed.get(command.id)
+  if (!handed || !Number.isSafeInteger(command.frames) || command.frames < 1) return
+  for (const size of handed.sizes.splice(0, command.frames)) handed.bytes -= size
+  if (handed.paused && handed.bytes < RECEIVE_CREDIT) { handed.paused = false; record.connections.get(command.id)?.resume?.() }
 }
 
 /** A dial waits for the endpoint to be up, then for the contact: a dead one's stale DHT record takes seconds to fail. */
@@ -177,7 +199,7 @@ createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line', line =
   const id = command?.endpoint
   if (!Number.isSafeInteger(id) || id < 1) { void shutdown(); return }
   if (command.type === 'start') { start(id, command.seedB64); return }
-  if (!['connect', 'send', 'close', 'stop'].includes(command.type)) { void shutdown(); return }
+  if (!['connect', 'send', 'close', 'stop', 'took'].includes(command.type)) { void shutdown(); return }
   // Commands for an endpoint that is already gone are late, not wrong.
   const record = endpoints.get(id)
   if (!record) return

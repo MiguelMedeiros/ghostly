@@ -350,11 +350,29 @@ describe("an app the watchdog stopped", () => {
     expect(screen.queryByTestId("mini-app-stopped")).not.toBeInTheDocument();
   });
 
+  // Pressed, it waits for the app's files and the runner: busy for a screen reader only, it looked pressed for nothing
+  // and a press meanwhile did nothing. It dims and shows the wait, as Open again in a chat's panel does.
+  it("alone: Open again shows it is busy while it opens again, as in a chat's panel", async () => {
+    open = aloneOpener();
+    await open(REF, null);
+    started[0]!.stop("unresponsive");
+    let release!: () => void;
+    entryWaits = new Promise<void>((resolve) => { release = resolve; });
+    const again = within(screen.getByTestId("mini-app")).getByRole("button", { name: "Open again" });
+    expect(again).toHaveClass("cursor-pointer", "aria-disabled:cursor-wait", "aria-disabled:opacity-60");
+    again.click();
+    expect(again).toHaveAttribute("aria-disabled", "true");
+    expect(again).toHaveAttribute("aria-busy", "true");
+    release();
+    await waitFor(() => expect(started).toHaveLength(2));
+  });
+
   it("an app stopped for anything else offers no Open again", async () => {
     setAppOpener(open);
     chatPanel();
     await act(() => open(REF, "link-1"));
     act(() => started[0]!.stop("protocol"));
+    expect(screen.getByTestId("mini-app-stopped")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Open again" })).not.toBeInTheDocument();
   });
 });
@@ -532,6 +550,35 @@ describe("an app in a chat the person went Back from, that stops", () => {
       expect(chatApp("link-1")).toBeUndefined();
       expect(screen.queryByTestId("mini-app-resume")).not.toBeInTheDocument();
     });
+  }
+
+  // The person is in the chat, the app behind Back: its way back turning to "Stopped" was drawn only, so a screen reader
+  // heard nothing while the panel's own line is hidden with it. Said politely, in a line there since the way back showed.
+  for (const where of ["phone", "narrow"]) {
+    for (const reason of ["revoked", "unresponsive"]) {
+      it(`${where}, ${reason}: why is said while the person stays in the chat, the focus left there`, async () => {
+        const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) { return where === "narrow" && this.classList.contains("chat-pane") ? 604 : 0; });
+        try {
+          const { user } = chatPanel(where === "phone");
+          await act(() => open(REF, "link-1"));
+          await user.click(within(screen.getByTestId("mini-app")).getByTestId("mini-app-back"));
+          const field = screen.getByRole("textbox", { name: "Message" });
+          await user.click(field);
+          const column = document.querySelector<HTMLElement>(".chat-column")!;
+          const said = within(column).getByRole("status");
+          expect(said).toBeEmptyDOMElement();
+          if (reason === "revoked") await checked({ status: "revoked" });
+          else act(() => started[0]!.stop(reason));
+          expect(within(column).getByRole("status")).toBe(said);
+          expect(said).toHaveTextContent(reason === "revoked" ? "\u2068Chess\u2069 was stopped: its publisher revoked this version" : /^\u2068Chess\u2069 stopped responding and was closed/);
+          expect(document.activeElement).toBe(field);
+          // Not a second name for the way back: it still reads "Back to Chess, Stopped".
+          expect(screen.getByTestId("mini-app-resume")).toHaveAccessibleName(/^Back to Chess ?, Stopped$/);
+        } finally {
+          width.mockRestore();
+        }
+      });
+    }
   }
 
   // Shown again already stopped, the line comes with its words, which a live region does not read: the focus goes to

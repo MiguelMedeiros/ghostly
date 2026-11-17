@@ -1,7 +1,7 @@
 import { identityStatement, type IdentityBinding, type IdentityStatement } from "@ghostly/core";
 import { IDENTITY_PROVIDERS } from "@ghostly/browser/proofs/registry";
 import { parseProofBunker } from "@ghostly/browser/proofs/nostr";
-import type { IdentityProofProvider, IdentitySigner, SignerField, SignerInstructions } from "@ghostly/browser/proofs/contract";
+import { SignerTimeout, type IdentityProofProvider, type IdentitySigner, type SignerField, type SignerInstructions } from "@ghostly/browser/proofs/contract";
 import type { IdentityProofView } from "@ghostly/browser/shared/types";
 import { IDENTITY_DRAFT_TTL_MS, IDENTITY_MAX_DRAFTS } from "@ghostly/browser/engine/identities";
 import { chatOf, node, num, ownChatOf, state, str, type ApiContext, type Method, type Params } from "./apiKit";
@@ -138,27 +138,39 @@ export const IDENTITY_METHODS: Record<string, Method> = {
           throw new CliError("bad_request", `${bunker.name} (${bunker.label}): ${error instanceof Error ? error.message : String(error)}`);
         }
       }
-      const seconds = num(params, "timeout", 300, { min: 5, max: 3600 });
+      // The signer waits as long (a NIP-46 signer's own 2 minutes are the app's), or at most what it can (Pubky's relay).
+      const most = signer.maxWaitMs ? Math.floor(signer.maxWaitMs / 1000) : 3600;
+      if (typeof params.timeout === "number" && params.timeout > most) throw new CliError("bad_request", `timeout must be a number from 5 to ${most}: ${signer.label} waits at most ${most} s for an approval`);
+      const seconds = num(params, "timeout", Math.min(300, most), { min: 5, max: most });
       const signal = AbortSignal.timeout(seconds * 1000);
+      // Once the signer's last step answered, nothing waits on the person any more: what fails after it (the engine's
+      // check, which runs to its end past the deadline) is said as it is, never as a wait that ran out.
+      let signed = false;
+      // The caller's own id for this call, in each of its events: two proofs waiting on one daemon are told apart by it.
+      const request = str(params, "request");
+      const tag = { provider: p.id, ...(request ?{ request } : {}) };
       const proof = await signer.run({
-        values, signal,
+        values, signal, waitMs: seconds * 1000,
         // A link or code to approve with holds the request's secret (contract.ts): to the listeners live, never the journal.
-        onAuthUrl: (url) => { ctx.hub.emitLive("identity.approval", `identity.approval:${Date.now()}`, { provider: p.id, url }); },
-        onProgress: (message) => { ctx.hub.emit("identity.progress", `identity.progress:${Date.now()}`, { provider: p.id, message }); },
+        onAuthUrl: (url) => { ctx.hub.emitLive("identity.approval", `identity.approval:${Date.now()}`, { ...tag, url }); },
+        onProgress: (message) => { ctx.hub.emit("identity.progress", `identity.progress:${Date.now()}`, { ...tag, message }); },
         onApproval: (request) => {
-          if (request) ctx.hub.emitLive("identity.approval", `identity.approval:${Date.now()}`, { provider: p.id, ...(request.qr ? { qr: request.qr.value, label: request.qr.label } : {}), notes: request.notes ?? [] });
+          if (request) ctx.hub.emitLive("identity.approval", `identity.approval:${Date.now()}`, { ...tag, ...(request.qr ? { qr: request.qr.value, label: request.qr.label } : {}), notes: request.notes ?? [] });
         },
       }, async (session) => {
         const { draftId, binding } = await begin(ctx, p, await session.subject(), params);
         try {
-          return await node(ctx).completeIdentityProof({ draftId, evidence: await session.sign(identityStatement(binding)) });
+          const evidence = await session.sign(identityStatement(binding));
+          signed = true;
+          return await node(ctx).completeIdentityProof({ draftId, evidence });
         } catch (error) {
           try { await node(ctx).cancelIdentityProof({ draftId }); } catch { /* already gone */ }
           throw error;
         }
       }).catch((error: unknown) => {
-        // The signer gives up with the signal's own words ("The operation was aborted due to timeout"), an engine failure to a bot.
-        if (!signal.aborted || error instanceof CliError) throw error;
+        // The signer gives up with the signal's own words ("The operation was aborted due to timeout"), or its own wait's
+        // at the same time ("Signer timed out"): an engine failure to a bot. Only while it was still waited on.
+        if (signed || !(signal.aborted || error instanceof SignerTimeout) || error instanceof CliError) throw error;
         throw new CliError("timeout", `Timed out after ${seconds} s waiting for ${signer.label} to approve the ${p.label} proof: --timeout <seconds> waits longer`);
       });
       return { done: true, proof: proofJson(proof) };

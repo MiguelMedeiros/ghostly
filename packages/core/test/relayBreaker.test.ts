@@ -175,6 +175,23 @@ describe("relay breaker", () => {
       { relay: "c", state: "ok" },
     ]);
   });
+
+  it("with every relay left alone for failing, each one's health says the next probe, 15 s on, not the end of its own wait", () => {
+    const { breaker, advance, now } = clocked();
+    const relays = ["a", "b"];
+    for (const relay of relays) for (let i = 0; i < BREAKER_THRESHOLD; i++) breaker.failure(relay, "error", "HTTP 500");
+    // Both out for a minute, but one of them is asked 15 s on: said "until" a minute on, a daemon's `status` and the
+    // connection panel named a time minutes after the relays were seen answering again (bug hunt 2026-11-15).
+    expect(breaker.health(relays).map((health) => health.until)).toEqual([now() + BREAKER_ALL_DOWN_PROBE_MS, now() + BREAKER_ALL_DOWN_PROBE_MS]);
+    advance(BREAKER_ALL_DOWN_PROBE_MS);
+    breaker.beginAllDown(breaker.allDownProbe(relays)!);
+    breaker.failure("a", "error", "HTTP 500");
+    // "a" failed its probe and is left alone two minutes; the next probe is still 15 s on.
+    expect(breaker.blockedFor("a")).toBe(2 * BREAKER_BASE_MS);
+    expect(breaker.health(relays).map((health) => health.until)).toEqual([now() + BREAKER_ALL_DOWN_PROBE_MS, now() + BREAKER_ALL_DOWN_PROBE_MS]);
+    // With a relay of the list still in use, no probe goes ahead of a wait: its own end.
+    expect(breaker.health(["a", "c"])).toEqual([{ relay: "a", state: "failing", until: now() + 2 * BREAKER_BASE_MS, reason: "HTTP 500" }, { relay: "c", state: "ok" }]);
+  });
 });
 
 describe("relay transport with a breaker", () => {

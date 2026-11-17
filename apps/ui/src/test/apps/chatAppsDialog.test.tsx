@@ -241,6 +241,22 @@ describe("the Apps page's chat picker (openAppInChat)", () => {
     await openAppInChat(installed(), "link-1");
     expect(sent).toHaveBeenCalledTimes(2);
   });
+
+  it("its opened card failed, then an Open of it that a newer one in the chat overtook: no card, as it never started", async () => {
+    run = { status: "ok" };
+    const opener = vi.fn(async () => {});
+    setAppOpener(opener);
+    sent.mockImplementationOnce(() => ({ error: "Contact is not reachable" }) as unknown as { error: null });
+    await expect(openAppInChat(installed(), "link-1")).rejects.toThrow("Contact is not reachable");
+    // Open on it (slow), then on another app: the other one runs there, and this one started nothing.
+    opener.mockImplementation(async () => "superseded" as never);
+    await openAppInChat(installed(), "link-1");
+    expect(sent).toHaveBeenCalledTimes(1);
+    // Its card is still owed: shown again there once it runs, it goes then.
+    opener.mockImplementation(async () => "shown" as never);
+    await openAppInChat(installed(), "link-1");
+    expect(sent).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("the card an app sends when it is opened in a chat", () => {
@@ -258,5 +274,66 @@ describe("the card an app sends when it is opened in a chat", () => {
     expect(params.text).toBe(`🧩 Opened Chess 1.2.0 in this chat (Ghostly app)\n${from}`);
     expect(JSON.stringify(params)).not.toContain(token);
     lists.mockImplementation(() => [installed()]);
+  });
+});
+
+describe("the chat's Apps when the installed apps could not be read", () => {
+  const STORAGE = "storage: The operation failed for reasons unrelated to the database itself";
+  let failing: boolean;
+  beforeEach(() => {
+    run = { status: "ok" };
+    failing = true;
+    lists.mockImplementation(() => { if (failing) throw new Error(STORAGE); return [installed()]; });
+  });
+  afterEach(() => lists.mockImplementation(() => [installed()]));
+
+  it("says so, with Try again, never \"No apps installed yet.\", and Try again shows the apps", async () => {
+    const { user } = renderApp(<ChatAppsDialog linkId="link-1" name="Ana" onClose={() => {}} />);
+    const line = await screen.findByTestId("chat-apps-error");
+    expect(line).toHaveTextContent("This browser can't keep apps here (private browsing?). Try a normal window.");
+    expect(within(line).getByRole("alert")).toBeInTheDocument();
+    expect(screen.queryByTestId("chat-apps-none")).toBeNull();
+
+    failing = false;
+    await user.click(within(line).getByRole("button", { name: "Try again" }));
+    await screen.findByTestId("chat-app");
+    expect(screen.queryByTestId("chat-apps-error")).toBeNull();
+    // The button went with its line: the focus is on the list's first Open, not the page.
+    expect(screen.getByTestId("chat-app-open")).toHaveFocus();
+  });
+
+  it("is busy while Try again reads, and a read that fails again puts its line back, read out again", async () => {
+    const { user } = renderApp(<ChatAppsDialog linkId="link-1" name="Ana" onClose={() => {}} />);
+    const line = await screen.findByTestId("chat-apps-error");
+    const before = within(line).getByRole("alert");
+    const fails: (() => void)[] = [];
+    lists.mockImplementation(() => new Promise<never>((_, reject) => { fails.push(() => reject(new Error(STORAGE))); }) as unknown as InstalledAppView[]);
+    const again = within(line).getByRole("button", { name: "Try again" });
+    await user.click(again);
+    expect(again).toHaveAttribute("aria-busy", "true");
+    expect(again).toHaveFocus();
+    await act(async () => { for (const fail of fails) fail(); });
+    await waitFor(() => expect(again).not.toHaveAttribute("aria-busy"));
+    // The same words left in place say nothing to a screen reader: the alert is a new one.
+    const after = within(screen.getByTestId("chat-apps-error")).getByRole("alert");
+    expect(after).not.toBe(before);
+    expect(after).toHaveTextContent("This browser can't keep apps here (private browsing?). Try a normal window.");
+    expect(again).toHaveFocus();
+  });
+
+  it("says it in the person's language", async () => {
+    renderApp(<ChatAppsDialog linkId="link-1" name="Ana" onClose={() => {}} />, { language: "pt" });
+    expect(await screen.findByTestId("chat-apps-error")).toHaveTextContent("Este navegador não consegue guardar apps aqui");
+  });
+
+  it("opened again after the read failed, reads the list again: storage that works again shows the apps", async () => {
+    const first = renderApp(<ChatAppsDialog linkId="link-1" name="Ana" onClose={() => {}} />);
+    await screen.findByTestId("chat-apps-error");
+    first.unmount();
+    failing = false;
+    renderApp(<ChatAppsDialog linkId="link-1" name="Ana" onClose={() => {}} />);
+    await screen.findByTestId("chat-app");
+    expect(screen.queryByTestId("chat-apps-error")).toBeNull();
+    expect(lists).toHaveBeenCalledTimes(2);
   });
 });

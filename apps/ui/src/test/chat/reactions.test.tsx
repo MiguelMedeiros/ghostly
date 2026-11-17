@@ -246,6 +246,7 @@ describe("the quick bar", () => {
   it("the React button's bar (a pointer) has no Copy: the text is selectable there", async () => {
     const { user } = renderApp(<MessageBubble message={message()} peerPubKey="peer" onReact={() => {}} reactionName={names} />);
     await user.click(screen.getByTestId("message-react-action"));
+    expect(screen.getByTestId("reaction-bar")).toBeInTheDocument();
     expect(screen.queryByTestId("reaction-bar-copy")).not.toBeInTheDocument();
   });
 

@@ -604,6 +604,11 @@ export class ChatFiles {
   /** Files that stopped sending for the chat's window alone: they go on once another's bytes are confirmed. */
   private readonly held = new Set<Entry>();
   /**
+   * The entries not ended (`track`): what is still to come or under way is read from these, not from every file the
+   * chat ever had, which it keeps for good. An offer read all of them, in every chat, at 100,000 files about 10 ms each.
+   */
+  private readonly unended = new Set<Entry>();
+  /**
    * Files this side cancelled while no session carried the cancel (`pf-abort`), said on the next one. The session also
    * goes for a moment when a move swaps it (its capabilities are agreed again): unsaid, the receiver showed the file
    * moving, its bytes kept, until its idle nudge asked 30 s later.
@@ -640,7 +645,10 @@ export class ChatFiles {
       const entry: Entry = { record: { ...record } };
       if (record.direction === "out") entry.out = { next: record.confirmed, sent: 0, generation: 0, sends: [] };
       else entry.in = { written: record.confirmed, stored: record.confirmed, acked: record.confirmed, checkpointed: record.confirmed, writing: Promise.resolve() };
+      const replaced = this.entries.get(key(record.direction, record.id));
+      if (replaced) this.unended.delete(replaced);
       this.entries.set(key(record.direction, record.id), entry);
+      this.track(entry);
     }
   }
 
@@ -649,6 +657,25 @@ export class ChatFiles {
   get peerRoom(): number | null { return this.attached ? this.peerRoomValue : null; }
 
   records(): FileTransferRecord[] { return [...this.entries.values()].map((e) => ({ ...e.record })); }
+  /** Bytes still to come of the files taken here, not ended (one still asked about is not taken yet). */
+  stillToCome(): number {
+    let due = 0;
+    for (const { record } of this.unended) if (record.direction === "in" && record.state !== "asking" && !transferEnded(record)) due += Math.max(0, record.file.size - record.confirmed);
+    return due;
+  }
+  /** A transfer under way: offered, moving, or being checked. */
+  underWay(): boolean {
+    for (const { record } of this.unended) if (record.state === "offered" || record.state === "active" || record.state === "verifying") return true;
+    return false;
+  }
+  /** Bytes of the files received here that were taken without asking and are kept (or on their way). */
+  takenUnasked(): number {
+    let taken = 0;
+    for (const { record } of this.entries.values()) {
+      if (record.direction === "in" && !record.consented && record.state !== "asking" && record.state !== "failed" && record.state !== "declined" && record.state !== "cancelled") taken += record.file.size;
+    }
+    return taken;
+  }
   get(direction: "in" | "out", id: string): FileTransferRecord | undefined {
     const record = this.entries.get(key(direction, id))?.record;
     return record && { ...record };
@@ -667,7 +694,17 @@ export class ChatFiles {
   }
 
   private changed(entry: Entry, progress = false): void {
+    this.track(entry);
     this.host.changed({ ...entry.record }, this.moved(entry), progress);
+  }
+
+  /**
+   * Keeps `unended` to the entries of this chat not ended. Each change of a record's state is reported (`changed`),
+   * so that is where a file that ended leaves it, and one taken or sent again comes back.
+   */
+  private track(entry: Entry): void {
+    if (!transferEnded(entry.record) && this.entries.get(key(entry.record.direction, entry.record.id)) === entry) this.unended.add(entry);
+    else this.unended.delete(entry);
   }
 
   private send(frame: Record<string, unknown>): boolean {
@@ -1194,6 +1231,8 @@ export class ChatFiles {
     // meanwhile is not a second check.
     incoming.verifying = true;
     await incoming.writing;
+    // Taken again meanwhile (the sender stopped it, then offered it again): this check is the old transfer's.
+    if (entry.in !== incoming) return;
     if (transferEnded(record) || record.state !== "active" || incoming.stored < record.file.size) {
       incoming.verifying = false;
       if (!transferEnded(record) && record.state === "active") this.send({ t: "pf-accept", id: record.id, offset: incoming.stored });
@@ -1204,7 +1243,9 @@ export class ChatFiles {
     let ok: boolean;
     try { const target = await incoming.target; await target.flush(); ok = await target.verify(digest); } catch { ok = false; }
     incoming.verifying = false;
-    if (transferEnded(record)) return;
+    // The check runs beside the session's frames: the sender's abort and a new offer may have taken the file up again
+    // from the start. Its answer was the old bytes', and ended the new transfer done with what had come of it.
+    if (transferEnded(record) || entry.in !== incoming) return;
     if (ok) {
       record.digest = digest;
       record.confirmed = record.file.size;
@@ -1315,8 +1356,10 @@ export class ChatFiles {
         return;
       }
       case "pf-done": {
-        // Checked out there. Said again to the offer of a new session too, after which this side is no longer verifying.
-        if (record.state !== "verifying" && record.confirmed !== record.file.size) return;
+        // Checked out there. Said again to the offer of a new session too, after which this side is no longer verifying,
+        // and to one sent again from the start (Send again on a file that failed here once the contact had it whole):
+        // ignored, the file was offered every 30 s for good, a done one there never anything else.
+        if (record.state !== "verifying" && record.state !== "offered" && record.confirmed !== record.file.size) return;
         record.confirmed = record.file.size;
         this.end(outgoing, "done");
         return;
@@ -1389,6 +1432,7 @@ export class ChatFiles {
     const entry = this.entries.get(key("in", id));
     if (!entry || transferEnded(entry.record)) return;
     this.entries.delete(key("in", id));
+    this.unended.delete(entry);
     const incoming = entry.in!;
     entry.record.state = "failed";
     clearTimeout(incoming.timer);
@@ -1490,5 +1534,6 @@ export class ChatFiles {
     if (!entry) return;
     if (!transferEnded(entry.record)) this.cancel(direction, id);
     this.entries.delete(key(direction, id));
+    this.unended.delete(entry);
   }
 }

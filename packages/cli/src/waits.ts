@@ -1,5 +1,5 @@
 import type { GroupView, StoredMessage } from "@ghostly/browser/shared/types";
-import { groupById, noMessage, nobodyJoinedChat, node, type ApiContext } from "./apiKit";
+import { groupById, noMessage, nobodyJoinedChat, node, type ApiContext, type Method } from "./apiKit";
 import { CliError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import { goesOn as goesOnIn } from "./waitNotice";
@@ -30,7 +30,7 @@ export const goesOn = (ctx: ApiContext, chat?: string) => chat !== undefined && 
 const stopped = (ctx: ApiContext) => ctx.stopping?.aborted === true;
 
 /** How a wait that ends short of its aim begins: its time ran out, or the daemon stopped under it. */
-const ended = (ctx: ApiContext, ms: number) => stopped(ctx) ? "The daemon stopped before the wait ended" : `Timed out after ${Math.round(ms / 1000)} s`;
+export const ended = (ctx: ApiContext, ms: number) => stopped(ctx) ? "The daemon stopped before the wait ended" : `Timed out after ${Math.round(ms / 1000)} s`;
 
 /** A timed-out wait's details, and `reason: "daemon-stopped"` when the daemon's stop ended it. */
 const known = (ctx: ApiContext, details: Record<string, unknown>) => stopped(ctx) ? { ...details, reason: "daemon-stopped" } : details;
@@ -76,8 +76,26 @@ export async function purgeMessage(ctx: ApiContext, message: StoredMessage): Pro
     gone = !(await node(ctx).getMessage(chat, messageId));
   }
   if (gone) await node(ctx).forgetQuotesOf(message);
-  await ctx.runtime.store.compact();
+  await ctx.runtime.store.compact({ scrub: true });
   if (!gone) throw new CliError("timeout", `Timed out after ${PURGE_WAIT_MS / 1000} s: the message is deleted, but what it said may stay in the profile's store until its next fold (within the hour)`, { messageId, deleted: messageId });
+}
+
+/**
+ * `message delete --purge` that the delete answers no to (`not_found`, `refused`): the store folds all the same, so
+ * the error says so in its words and `details.purged`. A message no longer here (the contact deleted it for everyone,
+ * or a delete here without `--purge` took it) and another member's group message (only its author deletes it, and
+ * once they do it is gone here) answered no and folded nothing: what a deleted copy said stayed in `db/journal.bin`
+ * and rows.db's WAL until the fold within the hour. A usage mistake (`bad_request`) folds nothing.
+ */
+export function foldsAnyway(method: Method): Method {
+  return async (ctx, params, call) => {
+    try { return await method(ctx, params, call); } catch (error) {
+      if (params.purge !== true || !(error instanceof CliError) || (error.code !== "not_found" && error.code !== "refused")) throw error;
+      await ctx.runtime.store.compact({ scrub: true });
+      // Said first: a refusal may end in a command to paste (`... is a group, not a chat: ghostly message delete ...`).
+      throw new CliError(error.code, `The store was folded anyway, so a deleted copy of it is gone from the profile's folder. ${error.message}`, { ...error.details, purged: true });
+    }
+  };
 }
 
 /**
@@ -134,12 +152,18 @@ export const ONE_SHOT_RECEIPT_MS = 2_000;
 /**
  * Waits until the contact confirmed my reaction or pin in a 1:1 chat (WISP 401): until `pending` no longer finds it in
  * what the contact has not confirmed (`chatUnconfirmed`). It goes on the live session, a reaction also on the DHT
- * envelopes; one not confirmed in time is kept and said again.
+ * envelopes; one not confirmed in time is kept and said again. A timeout's `details` carry what was asked
+ * (`asked`: the `messageId`, a reaction's `emoji`), as an edit's and a removal's do: a bot that retries has them there. `waitsLive`,
+ * read at the timeout: why it does not go by itself (a pin in a chat on the DHT only), said in place of "it still goes"
+ * and in `details.note`.
  */
-export async function waitForConfirmed(ctx: ApiContext, chat: string, what: "reaction" | "pin", pending: (left: { reactions: number[]; pin: number | null }) => boolean, ms: number): Promise<void> {
+export async function waitForConfirmed(ctx: ApiContext, chat: string, what: "reaction" | "pin", pending: (left: { reactions: number[]; pin: number | null }) => boolean, ms: number, asked: Record<string, unknown> = {}, waitsLive?: () => string | undefined): Promise<void> {
   const until = performance.now() + ms;
   while (pending(node(ctx).chatUnconfirmed({ linkId: chat }))) {
-    if (performance.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: the contact has not confirmed the ${what} yet. It is kept here and ${goesOn(ctx, chat)}`, known(ctx, { chat }));
+    if (performance.now() >= until || stopped(ctx)) {
+      const note = waitsLive?.();
+      throw new CliError("timeout", `${ended(ctx, ms)}: the contact has not confirmed the ${what} yet. It is kept here${note ? `. ${note}` : ` and ${goesOn(ctx, chat)}`}`, known(ctx, { chat, ...asked, ...(note && { note }) }));
+    }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
 }

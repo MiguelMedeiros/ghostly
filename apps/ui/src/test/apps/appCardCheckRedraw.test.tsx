@@ -5,7 +5,7 @@ import type { InstalledAppView } from "@ghostly/browser/engine/apps";
 import { MessageBubble } from "../../components/MessageBubble";
 import { setAppOpener } from "../../lib/apps/open";
 import { forgetAppsAvailable } from "../../lib/apps/flag";
-import { forgetInstalledApps } from "../../lib/apps/installed";
+import { forgetInstalledApps, installedApps, refreshInstalledApps } from "../../lib/apps/installed";
 import type { ChatMessage } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
@@ -74,4 +74,49 @@ it("draws no app card again after a check that changed nothing, and only an upda
   before = new Map(draws);
   await act(async () => { fakeEngine.emit({ kind: "apps-checked" }); });
   expect(redrawn(before)).toEqual([5, 25]);
+});
+
+// A check that finds nothing new still stamps a new `checkedAt` on every installed app (the engine's view carries it),
+// and nothing in the UI reads it: the apps read as before.
+const checked = (n: number, at: number): InstalledAppView => ({ ...installed(n), checkedAt: at });
+
+it("keeps every installed app's object when a check moved only its checkedAt", async () => {
+  list = [installed(0), installed(1)];
+  await refreshInstalledApps();
+  const first = installedApps();
+  expect(first).toHaveLength(2);
+
+  // The first check stamps a checkedAt the apps had none of, the next one moves it.
+  for (const at of [1_700_000_000_000, 1_700_000_000_000 + 31 * 60_000]) {
+    list = [checked(0, at), checked(1, at)];
+    await refreshInstalledApps();
+    expect(installedApps(), `checkedAt ${at}: the list held`).toBe(first);
+  }
+
+  // Anything else that moved is a new object, and only that app's.
+  list = [checked(0, 1), { ...checked(1, 1), version: "1.1.0" }];
+  await refreshInstalledApps();
+  const after = installedApps();
+  expect(after).not.toBe(first);
+  expect(after?.[0]).toBe(first?.[0]);
+  expect(after?.[1]).not.toBe(first?.[1]);
+  expect(after?.[1]?.version).toBe("1.1.0");
+});
+
+it("draws no app card again after a check that moved only every app's checkedAt", async () => {
+  const draws = new Map<number, number>();
+  renderApp(<>{Array.from({ length: 40 }, (_, i) => (
+    <Profiler key={i} id={`m${i}`} onRender={() => { draws.set(i, (draws.get(i) ?? 0) + 1); }}>
+      <MessageBubble message={message(i)} peerPubKey="peer" contactName="Ana" linkId="link-1" />
+    </Profiler>
+  ))}</>);
+  await act(async () => {});
+  expect(fakeEngine.callsTo("appList")).toHaveLength(1);
+  const before = new Map(draws);
+  for (const at of [1_700_000_000_000, 1_700_000_000_000 + 31 * 60_000]) {
+    list = [checked(0, at), checked(1, at), checked(2, at)];
+    await act(async () => { fakeEngine.emit({ kind: "apps-checked" }); });
+  }
+  expect(fakeEngine.callsTo("appList")).toHaveLength(3);
+  expect([...draws].filter(([i, n]) => n > (before.get(i) ?? 0)).map(([i]) => i), "only checkedAt moved: no bubble drawn again").toEqual([]);
 });

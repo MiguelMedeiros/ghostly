@@ -65,7 +65,44 @@ const unlessGone = (error: NodeJS.ErrnoException) => { if (error.code === "ENOEN
  * leaves before the backup's own cleanup: Ctrl-C on a one-shot exits once the profile closed, the backup still running.
  */
 const leftOnExit = new Set<string>();
-process.on("exit", () => { for (const path of leftOnExit) rmSync(path, { force: true }); });
+const removeLeft = () => { for (const path of leftOnExit) rmSync(path, { force: true }); };
+process.on("exit", removeLeft);
+
+/**
+ * SIGTERM and SIGHUP (a service manager's stop, `timeout`, an SSH session that drops) end a one-shot with no exit at
+ * all: only Ctrl-C is its own, and the daemon handles all three. While a backup runs, either removes its files, then
+ * ends the process by that signal as it would have. The daemon (another handler) stops as it does, the exit removing them.
+ */
+const LEAVING = ["SIGTERM", "SIGHUP"] as const;
+const onLeave = (signal: NodeJS.Signals) => {
+  if (process.listenerCount(signal) > 1) return;
+  removeLeft();
+  for (const name of LEAVING) process.off(name, onLeave);
+  process.kill(process.pid, signal);
+};
+const underWay = (...paths: string[]) => {
+  if (!leftOnExit.size) for (const name of LEAVING) process.on(name, onLeave);
+  for (const path of paths) leftOnExit.add(path);
+};
+const finished = (...paths: string[]) => {
+  for (const path of paths) leftOnExit.delete(path);
+  if (!leftOnExit.size) for (const name of LEAVING) process.off(name, onLeave);
+};
+
+/**
+ * The half-written backups beside `path` that a process gone since left (killed, or older than the handling above):
+ * nothing else removes them, and one with no passphrase starts with the store in the clear. A live process's stays.
+ */
+async function removeDeadPartials(path: string): Promise<void> {
+  const prefix = `${basename(path)}.partial-`;
+  for (const entry of await readdir(dirname(path)).catch(() => [])) {
+    const pid = Number(/^(\d+)(-[0-9a-f]{12})?$/.exec(entry.startsWith(prefix) ? entry.slice(prefix.length) : "")?.[1]);
+    if (!pid || pid === process.pid) continue;
+    let alive = true;
+    try { process.kill(pid, 0); } catch (error) { alive = (error as NodeJS.ErrnoException).code === "EPERM"; }
+    if (!alive) await rm(join(dirname(path), entry), { force: true });
+  }
+}
 
 async function walk(root: string, dir = root, out: string[] = []): Promise<string[]> {
   let names: string[];
@@ -150,9 +187,11 @@ export const BACKUP_METHODS: Record<string, Method> = {
     let out: FileHandle | null = null, writing = false;
     // From its export on, the store (every message and key in the clear) goes however the backup ends: an export cut
     // short, a failure before the backup is written, and a process that leaves first (Ctrl-C on a one-shot), the
-    // half-written backup with it. One a killed process left goes at the profile's next start (`startRuntime`).
-    leftOnExit.add(store).add(partial);
+    // half-written backup with it. One a killed process left goes at the profile's next start (`startRuntime`), and its
+    // half-written backup at the next backup to this path.
+    underWay(store, partial);
     try {
+      await removeDeadPartials(path);
       await ctx.runtime.store.exportSnapshot(store);
       stillAsked(gone);
       const holds = settings.find((setting) => setting.name === HOLDS), after = await readSetting(paths.dir, HOLDS);
@@ -213,8 +252,7 @@ export const BACKUP_METHODS: Record<string, Method> = {
       await out?.close().catch(() => {});
       await rm(partial, { force: true });
       await rm(store, { force: true });
-      leftOnExit.delete(store);
-      leftOnExit.delete(partial);
+      finished(store, partial);
     }
   },
 };

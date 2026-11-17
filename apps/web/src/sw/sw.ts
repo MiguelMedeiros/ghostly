@@ -41,7 +41,14 @@ interface WorkerScope {
   /** Web Locks, where the browser has them in workers: who holds which lock, by window id. */
   navigator?: { locks?: { query(): Promise<{ held?: { name?: string; clientId?: string }[] }> } };
   skipWaiting(): Promise<void>;
-  registration: { scope: string; showNotification(title: string, options: object): Promise<void>; getNotifications(filter?: { tag?: string }): Promise<Shown[]> };
+  registration: {
+    scope: string;
+    /** A newer worker of this registration, installing or installed and waiting (the one activating is neither). */
+    installing?: object | null;
+    waiting?: object | null;
+    showNotification(title: string, options: object): Promise<void>;
+    getNotifications(filter?: { tag?: string }): Promise<Shown[]>;
+  };
   clients: {
     claim(): Promise<void>;
     matchAll(options: { type: "window"; includeUncontrolled?: boolean }): Promise<WindowClient[]>;
@@ -83,6 +90,12 @@ worker.addEventListener("activate", (event) => {
   if (PUSH_PROFILE !== null) return;
   event.waitUntil((async () => {
     const names = await caches.keys();
+    // A newer worker installing or waiting behind this one (a later deploy found while this one waited, and the last
+    // tab closed): one of these caches is its own, maybe still filling. Deleted, its install would finish into a
+    // cache that is gone, and once it took over no cache would be left: the app would not open offline until the
+    // next deploy. The other builds' caches are left to its activation, which deletes all but its own. Read after
+    // the names: a cache listed is one whose worker started installing before, so is installing, waiting or failed.
+    if (worker.registration.installing || worker.registration.waiting) { await worker.clients.claim(); return; }
     await Promise.all(names.filter((name) => name.startsWith(CACHE_PREFIX) && name !== CACHE).map((name) => caches.delete(name)));
     await worker.clients.claim();
   })());
@@ -307,6 +320,9 @@ worker.addEventListener("message", (event) => {
   }
   if (message.type === "share-keep") {
     if (PUSH_PROFILE !== null || !message.item || typeof message.item !== "object") return;
+    // Those it counted as not kept are told to the next page all the same, with any dropped here.
+    const lost = message.dropped;
+    if (typeof lost === "number" && Number.isSafeInteger(lost) && lost > 0) dropped += lost;
     // The worker stays up while it waits again, as a share just posted does.
     event.waitUntil(new Promise<void>((resolve) => hold(message.item, resolve, true)));
     return;

@@ -606,14 +606,14 @@ describe("what a paired peer says about itself", () => {
     expect(t.b.groupsSupport).toBe(false);
   });
 
-  it("answers a reconnect request and ignores an unexpected acknowledgement", async () => {
+  it("ignores an old reconnect request and its acknowledgement", async () => {
     const t = linkedPair();
     await t.ready();
     const send = vi.spyOn(t.cb, "send");
     t.toB({ t: "paired-reconnect" });
     t.toB({ t: "paired-reconnect-ack" });
     await t.settle("b");
-    expect(sentFrames(send)).toContainEqual({ t: "paired-reconnect-ack" });
+    expect(sentFrames(send)).not.toContainEqual({ t: "paired-reconnect-ack" });
     expect(t.b.isDataLinkOpen).toBe(true);
   });
 
@@ -1195,21 +1195,25 @@ describe("native transports", () => {
     expect(t.onDataLinkState).toHaveBeenLastCalledWith("idle");
   });
 
-  it("after the peer asks to reconnect, its next native connection replaces the open session", async () => {
+  it("an old reconnect request leaves the open session to a dial that does not authenticate", async () => {
     const t = nativePair();
     const [ca, cb] = createChannelPair();
     t.ea.onConnection({ channel: ca, binding });
     t.eb.onConnection({ channel: cb, binding });
     await open(t.a, t.b);
-    const acks = vi.spyOn(ca, "send");
+    const sent = vi.spyOn(ca, "send");
     cb.send(JSON.stringify({ t: "paired-reconnect" }));
-    await vi.waitFor(() => expect(sentFrames(acks)).toContainEqual({ t: "paired-reconnect-ack" }));
-    const [xa, xb] = createChannelPair();
-    t.ea.onConnection({ channel: xa, binding });
-    expect((ca as FrameChannel & { closed: boolean }).closed).toBe(true);
-    t.eb.onConnection({ channel: xb, binding });
-    await open(t.a, t.b);
-    expect((t.a as unknown as Internal).channel).toBe(xa);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(sentFrames(sent)).not.toContainEqual({ t: "paired-reconnect-ack" });
+    // Anyone may dial the endpoint: until the dial proves to be the contact, the live session stays.
+    const [extra, far] = createChannelPair();
+    const close = vi.spyOn(extra, "close");
+    t.ea.onConnection({ channel: extra, binding });
+    far.send(JSON.stringify({ t: "pair-offer", v: 1 }));
+    await vi.waitFor(() => expect(close).toHaveBeenCalled());
+    expect((ca as FrameChannel & { closed: boolean }).closed).toBe(false);
+    expect((t.a as unknown as Internal).channel).toBe(ca);
+    expect(t.a.isDataLinkOpen).toBe(true);
   });
 
   it("an incoming connection on a transport this side does not offer is closed", async () => {
@@ -1487,6 +1491,24 @@ describe("DHT-only delivery", () => {
     await link.setDeliveryMode("stream");
     expect(start).toHaveBeenCalled();
     expect(link.textDelivery).toBe("unavailable");
+  });
+
+  it("an edit the DHT packet cannot carry with its element says so at once, though its text alone fits as a text", async () => {
+    const { link } = dhtLink();
+    const edit = (m: string) => ({ id: newId(), e: 1, ts: Date.now(), m });
+    // Off the floor nothing is asked: an edit goes on the live session.
+    expect(link.dhtEditTooBig(edit("x".repeat(256)))).toBeNull();
+    await link.setDeliveryMode("dht");
+    // The longest ASCII text the packet carries now, measured as the floor does: the same bytes as an edit go with its
+    // element (the message's id and the edit's number), and no longer fit. It waited for good, said nowhere.
+    let bound = 256;
+    while (link.validateText("x".repeat(bound), Date.now(), newId())) bound--;
+    expect(bound).toBeGreaterThan(200);
+    for (const text of ["x".repeat(bound), "é".repeat(Math.floor(bound / 2)), "x".repeat(257)]) {
+      expect(link.dhtEditTooBig(edit(text)), `${utf8Encode(text).length} bytes`).toBe("Text and authentication exceed the DHT packet budget. Shorten the message.");
+    }
+    // A short one fits.
+    expect(link.dhtEditTooBig(edit("a short edit"))).toBeNull();
   });
 
   it("confirming a DHT contact needs the current comparison code", async () => {

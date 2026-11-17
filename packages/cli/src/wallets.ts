@@ -8,6 +8,7 @@ import { CASHU_MINT_SOURCE } from "@ghostly/browser/engine/paymentAdapters/provi
 import { CliError, type ErrorCode } from "./errors";
 import { ADDRESS_TYPES, CHAT_METHODS, PAY_METHODS, WALLET_TYPES } from "./words";
 import { findSecret, secretWords } from "./secretGuard";
+import { shellWord } from "./shellWord";
 
 /**
  * Wallets and payments (WISP 1100, phase 2): the app's wallet deck and a chat's payment sheet, as methods. Test
@@ -206,6 +207,21 @@ function memoOf(params: Params, verb: string, field: "memo" | "comment" = "memo"
   return memo || undefined;
 }
 
+/**
+ * What `pay` says with `paid: false`: the payment is not known paid yet. The mint (or the card's source) holds it
+ * pending, or its answer was lost; the engine keeps asking and never pays it twice. Before, the answer said `paid:
+ * false` and nothing else, and no read showed the sats the Cashu wallet set aside for it. Said in the
+ * words of the app's Cashu card ("set aside", `wallet.cashu.setAsideInfo`).
+ */
+function notPaidYet(ctx: ApiContext, n: WalletNetwork, source: string, amount: number, feeReserve: number): string {
+  const running = ctx.mode === "one-shot" ? " while this profile runs (`ghostly daemon --detach`)" : "";
+  if (source !== CASHU_MINT_SOURCE) {
+    return `Not paid yet: your Lightning source has not confirmed this payment (it is pending, or its answer was lost). It is asked again${running} and never paid twice: \`ghostly wallet list\` shows the card's balance once it settles.`;
+  }
+  const sats = `${amount + feeReserve} ${n === "testnet" ? "test sats" : "sats"}`;
+  return `Not paid yet: the mint has not settled this payment (it is pending, or its answer was lost). ${sats} are set aside for it, out of the balance: they leave with the payment, or come back to the balance if the mint says it failed. It settles by itself: the wallet keeps asking the mint${running} and never pays it twice. \`ghostly wallet history\` lists it once paid, and \`ghostly wallet list\` shows the balance.`;
+}
+
 function badMintUrl(error: unknown): boolean {
   const code = error instanceof Error ? (error as { engineCode?: unknown }).engineCode : undefined;
   return code === "invalidMintUrl" || code === "mintNotHttps";
@@ -260,6 +276,18 @@ function walletRefusal(error: unknown): unknown {
   if (error.name === "SwapUnsettledError" || (error as { unsettled?: unknown }).unsettled === true) return new CliError("unavailable", error.message);
   const code = WALLET_REFUSALS.find(([pattern]) => pattern.test(error.message))?.[1];
   return code ? new CliError(code, error.message) : error;
+}
+
+/**
+ * `wallet redeem` of ecash from a mint that is not one of the wallet's: the engine names the mint's host only and no
+ * way on. Its words, then the command that adds the whole mint URL (the token's), for one who trusts that mint: a mint
+ * holds the sats, so it is offered, never done. Shell-quoted as any hint's word; a URL no quoting survives is not printed.
+ */
+function mintNotAdded(error: unknown): CliError | undefined {
+  if (!(error instanceof Error) || !/^Ecash from \S+ is not accepted$/.test(error.message)) return undefined;
+  const mint = (error as { mint?: unknown }).mint;
+  if (typeof mint !== "string") return undefined;
+  return new CliError("engine", `${error.message}: its mint is not one of yours (if you trust it to hold your sats: ghostly wallet add-mint ${shellWord(mint, "<the token's mint URL>")})`);
 }
 
 const WALLETS: Record<string, Method> = {
@@ -354,7 +382,7 @@ const WALLETS: Record<string, Method> = {
   },
 
   async "wallet.redeem"(ctx, params) {
-    return node(ctx).walletReceiveToken({ token: str(params, "token", true).trim() });
+    return node(ctx).walletReceiveToken({ token: str(params, "token", true).trim() }).catch((error: unknown) => { throw mintNotAdded(error) ?? error; });
   },
 
   async "wallet.mint.add"(ctx, params) {
@@ -414,7 +442,8 @@ const WALLETS: Record<string, Method> = {
     const maxFee = params.maxFee === undefined ? null : num(params, "maxFee", 0);
     if (maxFee !== null && quote.feeReserve > maxFee) throw new CliError("refused", `The fee may reach ${quote.feeReserve} sats, more than the ${maxFee} allowed`);
     const paid = await node(ctx).walletPayQuote({ quote: quote.quote, mint: quote.mint, ...(note ? { note } : {}), ...real(params), ...(chat ? { linkId: chat.id, invoice } : {}) });
-    return { network: n, amount: quote.amount, feeReserve: quote.feeReserve, source: (quote as { source?: string }).source ?? quote.mint, paid: paid.paid };
+    const source = (quote as { source?: string }).source ?? quote.mint;
+    return { network: n, amount: quote.amount, feeReserve: quote.feeReserve, source, paid: paid.paid, ...(!paid.paid && { note: notPaidYet(ctx, n, source, quote.amount, quote.feeReserve) }) };
   },
 
   /** Ecash to a contact in a chat (the payment sheet's Pay). */
@@ -464,7 +493,13 @@ const WALLETS: Record<string, Method> = {
     const paymentId = str(params, "payment", true);
     const card = cardParam(params);
     const request = s.payments[paymentId];
-    if (!request || request.linkId !== link.id || request.kind !== "request") throw new CliError("not_found", `No request ${paymentId} in this chat`);
+    // Said as `payment check` says it: the id quoted, where this chat's payments are listed, and a payment of this chat
+    // that is no request named as what it is (it read "No request", as if nothing had that id).
+    const listed = `(ghostly payment list --chat ${link.id})`;
+    if (request?.linkId === link.id && request.kind !== "request") {
+      throw new CliError("not_found", `${JSON.stringify(paymentId)} is ${request.direction === "out" ? "a payment you sent" : "a payment you received"}, not a request: chat pay-request pays a request the contact made of you ${listed}`);
+    }
+    if (!request || request.linkId !== link.id) throw new CliError("not_found", `No request ${JSON.stringify(paymentId)} in this chat ${listed}`);
     // One I made is the contact's to pay: the engine knew it only as "Unknown payment request" (engine, exit 1).
     if (request.direction !== "in") throw new CliError("bad_request", `${JSON.stringify(paymentId)} is your own request: the contact pays it`);
     // The request says which network it is paid on: real money or test coins, never the choice of the payer.

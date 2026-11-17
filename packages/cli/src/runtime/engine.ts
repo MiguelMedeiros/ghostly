@@ -6,13 +6,15 @@ import { ACTIVE_DHT_POLL_MS, DAEMON_WATCH_PEER_IDLE_MS, fromBase64Url, RTC_CONFI
 import { MAX_IROH_RELAYS, irohRelayProblem } from "@ghostly/browser/platform/irohWeb";
 import type { EngineServer } from "@ghostly/browser/engine/server";
 import { loadCallStack } from "../calls/media";
-import { CliError } from "../errors";
+import { CliError, shownValue } from "../errors";
 import { joinLogLine } from "../joinLog";
 import { nativePublicKey } from "../nativeEd25519";
 import { nodeLocalFetch } from "../services";
 import { nodeFedimintSdk } from "./fedimint";
 import { installFileFetch } from "./fileFetch";
+import { nodeGroupCallFetch } from "./groupCallFetch";
 import { nodeHoldFetch } from "./holdFetch";
+import { nodeLnurlFetch, nodePublicFetch } from "./publicFetch";
 import { nodePublicRelay } from "./irohRelay";
 import { nodePushSend } from "./pushSend";
 import { openPersistentIndexedDb, type PersistentIndexedDb } from "./storage";
@@ -63,7 +65,7 @@ function bootstrapNodes(name: string, env: string | undefined): string[] {
     const port = /^[^\s:;/@[\]]+:(\d{1,5})$/.exec(node)?.[1];
     return !port || Number(port) < 1 || Number(port) > 65535;
   });
-  if (bad !== undefined) throw new CliError("usage", `${name} takes host:port nodes, comma-separated, not ${JSON.stringify(bad)}`);
+  if (bad !== undefined) throw new CliError("usage", `${name} takes host:port nodes, comma-separated, not ${shownValue(bad)}`);
   return nodes;
 }
 
@@ -77,7 +79,7 @@ export function pkarrRelays(env = process.env): string[] | null {
   if (!relays.length) return null;
   // Two relays split by ';' or a space were taken as one URL.
   const bad = relays.find((url) => !/^https?:\/\/[^/\s]/i.test(url) || /[\s;]/.test(url) || !URL.canParse(url));
-  if (bad) throw new CliError("usage", `GHOSTLY_PKARR_RELAYS takes http:// or https:// URLs, comma-separated, not ${JSON.stringify(bad)}`);
+  if (bad) throw new CliError("usage", `GHOSTLY_PKARR_RELAYS takes http:// or https:// URLs, comma-separated, not ${shownValue(bad)}`);
   return relays;
 }
 
@@ -365,6 +367,12 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     pushSend: (request) => nodePushSend(request),
     // Held items are read from the contact's storage on public addresses only (./holdFetch.ts).
     holdFetch: nodeHoldFetch(),
+    // A contact's identity proof and public data are read on public addresses only, as a held item (./publicFetch.ts).
+    identityFetch: nodePublicFetch(),
+    // A group's call node is asked on public addresses only, as an identity proof is read (./groupCallFetch.ts).
+    groupCallFetch: nodeGroupCallFetch(),
+    // A Lightning address's service, each of its redirects and its callback, the same way (./publicFetch.ts).
+    lnurlFetch: nodeLnurlFetch(),
     // libdatachannel keeps only its own candidates out of the offer under `iceTransportPolicy: "relay"`: its ICE still
     // checks from this machine's sockets. With Hide my IP from contacts on, chats and group edges go over the relays.
     webrtcIgnoresRelayOnly: true,

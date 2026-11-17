@@ -51,6 +51,11 @@ interface Slot {
 }
 
 const slots = new Map<string, Slot>();
+/**
+ * Who the contact was in each chat whose panel showed, kept once the panel goes: a Desktop app's window outlives its
+ * chat page, and its title still names the contact while the app serves them a file.
+ */
+const contacts = new Map<string, AppContact>();
 const apps = new Map<string, ChatApp>();
 const listeners = new Set<() => void>();
 let sessions: readonly string[] = [];
@@ -66,7 +71,7 @@ function changed() {
  * running there stops. Called again as the contact's name changes.
  */
 export function registerAppSlot(linkId: string, slot: Slot | null): void {
-  if (slot) { slots.set(linkId, slot); return; }
+  if (slot) { slots.set(linkId, slot); contacts.set(linkId, slot.contact); return; }
   slots.delete(linkId);
   const app = apps.get(linkId);
   if (app?.stopped) setChatApp(linkId, null);
@@ -77,9 +82,9 @@ export function appSlot(linkId: string): HTMLElement | undefined {
   return slots.get(linkId)?.box;
 }
 
-/** Who the contact is in `linkId`, as its chat shows them. */
+/** Who the contact is in `linkId`, as its chat shows them, or last showed them once it closed. */
 export function appContact(linkId: string): AppContact | undefined {
-  return slots.get(linkId)?.contact;
+  return contacts.get(linkId);
 }
 
 export function chatApp(linkId: string): ChatApp | undefined {
@@ -90,6 +95,36 @@ export function setChatApp(linkId: string, app: ChatApp | null): void {
   if (app) apps.set(linkId, app);
   else if (!apps.delete(linkId)) return;
   changed();
+}
+
+/**
+ * Each chat's presses, in the order pressed: an Open (`webOpener.ts`), or "Back to <app>" on the one running there
+ * (`ChatAppResume`). An Open counts as the person's choice only once nothing can refuse it any more (`noteChoice`):
+ * one refused (revoked, offline, locked) chose nothing, so an older one still on its way there still opens.
+ */
+const pressed = new Map<string, number>();
+/** The newest press that counted as the person's choice in each chat (`noteChoice`). */
+const choices = new Map<string, number>();
+
+/** An Open pressed in the chat `linkId`: its place in the order pressed, not a choice yet (`noteChoice`). */
+export function pressTurn(linkId: string): number {
+  const turn = (pressed.get(linkId) ?? 0) + 1;
+  pressed.set(linkId, turn);
+  return turn;
+}
+
+/**
+ * The person chose what runs in the chat `linkId` now (`turn`, from `pressTurn`; a new press when not given): an open
+ * pressed before it, still on its way there, starts nothing. Call it only once `isNewestChoice(linkId, turn)`.
+ */
+export function noteChoice(linkId: string, turn = pressTurn(linkId)): number {
+  choices.set(linkId, turn);
+  return turn;
+}
+
+/** Whether no press after `turn` (from `pressTurn`) counted as the person's choice in the chat `linkId` yet. */
+export function isNewestChoice(linkId: string, turn: number): boolean {
+  return (choices.get(linkId) ?? 0) <= turn;
 }
 
 /** Shows or hides the app in `linkId`, or puts it over the whole chat (`wide`). */

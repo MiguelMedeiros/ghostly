@@ -1,4 +1,4 @@
-import { CliError } from "./errors";
+import { CliError, secretValue, shownValue } from "./errors";
 
 export type OptionType = "string" | "number" | "boolean" | "list";
 export interface OptionSpec {
@@ -24,7 +24,7 @@ export interface Parsed { positionals: string[]; options: Record<string, string 
  * `Number()` alone read `1e3` as 1,000, `0x10` as 16 and `" 21"` as 21: `chat pay bob 2e3`, a typo of 23, paid 2,000.
  */
 export const decimalNumber = (value: string): number => /^-?\d+(\.\d+)?$/.test(value) ? Number(value) : NaN;
-const notANumber = (name: string, option: OptionSpec, value: string) => new CliError("usage", `--${name} takes ${option.takes ?? "a number"}, not ${JSON.stringify(value)}`);
+const notANumber = (name: string, option: OptionSpec, value: string) => new CliError("usage", `--${name} takes ${option.takes ?? "a number"}, not ${shownValue(value)}`);
 
 /**
  * The word right after an option that stood alone because it was no number (`--voice 2s`), by the positionals a parse
@@ -131,7 +131,7 @@ export function parseArgs(argv: readonly string[], spec: Record<string, OptionSp
       } else if (option.type === "list") {
         options[name] = [...((options[name] as string[] | undefined) ?? []), value];
       } else {
-        if (option.choices && !option.choices.includes(value)) throw new CliError("usage", `--${name} takes ${listed(option.choices)}, not ${JSON.stringify(value)}`);
+        if (option.choices && !option.choices.includes(value)) throw new CliError("usage", `--${name} takes ${listed(option.choices)}, not ${shownValue(value)}`);
         options[name] = value;
       }
       continue;
@@ -150,12 +150,24 @@ export function parseArgs(argv: readonly string[], spec: Record<string, OptionSp
 function unknownOption(arg: string, all: Record<string, OptionSpec>, parsing: ParseFor | undefined, help = parsing ? `ghostly help ${parsing.command}` : undefined): CliError {
   const names = Object.entries(all).flatMap(([name, o]) => (o.type === "boolean" ? [name, `no-${name}`] : [name]));
   const near = nearest(arg.replace(/^--?/, ""), names);
+  const privateKey = /PRIVATE KEY/.test(arg);
   const hints = [
     ...(near ? [`did you mean --${near}?`] : []),
+    ...(privateKey ? ["never paste a private key anywhere: Ghostly only needs the public key;"] : []),
     ...(parsing?.text && /^-[^-]/.test(arg) ? ["put -- before text that starts with a dash;"] : []),
     ...(help ? [help] : []),
   ];
-  return new CliError("usage", `Unknown option ${arg}${parsing ? ` for ghostly ${parsing.command}` : ""}${hints.length ? ` (${hints.join(" ")})` : ""}`);
+  return new CliError("usage", `Unknown option ${shownOption(arg, privateKey)}${parsing ? ` for ghostly ${parsing.command}` : ""}${hints.length ? ` (${hints.join(" ")})` : ""}`);
+}
+
+/**
+ * An unknown option as its refusal names it: a pasted private key (a PEM or OpenPGP block starts with dashes), a word
+ * with a line break or one longer than any option's name is described, not printed (docs/CLI.md "Secrets stay hidden").
+ * A seed, an nsec, a hex key or a Cashu token is longer than 40 characters too.
+ */
+function shownOption(arg: string, privateKey: boolean): string {
+  if (privateKey) return "(a private key)";
+  return secretValue(arg) ?? arg;
 }
 
 /**
@@ -214,7 +226,7 @@ export function checkSettingKey(key: string, kinds: Record<string, SettingKind>)
 
 /** A value of another kind than its key takes (`online maybe`): a usage error too, before the profile opens. */
 export function checkSettingValue(key: string, kind: SettingKind, value: unknown, typed: string): void {
-  if (kind === "boolean" && typeof value !== "boolean") throw new CliError("usage", `${key} takes true or false, not ${JSON.stringify(typed)}: ${SETTINGS_SET}`);
+  if (kind === "boolean" && typeof value !== "boolean") throw new CliError("usage", `${key} takes true or false, not ${shownValue(typed)}: ${SETTINGS_SET}`);
   // Not echoed: a TURN password may be in it.
   if (kind === "strings" && !(Array.isArray(value) && value.every((v) => typeof v === "string"))) throw new CliError("usage", `${key} takes a JSON list of strings: ${SETTINGS_SET}`);
   if (kind === "ice" && !(Array.isArray(value) && value.every((v) => v && typeof v === "object"))) throw new CliError("usage", `${key} takes a JSON list of ICE servers: ${SETTINGS_SET}`);

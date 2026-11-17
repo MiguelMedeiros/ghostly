@@ -1,9 +1,9 @@
 import {
   COMMUNITY_LIMITS, COMMUNITY_TOPOLOGY, CommunitySession, GROUP_READ_NOTE_COMMUNITY, KNOCK_TTL_MS, MAX_KNOCKS, MEMBER_KEY,
-  beaconKeys, beaconRecords, createIdentity, decodeCommunityLink, doorHubs, groupName, entryParams, publicKeyFromZ32, encodeCommunityLink, freshHubs, identityFromSeedB64, knockIdentity, knockRecords, lobbyKeys, lobbyRecords, mergeBeacon, newerHead, readBeaconHead, type CommunityHead,
+  beaconKeys, beaconRecords, createIdentity, decodeCommunityLink, doorHubs, groupName, entryParams, publicKeyFromZ32, encodeCommunityLink, freshHubs, identityFromSeedB64, knockIdentity, knockRecords, lobbyKeys, lobbyRecords, memberAdmissions, mergeBeacon, newerHead, readBeaconHead, type CommunityHead,
   mentionsMember, receivedTimestamp, mergeKnocks, mergeLobby, pickHubs, rankHubs, readBeacon, readKnocks, readLobby, rosterHas, routedCommunityFrame, shouldBeHub,
   GROUP_HAVE_FRAME, WATCH_PEER_MS, COMMUNITY_PIN_FRAME,
-  type CommunityFrame, type CommunityLeaveFrame, type CommunityMessageFrame, type GroupEdit, type GroupFileMeta, type GroupMention, type WireReply, type StatusCard, type CommunityState, type GroupEntryLink, type GroupMetaChange, type Hub, type Knock, type Roster,
+  type CommunityFrame, type CommunityLeaveFrame, type CommunityMessageFrame, type GroupEdit, type GroupFileMeta, type GroupMention, type WireReply, type StatusCard, type CommunityState, type GroupEntryLink, type GroupMeta, type GroupMetaChange, type Hub, type Knock, type Roster,
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import { groupReply } from "../shared/replies";
@@ -220,14 +220,8 @@ function admissionsHeld(s: CommunitySession): boolean {
   return !s.isAdmin && membersAtBound(s);
 }
 function membersAtBound(s: CommunitySession): boolean {
-  const admin = s.admin, chain = s.state.chain;
-  let n = 0;
-  for (let i = chain.length - 1; i >= 0; i--) {
-    const c = chain[i];
-    if (c.k === "create" || c.k === "role" || (c.by === admin && c.k !== "remove" && c.k !== "leave")) break;
-    if (c.k === "add") n++;
-  }
-  return n >= COMMUNITY_LIMITS.memberAdmissions;
+  const chain = s.state.chain;
+  return memberAdmissions(s.admin, (function* () { for (let i = chain.length - 1; i >= 0; i--) yield chain[i]; })()) >= COMMUNITY_LIMITS.memberAdmissions;
 }
 /**
  * Whether the admin's app is wanted at the door: the members signed all the admissions in a row they may, and only the
@@ -504,6 +498,11 @@ export class Communities {
     if (!session?.isMember) return undefined;
     return { me: session.myKey, community: true, inRoster: key => rosterHas(session.roster, key), couldRead: (key, messageId) => session.couldRead(key, messageId) };
   }
+  /** Me in a community I am a member of, for its call (WISP 602): my member key, its seed, the admin's metadata, and whether I am the admin. */
+  callMember(groupId: string): { key: string; seedB64: string; meta?: GroupMeta; isAdmin: boolean } | undefined {
+    const session = this.live.get(groupId)?.session;
+    return session?.isMember ? { key: session.myKey, seedB64: session.state.seedB64, meta: session.state.meta, isAdmin: session.isAdmin } : undefined;
+  }
   /** Is this device a hub of the group? (tests and the load harness) */
   isHub(groupId: string): boolean { const live = this.live.get(groupId); return !!live?.hub && live.session.status === "active"; }
 
@@ -570,7 +569,7 @@ export class Communities {
     const former = Object.entries(s.state.nicks).filter(([key]) => !inRoster.has(key));
     return [{ ...base, name: s.name, ...(former.length ? { formerNames: Object.fromEntries(former) } : {}), status: s.status, statusReason: s.state.statusReason, epoch: s.epoch, myKey: s.myKey, isAdmin: s.isAdmin,
       ...(s.isMember && s.entryKey ? { entryLink: encodeCommunityLink({ g: s.id, host: s.entryKey }) } : {}),
-      canSend: s.canSend, ...(s.picture ? { picture: s.picture } : {}), ...(invitation ? { invitation } : {}),
+      canSend: s.canSend, ...(s.picture ? { picture: s.picture } : {}), ...(invitation ? { invitation } : {}), ...(s.call ? { call: s.call } : {}),
       // Not an edge to one whose leave I hold, which its app keeps a while after it left (`leftBehind`): it carries nothing.
       community: { hub: live.hub, hubs: hubs.length, connected: [...edges.keys()].filter(key => ready(key) && !this.gone(live, key)).length, ...(s.isAdmin && live.unansweredTold && { unansweredKnocks: live.unanswered!.size }) },
       members: roster.map(([key, role]) => ({ key, role, me: key === s.myKey,
@@ -951,6 +950,7 @@ export class Communities {
   // message dated after it.
   async setPicture(groupId: string, picture: string | null): Promise<void> { await this.require(groupId).setPicture(picture, this.now()); }
   async rename(groupId: string, name: string): Promise<void> { await this.require(groupId).rename(name, this.now()); }
+  async setCall(groupId: string, sfu: string | null, e2ee?: boolean): Promise<void> { await this.require(groupId).setCall(sfu, e2ee, this.now()); }
   /** A new link (the old one reaches nobody), or none. */
   async replaceLink(groupId: string, off = false): Promise<string> {
     const s = this.require(groupId);

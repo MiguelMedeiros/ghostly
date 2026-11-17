@@ -1,4 +1,4 @@
-import { relayUrl } from "@ghostly/core";
+import { relayUrl, relayUrlTooLong } from "@ghostly/core";
 
 /**
  * The HyperDHT relay a browser reaches the HyperDHT through (WISP 103, browser profile). Empty: none, so a
@@ -16,10 +16,12 @@ export function hyperdhtRelayProblem(url: string): string | null {
   let parsed: URL;
   try { parsed = new URL(url); } catch { return "Enter a relay address (wss://…)"; }
   if (parsed.protocol !== "wss:" && !(parsed.protocol === "ws:" && ["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname))) return "Use a wss:// relay address";
-  if (parsed.username || parsed.password || /[?#]/.test(url) || url.length > 256) return `Not a relay address: ${url}`;
+  if (parsed.username || parsed.password || /[?#]/.test(url)) return `Not a relay address: ${url}`;
   // Nor one a contact would drop with the whole descriptor (`relayUrl`: a space in it, past 126 characters, a capital in
-  // `localhost`), leaving the relay unused for reaching this browser without a word.
-  if (!relayUrl(hyperdhtRelayUrl(url))) return `Not a relay address: ${url}`;
+  // `localhost`), leaving the relay unused for reaching this browser without a word. One refused for its length alone
+  // is a relay address all the same: what to do is said instead.
+  const named = hyperdhtRelayUrl(url);
+  if (url.length > 256 || !relayUrl(named)) return relayUrlTooLong(named) ? `Use a shorter relay address: ${url}` : `Not a relay address: ${url}`;
   return null;
 }
 

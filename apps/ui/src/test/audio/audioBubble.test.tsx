@@ -369,10 +369,11 @@ describe("an audio file not here yet", () => {
     expect(document.activeElement).toBe(screen.getByTestId("audio-bubble"));
   });
 
-  it("an offer larger than the room here cannot be accepted", () => {
+  it("an offer larger than the room shown still takes Download: the engine reads the room again", async () => {
     const file = song({ size: 40 * MB });
     show(file, { state: "transferring", stage: "asking", direction: "in", transferred: 0, size: file.size, room: 10 * MB });
-    expect(screen.getByTestId("audio-accept")).toBeDisabled();
+    fireEvent.click(screen.getByTestId("audio-accept"));
+    await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))).toEqual({ linkId: "chat1", fileId: file.id, action: "accept" }));
   });
 
   it("while it arrives: a ring round the play button, the status, and pause/cancel", async () => {

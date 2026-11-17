@@ -96,6 +96,15 @@ It never starts, stops, resets or seeds a stack, here or on one, and never falls
 - serve e2e builds only on your session's port range (`--port`); `test:affected` stops the preview it started, and you stop every other server or container you started when you finish;
 - a known flaky or load-sensitive test failing locally is not a reason to rerun the whole suite: rerun that file, and let CI judge.
 
+### Quarantine
+
+A flaky test can leave the gate for at most 7 days while its open `kind:flake` issue is worked on:
+
+- an end-to-end test gets the tag `@quarantine` and, at most 5 lines above it, `// quarantine: #<issue> until <YYYY-MM-DD>`. `e2e/playwright.config.ts` and `e2e/playwright.desktop.config.ts` leave it out ([`e2e/support/quarantine.ts`](../e2e/support/quarantine.ts));
+- a unit test file gets an entry in [`tools/scripts/quarantine.json`](../tools/scripts/quarantine.json): `{ "file", "config", "issue", "until" }`, paths from the repository root. Every Vitest config leaves it out (`quarantined()` in `tools/vitest.shared.ts`).
+
+With `GHOSTLY_QUARANTINE=1` both run: the nightly E2E (full) sets it, and `node tools/scripts/quarantine.mjs --run` runs the unit test files. `node tools/scripts/quarantine.mjs` fails, one line each, on a date past or more than 7 days ahead: CI runs it on every pull request. With `GHOSTLY_FLAKE_TOKEN` (a token that can read the issues; the nightly has it, a pull request's build gets no secret) it also fails on an issue that is closed or not `kind:flake`. Fixed: take the tag, the line or the entry out in the fix's pull request.
+
 ## What CI runs
 
 **CI** (`.github/workflows/ci.yml`) runs on every pull request into `dev` or `main` and on every push to them. A new push to a pull request cancels the run it replaces. It takes about 3.5 minutes.
@@ -107,7 +116,7 @@ A **draft** pull request gets the fast tier: lint and types, the unit tests its 
 | Changed paths | [`tools/scripts/ci-changes.mjs`](../tools/scripts/ci-changes.mjs): which jobs below this pull request needs, from its files and whether it is a draft | always (pushes run everything, but a push to `dev` whose tree a pull request's CI Success already passed runs only Tauri Backend) |
 | Frontend lint and types | `npm run lint`, `npm run typecheck`, `node tools/scripts/changes.mjs` (the `docs/changelog/unreleased/` entries), `npm run test:map -- --summary` (the check, and the map on the run's summary page) | always, but a tested push to `dev` |
 | Frontend tests (app) | `npm run test:app` (UI components, matrix, scripts) | not in a draft |
-| Affected unit tests (draft 1/4 to 4/4) | `test-affected.mjs --base HEAD^1 --no-e2e --no-rust --no-lint --no-typecheck --unit-group <i>/4`: `vitest related` per project over the change, 4 workers; ui, browser and cli each on a runner of their own, every other project on the fourth | a draft only, in place of the app's tests and the packages shards |
+| Affected unit tests (draft 1/4 to 4/4) | `test-affected.mjs --base HEAD^1 --no-e2e --no-rust --no-lint --no-typecheck --unit-group <i>/4`: `vitest related` per project over the change, 4 workers; ui, browser and cli each on a runner of their own, every other project on the fourth, and the cli cut in two halves by time (`vitest --shard`, [`tools/vitest.shards.ts`](../tools/vitest.shards.ts)): the first on the third runner, the second on the fourth | a draft only, in place of the app's tests and the packages shards |
 | Frontend tests (packages 1/4 to 4/4) | `npm run test:packages` (core, browser, sdk, extension and the headless CLI, whose tests build it and pair two bots) in 4 shards balanced by time ([`tools/scripts/test-shards.mjs`](../tools/scripts/test-shards.mjs), `tools/scripts/test-durations.json`); the CLI's two-peer story has a shard of its own. The two jobs together are `npm test` | not in a draft; skipped when every change is under `docs/`, or under `apps/website/` outside the site files the packages' tests read |
 | CLI on Linux ARM64 | the CLI packed as npm publishes it, installed into an empty folder, starts a daemon with WebRTC and calls; then the CLI's whole suite, voice calls included, on an arm64 runner | as the packages' tests |
 | Frontend builds | `npm run build`, `check:desktop-bundle`, `build:extension`, `build:web`, `test:sdk-example` | not in a draft |

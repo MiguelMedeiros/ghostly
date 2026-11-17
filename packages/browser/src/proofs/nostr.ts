@@ -2,6 +2,7 @@ import type { BunkerPointer, BunkerSigner } from 'nostr-tools/nip46';
 import type { SimplePool } from 'nostr-tools/pool';
 import { generateSecretKey } from 'nostr-tools/pure';
 import type { NostrProofEvent } from '@ghostly/core';
+import { SignerTimeout } from './contract';
 
 export interface NostrSigner {
   getPublicKey(): Promise<string>;
@@ -29,9 +30,10 @@ export function parseProofBunker(input: string): BunkerPointer {
 /**
  * Runs `work` with the person's Nostr signer: the page's NIP-07 extension, or a NIP-46 bunker. `permissions`
  * is what the bunker is asked for (NIP-46 `connect`): the identity proof's `sign_event:30078` by default;
- * the social layer asks for the kinds it publishes.
+ * the social layer asks for the kinds it publishes. `timeoutMs`: how long the person has to approve, 2 minutes by default
+ * (the CLI waits its --timeout).
  */
-export async function withNostrSigner<T>(options: { bunker?: string; signal: AbortSignal; onAuth(url: string): void; permissions?: string; appName?: string }, work: (signer: NostrSigner) => Promise<T>): Promise<T> {
+export async function withNostrSigner<T>(options: { bunker?: string; signal: AbortSignal; onAuth(url: string): void; permissions?: string; appName?: string; timeoutMs?: number }, work: (signer: NostrSigner) => Promise<T>): Promise<T> {
   options.signal.throwIfAborted();
   let signer: BunkerSigner | undefined;
   let pool: SimplePool | undefined;
@@ -39,25 +41,36 @@ export async function withNostrSigner<T>(options: { bunker?: string; signal: Abo
   let timer: ReturnType<typeof setTimeout> | undefined;
   let abort: (() => void) | undefined;
   let closed = false;
-  const guard: NostrSigner = {
-    getPublicKey: async () => { if (closed) throw new Error('Signer request cancelled'); const key = await active!.getPublicKey(); if (closed) throw new Error('Signer request cancelled'); return key; },
-    signEvent: async event => { if (closed) throw new Error('Signer request cancelled'); const signed = await active!.signEvent(event); if (closed) throw new Error('Signer request cancelled'); return signed; },
-  };
   let active: NostrSigner | undefined;
   try {
     const timeout = new Promise<never>((_, reject) => {
       abort = () => { closed = true; reject(new Error('Signing cancelled')); };
       options.signal.addEventListener('abort', abort, { once: true });
-      timer = setTimeout(() => { closed = true; reject(new Error('Signer timed out. Your Ghostly identity is unchanged.')); }, 120_000);
+      timer = setTimeout(() => { closed = true; reject(new SignerTimeout('Signer timed out. Your Ghostly identity is unchanged.')); }, options.timeoutMs ?? 120_000);
     });
-    const action = async () => {
+    // Ending once no signer step waits on it: nothing more to cut short.
+    timeout.catch(() => {});
+    /**
+     * Only the signer's own steps (connecting, its key, a signature) are ended by the two minutes or the cancel. What
+     * `work` does with an answer, such as the engine checking and saving the proof (a NIP-05 lookup takes up to 30 s),
+     * runs to its end: cut short, the person read "unchanged" of a proof that was saved (agents#6035).
+     */
+    const step = async <R>(asked: () => Promise<R>): Promise<R> => {
+      if (closed) throw new Error('Signer request cancelled');
+      return Promise.race([asked(), timeout]);
+    };
+    const guard: NostrSigner = {
+      getPublicKey: () => step(() => active!.getPublicKey()),
+      signEvent: event => step(() => active!.signEvent(event)),
+    };
+    const connect = async () => {
       if (options.bunker) {
         const bp = parseProofBunker(options.bunker);
         // Loaded here, not with the app: the NIP-46 signer and its relay pool are only for a bunker.
         const [{ BunkerSigner }, { SimplePool }] = await Promise.all([import('nostr-tools/nip46'), import('nostr-tools/pool')]);
         if (closed) throw new Error('Signer request cancelled');
         pool = new SimplePool(); clientKey = generateSecretKey();
-        // No timeout of nostr-tools' own (30 s since 2.26): the person approves on their phone, within the 2 minutes above.
+        // No timeout of nostr-tools' own (30 s since 2.26): the person approves on their phone, within the wait above.
         signer = BunkerSigner.fromBunker(clientKey, bp, { pool, skipSwitchRelays: true, timeout: 0, onauth: url => {
           try { const u = new URL(url); if (!closed && u.protocol === 'https:' && !u.username && !u.password) options.onAuth(u.href); } catch { /* Invalid signer URL: never navigate. */ }
         } });
@@ -67,10 +80,10 @@ export async function withNostrSigner<T>(options: { bunker?: string; signal: Abo
         active = extensionSigner();
         if (!active) throw new Error('No NIP-07 signer in this window. Use a bunker connection from your Nostr signer.');
       }
-      if (closed) throw new Error('Signer request cancelled');
-      return work(guard);
     };
-    return await Promise.race([action(), timeout]);
+    await Promise.race([connect(), timeout]);
+    if (closed) throw new Error('Signer request cancelled');
+    return await work(guard);
   } finally {
     closed = true;
     if (timer) clearTimeout(timer);

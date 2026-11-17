@@ -35,7 +35,7 @@ async function reopen(p: Peer): Promise<void> {
   await expect(field(p)).toBeVisible({ timeout: 60_000 });
 }
 
-test("an edit shows on the contact's side in place, marked edited, with the history in its details", { tag: ["@feature:chat.edit", "@feature:chat.edit.wire"] }, async ({ peer }) => {
+test("an edit shows on the contact's side in place, marked edited, with the history in its details", { tag: ["@journey", "@feature:chat.edit", "@feature:chat.edit.wire"] }, async ({ peer }) => {
   test.setTimeout(4 * 60_000);
   const [alice, bob] = await Promise.all([peer("edit-alice"), peer("edit-bob")]);
   await link(alice, bob);

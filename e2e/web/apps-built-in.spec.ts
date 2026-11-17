@@ -154,7 +154,7 @@ test("in Arabic on a phone, Chess's row keeps Comes with Ghostly whole and its E
   expect(await inSight(hint, "Play chess")).toBe(true);
 });
 
-test("opened from a chat's Apps, Chess runs with the contact, whose card of it opens from their own build", { tag: ["@feature:apps.built-in", "@feature:apps.chat.card"] }, async ({ peer }) => {
+test("opened from a chat's Apps, Chess runs with the contact, whose card of it opens from their own build", { tag: ["@journey", "@feature:apps.built-in", "@feature:apps.chat.card"] }, async ({ peer }) => {
   const [ana, bob] = await Promise.all([peer("ana"), peer("bob")]);
   const [anaAsked, bobAsked] = await Promise.all([withBuiltIns(ana), withBuiltIns(bob)]);
   await setNickname(ana, "Ana");

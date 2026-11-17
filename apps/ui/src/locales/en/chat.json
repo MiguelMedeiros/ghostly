@@ -208,6 +208,8 @@
     "noMatch": "No chat by that name",
     "partial": "{{sent}} of {{count}} sent",
     "pick": "Pick up to {{count}}",
+    "refused": "{{name}}: {{error}}",
+    "refusedPartial": "{{name}} ({{partial}}): {{error}}",
     "search": "Search chats",
     "select": "Select",
     "selected": "{{count}} selected",

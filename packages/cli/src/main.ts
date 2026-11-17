@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { connect } from "node:net";
 import { closeSync, fstatSync, openSync, readFileSync, readSync, rmSync } from "node:fs";
 import { dirname, sep } from "node:path";
@@ -12,10 +13,11 @@ import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULT
 import { asCliError, CliError, type ErrorCode, EXIT, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import type { Host } from "./host";
+import { identityWaitLines } from "./identityWait";
 import { jsonOut } from "./jsonOut";
 import { ownProfile } from "./privateFolder";
 import { shellWord } from "./shellWord";
-import { waitNotice, waitsFor, type WaitNotice } from "./waitNotice";
+import { dhtOnlyNotice, longTextChat, waitNotice, waitsFor, type WaitNotice } from "./waitNotice";
 import type { RuntimeOptions } from "./runtime/engine";
 import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, followDaemon, PAUSE_HOLD_MS, startAt } from "./listen";
 import { format } from "node:util";
@@ -213,10 +215,10 @@ export function oneChatOnly(method: string, params: Record<string, unknown>): bo
 
 /**
  * What a member says in one group, over that group's own edges: no 1:1 chat carries any of it. The admin's name,
- * picture, hubs and fresh secret too (the group's metadata or a commit). Not `group.remove` (the one removed hears it
+ * picture, call node, hubs and fresh secret too (the group's metadata or a commit). Not `group.remove` (the one removed hears it
  * over the chat that invited them) nor `group.admin` (the new admin takes back the invitations still out).
  */
-const GROUP_EDGES_ONLY: ReadonlySet<string> = new Set(["group.send", "group.edit", "group.react", "group.typing", "group.rename", "group.picture", "group.hub", "group.rotate"]);
+const GROUP_EDGES_ONLY: ReadonlySet<string> = new Set(["group.send", "group.edit", "group.react", "group.typing", "group.rename", "group.picture", "group.call", "group.hub", "group.rotate"]);
 
 /**
  * A command about one group that goes over its edges only (`GROUP_EDGES_ONLY`): a one-shot for it leaves the saved 1:1
@@ -536,10 +538,13 @@ function interruptible(s: Session): { run<T>(work: (s: Session) => Promise<T>): 
     promise.then((value) => { if (!interrupted || done) resolve(value); }, (error: unknown) => { if (!interrupted || done) reject(error); });
   });
   const call = (method: string, params?: unknown): Promise<unknown> => {
-    const entry = { method, notice: waitNotice(method, (params ?? {}) as Record<string, unknown>, s.mode) };
+    const given = (params ?? {}) as Record<string, unknown>;
+    const entry = { method, notice: waitNotice(method, given, s.mode) };
     pending.add(entry);
-    const notice = entry.notice;
-    const timer = notice && process.stderr.isTTY ? setTimeout(() => process.stderr.write(`ghostly: ${notice.waiting}\n`), WAIT_NOTICE_MS) : undefined;
+    // A long text's chat, read beside the send: on the DHT only, the notice and Ctrl-C say why it waits, not that it goes.
+    const chat = entry.notice && longTextChat(method, given);
+    if (chat) void s.call("chat.get", { chat }).then((view) => { if (entry.notice) entry.notice = dhtOnlyNotice(entry.notice, given, view as Record<string, unknown>, s.mode); }, () => {});
+    const timer = entry.notice && process.stderr.isTTY ? setTimeout(() => process.stderr.write(`ghostly: ${entry.notice!.waiting}\n`), WAIT_NOTICE_MS) : undefined;
     return held(s.call(method, params).finally(() => { clearTimeout(timer); pending.delete(entry); }));
   };
   return {
@@ -620,7 +625,7 @@ export const SPECIAL: [usage: string, summary: string, options?: Record<string, 
   ["identity add <provider> [subject] [--signer id] [--field name=value]... [--stdin] [--days n] [--timeout s]", "Make an identity proof (a tool's or a published one finishes with identity complete)", {
     signer: o("string", "Which signer makes the proof (identity providers lists them)"), field: o("list", "A field of the provider's form, name=value"),
     stdin: o("boolean", "Take the fields as name=value lines on stdin (a signer's link: out of ps and the shell's history)"),
-    days: o("number", "How long the proof holds"), timeout: o("number", "Seconds to wait for an approval"),
+    days: o("number", "How long the proof holds"), timeout: o("number", "Seconds to wait for an approval (default 300, 5 to 3600; Pubky at most 300)"),
   }],
   ["version", "This CLI's version (also ghostly --version)"],
 ];
@@ -1385,7 +1390,7 @@ async function listenCommand(argv: string[]): Promise<void> {
   const cursor = here(parsed.options.cursor);
   // Before the profile opens: a cursor that cannot be written is no per-event warning.
   checkCursor(cursor);
-  const since = startAt(sinceOf(parsed.options), cursor, (line) => process.stderr.write(line + "\n"));
+  const starting = startAt(sinceOf(parsed.options), cursor, (line) => process.stderr.write(line + "\n")), since = starting.from;
   // Kept for the whole listen (a model loads once); its process ends with this one.
   const translator = await translatorFor(parsed.options.translate, g.home);
   // A cursor that can no longer be written (a full disk) stops the listener, with the error and its exit code: run on,
@@ -1438,8 +1443,11 @@ async function listenCommand(argv: string[]): Promise<void> {
     const stop = stopper(async () => { following.close(); await handle.stop(); });
     quit = (code) => { following.close(); process.exit(code); };
     onReaderGone(stop);
-    await following.subscribed;
+    // Before the subscription's answer is awaited: the events it replays can come in the same read, and the first one's
+    // hook started before the await went on. A SIGTERM then ended the listen on the spot and left the hook running.
     onStopSignals(stop);
+    const answer = await following.subscribed as { lastSeq?: unknown } | null;
+    if (typeof answer?.lastSeq === "number") starting.known(answer.lastSeq);
     return;
   }
   const [{ keepServing, serve }, { callApi }] = await Promise.all([engineHost(), engineApi()]);
@@ -1483,6 +1491,7 @@ async function listenCommand(argv: string[]): Promise<void> {
     off = host.ctx.hub.onEvent(feed.take);
   };
   const feed = new Feed(handle, since, () => { off?.(); off = null; }, open);
+  starting.known(host.ctx.hub.lastSeq);
   open(since);
   host.ctx.hub.emit("daemon.started", `daemon.started:${process.pid}:${Date.now()}`, { pid: process.pid, version: VERSION, listen: true });
 }
@@ -1611,9 +1620,12 @@ async function identityAddCommand(argv: string[]): Promise<void> {
   // A signer's secret (a bunker:// link) on the command line shows in ps for as long as the approval is waited for.
   const { fields, warning } = await identityFields(items, parsed.options.stdin === true, identitySecretFields(known, parsed.options.signer as string | undefined), readStdin, process.stdin.isTTY === true);
   if (warning) process.stderr.write(`ghostly: ${warning}\n`);
-  const params ={ provider, subject: subject.join(" ") || undefined, signer: parsed.options.signer, fields, days: parsed.options.days, timeout: parsed.options.timeout };
+  // This call's own id: the daemon's watcher hears every proof's wait, and prints only this one's.
+  const request = randomUUID();
+  const params ={ provider, subject: subject.join(" ") || undefined, signer: parsed.options.signer, fields, days: parsed.options.days, timeout: parsed.options.timeout, request };
   const tell = (event: GhostlyEvent) => {
-    if (event.type === "identity.approval" || event.type === "identity.progress") process.stderr.write(JSON.stringify(event) + "\n");
+    const lines = identityWaitLines(event, request, process.stderr.isTTY === true);
+    if (lines) process.stderr.write(lines);
   };
   const addThroughDaemon = async (client: DaemonClient) => {
     await warnVersion(client);

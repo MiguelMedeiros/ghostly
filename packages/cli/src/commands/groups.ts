@@ -1,5 +1,5 @@
-import { CliError } from "../errors";
-import { type Command, groupWait, here, picture, refs, showSecret, secret, cursor, pageLimit, reaction, timeout, typingFor, typingKind } from "./shared";
+import { CliError, shownValue } from "../errors";
+import { type Command, groupWait, here, picture, refs, showSecret, secret, cursor, pageLimit, reaction, timeout, typingFor, typingKind, typingWords } from "./shared";
 
 const nameForce = { type: "boolean", description: "Use the name even if it looks like a seed, a key or ecash" } as const;
 const forced = (options: Record<string, unknown>) => (options.force === true ? { force: true } : {});
@@ -15,13 +15,29 @@ export const commands: Record<string, Command> = {
     method: "group.auto", usage: "group auto [on|off] [--from <chat>]...", summary: "Accept group invitations by themselves, only from the chats named (kept in the profile; the daemon accepts)",
     args: ["mode...?"], options: { from: { type: "list", description: "Invitations from this chat: its id, its contact's key or a label given here with chat rename (again for more: a new on replaces the list)" } },
     params: ({ options }, a) => {
-      if (a.mode !== undefined && a.mode !== "on" && a.mode !== "off") throw new CliError("usage", `group auto takes on or off, not ${JSON.stringify(a.mode)}: ghostly group auto [on|off] [--from <chat>]...`);
+      if (a.mode !== undefined && a.mode !== "on" && a.mode !== "off") throw new CliError("usage", `group auto takes on or off, not ${shownValue(a.mode)}: ghostly group auto [on|off] [--from <chat>]...`);
       // Never from anyone: on names its chats. Without on, the chats would be dropped without a word.
       if (a.mode === "on" && options.from === undefined) throw new CliError("usage", "group auto on needs the chats whose invitations it accepts: ghostly group auto on --from <chat>");
       if (a.mode !== "on" && options.from !== undefined) throw new CliError("usage", "--from goes with on: ghostly group auto on --from <chat>");
       refs(options.from, "from", "chat");
       if (a.mode === undefined) return {};
       return a.mode === "on" ? { on: true, from: options.from } : { on: false };
+    },
+  },
+  "group call": {
+    method: "group.call", usage: "group call <group> --sfu <https origin> [--e2ee | --no-e2ee] | --e2ee | --no-e2ee | --clear [--show-secret]",
+    summary: "Name the node a community group's calls go through, turn sealed call media on or off, or --clear (admin)", args: ["group"],
+    options: {
+      ...showSecret, sfu: { type: "string", description: "The node's https origin, e.g. https://call.example.com" },
+      e2ee: { type: "boolean", eitherWay: true, description: "Seal the call media end to end (--no-e2ee: off); left out, the group keeps what it had" },
+      clear: { type: "boolean", description: "The group has no calls" },
+    },
+    params: ({ options }, a) => {
+      // Every form the usage line takes: before, only --sfu and --clear, though `--e2ee` alone seals the node set already.
+      if (options.sfu === undefined && options.clear !== true && options.e2ee === undefined) throw new CliError("usage", "Missing --sfu, --e2ee, --no-e2ee or --clear: ghostly group call <group> --sfu <https origin> [--e2ee | --no-e2ee] | --e2ee | --no-e2ee | --clear");
+      if (options.sfu !== undefined && options.clear === true) throw new CliError("usage", "--clear removes the call node: not with --sfu");
+      if (options.e2ee !== undefined && options.clear === true) throw new CliError("usage", "--clear removes the call node: not with --e2ee or --no-e2ee");
+      return { group: a.group, ...(options.clear === true ? { clear: true } : options.sfu !== undefined ? { sfu: options.sfu } : {}), ...(options.e2ee !== undefined && { e2ee: options.e2ee === true }), ...secret(options) };
     },
   },
   "group create": {
@@ -53,7 +69,7 @@ export const commands: Record<string, Command> = {
     method: "group.invite", usage: "group invite <group> <chat> [--show-secret]", summary: "Invite a contact into a group you administer", args: ["group", "chat"],
     options: showSecret, params: ({ options }, a) => ({ group: a.group, chat: a.chat, ...secret(options) }),
   },
-  "group join": { method: "group.join", usage: "group join [<link> | -]", summary: "Join a group by its link; the link on stdin keeps it out of ps", args: ["link?"], params: (_, { link }) => ({ link }) },
+  "group join": { method: "group.join", usage: "group join [<link> | -]", summary: "Join a group by its link; the link on stdin keeps it out of ps (without a daemon it waits up to 60 s to be let in)", args: ["link?"], params: (_, { link }) => ({ link }) },
   "group leave": {
     method: "group.leave", usage: "group leave <group> --yes", summary: "Leave a group; its history and files go from this device", args: ["group"],
     options: { yes: { type: "boolean", description: "Confirm" } }, params: ({ options }, { group }) => ({ group, yes: options.yes === true }),
@@ -110,6 +126,6 @@ export const commands: Record<string, Command> = {
       status: { type: "string", description: "A short line shown instead, e.g. \"Reading the thread…\" (40 characters, no links)" },
       for: { type: "number", description: "Keep saying it for this many seconds (up to 600), until a send or --stop" },
     },
-    params: ({ options }, { group }) => ({ group, stop: options.stop === true, kind: options.kind, status: options.status, for: typingFor(options) }),
+    params: ({ options }, { group }) => ({ group, stop: options.stop === true, ...typingWords(options), for: typingFor(options) }),
   },
 };

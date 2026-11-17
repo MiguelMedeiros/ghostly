@@ -138,7 +138,11 @@ describe("a link that lets nobody in", () => {
   });
 
   it("is not shown to a member who is not the admin, nor while the link works", () => {
-    openGroup(admin({ entryLink: LINK, entryJammed: true, isAdmin: false }));
+    const { unmount } = openGroup(admin({ entryLink: LINK, entryJammed: true, isAdmin: false }));
+    expect(screen.queryByTestId("group-link-jammed")).not.toBeInTheDocument();
+    unmount();
+    openGroup(admin({ entryLink: LINK }));
+    expect(screen.getByTestId("group-chat")).toBeInTheDocument();
     expect(screen.queryByTestId("group-link-jammed")).not.toBeInTheDocument();
   });
 });

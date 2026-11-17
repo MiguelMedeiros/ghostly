@@ -1,5 +1,5 @@
 import { MAX_GROUP_NAME_BYTES, MAX_GROUP_NAME_LENGTH, decodeCommunityLink, decodeGroupEntryLink, groupEntryUrl, type PairedTransport } from "@ghostly/core";
-import { fitText, fitTextEdit, utf8Bytes } from "./fitText";
+import { utf8Bytes } from "./fitText";
 import { getPrefix, setSessionDraft } from "./storage";
 import { appLinkOrigin, decodePart } from "./url";
 import { setChatFolder } from "./chatFolders";
@@ -14,21 +14,11 @@ import { transportName } from "./connection";
 import { ago } from "./time";
 import { english } from "./english";
 import { relayCause } from "./problemText";
+import { listText } from "./listText";
 import type { Translate } from "../contexts/I18nContext";
 
 /** Whether a group's name is one `groupName` takes whole: characters (`MAX_GROUP_NAME_LENGTH`) and bytes (`MAX_GROUP_NAME_BYTES`). */
 export const fitsGroupName = (s: string) => [...s].length <= MAX_GROUP_NAME_LENGTH && utf8Bytes(s) <= MAX_GROUP_NAME_BYTES;
-
-/**
- * What a group's name field keeps of what was typed or pasted: as much as `groupName` takes, counted as it counts
- * (`fitsGroupName`), cut between whole emoji. An input's `maxLength` counts UTF-16 units: a name of emoji stopped at
- * 32 of them, a family at 5 (agents#1048).
- */
-export const fitGroupName = (value: string): string => fitText(value, fitsGroupName);
-
-/** A change to a group's name field, kept to what `groupName` takes the way a text field with a limit does (`fitTextEdit`). */
-export const fitGroupNameEdit = (before: string, after: string, caret: number | null): { value: string; caret: number } =>
-  fitTextEdit(before, after, caret, fitsGroupName);
 
 /**
  * What a name may hold that draws nothing by itself, and that `sanitizeNick` keeps since a name may need it beside
@@ -214,7 +204,7 @@ export function groupTransports(members: GroupMemberView[], t: Translate = engli
   const head = hubbed ? t("group.transports.liveHubs", { live: live.length + hubbed, total: others.length, hubs: hubbed })
     : t("group.transports.live", { live: live.length, total: others.length });
   if (counts.size === 1) { const [transport] = counts.keys(); return { line: t("group.transports.over", { head, transport: transportName(transport) }), transport }; }
-  return { line: t("group.transports.mixed", { head, list: [...counts].sort((a, b) => b[1] - a[1]).map(([kind, n]) => `${n} ${transportName(kind)}`).join(", ") }) };
+  return { line: t("group.transports.mixed", { head, list: listText([...counts].sort((a, b) => b[1] - a[1]).map(([kind, n]) => `${n} ${transportName(kind)}`), t) }) };
 }
 
 /**

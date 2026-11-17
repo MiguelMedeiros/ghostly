@@ -82,7 +82,8 @@ async function resolve(did: string, method: DidMethod, options: DidResolveOption
     return { method, document: parseDidDocument(did, raw), host: didWebHost(did), documentUrl };
   }
   // No relay answered (not reached, or an error status): this side's network, which says nothing of the DID.
-  const found = await (options.dht ?? resolveDidDht)(did, { fetch: options.fetch, signal: options.signal, relays: pkarrRelays() })
+  const fetch: IdentityFetch = (url, init) => options.fetch(url, { ...init, ownPkarrRelay: true });
+  const found = await (options.dht ?? resolveDidDht)(did, { fetch, signal: options.signal, relays: pkarrRelays() })
     .catch((e: unknown) => { throw e instanceof DidDhtError && e.code === "unreachable" ? new IdentityCheckUnavailable(e.message) : e; });
   if (found.metadata.deactivated) throw new DidError("This DID is deactivated: its owner retired it");
   return { method, document: parseDidDocument(did, found.document), relay: found.relay };

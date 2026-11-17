@@ -285,11 +285,12 @@ export function viewerServicePolicy(relayOnly: boolean): string {
  * The browser features a contact's app in the extension's viewer tab may not use. Its tab is a site of its own, so
  * what the person granted it (camera, microphone, location, a device) would be a site setting of the browser's, which
  * no Delete chat, Clear all data or Delete profile reaches; denied here, the browser never asks and ignores a grant
- * made before. The web app's view is a frame of another site, which gets none of them, and Desktop's window grants none.
+ * made before. The web app's view is a frame of another site, which gets none of them, and Desktop's window grants none
+ * and is served the same value (`PERMISSIONS_POLICY` in `apps/desktop/src/viewer.rs`).
  */
 export const VIEWER_PERMISSIONS_POLICY = [
   "camera", "microphone", "display-capture", "geolocation", "midi", "usb", "serial", "hid", "clipboard-read",
-  "idle-detection", "local-fonts", "window-management", "storage-access", "publickey-credentials-create",
+  "clipboard-write", "idle-detection", "local-fonts", "window-management", "storage-access", "publickey-credentials-create",
 ].map((feature) => `${feature}=()`).join(", ");
 
 /** A contact's headers that would set the page's features: the viewer's own policy takes their place. */

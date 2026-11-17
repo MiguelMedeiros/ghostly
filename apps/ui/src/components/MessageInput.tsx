@@ -263,7 +263,8 @@ export function MessageInput({
   const translatesSend = useTranslatesWhatISend(draftId);
   // Hide my IP from contacts: reading a link's page tells its site this device's address, and a pasted link may be a
   // contact's server. With it on no preview is made; the link goes as text (a picture link someone sent is not read either).
-  const relayOnly = useEngineValue((state) => state?.settings.relayOnly === true);
+  // Until the engine's first state it counts as on: a kept draft's link would otherwise be read before the engine says.
+  const relayOnly = useEngineValue((state) => !state || state.settings.relayOnly === true);
   const linkPreview = useLinkPreviewDraft(text, linkPreviews && !disabled && !relayOnly, edit?.preview);
 
   // Ready to type when the chat opens, where that costs nothing: on a touch screen the keyboard would come up over
@@ -1197,7 +1198,8 @@ export function MessageInput({
           disabled={disabled || !text.trim()}
           className="composer-send w-11 h-11 max-md:w-12 max-md:h-12 flex items-center justify-center bg-accent rounded-full text-on-accent hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shrink-0"
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+          {/* Points where the message goes: to the left where the app reads right to left. */}
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" className="rtl:-scale-x-100">
             <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
           </svg>
         </button>}

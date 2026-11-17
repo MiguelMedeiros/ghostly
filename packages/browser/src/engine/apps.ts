@@ -99,11 +99,6 @@ const STAGED = { max: 4, ms: 10 * 60 * 1000 } as const;
 const BUNDLES_KEPT = { min: 2, ms: 60 * 1000 } as const;
 /** URLs the engine remembers it read whole and refused (`Apps.refusedReads`). */
 const REFUSED_READS_KEPT = 256;
-/**
- * Listing URLs the update check keeps as peeked with nothing to take (`Apps.listingMisses`), the oldest going first: a
- * store that lists new URLs at each index would grow them at every check.
- */
-export const LISTING_MISSES_KEPT = 1024;
 /** The first bytes of a bundle: magic, the manifest's length and the largest manifest. */
 const PEEK_BYTES = APP_BUNDLE_MAGIC.length + 4 + APP_BUNDLE_LIMITS.manifestBytes;
 /** What a peek reads first: the magic, the length and any usual manifest (about 1 KiB). A longer one is read to its end after. */
@@ -392,6 +387,10 @@ function listingUrls(urls: readonly string[]): string[] {
   return [...readable.filter(pinned), ...readable.filter((u) => !pinned(u))];
 }
 
+/** A read that failed for a reason that may pass: offline, the host not reached or too slow, its own trouble (5xx, 429). */
+const passing = (error: unknown): boolean => error instanceof AppFetchError
+  && (error.code === "offline" || error.code === "network" || error.code === "slow" || (error.status ?? 0) >= 500 || error.status === 429);
+
 /** An error whose message starts with its code (`<code>: words`), as it crosses the engine's RPC. */
 function fail(code: string, words: string): never {
   throw new Error(`${code}: ${words}`);
@@ -473,28 +472,48 @@ const REVOCATIONS_KEPT = { each: 64, all: 1024 } as const;
  * revocation's read is about 0.15 ms, and the 1024 kept at most held the page's thread 160 ms at every install screen).
  */
 function keptRevocations(kept: unknown, ref: string): { mine: SignedAppRevocation[]; all: Map<string, unknown[]> } {
+  const all = keptLists(kept);
+  return { mine: keptOf(all, ref), all };
+}
+
+/** The revocations as kept, by reference, each app's list left unread (`keptRevocations`). */
+function keptLists(kept: unknown): Map<string, unknown[]> {
   const all = new Map<string, unknown[]>();
   if (Array.isArray(kept)) {
     for (const entry of kept) if (Array.isArray(entry) && isAppRef(entry[0]) && Array.isArray(entry[1]) && entry[1].length) all.set(entry[0], entry[1]);
   }
-  const mine = (all.get(ref) ?? []).flatMap((r: unknown) => {
+  return all;
+}
+
+/** Those of `ref` among the revocations as kept (`keptRevocations`). */
+function keptOf(all: ReadonlyMap<string, unknown[]>, ref: string): SignedAppRevocation[] {
+  return (all.get(ref) ?? []).flatMap((r: unknown) => {
     const read = readAppRevocationShape(r);
     return read.ok && read.revocation.statement.app === ref && read.revocation.signature.key === appRefPublisher(ref) ? [read.revocation] : [];
   });
-  return { mine, all };
 }
 
-/** Queues, on the settings store of an open transaction, these revocations of `ref` kept with the others (each once). */
-function keepRevocations(settings: IDBObjectStore, ref: string, add: readonly SignedAppRevocation[]): void {
-  if (!add.length) return;
+/**
+ * Queues, on the settings store of an open transaction, these revocations of each app (by reference) kept with the others
+ * (each once): one read and one write for them all, as two calls in one transaction would each read the value before
+ * either wrote, and the second would drop the first's.
+ */
+function keepRevocations(settings: IDBObjectStore, adds: ReadonlyMap<string, readonly SignedAppRevocation[]>): void {
+  if (![...adds.values()].some((add) => add.length)) return;
   const read = settings.get(APP_REVOCATIONS_KEY);
   read.onsuccess = () => {
-    const { mine: before, all: kept } = keptRevocations(read.result, ref);
-    const merged = new Map(before.map((r) => [canonicalJson(r), r]));
-    for (const r of add) if (r.statement.app === ref) merged.set(canonicalJson(r), r);
-    if (merged.size === before.length) return;
-    kept.delete(ref);
-    kept.set(ref, [...merged.values()].slice(-REVOCATIONS_KEPT.each));
+    const kept = keptLists(read.result);
+    let changed = false;
+    for (const [ref, add] of adds) {
+      const before = keptOf(kept, ref);
+      const merged = new Map(before.map((r) => [canonicalJson(r), r]));
+      for (const r of add) if (r.statement.app === ref) merged.set(canonicalJson(r), r);
+      if (merged.size === before.length) continue;
+      kept.delete(ref);
+      kept.set(ref, [...merged.values()].slice(-REVOCATIONS_KEPT.each));
+      changed = true;
+    }
+    if (!changed) return;
     // Past the cap, room is made from the publisher that holds the most (on a tie, the one kept longest ago), from its
     // apps kept longest ago: one publisher's revocations of its own apps never push out another's, and a publisher keeps
     // its revocations until as many others each hold as many.
@@ -722,14 +741,17 @@ export class Apps {
   /**
    * Listing URLs whose peek showed nothing to take (`<store> <ref> <url>` → `<index digest> <listed digest> <pin>
    * <installed digest> <waiting digest>`): the same index listing the same, for the same app, is not peeked again at
-   * every check. At most `LISTING_MISSES_KEPT`, the oldest going first; a store's go when it is removed.
+   * every check. Only the ones the last check read or wrote stay (`listingsRead`): a store that lists new URLs at each
+   * index does not grow them, and none the index still lists goes (with a count kept, the oldest going first, a check
+   * of more than that dropped each before it was read, and peeked every one again). A store's go when it is removed.
    */
   private readonly listingMisses = new Map<string, string>();
+  /** The `listingMisses` the update check running now read or wrote; null outside a check. */
+  private listingsRead: Set<string> | null = null;
 
   private missListing(missed: string, seen: string): void {
-    this.listingMisses.delete(missed);
     this.listingMisses.set(missed, seen);
-    for (const old of this.listingMisses.keys()) { if (this.listingMisses.size <= LISTING_MISSES_KEPT) break; this.listingMisses.delete(old); }
+    this.listingsRead?.add(missed);
   }
   /**
    * URLs whose whole read the update check, or a fetch of missing files, refused (a file hash that does not hold, a bad
@@ -1018,7 +1040,8 @@ export class Apps {
    * one `app` leaves out on purpose (the check's, of a version gone) was on `was` already. So is what the person's stores
    * revoke of the versions written, as held at the write: a version fetched while a store's index revoked it was not on
    * the record `keepStoreRevocations` read. A store removed since keeps no index: what it revoked of this app is among
-   * the ones this profile kept (`APP_REVOCATIONS_KEY`), judged here too.
+   * the ones this profile kept (`APP_REVOCATIONS_KEY`), judged here too. Every revocation of this app the stores hold
+   * is kept there at the write.
    */
   private async putAppIfUnchanged(app: InstalledApp, was: InstalledApp | undefined): Promise<boolean> {
     const stores = await this.records();
@@ -1033,6 +1056,9 @@ export class Apps {
       app = withRevocations(app, (now?.revocations ?? []).filter((r) => !had.has(canonicalJson(r))));
       const revoked = [...stores.values()].flatMap((s) => (s.removed ? [] : s.index?.revoked ?? []));
       app = withRevocations(app, stopping(this.versionsOf(app), [...revoked, ...keptRevocations(kept.result, app.ref).mine]));
+      // Those of its other versions are kept with the profile's, as `keepStoreRevocations` does for an app installed when
+      // the index was read: one installed after it, the store's next index without them, would install a version revoked.
+      keepRevocations(tx.objectStore(STORES.settings), new Map([[app.ref, revoked.filter((r) => r.statement.app === app.ref)]]));
       const { store: pin, ...unpinned } = app;
       tx.objectStore(STORES.apps).put(pin !== undefined && stores.get(pin)?.removed ? unpinned : app);
       put = true;
@@ -1083,7 +1109,7 @@ export class Apps {
     const mine = installed.map((app) => [app.ref, revoked.filter((r) => r.statement.app === app.ref)] as const).filter(([, r]) => r.length);
     if (mine.length) {
       const tx = (await openDb()).transaction(STORES.settings, "readwrite");
-      for (const [ref, r] of mine) keepRevocations(tx.objectStore(STORES.settings), ref, r);
+      keepRevocations(tx.objectStore(STORES.settings), new Map(mine));
       await done(tx);
     }
     for (const first of installed) {
@@ -1751,6 +1777,8 @@ export class Apps {
 
     // The install screen opened again on the version it showed (a listing, a card naming its digest): the bundle read and
     // checked from that URL within `STAGED.ms` is taken as it is, and only its revocations are read again.
+    // None read: a URL's passing trouble (its host down, a rate limit, too slow) is what is said, not a later URL's 404 or
+    // refusal, so the screen offers Try again, which may read that URL.
     let last: unknown = null;
     for (const url of urls) {
       try {
@@ -1764,7 +1792,7 @@ export class Apps {
           if (expect.exact && version.digest !== expect.digest) fail("unlisted", "The URL holds a version the store does not list");
         }
         return this.stage(bundle, bytes, url, fromStore);
-      } catch (error) { last = error; }
+      } catch (error) { if (!passing(last) || passing(error)) last = error; }
     }
     throw last instanceof Error ? last : new Error(String(last));
   }
@@ -1787,16 +1815,20 @@ export class Apps {
    */
   private async readStopping(version: AppVersion, urls: string[]): Promise<SignedAppRevocation[]> {
     const read = (await this.readRevocations(version.ref, urls)) ?? [];
-    const stops = stopping([version], read);
+    await this.keepStopping(version, read);
+    return read;
+  }
+  /** Keeps those of these verified revocations that stop `version`, with the profile's and on the installed app. */
+  private async keepStopping(version: AppVersion, revocations: readonly SignedAppRevocation[]): Promise<void> {
+    const stops = stopping([version], revocations);
     if (stops.length) {
       const tx = (await openDb()).transaction(STORES.settings, "readwrite");
-      keepRevocations(tx.objectStore(STORES.settings), version.ref, stops);
+      keepRevocations(tx.objectStore(STORES.settings), new Map([[version.ref, stops]]));
       await done(tx);
       // On the installed app too, when they stop a version of it: what runs it and Update judge with its record.
       const installed = await this.app(version.ref);
       if (installed) await this.keepOnRecord(installed, stops);
     }
-    return read;
   }
 
   private async stage(bundle: AppBundle, bytes: Uint8Array, from: string, fromStore?: string, carried = false): Promise<AppPreview> {
@@ -1808,6 +1840,9 @@ export class Apps {
     const read = carried ? [] : await this.readStopping(version, [from, ...(manifest.sources ?? [])]);
     const revocations = [...await this.keptRevocationsOf(version.ref), ...read];
     const [installed, stores] = await Promise.all([this.app(version.ref), this.stores()]);
+    // What a store's index revokes of it is kept too (the person is shown it revoked): the store removed, or its next index
+    // without it, does not let this version install, as `keepStoreRevocations` does for an installed app.
+    await this.keepStopping(version, stores.flatMap((s) => s.index?.revoked ?? []));
     // What Install will answer: a clash with the update waiting is one too.
     const decision = installDecision(installed, version);
     const install = decision === "other-app" ? "new" : decision;
@@ -2033,14 +2068,18 @@ export class Apps {
     // (a bundle write refused on a full disk) is left out, as one uninstalled meanwhile is: a throw would end the check
     // while the other workers still run, and the next check would start beside them.
     this.revocationSplits = new Map();
+    const read = new Set<string>();
+    this.listingsRead = read;
     try {
       const out = (await Promise.all(pooled(apps, APP_CHECK_PARALLEL, (app) => this.checkApp(app, stores).catch(() => null)))).filter((r) => r !== null);
+      for (const missed of this.listingMisses.keys()) if (!read.has(missed)) this.listingMisses.delete(missed);
       // Each one judged with the revocations this profile kept as they are now, read once for every app (up to 1024 of
       // every app: once per app, a check read them again for each one).
       const kept = out.length ? await this.keptValue() : null;
       return await Promise.all(out.map(async ({ app, outcome }) => ({ ref: app.ref, outcome, run: await this.runCheckOf(app, stores, kept) })));
     } finally {
       this.revocationSplits = null;
+      this.listingsRead = null;
     }
   }
 
@@ -2085,7 +2124,8 @@ export class Apps {
       const seen = `${s.digest} ${listing.digest} ${pinned ?? ""} ${app.digest} ${app.pending?.digest ?? ""}`;
       for (const url of listingUrls(listing.urls)) {
         const missed = `${s.key} ${app.ref} ${url}`;
-        if (candidates.has(url) || (s.digest !== undefined && this.listingMisses.get(missed) === seen)) continue;
+        if (candidates.has(url)) continue;
+        if (s.digest !== undefined && this.listingMisses.get(missed) === seen) { this.listingsRead?.add(missed); continue; }
         candidates.set(url, { sequence: listing.sequence, ...(pinned !== undefined && { digest: listing.digest }), peek: true, ...(s.digest !== undefined && { miss: [missed, seen] as [string, string] }) });
       }
     }
@@ -2111,7 +2151,7 @@ export class Apps {
       const stops = stopping([versionOf(app.pending.manifest, app.pending.digest)], [...(app.revocations ?? []), ...stores.flatMap((s) => s.index?.revoked ?? [])]);
       if (stops.length) {
         const tx = (await openDb()).transaction(STORES.settings, "readwrite");
-        keepRevocations(tx.objectStore(STORES.settings), app.ref, stops);
+        keepRevocations(tx.objectStore(STORES.settings), new Map([[app.ref, stops]]));
         await done(tx);
       }
       dropped.push(app.pending);
@@ -2418,7 +2458,7 @@ export class Apps {
     this.held.delete(ref);
     // Its revocations stay (`APP_REVOCATIONS_KEY`): the record's as it is in this transaction, read before it goes.
     const record = tx.objectStore(STORES.apps).get(ref);
-    record.onsuccess = () => keepRevocations(tx.objectStore(STORES.settings), ref, (record.result as InstalledApp | undefined)?.revocations ?? []);
+    record.onsuccess = () => keepRevocations(tx.objectStore(STORES.settings), new Map([[ref, (record.result as InstalledApp | undefined)?.revocations ?? []]]));
     tx.objectStore(STORES.apps).delete(ref);
     tx.objectStore(STORES.appStorage).delete(rowsOf(ref));
     if (builtIn) markBuiltIns(tx.objectStore(STORES.settings), (marks) => { marks.removed[ref] ??= this.now(); });

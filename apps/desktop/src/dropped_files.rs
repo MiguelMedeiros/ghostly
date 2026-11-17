@@ -37,15 +37,22 @@ const DROP_CHOOSER: &str = "application/x-ghostly-dropped-files";
 /// UTF-8, which WebKit's chooser takes no other way): the drop stays, for the page to read by token.
 const READ_INSTEAD: &str = "read-dropped-files";
 
-/// Clicks that input as the app: WebKit opens a file chooser only for a click a person made, and a drop is none.
-const CHOOSE_SCRIPT: &str = "document.getElementById('ghostly-dropped-files')?.click()";
+/// The page's drop input (`DROP_INPUT_ID` in apps/ui/src/lib/pastedFiles.ts).
+const DROP_INPUT_ID: &str = "ghostly-dropped-files";
+
+/// Marks that input with this call's own type and clicks it as the app: WebKit opens a file chooser only for a click a
+/// person made, and a drop is none. Only a chooser with that type gets the files: a fixed mark, any frame in the window
+/// could ask with.
+fn choose_script(accept: &str) -> String {
+    format!("(i=>{{if(i){{i.accept='{accept}';i.click()}}}})(document.getElementById('{DROP_INPUT_ID}'))")
+}
 
 /// The files of the latest drop from another app, until the page takes them, once; and those it asked to have picked
-/// on its file input, until the input's chooser takes them, once.
+/// on its file input, with the type that input's chooser asks with, until that chooser takes them, once.
 #[derive(Default)]
 pub struct DroppedFiles {
     latest: Mutex<Option<(Vec<PathBuf>, Instant)>>,
-    chosen: Mutex<Option<(Vec<PathBuf>, Instant)>>,
+    chosen: Mutex<Option<(Vec<PathBuf>, Instant, String)>>,
 }
 
 /// What was put a moment ago (within `fresh`), taken with when it was put; nothing after that, nor a second time.
@@ -77,19 +84,38 @@ impl DroppedFiles {
         take_fresh(&self.latest, FRESH)
     }
 
-    /// The files the drop chooser picks, if the page asked a moment ago; nothing after that, nor a second time.
+    /// The files a chooser with these types picks: those the page asked a moment ago to have picked, for the chooser of
+    /// that ask; nothing after that, nor a second time, nor for any other chooser (which leaves them to that one).
     #[cfg_attr(not(any(target_os = "linux", test)), allow(dead_code))]
-    fn take_chosen(&self) -> Vec<PathBuf> {
-        take_fresh(&self.chosen, CHOSEN_FRESH)
-            .map(|(paths, _)| paths)
+    fn take_chosen<S: AsRef<str>>(&self, types: &[S]) -> Vec<PathBuf> {
+        let mut chosen = self.chosen.lock().unwrap();
+        if !matches!(&*chosen, Some((_, _, accept)) if is_drop_chooser(types, accept)) {
+            return Vec::new();
+        }
+        chosen
+            .take()
+            .filter(|(_, at, _)| at.elapsed() <= CHOSEN_FRESH)
+            .map(|(paths, ..)| paths)
             .unwrap_or_default()
     }
 }
 
-/// Whether a file chooser is the page's drop input's (`DROP_CHOOSER` its one type), which the window answers itself.
+/// A new type for the drop input's chooser, of one call: `DROP_CHOOSER` and 128 random bits.
+fn drop_chooser_type() -> String {
+    format!("{DROP_CHOOSER}.{:032x}", rand::random::<u128>())
+}
+
+/// Whether a file chooser is the one `choose_script` opened with this `accept` (its one type).
 #[cfg_attr(not(any(target_os = "linux", test)), allow(dead_code))]
-fn is_drop_chooser<S: AsRef<str>>(types: &[S]) -> bool {
-    matches!(types, [only] if only.as_ref() == DROP_CHOOSER)
+fn is_drop_chooser<S: AsRef<str>>(types: &[S], accept: &str) -> bool {
+    matches!(types, [only] if only.as_ref() == accept)
+}
+
+/// Whether a file chooser is the page's drop input's, which the window answers itself, never with the system's dialog:
+/// `DROP_CHOOSER`, as the page makes it, or with a call's type.
+#[cfg_attr(not(any(target_os = "linux", test)), allow(dead_code))]
+fn is_drop_input<S: AsRef<str>>(types: &[S]) -> bool {
+    matches!(types, [only] if only.as_ref().starts_with(DROP_CHOOSER))
 }
 
 /// Names only a web engine gives a drag's targets: a page's drag, whatever its list says. Chromium marks every drag a
@@ -178,11 +204,14 @@ pub async fn choose_dropped_files<R: tauri::Runtime>(
         return Err(READ_INSTEAD.into());
     }
     let count = files.len();
+    let accept = drop_chooser_type();
+    let script = choose_script(&accept);
     *dropped.chosen.lock().unwrap() = Some((
         files.into_iter().map(|(path, ..)| path).collect(),
         Instant::now(),
+        accept,
     ));
-    if let Err(e) = window.eval(CHOOSE_SCRIPT) {
+    if let Err(e) = window.eval(&script) {
         // No click, no chooser: nothing else in the window may take these files.
         dropped.chosen.lock().unwrap().take();
         return Err(e.to_string());
@@ -203,7 +232,7 @@ pub fn install<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
 
 #[cfg(target_os = "linux")]
 mod linux {
-    use super::{from_a_web_page, is_drop_chooser, local_files, DroppedFiles, DRAG_EVENT};
+    use super::{from_a_web_page, is_drop_input, local_files, DroppedFiles, DRAG_EVENT};
     use gtk::prelude::{DragContextExtManual, WidgetExt};
     use std::cell::{Cell, RefCell};
     use std::path::PathBuf;
@@ -228,17 +257,18 @@ mod linux {
         let drag = Rc::new(Drag::default());
         let app = main.app_handle().clone();
 
-        // The page's drop input (`choose_dropped_files`): the drop's files, never a dialog. Any other input's chooser
-        // goes on to WebKit's own, the system's dialog.
+        // The page's drop input (`choose_dropped_files`): the drop's files for the chooser of that call's type, nothing
+        // for any other, never a dialog. Any other input's chooser goes on to WebKit's own, the system's dialog.
         {
             let app = app.clone();
             webview.connect_run_file_chooser(move |_, request| {
-                if !is_drop_chooser(&request.mime_types()) {
+                let types = request.mime_types();
+                if !is_drop_input(&types) {
                     return false;
                 }
                 let paths = app
                     .try_state::<DroppedFiles>()
-                    .map(|dropped| dropped.take_chosen())
+                    .map(|dropped| dropped.take_chosen(&types))
                     .unwrap_or_default();
                 let paths: Vec<&str> = paths.iter().filter_map(|path| path.to_str()).collect();
                 if paths.is_empty() {
@@ -477,7 +507,7 @@ mod tests {
         };
         let dropped = app.state::<DroppedFiles>();
         assert_eq!(choose(&main), Ok(0), "no drop yet");
-        assert!(dropped.take_chosen().is_empty());
+        assert!(take_asked(&dropped).is_empty());
 
         dropped.put(
             vec![dir.join("archive 300.bin"), dir.join("a folder")],
@@ -490,38 +520,105 @@ mod tests {
         assert_eq!(choose(&other), Err("Not allowed from this window".into()));
         assert_eq!(choose(&main), Ok(1));
         assert_eq!(read(&main), Ok(Vec::new()), "the drop is taken");
-        assert_eq!(dropped.take_chosen(), vec![dir.join("archive 300.bin")]);
-        assert!(dropped.take_chosen().is_empty(), "picked once");
+        let accept = asked(&dropped);
+        assert_eq!(take_asked(&dropped), vec![dir.join("archive 300.bin")]);
+        assert!(dropped.take_chosen(&[&accept]).is_empty(), "picked once");
 
         // Files the page asked to have picked a while ago go to no chooser: the click comes at once, or never.
         *dropped.chosen.lock().unwrap() = Some((
             vec![dir.join("archive 300.bin")],
             Instant::now().checked_sub(Duration::from_secs(3)).unwrap(),
+            accept.clone(),
         ));
-        assert!(dropped.take_chosen().is_empty(), "too late for a chooser");
+        assert!(take_asked(&dropped).is_empty(), "too late for a chooser");
 
         // A folder alone: nothing to pick, and nothing clicked.
         dropped.put(vec![dir.join("a folder")], Instant::now());
         assert_eq!(choose(&main), Ok(0));
-        assert!(dropped.take_chosen().is_empty());
+        assert!(take_asked(&dropped).is_empty());
 
-        assert!(is_drop_chooser(&["application/x-ghostly-dropped-files"]));
+        // Only the drop input's chooser is the window's to answer; any other is the system's dialog.
+        for input in [&[DROP_CHOOSER][..], &[accept.as_str()]] {
+            assert!(is_drop_input(input), "{input:?}");
+        }
         for other in [
             &[][..],
             &["image/*"],
             &["application/x-ghostly-dropped-files", "image/*"],
         ] {
-            assert!(!is_drop_chooser(other), "{other:?}");
+            assert!(!is_drop_input(other), "{other:?}");
+            assert!(!is_drop_chooser(other, &accept), "{other:?}");
         }
-        // The page clicks the input the window picks on.
+        // The page clicks the input the window picks on, which starts with a type no call's chooser has.
+        let page = include_str!("../../ui/src/lib/pastedFiles.ts");
+        assert!(page.contains(&format!("DROP_INPUT_ID = \"{DROP_INPUT_ID}\"")));
+        assert!(page.contains(&format!("DROP_INPUT_ACCEPT = \"{DROP_CHOOSER}\"")));
+        assert!(choose_script(&accept).contains(&format!(
+            "i.accept='{accept}';i.click()}}}})(document.getElementById('{DROP_INPUT_ID}'))"
+        )));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// The type `choose_dropped_files` gave the drop input's chooser this time, or none.
+    fn asked(dropped: &DroppedFiles) -> String {
+        dropped
+            .chosen
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|(.., accept)| accept.clone())
+            .unwrap_or_default()
+    }
+
+    /// What the chooser `choose_dropped_files` just opened gets.
+    fn take_asked(dropped: &DroppedFiles) -> Vec<PathBuf> {
+        dropped.take_chosen(&[asked(dropped)])
+    }
+
+    /// A drop's files go only to the chooser of the call that asked for them, by a type of that call's own: a chooser
+    /// any frame in the window could open with the input's fixed mark, or with an earlier call's type, gets nothing, and
+    /// leaves them to the one asked.
+    #[test]
+    fn only_the_chooser_of_this_call_gets_a_drops_files() {
+        let dir = std::env::temp_dir().join(format!("ghostly-nonce-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("first.txt"), b"1").unwrap();
+        std::fs::write(dir.join("second.txt"), b"2").unwrap();
+        let app = app();
+        let main = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let choose = || tauri::async_runtime::block_on(choose_dropped_files(main.clone()));
+        let dropped = app.state::<DroppedFiles>();
+
+        dropped.put(vec![dir.join("first.txt")], Instant::now());
+        assert_eq!(choose(), Ok(1));
+        let stale = asked(&dropped);
+        assert_eq!(take_asked(&dropped), vec![dir.join("first.txt")]);
+
+        dropped.put(vec![dir.join("second.txt")], Instant::now());
+        assert_eq!(choose(), Ok(1));
+        let accept = asked(&dropped);
+        assert_ne!(accept, stale, "a new type each call");
+        let random = accept.strip_prefix(&format!("{DROP_CHOOSER}.")).unwrap();
         assert!(
-            include_str!("../../ui/src/lib/pastedFiles.ts").contains(&format!(
-                "DROP_INPUT_ID = \"{}\"",
-                CHOOSE_SCRIPT.split('\'').nth(1).unwrap()
-            ))
+            random.len() == 32
+                && random
+                    .bytes()
+                    .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')),
+            "{accept}: 128 bits, as WebKit hands a type over (lowercase)"
         );
-        assert!(include_str!("../../ui/src/lib/pastedFiles.ts")
-            .contains(&format!("DROP_INPUT_ACCEPT = \"{DROP_CHOOSER}\"")));
+        let upper = accept.to_uppercase();
+        for guess in [DROP_CHOOSER, stale.as_str(), upper.as_str(), "*/*", ""] {
+            assert!(dropped.take_chosen(&[guess]).is_empty(), "{guess:?}");
+        }
+        assert!(dropped
+            .take_chosen(&[accept.as_str(), "image/*"])
+            .is_empty());
+        assert_eq!(
+            dropped.take_chosen(&[&accept]),
+            vec![dir.join("second.txt")]
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -547,7 +644,7 @@ mod tests {
             tauri::async_runtime::block_on(choose_dropped_files(main.clone())),
             Ok(many.len())
         );
-        assert_eq!(dropped.take_chosen(), many);
+        assert_eq!(take_asked(&dropped), many);
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -574,7 +671,7 @@ mod tests {
             tauri::async_runtime::block_on(choose_dropped_files(main.clone())),
             Err(READ_INSTEAD.into())
         );
-        assert!(dropped.take_chosen().is_empty(), "nothing to pick");
+        assert!(take_asked(&dropped).is_empty(), "nothing to pick");
         let items = read(&main).unwrap();
         assert_eq!(
             items.iter().map(|i| i.name.as_deref()).collect::<Vec<_>>(),

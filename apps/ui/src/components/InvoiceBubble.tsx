@@ -106,6 +106,16 @@ function Card({ label, tag, amount, unit, otherUnit, lines, qr, children, testId
   const [showQr, setShowQr] = useState(true);
   // A token of many proofs, or a long invoice, holds more than one QR code: said in words, the card and its actions stay.
   const fits = useMemo(() => qrFits(qr), [qr]);
+  // The code and the QR button take each other's place, and the keys with it: not the page, whose next Tab starts from
+  // the top.
+  const qrCode = useRef<HTMLButtonElement>(null);
+  const qrButton = useRef<HTMLButtonElement>(null);
+  const shownQr = useRef(showQr);
+  useEffect(() => {
+    if (shownQr.current === showQr) return;
+    shownQr.current = showQr;
+    if (focusLost()) (showQr ? qrCode : qrButton).current?.focus({ preventScroll: true });
+  }, [showQr]);
   return (
     <div className="min-w-[230px] max-md:min-w-[min(230px,68vw)] max-w-[min(300px,72vw)] px-1 py-0.5" data-testid={testId}>
       <p className="chat-text-pay-label uppercase tracking-wider text-text-primary/65 m-0 flex items-center gap-2">{label}{tag}</p>
@@ -131,6 +141,7 @@ function Card({ label, tag, amount, unit, otherUnit, lines, qr, children, testId
       {!fits && <p className="chat-text-pay-detail leading-snug m-0 mt-1 text-text-primary/65" data-testid="qr-too-long">{t("payments.invoice.qrTooLong")}</p>}
       {fits && showQr && (
         <button
+          ref={qrCode}
           onClick={() => setShowQr(false)}
           className="block mt-2 bg-white p-2.5 rounded-lg cursor-pointer border-none"
           title={t("payments.invoice.hideQr")}
@@ -141,7 +152,7 @@ function Card({ label, tag, amount, unit, otherUnit, lines, qr, children, testId
       <div className="flex flex-wrap gap-1.5 mt-2">
         {children}
         {fits && !showQr && (
-          <button className={quiet} onClick={() => setShowQr(true)}>QR</button>
+          <button ref={qrButton} className={quiet} onClick={() => setShowQr(true)}>QR</button>
         )}
       </div>
     </div>

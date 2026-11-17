@@ -22,6 +22,9 @@ describe("maintenance scripts refuse an argument they do not take", () => {
     ["changes.mjs", ["1.12.0"]],
     ["changes.mjs", ["--preview", "1.12.0", "extra"]],
     ["changes.mjs", ["--preview", "next"]],
+    ["test-bloat.mjs", ["--sinse", "7d"]],
+    ["test-bloat.mjs", ["--since", "7"]],
+    ["test-bloat.mjs", ["--weak", "--jsno"]],
   ])("%s %s: usage, exit 2, nothing done", (script, args) => {
     const result = run(script, ...args);
     expect(result.status).toBe(2);

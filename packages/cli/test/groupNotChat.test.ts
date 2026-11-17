@@ -30,7 +30,9 @@ function fake(): ApiContext {
   const dir = mkdtempSync(join(tmpdir(), "gnc-"));
   dirs.push(dir);
   const calls = new CallManager({ engine: { chatView: chatViewOf, groupView: groupViewOf, getState: state, setCallSignal: async () => {} } as unknown as CallEngine, emit: () => {}, profileDir: dir });
-  return { runtime: { server: { node }, paths: { name: "default", dir }, callsUnavailable: null }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, calls, mode: "daemon", version: "test" } as unknown as ApiContext;
+  // `message delete --purge` folds the store even when it is refused (`foldsAnyway`).
+  const store = { compact: async () => {} };
+  return { runtime: { server: { node }, store, paths: { name: "default", dir }, callsUnavailable: null }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, calls, mode: "daemon", version: "test" } as unknown as ApiContext;
 }
 
 const isGroup = (ref: string) => ({ code: "not_found", message: `${JSON.stringify(ref)} is a group, not a chat (ghostly chat list)`, details: { group: "g1crew" } });
@@ -152,21 +154,28 @@ describe("listen --from a group, --group a chat", () => {
     await expect(allowlist(["Nobody"], [], call, async () => null)).rejects.toMatchObject(noChat("Nobody"));
   });
 
-  it("--group a chat names it by its id, which --from takes, never by the name its contact chose or a prefix", async () => {
-    // Bob chose his own name; this side gave his chat no label. `--from Bob` or `--from chat-b` is refused.
-    const bob = { ...alice, id: "chat-bob", label: undefined, peerNick: "Bob", peerPubKeyZ32: "pbob" } as unknown as LinkView;
+  it("--group a chat found only by the name its contact chose or a prefix is refused as --from refuses it, with no --from to paste", async () => {
+    // Bob chose his own name; this side labelled his chat "bobby". `--from Bob` or `--from chat-b` is refused.
+    const bob = { ...alice, id: "chat-bob", label: "bobby", peerNick: "Bob", peerPubKeyZ32: "pbob" } as unknown as LinkView;
     const withBob = (method: string, params: Record<string, unknown>) => {
       const ctx = fake();
       (ctx.runtime as unknown as { server: { node: { getState: () => EngineState } } }).server.node.getState = () => ({ ...state(), links: [alice, bob] }) as unknown as EngineState;
       return callApi(ctx, method, params);
     };
     for (const ref of ["Bob", "chat-b"]) {
+      const refused = { code: "bad_request", message: expect.stringMatching(/only by what its contact chose.*ghostly chat rename/), details: { chat: "chat-bob", contact: "pbob" } };
+      const asGroup = await allowlist([], [ref], withBob, async () => null).catch((error: unknown) => error);
+      expect(asGroup).toMatchObject(refused);
+      expect(String((asGroup as Error).message)).not.toMatch(/--from/);
+      await expect(allowlist([ref], [], withBob, async () => null)).rejects.toMatchObject(refused);
+    }
+    // Its id, or the label given here, still gets the --from that takes it.
+    for (const ref of ["chat-bob", "bobby"]) {
       await expect(allowlist([], [ref], withBob, async () => null)).rejects.toMatchObject({
         code: "not_found", message: `"${ref}" is a chat, not a group: ghostly listen --from chat-bob`, details: { chat: "chat-bob" },
       });
-      await expect(allowlist([ref], [], withBob, async () => null)).rejects.toMatchObject({ details: { chat: "chat-bob" } });
+      expect(await allowlist([ref], [], withBob, async () => null)).toBeDefined();
     }
-    expect(await allowlist(["chat-bob"], [], withBob, async () => null)).toBeDefined();
   });
 });
 
@@ -230,5 +239,12 @@ describe("a hint naming a group a shell would expand", () => {
 
   it("message delete Crew keeps the name alone when --everyone takes it as the group", async () => {
     expect(await offered(call("Crew")("chat.delete", { chat: "Crew", message: "m1" }))).toEqual(["ghostly", "message", "delete", "Crew", "m1", "--everyone"]);
+  });
+
+  it("message delete <group> <message> --purge keeps --purge in the command offered", async () => {
+    // Pasted without it, the message went for everyone and its text stayed in the profile's folder up to an hour.
+    expect(await offered(call("Crew")("chat.delete", { chat: "Crew", message: "m1", purge: true }))).toEqual(["ghostly", "message", "delete", "Crew", "m1", "--everyone", "--purge"]);
+    expect(await offered(call("Crew")("chat.delete", { chat: "group:Crew", message: "m1", purge: true }))).toEqual(["ghostly", "message", "delete", "group:Crew", "m1", "--everyone", "--purge"]);
+    expect(await offered(call("Crew")("chat.delete", { chat: "Crew", message: "m1", purge: false }))).toEqual(["ghostly", "message", "delete", "Crew", "m1", "--everyone"]);
   });
 });

@@ -92,6 +92,12 @@ export const ENGINE_ERRORS = {
   serviceShareFull: "A contact can reach at most {max} of your apps: take one back from them before sharing another",
   // One profile on several devices (WISP 06).
   groupTurnUnconfirmed: "Can't check which device is active, so the group was not changed. Try again in a moment.",
+  // Group calls through the group's node (WISP 602).
+  groupNoCall: "This group has no calls: its admin has not set a call server",
+  groupCallNotMember: "You are not in this group, so you can't join its call",
+  groupCallRefused: "{host} did not let you into the group's call. Try again in a minute.",
+  groupCallBusy: "{host} is busy. Try the call again in a minute.",
+  groupCallFailed: "{host} could not start the group's call. Try again later.",
 } as const;
 
 export type EngineErrorCode = keyof typeof ENGINE_ERRORS;

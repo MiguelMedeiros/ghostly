@@ -1,5 +1,6 @@
 import type { BrowserHost } from "@ghostly/browser/host";
 import { engine } from "@ghostly/browser/platform/engine";
+import { MAX_SERVICES, viewerTag } from "@ghostly/core";
 import { uiPortName, type RuntimeMessage, type ViewerPage } from "./messages";
 import { extensionUpdates } from "./updates";
 import { extensionOidc } from "./oidc";
@@ -7,7 +8,7 @@ import { extensionAtproto } from "./atproto";
 import { loadSettings } from "../../ui/src/lib/settings";
 import { languageTag, textDirection } from "../../ui/src/lib/documentLanguage";
 import { translatorFor } from "../../ui/src/locales";
-import { activeNamespace, markEngineRestart, pageProfileIsCurrent, startAsProfileInUse } from "./profile";
+import { activeNamespace, markEngineRestart, pageNamespace, pageProfileIsCurrent, startAsProfileInUse } from "./profile";
 import { setServiceWindowsCloser } from "../../ui/src/lib/serviceWindows";
 import { forgetLocalAccess, releaseUnusedLocalAccess, withLocalAccess } from "./localAccess";
 import { allowLocalOrigin, localOriginAllowed } from "./localAllowList";
@@ -25,6 +26,39 @@ const openedViewers = openedServices<OpenedViewer>(
   },
   (a, b) => a.service === b.service && a.peer === b.peer && a.tag === b.tag,
 );
+
+/**
+ * Every app each chat and group member lists, noted as the list comes (`peerServices`): an app opened before the opened-apps list was
+ * kept is on no list, and Delete chat, Clear all data and Delete profile no longer know the chat's apps by then.
+ * Clearing an origin no app ever opened clears nothing. Each one once per page: the list comes with every state. All
+ * of a state's together: one at a time, a page's first state would read the whole list once per app. Only web apps
+ * (`http`), the only ones a viewer tab opens, and no more for a chat than one list holds (`MAX_SERVICES`): a contact
+ * may list new apps at any time, and each entry is one origin Delete chat has Chrome clear.
+ */
+const listedNoted = new Set<string>();
+engine.subscribe(() => {
+  const state = engine.state;
+  // A page left behind by a switch in another tab may still hold the other profile's chats.
+  if (!state?.links || !pageProfileIsCurrent()) return;
+  // A group member's apps open from their chat in the group (`linkByPeer`) as a contact's do.
+  const links = [...state.links, ...(state.edges ?? [])];
+  const profile = activeProfileId();
+  const listed: OpenedViewer[] = [];
+  for (const link of links) {
+    if (!link.peerServices?.length) continue;
+    // Keyed by the chat's own key, not its tag: the tag is a hash, and every state lists every chat's apps again.
+    let tag: string | undefined;
+    for (const { id: service, type } of link.peerServices) {
+      if (type !== "http") continue;
+      const key = `${profile} ${link.myPubKeyZ32} ${service} ${link.peerPubKeyZ32}`;
+      if (listedNoted.has(key)) continue;
+      listedNoted.add(key);
+      tag ??= viewerTag(link.myPubKeyZ32);
+      listed.push({ profile, tag, service, peer: link.peerPubKeyZ32 });
+    }
+  }
+  if (listed.length) openedViewers.noteUpTo(MAX_SERVICES, ...listed);
+});
 
 // A contact's app tabs close when the profile locks, as Desktop's windows do: the worker serves them, page or not.
 setServiceWindowsCloser(() => void chrome.runtime.sendMessage({ target: "background", type: "close-services" } satisfies RuntimeMessage).catch(() => {}));
@@ -78,14 +112,14 @@ export const extensionHost: BrowserHost = {
     markEngineRestart();
   },
 
-  // Chrome's own prompt, and only from a user gesture: it comes first. The exact address goes on this profile's list,
-  // the only addresses its peer reaches (localAllowList.ts).
+  // Chrome's own prompt, and only from a user gesture: it comes first. The exact address goes on this page's profile's
+  // list, the only addresses its peer reaches (localAllowList.ts): never on the one another tab switched to meanwhile.
   async requestLocalAccess(originPattern, origin) {
     const granted = await chrome.permissions.request({ origins: [originPattern] });
-    if (granted) await allowLocalOrigin(activeNamespace(), origin);
+    if (granted) await allowLocalOrigin(pageNamespace(), origin);
     return granted;
   },
-  localAccessAllowed: (origin) => localOriginAllowed(activeNamespace(), origin),
+  localAccessAllowed: (origin) => localOriginAllowed(pageNamespace(), origin),
   // The share's app is added under the lock the give-back holds, so neither runs in the middle of the other.
   withLocalAccess,
   // Given back once no app of any profile is at that host, on any port (localAccess.ts).

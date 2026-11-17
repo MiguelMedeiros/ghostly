@@ -12,6 +12,14 @@ import { decodeCashu, findSecret } from "../../lib/parse/secrets";
 // The lists the composer loads as it opens.
 import "../../lib/parse/seedLists";
 
+/** Electrum's checksum is an HMAC-SHA512: counted, to see how many windows it was tried on. */
+const hmacCalls = vi.hoisted(() => ({ count: 0 }));
+vi.mock("@noble/hashes/hmac.js", async (original) => {
+  const real = await original<typeof import("@noble/hashes/hmac.js")>();
+  const hmac = Object.assign((...args: Parameters<typeof real.hmac>) => { hmacCalls.count++; return real.hmac(...args); }, real.hmac);
+  return { ...real, hmac };
+});
+
 // covers: app.composer.secret-guard
 
 /**
@@ -320,6 +328,15 @@ describe("what the guard asks about", () => {
     ["a .cookie file's contents after its name", `.cookie ${HEX}`],
   ])("a login to a node: %s", (_, text) => expect(findSecret(text)).toEqual({ kind: "node-login" }));
 
+  it.each([
+    ["a bunker link", `bunker://${HEX}?relay=wss://relay.damus.io&secret=0f3c9a1b`],
+    ["a bunker link with encoded relays and no word beside it",
+      `bunker://${HEX}?relay=wss%3A%2F%2Frelay.damus.io%2F&relay=wss%3A%2F%2Frelay.primal.net%2F&secret=0f3c9a1b`],
+    ["a bunker link in a sentence", `connect with BUNKER://${HEX}?secret=abc&relay=wss://r.example then`],
+    ["a nostrconnect link", `nostrconnect://${HEX}?relay=wss%3A%2F%2Frelay.damus.io&metadata=%7B%22name%22%3A%22App%22%7D&secret=0f3c9a1b`],
+    ["a nostrconnect link inside another link", `https://signer.example/?uri=nostrconnect%3A%2F%2F${HEX}%3Frelay%3Dwss%253A%252F%252Fr.example%26secret%3D0f3c9a1b`],
+  ])("a signer connection link: %s", (_, text) => expect(findSecret(text)).toEqual({ kind: "signer-link" }));
+
   it("64 hex digits beside \"password\" are a key", () => {
     expect(findSecret(`password ${HEX}`)).toEqual({ kind: "hex-key" });
   });
@@ -376,6 +393,7 @@ describe("a secret with characters that take no room on screen inside it", () =>
       ["a macaroon in hex", broken(MACAROON_HEX, mark, 40), "node-login"],
       ["a rune", broken(RUNE.restricted, mark), "node-login"],
       ["a bitcoind cookie", broken(`__cookie__:${HEX}`, mark), "node-login"],
+      ["a bunker link", broken(`bunker://${HEX}?relay=wss://relay.damus.io&secret=0f3c9a1b`, mark), "signer-link"],
       ["a seed with marks inside its words", broken(MNEMONICS[0], mark, 3), "mnemonic"],
       ["a seed with marks for spaces", MNEMONICS[1].split(" ").join(mark), "mnemonic"],
     ])("%s", (_, text, kind) => expect(findSecret(text)).toEqual({ kind }));
@@ -460,6 +478,9 @@ describe("what it lets through", () => {
     "bc1p5d7rjq7g6rdk2yhzks9smlaqtedr4dekq08ge8ztwac72sfr9rusxg3297",
     "02" + "01".repeat(32) + " is the node's pubkey",
     "0201036c6e64 is how a macaroon starts",
+    // A signer's link with no secret in it only says where the signer is.
+    `bunker://${"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"}?relay=wss://relay.damus.io`,
+    `nostrconnect://${"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"}?relay=wss://relay.damus.io&name=App`,
     "",
   ])("%s", (text) => expect(findSecret(text)).toBeNull());
 
@@ -527,8 +548,55 @@ describe("how long it takes", () => {
     ["hex with a zero-width space every few digits", "abcdef01\u200b".repeat(MAX / 9)],
     ["seed words with a soft hyphen in each", "zo\u00ado ".repeat(MAX / 5)],
     ["a numbered word and a line of spaces", `1 a${" ".repeat(MAX - 4)}x`],
+    ["signer link schemes with no secret", "bunker://?relay=".repeat(MAX / 16)],
   ])("a 16 KiB message of %s is read in well under a frame", (_, text) => {
     expect(time(text)).toBeLessThan(50);
+  });
+
+  /**
+   * English seed words in a row, none of whose windows any list takes for a seed: each word is taken only once the
+   * last 25 with it are no seed, so every checksum of the budget is tried and fails. A contact can send this.
+   */
+  const noSeedRun = (() => {
+    const words: string[] = [];
+    let bytes = 0;
+    for (let next = 0; bytes < MAX - 9; next++) {
+      const word = wordlist[(next * 7) % wordlist.length];
+      // After a word on no list, so the tail is never a whole message of seed words.
+      if (findSecret(`the ${[...words.slice(-24), word].join(" ")}`)) continue;
+      words.push(word);
+      bytes += word.length + 1;
+    }
+    return words.join(" ");
+  })();
+
+  it("a 16 KiB run of seed words with no seed in it is read in well under a frame", () => {
+    expect(findSecret(noSeedRun)).toBeNull();
+    expect(time(noSeedRun)).toBeLessThan(50);
+  });
+
+  it("tries Electrum's checksum, an HMAC-SHA512, on a few hundred windows of a message at most", () => {
+    // It was tried on every 12-word window of the budget: 60 to 120 ms of the daemon's thread per message forwarded.
+    for (const text of [noSeedRun, `\u200b${noSeedRun}`]) {
+      hmacCalls.count = 0;
+      expect(findSecret(text)).toBeNull();
+      // With a zero-width space before it, the same words were read again as the text reads without it.
+      expect(hmacCalls.count).toBeLessThanOrEqual(256);
+    }
+  });
+
+  it("still finds an Electrum seed after a long run of seed words, or many shorter ones", () => {
+    // The run's inner windows spent the few hundred checksums first: 267 seed words before it were enough to miss it.
+    // Now as far as BIP39's own checksums reach (about 830 seed words in one run).
+    const ELECTRUM_STANDARD = "capital captain car carbon card cargo carpet carry cart case cash casino";
+    const words = noSeedRun.split(" ");
+    const runsOf24 = Array.from({ length: 40 }, (_, i) => words.slice(i * 24, i * 24 + 24).join(" ")).join(" the ");
+    for (const before of [words.slice(0, 300).join(" "), words.slice(0, 800).join(" "), runsOf24]) {
+      hmacCalls.count = 0;
+      expect(findSecret(`${before} and my electrum seed: ${ELECTRUM_STANDARD}`)).toEqual({ kind: "mnemonic" });
+      expect(hmacCalls.count).toBeLessThanOrEqual(256);
+      expect(findSecret(`${ELECTRUM_STANDARD}, then ${before}`)).toEqual({ kind: "mnemonic" });
+    }
   });
 
   it("a numbered word between two runs of spaces is read in well under a frame", () => {

@@ -13,7 +13,9 @@ describe("stdout", () => {
     // Nothing listens there: every request is refused at once, and the relay is soon left alone, with a note.
     ok(await ghostly(["--home", dir, "settings", "set", "relays", JSON.stringify(["http://127.0.0.1:9"])]));
     const { chat } = ok(await ghostly(["--home", dir, "invite", "create", "--label", "nobody"]));
-    const result = await ghostly(["--home", dir, "chat", "wait", chat as string, "--until", "live", "--timeout", "12"]);
+    // The note comes at the first refused request (a connection never made leaves the relay alone at once), so a
+    // short wait is enough: the rest of it is only the wait running out.
+    const result = await ghostly(["--home", dir, "chat", "wait", chat as string, "--until", "live", "--timeout", "4"]);
     expect(error(result, "timeout", 4).message).toContain("Timed out");
     expect(result.stdout.trim().split("\n"), "one line, the answer").toHaveLength(1);
     expect(() => JSON.parse(result.stdout)).not.toThrow();

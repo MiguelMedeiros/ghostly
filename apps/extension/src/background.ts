@@ -3,7 +3,7 @@ import { VIEWER_PORT, type EngineStatus, type HttpRequest, type HttpRequestReply
 import { fromOwnPage } from "./shared/sender";
 import { isViewerOrigin, parseViewerUrl, viewerUrl, VIEWER_URL_PATTERN } from "./shared/viewer";
 import { rememberPendingUpdate, takePagesToReopen } from "./updates";
-import { localOriginAllowed } from "./localAllowList";
+import { disallowLocalPatterns, localOriginAllowed } from "./localAllowList";
 import servicesEn from "../../ui/src/locales/en/services.json";
 import { isLocalHost } from "../../ui/src/lib/localHost";
 
@@ -297,11 +297,14 @@ chrome.permissions.onAdded.addListener(listenToNotifications);
 /**
  * The person turned off the extension's site access to a host of this machine (`chrome://extensions`, or the puzzle
  * menu): the peer stops sharing the apps there, as "Share" turned off does, until they are turned on again. Ghostly's own
- * `permissions.remove` fires this too, once no app is left at that host: then there is nothing to turn off.
+ * `permissions.remove` fires this too, once no app is left at that host: then there is nothing to turn off. Every
+ * profile's allowed addresses there go first (`disallowLocalPatterns`): each needs its own Allow again.
  */
 chrome.permissions.onRemoved.addListener(({ origins }) => {
   if (!origins?.length) return;
-  void ensureEngine()
+  void disallowLocalPatterns(origins)
+    .catch(() => {})
+    .then(() => ensureEngine())
     .then(() => chrome.runtime.sendMessage({ target: "engine", type: "local-access-removed", origins } satisfies RuntimeMessage))
     .catch(() => {});
 });
@@ -445,7 +448,7 @@ function outsideLink(url: unknown): string | null {
   let link: URL;
   try { link = new URL(url); } catch { return null; }
   if ((link.protocol !== "http:" && link.protocol !== "https:") || link.href.length > 4096) return null;
-  const name = link.hostname.toLowerCase().replace(/\.$/, "");
+  const name = link.hostname.toLowerCase().replace(/\.+$/, "");
   if (isLocalHost(name) || name.endsWith(".invalid")) return null;
   return link.href;
 }

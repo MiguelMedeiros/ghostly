@@ -1,5 +1,5 @@
 import type { RatchetBox } from "./ratchet";
-import { DhtDelivery, type DeliveryMode, type DhtDeliveryState, type DhtDeliveryView , type DhtPacketFacts } from "./dhtDelivery";
+import { DhtDelivery, DHT_PACKET_BUDGET, DHT_TEXT_TOO_LONG, type DeliveryMode, type DhtDeliveryState, type DhtDeliveryView , type DhtPacketFacts } from "./dhtDelivery";
 import type { DhtFileAnnouncement, DhtFileOffer } from "./dhtFiles";
 import { PairedFiles } from "./pairedFiles";
 import { TransportSwitch, allowedTransports, type SwitchPlan } from "./transportSwitch";
@@ -262,7 +262,7 @@ export const LIVENESS_MISSED_PINGS = 3;
 const YIELD_BYE_MS = 300;
 const QUIET_FRAMES = new Set(["paired-ping", "paired-pong", "paired-bye", "paired-policy", "paired-switch-plan", "paired-switch-ready",
   "paired-switch-failed", "paired-switch-keep", "paired-rtc", "paired-adapters", "paired-nick", "paired-avatar", "paired-capabilities",
-  "paired-wake", "paired-hold", "paired-payments", "paired-groups", "paired-services", "paired-reconnect", "paired-reconnect-ack", CONTACT_ASKER_FRAME]);
+  "paired-wake", "paired-hold", "paired-payments", "paired-groups", "paired-services", CONTACT_ASKER_FRAME]);
 /**
  * What a session a move replaced still reads while its channel retires (`SWITCH_RETIRE_MS`): the contact's texts,
  * reactions, pins and edits, and its receipts of this side's, which it sends on that session until its own side moves.
@@ -362,6 +362,35 @@ export const MAX_PAIRED_MESSAGE_FRAME = 56 * 1024;
  * resends with backoff), so a catch-up only slows.
  */
 export const MESSAGE_RECEIVE_LIMITS = { burst: 200, burstWindowMs: 10_000, hourly: 1_800, hourWindowMs: 3_600_000 } as const;
+/** What `sendMessage` says of a text the contact's windows have no room for yet: it did not go (`MessagePace`). */
+export const MESSAGE_PACED = "Your contact takes a limited number of texts at a time. It goes by itself once they can take more.";
+/** How long a text sent with no receipt yet counts as taken past its send: one in flight is taken when it lands. */
+const PACE_UNANSWERED_MS = 60_000;
+
+/**
+ * The texts this side sent on a paired session, counted against the contact's windows (`MESSAGE_RECEIVE_LIMITS`), so
+ * none goes that the contact would refuse. A refused text went unconfirmed and came again with the outbox's backoff,
+ * after texts written later that found room meanwhile: the contact read them out of order. Past the hour's total it
+ * was sent until its attempts ran out, well inside the hour, and ended failed. Each counts from its receipt, the latest
+ * the contact can have taken it: counted from its send, a frame that sat in a queue was taken later than counted.
+ */
+export class MessagePace {
+  private sent: { id: string; at: number; answered?: number }[] = [];
+  constructor(private readonly now: () => number = Date.now) {}
+  /** The contact's windows have room for one more text now. */
+  room(): boolean {
+    const now = this.now(), { burst, burstWindowMs, hourly, hourWindowMs } = MESSAGE_RECEIVE_LIMITS;
+    const counts = (entry: { at: number; answered?: number }, windowMs: number) =>
+      entry.answered !== undefined ? now - entry.answered < windowMs : now - entry.at < windowMs + PACE_UNANSWERED_MS;
+    this.sent = this.sent.filter(entry => counts(entry, hourWindowMs));
+    return this.sent.length < hourly && this.sent.filter(entry => counts(entry, burstWindowMs)).length < burst;
+  }
+  took(id: string): void { this.sent.push({ id, at: this.now() }); }
+  /** Its receipt came: the contact counted it by now. */
+  answered(id: string): void {
+    for (let i = this.sent.length - 1; i >= 0; i--) if (this.sent[i].id === id && this.sent[i].answered === undefined) { this.sent[i].answered = this.now(); return; }
+  }
+}
 
 /**
  * A `paired-message` frame. The preview (`pv`) is left out when the frame would pass `MAX_PAIRED_MESSAGE_FRAME`
@@ -889,8 +918,6 @@ export class GhostLink {
   private nativeFailures = new Map<PairedTransport, number>();
   private demotedUntil = new Map<PairedTransport, number>();
   private connectionEpoch = 0;
-  private switchAllowedUntil = 0;
-  private switchAck: (() => void) | null = null;
   private readonly switcher: TransportSwitch;
   /** `plan`: a switch both sides agreed; without one, a replacement the contact dialled (`attachReplacement`). */
   private candidate: LinkCandidate | null = null;
@@ -988,6 +1015,8 @@ export class GhostLink {
     new RateWindow(MESSAGE_RECEIVE_LIMITS.burst, MESSAGE_RECEIVE_LIMITS.burstWindowMs),
     new RateWindow(MESSAGE_RECEIVE_LIMITS.hourly, MESSAGE_RECEIVE_LIMITS.hourWindowMs),
   ];
+  /** The texts sent to the contact, against their `messagesReceived` (`MessagePace`). */
+  private readonly messagesSent = new MessagePace();
   /** Call signals the contact may send per window; the rest are dropped. */
   private readonly callsReceived = new RateWindow(CALL_RECEIVE_LIMIT, CALL_RATE_WINDOW_MS);
   /** WebRTC signals the contact may send on the session (`paired-rtc`) per window; the rest are dropped. */
@@ -1817,6 +1846,8 @@ export class GhostLink {
     return this.canSendText ? null : "No authenticated text delivery method is available.";
   }
   get canSendText(): boolean { return this.textDelivery !== "unavailable"; }
+  /** A text on the live session would find room in the contact's windows now (`MessagePace`); the DHT floor has its own pace. */
+  get textRoom(): boolean { return this.textDelivery !== "stream" || this.messagesSent.room(); }
   get dhtDelivery(): DhtDeliveryView | undefined { return this.dht?.view; }
   /** The chat is on screen: on the DHT its mailbox is read at the signaling pace (WISP 403, poll pace). */
   setChatActive(active: boolean): void {
@@ -2433,7 +2464,6 @@ export class GhostLink {
     if (this.channel && plan?.choices.includes(binding.transport)) {
       void this.attachCandidate(channel, binding, plan).catch(() => {}); return;
     }
-    if (this.channel && Date.now() < this.switchAllowedUntil) { this.switchAllowedUntil = 0; this.disconnect(); }
     // While yielding, the listener closes in a moment, and a session taken on it with it.
     if (this.stopped || this.leaving || this.yielding || !this.transportOffer().includes(binding.transport)) { channel.close(); return; }
     if (this.channel) { this.attachReplacement(channel, binding); return; }
@@ -3179,8 +3209,9 @@ export class GhostLink {
       // Past the contact's frame limit its session would end on it, and again on each retry.
       const frame = pairedMessageFrame(id, timestamp, trimmed, preview, reply, forwarded, card);
       if (frame.length > SESSION_FRAME_MAX) return PAIRED_FRAME_TOO_LARGE;
+      if (!this.messagesSent.room()) return MESSAGE_PACED;
       this.pairedPending.set(id, timestamp);
-      try { this.channel.send(frame); return null; }
+      try { this.channel.send(frame); this.messagesSent.took(id); return null; }
       catch { this.pairedPending.delete(id); return "The connection closed before sending. Reconnect and retry."; }
     }
     if (this.channel && trimmed.length <= LIMITS.maxChatMessageBytes / 4) {
@@ -3215,6 +3246,10 @@ export class GhostLink {
   dhtWentNowhere(id: string): boolean { return !!this.dht?.wentNowhereFor(id); }
   /** What went on the DHT floor under this id needs no more retries there (it went live, or was withdrawn). */
   async settleDht(id: string): Promise<void> { await this.dht?.acknowledge(id); }
+  /** Whether the DHT floor holds this text of mine, or an edit of it, awaiting its receipt or not (`DhtDelivery.holds`). */
+  dhtHolds(wireId: string): boolean { return !!this.dht?.holds(wireId); }
+  /** A text of mine deleted here leaves the DHT floor, an edit of it waiting there too (`DhtDelivery.withdraw`). */
+  async withdrawDht(wireId: string): Promise<void> { await this.dht?.withdraw(wireId); }
 
   /** Publishes a `_call` signal; a connected peer also gets it right away over the data link. */
   async setCallSignal(signal: string | null): Promise<void> {
@@ -3834,6 +3869,17 @@ export class GhostLink {
     if (edit.rm) return "A removal goes when you are live";
     if (dht && this.dht && this.textDelivery === "dht") return this.dht.send(edit.m, edit.ts, dhtEditId(edit.id, edit.e), undefined, [edit.id, edit.e]);
     return "Edits go when you are live";
+  }
+  /**
+   * Why the DHT floor can never carry this edit, or null (WISP 403 § Edits): it goes there as a text with the edit's
+   * element, which must fit the packet once sealed, as a text must (`validateText`). One past the 256 bytes never fits
+   * it either, and says so with the same reason. Null off the floor, and for what only makes it wait there (a text
+   * awaiting its receipt): that one goes in its turn.
+   */
+  dhtEditTooBig(edit: WireEdit): string | null {
+    if (this.isDataLinkOpen || this.textDelivery !== "dht") return null;
+    const error = this.dht!.validate(edit.m, edit.ts, dhtEditId(edit.id, edit.e), undefined, [edit.id, edit.e]);
+    return error === DHT_PACKET_BUDGET || error === DHT_TEXT_TOO_LONG ? DHT_PACKET_BUDGET : null;
   }
   /** Confirms an edit of the contact's that waited for its message (`onMessageEdit` returned false). */
   confirmEdit(id: string, e: number): void {
@@ -4890,11 +4936,6 @@ export class GhostLink {
             });
             return;
           }
-          if (frame?.t === "paired-reconnect") {
-            this.switchAllowedUntil = Date.now() + 30_000;
-            channel.send(JSON.stringify({ t: "paired-reconnect-ack" })); return;
-          }
-          if (frame?.t === "paired-reconnect-ack") { this.switchAck?.(); return; }
           if (frame?.t === "paired-adapters") {
             if (!frame.descriptors || typeof frame.descriptors !== "object" || JSON.stringify(frame.descriptors).length > 4096) return;
             const descriptors = checkedDescriptors(frame.descriptors);
@@ -4926,6 +4967,7 @@ export class GhostLink {
             const live = this.answerOn(channel);
             if (live) live.send(JSON.stringify({ t: "paired-received", id: frame.id }));
           } else if (frame.t === "paired-received") {
+            this.messagesSent.answered(frame.id);
             const timestamp = this.pairedPending.get(frame.id);
             if (timestamp !== undefined) {
               await this.options.events?.onMessageReceipt?.(frame.id);

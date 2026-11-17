@@ -2,7 +2,7 @@ import { BUTTONS_CAPABILITY, BUTTON_STYLES, STATUS_CARD_LIMITS, buttonLabelClash
 import type { LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import type { Parsed } from "./args";
 import { bool, chatOrGroup, messageOf, noMessage, node, num, oneOf, oneShotWaits, str, type Method, type Params, type RefPlace } from "./apiKit";
-import { CliError } from "./errors";
+import { CliError, shownValue } from "./errors";
 import { findSecret, secretWords } from "./secretGuard";
 import { checkTextSize } from "./textSize";
 import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
@@ -30,7 +30,7 @@ export function buttonsOf(options: Parsed["options"]): { buttons: Record<string,
   }
   const buttons: Record<string, unknown>[] = given.map((value) => {
     const colon = value.indexOf(":");
-    if (colon < 1 || colon === value.length - 1) throw new CliError("usage", `--button takes id:Label, like yes:Yes, not ${JSON.stringify(value)}`);
+    if (colon < 1 || colon === value.length - 1) throw new CliError("usage", `--button takes id:Label, like yes:Yes, not ${shownValue(value)}`);
     return { id: value.slice(0, colon), label: value.slice(colon + 1).trim() };
   });
   const twice = buttons.findIndex((button, at) => buttons.findIndex((other) => other.id === button.id) !== at);
@@ -46,7 +46,7 @@ export function buttonsOf(options: Parsed["options"]): { buttons: Record<string,
   for (const value of Array.isArray(options.style) ? options.style as string[] : []) {
     const eq = value.indexOf("=");
     const button = eq > 0 ? buttons.find((b) => b.id === value.slice(0, eq)) : undefined;
-    if (!button) throw new CliError("usage", `--style takes id=primary|neutral|danger for one of the buttons, not ${JSON.stringify(value)}`);
+    if (!button) throw new CliError("usage", `--style takes id=primary|neutral|danger for one of the buttons, not ${shownValue(value)}`);
     const style = value.slice(eq + 1);
     if (!(BUTTON_STYLES as readonly string[]).includes(style)) throw new CliError("usage", `--style ${JSON.stringify(value)}: a button's style is ${BUTTON_STYLES.join(", ")}`);
     button.style = style;

@@ -5,7 +5,8 @@ import { createLink, encodeInviteCode } from "@ghostly/core";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test as base, expect, type Browser, type BrowserContext, type Locator, type Page } from "@playwright/test";
+import { test as base, expect, type Browser, type BrowserContext, type Locator, type Page, type Request } from "@playwright/test";
+import { shouldReloadAfterBoot } from "./bootReload";
 import { MAINNET_MINTS, attachMint } from "./mint";
 import { LocalRelay } from "./relay";
 import { useLocalStun } from "./stun";
@@ -152,11 +153,48 @@ export async function openPeer(browser: Browser, relay: LocalRelay, baseURL: str
   // A busy CI runner on a quiet machine: E2E_CPU_RATE=6 runs every page six times slower (Chromium only).
   const cpuRate = Number(process.env.E2E_CPU_RATE) || 1;
   if (cpuRate > 1 && browser.browserType().name() === "chromium") await (await context.newCDPSession(page)).send("Emulation.setCPUThrottlingRate", { rate: cpuRate });
-  await page.goto("/");
-  await expect(page.getByTitle("New Chat")).toBeVisible();
+  await openApp(page, name, () => page.goto("/"));
   const irohRelay = options.irohRelay ?? (deployedBuild ? NO_IROH_RELAY : undefined);
   if (irohRelay) await setIrohRelay(page, irohRelay);
   return { name, context, page };
+}
+
+/**
+ * Loads the app (`load`: a `goto`, or a `reload` once a test has set something the app reads as it starts) and waits
+ * for it to draw. A load Chromium broke off because the machine's network changed under it is done again, at most
+ * `MAX_BOOT_RELOADS` times, and the log says so (support/bootReload.ts); anything else fails as it always did.
+ */
+export async function openApp(page: Page, name: string, load: () => Promise<unknown>): Promise<void> {
+  const ready = page.getByTitle("New Chat");
+  const bootError = page.locator("[data-testid=boot-fallback][data-reason=error]");
+  for (let reloads = 0; ; reloads++) {
+    const failures: string[] = [];
+    const failed = (request: Request) => { failures.push(request.failure()?.errorText ?? ""); };
+    page.on("requestfailed", failed);
+    let broken: unknown = null;
+    let said: string | null = null;
+    try {
+      await load();
+      await expect(ready.or(bootError)).toBeVisible();
+      if (await bootError.isVisible()) said = await bootError.getByTestId("boot-fallback-details").inputValue().catch(() => "");
+    } catch (error) {
+      broken = error;
+    } finally {
+      page.off("requestfailed", failed);
+    }
+    if (broken === null && said === null) return;
+    const why = shouldReloadAfterBoot(failures, said, reloads);
+    if (!why) {
+      if (broken !== null) throw broken;
+      break;
+    }
+    console.log(`  ↻ ${testTitle()} [${name}] reloaded: ${why} during the first load`);
+  }
+  await expect(ready).toBeVisible();
+}
+
+function testTitle(): string {
+  try { return base.info().title; } catch { return "(no test)"; }
 }
 
 /** Points this peer's Iroh at `relay` (Settings → Network), before it has a chat to start an endpoint for. */
@@ -456,8 +494,7 @@ export async function openProfilePage(page: Page): Promise<void> {
  */
 export async function useFakeProviders(peer: Peer): Promise<void> {
   await peer.page.evaluate(() => localStorage.setItem("ghostly-test-providers", "1"));
-  await peer.page.reload();
-  await expect(peer.page.getByTitle("New Chat")).toBeVisible();
+  await openApp(peer.page, peer.name, () => peer.page.reload());
 }
 
 /** Back from the wallet to the chat it was opened from. */

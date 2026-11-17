@@ -20,7 +20,7 @@ vi.mock("../../lib/wakePush", async (importOriginal) => ({ ...await importOrigin
  * the first profile back dropped them with its old copy's keys.
  */
 
-const SWITCHES = ["ghostly_keep_awake", "ghostly_stay_connected", "ghostly_call_mini", "ghostly_call_window_box", "ghostly_call_self_view_box", "ghostly_update_dismissed"];
+const SWITCHES = ["ghostly_keep_awake", "ghostly_stay_connected", "ghostly_call_mini", "ghostly_call_window_box", "ghostly_call_self_view_box", "ghostly_update_dismissed", "ghostly_group_call_mini", "ghostly_group_call_window_box"];
 const suffixes = SWITCHES.map((key) => key.slice("ghostly_".length));
 
 beforeEach(() => {
