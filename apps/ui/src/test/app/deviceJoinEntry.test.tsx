@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDeviceInvite, turnName } from "@ghostly/core";
@@ -9,6 +9,7 @@ import { ProfileSwitcherMenu } from "../../components/ProfileSwitcher";
 import { Sidebar } from "../../components/Sidebar";
 import { DevicesSection } from "../../components/devices/DevicesSection";
 import { JoinHost } from "../../components/devices/JoinHost";
+import { JoinProfileDialog } from "../../components/devices/JoinProfileDialog";
 import { Home } from "../../pages/Home";
 import { LockScreenProvider, useLockScreen } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
@@ -528,6 +529,50 @@ describe("a profile made for a code", () => {
       await user.click(screen.getByRole("button", { name: "Close" }));
       await waitFor(() => expect(reload).toHaveBeenCalled());
     } finally { Reflect.deleteProperty(navigator, "storage"); }
+  });
+
+  it("closed while its join is asked: the enrollment the engine then starts is cancelled, not left running unseen", async () => {
+    let answer!: (view: EnrollView) => void;
+    fakeEngine.on("deviceEnrollJoin", () => new Promise<EnrollView>((resolve) => { answer = resolve; }));
+    fakeEngine.on("deviceEnrollCancel", () => undefined);
+    function Host() {
+      const [open, setOpen] = useState(true);
+      return open ? <JoinProfileDialog request={{ code: code(), start: "go", name: "Pixel" }} onClose={() => setOpen(false)} onRestore={() => {}} /> : null;
+    }
+    const { user } = renderApp(<Host />);
+    await waitFor(() => expect(fakeEngine.callsTo("deviceEnrollJoin")).toHaveLength(1));
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByTestId("device-join")).toBeNull());
+    answer({ role: "joiner", step: "connecting" });
+    await waitFor(() => expect(fakeEngine.callsTo("deviceEnrollCancel")).toHaveLength(1));
+  });
+
+  it("closed while its join is asked, and opened again on a new join: the first one's late answer does not cancel the new one", async () => {
+    const answers: ((view: EnrollView) => void)[] = [];
+    fakeEngine.on("deviceEnrollJoin", () => new Promise<EnrollView>((resolve) => { answers.push(resolve); }));
+    fakeEngine.on("deviceEnrollCancel", () => undefined);
+    fakeEngine.on("deviceEnrollView", () => ({ role: "joiner", step: "connecting" }));
+    function Host() {
+      const [opened, setOpened] = useState(1);
+      const [open, setOpen] = useState(true);
+      return <>
+        <button type="button" onClick={() => { setOpened(opened + 1); setOpen(true); }}>Open again</button>
+        {open && <JoinProfileDialog key={opened} request={{ code: code(), start: "go", name: "Pixel" }} onClose={() => setOpen(false)} onRestore={() => {}} />}
+      </>;
+    }
+    const { user } = renderApp(<Host />);
+    await waitFor(() => expect(fakeEngine.callsTo("deviceEnrollJoin")).toHaveLength(1));
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByTestId("device-join")).toBeNull());
+    await user.click(screen.getByRole("button", { name: "Open again" }));
+    await waitFor(() => expect(fakeEngine.callsTo("deviceEnrollJoin")).toHaveLength(2));
+    answers[1]!({ role: "joiner", step: "connecting" });
+    await screen.findByTestId("device-join-connecting");
+    // The new join ended the first one in the engine already: a cancel now would end the one on screen.
+    answers[0]!({ role: "joiner", step: "connecting" });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(fakeEngine.callsTo("deviceEnrollCancel")).toEqual([]);
+    expect(screen.getByTestId("device-join")).toBeInTheDocument();
   });
 
   it("goes on while the browser asks the person whether to keep its data, and opens once they say yes", async () => {
