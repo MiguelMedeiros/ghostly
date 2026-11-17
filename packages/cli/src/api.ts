@@ -1383,10 +1383,12 @@ function editRefusalWords(error: string, ref: string, place: RefPlace): string {
  * `message delete --everyone` given no message of mine. It said "No message … of yours" for all of them, as if one of
  * mine deleted already were the contact's: another's message says whose it is (in a chat, with the delete that takes
  * it off this device), one of mine deleted already says so (the chat's deleted ids), and any other is not here.
+ * Another's is `refused` (exit 1), as `edit` refuses it: it was `not_found` (exit 3), so one `case $?` could not take
+ * both, and a message that is there read as one that is not.
  */
 function deleteNotMine(ctx: ApiContext, target: { linkId: string; group: boolean }, ref: string, theirs: StoredMessage | undefined, place: RefPlace, purge: boolean): CliError {
-  if (theirs && target.group) return new CliError("not_found", `${JSON.stringify(ref)} is another member's message: only its author deletes a group's message, for everyone`);
-  if (theirs) return new CliError("not_found", `${JSON.stringify(ref)} is the contact's message: only your own messages are deleted for everyone (ghostly message delete ${shellWord(place.ref, "<chat>")} ${shellWord(theirs.id, "<message>")}${purge ? " --purge" : ""} deletes it on this device)`);
+  if (theirs && target.group) return new CliError("refused", `${JSON.stringify(ref)} is another member's message: only its author deletes a group's message, for everyone`);
+  if (theirs) return new CliError("refused", `${JSON.stringify(ref)} is the contact's message: only your own messages are deleted for everyone (ghostly message delete ${shellWord(place.ref, "<chat>")} ${shellWord(theirs.id, "<message>")}${purge ? " --purge" : ""} deletes it on this device)`);
   const deleted = !target.group && node(ctx).deletedIdsOf(target.linkId).includes(ref);
   return noMessage(ref, place, deleted ? { tail: ": it was deleted already" } : {});
 }

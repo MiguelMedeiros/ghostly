@@ -122,4 +122,15 @@ describe("message delete --everyone on a message it cannot delete", () => {
     });
     expect(node.removeMessage).not.toHaveBeenCalled();
   });
+
+  it("a contact's message is refused (exit 1) by edit and by delete --everyone alike; it was not_found (exit 3) from the delete", async () => {
+    const { ctx } = refusal("Only your own text messages can be edited");
+    const edit = await callApi(ctx, "chat.edit", { chat: "Alice", message: "peer_x", text: "x" }).catch((e: unknown) => e);
+    const remove = await callApi(ctx, "chat.delete", { chat: "Alice", message: "peer_x", everyone: true }).catch((e: unknown) => e);
+    const group = await callApi(ctx, "chat.delete", { chat: "Crew", message: "bobkey:1:0", everyone: true }).catch((e: unknown) => e);
+    const groupEdit = await callApi(ctx, "group.edit", { group: "Crew", message: "bobkey:1:0", text: "x" }).catch((e: unknown) => e);
+    expect([edit, remove, groupEdit, group].map((e) => (e as { code?: string }).code)).toEqual(["refused", "refused", "refused", "refused"]);
+    // One of mine deleted already stays not found: gone, not someone else's.
+    await expect(callApi(ctx, "chat.delete", { chat: "Alice", message: "me_gone", everyone: true })).rejects.toMatchObject({ code: "not_found" });
+  });
 });
