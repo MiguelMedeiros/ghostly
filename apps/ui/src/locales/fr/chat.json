@@ -61,15 +61,19 @@
       "sent": "Envoyé. Pas encore d'accusé.",
       "sentGroup": "Envoyé au groupe. Les groupes n'ont pas d'accusé.",
       "waiting": "Part tout seul quand votre contact est en ligne.",
+      "waitingBehind": "Part tout seul après les messages précédents.",
       "waitingLiveContact": "Les fichiers ont besoin d'une liaison directe. La discussion de votre contact est en DHT seule : il part quand il l'autorise à nouveau.",
-      "waitingLiveYou": "Les fichiers ont besoin d'une liaison directe. Cette discussion est en DHT seule : changez-le depuis l'icône de connexion."
+      "waitingLiveYou": "Les fichiers ont besoin d'une liaison directe. Cette discussion est en DHT seule : changez-le depuis l'icône de connexion.",
+      "waitingPaced": "Votre contact reçoit un nombre limité de messages à la fois. Part tout seul dès qu'il peut en recevoir plus."
     },
     "offline": "Vous êtes hors ligne",
     "retry": "Non envoyé. Renvoyer",
     "sending": "Envoi en cours",
     "sent": "Envoyé",
     "waiting": "En attente que votre contact soit en ligne",
-    "waitingLive": "En attente d'une liaison directe"
+    "waitingBehind": "En attente des messages précédents",
+    "waitingLive": "En attente d'une liaison directe",
+    "waitingPaced": "En attente que votre contact puisse recevoir plus de messages"
   },
   "disabledPlaceholder": "Message…",
   "edit": {

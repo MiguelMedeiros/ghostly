@@ -7,6 +7,7 @@ import { translatorFor } from "../../locales";
 import { linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { NotSent } from "@ghostly/browser/engine/outbox";
+import { MESSAGE_PACED } from "@ghostly/core";
 import { Profiler } from "react";
 import type { ChatMessage } from "../../lib/types";
 import { keepSentOriginal, sentOriginal } from "../../lib/sentOriginals";
@@ -59,6 +60,31 @@ describe("Cancel sending a waiting message", () => {
     expect(screen.queryByText(TEXT)).toBeNull();
     expect(screen.queryByTestId("message-retry-error")).toBeNull();
     expect(loadSession("chat-1")?.deletedIds).toEqual(["me_w1"]);
+  });
+});
+
+describe("texts the contact's windows have no room for yet, on a live chat", () => {
+  const PEER = "peer".padEnd(52, "p");
+  const FIRST = "the first, held by the pace", SECOND = "the second, behind it";
+  afterEach(() => { localStorage.clear(); setStorageProfile(""); });
+
+  it("say they wait for room and for the text before them, not for the contact to be online", async () => {
+    saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", createdAt: 1_700_000_000_000,
+      messages: [
+        { id: "me_p1", ref: "p1", text: FIRST, sender: "me", timestamp: 1_700_000_000_500, via: "datalink", delivery: "waiting", deliveryError: MESSAGE_PACED },
+        { id: "me_p2", ref: "p2", text: SECOND, sender: "me", timestamp: 1_700_000_000_600, via: "datalink", delivery: "waiting", deliveryError: NotSent.BEHIND },
+      ] as never });
+    const { user, engine } = renderApp(<Chat sessionId="chat-1" visible onCallChange={() => {}} callLayer={null} />, { language: "en" });
+    engine.update({ settings: { online: true }, links: [linkView({ id: "link-1", peerPubKeyZ32: PEER, profile: "paired-chat/1", peerOnline: true } as never)] } as never);
+    await screen.findByText(FIRST);
+    const mark = (text: string) => within(screen.getByText(text).closest("[data-message-row]") as HTMLElement).getByTestId("message-delivery");
+    expect(mark(FIRST)).toHaveAccessibleName("Waiting for your contact to take more texts");
+    await user.hover(mark(FIRST));
+    expect(screen.getByTestId("message-delivery-tip")).toHaveTextContent("Your contact takes a limited number of texts at a time. Sends by itself once they can take more.");
+    await user.unhover(mark(FIRST));
+    expect(mark(SECOND)).toHaveAccessibleName("Waiting for the messages before it");
+    await user.hover(mark(SECOND));
+    expect(screen.getByTestId("message-delivery-tip")).toHaveTextContent("Sends by itself after the messages before it.");
   });
 });
 
