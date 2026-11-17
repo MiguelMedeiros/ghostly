@@ -12,6 +12,7 @@ import { useChatTargets, type ChatTarget } from "../../hooks/useChatTargets";
 import { rawError } from "../../lib/errorText";
 import { problemLine } from "../../lib/problemText";
 import { listParts, listText } from "../../lib/listText";
+import { fillNodes } from "../../lib/fillNodes";
 import type { Translate } from "../../locales/translate";
 import { useBackCloses } from "../../hooks/useDismiss";
 import { SearchStatus } from "../ui/SearchStatus";
@@ -40,6 +41,7 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
   const [secret, setSecret] = useState<SecretFinding | null>(null);
   const [busy, setBusy] = useState(false);
   useBackCloses(() => { if (!busy) onClose(); });
+  /** `partial`: how much of it the chat got, when it got some ("1 of 2 sent"). */
   const [problems, setProblems] = useState<{ name: string; partial?: string; error: string }[]>([]);
   /** The chats a send that others refused went to: out of the selection, so Send again does not send them it twice. */
   const [sentTo, setSentTo] = useState<string[]>([]);
@@ -95,7 +97,7 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
     const failed = outcome.filter(o => o.error !== null).map(o => {
       const name = chosen.find(c => c.target === o.to)?.name ?? "", part = gotNow[o.to]?.length ?? 0;
       const error = problemLine(o.error, t);
-      return { name, partial: part ? ` (${t("chat.forward.partial", { sent: String(part), count: String(messages.length) })})` : "", error };
+      return { name, partial: part ? t("chat.forward.partial", { sent: String(part), count: String(messages.length) }) : undefined, error };
     });
     if (failed.length) {
       setProblems(failed);
@@ -139,7 +141,9 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
     {problems.length > 0 && (
       <div className="mx-4 mt-2" role="alert" data-testid="forward-error">
         <ul className="m-0 list-none space-y-1 p-0">
-          {problems.map((p, i) => <li key={i} className="text-xs text-danger">{p.name ? <><bdi>{p.name}</bdi>{p.partial}: {p.error}</> : p.error}</li>)}
+          {/* The name in its `<bdi>`, the brackets and colon the language's own ("Ana（2 件中 1 件送信済み）：…"). */}
+          {problems.map((p, i) => <li key={i} className="text-xs text-danger">{!p.name ? p.error
+            : fillNodes(p.partial ? t("chat.forward.refusedPartial", { partial: p.partial }) : t("chat.forward.refused"), { name: <bdi>{p.name}</bdi>, error: p.error })}</li>)}
         </ul>
       </div>
     )}

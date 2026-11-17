@@ -17,6 +17,7 @@
   "deleteChatLocal": "Se eliminarán el chat y su historial de este dispositivo, no la copia de tu contacto.",
   "deleteChatTitle": "¿Eliminar chat?",
   "goHome": "Ir al inicio",
+  "labelValue": "{{label}}: {{value}}",
   "loading": "Cargando...",
   "moreInfo": "Más información",
   "needsYou": {
@@ -27,6 +28,7 @@
   "notCopied": "No se copió",
   "quotedName": "«{{name}}»",
   "save": "Guardar",
+  "sentences": "{{first}}. {{second}}",
   "size": {
     "b": "{{n}} B",
     "gb": "{{n}} GB",

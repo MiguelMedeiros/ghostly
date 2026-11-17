@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BUTTONS_CAPABILITY, DhtDelivery, GhostLink, createIdentity, createLink, createRelayPayload, identityFromSeedB64, parseRelayPayload, readStatusCard, type IncomingMessage, type PairingState, type PkarrTransport, type SignedPacket, type WireEdit } from "@ghostly/core";
-import { GhostlyNode } from "../src/engine/node";
+import { BUTTON_PRESS_MS, GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { HoldEngine, emptyHoldState } from "../src/engine/hold";
 import { presignS3 } from "../src/backup/s3";
@@ -159,6 +159,20 @@ describe("a bot asks with buttons", () => {
 });
 
 describe("pressing a contact's buttons", () => {
+  /**
+   * The clock moves on past the one press a second (`BUTTON_PRESS_MS`), as if that long went by: `Date.now` runs that
+   * much ahead from here on, for the node and its contact too, instead of the test waiting it out. Put back once both
+   * apps are closed.
+   */
+  let ahead = 0;
+  const aSecondLater = () => {
+    if (!ahead) {
+      const now = Date.now, clock = vi.spyOn(Date, "now").mockImplementation(() => now() + ahead);
+      cleanup.unshift(async () => { ahead = 0; clock.mockRestore(); });
+    }
+    ahead += BUTTON_PRESS_MS + 50;
+  };
+
   it("sends a reply naming the button, the label as its text; refuses what cannot be pressed", async () => {
     const t = await setup();
     expect(await t.contact.sendMessage(QUESTION, Date.now(), WIRE("Q"), undefined, undefined, undefined, readStatusCard(ask())!)).toBeNull();
@@ -170,12 +184,12 @@ describe("pressing a contact's buttons", () => {
     await vi.waitFor(() => expect(t.contactGot.at(-1)).toMatchObject({ text: "Tell me more", reply: { i: WIRE("Q"), f: "recipient", b: "more" } }));
     // One press a second per message.
     expect(await t.node.pressButton({ linkId: t.id, messageId: question.id, buttonId: "yes" })).toMatchObject({ refused: true, error: "One press a second" });
-    await new Promise(resolve => setTimeout(resolve, 1_050));
+    aSecondLater();
     expect((await t.node.pressButton({ linkId: t.id, messageId: question.id, buttonId: "yes" })).error).toBeNull();
     await vi.waitFor(() => expect(t.contactGot.at(-1)).toMatchObject({ text: "Yes", reply: { b: "yes" } }));
     expect((await t.row(more.messageId!)).replyTo).toMatchObject({ button: "more", messageId: question.id });
     // Answered with a once button: nothing more goes.
-    await new Promise(resolve => setTimeout(resolve, 1_050));
+    aSecondLater();
     expect(await t.node.pressButton({ linkId: t.id, messageId: question.id, buttonId: "no" })).toMatchObject({ refused: true, error: "You already answered" });
     // My own message's buttons do nothing.
     const mine = await t.node.sendMessage({ linkId: t.id, text: "Mine?", card: ask() });
@@ -209,7 +223,7 @@ describe("pressing a contact's buttons", () => {
     expect(byPress).toEqual([]);
     // Buttons with no once among them are pressed as often as I like.
     expect((await t.node.pressButton({ linkId: t.id, messageId: any.id, buttonId: "again" })).error).toBeNull();
-    await new Promise(resolve => setTimeout(resolve, 1_050));
+    aSecondLater();
     expect((await t.node.pressButton({ linkId: t.id, messageId: any.id, buttonId: "back" })).error).toBeNull();
   });
 });

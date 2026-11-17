@@ -47,7 +47,7 @@ export function NostrPublishDialog({ request, onClose, onDone }: { request: Nost
   const [secret, setSecret] = useState<SecretFinding | null>(null);
   const confirm = async (guarded = false) => {
     if (!draft) return;
-    const found = guarded ? null : findSecret(publicText(draft.template));
+    const found = guarded ? null : publicTexts(draft.template).map((text) => findSecret(text)).find(Boolean) ?? null;
     if (found) { setSecret(found); return; }
     const controller = new AbortController(); abort.current = controller;
     setBusy(true); setError(""); setAuthUrl("");
@@ -112,11 +112,13 @@ export function NostrPublishDialog({ request, onClose, onDone }: { request: Nost
 
 /**
  * What a draft makes public, as the person wrote it: a note's text, or a profile's fields one to a line (its JSON's
- * escapes would join the words of an About written on several lines).
+ * escapes would join the words of an About written on several lines). Each field is also read alone: a field that is
+ * nothing but seed words is a seed even when its checksum fails, which the joined text never shows.
  */
-function publicText(template: NostrDraft["template"]): string {
-  if (template.kind !== 0) return template.content;
-  return Object.values(safeJson(template.content)).filter((v): v is string => typeof v === "string").join("\n");
+function publicTexts(template: NostrDraft["template"]): string[] {
+  if (template.kind !== 0) return [template.content];
+  const fields = Object.values(safeJson(template.content)).filter((v): v is string => typeof v === "string");
+  return [...fields, fields.join("\n")];
 }
 
 function safeJson(text: string): Record<string, unknown> {

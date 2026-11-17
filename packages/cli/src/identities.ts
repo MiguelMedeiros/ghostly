@@ -146,13 +146,16 @@ export const IDENTITY_METHODS: Record<string, Method> = {
       // Once the signer's last step answered, nothing waits on the person any more: what fails after it (the engine's
       // check, which runs to its end past the deadline) is said as it is, never as a wait that ran out.
       let signed = false;
+      // The caller's own id for this call, in each of its events: two proofs waiting on one daemon are told apart by it.
+      const request = str(params, "request");
+      const tag = { provider: p.id, ...(request ?{ request } : {}) };
       const proof = await signer.run({
         values, signal, waitMs: seconds * 1000,
         // A link or code to approve with holds the request's secret (contract.ts): to the listeners live, never the journal.
-        onAuthUrl: (url) => { ctx.hub.emitLive("identity.approval", `identity.approval:${Date.now()}`, { provider: p.id, url }); },
-        onProgress: (message) => { ctx.hub.emit("identity.progress", `identity.progress:${Date.now()}`, { provider: p.id, message }); },
+        onAuthUrl: (url) => { ctx.hub.emitLive("identity.approval", `identity.approval:${Date.now()}`, { ...tag, url }); },
+        onProgress: (message) => { ctx.hub.emit("identity.progress", `identity.progress:${Date.now()}`, { ...tag, message }); },
         onApproval: (request) => {
-          if (request) ctx.hub.emitLive("identity.approval", `identity.approval:${Date.now()}`, { provider: p.id, ...(request.qr ? { qr: request.qr.value, label: request.qr.label } : {}), notes: request.notes ?? [] });
+          if (request) ctx.hub.emitLive("identity.approval", `identity.approval:${Date.now()}`, { ...tag, ...(request.qr ? { qr: request.qr.value, label: request.qr.label } : {}), notes: request.notes ?? [] });
         },
       }, async (session) => {
         const { draftId, binding } = await begin(ctx, p, await session.subject(), params);

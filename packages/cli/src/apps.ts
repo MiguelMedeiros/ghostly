@@ -7,9 +7,9 @@ import {
   readAppRevocations, readAppStore, repeatedJsonKey, seedSigner, setAppSignatureFastPath, signAppObject, signAppRevocation, signAppStore, toBase64Url, toZ32, type AppBundle,
   type AppManifest, type AppRevokeStatement, type AppStoreIndex, type AppStoreReading, type SignedAppRevocation, type Signer,
 } from "@ghostly/core";
-import { APP_FETCH_HOSTS, isAppFetchUrl } from "@ghostly/browser/engine/appFetch";
+import { APP_FETCH_HOSTS, APP_FETCH_LIMITS, isAppFetchUrl } from "@ghostly/browser/engine/appFetch";
 import { templateManifest, templatePage, templateReadme } from "./appTemplate";
-import { CliError, localFileError } from "./errors";
+import { CliError, localFileError, shownValue } from "./errors";
 import { jsonOut } from "./jsonOut";
 import { guardText } from "./secretGuard";
 import { nativeEd25519 } from "./nativeEd25519";
@@ -313,9 +313,9 @@ export async function initApp(dirArg: string, what: { name?: string; title?: str
     if (checked.detail === "name is not valid") {
       throw new CliError("usage", what.name === undefined
         ? `The folder's name gives no app name (${JSON.stringify(basename(dir))}): give --name, a lowercase letter then up to 31 lowercase letters, digits or hyphens: ${usage}`
-        : `--name is a lowercase letter then up to 31 lowercase letters, digits or hyphens, not ${JSON.stringify(what.name)}`);
+        : `--name is a lowercase letter then up to 31 lowercase letters, digits or hyphens, not ${shownValue(what.name)}`);
     }
-    if (checked.detail === "title is not valid") throw new CliError("usage", `--title is one line of 1 to ${APP_BUNDLE_LIMITS.title} characters, not ${JSON.stringify(title)}`);
+    if (checked.detail === "title is not valid") throw new CliError("usage", `--title is one line of 1 to ${APP_BUNDLE_LIMITS.title} characters, not ${shownValue(title)}`);
     throw refused("The template makes no valid manifest", checked);
   }
 
@@ -462,7 +462,7 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
     throw refused(`${out} is ${appRef(previous.publisher, previous.name)}, signed by another key (${appFingerprint(previous.publisher)}): a version of an app is signed by its own key`, { reason: "other-app" }, { publisher: previous.publisher });
   }
   if (previous && previous.name !== draft.name) {
-    throw refused(`${out} is the app ${JSON.stringify(previous.name)}, not ${JSON.stringify(draft.name)}: name another --out for another app`, { reason: "other-app" });
+    throw refused(`${out} is the app ${shownValue(previous.name)}, not ${shownValue(draft.name)}: name another --out for another app`, { reason: "other-app" });
   }
 
   if (sequenceArg !== undefined && previous && sequenceArg <= previous.sequence) {
@@ -675,6 +675,11 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
   const { indexBytes, sigBytes } = await signAppStore(index as unknown as AppStoreIndex, key.signer, checked);
   const read = readAppStore(indexBytes, sigBytes, now, key.key, checked);
   if (!read.ok) throw refused(`${indexPath} would be refused by a client`, read);
+  // The format takes 16 MiB, but a client reads at most `storeIndexBytes` of an index (4 MiB in phase 1): past it, every
+  // one refuses the whole store as too large.
+  if (indexBytes.length > APP_FETCH_LIMITS.storeIndexBytes) {
+    throw refused(`${indexPath} would be refused by a client`, { reason: "too-large", detail: `${indexBytes.length} bytes signed, a client reads at most ${APP_FETCH_LIMITS.storeIndexBytes} (4 MiB)` });
+  }
   const store = read.store;
   // Unless the signature there is this one's bytes (Ed25519 is deterministic): a run stopped between the signature's
   // rename and the index's, signed again. Not the index's bytes: a held index edited in place is this one's bytes too,

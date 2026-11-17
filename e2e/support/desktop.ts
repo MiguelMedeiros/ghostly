@@ -278,8 +278,22 @@ const PORT_TAKEN = /Unable to listen for HTTP server|can not listen to address/;
 
 class PortTaken extends Error {}
 
+/** An open app, from `openDesktop`. */
+export interface OpenDesktop {
+  app: DesktopApp;
+  stop: () => Promise<void>;
+  /**
+   * What the driver, the app and its WebKit processes wrote to stdout and stderr so far (the last `OUTPUT_KEPT`
+   * characters): GStreamer's own errors among it with `GST_DEBUG` set, which a page's MediaError never says.
+   */
+  output: () => string;
+}
+
+/** How much of a driver's output an open app keeps for `output`. */
+const OUTPUT_KEPT = 512 * 1024;
+
 /** `tauri-driver`, and the app it opens, until `stop`. A driver that lost one of its ports starts again on others. */
-export async function openDesktop(options: DesktopOptions = {}): Promise<{ app: DesktopApp; stop: () => Promise<void> }> {
+export async function openDesktop(options: DesktopOptions = {}): Promise<OpenDesktop> {
   // Before anything is spawned: a missing binary is not something to retry for 30 seconds.
   const application = options.binary ?? desktopBinary();
   for (let attempt = 1; ; attempt++) {
@@ -291,7 +305,7 @@ export async function openDesktop(options: DesktopOptions = {}): Promise<{ app: 
   }
 }
 
-async function launchDesktop(application: string, options: DesktopOptions): Promise<{ app: DesktopApp; stop: () => Promise<void> }> {
+async function launchDesktop(application: string, options: DesktopOptions): Promise<OpenDesktop> {
   const port = await freePort();
   const nativePort = await freePort();
   // A session bus of its own unless the test brings one: see `privateBus`.
@@ -315,18 +329,19 @@ async function launchDesktop(application: string, options: DesktopOptions): Prom
       }, options.env),
     },
   );
-  const log: string[] = [];
+  let log = "";
   let lostPort: (error: Error) => void = () => {};
   const taken = new Promise<never>((_, fail) => { lostPort = fail; });
-  for (const stream of [driver.stdout, driver.stderr]) stream?.on("data", (chunk: Buffer) => {
-    log.push(chunk.toString());
-    if (PORT_TAKEN.test(log.join(""))) lostPort(new PortTaken(`A driver port (${port}, ${nativePort}) was taken:\n${log.join("")}`));
-  });
-  const died = new Promise<never>((_, fail) =>
-    driver.on("exit", (code) => fail(new Error(`tauri-driver exited (${code}). Is it installed, with a WebDriver for this platform?\n${log.join("")}`))),
-  );
   // Once either has ended the open, the session's retries stop too: no asking a driver that is gone.
   const settled = new AbortController();
+  for (const stream of [driver.stdout, driver.stderr]) stream?.on("data", (chunk: Buffer) => {
+    log = (log + chunk.toString()).slice(-OUTPUT_KEPT);
+    // A port is taken only as the driver binds, before the app is open.
+    if (!settled.signal.aborted && PORT_TAKEN.test(log)) lostPort(new PortTaken(`A driver port (${port}, ${nativePort}) was taken:\n${log}`));
+  });
+  const died = new Promise<never>((_, fail) =>
+    driver.on("exit", (code) => fail(new Error(`tauri-driver exited (${code}). Is it installed, with a WebDriver for this platform?\n${log}`))),
+  );
 
   const endpoint = `http://127.0.0.1:${port}`;
   const exited = new Promise<void>((done) => driver.once("exit", () => done()));
@@ -353,7 +368,7 @@ async function launchDesktop(application: string, options: DesktopOptions): Prom
       const started = launched();
       await app.close();
       await end(started);
-    } };
+    }, output: () => log };
   } catch (error) {
     await end(launched());
     throw error;

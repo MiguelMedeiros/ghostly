@@ -6,6 +6,9 @@
 //! Here the name is resolved and refused when any of its addresses is not public, when the connection is made (so a
 //! name that changes its answer in between is refused too), as the CLI's does (packages/cli/src/runtime/holdFetch.ts).
 //! A plain GET over HTTPS: no redirect followed, no proxy, no cookies, a bounded body. The engine checks the rest.
+//!
+//! A contact's identity proof and public data (WISP 300, PUBLIC-PROFILES.md) are read here too, for the same reason
+//! (apps/ui/src/desktop/identityFetch.ts): those reads say what they accept, and the answer says its type.
 
 use std::net::IpAddr;
 use std::sync::OnceLock;
@@ -22,11 +25,15 @@ use crate::link_preview::{is_public, PublicOnly};
 const MAX_BODY: usize = 8 * 1024 * 1024;
 /// Past the engine's own limit for the largest item (`holdFetchTimeoutMs`, packages/browser/src/engine/hold.ts).
 const TIMEOUT: Duration = Duration::from_secs(150);
+/// The request headers an identity read sends (`accept`; a Pubky homeserver's `pubky-host`); any other is dropped.
+const HEADERS: [&str; 2] = ["accept", "pubky-host"];
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HoldResponse {
     pub status: u16,
+    /// The answer's `Content-Type`, empty when it has none.
+    pub content_type: String,
     /// Empty for any status but 2xx: the engine refuses those without reading them.
     pub body_b64: String,
 }
@@ -82,16 +89,35 @@ fn reason(error: reqwest::Error) -> String {
     text
 }
 
-async fn get(client: &reqwest::Client, url: reqwest::Url) -> Result<HoldResponse, String> {
-    let mut response = client
-        .get(url)
+async fn get(
+    client: &reqwest::Client,
+    url: reqwest::Url,
+    headers: Vec<(String, String)>,
+) -> Result<HoldResponse, String> {
+    let mut request = client.get(url);
+    for (name, value) in headers {
+        if HEADERS.contains(&name.to_ascii_lowercase().as_str())
+            && value.len() < 2048
+            && !value.contains(['\r', '\n'])
+        {
+            request = request.header(name, value);
+        }
+    }
+    let mut response = request
         .send()
         .await
         .map_err(|e| format!("unreachable: {}", reason(e)))?;
     let status = response.status().as_u16();
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
     if !response.status().is_success() {
         return Ok(HoldResponse {
             status,
+            content_type,
             body_b64: String::new(),
         });
     }
@@ -116,16 +142,17 @@ async fn get(client: &reqwest::Client, url: reqwest::Url) -> Result<HoldResponse
     }
     Ok(HoldResponse {
         status,
+        content_type,
         body_b64: STANDARD.encode(body),
     })
 }
 
-/// One GET of a held item or manifest at `url`, on public addresses only.
-pub async fn fetch(url: String) -> Result<HoldResponse, String> {
+/// One GET of a held item or manifest (or an identity's proof or public data) at `url`, on public addresses only.
+pub async fn fetch(url: String, headers: Vec<(String, String)>) -> Result<HoldResponse, String> {
     let url =
         reqwest::Url::parse(&url).map_err(|_| "The storage address is not a URL".to_string())?;
     allowed(&url)?;
-    get(client()?, url).await
+    get(client()?, url, headers).await
 }
 
 #[cfg(test)]
@@ -206,7 +233,7 @@ mod tests {
                 answers.iter().map(|a| a.parse().unwrap()).collect(),
             ))
             .unwrap();
-            let error = get(&client, at(port)).await.err();
+            let error = get(&client, at(port), vec![]).await.err();
             assert!(
                 error
                     .as_deref()
@@ -233,14 +260,18 @@ mod tests {
     #[tokio::test]
     async fn the_app_s_own_resolver_refuses_this_machine() {
         // The shipped path: `localhost` resolves here, with no network, to loopback only.
-        let error = fetch("https://localhost/b/o".into()).await.unwrap_err();
+        let error = fetch("https://localhost/b/o".into(), vec![])
+            .await
+            .unwrap_err();
         assert!(error.contains("not a public address"), "{error}");
     }
 
     #[tokio::test]
     async fn a_public_storage_is_read_and_a_redirect_is_not_followed() {
         let (port, _) = serve(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nheld").await;
-        let read = get(&build(Storage).unwrap(), at(port)).await.unwrap();
+        let read = get(&build(Storage).unwrap(), at(port), vec![])
+            .await
+            .unwrap();
         assert_eq!(read.status, 200);
         assert_eq!(STANDARD.decode(read.body_b64).unwrap(), b"held");
 
@@ -248,13 +279,62 @@ mod tests {
             b"HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:1/\r\nContent-Length: 0\r\n\r\n",
         )
         .await;
-        let moved = get(&build(Storage).unwrap(), at(port)).await.unwrap();
+        let moved = get(&build(Storage).unwrap(), at(port), vec![])
+            .await
+            .unwrap();
         assert_eq!((moved.status, moved.body_b64.as_str()), (302, ""));
         assert_eq!(taken.load(Ordering::SeqCst), 1);
 
         let (port, _) = serve(b"HTTP/1.1 200 OK\r\nContent-Length: 9000000\r\n\r\n").await;
-        let error = get(&build(Storage).unwrap(), at(port)).await.unwrap_err();
+        let error = get(&build(Storage).unwrap(), at(port), vec![])
+            .await
+            .unwrap_err();
         assert_eq!(error, "The held item is too large");
+    }
+
+    #[tokio::test]
+    async fn an_identity_read_says_what_it_accepts_and_gets_the_answer_s_type() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let asked = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0u8; 4096];
+            let n = stream.read(&mut request).await.unwrap();
+            let _ = stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/did+json\r\nContent-Length: 2\r\n\r\n{}")
+                .await;
+            String::from_utf8_lossy(&request[..n]).to_ascii_lowercase()
+        });
+        let headers = [
+            ("Accept", "application/did+json"),
+            ("pubky-host", "k"),
+            ("Cookie", "c=1"),
+            ("accept-x", "y\r\nx: 1"),
+        ];
+        let read = get(
+            &build(Storage).unwrap(),
+            at(port),
+            headers
+                .iter()
+                .map(|(n, v)| (n.to_string(), v.to_string()))
+                .collect(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            (read.status, read.content_type.as_str()),
+            (200, "application/did+json")
+        );
+        let request = asked.await.unwrap();
+        assert!(
+            request.contains("accept: application/did+json\r\n"),
+            "{request}"
+        );
+        assert!(request.contains("pubky-host: k\r\n"), "{request}");
+        assert!(
+            !request.contains("cookie") && !request.contains("accept-x"),
+            "{request}"
+        );
     }
 
     #[tokio::test]
@@ -270,7 +350,7 @@ mod tests {
             "file:///etc/passwd",
             "not a url",
         ] {
-            assert!(fetch(refused.into()).await.is_err(), "{refused}");
+            assert!(fetch(refused.into(), vec![]).await.is_err(), "{refused}");
         }
         for url in ["https://s3.example.com/b/o", "https://93.184.215.14/b/o"] {
             assert!(allowed(&reqwest::Url::parse(url).unwrap()).is_ok(), "{url}");

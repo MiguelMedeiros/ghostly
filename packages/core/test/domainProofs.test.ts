@@ -168,5 +168,13 @@ describe('public addresses only', () => {
   it.each(['2606:4700:4700::1111', '2001:4860:4860::8888', '::ffff:808:808', '64:ff9b::808:808'])('allows %s', a => {
     expect(isPublicAddress(v6(a))).toBe(true);
   });
+  // 6to4 and Teredo carry an IPv4 address a gateway may reach (2002:7f00:1:: is 6to4 of 127.0.0.1), and
+  // documentation addresses are no one's: all refused whole, as Desktop's link preview and the app's host check do.
+  it.each(['2002:7f00:1::', '2002:808:808::1', '2001::1', '2001:0:4136:e378:8000:63bf:3fff:fdd2', '2001:db8::1', '2001:db8:ffff::1'])('refuses %s', a => {
+    expect(isPublicAddress(v6(a))).toBe(false);
+  });
+  it.each(['2001:1::1', '2001:db9::1', '2003::1', '2001:470::1'])('allows %s', a => {
+    expect(isPublicAddress(v6(a))).toBe(true);
+  });
   it('refuses anything that is not an address', () => expect(isPublicAddress(new Uint8Array(5))).toBe(false));
 });

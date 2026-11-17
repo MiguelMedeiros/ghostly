@@ -191,3 +191,46 @@ describe("a voice message or a video quoted or pinned, in Portuguese", () => {
     expect(screen.getByTestId("pinned-snippet")).toHaveTextContent("🎤 Mensagem de voz (0:07)");
   });
 });
+
+// covers: chat.pins
+describe("a pin of an older message right after a reload, before the chat's history comes in", () => {
+  /**
+   * After a reload the chat shows its newest stored messages first (`STORED_MESSAGES`); the older ones come with the
+   * engine's history. A pin of one of those older messages said "Not on this device" with its line disabled meanwhile,
+   * where a reply's quote of the same message reads as loading (`quoteFor`). It waits the same way now; once the history
+   * is in and the message really is not there, it still says so.
+   */
+  const RECENT = "R".repeat(22), OLD = "O".repeat(22);
+  const recent: ChatMessage = { id: `peer_${RECENT}`, text: "see you at eight", sender: "peer", timestamp: 1_700_000_100_000 };
+  const old: ChatMessage = { id: `peer_${OLD}`, text: "the door code is 4321", sender: "peer", timestamp: 1_700_000_000_000 };
+  const pin = { id: OLD, messageId: old.id } as never;
+
+  it("reads as loading, as a reply's quote of it does, not \"Not on this device\"", () => {
+    renderApp(<PinnedBar pin={pin} index={replyIndex([recent], false, true)} />);
+    const snippet = screen.getByTestId("pinned-snippet");
+    expect(snippet).not.toHaveTextContent("Not on this device");
+    expect(screen.getByTestId("pinned-open")).toHaveAttribute("data-state", "loading");
+    expect(snippet).toHaveTextContent(/^…$/);
+    expect(quoteFor({ id: OLD, snippet: "", from: "peer", messageId: old.id }, replyIndex([recent], false, true), () => "Alice").state).toBe("loading");
+    // Nothing to jump to yet: the line waits, and opens the message once it is in.
+    expect(screen.getByTestId("pinned-open")).toBeDisabled();
+  });
+
+  it("shows the message, and jumps to it, once the history is in", () => {
+    const { rerender } = renderApp(<PinnedBar pin={pin} index={replyIndex([recent], false, true)} />);
+    rerender(<PinnedBar pin={pin} index={replyIndex([old, recent])} />);
+    expect(screen.getByTestId("pinned-snippet")).toHaveTextContent(/^the door code is 4321$/);
+    expect(screen.getByTestId("pinned-open")).toBeEnabled();
+  });
+
+  it("still says \"Not on this device\" once the history is in and the message is not there", () => {
+    renderApp(<PinnedBar pin={pin} index={replyIndex([recent])} />);
+    expect(screen.getByTestId("pinned-snippet")).toHaveTextContent(/^Not on this device$/);
+    expect(screen.getByTestId("pinned-open")).toBeDisabled();
+  });
+
+  it("says \"Not on this device\" at once for a pin the engine found no row for, older messages here or not", () => {
+    renderApp(<PinnedBar pin={{ id: OLD } as never} index={replyIndex([recent], false, true)} />);
+    expect(screen.getByTestId("pinned-snippet")).toHaveTextContent(/^Not on this device$/);
+  });
+});

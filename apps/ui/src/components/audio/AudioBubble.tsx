@@ -333,7 +333,8 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
       {offered && (
         <div className="mt-1.5 px-1" data-testid="audio-offer">
           <div className="flex items-center gap-2">
-            <button type="button" data-testid="audio-accept" disabled={noRoom} onClick={() => act("accept")}
+            {/* Not turned off by a room shown less than its size: that room may be old, and the engine reads it again. */}
+            <button type="button" data-testid="audio-accept" onClick={() => act("accept")}
               className={`text-xs px-3 py-1 rounded-full bg-accent text-on-accent border-none ${FORCED_EDGE} cursor-pointer disabled:opacity-50 disabled:cursor-default`}>
               {t("chat.media.downloadSize", { size: formatFileSize(file.size, t) })}
             </button>

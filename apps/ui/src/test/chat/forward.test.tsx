@@ -79,7 +79,7 @@ describe("the Forward to… picker", () => {
   function Where() {
     return <p data-testid="where">{useLocation().pathname}</p>;
   }
-  const open = (messages: ChatMessage[], from = "link-bo", language?: "pt" | "ar") => renderApp(<Routes>
+  const open = (messages: ChatMessage[], from = "link-bo", language?: "pt" | "ar" | "ja") => renderApp(<Routes>
     <Route path="/here" element={<ForwardDialog from={from} messages={messages} onClose={() => {}} />} />
     <Route path="*" element={<Where />} />
   </Routes>, { route: "/here", language });
@@ -340,6 +340,24 @@ describe("the Forward to… picker", () => {
       { linkId: "link-1", messageIds: ["b"], to: ["link-ana"] },
     ]);
     expect(screen.queryByTestId("forward-error")).toBeNull();
+  });
+
+  // A refusal's brackets and colon were English ones glued around the translated parts: "Ana (2 件中 1 件送信済み): …".
+  it("says how much a chat got with the language's own brackets and colon, its name still isolated", async () => {
+    const all = [message({ id: "a", timestamp: 1 }), message({ id: "b", timestamp: 2 })];
+    fakeEngine.on("forwardMessages", ({ to, messageIds }: { to: string[]; messageIds: string[] }) => ({ results: to.map(t => {
+      const sent = t === "link-ana" ? ["a"] : t === "link-bo" ? [] : messageIds;
+      return { to: t, messageIds: sent.map(id => `me_${id}`), sent, error: sent.length < messageIds.length ? "You are offline" : null };
+    }) }));
+    const { user } = open(all, "link-1", "ja");
+    const rows = screen.getAllByTestId("forward-target");
+    await user.click(rows[0]!);
+    await user.click(rows[2]!);
+    await user.click(screen.getByTestId("forward-send"));
+    const [ana, bo] = within(screen.getByTestId("forward-error")).getAllByRole("listitem");
+    expect(ana).toHaveTextContent(/^Ana（2 件中 1 件送信済み）：\S/);
+    expect(bo).toHaveTextContent(/^Bo：\S/);
+    expect(ana!.querySelector("bdi")).toHaveTextContent(/^Ana$/);
   });
 
   // In one Arabic string a Latin name's end punctuation went to the line's side: "Ana!" read "!Ana", and the chosen names

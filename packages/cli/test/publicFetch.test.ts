@@ -1,10 +1,11 @@
 import { createServer, type AddressInfo, type Socket } from "node:net";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
+import { fetchLnurlJson } from "@ghostly/core";
 import { boundedIdentityFetch } from "@ghostly/browser/proofs/verify";
-import { nodePublicFetch } from "../src/runtime/publicFetch";
+import { nodeLnurlFetch, nodePublicFetch } from "../src/runtime/publicFetch";
 import { publicOnly } from "../src/runtime/pushSend";
 
-// covers: proofs.share, profiles.public
+// covers: proofs.share, profiles.public, wallet.lnurl.protocol
 
 /** A DNS that answers each name from a table: no lookup leaves this machine. */
 const answers = (table: Record<string, string[]>) => publicOnly((host, _options, callback) =>
@@ -34,6 +35,26 @@ it("reads an address a contact's identity names only at a name whose every addre
       await expect(read(url), url).rejects.toThrow(/not a public address/);
     expect(local.seen.connections).toBe(0);
   } finally { await local.close(); }
+});
+
+it("asks a Lightning address's service, its redirects and its callback only at a name whose every address is public when it connects", async () => {
+  const local = await listener();
+  try {
+    // The engine checks these names by what they say only: each passes, and resolves to this machine or its network.
+    const lnurl = nodeLnurlFetch(answers({ "pay.example": ["127.0.0.1"], "lan.pay.example": ["192.168.1.10"], "mixed.pay.example": ["8.8.8.8", "10.0.0.5"] }));
+    for (const url of [`https://pay.example:${local.port}/.well-known/lnurlp/alice`, `https://lan.pay.example:${local.port}/cb?amount=1000`,
+      `https://mixed.pay.example:${local.port}/.well-known/lnurlp/alice`])
+      await expect(fetchLnurlJson(url, { fetch: lnurl, timeoutMs: 3_000 }), url).rejects.toThrow();
+    expect(local.seen.connections).toBe(0);
+  } finally { await local.close(); }
+});
+
+it("asks a service the person named on this machine as named", async () => {
+  const local = vi.fn(async () => Response.json({ tag: "payRequest" }));
+  const lnurl = nodeLnurlFetch(answers({}), local);
+  for (const url of ["http://127.0.0.1:4100/.well-known/lnurlp/alice", "http://localhost:4100/.well-known/lnurlp/alice", "http://[::1]:4100/x"])
+    expect(await fetchLnurlJson(url, { fetch: lnurl }), url).toEqual({ tag: "payRequest" });
+  expect(local).toHaveBeenCalledTimes(3);
 });
 
 it("sends only a GET over HTTPS", async () => {

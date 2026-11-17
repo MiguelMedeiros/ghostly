@@ -503,6 +503,37 @@ export function groupOf(ctx: ApiContext, params: Params, twin?: string): GroupVi
   }
 }
 
+/** A group as a sentence names it: one joined by its link has no name until a member's app lets this profile in. */
+export const groupCalled = (group: GroupView) => group.name || "this group";
+
+/**
+ * A group this profile is not in yet (only its invitation, or a knock at its link), said with what the person can do,
+ * the same sentence for every command; undefined for any other group. `ref`: the group as the command named it.
+ * `decline`: the step out of it (`group leave`), not into it. An invitation its admin took back (left, forgot the group
+ * or handed the role on) has no way in: `group accept` answers "This invitation was taken back", so it names
+ * `group decline`, which drops it from the list.
+ */
+export function notInYet(group: GroupView, ref: string, decline = false): string | undefined {
+  if (group.status || !group.invitation) return undefined;
+  const shown = shellWord(ref, group.id);
+  const { accepted, viaLink, takenBack } = group.invitation;
+  if (takenBack && !decline) return `Its invitation to ${groupCalled(group)} was taken back: ghostly group decline ${shown} drops it`;
+  const why = decline ? `ghostly group decline ${shown} turns it down`
+    : !accepted ? `ghostly group accept ${shown} joins it`
+    : viaLink ? "you opened its link, and no member's app has let you in"
+    : "you accepted its invitation, and its admin has not let you in";
+  return `You are not in ${groupCalled(group)} yet: ${why}`;
+}
+
+/**
+ * The engine's refusal of a group this profile is not in yet ("You are not in this group", "Group not found"), said as
+ * `notInYet` says it, with the same code; any other error as it is.
+ */
+export function notInYetError(group: GroupView, ref: string, error: CliError, decline = false): CliError {
+  const said = /^(You are not in this group( yet)?|Group not found)$/.test(error.message) ? notInYet(group, ref, decline) : undefined;
+  return said ? new CliError(error.code, said, error.details) : error;
+}
+
 /**
  * The group whose id `id` is, built alone with its members' edges, as `byId` builds a chat: a group's own id names it
  * before anything else does (`findGroup`), and a bot names a group by the id its events give. Undefined for any other

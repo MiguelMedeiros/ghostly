@@ -8,6 +8,8 @@ import { useGroupNameField } from "../hooks/useGroupNameField";
 import { useEngineValue } from "../lib/engineState";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
+import { SecretGuardDialog } from "./SecretGuardDialog";
+import { findSecret, type SecretFinding } from "../lib/parse/secrets";
 import { useNoLinksHint } from "../hooks/useNoLinksHint";
 
 type Kind = "community" | "mesh";
@@ -50,8 +52,12 @@ export function NewGroupDialog({ onClose, onCreated, returnFocus }: { onClose():
   }, [returnFocus, input]);
   // A name with nothing visible in it (a zero-width space, a direction mark) is refused as the engine refuses it.
   const named = !!groupName(name);
-  const submit = async () => {
+  // A name that looks like a secret asks first, as the chat composer does: everyone let in reads it.
+  const [secret, setSecret] = useState<SecretFinding | null>(null);
+  const submit = async (confirmed = false) => {
     if (!named || busy || noLinks) return;
+    const found = confirmed ? null : findSecret(name);
+    if (found) { setSecret(found); return; }
     setBusy(true); setError(null);
     try {
       const { groupId } = await engine.call("createGroup", { name: name.trim(), profile: kind });
@@ -85,5 +91,6 @@ export function NewGroupDialog({ onClose, onCreated, returnFocus }: { onClose():
           className="min-h-11 rounded-lg bg-accent px-4 text-sm font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-accent">{t("group.create.create")}</button>
       </div>
     </form>
+    {secret && <SecretGuardDialog finding={secret} onCancel={() => setSecret(null)} onConfirm={() => { setSecret(null); void submit(true); }} />}
   </dialog>, document.body);
 }
