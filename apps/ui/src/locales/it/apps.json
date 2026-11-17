@@ -197,6 +197,8 @@
     "removeAppsOne": "Elenca un'app che hai installato: {{titles}}. Non riceverà più aggiornamenti né rimozioni da questo store.",
     "removeNamed": "Rimuovi {{name}}",
     "removeNone": "Per aggiungerlo di nuovo ti servirà il suo link.",
+    "removeTakenDown": "Ha rimosso app che hai installato: {{titles}}. Rimuovere lo store pone fine a quella rimozione.",
+    "removeTakenDownOne": "Ha rimosso un’app che hai installato: {{titles}}. Rimuovere lo store pone fine a quella rimozione.",
     "removeTitle": "Rimuovere {{name}}?",
     "rollback": "Il link di questo store ora contiene un elenco più vecchio del tuo. Ghostly ha tenuto il tuo.",
     "showMore": "Mostra altre ({{count}})",
