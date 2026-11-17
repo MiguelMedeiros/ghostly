@@ -13,7 +13,7 @@ import { NAME, withName } from "./aroundName";
 import { removedLine } from "./removedLine";
 import { stopReason, stoppedSaid } from "./stoppedSaid";
 import { appErrorCode, appErrorRetryable, appErrorText, appErrorView, appUpdateErrorView, type AppErrorView } from "../../lib/apps/errors";
-import { refreshInstalledApps } from "../../lib/apps/installed";
+import { appStopped, refreshInstalledApps } from "../../lib/apps/installed";
 import { useTryAgain } from "../../lib/apps/tryAgain";
 import { saveAppData } from "../../lib/apps/exportData";
 import { webKitAppLeak } from "../../lib/apps/flag";
@@ -507,9 +507,13 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
   const why = runLine(app.run, t, "apps.app.revokedNext");
   const runId = useId();
   const canRun = app.run.status === "ok";
+  // On the Uninstall question too: the app stopping while it was open was said nowhere (the Apps page leaves it to this
+  // screen). Not for the render in which it may run again, before the effect above clears it: that said "stopped".
+  const stopLine = <p role="status" aria-live="polite" className="sr-only" data-testid="app-stop-said">{toldStop && appStopped(app) ? stoppedSaid(app.title, app.run, t) : ""}</p>;
   if (removing) {
     return (
       <Shell titleId={titleId} onClose={keepIt} testId="app-uninstall">
+        {stopLine}
         <h2 id={titleId} className="text-lg font-medium text-text-primary [overflow-wrap:anywhere]">{withName(t("apps.app.uninstallTitle", { title: NAME }), app.title)}</h2>
         <p className="text-sm text-text-secondary">{t("apps.app.uninstallText")}</p>
         {error && <ErrorLine error={error} />}
@@ -523,7 +527,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
   }
   return (
     <Shell titleId={titleId} describedBy={why ? runId : undefined} onClose={close} testId="app-details" box={box}>
-      <p role="status" aria-live="polite" className="sr-only" data-testid="app-stop-said">{toldStop ? stoppedSaid(app.title, app.run, t) : ""}</p>
+      {stopLine}
       <Head titleId={titleId} title={app.title} version={app.version} tagline={app.tagline} installed={app} />
       <Publisher fingerprint={app.fingerprint} unknown={app.unknownPublisher} listedBy={app.listedBy} builtIn={app.builtIn && "installed"} />
       {why && <Line id={runId} tone={app.run.status === "needs-files" ? "warning" : "danger"} testId="app-run-line">{why}</Line>}
