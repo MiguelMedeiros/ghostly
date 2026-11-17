@@ -240,12 +240,13 @@ export function oneGroupOnly(method: string): boolean {
  * payments), none from a chat's history: `wallet list` took 1.3 s and 239 MB instead of 0.48 s and 146 MB with 50,000
  * messages; `payment list --chat` starts the chat it names. `identity providers` reads nothing of the profile, and
  * `call auto` and `group auto` with no on|off what it keeps: each took 1.6 s and 211 MB instead of 0.8 s and 152 MB
- * with 50,000.
+ * with 50,000. `saved list` reads each saved row by its key, a quoted original by its id and the contact's name from
+ * the chat's record: 1.2 s instead of 0.7 s with 30,000 messages, nothing saved.
  */
 const NO_HISTORY_READS: ReadonlySet<string> = new Set([
   "status", "profile.get", "settings.get", "status.get", "chat.list", "group.list", "group.get", "group.history",
   "call.list", "service.list", "identity.list", "x401.credential.list", "app.served", "wallet.list", "wallet.history",
-  "payment.list", "identity.providers",
+  "payment.list", "identity.providers", "saved.list",
 ]);
 
 /**
