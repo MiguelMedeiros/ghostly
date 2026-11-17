@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { LocalTrackPublication, Participant, RemoteTrackPublication, Room, TrackPublication } from "livekit-client";
+import type { LocalTrackPublication, Participant, RemoteTrackPublication, Room, Track, TrackPublication } from "livekit-client";
 import { callRtcConfig } from "@ghostly/core";
 import { screenShareErrorMessage } from "@ghostly/react";
-import { preferredDevice } from "../lib/mediaDevices";
+import { preferredDevice, trackDevice } from "../lib/mediaDevices";
 import type { GroupCallParticipant, GroupCallState } from "../components/GroupCallView";
 
 /*
@@ -66,9 +66,17 @@ export interface GroupCall extends GroupCallState {
   error: GroupCallError | null;
   /** The status is "left" because the group's admin took you out of the room (WISP 602 § Moderation), not by your own Leave. */
   removedByAdmin: boolean;
+  /** Your microphone's capture, muted or not; null before it was first turned on. Never played: the device checks read it. */
+  micTrack: MediaStreamTrack | null;
   toggleMic: () => Promise<void>;
   toggleCamera: () => Promise<void>;
   toggleScreen: () => Promise<void>;
+  /**
+   * Captures from another microphone or camera (null: the default) in the call's own track, as `useCallDevices` asks.
+   * Off, it is taken when turned on. Rejects when that device would not open: the call goes on with the one it had.
+   */
+  switchMicrophone: (deviceId: string | null) => Promise<void>;
+  switchCamera: (deviceId: string | null) => Promise<void>;
   /** Leaves the room and stops every track this call captured. */
   leave: () => Promise<void>;
 }
@@ -151,7 +159,9 @@ function heldOf(p: Participant): NonNullable<GroupCallParticipant["byAdmin"]> {
 }
 
 const NOBODY: GroupCallParticipant = { identity: "", name: "", mic: false, camera: false, screen: false, speaking: false, tracks: {} };
-const EMPTY: GroupCallState = { participants: [], activeSpeaker: null, local: NOBODY };
+/** What the room shows now, and your own microphone's capture, which no tile carries. */
+type Snapshot = GroupCallState & { micTrack: MediaStreamTrack | null };
+const EMPTY: Snapshot = { participants: [], activeSpeaker: null, local: NOBODY, micTrack: null };
 
 interface Session {
   lk?: LivekitModule;
@@ -173,6 +183,9 @@ interface Session {
   screenAsking: boolean;
   refresh: () => void;
 }
+
+/** The system's default device, as asked of a capture that had a chosen one: browsers without a "default" entry take theirs. */
+const DEFAULT_DEVICE: ConstrainDOMString = { ideal: "default" };
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error ?? "")) || "failed";
 
@@ -204,12 +217,31 @@ function personOf(p: Participant, lk: LivekitModule, local: boolean, sealed: boo
   };
 }
 
-function snapshot(room: Room, lk: LivekitModule, sealed: boolean): GroupCallState {
+function snapshot(room: Room, lk: LivekitModule, sealed: boolean): Snapshot {
   return {
     local: personOf(room.localParticipant, lk, true, sealed),
     participants: [...room.remoteParticipants.values()].map((p) => personOf(p, lk, false, sealed)),
     activeSpeaker: room.activeSpeakers[0]?.identity ?? null,
+    micTrack: room.localParticipant.getTrackPublication(lk.Track.Source.Microphone)?.track?.mediaStreamTrack ?? null,
   };
+}
+
+/**
+ * Captures `source` from `deviceId` (null: the default) through LiveKit's own track: a live capture restarts on it at
+ * once, one turned off takes it when turned on again. Exactly that device, so one that will not open says so; LiveKit
+ * stops the old capture before opening the new, and the one it had is opened again then.
+ */
+async function switchInput(room: Room, source: Track.Source, deviceId: string | null): Promise<void> {
+  const track = room.localParticipant.getTrackPublication(source)?.track;
+  // Never on in this call: turned on, it opens the device chosen then (`preferredDevice`).
+  if (!track) return;
+  const was = trackDevice(track.mediaStreamTrack);
+  try {
+    await track.setDeviceId(deviceId ? { exact: deviceId } : DEFAULT_DEVICE);
+  } catch (error) {
+    if (track.mediaStreamTrack.readyState === "ended" && !track.isMuted) await track.setDeviceId(was ? { ideal: was } : DEFAULT_DEVICE).catch(() => {});
+    throw error;
+  }
 }
 
 /** Takes the shared screen down and stops it; safe to call twice. */
@@ -306,7 +338,7 @@ function admit(pub: RemoteTrackPublication): void {
  * at all: never unsealed. Sealing turned on or off for the group joins the room again.
  */
 export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, newest, loadLivekit, sealWaitMs = SEAL_WAIT_MS }: UseGroupCallOptions): GroupCall {
-  const [state, setState] = useState<GroupCallState>(EMPTY);
+  const [state, setState] = useState<Snapshot>(EMPTY);
   const [status, setStatus] = useState<GroupCallStatus>("idle");
   const [error, setError] = useState<GroupCallError | null>(null);
   const [removedByAdmin, setRemovedByAdmin] = useState(false);
@@ -575,6 +607,18 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
     if (s.sealedStill()) s.refresh();
   }, []);
 
+  const switchTo = useCallback(async (source: "Microphone" | "Camera", deviceId: string | null) => {
+    const s = active();
+    if (!s) throw new Error("This call has no microphone or camera to switch");
+    try {
+      await switchInput(s.room, s.lk.Track.Source[source], deviceId);
+    } finally {
+      if (s.sealedStill()) s.refresh();
+    }
+  }, []);
+  const switchMicrophone = useCallback((deviceId: string | null) => switchTo("Microphone", deviceId), [switchTo]);
+  const switchCamera = useCallback((deviceId: string | null) => switchTo("Camera", deviceId), [switchTo]);
+
   const leave = useCallback(async () => {
     const s = session.current;
     if (!s || s.ended) return;
@@ -582,5 +626,5 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
     setStatus("left");
   }, []);
 
-  return { ...state, status, error, removedByAdmin, toggleMic, toggleCamera, toggleScreen, leave };
+  return { ...state, status, error, removedByAdmin, toggleMic, toggleCamera, toggleScreen, switchMicrophone, switchCamera, leave };
 }
