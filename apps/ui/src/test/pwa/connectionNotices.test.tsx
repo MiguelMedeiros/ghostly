@@ -51,6 +51,32 @@ describe("the reconnecting notice", () => {
     await waitFor(() => expect(screen.queryByTestId("reconnecting-banner")).toBeNull(), { timeout: 3000 });
     expect(engine.reconnecting).toBe(false);
   });
+
+  it("says once that the tab is connected again, on a page whose list is hidden too, and nothing before it was lost", async () => {
+    // The banner goes with nothing said: a screen-reader user who heard "Reconnecting…" never heard it was over.
+    windowIs(true);
+    window.location.hash = "#/settings";
+    render(<Root />);
+    await screen.findByTestId("mobile-tabs");
+    const said = screen.getByTestId("reconnected-said");
+    expect(said).toHaveAttribute("aria-live", "polite");
+    expect(said).toBeEmptyDOMElement();
+
+    fakeEngine.refuse = new Error("The offscreen document did not start");
+    fakeEngine.drop();
+    await waitFor(() => expect(engine.reconnecting).toBe(true), { timeout: 3000 });
+    expect(said).toBeEmptyDOMElement();
+
+    fakeEngine.refuse = null;
+    await waitFor(() => expect(said).toHaveTextContent("Connected to Ghostly again"), { timeout: 3000 });
+    expect(said).toBeVisible();
+
+    // Lost again: the line clears, to be said anew once it is back.
+    fakeEngine.refuse = new Error("The offscreen document did not start");
+    fakeEngine.drop();
+    await waitFor(() => expect(said).toBeEmptyDOMElement(), { timeout: 3000 });
+    window.location.hash = "";
+  });
 });
 
 // covers: extension.reconnecting

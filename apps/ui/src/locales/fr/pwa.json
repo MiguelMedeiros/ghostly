@@ -18,6 +18,7 @@
   "notNow": "Plus tard",
   "offline": "Hors ligne",
   "offlineHint": "Vos discussions sont là. Rien ne part avant votre retour en ligne.",
+  "reconnected": "De nouveau connecté à Ghostly",
   "reconnecting": "Reconnexion…",
   "reconnectingHint": "Cet onglet a perdu Ghostly et réessaie. Les nouveaux messages s'afficheront ici dès son retour.",
   "reconnectingPageHint": "Cet onglet a perdu Ghostly et réessaie. Attendez son retour pour modifier quoi que ce soit ici.",
