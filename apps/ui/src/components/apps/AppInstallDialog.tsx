@@ -13,7 +13,7 @@ import { NAME, withName } from "./aroundName";
 import { removedLine } from "./removedLine";
 import { stopReason, stoppedSaid } from "./stoppedSaid";
 import { appErrorCode, appErrorRetryable, appErrorText, appErrorView, appUpdateErrorView, type AppErrorView } from "../../lib/apps/errors";
-import { refreshInstalledApps } from "../../lib/apps/installed";
+import { appStopped, refreshInstalledApps } from "../../lib/apps/installed";
 import { useTryAgain } from "../../lib/apps/tryAgain";
 import { saveAppData } from "../../lib/apps/exportData";
 import { webKitAppLeak } from "../../lib/apps/flag";
@@ -72,6 +72,11 @@ function runLine(run: AppRunStatus, t: Translate, next: TranslationKey): ReactNo
   if (run.status === "needs-files") return t("apps.app.needsFiles");
   return null;
 }
+
+/** Why a version the person already has cannot be installed again. */
+const HAVE: Partial<Record<AppPreview["install"], TranslationKey>> = {
+  rollback: "apps.install.rollback", equivocation: "apps.install.equivocation", same: "apps.install.same",
+};
 
 // A store's takedown reason (200 characters, which may hold no space: a link) and a store's or contact's name break
 // anywhere: unbroken, a reason pushed the screen 933 px sideways on a phone, its start off the left side in Arabic.
@@ -284,6 +289,8 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
   // The app asks for more than this screen lists, and reading it again failed (offline, the host down): what the screen
   // shows is not what Install would be asked to grant, so Install waits until Try again reads it.
   const [stale, setStale] = useState(false);
+  // Why it waits for Try again (what the read again was for): the screen says that, not that it is ready.
+  const [staleFor, setStaleFor] = useState<"asks" | "expired">("asks");
   const [rechecking, setRechecking] = useState(false);
   const retryButton = useRef<HTMLButtonElement>(null), confirmButton = useRef<HTMLButtonElement>(null);
   // Busy while it reads, its line read out again when it fails again (lib/apps/tryAgain.ts). Once it reads (or fails in
@@ -311,7 +318,7 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
       return null;
     } catch (read) {
       // The read's own failure, said as it is: "look at them again" over the old list had nothing new to look at.
-      setStale(true); setError(appErrorView(read, t));
+      setStale(true); setStaleFor(rereadFor.current); setError(appErrorView(read, t));
       return null;
     }
   };
@@ -360,14 +367,19 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
 
   const shownTitle = preview?.manifest.title ?? title ?? t("apps.title");
   const blocked = preview && (preview.run.status === "revoked" || preview.run.status === "removed" || preview.install === "rollback" || preview.install === "equivocation" || preview.install === "same");
-  const why = preview && (runLine(preview.run, t, "apps.install.revokedNext") ?? (preview.install === "rollback" ? t("apps.install.rollback")
-    : preview.install === "equivocation" ? t("apps.install.equivocation")
-      : preview.install === "same" ? t("apps.install.same") : null));
+  // A version the person has (a newer one, this one, another copy of it) says so after a revocation too: "Look for a
+  // newer version from its publisher" was said to someone who has it.
+  const kept = preview && HAVE[preview.install];
+  const why = preview && (runLine(preview.run, t, kept || "apps.install.revokedNext") ?? (kept ? t(kept) : null));
   // What the check found, said to a screen reader: the focus is on the screen, named by its title only, and the result
   // came in plain lines, so nothing said whether it can be installed. Said from the start (it also describes the
-  // screen), so the change is read out; a failed read says itself (its alert).
+  // screen), so the change is read out; a failed read says itself (its alert). Install off until Try again reads it
+  // (`stale`) is not ready: it says to look at it again, as a read that worked would (`recheck`), once, and stays said
+  // while Try again reads or fails again.
   const saidId = useId();
-  const said = !preview ? !error && t("apps.install.fetching") : blocked ? why : t(preview.install === "update" ? "apps.install.readyUpdate" : "apps.install.ready");
+  const said = !preview ? !error && t("apps.install.fetching") : blocked ? why
+    : stale ? t(staleFor === "expired" ? "apps.errors.expired" : preview.install === "update" ? "apps.errors.permissionsChanged" : "apps.install.asksChanged")
+      : t(preview.install === "update" ? "apps.install.readyUpdate" : "apps.install.ready");
   return (
     <Shell titleId={titleId} describedBy={saidId} onClose={close} testId="app-install">
       <p id={saidId} role="status" className="sr-only" data-testid="app-install-said">{said}</p>
@@ -495,9 +507,13 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
   const why = runLine(app.run, t, "apps.app.revokedNext");
   const runId = useId();
   const canRun = app.run.status === "ok";
+  // On the Uninstall question too: the app stopping while it was open was said nowhere (the Apps page leaves it to this
+  // screen). Not for the render in which it may run again, before the effect above clears it: that said "stopped".
+  const stopLine = <p role="status" aria-live="polite" className="sr-only" data-testid="app-stop-said">{toldStop && appStopped(app) ? stoppedSaid(app.title, app.run, t) : ""}</p>;
   if (removing) {
     return (
       <Shell titleId={titleId} onClose={keepIt} testId="app-uninstall">
+        {stopLine}
         <h2 id={titleId} className="text-lg font-medium text-text-primary [overflow-wrap:anywhere]">{withName(t("apps.app.uninstallTitle", { title: NAME }), app.title)}</h2>
         <p className="text-sm text-text-secondary">{t("apps.app.uninstallText")}</p>
         {error && <ErrorLine error={error} />}
@@ -511,7 +527,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
   }
   return (
     <Shell titleId={titleId} describedBy={why ? runId : undefined} onClose={close} testId="app-details" box={box}>
-      <p role="status" aria-live="polite" className="sr-only" data-testid="app-stop-said">{toldStop ? stoppedSaid(app.title, app.run, t) : ""}</p>
+      {stopLine}
       <Head titleId={titleId} title={app.title} version={app.version} tagline={app.tagline} installed={app} />
       <Publisher fingerprint={app.fingerprint} unknown={app.unknownPublisher} listedBy={app.listedBy} builtIn={app.builtIn && "installed"} />
       {why && <Line id={runId} tone={app.run.status === "needs-files" ? "warning" : "danger"} testId="app-run-line">{why}</Line>}

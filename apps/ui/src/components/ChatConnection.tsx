@@ -2,13 +2,14 @@ import { useOutsideDismiss } from "../hooks/useDismiss";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { useCopyKey } from "../hooks/useCopyKey";
 import { useFocusBack } from "../hooks/useFocusBack";
+import { useSaidSettled } from "../hooks/useSaidSettled";
 import { Link } from "react-router-dom";
 import type { PairedTransport } from "@ghostly/core";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { dots, focus, transportName, type ConnectionKind } from "../lib/connection";
-import { CONTACT, connectionSummary, lasting, liveAttemptText, namedReason, ownTransports, transportWaitText } from "../lib/transportEvents";
+import { CONTACT, connectionSummary, lasting, liveAttemptText, namedReason, transportWaitText } from "../lib/transportEvents";
 import { clockTime, formatAt } from "../lib/time";
 import { fillNames } from "../lib/fillNodes";
 import { ConnectionIcon } from "./ConnectionIcon";
@@ -50,13 +51,6 @@ function liveClosedAt(history: LinkView["transportHistory"]): number | undefined
   }
   return undefined;
 }
-
-/**
- * How long a chat back on Automatic over a relay, with a direct transport both apps run, keeps that unsaid. Automatic
- * moves off it then (WISP 100: Iroh's relay first, then the direct path): 0.25 s between two browsers, about 1 s in the
- * core's restart harness. Still there after this, it is said.
- */
-export const MOVE_QUIET_MS = 3_000;
 
 /** What the connection's label says, before it is put in words: the icon's kind is read from it, not from the words. */
 type LabelState = "status" | "offline" | "issue" | "publication" | "discovery" | "dhtByYou" | "dhtByContact" | "held" | "heldPlain" | "switching" | "dhtWaiting"
@@ -231,21 +225,12 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
       case "connecting": return t("connection.state.connectingDots");
     }
   })();
-  // Back on Automatic over a relay, with a direct transport both apps run: the chat moves there in a moment. Said
-  // aloud, every reload and every return of the contact's app read "Connected · Iroh (relayed)" and then "Connected ·
-  // WebRTC"; it says where it lands, and the relay only if the chat is still on it after MOVE_QUIET_MS. Not on a network
-  // that blocks direct connections (`directBlocked`): the relay is where it lands there.
-  const moving = labelState === "connected" && !directBlocked && !!link?.transportRelayed && !!pair?.transport && link.transportFallback !== false
-    && (link.transportAutomatic ?? link.preferredTransport === undefined) && link.transportLive?.cause !== "contact"
-    && ownTransports(link).some(t => t !== pair.transport && !!link.peerTransports?.includes(t) && !link.relayedTransports?.includes(t));
-  const [spoken, setSpoken] = useState(label), [movingSince, setMovingSince] = useState<number>();
-  if (!moving) { if (movingSince !== undefined) setMovingSince(undefined); if (spoken !== label) setSpoken(label); }
-  else if (movingSince === undefined) setMovingSince(Date.now());
-  useEffect(() => {
-    if (movingSince === undefined) return;
-    const timer = window.setTimeout(() => setSpoken(label), Math.max(0, movingSince + MOVE_QUIET_MS - Date.now()));
-    return () => window.clearTimeout(timer);
-  }, [movingSince, label]);
+  // What the live region says: where the connection settles, once it held for SAID_QUIET_MS. Said at every change, a
+  // link that flapped read each drop and each return ("On DHT", "Connected · WebRTC", ten times in 20 s), and every
+  // reload read "Connected · Iroh (relayed)" before the move to WebRTC a moment later. A trouble of its own (offline, a
+  // connection issue, the relays) is said at once, and so is anything while the region is muted for the scene.
+  const muted = scene && !SAID_BESIDE_SCENE.has(labelState);
+  const spoken = useSaidSettled(label, muted || SAID_BESIDE_SCENE.has(labelState));
   const kind: ConnectionKind = !paired ? (/^Connected/.test(rawStatus) ? "connected" : /issue|unavailable|mismatch/.test(rawStatus) ? "failure" : rawStatus === "Offline" ? "offline" : "waiting")
     : !online ? "offline" : peerLost ? "waiting" : failing ? "failure" : failure ? "waiting" : labelState === "pairing" ? (pairingFailed ? "failure" : "waiting") : waitOff && (pair?.transitionTarget || !textDht) ? "waiting" : dht || textDht || labelState === "onDht" || labelState === "dhtByContact" ? "dht" : ready && !pair?.transitionTarget ? "connected" : "waiting";
   const connecting = kind === "waiting" && (labelState === "connecting" || !!pair?.transitionTarget);
@@ -446,7 +431,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   </span>
   {/* Off, not emptied, while the scene speaks: the scene going away then says nothing new. A failure the scene does not
       tell (the relays, the connection, offline) is still said here. */}
-  <span className="sr-only" aria-live={scene && !SAID_BESIDE_SCENE.has(labelState) ? "off" : "polite"}>{spoken}</span>
+  <span className="sr-only" aria-live={muted ? "off" : "polite"}>{spoken}</span>
   </div>;
 }
 
