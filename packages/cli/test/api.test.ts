@@ -1048,10 +1048,10 @@ describe("chat wait", () => {
   });
 
   it("a timeout names the state in words that read: text is carried, not been", async () => {
-    // It read "waiting for chat chat-one to be text".
+    // It read "waiting for chat chat-one to be text": the chat by its id too, where the person named it Alice.
     const { ctx } = moving(remembered({ textDelivery: "unavailable" }));
-    await expect(callApi(ctx, "chat.wait", { chat: "Alice", until: "text", timeout: 1 })).rejects.toMatchObject({ code: "timeout", message: "Timed out after 1 s waiting for chat chat-one to carry text" });
-    await expect(callApi(ctx, "chat.wait", { chat: "Alice", until: "live", timeout: 1 })).rejects.toMatchObject({ code: "timeout", message: "Timed out after 1 s waiting for chat chat-one to be live" });
+    await expect(callApi(ctx, "chat.wait", { chat: "Alice", until: "text", timeout: 1 })).rejects.toMatchObject({ code: "timeout", message: "Timed out after 1 s waiting for chat Alice to carry text" });
+    await expect(callApi(ctx, "chat.wait", { chat: "Alice", until: "live", timeout: 1 })).rejects.toMatchObject({ code: "timeout", message: "Timed out after 1 s waiting for chat Alice to be live" });
   });
 
   it("a chat removed while it is waited for answers not_found at once, not a timeout at the end", async () => {
