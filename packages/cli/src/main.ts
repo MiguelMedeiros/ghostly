@@ -620,7 +620,7 @@ export const SPECIAL: [usage: string, summary: string, options?: Record<string, 
   ["identity add <provider> [subject] [--signer id] [--field name=value]... [--stdin] [--days n] [--timeout s]", "Make an identity proof (a tool's or a published one finishes with identity complete)", {
     signer: o("string", "Which signer makes the proof (identity providers lists them)"), field: o("list", "A field of the provider's form, name=value"),
     stdin: o("boolean", "Take the fields as name=value lines on stdin (a signer's link: out of ps and the shell's history)"),
-    days: o("number", "How long the proof holds"), timeout: o("number", "Seconds to wait for an approval"),
+    days: o("number", "How long the proof holds"), timeout: o("number", "Seconds to wait for an approval (default 300, 5 to 3600; Pubky at most 300)"),
   }],
   ["version", "This CLI's version (also ghostly --version)"],
 ];
