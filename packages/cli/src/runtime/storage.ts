@@ -241,6 +241,8 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   let holdsRatchet = false;
   /** The journal holds a delete of a chat or a message (or a settings write), and what came before it with it. */
   let holdsDelete = false;
+  /** The exports under way (a backup's), each holding rows.db as it was when it began (`openTreeReader`). */
+  const exporting = new Set<Promise<void>>();
   const pending = new WeakMap<unknown[], Op[]>();
 
   const snapshotPath = join(dir, SNAPSHOT);
@@ -720,6 +722,9 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     // commit meanwhile wait behind it in the queue (`append`), so the journal it replaces gets none of them.
     const file = await open(temporary, "w", 0o600);
     try { await writeSnapshotTo(file, snapshot); await file.sync(); } finally { await file.close(); }
+    // A scrub's checkpoint stops at an export's reader: rows.db kept the pages from before it, a purged text in them,
+    // after `message delete --purge` answered. None begins between this wait and the checkpoint: no turn passes.
+    while (scrub && trees && exporting.size) await Promise.allSettled(exporting);
     if (trees) {
       // Every transaction the snapshot holds goes to the trees, and to the disk, in the turn the snapshot takes the
       // journal's place: also one whose entry waits behind this snapshot in the queue (the snapshot holds what it did
@@ -785,6 +790,8 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     async compact(options) {
       // After the transactions running now: the fold is whole.
       await settled();
+      // A scrub waits for the exports under way here, out of the queue: the writes meanwhile do not wait with it.
+      while (options?.scrub && exporting.size) await Promise.allSettled(exporting);
       // The caller reads the snapshot next (a backup): a fold that failed is its failure, not a line on stderr.
       let thrown: { error: unknown } | null = null;
       await enqueue(() => writeSnapshot(options?.scrub).catch((error: unknown) => { thrown = { error }; throw error; }));
@@ -805,8 +812,12 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     async exportSnapshot(path: string) {
       await settled();
       // Written and synced off the thread: 215 ms of the export of 100,000 messages, in one turn when it was sync.
-      const file = await open(path, "w", 0o600);
-      try { await exportTo(file); await file.sync(); } finally { await file.close(); }
+      const run = (async () => {
+        const file = await open(path, "w", 0o600);
+        try { await exportTo(file); await file.sync(); } finally { await file.close(); }
+      })();
+      exporting.add(run);
+      try { await run; } finally { exporting.delete(run); }
     },
   };
 }

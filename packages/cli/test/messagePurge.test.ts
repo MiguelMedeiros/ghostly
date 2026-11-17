@@ -1,4 +1,5 @@
-import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { createReadStream, mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
@@ -125,5 +126,34 @@ describe("message delete --purge", () => {
     await put({ linkId: "chat-one", id: "peer_4", text: `last: ${SECRET}`, sender: "peer", timestamp: 5, via: "datalink" });
     await expect(callApi(ctx, "chat.delete", { chat: "group:g1", message: "k:1:0", everyone: true, wait: "confirmed", purge: true })).rejects.toMatchObject({ code: "bad_request", details: undefined });
     expect(holding()).toContain("journal.bin");
+  });
+
+  // A FIFO nobody reads yet holds the export where it is, rows.db read as it was when it began.
+  it.skipIf(process.platform === "win32")("during a backup's export, answers once the export ends, nothing of the text left in rows.db", async () => {
+    const ctx = fake();
+    // A secret of its own: the one above is still in a message here.
+    const backedUp = "sk-made-up-backed-up-fedcba9876543210";
+    const holds = () => readdirSync(dir).filter((file) => readFileSync(join(dir, file)).includes(backedUp));
+    await put({ linkId: "chat-one", id: "peer_5", text: `under a backup: ${backedUp}`, sender: "peer", timestamp: 6, via: "datalink" });
+    // Past a pipe's buffer, so the export waits on its writes.
+    for (let i = 0; i < 300; i++) await put({ linkId: "chat-one", id: `filler_${i}`, text: "x".repeat(1000), sender: "peer", timestamp: 7 + i, via: "datalink" });
+    await store.compact();
+    expect(holds()).toEqual(["rows.db"]);
+    const fifo = join(mkdtempSync(join(tmpdir(), "ghostly-purge-export-")), "store.bin");
+    execFileSync("mkfifo", [fifo]);
+    const exported = store.exportSnapshot(fifo);
+    const out = createReadStream(fifo);
+    out.pause();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    let held: string[] | null = null;
+    const purge = callApi(ctx, "chat.delete", { chat: "Alice", message: "peer_5", purge: true }).then((answer) => { held = holds(); return answer; });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    // Not while the export holds rows.db: its checkpoint would stop there, the text kept in rows.db's pages.
+    expect(held).toBeNull();
+    out.resume();
+    // Read whole, then refused at its sync: a FIFO has nothing to sync.
+    await expect(exported).rejects.toMatchObject({ code: "EINVAL" });
+    expect(await purge).toEqual({ chat: "chat-one", messageId: "peer_5", deleted: "peer_5", everyone: false, purged: true });
+    expect(held).toEqual([]);
   });
 });
