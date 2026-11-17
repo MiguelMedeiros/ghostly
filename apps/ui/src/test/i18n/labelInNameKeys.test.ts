@@ -15,6 +15,9 @@ const PAIRS = [
   { where: "the list's Join button", shown: "sidebar.join", name: "join.submit" },
   { where: "Network's Reset for the relays", shown: "network.reset", name: "network.resetRelays" },
   { where: "Network's Reset for the Iroh relays", shown: "network.reset", name: "network.resetIroh" },
+  { where: "a group member's Hand over admin", shown: "group.members.makeAdmin", name: "group.members.makeAdminLabel" },
+  { where: "a group member's Remove", shown: "group.members.remove", name: "group.members.removeLabel" },
+  { where: "a contact's Invite to the group", shown: "group.members.inviteAction", name: "group.members.inviteLabel" },
 ] as const;
 
 describe.each(LANGUAGES)("in %s, a button's name holds the word it shows", (language) => {

@@ -27,6 +27,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
 import { initial } from "../lib/initial";
+import { isolate } from "../lib/ownStatus";
 
 /** The focus fell to the page: what had it went away. */
 const focusLost = () => !document.activeElement || document.activeElement === document.body;
@@ -207,7 +208,7 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
     <ul ref={list} tabIndex={-1} className="mt-3 max-h-56 space-y-1 overflow-y-auto rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-accent" data-testid="group-member-list">
       {live.members.map(m => <MemberRow key={m.key} member={m} focused={m.key === focusKey} out={out} viaHub={viaHubs(m)} photo={photoOf(m)} myNick={m.me ? myNick : undefined}
         peerKey={m.me ? undefined : contactKey(m.key)} status={m.me || out ? "" : viaHubs(m) ? t("group.member.viaHub") : edgeLabel(m, now, t, since)}
-        tools={!live.isAdmin || m.me ? "" : hubChoice ? "hubs" : "admin"} busy={busy !== null} onHub={setHub} onPromote={setPromoting} onRemove={setRemoving} />)}
+        tools={!live.isAdmin || m.me ? "" : hubChoice ? "hubs" : "admin"} sameName={sameNamed(live.members).has(m.key)} busy={busy !== null} onHub={setHub} onPromote={setPromoting} onRemove={setRemoving} />)}
     </ul>
     {/* What being a hub means, once under the list: it was a tooltip on each badge, which a phone never shows. */}
     {live.members.some(m => m.hub) && <p data-testid="group-hubs-why" className="mt-1 text-xs text-text-muted">{t("group.hubs.note")}</p>}
@@ -226,6 +227,7 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
             {pending ? <span className="text-xs text-text-muted">{t("group.members.invited")}</span>
               : !link.groups ? <span className="text-xs text-text-muted">{link.dataLink === "open" ? t("group.members.needsUpdate") : t("group.members.notConnected")}</span>
               : <button disabled={!can} aria-disabled={busy !== null || undefined} onClick={() => invite(link.id)} data-testid="group-invite"
+                aria-label={t("group.members.inviteLabel", { name: isolate(contactName(link)) })}
                 className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] disabled:opacity-40 aria-disabled:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.members.inviteAction")}</button>}
           </li>;
         })}
@@ -263,6 +265,8 @@ interface MemberRowProps {
   status: string;
   /** What the admin can do about them: nothing, hand over and remove, and with hubs their role as one. */
   tools: "" | "admin" | "hubs";
+  /** Another member shows their name too: their buttons tell them apart by the end of their key, as the questions do. */
+  sameName: boolean;
   /** Something is being done in the dialog: nothing else starts. */
   busy: boolean;
   onHub(key: string, role: HubRole): void;
@@ -280,8 +284,11 @@ function sameRow(a: MemberRowProps, b: MemberRowProps): boolean {
  * One member of the list. Drawn again only when what it shows changed: a community has up to 256 of them, and the
  * engine sends a state up to 20 times a second, most of which change no member.
  */
-const MemberRow = memo(function MemberRow({ member: m, focused, out, viaHub, photo, myNick, peerKey, status, tools, busy, onHub, onPromote, onRemove }: MemberRowProps) {
+const MemberRow = memo(function MemberRow({ member: m, focused, out, viaHub, photo, myNick, peerKey, status, tools, sameName, busy, onHub, onPromote, onRemove }: MemberRowProps) {
   const { t } = useI18n();
+  // Whose Hand over admin and Remove are, as a screen reader says them down the list ("Remove Bob"): the button shows its
+  // word alone, and every row's read the same. The name is isolated, so a Latin one keeps its direction in Arabic.
+  const whose = tools ? isolate(memberName(m, t, sameName ? new Set([m.key]) : undefined)) : "";
   const hubLabels = { auto: t("group.hubs.auto"), pin: t("group.hubs.pin"), exclude: t("group.hubs.exclude") };
   return <li data-testid="group-member" data-key={m.key} data-role={m.role} data-focused={focused || undefined}
     className={`flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg px-2 py-1.5 hover:bg-surface-hover ${focused ? "bg-surface-hover ring-1 ring-accent/60" : ""}`}>
@@ -302,9 +309,9 @@ const MemberRow = memo(function MemberRow({ member: m, focused, out, viaHub, pho
     {tools && <span data-testid="group-member-actions" className="ms-auto flex shrink-0 items-center gap-1 max-md:gap-2">
       {tools === "hubs" && <Select size="sm" fit aria-label={t("group.hubs.choice")} data-testid="group-member-hub-role" busy={busy}
         value={m.hubRole ?? "auto"} options={HUB_ROLES.map(value => ({ value, label: hubLabels[value] }))} onChange={role => onHub(m.key, role)} />}
-      <button disabled={busy} onClick={() => onPromote(m)} data-testid="group-make-admin"
+      <button disabled={busy} onClick={() => onPromote(m)} data-testid="group-make-admin" aria-label={t("group.members.makeAdminLabel", { name: whose })}
         className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-surface-alt hover:text-text-primary disabled:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.members.makeAdmin")}</button>
-      <button disabled={busy} onClick={() => onRemove(m)} data-testid="group-remove-member"
+      <button disabled={busy} onClick={() => onRemove(m)} data-testid="group-remove-member" aria-label={t("group.members.removeLabel", { name: whose })}
         className="rounded px-2 py-1 text-xs text-danger-ink hover:bg-danger/10 disabled:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.members.remove")}</button>
     </span>}
   </li>;
