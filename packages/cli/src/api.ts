@@ -159,20 +159,21 @@ const codePoints = (text: string, index: number) => [...text.slice(0, index)].le
 const NAME_CHAR = String.raw`[\p{L}\p{M}\p{N}_]`;
 
 /**
- * Where `@name` first stands in `text`, without regard to case, or null. `whole`: only where no name character
- * follows it, so `@Al` is not the start of `@Alice`. The regex's case folding keeps each character's length, so the
- * match is a place in the text as written: one found in `text.toLowerCase()` came a character late after a letter
- * that lowercases longer ("İ").
+ * Where `@name` first stands whole in `text` (no name character after it, so `@Al` is not the start of `@Alice`),
+ * without regard to case, or null. The regex's case folding keeps each character's length, so the match is a place
+ * in the text as written: one found in `text.toLowerCase()` came a character late after a letter that lowercases
+ * longer ("İ").
  */
-function mentionIn(text: string, name: string, whole: boolean): RegExpExecArray | null {
+function mentionIn(text: string, name: string): RegExpExecArray | null {
   const literal = name.replace(/[\\^$.*+?()[\]{}|/]/g, "\\$&");
-  return new RegExp(`@${literal}${whole ? `(?!${NAME_CHAR})` : ""}`, "iu").exec(text);
+  return new RegExp(`@${literal}(?!${NAME_CHAR})`, "iu").exec(text);
 }
 
 /**
  * Mentions for a group message: each ref (a member key, a unique prefix of one, a member's name, or `everyone`) must
- * be written in the text as `@<name>` (or `@<key>`, `@<key prefix>`, `@everyone`); the first such place that stands
- * whole is the mention (with none whole, the first place one starts a longer word, as before). A ref
+ * be written whole in the text as `@<name>` (or `@<key>`, `@<key prefix>`, `@everyone`); the first such place is the
+ * mention. Only the start of a longer word (`@Alice` for `Al`, `@Allan` for `all`) is not written: refused, where
+ * before the mention went on it. A ref
  * more than one member answers to, none does, or this profile itself (`myName`: reads its own name, only for a ref no
  * member answers to) is refused as `group remove` refuses it: before, its own name was "No member", and two members
  * of one name gave no key. `groupRef`: the group as the command named it, for the refusal's hint.
@@ -192,8 +193,7 @@ export function mentionsFor(text: string, refs: readonly string[], group: GroupV
       key = matches[0].key;
       spelled = [matches[0].nick?.trim(), ref, key, key.slice(0, 8)].filter((s): s is string => !!s);
     }
-    const first = (whole: boolean) => spelled.map((name) => mentionIn(text, name, whole)).find((m) => m !== null);
-    const found = first(true) ?? first(false);
+    const found = spelled.map((name) => mentionIn(text, name)).find((m) => m !== null);
     if (!found) throw new CliError("bad_request", `Write @${spelled[0]} in the text to mention ${ref}`);
     out.push({ k: key, o: codePoints(text, found.index), l: [...found[0]].length });
   }

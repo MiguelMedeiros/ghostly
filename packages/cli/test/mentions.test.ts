@@ -75,11 +75,14 @@ describe("group mentions", () => {
     expect(mentionsFor(`@${AL.slice(0, 8)} hi`, ["Al"], crew)).toEqual([{ k: AL, o: 0, l: 9 }]);
   });
 
-  // No whole @name anywhere: the first place it starts a longer word, as before (a send that went still goes).
-  it("with no whole @name, the start of a longer one is still taken", () => {
-    expect(mentionsFor("ping @Alice", ["Al"], crew)).toEqual([{ k: AL, o: 5, l: 3 }]);
-    expect(mentionsFor("@Allan hi", ["everyone"], crew)).toEqual([{ k: "*", o: 0, l: 4 }]);
+  // No whole @name anywhere: the mention went on the start of a longer one ("@Alice" for Al, "@Allan" for everyone).
+  it("only the start of a longer word is not the @name: refused", async () => {
+    expect(() => mentionsFor("ping @Alice", ["Al"], crew)).toThrow(expect.objectContaining({ code: "bad_request", message: "Write @Al in the text to mention Al" }));
+    expect(() => mentionsFor("@Allan hi", ["everyone"], crew)).toThrow(expect.objectContaining({ code: "bad_request", message: "Write @everyone in the text to mention everyone" }));
     expect(() => mentionsFor("ping Al", ["Al"], crew)).toThrow(expect.objectContaining({ code: "bad_request", message: "Write @Al in the text to mention Al" }));
+    const { ctx, node } = fake();
+    await expect(callApi(ctx, "group.send", { group: "Crew", text: "ping @Alice", mentions: ["Al"] })).rejects.toMatchObject({ code: "bad_request", message: "Write @Al in the text to mention Al" });
+    expect(node.sendGroupMessage).not.toHaveBeenCalled();
   });
 
   it("group send hands the engine the mention on the whole @name", async () => {
