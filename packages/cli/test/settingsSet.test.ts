@@ -67,4 +67,16 @@ describe("settings set", () => {
     expect(ok(await ghostly(["--home", dir, "settings", "get"])).hyperdhtRelay).toBe("");
     expect(ok(await ghostly(["--home", dir, "settings", "set", "hyperdhtRelay", "wss://relay.example"])).hyperdhtRelay).toBe("wss://relay.example");
   });
+
+  it("says on stderr that the CLI's own HyperDHT does not dial through the HyperDHT relay it keeps", { timeout: 60_000 }, async () => {
+    // It answered ok and showed the relay as in effect, while the CLI kept dialling HyperDHT from its own address.
+    const dir = home("settings-hyperdht-relay-unused");
+    const result = await ghostly(["--home", dir, "settings", "set", "hyperdhtRelay", "wss://relay.example"]);
+    const set = ok(result);
+    expect(set.hyperdhtRelay).toBe("wss://relay.example");
+    expect(Object.hasOwn(set, "warning")).toBe(false);
+    expect(result.stderr).toContain("ghostly: This CLI runs HyperDHT itself and does not dial through hyperdhtRelay");
+    // Clearing it says nothing.
+    expect((await ghostly(["--home", dir, "settings", "set", "hyperdhtRelay", '""'])).stderr).not.toContain("hyperdhtRelay");
+  });
 });

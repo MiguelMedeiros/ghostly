@@ -507,8 +507,13 @@ const METHODS: Record<string, Method> = {
         patch[key] = servers;
         // libdatachannel (libjuice) skips TURN over TCP and TLS without a word; the apps' browsers use them, so they stay.
         const unused = servers.flatMap((server) => server.urls.split(/[\s,]+/)).filter((url) => /^turns:|\?transport=tcp$/i.test(url));
-        if (unused.length) warning = `The CLI reaches TURN over UDP only: it does not use ${unused.join(", ")} (the apps do). Add a turn: server over UDP for the CLI`;
+        if (unused.length) warning = (warning ? `${warning}. ` : "") + `The CLI reaches TURN over UDP only: it does not use ${unused.join(", ")} (the apps do). Add a turn: server over UDP for the CLI`;
         continue;
+      }
+      // The CLI hands the engine a HyperDHT of its own (runtime/engine.ts), which dials from this machine: the engine takes
+      // the relay only under "Hide my IP from contacts", not the CLI's yet (`engine.call`). Kept for the apps, said here.
+      if (key === "hyperdhtRelay" && value) {
+        warning = (warning ? `${warning}. ` : "") + "This CLI runs HyperDHT itself and does not dial through hyperdhtRelay: it uses it only with Hide my IP from contacts, which comes in a later release. It is kept for the apps this profile moves to";
       }
       patch[key] = value;
     }
