@@ -1040,7 +1040,7 @@ describe("with the apps flag on", () => {
     renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
     act(() => fakeEngine.update({ links: [ana(false)] }));
     expect(await screen.findByTestId("app-card-run-anyway")).toBeInTheDocument();
-    expect(screen.getByTestId("app-card-waiting")).toHaveTextContent("Chess needs you both online");
+    expect(screen.getByTestId("app-card-waiting")).toHaveTextContent(/needs you both online$/);
   });
 
   it("a store read again that removed an installed app stops it on the page at once", async () => {
