@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AWAITING_PEER_MS, OwnInviteError, type PairingProgress } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { callApi, findChat, findGroup, hideStateSecrets, mentionsFor, redactSettings, type ApiContext } from "../src/api";
-import { chatOrGroup, findChatOrGroup, findOwnNamedChat } from "../src/apiKit";
+import { chatOrGroup, findChatOrGroup, findOwnNamedChat, noFile, noMessage } from "../src/apiKit";
 import { parseArgs } from "../src/args";
 import { COMMANDS } from "../src/commands";
 import { ENGINE_PARAMS } from "../src/engineMethods";
@@ -294,6 +294,25 @@ describe("chats", () => {
     const respelled = KEY.slice(0, 51) + "t";
     expect(refused([link("chatMallory", { peerNick: respelled })], respelled)).toMatchObject({ code: "bad_request", message: expect.stringMatching(/not a contact key/) });
     expect(findChatOrGroup([asName], [room], "ggg")).toEqual({ group: room });
+  });
+
+  // `ghostly send "$TOKEN" bob` (the words swapped) answered `No chat "cashuB…"`, and bots keep the output.
+  it("a ref that names nothing is not repeated when it is long or looks secret, as a refusal of a value is not", () => {
+    const TOKEN = `cashuB${"o2FteCJodHRwczovL21pbnQ".repeat(4)}`;
+    const NSEC = "nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5";
+    const LONG = "a sentence typed in the wrong place, longer than forty";
+    const message = (run: () => unknown) => { try { run(); } catch (error) { return (error as Error).message; } };
+    const room = { ...group, id: "r".repeat(22), name: "Team" } as unknown as GroupView;
+    const place = { group: false, ref: "alice" };
+    for (const [ref, shown] of [[TOKEN, "(a Cashu token)"], [NSEC, "(a private key)"], [LONG, `(a ${LONG.length}-character word)`]]) {
+      expect(message(() => findChat([link("chatA", { label: "alice" })], ref))).toBe(`No chat ${shown} (ghostly chat list)`);
+      expect(message(() => findGroup([room], ref))).toBe(`No group ${shown} (ghostly group list)`);
+      expect(message(() => findChatOrGroup([link("chatA", { label: "alice" })], [room], ref))).toBe(`No chat or group ${shown} (ghostly chat list, ghostly group list)`);
+      expect(message(() => { throw noMessage(ref, place); })).toBe(`No message ${shown} in this chat (ghostly chat history alice)`);
+      expect(message(() => { throw noFile(ref, place); })).toBe(`No file ${shown} in this chat (ghostly file list alice)`);
+    }
+    // A short word is quoted as before.
+    expect(message(() => findChat([], "zed"))).toBe('No chat "zed" (ghostly chat list)');
   });
 
   it("a ref shaped as a chat's id is that chat or none: never a contact's own name, a group's name or a group's prefix", () => {
