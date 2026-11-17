@@ -143,4 +143,26 @@ describe("file actions on an ended 1:1 transfer", () => {
       details: { reason: "no_room", room: 40_714_240 },
     });
   });
+
+  /**
+   * On a nearly full disk, where this refusal is met: sizes under a megabyte read "(0.1 MB) does not fit: 0 MB free",
+   * or the same 0.1 MB on both sides, where the engine's line (released) said "48.0 KB free".
+   */
+  it("accept refused for no room on a nearly full disk names sizes under a megabyte in KB, not 0 MB", async () => {
+    const id = "chat-one-in-small";
+    await fileStore.put({ id, linkId: "chat-one", createdAt: 1, direction: "in", metadata: { name: "notes.txt", size: 61_440, mime: "text/plain", timestamp: 1 }, transfer: { state: "transferring", transferred: 0, size: 61_440 } } as never);
+    const { ctx, node } = world({ [id]: { state: "transferring", stage: "asking", transferred: 0, size: 61_440, direction: "in", room: 49_152 } as FileTransferView });
+    node.fileAction.mockRejectedValueOnce(Object.assign(new Error("No room on this device for this file (48.0 KB free)"), { room: 49_152, size: 61_440, coming: 0 }));
+    await expect(callApi(ctx, "file.action", { file: id, action: "accept" })).rejects.toMatchObject({
+      message: `notes.txt (61 KB) does not fit: 49 KB free. Free some space, then ghostly file accept ${id} again (or file decline)`,
+    });
+    node.fileAction.mockRejectedValueOnce(Object.assign(new Error("No room on this device for this file (48.0 KB free)"), { room: 49_152, size: 40_960, coming: 20_480 }));
+    await expect(callApi(ctx, "file.action", { file: id, action: "accept" })).rejects.toMatchObject({
+      message: `notes.txt (41 KB) does not fit: 49 KB free, and 20 KB of files still coming need it first. Free some space, then ghostly file accept ${id} again (or file decline)`,
+    });
+    node.fileAction.mockRejectedValueOnce(Object.assign(new Error("No room on this device for this file (0 B free)"), { room: 0, size: 512, coming: 0 }));
+    await expect(callApi(ctx, "file.action", { file: id, action: "accept" })).rejects.toMatchObject({
+      message: `notes.txt (512 B) does not fit: 0 B free. Free some space, then ghostly file accept ${id} again (or file decline)`,
+    });
+  });
 });
