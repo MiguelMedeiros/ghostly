@@ -14,6 +14,7 @@ import { transportName } from "./connection";
 import { ago } from "./time";
 import { english } from "./english";
 import { relayCause } from "./problemText";
+import { listText } from "./listText";
 import type { Translate } from "../contexts/I18nContext";
 
 /** Whether a group's name is one `groupName` takes whole: characters (`MAX_GROUP_NAME_LENGTH`) and bytes (`MAX_GROUP_NAME_BYTES`). */
@@ -203,7 +204,7 @@ export function groupTransports(members: GroupMemberView[], t: Translate = engli
   const head = hubbed ? t("group.transports.liveHubs", { live: live.length + hubbed, total: others.length, hubs: hubbed })
     : t("group.transports.live", { live: live.length, total: others.length });
   if (counts.size === 1) { const [transport] = counts.keys(); return { line: t("group.transports.over", { head, transport: transportName(transport) }), transport }; }
-  return { line: t("group.transports.mixed", { head, list: [...counts].sort((a, b) => b[1] - a[1]).map(([kind, n]) => `${n} ${transportName(kind)}`).join(", ") }) };
+  return { line: t("group.transports.mixed", { head, list: listText([...counts].sort((a, b) => b[1] - a[1]).map(([kind, n]) => `${n} ${transportName(kind)}`), t) }) };
 }
 
 /**

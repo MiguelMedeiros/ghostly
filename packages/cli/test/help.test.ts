@@ -46,6 +46,9 @@ describe("help", () => {
     expect(send.stdout).toContain("everything after it is the text, options included");
     expect((await ghostly(["help", "group", "send"])).stdout).toContain("Put options before --.");
     expect(daemon.stdout).not.toContain("Put options before --.");
+    // A refusal and a default the README gave and the help did not.
+    expect((await ghostly(["help", "file", "accept"])).stdout).toContain("refused when it does not fit in the room left on this device, and it keeps waiting");
+    expect((await ghostly(["help", "identity", "add"])).stdout).toMatch(/--timeout <n>\s+Seconds to wait for an approval \(default 300, 5 to 3600; Pubky at most 300\)/);
   });
 
   it("an unknown command is a usage error; plain help is the whole list", async () => {

@@ -121,6 +121,10 @@ describe("GroupEdits on its own", () => {
     expect(await edits.edit("g1", mine(0).id, "   ")).toMatchObject({ refused: true, error: expect.stringMatching(/cannot be empty/) });
     expect(await edits.edit("g1", mine(0).id, "x".repeat(16 * 1024 + 1))).toMatchObject({ refused: true, error: expect.stringMatching(/exceeds/) });
     expect(await edits.edit("g1", mine(2).id, "one more")).toMatchObject({ refused: true, error: expect.stringMatching(/100 times/) });
+    // Whether the message is there at all, with each refusal once it was looked for: the CLI tells "not found" by it.
+    expect(await edits.edit("g1", bobs(0).id, "mine now")).toMatchObject({ missing: false });
+    expect(await edits.edit("g1", mine(0).id, "   ")).toMatchObject({ missing: false });
+    expect(await edits.edit("g1", "nobody:9:9", "x")).toEqual({ error: "Only your own text messages can be edited", refused: true, missing: true });
   });
 
   it("refuses to edit or delete for everyone a text of mine written under the member key I had before I was removed and invited back", async () => {

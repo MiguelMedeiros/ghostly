@@ -21,10 +21,14 @@ export interface SwitchPlan {
   upgrade?: boolean;
 }
 /**
- * The contact's policies read per window. A choice, a retry or a session's start each say one, so a handful a minute;
- * every one read may plan a move this side dials. Past that only the newest waits, read once the window has room.
+ * The contact's policies read per window. A choice, a retry or a session's start each say one; every one read may plan
+ * a move this side dials. Past that only the newest waits, read once the window has room.
+ * A person moving the chat back and forth as fast as it goes says one per move, and a move back to the transport just
+ * left waits for its old session to retire (`SWITCH_RETIRE_MS`): about 20 a minute. At 10, the 11th move in a minute
+ * waited for the window: 50 s when the side that chose plans the moves (its plan, for a policy the contact had not read
+ * yet, timed out after 30 s and was tried again 20 s later), 4 of 50 back-to-back moves between two CLIs.
  */
-export const POLICY_RECEIVE_LIMIT = 10, POLICY_RECEIVE_WINDOW_MS = 60_000;
+export const POLICY_RECEIVE_LIMIT = 30, POLICY_RECEIVE_WINDOW_MS = 60_000;
 export const allowedTransports = (policy: TransportPolicy) => transportOrder(policy.available, policy.preferred, policy.fallback);
 /** The first ranked transport that is not relayed. */
 const directFirst = (ranked: readonly PairedTransport[], relayed: readonly string[]) => ranked.find(t => !relayed.includes(t));

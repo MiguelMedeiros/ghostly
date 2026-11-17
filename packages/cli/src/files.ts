@@ -339,6 +339,16 @@ async function waitForFile(ctx: ApiContext, params: Params, stopping?: AbortSign
   return { ...where, file: fileId, state: "done", size: transfer.size };
 }
 
+/**
+ * `file accept` of a file that does not fit the room left beside the files still coming (`FileDesk.accept`), in this
+ * CLI's MB: the engine's line gave the room in binary MB beside a size in decimal ones, and neither the files still
+ * coming that take the rest nor the way out.
+ */
+function noRoomWords(fileId: string, name: string | undefined, size: number, room: number, coming: number): string {
+  const rest = coming > 0 ? `, and ${megabytes(coming)} of files still coming need it first` : "";
+  return `${name ?? "The file"} (${megabytes(size)}) does not fit: ${megabytes(room)} free${rest}. Free some space, then ghostly file accept ${fileId} again (or file decline)`;
+}
+
 /** A received file that waits for this person's `file accept` (`file wait`, `file save`): said naming the command. */
 function waitsForYou(name: string | undefined, fileId: string, where: { chat: string } | { group: string } | undefined, size: number): CliError {
   return new CliError("confirm", `${name ?? "The file"} (${megabytes(size)}) waits for you to take it: ghostly file accept ${fileId} (or file decline)`, { file: fileId, ...where, size, stage: "asking" });
@@ -488,7 +498,16 @@ export const FILE_METHODS: Record<string, Method> = {
     if ((action === "pause" || action === "resume" || action === "request") && view?.stage === "asking" && view.direction === "in") {
       throw new CliError("refused", "Not taken yet: it waits for you to take it (file accept, or file decline)");
     }
-    await node(ctx).fileAction({ linkId, fileId, action });
+    // Larger than the room this device has left now (`FileDesk.accept`): not started, it keeps waiting for the answer.
+    try {
+      await node(ctx).fileAction({ linkId, fileId, action });
+    } catch (error) {
+      const { room, size, coming } = (error ?? {}) as { room?: unknown; size?: unknown; coming?: unknown };
+      if (action === "accept" && error instanceof Error && typeof room === "number" && error.message.startsWith("No room on this device")) {
+        throw new CliError("refused", noRoomWords(fileId, (await fileStore.get(fileId).catch(() => undefined))?.metadata?.name, typeof size === "number" ? size : view?.size ?? 0, room, typeof coming === "number" ? coming : 0), { reason: "no_room", room });
+      }
+      throw error;
+    }
     return { ...where, file: fileId, action, transfer: state(ctx).transfers[fileId] ?? null };
   },
 

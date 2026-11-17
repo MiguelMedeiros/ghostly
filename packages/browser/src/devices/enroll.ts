@@ -10,7 +10,7 @@ import { DeviceSetError, deviceIdentity, firstTurn, openTurnKeeper } from "./set
 import { createDeviceSigningKey, type DeviceSigningKey } from "./signingKey";
 import { MAX_DEVICES, MAX_UNFINISHED_GRANTS, type DeviceRecord, type DeviceSlot, type UnfinishedGrant } from "./state";
 import { amendDevice, enrollDevice, readDeviceRecord } from "./store";
-import { deviceSetOf, type TurnKeeper } from "./turn";
+import { adoptedSet, deviceSetOf, type TurnKeeper } from "./turn";
 
 /*
  * Adding a device (WISP 06 § Adding a device): `enroll/1` over a one-time session that a device code opens.
@@ -655,7 +655,7 @@ export async function finishEnrollment(profile: string, network: TurnNetwork, op
     if (read && read.result === "other" && read.record && read.payload && !read.record.tombstone && listsAt(read, ownKey, record.ownSlot)) {
       const seen = Number(read.record.sequence);
       await amendDevice(profile, {
-        turn: read.record.turn, rev: read.record.rev, turnPacket: toBase64Url(read.payload), activeSlot: read.record.active, deviceSet: deviceSetOf(read.record),
+        turn: read.record.turn, rev: read.record.rev, turnPacket: toBase64Url(read.payload), activeSlot: read.record.active, deviceSet: adoptedSet(record.deviceSet, null, read.record, record.activeSlot),
         ...(seen > (record.seenSequence ?? 0) ? { seenSequence: seen } : {}),
       });
       return true;

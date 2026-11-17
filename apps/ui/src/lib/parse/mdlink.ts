@@ -19,10 +19,14 @@ function hostOf(url: string): string | null {
   }
 }
 
-/** Something in a label that reads as a web address or a domain: "ghostly.tools", "https://a.example/x", "1.2.3.4". */
-const ADDRESS = /(?:[a-z][a-z\d+.-]{0,20}:\/\/)?[\p{L}\p{N}][\p{L}\p{N}-]{0,62}(?:\.[\p{L}\p{N}][\p{L}\p{N}-]{0,62}){1,8}/giu;
+/**
+ * Something in a label that reads as a web address or a domain: "ghostly.tools", "https://a.example/x", "1.2.3.4".
+ * A combining mark NFKC leaves alone is part of the label it sits in, as a browser reads it ("paypal.c̲om").
+ */
+const ADDRESS =
+  /(?:[a-z][a-z\d+.-]{0,20}:\/\/)?[\p{L}\p{N}][\p{L}\p{N}\p{M}-]{0,62}(?:\.\p{M}*[\p{L}\p{N}][\p{L}\p{N}\p{M}-]{0,62}){1,8}/giu;
 /** Ends in a top-level domain (letters), or is an IPv4 address. "v1.2", "3.14" and "e.g." are not hosts. */
-const LOOKS_LIKE_HOST = /\.\p{L}[\p{L}\p{N}-]{1,62}$|^\d{1,3}(?:\.\d{1,3}){3}$/u;
+const LOOKS_LIKE_HOST = /\.\p{M}*\p{L}[\p{L}\p{N}\p{M}-]{1,62}$|^\d{1,3}(?:\.\d{1,3}){3}$/u;
 /** File extensions no top-level domain uses: "report.pdf", "Node.js" and "package.json" are names, not hosts. */
 const NOT_A_TLD = /\.(?:[cm]?js|jsx|tsx?|json|css|html?|txt|log|csv|png|jpe?g|gif|svg|webp|toml|ya?ml|lock|wasm|pdf|rb|go)$/i;
 /** Extensions that are country domains too (Moldova, Paraguay…): a file only as a path's last part ("docs/CHAT.md"). */
@@ -47,8 +51,9 @@ const EMOJI =
  * Whether a link's text would make a reader think it goes somewhere else: it names a host that is not the link's (nor
  * one the link's host sits under), or it holds an invisible or direction character, which can turn "moc.lapyap"
  * into "paypal.com" on screen. The text is read as a browser would read a host ("ghostly。tools" and "ｇｈｏｓｔｌｙ.tools"
- * are "ghostly.tools"). File names are left alone ("report.pdf", "docs/CHAT.md"); anything else that reads as a
- * host counts, which errs on the safe side: the bubble shows the address.
+ * are "ghostly.tools"); a host still not ASCII after that counts even when it is the link's own, as a bare link shows
+ * it in punycode. File names are left alone ("report.pdf", "docs/CHAT.md"); anything else that reads as a host
+ * counts, which errs on the safe side: the bubble shows the address.
  */
 export function labelMisleads(label: string, url: string): boolean {
   const target = hostOf(url);
@@ -64,6 +69,9 @@ export function labelMisleads(label: string, url: string): boolean {
       const at = found.index;
       if (FILE_IN_PATH.test(bare) && text[at - 1] === "/" && at > 1 && !/[/:]/.test(text[at - 2])) continue;
     }
+    // A host in other letters than ASCII: even the link's own is drawn as written ("раураl.com"), while a bare link
+    // of it shows its punycode.
+    if (/[\u0080-\uffff]/.test(bare)) return true;
     const host = hostOf(`https://${bare}`);
     if (!host) return true;
     if (host !== target && !target.endsWith(`.${host}`)) return true;

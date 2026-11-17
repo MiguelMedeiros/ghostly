@@ -15,6 +15,7 @@ import { UnseenSatsDot } from "./UnseenSatsDot";
 import { useBackupDue } from "../hooks/useBackupDue";
 import { useAppsState } from "../lib/apps/flag";
 import { AppGlyph } from "./apps/AppIcon";
+import { listText } from "../lib/listText";
 
 const icon = { width: 24, height: 24, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -104,7 +105,10 @@ export function MobileTabBar() {
           const fresh = account && glances.othersFresh > 0;
           const others = account && (glances.othersUnread > 0 || fresh);
           const wallet = tab.path === "/wallet";
-          const label = wallet && (unseen.real || unseen.test || backupDue) ? `${unseenSatsLabel(t(tab.label), unseen, t)}${backupDue ? `, ${t("wallet.backupReminder.label")}` : ""}` : dot ? `${t(tab.label)}, ${t("identities.attention")}` : account ? `${t(tab.label)}, ${glances.current.name}${fresh ? `, ${t("profileSwitcher.othersNew")}` : others ? `, ${t("profileSwitcher.othersUnread")}` : ""}` : undefined;
+          const parts = wallet && (unseen.real || unseen.test || backupDue) ? [unseenSatsLabel(t(tab.label), unseen, t), backupDue ? t("wallet.backupReminder.label") : ""]
+            : dot ? [t(tab.label), t("identities.attention")]
+            : account ? [t(tab.label), glances.current.name, fresh ? t("profileSwitcher.othersNew") : others ? t("profileSwitcher.othersUnread") : ""] : undefined;
+          const label = parts && listText(parts.filter(Boolean), t);
           return (
             <button
               key={tab.path}

@@ -1946,10 +1946,15 @@ export class CashuWallet {
     this.meltTimer = null;
     if (this.stopped) return;
     const melts = await this.readMelts();
+    const down = new Set<string>();
 
     for (const melt of melts) {
       if (!this.meltAsk.due(melt.quote, Date.now())) continue;
       try {
+        // Its mint could not be loaded for another melt just now: this one waits as that one does.
+        if (down.has(melt.mint)) throw new Error("mint down");
+        try { await this.wallet(melt.mint); }
+        catch (error) { down.add(melt.mint); throw error; }
         const outcome = await this.locked(melt.mint, async () => {
           // It may have been settled while this waited for the lock.
           const current = await openRow(STORES.melts, await wrap<PendingMelt | undefined>((await store(STORES.melts, "readonly")).get(melt.quote)));

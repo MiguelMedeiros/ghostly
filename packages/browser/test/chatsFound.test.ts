@@ -5,6 +5,7 @@ import { ChatTextSearch, SEARCH_KEPT_MS } from "../src/engine/chatSearch";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { STORES, transact } from "../src/shared/idb";
+import { refusedRow } from "../src/shared/refusals";
 import type { StoredLink, StoredMessage } from "../src/shared/types";
 // covers: chats.list.search
 
@@ -17,6 +18,9 @@ import type { StoredLink, StoredMessage } from "../src/shared/types";
 
 const row = (linkId: string, id: string, text: string, sender: "me" | "peer" = "peer"): StoredMessage =>
   ({ linkId, id, wireId: id, text, sender, timestamp: 1_700_000_000_000 + Number(id.replace(/\D/g, "") || 0), via: "datalink" });
+/** The rows of `stored` by their ids, as the store reads them again after a change. */
+const rowsOf = (stored: Record<string, StoredMessage[]>) => async (linkId: string, ids: readonly string[]) =>
+  ids.map((id) => stored[linkId]?.find((m) => m.id === id));
 
 describe("the chats' texts searched in the engine", () => {
   afterEach(() => vi.useRealTimers());
@@ -28,7 +32,7 @@ describe("the chats' texts searched in the engine", () => {
       c: [row("c", "1", "CAFE AU LAIT")],
     };
     const reads: string[] = [];
-    const search = new ChatTextSearch(async (linkId) => { reads.push(linkId); return stored[linkId] ?? []; });
+    const search = new ChatTextSearch(async (linkId) => { reads.push(linkId); return stored[linkId] ?? []; }, rowsOf(stored));
     expect(await search.found(["a", "b", "c"], "cafe")).toEqual(["a", "c"]);
     expect(await search.found(["a", "b", "c"], "café a")).toEqual(["c"]);
     expect(await search.found(["c", "a"], "c")).toEqual(["c", "a"]);
@@ -40,18 +44,66 @@ describe("the chats' texts searched in the engine", () => {
     vi.useFakeTimers();
     const stored: Record<string, StoredMessage[]> = { a: [row("a", "1", "first")], b: [row("b", "1", "other")] };
     const reads: string[] = [];
-    const search = new ChatTextSearch(async (linkId) => { reads.push(linkId); return stored[linkId]; });
+    const search = new ChatTextSearch(async (linkId) => { reads.push(linkId); return stored[linkId]; }, rowsOf(stored));
     expect(await search.found(["a", "b"], "second")).toEqual([]);
     stored.a = [...stored.a, row("a", "2", "second")];
-    search.changed("a");
+    search.changed("a", ["2"]);
     expect(await search.found(["a", "b"], "second")).toEqual(["a"]);
-    expect(reads).toEqual(["a", "b", "a"]);
+    expect(reads).toEqual(["a", "b"]);
     await vi.advanceTimersByTimeAsync(SEARCH_KEPT_MS - 1);
     expect(await search.found(["a", "b"], "first")).toEqual(["a"]);
-    expect(reads).toHaveLength(3);
+    expect(reads).toHaveLength(2);
     await vi.advanceTimersByTimeAsync(SEARCH_KEPT_MS);
     expect(await search.found(["a", "b"], "first")).toEqual(["a"]);
-    expect(reads).toEqual(["a", "b", "a", "a", "b"]);
+    expect(reads).toEqual(["a", "b", "a", "b"]);
+  });
+
+  it("reads again only the rows that changed, not the chat's whole history, however often it changes", async () => {
+    const stored = new Map(Array.from({ length: 1_000 }, (_, i) => [`m${i}`, row("a", `m${i}`, `line ${i}.`)]));
+    const whole: string[] = [];
+    const rows: string[][] = [];
+    const search = new ChatTextSearch(
+      async (linkId) => { whole.push(linkId); return [...stored.values()]; },
+      async (_linkId, ids) => { rows.push([...ids]); return ids.map((id) => stored.get(id)); },
+    );
+    expect(await search.found(["a"], "line 7.")).toEqual(["a"]);
+    // A chat catching up, a message at a time, with the search typed: each answer reads the new rows only.
+    for (let i = 1_000; i < 1_010; i++) {
+      stored.set(`m${i}`, row("a", `m${i}`, `catching up ${i}`));
+      search.changed("a", [`m${i}`]);
+      expect(await search.found(["a"], `catching up ${i}`)).toEqual(["a"]);
+    }
+    // An edit finds the chat by its new words only, a delete by none of its words.
+    stored.set("m3", row("a", "m3", "the old soup"));
+    stored.delete("m1009");
+    search.changed("a", ["m3", "m1009"]);
+    expect(await search.found(["a"], "soup")).toEqual(["a"]);
+    expect(await search.found(["a"], "line 3.")).toEqual([]);
+    expect(await search.found(["a"], "catching up 1009")).toEqual([]);
+    expect(whole).toEqual(["a"]);
+    expect(rows.flat()).toHaveLength(12);
+  });
+
+  it("reads again a row that changed while the chat's history was still being read", async () => {
+    const stored = new Map([["m1", row("a", "m1", "first")]]);
+    let readWhole: (() => void) | undefined;
+    const search = new ChatTextSearch(
+      async () => {
+        const before = [...stored.values()];
+        // The first read is slow; any later one is quick.
+        if (!readWhole) await new Promise<void>((resolve) => { readWhole = resolve; });
+        return before;
+      },
+      async (_linkId, ids) => ids.map((id) => stored.get(id)),
+    );
+    const first = search.found(["a"], "second");
+    await vi.waitFor(() => expect(readWhole).toBeTypeOf("function"));
+    stored.set("m2", row("a", "m2", "second"));
+    search.changed("a", ["m2"]);
+    readWhole!();
+    // The answer asked before the change may miss it; the next one has it.
+    await first;
+    expect(await search.found(["a"], "second")).toEqual(["a"]);
   });
 
   it("reads a text with its formatting's marks left out, a file by its name, and no payment lines", async () => {
@@ -60,7 +112,7 @@ describe("the chats' texts searched in the engine", () => {
       b: [{ ...row("b", "1", "Payment of 21 sats"), paymentId: "p1" }, { ...row("b", "2", "here is the plan"), file: { id: "f", name: "report.pdf", size: 1, mime: "application/pdf" } as never }],
       c: [row("c", "1", "my_snake_case var")],
     };
-    const search = new ChatTextSearch(async (linkId) => stored[linkId] ?? []);
+    const search = new ChatTextSearch(async (linkId) => stored[linkId] ?? [], rowsOf(stored));
     const found = (query: string) => search.found(["a", "b", "c"], query);
     expect(await found("hello world")).toEqual(["a"]);
     expect(await found("the plan now")).toEqual(["a"]);
@@ -74,10 +126,32 @@ describe("the chats' texts searched in the engine", () => {
 
   it("does not keep a read that failed", async () => {
     let fail = true;
-    const search = new ChatTextSearch(async () => { if (fail) throw new Error("store closed"); return [row("a", "1", "hello")]; });
+    const search = new ChatTextSearch(async () => { if (fail) throw new Error("store closed"); return [row("a", "1", "hello")]; }, async () => []);
     await expect(search.found(["a"], "hello")).rejects.toThrow("store closed");
     fail = false;
     expect(await search.found(["a"], "hello")).toEqual(["a"]);
+  });
+
+  it("finds no chat by a line the pages draw as the app's own: a joined line, a refused payment's", async () => {
+    const reason = "Ecash from 127.0.0.1 is not accepted";
+    const stored: Record<string, StoredMessage[]> = {
+      // Every paired chat has its joined line: theirs (as the engine took it) and mine.
+      joined: [{ ...row("joined", "1", "👋 Alice joined"), joinLine: true }, row("joined", "2", "👋 joined", "me")],
+      refused: [{ ...row("refused", "peer_7_refused", ""), ...refusedRow({ amount: 21, network: "mainnet", reason }) }],
+      // A line an older version stored in English, without its values.
+      older: [row("older", "peer_8_refused", "Could not receive 1,000 sats: This ecash was already spent somewhere else")],
+      // The same words written by a person are their messages.
+      texts: [row("texts", "peer_9", "We joined the club"), row("texts", "peer_10", "Could not receive 5 sats: try again", "peer")],
+    };
+    const search = new ChatTextSearch(async (linkId) => stored[linkId] ?? [], rowsOf(stored));
+    const found = (query: string) => search.found(Object.keys(stored), query);
+    expect(await found("joined")).toEqual(["texts"]);
+    expect(await found("alice")).toEqual([]);
+    expect(await found("sats")).toEqual(["texts"]);
+    expect(await found("could not receive")).toEqual(["texts"]);
+    expect(await found(reason)).toEqual([]);
+    expect(await found("already spent")).toEqual([]);
+    expect(await found("the club")).toEqual(["texts"]);
   });
 });
 

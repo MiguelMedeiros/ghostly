@@ -161,6 +161,30 @@ it("a large file waits for the person, shows the room here, and is stored whole 
   expect(await (await fileBytes()).digest(fileId)).toBe(digestOf(size));
 }, 90_000);
 
+/**
+ * Accept on a file whose offer waited started it whatever room was left: files taken meanwhile had filled the disk,
+ * and it failed part way. Not started now: it keeps waiting, the contact asked for nothing, the room read shown.
+ */
+it("Accept on a waiting file larger than the room left now does not start it: it keeps waiting, the room read shown", async () => {
+  const t = await setup();
+  const size = FILE_LIMITS.askAboveBytes + 1234;
+  t.offer("tight-0001", size);
+  await vi.waitFor(() => expect(t.records.get("out:tight-0001")).toMatchObject({ state: "asking", waitingFor: "consent" }));
+  await vi.waitFor(async () => expect((await t.incoming("tight-0001"))?.transfer).toMatchObject({ stage: "asking", room: left }));
+  const { fileId } = (await t.incoming("tight-0001"))!;
+  // Files taken meanwhile filled the disk: a byte less left than the file needs.
+  left = size - 1;
+  const answer = await Promise.resolve().then(() => t.node().fileAction({ linkId: t.id, fileId, action: "accept" })).then(() => null, (error: Error) => error);
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  expect(t.records.get("out:tight-0001")?.state, "the contact was asked for nothing").toBe("asking");
+  expect(t.node().getState().transfers[fileId]).toMatchObject({ state: "transferring", stage: "asking", room: size - 1 });
+  expect(answer?.message).toMatch(/^No room on this device for this file \(.+ free\)$/);
+  // Room made: Accept takes it.
+  left = 40 * 1024 ** 3;
+  await t.node().fileAction({ linkId: t.id, fileId, action: "accept" });
+  await vi.waitFor(() => expect(t.records.get("out:tight-0001")?.state).not.toBe("asking"));
+}, 30_000);
+
 it.each([
   { storage: "files on disk (Desktop, web, extension, CLI)", onDisk: true },
   { storage: "IndexedDB pieces", onDisk: false },

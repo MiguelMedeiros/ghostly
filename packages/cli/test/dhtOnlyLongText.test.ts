@@ -1,4 +1,6 @@
+import { writeFileSync } from "node:fs";
 import type { Server } from "node:http";
+import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running, type Result } from "./support/cli";
 // covers: chat.dht.delivery, headless.chat
@@ -11,7 +13,7 @@ import { error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running, type Re
 let relays: { url: string; server: Server }[] = [];
 let dht: { bootstrap: string; destroy(): Promise<void> };
 const running: Running[] = [];
-const alice = home("alice"), bob = home("bob");
+const alice = home("alice"), bob = home("bob"), carol = home("carol"), dave = home("dave");
 let env: NodeJS.ProcessEnv;
 const as = (dir: string, ...args: string[]) => ghostly(["--home", dir, ...args], { env });
 const long = "é".repeat(150); // 300 bytes
@@ -30,6 +32,30 @@ function saysWhy(result: Result) {
   const details = (result.json.error as { details?: Record<string, unknown> }).details;
   expect(details).toMatchObject({ delivery: "waiting", note: expect.stringContaining("(ghostly chat transport bob auto), or shorten it") });
   expect(failure.message).toContain(details!.note as string);
+}
+
+/** `forward` of such a text into the chat: its result there has the note `send` answers. */
+function forwardSaysWhy(answer: Record<string, unknown>) {
+  const [result] = answer.results as Record<string, unknown>[];
+  expect(result).toMatchObject({ kind: "chat", error: null, note: expect.stringContaining("you and the contact keep this chat on the DHT only: it goes once both choose a live transport (ghostly chat transport bob auto), or shorten it") });
+}
+
+/**
+ * The same wait on a terminal, ended with Ctrl-C: its notice said "it still goes" and Ctrl-C that it is kept and "still
+ * goes by itself" (or with the next command), neither true while the chat stays on the DHT only. Both say the note.
+ */
+async function interruptedSaysWhy(dir: string) {
+  const tty = join(dir, "tty-stderr.cjs");
+  writeFileSync(tty, "Object.defineProperty(process.stderr, \"isTTY\", { value: true });\n");
+  const send = new Running(["--home", dir, "send", "bob", waited, "--wait", "sent", "--timeout", "60"], { ...env, NODE_OPTIONS: `--require "${tty}"` });
+  running.push(send);
+  const note = "Longer than the 256 bytes the DHT carries, and you and the contact keep this chat on the DHT only: it goes once both choose a live transport (ghostly chat transport bob auto), or shorten it";
+  await expect.poll(() => send.stderr, { timeout: 30_000, interval: 100 }).toContain("ghostly: waiting for it to go out to bob (up to 60 s; Ctrl-C stops waiting). " + note + "\n");
+  send.child.kill("SIGINT");
+  expect(await send.exited(15_000)).toBe(130);
+  expect(send.stderr).toContain("ghostly: stopped waiting (Ctrl-C): it is kept here. " + note + "\n");
+  expect(send.stderr).not.toMatch(/still goes|next command|daemon --detach/);
+  expect(send.lines).toEqual([{ error: { code: "interrupted", message: "Stopped waiting (Ctrl-C): it is kept here. " + note, details: { method: "chat.send" } } }]);
 }
 
 beforeAll(async () => {
@@ -66,6 +92,12 @@ it("a text past 256 bytes in a DHT-only chat answers at once (or at an explicit 
   expect(kept.note).toContain("256 bytes the DHT carries");
   expect(kept.note).toContain("ghostly chat transport bob auto");
   for (const wait of ["sent", "delivered"]) saysWhy(await as(alice, "send", "bob", waited, "--wait", wait, "--timeout", "2"));
+  // Forwarded into the same chat it waits as well: the chat's result says why, and so does a `--wait sent` timeout.
+  forwardSaysWhy(ok(await as(alice, "forward", "bob", kept.messageId as string, "--to", "bob")));
+  const forwardWait = await as(alice, "forward", "bob", kept.messageId as string, "--to", "bob", "--wait", "sent", "--timeout", "2");
+  saysWhy(forwardWait);
+  forwardSaysWhy((forwardWait.json.error as { details: Record<string, unknown> }).details);
+  await interruptedSaysWhy(alice);
 
   // A one-shot: no 30 s wait for a send that cannot come, no timeout.
   await daemons.get(alice)!.stop();
@@ -75,8 +107,9 @@ it("a text past 256 bytes in a DHT-only chat answers at once (or at an explicit 
   expect(oneShot.delivery).toBe("waiting");
   expect(oneShot.note).toContain("you and the contact keep this chat on the DHT only");
   for (const wait of ["sent", "delivered"]) saysWhy(await as(alice, "send", "bob", waited, "--wait", wait, "--timeout", "2"));
+  await interruptedSaysWhy(alice);
 
-  // What the note says ends the wait does: both choose a live transport, and both texts reach the contact.
+  // What the note says ends the wait does: both choose a live transport, and every text, the forwarded ones too, reaches the contact.
   const back = new Running(["--home", alice, "daemon"], env);
   running.push(back);
   await back.waitFor((l) => l.daemon === "ready");
@@ -84,5 +117,46 @@ it("a text past 256 bytes in a DHT-only chat answers at once (or at an explicit 
   ok(await as(bob, "chat", "transport", "alice", "auto"));
   ok(await as(alice, "chat", "wait", "bob", "--until", "live", "--timeout", "90"));
   await expect.poll(async () => (ok(await as(bob, "chat", "history", "alice", "--limit", "10")).messages as { text: string; from: string }[])
-    .filter((m) => m.from === "peer" && (m.text === long || m.text === waited)).length, { timeout: 60_000, interval: 1_000 }).toBe(6);
+    .filter((m) => m.from === "peer" && (m.text === long || m.text === waited)).length, { timeout: 60_000, interval: 1_000 }).toBe(10);
+});
+
+/** When a hold ends, as the CLI says it: this machine's hour and minute, with the day when it is not today. */
+function clock(until: number): string {
+  const at = new Date(until), two = (n: number) => String(n).padStart(2, "0");
+  const day = at.toDateString() === new Date().toDateString() ? "" : `${at.getFullYear()}-${two(at.getMonth() + 1)}-${two(at.getDate())} `;
+  return `${day}${two(at.getHours())}:${two(at.getMinutes())}`;
+}
+
+/**
+ * A hold (`chat disconnect --hold`) is this side's DHT only for a while: a text past 256 bytes waits through it and goes
+ * by itself when it ends. The note and an explicit `--wait`'s timeout said it goes only once you choose a live
+ * transport (`chat transport <chat> auto`, which ends the hold the person asked for). They say when the hold ends, and
+ * the command that ends it now.
+ */
+it("under a hold, a text past 256 bytes says it goes when the hold ends, and goes then with nothing chosen", { timeout: 300_000 }, async () => {
+  for (const dir of [carol, dave]) {
+    ok(await as(dir, "settings", "set", "relays", JSON.stringify(relays.map((r) => r.url))));
+    const daemon = new Running(["--home", dir, "daemon"], env);
+    running.push(daemon);
+    await daemon.waitFor((l) => l.daemon === "ready");
+  }
+  const invite = ok(await as(carol, "invite", "create", "--label", "dave"));
+  ok(await as(dave, "invite", "join", invite.link as string, "--label", "carol"));
+  for (const [dir, chat] of [[carol, "dave"], [dave, "carol"]]) ok(await as(dir, "chat", "wait", chat, "--until", "live", "--timeout", "90"));
+  const until = ok(await as(carol, "chat", "disconnect", "dave", "--hold", "0.5")).heldUntil as number;
+  const held = `this chat is held on the DHT only until ${clock(until)}: it goes then, or now with ghostly chat connect dave`;
+
+  const kept = ok(await as(carol, "send", "dave", long));
+  expect(kept.delivery).toBe("waiting");
+  expect(kept.note).toBe(`Longer than the 256 bytes the DHT carries, and ${held}`);
+  const timedOut = await as(carol, "send", "dave", waited, "--wait", "delivered", "--timeout", "2");
+  const failure = error(timedOut, "timeout", 4);
+  expect(failure.message).not.toContain("choose a live transport");
+  expect(failure.message).toContain(`the message is waiting. Longer than the 256 bytes the DHT carries, and ${held}`);
+  expect((timedOut.json.error as { details?: Record<string, unknown> }).details).toMatchObject({ delivery: "waiting", note: expect.stringContaining(held) });
+
+  // What the words say: the hold ends by itself, and both texts reach the contact with no transport chosen.
+  await expect.poll(async () => (ok(await as(dave, "chat", "history", "carol", "--limit", "10")).messages as { text: string; from: string }[])
+    .filter((m) => m.from === "peer" && (m.text === long || m.text === waited)).length, { timeout: 150_000, interval: 2_000 }).toBe(2);
+  expect(ok(await as(carol, "chat", "show", "dave"))).toMatchObject({ heldUntil: null, deliveryMode: "stream" });
 });

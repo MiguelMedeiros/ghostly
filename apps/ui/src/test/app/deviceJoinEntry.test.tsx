@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDeviceInvite, turnName } from "@ghostly/core";
@@ -9,6 +9,7 @@ import { ProfileSwitcherMenu } from "../../components/ProfileSwitcher";
 import { Sidebar } from "../../components/Sidebar";
 import { DevicesSection } from "../../components/devices/DevicesSection";
 import { JoinHost } from "../../components/devices/JoinHost";
+import { JoinProfileDialog } from "../../components/devices/JoinProfileDialog";
 import { Home } from "../../pages/Home";
 import { LockScreenProvider, useLockScreen } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
@@ -496,6 +497,44 @@ describe("a profile made for a code", () => {
     expect(regions).toEqual([spoken]);
   });
 
+  it("not finished: a screen reader hears it from the same line, and the focus goes to Continue, the one thing to press", async () => {
+    catchReload();
+    sessionStorage.setItem(JOIN_REQUEST, JSON.stringify({ id: activeProfileId(), code: code(), start: "go", name: "Pixel" }));
+    fakeEngine.on("deviceEnrollJoin", () => ({ role: "joiner", step: "connecting" }));
+    let view: EnrollView = { role: "joiner", step: "finishing", device: "MacBook" };
+    fakeEngine.on("deviceEnrollView", () => view);
+    Object.defineProperty(navigator, "storage", { configurable: true, value: { persisted: async () => true, persist: async () => true } });
+    try {
+      renderApp(<JoinHost />);
+      await screen.findByText("Finishing…", {}, { timeout: 3_000 });
+      const spoken = screen.getByTestId("device-join-spoken");
+      expect(spoken).toHaveTextContent(/^$/);
+      view = { role: "joiner", step: "unfinished", device: "MacBook" };
+      await waitFor(() => expect(spoken).toHaveTextContent("Not finished: your other device has not listed this one yet."), { timeout: 3_000 });
+      expect(screen.getByTestId("device-join-spoken")).toBe(spoken);
+      await waitFor(() => expect(screen.getByTestId("device-join-continue")).toHaveFocus());
+    } finally { Reflect.deleteProperty(navigator, "storage"); }
+  });
+
+  it("done, with the browser free to clear this device's data: a screen reader hears it from the same line, and the focus goes to Continue", async () => {
+    const reload = catchReload();
+    sessionStorage.setItem(JOIN_REQUEST, JSON.stringify({ id: activeProfileId(), code: code(), start: "go", name: "Pixel" }));
+    fakeEngine.on("deviceEnrollJoin", () => ({ role: "joiner", step: "connecting" }));
+    let view: EnrollView = { role: "joiner", step: "finishing", device: "MacBook" };
+    fakeEngine.on("deviceEnrollView", () => view);
+    Object.defineProperty(navigator, "storage", { configurable: true, value: { persisted: async () => false, persist: async () => false } });
+    try {
+      renderApp(<JoinHost />);
+      await screen.findByText("Finishing…", {}, { timeout: 3_000 });
+      const spoken = screen.getByTestId("device-join-spoken");
+      view = { role: "joiner", step: "done", device: "MacBook" };
+      await waitFor(() => expect(spoken).toHaveTextContent("This device is on standby for your profile."), { timeout: 3_000 });
+      expect(screen.getByTestId("device-join-persist")).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByTestId("device-join-continue")).toHaveFocus());
+      expect(reload).not.toHaveBeenCalled();
+    } finally { Reflect.deleteProperty(navigator, "storage"); }
+  });
+
   it("once added, opens the standby screen by itself, the lock handed over across that reload", async () => {
     const hash = await hashPassword("a long lock password");
     localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: hash, timeoutMinutes: 5 } }));
@@ -514,6 +553,8 @@ describe("a profile made for a code", () => {
       sessionStorage.removeItem(HANDOVER);
       expect(await screen.findByTestId("device-join-done", {}, { timeout: 3_000 })).toHaveAttribute("data-step", "done");
       expect(screen.queryByTestId("device-join-continue")).toBeNull();
+      // Said from the line that was there before: "Opening…" comes with the step, and may not be read.
+      expect(screen.getByTestId("device-join-spoken")).toHaveTextContent("This device is on standby for your profile.");
       await waitFor(() => expect(reload).toHaveBeenCalled(), { timeout: 4_000 });
       expect(JSON.parse(sessionStorage.getItem(HANDOVER)!)).toMatchObject({ profile: activeProfileId(), hash });
       expect(nameStepPending()).toBe(false);
@@ -544,6 +585,50 @@ describe("a profile made for a code", () => {
     } finally { Reflect.deleteProperty(navigator, "storage"); }
   });
 
+  it("closed while its join is asked: the enrollment the engine then starts is cancelled, not left running unseen", async () => {
+    let answer!: (view: EnrollView) => void;
+    fakeEngine.on("deviceEnrollJoin", () => new Promise<EnrollView>((resolve) => { answer = resolve; }));
+    fakeEngine.on("deviceEnrollCancel", () => undefined);
+    function Host() {
+      const [open, setOpen] = useState(true);
+      return open ? <JoinProfileDialog request={{ code: code(), start: "go", name: "Pixel" }} onClose={() => setOpen(false)} onRestore={() => {}} /> : null;
+    }
+    const { user } = renderApp(<Host />);
+    await waitFor(() => expect(fakeEngine.callsTo("deviceEnrollJoin")).toHaveLength(1));
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByTestId("device-join")).toBeNull());
+    answer({ role: "joiner", step: "connecting" });
+    await waitFor(() => expect(fakeEngine.callsTo("deviceEnrollCancel")).toHaveLength(1));
+  });
+
+  it("closed while its join is asked, and opened again on a new join: the first one's late answer does not cancel the new one", async () => {
+    const answers: ((view: EnrollView) => void)[] = [];
+    fakeEngine.on("deviceEnrollJoin", () => new Promise<EnrollView>((resolve) => { answers.push(resolve); }));
+    fakeEngine.on("deviceEnrollCancel", () => undefined);
+    fakeEngine.on("deviceEnrollView", () => ({ role: "joiner", step: "connecting" }));
+    function Host() {
+      const [opened, setOpened] = useState(1);
+      const [open, setOpen] = useState(true);
+      return <>
+        <button type="button" onClick={() => { setOpened(opened + 1); setOpen(true); }}>Open again</button>
+        {open && <JoinProfileDialog key={opened} request={{ code: code(), start: "go", name: "Pixel" }} onClose={() => setOpen(false)} onRestore={() => {}} />}
+      </>;
+    }
+    const { user } = renderApp(<Host />);
+    await waitFor(() => expect(fakeEngine.callsTo("deviceEnrollJoin")).toHaveLength(1));
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByTestId("device-join")).toBeNull());
+    await user.click(screen.getByRole("button", { name: "Open again" }));
+    await waitFor(() => expect(fakeEngine.callsTo("deviceEnrollJoin")).toHaveLength(2));
+    answers[1]!({ role: "joiner", step: "connecting" });
+    await screen.findByTestId("device-join-connecting");
+    // The new join ended the first one in the engine already: a cancel now would end the one on screen.
+    answers[0]!({ role: "joiner", step: "connecting" });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(fakeEngine.callsTo("deviceEnrollCancel")).toEqual([]);
+    expect(screen.getByTestId("device-join")).toBeInTheDocument();
+  });
+
   it("goes on while the browser asks the person whether to keep its data, and opens once they say yes", async () => {
     const reload = catchReload();
     sessionStorage.setItem(JOIN_REQUEST, JSON.stringify({ id: activeProfileId(), code: code(), start: "go", name: "Pixel" }));
@@ -558,10 +643,14 @@ describe("a profile made for a code", () => {
       fakeEngine.on("deviceEnrollView", () => ({ role: "joiner", step: "done", device: "MacBook" }));
       expect(await screen.findByTestId("device-join-continue", {}, { timeout: 3_000 })).toBeVisible();
       expect(screen.queryByTestId("device-join-persist")).toBeNull();
+      await waitFor(() => expect(screen.getByTestId("device-join-continue")).toHaveFocus());
       // Past the pause the dialog takes before it opens the standby screen by itself.
       await new Promise((resolve) => setTimeout(resolve, 2_000));
       expect(reload).not.toHaveBeenCalled();
       act(() => answer(true));
+      // Continue goes away under the focus: the focus stays in the dialog, on the step's body, not on the page.
+      await waitFor(() => expect(screen.queryByTestId("device-join-continue")).toBeNull());
+      await waitFor(() => expect(screen.getByTestId("device-join-done").parentElement).toHaveFocus());
       await waitFor(() => expect(reload).toHaveBeenCalled(), { timeout: 4_000 });
     } finally { Reflect.deleteProperty(navigator, "storage"); }
   });

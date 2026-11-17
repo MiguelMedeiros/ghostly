@@ -78,7 +78,11 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
   // The password form, They match or Try again went away with its step: the focus stays in the dialog.
   useEffect(() => { if (step === "enroll") keepFocusIn(body.current); }, [step, view?.step, busy]);
   // Closed before it ended: the code is spent, and nothing was added.
-  useEffect(() => () => { if (!ended.current) void engine.call("deviceEnrollCancel").catch(() => {}); }, []);
+  const closed = useRef(false);
+  useEffect(() => {
+    closed.current = false;
+    return () => { closed.current = true; if (!ended.current) void engine.call("deviceEnrollCancel").catch(() => {}); };
+  }, []);
 
   /** Says what went wrong; a refused field gets the focus back with its text selected, to be typed again. */
   const fail = (text: string, field?: "password" | "again") => {
@@ -93,6 +97,16 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
     clear(); setBusy(true);
     try {
       const first = await engine.call("deviceEnrollInvite", { name: defaultDeviceName(isDesktopApp() ? { userAgent: navigator.userAgent, desktop: true } : undefined, t) });
+      // Closed while the code was being made (× and Escape close "Preparing" too): the enrollment the engine just started
+      // would run its ten minutes with no page showing it, and Remove, Rename and a move refused all along. The engine
+      // cancels whichever enrollment it holds: only while that is still this code, not one a dialog opened since started.
+      if (closed.current) {
+        const code = first.role === "inviter" && first.step === "waiting" ? first.code : null;
+        if (code) void engine.call("deviceEnrollView").then((now) => {
+          if (now?.role === "inviter" && now.step === "waiting" && now.code === code) return engine.call("deviceEnrollCancel");
+        }).catch(() => {});
+        return;
+      }
       ended.current = false; dismissed.current = false;
       setView(first); setStep("enroll");
     } catch (cause) {
@@ -117,6 +131,8 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
       const made = await engine.call("deviceHandoffVerifier", { password, current: password }).then(() => true, () => false);
       setBusy(false);
       if (!made) { fail(t("devices.handoff.verifierFailed")); return; }
+      // Closed while the password was checked: no code for a dialog that is gone.
+      if (closed.current) return;
       await start();
       return;
     }
@@ -127,6 +143,7 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
     const made = await engine.call("deviceHandoffVerifier", { password, current: previous.current }).then(() => true, () => false);
     setBusy(false);
     if (!made) { fail(t("devices.handoff.verifierFailed")); return; }
+    if (closed.current) return;
     await start();
   };
 
@@ -173,8 +190,12 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
   // The digits to check and the device added are plain lines, and the focus stays on the body: a screen reader hears them
   // from a line that is there from the code on and changes its text (one that comes with its step is often not read).
   const spoken = view?.role !== "inviter" ? ""
-    : view.step === "confirm" ? <>{fillNames(t("devices.add.found"), { device: view.device })} <span dir="ltr">{`${view.digits.slice(0, 3)} ${view.digits.slice(3)}`}</span></>
+    // The digits one by one, as the new device says them: "482 913" would be read as two numbers, unlike over there.
+    : view.step === "confirm" ? <>{fillNames(t("devices.add.found"), { device: view.device })} <span dir="ltr">{view.digits.split("").join(" ")}</span></>
     : view.step === "done" ? fillNames(t("devices.add.done"), { device: view.device }) : "";
+  // Another device tried the code: the one warning of the code step, said at once from a line of its own that is there
+  // from the code on, like the one above. The notice under the code shows it.
+  const urgent = view?.role === "inviter" && (view.step === "waiting" || view.step === "confirm") && !!view.refused ? t("devices.add.refused") : "";
 
   // From They match until the device is added or the enrollment failed, × and Escape do nothing: the grant may have gone
   // out, and closing would cancel it, leaving "Not finished" on both devices. The engine ends the step on its own.
@@ -186,6 +207,7 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
       <Toast toast={notice.toast} onDismiss={notice.dismiss} place="dialog" testId="device-add-notice" />
       <div ref={body} tabIndex={-1} className="space-y-3 focus:outline-none">
       <p role="status" className="sr-only" data-testid="device-add-spoken">{spoken}</p>
+      <p role="alert" className="sr-only" data-testid="device-add-alert">{urgent}</p>
       {/* Try again, until the engine answers: a new code, or why there is none. */}
       {!view && busy && <Status testId="device-add-preparing" step="preparing">{t("devices.join.preparing")}</Status>}
       {view?.role === "inviter" && view.step === "waiting" && <>
@@ -194,7 +216,7 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
             link sent to it, opens Ghostly with the code, on the one screen that names this profile. Join and "Add this
             device to another profile" read the link too. */}
         <div data-testid="device-add-code" data-code={view.code} data-link={deviceLink(view.code, appLinkOrigin(), profileName)}>
-          <QRCodeDisplay value={deviceLink(view.code, appLinkOrigin(), profileName)} qr={deviceLinkQr(view.code, appLinkOrigin(), profileName)} copyLabel={t("devices.add.copy")} />
+          <QRCodeDisplay value={deviceLink(view.code, appLinkOrigin(), profileName)} qr={deviceLinkQr(view.code, appLinkOrigin(), profileName)} copyLabel={t("devices.add.copy")} title={t("devices.add.codeQr")} />
         </div>
         <Status testId="device-add-status" step={view.seen ? "connecting" : "waiting"}>{view.seen ? t("devices.add.connecting") : t("devices.add.waiting")}</Status>
         <p data-testid="device-add-left" className="text-text-muted text-xs">{t("devices.add.left", { time: timeLeft(view.expires, now) })}</p>

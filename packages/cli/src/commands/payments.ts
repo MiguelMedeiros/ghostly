@@ -1,6 +1,6 @@
 import { type Command, net, card, memo, confirmReal, force, sats, pageLimit, pairs } from "./shared";
 import { ADDRESS_TYPES, CHAT_METHODS, PAY_METHODS, WALLET_TYPES } from "../words";
-import { CliError } from "../errors";
+import { CliError, shownValue } from "../errors";
 
 /**
  * `chat accept`'s --networks: mainnet and/or testnet, comma-separated; any other word, or none (an unset variable), is a
@@ -9,8 +9,8 @@ import { CliError } from "../errors";
  */
 function networkList(value: string): string[] {
   const networks = value.split(",").map((n) => n.trim()).filter(Boolean);
-  if (!networks.length) throw new CliError("usage", `--networks takes mainnet, testnet or mainnet,testnet (to stop taking it: --off), not ${JSON.stringify(value)}`);
-  if (!networks.every((n) => n === "mainnet" || n === "testnet")) throw new CliError("usage", `--networks takes mainnet, testnet or mainnet,testnet, not ${JSON.stringify(value)}`);
+  if (!networks.length) throw new CliError("usage", `--networks takes mainnet, testnet or mainnet,testnet (to stop taking it: --off), not ${shownValue(value)}`);
+  if (!networks.every((n) => n === "mainnet" || n === "testnet")) throw new CliError("usage", `--networks takes mainnet, testnet or mainnet,testnet, not ${shownValue(value)}`);
   return networks;
 }
 
@@ -20,7 +20,7 @@ function networkList(value: string): string[] {
  */
 function requestAmount(value: string | undefined, method: unknown): number | string {
   if (method !== "usdt") return sats(value);
-  if (!/^\d+(\.\d+)?$/.test(value ?? "") || !/[1-9]/.test(value!)) throw new CliError("usage", `<amount> with --method usdt takes USDT above 0 (5 or 0.25), not ${JSON.stringify(value)}`);
+  if (!/^\d+(\.\d+)?$/.test(value ?? "") || !/[1-9]/.test(value!)) throw new CliError("usage", `<amount> with --method usdt takes USDT above 0 (5 or 0.25), not ${shownValue(value)}`);
   return value!;
 }
 

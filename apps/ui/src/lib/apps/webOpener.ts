@@ -15,6 +15,7 @@ import { runnerPolicy } from "./runnerCheck";
 import { CHAT_CLOSED, LOCKED, lockedSince, registerRunningApp, takenDownSince, type AppOpener, type AppTakedown } from "./open";
 import type { AppsPlatform, LinkedFilesHost } from "../platform";
 import { openLayer } from "../layerHistory";
+import { ownDirection } from "../ownDirection";
 
 export interface WebOpenerOptions {
   apps: () => AppsPlatform | null | undefined;
@@ -69,10 +70,13 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
     const entry = await host.entry(ref, options?.runAnyway === true);
     if (locked()) throw new Error(LOCKED);
     // The runner from what the person granted; its server must send that runner's policy. The runner pages are never
-    // cached (sw/policy.ts): offline, or when it could not be asked, it would not load, and the person is told so.
+    // cached (sw/policy.ts): offline, or when it could not be asked, it would not load, and the person is told so. Its
+    // server answering with an error of its own (a 502 while it restarts, a 429) while online is the host's trouble,
+    // said as the host's (`apps.errors.hostProblem`), not as the person being offline.
     const internet = entry.permissions.includes("internet");
     const policy = navigator.onLine === false ? null : await runnerPolicy(runnerFor(host, entry), fetch, internet);
-    if (policy === null) throw new Error("offline: the runner page could not be reached");
+    if (typeof policy === "number" && navigator.onLine !== false) throw new Error(`status: The host answered ${policy}`);
+    if (policy === null || typeof policy === "number") throw new Error("offline: the runner page could not be reached");
     if (!policy) throw new Error("runner: This server does not send the policy apps run under");
     if (locked()) throw new Error(LOCKED);
     gone(ref, entry.digest, options?.runAnyway === true);
@@ -232,7 +236,12 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
               if (!overlay.isConnected) return;
               again.removeAttribute("aria-busy");
               again.removeAttribute("aria-disabled");
-              if (errorText) failed.textContent = errorText(error);
+              if (!errorText) return;
+              // An English error shown as it came keeps its own direction in Arabic, as the chat panel's line does.
+              const text = errorText(error);
+              const dir = ownDirection(text);
+              if (dir) failed.dir = dir; else failed.removeAttribute("dir");
+              failed.textContent = text;
             });
           });
           said.after(again, failed);
