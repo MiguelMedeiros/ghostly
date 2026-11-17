@@ -813,7 +813,8 @@ export async function startRelay(options = {}) {
   const onresponse = dht.io.onresponse
   dht.io.onresponse = (...args) => { answeredAt = monotonicNow(); return onresponse(...args) }
   await dht.ready()
-  if (dht.toArray().length === 0) log('bootstrap reached no node')
+  // With its next step: the operator reading it has no other line that says what to check.
+  if (dht.toArray().length === 0) log(`bootstrap reached no node: check that this host can send UDP out (a tunnel, a firewall or a container network may not)${bootstrap.length ? ' and that GHOSTLY_HYPERDHT_BOOTSTRAP names running nodes' : ''}; /healthz answers 503 until a node answers`)
 
   const clients = new Set()
   // Each client's dht-relay session, for what it holds (`stats().held`).
