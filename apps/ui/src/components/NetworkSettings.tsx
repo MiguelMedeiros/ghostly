@@ -13,6 +13,7 @@ import { errorText, rawError } from "../lib/errorText";
 import { clockOffTexts } from "../lib/clockOff";
 import { exactText } from "../lib/exactText";
 import { fillNames } from "../lib/fillNodes";
+import { ownDirection } from "../lib/ownDirection";
 import { FieldError } from "./ui/FieldError";
 
 /** Protocol names the transport line keeps as they are, each its own `<bdi>` (Latin inside an Arabic sentence). */
@@ -246,7 +247,7 @@ export function NetworkSettings() {
             {t("common.save")}
           </button>
           {saved && <span role="status" data-testid="network-saved" className="text-accent text-sm">{t("network.saved")}</span>}
-          {error && <span role="alert" data-testid="network-error" className="text-danger text-sm min-w-0 break-words">{error}</span>}
+          {error && <span role="alert" dir={ownDirection(error)} data-testid="network-error" className="text-danger text-sm min-w-0 break-words">{error}</span>}
           <span data-testid="network-protocol" data-kind={reaches} className="text-text-muted text-xs ms-auto min-w-0">{fillNames(t(reaches === "direct" ? "network.protocolDirect" : "network.protocolRelays"), PROTOCOL_NAMES)}</span>
         </div>
       </Block>

@@ -6,6 +6,7 @@ import type { CallModeration } from "../hooks/useCallModeration";
 import { useBackCloses, useBackdropDismiss, useQuestionDialog } from "../hooks/useDismiss";
 import { errorText } from "../lib/errorText";
 import type { GroupCallSource } from "../lib/groupCallModeration";
+import { ownDirection } from "../lib/ownDirection";
 import { InfoButton } from "./layout/Section";
 import { Menu, MenuItem, MenuSeparator } from "./Menu";
 
@@ -127,7 +128,7 @@ export function ModerationProblem({ moderation }: { moderation: CallModeration |
   const problem = moderation?.problem;
   if (!problem) return null;
   return (
-    <p key={problem.id} role="alert" data-testid="group-call-moderation-error"
+    <p key={problem.id} role="alert" dir={ownDirection(problem.line)} data-testid="group-call-moderation-error"
       className="absolute top-16 left-1/2 -translate-x-1/2 z-20 w-max max-w-[calc(100%-2rem)] rounded-lg bg-black/70 px-3 py-2 text-center text-xs text-white">
       {problem.line}
     </p>
