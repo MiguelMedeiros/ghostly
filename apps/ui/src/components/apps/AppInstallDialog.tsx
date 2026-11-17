@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { AppListedBy, AppPreview, AppRunStatus, AppSource, InstalledAppView } from "@ghostly/browser/engine/apps";
@@ -11,8 +11,9 @@ import { AppIcon, Fingerprint } from "./AppIcon";
 import { AppDescription } from "./AppDescription";
 import { NAME, withName } from "./aroundName";
 import { removedLine } from "./removedLine";
-import { appErrorCode, appErrorText, appErrorView, appUpdateErrorView, type AppErrorView } from "../../lib/apps/errors";
+import { appErrorCode, appErrorRetryable, appErrorText, appErrorView, appUpdateErrorView, type AppErrorView } from "../../lib/apps/errors";
 import { refreshInstalledApps } from "../../lib/apps/installed";
+import { useTryAgain } from "../../lib/apps/tryAgain";
 import { saveAppData } from "../../lib/apps/exportData";
 import { webKitAppLeak } from "../../lib/apps/flag";
 import { forgetLinkedFiles, type OpenAppOptions } from "../../lib/apps/open";
@@ -254,19 +255,44 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
   // Fetched once per source: a new language while it loads must not fetch it again.
   const tr = useRef(t);
   tr.current = t;
+  // The first read failed for a reason trying again may change (the host's own trouble, offline): Try again reads it.
+  // Only the newest read is shown: one for a source left meanwhile, or the screen gone, is dropped.
+  const [retryable, setRetryable] = useState(false);
+  const reading = useRef(0);
+  const firstRead = useCallback((from: AppSource) => {
+    const mine = ++reading.current;
+    return engine.call("appPreview", from).then((p) => {
+      if (reading.current !== mine) return;
+      setPreview(p); setError(null); setRetryable(false);
+    }, (e: unknown) => {
+      if (reading.current !== mine) return;
+      setError(appErrorView(e, tr.current)); setRetryable(appErrorRetryable(e));
+    });
+  }, []);
   useEffect(() => {
     if (have) return;
-    let live = true;
-    setPreview(null); setError(null);
-    engine.call("appPreview", JSON.parse(key) as AppSource).then((p) => { if (live) setPreview(p); }, (e: unknown) => { if (live) setError(appErrorView(e, tr.current)); });
-    return () => { live = false; };
-  }, [key, have]);
+    const reads = reading;
+    setPreview(null); setError(null); setRetryable(false);
+    void firstRead(JSON.parse(key) as AppSource);
+    return () => { reads.current++; };
+  }, [key, have, firstRead]);
 
   // The app asks for more than this screen lists, and reading it again failed (offline, the host down): what the screen
   // shows is not what Install would be asked to grant, so Install waits until Try again reads it.
   const [stale, setStale] = useState(false);
   const [rechecking, setRechecking] = useState(false);
   const retryButton = useRef<HTMLButtonElement>(null), confirmButton = useRef<HTMLButtonElement>(null);
+  // Busy while it reads, its line read out again when it fails again (lib/apps/tryAgain.ts). Once it reads (or fails in
+  // a way trying again cannot change), the button goes with its line, and the focus it had goes to Install, or to the
+  // screen when nothing here installs: not to the page.
+  const readAgain = useTryAgain(() => firstRead(source));
+  // The screen Try again was pressed on, to hold the focus when nothing on it installs.
+  const screenOf = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (readAgain.tries === 0) return;
+    const active = document.activeElement;
+    if (!active || active === document.body) (confirmButton.current ?? screenOf.current)?.focus({ preventScroll: true });
+  }, [readAgain.tries]);
   // Why the screen is read again: what it asks changed, or the engine no longer holds what it fetched (`expired`).
   const rereadFor = useRef<"asks" | "expired">("asks");
   const recheck = async (): Promise<AppPreview | null> => {
@@ -346,11 +372,14 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
           {preview.manifest.description && <AppDescription text={preview.manifest.description} from="publisher" testId="app-description" />}
         </>
       )}
-      {error && <ErrorLine error={error} testId="app-install-error" />}
+      {error && <ErrorLine key={readAgain.tries} error={error} testId="app-install-error" />}
       {/* Too wide for one line (a phone at a large text size), the buttons wrap: unwrapped, "Install and open" pushed
           Cancel off the screen's start, where nothing scrolls to it. */}
       <div className="flex flex-wrap justify-end gap-2">
         <Button disabled={busy} onClick={onClose}>{t("common.cancel")}</Button>
+        {!preview && error && retryable && (
+          <Button data-testid="app-install-read-again" loading={readAgain.busy} onClick={(e) => { screenOf.current = e.currentTarget.closest<HTMLElement>("[role=dialog]"); readAgain.again(); }}>{t("apps.page.tryAgain")}</Button>
+        )}
         {preview && !blocked && stale && (
           <Button ref={retryButton} data-testid="app-install-retry" loading={rechecking} onClick={() => void retry()}>{t("apps.page.tryAgain")}</Button>
         )}

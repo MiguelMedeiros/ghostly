@@ -111,12 +111,26 @@ export function appStoreProblemText(store: Pick<AppStoreSummary, "problem" | "pr
   return appStoreErrorView(new Error(`${store.problem}: ${store.problemStatus !== undefined ? `The host answered ${store.problemStatus}` : ""}`), t).text;
 }
 
+/** The HTTP status of a `status` error (`status: The host answered 503`), else 0. */
+function hostStatus(error: unknown): number {
+  return appErrorCode(error) === "status" ? Number(/\b(\d{3})\b/.exec(error instanceof Error ? error.message : String(error))?.[1]) : 0;
+}
+
+/**
+ * A read that trying again may change: the host's own trouble (an outage, a rate limit), offline, the host not
+ * reached, too slow. A wrong link, a refused bundle, a revoked or removed version stay as they are.
+ */
+export function appErrorRetryable(error: unknown): boolean {
+  const code = appErrorCode(error), status = hostStatus(error);
+  return code === "offline" || code === "network" || code === "slow" || status >= 500 || status === 429;
+}
+
 export function appErrorText(error: unknown, t: Translate): string {
   // An Open the profile's lock overtook (open.ts): nothing failed, it opens again once unlocked.
   if ((error instanceof Error ? error.message : error) === LOCKED) return t("apps.errors.locked");
   const code = appErrorCode(error);
   // The host's own trouble (an outage, a rate limit) is not a wrong link: trying again later may work.
-  const status = code === "status" ? Number(/\b(\d{3})\b/.exec(error instanceof Error ? error.message : String(error))?.[1]) : 0;
+  const status = hostStatus(error);
   if (status >= 500 || status === 429) return t("apps.errors.hostProblem", { status });
   const key = code ? KEYS[code] : undefined;
   if (key) return t(key);
