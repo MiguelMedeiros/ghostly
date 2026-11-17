@@ -191,15 +191,20 @@ export function precacheList(files: readonly string[], leaveOut: readonly string
  * What the worker is built with, from the public folder's files and the bundle: the precache, each language's files
  * (but English's, in the entry), which the install takes for the person's language only (`installList`), and the
  * build's other hashed files (`lazy`: the WebAssembly, the online-only chunks), kept on their first use (`asset`).
+ * `bundle` is read before Vite's own `generateBundle`, its entry chunks still there for the walk (`optionalFiles`);
+ * `written`, when given, is what the build writes after it: a name it dropped (an entry chunk that was only imports,
+ * named in index.html instead) is in no list, as one 404 fails the install.
  */
-export function serviceWorkerFiles(publicFiles: readonly string[], bundle: readonly (BundleFile & { moduleIds?: readonly string[] })[]): { precache: string[]; languages: Record<string, string[]>; lazy: string[] } {
+export function serviceWorkerFiles(publicFiles: readonly string[], bundle: readonly (BundleFile & { moduleIds?: readonly string[] })[], written?: readonly string[]): { precache: string[]; languages: Record<string, string[]>; lazy: string[] } {
   const { onlineOnly, languages } = optionalFiles(bundle);
+  const kept = written && new Set(written.map((file) => "/" + file.replace(/^\/+/, "")));
+  const writes = (path: string) => !kept || !path.startsWith("/assets/") || kept.has(path);
   const leaveOut = [...desktopOnlyFiles(bundle), ...onlineOnly, ...Object.values(languages).flat()];
-  const precache = precacheList([...publicFiles, ...bundle.map((file) => file.fileName)], leaveOut);
-  const byLanguage = Object.fromEntries(Object.entries(languages).map(([language, files]) => [language, files.map((file) => "/" + file.replace(/^\/+/, ""))]));
+  const precache = precacheList([...publicFiles, ...bundle.map((file) => file.fileName)], leaveOut).filter(writes);
+  const byLanguage = Object.fromEntries(Object.entries(languages).map(([language, files]) => [language, files.map((file) => "/" + file.replace(/^\/+/, "")).filter(writes)]));
   const installed = new Set([...precache, ...Object.values(byLanguage).flat()]);
   const lazy = [...new Set(bundle.map((file) => "/" + file.fileName.replace(/^\/+/, "")))]
-    .filter((path) => path.startsWith("/assets/") && !path.endsWith(".map") && !installed.has(path))
+    .filter((path) => path.startsWith("/assets/") && !path.endsWith(".map") && !installed.has(path) && writes(path))
     .sort();
   return { precache, languages: byLanguage, lazy };
 }
