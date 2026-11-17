@@ -343,7 +343,8 @@ export function groupJson(group: GroupView, showSecret = false) {
     ...(group.hubs ? { hubs: group.hubs } : {}),
     // A join nobody answered (the knocks stopped: `group accept` knocks again) and an invitation its sender took back
     // (`group accept` refuses it) said, as the app's card does: before, both read as a live "invited", stage "knocked".
-    invitation: group.invitation ? { chat: group.invitation.linkId, accepted: group.invitation.accepted, viaLink: !!group.invitation.viaLink, stage: group.invitation.stage ?? null,
+    // A link join's `linkId` is the engine's id for the knock, no chat `chat show` knows.
+    invitation: group.invitation ? { chat: group.invitation.viaLink ? null : group.invitation.linkId, accepted: group.invitation.accepted, viaLink: !!group.invitation.viaLink, stage: group.invitation.stage ?? null,
       ...knockNote(group),
       ...(group.invitation.unanswered ? { unanswered: true } : {}), ...(group.invitation.takenBack ? { takenBack: true } : {}) } : null,
     // Other groups that came under this id (a contact's invitation, with the chat it came over, or a link opened): kept

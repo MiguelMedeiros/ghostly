@@ -398,6 +398,20 @@ describe("group link", () => {
   });
 });
 
+describe("group hub", () => {
+  // Found in a bug hunt: on a community it answered the engine's "A community group chooses its hubs by itself" as
+  // `engine` (a fault worth a retry), admin or not; `group call` refuses the wrong profile before the engine.
+  it("is refused on a community before the engine, saying what it is for", async () => {
+    const { ctx, node } = fake();
+    const setGroupHub = vi.fn(async () => undefined);
+    Object.assign(node, { setGroupHub });
+    node.getState = () => ({ links: [], groups: [{ ...group, profile: "community" }], settings: {}, transport: {} }) as unknown as EngineState;
+    await expect(callApi(ctx, "group.hub", { group: "Crew", member: "Ana", role: "pin" })).rejects.toMatchObject({ code: "refused",
+      message: "Crew is a community: it chooses its hubs by itself; group hub is for a private group past 16 members" });
+    expect(setGroupHub).not.toHaveBeenCalled();
+  });
+});
+
 describe("group accept", () => {
   // Found in a bug hunt: a community with nothing to accept (one this profile is in, or was removed from) answered
   // {"group": id}, exit 0, as if accepted: the engine's knock again does nothing there. A private group said "No
@@ -687,7 +701,7 @@ describe("an invitation that will not go on by itself", () => {
     const invited = (invitation: Record<string, unknown>) => ({ ...group, status: undefined, isAdmin: false, members: [], canSend: false, entryLink: undefined,
       invitation: { linkId: "l1", contact: "", admin: "anakey", members: 2, accepted: false, ...invitation } }) as unknown as GroupView;
     expect(groupJson(invited({ accepted: true, viaLink: true, stage: "knocked", unanswered: true })).invitation)
-      .toEqual({ chat: "l1", accepted: true, viaLink: true, stage: "knocked", unanswered: true,
+      .toEqual({ chat: null, accepted: true, viaLink: true, stage: "knocked", unanswered: true,
         note: "You opened its link and nobody let you in: ghostly group accept g1 knocks again, ghostly group decline g1 drops it" });
     expect(groupJson(invited({ linkId: "chat-ana", takenBack: true })).invitation)
       .toEqual({ chat: "chat-ana", accepted: false, viaLink: false, stage: null, takenBack: true });
@@ -700,7 +714,8 @@ describe("an invitation that will not go on by itself", () => {
   it("a link join's invitation carries a note that says it knocks at the link and how to stop it", () => {
     const knock = (invitation: Record<string, unknown>) => groupJson({ ...group, id: "g9", status: undefined, isAdmin: false, members: [], canSend: false, entryLink: undefined,
       invitation: { linkId: "fhm4bwkoccyq54h5", contact: "", admin: "", members: 0, accepted: true, viaLink: true, ...invitation } } as unknown as GroupView);
-    expect(knock({ stage: "knocked" })).toMatchObject({ status: "invited", statusReason: null, invitation: { viaLink: true, stage: "knocked",
+    // Its `chat` was the engine's id for the knock, which `chat show` does not know.
+    expect(knock({ stage: "knocked" })).toMatchObject({ status: "invited", statusReason: null, invitation: { chat: null, viaLink: true, stage: "knocked",
       note: "You opened its link and knock until a member's app lets you in (stage says how far): ghostly group decline g9 stops it" } });
     // A contact's invitation has nothing to add: it is one.
     expect(groupJson({ ...group, status: undefined, invitation: { linkId: "chat-ana", contact: "Ana", admin: "anakey", members: 2, accepted: false } } as unknown as GroupView).invitation).not.toHaveProperty("note");
