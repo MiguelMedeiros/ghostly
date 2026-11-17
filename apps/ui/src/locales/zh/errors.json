@@ -202,6 +202,8 @@
     "gone": "此文件已不在这里",
     "incomplete": "此文件不完整：缺少一部分",
     "noRoom": "联系人的设备空间不足",
+    "noRoomBesideComing": "正在接收的文件之外没有空间",
+    "noRoomBesideComingNext": "可用 {{free}}，剩余 {{left}}。请等待它们接收完成，或取消其中一个，然后重试。",
     "noRoomHere": "此设备空间不足",
     "noRoomHereNext": "请释放空间，然后再请对方发送。",
     "noRoomNext": "剩余 {{free}}。",
