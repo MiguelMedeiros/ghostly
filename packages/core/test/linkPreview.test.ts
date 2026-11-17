@@ -36,6 +36,8 @@ describe("linksIn", () => {
     expect(linksIn("no links here")).toEqual([]);
     // An emoji typed right after a link was previewed as part of it ("…/a%F0%9F%94%A5").
     expect(linksIn("olha https://a.example/x🔥 e https://b.example/y!👍🏽")).toEqual(["https://a.example/x", "https://b.example/y"]);
+    // A direction mark typed after a link was previewed as part of it ("…/x%E2%80%8F").
+    expect(linksIn("\u0632\u0648\u0631\u0648\u0627 https://a.example/x\u200f. https://b.example/y\u200e")).toEqual(["https://a.example/x", "https://b.example/y"]);
   });
 
   // The preview was fetched from /a%E3%80%82, a page the person never linked.

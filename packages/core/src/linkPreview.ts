@@ -58,10 +58,11 @@ export const LINK_TRAILING = /[.,;:!?'"*_>…»’”]/;
 
 /**
  * What a chat puts right after a link with no space and no address ends with: an emoji ("https://x.example/a🔥", with
- * its skin tone, presentation selector, joiners and flag tags) and characters that draw as nothing. Read one code point
- * at a time from the end, so an emoji inside an address stays in it.
+ * its skin tone, presentation selector, joiners and flag tags) and characters that draw as nothing, the direction marks
+ * and isolates a right-to-left sentence puts around a link among them. Read one code point at a time from the end, so
+ * an emoji inside an address stays in it.
  */
-const LINK_TAIL = /^(?:\p{Extended_Pictographic}|\p{Emoji_Modifier}|\p{Regional_Indicator}|[\u200b\u200c\u2060\ufeff\u{e0020}-\u{e007f}]|\u200d|\ufe0e|\ufe0f)$/u;
+const LINK_TAIL = /^(?:\p{Extended_Pictographic}|\p{Emoji_Modifier}|\p{Regional_Indicator}|[\u200b\u200c\u2060\ufeff\u{e0020}-\u{e007f}]|[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]|\u200d|\ufe0e|\ufe0f)$/u;
 
 /** How many UTF-16 units of `url` before `end` are an emoji's or an invisible character's last code point (0: none). */
 export function linkTail(url: string, end: number): number {
