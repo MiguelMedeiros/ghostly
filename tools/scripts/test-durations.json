@@ -675,7 +675,7 @@
   "packages/cli/test/oneShotJoin.test.ts": 0,
   "packages/cli/test/oneShotLocalWrites.test.ts": 10.4,
   "packages/cli/test/oneShotNobodyJoined.test.ts": 17.6,
-  "packages/cli/test/oneShotOneChat.test.ts": 21.7,
+  "packages/cli/test/oneShotOneChat.test.ts": 28.9,
   "packages/cli/test/oneShotReads.test.ts": 6.3,
   "packages/cli/test/oneShotWrites.test.ts": 3.5,
   "packages/cli/test/ownProfileRace.test.ts": 0,
