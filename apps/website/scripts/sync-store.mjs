@@ -146,18 +146,19 @@ export function revocationUrls(listing, bundles) {
 }
 
 /**
- * The bundle URLs in the order their bytes take the budget: every listing's jsDelivr copies before any raw `HEAD` (as
- * lib/storeRead.ts tries them: a copy names a commit, where `HEAD` moves on after review), and in each, every listing's
- * first URL before any listing's second. So one listing's mirrors, however large they turn, never leave a listing after
- * it with none of its URLs read: what is over the budget is a later mirror.
+ * The bundle URLs in the order their bytes take the budget: each listing's URLs in the order lib/storeRead.ts tries them
+ * (its jsDelivr copies before its raw `HEAD`: a copy names a commit, where `HEAD` moves on after review), and every
+ * listing's first before any listing's second. So one listing's mirrors, however large they turn, never leave a listing
+ * after it with none of its URLs read: what is over the budget is a later mirror.
  */
 function bundleOrder(listings) {
   const pinned = (u) => new URL(u).hostname.toLowerCase() === "cdn.jsdelivr.net";
-  const valid = listings.map((listing) => listing.urls.filter((u) => typeof u === "string" && isFetchUrl(u)));
+  const tried = listings.map((listing) => {
+    const urls = listing.urls.filter((u) => typeof u === "string" && isFetchUrl(u));
+    return [...urls.filter(pinned), ...urls.filter((u) => !pinned(u))];
+  });
   const order = new Set();
-  for (const group of [valid.map((urls) => urls.filter(pinned)), valid.map((urls) => urls.filter((u) => !pinned(u)))]) {
-    for (let rank = 0; rank < LIMITS.urls; rank++) for (const urls of group) if (rank < urls.length) order.add(urls[rank]);
-  }
+  for (let rank = 0; rank < LIMITS.urls; rank++) for (const urls of tried) if (rank < urls.length) order.add(urls[rank]);
   return [...order];
 }
 

@@ -150,6 +150,20 @@ test("a listing's mirrors do not leave the listings after it without a bundle", 
   assert.deepEqual(snap.problems, [`${early.urls[3]}: over the ${LIMITS.totalBytes} bytes all bundles may take`]);
 });
 
+test("a listing's jsDelivr mirrors do not leave a listing after it with only a raw URL without a bundle", async () => {
+  const MiB = 1024 * 1024;
+  const first = [1, 2, 3].map((i) => `https://cdn.jsdelivr.net/gh/x/a${i}@0123abc/a.ghostlyapp`);
+  const pinned = "https://cdn.jsdelivr.net/gh/x/p@0123abc/a.ghostlyapp";
+  const rawOnly = `${RAW}/b/HEAD/a.ghostlyapp`;
+  const served = Object.fromEntries(first.map((u, i) => [u, new Uint8Array(LIMITS.bundleBytes).fill(i + 1)]));
+  served[pinned] = new Uint8Array(15 * MiB).fill(10);
+  served[rawOnly] = new Uint8Array(2 * MiB).fill(11);
+  const { fetcher } = network([{ urls: first }, { urls: [pinned] }, { urls: [rawOnly] }], served);
+  const snap = await fromStore(fetcher);
+  assert.deepEqual(Object.keys(snap.bundles), [first[0], pinned, rawOnly, first[1]]);
+  assert.deepEqual(snap.problems, [`${first[2]}: over the ${LIMITS.totalBytes} bytes all bundles may take`]);
+});
+
 test("reads that finish out of order keep the list's order, its byte budget and its problems as one read at a time does", async () => {
   const big = (n) => new Uint8Array(LIMITS.bundleBytes).fill(n);
   // Read one URL of each listing at a time (bundleOrder): one, three, two, four, broken, small. Three full bundles and
