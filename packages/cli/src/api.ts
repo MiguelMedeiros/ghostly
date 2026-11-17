@@ -1258,9 +1258,11 @@ async function guardEngineSend(ctx: ApiContext, method: string, args: Params): P
   let texts: unknown = [args.text, args.card, args.caption, args.memo, args.comment, args.name, of(args.settings, "nick"), of(args.file, "name"), of(args.status, "text"), args.content,
     ...(args.fields && typeof args.fields === "object" ? Object.values(args.fields) : [])];
   if (method === "forwardMessages") {
-    const ids = Array.isArray(args.messageIds) ? args.messageIds.filter((id): id is string => typeof id === "string") : [];
+    // Each id once, and none past the engine's bound, which it refuses before reading any: as `chat.forward` reads them.
+    // One id given 50,000 times was read as often, all at once, for the engine's refusal or its one message.
+    const ids = Array.isArray(args.messageIds) ? [...new Set(args.messageIds.filter((id): id is string => typeof id === "string"))] : [];
     const linkId = args.linkId;
-    texts = typeof linkId === "string" && linkId ? await Promise.all(ids.map(async (id) => {
+    texts = typeof linkId === "string" && linkId && ids.length <= FORWARD_MESSAGES ? await Promise.all(ids.map(async (id) => {
       const message = await node(ctx).getMessage(linkId, id);
       return message && !message.file ? message.text : null;
     })) : [];
