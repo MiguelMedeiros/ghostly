@@ -19,6 +19,7 @@ import { AppChatPicker } from "../components/apps/AppChatPicker";
 import { NAME, withName } from "../components/apps/aroundName";
 import { useAppsState } from "../lib/apps/flag";
 import { appStopped, refreshInstalledApps, useBuiltInApps, useInstalledApps, useInstalledAppsFailure } from "../lib/apps/installed";
+import { useTryAgain } from "../lib/apps/tryAgain";
 import { kept } from "../lib/apps/kept";
 import { openApp, type OpenAppOptions } from "../lib/apps/open";
 import { appErrorText, appErrorView, appStoreProblemText } from "../lib/apps/errors";
@@ -360,13 +361,14 @@ const StoreBlock = memo(function StoreBlock({ store, alone, installed, onInstall
 });
 
 /** A list that could not be read (storage: a private window, a full disk): said so, with Try again, never "none yet". */
-function ReadFailed({ error, testId, onRetry }: { error: unknown; testId: string; onRetry: () => void }) {
+function ReadFailed({ error, testId, onRetry }: { error: unknown; testId: string; onRetry: () => Promise<unknown> }) {
   const { t } = useI18n();
   const view = appErrorView(error, t);
+  const { busy, tries, again } = useTryAgain(onRetry);
   return (
     <Block testId={testId}>
-      <Notice tone="error" testId={`${testId}-line`} details={view.info}>{view.text}</Notice>
-      <Button onClick={onRetry}>{t("apps.page.tryAgain")}</Button>
+      <Notice key={tries} tone="error" testId={`${testId}-line`} details={view.info}>{view.text}</Notice>
+      <Button loading={busy} onClick={again}>{t("apps.page.tryAgain")}</Button>
     </Block>
   );
 }
@@ -486,7 +488,7 @@ export function Apps() {
       trailing={<PageAction label={t("apps.page.add")} title={t("apps.page.addHint")} testId="apps-add" onClick={() => setAdding(true)} />}>
       <p className="text-sm text-text-secondary">{t("apps.page.intro")}</p>
       <Section title={t("apps.page.installed")} testId="apps-installed">
-        {installedFailure != null && <ReadFailed error={installedFailure} testId="apps-installed-error" onRetry={() => { setRetried("installed"); void refreshInstalledApps(); }} />}
+        {installedFailure != null && <ReadFailed error={installedFailure} testId="apps-installed-error" onRetry={() => { setRetried("installed"); return refreshInstalledApps(); }} />}
         {installed === null ? <Block><Notice>{t("apps.page.loading")}</Notice></Block>
           : installed.length === 0 && builtIns.length === 0 ? installedFailure == null && <Block testId="apps-none"><Notice>{t("apps.page.none")}</Notice></Block>
             : <>
@@ -495,7 +497,7 @@ export function Apps() {
             </>}
       </Section>
       <Section title={t("apps.page.stores")} testId="apps-stores">
-        {storesFailure != null && <ReadFailed error={storesFailure} testId="apps-stores-error" onRetry={() => { setRetried("stores"); void reloadStores(); }} />}
+        {storesFailure != null && <ReadFailed error={storesFailure} testId="apps-stores-error" onRetry={() => { setRetried("stores"); return reloadStores(); }} />}
         {stores === null ? <Block><Notice>{t("apps.page.loading")}</Notice></Block>
           : stores.length === 0 ? storesFailure == null && <Block testId="apps-no-stores"><Notice>{t("apps.page.noStores")}</Notice></Block>
             : stores.map((store) => <StoreBlock key={store.key} store={store} alone={stores.length === 1} installed={installed ?? NO_APPS} onError={fail} onProblem={show} onRead={said} onRemoved={storeRemoved}
