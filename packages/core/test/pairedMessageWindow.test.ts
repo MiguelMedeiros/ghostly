@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GhostLink, MESSAGE_RECEIVE_LIMITS, pairedMessageFrame, type GhostLinkOptions } from "../src/ghostlink";
+import { GhostLink, MESSAGE_PACED, MESSAGE_RECEIVE_LIMITS, pairedMessageFrame, type GhostLinkOptions } from "../src/ghostlink";
 import { createLink } from "../src/invite";
 import { createIdentity } from "../src/identity";
 import type { BoundChannel, NativeBinding, NativeEndpoint } from "../src/pairedTransports";
@@ -83,14 +83,14 @@ const settle = () => new Promise(resolve => setTimeout(resolve, 50));
 describe("texts a contact sends on a paired session", () => {
   it("are taken up to a burst per window and a total per hour; the rest go unconfirmed, and come again", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
-    const { a, b, sent, messages } = pair();
+    const { a, b, sent, messages, theirs } = pair();
     await a.connect(10_000);
     await vi.waitFor(() => expect(a.isDataLinkOpen && b.isDataLinkOpen).toBe(true));
     const { burst, burstWindowMs, hourly, hourWindowMs } = MESSAGE_RECEIVE_LIMITS;
     let n = 0;
-    // B's app sends no faster than a person or a bot would: a modified one floods A's chat with texts.
+    // B's app paces itself to these windows: a modified one, said straight on B's end of the session, floods A's chat.
     const flood = async (count: number) => {
-      for (let i = 0; i < count; i++) expect(await b.sendMessage(`text ${n}`, 1_790_000_000_000 + n, id(n++))).toBeNull();
+      for (let i = 0; i < count; i++, n++) theirs().send(pairedMessageFrame(id(n), 1_790_000_000_000 + n, `text ${n}`));
       await settle();
     };
     await flood(burst + 20);
@@ -112,6 +112,49 @@ describe("texts a contact sends on a paired session", () => {
     await flood(1);
     expect(messages).toHaveLength(hourly + 1);
     expect(a.isDataLinkOpen && b.isDataLinkOpen).toBe(true);
+  }, 60_000);
+
+  it("the sender keeps within the contact's windows: a text with no room does not go until there is, so none is refused", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { a, b, sent, messages } = pair();
+    await a.connect(10_000);
+    await vi.waitFor(() => expect(a.isDataLinkOpen && b.isDataLinkOpen).toBe(true));
+    const { burst, burstWindowMs, hourly, hourWindowMs } = MESSAGE_RECEIVE_LIMITS;
+    let n = 0, went = 0;
+    // B's own app, as a bot flushing a backlog: whatever does not go now says so, and stays on B's side.
+    const send = async (count: number) => {
+      const answers: (string | null)[] = [];
+      for (let i = 0; i < count; i++, n++) {
+        const answer = await b.sendMessage(`text ${n}`, 1_790_000_000_000 + n, id(n));
+        answers.push(answer);
+        if (answer === null) went++;
+      }
+      await settle();
+      return answers;
+    };
+    const answers = await send(burst + 20);
+    expect(answers.slice(0, burst).every(answer => answer === null)).toBe(true);
+    expect(answers.slice(burst).every(answer => answer === MESSAGE_PACED)).toBe(true);
+    expect(b.textRoom).toBe(false);
+    // Everything that went was taken and confirmed: nothing went to be refused and come again after later texts.
+    expect(messages).toHaveLength(went);
+    expect(receipts(sent)).toBe(went);
+    // The window counts from the receipts: once it is over, there is room again.
+    vi.setSystemTime(Date.now() + burstWindowMs);
+    expect(b.textRoom).toBe(true);
+    // Window after window up to the hour's total, never past it: past it a fresh short window does not open room.
+    while (went < hourly) { await send(burst); vi.setSystemTime(Date.now() + burstWindowMs); }
+    expect(went).toBe(hourly);
+    expect(b.textRoom).toBe(false);
+    expect(await send(1)).toEqual([MESSAGE_PACED]);
+    expect(messages).toHaveLength(hourly);
+    expect(receipts(sent)).toBe(hourly);
+    // An hour on, the next one goes and is taken.
+    vi.setSystemTime(Date.now() + hourWindowMs);
+    expect(b.textRoom).toBe(true);
+    expect(await send(1)).toEqual([null]);
+    expect(messages).toHaveLength(hourly + 1);
+    expect(receipts(sent)).toBe(hourly + 1);
   }, 60_000);
 
   it("a refused text is counted, not read: a flood of malformed ones does not reach the app either", async () => {

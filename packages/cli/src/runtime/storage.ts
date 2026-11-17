@@ -150,6 +150,8 @@ const SEQ = "__ghostly_entry__";
 const CLOSE_WAIT_MS = 5_000;
 /** Records an export reads and serializes in one turn of the event loop, then writes: a few milliseconds' worth. */
 const EXPORT_PAGE = 256;
+/** How long a fold's snapshot serializes records before it writes them and lets the daemon's other work run. */
+const PAGE_MS = 5;
 /** How long a relaxed transaction's entry may wait for a sync when no other transaction brings one. */
 const RELAXED_SYNC_MS = 1_000;
 /**
@@ -393,7 +395,8 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
    * text the engine had told the contact it held.
    */
   function append(ops: Op[], lazy: boolean, entry: number, owner: unknown[], complete: () => void): { error: unknown } | "unsynced" | "queued" | null {
-    holdsDelete ||= ops.some(deletes);
+    const deleting = ops.some(deletes);
+    holdsDelete ||= deleting;
     if (trees) ops = [{ db: SEQ, store: "", kind: "clear", seq: entry }, ...ops];
     if (queued === 0 && !ops.some((op) => op.kind === "put" && hasBlob(op.value))) {
       let done: boolean;
@@ -408,7 +411,11 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     held++;
     void enqueue(async () => {
       try {
-        if (writeEntry(serialize(await Promise.all(ops.map(async (op) => (op.kind === "put" ? { ...op, value: await blobsToDisk(op.value) } : op)))), lazy ? "lazy" : "now")) written(entry);
+        if (writeEntry(serialize(await Promise.all(ops.map(async (op) => (op.kind === "put" ? { ...op, value: await blobsToDisk(op.value) } : op)))), lazy ? "lazy" : "now")) {
+          // A fold it waited behind cleared the mark, with a snapshot taken before it: the new journal holds its delete.
+          holdsDelete ||= deleting;
+          written(entry);
+        }
       } catch (error) {
         // Too late to refuse it (the transactions after it ran on what it wrote): the store is folded into a whole
         // snapshot before its `complete` goes, as when a sync fails.
@@ -599,8 +606,11 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     };
   }
 
-  /** What is held, as a snapshot of format 3: the stores kept on disk say only that they are. */
-  async function capture(journalName: string): Promise<Snapshot> {
+  /**
+   * What is held, as a snapshot of format 3: the stores kept on disk say only that they are. `upTo`: the last entry it
+   * holds, the transactions whose layers go to the trees with it.
+   */
+  async function capture(journalName: string): Promise<{ snapshot: Snapshot; upTo: number }> {
     const snapshot: Snapshot = { format: 1, journal: journalName, databases: [] };
     const held: SnapshotStore[] = [];
     for (const db of raw._databases.values()) {
@@ -614,15 +624,17 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
           snapshot.format = 3;
           continue;
         }
-        const saved: SnapshotStore = { ...storeMeta(store), records: [] };
-        for (const record of store.records.values()) saved.records.push([record.key, record.value]);
+        const saved: SnapshotStore = { ...storeMeta(store), records: treeRecords(store.records).map(({ key, value }) => [key, value]) };
         stores.push(saved);
         held.push(saved);
       }
       snapshot.databases.push({ name: db.name, version: db.version, stores });
     }
-    for (const store of held) for (const record of store.records) record[1] = await blobsToDisk(record[1]);
-    return snapshot;
+    // The records were read in this turn: a transaction that commits while their Blobs are written is not in them.
+    const upTo = seq;
+    // Only a value that holds a Blob waits for it: an await for each of 300,000 notes held the thread 130 ms.
+    for (const store of held) for (const record of store.records) if (hasBlob(record[1])) record[1] = await blobsToDisk(record[1]);
+    return { snapshot, upTo };
   }
 
   /**
@@ -694,25 +706,34 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   async function snapshotToDisk(scrub = false) {
     // The journal is closed and removed below: not while a sync runs on it.
     await synced();
+    // The snapshot holds what the journal's entries said, the relaxed ones too: no sync of them runs while it is written.
+    if (relaxed) { clearTimeout(relaxed); relaxed = null; }
     const name = randomBytes(8).toString("hex");
-    const snapshot = await capture(name);
+    const { snapshot, upTo } = await capture(name);
+    // The trees the schema has at this point in time, as the snapshot names them.
+    const live = trees ? liveTrees() : null;
+    // What is held now is in this snapshot: a write that fails while it is written says so again (one that fails it, too).
+    unsaved = false;
+    const temporary = snapshotPath + ".tmp";
+    // A page at a time, and synced off the thread: serialized whole and synced in place, the hourly fold of a profile
+    // with 100,000 notes in the event hub's seen set held the daemon 218 ms (835 ms at 300,000). The transactions that
+    // commit meanwhile wait behind it in the queue (`append`), so the journal it replaces gets none of them.
+    const file = await open(temporary, "w", 0o600);
+    try { await writeSnapshotTo(file, snapshot); await file.sync(); } finally { await file.close(); }
     if (trees) {
-      // Every finished transaction goes to the trees, and to the disk, before the snapshot takes the journal's place:
-      // also one whose entry waits behind this snapshot in the queue (the snapshot may hold what it did elsewhere). Its
-      // entry, written after, is then one SQLite holds, which a replay skips.
-      trees.apply(seq);
+      // Every transaction the snapshot holds goes to the trees, and to the disk, in the turn the snapshot takes the
+      // journal's place: also one whose entry waits behind this snapshot in the queue (the snapshot holds what it did
+      // elsewhere). Its entry, written after, is then one SQLite holds, which a replay skips. Not before the snapshot is
+      // written: a process killed meanwhile came back to the old snapshot and journal, without such a transaction, and
+      // to rows.db with it, half of it (a file's state deleted, its record kept).
+      trees.apply(upTo);
       if (scrub) trees.scrub();
       trees.sync();
     }
-    const temporary = snapshotPath + ".tmp";
-    const fd = openSync(temporary, "w", 0o600);
-    try { writeAll(fd, serialize(snapshot)); fsyncSync(fd); } finally { closeSync(fd); }
     renameSync(temporary, snapshotPath);
-    // Trees of stores and indexes gone from the schema: once no snapshot on disk names them.
-    try { trees?.sweep(liveTrees()); } catch (error) { process.stderr.write(`ghostly: storage: old trees not removed: ${error instanceof Error ? error.message : String(error)}\n`); }
+    // Trees of stores and indexes gone from the schema: once no snapshot on disk names them, nor the schema now.
+    try { if (live) trees!.sweep(new Set([...live, ...liveTrees()])); } catch (error) { process.stderr.write(`ghostly: storage: old trees not removed: ${error instanceof Error ? error.message : String(error)}\n`); }
     snapshotName = name;
-    unsaved = false;
-    // The snapshot holds what the journal's entries said, the relaxed ones too.
     if (relaxed) { clearTimeout(relaxed); relaxed = null; }
     if (journalFd !== null) { closeSync(journalFd); journalFd = null; }
     rmSync(journalPath, { force: true });
@@ -793,6 +814,45 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
 /** Writes every byte: one write may take only a part (a disk nearly full). */
 function writeAll(fd: number, bytes: Buffer) {
   for (let at = 0; at < bytes.length; ) at += writeSync(fd, bytes, at);
+}
+
+/**
+ * A snapshot to `file`, its records `EXPORT_PAGE` at a time (or fewer, large ones: `PAGE_MS` of the thread) with a write
+ * between: what `serialize(snapshot)` would write.
+ */
+async function writeSnapshotTo(file: FileHandle, snapshot: Snapshot) {
+  const out = new SnapshotWriter(file);
+  const { databases, ...head } = snapshot;
+  out.begin("o");
+  for (const [key, value] of Object.entries(head)) out.value(key, value);
+  out.key("databases");
+  out.begin("A", databases.length);
+  for (const { stores, ...db } of databases) {
+    out.begin("o");
+    for (const [key, value] of Object.entries(db)) out.value(key, value);
+    out.key("stores");
+    out.begin("A", stores.length);
+    for (const { records, ...meta } of stores) {
+      out.begin("o");
+      for (const [key, value] of Object.entries(meta)) out.value(key, value);
+      out.key("records");
+      out.begin("A", records.length);
+      let due = performance.now() + PAGE_MS;
+      for (let at = 0; at < records.length; at++) {
+        out.item(records[at]);
+        if ((at + 1) % EXPORT_PAGE !== 0 && performance.now() < due) continue;
+        await out.flush();
+        due = performance.now() + PAGE_MS;
+      }
+      out.end("A", records.length);
+      out.end("o", Object.keys(meta).length + 1);
+    }
+    out.end("A", stores.length);
+    out.end("o", Object.keys(db).length + 1);
+  }
+  out.end("A", databases.length);
+  out.end("o", Object.keys(head).length + 1);
+  await out.flush();
 }
 
 /**
@@ -1265,6 +1325,21 @@ function absent(keyPath: string | string[], value: unknown): boolean {
     object = (object as Record<string, unknown>)[step];
   }
   return false;
+}
+
+/**
+ * A store's records in key order, read off fake-indexeddb's red-black tree node by node: its own iterator nests a
+ * generator per level and checks the range at each node, 360 ms of the daemon's thread for a seen set of 300,000 notes.
+ */
+function treeRecords(store: RawRecordStore): RawRecord[] {
+  const records: RawRecord[] = [], above: RawNode[] = [];
+  for (let node = store.records._root; node || above.length; ) {
+    if (node) { above.push(node); node = node.left; continue; }
+    node = above.pop()!;
+    if (!node.deleted) records.push(node.record);
+    node = node.right;
+  }
+  return records;
 }
 
 /**

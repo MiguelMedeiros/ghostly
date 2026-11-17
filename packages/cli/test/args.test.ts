@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { liftGlobals, nearest, parseArgs } from "../src/args";
 import { idSlot, numberSlot, positionals, COMMANDS, TEXT_COMMANDS } from "../src/commands";
+import { sats } from "../src/commands/shared";
 import { GhostlyHttpError, TYPING_KINDS, engineError } from "@ghostly/core";
 import { asCliError, CliError, EXIT } from "../src/errors";
 // covers: headless.cli
@@ -53,6 +54,41 @@ describe("the argument parser", () => {
       expect(message).toMatch(/never paste a private key|character word/);
       for (const line of [...body, "x".repeat(40)]) expect(message).not.toContain(line);
     }
+  });
+
+  it("does not print a long or secret-looking word a value refusal quotes", () => {
+    const cashu = `cashuB${"o2FteBtodHRwczovL21pbnQuZXhhbXBsZS5jb20".repeat(2)}`;
+    const nwc = "nostr+walletconnect://abc?relay=wss://r&secret=0123456789abcdef";
+    const seed = "abandon ability able about above absent absorb abstract absurd abuse access accident";
+    const refusals: [() => unknown, RegExp][] = [
+      [() => sats(cashu), /^<sats> takes a whole number from 1 up, not \(a Cashu token\)$/],
+      [() => sats(seed), /^<sats> takes a whole number from 1 up, not \(a 84-character word\)$/],
+      [() => sats("abc"), /^<sats> takes a whole number from 1 up, not "abc"$/],
+      [() => positionals(COMMANDS["wallet create"], [nwc]), /^<type> takes .*, not \(a wallet connection link\)$/],
+      [() => positionals(COMMANDS["chat transport"], ["foo", cashu]), /^<transport> takes .*, not \(a Cashu token\)$/],
+      [() => parseArgs(["--limit", cashu], { limit: { type: "number", description: "" } }), /^--limit takes a number, not \(a Cashu token\)$/],
+      [() => parseArgs(["--net", "nsec1abc"], { net: { type: "string", description: "", choices: ["a", "b"] } }), /^--net takes a or b, not \(a private key\)$/],
+      [() => parseArgs(["--net", "line\nbreak"], { net: { type: "string", description: "", choices: ["a", "b"] } }), /^--net takes a or b, not \(a 10-character word\)$/],
+    ];
+    for (const [refuse, shown] of refusals) {
+      let message = "";
+      try { refuse(); } catch (error) { message = (error as Error).message; }
+      expect(message).toMatch(shown);
+      for (const secret of [cashu, nwc, seed, "nsec1abc", "line\nbreak"]) expect(message).not.toContain(secret);
+    }
+  });
+
+  it("quotes no typed value whole in a refusal: every one goes through shownValue", async () => {
+    const { readdir, readFile } = await import("node:fs/promises");
+    const root = resolve(__dirname, "../src");
+    const files = (await readdir(root, { recursive: true })).filter((file) => file.endsWith(".ts"));
+    const echoes: string[] = [];
+    for (const file of files) {
+      for (const [i, line] of (await readFile(resolve(root, file), "utf8")).split("\n").entries()) {
+        if (/not \$\{[^}]*JSON\.stringify/.test(line)) echoes.push(`${file}:${i + 1}`);
+      }
+    }
+    expect(echoes).toEqual([]);
   });
 
   it("takes a draft that starts with a dash (identity complete, the #357 failure)", () => {
@@ -537,7 +573,7 @@ describe("the argument parser", () => {
     usage("file send", ["alice", "a.wav", "--voice", "2000", "--peaks", "a,b"], `${peaks} "a,b"`);
     usage("file send", ["alice", "a.wav", "--voice", "--peaks", "1,,2"], `${peaks} "1,,2"`);
     usage("file send", ["alice", "a.wav", "--voice", "--peaks", ""], `${peaks} ""`);
-    usage("file send", ["alice", "a.wav", "--voice", "--peaks", new Array(129).fill(1).join(",")], `${peaks} "${new Array(129).fill(1).join(",")}"`);
+    usage("file send", ["alice", "a.wav", "--voice", "--peaks", new Array(129).fill(1).join(",")], `${peaks} (a 257-character word)`);
     usage("file send", ["alice", "a.wav", "--peaks", "1,2"], "--peaks is a voice note's waveform: not without --voice");
     // A file that is there: `file send` looks at it before the profile opens.
     const sound = import.meta.filename;

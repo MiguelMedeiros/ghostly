@@ -7,6 +7,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { problemLine, problemText } from "../lib/problemText";
 import { sizeIn } from "../lib/sizeText";
 import { fillNames } from "../lib/fillNodes";
+import { ownDirection } from "../lib/ownDirection";
 import type { Translate } from "../locales/translate";
 import { FocusSafeButton } from "./ui/FocusSafeButton";
 
@@ -73,7 +74,7 @@ export function ChatHoldDialog({ peer, name, onSave, onClose }: { peer: PeerLink
           </div>
         </div>
         <p className="text-[11px] text-text-muted">{t("chat.hold.privacy")}</p>
-        {error && <p role="alert" className="text-xs text-danger">{error}</p>}
+        {error && <p role="alert" dir={ownDirection(error)} className="text-xs text-danger">{error}</p>}
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm bg-surface-alt text-text-primary border border-border hover:bg-surface-hover cursor-pointer">{t("common.cancel")}</button>
           {/* Busy while it saves, not disabled: that would drop a keyboard's focus to the page, and keep it there on a refusal. */}

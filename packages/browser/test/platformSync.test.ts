@@ -272,6 +272,22 @@ describe("mirroring what the peer stores into the chat", () => {
     expect(stored.messages[0]).toMatchObject({ id: "mine", delivery: "failed", deliveryError: "offline" });
   });
 
+  it("drops a file's waiting state once the engine sends it live, and keeps the status the chat gave a text of mine", async () => {
+    const file = { id: "link-1-out-f1", name: "a.txt", size: 3, mime: "text/plain" } as StoredMessage["file"];
+    const waiting = message({ id: "me_file", sender: "me", text: "a.txt", file, delivery: "waiting", deliveryError: "Sent when you are live." });
+    const text = { id: "me_text", sender: "me" as const, text: "hi", timestamp: 11, delivery: "sent" as const };
+    let stored = await mirror([waiting], { messages: [text] });
+    expect(stored.messages.find((m) => m.id === "me_file")).toMatchObject({ delivery: "waiting" });
+    changes = 0;
+    engine.messageListeners[0]("link-1", [{ ...waiting, delivery: undefined, deliveryError: undefined }, message({ id: "me_text", sender: "me", timestamp: 11 })]);
+    stored = storage.loadSession("s1")!;
+    const sent = stored.messages.find((m) => m.id === "me_file")!;
+    expect(sent.delivery).toBeUndefined();
+    expect(sent.deliveryError).toBeUndefined();
+    expect(stored.messages.find((m) => m.id === "me_text")).toMatchObject({ delivery: "sent" });
+    expect(changes).toBe(1);
+  });
+
   it("puts an edit's new text in place: the same message, nothing new to read, and the preview follows", async () => {
     const shown = { id: "peer_x", sender: "peer" as const, text: "v0 https://a.example/", timestamp: 10, preview: { u: "https://a.example/" } };
     const stored = await mirror([message({ id: "peer_x", text: "v2", edit: { seq: 2, at: 20, history: [{ at: 10, text: "v0 https://a.example/" }] } })], { messages: [shown] });

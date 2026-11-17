@@ -566,7 +566,7 @@ const DROPPED_HEADERS: [&str; 5] = [
 
 /// The page's features, Ghostly's alone: the contact's `Permissions-Policy` (or the older `Feature-Policy`) could
 /// allow them, so it takes their place. `VIEWER_PERMISSIONS_POLICY` in `packages/core/src/http.ts`.
-const PERMISSIONS_POLICY: &str = "camera=(), microphone=(), display-capture=(), geolocation=(), midi=(), usb=(), serial=(), hid=(), clipboard-read=(), idle-detection=(), local-fonts=(), window-management=(), storage-access=(), publickey-credentials-create=()";
+const PERMISSIONS_POLICY: &str = "camera=(), microphone=(), display-capture=(), geolocation=(), midi=(), usb=(), serial=(), hid=(), clipboard-read=(), clipboard-write=(), idle-detection=(), local-fonts=(), window-management=(), storage-access=(), publickey-credentials-create=()";
 
 /// A contact's headers that would set the page's features (`PERMISSIONS_POLICY`).
 const FEATURE_HEADERS: [&str; 2] = ["permissions-policy", "feature-policy"];
@@ -734,7 +734,7 @@ fn external_target(url: &url::Url, site: &str, service: &str) -> Option<String> 
 }
 
 /// Whether a link names this machine or the local network: an address that is not public (loopback, private,
-/// link-local, …), `localhost` and its subdomains, an mDNS `.local` name, or a name of one label (`router`, `nas`)
+/// link-local, …), `localhost` and its subdomains, an mDNS `.local` name, a router's `.lan` name, or a name of one label (`router`, `nas`)
 /// that only a local resolver answers. The contact's page runs on the contact's side; opening such a link in the
 /// person's browser sends it with the browser's cookies, past the browser's own guard for local addresses
 /// (WebView2 opens one from script, with no click). A public name that resolves to a local address is not caught here.
@@ -748,6 +748,7 @@ fn is_local_host(url: &url::Url) -> bool {
                 || name.ends_with(".localhost")
                 || name.ends_with(".local")
                 || name.ends_with(".internal")
+                || name.ends_with(".lan")
                 || name.ends_with(".home.arpa")
         }
         None => true,
@@ -1400,6 +1401,8 @@ mod tests {
             "http://router/",
             "http://metadata.google.internal/",
             "http://nas.home.arpa/",
+            "http://router.lan/",
+            "http://NAS.Lan./",
         ] {
             assert_eq!(outside(local), None, "{local}");
         }

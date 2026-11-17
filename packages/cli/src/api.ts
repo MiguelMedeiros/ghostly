@@ -1,4 +1,4 @@
-import { AWAITING_PEER_MS, decodeGroupEntryLink, inviteLink, LIMITS, MENTION_EVERYONE, normalizeRelayUrl, ownInviteRefusal, relayUrlProblem, replySnippet, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type TypingKind } from "@ghostly/core";
+import { AWAITING_PEER_MS, DHT_PACKET_BUDGET, decodeGroupEntryLink, inviteLink, LIMITS, MENTION_EVERYONE, normalizeRelayUrl, ownInviteRefusal, relayUrlProblem, replySnippet, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type TypingKind } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
 import { DEFAULT_HYPERDHT_RELAY } from "@ghostly/browser/shared/hyperdhtRelay";
@@ -18,7 +18,7 @@ import { checkShownName } from "./profiles";
 import { ended, foldsAnyway, goesOn, nobodyElseIn, outOf, purgeMessage, waitForConfirmed, waitForEdit, waitForGroupFrame, waitForMessage, waitForRemoval } from "./waits";
 import { STATUS_CARD_METHODS, secretIn } from "./statusCards";
 import { BUTTON_METHODS, buttonsCard, pressable } from "./buttons";
-import { forgetHold, HOLD_MAX_MINUTES, holdChat, holdOf, releaseHold } from "./holds";
+import { forgetHold, HOLD_MAX_MINUTES, holdChat, holdEnds, holdOf, releaseHold } from "./holds";
 import { endTyping, keepOneShot, keepTyping, sayTyping } from "./typing";
 import { GROUP_ADMIN_METHODS, noMember, withUrl } from "./groupAdmin";
 import { withStoredIds } from "./turnRefs";
@@ -32,7 +32,7 @@ import { APP_CHAT_METHODS } from "./appChat";
 import { WALLET_METHODS } from "./wallets";
 import { checkOwnStatus, statusJson } from "./ownStatus";
 import { TRANSPORT_NAMES } from "./words";
-import { chatState } from "./waitNotice";
+import { chatState, dhtOnlyNote, heldWords } from "./waitNotice";
 import { chatDetailsJson, chatJson, chatMessageJson, groupJson, groupMessageJson, groupPayTwins, isLive, messageJson, type MessageJson } from "./views";
 
 /**
@@ -317,6 +317,28 @@ async function letIn(ctx: ApiContext, groupId: string, link: string, held: Group
   return { group: groupId, joined, stage, warning: `Not in yet: no member's app has let you in. A member's app lets you in only while this profile is running: ${show}` };
 }
 
+/**
+ * Why a text that waits will not go by itself, or undefined (waitNotice.ts `dhtOnlyNote`). This side's DHT only that is
+ * a hold (`chat disconnect --hold`) is read from `ctx`'s profile; without it, as a DHT only chosen.
+ */
+function dhtOnlyWait(link: LinkView, text: string, ref: string, ctx?: ApiContext): string | undefined {
+  const mine = link.deliveryMode === "dht";
+  return dhtOnlyNote({ mine, theirs: link.dhtDelivery?.peerMode === "dht", heldUntil: mine && ctx ? holdEnds(ctx, link.id) : null, oneShot: ctx?.mode === "one-shot" }, text, ref);
+}
+
+/**
+ * A `--wait sent|delivered` on a text `dhtOnlyWait` holds back, ended short (its timeout, the daemon's stop): it said the
+ * text still goes by itself, or with this profile's next command, which it does not while the chat stays on the DHT
+ * only. It says why instead, with the note in `details.note` too; same code and exit. Read again at the end: a chat
+ * taken off DHT only meanwhile keeps the usual words.
+ */
+function dhtOnlyTimeout(ctx: ApiContext, chat: string, text: string, ref: string, ms: number, error: unknown): unknown {
+  if (!(error instanceof CliError) || error.code !== "timeout" || error.details?.delivery !== "waiting") return error;
+  const link = state(ctx).links.find((l) => l.id === chat);
+  const note = link && dhtOnlyWait(link, text, ref, ctx);
+  return note ? new CliError("timeout", `${ended(ctx, ms)}: the message is waiting. ${note}`, { ...error.details, note }) : error;
+}
+
 const METHODS: Record<string, Method> = {
   ...WALLET_METHODS,
   ...FILE_METHODS,
@@ -502,14 +524,22 @@ const METHODS: Record<string, Method> = {
     // A `--reply` to a message this chat does not have is not_found (exit 3), as `file send --reply` and `group send` say.
     if (result.error) {
       throw (replyTo && notHere(result.error, replyTo, { group: false, ref: str(params, "chat", true) }))
-        || (/not in this chat|cannot be replied to/.test(result.error) ? new CliError("not_found", result.error) : new CliError(result.refused ? "refused" : "unavailable", result.error));
+        || (/not in this chat|cannot be replied to/.test(result.error) ? new CliError("not_found", result.error) : new CliError(result.refused ? "refused" : "unavailable", dhtTooLong(ctx, link, result.error, "text", str(params, "chat", true))));
     }
     if (!result.messageId) throw new CliError("bad_request", "Nothing to send");
     let message = await node(ctx).getMessage(link.id, result.messageId);
-    if (wait !== "none") message = await waitForMessage(ctx, link.id, result.messageId, wait, ms);
+    // Past the 256 bytes the DHT carries, in a chat on the DHT only: it waits for a live session, which comes only once
+    // the chat leaves DHT only. A one-shot sat 30 s, then answered `timeout` saying it goes with the next command.
+    const ref = str(params, "chat", true);
+    const dhtOnly = message?.delivery === "waiting" ? dhtOnlyWait(link, text, ref, ctx) : undefined;
+    // An explicit `--wait` still waits as asked, and a wait that ends short says that note, not that the text goes by itself.
+    if (wait !== "none" && !(dhtOnly && params.wait === undefined)) {
+      message = await waitForMessage(ctx, link.id, result.messageId, wait, ms).catch((error: unknown) => { throw dhtOnlyTimeout(ctx, link.id, text, ref, ms, error); });
+    }
     return {
       chat: link.id, messageId: result.messageId, delivery: message?.delivery ?? null, ...(card ? { buttons: card.id, card, pressable: pressable(link) } : {}),
       ...(unjoined && message?.delivery === "waiting" && { note: `Nobody joined this chat yet: the message goes once they join${ctx.mode === "one-shot" ? " while this profile is online (`ghostly daemon --detach`)" : ""}` }),
+      ...(dhtOnly && message?.delivery === "waiting" && { note: dhtOnly }),
     };
   },
   /**
@@ -528,12 +558,13 @@ const METHODS: Record<string, Method> = {
     }
     const { wait, ms } = confirmWait(ctx, params, link.id);
     const result = await node(ctx).editMessage({ linkId: link.id, messageId, text });
-    if (result.error) throw editRefused(await messageOf(ctx, link.id, messageId), messageId, { group: false, ref: str(params, "chat", true) }, result.error, result.refused);
+    if (result.error) throw await editRefused(ctx, link.id, messageId, { group: false, ref: str(params, "chat", true) }, dhtTooLong(ctx, link, result.error, "edit", str(params, "chat", true)), result);
     const id = result.messageId ?? messageId;
     let message = await node(ctx).getMessage(link.id, id);
     if (wait === "confirmed" && message?.edit?.pending) message = await waitForEdit(ctx, link.id, id, ms);
     const confirmed = !!message && !message.edit?.pending;
-    return { chat: link.id, messageId: id, edits: message?.edit?.seq ?? 0, confirmed, ...(!confirmed && keptForJoin(ctx, link.id, "the edit")) };
+    // Too long for the DHT packet as an edit: it waits for the live session (`note`), refused where none comes.
+    return { chat: link.id, messageId: id, edits: message?.edit?.seq ?? 0, confirmed, ...(!confirmed && result.note && { note: result.note }), ...(!confirmed && keptForJoin(ctx, link.id, "the edit")) };
   },
   /**
    * WISP 401 § Typing: said on the live session only, and a start only while `sendTyping` is on; it holds 6 s there.
@@ -648,12 +679,12 @@ const METHODS: Record<string, Method> = {
     if (!messageIds.length) throw new CliError("bad_request", "Name the messages to forward (their ids, from history or an event)");
     if (messageIds.length > FORWARD_MESSAGES) throw new CliError("bad_request", `Forward at most ${FORWARD_MESSAGES} messages at once, not ${messageIds.length}`);
     // A chat or group named twice (by its name and its id too) is one of them, as the engine counts.
-    const to: ReturnType<typeof chatOrGroup>[] = [];
+    const to: (ReturnType<typeof chatOrGroup> & { ref: string })[] = [];
     for (const ref of new Set(list(params, "to"))) {
       const target = chatOrGroup(ctx, ref, s);
       if (to.some((t) => t.linkId === target.linkId)) continue;
       if (to.length === FORWARD_TARGETS) throw new CliError("bad_request", `Forward to at most ${FORWARD_TARGETS} chats and groups at once`);
-      to.push(target);
+      to.push({ ...target, ref });
     }
     if (!to.length) throw new CliError("bad_request", "Forward to which chat? Name one or more with --to");
     // Each by its id here, one row each: never the whole history of the chat or group.
@@ -675,8 +706,20 @@ const METHODS: Record<string, Method> = {
     let results;
     try { ({ results } = await node(ctx).forwardMessages({ linkId: from.linkId, messageIds, to: to.map((t) => t.linkId) })); }
     catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); }
-    const out: { to: string; kind: "group" | "chat"; messageIds: string[]; sent: string[]; error: string | null; edges?: number }[] =
+    const out: { to: string; kind: "group" | "chat"; messageIds: string[]; sent: string[]; error: string | null; edges?: number; note?: string }[] =
       results.map((result, i) => ({ to: to[i]!.id, kind: to[i]!.group ? "group" as const : "chat" as const, messageIds: result.messageIds, sent: result.sent, error: result.error }));
+    // A text past the 256 bytes the DHT carries, forwarded into a chat on the DHT only, waits as `send`'s does: the
+    // chat's result says why in a `note`, and a `--wait sent` that ends short says it too. It said nothing, and the
+    // timeout that the text still goes by itself.
+    for (const [i, result] of out.entries()) {
+      const link = to[i]!.group ? undefined : state(ctx).links.find((l) => l.id === to[i]!.id);
+      // Its copies read only in a chat on the DHT only, by either side's choice.
+      if (!link || (link.deliveryMode !== "dht" && link.dhtDelivery?.peerMode !== "dht")) continue;
+      for (const messageId of result.messageIds) {
+        const copy = await node(ctx).getMessage(link.id, messageId);
+        if (copy && !copy.file && copy.delivery === "waiting") result.note ??= dhtOnlyWait(link, copy.text, to[i]!.ref);
+      }
+    }
     // A copy's wait that ends short (its time ran out, its delivery failed) ends the waits, not the answer: it threw
     // alone with that copy's id, every target's result and another's refusal lost, and a bot that sent again sent twice.
     let short: CliError | undefined;
@@ -699,7 +742,7 @@ const METHODS: Record<string, Method> = {
       await waited(async () => {
         const sent = await node(ctx).getMessage(to[i]!.id, messageId);
         if (sent?.file) await FILE_METHODS["file.wait"](ctx, { chat: to[i]!.id, file: sent.file.id, timeout: ms / 1000 });
-        else await waitForMessage(ctx, to[i]!.id, messageId, "sent", ms);
+        else await waitForMessage(ctx, to[i]!.id, messageId, "sent", ms).catch((error: unknown) => { throw dhtOnlyTimeout(ctx, to[i]!.id, sent?.text ?? "", to[i]!.ref, ms, error); });
       }, () => undefined);
     }
     // A refusal first, then what ended a wait: each with every target's result.
@@ -972,7 +1015,7 @@ const METHODS: Record<string, Method> = {
     const linkId = `group:${group.id}`;
     const before = (await node(ctx).getMessage(linkId, messageId))?.edit?.seq ?? 0;
     const result = await node(ctx).editMessage({ linkId, messageId, text, ...(mentions.length ? { mentions } : {}) });
-    if (result.error) throw editRefused(await messageOf(ctx, linkId, messageId), messageId, { group: true, ref: str(params, "group", true) }, result.error, result.refused);
+    if (result.error) throw await editRefused(ctx, linkId, messageId, { group: true, ref: str(params, "group", true) }, result.error, result);
     const message = await node(ctx).getMessage(linkId, messageId);
     const edits = message?.edit?.seq ?? 0;
     // The text the message already has: no edit was made and nothing went. It answered `sent: true` before, for a
@@ -1160,11 +1203,14 @@ const ENGINE_SENDS: ReadonlySet<string> = new Set([
   "createGroup", "renameGroup", "updateSettings", "sendFile",
   // The status every contact reads, as `status set` guards it.
   "setOwnStatus",
+  // A Nostr note or profile, public on relays: the app asks before it is signed (NostrPublishDialog).
+  "nostrDraft",
 ]);
 
 async function guardEngineSend(ctx: ApiContext, method: string, args: Params): Promise<void> {
   const of = (value: unknown, key: string) => (value && typeof value === "object" ? (value as Params)[key] : undefined);
-  let texts: unknown = [args.text, args.card, args.caption, args.memo, args.comment, args.name, of(args.settings, "nick"), of(args.file, "name"), of(args.status, "text")];
+  let texts: unknown = [args.text, args.card, args.caption, args.memo, args.comment, args.name, of(args.settings, "nick"), of(args.file, "name"), of(args.status, "text"), args.content,
+    ...(args.fields && typeof args.fields === "object" ? Object.values(args.fields) : [])];
   if (method === "forwardMessages") {
     const ids = Array.isArray(args.messageIds) ? args.messageIds.filter((id): id is string => typeof id === "string") : [];
     const linkId = args.linkId;
@@ -1257,11 +1303,45 @@ function chatNotGroup(ctx: ApiContext, params: Params, command: string, rest = "
 /**
  * An edit the engine refused. A message that is not in the chat or group at all is `not_found` (exit 3), said as every
  * message id is (`noMessage`); before, a mistyped or lost id read "Only your own text messages can be edited"
- * (`refused`, exit 1), as if the message were someone else's.
+ * (`refused`, exit 1), as if the message were someone else's. Whether it is there is the engine's answer (`missing`)
+ * once it looked for it: read again here, an id no message goes by read the chat's whole history a second time (0.7 s
+ * at 100,000 messages). Only a refusal before it looked (a chat that cannot edit, a group I am not in) looks here.
  */
-function editRefused(message: StoredMessage | undefined, ref: string, place: RefPlace, error: string, refused: boolean | undefined): CliError {
-  if (refused && !message) return noMessage(ref, place);
-  return new CliError(refused ? "refused" : "unavailable", error);
+async function editRefused(ctx: ApiContext, linkId: string, ref: string, place: RefPlace, error: string, result: { refused?: boolean; missing?: boolean }): Promise<CliError> {
+  if (!result.refused) return new CliError("unavailable", error);
+  if (result.missing ?? !(await messageOf(ctx, linkId, ref))) return noMessage(ref, place);
+  return new CliError("refused", error);
+}
+
+/**
+ * About the longest ASCII text, and edit, the DHT packet carries once sealed and signed: within the 256 bytes, the
+ * envelope's authentication (and an edit's element) takes the rest. The edge moves by a byte or two with the chat (the
+ * envelope's sequence, the edit's number), so the words say "about"; `dhtBudgetWords.test.ts` sends both sizes on two
+ * paired daemons.
+ */
+const DHT_TEXT_FITS = 248, DHT_EDIT_FITS = 214;
+
+/**
+ * The engine's refusal of a text or an edit within 256 bytes that the DHT packet cannot carry (`DHT_PACKET_BUDGET`,
+ * "Text and authentication exceed the DHT packet budget"), said as the apps and `dhtOnlyWait` say it: too long for the
+ * DHT, about how much fits, and what ends it, by whose choice keeps the chat on the DHT only (this side's hold: when
+ * it ends, and the command that ends it now). Any other error as is.
+ */
+function dhtTooLong(ctx: ApiContext, asked: LinkView, error: string, kind: "text" | "edit", ref: string): string {
+  if (error !== DHT_PACKET_BUDGET) return error;
+  // Read again: the contact's choice may have come with the envelope the engine read since the chat was looked up.
+  const link = state(ctx).links.find((l) => l.id === asked.id) ?? asked;
+  const mine = link.deliveryMode === "dht", theirs = link.dhtDelivery?.peerMode === "dht";
+  const held = mine ? holdEnds(ctx, link.id) : null, chosen = mine && held === null;
+  const fits = kind === "text" ? `a text fits about ${DHT_TEXT_FITS} bytes there` : `an edit fits about ${DHT_EDIT_FITS} bytes there`;
+  const act = kind === "text" ? "send it" : "make the edit";
+  const switchBack = `ghostly chat transport ${shellWord(ref, "<chat>")} auto`;
+  const who = chosen && theirs ? `you and the contact keep this chat on the DHT only: ${act} once both choose a live transport (${switchBack}), or shorten it`
+    : chosen ? `this chat is on the DHT only: ${act} once you choose a live transport (${switchBack}), or shorten it`
+    : theirs ? `the contact keeps this chat on the DHT only: ${act} once they choose a live transport, or shorten it`
+    : held !== null ? `${heldWords(held, ref, act)}, or shorten it`
+    : `shorten it, or ${act} once the chat is live`;
+  return `Too long for the DHT (${fits} once sealed): ${who}`;
 }
 
 /**

@@ -55,7 +55,20 @@ const faults = vi.hoisted(() => ({ rename: false, short: false, full: false, syn
  * How long a sync off the thread takes, at least: a slow disk's (a test's own; 0, as fast as this one is), and what it
  * waits for first, when a test holds it. And the syncs done.
  */
-const disk = vi.hoisted(() => ({ syncMs: 0, held: null as Promise<void> | null, synced: 0 }));
+const disk = vi.hoisted(() => ({ syncMs: 0, held: null as Promise<void> | null, synced: 0, snapshotSync: null as (() => Promise<void>) | null }));
+/** A fold's snapshot is synced through its own file handle: `disk.snapshotSync`, when a test sets it, runs first. */
+vi.mock("node:fs/promises", async (original) => {
+  const fsp = await original<typeof import("node:fs/promises")>();
+  return {
+    ...fsp,
+    open: async (...args: Parameters<typeof fsp.open>) => {
+      const handle = await fsp.open(...args);
+      if (!String(args[0]).endsWith("snapshot.bin.tmp")) return handle;
+      const sync = handle.sync.bind(handle);
+      return Object.assign(handle, { sync: async () => { await disk.snapshotSync?.(); return sync(); } });
+    },
+  };
+});
 
 const opened: PersistentIndexedDb[] = [];
 // A store left open keeps journaling every later test's transactions (the classes it hooks are shared): close them.
@@ -165,7 +178,10 @@ describe("persistent IndexedDB", () => {
 
   it("lets the transactions that commit while a sync runs share the next one, each `complete` after its entry is synced", async () => {
     const dir = folder();
-    const d = await db(await open(dir));
+    const store = await openPersistentIndexedDb(dir); opened.push(store);
+    const d = await db(store.factory);
+    // The snapshot the new database's stores asked for is written a page at a time: the transactions below come after it.
+    await store.flush();
     // A disk that takes 10 ms a sync (#597's): one per transaction, one after another, held 8 sends in flight to the pace of 1.
     disk.syncMs = 10;
     // The first sync is held until the other 7 have committed (journaled, their `complete` not heard): a slow runner
@@ -318,9 +334,13 @@ describe("persistent IndexedDB", () => {
     const store = await openPersistentIndexedDb(dir); opened.push(store);
     const first = await db(store.factory);
     await tx(first, ["messages"], (s) => { s.messages.put({ linkId: "a", id: "1" }); });
+    // The folder as the process left it: the store still open here folds on its own turns, in its own folder.
+    await store.flush();
+    const killed = folder();
+    cpSync(dir, killed, { recursive: true });
     const header = Buffer.alloc(4); header.writeUInt32BE(1000);
-    appendFileSync(join(dir, "journal.bin"), Buffer.concat([header, Buffer.from("partial")]));
-    const second = await db(await open(dir));
+    appendFileSync(join(killed, "journal.bin"), Buffer.concat([header, Buffer.from("partial")]));
+    const second = await db(await open(killed));
     expect(await read(second.transaction("messages").objectStore("messages").count())).toBe(1);
   });
 
@@ -370,6 +390,44 @@ describe("persistent IndexedDB", () => {
     expect(statSync(join(dir, "snapshot.bin")).mode & 0o777).toBe(0o600);
     expect(statSync(dir).mode & 0o777).toBe(0o700);
     await store.close();
+  });
+
+  it("writes a fold's snapshot a page at a time, synced off the thread: the daemon answers while a large one is written", async () => {
+    // Serialized whole and synced on the thread, the hourly fold of a profile with 100,000 notes in the event hub's
+    // seen set held the daemon 218 ms (835 ms at 300,000): socket calls, relays and a call's frames waited.
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    opened.push(store);
+    const first = await db(store.factory);
+    await tx(first, ["log", "messages"], (s) => {
+      for (let i = 0; i < 3_000; i++) s.log.put(`delivered@${i}`);
+      s.messages.put({ linkId: "a", id: "1" });
+    });
+    const onThread = syncs.onThread;
+    // Turns of the event loop that run while the snapshot is half written.
+    const partial = join(dir, "snapshot.bin.tmp");
+    let during = 0, stop = false;
+    const turn = () => { if (stop) return; if (existsSync(partial)) during++; setImmediate(turn); };
+    turn();
+    // A write that commits meanwhile waits behind the fold, and is on the disk after it.
+    const folding = store.compact();
+    const late = tx(first, ["log"], (s) => { s.log.put("late", 9_999); });
+    await folding;
+    await late;
+    stop = true;
+    expect(during).toBeGreaterThan(0);
+    expect(syncs.onThread - onThread).toBe(0);
+    expect(existsSync(partial)).toBe(false);
+
+    // The folder as a process killed now leaves it: the snapshot and what came after it.
+    const killed = folder();
+    cpSync(dir, killed, { recursive: true });
+    const second = await db(await open(killed));
+    const log = () => second.transaction("log").objectStore("log");
+    expect(await read(log().count())).toBe(3_001);
+    expect(await read(log().get(3_000))).toBe("delivered@2999");
+    expect(await read(log().get(9_999))).toBe("late");
+    expect(await read(second.transaction("messages").objectStore("messages").get(["a", "1"]))).toEqual({ linkId: "a", id: "1" });
   });
 
   it("keeps on close a write nobody waited for: the transaction made in the turn the process leaves", async () => {
@@ -1388,6 +1446,109 @@ describe("messages kept in rows.db", () => {
     expect(held(close)).toEqual([]);
   });
 
+  it("a chat delete or a settings write that commits while the fold's snapshot is written still leaves the disk once that snapshot is an hour old", async () => {
+    const profile = (factory: IDBFactory) => new Promise<IDBDatabase>((resolve, reject) => {
+      const request = factory.open("ghostly", 1);
+      request.onupgradeneeded = () => {
+        request.result.createObjectStore("links", { keyPath: "id" });
+        request.result.createObjectStore("settings");
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const held = (dir: string, word: string) => readdirSync(dir).filter((name) => readFileSync(join(dir, name)).includes(word));
+    const age = (dir: string) => { const then = (Date.now() - 2 * 60 * 60_000) / 1000; utimesSync(join(dir, "snapshot.bin"), then, then); };
+    const left: Record<string, string[]> = {};
+    try {
+      // `chat remove` deletes the chat's row; `x401 credential remove` writes the settings again without the secret.
+      // "after": the same once the fold is done, which was folded as it is now before the fold was written off the thread.
+      for (const when of ["during", "after"] as const) for (const what of ["chat", "settings"] as const) {
+        const dir = folder();
+        const store = await openPersistentIndexedDb(dir);
+        opened.push(store);
+        const d = await profile(store.factory);
+        await tx(d, ["links", "settings"], (s) => { s.links.put({ id: "chat-1", seed: "gone-chat" }); s.settings.put({ x401: "gone-settings" }, "settings"); });
+        // The fold's snapshot, taken with both, waits to be synced until the delete has committed.
+        let release = () => {};
+        const writing = new Promise<void>((reached) => {
+          disk.snapshotSync = () => { reached(); return new Promise<void>((go) => { release = go; }); };
+        });
+        const folding = store.compact();
+        await writing;
+        if (when === "after") { release(); await folding; }
+        const removing = tx(d, ["links", "settings"], (s) => { if (what === "chat") s.links.delete("chat-1"); else s.settings.put({}, "settings"); });
+        // Committed: a transaction started after it reads what it did (its `complete` waits for the fold).
+        const now = d.transaction(["links", "settings"]);
+        expect(await read(what === "chat" ? now.objectStore("links").get("chat-1") : now.objectStore("settings").get("settings"))).toEqual(what === "chat" ? undefined : {});
+        release();
+        await folding;
+        await removing;
+        disk.snapshotSync = null;
+        expect(held(dir, `gone-${what}`)).toEqual(["snapshot.bin"]);
+        // An hour on, the next write folds the delete in.
+        age(dir);
+        await tx(d, ["links"], (s) => { s.links.put({ id: "chat-2" }); });
+        await store.flush();
+        left[`${what} ${when} the fold`] = held(dir, `gone-${what}`);
+      }
+    } finally { disk.snapshotSync = null; }
+    expect(left).toEqual({ "chat during the fold": [], "settings during the fold": [], "chat after the fold": [], "settings after the fold": [] });
+  });
+
+  it("a transaction over a store kept on disk and a held one that waits behind the fold is all or nothing in a process killed while its snapshot is written", async () => {
+    const profile = (factory: IDBFactory) => new Promise<IDBDatabase>((resolve, reject) => {
+      const request = factory.open("ghostly", 1);
+      request.onupgradeneeded = () => {
+        request.result.createObjectStore("files", { keyPath: "id" });
+        request.result.createObjectStore("fileState", { keyPath: "id" });
+        request.result.createObjectStore("settings");
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    opened.push(store);
+    const d = await profile(store.factory);
+    // A file's record (held) and its state (rows.db), and a settings write: the journal holds a delete.
+    await tx(d, ["files", "fileState"], (s) => { s.files.put({ id: "f1" }); s.fileState.put({ id: "f1", state: "done" }); });
+    await tx(d, ["settings"], (s) => { s.settings.put({}, "settings"); });
+    await store.flush();
+    // The snapshot an hour old: the next entry written folds the store, which waits for that entry's sync.
+    const then = (Date.now() - 2 * 60 * 60_000) / 1000;
+    utimesSync(join(dir, "snapshot.bin"), then, then);
+    let synced = () => {};
+    disk.held = new Promise<void>((go) => { synced = go; });
+    let written = () => {};
+    const writing = new Promise<void>((reached) => {
+      disk.snapshotSync = () => { disk.snapshotSync = null; reached(); return new Promise<void>((go) => { written = go; }); };
+    });
+    try {
+      const renamed = tx(d, ["files"], (s) => { s.files.put({ id: "f1", name: "a.txt" }); });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      // `file delete`, its two stores in one transaction, waits behind the fold.
+      const deleting = tx(d, ["files", "fileState"], (s) => { s.files.delete("f1"); s.fileState.delete("f1"); });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      disk.held = null;
+      synced();
+      await writing;
+      // The folder as a process killed while the fold's snapshot is written leaves it.
+      const killed = copyOf(dir);
+      written();
+      await store.flush();
+      await renamed;
+      await deleting;
+      const after = await profile(await open(killed));
+      const t = after.transaction(["files", "fileState"]);
+      // The file and its state as they were before the delete, which never completed: not its state gone, its record kept.
+      expect({ file: await read(t.objectStore("files").get("f1")), state: await read(t.objectStore("fileState").get("f1")) })
+        .toEqual({ file: { id: "f1", name: "a.txt" }, state: { id: "f1", state: "done" } });
+    } finally { disk.held = null; disk.snapshotSync = null; }
+    // And once the fold is done, the delete is whole after a kill.
+    const t = (await profile(await open(copyOf(dir)))).transaction(["files", "fileState"]);
+    expect({ file: await read(t.objectStore("files").get("f1")), state: await read(t.objectStore("fileState").get("f1")) }).toEqual({ file: undefined, state: undefined });
+  });
+
   it("a put a unique index refuses in a store kept on disk leaves the store writable by the next transaction", async () => {
     const dir = folder();
     const factory = await open(dir);
@@ -1415,6 +1576,8 @@ describe("messages kept in rows.db", () => {
     for (let i = 0; i < 12; i++) await tx(d, ["messages"], (s) => { s.messages.put(message(i)); });
     d.close();
     (await upgrade(store.factory, 2, (u) => { u.objectStore("messages").createIndex("byCard", "card.kind"); })).close();
+    // In rows.db with the snapshot the schema change asked for.
+    await store.flush();
     expect(await entryCount(dir, "byCard")).toBe(3);
     await store.close();
     const again = await openPersistentIndexedDb(dir);

@@ -3,6 +3,7 @@ import { useCopyKey } from "../../hooks/useCopyKey";
 import { useOptionalI18n } from "../../contexts/I18nContext";
 import { InfoButton } from "../layout/Section";
 import type { Problem } from "../../lib/problemText";
+import { ownDirection } from "../../lib/ownDirection";
 
 /**
  * How a notice reads: `error` (red) only when the person has something to do; `wait` when the app tries again by
@@ -37,7 +38,8 @@ export function Notice({ tone, title, next, details, problem, children, testId, 
     <div role={kind === "error" ? "alert" : undefined} data-testid={testId} data-tone={kind} className={`${COLOR[kind]} ${className}`}>
       <div className="flex items-start gap-1.5">
         <p className="m-0 min-w-0 flex-1 break-words">
-          <span data-testid={testId ? `${testId}-title` : undefined}>{head}</span>
+          {/* A title as it came (the engine's English) in its own direction: in Arabic its stop stays at its end. */}
+          <span dir={ownDirection(head)} data-testid={testId ? `${testId}-title` : undefined}>{head}</span>
           {then && <span data-testid={testId ? `${testId}-next` : undefined} className="block text-text-secondary">{then}</span>}
         </p>
         {(more || why) && <InfoButton open={open} onToggle={() => setOpen(!open)} controls={id} testId={testId ? `${testId}-info` : undefined} className="mt-px" />}

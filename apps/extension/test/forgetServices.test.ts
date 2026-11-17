@@ -7,6 +7,12 @@ import { OTHER_PEER, OTHER_TAG, PEER, SERVICE, TAG, bootExtension, useProfile } 
 
 // covers: services.open
 
+// Each viewer tag a page hashes, counted.
+const hashed = vi.hoisted(() => ({ count: 0 }));
+vi.mock("@ghostly/core", async (original) => {
+  const core = await original<typeof import("@ghostly/core")>();
+  return { ...core, viewerTag: (key: string) => (hashed.count++, core.viewerTag(key)) };
+});
 vi.mock("@ghostly/browser/engine/server", async () => (await import("./fakeEngine")).engineServerModule);
 // The chats the page's peer sends it, with the apps each contact lists.
 const pageEngine = vi.hoisted(() => {
@@ -111,6 +117,22 @@ describe("what a contact's app kept in its viewer tab", () => {
 
     await forgetServicesOf({ profile: "" });
     expect(removed()).toHaveLength(40);
+  });
+
+  it("hashes no chat's viewer tag again for a state that lists only apps already noted", async () => {
+    await page();
+    const key = (n: number) => toZ32(new Uint8Array(32).fill(n));
+    const links = Array.from({ length: 20 }, (_, i) => ({ myPubKeyZ32: key(i + 1), peerPubKeyZ32: key(i + 101), peerServices: [{ id: SERVICE, type: "http" }, { id: "notes", type: "http" }] }));
+    const edges = links.map((link, i) => ({ ...link, peerPubKeyZ32: key(i + 201) }));
+    pageEngine.send(links, edges);
+    hashed.count = 0;
+    // Every message, mark and presence change sends the same lists again, and a file moving four times a second.
+    for (let i = 0; i < 10; i++) pageEngine.send(links, edges);
+    expect(hashed.count).toBe(0);
+
+    // A new app on one chat: that chat's tag only.
+    pageEngine.send([{ ...links[0], peerServices: [{ id: "chess", type: "http" }] }, ...links.slice(1)], edges);
+    expect(hashed.count).toBe(1);
   });
 
   it("notes only the web apps a chat lists, and no more of them than one list holds, however many new ones its contact lists", async () => {

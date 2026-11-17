@@ -19,8 +19,8 @@ import { dhtFileElements, dhtFileId, readDhtFile, type DhtFileAnnouncement, type
 export type DeliveryMode = "stream" | "dht";
 export const DHT_TEXT_BYTES = 256;
 export const DHT_MESSAGE_TTL = 5 * 60_000;
-const DHT_TEXT_TOO_LONG = `DHT text is limited to ${DHT_TEXT_BYTES} UTF-8 bytes. Shorten it or choose a live connection.`;
-const DHT_PACKET_BUDGET = "Text and authentication exceed the DHT packet budget. Shorten the message.";
+export const DHT_TEXT_TOO_LONG = `DHT text is limited to ${DHT_TEXT_BYTES} UTF-8 bytes. Shorten it or choose a live connection.`;
+export const DHT_PACKET_BUDGET = "Text and authentication exceed the DHT packet budget. Shorten the message.";
 const CONTROL_TTL = 10 * 60_000;
 /**
  * How far apart two devices' clocks may be for an envelope's expiry: a reader takes one until this long after `expires`

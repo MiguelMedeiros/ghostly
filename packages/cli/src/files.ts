@@ -488,7 +488,14 @@ export const FILE_METHODS: Record<string, Method> = {
     if ((action === "pause" || action === "resume" || action === "request") && view?.stage === "asking" && view.direction === "in") {
       throw new CliError("refused", "Not taken yet: it waits for you to take it (file accept, or file decline)");
     }
-    await node(ctx).fileAction({ linkId, fileId, action });
+    // Larger than the room this device has left now (`FileDesk.accept`): not started, it keeps waiting for the answer.
+    try {
+      await node(ctx).fileAction({ linkId, fileId, action });
+    } catch (error) {
+      const room = (error as { room?: unknown } | null)?.room;
+      if (action === "accept" && error instanceof Error && typeof room === "number" && error.message.startsWith("No room on this device")) throw new CliError("refused", error.message, { reason: "no_room", room });
+      throw error;
+    }
     return { ...where, file: fileId, action, transfer: state(ctx).transfers[fileId] ?? null };
   },
 

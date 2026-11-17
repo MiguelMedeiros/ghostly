@@ -59,7 +59,7 @@ import { GROUP_WAKE_FRAME, GROUP_WAKE_RECEIVE_LIMIT, GroupWakeLimiter, RateWindo
 import { COMMUNITY_REACTION_FRAME, GROUP_REACTION_FRAME, REACTION_LIMITS, ReactionWindow, queueReaction, readReaction, validReactionNumber, wireReaction, type WireReaction } from "@ghostly/core";
 import { COMMUNITY_PIN_FRAME, PIN_LIMITS, mayPin, pinIsNewer, pinNumberHolds, readPin, type GroupPinFrame, type WirePin } from "@ghostly/core";
 import { CapsExchange, DHT_FILE_CAPABILITY, DHT_FILE_TOO_LARGE, DHT_TEXT_CAPABILITY, HOLD_CAPABILITY, dhtFileId, type DhtFileAnnouncement, type DhtPacketFacts, TRANSPORTS, automaticTransport, capsDescriptors, dialDescriptors, type CapsContent, type CapsRecord, type PairingCredentials } from "@ghostly/core";
-import { fileMessageText, parseLinkPreview, pairedMessageFrame, pairedMessageFits, pairedEditFits, PAIRED_FRAME_TOO_LARGE, type WireReply, type LinkPreview, type PaymentRequest, type PaymentAsk, type Payment, type PaymentResult, HOLD_LIMITS, MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, lastSharedWithMe, receivedIdentityStatus, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
+import { fileMessageText, parseLinkPreview, pairedMessageFrame, pairedMessageFits, pairedEditFits, PAIRED_FRAME_TOO_LARGE, MESSAGE_PACED, type WireReply, type LinkPreview, type PaymentRequest, type PaymentAsk, type Payment, type PaymentResult, HOLD_LIMITS, MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, lastSharedWithMe, receivedIdentityStatus, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
 import {
   presenceSeenAt,
   DEFAULT_RELAYS,
@@ -392,6 +392,8 @@ export const cardRestoreTiming = { everyMs: CARD_RESTORE_EVERY_MS };
 const RTT_SAVE_MS = 5 * 60_000;
 /** A reaction said on the live session and not confirmed is said again after this long. */
 const REACTION_RESEND_MS = 30_000;
+/** An edit the DHT packet cannot carry, in a chat that goes live (`editMessage`): kept, it waits for the live session. */
+const DHT_EDIT_WAITS = "Too long for the DHT packet as an edit: it goes when you are live.";
 /** How long a deleted chat's session stays up once the ends of its moving files are said, so they get there (as a yield's goodbye). */
 const FILES_END_MS = 300;
 /** A link event that only asks something and acts on nothing: a deleted chat's link may still ask it (`whileChat`). */
@@ -713,9 +715,19 @@ export interface NodeOptions {
   holdFetch?: typeof fetch;
   /**
    * How an identity's proof and public data are read (WISP 300, PUBLIC-PROFILES.md) at the addresses a contact's proof
-   * names. Default: `fetch`. The CLI passes one that connects only to public addresses, which a page cannot check.
+   * names. Default: `fetch`. The CLI and Desktop pass one that connects only to public addresses, which a page cannot check.
    */
   identityFetch?: typeof fetch;
+  /**
+   * How a group's call node is asked (WISP 602) at the origin the group's admin named. Default: `fetch`. The CLI
+   * passes one that connects only to public addresses, which a page cannot check.
+   */
+  groupCallFetch?: typeof fetch;
+  /**
+   * A group call's pass may send its LiveKit client to `ws://` on this machine: the e2e suite's LiveKit. Default off,
+   * and off in every shipped app: the group's node names that address.
+   */
+  groupCallLoopback?: boolean;
   /** How to reach Pkarr. Default: HTTP relays, the only way out of a browser. */
   transport?: PkarrTransport;
   pollIntervals?: PollIntervals;
@@ -847,7 +859,8 @@ export interface NodeOptions {
   /**
    * How a Lightning address or LNURL service is asked (WISP 205 § Transport). Default: `fetch`, which in a page cannot
    * read where a redirect leads, so a service that redirects is refused there. Ghostly Desktop passes one that asks
-   * from Rust when the service redirects, where every hop is checked before it is followed.
+   * from Rust when the service redirects, where every hop is checked before it is followed. The CLI passes one that
+   * connects only to public addresses.
    */
   lnurlFetch?: typeof fetch;
 }
@@ -1523,6 +1536,8 @@ export class GhostlyNode implements EngineImplementation {
     linkIds: () => [...this.links.keys()],
     online: () => this.networkOn,
     fetcher: (...request) => (this.options.identityFetch ?? globalThis.fetch)(...request),
+    // The profile's own Pkarr relays are read as the chats read them, not under `identityFetch`'s public-address rule.
+    relayFetcher: (...request) => globalThis.fetch(...request),
     relayOnly: () => this.settings.relayOnly === true,
     emit: () => { this.emitState(); this.did.changed(); void this.publicProfiles.prune().catch(() => {}); this.publicActivity.prune(); },
     redraw: linkId => this.chatChanged(linkId),
@@ -1782,6 +1797,7 @@ export class GhostlyNode implements EngineImplementation {
     messages: chat => db.getMessages(chat),
     message: (chat, id) => db.getMessage(chat, id),
     rows: (chat, id) => this.rowsNamed(chat, id),
+    unkeyed: chat => { const live = this.links.get(chat); return live && !live.stored.group ? this.unkeyedRowsOf(live) : undefined; },
     patch: (chat, id, change) => db.patchMessage(chat, id, change),
     changed: async (chat, id, note) => {
       const shown = this.reactionNotes.get(chat);
@@ -4475,9 +4491,12 @@ export class GhostlyNode implements EngineImplementation {
    * (`editsFor`) once the chat is live and both sides offer edit/1. Only texts, at most `MAX_EDITS_PER_MESSAGE` times each,
    * and never empty (deleting is for that). What an edit says is checked like a message: its length, its preview.
    */
-  async editMessage(params: { linkId: string; messageId: string; text: string; preview?: LinkPreview; mentions?: GroupMention[]; card?: unknown }): Promise<{ error: string | null; refused?: boolean; messageId?: string }> {
+  async editMessage(params: { linkId: string; messageId: string; text: string; preview?: LinkPreview; mentions?: GroupMention[]; card?: unknown }): Promise<{ error: string | null; refused?: boolean; missing?: boolean; messageId?: string; note?: string }> {
     const { linkId } = params;
-    const refuse = (error: string) => ({ error, refused: true });
+    // `missing`, once the message was looked for: whether the chat has none by that id or wire id, said with each
+    // refusal so the CLI tells a message not there from one it cannot edit without reading for it again.
+    const looked: { missing?: boolean } = {};
+    const refuse = (error: string) => ({ error, refused: true, ...looked });
     // A card's update (WISP 405 · Status Cards): the whole new card, and its fallback text unless one is given.
     const card = params.card === undefined ? undefined : GhostlyNode.cardToSend(params.card, true);
     if (typeof card === "string") return refuse(card);
@@ -4494,7 +4513,10 @@ export class GhostlyNode implements EngineImplementation {
     if (!live.stored.profile) return refuse("Editing needs a current chat; this compatibility chat cannot edit.");
     if (live.stored.group) return refuse("No such chat");
     if (typeof params.messageId !== "string" || typeof params.text !== "string") return refuse("No message to edit");
-    const message = await db.getMessage(linkId, params.messageId) ?? (await db.getMessages(linkId)).find(m => m.sender === "me" && m.wireId === params.messageId);
+    // By its id here, else by its wire id (what a bot keeps from `send`), each row read alone (`rowsByWireId`).
+    const named = await db.getMessage(linkId, params.messageId), wired = named ? [] : await this.rowsByWireId(live, params.messageId);
+    const message = named ?? wired.find(m => m.sender === "me");
+    looked.missing = !named && !wired.length;
     if (!message || !canEdit(message)) return refuse("Only your own text messages can be edited");
     if (card && !GhostlyNode.removes(card, message)) return refuse(notRemoved);
     const text = params.text.trim();
@@ -4510,13 +4532,19 @@ export class GhostlyNode implements EngineImplementation {
     if (seq > most) return refuse(`This message was edited ${most} times, the most one takes.`);
     // As a send is (`pairedMessageFits`): within 16 KiB, an edit's frame can still pass what the contact's session takes.
     if (!pairedEditFits({ id: "A".repeat(22), e: seq, ts: Date.now(), m: text, ...(card && { sc: card }) })) return refuse(PAIRED_FRAME_TOO_LARGE);
-    const edited = withEdit(message, { seq, at: Date.now(), text, preview, card, pending: true });
+    const at = Date.now();
+    // On the DHT floor an edit goes as a text with its element (WISP 403 § Edits), which the packet may not carry: it
+    // waited there for good with no reason said, and the contact kept the old text. A chat that never goes live (DHT
+    // only, on either side) refuses it as a text is refused; otherwise it goes once live, and the answer says so.
+    const tooBig = !card && message.wireId && this.takesDhtEdits(live) ? live.link?.dhtEditTooBig({ id: message.wireId, e: seq, ts: at, m: text }) : null;
+    if (tooBig && GhostlyNode.dhtByChoice(live)) return refuse(tooBig);
+    const edited = withEdit(message, { seq, at, text, preview, card, pending: true });
     await db.patchMessage(linkId, message.id, () => ({ text: edited.text, edit: edited.edit, preview: edited.preview, card: edited.card }));
     await this.messagesChanged(linkId, [message.id]);
     const edits = this.editsFor(linkId);
     edits.edited(message.id);
     void edits.flush().catch(() => {});
-    return { error: null, messageId: message.id };
+    return { error: null, messageId: message.id, ...(tooBig && { note: DHT_EDIT_WAITS }) };
   }
 
   /**
@@ -4811,6 +4839,8 @@ export class GhostlyNode implements EngineImplementation {
         if (!error && message.via === "pkarr") await this.cardWentBare(linkId, message);
         // No relay took it and none may hold it: it has not left this device (the outbox lets it wait, cancellable).
         if (error && message.via === "pkarr" && message.wireId && link.dhtWentNowhere(message.wireId)) return new NotSent(error);
+        // The contact's windows have no room for it yet: it did not go, and waits in its place for room (`MessagePace`).
+        if (error === MESSAGE_PACED) return new NotSent(error, MESSAGE_PACED);
         return error;
       }, message => message.via === "pkarr" ? DHT_MESSAGE_TTL : 20_000, message => {
         const pending = this.links.get(linkId)?.stored.dhtDeliveryState?.pending;
@@ -4825,7 +4855,7 @@ export class GhostlyNode implements EngineImplementation {
           // that its offer goes on the DHT floor, once, when the contact's app takes it there (WISP 403 § Files).
           if (message.file && !message.wireId) return (!!link?.isDataLinkOpen && link.textDelivery === "stream") || this.fileFloorReady(live, message);
           if (message.via === "pkarr" && !GhostlyNode.dhtByChoice(live) && link?.textDelivery !== "stream") return false;
-          return !!link?.canSendText && !!message.wireId && !link.validateText(message.text, message.timestamp, message.wireId, GhostlyNode.wireReply(message));
+          return !!link?.canSendText && link.textRoom && !!message.wireId && !link.validateText(message.text, message.timestamp, message.wireId, GhostlyNode.wireReply(message));
         },
         requeueExpired: () => !GhostlyNode.dhtByChoice(this.links.get(linkId)),
         // A 1:1 chat's files that wait for the live link go with its texts; a group edge's go as before (`sendWaiting`).
@@ -5313,6 +5343,8 @@ export class GhostlyNode implements EngineImplementation {
     const live = this.links.get(linkId);
     if (!live) throw new Error("No such chat");
     if (!["accept", "decline", "pause", "resume", "cancel", "resend", "request"].includes(action)) throw new Error("Unknown file action");
+    // Taken only when it fits in the room left now (`FileDesk.accept`): one that does not keeps waiting.
+    if (action === "accept") return this.fileDesk.accept(linkId, fileId).then(() => {});
     const now = this.fileDesk.act(linkId, fileId, action);
     // Sent again or asked again with no live session: it goes when the chat is live, and the chat tries now.
     if (!now && (action === "resend" || action === "request") && live.link && !live.link.isDataLinkOpen) void this.connect({ linkId }).catch(() => {});
@@ -5543,6 +5575,20 @@ export class GhostlyNode implements EngineImplementation {
   private unkeyedRowsOf(live: LiveLink): Promise<Map<string, string>> {
     return live.unkeyedRows ??= db.getMessages(live.stored.id).then(history => new Map(history.flatMap(m => { const ref = unkeyedRef(m); return ref ? [[ref, m.id] as const] : []; })),
       error => { live.unkeyedRows = undefined; throw error; });
+  }
+
+  /**
+   * A 1:1 chat's rows whose wire id (`StoredMessage.wireId`) is `wireId`, by time. Each is read alone: the chat's
+   * `me_`/`peer_` row of that id, and the one that goes by it under another id (`unkeyedRowsOf`: read from the history
+   * once in a run, then kept as rows are stored), so a row deleted since is not found and another chat's row of the same
+   * wire id is never read. Each id no row goes by read the whole chat (0.7 s at 100,000 messages) before.
+   */
+  private async rowsByWireId(live: LiveLink, wireId: string): Promise<StoredMessage[]> {
+    const ours = (rows: (StoredMessage | undefined)[]) => rows.filter((m): m is StoredMessage => m?.wireId === wireId).sort((a, b) => a.timestamp - b.timestamp);
+    const keyed = ours(await db.getMessagesById(live.stored.id, [`me_${wireId}`, `peer_${wireId}`]));
+    if (keyed.length) return keyed;
+    const other = (await this.unkeyedRowsOf(live)).get(wireId);
+    return other === undefined ? [] : ours([await db.getMessage(live.stored.id, other)]);
   }
 
   /**
@@ -6618,7 +6664,7 @@ export class GhostlyNode implements EngineImplementation {
     if (!me) throw engineError("groupCallNotMember");
     const sfu = groupCallSfu(me.meta);
     if (!sfu) throw engineError("groupNoCall");
-    return fetchGroupCallToken({ sfu, g: groupId, k: me.key, seed: identityFromSeedB64(me.seedB64).seed, name: this.sharedNick });
+    return fetchGroupCallToken({ sfu, g: groupId, k: me.key, seed: identityFromSeedB64(me.seedB64).seed, name: this.sharedNick, fetch: (...request) => (this.options.groupCallFetch ?? globalThis.fetch)(...request), loopback: this.options.groupCallLoopback === true });
   }
 
   /**
@@ -6637,7 +6683,7 @@ export class GhostlyNode implements EngineImplementation {
     if (!me?.isAdmin) return { ok: false, code: "not_admin" };
     const sfu = groupCallSfu(me.meta);
     if (!sfu) return { ok: false, code: "unsupported" };
-    return sendGroupCallModeration({ sfu, g: groupId, seed: identityFromSeedB64(me.seedB64).seed, act, target: act === "state" ? "" : target, src: takesSources ? src : [] });
+    return sendGroupCallModeration({ sfu, g: groupId, seed: identityFromSeedB64(me.seedB64).seed, act, target: act === "state" ? "" : target, src: takesSources ? src : [], fetch: (...request) => (this.options.groupCallFetch ?? globalThis.fetch)(...request) });
   }
 
   /**
@@ -8100,20 +8146,24 @@ export class GhostlyNode implements EngineImplementation {
   private async moveDeviceSet(remove?: string): Promise<DeviceSetView> {
     this.setMoveAllowed();
     if (this.settingMove) throw new Error("remove-busy: The device set is already changing.");
-    // Removed already, by a move cut short after its write (Remove pressed again): that removal is finished, not refused.
-    const record = remove === undefined ? null : await readDeviceRecord(databaseName()).catch(() => null);
-    if (record?.state === "active" && record.earlierSets.some((set) => set.removed === remove) && !record.deviceSet.some((slot) => slot?.key === remove)) {
+    // Taken before the first await: a second move that came during the record's read would plan from the same record.
+    const work = (async () => {
+      // Removed already, by a move cut short after its write (Remove pressed again): that removal is finished, not refused.
+      const record = remove === undefined ? null : await readDeviceRecord(databaseName()).catch(() => null);
+      if (record?.state === "active" && record.earlierSets.some((set) => set.removed === remove) && !record.deviceSet.some((slot) => slot?.key === remove)) return false;
+      const ports = await this.setMovePorts();
+      if (!ports) throw new Error("remove-state: This device cannot sign for its device set.");
+      await moveSet(ports, remove === undefined ? {} : { remove });
+      return true;
+    })();
+    this.settingMove = work;
+    let moved: boolean;
+    try { moved = await work; } finally { this.settingMove = null; }
+    if (!moved) {
       await this.finishRemovals().catch(() => {});
       this.watchTombstones();
       return this.deviceSet();
     }
-    const work = (async () => {
-      const ports = await this.setMovePorts();
-      if (!ports) throw new Error("remove-state: This device cannot sign for its device set.");
-      await moveSet(ports, remove === undefined ? {} : { remove });
-    })();
-    this.settingMove = work;
-    try { await work; } finally { this.settingMove = null; }
     if (remove !== undefined) await this.finishRemovals().catch(() => {});
     // The giver signs releases over the turn address, which moved with the secret: it is made again for the new one.
     if (this.handoffGiver) { this.deviceLinks?.setHandoff(null); this.handoffGiver = null; await this.startHandoff().catch(() => {}); }
