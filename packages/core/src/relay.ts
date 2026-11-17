@@ -1560,7 +1560,9 @@ export class RelayTransport implements PkarrTransport {
       if (isGroupRead(who) && (this.spent.get(relay)?.length ?? 0) >= this.limitOf(relay)) this.groupsFullAt.set(relay, now);
       if (isChat(who)) this.chatNeed(key, now, relay);
       if (writer) this.writeWaiting.set(`${writer} ${relay}`, now);
-      if (isDoorRead(who)) this.doorWaiting.set(relay, now);
+      // Only when the minute's limit holds it (a waiting write goes first anyway): a request it frees would go to the
+      // door. Not the chats' reserve, nor the background share: an edge's watch read would wait for nothing.
+      if (isDoorRead(who) && this.heldFor(relay, who, now, key, true, true, true) <= 0) this.doorWaiting.set(relay, now);
       if (isGroupAnswerRead(who)) {
         const waiting = this.answerReadWaiting.get(relay) ?? new Map<string, number>();
         this.answerReadWaiting.set(relay, waiting.set(key, now));
@@ -1609,9 +1611,10 @@ export class RelayTransport implements PkarrTransport {
    * group reads and background requests, never a chat's. Background requests yield to a link that signals. A chat's
    * signaling goes over the limit by its allowance (`SIGNALING_ALLOWANCE_SHARE`), and so do a few of its reads of a
    * contact that just went away (`DEPARTED_READS`) or of an invite awaited (`AWAITED_READS`). `ownAllowance` false: what holds an edge's read for its answer
-   * without its own allowance (`ANSWER_READ_ALLOWANCE`).
+   * without its own allowance (`ANSWER_READ_ALLOWANCE`). `limitFree` true: all but the minute's limit and the writes
+   * waiting (they go first), what still holds it once the minute frees requests (`DOOR_FIRST_MS`).
    */
-  private heldFor(relay: string, who: Asker, now = Date.now(), key?: string, turns = true, ownAllowance = true): number {
+  private heldFor(relay: string, who: Asker, now = Date.now(), key?: string, turns = true, ownAllowance = true, limitFree = false): number {
     const recent = within(this.spent.get(relay) ?? [], now, 60_000);
     const recentBackground = within(this.spentBackground.get(relay) ?? [], now, 60_000);
     this.spent.set(relay, recent);
@@ -1636,7 +1639,7 @@ export class RelayTransport implements PkarrTransport {
     const groupSignaled = within(this.spentGroupSignal.get(relay) ?? [], now, 60_000);
     this.spentGroupSignal.set(relay, groupSignaled);
     const groupFloor = isGroupSignal(who) && groupSignaled.length < allowance;
-    let wait = groupFloor ? 0 : over(recent, limit + allowance);
+    let wait = groupFloor || limitFree ? 0 : over(recent, limit + allowance);
     const starved = key !== undefined && this.starved(key, who, now);
     const groupOver = within(this.spentGroupOver.get(relay) ?? [], now, GROUP_OVER_PACE_MS);
     this.spentGroupOver.set(relay, groupOver);
@@ -1722,13 +1725,15 @@ export class RelayTransport implements PkarrTransport {
     // minute refused at every read, read its contact's answer only once the minute freed: 62 s, against 8 s (bug hunt,
     // 2026-11-07). A starved read goes before them (`READ_STARVED_MS`).
     const signalOver = isChatSignal(who) && !who.write && recent.length >= limit;
-    if (writer !== "chat" && !departed && !awaited && !signalOver && !starved) wait = Math.max(wait, waiting("chat"));
+    if (writer !== "chat" && !departed && !awaited && !signalOver && !starved && !limitFree) wait = Math.max(wait, waiting("chat"));
     // A read past the limit within the groups' allowance takes no request a waiting write could have (it is no signal).
     // An edge's read for its answer does not wait for one: the floor's other requests wait for it instead.
-    if (((writer === null && who.group && !pastLimit && !isGroupAnswerRead(who)) || who.background) && !starved) wait = Math.max(wait, waiting("group"));
+    if (((writer === null && who.group && !pastLimit && !isGroupAnswerRead(who)) || who.background) && !starved && !limitFree) wait = Math.max(wait, waiting("group"));
     // A door's read the budget refused goes first when a request frees (`DOOR_FIRST_MS`): the edges' watch reads, the
-    // groups' slow reads and the background reads wait for it, past the limit within the groups' allowance too. Not
-    // while the background share holds the door's read: what they leave would not go to it.
+    // groups' slow reads and the background reads wait for it, past the limit within the groups' allowance too. Only
+    // while the limit holds it (`take`: a write waiting goes first anyway), and not once the background share does: what they leave would not go
+    // to it. Held by the chats' reserve, a door armed this hold at each bell read, and an edge's watch read the
+    // reserve leaves be went 3 times in 5 minutes against 13 (review, 2026-11-17).
     const doorAt = this.doorWaiting.get(relay);
     if (doorAt !== undefined && now - doorAt < DOOR_FIRST_MS && !who.write && !who.door && (who.background || isWatch(who) || (isGroupRead(who) && !who.urgent)) && !starved && recentBackground.length < backgroundShare) wait = Math.max(wait, doorAt + DOOR_FIRST_MS - now);
     // The groups' other signaling waits for an edge's read for its answer the budget refused, for what that read could

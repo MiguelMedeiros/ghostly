@@ -86,6 +86,38 @@ describe("relay transport: a community door's reads while its edges watch member
     expect(delays.length).toBeGreaterThanOrEqual(30);
   });
 
+  it("holds no edge's watch read for the bell while a chat's reserve holds the bell", async () => {
+    // One relay; a 1:1 chat polls it urgently every 3 s, so its reserve stands the whole run, and plain group reads
+    // fill the minute every second. The chats' reserve holds the door's bell read (a background read), but not an
+    // edge's watch read within the groups' allowance: a freed request never goes to the bell, so the watch reads must
+    // not wait for it. Before, each refusal of the bell armed the hold again: 3 watch reads in 5 minutes against 13.
+    const stored = new Map<string, Uint8Array>(), asked = new Map<string, number>();
+    const fetchFn = (async (input: RequestInfo | URL) => {
+      const key = new URL(String(input)).pathname.slice(1);
+      asked.set(key, (asked.get(key) ?? 0) + 1);
+      const body = stored.get(key);
+      return body ? new Response(body as BodyInit, { status: 200 }) : new Response(null, { status: 404 });
+    }) as typeof fetch;
+    const relay = new RelayTransport({ relays: [RELAYS[0]], log: () => {}, fetch: fetchFn });
+    const group = withRequestOptions(relay, { group: true });
+    const chat = createIdentity(), bell = createIdentity(), watched = createIdentity();
+    const plain = Array.from({ length: 4 }, () => createIdentity());
+    for (const id of [chat, bell, watched, ...plain]) stored.set(id.pubKeyZ32, createRelayPayload(id, [{ label: "_ts", value: "1" }], 1n));
+    let watches = 0;
+    for (let t = 0; t < 5 * 60_000; t += 1_000) {
+      if (t) await vi.advanceTimersByTimeAsync(1_000);
+      if (t % 3_000 === 0) await relay.resolve(chat.pubKeyZ32, { urgent: true }).catch(() => {});
+      await group.resolve(plain[(t / 1_000) % plain.length].pubKeyZ32).catch(() => {});
+      if (t % 4_000 === 0) await group.resolve(bell.pubKeyZ32, { background: true, door: true }).catch(() => {});
+      if (t % 2_000 === 0) { watches++; await group.resolve(watched.pubKeyZ32, { urgent: true, watch: true }).catch(() => {}); }
+    }
+    expect(watches).toBe(150);
+    // As without the door's hold: 13 watch reads of 150, the bell 5 times, the chat 93.
+    expect(asked.get(watched.pubKeyZ32) ?? 0).toBeGreaterThanOrEqual(12);
+    expect(asked.get(bell.pubKeyZ32) ?? 0).toBeGreaterThanOrEqual(5);
+    expect(asked.get(chat.pubKeyZ32) ?? 0).toBeGreaterThanOrEqual(90);
+  });
+
   it("says a bell read the budget held back was held, and who spent the minute", async () => {
     const lines: Record<string, unknown>[] = [];
     setLinkTraceSink((line) => lines.push(JSON.parse(line)));
