@@ -190,12 +190,18 @@ export function RoadmapPage() {
                           <span className="dim mono rm-cand-kind">{c.kind}</span>
                           <LevelBadge level={c.level as Level} small />
                         </summary>
-                        <div className="rm-cand-body" lang="en">
-                          <p className="dim mono">
-                            {c.note ? `${c.status}: ${c.note}` : c.status} · {t.inventory.sourceStatus}
-                          </p>
-                          <ReferenceMarkdown body={c.body} sourcePath="docs/wisps/ADAPTER-ROADMAP.md" idPrefix={`${c.id}-`} />
-                        </div>
+                        <ReferenceMarkdown
+                          className="rm-cand-body"
+                          lang="en"
+                          lead={
+                            <p className="dim mono">
+                              {c.note ? `${c.status}: ${c.note}` : c.status} · {t.inventory.sourceStatus}
+                            </p>
+                          }
+                          body={c.body}
+                          sourcePath="docs/wisps/ADAPTER-ROADMAP.md"
+                          idPrefix={`${c.id}-`}
+                        />
                       </details>
                     </li>
                   ))}
