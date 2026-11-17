@@ -13,9 +13,11 @@ interface QRCodeDisplayProps {
   label?: string;
   /** What the Copy button says, when it does not copy an invite. */
   copyLabel?: string;
+  /** What a screen reader names the QR image, when it is not an invite's (Add a device's code). */
+  title?: string;
 }
 
-export function QRCodeDisplay({ value, qr, label, copyLabel }: QRCodeDisplayProps) {
+export function QRCodeDisplay({ value, qr, label, copyLabel, title }: QRCodeDisplayProps) {
   const { t } = useI18n();
   const currentValue = useRef(value); currentValue.current = value;
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -58,7 +60,7 @@ export function QRCodeDisplay({ value, qr, label, copyLabel }: QRCodeDisplayProp
           value={encoded}
           size={232}
           marginSize={2}
-          title={t("invite.qrTitle")}
+          title={title ?? t("invite.qrTitle")}
           bgColor="#ffffff"
           fgColor="#0b0f1a"
           level="M"
