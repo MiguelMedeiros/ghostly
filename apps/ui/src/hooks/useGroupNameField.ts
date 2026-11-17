@@ -14,8 +14,11 @@ import { fitsGroupName } from "../lib/groups";
  *
  * A keystroke or paste the name has no room for at all is refused before it reaches the field (`beforeinput`): let in
  * and then put back by script, the field lost the browser's undo history, and Ctrl+Z undid nothing (agents#1154).
+ *
+ * `onDropped`, when given, hears each change the name had no room for, whole or in part: a field that says its cut
+ * (the name step's status). Without it nothing is said, as before.
  */
-export function useFittedNameField(value: string, setValue: (value: string) => void, fits: (name: string) => boolean) {
+export function useFittedNameField(value: string, setValue: (value: string) => void, fits: (name: string) => boolean, onDropped?: () => void) {
   const ref = useRef<HTMLInputElement>(null);
   const caret = useRef<number | null>(null);
   // The name and caret as a composition found them, from its start to its end.
@@ -32,7 +35,9 @@ export function useFittedNameField(value: string, setValue: (value: string) => v
   // One listener for the field's life, which reads the rule of the latest draw.
   const rule = useRef(fits);
   rule.current = fits;
-  const [refuse] = useState(() => (e: InputEvent) => refuseInsertion(e, rule.current));
+  const dropped = useRef(onDropped);
+  dropped.current = onDropped;
+  const [refuse] = useState(() => (e: InputEvent) => { if (refuseInsertion(e, rule.current)) dropped.current?.(); });
   // Each draw: Rename's field comes and goes with the form around it.
   const bound = useRef<HTMLInputElement | null>(null);
   useEffect(() => {
@@ -46,7 +51,7 @@ export function useFittedNameField(value: string, setValue: (value: string) => v
   const onChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
     if (composing.current) { setValue(e.target.value); return; }
     const next = fitTextEdit(value, e.target.value, e.target.selectionStart, fits);
-    if (next.value !== e.target.value) { caret.current = next.caret; setRefused(n => n + 1); }
+    if (next.value !== e.target.value) { caret.current = next.caret; setRefused(n => n + 1); dropped.current?.(); }
     setValue(next.value);
   }, [value, setValue, fits]);
   const onCompositionStart = useCallback((e: CompositionEvent<HTMLInputElement>) => {
@@ -56,7 +61,7 @@ export function useFittedNameField(value: string, setValue: (value: string) => v
     const start = composing.current, composed = e.currentTarget.value;
     composing.current = null;
     if (!start || fitText(composed, fits) === composed) { setValue(composed); return; }
-    caret.current = start.caret; setRefused(n => n + 1);
+    caret.current = start.caret; setRefused(n => n + 1); dropped.current?.();
     setValue(start.value);
   }, [setValue, fits]);
   return { ref, onChange, onCompositionStart, onCompositionEnd, dir: draftDirection(value) };
@@ -65,13 +70,15 @@ export function useFittedNameField(value: string, setValue: (value: string) => v
 /** A group name field (`fitsGroupName`). */
 export const useGroupNameField = (value: string, setValue: (value: string) => void) => useFittedNameField(value, setValue, fitsGroupName);
 
-/** Cancels an insertion at a caret that would leave the name as it is (`fitTextEdit` keeps none of it). */
-function refuseInsertion(e: InputEvent, fits: (name: string) => boolean) {
+/** Cancels an insertion at a caret that would leave the name as it is (`fitTextEdit` keeps none of it): true when it did. */
+function refuseInsertion(e: InputEvent, fits: (name: string) => boolean): boolean {
   const input = e.target as HTMLInputElement;
-  if (e.isComposing || !e.inputType.startsWith("insert") || !e.data) return;
+  if (e.isComposing || !e.inputType.startsWith("insert") || !e.data) return false;
   const at = input.selectionStart, end = input.selectionEnd;
   // Over a selection, what fits takes its place: that is a change, left to onChange.
-  if (at === null || at !== end) return;
+  if (at === null || at !== end) return false;
   const before = input.value, after = before.slice(0, at) + e.data + before.slice(at);
-  if (fitTextEdit(before, after, at + e.data.length, fits).value === before) e.preventDefault();
+  if (fitTextEdit(before, after, at + e.data.length, fits).value !== before) return false;
+  e.preventDefault();
+  return true;
 }
