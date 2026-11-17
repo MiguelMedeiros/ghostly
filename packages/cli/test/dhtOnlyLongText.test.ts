@@ -1,6 +1,6 @@
 import type { Server } from "node:http";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
+import { error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running, type Result } from "./support/cli";
 // covers: chat.dht.delivery, headless.chat
 
 /**
@@ -15,6 +15,22 @@ const alice = home("alice"), bob = home("bob");
 let env: NodeJS.ProcessEnv;
 const as = (dir: string, ...args: string[]) => ghostly(["--home", dir, ...args], { env });
 const long = "é".repeat(150); // 300 bytes
+const waited = "x".repeat(300);
+
+/**
+ * `send --wait sent|delivered` of such a text waits as asked, and its timeout (exit 4) says what ends the wait, as the
+ * answer without `--wait` does (`details.note` too): it said the text still goes by itself while this profile is
+ * online, or with its next command, and neither sends it while the chat stays on the DHT only.
+ */
+function saysWhy(result: Result) {
+  const failure = error(result, "timeout", 4);
+  expect(failure.message).not.toMatch(/goes by itself|next command|daemon --detach/);
+  expect(failure.message).toContain("the message is waiting. Longer than the 256 bytes the DHT carries, and you and the contact keep this chat on the DHT only");
+  expect(failure.message).not.toContain(waited);
+  const details = (result.json.error as { details?: Record<string, unknown> }).details;
+  expect(details).toMatchObject({ delivery: "waiting", note: expect.stringContaining("(ghostly chat transport bob auto), or shorten it") });
+  expect(failure.message).toContain(details!.note as string);
+}
 
 beforeAll(async () => {
   relays = await Promise.all([localRelay(), localRelay()]);
@@ -28,7 +44,7 @@ afterAll(async () => {
   for (const relay of relays) relay.server.close();
 }, 30_000);
 
-it("a text past 256 bytes in a DHT-only chat answers at once, says what ends its wait, and goes once the chat is live", { timeout: 300_000 }, async () => {
+it("a text past 256 bytes in a DHT-only chat answers at once (or at an explicit --wait's timeout) saying what ends its wait, and goes once the chat is live", { timeout: 300_000 }, async () => {
   const daemons = new Map<string, Running>();
   for (const dir of [alice, bob]) {
     ok(await as(dir, "settings", "set", "relays", JSON.stringify(relays.map((r) => r.url))));
@@ -49,6 +65,7 @@ it("a text past 256 bytes in a DHT-only chat answers at once, says what ends its
   expect(kept.delivery).toBe("waiting");
   expect(kept.note).toContain("256 bytes the DHT carries");
   expect(kept.note).toContain("ghostly chat transport bob auto");
+  for (const wait of ["sent", "delivered"]) saysWhy(await as(alice, "send", "bob", waited, "--wait", wait, "--timeout", "2"));
 
   // A one-shot: no 30 s wait for a send that cannot come, no timeout.
   await daemons.get(alice)!.stop();
@@ -57,6 +74,7 @@ it("a text past 256 bytes in a DHT-only chat answers at once, says what ends its
   expect(Date.now() - started).toBeLessThan(20_000);
   expect(oneShot.delivery).toBe("waiting");
   expect(oneShot.note).toContain("you and the contact keep this chat on the DHT only");
+  for (const wait of ["sent", "delivered"]) saysWhy(await as(alice, "send", "bob", waited, "--wait", wait, "--timeout", "2"));
 
   // What the note says ends the wait does: both choose a live transport, and both texts reach the contact.
   const back = new Running(["--home", alice, "daemon"], env);
@@ -66,5 +84,5 @@ it("a text past 256 bytes in a DHT-only chat answers at once, says what ends its
   ok(await as(bob, "chat", "transport", "alice", "auto"));
   ok(await as(alice, "chat", "wait", "bob", "--until", "live", "--timeout", "90"));
   await expect.poll(async () => (ok(await as(bob, "chat", "history", "alice", "--limit", "10")).messages as { text: string; from: string }[])
-    .filter((m) => m.from === "peer" && m.text === long).length, { timeout: 60_000, interval: 1_000 }).toBe(2);
+    .filter((m) => m.from === "peer" && (m.text === long || m.text === waited)).length, { timeout: 60_000, interval: 1_000 }).toBe(6);
 });
