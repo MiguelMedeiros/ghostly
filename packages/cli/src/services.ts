@@ -244,13 +244,17 @@ async function proxy(request: IncomingMessage, response: ServerResponse, chunks:
 
 /**
  * The service a command names, by its id: one of this profile's. The engine changes nothing for an id it does not
- * know and says nothing, so a mistyped id read as done ("shared": true, with a contact).
+ * know and says nothing, so a mistyped id read as done ("shared": true, with a contact). Or by its name, when no other
+ * service has that name (`service add "My App"` makes `my-app`): before, the name was refused as "No service" while
+ * `service list` showed it. An id comes first; a name several services share is refused with their ids.
  */
 function serviceOf(ctx: ApiContext, params: Params): string {
-  const serviceId = str(params, "service", true);
+  const given = str(params, "service", true);
   const { services } = state(ctx);
-  if (!services.some((s) => s.id === serviceId)) throw noService(serviceId, servicesNamed(services, serviceId));
-  return serviceId;
+  if (services.some((s) => s.id === given)) return given;
+  const named = servicesNamed(services, given);
+  if (named.length === 1) return named[0];
+  throw noService(given, named);
 }
 
 /** The ids of the services `given` names by their name, compared as a chat's label is (`nameKey`: one case, one form). */
@@ -259,14 +263,11 @@ function servicesNamed(services: readonly { id: string; name: string }[], given:
   return key ? services.filter((s) => nameKey(s.name) === key).map((s) => s.id) : [];
 }
 
-/**
- * No service of that id. A service's name given instead (`service add "My App"` makes `my-app`) is told which id to
- * use: before, it read "No service" of a service `service list` shows by that very name. Same code and exit either way.
- */
+/** No service of that id or name, or a name several services share: which ids it names. Same code and exit either way. */
 function noService(given: string, named: readonly string[]): CliError {
   const quoted = JSON.stringify(given);
   if (!named.length) return new CliError("not_found", `No service ${quoted} (ghostly service list)`);
-  const which = named.length === 1 ? `${named[0]}: use its id` : `${named.length} services, ${named.slice(0, -1).join(", ")} and ${named.at(-1)}: use one of their ids`;
+  const which = `${named.length} services, ${named.slice(0, -1).join(", ")} and ${named.at(-1)}: use one of their ids`;
   return new CliError("not_found", `No service with id ${quoted}. ${quoted} is the name of ${which} (ghostly service list)`);
 }
 
