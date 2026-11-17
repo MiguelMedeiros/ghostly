@@ -1082,7 +1082,7 @@ describe("errors in the app's language", () => {
   it("the \"Error: \" String(error) adds on the way through the extension goes, and an unknown message stays as it came", () => {
     expect(rawError("Error: The Ghostly peer did not start. Reopen the extension to retry.")).toBe("The Ghostly peer did not start. Reopen the extension to retry.");
     expect(errorText(new Error("Error: Ghostly needs your permission to reach that local address"), translators.pt))
-      .toBe("O Ghostly precisa da sua permissão para acessar esse endereço local");
+      .toBe("O Ghostly precisa da sua permissão para acessar esse endereço local. Tente de novo e escolha Permitir quando for perguntado.");
     expect(errorText(new Error("Relay said: rate limited"), translators.pt)).toBe("Relay said: rate limited");
     expect(errorText("plain", translators.fr)).toBe("plain");
     expect(errorText(42, translators.fr)).toBe("42");

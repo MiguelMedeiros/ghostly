@@ -3,6 +3,7 @@
     "installUpdates": "Este app não consegue instalar atualizações",
     "limitedNext": "Isso volta a funcionar quando a verificação der certo. Confira sua conexão.",
     "localAddress": "O Ghostly precisa da sua permissão para acessar esse endereço local",
+    "localAddressNext": "Tente de novo e escolha Permitir quando for perguntado.",
     "lostPeer": "Esta aba perdeu o Ghostly antes de terminar",
     "lostPeerNext": "Talvez já tenha sido feito. Confira quando o Ghostly voltar e tente de novo.",
     "noRoom": "Não há espaço suficiente neste dispositivo",

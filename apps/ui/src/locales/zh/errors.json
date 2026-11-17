@@ -3,6 +3,7 @@
     "installUpdates": "此客户端无法安装更新",
     "limitedNext": "确认成功后即可使用。请检查你的网络连接。",
     "localAddress": "Ghostly 需要你的许可才能访问该本地地址",
+    "localAddressNext": "请重试，并在询问时选择“允许”。",
     "lostPeer": "完成之前，此标签页与 Ghostly 断开了连接",
     "lostPeerNext": "可能已经完成。请在 Ghostly 恢复后检查一下，再重试。",
     "noRoom": "此设备没有足够的空间",
