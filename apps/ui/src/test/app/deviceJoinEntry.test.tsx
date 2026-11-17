@@ -420,6 +420,20 @@ describe("a device code opened as a link (the QR code, by a phone's camera)", ()
     expect(screen.queryByTestId("device-join")).toBeNull();
   });
 
+  it("a code from a device whose clock runs 11 minutes behind this one: the one screen, and the code goes to the engine", async () => {
+    // Past its expiry by this device's clock, still in its ten minutes by the inviter's, whose word is the one that counts.
+    const device = createDeviceInvite(new Uint8Array(32).fill(7), Math.floor(Date.now() / 1000) - 11 * 60).code;
+    offerDeviceLink(device);
+    fakeEngine.on("deviceEnrollReady", () => "ready");
+    fakeEngine.on("deviceEnrollJoin", () => ({ role: "joiner", step: "connecting" }));
+    const { user } = renderApp(<JoinHost />);
+    await oneScreen();
+    expect(screen.queryByTestId("device-link-invalid")).toBeNull();
+    await user.click(screen.getByTestId("device-join-next"));
+    await waitFor(() => expect(fakeEngine.callsTo("deviceEnrollJoin")).toHaveLength(1));
+    expect(fakeEngine.callsTo("deviceEnrollJoin")[0]).toMatchObject({ code: device });
+  });
+
   it("the link names the profile before the code, which every reader takes after the last #; the QR keeps the code in capitals", () => {
     const device = code();
     const origin = appLinkOrigin();
