@@ -678,6 +678,12 @@ describe("the worker's limit on wake-ups", () => {
       expect(await takeWakeSlot("rot", "tok-19-0", "online", T0 + 19 * DAY + 10 * 60_000)).toBe(false);
     });
 
+    it("keeps the row it takes when that token's own row was spent", async () => {
+      expect(await takeWakeSlot("own", "tok-own", false, T0)).toBe(true);
+      expect(await takeWakeSlot("own", "tok-own", false, T0 + 31 * 60_000)).toBe(true);
+      expect(await takeWakeSlot("own", "tok-own", false, T0 + 31 * 60_000 + 1_000)).toBe(false);
+    });
+
     it("drops spent rows from the memory fallback too", async () => {
       vi.stubGlobal("indexedDB", undefined);
       resetWakeLimitMemory();
