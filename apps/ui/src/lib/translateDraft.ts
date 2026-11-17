@@ -1,4 +1,5 @@
-import type { GroupMention } from "@ghostly/core";
+import { uriEnd, type GroupMention } from "@ghostly/core";
+import { linkEnd } from "./parse/links";
 import { composeMentions } from "./parse/mentions";
 import { detectableText, DETECT_CHARS, MIN_LETTERS, MIN_PROBABILITY, type DetectLanguages } from "./translateWhich";
 
@@ -11,6 +12,9 @@ import { detectableText, DETECT_CHARS, MIN_LETTERS, MIN_PROBABILITY, type Detect
 /** What the draft is made of, in order: words to translate, and what stays as typed between them. */
 export type DraftPart = { kind: "words"; text: string } | { kind: "kept"; text: string };
 
+const WEB = /(?:https?:\/\/|www\.)/;
+const SCHEME = /(?:lightning|bitcoin|ethereum|monero|cashu|nostr|ghostly|mailto|lnurl):/;
+
 /**
  * Code blocks, inline code, links and payment URIs (each one the chat shows as a card: a translated amount or path is
  * another payment), Cashu tokens, Lightning invoices, and any long run with a digit (a key, an address).
@@ -18,14 +22,26 @@ export type DraftPart = { kind: "words"; text: string } | { kind: "kept"; text: 
 const KEPT = new RegExp([
   "```[\\s\\S]*?(?:```|$)",
   "`[^`\\n]+`",
-  "\\b(?:https?:\\/\\/|www\\.)\\S+",
-  "\\b(?:lightning|bitcoin|ethereum|monero|cashu|nostr|ghostly|mailto|lnurl):\\S+",
+  `\\b${WEB.source}\\S+`,
+  `\\b${SCHEME.source}\\S+`,
   "\\bcashu[AB][A-Za-z0-9_+/=-]+",
   "\\b(?:lnbc|lntb|lntbs|lnbcrt|lnurl)[0-9a-z]{10,}",
   "(?=[A-Za-z0-9_+/=:.-]*\\d)[A-Za-z0-9_+/=:.-]{20,}",
 ].join("|"), "gi");
 
 const LETTER = /\p{L}/u;
+const WEB_START = new RegExp(`^${WEB.source}`, "i");
+const SCHEME_START = new RegExp(`^${SCHEME.source}`, "i");
+
+/**
+ * A kept run as long as the bubble reads it: a link or payment URI ends where the sentence takes over (a Chinese or
+ * Japanese one has no space after it: "見て https://a.example/x。明日…"), not at the next space.
+ */
+function keptEnd(found: string): string {
+  if (WEB_START.test(found)) return linkEnd(found);
+  if (SCHEME_START.test(found)) return uriEnd(found);
+  return found;
+}
 
 /** `text` cut into words and kept runs; `mentions` (by code points, as a group sends them) are kept too. */
 export function draftParts(text: string, mentions: readonly { o: number; l: number }[] = []): DraftPart[] {
@@ -33,9 +49,12 @@ export function draftParts(text: string, mentions: readonly { o: number; l: numb
   const points = Array.from(text);
   const unit = (point: number) => points.slice(0, point).join("").length;
   const kept: [number, number][] = mentions.map(({ o, l }) => [unit(o), unit(o + l)]);
-  for (const found of text.matchAll(KEPT)) {
-    const at = found.index, end = at + found[0].length;
+  KEPT.lastIndex = 0;
+  for (let found; (found = KEPT.exec(text)); ) {
+    const at = found.index, end = at + keptEnd(found[0]).length;
     if (!kept.some(([from, to]) => at < to && end > from)) kept.push([at, end]);
+    // What follows a link's end is read again: the sentence goes on after it.
+    KEPT.lastIndex = Math.max(end, at + 1);
   }
   kept.sort((a, b) => a[0] - b[0]);
 
