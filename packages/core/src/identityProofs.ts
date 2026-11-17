@@ -394,6 +394,11 @@ export class IdentityExchange {
   private requested = new Set<string>();
   /** The nonces of the presentations in their provider's check now. */
   private checking = new Set<string>();
+  /**
+   * The nonces of the challenges sent on this connection. A presentation is signed for its session, so a challenge
+   * from a closed link that is not in its check now can no longer be answered.
+   */
+  private issued = new Set<string>();
   /** When the contact's presentations were checked with their provider (seconds), for `IDENTITY_MAX_CHECKS_PER_HOUR`. */
   private checks: number[] = [];
   /** When this side sent its recent frames (ms), for `IDENTITY_SEND_LIMIT`. Kept across connections, as the contact's count is. */
@@ -500,7 +505,7 @@ export class IdentityExchange {
     this.send({ t: "idp-hello", providers: [...this.options.providers()] });
   }
   stop(): void {
-    this.requested.clear(); this.peerProviders = undefined;
+    this.requested.clear(); this.peerProviders = undefined; this.issued.clear();
     this.outbox = []; this.attempts.clear();
     if (this.timer !== undefined) clearTimeout(this.timer);
     this.timer = undefined;
@@ -683,11 +688,17 @@ export class IdentityExchange {
     const challenge: IdentityChallenge = { nonce: toBase64Url(randomBytes(32)), issuedAt: now, provider, id };
     // Saved before it is sent: a presentation for a nonce this side never saved is always refused.
     await this.options.storage.update(l => {
+      // The same proof asked again after a reconnect: its challenge from the closed link gives up its place to this one.
+      const stale = (c: IdentityChallenge) => c.id === id && !this.issued.has(c.nonce) && !this.checking.has(c.nonce);
+      if (l.challenges.some(stale)) l = { ...l, challenges: l.challenges.filter(c => !stale(c)) };
       if (l.challenges.filter(c => liveAt(c, now)).length >= MAX_CHALLENGES) throw new Error("Too many identity challenges");
       // The request's line first, the ended challenges after: a line of this kind an ended one left verifying is
       // taken over in place (its id and time stay), and only the other ended ones' lines go.
       return this.withoutExpired(this.log({ ...l, challenges: [...l.challenges, challenge] }, { type: "shared", side: "theirs", proof: id, provider }), now);
     });
+    const held = new Set(this.options.storage.read().challenges.map(c => c.nonce));
+    for (const n of this.issued) if (!held.has(n)) this.issued.delete(n);
+    this.issued.add(challenge.nonce);
     this.send({ t: "idp-challenge", id, nonce: challenge.nonce, issuedAt: challenge.issuedAt });
   }
 
