@@ -232,6 +232,22 @@ describe("Lightning out: melts", () => {
     expect(events.onMeltResolved).toHaveBeenCalledWith(expect.objectContaining({ quote: "m1" }), false);
   });
 
+  it("gives the proofs of a payment the mint answered pending back at the next round once it fails, with no wait", async () => {
+    mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("PENDING"));
+    mint.completeMelt.mockResolvedValue({ quote: meltQuote("PENDING"), change: [], outputData: [] });
+    const { wallet, events } = setup();
+    expect(await pay(wallet)).toBe(false);
+
+    // The mint answered the request itself: no other request of it can land, so its UNPAID is final at once.
+    mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("UNPAID"));
+    mint.checkProofsStates.mockResolvedValue([{ state: "UNSPENT" }, { state: "UNSPENT" }, { state: "UNSPENT" }]);
+    await wallet["pollMelts"]();
+
+    expect(balance()).toBe(108);
+    expect(rows("melts")).toHaveLength(0);
+    expect(events.onMeltResolved).toHaveBeenCalledWith(expect.objectContaining({ quote: "m1" }), false);
+  });
+
   it("keeps the proofs reserved while the mint still has them pending", async () => {
     mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("PENDING"));
     mint.completeMelt.mockResolvedValue({ quote: meltQuote("UNPAID"), change: [], outputData: [] });

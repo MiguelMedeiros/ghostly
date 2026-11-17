@@ -1905,7 +1905,7 @@ export class CashuWallet {
       // A dropped connection or a gateway timeout says nothing: the payment may still be going through.
       if (!mintRefused(error) && !(error instanceof MeltChangeError)) return "pending";
       // The mint answered (a refusal), or took the proofs and only the change failed: its word decides.
-      const outcome = await this.settleMelt(melt, true).catch((): MeltOutcome => "pending");
+      const outcome = await this.settleMelt(await this.meltAnswered(melt), true).catch((): MeltOutcome => "pending");
       if (outcome === "unpaid") {
         unpaid();
         const lost = this.takeFailedFee(melt.quote);
@@ -1923,9 +1923,20 @@ export class CashuWallet {
       await this.finishMelt(melt, result.change);
       return "paid";
     }
-    const outcome = await this.settleMelt(melt, true).catch((): MeltOutcome => "pending");
+    const outcome = await this.settleMelt(await this.meltAnswered(melt), true).catch((): MeltOutcome => "pending");
     if (outcome === "unpaid") unpaid();
     return outcome;
+  }
+
+  /**
+   * Writes down that the mint answered this melt's one request: the poll's later UNPAID is then final (`settleMelt`),
+   * with no hold for a request still on its way. Not written, it is held as one whose answer was lost.
+   */
+  private async meltAnswered(melt: PendingMelt): Promise<PendingMelt> {
+    const answered: PendingMelt = { ...melt, answeredAt: Date.now() };
+    try { await committed((await store(STORES.melts, "readwrite")).put(await sealRow(STORES.melts, answered))); }
+    catch { return melt; }
+    return answered;
   }
 
   /**
@@ -2012,8 +2023,8 @@ export class CashuWallet {
     }
     if (quote.state === "PENDING") return "pending";
     // UNPAID with no answer to the request: it may still reach the mint and be paid with these very proofs. Held
-    // until no request of this melt can land any more.
-    if (!answered && !this.meltOverdue(melt)) return "pending";
+    // until no request of this melt can land any more. One the mint answered (`answeredAt`) has none left on its way.
+    if (!answered && melt.answeredAt === undefined && !this.meltOverdue(melt)) return "pending";
 
     // UNPAID: the payment failed, or never started. The mint says which proofs are still unspent.
     const inputs = await this.reservedProofs(melt);
