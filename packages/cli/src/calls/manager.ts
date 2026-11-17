@@ -293,7 +293,8 @@ export class CallManager {
     this.held.delete(chat);
     this.bursts.delete(chat);
     const link = this.link(chat);
-    const call = this.add(chat, "in", this.auto.rate);
+    // At the default rate: auto-answer's rate is its own answers' (below), not that of a call answered by hand.
+    const call = this.add(chat, "in", DEFAULT_RATE);
     call.offer = offer;
     call.video = signalHasVideo(offer);
     // Unanswered, an offer goes stale: the contact's app has given up or will, and answering it would be refused.
@@ -301,7 +302,7 @@ export class CallManager {
     this.host.emit("call.incoming", `call.incoming:${call.id}`, { call: call.id, chat, name: link ? nameOf(link) : null, video: call.video, auto: this.autoFor(chat) });
     this.prepare(call);
     if (this.host.answers !== false && this.autoFor(chat)) {
-      void this.answer(call.id, {}).catch((error) => process.stderr.write(`ghostly: auto-answer failed: ${error instanceof Error ? error.message : String(error)}\n`));
+      void this.answer(call.id, { rate: this.auto.rate }).catch((error) => process.stderr.write(`ghostly: auto-answer failed: ${error instanceof Error ? error.message : String(error)}\n`));
     }
   }
 
@@ -469,7 +470,8 @@ export class CallManager {
       throw new CliError("busy", "The contact is calling: their call rings here");
     }
     this.paced(link.id);
-    const rate = rateOf(options.rate, this.auto.rate);
+    // The default rate, as documented: auto-answer's rate is for the calls it answers, not the ones placed here.
+    const rate = rateOf(options.rate, DEFAULT_RATE);
     const stack = await this.stack();
     // The contact's call may have come in while the stack loaded.
     if (this.byChat(link.id)) throw new CliError("busy", "A call is already on in this chat");
