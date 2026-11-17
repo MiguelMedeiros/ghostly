@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { Outlet, useLocation } from "react-router-dom";
 import { Sidebar } from "./components/Sidebar";
 import { ListNotices } from "./components/ListNotices";
+import { ReconnectingBanner } from "./components/ReconnectingBanner";
 import { MobileTabBar } from "./components/MobileTabBar";
 import { InstallSteps } from "./components/InstallApp";
 import { TranslateDownloadFailure } from "./components/TranslateDownloadFailure";
@@ -290,6 +291,8 @@ export function App() {
         <Fragment key="chats">{chats("flex-1 flex flex-col min-h-0 min-w-0")}</Fragment>
         {!onChatList && !inChat && (
           <div key="page" className="flex-1 flex flex-col min-h-0 min-w-0">
+            {/* The list's "Reconnecting…" is hidden with it: a group says it under its own header. */}
+            {!inGroup && <ReconnectingBanner onPage />}
             <Outlet />
           </div>
         )}
