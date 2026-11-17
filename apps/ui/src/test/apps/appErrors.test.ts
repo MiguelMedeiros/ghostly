@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { LOCALES as locales } from "../i18n/locales";
 import { translateWith } from "../../locales/translate";
-import { appErrorCode, appErrorView, appStoreErrorView, appStoreProblemText } from "../../lib/apps/errors";
+import { appErrorCode, appErrorRetryable, appErrorView, appStoreErrorView, appStoreProblemText } from "../../lib/apps/errors";
 // covers: apps.page
 
 /*
@@ -25,13 +25,17 @@ describe("app errors", () => {
       .toEqual({ text: "That took too long on this connection. Try again on a faster one." });
   });
 
-  it("a host's own trouble (5xx, 429) says try again later, not that nothing is at the link", () => {
+  it("a host's own trouble (5xx, 429, 408) says try again later, not that nothing is at the link", () => {
     const en = translateWith(locales.en);
     expect(appErrorView(new Error("status: The host answered 404"), en).text).toBe("Nothing found at that link.");
     expect(appErrorView(new Error("status: The host answered 410"), en).text).toBe("Nothing found at that link.");
     expect(appErrorView(new Error("status: The host answered 500"), en).text).toBe("The host had a problem (error 500). Try again later.");
     expect(appErrorView(new Error("status: The host answered 503"), en).text).toBe("The host had a problem (error 503). Try again later.");
     expect(appErrorView(new Error("status: The host answered 429"), en).text).toBe("The host had a problem (error 429). Try again later.");
+    // Its own timeout too: the runner check asks again after a 408, as after a 5xx or a 429 (runnerCheck.ts).
+    expect(appErrorView(new Error("status: The host answered 408"), en).text).toBe("The host had a problem (error 408). Try again later.");
+    expect(appErrorRetryable(new Error("status: The host answered 408"))).toBe(true);
+    expect(appErrorRetryable(new Error("status: The host answered 404"))).toBe(false);
     expect(appErrorView(new Error("status: The host answered 500"), translateWith(locales.pt)).text).toBe("O servidor teve um problema (erro 500). Tente de novo mais tarde.");
   });
 
