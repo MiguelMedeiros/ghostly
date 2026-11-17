@@ -11,13 +11,15 @@
 // it read, icons included.
 //
 // Writes lib/store-snapshot.json (not committed): `revocations` holds each revocation file read, by its own URL (an
-// older snapshot has none, which revokes nothing). A failed read does not fail the build unless GHOSTLY_STORE_REQUIRED
+// older snapshot has none, which revokes nothing). A bundle whose bytes another URL already holds is kept once: `sameAs`
+// names that URL, and the bytes count against the budget once. A failed read does not fail the build unless GHOSTLY_STORE_REQUIRED
 // is set: the snapshot then says why, and the pages say the store could not be read.
 //
 //   GHOSTLY_STORE_FIXTURE=1 npm run sync:references     # the committed test store (e2e/fixtures/store), no network
 //   GHOSTLY_STORE_REQUIRED=1 npm run sync:references    # fail when the official store cannot be read
 //
 // CI sets GHOSTLY_STORE_FIXTURE, so its builds never ask GitHub. The fixture's README says how it was made.
+import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -177,15 +179,26 @@ export async function fromStore(fetcher = fetch) {
     problems.push(`a listing has no URLs or more than ${LIMITS.urls}: the index will not verify`);
     return { source: "store", index: b64(index), sig: b64(sig), bundles, revocations, problems };
   }
+  const sameAs = {};
   const readBundles = new Map();
+  // The URL that holds each kept bundle's bytes first, by their hash: a mirror of them is kept as that URL, for nothing.
+  const kept = new Map();
   let total = index.length + sig.length;
   await readInOrder(bundleOrder(listings), LIMITS.bundleBytes, fetcher, (url, bytes, error) => {
     try {
       if (error) throw error;
+      const hash = createHash("sha256").update(bytes).digest("hex");
+      const first = kept.get(hash);
+      if (first !== undefined) {
+        sameAs[url] = first;
+        readBundles.set(url, readBundles.get(first));
+        return;
+      }
       if (total + bytes.length > LIMITS.totalBytes) throw new Error(`${url}: over the ${LIMITS.totalBytes} bytes all bundles may take`);
       total += bytes.length;
       bundles[url] = b64(bytes);
       readBundles.set(url, bytes);
+      kept.set(hash, url);
     } catch (error) {
       problems.push(String(error?.message ?? error));
     }
@@ -235,7 +248,7 @@ export async function fromStore(fetcher = fetch) {
       else answers.set(use.url, answer.bytes && revocations[use.url] === undefined ? null : answer);
     }
   });
-  return { source: "store", index: b64(index), sig: b64(sig), bundles, revocations, problems };
+  return { source: "store", index: b64(index), sig: b64(sig), bundles, sameAs, revocations, problems };
 }
 
 function fromFixture(dir) {
@@ -263,7 +276,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     snapshot = { source: "none", error: String(error?.message ?? error), bundles: {}, revocations: {}, problems: [] };
   }
   writeFileSync(out, JSON.stringify({ readAt: new Date().toISOString(), ...snapshot }) + "\n");
-  const count = Object.keys(snapshot.bundles).length;
+  const count = Object.keys(snapshot.bundles).length + Object.keys(snapshot.sameAs ?? {}).length;
   if (snapshot.source === "none" && process.env.GHOSTLY_STORE_REQUIRED) {
     console.error(`The store: not read (${snapshot.error}), and GHOSTLY_STORE_REQUIRED is set.`);
     process.exit(1);

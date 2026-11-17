@@ -90,7 +90,7 @@ function network(listings, served, delay = () => 0) {
 
 test("the build reads the bundles and the revocation files a few at a time", async () => {
   const listings = Array.from({ length: 20 }, (_, i) => ({ urls: [`${RAW}/a${i}/a.ghostlyapp`, `${RAW}/b${i}/a.ghostlyapp`] }));
-  const served = Object.fromEntries(listings.flatMap((l) => l.urls).map((u) => [u, new Uint8Array(8)]));
+  const served = Object.fromEntries(listings.flatMap((l) => l.urls).map((u, i) => [u, new Uint8Array(8).fill(i)]));
   const bundles = network(listings, served, (url) => (url.endsWith(".ghostlyapp") ? 20 : 0));
   await fromStore(bundles.fetcher);
   assert.ok(bundles.seen.most > 1 && bundles.seen.most <= 8, `bundles: ${bundles.seen.most} at once`);
@@ -131,28 +131,32 @@ test("a listing's mirrors do not leave the listings after it without a bundle", 
   const MiB = 1024 * 1024;
   // As the live store lists them: a pinned jsDelivr copy and the raw `HEAD` it mirrors. Bytes differ from app to app.
   const app = (name, size, mirrors = [`${RAW}/${name}/HEAD/a.ghostlyapp`]) => ({ name, size, urls: [`${JSD}/${name}@0123abc/a.ghostlyapp`, ...mirrors] });
-  // Sorted first: a small pinned copy, then three `HEAD` URLs that now hold 12 MiB each.
+  // Sorted first: a small pinned copy, then three `HEAD` URLs that now hold other bytes, as large as a bundle may be.
   const early = app("ba", 60 * 1024, [1, 2, 3].map((i) => `${RAW}/ba${i}/HEAD/a.ghostlyapp`));
   const apps = [early, app("arena", 14.1 * MiB), ...["boo-blocks", "chess", "cinema", "pkdns"].map((n) => app(n, 2 * MiB))];
   const served = {};
-  apps.forEach(({ name, size, urls }, i) => {
-    urls.forEach((url, j) => (served[url] = new Uint8Array(name === "ba" && j > 0 ? 12 * MiB : Math.round(size)).fill(16 * i + j)));
+  apps.forEach(({ size, urls }, i) => {
+    const bundle = new Uint8Array(Math.round(size)).fill(i + 1);
+    urls.forEach((url, j) => (served[url] = i === 0 && j > 0 ? new Uint8Array(LIMITS.bundleBytes).fill(100 + j) : bundle));
   });
   const { fetcher } = network(apps.map(({ urls }) => ({ urls })), served);
   const snap = await fromStore(fetcher);
-  for (const { urls } of apps) assert.ok(urls[0] in snap.bundles, `${urls[0]} not kept:\n${snap.problems.join("\n")}`);
-  for (const { urls } of apps.slice(1)) assert.ok(urls[1] in snap.bundles, `${urls[1]} not kept:\n${snap.problems.join("\n")}`);
-  // What is over the budget is the early listing's own later mirrors.
-  assert.deepEqual(snap.problems, early.urls.slice(2).map((url) => `${url}: over the ${LIMITS.totalBytes} bytes all bundles may take`));
+  for (const { urls } of apps.slice(1)) {
+    assert.ok(urls[0] in snap.bundles, `${urls[0]} not kept:\n${snap.problems.join("\n")}`);
+    // The same bytes at the raw `HEAD` are kept once, and take nothing more from the budget.
+    assert.equal(snap.sameAs?.[urls[1]], urls[0], `${urls[1]} not kept:\n${snap.problems.join("\n")}`);
+  }
+  // What is over the budget is the early listing's own last mirror.
+  assert.deepEqual(snap.problems, [`${early.urls[3]}: over the ${LIMITS.totalBytes} bytes all bundles may take`]);
 });
 
 test("reads that finish out of order keep the list's order, its byte budget and its problems as one read at a time does", async () => {
-  const big = new Uint8Array(LIMITS.bundleBytes);
+  const big = (n) => new Uint8Array(LIMITS.bundleBytes).fill(n);
   // Read one URL of each listing at a time (bundleOrder): one, three, two, four, broken, small. Three full bundles and
   // the index take all but a few bytes of the budget: the fourth is over it, the small one after is not.
   const urls = ["one", "two", "broken", "three", "four", "small"].map((n) => `${RAW}/${n}/a.ghostlyapp`);
   const listings = [{ urls: urls.slice(0, 3) }, { urls: urls.slice(3) }];
-  const served = { [urls[0]]: big, [urls[1]]: big, [urls[2]]: 500, [urls[3]]: big, [urls[4]]: big, [urls[5]]: new Uint8Array(8) };
+  const served = { [urls[0]]: big(1), [urls[1]]: big(2), [urls[2]]: 500, [urls[3]]: big(3), [urls[4]]: big(4), [urls[5]]: new Uint8Array(8) };
   served[revoke(urls[1])] = 503;
   served[revoke(urls[4])] = 502;
   // The later a URL is listed, the sooner it answers.
