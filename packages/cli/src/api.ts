@@ -564,7 +564,7 @@ const METHODS: Record<string, Method> = {
     }
     const { wait, ms } = confirmWait(ctx, params, link.id);
     const result = await node(ctx).editMessage({ linkId: link.id, messageId, text });
-    if (result.error) throw editRefused(await messageOf(ctx, link.id, messageId), messageId, { group: false, ref: str(params, "chat", true) }, dhtTooLong(ctx, link, result.error, "edit", str(params, "chat", true)), result.refused);
+    if (result.error) throw await editRefused(ctx, link.id, messageId, { group: false, ref: str(params, "chat", true) }, dhtTooLong(ctx, link, result.error, "edit", str(params, "chat", true)), result);
     const id = result.messageId ?? messageId;
     let message = await node(ctx).getMessage(link.id, id);
     if (wait === "confirmed" && message?.edit?.pending) message = await waitForEdit(ctx, link.id, id, ms);
@@ -1009,7 +1009,7 @@ const METHODS: Record<string, Method> = {
     const linkId = `group:${group.id}`;
     const before = (await node(ctx).getMessage(linkId, messageId))?.edit?.seq ?? 0;
     const result = await node(ctx).editMessage({ linkId, messageId, text, ...(mentions.length ? { mentions } : {}) });
-    if (result.error) throw editRefused(await messageOf(ctx, linkId, messageId), messageId, { group: true, ref: str(params, "group", true) }, result.error, result.refused);
+    if (result.error) throw await editRefused(ctx, linkId, messageId, { group: true, ref: str(params, "group", true) }, result.error, result);
     const message = await node(ctx).getMessage(linkId, messageId);
     const edits = message?.edit?.seq ?? 0;
     // The text the message already has: no edit was made and nothing went. It answered `sent: true` before, for a
@@ -1294,11 +1294,14 @@ function chatNotGroup(ctx: ApiContext, params: Params, command: string, rest = "
 /**
  * An edit the engine refused. A message that is not in the chat or group at all is `not_found` (exit 3), said as every
  * message id is (`noMessage`); before, a mistyped or lost id read "Only your own text messages can be edited"
- * (`refused`, exit 1), as if the message were someone else's.
+ * (`refused`, exit 1), as if the message were someone else's. Whether it is there is the engine's answer (`missing`)
+ * once it looked for it: read again here, an id no message goes by read the chat's whole history a second time (0.7 s
+ * at 100,000 messages). Only a refusal before it looked (a chat that cannot edit, a group I am not in) looks here.
  */
-function editRefused(message: StoredMessage | undefined, ref: string, place: RefPlace, error: string, refused: boolean | undefined): CliError {
-  if (refused && !message) return noMessage(ref, place);
-  return new CliError(refused ? "refused" : "unavailable", error);
+async function editRefused(ctx: ApiContext, linkId: string, ref: string, place: RefPlace, error: string, result: { refused?: boolean; missing?: boolean }): Promise<CliError> {
+  if (!result.refused) return new CliError("unavailable", error);
+  if (result.missing ?? !(await messageOf(ctx, linkId, ref))) return noMessage(ref, place);
+  return new CliError("refused", error);
 }
 
 /**

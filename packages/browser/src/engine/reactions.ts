@@ -17,6 +17,12 @@ export interface ReactionsHost {
    * of mine and a payment go by their time here, and by their own id on the wire.
    */
   rows?(chat: string, id: string): Promise<string[]>;
+  /**
+   * The rows of a 1:1 chat that go by another id than their own, by that id, read once in a run (as `PinsHost.unkeyed`);
+   * undefined when the host keeps none for that chat. With them, a reaction of mine naming an id no row goes by reads
+   * no history.
+   */
+  unkeyed?(chat: string): Promise<ReadonlyMap<string, string>> | undefined;
   /** Changes one row in place (`db.patchMessage`); undefined when the row is gone. */
   patch(chat: string, id: string, change: (message: StoredMessage) => Partial<StoredMessage> | null): Promise<StoredMessage | undefined>;
   /** Row `id` of the chat changed: the pages hear it. `note`: its latest reaction, when this one is it. */
@@ -297,11 +303,12 @@ export class Reactions {
 
   /**
    * The row a received reaction names. Most often the row of that id (a group's), or of `peer_` or `me_` and that id (a
-   * chat's), else a row the host knows that id names (a file of mine, a payment): those are read alone. Any other (one
-   * not here yet) is looked for in the whole chat; in a group there is no other, since a row that takes a reaction goes
-   * by its own id there. A `received` one is looked for so at most once a `REACTION_LOOKUP_MS` per chat, since the
-   * contact can name ids that never were: one that comes meanwhile waits, and the next read finds what waited
-   * (`lookUpWaiting`).
+   * chat's), else a row the host knows that id names (a file of mine, a payment): those are read alone. Mine (the CLI's
+   * typo, a message gone) then looks only among the rows the host knows by another id (`unkeyed`), when it keeps them:
+   * each one read the whole chat, 0.7 s at 100,000 messages. Any other (one not here yet) is looked for in the whole
+   * chat; in a group there is no other, since a row that takes a reaction goes by its own id there. A `received` one is
+   * looked for so at most once a `REACTION_LOOKUP_MS` per chat, since the contact can name ids that never were: one
+   * that comes meanwhile waits, and the next read finds what waited (`lookUpWaiting`).
    */
   private async find(chat: string, id: string, received = false): Promise<StoredMessage | undefined> {
     const group = isGroup(chat);
@@ -314,6 +321,11 @@ export class Reactions {
       for (const rowId of await this.host.rows?.(chat, id) ?? []) {
         const row = await this.host.message(chat, rowId);
         if (row && replyRef(row, false) === id) return row;
+      }
+      const unkeyed = received ? undefined : this.host.unkeyed?.(chat);
+      if (unkeyed) {
+        const rowId = (await unkeyed).get(id), row = rowId === undefined ? undefined : await this.host.message(chat, rowId);
+        return row && replyRef(row, false) === id ? row : undefined;
       }
       if (received && !this.lookupDue(chat)) return undefined;
     }
