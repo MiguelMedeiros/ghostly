@@ -62,6 +62,9 @@ describe("the Node file store", () => {
     const emoji = fitName("😀".repeat(100));
     expect(emoji).toBe("😀".repeat(63));
     expect(fitName(`${"é".repeat(200)}.tar`)).toBe(`${"é".repeat(125)}.tar`);
+    // A mark goes before the extension, and the stem makes room for it.
+    expect(fitName(`${"文".repeat(83)}.txt`, " (2)")).toBe(`${"文".repeat(82)} (2).txt`);
+    expect(fitName("report.pdf", " (12)")).toBe("report (12).pdf");
   });
 
   it("saves a file under a name no tool takes for an option: a leading dash gets a _ first", () => {

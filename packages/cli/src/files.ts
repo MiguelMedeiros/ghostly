@@ -261,14 +261,15 @@ const NAME_BYTES = 255;
 /**
  * `name` as an entry of a folder: an app's name may have 200 characters, which in UTF-8 can be 800 bytes. The end of
  * its stem goes until it fits, its extension stays (as `sanitizeFileName` shortens it), so "文…文.txt" is saved as a text.
+ * A `mark` (" (2)") goes between them and is kept too.
  */
-export function fitName(name: string): string {
+export function fitName(name: string, mark = ""): string {
   const fits = (candidate: string) => Buffer.byteLength(candidate) <= NAME_BYTES;
-  if (fits(name)) return name;
+  if (!mark && fits(name)) return name;
   const extension = /\.[^.\s]{1,15}$/u.exec(name)?.[0] ?? "";
   const stem = [...name.slice(0, name.length - extension.length)];
-  while (stem.length && !fits(stem.join("").trimEnd() + extension)) stem.pop();
-  return (stem.join("").trimEnd() || "file") + extension;
+  while (stem.length && !fits(stem.join("").trimEnd() + mark + extension)) stem.pop();
+  return (stem.join("").trimEnd() || "file") + mark + extension;
 }
 
 /**
@@ -557,6 +558,12 @@ export const FILE_METHODS: Record<string, Method> = {
     // "<name> (2)", as a browser's Download does; a --path the user named is never renamed.
     const free = !force && !str(params, "path") && !!stored.metadata.voice;
     const ext = extname(named), stem = named.slice(0, named.length - ext.length);
+    // "<name> (n)", its stem shortened when the mark takes it past a name's bytes. Before, a long name (`fitName`) went
+    // past them: its stat failed ENAMETOOLONG, read as free, and the save there failed "too long for this file system".
+    const numbered = (n: number) => {
+      const plain = `${stem} (${n})${ext}`;
+      return Buffer.byteLength(basename(plain)) <= NAME_BYTES ? plain : join(dirname(named), fitName(basename(named), ` (${n})`));
+    };
     // The next "<name> (n)" a voice message steps to.
     let next = 2;
     // What is at `target` that the save may not go over, as the error that says so; nothing when it may.
@@ -575,14 +582,14 @@ export const FILE_METHODS: Record<string, Method> = {
       // In --dir the name is its sender's: two files of one name are two files. Before, --force was the one way out
       // named, and it replaced the other. The next free "<name> (2)" is offered, never taken unasked.
       let n = 2;
-      while (n <= 1000 && (await stat(`${stem} (${n})${ext}`).catch(() => undefined))) n += 1;
-      const other = `${stem} (${n})${ext}`;
+      while (n <= 1000 && (await stat(numbered(n)).catch(() => undefined))) n += 1;
+      const other = numbered(n);
       return new CliError("confirm", `${replace}, or --path ${shellWord(other, "<the one in details.path>")} (path over the socket) to keep both`, { path: other });
     };
     let target = named;
     for (let refused = await taken(target); refused; refused = await taken(target)) {
       if (!free || refused.code !== "confirm" || next > 1000) throw refused;
-      target = `${stem} (${next})${ext}`;
+      target = numbered(next);
       next += 1;
     }
     // The bytes go beside it first and take its name only once whole: a save that fails (the bytes not on this device, a
@@ -636,7 +643,7 @@ export const FILE_METHODS: Record<string, Method> = {
       while (!complete) try { await place(partial, target, force); complete = true; } catch (error) {
         const code = (error as NodeJS.ErrnoException).code;
         const refused = code === "EEXIST" || code === "EISDIR" || code === "ENOTEMPTY" ? await taken(target, code) : undefined;
-        if (free && refused?.code === "confirm" && next <= 1000) { target = `${stem} (${next})${ext}`; next += 1; continue; }
+        if (free && refused?.code === "confirm" && next <= 1000) { target = numbered(next); next += 1; continue; }
         throw refused ?? error;
       }
       // A contact chose its bytes and its name (`.command`, `.lnk`): marked as downloaded. Every save is, as Desktop's:

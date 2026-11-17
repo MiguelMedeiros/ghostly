@@ -190,6 +190,25 @@ describe("file save to a folder", () => {
     });
   });
 
+  it("the name it offers to keep both of a long name fits a folder's entry, and saves", async () => {
+    // 84 CJK characters + .pdf: 256 bytes, saved as 83 (253). Before, " (2)" made the offer 257 bytes: its stat failed
+    // ENAMETOOLONG, read as free, and the offered --path failed "too long for this file system".
+    const name = `${"文".repeat(84)}.pdf`;
+    await fileStore.put({
+      id: "chat-one-in-long", linkId: "chat-one", blob: new Blob(["long"]), createdAt: 1, direction: "in",
+      metadata: { name, size: 4, mime: "application/pdf", timestamp: 1 },
+      transfer: { state: "done", transferred: 4, size: 4 },
+    } as never);
+    const folder = join(dir, "long-name");
+    mkdirSync(folder);
+    const saved = `${"文".repeat(83)}.pdf`, offered = `${"文".repeat(82)} (2).pdf`;
+    expect(await callApi(ctx, "file.save", { file: "chat-one-in-long", dir: folder })).toMatchObject({ path: join(folder, saved) });
+    const refused = await callApi(ctx, "file.save", { file: "chat-one-in-long", dir: folder }).catch((error: unknown) => error);
+    expect(refused).toMatchObject({ code: "confirm", details: { path: join(folder, offered) } });
+    expect(await callApi(ctx, "file.save", { file: "chat-one-in-long", path: (refused as { details: { path: string } }).details.path })).toMatchObject({ path: join(folder, offered) });
+    expect(readdirSync(folder).sort()).toEqual([offered, saved].sort());
+  });
+
   it("the paths its hints suggest paste into a shell as one word: quoted, raw in details; one with a ' only there", async () => {
     // Before, "--path /x/report (2).txt" was a syntax error at "(" in bash and zsh, and a name with spaces two words.
     const quoted = (path: string) => `'${path}'`;
