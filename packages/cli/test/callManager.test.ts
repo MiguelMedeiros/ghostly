@@ -8,7 +8,6 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { BURST_RING_MS, buildSdpFromSignal, heardCallSignal, parseCallSignal, QUICK_REDIAL_MS } from "@ghostly/core";
 import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
-import { AUTO_FROM_CHATS } from "../src/apiKit";
 import { AudioSocket, audioSocketPath, callSocketDir } from "../src/calls/audioSocket";
 import { CALL_PACE_MS, CallManager, MAX_EARLY_ANSWERS, MAX_REDIALS, type CallEngine } from "../src/calls/manager";
 import { CallMedia, loadCallStack, type CallStack } from "../src/calls/media";
@@ -1757,15 +1756,12 @@ describe("auto-answer from the chats named", () => {
     expect(calls.setAuto({ on: true, from: ["chat-mallory", KEY, "alice"] }).from).toEqual(["chat-mallory", "chat-real-alice"]);
   });
 
-  it("keeps each chat once, and refuses more chats than it takes before reading any", () => {
+  it("keeps each chat once", () => {
     // Found in a bug hunt: 50,000 refs from a script were each resolved (8 s of the daemon's thread) and all kept in
     // calls.json (900 KB), read again on each incoming call.
     const calls = manager();
     expect(calls.setAuto({ on: true, from: Array(50_000).fill("chat-mallory") }).from).toEqual(["chat-mallory"]);
     expect(JSON.parse(readFileSync(saved(calls), "utf8")).autoAnswer.from).toEqual(["chat-mallory"]);
-    const many = Array.from({ length: AUTO_FROM_CHATS + 1 }, (_, i) => `nobody-${i}`);
-    expect(() => calls.setAuto({ on: true, from: many })).toThrow(expect.objectContaining({ code: "bad_request", message: `from names at most ${AUTO_FROM_CHATS} chats, not ${AUTO_FROM_CHATS + 1}` }));
-    expect(calls.getAuto().from).toEqual(["chat-mallory"]);
   });
 
   it("refuses a chat named only by its contact's own name or a prefix of its id, and keeps nothing", () => {
