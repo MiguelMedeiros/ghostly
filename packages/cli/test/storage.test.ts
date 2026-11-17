@@ -165,7 +165,10 @@ describe("persistent IndexedDB", () => {
 
   it("lets the transactions that commit while a sync runs share the next one, each `complete` after its entry is synced", async () => {
     const dir = folder();
-    const d = await db(await open(dir));
+    const store = await openPersistentIndexedDb(dir); opened.push(store);
+    const d = await db(store.factory);
+    // The snapshot the new database's stores asked for is written a page at a time: the transactions below come after it.
+    await store.flush();
     // A disk that takes 10 ms a sync (#597's): one per transaction, one after another, held 8 sends in flight to the pace of 1.
     disk.syncMs = 10;
     // The first sync is held until the other 7 have committed (journaled, their `complete` not heard): a slow runner
@@ -318,9 +321,13 @@ describe("persistent IndexedDB", () => {
     const store = await openPersistentIndexedDb(dir); opened.push(store);
     const first = await db(store.factory);
     await tx(first, ["messages"], (s) => { s.messages.put({ linkId: "a", id: "1" }); });
+    // The folder as the process left it: the store still open here folds on its own turns, in its own folder.
+    await store.flush();
+    const killed = folder();
+    cpSync(dir, killed, { recursive: true });
     const header = Buffer.alloc(4); header.writeUInt32BE(1000);
-    appendFileSync(join(dir, "journal.bin"), Buffer.concat([header, Buffer.from("partial")]));
-    const second = await db(await open(dir));
+    appendFileSync(join(killed, "journal.bin"), Buffer.concat([header, Buffer.from("partial")]));
+    const second = await db(await open(killed));
     expect(await read(second.transaction("messages").objectStore("messages").count())).toBe(1);
   });
 
@@ -370,6 +377,44 @@ describe("persistent IndexedDB", () => {
     expect(statSync(join(dir, "snapshot.bin")).mode & 0o777).toBe(0o600);
     expect(statSync(dir).mode & 0o777).toBe(0o700);
     await store.close();
+  });
+
+  it("writes a fold's snapshot a page at a time, synced off the thread: the daemon answers while a large one is written", async () => {
+    // Serialized whole and synced on the thread, the hourly fold of a profile with 100,000 notes in the event hub's
+    // seen set held the daemon 218 ms (835 ms at 300,000): socket calls, relays and a call's frames waited.
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    opened.push(store);
+    const first = await db(store.factory);
+    await tx(first, ["log", "messages"], (s) => {
+      for (let i = 0; i < 3_000; i++) s.log.put(`delivered@${i}`);
+      s.messages.put({ linkId: "a", id: "1" });
+    });
+    const onThread = syncs.onThread;
+    // Turns of the event loop that run while the snapshot is half written.
+    const partial = join(dir, "snapshot.bin.tmp");
+    let during = 0, stop = false;
+    const turn = () => { if (stop) return; if (existsSync(partial)) during++; setImmediate(turn); };
+    turn();
+    // A write that commits meanwhile waits behind the fold, and is on the disk after it.
+    const folding = store.compact();
+    const late = tx(first, ["log"], (s) => { s.log.put("late", 9_999); });
+    await folding;
+    await late;
+    stop = true;
+    expect(during).toBeGreaterThan(0);
+    expect(syncs.onThread - onThread).toBe(0);
+    expect(existsSync(partial)).toBe(false);
+
+    // The folder as a process killed now leaves it: the snapshot and what came after it.
+    const killed = folder();
+    cpSync(dir, killed, { recursive: true });
+    const second = await db(await open(killed));
+    const log = () => second.transaction("log").objectStore("log");
+    expect(await read(log().count())).toBe(3_001);
+    expect(await read(log().get(3_000))).toBe("delivered@2999");
+    expect(await read(log().get(9_999))).toBe("late");
+    expect(await read(second.transaction("messages").objectStore("messages").get(["a", "1"]))).toEqual({ linkId: "a", id: "1" });
   });
 
   it("keeps on close a write nobody waited for: the transaction made in the turn the process leaves", async () => {
