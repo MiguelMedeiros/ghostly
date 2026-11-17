@@ -33,11 +33,12 @@ const MAX_SCRIPTS = 4;
 /**
  * Chunks the app imports only when they are used, by the name the build gives their file (`<name>-<hash>.js`): the
  * online-only ones the service worker leaves out of its install (`ONLINE_ONLY_MODULES` in apps/web/src/sw/policy.ts:
- * Pubky, Keet proofs, the USDT and Ark wallets) and heavy ones a person may never open (a group call, OpenPGP).
+ * Pubky, Keet proofs, OPAQUE's handoff password proof, named `esm` after @serenity-kit/opaque's esm/index.js, the USDT
+ * and Ark wallets) and heavy ones a person may never open (a group call, OpenPGP).
  * A chunk folded into another loads with whatever took it in, often the first load, and leaves at most a stub of its
  * name behind (`ownCode`).
  */
-const LATER = ["pubky", "keet-identity-key", "usdt", "arkade", "groupCallLivekit", "openpgp.min"];
+const LATER = ["pubky", "keet-identity-key", "esm", "usdt", "arkade", "groupCallLivekit", "openpgp.min"];
 
 /** What index.html's scripts may weigh together, raw: twice the 4.5 MB they weighed when this was written. */
 const MAX_FIRST_LOAD_BYTES = 9_000_000;

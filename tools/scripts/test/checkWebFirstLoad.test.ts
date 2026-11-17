@@ -8,7 +8,7 @@ const CHECK = join(import.meta.dirname, "../check-web-first-load.mjs");
 const dirs: string[] = [];
 
 /** The chunks today's build keeps for later, each a file of its own: the online-only ones, a group call, OpenPGP. */
-const LATER = ["pubky-a1.js", "keet-identity-key-b2.js", "usdt-c3.js", "arkade-d4.js", "groupCallLivekit-e5.js", "openpgp.min-f6.js"];
+const LATER = ["pubky-a1.js", "keet-identity-key-b2.js", "esm-a7.js", "usdt-c3.js", "arkade-d4.js", "groupCallLivekit-e5.js", "openpgp.min-f6.js"];
 
 interface Page { src: string[]; preload?: string[] }
 
@@ -101,6 +101,14 @@ describe("check-web-first-load", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("pubky-a1.js only passes on main's exports: pubky was folded into main");
     expect(result.stderr).not.toContain("ceiling");
+  });
+
+  it("fails OPAQUE folded into the entry, which a static import of it anywhere on the first load does", () => {
+    // What the build leaves of @serenity-kit/opaque's chunk (named after its esm/index.js) once main takes it in.
+    const stub = `export{N as client,P as ready,F as server}from"./main-c.js";`;
+    const result = check(dist(TODAY, SIGN_IN, { text: { "esm-a7.js": stub }, bytes: { "main-c.js": 4_499_914 + 422_699 } }));
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("esm-a7.js only passes on main's exports: esm was folded into main");
   });
 
   it("fails a later chunk with no file of its own", () => {
