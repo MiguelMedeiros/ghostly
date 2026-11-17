@@ -504,7 +504,7 @@ describe("with the apps flag on", () => {
     fakeEngine.on("appList", () => [installed()]);
     renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
     act(() => fakeEngine.update({ links: [ana(false)] }));
-    expect(await screen.findByTestId("app-card-waiting")).toHaveTextContent("Chess needs you both online");
+    expect(await screen.findByTestId("app-card-waiting")).toHaveTextContent("⁨Chess⁩ needs you both online");
     expect(await screen.findByTestId("app-card-open")).toBeInTheDocument();
     expect(screen.queryByTestId("app-card-install")).not.toBeInTheDocument();
   });
@@ -524,7 +524,7 @@ describe("with the apps flag on", () => {
     expect(within(shown).getByTestId("app-card-title")).not.toHaveTextContent("Chess");
     // The card's name for a screen reader is the same app's, not Ana's word for it.
     expect(shown.closest("[data-message-card]")).toHaveAttribute("aria-label", "App: Private Notes");
-    expect(within(shown).getByTestId("app-card-waiting")).toHaveTextContent("Private Notes needs you both online");
+    expect(within(shown).getByTestId("app-card-waiting")).toHaveTextContent("⁨Private Notes⁩ needs you both online");
     await user.click(within(shown).getByTestId("app-card-open"));
     await waitFor(() => expect(opener).toHaveBeenCalledWith(REF, "link-1", { runAnyway: false }));
   });

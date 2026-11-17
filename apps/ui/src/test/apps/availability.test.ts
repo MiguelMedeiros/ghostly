@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import en from "../../locales/en";
+import { LOCALES } from "../i18n/locales";
 import { translateWith } from "../../locales/translate";
-import { appsBlock, appsComposerHint } from "../../lib/apps/availability";
+import { appsBlock, appsComposerHint, appsUnavailable } from "../../lib/apps/availability";
 import type { PeerLinkState } from "../../lib/platform";
 // covers: apps.chat.card
 
@@ -29,11 +30,23 @@ describe("+ → Apps", () => {
 
   it("names a live contact whose app offers no apps/1 (an older Ghostly), rather than asking them to come online", () => {
     expect(appsBlock(peer(true, ["calls/1", "files/3"]))).toBe("contact-cannot");
-    expect(appsComposerHint(peer(true, ["calls/1", "files/3"]), "Olga", t)).toBe("Olga's app can't run apps yet");
-    expect(appsComposerHint(peer(true, null), "Olga", t)).toBe("Olga's app can't run apps yet");
+    expect(appsComposerHint(peer(true, ["calls/1", "files/3"]), "Olga", t)).toBe("⁨Olga⁩'s app can't run apps yet");
+    expect(appsComposerHint(peer(true, null), "Olga", t)).toBe("⁨Olga⁩'s app can't run apps yet");
   });
 
   it("says nothing in a chat whose own app does not offer apps/1", () => {
     expect(appsComposerHint({ ...peer(true, []), sessionOffers: { mine: ["calls/1"], peer: [] } } as PeerLinkState, "Olga", t)).toBeNull();
+  });
+});
+
+describe("a chat's app card", () => {
+  it("isolates the app's title and the contact's name in every language, so \"Chess!\" does not read \"!Chess\" in Arabic", () => {
+    expect(appsUnavailable("not-live", "Chess!", "Bob!", t)).toBe("⁨Chess!⁩ needs you both online");
+    for (const [language, dict] of Object.entries(LOCALES)) {
+      const said = translateWith(dict, language as never);
+      expect(appsUnavailable("not-live", "Chess!", "Bob!", said), language).toContain("⁨Chess!⁩");
+      expect(appsUnavailable("contact-older", "Chess!", "Bob!", said), language).toContain("⁨Bob!⁩");
+      expect(appsComposerHint(peer(true, null), "Bob!", said), language).toContain("⁨Bob!⁩");
+    }
   });
 });
