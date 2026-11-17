@@ -2,7 +2,7 @@ import type { Identity } from "./identity";
 import { createRelayPayload, newerPacket, openRelayPayload, parseRelayPayload, PKARR_FUTURE_SKEW_MS, readOwnRelayPayload, RELAY_PAYLOAD_MAX_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
 import { RelayBreaker, type DiscoveryStatus, type RelayBreakerOptions, type RelayFailure } from "./relayBreaker";
 import { DiscoveryBudgetError, isDiscoveryBudgetError, PublishFailedError, publishedNowhere, type DiscoveryChange, type PkarrRequestOptions, type PkarrTransport, type ServerTime } from "./transport";
-import { traceLink } from "./linkTrace";
+import { linkTraceOn, traceLink } from "./linkTrace";
 import type { TurnConditions, TurnSourceAnswer, TurnSourcePut } from "./turnRead";
 
 /** Who asks, for the budget: a 1:1 chat's link comes before a group's, and both before background looks. */
@@ -49,6 +49,12 @@ const isGroupRead = (who: Asker): boolean => who.group && !who.write && !who.bac
 const isTurnRead = (who: Asker): boolean => !who.write && !who.door && (who.background || !who.group);
 /** A write that goes first once the budget frees a request (see `WRITE_FIRST_MS`): a chat's or a group's, never a background one. */
 const firstWriter = (who: Asker): "chat" | "group" | null => (!who.write || who.background ? null : who.group ? "group" : "chat");
+/** A community door's read (`door`): its knock bell, its beacon and lobby while someone comes in (`DOOR_FIRST_MS`). */
+const isDoorRead = (who: Asker): boolean => who.door && !who.write;
+/** Who asked, in words, for the link trace's tally of a relay's minute (`read.held`). */
+const ASKER_FLAGS = ["door", "urgent", "signal", "watch", "watchWrite", "departed", "awaited", "resume", "back", "catchUp"] as const;
+const askerLabel = (who: Asker): string =>
+  [who.write ? "write" : "read", who.background ? "background" : isChat(who) ? "chat" : "group", ...ASKER_FLAGS.filter((flag) => who[flag])].join(" ");
 /** A key's turn neither asked nor read in the last minute: it is dropped, and asking again starts a new one (`TURNS_PRUNE_MS`). */
 const staleTurn = (turn: { servedAt: number; askedAt: number }, now: number): boolean => now - Math.max(turn.askedAt, turn.servedAt) >= 60_000;
 /**
@@ -181,6 +187,19 @@ export const BACKGROUND_WRITES_SHARE = 1 / 2;
  * only thing that peer is waiting for) would go out only once the polling slowed down, half a minute later.
  */
 export const WRITE_FIRST_MS = 5_000;
+/**
+ * A community door's read (`door`: its knock bell, and its beacon and lobby while someone comes in) the budget refused
+ * on a relay goes first there when the minute frees a request: the group edges' reads of members that went away
+ * (`watch`), the groups' reads at a slow pace and the background reads wait this long after the refusal, while it is not
+ * read. Nor does it wait behind the packets queued for that relay (`catchUpLater`). Writes, the chats' reads and the
+ * reads of a link that signals (`urgent`: an edge's, the session that lets the joiner in) do not wait for it, and it
+ * takes nothing past the minute: only the order changes. A door whose edges watched the members that had just left
+ * (`WATCH_SHARE`) and offered to them spent each relay's minute on them (about three quarters of it), and took a freed
+ * request only when its own read came first: its bell, read every 4 to 6 s, answered the packet from before the knock
+ * 3 to 6 times in a row, and a joiner waited 18 to 23 s to be let in, 5 link joins in 24, against 3 to 8 s for the
+ * others (CLI lab, 2026-11-17).
+ */
+export const DOOR_FIRST_MS = 5_000;
 /**
  * Once a 1:1 chat needs the relays (the budget refused one of its requests there, or it read urgently anywhere: it polls
  * fast for a signal due any moment), group requests and background ones leave it the last this many of each minute (more
@@ -644,6 +663,8 @@ export class RelayTransport implements PkarrTransport {
   private readonly groupsFullAt = new Map<string, number>();
   /** When a link's write was last refused on each relay (`chat <relay>`, `group <relay>`), while it waits for the budget. */
   private readonly writeWaiting = new Map<string, number>();
+  /** When a community door's read was last refused on each relay, while it waits for the budget (`DOOR_FIRST_MS`). */
+  private readonly doorWaiting = new Map<string, number>();
   /** Per relay, the keys whose edges' reads for an answer it last refused, and when, until one is read (`ANSWER_READ_FIRST_MS`). */
   private readonly answerReadWaiting = new Map<string, Map<string, number>>();
   /**
@@ -668,6 +689,11 @@ export class RelayTransport implements PkarrTransport {
    * (`readHeldBackFor`), how many times in a row, and since when (`READ_STARVED_MS`).
    */
   private readonly heldBack = new Map<string, { until: number; times: number; since: number }>();
+  /**
+   * Per relay, the requests of the last minute and who asked for each: kept only while the link trace is on, for the
+   * tally a held-back read traces (`read.held`), which says what spent the minute it waits for.
+   */
+  private readonly spentBy = new Map<string, { at: number; as: string; key: string }[]>();
   /** When the relays last answered a read of each key, for `FRESH_READ_MS`. */
   private readonly readAt = new Map<string, number>();
   private readonly freshReadMs: number;
@@ -1289,6 +1315,7 @@ export class RelayTransport implements PkarrTransport {
     const known = down ? this.newest.get(pubKeyZ32) : newerPacket(this.newest.get(pubKeyZ32), this.written.get(pubKeyZ32));
     // A background read held back comes again at its own turn, not when the budget frees the next request.
     if (!down && budgetWait < Infinity) budgetWait = Math.max(budgetWait, this.backgroundTurnIn(pubKeyZ32, who, Date.now()));
+    if (!down && budgetWait < Infinity && linkTraceOn()) this.traceHeld(pubKeyZ32, who, budgetWait, !!(resting && known));
     if (resting && known) {
       if (down && !keptOnFailure) throw new RelaysFailedError(known);
       if (!down && budgetWait < Infinity) this.heldBackUntil(pubKeyZ32, Date.now() + budgetWait);
@@ -1389,6 +1416,22 @@ export class RelayTransport implements PkarrTransport {
     const left = held === undefined ? 0 : held.until - Date.now();
     // A hold that has run out is the past: the read that just ended was not held back (the relays went down after it).
     return left > 0 ? left : undefined;
+  }
+
+  /**
+   * The link trace's line for a read the budget held back (`read.held`): who asked, for how long, whether it answered
+   * the packet already known, and per relay what spent the last minute (who asked, how many; the keys asked most).
+   */
+  private traceHeld(pubKeyZ32: string, who: Asker, waitMs: number, known: boolean): void {
+    const now = Date.now();
+    const spent = this.relays.map((relay) => {
+      const list = (this.spentBy.get(relay) ?? []).filter((s) => now - s.at < 60_000);
+      const by: Record<string, number> = {}, keys: Record<string, number> = {};
+      for (const s of list) { by[s.as] = (by[s.as] ?? 0) + 1; keys[`${s.key} ${s.as}`] = (keys[`${s.key} ${s.as}`] ?? 0) + 1; }
+      const background = within(this.spentBackground.get(relay) ?? [], now, 60_000).length, catchUp = this.catchUpWaiting.get(relay) ?? 0;
+      return { n: list.length, background, catchUp, signaling: this.urgentAt + SIGNALING_WINDOW_MS > now, wait: this.heldFor(relay, who, now, pubKeyZ32, false), by, top: Object.entries(keys).sort((a, b) => b[1] - a[1]).slice(0, 6) };
+    });
+    traceLink(pubKeyZ32, "read.held", { as: askerLabel(who), waitMs, known, spent });
   }
 
   private heldBackUntil(pubKeyZ32: string, until: number): void {
@@ -1517,6 +1560,7 @@ export class RelayTransport implements PkarrTransport {
       if (isGroupRead(who) && (this.spent.get(relay)?.length ?? 0) >= this.limitOf(relay)) this.groupsFullAt.set(relay, now);
       if (isChat(who)) this.chatNeed(key, now, relay);
       if (writer) this.writeWaiting.set(`${writer} ${relay}`, now);
+      if (isDoorRead(who)) this.doorWaiting.set(relay, now);
       if (isGroupAnswerRead(who)) {
         const waiting = this.answerReadWaiting.get(relay) ?? new Map<string, number>();
         this.answerReadWaiting.set(relay, waiting.set(key, now));
@@ -1524,6 +1568,7 @@ export class RelayTransport implements PkarrTransport {
       return false;
     }
     if (writer) this.writeWaiting.delete(`${writer} ${relay}`);
+    if (isDoorRead(who)) this.doorWaiting.delete(relay);
     if (isGroupAnswerRead(who)) this.answerReadWaiting.get(relay)?.delete(key);
     // A way back that only its allowance let through counts there alone: it takes nothing from anyone else's minute.
     if (isWayBack(who) && this.heldFor(relay, { ...who, back: false }, now, key, false) > 0) {
@@ -1543,6 +1588,7 @@ export class RelayTransport implements PkarrTransport {
     if (departedOver) this.overAdd(this.departedOver, key, now);
     if (isAwaitedRead(who) && this.spent.get(relay)!.length >= this.limitOf(relay)) this.awaitedOver = [...within(this.awaitedOver, now, 60_000), now];
     this.spent.get(relay)!.push(now);
+    if (linkTraceOn()) this.spentBy.set(relay, [...(this.spentBy.get(relay) ?? []).filter((s) => now - s.at < 60_000), { at: now, as: askerLabel(who), key: key.slice(0, 6) }]);
     if (who.background) this.spentBackground.get(relay)!.push(now);
     if (who.background && who.write) this.spentBackgroundWrites.get(relay)!.push(now);
     if (isGroupUrgentRead(who) && isGroupAnswerRead(who)) this.spentAnswerUrgent.set(relay, [...(this.spentAnswerUrgent.get(relay) ?? []), now]);
@@ -1603,8 +1649,9 @@ export class RelayTransport implements PkarrTransport {
     // leave what is left of the background writes' share to them. Without it, a daemon whose 50 contacts were away
     // read them with every request the budget freed (each read starved in turn), and 35 of its 50 chats' packets never
     // reached the relays in 40 minutes, where the web app and the extension read them (bug hunt, 2026-11-06).
+    // Not a door's read (`DOOR_FIRST_MS`): a knock waits on it, and it is few (one every few seconds).
     const caughtUp = this.catchUpWaiting.get(relay) ?? 0;
-    if (who.background && !who.write && caughtUp) {
+    if (who.background && !who.write && caughtUp && !who.door) {
       const writesLeft = writesShare - recentBackgroundWrites.length;
       if (writesLeft > 0) wait = Math.max(wait, over(recent, Math.max(1, limit - writesLeft)), over(recentBackground, Math.max(1, backgroundShare - writesLeft)));
     }
@@ -1679,6 +1726,11 @@ export class RelayTransport implements PkarrTransport {
     // A read past the limit within the groups' allowance takes no request a waiting write could have (it is no signal).
     // An edge's read for its answer does not wait for one: the floor's other requests wait for it instead.
     if (((writer === null && who.group && !pastLimit && !isGroupAnswerRead(who)) || who.background) && !starved) wait = Math.max(wait, waiting("group"));
+    // A door's read the budget refused goes first when a request frees (`DOOR_FIRST_MS`): the edges' watch reads, the
+    // groups' slow reads and the background reads wait for it, past the limit within the groups' allowance too. Not
+    // while the background share holds the door's read: what they leave would not go to it.
+    const doorAt = this.doorWaiting.get(relay);
+    if (doorAt !== undefined && now - doorAt < DOOR_FIRST_MS && !who.write && !who.door && (who.background || isWatch(who) || (isGroupRead(who) && !who.urgent)) && !starved && recentBackground.length < backgroundShare) wait = Math.max(wait, doorAt + DOOR_FIRST_MS - now);
     // The groups' other signaling waits for an edge's read for its answer the budget refused, for what that read could
     // take now (`ANSWER_READ_FIRST_MS`): not the floor's last request, which only a write takes.
     if (isGroupSignal(who) && !isGroupAnswerRead(who)) {
