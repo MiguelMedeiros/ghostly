@@ -1,3 +1,5 @@
+import { MAX_GROUP_CALL_SFU } from "@ghostly/core";
+import { callNodeProblem } from "../callNode";
 import { CliError } from "../errors";
 import { type Command, groupWait, here, picture, refs, showSecret, secret, cursor, pageLimit, reaction, timeout, typingFor, typingKind } from "./shared";
 
@@ -37,6 +39,13 @@ export const commands: Record<string, Command> = {
       if (options.sfu === undefined && options.clear !== true && options.e2ee === undefined) throw new CliError("usage", "Missing --sfu, --e2ee, --no-e2ee or --clear: ghostly group call <group> --sfu <https origin> [--e2ee | --no-e2ee] | --e2ee | --no-e2ee | --clear");
       if (options.sfu !== undefined && options.clear === true) throw new CliError("usage", "--clear removes the call node: not with --sfu");
       if (options.e2ee !== undefined && options.clear === true) throw new CliError("usage", "--clear removes the call node: not with --e2ee or --no-e2ee");
+      // A value that is no https origin, or one past the limit, is wrong whatever the profile holds: said here, before
+      // the profile opens. Before: bad_request (exit 1) once the group was found, after not_found (exit 3) for a group
+      // not there. An origin in another spelling is told by the API, whose answer names the group. The value is not
+      // repeated here.
+      const wrong = typeof options.sfu === "string" ? callNodeProblem(options.sfu) : undefined;
+      if (wrong?.problem === "origin") throw new CliError("usage", "--sfu takes the call node's https origin, like https://call.example.com");
+      if (wrong?.problem === "long") throw new CliError("usage", `--sfu is too long: a call node is an https origin of at most ${MAX_GROUP_CALL_SFU} characters`);
       return { group: a.group, ...(options.clear === true ? { clear: true } : options.sfu !== undefined ? { sfu: options.sfu } : {}), ...(options.e2ee !== undefined && { e2ee: options.e2ee === true }), ...secret(options) };
     },
   },
