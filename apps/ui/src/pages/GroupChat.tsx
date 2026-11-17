@@ -940,7 +940,8 @@ export function GroupChat() {
       {/* On a phone the chat list's notices are on another screen: what is written here waits too. */}
       <OfflineBanner inChat />
       <ReconnectingBanner inChat />
-      {!noTimeline && <ChatSearchBar search={search} />}
+      {!noTimeline && <ChatSearchBar search={search} nameOf={m => m.sender === "me" ? t("chat.reply.you") : m.nick ?? (group.name || t("group.chat.unnamed"))}
+        noteLine={note => ownNotes.has(note.id) ? null : groupPayNoteLine(note, group, t)} />}
       {!noTimeline && <PinnedBar pin={group.pin} index={quoteIndex} onUnpin={canPin ? () => pinMessage(undefined, true) : undefined} returnFocus={optionsRef} />}
 
       {connecting && !error &&<div role="status" data-testid="group-connecting" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">

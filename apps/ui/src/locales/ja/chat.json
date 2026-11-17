@@ -405,6 +405,7 @@
   "search": {
     "close": "検索を閉じる",
     "count": "{{current}} / {{total}}",
+    "found": "{{count}}：{{name}}、{{text}}",
     "info": "このデバイスに保存されたメッセージとファイル名を検索します。外部には何も送信されません。",
     "newer": "新しい結果 (Shift+Enter)",
     "none": "結果なし",

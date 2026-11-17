@@ -45,6 +45,8 @@ describe("a group's search and a mention of a member who goes by another name no
     expect(count()).toBe("1 of 1");
     await type("Alicia");
     expect(count()).toBe("1 of 1");
+    // A screen reader hears the match with the count: its author by the roster's name, its words as the bubble shows them.
+    expect(screen.getByTestId("chat-search-said").textContent).toBe("1 of 1: Bob, @Alicia lunch?");
   });
 
   it("does not count a match for words its bubble no longer shows", async () => {

@@ -328,6 +328,21 @@ describe("the emoji/GIF panel", () => {
     expect(within(screen.getByTestId("emoji-section-people")).getByRole("button", { name: "😀" })).toBeInTheDocument();
   });
 
+  it("makes the tab shown the panel its switch's tab controls, by name, on emoji and on GIFs", async () => {
+    gifCities();
+    const { user } = composer();
+    await user.click(smiley());
+    // Before, two tabs that controlled nothing: no tab panel, and no aria-controls to one.
+    for (const [id, name] of [["emoji", "Emoji"], ["gif", "GIF"]] as const) {
+      if (id === "gif") await user.click(screen.getByTestId("expression-tab-gif"));
+      const shown = screen.getByRole("tabpanel", { name });
+      expect(shown).toBe(screen.getByTestId(`${id}-tab`));
+      expect(screen.getByTestId(`expression-tab-${id}`)).toHaveAttribute("aria-controls", shown.id);
+      // The other tab's panel is not drawn: its tab names none.
+      expect(screen.getByTestId(`expression-tab-${id === "emoji" ? "gif" : "emoji"}`)).not.toHaveAttribute("aria-controls");
+    }
+  });
+
   it("puts an emoji where the caret is, keeps the panel open, and lists it first under Recent next time", async () => {
     const { user } = composer();
     await user.type(field(), "hi there");
