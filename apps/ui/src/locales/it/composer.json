@@ -19,6 +19,13 @@
   },
   "chooseFiles": "Scegli i file",
   "closeCamera": "Chiudi fotocamera",
+  "dhtFits": {
+    "contact": "Troppo lungo per la DHT, che porta circa {{fits}} byte. La chat del tuo contatto è in Solo DHT: accorcialo, o aspetta che consenta di nuovo la connessione diretta.",
+    "editLive": "Troppo lungo per la DHT come modifica, che porta circa {{fits}} byte: parte quando sei connesso direttamente.",
+    "held": "Più di quanto porta la DHT (circa {{fits}} byte): viene conservato per il tuo contatto finché non è online.",
+    "live": "Troppo lungo per la DHT, che porta circa {{fits}} byte. Accorcialo, o invialo quando siete connessi direttamente.",
+    "you": "Troppo lungo per la DHT, che porta circa {{fits}} byte. Questa chat è in Solo DHT: accorcialo, o cambialo dall'icona di connessione."
+  },
   "dhtTooLong": "Troppo lungo per la DHT ({{bytes}} di {{max}} byte). Accorcialo o connettiti dal vivo; la bozza resta.",
   "document": "Documento",
   "dropFiles": "Rilascia per inviare",
