@@ -18,6 +18,7 @@ class FakeRegistration extends EventTarget {
   waiting: FakeWorker | null = null;
   active: FakeWorker | null = new FakeWorker("activated");
   update = vi.fn(async () => {});
+  unregister = vi.fn(async () => true);
 }
 
 class FakeContainer extends EventTarget {
@@ -110,6 +111,115 @@ describe("Reload on a new version", () => {
     const reload = vi.fn();
     await applyUpdate({ reload });
     expect(reload).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Reload when the new worker cannot install", () => {
+  // The page runs 1.13.0 build aaa; the server's `/version.json` answers what each test says.
+  const versionFile = vi.fn<(url: string) => Promise<Response>>();
+  const answers = (feed: object) => versionFile.mockImplementation(async () => new Response(JSON.stringify(feed), { status: 200 }));
+  const asked = () => versionFile.mock.calls.filter(([url]) => String(url).endsWith("/version.json")).length;
+  /** What happened, in order: the worker unregistered, the page reloaded. */
+  let steps: string[];
+  const reload = () => { steps.push("reload"); };
+
+  beforeEach(() => {
+    vi.stubGlobal("__APP_VERSION__", "1.13.0");
+    vi.stubGlobal("__APP_BUILD__", "aaa");
+    vi.stubGlobal("fetch", versionFile);
+    versionFile.mockReset();
+    steps = [];
+    registration.unregister.mockImplementation(async () => { steps.push("unregister"); return true; });
+  });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  /** A deploy's worker starts installing at `update()`, then its install fails (a precache file missing, storage full). */
+  const installFails = () => {
+    const next = new FakeWorker("installing");
+    registration.update.mockImplementation(async () => {
+      registration.installing = next;
+      setTimeout(() => { registration.installing = null; next.become("redundant"); }, 0);
+    });
+    return next;
+  };
+
+  it("a new build is out: the old worker is unregistered before the reload, so the page loads the new build", async () => {
+    answers({ version: "1.13.1", build: "bbb" });
+    const next = installFails();
+    await applyUpdate({ reload });
+    expect(steps).toEqual(["unregister", "reload"]);
+    expect(asked()).toBe(1);
+    expect(next.posted).toEqual([]);
+  });
+
+  it("a redeploy of the same version (another build) counts as a new build too", async () => {
+    answers({ version: "1.13.0", build: "ccc" });
+    installFails();
+    await applyUpdate({ reload });
+    expect(steps).toEqual(["unregister", "reload"]);
+  });
+
+  it("not installed in time: the same, once the server says a new build is out", async () => {
+    answers({ version: "1.13.1", build: "bbb" });
+    registration.update.mockImplementation(async () => { registration.installing = new FakeWorker("installing"); });
+    await applyUpdate({ timeoutMs: 20, reload });
+    expect(steps).toEqual(["unregister", "reload"]);
+  });
+
+  it("the new worker's script refused (update() rejects) while a new build is out: the same", async () => {
+    answers({ version: "1.13.1", build: "bbb" });
+    registration.update.mockImplementation(async () => { throw new TypeError("Failed to update a ServiceWorker: 404"); });
+    await applyUpdate({ reload });
+    expect(steps).toEqual(["unregister", "reload"]);
+  });
+
+  it("the server still has this build: the worker stays, a plain reload", async () => {
+    answers({ version: "1.13.0", build: "aaa" });
+    installFails();
+    await applyUpdate({ reload });
+    expect(asked()).toBe(1);
+    expect(steps).toEqual(["reload"]);
+    expect(registration.unregister).not.toHaveBeenCalled();
+  });
+
+  it("offline (the version file does not answer): the worker stays, so the reload still opens the app", async () => {
+    versionFile.mockImplementation(async () => { throw new TypeError("Failed to fetch"); });
+    installFails();
+    await applyUpdate({ reload });
+    expect(asked()).toBe(1);
+    expect(steps).toEqual(["reload"]);
+    expect(registration.unregister).not.toHaveBeenCalled();
+  });
+
+  it("the server answers with an error or something else: the worker stays", async () => {
+    versionFile.mockImplementation(async () => new Response("<html>bad gateway</html>", { status: 502 }));
+    installFails();
+    await applyUpdate({ reload });
+    versionFile.mockImplementation(async () => new Response("<html>a captive portal</html>", { status: 200 }));
+    installFails();
+    await applyUpdate({ reload });
+    expect(asked()).toBe(2);
+    expect(steps).toEqual(["reload", "reload"]);
+    expect(registration.unregister).not.toHaveBeenCalled();
+  });
+
+  it("nothing newer to install (another tab's Reload already put the new worker in place): never unregistered", async () => {
+    answers({ version: "1.13.1", build: "bbb" });
+    await applyUpdate({ reload });
+    expect(steps).toEqual(["reload"]);
+    expect(registration.unregister).not.toHaveBeenCalled();
+  });
+
+  it("the new worker installs: it takes over as before, nothing unregistered", async () => {
+    answers({ version: "1.13.1", build: "bbb" });
+    const next = new FakeWorker("installed");
+    registration.waiting = next;
+    const applying = applyUpdate({ reload });
+    await vi.waitFor(() => expect(next.posted).toEqual([{ type: "skip-waiting" }]));
+    container.dispatchEvent(new Event("controllerchange"));
+    await applying;
+    expect(steps).toEqual(["reload"]);
+    expect(registration.unregister).not.toHaveBeenCalled();
   });
 });
 
