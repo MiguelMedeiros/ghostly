@@ -629,10 +629,14 @@ describe("a profile made for a code", () => {
       fakeEngine.on("deviceEnrollView", () => ({ role: "joiner", step: "done", device: "MacBook" }));
       expect(await screen.findByTestId("device-join-continue", {}, { timeout: 3_000 })).toBeVisible();
       expect(screen.queryByTestId("device-join-persist")).toBeNull();
+      await waitFor(() => expect(screen.getByTestId("device-join-continue")).toHaveFocus());
       // Past the pause the dialog takes before it opens the standby screen by itself.
       await new Promise((resolve) => setTimeout(resolve, 2_000));
       expect(reload).not.toHaveBeenCalled();
       act(() => answer(true));
+      // Continue goes away under the focus: the focus stays in the dialog, on the step's body, not on the page.
+      await waitFor(() => expect(screen.queryByTestId("device-join-continue")).toBeNull());
+      await waitFor(() => expect(screen.getByTestId("device-join-done").parentElement).toHaveFocus());
       await waitFor(() => expect(reload).toHaveBeenCalled(), { timeout: 4_000 });
     } finally { Reflect.deleteProperty(navigator, "storage"); }
   });
