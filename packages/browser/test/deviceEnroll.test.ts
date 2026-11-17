@@ -414,6 +414,36 @@ describe("refusals", () => {
     expect(b.current()).toMatchObject({ step: "failed", reason: "cancelled" });
     await a.cancel();
   });
+
+  it("an inviter cancelled while it starts opens no link and shows no code, at its first read or at its last", async () => {
+    const a = inviter();
+    const starting = a.start();
+    await a.cancel();
+    expect(await starting).toMatchObject({ step: "failed", reason: "cancelled" });
+    // A profile with no device set yet: the cancel lands while its turn address is read, after the key was made.
+    const late: EnrollInviter = new EnrollInviter({
+      profile: C, network, open: pipe.openInviter, name: "MacBook", sleep: noSleep, timing: quick, forceSeed: true,
+      didSeed: async () => { void late.cancel(); return didSeed; },
+    });
+    expect(await late.start()).toMatchObject({ step: "failed", reason: "cancelled" });
+    expect(pipe.inviter).toBeNull();
+    expect(a.current()).toMatchObject({ step: "failed", reason: "cancelled" });
+    expect(late.current()).toMatchObject({ step: "failed", reason: "cancelled" });
+  });
+
+  it("a joiner cancelled while it starts makes no key and opens no link", async () => {
+    const a = inviter();
+    const waiting = await a.start();
+    if (waiting.step !== "waiting") throw new Error("no code");
+    const b = joiner();
+    const starting = b.start(waiting.code);
+    await b.cancel();
+    expect(await starting).toMatchObject({ step: "failed", reason: "cancelled" });
+    expect(pipe.joiners).toHaveLength(0);
+    expect(await loadDeviceSigningKey(B)).toBeNull();
+    expect(b.current()).toMatchObject({ step: "failed", reason: "cancelled" });
+    await a.cancel();
+  });
 });
 
 describe("crash matrix", () => {

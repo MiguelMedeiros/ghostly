@@ -305,10 +305,13 @@ export class EnrollInviter extends Enrollment {
   /** Makes the code and opens the one-time link. Throws when this device cannot add one now; nothing is written. */
   async start(): Promise<EnrollView> {
     const { profile, network } = this.options;
+    // Cancelled while it starts (the person closed the dialog): it opens nothing, and stays as the cancel left it.
     this.record = await readDeviceRecord(profile);
+    if (this.over) return this.view;
     if (this.record && this.record.state !== "active") throw new Error("Only the active device adds a device");
     if (this.record) {
       const identity = await deviceIdentity(profile, { record: this.record });
+      if (this.over) return this.view;
       if (!identity) throw new DeviceSetError("no device set");
       this.key = identity.key;
       this.d = identity.d;
@@ -319,6 +322,7 @@ export class EnrollInviter extends Enrollment {
       // A profile that gets its first device set: nothing may be at its turn address yet. A record there means
       // another copy of this profile (a restored backup) made a device set this one does not hold.
       const read = await readAt(network, this.d, this.key.publicKey, 0);
+      if (this.over) return this.view;
       if (!read.good) throw new EnrollRefusal("unreachable");
       if (read.result !== "none") throw new EnrollRefusal("elsewhere");
     }
@@ -522,8 +526,12 @@ export class EnrollJoiner extends Enrollment {
     const reading = readDeviceInvite(code, Math.floor(this.now() / 1000));
     if (!reading.ok) throw new EnrollCodeError(reading.reason);
     this.invite = reading;
-    if (await readDeviceRecord(this.options.profile)) throw new EnrollCodeError("set");
+    const record = await readDeviceRecord(this.options.profile);
+    // Cancelled while it starts: no key is made and no link opens, and it stays as the cancel left it.
+    if (this.over) return this.view;
+    if (record) throw new EnrollCodeError("set");
     this.key = await createDeviceSigningKey(this.options.profile, { forceSeed: this.options.forceSeed });
+    if (this.over) return this.view;
     this.crash("joiner:key-made");
     const inviterKey = reading.invite.inviterKey;
     this.show({ role: "joiner", step: "connecting" });
