@@ -874,7 +874,7 @@ const METHODS: Record<string, Method> = {
     return { removed: link.id };
   },
   async "chat.transport"(ctx, params) {
-    const link = chatOf(ctx, params);
+    const link = chatNotGroupLink(ctx, params);
     const name = str(params, "transport", true);
     const transport = Object.hasOwn(TRANSPORT_NAMES, name) ? TRANSPORT_NAMES[name] : undefined;
     if (!transport) throw new CliError("bad_request", `transport must be one of auto, dht, webrtc, iroh, hyperdht`);
@@ -887,7 +887,7 @@ const METHODS: Record<string, Method> = {
   },
   /** Reconnects now; a chat held off its direct link (`chat disconnect --hold`) leaves the hold first. */
   async "chat.connect"(ctx, params) {
-    const link = chatOf(ctx, params);
+    const link = chatNotGroupLink(ctx, params);
     await releaseHold(ctx, link.id, "connect");
     inviteTaken(link);
     dhtOnly(findChat(state(ctx).links, link.id));
@@ -899,7 +899,7 @@ const METHODS: Record<string, Method> = {
    * direct link that long, on the DHT (its "DHT only" choice, taken back after); 0 ends a hold now.
    */
   async "chat.disconnect"(ctx, params) {
-    const link = chatOf(ctx, params);
+    const link = chatNotGroupLink(ctx, params);
     const minutes = params.hold === undefined ? undefined : num(params, "hold", 0, { min: 0, max: HOLD_MAX_MINUTES });
     // `--hold 0` still ends a hold, one an older version put on a waiting invite too.
     if (minutes !== 0) somebodyJoined(link);
@@ -922,7 +922,7 @@ const METHODS: Record<string, Method> = {
     return chatJson(findChat(state(ctx).links, link.id));
   },
   async "chat.wait"(ctx, params) {
-    const link = chatOf(ctx, params);
+    const link = chatNotGroupLink(ctx, params);
     const until = oneOf(params, "until", ["live", "text", "paired"] as const, "live");
     const ms = num(params, "timeout", 60, { min: 1, max: 86_400 }) * 1000;
     const view = await waitForState(ctx, (s) => {
@@ -1339,6 +1339,15 @@ function joinRefused(link: string, error: unknown): unknown {
 }
 
 /**
+ * The chat a command about a chat's own connection names (`chat connect`, `disconnect`, `transport`, `wait`): a group's
+ * name says a group has none of its own, as `chat show` names `group show`. It read "(ghostly chat list)", a list that
+ * never has the group.
+ */
+function chatNotGroupLink(ctx: ApiContext, params: Params) {
+  return notAGroup(ctx, params, () => chatOf(ctx, params), (shown) => `it connects through its members' chats, with no transport of its own (ghostly group show ${shown})`);
+}
+
+/**
  * A chat command given a group's id, prefix or name: `not_found` that says it is a group, with `hint`: the group
  * command that takes it (`react` on a group, where `group react` is meant), or what to do where none does. `group:<id>`,
  * the form `pin` and `saved` take, is that group too (it read "No chat" before). A name no chat and no group has stays
@@ -1467,7 +1476,26 @@ async function connectWithin(ctx: ApiContext, link: LinkView, ms: number): Promi
       throw error;
     }
   } finally { clearTimeout(timer); }
-  throw new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s: the contact did not answer. ${connectNext(ctx, link)}`, { chat: link.id });
+  throw new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s: ${notLiveYet(ctx, link)}. ${connectNext(ctx, link)}`, { chat: link.id });
+}
+
+/**
+ * How long after a daemon's start a chat with no attempt ended yet reads as still resuming: with many chats, the start
+ * brings them back a few at a time, over minutes.
+ */
+const RESUMING_MS = 5 * 60_000;
+
+/**
+ * Why a daemon's `chat connect` timed out, as the chat reads at the end. No attempt of this run ended yet
+ * (`lastAttempt` null) while the daemon just started, or while the contact reads online: the chat is still coming
+ * back, nobody failed to answer. It said "the contact did not answer" right after a `daemon restart`, with the
+ * contact online. A one-shot always just started: it keeps the words it had.
+ */
+function notLiveYet(ctx: ApiContext, link: LinkView): string {
+  const now = state(ctx).links.find((l) => l.id === link.id) ?? link;
+  if (ctx.mode !== "daemon" || now.liveAttempt) return "the contact did not answer";
+  if (process.uptime() * 1000 < RESUMING_MS) return "the chat is still resuming after the daemon's start, and no attempt to reach the contact has ended yet";
+  return now.peerOnline ? "your contact's app reads online, and no attempt to reach it has ended yet" : "the contact did not answer";
 }
 
 /** What happens after a `chat connect` the contact did not answer: the daemon dials again by itself, a one-shot does not. */
