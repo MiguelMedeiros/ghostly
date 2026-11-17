@@ -514,6 +514,12 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
     mkdirSync(dirname(out), { recursive: true });
     writeWhole(out, bundle);
   });
+  // Clients look for updates and ghostly-revoke.json only at the sources on the hosts they read from (isAppFetchUrl).
+  const sources = checked.manifest.sources ?? [];
+  const notes = [
+    ...(key.created ? [madeKeyNote(keyPath, "publisher", key.key)] : []),
+    ...(sources.length && !sources.some(isAppFetchUrl) ? [`${APP_SOURCE} has no source a client reads from (${APP_FETCH_HOSTS.join(" or ")}): clients find no update or revocation of this app; add one there`] : []),
+  ];
 
   return {
     ...described(read.bundle, bundle),
@@ -522,7 +528,7 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
     files: contents.map((f) => f.path),
     ...(skipped.length ? { skipped } : {}),
     keyCreated: key.created,
-    ...(key.created ? { warning: madeKeyNote(keyPath, "publisher", key.key) } : {}),
+    ...(notes.length ? { warning: notes.join("; ") } : {}),
   };
 }
 
@@ -703,6 +709,8 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
   const notes = [
     ...(key.created ? [madeKeyNote(keyPath, "store", key.key)] : []),
     ...(store.expired ? [`expires (${new Date(store.index.expires * 1000).toISOString()}) is past: clients still install from it and say the store was not updated since then`] : []),
+    // A client installs a listing only from the URLs on the hosts it reads from (isAppFetchUrl).
+    ...store.index.apps.filter((app) => !app.urls.some(isAppFetchUrl)).map((app) => `${app.ref} has no URL a client reads from (${APP_FETCH_HOSTS.join(" or ")}): clients list it and cannot install it; add one there`),
   ];
   return {
     key: key.key, fingerprint: appFingerprint(key.key), name: store.index.name, kind: store.index.kind,
