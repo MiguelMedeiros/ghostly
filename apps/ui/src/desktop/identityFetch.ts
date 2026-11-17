@@ -15,11 +15,21 @@ export function desktopIdentityFetch(invoke: Invoke): typeof fetch {
     if ((init?.method ?? "GET").toUpperCase() !== "GET") throw new TypeError("Only GET is sent");
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     const headers = [...new Headers(init?.headers)];
-    const answer = await invoke<Answer>("hold_fetch", { url, headers }).catch((error: unknown) => { throw new TypeError(String(error)); });
-    init?.signal?.throwIfAborted();
+    const asked = invoke<Answer>("hold_fetch", { url, headers }).catch((error: unknown) => { throw new TypeError(String(error)); });
+    // Rust waits up to its own 150 s (held items are large): a read the engine gave up on (`boundedIdentityFetch`'s
+    // 10 s, a cancelled check) ends now, and its late answer is dropped.
+    const answer = await (init?.signal ? abortable(asked, init.signal) : asked);
     // A redirect is refused, as the WebView's `fetch` refuses it under `redirect: "error"`, the engine's default here.
     if (answer.status >= 300 && answer.status < 400 && init?.redirect !== "manual") throw new TypeError("Redirect refused");
     const body = answer.bodyB64 ? Uint8Array.from(atob(answer.bodyB64), (c) => c.charCodeAt(0)) : null;
     return new Response(body, { status: answer.status, headers: answer.contentType ? { "content-type": answer.contentType } : {} });
   };
+}
+
+function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const stop = () => reject(signal.reason);
+    signal.addEventListener("abort", stop, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", stop));
+  });
 }
