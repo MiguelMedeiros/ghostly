@@ -1322,7 +1322,9 @@ export class CashuWallet {
     if (unit !== UNIT) throw engineError("ecashOtherUnit", { unit });
     // A mint is a custodian and only the user picks those. The test mint holds nothing of value.
     if (addTestMint && !this.getKnownMints().includes(mint) && isTestMint(mint)) await this.events.onTestMintNeeded(mint);
-    if (!this.getKnownMints().includes(mint)) throw new Error(`Ecash from ${new URL(mint).hostname} is not accepted`);
+    // The words name the host only (a contact reads them in a payment's result); `mint` is the whole URL, which a host
+    // can offer to add (the CLI's `wallet add-mint`).
+    if (!this.getKnownMints().includes(mint)) throw Object.assign(new Error(`Ecash from ${new URL(mint).hostname} is not accepted`), { mint });
 
     return this.locked(mint, async () => {
       // A sender that prepaid the redeem fee put it on top of the amount; what the mint kept is the fee either way.
