@@ -541,7 +541,7 @@ answering), so the folder may hold other files, and several profiles' daemons ma
 | `reason` | |
 |---|---|
 | `hangup` | This side hung up, or declined a call that rang |
-| `remote-hangup` | The contact hung up a connected call |
+| `remote-hangup` | The contact hung up a connected call, or their app started over and calls again (`call.incoming` follows) |
 | `missed` | An incoming call stopped ringing unanswered (the contact gave up, or its offer went stale after 120 s) |
 | `rejected` | The contact declined this side's call |
 | `unanswered` | This side's call rang 60 s with no answer |
