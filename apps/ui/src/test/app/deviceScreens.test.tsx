@@ -471,7 +471,7 @@ describe("the forced takeover", () => {
 
   it("on a phone its × is 44 px, as the device dialogs' buttons are", () => {
     renderApp(<TakeoverDialog device="iPhone" password onClose={() => {}} />);
-    expect(screen.getByRole("button", { name: "Close" })).toHaveClass("max-md:h-11", "max-md:w-11");
+    expect(screen.getByRole("button", { name: "Close" })).toHaveClass("max-md:h-[44px]", "max-md:w-[44px]");
   });
 });
 

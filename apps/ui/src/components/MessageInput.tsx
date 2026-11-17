@@ -1047,7 +1047,7 @@ export function MessageInput({
       </span>
       {toastAction && (
         <button type="button" data-testid="composer-toast-action" onClick={() => { toastAction.run(); hideToast(); }}
-          className="-my-1.5 min-h-8 max-md:min-h-11 shrink-0 cursor-pointer border-none bg-transparent px-1 py-0 text-[13px] font-medium text-accent hover:underline">
+          className="-my-1.5 min-h-8 max-md:min-h-[44px] shrink-0 cursor-pointer border-none bg-transparent px-1 py-0 text-[13px] font-medium text-accent hover:underline">
           {toastAction.label}
         </button>
       )}
@@ -1091,7 +1091,7 @@ export function MessageInput({
       )}
       {shownConverting && (
         <button ref={cancelRef} type="button" data-testid="video-convert-cancel" onClick={() => cancelConverting(filesId, shown)}
-          className="min-h-6 max-md:min-h-11 shrink-0 cursor-pointer border-none bg-transparent px-1 py-0 text-[13px] font-medium text-accent hover:underline">
+          className="min-h-6 max-md:min-h-[44px] shrink-0 cursor-pointer border-none bg-transparent px-1 py-0 text-[13px] font-medium text-accent hover:underline">
           {t("common.cancel")}
         </button>
       )}

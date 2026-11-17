@@ -1217,9 +1217,9 @@ describe("the payment sheet's network tabs", () => {
       for (const m of ["pay", "accept"]) expect(screen.getByTestId(`payment-mode-${m}`)).toHaveClass("max-md:min-h-11");
       const arrows = [...screen.getAllByRole("button", { name: "Previous card" }), ...screen.getAllByRole("button", { name: "Next card" })];
       expect(arrows).toHaveLength(2);
-      for (const arrow of arrows) expect(arrow).toHaveClass("max-md:min-h-11", "max-md:min-w-11");
+      for (const arrow of arrows) expect(arrow).toHaveClass("max-md:min-h-[44px]", "max-md:min-w-[44px]");
       await user.click(screen.getByTestId("payment-card-lightning-mainnet"));
-      expect(screen.getByRole("button", { name: "Cards" })).toHaveClass("max-md:min-h-11");
+      expect(screen.getByRole("button", { name: "Cards" })).toHaveClass("max-md:min-h-[44px]");
     });
 
     it("pays a card of the tab on its own network, and goes back to that tab from the card", async () => {

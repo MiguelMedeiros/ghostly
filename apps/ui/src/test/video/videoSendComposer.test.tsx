@@ -153,7 +153,7 @@ describe("a video chosen to send", () => {
       await user.upload(screen.getByTestId("media-input"), mov());
       const cancel = await screen.findByTestId("video-convert-cancel");
 
-      expect(cancel).toHaveClass("min-h-6", "max-md:min-h-11", "px-1");
+      expect(cancel).toHaveClass("min-h-6", "max-md:min-h-[44px]", "px-1");
       await user.click(cancel);
       await waitFor(() => expect(screen.queryByTestId("file-preparing")).toBeNull());
     });

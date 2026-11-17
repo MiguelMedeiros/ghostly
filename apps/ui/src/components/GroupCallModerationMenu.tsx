@@ -39,7 +39,7 @@ export function TileModerationMenu({ identity, name, moderation, host }: { ident
   return (
     <div ref={anchor} className="absolute top-1.5 end-1.5 z-10">
       <button type="button" onClick={() => setOpen(!open)} data-testid="group-call-moderate" aria-label={label} title={label} aria-expanded={open} aria-haspopup="true"
-        className="grid h-8 w-8 max-md:h-11 max-md:w-11 cursor-pointer place-items-center rounded-full bg-black/60 text-white transition-colors hover:bg-black/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+        className="grid h-8 w-8 max-md:h-[44px] max-md:w-[44px] cursor-pointer place-items-center rounded-full bg-black/60 text-white transition-colors hover:bg-black/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" /></svg>
       </button>
       <Menu open={open} onClose={() => setOpen(false)} anchorRef={anchor} testId="group-call-moderate-menu" label={label} portal focusFirst host={host.current}>

@@ -140,12 +140,12 @@ function OpenReactionBar({ open, onClose, anchorRef, current, onReact, align, on
         {QUICK_REACTIONS.map((emoji, i) => (
           <button key={emoji} type="button" data-testid="reaction-quick" data-emoji={emoji} aria-pressed={current === emoji} aria-label={emoji} title={emoji}
             {...roving(i)} onClick={() => choose(emoji)}
-            className={`w-9 h-9 max-md:w-11 max-md:h-11 rounded-full text-[22px] leading-none flex items-center justify-center transition-transform hover:scale-125 hover:bg-surface-hover cursor-pointer ${current === emoji ? "bg-accent/25" : ""}`}>
+            className={`w-9 h-9 max-md:w-[44px] max-md:h-[44px] rounded-full text-[22px] leading-none flex items-center justify-center transition-transform hover:scale-125 hover:bg-surface-hover cursor-pointer ${current === emoji ? "bg-accent/25" : ""}`}>
             {emoji}
           </button>
         ))}
         <button type="button" data-testid="reaction-more" aria-label={t("chat.reactions.more")} title={t("chat.reactions.more")} {...roving(QUICK_REACTIONS.length)} onClick={() => setMore(true)}
-          className="w-9 h-9 max-md:w-11 max-md:h-11 rounded-full flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-hover cursor-pointer">
+          className="w-9 h-9 max-md:w-[44px] max-md:h-[44px] rounded-full flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-hover cursor-pointer">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
         </button>
       </div>

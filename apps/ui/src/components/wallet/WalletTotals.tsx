@@ -97,7 +97,7 @@ function TotalBreakdown({ id, currency, total, onClose }: { id: string; currency
           <p className="m-0 mt-0.5 text-xs text-text-muted">{t("wallet.total.title")}</p>
         </div>
         <button type="button" data-testid="wallet-total-close" onClick={onClose} aria-label={t("common.close")} title={t("common.close")}
-          className="shrink-0 p-1.5 -me-1.5 rounded-full text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors cursor-pointer max-md:min-h-11 max-md:min-w-11 grid place-items-center">
+          className="shrink-0 p-1.5 -me-1.5 rounded-full text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors cursor-pointer max-md:min-h-[44px] max-md:min-w-[44px] grid place-items-center">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
         </button>
       </div>
