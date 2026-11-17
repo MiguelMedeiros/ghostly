@@ -51,7 +51,8 @@ const LINK_CLOSERS: Record<string, string> = { ")": "(", "]": "[", "}": "{" };
  * and full stop, the full-width ! , : ; ? and brackets, the corner quotes, the Arabic comma, semicolon and question
  * mark, the Urdu full stop. No address holds one as typed, so a link stops at the first.
  */
-const LINK_STOP = /[、。〈-】！（），：；？،؛؟۔]/;
+export const LINK_STOP_CHARS = "、。〈-】！（），：；？،؛؟۔";
+const LINK_STOP = new RegExp(`[${LINK_STOP_CHARS}]`);
 
 /** What a link leaves out at its end: a sentence's punctuation ("…", "»", "”" too), never a path's "/". */
 export const LINK_TRAILING = /[.,;:!?'"*_>…»’”]/;
