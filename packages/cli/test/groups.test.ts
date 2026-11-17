@@ -377,6 +377,22 @@ describe("group link", () => {
     out("lost");
     expect(await callApi(ctx, "group.link", { group: "Crew" })).toEqual({ group: "g1", link: LINK, url: expect.stringMatching(/#\/join\//) });
   });
+
+  it("refuses every admin change of a member removed from a community, as group link is, never the engine's code", async () => {
+    // Found in a bug hunt: remove, admin, hub, rename, rotate and picture went to the engine, whose community answers
+    // the group's reason in words alone: `engine` (a bot retries it), while send and link said `refused`.
+    const { ctx, node } = fake();
+    const engine = vi.fn(async () => { throw new Error("You were removed from this group"); });
+    Object.assign(node, { removeGroupMember: engine, makeGroupAdmin: engine, setGroupHub: engine, renameGroup: engine, rotateGroup: engine, setGroupPicture: engine, inviteToGroup: engine });
+    node.getState = () => ({ links: [], groups: [{ ...group, profile: "community", isAdmin: false, canSend: false, status: "removed", statusReason: "You were removed from this group" }], settings: {}, transport: {} }) as unknown as EngineState;
+    const asked: [string, Record<string, unknown>][] = [
+      ["group.remove", { member: "Ana" }], ["group.admin", { member: "Ana" }], ["group.hub", { member: "Ana", role: "pin" }],
+      ["group.rename", { name: "X" }], ["group.rotate", {}], ["group.picture", { clear: true }], ["group.invite", { chat: "Ana" }],
+    ];
+    for (const [method, params] of asked)
+      await expect(callApi(ctx, method, { group: "Crew", ...params }), method).rejects.toMatchObject({ code: "refused", message: "You were removed from this group" });
+    expect(engine).not.toHaveBeenCalled();
+  });
 });
 
 describe("group accept", () => {
