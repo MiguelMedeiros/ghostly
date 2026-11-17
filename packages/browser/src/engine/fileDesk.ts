@@ -356,9 +356,11 @@ export class FileDesk {
     if (wireId && chat.files.get("in", wireId)?.state === "asking") {
       const room = await (await fileBytes()).room().catch(() => null);
       const record = chat.files.get("in", wireId);
-      if (room !== null && record?.state === "asking" && record.file.size + this.stillComing({}, room) > room) {
+      const coming = room === null ? 0 : this.stillComing({}, room);
+      if (room !== null && record?.state === "asking" && record.file.size + coming > room) {
         void this.rooms(room);
-        throw Object.assign(new Error(`No room on this device for this file (${formatFileSize(room)} free)`), { room });
+        // With the file's size and what still comes, for the CLI to say what fills the room in its own words.
+        throw Object.assign(new Error(`No room on this device for this file (${formatFileSize(room)} free)`), { room, size: record.file.size, coming });
       }
     }
     return this.act(linkId, fileId, "accept");
