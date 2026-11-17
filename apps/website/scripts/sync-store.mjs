@@ -1,7 +1,8 @@
 // The official store's bytes for the /apps pages, read once when the site is built (npm run sync:references, so
 // predev and prebuild too): the signed index `ghostly-store.json`, its `ghostly-store.sig`, and each listing's bundle
 // from each of its URLs (at most 4, as core's index reader allows) on a host the app reads from, so a URL that holds
-// another version than the listed one leaves the next to show it. Then each publisher's own `ghostly-revoke.json`, beside
+// another version than the listed one leaves the next to show it (every listing's first URLs before any listing's
+// mirrors, bundleOrder, so all of them share one byte budget). Then each publisher's own `ghostly-revoke.json`, beside
 // each of those URLs and beside each `sources` URL its bundles' manifests name, as the app reads them before Install
 // (packages/browser/src/engine/apps.ts, readRevocations): a version its publisher revoked is left out before the store
 // copies the revocation into its index. Nothing is checked here: lib/storeRead.ts verifies all
@@ -143,6 +144,22 @@ export function revocationUrls(listing, bundles) {
 }
 
 /**
+ * The bundle URLs in the order their bytes take the budget: every listing's jsDelivr copies before any raw `HEAD` (as
+ * lib/storeRead.ts tries them: a copy names a commit, where `HEAD` moves on after review), and in each, every listing's
+ * first URL before any listing's second. So one listing's mirrors, however large they turn, never leave a listing after
+ * it with none of its URLs read: what is over the budget is a later mirror.
+ */
+function bundleOrder(listings) {
+  const pinned = (u) => new URL(u).hostname.toLowerCase() === "cdn.jsdelivr.net";
+  const valid = listings.map((listing) => listing.urls.filter((u) => typeof u === "string" && isFetchUrl(u)));
+  const order = new Set();
+  for (const group of [valid.map((urls) => urls.filter(pinned)), valid.map((urls) => urls.filter((u) => !pinned(u)))]) {
+    for (let rank = 0; rank < LIMITS.urls; rank++) for (const urls of group) if (rank < urls.length) order.add(urls[rank]);
+  }
+  return [...order];
+}
+
+/**
  * Reads the official store and everything its pages show, with `fetcher` (the network's `fetch` unless a test gives its
  * own). A revocation file that is not there is no problem: most publishers have none.
  */
@@ -162,8 +179,7 @@ export async function fromStore(fetcher = fetch) {
   }
   const readBundles = new Map();
   let total = index.length + sig.length;
-  const bundleUrls = new Set(listings.flatMap((listing) => listing.urls.filter((u) => typeof u === "string" && isFetchUrl(u))));
-  await readInOrder([...bundleUrls], LIMITS.bundleBytes, fetcher, (url, bytes, error) => {
+  await readInOrder(bundleOrder(listings), LIMITS.bundleBytes, fetcher, (url, bytes, error) => {
     try {
       if (error) throw error;
       if (total + bytes.length > LIMITS.totalBytes) throw new Error(`${url}: over the ${LIMITS.totalBytes} bytes all bundles may take`);

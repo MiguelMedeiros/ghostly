@@ -126,9 +126,30 @@ test("the build does not hold a revocation file it did not keep until a later pu
   assert.ok(most < bound, `held ${Math.round(most / 1048576)} MiB, more than ${bound / 1048576}`);
 });
 
+test("a listing's mirrors do not leave the listings after it without a bundle", async () => {
+  const JSD = "https://cdn.jsdelivr.net/gh/ghostly-fixtures";
+  const MiB = 1024 * 1024;
+  // As the live store lists them: a pinned jsDelivr copy and the raw `HEAD` it mirrors. Bytes differ from app to app.
+  const app = (name, size, mirrors = [`${RAW}/${name}/HEAD/a.ghostlyapp`]) => ({ name, size, urls: [`${JSD}/${name}@0123abc/a.ghostlyapp`, ...mirrors] });
+  // Sorted first: a small pinned copy, then three `HEAD` URLs that now hold 12 MiB each.
+  const early = app("ba", 60 * 1024, [1, 2, 3].map((i) => `${RAW}/ba${i}/HEAD/a.ghostlyapp`));
+  const apps = [early, app("arena", 14.1 * MiB), ...["boo-blocks", "chess", "cinema", "pkdns"].map((n) => app(n, 2 * MiB))];
+  const served = {};
+  apps.forEach(({ name, size, urls }, i) => {
+    urls.forEach((url, j) => (served[url] = new Uint8Array(name === "ba" && j > 0 ? 12 * MiB : Math.round(size)).fill(16 * i + j)));
+  });
+  const { fetcher } = network(apps.map(({ urls }) => ({ urls })), served);
+  const snap = await fromStore(fetcher);
+  for (const { urls } of apps) assert.ok(urls[0] in snap.bundles, `${urls[0]} not kept:\n${snap.problems.join("\n")}`);
+  for (const { urls } of apps.slice(1)) assert.ok(urls[1] in snap.bundles, `${urls[1]} not kept:\n${snap.problems.join("\n")}`);
+  // What is over the budget is the early listing's own later mirrors.
+  assert.deepEqual(snap.problems, early.urls.slice(2).map((url) => `${url}: over the ${LIMITS.totalBytes} bytes all bundles may take`));
+});
+
 test("reads that finish out of order keep the list's order, its byte budget and its problems as one read at a time does", async () => {
   const big = new Uint8Array(LIMITS.bundleBytes);
-  // Three full bundles and the index take all but a few bytes of the budget: the fourth is over it, the small one after is not.
+  // Read one URL of each listing at a time (bundleOrder): one, three, two, four, broken, small. Three full bundles and
+  // the index take all but a few bytes of the budget: the fourth is over it, the small one after is not.
   const urls = ["one", "two", "broken", "three", "four", "small"].map((n) => `${RAW}/${n}/a.ghostlyapp`);
   const listings = [{ urls: urls.slice(0, 3) }, { urls: urls.slice(3) }];
   const served = { [urls[0]]: big, [urls[1]]: big, [urls[2]]: 500, [urls[3]]: big, [urls[4]]: big, [urls[5]]: new Uint8Array(8) };
@@ -138,10 +159,10 @@ test("reads that finish out of order keep the list's order, its byte budget and 
   const order = [...urls, ...urls.map(revoke)];
   const { fetcher } = network(listings, served, (url) => 5 * (order.length - order.indexOf(url)));
   const snap = await fromStore(fetcher);
-  assert.deepEqual(Object.keys(snap.bundles), [urls[0], urls[1], urls[3], urls[5]]);
+  assert.deepEqual(Object.keys(snap.bundles), [urls[0], urls[3], urls[1], urls[5]]);
   assert.deepEqual(snap.problems, [
-    `${urls[2]}: HTTP 500`,
     `${urls[4]}: over the ${LIMITS.totalBytes} bytes all bundles may take`,
+    `${urls[2]}: HTTP 500`,
     `${revoke(urls[1])}: HTTP 503`,
     `${revoke(urls[4])}: HTTP 502`,
   ]);
