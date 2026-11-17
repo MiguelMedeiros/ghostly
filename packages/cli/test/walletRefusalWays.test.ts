@@ -165,7 +165,7 @@ describe("pay and wallet redeem refusals, at a fake test mint", { timeout: 60_00
       });
     }
     // A mint that is no http(s) URL makes no token this wallet can use: said as such, never an empty host or `Invalid URL`.
-    for (const url of ["gopher://127.0.0.1:65401", "file:///etc/passwd", "data:text/plain,mint", "not a url"]) {
+    for (const url of ["gopher://127.0.0.1:65401", "ftp://mint.example", "file:///etc/passwd", "data:text/plain,mint", "javascript:alert(1)", "not a url"]) {
       expect(await refusal("wallet.redeem", { token: mint.token(4, url) }), url).toEqual({ code: "bad_request", message: "That is not a valid ecash token" });
     }
     expect(node.getState().wallet.networks?.testnet.balance).toBe(10_000);
