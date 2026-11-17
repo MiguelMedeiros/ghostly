@@ -52,7 +52,7 @@ function pagesFind(query: string): string[] {
 describe("the chat list's search, in the engine and in the pages", () => {
   it("finds the same chats for every query", async () => {
     const byId = new Map(ROWS.map((row) => [row.id, row]));
-    const search = new ChatTextSearch(async (linkId) => [byId.get(linkId)!]);
+    const search = new ChatTextSearch(async (linkId) => [byId.get(linkId)!], async () => []);
     for (const query of QUERIES) {
       const engine = (await search.found(ROWS.map((row) => row.id), query)).sort();
       expect(engine, query).toEqual(pagesFind(query));
