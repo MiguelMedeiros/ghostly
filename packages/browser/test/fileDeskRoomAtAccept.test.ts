@@ -89,7 +89,9 @@ it("Accept counts what the files already taken still need: one that fits only wi
   await t.files.accept("chat-a", first);
   await vi.waitFor(() => expect(t.accepted()).toEqual(["wBesideIt01"]));
   // With what fills it, for the CLI to say: the file's size, and the bytes still coming of the one taken.
-  await expect(t.files.accept("chat-b", second)).rejects.toMatchObject({ message: "No room on this device for this file (100.0 MB free)", room: 100 * MiB, size: 60 * MiB, coming: 60 * MiB });
+  await expect(t.files.accept("chat-b", second)).rejects.toMatchObject({
+    message: "No room on this device for this file beside the files still coming (40.0 MB left of 100.0 MB free)", room: 100 * MiB, size: 60 * MiB, coming: 60 * MiB,
+  });
   expect(t.accepted()).toEqual(["wBesideIt01"]);
   expect(t.transfers.get(second)).toMatchObject({ stage: "asking" });
   // The one under way ends (cancelled here): the offer waiting shows the room it leaves, and fits now.
