@@ -106,7 +106,7 @@ describe("website store, read once", () => {
   });
 
   it("gives a mirror the build kept by `sameAs` the bytes of the URL it names", async () => {
-    const pinned = "https://cdn.jsdelivr.net/gh/ana/chess@0123abc/app.ghostlyapp";
+    const pinned = `https://cdn.jsdelivr.net/gh/ana/chess@${"0123abcd".repeat(5)}/app.ghostlyapp`;
     const raw = "https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp";
     const { bytes } = await writeSnapshot(30 * 24 * 3600, [pinned, raw]);
     const { storeView } = await fresh();
