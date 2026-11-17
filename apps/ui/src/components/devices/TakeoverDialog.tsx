@@ -4,6 +4,7 @@ import { useI18n } from "../../contexts/I18nContext";
 import { useLockPassedNow } from "../../contexts/LockScreenContext";
 import { reloadIntoGate, takeoverErrorKey } from "../../lib/devices";
 import { focusToRetype } from "../../lib/focus";
+import { composingKey } from "../../hooks/useComposition";
 import { InfoButton } from "../layout/Section";
 import { DeviceDialog, field, primaryButton } from "./DeviceDialog";
 import { type Problem, problemText } from "../../lib/problemText";
@@ -82,9 +83,9 @@ export function TakeoverDialog({ device, password: asks, restored, ownSet, onClo
         </fieldset>
       )}
       {/* Enter in a field with "Lost or stolen?" still unanswered (Take over is off, so Enter would do nothing): the
-          keyboard goes to the question, the one thing left to do. */}
+          keyboard goes to the question, the one thing left to do. An input method's Enter confirms its candidate. */}
       <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); if (ready && !busy) void submit(); }}
-        onKeyDown={(event) => { if (event.key === "Enter" && lost === null && event.target instanceof HTMLInputElement) { event.preventDefault(); lostGroup.current?.querySelector("input")?.focus(); } }}>
+        onKeyDown={(event) => { if (event.key === "Enter" && lost === null && event.target instanceof HTMLInputElement && !composingKey(event.nativeEvent, null)) { event.preventDefault(); lostGroup.current?.querySelector("input")?.focus(); } }}>
         {asks && <input ref={passwordInput} type="password" autoFocus autoComplete="current-password" data-testid="takeover-password" aria-label={t("devices.password.current")} placeholder={t("devices.password.current")}
           aria-invalid={refused === "password" || undefined} aria-describedby={refused === "password" ? `${id}-error` : undefined} value={password} onChange={(event) => setPassword(event.target.value)} className={field} />}
         {device && (
