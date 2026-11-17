@@ -1,6 +1,6 @@
 import { generateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
-import { parsePaymentAmount, type WalletNetwork } from "@ghostly/core";
+import { decodeBolt11, parsePaymentAmount, type WalletNetwork } from "@ghostly/core";
 import type { EngineState, NetworkWalletsView, PaymentView, WalletInstanceView, WalletOffer, WalletType } from "@ghostly/browser/shared/types";
 import { bool, chatOf, inviteTaken, node, num, oneOf, ownChatOf, sentAt, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { paymentNetwork } from "@ghostly/browser/engine/paymentAdapters/walletInstances";
@@ -118,7 +118,9 @@ function readBalance<T extends number | string>(view: { locked: boolean; read?: 
 
 /**
  * One wallet of the deck with its balance, in its own unit. Never a key, a phrase or a token. A balance not read yet
- * is `null`, with `status` saying why (`locked`, `reading`, `error`).
+ * is `null`, with `status` saying why (`locked`, `reading`, `error`). The Cashu wallet also says its `setAside`: sats
+ * held for a payment or a swap the mints have not settled yet, in no balance and not gone, as the app's card says
+ * ("12 test sats set aside"); `wallet remove` counts them.
  */
 export function walletJson(instance: WalletInstanceView, s: EngineState) {
   const view = netView(s, instance.network);
@@ -150,7 +152,7 @@ export function walletJson(instance: WalletInstanceView, s: EngineState) {
   return {
     id: instance.id, type: instance.type, network: instance.network,
     ...(instance.card ? { card: instance.card, name: instance.name ?? null, receive: !!instance.receive } : {}),
-    balance, unit, address, status, error, config: instance.config,
+    balance, ...(instance.type === "cashu" && { setAside: view?.setAside ?? 0 }), unit, address, status, error, config: instance.config,
   };
 }
 
@@ -215,10 +217,42 @@ function memoOf(params: Params, verb: string, field: "memo" | "comment" = "memo"
 function notPaidYet(ctx: ApiContext, n: WalletNetwork, source: string, amount: number, feeReserve: number): string {
   const running = ctx.mode === "one-shot" ? " while this profile runs (`ghostly daemon --detach`)" : "";
   if (source !== CASHU_MINT_SOURCE) {
-    return `Not paid yet: your Lightning source has not confirmed this payment (it is pending, or its answer was lost). It is asked again${running} and never paid twice: \`ghostly wallet list\` shows the card's balance once it settles.`;
+    return `Not paid yet: your Lightning source has not confirmed this payment (it is pending, or its answer was lost). It is asked again${running} and never paid twice: \`ghostly wallet history\` lists it under \`recent\` by its \`paymentHash\`, pending until it settles, then paid or failed.`;
   }
   const sats = `${amount + feeReserve} ${n === "testnet" ? "test sats" : "sats"}`;
-  return `Not paid yet: the mint has not settled this payment (it is pending, or its answer was lost). ${sats} are set aside for it, out of the balance: they leave with the payment, or come back to the balance if the mint says it failed. It settles by itself: the wallet keeps asking the mint${running} and never pays it twice. \`ghostly wallet history\` lists it once paid, and \`ghostly wallet list\` shows the balance.`;
+  return `Not paid yet: the mint has not settled this payment (it is pending, or its answer was lost). ${sats} are set aside for it, out of the balance: they leave with the payment, or come back to the balance if the mint says it failed. It settles by itself: the wallet keeps asking the mint${running} and never pays it twice. \`ghostly wallet list\` shows them as the Cashu wallet's \`setAside\`, and \`ghostly wallet history\` lists the payment under \`recent\` by its \`paymentHash\`: pending now, then paid or failed.`;
+}
+
+/**
+ * The same invoice paid again while its first payment is not settled: never paid twice, so `refused` (don't send the
+ * same again), naming the payment and where it shows. It was `engine` (exit 1), which a bot reads as the engine failing
+ * and may retry.
+ */
+function beingPaid(error: unknown, paymentHash: string | null): unknown {
+  if (!(error instanceof Error) || !/^This invoice is already being paid$/.test(error.message)) return error;
+  return new CliError("refused", "This invoice is already being paid: it is not settled yet, and is never paid twice (ghostly wallet history)", { reason: "pending", paymentHash });
+}
+
+/**
+ * The network's Lightning cards' latest operations, newest first: what the app's card lists as Recent (`recent` of the
+ * engine's view), each by its payment hash with its state. A payment left pending shows here until it settles, then
+ * as paid or failed; `history` holds only the Cashu movements that settled.
+ */
+function lightningRecent(s: EngineState, n: WalletNetwork) {
+  return (netView(s, n)?.lightnings ?? []).flatMap((c) => (c.recent ?? []).map((op) => ({
+    card: c.card, direction: op.direction, paymentHash: op.paymentHash, amount: op.amount, fee: op.fee ?? null, state: op.state,
+    error: op.error ?? null, createdAt: op.createdAt, settledAt: op.settledAt ?? null,
+  }))).sort((a, b) => b.createdAt - a.createdAt);
+}
+
+/**
+ * Waits (at most `ms`) until the wallet view shows this outgoing payment as answered. The engine makes the view again
+ * within 50 ms of a change, so read at once the answer said the sats set aside before the payment.
+ */
+async function viewShows(ctx: ApiContext, n: WalletNetwork, paymentHash: string, ms = 2_000): Promise<void> {
+  const until = Date.now() + ms;
+  const shows = () => (netView(state(ctx), n)?.lightnings ?? []).some((c) => (c.recent ?? []).some((op) => op.direction === "out" && op.paymentHash === paymentHash && op.state !== "sending"));
+  while (!shows() && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 20));
 }
 
 function badMintUrl(error: unknown): boolean {
@@ -340,7 +374,8 @@ const WALLETS: Record<string, Method> = {
     const limit = num(params, "limit", 50, { min: 1, max: 10_000, whole: true });
     await federationsOpen(ctx);
     // Read from the store: the wallet view keeps only the newest 100.
-    return { network: n, history: await node(ctx).walletHistory({ network: n, limit }) };
+    const history = await node(ctx).walletHistory({ network: n, limit });
+    return { network: n, history, recent: lightningRecent(state(ctx), n) };
   },
 
   async "wallet.receive"(ctx, params) {
@@ -428,9 +463,18 @@ const WALLETS: Record<string, Method> = {
     if (expected && quote.amount !== expected) throw new CliError("refused", `The invoice asks ${quote.amount} sats, not the ${expected} given with --amount`);
     const maxFee = params.maxFee === undefined ? null : num(params, "maxFee", 0);
     if (maxFee !== null && quote.feeReserve > maxFee) throw new CliError("refused", `The fee may reach ${quote.feeReserve} sats, more than the ${maxFee} allowed`);
-    const paid = await node(ctx).walletPayQuote({ quote: quote.quote, mint: quote.mint, ...(note ? { note } : {}), ...real(params), ...(chat ? { linkId: chat.id, invoice } : {}) });
+    const paymentHash = decodeBolt11(invoice)?.paymentHash ?? null;
+    const paid = await node(ctx).walletPayQuote({ quote: quote.quote, mint: quote.mint, ...(note ? { note } : {}), ...real(params), ...(chat ? { linkId: chat.id, invoice } : {}) })
+      .catch((error: unknown) => { throw beingPaid(error, paymentHash); });
     const source = (quote as { source?: string }).source ?? quote.mint;
-    return { network: n, amount: quote.amount, feeReserve: quote.feeReserve, source, paid: paid.paid, ...(!paid.paid && { note: notPaidYet(ctx, n, source, quote.amount, quote.feeReserve) }) };
+    if (paid.paid) return { network: n, amount: quote.amount, feeReserve: quote.feeReserve, source, paid: true };
+    // Not settled yet: the payment by its hash, and through the mints the sats set aside (the network's, as `wallet list`
+    // says them), read once the wallet view shows the payment.
+    if (paymentHash) await viewShows(ctx, n, paymentHash);
+    return {
+      network: n, amount: quote.amount, feeReserve: quote.feeReserve, source, paid: false, pending: true, paymentHash,
+      ...(source === CASHU_MINT_SOURCE && { setAside: netView(state(ctx), n)?.setAside ?? 0 }), note: notPaidYet(ctx, n, source, quote.amount, quote.feeReserve),
+    };
   },
 
   /** Ecash to a contact in a chat (the payment sheet's Pay). */

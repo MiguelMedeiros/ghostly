@@ -128,4 +128,53 @@ describe("pay that the mint has not settled", { timeout: 60_000 }, () => {
     expect(lost.note).toMatch(/^Not paid yet: the mint has not settled this payment \(it is pending, or its answer was lost\)/);
     expect(lost.note).toContain("22 test sats are set aside for it");
   });
+
+  // The payment by its hash, the sats set aside for it, and one read that shows it until it settles and how it ended.
+  const recentOf = async (hash: string) => ((await callApi(ctx, "wallet.history", {}) as { recent: Record<string, unknown>[] }).recent).find((op) => op.paymentHash === hash);
+  /**
+   * The wallet asks the mint about its pending payments again, as its own timer would half an hour on: by then no
+   * request of theirs can reach the mint any more, so an unpaid answer gives the sats back.
+   */
+  const askAgain = async () => {
+    const later = 30 * 60_000, monotonic = vi.spyOn(performance, "now").mockReturnValue(performance.now() + later);
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + later });
+    try { await (node as unknown as { wallet: { pollMelts(): Promise<void> } }).wallet.pollMelts(); } finally { vi.useRealTimers(); monotonic.mockRestore(); }
+  };
+
+  it("answers pending with the payment hash and the sats set aside, which wallet list says as setAside", async () => {
+    mint.cfg.melt = "pending";
+    const listed = async () => ((await callApi(ctx, "wallet.list", { network: "testnet" }) as { wallets: Record<string, unknown>[] }).wallets).find((w) => w.type === "cashu")!;
+    const before = await listed();
+    // The two payments above: 12 and 22 sats set aside, out of the balance.
+    expect(before).toMatchObject({ setAside: 34 });
+    const pending = await callApi(ctx, "pay", { target: invoice(30, 5) }) as Record<string, unknown>;
+    expect(pending).toMatchObject({ paid: false, pending: true, paymentHash: "05".repeat(32), setAside: 66 });
+    expect(pending.note).toContain("Cashu wallet's `setAside`");
+    expect(await listed()).toMatchObject({ setAside: 66, balance: (before.balance as number) - 32 });
+    // A paid payment answers as before.
+    mint.cfg.melt = "pay";
+    expect(await callApi(ctx, "pay", { target: invoice(1, 6) })).toEqual({ network: "testnet", amount: 1, feeReserve: 2, source: "cashu-mint", paid: true });
+  });
+
+  it("paying the same invoice again while it is pending is refused, naming it", async () => {
+    await expect(callApi(ctx, "pay", { target: invoice(10, 3) })).rejects.toMatchObject({
+      code: "refused", message: "This invoice is already being paid: it is not settled yet, and is never paid twice (ghostly wallet history)", details: { reason: "pending", paymentHash: "03".repeat(32) },
+    });
+  });
+
+  it("wallet history lists the pending payment under recent, then how it ended", async () => {
+    expect(await recentOf("03".repeat(32))).toMatchObject({ card: "cashu", direction: "out", amount: 10, state: "pending", settledAt: null });
+    expect(await recentOf("04".repeat(32))).toMatchObject({ direction: "out", amount: 20, state: "pending" });
+    // The mint pays the first and says the second never went.
+    for (const m of mint.melts.values()) if (m.state === "PENDING") m.state = m.amount === 10 ? "PAID" : m.amount === 20 ? "UNPAID" : m.state;
+    await askAgain();
+    // The wallet view is made again within moments of the answer.
+    await vi.waitFor(async () => expect(await recentOf("04".repeat(32))).toMatchObject({ state: "failed" }));
+    expect(await recentOf("03".repeat(32))).toMatchObject({ state: "paid", settledAt: expect.any(Number) });
+    const history = (await callApi(ctx, "wallet.history", {}) as { history: { kind: string; amount: number }[] }).history;
+    // Paid: its movement is in the history now, beside the one paid at once in the first test.
+    expect(history.filter((tx) => tx.kind === "lightning-out" && tx.amount === 10)).toHaveLength(2);
+    // Only the one still pending (32 sats) is set aside now; the failed one's 22 came back.
+    expect(((await callApi(ctx, "wallet.list", { network: "testnet" }) as { wallets: Record<string, unknown>[] }).wallets).find((w) => w.type === "cashu")).toMatchObject({ setAside: 32 });
+  });
 });
