@@ -173,7 +173,7 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     expect(spoken).toHaveAttribute("role", "status");
     expect(spoken).toHaveTextContent(/^$/);
     view = { role: "inviter", step: "confirm", digits: "482913", device: "Phone", kind: "web" };
-    await waitFor(() => expect(spoken).toHaveTextContent("Found Phone. Check that it shows the same digits. 482 913"), { timeout: 3_000 });
+    await waitFor(() => expect(spoken).toHaveTextContent("Found Phone. Check that it shows the same digits. 4 8 2 9 1 3"), { timeout: 3_000 });
     view = { role: "inviter", step: "done", device: "Phone", published: true };
     await waitFor(() => expect(spoken).toHaveTextContent("Phone added. It is on standby."), { timeout: 3_000 });
     expect(screen.getByTestId("device-add-spoken")).toBe(spoken);
