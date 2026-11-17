@@ -132,6 +132,9 @@
   "nameLabel": "资料名称",
   "nameSaved": "名称已保存",
   "nameStep": {
+    "full": "已达上限：{{count}} 个字符。",
+    "limit": "最多 {{count}} 个字符。",
+    "needName": "请输入名字以继续。",
     "placeholder": "你的名字",
     "save": "继续",
     "skip": "跳过",
