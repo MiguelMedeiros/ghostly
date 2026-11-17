@@ -4,6 +4,8 @@ import { APP_CLOSED_EVENT, APP_REQUEST_EVENT, desktopOpener, type DesktopOpenerO
 import { memoryAppId, memoryHost } from "../../lib/apps/memoryHost";
 import { nameToldIn } from "../../lib/apps/nameInChat";
 import { CHAT_CLOSED, stopAppsIn, stopTakenDown } from "../../lib/apps/open";
+import { appWithContact, registerAppSlot } from "../../lib/apps/running";
+import { translatorFor } from "../../locales";
 import type { AppEntry } from "../../lib/platform";
 import { engineState, linkView } from "../fakeEngine";
 
@@ -153,6 +155,25 @@ describe("opening an app on Desktop", () => {
     request("app-1", { id: 5, type: "files.unserve", args: [again] });
     await answer("app-1", 5);
     expect(titles()).toEqual([["app-1", "Chess · sharing a file with Ana"], ["app-1", "Chess with Ana"]]);
+  });
+
+  it("still names the contact in its window's title while serving once the person went to another chat", async () => {
+    // main.tsx's title: the chat's panel tells who the contact is, and goes when the chat page closes; the app's window stays.
+    const t = translatorFor("en");
+    const { calls, host, open, request, answer } = setup({ permissions: ["chat", "files"] }, (title, linkId, serving) => appWithContact(title, linkId, t, serving));
+    registerAppSlot(LINK, { box: document.createElement("div"), sessionId: "s1", contact: { name: "Ana", named: true } });
+    await open(REF, LINK);
+    registerAppSlot(LINK, null);
+    request("app-1", { id: 0, type: "writing", args: [] });
+    await answer("app-1", 0);
+    host.nextPick = [{ path: "Films/Up.mp4", bytes: new Uint8Array(10) }];
+    request("app-1", { id: 1, type: "files.pick", args: [] });
+    const [film] = (await answer("app-1", 1)).value as { id: string }[];
+    request("app-1", { id: 2, type: "files.serve", args: [film!.id] });
+    const serve = (await answer("app-1", 2)).value as string;
+    request("app-1", { id: 3, type: "files.unserve", args: [serve] });
+    await answer("app-1", 3);
+    expect(calls.filter((c) => c.command === "app_title").map((c) => c.args.title)).toEqual(["Chess · sharing a file with Ana", "Chess with Ana"]);
   });
 
   it("opens a window with the checked entry and what the person granted, and runs the web broker for it", async () => {

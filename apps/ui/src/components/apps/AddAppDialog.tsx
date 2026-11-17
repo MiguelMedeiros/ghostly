@@ -154,8 +154,9 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
               {store.expired && <p className="text-xs text-test-money-ink">{t("apps.store.stale", { date: date(store.expires, t.language) })}</p>}
             </div>
             {heldLine && <Notice testId="apps-add-store-held" tone={held?.equivocation ? "warning" : undefined}>{heldLine}</Notice>}
-            {/* A store held is still read from its own link: this one is not where it is read from. */}
-            {offered && !held && <Notice>{t("apps.add.storeReads", { host: hostOf(store.url) })}</Notice>}
+            {/* A newer copy of a store held is read too, at each refresh while the store's own link is behind it (the
+                engine keeps it as `copyUrl`; one at a commit stays behind): its host is named as a new store's. */}
+            {offered && <Notice>{t("apps.add.storeReads", { host: hostOf(store.url) })}</Notice>}
             {/* The store's own words come after Ghostly's lines about it (expired, held, where it is read from). */}
             {store.description && <AppDescription text={store.description} from="store" testId="apps-add-store-description" />}
             {/* Wraps rather than push Cancel off the screen (a phone at a large text size), as the install screen's. */}

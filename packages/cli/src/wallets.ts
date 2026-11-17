@@ -207,6 +207,21 @@ function memoOf(params: Params, verb: string, field: "memo" | "comment" = "memo"
   return memo || undefined;
 }
 
+/**
+ * What `pay` says with `paid: false`: the payment is not known paid yet. The mint (or the card's source) holds it
+ * pending, or its answer was lost; the engine keeps asking and never pays it twice. Before, the answer said `paid:
+ * false` and nothing else, and no read showed the sats the Cashu wallet set aside for it. Said in the
+ * words of the app's Cashu card ("set aside", `wallet.cashu.setAsideInfo`).
+ */
+function notPaidYet(ctx: ApiContext, n: WalletNetwork, source: string, amount: number, feeReserve: number): string {
+  const running = ctx.mode === "one-shot" ? " while this profile runs (`ghostly daemon --detach`)" : "";
+  if (source !== CASHU_MINT_SOURCE) {
+    return `Not paid yet: your Lightning source has not confirmed this payment (it is pending, or its answer was lost). It is asked again${running} and never paid twice: \`ghostly wallet list\` shows the card's balance once it settles.`;
+  }
+  const sats = `${amount + feeReserve} ${n === "testnet" ? "test sats" : "sats"}`;
+  return `Not paid yet: the mint has not settled this payment (it is pending, or its answer was lost). ${sats} are set aside for it, out of the balance: they leave with the payment, or come back to the balance if the mint says it failed. It settles by itself: the wallet keeps asking the mint${running} and never pays it twice. \`ghostly wallet history\` lists it once paid, and \`ghostly wallet list\` shows the balance.`;
+}
+
 function badMintUrl(error: unknown): boolean {
   const code = error instanceof Error ? (error as { engineCode?: unknown }).engineCode : undefined;
   return code === "invalidMintUrl" || code === "mintNotHttps";
@@ -430,7 +445,8 @@ const WALLETS: Record<string, Method> = {
     const maxFee = params.maxFee === undefined ? null : num(params, "maxFee", 0);
     if (maxFee !== null && quote.feeReserve > maxFee) throw new CliError("refused", `The fee may reach ${quote.feeReserve} sats, more than the ${maxFee} allowed`);
     const paid = await node(ctx).walletPayQuote({ quote: quote.quote, mint: quote.mint, ...(note ? { note } : {}), ...real(params), ...(chat ? { linkId: chat.id, invoice } : {}) });
-    return { network: n, amount: quote.amount, feeReserve: quote.feeReserve, source: (quote as { source?: string }).source ?? quote.mint, paid: paid.paid };
+    const source = (quote as { source?: string }).source ?? quote.mint;
+    return { network: n, amount: quote.amount, feeReserve: quote.feeReserve, source, paid: paid.paid, ...(!paid.paid && { note: notPaidYet(ctx, n, source, quote.amount, quote.feeReserve) }) };
   },
 
   /** Ecash to a contact in a chat (the payment sheet's Pay). */

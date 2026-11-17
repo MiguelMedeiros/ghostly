@@ -255,6 +255,10 @@ export class IdentityProofs {
     this.timers = [];
     for (const { timer } of this.redrawTimers.values()) clearTimeout(timer);
     this.redrawTimers.clear();
+    // Every chat's exchange ends as if its link closed: no pacing timer outlives the engine, and a start after this
+    // greets each chat again when its link is ready.
+    for (const x of this.exchanges.values()) x.stop();
+    this.greeted.clear();
     this.lookupTimer = undefined;
     // The lookup under way ends here: what it read since its last write is kept for the next start.
     this.saveRound();

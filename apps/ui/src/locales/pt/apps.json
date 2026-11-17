@@ -22,6 +22,7 @@
     "revokedNext": "Ele fica parado até o publicador lançar uma versão nova, ou você pode desinstalá-lo.",
     "runAnyway": "Executar mesmo assim",
     "stopped": "Parado",
+    "stoppedSaid": "{{title}} parou.",
     "uninstall": "Desinstalar",
     "uninstallText": "Os arquivos e os dados dele em todas as conversas são apagados. Exporte os dados antes para guardá-los.",
     "uninstallTitle": "Desinstalar {{title}}?",
