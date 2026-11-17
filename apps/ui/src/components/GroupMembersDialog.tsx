@@ -154,6 +154,8 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
   // The link turned off or on elsewhere (the admin, another of my devices) swaps the link panel, or takes it away from a
   // community's member, with what had the focus: the list, next in the dialog, has it rather than the page.
   const linkOn = !!live.entryLink, wasOn = useRef(linkOn);
+  // A group whose name has not arrived yet (or that the admin cleared) is "A group", as the page header calls it.
+  const title = live.name || t("group.chat.unnamed");
   useEffect(() => {
     if (wasOn.current === linkOn) return;
     wasOn.current = linkOn;
@@ -163,16 +165,16 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
     className="m-auto w-[calc(100%_-_2rem)] max-w-md max-h-[90dvh] overflow-y-auto rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
     <div className="flex items-start justify-between gap-3">
       <div className="flex min-w-0 items-center gap-3">
-        <AvatarOpener src={live.picture} name={live.name} testId="group-members-avatar-open" className="shrink-0 rounded-full">
+        <AvatarOpener src={live.picture} name={title} testId="group-members-avatar-open" className="shrink-0 rounded-full">
           <GroupAvatar picture={live.picture} size={56} testId="group-members-avatar" className="bg-accent/15" />
         </AvatarOpener>
         <div className="min-w-0">
           {/* The group's and each person's name read in their own direction: a Latin name in Arabic is cut at its end. As
               wide as the name, the title stays beside the picture whichever way the name runs. A long name wraps rather
               than ends in "…": on a phone this panel is the group's only info screen, and a member has no Rename field. */}
-          {naming === null ? <h2 id={`${id}-title`} dir="auto" data-testid="group-members-name" className="w-fit max-w-full break-words text-base font-semibold">{live.name}</h2>
+          {naming === null ? <h2 id={`${id}-title`} dir="auto" data-testid="group-members-name" className="w-fit max-w-full break-words text-base font-semibold">{title}</h2>
             : <form className="flex items-center gap-2 max-md:gap-3" onSubmit={e => { e.preventDefault(); void rename(); }}>
-              <h2 id={`${id}-title`} className="sr-only">{live.name}</h2>
+              <h2 id={`${id}-title`} className="sr-only">{title}</h2>
               {/* While the engine renames, the field is read-only and Save does nothing: disabled, they would drop the focus to the page. */}
               <input autoFocus data-testid="group-rename-input" aria-label={t("group.rename.label")} aria-describedby={`${id}-rename-hint`} ref={namingField.ref} value={naming} dir={namingField.dir} readOnly={busy !== null}
                 onChange={namingField.onChange} onCompositionStart={namingField.onCompositionStart} onCompositionEnd={e => { namingField.onCompositionEnd(e); namingKeys.inputProps.onCompositionEnd(e); }} onKeyDown={e => { if (namingKeys.composing(e)) return; if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); endNaming(); } }}
