@@ -108,11 +108,13 @@ function callNode(raw: string, ref: string, groupId: string): string {
 /**
  * A group this profile administers or is in, not only an invitation: before, the engine answered `group rename`,
  * `picture`, `link`, `rotate` and `invite` on an invitation not yet joined with "Group not found" (engine, exit 1),
- * while `group show` listed it, and `remove`/`admin` said "No member" of a member list it had not received yet.
+ * while `group show` listed it, and `remove`/`admin` said "No member" of a member list it had not received yet. Nor one
+ * this profile is out of (removed, or left): refused with why, as `group send` is. Before, a community's engine said
+ * "You were removed from this group" in words alone, `engine` (a bot retries it), to all but `link` and `call`.
  */
 function joined(ctx: ApiContext, params: Params, twin?: string): GroupView {
   const group = groupOf(ctx, params, twin);
-  const yet = notInYet(group, str(params, "group", true));
+  const yet = notInYet(group, str(params, "group", true)) ?? outOf(group);
   if (yet) throw new CliError("refused", yet);
   return group;
 }
@@ -175,11 +177,9 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
     return view(ctx, group.id, params);
   },
   async "group.link"(ctx, params) {
+    // A member removed (or gone) is refused (`joined`): before, it got the link it held when it was removed, exit 0,
+    // though `group show` said link null and the admin may have reset it or turned it off since.
     const group = joined(ctx, params);
-    // A member removed (or gone) is refused as `group send` is: before, it got the link it held when it was removed,
-    // exit 0, though `group show` said link null and the admin may have reset it or turned it off since.
-    const out = outOf(group);
-    if (out) throw new CliError("refused", out);
     // On unless `on` says otherwise; an `on` that is no boolean ("false", 0) is refused, never read as on.
     const on = params.on === undefined || bool(params, "on"), reset = bool(params, "reset");
     if (!on && reset) throw new CliError("bad_request", "on: false turns the link off: not with reset");
@@ -196,12 +196,9 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
     return { group: group.id, picture: !bool(params, "clear") };
   },
   async "group.call"(ctx, params) {
+    // A profile out of the group (removed, or the admin who left) is told why (`joined`): before, "Only the admin" to them all.
     const group = joined(ctx, params);
     if (group.profile !== "community") throw new CliError("refused", `${group.name} is a private group: only a community group has calls through a node`);
-    // A profile out of the group (removed, or the admin who left) is told why, as the engine's rename and picture say
-    // it: before, "Only the admin" to them all.
-    const out = outOf(group);
-    if (out) throw new CliError("refused", out);
     if (!group.isAdmin) throw new CliError("refused", `Only the admin of ${group.name} sets its call node`);
     const ref = str(params, "group", true), raw = str(params, "sfu");
     const e2ee = params.e2ee === undefined || params.e2ee === null ? undefined : bool(params, "e2ee");
