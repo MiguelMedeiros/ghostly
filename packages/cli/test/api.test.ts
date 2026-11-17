@@ -1288,9 +1288,11 @@ describe("the engine passthrough", () => {
   it("a call that deletes chats or groups asks for yes, as the commands made for it do", async () => {
     const { ctx, node } = fake();
     const calls = { clearProfileData: vi.fn(), removeLink: vi.fn(), leaveGroup: vi.fn(async () => ({})), forgetGroup: vi.fn(), switchGroup: vi.fn(), deviceRemove: vi.fn() };
+    // What each takes: a call given less is told that first, and asks for nothing (the test below).
+    const given: Record<string, Record<string, string>> = { clearProfileData: {}, removeLink: { linkId: "chat-one" }, leaveGroup: { groupId: "g1" }, forgetGroup: { groupId: "g1" }, switchGroup: { groupId: "g1", to: "chat-one" }, deviceRemove: { key: "k" } };
     Object.assign(node, calls, { removalsPending: () => [] });
     for (const [method, call] of Object.entries(calls)) {
-      await expect(callApi(ctx, "engine.call", { method, params: {} }), method).rejects.toMatchObject({ code: "confirm", message: expect.stringContaining("--yes") });
+      await expect(callApi(ctx, "engine.call", { method, params: given[method] }), method).rejects.toMatchObject({ code: "confirm", message: expect.stringContaining("--yes") });
       expect(call, method).not.toHaveBeenCalled();
     }
     expect(ctx.calls.forgetChat).not.toHaveBeenCalled();
@@ -1331,6 +1333,10 @@ describe("the engine passthrough", () => {
     expect(await call("renameLink", {})).toMatchObject(takes("renameLink", "linkId, label missing"));
     expect(await call("renameLink", { linkId: "c" })).toMatchObject(takes("renameLink", "label missing"));
     expect(await call("updateSettings", { nick: "x" })).toMatchObject(takes("updateSettings", "settings missing"));
+    // Said before --yes is asked, over the socket too: a call that cannot run asked to confirm a deletion (confirm) first.
+    expect(await call("switchGroup")).toMatchObject(takes("switchGroup", "no parameters given"));
+    expect(await call("removeLink", {})).toMatchObject(takes("removeLink", "linkId missing"));
+    expect(await call("removeLink", { linkId: "c" })).toMatchObject({ code: "confirm", message: expect.stringContaining("--yes") });
     expect(renameLink).not.toHaveBeenCalled();
     expect(updateSettings).not.toHaveBeenCalled();
     // A number for the text: the engine's words behind it.

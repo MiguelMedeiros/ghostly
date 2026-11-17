@@ -1,7 +1,7 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { expect, it } from "vitest";
 import { ENGINE_METHODS, ENGINE_PARAMS, SECRET_RESULTS, engineParamsProblem, hideSecretFields } from "../src/engineMethods";
-import { ghostly, home, ok } from "./support/cli";
+import { error, ghostly, home, ok } from "./support/cli";
 // covers: headless.engine-passthrough
 
 const source = readFileSync(new URL("../../browser/src/shared/rpc.ts", import.meta.url), "utf8");
@@ -66,6 +66,32 @@ it("`engine --list --verbose` names what each call takes", { timeout: 60_000 }, 
   expect(listed.takes).toMatchObject({ renameLink: "{ linkId, label }", updateSettings: "{ settings }", getMessages: "{ linkId }", getState: "" });
   expect(Object.keys(listed.takes).sort()).toEqual(listed.methods);
   expect(ok(await ghostly(["--home", dir, "engine", "--list"]))).toEqual({ methods: listed.methods });
+});
+
+it("says what a call takes before the profile opens and before --yes is asked (usage, exit 2)", { timeout: 120_000 }, async () => {
+  const dir = home("engine-takes-first");
+  // Before: `engine switchGroup` asked for --yes (confirm, exit 5) and, given it, said its parameters were missing
+  // (bad_request, exit 1), the profile opened for both. A call that cannot run never asks to confirm a deletion.
+  const cases: [args: string[], message: string][] = [
+    [["switchGroup"], "switchGroup takes { groupId, to }: no parameters given (ghostly engine --list --verbose)"],
+    [["switchGroup", "--yes"], "switchGroup takes { groupId, to }: no parameters given (ghostly engine --list --verbose)"],
+    [["switchGroup", JSON.stringify({ groupId: "g" })], "switchGroup takes { groupId, to }: to missing (ghostly engine --list --verbose)"],
+    [["removeLink"], "removeLink takes { linkId }: no parameters given (ghostly engine --list --verbose)"],
+    [["removeLink", "{}", "--yes"], "removeLink takes { linkId }: linkId missing (ghostly engine --list --verbose)"],
+    [["removeLink", "[\"c\"]"], "The parameters must be JSON (an object)"],
+    [["renameLink", JSON.stringify({ linkId: "c" })], "renameLink takes { linkId, label }: label missing (ghostly engine --list --verbose)"],
+  ];
+  for (const [args, message] of cases) {
+    const result = await ghostly(["--home", dir, "engine", ...args]);
+    expect(error(result, "usage", 2).message, args.join(" ")).toBe(message);
+  }
+  expect((await ghostly(["--home", dir, "engine", "removeLink"])).json.error).toMatchObject({ details: { takes: "{ linkId }" } });
+  // No profile was made or opened for them.
+  expect(readdirSync(dir)).toEqual([]);
+  // A call that can run still asks for --yes first.
+  for (const args of [["switchGroup", JSON.stringify({ groupId: "g", to: "c" })], ["removeLink", JSON.stringify({ linkId: "c" })]]) {
+    expect(error(await ghostly(["--home", dir, "engine", ...args]), "confirm", 5).message, args[0]).toContain("--yes");
+  }
 });
 
 /** Each EngineApi call's parameter, in ENGINE_PARAMS' words. */

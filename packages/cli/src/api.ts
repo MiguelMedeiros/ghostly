@@ -6,7 +6,7 @@ import { groupPayLineId, groupPayNoteId } from "@ghostly/browser/shared/groupPay
 import { DEFAULT_IROH_RELAYS } from "@ghostly/browser/platform/irohWeb";
 import { FORWARD_MESSAGES, FORWARD_TARGETS } from "@ghostly/browser/engine/forwards";
 import { findSecret, guardText, secretWords } from "./secretGuard";
-import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
+import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem, engineTakesLine } from "./engineMethods";
 import { asCliError, CliError } from "./errors";
 import { shellWord } from "./shellWord";
 import {
@@ -1088,6 +1088,12 @@ const METHODS: Record<string, Method> = {
     const raw = params.params;
     if (raw !== undefined && (raw === null || typeof raw !== "object" || Array.isArray(raw))) throw new CliError("bad_request", "params must be an object");
     const args = raw as Params | undefined;
+    // A call given less than it takes failed with JavaScript's own TypeError, or did nothing and answered null. Said
+    // before --yes or --confirm-real is asked: a call that cannot run asked to confirm a deletion first.
+    const takes = ENGINE_PARAMS[method] ?? READ_PARAMS[method];
+    const wrong = (why: string, rawError?: string) => new CliError("bad_request", engineTakesLine(method, why), { takes, ...(rawError ? { rawError } : {}) });
+    const problem = engineParamsProblem(method, args);
+    if (problem) throw wrong(problem);
     // "Hide my IP from contacts" (`relayOnly`, WISP 100 § Relay only) is the apps' switch in Settings, Network, not the
     // CLI's yet: its WebRTC chat links (node-datachannel) still check from this machine's own sockets under the relay
     // policy, as its calls did (they are refused while it is on). Nobody turns it on through here until they keep to
@@ -1102,11 +1108,6 @@ const METHODS: Record<string, Method> = {
     const deletes = DESTRUCTIVE_CALLS.get(method);
     if (deletes && !bool(params, "yes")) throw new CliError("confirm", `${method} ${deletes}; pass --yes (yes: true over the socket) to go on`);
     if (method === "clearProfileData") return clearProfile(ctx, bool(params, "force"));
-    // A call given less than it takes failed with JavaScript's own TypeError, or did nothing and answered null.
-    const takes = ENGINE_PARAMS[method] ?? READ_PARAMS[method];
-    const wrong = (why: string, rawError?: string) => new CliError("bad_request", `${method} takes ${takes || "no parameters"}: ${why} (ghostly engine --list --verbose)`, { takes, ...(rawError ? { rawError } : {}) });
-    const problem = engineParamsProblem(method, args);
-    if (problem) throw wrong(problem);
     // Removing the chat or putting it on DHT only is refused mid-call, as `chat remove` and `chat transport dht` are.
     if (typeof args?.linkId === "string") {
       if (method === "removeLink") {

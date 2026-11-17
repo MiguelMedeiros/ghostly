@@ -8,7 +8,7 @@ import { connectDaemon, DaemonClient, endedUnanswered, endedUnsent, isNotTheDaem
 import { childEnv, dropSecretEnv } from "./childEnv";
 import { COMMANDS, idSlot, noMoreThan, numberSlot, positionals, takesText, TEXT_COMMANDS } from "./commands";
 import { here, inRange, INPUT_BYTES, localStat, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
-import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS, hideSecretFields } from "./engineMethods";
+import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS, engineParamsProblem, engineTakesLine, hideSecretFields } from "./engineMethods";
 import { asCliError, CliError, type ErrorCode, EXIT, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import type { Host } from "./host";
@@ -1513,6 +1513,12 @@ async function engineCommand(argv: string[]): Promise<void> {
   if (text !== undefined && text.trim()) {
     try { params = JSON.parse(text); } catch { throw new CliError("usage", "The parameters must be JSON (an object)"); }
   }
+  // What the call takes is the command line's to get right, so it is said here, before the profile opens and before
+  // --yes or --confirm-real is asked: before, `engine switchGroup` asked for --yes (exit 5), and only then said its
+  // parameters were missing (bad_request, exit 1).
+  if (params !== undefined && (params === null || typeof params !== "object" || Array.isArray(params))) throw new CliError("usage", "The parameters must be JSON (an object)");
+  const problem = engineParamsProblem(method, params as Record<string, unknown> | undefined);
+  if (problem) throw new CliError("usage", engineTakesLine(method, problem), { takes: ENGINE_PARAMS[method] ?? READ_PARAMS[method] });
   const confirmReal = parsed.options["confirm-real"] === true;
   if (confirmReal && params && typeof params === "object") (params as Record<string, unknown>).confirmedReal = true;
   const yes = parsed.options.yes === true;
