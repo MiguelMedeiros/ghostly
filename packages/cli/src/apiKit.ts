@@ -509,12 +509,15 @@ export const groupCalled = (group: GroupView) => group.name || "this group";
 /**
  * A group this profile is not in yet (only its invitation, or a knock at its link), said with what the person can do,
  * the same sentence for every command; undefined for any other group. `ref`: the group as the command named it.
- * `decline`: the step out of it (`group leave`), not into it.
+ * `decline`: the step out of it (`group leave`), not into it. An invitation its admin took back (left, forgot the group
+ * or handed the role on) has no way in: `group accept` answers "This invitation was taken back", so it names
+ * `group decline`, which drops it from the list.
  */
 export function notInYet(group: GroupView, ref: string, decline = false): string | undefined {
   if (group.status || !group.invitation) return undefined;
   const shown = shellWord(ref, group.id);
-  const { accepted, viaLink } = group.invitation;
+  const { accepted, viaLink, takenBack } = group.invitation;
+  if (takenBack && !decline) return `Its invitation to ${groupCalled(group)} was taken back: ghostly group decline ${shown} drops it`;
   const why = decline ? `ghostly group decline ${shown} turns it down`
     : !accepted ? `ghostly group accept ${shown} joins it`
     : viaLink ? "you opened its link, and no member's app has let you in"
