@@ -65,7 +65,7 @@ it("Accept on an offer larger than the room left now does not start it: it keeps
   // Not started: nothing asked of the sender, and it still waits for the person.
   expect(t.accepted()).toEqual([]);
   expect(t.transfers.get(big)).toMatchObject({ state: "transferring", stage: "asking", direction: "in" });
-  expect(answer).toMatchObject({ message: "No room on this device for this file (40.0 MB free)", room: 40 * MiB });
+  expect(answer).toMatchObject({ message: "No room on this device for this file (40.0 MB free)", room: 40 * MiB, size: 60 * MiB, coming: 0 });
   // Every offer waiting shows the room read, not the one of when it came.
   expect(t.transfers.get(big)?.room).toBe(40 * MiB);
   expect(t.transfers.get(other)?.room).toBe(40 * MiB);
@@ -88,7 +88,8 @@ it("Accept counts what the files already taken still need: one that fits only wi
   const second = await t.offered("chat-b", "wBesideIt02", 60 * MiB);
   await t.files.accept("chat-a", first);
   await vi.waitFor(() => expect(t.accepted()).toEqual(["wBesideIt01"]));
-  await expect(t.files.accept("chat-b", second)).rejects.toMatchObject({ message: "No room on this device for this file (100.0 MB free)", room: 100 * MiB });
+  // With what fills it, for the CLI to say: the file's size, and the bytes still coming of the one taken.
+  await expect(t.files.accept("chat-b", second)).rejects.toMatchObject({ message: "No room on this device for this file (100.0 MB free)", room: 100 * MiB, size: 60 * MiB, coming: 60 * MiB });
   expect(t.accepted()).toEqual(["wBesideIt01"]);
   expect(t.transfers.get(second)).toMatchObject({ stage: "asking" });
   // The one under way ends (cancelled here): the offer waiting shows the room it leaves, and fits now.
