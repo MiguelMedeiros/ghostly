@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { GhostlyHttpError, LIMITS, parseLocalTarget, VIEWER_PERMISSIONS_POLICY, type ClientRequest, type ClientResponse, type LocalFetch } from "@ghostly/core";
-import { bool, chatOf, node, num, ownChatOf, settingsOf, shownName, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, chatOf, nameKey, node, num, ownChatOf, settingsOf, shownName, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError } from "./errors";
 import { isLive } from "./views";
 
@@ -244,12 +244,31 @@ async function proxy(request: IncomingMessage, response: ServerResponse, chunks:
 
 /**
  * The service a command names, by its id: one of this profile's. The engine changes nothing for an id it does not
- * know and says nothing, so a mistyped id read as done ("shared": true, with a contact).
+ * know and says nothing, so a mistyped id read as done ("shared": true, with a contact). Or by its name, when no other
+ * service has that name (`service add "My App"` makes `my-app`): before, the name was refused as "No service" while
+ * `service list` showed it. An id comes first; a name several services share is refused with their ids.
  */
 function serviceOf(ctx: ApiContext, params: Params): string {
-  const serviceId = str(params, "service", true);
-  if (!state(ctx).services.some((s) => s.id === serviceId)) throw new CliError("not_found", `No service ${JSON.stringify(serviceId)} (ghostly service list)`);
-  return serviceId;
+  const given = str(params, "service", true);
+  const { services } = state(ctx);
+  if (services.some((s) => s.id === given)) return given;
+  const named = servicesNamed(services, given);
+  if (named.length === 1) return named[0];
+  throw noService(given, named);
+}
+
+/** The ids of the services `given` names by their name, compared as a chat's label is (`nameKey`: one case, one form). */
+function servicesNamed(services: readonly { id: string; name: string }[], given: string): string[] {
+  const key = nameKey(given);
+  return key ? services.filter((s) => nameKey(s.name) === key).map((s) => s.id) : [];
+}
+
+/** No service of that id or name, or a name several services share: which ids it names. Same code and exit either way. */
+function noService(given: string, named: readonly string[]): CliError {
+  const quoted = JSON.stringify(given);
+  if (!named.length) return new CliError("not_found", `No service ${quoted} (ghostly service list)`);
+  const which = `${named.length} services, ${named.slice(0, -1).join(", ")} and ${named.at(-1)}: use one of their ids`;
+  return new CliError("not_found", `No service with id ${quoted}. ${quoted} is the name of ${which} (ghostly service list)`);
 }
 
 /**
