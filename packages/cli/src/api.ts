@@ -32,7 +32,7 @@ import { APP_CHAT_METHODS } from "./appChat";
 import { WALLET_METHODS } from "./wallets";
 import { checkOwnStatus, statusJson } from "./ownStatus";
 import { TRANSPORT_NAMES } from "./words";
-import { chatState, dhtOnlyNote, heldWords } from "./waitNotice";
+import { chatState, dhtOnlyNote, heldWords, pinWaitsNote, type DhtOnly } from "./waitNotice";
 import { chatDetailsJson, chatJson, chatMessageJson, groupJson, groupMessageJson, groupPayTwins, isLive, messageJson, type MessageJson } from "./views";
 
 /**
@@ -322,8 +322,23 @@ async function letIn(ctx: ApiContext, groupId: string, link: string, held: Group
  * a hold (`chat disconnect --hold`) is read from `ctx`'s profile; without it, as a DHT only chosen.
  */
 function dhtOnlyWait(link: LinkView, text: string, ref: string, ctx?: ApiContext): string | undefined {
+  return dhtOnlyNote(dhtOnlyOf(link, ctx), text, ref);
+}
+
+/** Where `link` stands on the DHT only (waitNotice.ts `DhtOnly`): this side's choice or hold, read from `ctx`'s profile. */
+function dhtOnlyOf(link: LinkView, ctx?: ApiContext): DhtOnly {
   const mine = link.deliveryMode === "dht";
-  return dhtOnlyNote({ mine, theirs: link.dhtDelivery?.peerMode === "dht", heldUntil: mine && ctx ? holdEnds(ctx, link.id) : null, oneShot: ctx?.mode === "one-shot" }, text, ref);
+  return { mine, theirs: link.dhtDelivery?.peerMode === "dht", heldUntil: mine && ctx ? holdEnds(ctx, link.id) : null, oneShot: ctx?.mode === "one-shot" };
+}
+
+/**
+ * Why my pin (or unpin) in a 1:1 chat does not go by itself, or undefined (waitNotice.ts `pinWaitsNote`): the chat is
+ * on the DHT only, and a pin goes on a live session only. Read as the chat is now: the contact's choice may have come
+ * since, or the chat left the DHT only. A chat nobody joined says that instead (`keptForJoin`, `goesOn`).
+ */
+function pinWaitsLive(ctx: ApiContext, linkId: string, ref: string, remove: boolean): string | undefined {
+  const link = state(ctx).links.find((l) => l.id === linkId);
+  return link && !nobodyJoined(link) ? pinWaitsNote(dhtOnlyOf(link, ctx), ref, remove) : undefined;
 }
 
 /**
@@ -604,7 +619,7 @@ const METHODS: Record<string, Method> = {
     const before = Math.max(...node(ctx).chatUnconfirmed({ linkId: link.id }).reactions);
     const result = await react(ctx, link.id, params, { group: false, ref: str(params, "chat", true) });
     const pending = (left: { reactions: number[] }) => left.reactions.some((n) => n > before);
-    if (wait === "confirmed") await waitForConfirmed(ctx, link.id, "reaction", pending, ms);
+    if (wait === "confirmed") await waitForConfirmed(ctx, link.id, "reaction", pending, ms, { messageId: result.messageId, emoji: result.emoji });
     const confirmed = !pending(node(ctx).chatUnconfirmed({ linkId: link.id }));
     return { chat: link.id, ...result, confirmed, ...(!confirmed && keptForJoin(ctx, link.id, "the reaction")) };
   },
@@ -617,7 +632,10 @@ const METHODS: Record<string, Method> = {
    */
   async "chat.pin"(ctx, params) {
     const target = chatOrGroup(ctx, str(params, "chat", true));
-    const remove = bool(params, "remove"), messageId = remove ? str(params, "message") : str(params, "message", true);
+    const remove = bool(params, "remove"), messageId = remove ? undefined : str(params, "message", true);
+    // --remove names no message (the chat has one pin): one given beside it was not read, so a bot that meant "unpin
+    // X" unpinned whatever was pinned, X or not.
+    if (remove && str(params, "message") !== undefined) throw new CliError("bad_request", "remove names no message: it unpins whatever is pinned (give no message)");
     if (target.group && params.wait === "confirmed") throw new CliError("bad_request", "A group has no receipts: wait confirmed is for a 1:1 chat (wait sent waits until a member's edge took it)");
     if (!target.group && params.wait === "sent") throw new CliError("bad_request", "wait sent is for a group: a 1:1 chat's pin waits with wait confirmed");
     const { wait, ms } = target.group
@@ -641,9 +659,12 @@ const METHODS: Record<string, Method> = {
     // The chat's one pin of mine waiting for the contact is this one (none: the contact confirmed it already).
     const mine = node(ctx).chatUnconfirmed({ linkId: target.linkId }).pin;
     const pending = (left: { pin: number | null }) => mine !== null && left.pin === mine;
-    if (wait === "confirmed") await waitForConfirmed(ctx, target.linkId, "pin", pending, ms);
+    const ref = str(params, "chat", true), pinned = remove ? null : messageId;
+    const waitsLive = () => pinWaitsLive(ctx, target.linkId, ref, remove);
+    if (wait === "confirmed") await waitForConfirmed(ctx, target.linkId, "pin", pending, ms, { messageId: pinned, removed: remove }, waitsLive);
     const confirmed = !pending(node(ctx).chatUnconfirmed({ linkId: target.linkId }));
-    return { chat: target.id, messageId: remove ? null : messageId, removed: remove, confirmed, ...(!confirmed && keptForJoin(ctx, target.linkId, remove ? "the unpin" : "the pin")) };
+    const note = confirmed ? undefined : keptForJoin(ctx, target.linkId, remove ? "the unpin" : "the pin").note ?? waitsLive();
+    return { chat: target.id, messageId: pinned, removed: remove, confirmed, ...(note && { note }) };
   },
   /** Saved messages: a mark on a message of a chat or a group, kept for this profile on this device; nothing is sent. */
   async "saved.add"(ctx, params) {
