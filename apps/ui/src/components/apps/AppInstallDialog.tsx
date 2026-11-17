@@ -73,6 +73,11 @@ function runLine(run: AppRunStatus, t: Translate, next: TranslationKey): ReactNo
   return null;
 }
 
+/** Why a version the person already has cannot be installed again. */
+const HAVE: Partial<Record<AppPreview["install"], TranslationKey>> = {
+  rollback: "apps.install.rollback", equivocation: "apps.install.equivocation", same: "apps.install.same",
+};
+
 // A store's takedown reason (200 characters, which may hold no space: a link) and a store's or contact's name break
 // anywhere: unbroken, a reason pushed the screen 933 px sideways on a phone, its start off the left side in Arabic.
 function Line({ children, tone = "muted", testId, id }: { children: ReactNode; tone?: "muted" | "danger" | "warning"; testId?: string; id?: string }) {
@@ -362,9 +367,10 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
 
   const shownTitle = preview?.manifest.title ?? title ?? t("apps.title");
   const blocked = preview && (preview.run.status === "revoked" || preview.run.status === "removed" || preview.install === "rollback" || preview.install === "equivocation" || preview.install === "same");
-  const why = preview && (runLine(preview.run, t, "apps.install.revokedNext") ?? (preview.install === "rollback" ? t("apps.install.rollback")
-    : preview.install === "equivocation" ? t("apps.install.equivocation")
-      : preview.install === "same" ? t("apps.install.same") : null));
+  // A version the person has (a newer one, this one, another copy of it) says so after a revocation too: "Look for a
+  // newer version from its publisher" was said to someone who has it.
+  const kept = preview && HAVE[preview.install];
+  const why = preview && (runLine(preview.run, t, kept || "apps.install.revokedNext") ?? (kept ? t(kept) : null));
   // What the check found, said to a screen reader: the focus is on the screen, named by its title only, and the result
   // came in plain lines, so nothing said whether it can be installed. Said from the start (it also describes the
   // screen), so the change is read out; a failed read says itself (its alert). Install off until Try again reads it
