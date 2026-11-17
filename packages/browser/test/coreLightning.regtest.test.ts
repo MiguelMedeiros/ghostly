@@ -4,7 +4,8 @@ import { decodeBolt11 } from "@ghostly/core";
 // @ts-expect-error: a plain script, shared with the e2e test
 import { CLN_REGTEST, nodeId, rune, spendable } from "../../../e2e/support/cln-regtest/regtest.mjs";
 import { CommandoClient, CommandoError, type SocketFactory } from "../src/engine/paymentAdapters/providers/commando";
-import { CoreLightning, checkRune } from "../src/engine/paymentAdapters/providers/coreLightning";
+import { CoreLightning } from "../src/engine/paymentAdapters/providers/coreLightning";
+import { checkRune } from "../src/engine/paymentAdapters/providers/coreLightningProvider";
 import { NothingSpentError } from "../src/engine/paymentAdapters/providers/types";
 import { describeLightningProvider } from "./helpers/providerContract";
 // covers-gated: wallet.lightning.cln.connect, wallet.lightning.cln.pay, wallet.lightning.provider-contract
