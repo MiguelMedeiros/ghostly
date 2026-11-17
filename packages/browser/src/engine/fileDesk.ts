@@ -135,6 +135,8 @@ export class FileDesk {
   private readonly restored = new Set<string>();
   /** A look again when a transfer would count as stuck, by local id. */
   private readonly stallChecks = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Offers being decided, and taken until their record is kept: the room they will take, before it counts itself. */
+  private readonly deciding = new Set<{ linkId: string; id: string; size: number; again: boolean }>();
 
   constructor(private readonly deps: FileDeskDeps) {}
 
@@ -148,7 +150,7 @@ export class FileDesk {
       decide: (file, again) => this.decide(linkId, file, again),
       openTarget: (record) => this.openTarget(linkId, record),
       openSource: (record) => this.openSource(linkId, record),
-      changed: (record, transferred, progress) => this.changed(linkId, record, transferred, progress),
+      changed: (record, transferred, progress) => { this.counted(linkId, record); this.changed(linkId, record, transferred, progress); },
       // A change of state is written at once (`changed`): the chat's writes so far hold it.
       kept: () => made.saving,
       room: async () => (await fileBytes()).room(),
@@ -421,6 +423,21 @@ export class FileDesk {
    * person decides. A file larger than the room this device has left is refused, and the sender told the room.
    */
   private async decide(linkId: string, file: FileInfo, again = false): Promise<OfferDecision> {
+    // Counted from now, before anything is awaited: offers from other chats decided after this one see it.
+    const held = { linkId, id: file.id, size: file.size, again };
+    this.deciding.add(held);
+    try {
+      const decision = await this.weigh(linkId, file, again, held);
+      // Taken: it counts until its record does (`stillComing`).
+      if (decision !== "accept") this.deciding.delete(held);
+      return decision;
+    } catch (error) {
+      this.deciding.delete(held);
+      throw error;
+    }
+  }
+
+  private async weigh(linkId: string, file: FileInfo, again: boolean, held: object): Promise<OfferDecision> {
     const used = this.deps.wireIds(linkId);
     // Said on the DHT floor first: its message is there, waiting for this offer.
     const said = this.chats.get(linkId)?.announced.has(file.id) ?? false;
@@ -434,7 +451,7 @@ export class FileDesk {
     const room = await (await fileBytes()).room().catch(() => null);
     if (room !== null && file.size > room) return { refuse: "no-room", room };
     // Beside what the files already taken still need: one that fits only without them is asked about.
-    if (room !== null && file.size + this.stillComing() > room) return "ask";
+    if (room !== null && file.size + this.stillComing(held) > room) return "ask";
     const taken = this.deps.receivedBytes(linkId) + this.autoTaken(linkId);
     return file.size <= FILE_LIMITS.askAboveBytes && taken + file.size <= FILE_LIMITS.autoAcceptBytesPerPeer ? "accept" : "ask";
   }
@@ -442,11 +459,26 @@ export class FileDesk {
   /**
    * Bytes still to come of the files taken here (every chat's, not ended): the room they will take. Read from each
    * chat's unfinished files only: copying every record each chat ever had cost every offer ~10 ms at 100,000 files.
+   * The offers decided before `own` count too, while still being decided or taken until their record is kept: each
+   * counts only the ones before it, so of several that fit only one at a time the first is taken and the rest asked.
    */
-  private stillComing(): number {
+  private stillComing(own: object): number {
     let due = 0;
     for (const chat of this.chats.values()) due += chat.files.stillToCome();
+    for (const held of this.deciding) {
+      if (held === own) break;
+      const chat = this.chats.get(held.linkId), record = chat?.files.get("in", held.id);
+      // Kept now (taken again: under way again), it counts itself; its chat gone, it is not coming.
+      if (!chat || (record && (!held.again || !transferEnded(record)))) this.deciding.delete(held);
+      else due += held.size;
+    }
     return due;
+  }
+
+  /** A taken offer's record is kept, under way: it counts itself from now (`stillComing`), even if forgotten later. */
+  private counted(linkId: string, record: FileTransferRecord): void {
+    if (record.direction !== "in" || transferEnded(record)) return;
+    for (const held of this.deciding) if (held.linkId === linkId && held.id === record.id) this.deciding.delete(held);
   }
 
   /** files/3 files this contact sent that were taken without asking and are kept (or on their way). */
