@@ -724,7 +724,18 @@ export class FileDesk {
       this.deps.settled?.(linkId, id, record, this.underway.delete(id));
       // A received file ended (whole, or dropped): the offers waiting show the room it leaves.
       if (record.direction === "in") void this.rooms();
+      // A sent one cancelled or declined is never sent again (`offer`, `ChatFiles.resend`): its staged copy goes, as a
+      // received one's part does. Kept, 7 cancelled big files held 3.5 GB of the sender's disk for good. Its record stays.
+      else if (record.state === "cancelled" || record.state === "declined") this.dropStaged(chat, id);
     }
+  }
+
+  /** The bytes a sent file was staged in, after the chat's writes before; a small one kept whole in its record stays. */
+  private dropStaged(chat: Chat, id: string): void {
+    chat.saving = chat.saving.then(async () => {
+      const stored = await fileStore.get(id);
+      if (stored?.bytes) await (await fileBytesOf(stored.bytes))?.remove(id);
+    }).catch(() => {});
   }
 
   /**
