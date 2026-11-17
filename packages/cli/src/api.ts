@@ -1338,14 +1338,14 @@ const ADMIN_ALONE = "You are the admin and nobody else in the group is online to
 const NOBODY_FOR_LEAVE = "Nobody in the group is connected right now to take your leave. Try again in a moment.";
 
 /**
- * A community's leave nobody was connected to take, said with the CLI's next step: "Try again in a moment" never passed
- * in a one-shot, which has no edge yet when it runs, and every member is refused alike (`group admin` hands nothing on
- * here). The code stays the engine's. Undefined for other errors.
+ * A community's leave nobody was connected to take, said as a state that changes (`unavailable`, as a contact not
+ * connected is) with the CLI's next step: "Try again in a moment" never passed in a one-shot, which has no edge yet
+ * when it runs, and every member is refused alike (`group admin` hands nothing on here). Undefined for other errors.
  */
 function nobodyForLeave(ctx: ApiContext, group: GroupView, ref: string, error: unknown): CliError | undefined {
   if (!(error instanceof Error) || error.message !== NOBODY_FOR_LEAVE) return undefined;
   const shown = shellWord(ref, group.id), show = `ghostly group show ${shown} says who is`;
-  return new CliError("engine", ctx.mode === "one-shot"
+  return new CliError("unavailable", ctx.mode === "one-shot"
     ? `Nobody in ${groupCalled(group)} is connected to take your leave, and a command without a daemon has no connection yet: keep this profile online (ghostly daemon --detach), then ghostly group leave ${shown} --yes once a member is (${show})`
     : `Nobody in ${groupCalled(group)} is connected to take your leave: try again when a member is online (${show})`);
 }
@@ -1353,7 +1353,8 @@ function nobodyForLeave(ctx: ApiContext, group: GroupView, ref: string, error: u
 /**
  * `group leave` the engine refused, said with the CLI's next step: an invitation not joined yet answered "Group not
  * found" of a group `group show` lists (its way out is `group decline`), an admin alone online "make someone the
- * admin", the app's words, and a community nobody is connected to (`nobodyForLeave`). The code stays the engine's.
+ * admin", the app's words, and a community nobody is connected to (`nobodyForLeave`). The code stays the engine's but
+ * for that last one.
  */
 function leaveRefused(ctx: ApiContext, group: GroupView, ref: string, error: unknown): unknown {
   if (!(error instanceof Error)) return error;

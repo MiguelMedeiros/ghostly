@@ -664,15 +664,15 @@ describe("a group not joined yet, said the same by every command", () => {
       return { ctx: { ...ctx, mode } as ApiContext, ...engine };
     }
 
-    it("a leave says it waits for a member online, with the step a one-shot needs", async () => {
+    it("a leave says it waits for a member online, with the step a one-shot needs, as unavailable", async () => {
       for (const isAdmin of [true, false]) {
-        await expect(callApi(held(community(isAdmin, 0), "one-shot", true).ctx, "group.leave", { group: "Crew", yes: true })).rejects.toMatchObject({ code: "engine",
+        await expect(callApi(held(community(isAdmin, 0), "one-shot", true).ctx, "group.leave", { group: "Crew", yes: true })).rejects.toMatchObject({ code: "unavailable",
           message: "Nobody in Crew is connected to take your leave, and a command without a daemon has no connection yet: keep this profile online (ghostly daemon --detach), then ghostly group leave Crew --yes once a member is (ghostly group show Crew says who is)" });
-        await expect(callApi(held(community(isAdmin, 0), "daemon", true).ctx, "group.leave", { group: "Crew", yes: true })).rejects.toMatchObject({ code: "engine",
+        await expect(callApi(held(community(isAdmin, 0), "daemon", true).ctx, "group.leave", { group: "Crew", yes: true })).rejects.toMatchObject({ code: "unavailable",
           message: "Nobody in Crew is connected to take your leave: try again when a member is online (ghostly group show Crew says who is)" });
       }
       // The admin's forget is the same leave first, refused the same way.
-      await expect(callApi(held(community(true, 0), "daemon", true).ctx, "group.forget", { group: "Crew", yes: true })).rejects.toMatchObject({ code: "engine",
+      await expect(callApi(held(community(true, 0), "daemon", true).ctx, "group.forget", { group: "Crew", yes: true })).rejects.toMatchObject({ code: "unavailable",
         message: "Nobody in Crew is connected to take your leave: try again when a member is online (ghostly group show Crew says who is)" });
     });
 
