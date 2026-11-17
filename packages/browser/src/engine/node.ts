@@ -5321,6 +5321,8 @@ export class GhostlyNode implements EngineImplementation {
     const live = this.links.get(linkId);
     if (!live) throw new Error("No such chat");
     if (!["accept", "decline", "pause", "resume", "cancel", "resend", "request"].includes(action)) throw new Error("Unknown file action");
+    // Taken only when it fits in the room left now (`FileDesk.accept`): one that does not keeps waiting.
+    if (action === "accept") return this.fileDesk.accept(linkId, fileId).then(() => {});
     const now = this.fileDesk.act(linkId, fileId, action);
     // Sent again or asked again with no live session: it goes when the chat is live, and the chat tries now.
     if (!now && (action === "resend" || action === "request") && live.link && !live.link.isDataLinkOpen) void this.connect({ linkId }).catch(() => {});

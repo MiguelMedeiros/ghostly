@@ -261,6 +261,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["You cancelled it", `${CORE}/chatFiles.ts`],
   // A file said on the DHT floor that ended here before it came (engine/fileDesk.ts `floorRefusal`, `sweep`).
   ["No room on this device for this file", `${BROWSER}/engine/fileDesk.ts`],
+  ["No room on this device for this file (16.2 MB free)", `${BROWSER}/engine/fileDesk.ts`, "No room on this device for this file ("],
   ["Too many files are waiting here", `${BROWSER}/engine/fileDesk.ts`],
   ["It was refused here", `${BROWSER}/engine/fileDesk.ts`],
   ["It did not come within a week", `${BROWSER}/engine/fileDesk.ts`],
@@ -878,6 +879,12 @@ describe("errors in the app's language", () => {
     expect(bubble("It was refused here")).toEqual({ status: t("errors.files.floor.refused"), info: { text: t("errors.files.askAgain") } });
     expect(bubble("It did not come within a week")).toEqual({ status: t("errors.files.floor.notInAWeek"), info: { text: t("errors.files.askAgain") } });
     expect(bubble("Cancelled by the sender")).toEqual({ status: t("chat.file.cancelled"), info: { text: t("errors.files.askAgain") } });
+  });
+
+  it.each(LANGUAGES)("Accept on an offer the room left no longer fits says so, and to make room and try again, in %s", (language) => {
+    const t = translators[language];
+    // As fileDesk.ts `accept` throws it: the offer keeps waiting, so the next step is to try again, not to ask for it.
+    expect(problemText(new Error("No room on this device for this file (16.2 MB free)"), t)).toEqual({ tone: "error", title: t("errors.files.noRoomHere"), next: t("errors.app.noRoomNext") });
   });
 
   it.each(LANGUAGES)("a 1:1 file declined or cancelled says who did it behind its ⓘ in %s, never the engine's English", (language) => {
