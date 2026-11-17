@@ -111,15 +111,30 @@ export interface BundleFile {
   facadeModuleId?: string | null;
   imports?: readonly string[];
   dynamicImports?: readonly string[];
+  /** An asset's content: the app's page (`index.html`) names the scripts it loads. */
+  source?: string | Uint8Array;
+}
+
+/**
+ * The scripts the app's page loads, by file name: its module scripts and modulepreloads. Vite drops an entry chunk that is
+ * nothing but imports (the `main` group took its code) and names those in the page instead, so the page, not an entry
+ * chunk, is where the app starts.
+ */
+function pageScripts(bundle: readonly BundleFile[]): string[] {
+  const page = bundle.find((file) => file.type === "asset" && file.fileName === "index.html")?.source;
+  const html = typeof page === "string" ? page : page ? new TextDecoder().decode(page) : "";
+  return [...html.matchAll(/<(?:script[^>]*\ssrc|link[^>]*rel="modulepreload"[^>]*\shref)="\/?(assets\/[^"]+\.js)"/g)].map(([, name]) => name!);
 }
 
 /**
  * The build's chunks the install leaves to their first use: those only reached through a dynamic import of an
  * online-only module (`onlineOnly`) or of a language (`languages`, by language: the install takes the person's own,
- * `installList`). Walked from the entries along every import but those: a chunk any other path reaches is kept.
+ * `installList`). Walked from the entries and the scripts the app's page loads, along every import but those: a chunk
+ * any other path reaches is kept.
  */
 export function optionalFiles(bundle: Iterable<BundleFile>): { onlineOnly: string[]; languages: Record<string, string[]> } {
-  const chunks = new Map([...bundle].filter((file) => file.type === "chunk").map((file) => [file.fileName, file]));
+  const files = [...bundle];
+  const chunks = new Map(files.filter((file) => file.type === "chunk").map((file) => [file.fileName, file]));
   const facade = (file: BundleFile) => file.facadeModuleId?.replace(/\\/g, "/") ?? "";
   const languageOf = (file: BundleFile) => LANGUAGE_MODULE.exec(facade(file))?.[1];
   const door = (file: BundleFile) => languageOf(file) !== undefined || ONLINE_ONLY_MODULES.some((id) => facade(file).includes(id));
@@ -134,7 +149,7 @@ export function optionalFiles(bundle: Iterable<BundleFile>): { onlineOnly: strin
     }
     return seen;
   };
-  const kept = walk([...chunks.values()].filter((file) => file.isEntry).map((file) => file.fileName), new Set(), true);
+  const kept = walk([...[...chunks.values()].filter((file) => file.isEntry).map((file) => file.fileName), ...pageScripts(files)], new Set(), true);
   const languages: Record<string, string[]> = {};
   for (const file of chunks.values()) {
     const language = languageOf(file);
