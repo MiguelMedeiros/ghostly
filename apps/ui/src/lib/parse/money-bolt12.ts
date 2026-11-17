@@ -118,7 +118,8 @@ export function decodeBolt12Offer(text: string): Bolt12Offer | null {
   return offer;
 }
 
-const OFFER_WORD = /(?<![A-Za-z0-9])(?:(?:lightning:|bitcoin:\?(?:[^\s]*&)?lno=))?(lno1[02-9ac-hj-np-z]+(?:\+\s*[02-9ac-hj-np-z]+)*|LNO1[02-9AC-HJ-NP-Z]+(?:\+\s*[02-9AC-HJ-NP-Z]+)*)/g;
+// A link's parameters stop at the next `bitcoin:`: each link reads only its own part of a word, not the rest of it.
+const OFFER_WORD = /(?<![A-Za-z0-9])(?:(?:lightning:|bitcoin:\?(?:(?:(?!bitcoin:)[^\s])*&)?lno=))?(lno1[02-9ac-hj-np-z]+(?:\+\s*[02-9ac-hj-np-z]+)*|LNO1[02-9AC-HJ-NP-Z]+(?:\+\s*[02-9AC-HJ-NP-Z]+)*)/g;
 
 /** A BOLT 12 offer anywhere in a message, bare, `lightning:` or in a `bitcoin:?lno=` link. */
 export function findBolt12Offer(text: string): { offer: Bolt12Offer; rest: string } | null {
