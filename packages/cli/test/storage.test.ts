@@ -1312,6 +1312,24 @@ describe("messages kept in rows.db", () => {
     expect(gone.filter((text) => bytes.includes(`${text} `))).toEqual([]);
   });
 
+  it("scrubs asked at once (`message delete --purge` x 6) write rows.db again once or twice, and each one's delete is gone", async () => {
+    // Each wrote rows.db whole on the thread: ten at once held a daemon of 100,000 messages 15 s.
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    opened.push(store);
+    const d = await db(store.factory);
+    await tx(d, ["messages"], (s) => { for (let i = 0; i < 6; i++) s.messages.put({ linkId: "chat", id: `m${i}`, text: `purged-${i}-secret` }); });
+    await store.compact();
+    const scrubs = vi.spyOn(TreeFile.prototype, "scrub");
+    try {
+      await Promise.all(Array.from({ length: 6 }, (_, i) => tx(d, ["messages"], (s) => s.messages.delete(["chat", `m${i}`])).then(() => store.compact({ scrub: true }))));
+      expect(scrubs.mock.calls.length).toBeLessThanOrEqual(2);
+    } finally { scrubs.mockRestore(); }
+    d.close();
+    const bytes = readFileSync(join(dir, "rows.db"));
+    for (let i = 0; i < 6; i++) expect(bytes.includes(`purged-${i}-secret`), `m${i}`).toBe(false);
+  });
+
   it("a deleted chat and its messages leave the journal once the snapshot is an hour old, at a start, a write or a close", async () => {
     const chats = (factory: IDBFactory) => new Promise<IDBDatabase>((resolve, reject) => {
       const request = factory.open("ghostly", 1);
