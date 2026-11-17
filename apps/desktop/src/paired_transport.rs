@@ -245,7 +245,9 @@ impl TransportState {
         let state = self.clone();
         tokio::spawn(async move {
             tokio::select! {
-                _ = async { while let Some((frame, binary, written)) = rx.recv().await { wire::write_message(&mut send, &frame, binary).await?; let _ = written.send(()); } Ok::<(), String>(()) } => {},
+                // Its sender dropped with the socket still open (an exit, `shutdown`): the stream ends after what was
+                // queued on it, and the connection stays until the contact, having read it all, closes its end.
+                _ = async { while let Some((frame, binary, written)) = rx.recv().await { wire::write_message(&mut send, &frame, binary).await?; let _ = written.send(()); } send.finish().map_err(|e| e.to_string())?; std::future::pending::<Result<(), String>>().await } => {},
                 _ = async { loop { let (frame, binary) = wire::read_message(&mut recv).await?; credit.hand(frame.len() as u32).await?; let event = if binary { Event::Binary { id, bytes: base64::engine::general_purpose::STANDARD.encode(frame) } } else { Event::Frame { id, text: String::from_utf8(frame).map_err(|_| "Non-text paired frame")? } }; events.send(event).map_err(|_| "Native UI unavailable")?; } #[allow(unreachable_code)] Ok::<(), String>(()) } => {},
                 _ = connection.closed() => {},
             }
@@ -272,10 +274,6 @@ impl TransportState {
             socket.connection.close(0u32.into(), b"closed");
         }
     }
-    /// The app is exiting: every connection is closed and every endpoint stopped, so each contact's
-    /// app hears a close at once (QUIC's CONNECTION_CLOSE) instead of timing out 30 s later, and
-    /// starts watching for this app to come back. Bounded by `within`: exiting never waits on a
-    /// relay that does not answer.
     /// The app is about to exit: what the page left to be said on each connection (`paired_native_parting`, a call's
     /// hang-up) goes now, after whatever it sent, so the contact hears it even when the page is gone (a logout ends
     /// WebKit's processes with the app). Each goes once. Returns once every one is written on its stream.
@@ -296,10 +294,34 @@ impl TransportState {
         }))
         .await;
     }
+    /// The app is exiting: every connection is closed and every endpoint stopped, so each contact's
+    /// app hears a close at once (QUIC's CONNECTION_CLOSE) instead of timing out 30 s later, and
+    /// starts watching for this app to come back. Bounded by `within`: exiting never waits on a
+    /// relay that does not answer.
+    /// Each stream ends first, after what was written on it (a call's hang-up from `part`), and the
+    /// connection is closed once the contact closed its end, having read it all, or half of `within` passed:
+    /// a close at once threw away what QUIC had not yet sent, and the contact's read with it.
     pub async fn shutdown(&self, within: Duration) {
-        let peers = self.release(b"app exiting");
-        let closing = close_all(peers);
-        let _ = tokio::time::timeout(within, closing).await;
+        let (connections, peers) = {
+            let mut inner = self.inner.lock().unwrap();
+            inner.page += 1;
+            let connections: Vec<Connection> = inner
+                .sockets
+                .drain()
+                .map(|(_, (_, socket))| socket.connection)
+                .collect();
+            let peers: Vec<Peer> = inner.peers.drain().map(|(_, peer)| peer).collect();
+            (connections, peers)
+        };
+        for peer in &peers {
+            peer.silence();
+        }
+        let ended = futures_util::future::join_all(connections.iter().map(Connection::closed));
+        let _ = tokio::time::timeout(within / 2, ended).await;
+        for connection in &connections {
+            connection.close(0u32.into(), b"app exiting");
+        }
+        let _ = tokio::time::timeout(within / 2, close_all(peers)).await;
     }
     /// Every connection closed and every endpoint off the books, now; the endpoints are the caller's to close.
     fn release(&self, why: &'static [u8]) -> Vec<Peer> {
