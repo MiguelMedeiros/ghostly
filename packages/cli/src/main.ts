@@ -10,7 +10,7 @@ import { childEnv, dropSecretEnv } from "./childEnv";
 import { COMMANDS, idSlot, noMoreThan, numberSlot, positionals, takesText, TEXT_COMMANDS } from "./commands";
 import { here, inRange, INPUT_BYTES, localStat, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS, hideSecretFields } from "./engineMethods";
-import { asCliError, CliError, type ErrorCode, EXIT, localFileError } from "./errors";
+import { asCliError, CliError, type ErrorCode, EXIT, localFileError, secretValue } from "./errors";
 import type { GhostlyEvent } from "./events";
 import type { Host } from "./host";
 import { identityWaitLines } from "./identityWait";
@@ -1862,12 +1862,14 @@ export async function main(input: string[]): Promise<number> {
  * credential`) are answered with the group's commands, as `ghostly help chat` lists them; before, it was only "Unknown
  * command: chat". The longest group the words name answers: `x401 credential frob` lists add, list and remove.
  * A word near one of them is a typo: `chat lst` and `sned hi` say the command meant (`chat list`, `send`) and its help.
+ * A long or secret-looking word (a Cashu token after `ghostly wallet`, redeem left out) is described, not repeated.
  */
 export function unknownCommand(first: string | undefined, second?: string, third?: string): CliError {
   const asked = [first, second, third].filter((word): word is string => !!word);
+  const shown = (word: string) => secretValue(word) ?? word;
   const all = helpRows().map((row) => commandWords(row.usage));
   const takes = (group: readonly string[]) => [...new Set(all.filter((words) => words.length > group.length && group.every((word, i) => words[i] === word)).map((words) => words[group.length]))];
-  const meant = (typed: readonly string[], words: readonly string[]) => new CliError("usage", `Unknown command: ${typed.join(" ")} (did you mean ${words.join(" ")}? ghostly help ${words.join(" ")})`);
+  const meant = (typed: readonly string[], words: readonly string[]) => new CliError("usage", `Unknown command: ${typed.map(shown).join(" ")} (did you mean ${words.join(" ")}? ghostly help ${words.join(" ")})`);
   for (let depth = Math.min(asked.length, 2); depth >= 1; depth--) {
     const group = asked.slice(0, depth), name = group.join(" "), extra = asked[depth];
     const subs = takes(group);
@@ -1875,12 +1877,12 @@ export function unknownCommand(first: string | undefined, second?: string, third
     const near = extra === undefined ? undefined : nearest(extra, subs);
     if (near) return meant([...group, extra!], [...group, near]);
     const list = `${subs.slice(0, -1).join(", ")}${subs.length > 1 ? " or " : ""}${subs.at(-1)}`;
-    return new CliError("usage", extra ? `Unknown command: ${name} ${extra}: ghostly ${name} takes ${list} (ghostly help ${name})` : `ghostly ${name} takes a command: ${list} (ghostly help ${name})`);
+    return new CliError("usage", extra ? `Unknown command: ${name} ${shown(extra)}: ghostly ${name} takes ${list} (ghostly help ${name})` : `ghostly ${name} takes a command: ${list} (ghostly help ${name})`);
   }
   // A first word that names no command: the words after it are its arguments (`sned hi`), unless they are a command
   // word of the one it meant (`chta list`).
   const near = asked[0] === undefined ? undefined : nearest(asked[0], takes([]));
-  if (!near) return new CliError("usage", `Unknown command: ${asked[0] ?? '""'} (ghostly help)`);
+  if (!near) return new CliError("usage", `Unknown command: ${asked[0] === undefined ? '""' : shown(asked[0])} (ghostly help)`);
   return asked[1] !== undefined && takes([near]).includes(asked[1]) ? meant(asked.slice(0, 2), [near, asked[1]]) : meant([asked[0]], [near]);
 }
 
