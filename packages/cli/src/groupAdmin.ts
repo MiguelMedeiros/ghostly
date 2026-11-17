@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { MAX_AVATAR_LENGTH, MAX_AVATAR_SIDE, MAX_GROUP_CALL_SFU, NO_PICTURE_METADATA, groupCallSfu, sanitizeAvatar, stripPictureMetadata } from "@ghostly/core";
 import type { GroupView } from "@ghostly/browser/shared/types";
-import { bool, contactKeyOf, groupById, groupNameOf, groupOf, node, notInYet, ownChatOf, settingsOf, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, contactKeyOf, groupById, groupNameOf, groupOf, node, notInYet, oneOf, ownChatOf, settingsOf, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError, localFileError } from "./errors";
 import { shellWord } from "./shellWord";
 import { guardText } from "./secretGuard";
@@ -181,9 +181,9 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
   },
   async "group.hub"(ctx, params) {
     const group = joined(ctx, params);
-    const role = str(params, "role") ?? "auto";
-    if (!["pin", "exclude", "auto"].includes(role)) throw new CliError("bad_request", "role is pin, exclude or auto");
-    await node(ctx).setGroupHub({ groupId: group.id, key: member(ctx, group, params, role === "pin").key, role: role === "auto" ? null : role as "pin" | "exclude" });
+    // Left out is auto; given empty (an unset variable in a script) is refused, never read as left out and so as auto.
+    const role = oneOf(params, "role", ["pin", "exclude", "auto"] as const, "auto");
+    await node(ctx).setGroupHub({ groupId: group.id, key: member(ctx, group, params, role === "pin").key, role: role === "auto" ? null : role });
     return view(ctx, group.id, params);
   },
   async "group.rename"(ctx, params) {

@@ -240,6 +240,26 @@ describe("group administration", () => {
     expect(node.removeGroupMember).toHaveBeenCalledWith({ groupId: "g1", key: KEY });
   });
 
+  // An empty role (an unset variable in a script) was read as left out, so `role: ""` cleared the member's pin or
+  // exclusion (role null) and answered ok. Given empty it is refused; left out it is still auto.
+  it("group.hub refuses an empty role, and a role left out is still auto", async () => {
+    const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1o";
+    const crew = { id: "g1", name: "Crew", members: [{ key: "595m389h77", me: true }, { key: KEY, nick: "Bob", me: false }] } as unknown as GroupView;
+    const node = { getState: () => ({ links: [], groups: [crew], settings: {}, transport: {} }) as unknown as EngineState, groupView: groupViewOf, getSettings: () => ({}), setGroupHub: vi.fn() };
+    const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
+    for (const role of ["", "PIN", "none"]) {
+      await expect(callApi(ctx, "group.hub", { group: "Crew", member: KEY, role }), JSON.stringify(role)).rejects.toMatchObject({ code: "bad_request", message: "role must be one of pin, exclude, auto" });
+    }
+    expect(node.setGroupHub).not.toHaveBeenCalled();
+    for (const [role, sent] of [["pin", "pin"], ["exclude", "exclude"], ["auto", null]] as const) {
+      await callApi(ctx, "group.hub", { group: "Crew", member: KEY, role });
+      expect(node.setGroupHub).toHaveBeenLastCalledWith({ groupId: "g1", key: KEY, role: sent });
+    }
+    node.setGroupHub.mockClear();
+    await callApi(ctx, "group.hub", { group: "Crew", member: KEY });
+    expect(node.setGroupHub).toHaveBeenCalledWith({ groupId: "g1", key: KEY, role: null });
+  });
+
   it("a member's whole key is that member, whatever another member calls itself", () => {
     const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1o", OTHER = "o".repeat(52);
     const named = { name: "G", members: [{ key: "me", me: true }, { key: KEY, nick: "Bob", me: false }, { key: OTHER, nick: KEY, me: false }] } as unknown as GroupView;
