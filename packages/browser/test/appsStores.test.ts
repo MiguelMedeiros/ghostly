@@ -610,4 +610,25 @@ describe("stores", () => {
     await expect(store.preview({ store: keyOf(STORE_KEY), ref: v1.ref })).rejects.toThrow(/^host/);
     expect(net.fetch).not.toHaveBeenCalled();
   });
+
+  it("a listing none of whose URLs read says the host's own trouble over another URL's refusal: trying again may read it", async () => {
+    const v1 = await bundle(), v2 = await bundle({ sequence: 2 });
+    const BUSY = "https://raw.githubusercontent.com/ana/chess/main/app.ghostlyapp";
+    const OTHER = "https://raw.githubusercontent.com/ana/chess-copy/HEAD/app.ghostlyapp";
+    const answer = net.fetch.getMockImplementation()!;
+    let status = 503;
+    net.fetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) =>
+      String(input) === BUSY ? new Response("busy", { status }) : answer(input, init));
+    const store = apps(net);
+    // The busy URL first, then one that is not there (404), or holds a version the store does not list.
+    for (const [other, held] of [[OTHER, null], [OTHER, v2.bytes]] as const) {
+      if (held) net.put(other, held);
+      await net.putStore(await storeFiles({ sequence: held ? 3 : 2, apps: [listing(v1, [BUSY, other])] }));
+      if (held) await store.refreshStores(); else await store.addStore({ url: STORE_URL });
+      for (status of [503, 429]) {
+        await expect(store.preview({ store: keyOf(STORE_KEY), ref: v1.ref }), `${status}, then ${held ? "another version" : "404"}`)
+          .rejects.toThrow(`status: The host answered ${status}`);
+      }
+    }
+  });
 });

@@ -1,4 +1,4 @@
-import { AWAITING_PEER_MS, DHT_PACKET_BUDGET, DHT_TEXT_BYTES, decodeGroupEntryLink, inviteLink, LIMITS, MENTION_EVERYONE, normalizeRelayUrl, ownInviteRefusal, relayUrlProblem, replySnippet, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type TypingKind } from "@ghostly/core";
+import { AWAITING_PEER_MS, DHT_PACKET_BUDGET, decodeCommunityLink, decodeGroupEntryLink, inviteLink, LIMITS, MENTION_EVERYONE, normalizeRelayUrl, ownInviteRefusal, relayUrlProblem, replySnippet, TYPING_KINDS, type GroupMention, type TypingKind } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
 import { DEFAULT_HYPERDHT_RELAY } from "@ghostly/browser/shared/hyperdhtRelay";
@@ -10,7 +10,7 @@ import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PA
 import { asCliError, CliError } from "./errors";
 import { shellWord } from "./shellWord";
 import {
-  bool, chatOf, chatOrGroup, dhtOnly, findChat, findChatOrGroup, findGroup, groupById, groupNameOf, groupOf, groupPrefixed, inviteTaken, keptForJoin, list, messageOf, noMessage, nobodyJoined, node, num, oneOf, oneShotWaits, settingsOf, shownName, sinceSeq, somebodyJoined, state, str, transportOffered, waitForState,
+  bool, chatOf, chatOrGroup, dhtOnly, findChat, findChatOrGroup, findGroup, groupById, groupCalled, groupNameOf, groupOf, groupPrefixed, inviteTaken, keptForJoin, list, messageOf, noMessage, nobodyJoined, node, notInYet, notInYetError, num, oneOf, oneShotWaits, settingsOf, shownName, sinceSeq, somebodyJoined, state, str, transportOffered, waitForState,
   type ApiContext, type CallScope, type Method, type Params, type RefPlace,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
@@ -19,7 +19,7 @@ import { ended, foldsAnyway, goesOn, nobodyElseIn, outOf, purgeMessage, waitForC
 import { STATUS_CARD_METHODS, secretIn } from "./statusCards";
 import { BUTTON_METHODS, buttonsCard, pressable } from "./buttons";
 import { forgetHold, HOLD_MAX_MINUTES, holdChat, holdEnds, holdOf, releaseHold } from "./holds";
-import { endTyping, keepOneShot, keepTyping, sayTyping } from "./typing";
+import { endTyping, keepOneShot, keepTyping, ONE_SHOT_LIVE_GRACE_MS, sayTyping, typingStatus } from "./typing";
 import { GROUP_ADMIN_METHODS, moreThanOneMember, noMember, withUrl } from "./groupAdmin";
 import { withStoredIds } from "./turnRefs";
 import { IDENTITY_METHODS } from "./identities";
@@ -32,7 +32,7 @@ import { APP_CHAT_METHODS } from "./appChat";
 import { WALLET_METHODS } from "./wallets";
 import { checkOwnStatus, statusJson } from "./ownStatus";
 import { TRANSPORT_NAMES } from "./words";
-import { chatState } from "./waitNotice";
+import { chatState, dhtOnlyNote, heldWords, pinWaitsNote, type DhtOnly } from "./waitNotice";
 import { chatDetailsJson, chatJson, chatMessageJson, groupJson, groupMessageJson, groupPayTwins, isLive, messageJson, type MessageJson } from "./views";
 
 /**
@@ -240,6 +240,15 @@ const BAD_VALUE = /^Cannot (destructure|read properties of (undefined|null))|is 
 const ONE_SHOT_TYPING = "Typing is said on a live session only, and a one-shot has none: it reached nobody. Keep the profile online (`ghostly daemon --detach`), or give --for to wait until it is live";
 // A stop takes no --for, so only the daemon half holds.
 const ONE_SHOT_TYPING_STOP = "A stop is said on a live session only, and a one-shot has none: it reached nobody. Keep the profile online (`ghostly daemon --detach`)";
+// A one-shot's --for that ended with nobody to see it (`keepOneShot`): it answered `typing: true`, an `until` to come, no note.
+const ONE_SHOT_TYPING_UNSEEN = `Typing is said on a live session only, and none came up in time (a one-shot waits up to ${ONE_SHOT_LIVE_GRACE_MS / 1000} s for one): it reached nobody, and it is off. Keep the profile online (\`ghostly daemon --detach\`) so the chat is live when you say it`;
+
+/** A one-shot typing's `note`: without `--for` it reached nobody; with it, only when nobody was live to see it. */
+function oneShotTypingNote(ctx: ApiContext, typing: boolean, kept: boolean, seen: boolean): { note: string } | undefined {
+  if (ctx.mode !== "one-shot") return undefined;
+  if (!kept) return { note: typing ? ONE_SHOT_TYPING : ONE_SHOT_TYPING_STOP };
+  return seen ? undefined : { note: ONE_SHOT_TYPING_UNSEEN };
+}
 
 // ---------- methods ----------
 
@@ -321,36 +330,27 @@ async function letIn(ctx: ApiContext, groupId: string, link: string, held: Group
 }
 
 /**
- * Why a text that waits will not go by itself, or undefined: longer than the 256 bytes the DHT carries, in a chat on
- * the DHT only (this side's choice, the contact's, or both). It goes once the chat is live, which neither side's app
- * tries while either keeps it on the DHT only, so it is said with what ends that, or to shorten it. This side's DHT
- * only that is a hold (`chat disconnect --hold`) ends by itself: said with when, and the command that ends it now
- * (read from `ctx`'s profile; without it, as a DHT only chosen).
+ * Why a text that waits will not go by itself, or undefined (waitNotice.ts `dhtOnlyNote`). This side's DHT only that is
+ * a hold (`chat disconnect --hold`) is read from `ctx`'s profile; without it, as a DHT only chosen.
  */
 function dhtOnlyWait(link: LinkView, text: string, ref: string, ctx?: ApiContext): string | undefined {
-  const mine = link.deliveryMode === "dht", theirs = link.dhtDelivery?.peerMode === "dht";
-  if ((!mine && !theirs) || new TextEncoder().encode(text.trim()).length <= DHT_TEXT_BYTES) return undefined;
-  const held = mine && ctx ? holdEnds(ctx, link.id) : null, chosen = mine && held === null;
-  const switchBack = `ghostly chat transport ${shellWord(ref, "<chat>")} auto`;
-  const who = chosen && theirs ? `you and the contact keep this chat on the DHT only: it goes once both choose a live transport (${switchBack}), or shorten it`
-    : theirs ? "the contact keeps this chat on the DHT only: it goes once they choose a live transport, or shorten it"
-    : held !== null ? heldWords(held, ref, "it goes", ctx?.mode === "one-shot")
-    : `this chat is on the DHT only: it goes once you choose a live transport (${switchBack}), or shorten it`;
-  return `Longer than the ${DHT_TEXT_BYTES} bytes the DHT carries, and ${who}`;
+  return dhtOnlyNote(dhtOnlyOf(link, ctx), text, ref);
+}
+
+/** Where `link` stands on the DHT only (waitNotice.ts `DhtOnly`): this side's choice or hold, read from `ctx`'s profile. */
+function dhtOnlyOf(link: LinkView, ctx?: ApiContext): DhtOnly {
+  const mine = link.deliveryMode === "dht";
+  return { mine, theirs: link.dhtDelivery?.peerMode === "dht", heldUntil: mine && ctx ? holdEnds(ctx, link.id) : null, oneShot: ctx?.mode === "one-shot" };
 }
 
 /**
- * A chat this side holds on the DHT only (`chat disconnect --hold`) until `until`: what waits for its end (`act`)
- * goes then by itself, or at once with `chat connect`, which ends the hold. A hold whose time is up and that is still
- * ending (`holdEnds`) says so. The time is this machine's: the hour and minute, with the day when it is not today.
+ * Why my pin (or unpin) in a 1:1 chat does not go by itself, or undefined (waitNotice.ts `pinWaitsNote`): the chat is
+ * on the DHT only, and a pin goes on a live session only. Read as the chat is now: the contact's choice may have come
+ * since, or the chat left the DHT only. A chat nobody joined says that instead (`keptForJoin`, `goesOn`).
  */
-function heldWords(until: number, ref: string, act: string, oneShot = false): string {
-  const connect = `ghostly chat connect ${shellWord(ref, "<chat>")}`;
-  const online = oneShot ? " while this profile is online (ghostly daemon --detach)" : "";
-  if (until <= Date.now()) return `this chat's hold on the DHT only is ending: ${act} once the chat is live${online}, or now with ${connect}`;
-  const at = new Date(until), two = (n: number) => String(n).padStart(2, "0");
-  const day = at.toDateString() === new Date().toDateString() ? "" : `${at.getFullYear()}-${two(at.getMonth() + 1)}-${two(at.getDate())} `;
-  return `this chat is held on the DHT only until ${day}${two(at.getHours())}:${two(at.getMinutes())}: ${act} then${online}, or now with ${connect}`;
+function pinWaitsLive(ctx: ApiContext, linkId: string, ref: string, remove: boolean): string | undefined {
+  const link = state(ctx).links.find((l) => l.id === linkId);
+  return link && !nobodyJoined(link) ? pinWaitsNote(dhtOnlyOf(link, ctx), ref, remove) : undefined;
 }
 
 /**
@@ -612,12 +612,14 @@ const METHODS: Record<string, Method> = {
     const until = seconds ? Date.now() + seconds * 1000 : null;
     const kept = seconds ? keepTyping(ctx, { linkId: link.id }, seconds * 1000, word) : null;
     const open = (s: EngineState) => s.links.find((l) => l.id === link.id)?.dataLink === "open";
-    if (kept && ctx.mode === "one-shot") await keepOneShot(ctx, { linkId: link.id }, kept, open);
+    const seen = kept && ctx.mode === "one-shot" ? await keepOneShot(ctx, { linkId: link.id }, kept, open) : true;
+    // Ended with nobody to see it: off, as a stop answers.
+    const on = typing && seen;
     const now = state(ctx);
     return {
-      chat: link.id, typing, ...(typing ? { kind } : {}), ...(status ? { status } : {}),
-      live: open(now), sendTyping: now.settings.sendTyping !== false, ...(until ? { until } : {}),
-      ...(!kept && ctx.mode === "one-shot" && { note: typing ? ONE_SHOT_TYPING : ONE_SHOT_TYPING_STOP }),
+      chat: link.id, typing: on, ...(on ? { kind } : {}), ...(on && status ? { status } : {}),
+      live: open(now), sendTyping: now.settings.sendTyping !== false, ...(on && until ? { until } : {}),
+      ...oneShotTypingNote(ctx, typing, !!kept, seen),
     };
   },
   /**
@@ -631,7 +633,7 @@ const METHODS: Record<string, Method> = {
     const before = Math.max(...node(ctx).chatUnconfirmed({ linkId: link.id }).reactions);
     const result = await react(ctx, link.id, params, { group: false, ref: str(params, "chat", true) });
     const pending = (left: { reactions: number[] }) => left.reactions.some((n) => n > before);
-    if (wait === "confirmed") await waitForConfirmed(ctx, link.id, "reaction", pending, ms);
+    if (wait === "confirmed") await waitForConfirmed(ctx, link.id, "reaction", pending, ms, { messageId: result.messageId, emoji: result.emoji });
     const confirmed = !pending(node(ctx).chatUnconfirmed({ linkId: link.id }));
     return { chat: link.id, ...result, confirmed, ...(!confirmed && keptForJoin(ctx, link.id, "the reaction")) };
   },
@@ -644,7 +646,10 @@ const METHODS: Record<string, Method> = {
    */
   async "chat.pin"(ctx, params) {
     const target = chatOrGroup(ctx, str(params, "chat", true));
-    const remove = bool(params, "remove"), messageId = remove ? str(params, "message") : str(params, "message", true);
+    const remove = bool(params, "remove"), messageId = remove ? undefined : str(params, "message", true);
+    // --remove names no message (the chat has one pin): one given beside it was not read, so a bot that meant "unpin
+    // X" unpinned whatever was pinned, X or not.
+    if (remove && str(params, "message") !== undefined) throw new CliError("bad_request", "remove names no message: it unpins whatever is pinned (give no message)");
     if (target.group && params.wait === "confirmed") throw new CliError("bad_request", "A group has no receipts: wait confirmed is for a 1:1 chat (wait sent waits until a member's edge took it)");
     if (!target.group && params.wait === "sent") throw new CliError("bad_request", "wait sent is for a group: a 1:1 chat's pin waits with wait confirmed");
     const { wait, ms } = target.group
@@ -653,7 +658,11 @@ const METHODS: Record<string, Method> = {
     const result = await node(ctx).pinMessage({ linkId: target.linkId, ...(messageId && { messageId }), remove });
     const gone = result.error && messageId ? notHere(result.error, messageId, { group: target.group, ref: str(params, "chat", true) }) : undefined;
     if (gone) throw gone;
-    if (result.error) throw new CliError(result.refused || /Only the admin/.test(result.error) ? "refused" : /not in this (?:chat|group)|Nothing is pinned/.test(result.error) ? "not_found" : "bad_request", result.error);
+    if (result.error) {
+      const error = new CliError(result.refused || /Only the admin/.test(result.error) ? "refused" : /not in this (?:chat|group)|Nothing is pinned/.test(result.error) ? "not_found" : "bad_request", result.error);
+      const group = target.group ? groupById(ctx, target.id) : undefined;
+      throw group ? notInYetError(group, str(params, "chat", true), error) : error;
+    }
     if (target.group) {
       // A one-shot leaves once its command is done, and its groups with it: what no edge took yet went nowhere.
       const n = result.n, pinned = remove ? null : messageId;
@@ -664,9 +673,12 @@ const METHODS: Record<string, Method> = {
     // The chat's one pin of mine waiting for the contact is this one (none: the contact confirmed it already).
     const mine = node(ctx).chatUnconfirmed({ linkId: target.linkId }).pin;
     const pending = (left: { pin: number | null }) => mine !== null && left.pin === mine;
-    if (wait === "confirmed") await waitForConfirmed(ctx, target.linkId, "pin", pending, ms);
+    const ref = str(params, "chat", true), pinned = remove ? null : messageId;
+    const waitsLive = () => pinWaitsLive(ctx, target.linkId, ref, remove);
+    if (wait === "confirmed") await waitForConfirmed(ctx, target.linkId, "pin", pending, ms, { messageId: pinned, removed: remove }, waitsLive);
     const confirmed = !pending(node(ctx).chatUnconfirmed({ linkId: target.linkId }));
-    return { chat: target.id, messageId: remove ? null : messageId, removed: remove, confirmed, ...(!confirmed && keptForJoin(ctx, target.linkId, remove ? "the unpin" : "the pin")) };
+    const note = confirmed ? undefined : keptForJoin(ctx, target.linkId, remove ? "the unpin" : "the pin").note ?? waitsLive();
+    return { chat: target.id, messageId: pinned, removed: remove, confirmed, ...(note && { note }) };
   },
   /** Saved messages: a mark on a message of a chat or a group, kept for this profile on this device; nothing is sent. */
   async "saved.add"(ctx, params) {
@@ -970,7 +982,7 @@ const METHODS: Record<string, Method> = {
     } catch (error) {
       // Not a link to a group at all: the caller's input, as `invite join` answers a word that is no invite.
       if (error instanceof Error && error.message === "This is not a link to a group") throw new CliError("bad_request", error.message);
-      throw error;
+      throw joinRefused(link, error);
     }
     return letIn(ctx, groupId, link, before.find((g) => g.id === groupId));
   },
@@ -1012,7 +1024,7 @@ const METHODS: Record<string, Method> = {
     // Not a member (removed, say): refused, and nothing was sent. Anything else by what a bot can do about it.
     // A `--reply` the group lacks says "group": the engine's line says "chat".
     if (result.error) throw (replyTo && notHere(result.error, replyTo, { group: true, ref: str(params, "group", true) }))
-      || (result.refused ? new CliError("refused", result.error) : groupSendRefused(result.error));
+      || notInYetError(group, str(params, "group", true), result.refused ? new CliError("refused", result.error) : groupSendRefused(result.error));
     const messageId = result.messageId ?? null;
     // `edges`: how many took it so far (none yet is not an error: it goes when one opens). `sent`: whether one did.
     // Before 2026-10-02 `sent` was always true, also for a message no edge had taken.
@@ -1062,7 +1074,8 @@ const METHODS: Record<string, Method> = {
     const group = groupOf(ctx, params, "react <chat> <message> <emoji>");
     const wait = oneOf(params, "wait", ["none", "sent"] as const, ctx.mode === "one-shot" ? "sent" : "none");
     const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
-    const { n, ...said } = await react(ctx, `group:${group.id}`, params, { group: true, ref: str(params, "group", true) });
+    const ref = str(params, "group", true);
+    const { n, ...said } = await react(ctx, `group:${group.id}`, params, { group: true, ref }).catch((error) => { throw error instanceof CliError ? notInYetError(group, ref, error) : error; });
     const edges = !n ? 0 : wait === "sent" ? await waitForGroupFrame(ctx, group.id, said.messageId, { reaction: n }, ms)
       : node(ctx).groupTaken({ groupId: group.id, messageId: said.messageId, reaction: n });
     return { group: group.id, ...said, sent: edges > 0, edges };
@@ -1079,25 +1092,27 @@ const METHODS: Record<string, Method> = {
     const word = { ...(kind !== "typing" ? { kind } : {}), ...(status ? { status } : {}) };
     const seconds = params.for === undefined ? 0 : num(params, "for", 0, { min: 1, max: 600 });
     if (!typing && seconds) throw new CliError("bad_request", "for keeps typing on: not with stop");
-    // Removed or gone, as `group send` says it: `refused`, with the group's reason.
-    if (typing && group.status !== "active") throw new CliError("refused", group.statusReason ?? "You are not in this group");
+    // Removed or gone, as `group send` says it: `refused`, with the group's reason; not in yet, with the next step.
+    if (typing && group.status !== "active") throw new CliError("refused", group.statusReason ?? notInYet(group, str(params, "group", true)) ?? "You are not in this group");
     const target = { groupId: group.id };
     endTyping(ctx, target, false);
     sayTyping(ctx, target, typing, word);
     const until = seconds ? Date.now() + seconds * 1000 : null;
     const kept = seconds ? keepTyping(ctx, target, seconds * 1000, word) : null;
     const reached = (now: GroupView | undefined) => (now ?? group).members.filter((m) => !m.me && m.online && !m.viaHub).length;
-    if (kept && ctx.mode === "one-shot") await keepOneShot(ctx, target, kept, (s) => reached(s.groups.find((g) => g.id === group.id)) > 0);
+    const seen = kept && ctx.mode === "one-shot" ? await keepOneShot(ctx, target, kept, (s) => reached(s.groups.find((g) => g.id === group.id)) > 0) : true;
+    const on = typing && seen;
     return {
-      group: group.id, typing, ...(typing ? { kind } : {}), ...(status ? { status } : {}),
-      reached: reached(groupById(ctx, group.id)), sendTyping: settingsOf(ctx).sendTyping !== false, ...(until ? { until } : {}),
-      ...(!kept && ctx.mode === "one-shot" && { note: typing ? ONE_SHOT_TYPING : ONE_SHOT_TYPING_STOP }),
+      group: group.id, typing: on, ...(on ? { kind } : {}), ...(on && status ? { status } : {}),
+      reached: reached(groupById(ctx, group.id)), sendTyping: settingsOf(ctx).sendTyping !== false, ...(on && until ? { until } : {}),
+      ...oneShotTypingNote(ctx, typing, !!kept, seen),
     };
   },
   async "group.leave"(ctx, params) {
     const group = groupOf(ctx, params);
     if (!bool(params, "yes")) throw new CliError("confirm", "Leaving a group deletes its history and files on this device; pass --yes (yes: true over the socket) to go on");
-    const { admin } = await node(ctx).leaveGroup({ groupId: group.id });
+    const ref = str(params, "group", true);
+    const { admin } = await node(ctx).leaveGroup({ groupId: group.id }).catch((error) => { throw leaveRefused(group, ref, error); });
     // The member who became the admin, named from the roster read before leaving: the group is gone from the state now.
     const next = admin ? group.members.find((m) => m.key === admin) : undefined;
     return { left: group.id, ...(admin ? { admin: { key: admin, name: next?.nick ?? null } } : {}) };
@@ -1275,18 +1290,15 @@ async function react(ctx: ApiContext, linkId: string, params: Params, place: Ref
 
 /**
  * What `typing` says: a kind, and a status a bot writes. The contact's app would cut a long status and drop one with
- * a link; here that is an error instead, so the bot learns what the contact will (not) see.
+ * a link; here that is an error instead, so the bot learns what the contact will (not) see. A blank status is none.
+ * The command checks both first (commands/shared.ts `typingWords`): these words are the socket's.
  */
 function typingWord(params: Params, typing: boolean): { kind: TypingKind; status?: string } {
   const kind = oneOf(params, "kind", TYPING_KINDS, "typing");
   const raw = str(params, "status");
-  if (!typing && (params.kind !== undefined || raw !== undefined)) throw new CliError("bad_request", "kind and status go with a start, not with stop");
-  if (raw === undefined) return { kind };
-  const oneLine = raw.replace(/\s+/g, " ").trim();
-  if ([...oneLine].length > TYPING_STATUS_MAX) throw new CliError("bad_request", `status: at most ${TYPING_STATUS_MAX} characters`);
-  const status = sanitizeTypingStatus(oneLine);
-  if (!status) throw new CliError("bad_request", "status: plain text, with no link or markup");
-  return { kind, status };
+  if (!typing && (params.kind !== undefined || raw?.trim())) throw new CliError("bad_request", "kind and status go with a start, not with stop");
+  const status = typingStatus(raw, "status", "bad_request");
+  return status ? { kind, status } : { kind };
 }
 
 /**
@@ -1299,6 +1311,40 @@ export function groupSendRefused(error: string): CliError {
   if (/not in this chat|cannot be replied to/.test(error)) return new CliError("not_found", error);
   if (/^You (were removed from|left|are no longer in) this group$|Membership changes are halted/.test(error)) return new CliError("refused", error);
   return new CliError("unavailable", error);
+}
+
+/** The engine's admin who may not leave: the app's words say "make someone the admin", which names no command here. */
+const ADMIN_ALONE = "You are the admin and nobody else in the group is online to take over. Try again when a member is, or make someone the admin first.";
+
+/**
+ * `group leave` the engine refused, said with the CLI's next step: an invitation not joined yet answered "Group not
+ * found" of a group `group show` lists (its way out is `group decline`), and an admin alone online "make someone the
+ * admin", the app's words. The code stays the engine's.
+ */
+function leaveRefused(group: GroupView, ref: string, error: unknown): unknown {
+  if (!(error instanceof Error)) return error;
+  const shown = shellWord(ref, group.id);
+  if (error.message === ADMIN_ALONE) return new CliError("engine", `You are the admin and nobody else in ${groupCalled(group)} is online to take over: try again when a member is, or make one the admin first (ghostly group admin ${shown} <member key>)`);
+  const yet = error.message === "Group not found" ? notInYet(group, ref, true) : undefined;
+  return yet ? new CliError("engine", yet) : error;
+}
+
+/**
+ * `group join` the engine refused for a group held here under the link's id, in the app's words ("Delete it from this
+ * device", its menu item), said with the CLI's command. The code stays the engine's. "Answer it first" comes only for
+ * an invitation taken back (a live one is kept and the link goes on beside it), which `group accept` refuses: its way
+ * out is `group decline`.
+ */
+function joinRefused(link: string, error: unknown): unknown {
+  if (!(error instanceof Error)) return error;
+  const id = (decodeCommunityLink(link) ?? decodeGroupEntryLink(link))?.g ?? "<group>";
+  if (error.message === "You are out of this group and its history is still here. Delete it from this device to join with a link.") {
+    return new CliError("engine", `You are out of this group and its history is still here: ghostly group forget ${id} --yes deletes it from this device, then join with the link`);
+  }
+  if (error.message === "You have an invitation to this group. Answer it first.") {
+    return new CliError("engine", `Its invitation to this group was taken back: ghostly group decline ${id} drops it, then join with the link`);
+  }
+  return error;
 }
 
 /**

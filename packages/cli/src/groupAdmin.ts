@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { MAX_AVATAR_LENGTH, MAX_AVATAR_SIDE, MAX_GROUP_CALL_SFU, NO_PICTURE_METADATA, groupCallSfu, sanitizeAvatar, stripPictureMetadata } from "@ghostly/core";
 import type { GroupView } from "@ghostly/browser/shared/types";
-import { bool, contactKeyOf, groupById, groupNameOf, groupOf, node, ownChatOf, settingsOf, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, contactKeyOf, groupById, groupNameOf, groupOf, node, notInYet, ownChatOf, settingsOf, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError, localFileError } from "./errors";
 import { shellWord } from "./shellWord";
 import { guardText } from "./secretGuard";
@@ -133,11 +133,9 @@ function callNode(raw: string, ref: string, groupId: string): string {
  */
 function joined(ctx: ApiContext, params: Params, twin?: string): GroupView {
   const group = groupOf(ctx, params, twin);
-  if (group.status || !group.invitation) return group;
-  const shown = shellWord(str(params, "group", true), group.id);
-  throw new CliError("refused", group.invitation.accepted
-    ? `You are not in ${group.name} yet: you accepted its invitation, and its admin has not let you in`
-    : `You are not in ${group.name} yet: ghostly group accept ${shown} joins it`);
+  const yet = notInYet(group, str(params, "group", true));
+  if (yet) throw new CliError("refused", yet);
+  return group;
 }
 
 /** The member `params.member` names in `group`, this profile's own name said to be it; by its key only for a grant. */

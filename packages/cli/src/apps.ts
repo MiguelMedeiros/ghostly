@@ -7,7 +7,7 @@ import {
   readAppRevocations, readAppStore, repeatedJsonKey, seedSigner, setAppSignatureFastPath, signAppObject, signAppRevocation, signAppStore, toBase64Url, toZ32, type AppBundle,
   type AppManifest, type AppRevokeStatement, type AppStoreIndex, type AppStoreReading, type SignedAppRevocation, type Signer,
 } from "@ghostly/core";
-import { APP_FETCH_HOSTS, isAppFetchUrl } from "@ghostly/browser/engine/appFetch";
+import { APP_FETCH_HOSTS, APP_FETCH_LIMITS, isAppFetchUrl } from "@ghostly/browser/engine/appFetch";
 import { templateManifest, templatePage, templateReadme } from "./appTemplate";
 import { CliError, localFileError } from "./errors";
 import { jsonOut } from "./jsonOut";
@@ -675,6 +675,11 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
   const { indexBytes, sigBytes } = await signAppStore(index as unknown as AppStoreIndex, key.signer, checked);
   const read = readAppStore(indexBytes, sigBytes, now, key.key, checked);
   if (!read.ok) throw refused(`${indexPath} would be refused by a client`, read);
+  // The format takes 16 MiB, but a client reads at most `storeIndexBytes` of an index (4 MiB in phase 1): past it, every
+  // one refuses the whole store as too large.
+  if (indexBytes.length > APP_FETCH_LIMITS.storeIndexBytes) {
+    throw refused(`${indexPath} would be refused by a client`, { reason: "too-large", detail: `${indexBytes.length} bytes signed, a client reads at most ${APP_FETCH_LIMITS.storeIndexBytes} (4 MiB)` });
+  }
   const store = read.store;
   // Unless the signature there is this one's bytes (Ed25519 is deterministic): a run stopped between the signature's
   // rename and the index's, signed again. Not the index's bytes: a held index edited in place is this one's bytes too,
