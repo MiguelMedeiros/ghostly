@@ -35,9 +35,9 @@ test("DHT-only starts from an invite without streams, preserves drafts and recei
   const text="DHT íntegro 👻";
   await say(a,text);await expect(chat(b).getByText(text,{exact:true})).toBeVisible();await expect(received(a)).toHaveCount(1);
   expect([...relay.packets.values()].every(packet=>!packet.includes(Buffer.from(text)))).toBe(true);
-  // Past the 256 bytes the DHT carries the counter turns amber, and the text waits for a live connection with a cancel (WISP 400).
+  // Past the about 248 bytes the DHT packet carries the counter turns amber; past 256 the text waits for a live connection with a cancel (WISP 400).
   const large="👻".repeat(65); await b.page.getByPlaceholder("Message…").fill(large);
-  await expect(b.page.getByTestId("dht-byte-count")).toHaveText("260 / 256 B");
+  await expect(b.page.getByTestId("dht-byte-count")).toHaveText("260 / 248 B");
   await b.page.getByRole("button",{name:"Send message",exact:true}).click();
   const waiting=chat(b).locator(".group").filter({hasText:large});
   await expect(delivered(waiting,"waiting")).toHaveAccessibleName("Waiting for your contact to be online");await expect(b.page.getByPlaceholder("Message…")).toHaveValue("");

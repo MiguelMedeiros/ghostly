@@ -60,10 +60,11 @@ interface MessageInputProps {
   maxLength?: number;
   maxBytes?: number;
   /**
-   * What the DHT carries while the chat is not live: past it the counter turns amber and the text is still
-   * sent, waiting for a live connection (or held) instead of being refused.
+   * What the DHT carries while the chat is not live: past it the counter turns amber, and its title says what becomes
+   * of a text that long (`softTitle`, by its bytes; else that it waits for a live connection).
    */
   softBytes?: number;
+  softTitle?: (bytes: number) => string;
   /**
    * The most UTF-8 bytes a message may have (the engine's 16 KiB): the counter near the end counts bytes then, not
    * characters, and a longer text stays in the field with why. An accented letter takes two, most CJK three, an emoji four.
@@ -167,6 +168,7 @@ export function MessageInput({
   maxLength = DEFAULT_MAX,
   maxBytes,
   softBytes,
+  softTitle,
   textBytes,
   onSendFile,
   payments,
@@ -1159,7 +1161,7 @@ export function MessageInput({
               className="composer-textarea"
             />
             {softBytes && !maxBytes && !nearHard && bytes > softBytes - 60 && (
-              <span data-testid="dht-byte-count" title={overSoft ? t("composer.overSoft", { bytes: softBytes }) : undefined}
+              <span data-testid="dht-byte-count" title={overSoft ? softTitle?.(bytes) ?? t("composer.overSoft", { bytes: softBytes }) : undefined}
                 className={`absolute end-2.5 bottom-1 text-[10px] ${overSoft ? "text-warn-ink" : "text-text-muted"}`}>
                 {bytes} / {softBytes} B
               </span>
