@@ -87,6 +87,19 @@ describe.skipIf(process.platform === "win32")("sockets outside the profile", () 
     expect(refusal?.message).toMatch(new RegExp(`rm -r ${open}.*chmod 700 ${open}`));
   });
 
+  it("a folder another account made is not met with `rm -r` or `chmod`, which /tmp's sticky bit refuses: XDG_RUNTIME_DIR or a shorter --home", () => {
+    const theirs = join(root, "theirs");
+    mkdirSync(theirs, { mode: 0o755 });
+    vi.spyOn(process, "getuid").mockReturnValue(process.getuid!() + 1);
+    try {
+      const refusal = (() => { try { privateFolder(theirs, "the daemon will not put its socket there"); } catch (error) { return asCliError(error); } })();
+      expect(refusal?.code).toBe("refused");
+      expect(refusal?.message).toMatch(/another account made it/);
+      expect(refusal?.message).toMatch(/XDG_RUNTIME_DIR.*--home/);
+      expect(refusal?.message).not.toMatch(/rm -r|chmod/);
+    } finally { vi.restoreAllMocks(); }
+  });
+
   it("a client connects only to a socket of this user's", async () => {
     const file = join(root, "not-a-socket");
     writeFileSync(file, "");
