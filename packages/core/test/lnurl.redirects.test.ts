@@ -53,6 +53,8 @@ describe("a redirect of an LNURL service", () => {
       ["http://192.168.1.1/cgi-bin/reboot", /HTTPS/], ["http://localhost:8080/x", /HTTPS/], ["http://abcdefghijklmnop.onion/x", /HTTPS/],
       ["https://192.168.1.1/cgi-bin/reboot", /local address/], ["https://127.0.0.1:8443/x", /local address/], ["https://[::1]/x", /local address/],
       ["https://router/x", /local address/], ["https://nas.local/x", /local address/], ["https://[fd00::1]/x", /local address/], ["https://10.0.0.7/x", /local address/],
+      ["https://[2002:7f00:1::]/x", /local address/], ["https://[2001:0:4136:e378:8000:63bf:80ff:fffe]/x", /local address/],
+      ["https://[2::1]/x", /local address/], ["https://[20::1]/x", /local address/], ["https://localhost../x", /local address/],
       ["https://u:p@pay.example.net/y", /credentials/], ["ftp://pay.example.net/y", /HTTPS/], ["https://", /invalid address/],
       [`https://pay.example.net/${"y".repeat(LNURL_LIMITS.maxUrlLength)}`, /too long/],
     ] as const) {
