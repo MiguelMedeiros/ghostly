@@ -541,7 +541,7 @@ function interruptible(s: Session): { run<T>(work: (s: Session) => Promise<T>): 
     const given = (params ?? {}) as Record<string, unknown>;
     const entry = { method, notice: waitNotice(method, given, s.mode) };
     pending.add(entry);
-    // A long text's chat, read beside the send: on the DHT only, the notice and Ctrl-C say why it waits, not that it goes.
+    // A long text's or a file's chat, read beside the send: on the DHT only, the notice and Ctrl-C say why it waits, not that it goes.
     const chat = entry.notice && longTextChat(method, given);
     if (chat) void s.call("chat.get", { chat }).then((view) => { if (entry.notice) entry.notice = dhtOnlyNotice(entry.notice, given, view as Record<string, unknown>, s.mode); }, () => {});
     const timer = entry.notice && process.stderr.isTTY ? setTimeout(() => process.stderr.write(`ghostly: ${entry.notice!.waiting}\n`), WAIT_NOTICE_MS) : undefined;

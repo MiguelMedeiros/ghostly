@@ -10,13 +10,14 @@ import { replyRef } from "@ghostly/browser/shared/replies";
 import type { EngineState, FileTransferView, GroupView, MessageFile, StoredMessage } from "@ghostly/browser/shared/types";
 import { groupFileId, groupOfFile } from "@ghostly/browser/engine/groupFiles";
 import { childEnv } from "./childEnv";
-import { bool, chatOf, findChatOrGroup, keptForJoin, list, noFile, noMessage, node, num, oneOf, oneShotWaits, sentAt, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
-import { groupSendRefused } from "./api";
+import { bool, chatOf, findChatOrGroup, keptForJoin, list, noFile, noMessage, nobodyJoined, node, num, oneOf, oneShotWaits, sentAt, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
+import { dhtOnlyOf, groupSendRefused } from "./api";
 import { CliError } from "./errors";
 import { shellWord } from "./shellWord";
 import { guardText } from "./secretGuard";
 import { endTyping } from "./typing";
 import { measureVoice } from "./voicePeaks";
+import { fileWaitsNote } from "./waitNotice";
 import { goesOn } from "./waits";
 
 /**
@@ -84,10 +85,10 @@ const megabytes = (size: number) => `${Math.round(size / 100_000) / 10} MB`;
  * Where an unfinished transfer stands, in words, for a person reading a timeout: the stage's id ("asking", "waiting")
  * stays in `details.stage` for a bot. A group's file says why it waits (`note`), as the app does.
  */
-function stageWords(transfer: FileTransferView): string {
+function stageWords(transfer: FileTransferView, dhtOnly?: string): string {
   switch (transfer.stage) {
     case "preparing": return "getting it ready to send";
-    case "waiting": return transfer.note ?? "waiting for a connection to the contact";
+    case "waiting": return transfer.note ?? dhtOnly ?? "waiting for a connection to the contact";
     case "asking": return transfer.direction === "in" ? "waiting for you to take it (file accept)" : "waiting for the contact to take it";
     case "queued": return "waiting its turn";
     case "paused": return transfer.pausedBy === "peer" ? "paused by the contact" : "paused here (file resume)";
@@ -98,11 +99,24 @@ function stageWords(transfer: FileTransferView): string {
 
 /**
  * A transfer that waits for a person's decision (`asking`), with whose: `me` (`file accept` takes it here) or `contact`
- * (theirs). A received file's `transferring` alone read as if it were moving.
+ * (theirs). A received file's `transferring` alone read as if it were moving. One that waits in a chat on the DHT only
+ * (`dhtOnly`, `fileWaitsLive`) waits for whoever keeps it there (`me` when this side does), said in its `note`.
  */
-function withWaitingFor(transfer: FileTransferView | undefined): (FileTransferView & { waitingFor?: "me" | "contact" }) | undefined {
-  if (transfer?.state !== "transferring" || transfer.stage !== "asking") return transfer;
+function withWaitingFor<T extends FileTransferView>(transfer: T | undefined, dhtOnly?: { note: string; mine: boolean }): (T & { waitingFor?: "me" | "contact" }) | undefined {
+  if (transfer?.state !== "transferring") return transfer;
+  if (transfer.stage === "waiting" && dhtOnly) return { ...transfer, waitingFor: dhtOnly.mine ? "me" : "contact", note: transfer.note ?? dhtOnly.note };
+  if (transfer.stage !== "asking") return transfer;
   return { ...transfer, waitingFor: transfer.direction === "in" ? "me" : "contact" };
+}
+
+/**
+ * Why a file in a 1:1 chat waits however long a command waits for it (waitNotice.ts `fileWaitsNote`), or undefined: the
+ * chat is on the DHT only, and a file goes on a live session only. Read as the chat is now. `ref`: how the commands it
+ * names call the chat. A chat nobody joined says that instead (`keptForJoin`).
+ */
+function fileWaitsLive(ctx: ApiContext, linkId: string, ref: string): string | undefined {
+  const link = state(ctx).links.find((l) => l.id === linkId);
+  return link && !nobodyJoined(link) ? fileWaitsNote(dhtOnlyOf(link, ctx), ref) : undefined;
 }
 
 /** The chat or the group a file command names (`findChatOrGroup`). */
@@ -315,11 +329,12 @@ const ACTIONS = ["accept", "decline", "pause", "resume", "cancel", "resend", "re
 /**
  * `file wait`: until a transfer ends: done answers, failed is an `engine` error with the transfer's words (and whether
  * `file resend` can go on). A file whose transfer this run has not seen answers from the file store. `stopping`: the
- * daemon's stop ends it as well (`waitForState`), for `file send --wait`, which answers with what it knows then.
+ * daemon's stop ends it as well (`waitForState`), for `file send --wait`, which answers with what it knows then. A
+ * transfer that waits in a chat on the DHT only says why, naming the chat as `ref` does (`fileWaitsLive`).
  */
-async function waitForFile(ctx: ApiContext, params: Params, stopping?: AbortSignal) {
+async function waitForFile(ctx: ApiContext, params: Params, stopping?: AbortSignal, ref = str(params, "chat")) {
   const fileId = str(params, "file", true);
-  const { where } = fileChat(ctx, params, fileId);
+  const { linkId, where } = fileChat(ctx, params, fileId);
   const stored = await fileStore.get(fileId);
   if (!stored && !state(ctx).transfers[fileId]) throw noFile(fileId);
   const ms = num(params, "timeout", 300, { min: 1, max: 86_400 }) * 1000;
@@ -331,7 +346,8 @@ async function waitForFile(ctx: ApiContext, params: Params, stopping?: AbortSign
     return now && (now.state === "done" || now.state === "failed" || (now.stage === "asking" && now.direction === "in")) ? now : undefined;
   }, ms, `file ${fileId} to arrive`, stopping).catch((error: unknown) => {
     const now = state(ctx).transfers[fileId];
-    if (error instanceof CliError && error.code === "timeout" && now) throw new CliError("timeout", `${error.message} (${now.transferred} of ${now.size} bytes${now.stage ? `, ${stageWords(now)}` : ""})`, { file: fileId, transferred: now.transferred, size: now.size, stage: now.stage ?? null, ...(error.details?.reason ? { reason: error.details.reason } : {}) });
+    const note = now?.stage === "waiting" && "chat" in where ? fileWaitsLive(ctx, linkId, ref ?? linkId) : undefined;
+    if (error instanceof CliError && error.code === "timeout" && now) throw new CliError("timeout", `${error.message} (${now.transferred} of ${now.size} bytes${now.stage ? `, ${stageWords(now, note)}` : ""})`, { file: fileId, transferred: now.transferred, size: now.size, stage: now.stage ?? null, ...(error.details?.reason ? { reason: error.details.reason } : {}), ...(note && { note }) });
     throw error;
   });
   if (transfer.state === "failed") throw new CliError("engine", transfer.error ?? "The transfer failed", { file: fileId, ...where, retry: !!transfer.retry });
@@ -413,14 +429,21 @@ export const FILE_METHODS: Record<string, Method> = {
     // The engine names a sent file's row after its time (node.ts `sendFile`), the one given here.
     const messageId = `me_${timestamp}`;
     // A wait that ends short (its time, or the daemon's stop: a restart) leaves the file in the chat, going on as a text
-    // does (waits.ts): said so, with its ids. A stop ended the connection under it before, with no id to look for.
-    if (wait === "sent") await waitForFile(ctx, { chat: link.id, file: file.id, timeout: seconds }, ctx.stopping).catch((error: unknown) => {
+    // does (waits.ts): said so, with its ids. A stop ended the connection under it before, with no id to look for. In a
+    // chat on the DHT only it does not go by itself: said why, and what ends it (`fileWaitsLive`).
+    const ref = str(params, "chat", true);
+    if (wait === "sent") await waitForFile(ctx, { chat: link.id, file: file.id, timeout: seconds }, ctx.stopping, ref).catch((error: unknown) => {
       if (!(error instanceof CliError) || error.code !== "timeout") throw error;
-      throw new CliError("timeout", `${error.message}. It is kept here and ${goesOn(ctx, link.id)}`, { ...error.details, chat: link.id, messageId, file: file.id });
+      const note = fileWaitsLive(ctx, link.id, ref);
+      // Said already where the transfer stands (`file wait`'s timeout), it is not said twice.
+      const why = !note ? ` and ${goesOn(ctx, link.id)}` : error.details?.note ? "" : `. ${note}`;
+      throw new CliError("timeout", `${error.message}. It is kept here${why}`, { ...error.details, chat: link.id, messageId, file: file.id, ...(note && { note }) });
     });
+    const kept = keptForJoin(ctx, link.id, "the file");
+    const note = kept.note ?? fileWaitsLive(ctx, link.id, ref);
     return {
       chat: link.id, messageId, file: { id: file.id, name: file.name, size: file.size, mime: file.mime, ...(voice ? { voice: true } : {}), ...(image ? { image } : {}) }, ...(warning ? { warning } : {}),
-      ...keptForJoin(ctx, link.id, "the file"),
+      ...(note && { note }),
     };
   },
 
@@ -440,7 +463,10 @@ export const FILE_METHODS: Record<string, Method> = {
     // every one of them each time (75 ms), with the daemon's other calls waiting behind it.
     const linkId = "group" in target ? `group:${target.group.id}` : target.link.id;
     const kept = await keptOf(linkId);
-    const files = filesOf(await node(ctx).fileMessages(linkId), (id) => withWaitingFor(views[id] ?? kept.get(id)));
+    // A chat on the DHT only: a file that waits there waits for whoever keeps it so, not for the contact to be back.
+    const note = "group" in target ? undefined : fileWaitsLive(ctx, linkId, str(params, "chat", true));
+    const dhtOnly = note === undefined ? undefined : { note, mine: !("group" in target) && target.link.deliveryMode === "dht" };
+    const files = filesOf(await node(ctx).fileMessages(linkId), (id) => withWaitingFor(views[id] ?? kept.get(id), dhtOnly));
     return "group" in target ? { group: target.group.id, files } : { chat: target.link.id, files };
   },
 

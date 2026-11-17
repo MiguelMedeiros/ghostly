@@ -335,7 +335,7 @@ function dhtOnlyWait(link: LinkView, text: string, ref: string, ctx?: ApiContext
 }
 
 /** Where `link` stands on the DHT only (waitNotice.ts `DhtOnly`): this side's choice or hold, read from `ctx`'s profile. */
-function dhtOnlyOf(link: LinkView, ctx?: ApiContext): DhtOnly {
+export function dhtOnlyOf(link: LinkView, ctx?: ApiContext): DhtOnly {
   const mine = link.deliveryMode === "dht";
   return { mine, theirs: link.dhtDelivery?.peerMode === "dht", heldUntil: mine && ctx ? holdEnds(ctx, link.id) : null, oneShot: ctx?.mode === "one-shot" };
 }
