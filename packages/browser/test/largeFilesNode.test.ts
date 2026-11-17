@@ -335,7 +335,8 @@ it("a received file is said done only once that is kept: the app gone before, it
   lost = false;
   await t.restartApp();
   await vi.waitFor(async () => expect((await fileStore.get(fileId))?.wire3?.state).toBe("done"), { timeout: 15_000 });
-  expect(t.records.get("out:cut-000001")?.state).toBe("done");
+  // The done is sent once the record is kept, and reaches the contact a moment after.
+  await vi.waitFor(() => expect(t.records.get("out:cut-000001")?.state).toBe("done"));
   expect(await (await fileBytes()).digest(fileId)).toBe(digestOf(632));
   expect((await db.getMessages(t.id)).filter((m) => m.id === "peer_cut-000001")).toHaveLength(1);
 }, 60_000);
