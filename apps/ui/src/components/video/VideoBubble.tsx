@@ -369,10 +369,10 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/10">
               {offered ? (
                 <>
+                  {/* Not turned off by a room shown less than its size: that room may be old, and the engine reads it again. */}
                   <button
                     type="button"
                     data-testid="video-accept"
-                    disabled={noRoom}
                     onClick={() => act("accept")}
                     className={`flex items-center gap-2 max-w-[calc(100%-8px)] px-3 py-2 rounded-full bg-black/60 hover:bg-black/75 text-white text-[14px] font-medium border-none ${FORCED_EDGE} cursor-pointer disabled:opacity-50 disabled:cursor-default`}
                   >

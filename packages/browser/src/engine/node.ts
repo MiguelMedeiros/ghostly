@@ -1784,6 +1784,7 @@ export class GhostlyNode implements EngineImplementation {
     messages: chat => db.getMessages(chat),
     message: (chat, id) => db.getMessage(chat, id),
     rows: (chat, id) => this.rowsNamed(chat, id),
+    unkeyed: chat => { const live = this.links.get(chat); return live && !live.stored.group ? this.unkeyedRowsOf(live) : undefined; },
     patch: (chat, id, change) => db.patchMessage(chat, id, change),
     changed: async (chat, id, note) => {
       const shown = this.reactionNotes.get(chat);
@@ -4477,9 +4478,12 @@ export class GhostlyNode implements EngineImplementation {
    * (`editsFor`) once the chat is live and both sides offer edit/1. Only texts, at most `MAX_EDITS_PER_MESSAGE` times each,
    * and never empty (deleting is for that). What an edit says is checked like a message: its length, its preview.
    */
-  async editMessage(params: { linkId: string; messageId: string; text: string; preview?: LinkPreview; mentions?: GroupMention[]; card?: unknown }): Promise<{ error: string | null; refused?: boolean; messageId?: string; note?: string }> {
+  async editMessage(params: { linkId: string; messageId: string; text: string; preview?: LinkPreview; mentions?: GroupMention[]; card?: unknown }): Promise<{ error: string | null; refused?: boolean; missing?: boolean; messageId?: string; note?: string }> {
     const { linkId } = params;
-    const refuse = (error: string) => ({ error, refused: true });
+    // `missing`, once the message was looked for: whether the chat has none by that id or wire id, said with each
+    // refusal so the CLI tells a message not there from one it cannot edit without reading for it again.
+    const looked: { missing?: boolean } = {};
+    const refuse = (error: string) => ({ error, refused: true, ...looked });
     // A card's update (WISP 405 · Status Cards): the whole new card, and its fallback text unless one is given.
     const card = params.card === undefined ? undefined : GhostlyNode.cardToSend(params.card, true);
     if (typeof card === "string") return refuse(card);
@@ -4496,7 +4500,10 @@ export class GhostlyNode implements EngineImplementation {
     if (!live.stored.profile) return refuse("Editing needs a current chat; this compatibility chat cannot edit.");
     if (live.stored.group) return refuse("No such chat");
     if (typeof params.messageId !== "string" || typeof params.text !== "string") return refuse("No message to edit");
-    const message = await db.getMessage(linkId, params.messageId) ?? (await db.getMessages(linkId)).find(m => m.sender === "me" && m.wireId === params.messageId);
+    // By its id here, else by its wire id (what a bot keeps from `send`), each row read alone (`rowsByWireId`).
+    const named = await db.getMessage(linkId, params.messageId), wired = named ? [] : await this.rowsByWireId(live, params.messageId);
+    const message = named ?? wired.find(m => m.sender === "me");
+    looked.missing = !named && !wired.length;
     if (!message || !canEdit(message)) return refuse("Only your own text messages can be edited");
     if (card && !GhostlyNode.removes(card, message)) return refuse(notRemoved);
     const text = params.text.trim();
@@ -5321,6 +5328,8 @@ export class GhostlyNode implements EngineImplementation {
     const live = this.links.get(linkId);
     if (!live) throw new Error("No such chat");
     if (!["accept", "decline", "pause", "resume", "cancel", "resend", "request"].includes(action)) throw new Error("Unknown file action");
+    // Taken only when it fits in the room left now (`FileDesk.accept`): one that does not keeps waiting.
+    if (action === "accept") return this.fileDesk.accept(linkId, fileId).then(() => {});
     const now = this.fileDesk.act(linkId, fileId, action);
     // Sent again or asked again with no live session: it goes when the chat is live, and the chat tries now.
     if (!now && (action === "resend" || action === "request") && live.link && !live.link.isDataLinkOpen) void this.connect({ linkId }).catch(() => {});
@@ -5551,6 +5560,20 @@ export class GhostlyNode implements EngineImplementation {
   private unkeyedRowsOf(live: LiveLink): Promise<Map<string, string>> {
     return live.unkeyedRows ??= db.getMessages(live.stored.id).then(history => new Map(history.flatMap(m => { const ref = unkeyedRef(m); return ref ? [[ref, m.id] as const] : []; })),
       error => { live.unkeyedRows = undefined; throw error; });
+  }
+
+  /**
+   * A 1:1 chat's rows whose wire id (`StoredMessage.wireId`) is `wireId`, by time. Each is read alone: the chat's
+   * `me_`/`peer_` row of that id, and the one that goes by it under another id (`unkeyedRowsOf`: read from the history
+   * once in a run, then kept as rows are stored), so a row deleted since is not found and another chat's row of the same
+   * wire id is never read. Each id no row goes by read the whole chat (0.7 s at 100,000 messages) before.
+   */
+  private async rowsByWireId(live: LiveLink, wireId: string): Promise<StoredMessage[]> {
+    const ours = (rows: (StoredMessage | undefined)[]) => rows.filter((m): m is StoredMessage => m?.wireId === wireId).sort((a, b) => a.timestamp - b.timestamp);
+    const keyed = ours(await db.getMessagesById(live.stored.id, [`me_${wireId}`, `peer_${wireId}`]));
+    if (keyed.length) return keyed;
+    const other = (await this.unkeyedRowsOf(live)).get(wireId);
+    return other === undefined ? [] : ours([await db.getMessage(live.stored.id, other)]);
   }
 
   /**

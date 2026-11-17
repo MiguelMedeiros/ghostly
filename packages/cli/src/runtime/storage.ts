@@ -606,8 +606,11 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     };
   }
 
-  /** What is held, as a snapshot of format 3: the stores kept on disk say only that they are. */
-  async function capture(journalName: string): Promise<Snapshot> {
+  /**
+   * What is held, as a snapshot of format 3: the stores kept on disk say only that they are. `upTo`: the last entry it
+   * holds, the transactions whose layers go to the trees with it.
+   */
+  async function capture(journalName: string): Promise<{ snapshot: Snapshot; upTo: number }> {
     const snapshot: Snapshot = { format: 1, journal: journalName, databases: [] };
     const held: SnapshotStore[] = [];
     for (const db of raw._databases.values()) {
@@ -627,9 +630,11 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
       }
       snapshot.databases.push({ name: db.name, version: db.version, stores });
     }
+    // The records were read in this turn: a transaction that commits while their Blobs are written is not in them.
+    const upTo = seq;
     // Only a value that holds a Blob waits for it: an await for each of 300,000 notes held the thread 130 ms.
     for (const store of held) for (const record of store.records) if (hasBlob(record[1])) record[1] = await blobsToDisk(record[1]);
-    return snapshot;
+    return { snapshot, upTo };
   }
 
   /**
@@ -704,17 +709,9 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     // The snapshot holds what the journal's entries said, the relaxed ones too: no sync of them runs while it is written.
     if (relaxed) { clearTimeout(relaxed); relaxed = null; }
     const name = randomBytes(8).toString("hex");
-    const snapshot = await capture(name);
+    const { snapshot, upTo } = await capture(name);
     // The trees the schema has at this point in time, as the snapshot names them.
     const live = trees ? liveTrees() : null;
-    if (trees) {
-      // Every finished transaction goes to the trees, and to the disk, before the snapshot takes the journal's place:
-      // also one whose entry waits behind this snapshot in the queue (the snapshot may hold what it did elsewhere). Its
-      // entry, written after, is then one SQLite holds, which a replay skips.
-      trees.apply(seq);
-      if (scrub) trees.scrub();
-      trees.sync();
-    }
     // What is held now is in this snapshot: a write that fails while it is written says so again (one that fails it, too).
     unsaved = false;
     const temporary = snapshotPath + ".tmp";
@@ -723,6 +720,16 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     // commit meanwhile wait behind it in the queue (`append`), so the journal it replaces gets none of them.
     const file = await open(temporary, "w", 0o600);
     try { await writeSnapshotTo(file, snapshot); await file.sync(); } finally { await file.close(); }
+    if (trees) {
+      // Every transaction the snapshot holds goes to the trees, and to the disk, in the turn the snapshot takes the
+      // journal's place: also one whose entry waits behind this snapshot in the queue (the snapshot holds what it did
+      // elsewhere). Its entry, written after, is then one SQLite holds, which a replay skips. Not before the snapshot is
+      // written: a process killed meanwhile came back to the old snapshot and journal, without such a transaction, and
+      // to rows.db with it, half of it (a file's state deleted, its record kept).
+      trees.apply(upTo);
+      if (scrub) trees.scrub();
+      trees.sync();
+    }
     renameSync(temporary, snapshotPath);
     // Trees of stores and indexes gone from the schema: once no snapshot on disk names them, nor the schema now.
     try { if (live) trees!.sweep(new Set([...live, ...liveTrees()])); } catch (error) { process.stderr.write(`ghostly: storage: old trees not removed: ${error instanceof Error ? error.message : String(error)}\n`); }

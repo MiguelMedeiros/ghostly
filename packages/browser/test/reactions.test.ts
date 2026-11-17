@@ -136,6 +136,21 @@ describe("reacting over the live link", () => {
     expect(await t.pending()).toEqual([]);
   });
 
+  it("reactions of mine naming ids no message goes by read the chat whole once in a run, not each", async () => {
+    // Each read the chat's whole history for the id both sides know: 0.6-0.8 s a call at 100,000 messages. Now once,
+    // for the rows that go by another id than their own.
+    const t = await setup();
+    await t.contact.sendMessage("hi");
+    const original = await t.row("hi");
+    const whole = vi.spyOn(db, "getMessages");
+    const errors = [];
+    for (const messageId of ["me_typo", "Z".repeat(22), "Y".repeat(22), "nope"]) errors.push((await t.node.react({ linkId: t.id, messageId, emoji: "👍" })).error);
+    expect(whole.mock.calls.filter(([chat]) => chat === t.id)).toHaveLength(1);
+    expect(errors).toEqual(Array(4).fill("That message is not in this chat, or takes no reaction"));
+    whole.mockRestore();
+    expect((await t.node.react({ linkId: t.id, messageId: original.id, emoji: "👍" })).error).toBeNull();
+  });
+
   it("a contact's reaction lands on the row under `peer`, the latest number winning, and mine stays mine", async () => {
     const t = await setup();
     await t.agreed();
@@ -698,6 +713,27 @@ describe("the reactions store", () => {
     expect(await mine("chat", "me_BBBBBBBBBBBBBBBB", "🙏")).toBe("BBBBBBBBBBBBBBBB");
     expect(whole.mock.calls).toEqual([["chat"]]);
     expect(numbers.at(-1)).toBe(9_503);
+  });
+
+  it("a reaction of mine finds a row by the id it goes by under another (the host's `unkeyed`), and one no row goes by reads no history", async () => {
+    const rows = [
+      row({ linkId: "chat", id: "me_BBBBBBBBBBBBBBBB", sender: "me", text: "mine" }),
+      row({ linkId: "chat", id: "peer_1", text: "their file", wireId: "fileWireId01" }),
+      row({ linkId: "other", id: "peer_2", text: "another chat's", wireId: "otherWire001" }),
+    ];
+    const { reactions, host } = memory(rows);
+    // What the host keeps of the chat's rows by another id: one of them deleted since.
+    const unkeyed = new Map([["fileWireId01", "peer_1"], ["goneWireId01", "peer_9"]]);
+    Object.assign(host, { message: async (chat: string, id: string) => rows.find(r => r.linkId === chat && r.id === id), unkeyed: (chat: string) => chat === "chat" ? Promise.resolve(unkeyed) : undefined });
+    const whole = vi.spyOn(host, "messages");
+    const mine = async (id: string) => { const out = await reactions.mine("chat", id, "👍"); return "error" in out ? out.error : out.reaction.id; };
+    // My highest number in the chat is read from its history once, as before.
+    expect(await mine("BBBBBBBBBBBBBBBB")).toBe("BBBBBBBBBBBBBBBB");
+    whole.mockClear();
+    expect(await mine("fileWireId01")).toBe("fileWireId01");
+    for (const id of ["me_typo", "neverWasHere", "goneWireId01", "otherWire001"]) expect(await mine(id)).toBe("That message is not in this chat, or takes no reaction");
+    expect(whole).not.toHaveBeenCalled();
+    expect(rows.map(r => r.reactions?.me?.e)).toEqual(["👍", "👍", undefined]);
   });
 
   it("in a private group I was removed from and invited back to, refuses to change or take back a reaction of mine from before", async () => {
