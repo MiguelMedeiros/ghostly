@@ -1536,6 +1536,8 @@ export class GhostlyNode implements EngineImplementation {
     linkIds: () => [...this.links.keys()],
     online: () => this.networkOn,
     fetcher: (...request) => (this.options.identityFetch ?? globalThis.fetch)(...request),
+    // The profile's own Pkarr relays are read as the chats read them, not under `identityFetch`'s public-address rule.
+    relayFetcher: (...request) => globalThis.fetch(...request),
     relayOnly: () => this.settings.relayOnly === true,
     emit: () => { this.emitState(); this.did.changed(); void this.publicProfiles.prune().catch(() => {}); this.publicActivity.prune(); },
     redraw: linkId => this.chatChanged(linkId),
