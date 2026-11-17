@@ -49,6 +49,42 @@ it("takes without asking only what fits beside the files still on their way, fro
 });
 
 /**
+ * Offers from several contacts that come at the same moment (a device back online, each contact's waiting files offered
+ * on its own session) were each decided before any of them was recorded: none saw the others, and all were taken
+ * without asking though together they did not fit (two 20 MiB files with 30 MiB free). An offer being decided counts
+ * as still to come for the others decided beside it.
+ */
+it.each([
+  { free: 30, size: 20, links: ["chat-a", "chat-b"] },
+  { free: 32, size: 15, links: ["chat-a", "chat-b", "chat-c"] },
+])("asks about offers from contacts at the same moment that together do not fit ($links.length × $size MiB, $free MiB free)", async ({ free, size, links }) => {
+  vi.stubGlobal("navigator", { storage: { estimate: async () => ({ quota: free * MiB, usage: 0 }) } });
+  resetFileBytes(["idb"]);
+  const sent: { link: string; frame: Record<string, unknown> }[] = [];
+  const desk = new FileDesk({
+    send: (link, frame) => { sent.push({ link, frame }); return true; },
+    receivedBytes: () => 0,
+    wireIds: () => new Set(),
+    deleted: () => false,
+    messageExists: async () => false,
+    storeMessage: async () => {},
+    transfers: new Map(),
+    changed: () => {},
+  });
+  for (const link of links) desk.session(link, true);
+  const ids = links.map((link) => `wAtOnce${link.slice(-1)}01`);
+  await Promise.all(links.map((link, i) => desk.handle(link, { t: "pf-offer", id: ids[i], name: `${ids[i]}.mp4`, mime: "video/mp4", size: size * MiB, ts: 1_700_000_000_000 })));
+  const answered = (t: string) => sent.filter(({ frame }) => frame.t === t && (t !== "pf-wait" || frame.why === "consent")).map(({ frame }) => frame.id);
+  // As many as fit together are taken, the first ones; the rest are asked about.
+  const fit = Math.floor(free / size);
+  await vi.waitFor(() => expect(answered("pf-accept")).toEqual(ids.slice(0, fit)));
+  await vi.waitFor(() => expect(answered("pf-wait")).toEqual(ids.slice(fit)));
+  expect(sent.filter(({ frame }) => frame.t === "pf-refuse")).toEqual([]);
+  for (const link of links) desk.drop(link);
+  await fileStore.deleteForLink("chat-c");
+});
+
+/**
  * What is still to come was read by copying every record of every chat, the finished ones the chats keep for good
  * included: each offer cost more with every file the profile ever had (about 10 ms at 200 chats of 500 files). It is
  * read from the transfers not ended alone, and answers the same.
