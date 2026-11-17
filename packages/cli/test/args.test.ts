@@ -488,6 +488,19 @@ describe("the argument parser", () => {
       expect(params(name, [target, "--stop"])).toMatchObject({ for: undefined, stop: true });
       // A kind no typing takes: before, the API answered after the profile opened ("kind must be one of …", exit 1).
       usage(name, [target, "--kind", "foo"], "--kind takes typing, recording or thinking, not \"foo\"");
+      // The status and a stop's kind or status, as `status set` checks its text: before, the API answered after the
+      // profile opened (`bad_request`, exit 1) in its socket words, with no count.
+      usage(name, [target, "--status", "x".repeat(41)], "--status is up to 40 characters, not 41 characters");
+      usage(name, [target, "--status", "see https://x.example"], "--status is plain text: no link or markup");
+      usage(name, [target, "--status", "\u202E\u200B"], "--status needs a character that shows");
+      usage(name, [target, "--stop", "--kind", "thinking"], "--kind goes with a start, not with --stop");
+      usage(name, [target, "--stop", "--status", "done"], "--status goes with a start, not with --stop");
+      // Blank is no status, as "" is: it was refused as "no link or markup".
+      for (const status of ["   ", "\t \n", ""]) {
+        expect(params(name, [target, "--status", status]), JSON.stringify(status)).toMatchObject({ status: undefined, stop: false });
+        expect(params(name, [target, "--stop", "--status", status])).toMatchObject({ status: undefined, stop: true });
+      }
+      expect(params(name, [target, "--status", "Reading the thread"])).toMatchObject({ status: "Reading the thread" });
       usage(name, [target, "--kind", ""], "--kind takes typing, recording or thinking, not \"\"");
       expect(COMMANDS[name].options!.kind.choices).toEqual(TYPING_KINDS);
       expect(params(name, [target, "--kind", "recording"])).toMatchObject({ kind: "recording" });

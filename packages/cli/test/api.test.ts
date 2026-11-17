@@ -688,15 +688,44 @@ describe("chats", () => {
       [{ kind: "dancing" }, "kind must be one of typing, recording, thinking"],
       // Empty (an unset variable in a script) is no kind: never read as plain typing.
       [{ kind: "" }, "kind must be one of typing, recording, thinking"],
-      [{ status: "x".repeat(41) }, "status: at most 40 characters"],
-      [{ status: "see https://x.example" }, "status: plain text, with no link or markup"],
-      [{ status: "<b>hi</b>" }, "status: plain text, with no link or markup"],
-      [{ status: "\u202E\u200B" }, "status: plain text, with no link or markup"],
+      [{ status: "x".repeat(41) }, "status is up to 40 characters, not 41 characters"],
+      [{ status: "see https://x.example" }, "status is plain text: no link or markup"],
+      [{ status: "<b>hi</b>" }, "status is plain text: no link or markup"],
+      // Nothing that shows: it was refused as "no link or markup", which it holds neither of.
+      [{ status: "\u202E\u200B" }, "status needs a character that shows"],
       [{ stop: true, kind: "thinking" }, "kind and status go with a start, not with stop"],
       [{ stop: true, status: "done" }, "kind and status go with a start, not with stop"],
     ] as const) await expect(callApi(ctx, "chat.typing", { chat: "Alice", ...params }), message).rejects.toMatchObject({ code: "bad_request", message });
     expect(node.setTyping).not.toHaveBeenCalled();
     expect(await callApi(ctx, "chat.typing", { chat: "Alice", status: "x".repeat(40) })).toMatchObject({ status: "x".repeat(40) });
+  });
+
+  // Blank once trimmed was refused as "plain text, with no link or markup" (exit 1), while "" was no status at all.
+  it("typing takes a blank status as no status, as an empty one, with a start or a stop", async () => {
+    const { ctx, node } = fake();
+    for (const status of ["   ", "\t \n", ""]) {
+      const answer = await callApi(ctx, "chat.typing", { chat: "Alice", status });
+      expect(answer, JSON.stringify(status)).toEqual({ chat: "chat-one", typing: true, kind: "typing", live: false, sendTyping: true });
+      expect(node.setTyping).toHaveBeenLastCalledWith({ linkId: "chat-one", typing: true });
+      expect(await callApi(ctx, "chat.typing", { chat: "Alice", stop: true, status })).toMatchObject({ typing: false });
+    }
+  });
+
+  // A group's one-shot --for whose edges never opened answered `typing: true` and an `until` to come, with no note.
+  it("a one-shot group typing --for with no edge open in time says it is off and reached nobody", async () => {
+    vi.useFakeTimers();
+    try {
+      const { ctx, node } = fake();
+      Object.assign(ctx, { mode: "one-shot" });
+      const state = node.getState();
+      const mesh = { ...group, id: "m1", name: "Mesh", profile: "mesh", status: "active", members: group.members.map((m) => ({ ...m, online: false })) } as unknown as GroupView;
+      node.getState = () => ({ ...state, groups: [mesh] });
+      const typing = callApi(ctx, "group.typing", { group: "Mesh", for: 60 });
+      await vi.advanceTimersByTimeAsync(15_100);
+      const answer = await typing;
+      expect(answer).toMatchObject({ group: "m1", typing: false, reached: 0, note: expect.stringMatching(/reached nobody.*ghostly daemon --detach/) });
+      expect(answer).not.toHaveProperty("until");
+    } finally { vi.useRealTimers(); }
   });
 
   // A one-shot `send` to a chat whose invite nobody took sat its whole 30 s and failed `timeout` (exit 4, which a bot

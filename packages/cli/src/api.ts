@@ -1,4 +1,4 @@
-import { AWAITING_PEER_MS, DHT_PACKET_BUDGET, decodeCommunityLink, decodeGroupEntryLink, inviteLink, LIMITS, MENTION_EVERYONE, normalizeRelayUrl, ownInviteRefusal, relayUrlProblem, replySnippet, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type TypingKind } from "@ghostly/core";
+import { AWAITING_PEER_MS, DHT_PACKET_BUDGET, decodeCommunityLink, decodeGroupEntryLink, inviteLink, LIMITS, MENTION_EVERYONE, normalizeRelayUrl, ownInviteRefusal, relayUrlProblem, replySnippet, TYPING_KINDS, type GroupMention, type TypingKind } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
 import { DEFAULT_HYPERDHT_RELAY } from "@ghostly/browser/shared/hyperdhtRelay";
@@ -19,7 +19,7 @@ import { ended, foldsAnyway, goesOn, nobodyElseIn, outOf, purgeMessage, waitForC
 import { STATUS_CARD_METHODS, secretIn } from "./statusCards";
 import { BUTTON_METHODS, buttonsCard, pressable } from "./buttons";
 import { forgetHold, HOLD_MAX_MINUTES, holdChat, holdEnds, holdOf, releaseHold } from "./holds";
-import { endTyping, keepOneShot, keepTyping, sayTyping } from "./typing";
+import { endTyping, keepOneShot, keepTyping, ONE_SHOT_LIVE_GRACE_MS, sayTyping, typingStatus } from "./typing";
 import { GROUP_ADMIN_METHODS, noMember, withUrl } from "./groupAdmin";
 import { withStoredIds } from "./turnRefs";
 import { IDENTITY_METHODS } from "./identities";
@@ -237,6 +237,15 @@ const BAD_VALUE = /^Cannot (destructure|read properties of (undefined|null))|is 
 const ONE_SHOT_TYPING = "Typing is said on a live session only, and a one-shot has none: it reached nobody. Keep the profile online (`ghostly daemon --detach`), or give --for to wait until it is live";
 // A stop takes no --for, so only the daemon half holds.
 const ONE_SHOT_TYPING_STOP = "A stop is said on a live session only, and a one-shot has none: it reached nobody. Keep the profile online (`ghostly daemon --detach`)";
+// A one-shot's --for that ended with nobody to see it (`keepOneShot`): it answered `typing: true`, an `until` to come, no note.
+const ONE_SHOT_TYPING_UNSEEN = `Typing is said on a live session only, and none came up in time (a one-shot waits up to ${ONE_SHOT_LIVE_GRACE_MS / 1000} s for one): it reached nobody, and it is off. Keep the profile online (\`ghostly daemon --detach\`) so the chat is live when you say it`;
+
+/** A one-shot typing's `note`: without `--for` it reached nobody; with it, only when nobody was live to see it. */
+function oneShotTypingNote(ctx: ApiContext, typing: boolean, kept: boolean, seen: boolean): { note: string } | undefined {
+  if (ctx.mode !== "one-shot") return undefined;
+  if (!kept) return { note: typing ? ONE_SHOT_TYPING : ONE_SHOT_TYPING_STOP };
+  return seen ? undefined : { note: ONE_SHOT_TYPING_UNSEEN };
+}
 
 // ---------- methods ----------
 
@@ -585,12 +594,14 @@ const METHODS: Record<string, Method> = {
     const until = seconds ? Date.now() + seconds * 1000 : null;
     const kept = seconds ? keepTyping(ctx, { linkId: link.id }, seconds * 1000, word) : null;
     const open = (s: EngineState) => s.links.find((l) => l.id === link.id)?.dataLink === "open";
-    if (kept && ctx.mode === "one-shot") await keepOneShot(ctx, { linkId: link.id }, kept, open);
+    const seen = kept && ctx.mode === "one-shot" ? await keepOneShot(ctx, { linkId: link.id }, kept, open) : true;
+    // Ended with nobody to see it: off, as a stop answers.
+    const on = typing && seen;
     const now = state(ctx);
     return {
-      chat: link.id, typing, ...(typing ? { kind } : {}), ...(status ? { status } : {}),
-      live: open(now), sendTyping: now.settings.sendTyping !== false, ...(until ? { until } : {}),
-      ...(!kept && ctx.mode === "one-shot" && { note: typing ? ONE_SHOT_TYPING : ONE_SHOT_TYPING_STOP }),
+      chat: link.id, typing: on, ...(on ? { kind } : {}), ...(on && status ? { status } : {}),
+      live: open(now), sendTyping: now.settings.sendTyping !== false, ...(on && until ? { until } : {}),
+      ...oneShotTypingNote(ctx, typing, !!kept, seen),
     };
   },
   /**
@@ -1065,11 +1076,12 @@ const METHODS: Record<string, Method> = {
     const until = seconds ? Date.now() + seconds * 1000 : null;
     const kept = seconds ? keepTyping(ctx, target, seconds * 1000, word) : null;
     const reached = (now: GroupView | undefined) => (now ?? group).members.filter((m) => !m.me && m.online && !m.viaHub).length;
-    if (kept && ctx.mode === "one-shot") await keepOneShot(ctx, target, kept, (s) => reached(s.groups.find((g) => g.id === group.id)) > 0);
+    const seen = kept && ctx.mode === "one-shot" ? await keepOneShot(ctx, target, kept, (s) => reached(s.groups.find((g) => g.id === group.id)) > 0) : true;
+    const on = typing && seen;
     return {
-      group: group.id, typing, ...(typing ? { kind } : {}), ...(status ? { status } : {}),
-      reached: reached(groupById(ctx, group.id)), sendTyping: settingsOf(ctx).sendTyping !== false, ...(until ? { until } : {}),
-      ...(!kept && ctx.mode === "one-shot" && { note: typing ? ONE_SHOT_TYPING : ONE_SHOT_TYPING_STOP }),
+      group: group.id, typing: on, ...(on ? { kind } : {}), ...(on && status ? { status } : {}),
+      reached: reached(groupById(ctx, group.id)), sendTyping: settingsOf(ctx).sendTyping !== false, ...(on && until ? { until } : {}),
+      ...oneShotTypingNote(ctx, typing, !!kept, seen),
     };
   },
   async "group.leave"(ctx, params) {
@@ -1254,18 +1266,15 @@ async function react(ctx: ApiContext, linkId: string, params: Params, place: Ref
 
 /**
  * What `typing` says: a kind, and a status a bot writes. The contact's app would cut a long status and drop one with
- * a link; here that is an error instead, so the bot learns what the contact will (not) see.
+ * a link; here that is an error instead, so the bot learns what the contact will (not) see. A blank status is none.
+ * The command checks both first (commands/shared.ts `typingWords`): these words are the socket's.
  */
 function typingWord(params: Params, typing: boolean): { kind: TypingKind; status?: string } {
   const kind = oneOf(params, "kind", TYPING_KINDS, "typing");
   const raw = str(params, "status");
-  if (!typing && (params.kind !== undefined || raw !== undefined)) throw new CliError("bad_request", "kind and status go with a start, not with stop");
-  if (raw === undefined) return { kind };
-  const oneLine = raw.replace(/\s+/g, " ").trim();
-  if ([...oneLine].length > TYPING_STATUS_MAX) throw new CliError("bad_request", `status: at most ${TYPING_STATUS_MAX} characters`);
-  const status = sanitizeTypingStatus(oneLine);
-  if (!status) throw new CliError("bad_request", "status: plain text, with no link or markup");
-  return { kind, status };
+  if (!typing && (params.kind !== undefined || raw?.trim())) throw new CliError("bad_request", "kind and status go with a start, not with stop");
+  const status = typingStatus(raw, "status", "bad_request");
+  return status ? { kind, status } : { kind };
 }
 
 /**
