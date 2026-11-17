@@ -89,6 +89,22 @@ describe("help", () => {
     expect((await ghostly(["help", "listen"])).stdout).toContain("[--print]");
   });
 
+  it("an unknown command does not repeat a long or secret-looking word typed as one", async () => {
+    // A token pasted after `ghostly wallet` (redeem left out) or `ghostly` alone was printed whole: bots keep the output.
+    const token = `cashuB${"o2FteCJodHRwczovL21pbnQuZXhhbXBsZS5jb20".repeat(3)}`, nsec = `nsec1${"q".repeat(58)}`;
+    for (const [args, message] of [
+      [["wallet", token], expect.stringMatching(/^Unknown command: wallet \(a Cashu token\): ghostly wallet takes .* \(ghostly help wallet\)$/)],
+      [[token], "Unknown command: (a Cashu token) (ghostly help)"],
+      [[nsec], "Unknown command: (a private key) (ghostly help)"],
+      [["identity", "frob", nsec], expect.stringMatching(/^Unknown command: identity frob: ghostly identity takes /)],
+    ] as const) {
+      const result = await ghostly([...args]);
+      expect(result.code, args.join(" ")).toBe(2);
+      expect(result.json, args.join(" ")).toEqual({ error: { code: "usage", message } });
+      expect(result.stdout + result.stderr, args.join(" ")).not.toMatch(/cashuB|nsec1/);
+    }
+  });
+
   it("profile and settings name their commands as every group does, and help for a word a group does not take is unknown", async () => {
     // `profile frob` said "ghostly profile create|list|use|show|set|picture|backup|restore", `settings frob` "ghostly
     // settings get | settings set <key> <json-value>"; `help chat histroy` printed the chat group's list with exit 0.
