@@ -78,7 +78,11 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
   // The password form, They match or Try again went away with its step: the focus stays in the dialog.
   useEffect(() => { if (step === "enroll") keepFocusIn(body.current); }, [step, view?.step, busy]);
   // Closed before it ended: the code is spent, and nothing was added.
-  useEffect(() => () => { if (!ended.current) void engine.call("deviceEnrollCancel").catch(() => {}); }, []);
+  const closed = useRef(false);
+  useEffect(() => {
+    closed.current = false;
+    return () => { closed.current = true; if (!ended.current) void engine.call("deviceEnrollCancel").catch(() => {}); };
+  }, []);
 
   /** Says what went wrong; a refused field gets the focus back with its text selected, to be typed again. */
   const fail = (text: string, field?: "password" | "again") => {
@@ -93,6 +97,9 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
     clear(); setBusy(true);
     try {
       const first = await engine.call("deviceEnrollInvite", { name: defaultDeviceName(isDesktopApp() ? { userAgent: navigator.userAgent, desktop: true } : undefined, t) });
+      // Closed while the code was being made (× and Escape close "Preparing" too): the enrollment the engine just started
+      // would run its ten minutes with no page showing it, and Remove, Rename and a move refused all along.
+      if (closed.current) { void engine.call("deviceEnrollCancel").catch(() => {}); return; }
       ended.current = false; dismissed.current = false;
       setView(first); setStep("enroll");
     } catch (cause) {

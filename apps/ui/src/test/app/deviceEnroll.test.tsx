@@ -255,6 +255,52 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     expect(engine.callsTo("deviceEnrollCancel")).toEqual([]);
   }, 20_000);
 
+  it("closed while the code is being made: the enrollment the engine then starts is cancelled, not left running unseen", async () => {
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: await hashPassword("a long password"), timeoutMinutes: 5 } }));
+    function Host() {
+      const [open, setOpen] = useState(true);
+      return open ? <AddDeviceDialog onClose={() => setOpen(false)} /> : null;
+    }
+    const { user, engine } = renderApp(<Host />);
+    let answer!: (view: EnrollView) => void;
+    engine.on("deviceEnrollInvite", () => new Promise<EnrollView>((resolve) => { answer = resolve; }));
+    engine.on("deviceHandoffVerifier", () => undefined);
+    engine.on("deviceEnrollCancel", () => undefined);
+    engine.on("deviceEnrollView", () => waiting);
+    await user.type(screen.getByTestId("device-add-password"), "a long password");
+    await user.click(screen.getByTestId("device-add-next"));
+    await waitFor(() => expect(engine.callsTo("deviceEnrollInvite")).toHaveLength(1));
+    // The first code of a profile reads the turn address first: seconds, with the × there all along.
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByTestId("device-add")).toBeNull());
+    answer(waiting);
+    await waitFor(() => expect(engine.callsTo("deviceEnrollCancel")).toHaveLength(1));
+  }, 20_000);
+
+  it("closed while Try again's new code is being made: that enrollment is cancelled too", async () => {
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: await hashPassword("a long password"), timeoutMinutes: 5 } }));
+    function Host() {
+      const [open, setOpen] = useState(true);
+      return open ? <AddDeviceDialog onClose={() => setOpen(false)} /> : null;
+    }
+    const { user, engine } = renderApp(<Host />);
+    engine.on("deviceEnrollInvite", () => waiting);
+    engine.on("deviceHandoffVerifier", () => undefined);
+    engine.on("deviceEnrollCancel", () => undefined);
+    engine.on("deviceEnrollView", () => ({ role: "inviter", step: "failed", reason: "expired" }));
+    await user.type(screen.getByTestId("device-add-password"), "a long password");
+    await user.click(screen.getByTestId("device-add-next"));
+    await screen.findByTestId("device-add-failed", {}, { timeout: 3_000 });
+    let answer!: (view: EnrollView) => void;
+    engine.on("deviceEnrollInvite", () => new Promise<EnrollView>((resolve) => { answer = resolve; }));
+    await user.click(screen.getByTestId("device-add-again"));
+    await screen.findByTestId("device-add-preparing");
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByTestId("device-add")).toBeNull());
+    answer(waiting);
+    await waitFor(() => expect(engine.callsTo("deviceEnrollCancel")).toHaveLength(1));
+  }, 20_000);
+
   it("says a device is connecting once one read the code, and Try again after a failure makes a new code", async () => {
     localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: await hashPassword("a long password"), timeoutMinutes: 5 } }));
     const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
