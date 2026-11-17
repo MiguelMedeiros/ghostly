@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
-import { screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readStatusCard, statusCardText } from "@ghostly/core";
 import { Chat } from "../../pages/Chat";
 import { saveSession } from "../../lib/storage";
@@ -111,6 +111,70 @@ describe("a chat's header on a phone", () => {
     openChat();
     await screen.findByTestId("chat-options");
     for (const id of ["connection-options", "call-audio", ...MOVED]) expect(screen.getByTestId(id), id).toBeInTheDocument();
+  });
+});
+
+// A phone on its side (844x390 with an iPhone's safe areas) left the chat a 330 px pane beside the list: the header
+// followed the window, had every button, and cut the name to "Con…". On a touch screen it follows the pane now.
+describe("a chat's header in a pane as narrow as a phone, in a wide window", () => {
+  let paneWidth = 330;
+  const resized: (() => void)[] = [];
+  /** A touch screen with no mouse (`any-pointer` coarse, never fine), or a mouse. */
+  function pointer(touch: boolean) {
+    const matchMedia = window.matchMedia.bind(window);
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) =>
+      query === "(any-pointer: coarse)" || query === "(any-pointer: fine)"
+        ? ({ ...matchMedia(query), matches: query === "(any-pointer: coarse)" ? touch : !touch } as MediaQueryList)
+        : matchMedia(query));
+  }
+  beforeEach(() => {
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) { return this.classList.contains("chat-pane") ? paneWidth : 0; });
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+      observe(target: Element) { if (target.classList.contains("chat-pane")) resized.push(() => this.callback([], this as never)); }
+      unobserve() {}
+      disconnect() {}
+    });
+  });
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); resized.length = 0; paneWidth = 330; });
+
+  it("is the phone's on a touch screen: the name, the connection, a voice call and ⋮, and the rest in ⋮", async () => {
+    pointer(true);
+    viewport(844, 390);
+    openChat();
+    await screen.findByTestId("chat-options");
+    for (const id of ["connection-options", "call-audio"]) expect(screen.getByTestId(id), id).toBeInTheDocument();
+    for (const id of MOVED) expect(screen.queryByTestId(id), id).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1 })).toHaveClass("shrink-0", "max-w-full");
+  });
+
+  // A Desktop window at its default 900x700 leaves the chat a 479 px pane beside the 420 px list: with a mouse, the video
+  // call stays in the row (the macOS calls e2e starts one there).
+  it("keeps every button with a mouse, a Desktop window at its default size", async () => {
+    pointer(false);
+    paneWidth = 479;
+    viewport(900, 700);
+    openChat();
+    await screen.findByTestId("chat-options");
+    for (const id of MOVED) expect(screen.getByTestId(id), id).toBeInTheDocument();
+  });
+
+  it("has every button again as the pane grows past a phone's, and the phone's as it narrows", async () => {
+    pointer(true);
+    viewport(1024, 768);
+    openChat();
+    await screen.findByTestId("chat-options");
+    expect(screen.queryByTestId("call-video")).not.toBeInTheDocument();
+    paneWidth = 604;
+    act(() => resized.forEach(resize => resize()));
+    for (const id of MOVED) expect(screen.getByTestId(id), id).toBeInTheDocument();
+    // Hidden (a chat kept loaded off screen) it is 0 wide: the header stays as it was.
+    paneWidth = 0;
+    act(() => resized.forEach(resize => resize()));
+    expect(screen.getByTestId("call-video")).toBeInTheDocument();
+    paneWidth = 480;
+    act(() => resized.forEach(resize => resize()));
+    expect(screen.queryByTestId("call-video")).not.toBeInTheDocument();
   });
 });
 
