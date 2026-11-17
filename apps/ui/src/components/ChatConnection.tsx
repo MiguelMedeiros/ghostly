@@ -9,8 +9,9 @@ import type { LinkView } from "@ghostly/browser/shared/types";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { dots, focus, transportName, type ConnectionKind } from "../lib/connection";
-import { connectionSummary, lasting, liveAttemptText, namedReason, transportWaitText } from "../lib/transportEvents";
+import { CONTACT, connectionSummary, lasting, liveAttemptText, namedReason, transportWaitText } from "../lib/transportEvents";
 import { clockTime, formatAt } from "../lib/time";
+import { fillNames } from "../lib/fillNodes";
 import { ConnectionIcon } from "./ConnectionIcon";
 import { PairingDetail } from "./pairing/PairingDetail";
 import { PairingGlyph } from "./pairing/PairingGlyph";
@@ -140,13 +141,15 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   // The contact's name; none when they shared none, and the Details text then says "your contact" in sentences of its
   // own: a fallback name dropped into a sentence read "No attempt of Your contact's", "L'app di Il tuo contatto".
   const contact = link?.peerNick || undefined;
+  // Their name in the waiting and not-live boxes: its own <bdi>, put where the line has `CONTACT`.
+  const named = (text: string) => fillNames(text, { contact: contact ?? "" });
   // A chosen transport not reached yet (WISP 100): waited for, never a connection issue. `waitOff`: nothing else may
   // carry the chat meanwhile (Fallback off), so it is on the DHT; otherwise it stays live where it is.
   const wait = !dht ? link?.transportWait : undefined, waitOff = !!wait && !wait.live;
-  const waitText = wait ? transportWaitText(wait, contact, clock, t) : undefined;
+  const waitText = wait ? transportWaitText(wait, contact && CONTACT, clock, t) : undefined;
   // Why a pinned chat is not live (WISP 100): what the last attempt tried, or that the contact's app dials. Not for DHT
   // only, this side's or the contact's: no attempt comes then, and the DHT only choice says whose it is.
-  const notLive = paired && pinned && !dht && link?.dhtDelivery?.peerMode !== "dht" && !ready ? liveAttemptText(link?.liveAttempt, link?.liveDialer, contact, clock, t) : undefined;
+  const notLive = paired && pinned && !dht && link?.dhtDelivery?.peerMode !== "dht" && !ready ? liveAttemptText(link?.liveAttempt, link?.liveDialer, contact && CONTACT, clock, t) : undefined;
   const words = usePairingWords();
   // A first pairing on its way: its stage names the connection until the chat is live, on the DHT or failed.
   // It reads the same view as the scene (`progress.view`): the same words, the same step, the same clock.
@@ -344,7 +347,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
           <div className="space-y-2 px-1 pb-2">
             {wait && waitText && <div data-testid="connection-waiting" data-reason={wait.reason} data-transport={wait.transport} className="rounded-lg bg-surface-hover px-2.5 py-2 leading-4">
               <p className="font-medium text-text-primary">{waitText.label}</p>
-              <p className="mt-0.5 break-words" data-testid="connection-waiting-why">{waitText.why}</p>
+              <p className="mt-0.5 break-words" data-testid="connection-waiting-why">{named(waitText.why)}</p>
               <p className="mt-0.5">{waitText.meanwhile}</p>
               {waitText.automatic && link && <FocusSafeButton type="button" data-testid="connection-waiting-automatic" disabled={busy || !ghostlyOnline}
                 className={`mt-1.5 min-h-9 rounded-md px-2 text-accent hover:bg-surface disabled:opacity-40 ${focus}`}
@@ -359,7 +362,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
             </div>}
             {notLive && <div data-testid="connection-not-live" data-side={link?.liveAttempt?.side ?? "none"} className="rounded-lg bg-surface-hover px-2.5 py-2 leading-4">
               <p className="font-medium text-text-primary">{notLive.label}</p>
-              {notLive.lines.map(line => <p key={line} className="mt-0.5 break-words">{line}</p>)}
+              {notLive.lines.map(line => <p key={line} className="mt-0.5 break-words">{named(line)}</p>)}
             </div>}
             {discoveryFailure && <p data-testid="discovery-help">{awaitingJoin && `${t("connection.panel.noContactYet")} `}{(() => {
               // The link sits where the sentence puts it, in every language.
