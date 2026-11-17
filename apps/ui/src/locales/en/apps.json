@@ -22,6 +22,7 @@
     "revokedNext": "It stays stopped until its publisher releases a new version, or you can uninstall it.",
     "runAnyway": "Run anyway",
     "stopped": "Stopped",
+    "stoppedSaid": "{{title}} stopped.",
     "uninstall": "Uninstall",
     "uninstallText": "Its files and its data in every chat are deleted. Export the data first to keep it.",
     "uninstallTitle": "Uninstall {{title}}?",
