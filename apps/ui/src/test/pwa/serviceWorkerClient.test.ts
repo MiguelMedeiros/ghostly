@@ -333,6 +333,20 @@ describe("a share, on the page's side", () => {
       expect(answered).toHaveBeenCalledWith("shareNone");
     });
 
+    it("a link reaches the tab before the wait is over: the share is still forwarded, after the wait and as it goes", () => {
+      handShareOver(() => false, () => {});
+      // The link takes the address, then leaves it for the app's home once the tab that is the app took it.
+      window.location.hash = "#/invite/abc";
+      vi.advanceTimersByTime(SHARE_FORWARD_AFTER_MS);
+      expect(forwards()).toEqual([{ type: "share-forward", profile: activeProfileId() }]);
+      registration.active!.posted.length = 0;
+      window.location.hash = "#/shared";
+      handShareOver(() => false, () => {});
+      window.location.hash = "#/";
+      window.dispatchEvent(new Event("pagehide"));
+      expect(forwards()).toEqual([{ type: "share-forward", profile: activeProfileId() }]);
+    });
+
     it("the tab took over meanwhile: it asks for the share itself, nothing is forwarded", () => {
       const answered = vi.fn();
       handShareOver(() => true, answered);
