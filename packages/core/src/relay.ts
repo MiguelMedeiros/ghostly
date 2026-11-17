@@ -51,6 +51,12 @@ const isTurnRead = (who: Asker): boolean => !who.write && !who.door && (who.back
 const firstWriter = (who: Asker): "chat" | "group" | null => (!who.write || who.background ? null : who.group ? "group" : "chat");
 /** A community door's read (`door`): its knock bell, its beacon and lobby while someone comes in (`DOOR_FIRST_MS`). */
 const isDoorRead = (who: Asker): boolean => who.door && !who.write;
+/**
+ * A key's reads the budget holds back are traced (`read.held`) once in this long, a clock gone back aside. The Desktop
+ * app's log takes every line and rotates at 2 MiB: a ~1 KB line at each held read, 100 a minute behind a community
+ * door, pushed the pairing traces out of it in 13 minutes.
+ */
+const HELD_TRACE_MS = 60_000;
 /** Who asked, in words, for the link trace's tally of a relay's minute (`read.held`). */
 const ASKER_FLAGS = ["door", "urgent", "signal", "watch", "watchWrite", "departed", "awaited", "resume", "back", "catchUp"] as const;
 const askerLabel = (who: Asker): string =>
@@ -689,6 +695,8 @@ export class RelayTransport implements PkarrTransport {
    * (`readHeldBackFor`), how many times in a row, and since when (`READ_STARVED_MS`).
    */
   private readonly heldBack = new Map<string, { until: number; times: number; since: number }>();
+  /** Per key, when the link trace last said a read of it was held (`HELD_TRACE_MS`). */
+  private readonly heldTracedAt = new Map<string, number>();
   /**
    * Per relay, the requests of the last minute and who asked for each: kept only while the link trace is on, for the
    * tally a held-back read traces (`read.held`), which says what spent the minute it waits for.
@@ -766,7 +774,7 @@ export class RelayTransport implements PkarrTransport {
    * `PkarrTransport.forget`: the packets and dates this client kept under these keys go, on every relay (`written`,
    * `newest`, `lastTimestamp`, `seenTimestamp`, `lastPut`). A spare invite replaced unused left them here for its two keys
    * for good: an idle CLI daemon gained 8 keys an hour (343 in `written` and 690 `lastPut` entries after a day). The maps
-   * that bound themselves (`readAt`, `lastReadFrom`, `heldBack`, `missing`, the turns) and the catch-ups, which go once
+   * that bound themselves (`readAt`, `lastReadFrom`, `heldBack`, `heldTracedAt`, `missing`, the turns) and the catch-ups, which go once
    * put, are left as they are. A later put under one of these keys goes as a key's first.
    */
   forget(keys: Iterable<string>): void {
@@ -1423,7 +1431,11 @@ export class RelayTransport implements PkarrTransport {
    * the packet already known, and per relay what spent the last minute (who asked, how many; the keys asked most).
    */
   private traceHeld(pubKeyZ32: string, who: Asker, waitMs: number, known: boolean): void {
-    const now = Date.now();
+    const now = Date.now(), last = this.heldTracedAt.get(pubKeyZ32);
+    if (last !== undefined && now - last < HELD_TRACE_MS && now >= last) return;
+    this.heldTracedAt.delete(pubKeyZ32);
+    this.heldTracedAt.set(pubKeyZ32, now);
+    if (this.heldTracedAt.size > READ_TURNS_KEPT) this.heldTracedAt.delete(this.heldTracedAt.keys().next().value!);
     const spent = this.relays.map((relay) => {
       const list = (this.spentBy.get(relay) ?? []).filter((s) => now - s.at < 60_000);
       const by: Record<string, number> = {}, keys: Record<string, number> = {};

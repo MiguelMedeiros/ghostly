@@ -142,4 +142,15 @@ describe("relay transport: a community door's reads while its edges watch member
     expect(Math.max(...spent.map((s) => s.n))).toBeGreaterThanOrEqual(REQUESTS_PER_MINUTE);
     expect(spent.some((s) => (s.by["read group urgent watch"] ?? 0) > 0)).toBe(true);
   });
+
+  it("says a key's read is held once a minute while it stays held, not at each read", async () => {
+    // The Desktop app's log takes every trace line (its sink is always on) and rotates at 2 MiB. Before, every held read
+    // wrote its ~1 KB tally: the door's traffic wrote 104 `read.held` lines a minute, a rotation every 13 minutes.
+    const held = new Map<string, number>();
+    setLinkTraceSink((line) => { const l = JSON.parse(line); if (l.step === "read.held") held.set(l.me, (held.get(l.me) ?? 0) + 1); });
+    const { traffic } = door();
+    for (let t = 0; t < 10 * 60_000; t += 500) { if (t) await vi.advanceTimersByTimeAsync(500); await traffic(t); }
+    expect(held.size).toBeGreaterThan(0);
+    for (const times of held.values()) expect(times).toBeLessThanOrEqual(11);
+  });
 });
