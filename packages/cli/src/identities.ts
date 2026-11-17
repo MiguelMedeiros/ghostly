@@ -30,7 +30,8 @@ interface Draft { draftId: string; provider: string; signer: string; binding: Id
 const drafts = new Map<string, Draft>();
 const NO_DRAFT = `No such draft here: it is kept by the daemon that made it, for ${IDENTITY_DRAFT_TTL_MS / 60_000} minutes and while fewer than ${IDENTITY_MAX_DRAFTS} newer ones wait`;
 
-function provider(id: string): IdentityProofProvider {
+/** The provider `id` names; a one-shot `identity add` asks before the profile opens (main.ts `identityAddCommand`). */
+export function identityProvider(id: string): IdentityProofProvider {
   const found = IDENTITY_PROVIDERS.find((p) => p.id === id);
   if (!found) throw new CliError("not_found", `No identity provider ${id} (ghostly identity providers)`);
   return found;
@@ -125,7 +126,7 @@ export const IDENTITY_METHODS: Record<string, Method> = {
   /** Starts a proof. In-app signers finish it here; the others return the statement and what to do with it. */
   async "identity.add"(ctx, params) {
     pruneDrafts();
-    const p = provider(str(params, "provider", true));
+    const p = identityProvider(str(params, "provider", true));
     const signer = signerOf(p, str(params, "signer"));
     if (signer.kind === "in-app") {
       const values = (params.fields ?? {}) as Record<string, string>;
@@ -194,7 +195,7 @@ export const IDENTITY_METHODS: Record<string, Method> = {
     pruneDrafts();
     const draft = drafts.get(str(params, "draft", true));
     if (!draft) throw new CliError("not_found", NO_DRAFT);
-    const p = provider(draft.provider);
+    const p = identityProvider(draft.provider);
     const signer = signerOf(p, draft.signer);
     const statement: IdentityStatement = identityStatement(draft.binding);
     let evidence: unknown;

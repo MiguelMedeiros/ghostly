@@ -285,6 +285,30 @@ function serviceNameOf(params: Params): string {
   return name;
 }
 
+/** `service add`'s name and target, checked with no profile open (api.ts `refuseBeforeStart`). */
+export function serviceShape(params: Params): { name: string; target: string } {
+  const name = serviceNameOf(params);
+  const target = str(params, "target", true);
+  // The engine's own check of the target (core http.ts `parseLocalTarget`), the only one: a query, a fragment, a user
+  // and password or a scheme other than http(s) is the person's input to fix, `bad_request` naming it. Thrown by the
+  // engine, they were plain errors, `engine` (exit 1): "the engine failed" (agents#894). A check of its own here
+  // read `localhost:8080` as the scheme `localhost:`, refused `127.0.0.1:8080` as no URL, and let `127.0.0.2` through
+  // for the engine to refuse in other words.
+  try { parseLocalTarget(target); } catch (error) {
+    const said = error instanceof Error ? error.message : String(error);
+    // Read as the engine reads it (no scheme is http) and named without its user, password, query and fragment: the
+    // parts refused here can hold a secret (a token). One that is no URL at all is named as given.
+    const text = target.trim();
+    let shown = text;
+    try {
+      const url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `http://${text}`);
+      shown = `${url.protocol}//${url.host}${url.pathname}`;
+    } catch { /* Not a URL: named as given. */ }
+    throw new CliError(/^Only services on this machine/.test(said) ? "refused" : "bad_request", `${said}: ${shown}`);
+  }
+  return { name, target };
+}
+
 function portError(error: unknown, port: number): unknown {
   const { code } = (error ?? {}) as { code?: unknown };
   if (port && code === "EADDRINUSE") return new CliError("busy", `Port ${port} is in use on this machine: choose another, or leave out --port`);
@@ -297,25 +321,7 @@ export const SERVICE_METHODS: Record<string, Method> = {
     return { services: state(ctx).services.map((s) => ({ id: s.id, name: s.name, target: s.target, enabled: s.enabled, sharedWith: s.sharedWith ?? [], requests: s.requests })) };
   },
   async "service.add"(ctx, params) {
-    const name = serviceNameOf(params);
-    const target = str(params, "target", true);
-    // The engine's own check of the target (core http.ts `parseLocalTarget`), the only one: a query, a fragment, a user
-    // and password or a scheme other than http(s) is the person's input to fix, `bad_request` naming it. Thrown by the
-    // engine, they were plain errors, `engine` (exit 1): "the engine failed" (agents#894). A check of its own here
-    // read `localhost:8080` as the scheme `localhost:`, refused `127.0.0.1:8080` as no URL, and let `127.0.0.2` through
-    // for the engine to refuse in other words.
-    try { parseLocalTarget(target); } catch (error) {
-      const said = error instanceof Error ? error.message : String(error);
-      // Read as the engine reads it (no scheme is http) and named without its user, password, query and fragment: the
-      // parts refused here can hold a secret (a token). One that is no URL at all is named as given.
-      const text = target.trim();
-      let shown = text;
-      try {
-        const url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `http://${text}`);
-        shown = `${url.protocol}//${url.host}${url.pathname}`;
-      } catch { /* Not a URL: named as given. */ }
-      throw new CliError(/^Only services on this machine/.test(said) ? "refused" : "bad_request", `${said}: ${shown}`);
-    }
+    const { name, target } = serviceShape(params);
     // `service`, as the rest of the family answers it; `serviceId` (the engine's key) stays beside it for a release.
     const { serviceId } = node(ctx).addService({ name, target });
     return { service: serviceId, serviceId };
