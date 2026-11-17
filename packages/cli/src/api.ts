@@ -715,8 +715,16 @@ const METHODS: Record<string, Method> = {
   },
   /** The saved messages under `saved`, the last saved first, each as it is now and named by its chat or group. */
   async "saved.list"(ctx) {
+    let saved = await node(ctx).savedMessages();
+    // A one-shot leaves the saved chats unstarted (`readsNoHistory`): each 1:1 chat that holds a saved row is restored
+    // first (a no-op in a daemon), whose outbox and waiting reactions rewrite rows this lists. Mine still "sent" when
+    // the last process stopped listed so, not queued as `chat history` says it. Nothing saved: no chat is read.
+    const chats = new Set(saved.flatMap((s) => (s.message.linkId.startsWith("group:") ? [] : [s.message.linkId])));
+    if (chats.size) {
+      for (const linkId of chats) await node(ctx).startDeferredChat(linkId);
+      saved = await node(ctx).savedMessages();
+    }
     const { links, groups } = state(ctx);
-    const saved = await node(ctx).savedMessages();
     // A saved reply quotes its original as history gives it: per chat or group, one read per quoted original.
     const originals = new Map<string, Originals>();
     for (const linkId of new Set(saved.map((s) => s.message.linkId))) originals.set(linkId, await originalsNow(ctx, linkId, saved.flatMap((s) => (s.message.linkId === linkId ? [s.message] : []))));
