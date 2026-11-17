@@ -59,6 +59,8 @@ export const APP_CHECK_TIMINGS = {
   /** After the engine starts, so the chats come up first. */
   afterStartMs: 60_000,
   everyMs: 24 * 60 * 60 * 1000,
+  /** A check the network was off for is tried again this soon, not a day later. */
+  offlineRetryMs: 10 * 60 * 1000,
   /** A check at start is skipped when every app was checked this recently (a page reloaded several times). */
   freshMs: 60 * 60 * 1000,
 } as const;
@@ -839,12 +841,12 @@ export class Apps {
       this.timer = null;
       void (async () => {
         if (this.stopped) return;
-        if (this.host.online()) {
-          const apps = await this.installed();
-          const fresh = atStart && apps.length > 0 && apps.every((a) => this.checkedWithin(a.checkedAt, APP_CHECK_TIMINGS.freshMs));
-          // No app installed: no request, to a store or anywhere (WISP 1200 § Updates and rollback, "When").
-          if (apps.length && !fresh) await this.checkUpdates().catch(() => {});
-        }
+        // The network off: the check is tried again soon (as the one after start, if it was that one), not a day later.
+        if (!this.host.online()) return this.schedule(APP_CHECK_TIMINGS.offlineRetryMs, atStart);
+        const apps = await this.installed();
+        const fresh = atStart && apps.length > 0 && apps.every((a) => this.checkedWithin(a.checkedAt, APP_CHECK_TIMINGS.freshMs));
+        // No app installed: no request, to a store or anywhere (WISP 1200 § Updates and rollback, "When").
+        if (apps.length && !fresh) await this.checkUpdates().catch(() => {});
         if (!this.stopped) this.schedule(APP_CHECK_TIMINGS.everyMs);
       })();
     }, ms);
