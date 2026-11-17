@@ -346,13 +346,18 @@ export function answerWithin(method: string, params: Record<string, unknown>): n
   return undefined;
 }
 
-/** `again`: whether a read the daemon left unanswered as it stopped is asked once more (`throughDaemon`). */
-async function session(g: Globals, options: RuntimeOptions, again = true): Promise<Session> {
+/**
+ * `again`: whether a read the daemon left unanswered as it stopped is asked once more (`throughDaemon`). `first`: the
+ * call a one-shot makes, whose own words are checked before the profile opens (api.ts `refuseBeforeStart`): a malformed
+ * one opened it online and started every saved chat to be refused (with 10 chats, 20 relay requests and 0.4 s more).
+ */
+async function session(g: Globals, options: RuntimeOptions, again = true, first?: { method: string; params: Record<string, unknown> }): Promise<Session> {
   requireProfile(g);
   const anew = again ? () => session(g, options, false) : undefined;
   const client = await connectDaemon(g.paths);
   if (client) return throughDaemon(client, anew);
-  const [, { callApi, startNamedChats }] = await Promise.all([engineHost(), engineApi()]);
+  const [, { callApi, refuseBeforeStart, startNamedChats }] = await Promise.all([engineHost(), engineApi()]);
+  if (first) await refuseBeforeStart(first.method, first.params);
   const host = await openOneShot(g, options);
   if (host instanceof DaemonClient) return throughDaemon(host, anew);
   const call = async (m: string, p?: unknown) => {
@@ -494,8 +499,8 @@ async function openOneShot(g: Globals, options: RuntimeOptions = {}, mode: Host[
  * nothing of the groups, `deferChats` too when it names that chat or makes or joins a new one (`oneChatOnly`), `offline`
  * when it only reads or changes only this device (`offlineCall`).
  */
-async function withSession<T>(g: Globals, work: (s: Session) => Promise<T>, options: RuntimeOptions = {}): Promise<T> {
-  const s = await session(g, options);
+async function withSession<T>(g: Globals, work: (s: Session) => Promise<T>, options: RuntimeOptions = {}, first?: { method: string; params: Record<string, unknown> }): Promise<T> {
+  const s = await session(g, options, true, first);
   const stops = interruptible(s);
   try { return await stops.run(work); } finally { await s.close(); stops.off(); }
 }
@@ -1640,7 +1645,9 @@ async function identityAddCommand(argv: string[]): Promise<void> {
   requireProfile(g);
   const client = await connectDaemon(g.paths);
   if (client) { await addThroughDaemon(client); return; }
-  const [, { callApi }] = await Promise.all([engineHost(), engineApi()]);
+  const [, { callApi, identityProvider }] = await Promise.all([engineHost(), engineApi()]);
+  // A provider there is none of, refused before the profile opens: it started every saved chat to be refused.
+  identityProvider(provider);
   const host = await openOneShot(g);
   if (host instanceof DaemonClient) { await addThroughDaemon(host); return; }
   const off = host.ctx.hub.onEvent(tell);
@@ -1707,7 +1714,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
       return joined.answer;
     }
     return result;
-  }, { deferGroups: chatOnly(command.method, params) || newChatOnly(command.method), deferChats: oneChatOnly(command.method, params) || oneGroupOnly(command.method) || readsNoHistory(command.method, params), offline: offlineCall(command.method, params) });
+  }, { deferGroups: chatOnly(command.method, params) || newChatOnly(command.method), deferChats: oneChatOnly(command.method, params) || oneGroupOnly(command.method) || readsNoHistory(command.method, params), offline: offlineCall(command.method, params) }, { method: command.method, params });
   if (translator) {
     try { printAnswer(await (await import("./translate")).translateAnswer(result, translator)); } finally { translator.close(); }
     return;

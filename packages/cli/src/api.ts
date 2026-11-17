@@ -24,12 +24,12 @@ import { GROUP_ADMIN_METHODS, moreThanOneMember, noMember, withUrl } from "./gro
 import { withStoredIds } from "./turnRefs";
 import { IDENTITY_METHODS } from "./identities";
 import { X401_METHODS } from "./x401";
-import { closeServicesOf, SERVICE_METHODS } from "./services";
+import { closeServicesOf, SERVICE_METHODS, serviceShape } from "./services";
 import { BACKUP_METHODS } from "./backup";
 import { CALL_METHODS } from "./calls/api";
 import { APP_SERVE_METHODS } from "./appServe";
 import { APP_CHAT_METHODS } from "./appChat";
-import { WALLET_METHODS } from "./wallets";
+import { mintUrlShape, payShape, tokenShape, WALLET_METHODS } from "./wallets";
 import { checkOwnStatus, statusJson } from "./ownStatus";
 import { TRANSPORT_NAMES } from "./words";
 import { chatState, dhtOnlyNote, heldWords, pinWaitsNote, type DhtOnly } from "./waitNotice";
@@ -1373,6 +1373,15 @@ function leaveRefused(group: GroupView, ref: string, error: unknown): unknown {
  * an invitation taken back (a live one is kept and the link goes on beside it), which `group accept` refuses: its way
  * out is `group decline`.
  */
+/**
+ * The link `group join` takes, read before a one-shot opens the profile (`refuseBeforeStart`): one that names no group,
+ * a private one's or a community's, is refused as the engine's `joinByLink` refuses it with the same two decoders.
+ */
+function groupLinkShape(params: Params): void {
+  const link = str(params, "link", true);
+  if (!decodeCommunityLink(link) && !decodeGroupEntryLink(link)) throw new CliError("bad_request", "This is not a link to a group");
+}
+
 function joinRefused(link: string, error: unknown): unknown {
   if (!(error instanceof Error)) return error;
   const id = (decodeCommunityLink(link) ?? decodeGroupEntryLink(link))?.g ?? "<group>";
@@ -1633,7 +1642,22 @@ function quoteChecked(json: MessageJson, message: StoredMessage, originals: Orig
   return { ...json, replyTo: { ...json.replyTo, snippet: replySnippet(original.text) } };
 }
 
+/**
+ * Each method's check of its own words, the one its handler makes first: none needs the profile. A one-shot makes it
+ * before the profile opens (main.ts `session`): a target that is no invoice, a token or mint URL that is none, or a word
+ * that is no group link started every saved chat to be refused (with 10 chats, 20 relay requests and 0.4 s more).
+ */
+const SHAPES: Record<string, (params: Params) => unknown> = {
+  "pay": payShape, "wallet.redeem": tokenShape, "wallet.mint.add": mintUrlShape, "group.join": groupLinkShape, "service.add": serviceShape,
+};
+
+/** Throws what `method` answers `params` whose shape it refuses, with no profile open; nothing for any other. */
+export async function refuseBeforeStart(method: string, params: Params): Promise<void> {
+  if (Object.hasOwn(SHAPES, method)) await SHAPES[method](params);
+}
+
 export { findChat, findGroup, startNamedChats } from "./apiKit";
+export { identityProvider } from "./identities";
 export type { ApiContext } from "./apiKit";
 export const API_METHODS: readonly string[] = Object.keys(METHODS);
 
