@@ -53,6 +53,13 @@ describe("group auto", () => {
     expect(w.auto.set({ on: true, from: ["Miguel", "chat-owner"] })).toEqual({ on: true, from: ["chat-owner"] });
   });
 
+  it("reads a chat given many times once, as call auto on --from does", () => {
+    // Found in a bug hunt: 50,000 refs from a script were each resolved (8 s of the daemon's thread) before the one chat
+    // they named was kept.
+    const w = world();
+    expect(w.auto.set({ on: true, from: Array(50_000).fill("Miguel") })).toEqual({ on: true, from: ["chat-owner"] });
+  });
+
   it("--from a group says it is a group, not a chat, with its id, as call auto on --from does", () => {
     const w = world();
     w.s.groups = [{ id: "g1crew", name: "Crew", profile: "mesh", members: [], isAdmin: false, status: "active" } as unknown as GroupView];

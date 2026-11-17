@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { EngineState, GroupView } from "@ghostly/browser/shared/types";
-import { findOwnNamedChat } from "./apiKit";
+import { findOwnNamedChats } from "./apiKit";
 import { CliError } from "./errors";
 
 /**
@@ -59,8 +59,7 @@ export class GroupAutoJoin {
       // Never a chat found only by a name its contact chose (`findOwnNamedChat`), as `call auto on --from`; a group's
       // name or id is refused as one ("is a group, not a chat", with its id), as there.
       const { links, groups } = this.host.engine.getState();
-      const grants = next.from.map((ref) => findOwnNamedChat(links, ref, groups)).map((link) => ({ chat: link.id, contact: link.peerPubKeyZ32 }));
-      this.grants = grants.filter((g, i) => grants.findIndex((x) => x.chat === g.chat) === i);
+      this.grants = findOwnNamedChats(links, next.from, groups).map((link) => ({ chat: link.id, contact: link.peerPubKeyZ32 }));
     }
     this.save();
     if (this.host.joins) this.check(this.host.engine.getState());

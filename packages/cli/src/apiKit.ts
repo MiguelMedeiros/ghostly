@@ -292,6 +292,21 @@ export function findOwnNamedChat(links: readonly LinkView[], ref: string, groups
   return chat.link;
 }
 
+/**
+ * `findOwnNamedChat` for each chat a grant names (`call auto` / `group auto on --from`), each chat once: a ref given twice
+ * is read once, and a chat named by its id and its label too is kept once: 50,000 copies of one ref from a script were
+ * each resolved (8 s of the daemon's thread), and `call auto` kept them all.
+ */
+export function findOwnNamedChats(links: readonly LinkView[], refs: readonly string[], groups: readonly GroupView[] = []): LinkView[] {
+  const unique = new Set(refs);
+  const chats = new Map<string, LinkView>();
+  for (const ref of unique) {
+    const link = findOwnNamedChat(links, ref, groups);
+    if (!chats.has(link.id)) chats.set(link.id, link);
+  }
+  return [...chats.values()];
+}
+
 /** `findOwnNamedChat`'s refusal: `ref` found `chat` only by what its contact chose. */
 export function namedByThem(ref: string, chat: { chat: string; name: string | null; contact: string | undefined }): CliError {
   return new CliError("bad_request", `${JSON.stringify(ref)} names a chat only by what its contact chose (a prefix of its id, its own name): use the chat's id, its contact's key or a label given here (ghostly chat rename <chat> <name>)`, chat);
