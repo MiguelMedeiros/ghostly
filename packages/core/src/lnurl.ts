@@ -2,6 +2,7 @@ import { engineError } from "./engineErrors";
 import { bech32 } from "@scure/base";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { decodeBolt11, type Bolt11Invoice } from "./bolt11";
+import { underLocalSuffix } from "./localNames";
 import { stripHidden } from "./text";
 
 /**
@@ -78,14 +79,14 @@ export const LIGHTNING_DESTINATION_PATTERN = /(?:lightning:|lnurlp:\/\/|lnurl1|[
 const REDIRECTS = [301, 302, 303, 307, 308];
 
 /**
- * A host that is not on the public internet, as far as its name tells: this machine, a single label, `.local` and its
- * kin, private and reserved IP addresses. (What a public name resolves to is checked where the client resolves names
- * itself, as Ghostly Desktop and the CLI do, for every request.)
+ * A host that is not on the public internet, as far as its name tells: this machine, a single label, a name under a
+ * local suffix (`localNames.ts`), private and reserved IP addresses. (What a public name resolves to is checked where
+ * the client resolves names itself, as Ghostly Desktop and the CLI do, for every request.)
  */
 function isLocalHost(hostname: string): boolean {
   const host = hostname.toLowerCase().replace(/\.+$/, "").replace(/^\[|\]$/g, "");
   if (!host.includes(".") && !host.includes(":")) return true;
-  if (/(^|\.)(localhost|local|internal|lan|home\.arpa)$/.test(host)) return true;
+  if (underLocalSuffix(host)) return true;
   const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
   if (v4) {
     const [a, b] = [Number(v4[1]), Number(v4[2])];

@@ -47,6 +47,7 @@ mod linked_files;
 mod lnd;
 mod local_access;
 mod local_fetch;
+mod local_names;
 mod microphone;
 // Android and iOS: the Desktop-only modules' commands, refusing (`commands!` is one list for every platform).
 #[cfg(mobile)]

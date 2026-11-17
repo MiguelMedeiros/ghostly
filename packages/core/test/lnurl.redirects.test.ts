@@ -55,6 +55,7 @@ describe("a redirect of an LNURL service", () => {
       ["https://router/x", /local address/], ["https://nas.local/x", /local address/], ["https://[fd00::1]/x", /local address/], ["https://10.0.0.7/x", /local address/],
       ["https://[2002:7f00:1::]/x", /local address/], ["https://[2001:0:4136:e378:8000:63bf:80ff:fffe]/x", /local address/],
       ["https://[2::1]/x", /local address/], ["https://[20::1]/x", /local address/], ["https://localhost../x", /local address/],
+      ["https://router.home/x", /local address/], ["https://nas.localdomain/x", /local address/], ["https://hr.intranet/x", /local address/], ["https://files.corp/x", /local address/],
       ["https://u:p@pay.example.net/y", /credentials/], ["ftp://pay.example.net/y", /HTTPS/], ["https://", /invalid address/],
       [`https://pay.example.net/${"y".repeat(LNURL_LIMITS.maxUrlLength)}`, /too long/],
     ] as const) {

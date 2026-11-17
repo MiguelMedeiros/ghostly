@@ -538,20 +538,7 @@ fn dialable_relay(relay: Option<&str>, own: &[String]) -> bool {
     }
     match url.host() {
         Some(url::Host::Domain(name)) => {
-            name.contains('.')
-                && ![
-                    "localhost",
-                    "local",
-                    "internal",
-                    "lan",
-                    "home",
-                    "home.arpa",
-                    "localdomain",
-                    "intranet",
-                    "corp",
-                ]
-                .iter()
-                .any(|suffix| name == *suffix || name.ends_with(&format!(".{suffix}")))
+            name.contains('.') && !crate::local_names::under_local_suffix(name)
         }
         Some(url::Host::Ipv4(ip)) => crate::link_preview::is_public(ip.into()),
         Some(url::Host::Ipv6(ip)) => crate::link_preview::is_public(ip.into()),
