@@ -17,6 +17,7 @@
   "deleteChatLocal": "这将删除此设备上的聊天及其记录，不会删除联系人的副本。",
   "deleteChatTitle": "删除聊天？",
   "goHome": "返回首页",
+  "labelValue": "{{label}}：{{value}}",
   "loading": "加载中...",
   "moreInfo": "更多信息",
   "needsYou": {
@@ -27,6 +28,7 @@
   "notCopied": "未复制",
   "quotedName": "“{{name}}”",
   "save": "保存",
+  "sentences": "{{first}}。{{second}}",
   "size": {
     "b": "{{n}} B",
     "gb": "{{n}} GB",

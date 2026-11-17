@@ -208,6 +208,8 @@
     "noMatch": "Nenhuma conversa com esse nome",
     "partial": "{{sent}} de {{count}} enviadas",
     "pick": "Escolha até {{count}}",
+    "refused": "{{name}}: {{error}}",
+    "refusedPartial": "{{name}} ({{partial}}): {{error}}",
     "search": "Buscar conversas",
     "select": "Selecionar",
     "selected": "{{count}} selecionadas",
