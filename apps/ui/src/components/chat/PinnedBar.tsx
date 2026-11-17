@@ -38,17 +38,21 @@ export function PinnedBar({ pin, index, onUnpin, returnFocus, appCards = false }
   };
   if (!pin?.id) return null;
   const original = index.byRef.get(pin.id) ?? (pin.messageId ? index.byId.get(pin.messageId) : undefined);
+  // Not here yet is not "not on this device" while the chat's older messages are still on their way, as a reply's
+  // quote reads it (`quoteFor`'s `loading`): only a pin the engine found its row for (`messageId`). The line waits
+  // as the quote's does, its jump coming once the message is in.
+  const state = original ? "found" : pin.messageId && index.partial ? "loading" : "missing";
   const open = () => { if (original && !jumpToMessage(original.id) && revealMessage(original.id)) jumpToMessage(original.id); };
   const more = t("common.moreInfo");
   return (
     <div data-testid="pinned-bar" onFocus={e => { held.current = e.target as HTMLElement; }} onBlur={onBlur} className="pinned-bar shrink-0 border-b border-border bg-panel-header px-3 py-1 max-md:px-2">
       <div className="flex items-center gap-1">
-        <button type="button" data-testid="pinned-open" onClick={open} disabled={!original}
+        <button type="button" data-testid="pinned-open" data-state={state} onClick={open} disabled={!original}
           className="min-w-0 flex-1 flex items-center gap-2 rounded px-1 py-0.5 text-start enabled:cursor-pointer enabled:hover:bg-surface-hover">
           <span className="shrink-0 text-accent"><PinIcon active size={15} /></span>
           <span className="min-w-0 flex-1">
             <span className="block text-[11px] font-medium text-accent">{t("chat.pinned.bar")}</span>
-            <span data-testid="pinned-snippet" dir="auto" className="block truncate text-sm text-text-secondary">{original ? messageSnippet(original, t, appCards) : t("chat.pinned.notHere")}</span>
+            <span data-testid="pinned-snippet" dir="auto" className="block truncate text-sm text-text-secondary">{original ? messageSnippet(original, t, appCards) : state === "loading" ? "…" : t("chat.pinned.notHere")}</span>
           </span>
         </button>
         <button type="button" data-testid="pinned-info" aria-expanded={info} aria-controls={infoId} aria-label={more} title={more} onClick={() => setInfo(!info)}
