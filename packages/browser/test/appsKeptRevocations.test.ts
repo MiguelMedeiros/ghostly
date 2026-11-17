@@ -71,6 +71,33 @@ describe("revocations an app's uninstall leaves", () => {
     expect(await appRows()).toEqual([]);
   });
 
+  it("a store's index revoking the next version of several installed apps, dropped by the store since: a copy of each is refused", async () => {
+    const store = apps(net);
+    const installed = await Promise.all([0, 1, 2].map((i) => bundle({ name: `app${i}` })));
+    for (const [i, app] of installed.entries()) {
+      net.put(`${REPO}/app${i}.ghostlyapp`, app.bytes);
+      await store.preview({ url: `${REPO}/app${i}.ghostlyapp` });
+      await store.install({ digest: app.digest, grant: ["chat"] });
+    }
+    const next = await Promise.all([0, 1, 2].map((i) => bundle({ name: `app${i}`, sequence: 2 })));
+    await net.putStore(await storeFiles({ apps: [], revoked: await Promise.all(next.map((v2) => revocation(v2.ref, [v2.digest], "Leaked key"))) }));
+    const puts = vi.spyOn(IDBObjectStore.prototype, "put");
+    await store.addStore({ url: STORE_URL });
+    // Kept with one write, not one per app.
+    expect(puts.mock.calls.filter(([, key]) => key === APP_REVOCATIONS_KEY)).toHaveLength(1);
+    puts.mockRestore();
+    await net.putStore(await storeFiles({ sequence: 2, apps: [] }));
+    await store.refreshStores();
+
+    for (const [i, v2] of next.entries()) {
+      const copy = `${MIRROR}/app${i}.ghostlyapp`;
+      net.put(copy, v2.bytes);
+      expect((await store.preview({ url: copy })).run).toEqual({ status: "revoked", reason: "Leaked key" });
+      await expect(store.install({ digest: v2.digest, grant: ["chat"] })).rejects.toThrow(/^revoked/);
+    }
+    expect((await appRows()).map((row) => row.digest)).toEqual(installed.map((app) => app.digest));
+  });
+
   it("a copy previewed while the app was installed, then Install after its uninstall: refused", async () => {
     const v1 = await bundle();
     net.put(BUNDLE_URL, v1.bytes);
