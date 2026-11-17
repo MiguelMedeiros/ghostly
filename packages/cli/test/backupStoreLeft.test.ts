@@ -47,6 +47,36 @@ describe("a backup that fails", () => {
     await expect(backup(paths, { exportSnapshot })).rejects.toThrow();
     expect(readdirSync(paths.db)).toEqual([]);
   });
+
+  // A name the disk takes whose half-written file's (`.partial-<pid>-<hex>`, ~28 bytes longer) it does not: the
+  // backup fails to open it, and removing it fails the same way. That kept the store from being removed.
+  const long = (paths: ReturnType<typeof profile>) => join(paths.dir, "b".repeat(240));
+
+  it("to a name too long for its half-written file leaves no store behind, and fails with the open's error", async () => {
+    const paths = profile("backup-long-name");
+    const store = { exportSnapshot: async (path: string) => writeFileSync(path, "STORE", { mode: 0o600 }) };
+    await expect(BACKUP_METHODS["profile.backup"]({ runtime: { paths, store } } as unknown as ApiContext, { path: long(paths), noPassphrase: true }))
+      .rejects.toMatchObject({ code: "ENAMETOOLONG", syscall: "open" });
+    expect(readdirSync(paths.db)).toEqual([]);
+    expect(readdirSync(paths.dir).sort()).toEqual(["db", "files"]);
+  });
+
+  it("to a name too long for its half-written file, the process leaving meanwhile, still removes the store", async () => {
+    const paths = profile("backup-long-name-exit");
+    let exported!: () => void, release!: () => void;
+    const ready = new Promise<void>((done) => { exported = done; }), gate = new Promise<void>((done) => { release = done; });
+    const exportSnapshot = async (path: string) => { writeFileSync(path, "STORE", { mode: 0o600 }); exported(); await gate; };
+    const running = BACKUP_METHODS["profile.backup"]({ runtime: { paths, store: { exportSnapshot } } } as unknown as ApiContext, { path: long(paths), noPassphrase: true });
+    running.catch(() => {});
+    await ready;
+    // What the process's exit runs, the backup still under way.
+    const removeLeft = process.listeners("exit").find((listener) => listener.name === "removeLeft") as () => void;
+    expect(removeLeft).toBeTypeOf("function");
+    expect(() => removeLeft()).not.toThrow();
+    expect(readdirSync(paths.db)).toEqual([]);
+    release();
+    await expect(running).rejects.toThrow();
+  });
 });
 
 describe("a backup's start", () => {

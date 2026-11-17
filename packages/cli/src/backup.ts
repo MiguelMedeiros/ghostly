@@ -65,7 +65,7 @@ const unlessGone = (error: NodeJS.ErrnoException) => { if (error.code === "ENOEN
  * leaves before the backup's own cleanup: Ctrl-C on a one-shot exits once the profile closed, the backup still running.
  */
 const leftOnExit = new Set<string>();
-const removeLeft = () => { for (const path of leftOnExit) rmSync(path, { force: true }); };
+const removeLeft = () => { for (const path of leftOnExit) try { rmSync(path, { force: true }); } catch { /* the others still go */ } };
 process.on("exit", removeLeft);
 
 /**
@@ -250,8 +250,10 @@ export const BACKUP_METHODS: Record<string, Method> = {
       throw error;
     } finally {
       await out?.close().catch(() => {});
-      await rm(partial, { force: true });
-      await rm(store, { force: true });
+      // Each on its own, the store first: one that cannot be removed (a name the disk takes whose `.partial-…` is too
+      // long for it) neither keeps the store nor takes the place of the backup's own error.
+      await rm(store, { force: true }).catch(() => {});
+      await rm(partial, { force: true }).catch(() => {});
       finished(store, partial);
     }
   },
