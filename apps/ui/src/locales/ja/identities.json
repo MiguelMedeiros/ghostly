@@ -116,6 +116,7 @@
     "recheck": "再確認",
     "recheckNote": "再確認では、所有者による取り消しがないか調べます。",
     "recheckNoteRepeat": "再確認では、所有者による取り消しがないか調べ、確認をやり直します。",
+    "rechecked": "再確認しました: {{status}}",
     "revoked": "{{status}}: 所有者が削除し、取り消しを公開しました",
     "shareYours": "自分の ID はチャットの + から共有できます。",
     "sharedBy": "{{name}} が共有",
