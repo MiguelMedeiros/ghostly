@@ -288,6 +288,10 @@ export function engineParamsProblem(method: string, params: Record<string, unkno
   return missing.length ? `${missing.join(", ")} missing` : undefined;
 }
 
+/** What a call given what it does not take is told: what it takes, why not, and where every call's shape is listed. */
+export const engineTakesLine = (method: string, why: string): string =>
+  `${method} takes ${(ENGINE_PARAMS[method] ?? READ_PARAMS[method]) || "no parameters"}: ${why} (ghostly engine --list --verbose)`;
+
 /**
  * Calls that delete what this device holds, by what they delete: they go only with `--yes` (`yes: true` over the
  * socket), as `chat remove`, `group leave` and `group forget` ask for it.
