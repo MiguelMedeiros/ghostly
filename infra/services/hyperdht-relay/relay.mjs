@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import http from 'node:http'
 import { createRequire } from 'node:module'
+import { BlockList, isIP, isIPv6 } from 'node:net'
 import { dirname, join } from 'node:path'
 import DHT from 'hyperdht'
 import { relay } from '@hyperswarm/dht-relay'
@@ -713,6 +714,14 @@ export function addressOf(request, options = {}) {
   return forwardedAddress(request, options) ?? request.socket.remoteAddress ?? 'unknown'
 }
 
+/**
+ * Whether an address is loopback, private or link-local: where a reverse proxy on the same host or network connects
+ * from. Clients refused at their address's limit from one of these, with no proxy setting, are likely one proxy's.
+ */
+const NEARBY = new BlockList()
+for (const [network, prefix, type] of [['127.0.0.0', 8, 'ipv4'], ['10.0.0.0', 8, 'ipv4'], ['172.16.0.0', 12, 'ipv4'], ['192.168.0.0', 16, 'ipv4'], ['169.254.0.0', 16, 'ipv4'], ['100.64.0.0', 10, 'ipv4'], ['::1', 128, 'ipv6'], ['fc00::', 7, 'ipv6'], ['fe80::', 10, 'ipv6']]) NEARBY.addSubnet(network, prefix, type)
+export const nearbyAddress = address => isIP(address ?? '') > 0 && NEARBY.check(address, isIPv6(address) ? 'ipv6' : 'ipv4')
+
 /** The client's address from the header `proxies` or `cloudflare` says to read (see addressOf), or null without it. */
 export function forwardedAddress(request, { proxies = 0, cloudflare = false } = {}) {
   if (cloudflare) {
@@ -940,7 +949,14 @@ export async function startRelay(options = {}) {
     if (origins.size && !origins.has(origin)) { refusedOrigin(origin); return refuse('403 Forbidden') }
     const room = clients.size >= limits.clients ? makeRoom(address) : undefined
     if (room === null) return refuse('503 Service Unavailable', 'full')
-    if ((perAddress.get(address)?.size ?? 0) >= limits.clientsPerAddress) return refuse('429 Too Many Requests', 'address')
+    if ((perAddress.get(address)?.size ?? 0) >= limits.clientsPerAddress) {
+      // A proxy that writes no header and was not named: every browser behind it is this one address, and the hints
+      // above, which wait for a header, never fire. Said once, naming no address.
+      if (!options.cloudflare && !options.proxies && request.headers['x-forwarded-for'] === undefined && request.headers['cf-connecting-ip'] === undefined && nearbyAddress(request.socket.remoteAddress)) {
+        hint('nearby', `clients refused at ${limitVariable('clientsPerAddress')} (${limits.clientsPerAddress}) come from a loopback or private address: if they come through a proxy, have it write X-Forwarded-For and set GHOSTLY_RELAY_PROXIES (GHOSTLY_RELAY_CLOUDFLARE behind Cloudflare), or every client counts as the proxy`)
+      }
+      return refuse('429 Too Many Requests', 'address')
+    }
     // Room is made once the upgrade is through (ws calls back at once then, or never): one it refuses drops nobody.
     wss.handleUpgrade(request, socket, head, ws => { room?.(); accept(ws, address) })
   })

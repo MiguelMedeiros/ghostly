@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
+import { BlockList, isIP, isIPv6 } from 'node:net'
 
 // The per-minute counts read a monotonic clock: a host clock set back (an NTP step, a resumed VM) would otherwise keep
 // every request before the step in its minute, refusing an address or subscription near its limit for the whole step.
@@ -131,6 +132,14 @@ export function clientAddress (req, proxies = 0) {
   return forwardedAddress(req, proxies) ?? req.socket.remoteAddress ?? ''
 }
 
+/**
+ * Whether an address is loopback, private or link-local: where a reverse proxy on the same host or network connects
+ * from. Clients refused at their address's rate from one of these, with no proxy setting, are likely one proxy's.
+ */
+const NEARBY = new BlockList()
+for (const [network, prefix, type] of [['127.0.0.0', 8, 'ipv4'], ['10.0.0.0', 8, 'ipv4'], ['172.16.0.0', 12, 'ipv4'], ['192.168.0.0', 16, 'ipv4'], ['169.254.0.0', 16, 'ipv4'], ['100.64.0.0', 10, 'ipv4'], ['::1', 128, 'ipv6'], ['fc00::', 7, 'ipv6'], ['fe80::', 10, 'ipv6']]) NEARBY.addSubnet(network, prefix, type)
+export const nearbyAddress = address => isIP(address ?? '') > 0 && NEARBY.check(address, isIPv6(address) ? 'ipv6' : 'ipv4')
+
 /** The client's address from `X-Forwarded-For` behind `proxies` proxies (see clientAddress), or null without that entry. */
 export function forwardedAddress (req, proxies = 0) {
   if (!proxies) return null
@@ -254,6 +263,7 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
   // Once per start: a proxy in front the relay was not told about, or one it was told about that does not write the
   // header, makes every client count as that proxy.
   let hinted = false
+  let nearbyHinted = false
   // Compared as a browser writes them: `https://app.example/` in the settings still lets https://app.example in.
   const allowed = new Set(origins.map(origin => originOf(origin) ?? origin))
 
@@ -292,7 +302,14 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
       hinted = true
       log('requests arrive without X-Forwarded-For though GHOSTLY_RELAY_PROXIES is set: each counts as the proxy, so have the proxy write it or leave the setting out')
     }
-    if (!addresses.take(ip, monotonicNow())) return refuse('rate', 429, { error: 'Too many' })
+    if (!addresses.take(ip, monotonicNow())) {
+      // A proxy that writes no header and was not named: everyone behind it shares this one address's rate. Said once.
+      if (!proxies && !nearbyHinted && req.headers['x-forwarded-for'] === undefined && nearbyAddress(req.socket.remoteAddress)) {
+        nearbyHinted = true
+        log(`requests refused at the rate of ${perMinute} a minute from one address come from a loopback or private address: if they come through a proxy, have it write X-Forwarded-For and set GHOSTLY_RELAY_PROXIES, or every client shares that rate`)
+      }
+      return refuse('rate', 429, { error: 'Too many' })
+    }
 
     if (Number(req.headers['content-length']) > requestBytes) return refuse('size', 413, { error: 'Too large' })
     const chunks = []
