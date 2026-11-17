@@ -55,7 +55,7 @@ describe("a one-shot about one chat", { timeout: 180_000 }, () => {
     const daemon = new Running(["--home", bob, "daemon"], bobEnv);
     running.push(daemon);
     await daemon.waitFor((l) => l.daemon === "ready");
-    for (let i = 0; i < 12; i++) ok(await ghostly(["--home", bob, "invite", "create", "--label", `unused${i}`], { env: bobEnv }));
+    await Promise.all(Array.from({ length: 12 }, async (_, i) => ok(await ghostly(["--home", bob, "invite", "create", "--label", `unused${i}`], { env: bobEnv }))));
     ok(await ghostly(["--home", bob, "daemon", "stop"], { env: bobEnv }));
     await daemon.exited(20_000);
     const carolDaemon = new Running(["--home", carol, "daemon"], carolEnv);
@@ -156,25 +156,30 @@ describe("a one-shot about one group", { timeout: 300_000 }, () => {
     daveEnv = { GHOSTLY_PKARR_RELAYS: daveRelay.url, GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap };
     erinEnv = { GHOSTLY_PKARR_RELAYS: erinRelay.url, GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap, GHOSTLY_TEST_RELAY_REQUESTS_PER_MINUTE: "Infinity" };
     const erinDaemon = new Running(["--home", erin, "daemon"], erinEnv);
-    const daveDaemon = new Running(["--home", dave, "daemon"], daveEnv);
+    // Dave's daemon makes the setup only, with no relay budget: under it, the seven joins waited on its relay minute,
+    // about 20 s each. His one-shots below, which are measured, keep theirs.
+    const daveDaemon = new Running(["--home", dave, "daemon"], { ...daveEnv, GHOSTLY_TEST_RELAY_REQUESTS_PER_MINUTE: "Infinity" });
     running.push(erinDaemon, daveDaemon);
     await Promise.all([erinDaemon, daveDaemon].map((d) => d.waitFor((l) => l.daemon === "ready")));
     // Dave joins Erin's private group and six more of hers through their links, then makes twelve invites nobody
     // takes, and stops.
-    for (const name of ["Crew", "One", "Two", "Three", "Four", "Five", "Six"]) {
+    const groups = await Promise.all(["Crew", "One", "Two", "Three", "Four", "Five", "Six"].map(async (name) => {
       const made = ok(await ghostly(["--home", erin, "group", "create", name, "--mesh"], { env: erinEnv })).group as string;
       const link = ok(await ghostly(["--home", erin, "group", "link", made], { env: erinEnv })).link as string;
       ok(await ghostly(["--home", dave, "group", "join", link], { env: daveEnv }));
-      for (let i = 0; ; i++) {
-        const shown = ok(await ghostly(["--home", dave, "group", "show", made], { env: daveEnv }));
-        const members = shown.members as { online: boolean }[];
-        if (shown.status === "active" && members.length === 2 && members.every((m) => m.online)) break;
-        if (i > 90) throw new Error(`Dave not in ${name}: ${JSON.stringify(shown)}`);
-        await new Promise((r) => setTimeout(r, 1000));
-      }
-      group ||= made;
+      return made;
+    }));
+    for (let i = 0, waiting = groups; waiting.length; i++) {
+      const shown = await Promise.all(waiting.map(async (made) => ok(await ghostly(["--home", dave, "group", "show", made], { env: daveEnv }))));
+      waiting = waiting.filter((_, j) => {
+        const members = shown[j].members as { online: boolean }[];
+        return !(shown[j].status === "active" && members.length === 2 && members.every((m) => m.online));
+      });
+      if (waiting.length && i > 90) throw new Error(`Dave not in ${waiting.join(", ")}: ${JSON.stringify(shown)}`);
+      if (waiting.length) await new Promise((r) => setTimeout(r, 1000));
     }
-    for (let i = 0; i < 12; i++) ok(await ghostly(["--home", dave, "invite", "create", "--label", `unused${i}`], { env: daveEnv }));
+    group = groups[0];
+    await Promise.all(Array.from({ length: 12 }, async (_, i) => ok(await ghostly(["--home", dave, "invite", "create", "--label", `unused${i}`], { env: daveEnv }))));
     ok(await ghostly(["--home", dave, "daemon", "stop"], { env: daveEnv }));
     await daveDaemon.exited(20_000);
   }, 300_000);
