@@ -226,16 +226,17 @@ export async function verifyApp(source: string): Promise<Record<string, unknown>
 
 /**
  * The revocations of a `ghostly-revoke.json`, a URL or a file, as a client reads it. None there, one that does not
- * answer, or one a client would not read, revokes nothing.
+ * answer, or one a client would not read, revokes nothing. A revocation `checked` holds is not verified again: one
+ * repeated in a file, or in the files beside the URL and its sources, is checked once.
  */
-async function revocationsIn(file: string, isUrl: boolean): Promise<SignedAppRevocation[]> {
+async function revocationsIn(file: string, isUrl: boolean, checked?: Set<string>): Promise<SignedAppRevocation[]> {
   let bytes: Uint8Array;
   try {
     if (isUrl) bytes = await fetchBundle(file);
     else if (!existsSync(file)) return [];
     else bytes = readBundleFile(file);
   } catch { return []; }
-  const read = readAppRevocations(bytes);
+  const read = readAppRevocations(bytes, checked);
   return read.ok ? read.revocations : [];
 }
 
@@ -267,8 +268,10 @@ export async function checkedBundle(source: string): Promise<{ bundle: AppBundle
   const files = isUrl
     ? new Set([source, ...(m.sources ?? []).filter(isAppFetchUrl)].flatMap(besideUrl))
     : [join(dirname(userPath(source)), APP_REVOKE_FILE)];
-  // Read together: one host that does not answer holds the check for one wait, not one per file after it.
-  const lists = await Promise.all([...files].map((file) => revocationsIn(file, isUrl)));
+  // Read together: one host that does not answer holds the check for one wait, not one per file after it. Each
+  // revocation's signature is checked once across them all (at most 9 files of 4096).
+  const checked = new Set<string>();
+  const lists = await Promise.all([...files].map((file) => revocationsIn(file, isUrl, checked)));
   for (const [i, file] of [...files].entries()) {
     const revocation = appRevocationFor(version, lists[i]!);
     if (revocation) {
