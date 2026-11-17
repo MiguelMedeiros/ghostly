@@ -13,6 +13,11 @@ export function setLinkTraceSink(next: LinkTraceSink | null): void {
   sink = next;
 }
 
+/** Whether the lines go anywhere: costly detail is gathered only then. */
+export function linkTraceOn(): boolean {
+  return !!(globalThis as { __ghostlyLinkTrace?: boolean }).__ghostlyLinkTrace || !!sink;
+}
+
 export function traceLink(me: string, step: string, detail?: Record<string, unknown>): void {
   const console_ = (globalThis as { __ghostlyLinkTrace?: boolean }).__ghostlyLinkTrace;
   if (!console_ && !sink) return;
