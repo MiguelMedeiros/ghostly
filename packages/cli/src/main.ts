@@ -1476,13 +1476,17 @@ async function listenCommand(argv: string[]): Promise<void> {
   // The hub's listener comes off while the feed is paused, and back after a replay from the last event taken. What a
   // replay gave and the feed did not take yet waits for the resume: one read of the journal per catch-up, not one per
   // pause; the journal is read again only for what came meanwhile.
-  let off: (() => void) | null = null, left: GhostlyEvent[] = [];
+  // A gap is numbered as the event before it, so a replay after the one that ended on it gives it again: the last one
+  // taken is not taken twice. Before, after a crash (seqs reserved past the journal's end) every replay was that gap
+  // alone, and the loop handed it on ~1,000 times, until the feed paused.
+  let off: (() => void) | null = null, left: GhostlyEvent[] = [], gap: string | undefined;
   const open = (from: number | undefined) => {
     for (;;) {
-      const events = left.length ? left : host.ctx.hub.replay(from ?? host.ctx.hub.lastSeq);
+      const events = (left.length ? left : host.ctx.hub.replay(from ?? host.ctx.hub.lastSeq)).filter((e) => e.type !== "events.gap" || e.id !== gap);
       left = [];
       if (!events.length) break;
       for (let i = 0; i < events.length; i++) {
+        if (events[i].type === "events.gap") gap = events[i].id;
         feed.take(events[i]);
         if (feed.paused) { left = events.slice(i + 1); return; }
       }
