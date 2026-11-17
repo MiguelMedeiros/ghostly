@@ -385,6 +385,32 @@ function dhtOnlyTimeout(ctx: ApiContext, chat: string, text: string, ref: string
   return note ? new CliError("timeout", `${ended(ctx, ms)}: the message is waiting. ${note}`, { ...error.details, note }) : error;
 }
 
+/**
+ * What keeps `link` off a live session, or undefined: a chat on DHT only opens none (WISP 100: no app dials it). A hold
+ * of this side's (`chat disconnect --hold`) ends by itself (`held`: when), unless the contact's choice keeps it there
+ * too; this side's choice or the contact's is `chat connect`'s refusal (apiKit `dhtOnly`), in its words.
+ */
+function offLive(ctx: ApiContext, link: LinkView): { held: number } | { refusal: CliError } | undefined {
+  const held = link.deliveryMode === "dht" && link.dhtDelivery?.peerMode !== "dht" ? holdEnds(ctx, link.id) : null;
+  if (held !== null) return { held };
+  try { dhtOnly(link); } catch (error) { if (error instanceof CliError) return { refusal: error }; throw error; }
+  return undefined;
+}
+
+/**
+ * A `chat wait --until live` that timed out on a chat on DHT only: it could never go live, and its timeout read as a
+ * slow network, so a script waited again. Said with why and what ends it, in `chat connect`'s words; same code, exit
+ * and fields. Read as the chat is at the end: one taken off DHT only meanwhile keeps the usual words.
+ */
+function liveNeverCame(ctx: ApiContext, linkId: string, ref: string, error: unknown): unknown {
+  if (!(error instanceof CliError) || error.code !== "timeout" || error.details) return error;
+  const link = state(ctx).links.find((l) => l.id === linkId);
+  const off = link && offLive(ctx, link);
+  if (!off) return error;
+  const why = "held" in off ? heldWords(off.held, ref, "it goes live", ctx.mode === "one-shot") : off.refusal.message;
+  return new CliError("timeout", `${error.message}. ${why.charAt(0).toUpperCase()}${why.slice(1)}`);
+}
+
 const METHODS: Record<string, Method> = {
   ...WALLET_METHODS,
   ...FILE_METHODS,
@@ -979,6 +1005,8 @@ const METHODS: Record<string, Method> = {
     const link = chatOf(ctx, params);
     const until = oneOf(params, "until", ["live", "text", "paired"] as const, "live");
     const ms = num(params, "timeout", 60, { min: 1, max: 86_400 }) * 1000;
+    // The chat as the person named it, as the waiting notice says it (waitNotice.ts): its id read as another chat.
+    const ref = str(params, "chat", true);
     const view = await waitForState(ctx, (s) => {
       const now = s.links.find((l) => l.id === link.id);
       if (!now) throw new CliError("not_found", `Chat ${link.id} was removed`);
@@ -988,7 +1016,7 @@ const METHODS: Record<string, Method> = {
         : until === "text" ? now.textDelivery === "stream" || now.textDelivery === "dht" || now.textDelivery === "hold"
         : !!now.peerParticipationKey || !!now.pairingProgress?.peerSeen || now.pairing?.status === "ready" || isLive(now);
       return ok ? now : undefined;
-    }, ms, `chat ${link.id} ${chatState(until).to}`);
+    }, ms, `chat ${ref} ${chatState(until).to}`).catch((error: unknown) => { throw until === "live" ? liveNeverCame(ctx, link.id, ref, error) : error; });
     return chatJson(view);
   },
 
