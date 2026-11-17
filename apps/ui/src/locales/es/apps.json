@@ -22,6 +22,7 @@
     "revokedNext": "Seguirá detenida hasta que su editor publique una versión nueva, o puedes desinstalarla.",
     "runAnyway": "Ejecutar de todos modos",
     "stopped": "Detenida",
+    "stoppedSaid": "{{title}} se detuvo.",
     "uninstall": "Desinstalar",
     "uninstallText": "Se borran sus archivos y sus datos en todos los chats. Exporta los datos antes para conservarlos.",
     "uninstallTitle": "¿Desinstalar {{title}}?",

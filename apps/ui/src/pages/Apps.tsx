@@ -14,6 +14,7 @@ import { draftDirection } from "../lib/documentLanguage";
 import { AppIcon, Fingerprint } from "../components/apps/AppIcon";
 import { AppInstallDialog, InstalledAppDialog } from "../components/apps/AppInstallDialog";
 import { removedLine } from "../components/apps/removedLine";
+import { stoppedSaid } from "../components/apps/stoppedSaid";
 import { AddAppDialog } from "../components/apps/AddAppDialog";
 import { AppChatPicker } from "../components/apps/AppChatPicker";
 import { NAME, withName } from "../components/apps/aroundName";
@@ -452,6 +453,19 @@ export function Apps() {
   const { show } = notice;
   const fail = useCallback((e: unknown) => show(appErrorText(e, t)), [show, t]);
   const said = useCallback((text: string) => show(text, { tone: "success" }), [show]);
+  // An update check or a store stopped an installed app: its row turning to Stopped, its Open going, were seen and never
+  // heard. Said politely, once, with why, in a status there since the page opened. Not for the apps already stopped
+  // when the page first read them, and not for the one whose screen is open (that screen says it).
+  const wasStopped = useRef<ReadonlyMap<string, boolean> | null>(null);
+  const [stopSaid, setStopSaid] = useState("");
+  useEffect(() => {
+    if (!installed) return;
+    const before = wasStopped.current;
+    wasStopped.current = new Map(installed.map((a) => [a.ref, appStopped(a)]));
+    if (!before) return;
+    const stopped = installed.filter((a) => appStopped(a) && before.get(a.ref) === false && a.ref !== details);
+    if (stopped.length) setStopSaid(stopped.map((a) => stoppedSaid(a.title, a.run, t)).join(" "));
+  }, [installed, details, t]);
 
   // A store that reads as before stays the object held, and the list held when all do: the update check and each
   // Refresh read every store again, and a store's block draws its listings again only when its own list changed.
@@ -487,6 +501,7 @@ export function Apps() {
     <Page title={t("apps.title")} width="md" testId="apps-page" overlay={<Toast toast={notice.toast} onDismiss={notice.dismiss} place="page" />}
       trailing={<PageAction label={t("apps.page.add")} title={t("apps.page.addHint")} testId="apps-add" onClick={() => setAdding(true)} />}>
       <p className="text-sm text-text-secondary">{t("apps.page.intro")}</p>
+      <p role="status" aria-live="polite" aria-atomic="true" className="sr-only" data-testid="apps-stop-said">{stopSaid}</p>
       <Section title={t("apps.page.installed")} testId="apps-installed">
         {installedFailure != null && <ReadFailed error={installedFailure} testId="apps-installed-error" onRetry={() => { setRetried("installed"); return refreshInstalledApps(); }} />}
         {installed === null ? <Block><Notice>{t("apps.page.loading")}</Notice></Block>
