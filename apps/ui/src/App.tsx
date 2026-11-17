@@ -42,6 +42,7 @@ import { useServiceWindowsHideIp } from "./hooks/useServiceWindowsHideIp";
 import { usePresence } from "./hooks/useOwnStatus";
 import { useIsLocked } from "./contexts/LockScreenContext";
 import { StatusPickerHost } from "./components/StatusPicker";
+import { ReconnectedSaid } from "./components/ReconnectedSaid";
 import { focusLost } from "./lib/focus";
 
 /**
@@ -273,6 +274,7 @@ export function App() {
         <InstallSteps />
         <TranslateDownloadFailure />
         <StatusPickerHost />
+        <ReconnectedSaid />
       </div>
     );
   }
@@ -305,6 +307,7 @@ export function App() {
       <InstallSteps />
       <TranslateDownloadFailure />
       <StatusPickerHost />
+      <ReconnectedSaid />
     </div>
   );
 }
