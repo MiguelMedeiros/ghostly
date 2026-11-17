@@ -10,6 +10,7 @@ import { appStopped, refreshInstalledApps, sendOpenedCard, useBuiltInApps, useIn
 import { openApp } from "../../lib/apps/open";
 import { chatAppOver } from "../../lib/apps/running";
 import { appErrorText, appErrorView } from "../../lib/apps/errors";
+import { ownDirection } from "../../lib/ownDirection";
 
 /** Open is offered for an app that may run, and for one whose files are missing here (a restored profile): opening it fetches them. */
 const opens = (app: InstalledAppView) => !appStopped(app);
@@ -132,7 +133,7 @@ export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, on
             {t("apps.composer.browse")}
           </button>
         </div>
-        {error && <p role="alert" className="text-xs text-danger-ink" data-testid="chat-apps-error">{error}</p>}
+        {error && <p role="alert" dir={ownDirection(error)} className="text-xs text-danger-ink" data-testid="chat-apps-error">{error}</p>}
         <div className="flex justify-end">
           <Button onClick={onClose}>{t("common.close")}</Button>
         </div>

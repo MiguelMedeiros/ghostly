@@ -16,6 +16,7 @@ import { refreshInstalledApps } from "../../lib/apps/installed";
 import { saveAppData } from "../../lib/apps/exportData";
 import { webKitAppLeak } from "../../lib/apps/flag";
 import { forgetLinkedFiles, type OpenAppOptions } from "../../lib/apps/open";
+import { ownDirection } from "../../lib/ownDirection";
 
 /*
  * The install screen (WISP 1200 § Permissions, § Apps sent in a chat, § Takedowns): what the checked bundle says,
@@ -103,13 +104,13 @@ function Publisher({ fingerprint, unknown: unlisted, listedBy, sentBy, builtIn }
  * bundle ("assets/ChessBoard_….html", up to 128 characters with no space or dash): it breaks anywhere rather than push
  * the screen sideways on a phone.
  */
-function InfoLine({ children, info, testId, className = "text-xs text-text-secondary" }: { children: ReactNode; info?: ReactNode; testId?: string; className?: string }) {
+function InfoLine({ children, info, testId, className = "text-xs text-text-secondary", dir }: { children: ReactNode; info?: ReactNode; testId?: string; className?: string; dir?: "auto" }) {
   const [open, setOpen] = useState(false);
   const id = useId();
   return (
     <div data-testid={testId}>
       <div className={`flex items-start gap-1.5 ${className}`}>
-        <span className="min-w-0">{children}</span>
+        <span dir={dir} className="min-w-0">{children}</span>
         {info && <InfoButton open={open} onToggle={() => setOpen(!open)} controls={id} testId={testId && `${testId}-info`} className="-my-0.5" />}
       </div>
       {info && open && <p id={id} data-testid={testId && `${testId}-text`} className="text-xs text-text-secondary leading-relaxed mt-1.5 ps-3 border-s-2 border-border [overflow-wrap:anywhere]">{info}</p>}
@@ -117,9 +118,12 @@ function InfoLine({ children, info, testId, className = "text-xs text-text-secon
   );
 }
 
-/** An error's line, with its ⓘ when it has a longer story (a browser that keeps no app files). */
+/**
+ * An error's line, with its ⓘ when it has a longer story (a browser that keeps no app files). One shown as it came (the
+ * engine's English) keeps its own direction: in Arabic Uninstall's "…indexedDB.open." had its stop at the line's start.
+ */
 function ErrorLine({ error, testId }: { error: AppErrorView; testId?: string }) {
-  return <div role="alert"><InfoLine testId={testId} info={error.info} className="text-xs text-danger-ink whitespace-pre-line">{error.text}</InfoLine></div>;
+  return <div role="alert"><InfoLine testId={testId} info={error.info} dir={ownDirection(error.text)} className="text-xs text-danger-ink whitespace-pre-line">{error.text}</InfoLine></div>;
 }
 
 /** What the app may do: always its own data on this device (not on an update), then each permission it asks for. */
