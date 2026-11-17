@@ -11,7 +11,7 @@ import { error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running, type Re
 let relays: { url: string; server: Server }[] = [];
 let dht: { bootstrap: string; destroy(): Promise<void> };
 const running: Running[] = [];
-const alice = home("alice"), bob = home("bob");
+const alice = home("alice"), bob = home("bob"), carol = home("carol"), dave = home("dave");
 let env: NodeJS.ProcessEnv;
 const as = (dir: string, ...args: string[]) => ghostly(["--home", dir, ...args], { env });
 const long = "é".repeat(150); // 300 bytes
@@ -85,4 +85,45 @@ it("a text past 256 bytes in a DHT-only chat answers at once (or at an explicit 
   ok(await as(alice, "chat", "wait", "bob", "--until", "live", "--timeout", "90"));
   await expect.poll(async () => (ok(await as(bob, "chat", "history", "alice", "--limit", "10")).messages as { text: string; from: string }[])
     .filter((m) => m.from === "peer" && (m.text === long || m.text === waited)).length, { timeout: 60_000, interval: 1_000 }).toBe(6);
+});
+
+/** When a hold ends, as the CLI says it: this machine's hour and minute, with the day when it is not today. */
+function clock(until: number): string {
+  const at = new Date(until), two = (n: number) => String(n).padStart(2, "0");
+  const day = at.toDateString() === new Date().toDateString() ? "" : `${at.getFullYear()}-${two(at.getMonth() + 1)}-${two(at.getDate())} `;
+  return `${day}${two(at.getHours())}:${two(at.getMinutes())}`;
+}
+
+/**
+ * A hold (`chat disconnect --hold`) is this side's DHT only for a while: a text past 256 bytes waits through it and goes
+ * by itself when it ends. The note and an explicit `--wait`'s timeout said it goes only once you choose a live
+ * transport (`chat transport <chat> auto`, which ends the hold the person asked for). They say when the hold ends, and
+ * the command that ends it now.
+ */
+it("under a hold, a text past 256 bytes says it goes when the hold ends, and goes then with nothing chosen", { timeout: 300_000 }, async () => {
+  for (const dir of [carol, dave]) {
+    ok(await as(dir, "settings", "set", "relays", JSON.stringify(relays.map((r) => r.url))));
+    const daemon = new Running(["--home", dir, "daemon"], env);
+    running.push(daemon);
+    await daemon.waitFor((l) => l.daemon === "ready");
+  }
+  const invite = ok(await as(carol, "invite", "create", "--label", "dave"));
+  ok(await as(dave, "invite", "join", invite.link as string, "--label", "carol"));
+  for (const [dir, chat] of [[carol, "dave"], [dave, "carol"]]) ok(await as(dir, "chat", "wait", chat, "--until", "live", "--timeout", "90"));
+  const until = ok(await as(carol, "chat", "disconnect", "dave", "--hold", "0.5")).heldUntil as number;
+  const held = `this chat is held on the DHT only until ${clock(until)}: it goes then, or now with ghostly chat connect dave`;
+
+  const kept = ok(await as(carol, "send", "dave", long));
+  expect(kept.delivery).toBe("waiting");
+  expect(kept.note).toBe(`Longer than the 256 bytes the DHT carries, and ${held}`);
+  const timedOut = await as(carol, "send", "dave", waited, "--wait", "delivered", "--timeout", "2");
+  const failure = error(timedOut, "timeout", 4);
+  expect(failure.message).not.toContain("choose a live transport");
+  expect(failure.message).toContain(`the message is waiting. Longer than the 256 bytes the DHT carries, and ${held}`);
+  expect((timedOut.json.error as { details?: Record<string, unknown> }).details).toMatchObject({ delivery: "waiting", note: expect.stringContaining(held) });
+
+  // What the words say: the hold ends by itself, and both texts reach the contact with no transport chosen.
+  await expect.poll(async () => (ok(await as(dave, "chat", "history", "carol", "--limit", "10")).messages as { text: string; from: string }[])
+    .filter((m) => m.from === "peer" && (m.text === long || m.text === waited)).length, { timeout: 150_000, interval: 2_000 }).toBe(2);
+  expect(ok(await as(carol, "chat", "show", "dave"))).toMatchObject({ heldUntil: null, deliveryMode: "stream" });
 });

@@ -18,7 +18,7 @@ import { checkShownName } from "./profiles";
 import { ended, foldsAnyway, goesOn, nobodyElseIn, outOf, purgeMessage, waitForConfirmed, waitForEdit, waitForGroupFrame, waitForMessage, waitForRemoval } from "./waits";
 import { STATUS_CARD_METHODS, secretIn } from "./statusCards";
 import { BUTTON_METHODS, buttonsCard, pressable } from "./buttons";
-import { forgetHold, HOLD_MAX_MINUTES, holdChat, holdOf, releaseHold } from "./holds";
+import { forgetHold, HOLD_MAX_MINUTES, holdChat, holdEnds, holdOf, releaseHold } from "./holds";
 import { endTyping, keepOneShot, keepTyping, sayTyping } from "./typing";
 import { GROUP_ADMIN_METHODS, noMember, withUrl } from "./groupAdmin";
 import { withStoredIds } from "./turnRefs";
@@ -320,16 +320,34 @@ async function letIn(ctx: ApiContext, groupId: string, link: string, held: Group
 /**
  * Why a text that waits will not go by itself, or undefined: longer than the 256 bytes the DHT carries, in a chat on
  * the DHT only (this side's choice, the contact's, or both). It goes once the chat is live, which neither side's app
- * tries while either keeps it on the DHT only, so it is said with what ends that, or to shorten it.
+ * tries while either keeps it on the DHT only, so it is said with what ends that, or to shorten it. This side's DHT
+ * only that is a hold (`chat disconnect --hold`) ends by itself: said with when, and the command that ends it now
+ * (read from `ctx`'s profile; without it, as a DHT only chosen).
  */
-function dhtOnlyWait(link: LinkView, text: string, ref: string): string | undefined {
+function dhtOnlyWait(link: LinkView, text: string, ref: string, ctx?: ApiContext): string | undefined {
   const mine = link.deliveryMode === "dht", theirs = link.dhtDelivery?.peerMode === "dht";
   if ((!mine && !theirs) || new TextEncoder().encode(text.trim()).length <= DHT_TEXT_BYTES) return undefined;
+  const held = mine && ctx ? holdEnds(ctx, link.id) : null, chosen = mine && held === null;
   const switchBack = `ghostly chat transport ${shellWord(ref, "<chat>")} auto`;
-  const who = mine && theirs ? `you and the contact keep this chat on the DHT only: it goes once both choose a live transport (${switchBack}), or shorten it`
-    : mine ? `this chat is on the DHT only: it goes once you choose a live transport (${switchBack}), or shorten it`
-    : "the contact keeps this chat on the DHT only: it goes once they choose a live transport, or shorten it";
+  const who = chosen && theirs ? `you and the contact keep this chat on the DHT only: it goes once both choose a live transport (${switchBack}), or shorten it`
+    : theirs ? "the contact keeps this chat on the DHT only: it goes once they choose a live transport, or shorten it"
+    : held !== null ? heldWords(held, ref, "it goes", ctx?.mode === "one-shot")
+    : `this chat is on the DHT only: it goes once you choose a live transport (${switchBack}), or shorten it`;
   return `Longer than the ${DHT_TEXT_BYTES} bytes the DHT carries, and ${who}`;
+}
+
+/**
+ * A chat this side holds on the DHT only (`chat disconnect --hold`) until `until`: what waits for its end (`act`)
+ * goes then by itself, or at once with `chat connect`, which ends the hold. A hold whose time is up and that is still
+ * ending (`holdEnds`) says so. The time is this machine's: the hour and minute, with the day when it is not today.
+ */
+function heldWords(until: number, ref: string, act: string, oneShot = false): string {
+  const connect = `ghostly chat connect ${shellWord(ref, "<chat>")}`;
+  const online = oneShot ? " while this profile is online (ghostly daemon --detach)" : "";
+  if (until <= Date.now()) return `this chat's hold on the DHT only is ending: ${act} once the chat is live${online}, or now with ${connect}`;
+  const at = new Date(until), two = (n: number) => String(n).padStart(2, "0");
+  const day = at.toDateString() === new Date().toDateString() ? "" : `${at.getFullYear()}-${two(at.getMonth() + 1)}-${two(at.getDate())} `;
+  return `this chat is held on the DHT only until ${day}${two(at.getHours())}:${two(at.getMinutes())}: ${act} then${online}, or now with ${connect}`;
 }
 
 /**
@@ -341,7 +359,7 @@ function dhtOnlyWait(link: LinkView, text: string, ref: string): string | undefi
 function dhtOnlyTimeout(ctx: ApiContext, chat: string, text: string, ref: string, ms: number, error: unknown): unknown {
   if (!(error instanceof CliError) || error.code !== "timeout" || error.details?.delivery !== "waiting") return error;
   const link = state(ctx).links.find((l) => l.id === chat);
-  const note = link && dhtOnlyWait(link, text, ref);
+  const note = link && dhtOnlyWait(link, text, ref, ctx);
   return note ? new CliError("timeout", `${ended(ctx, ms)}: the message is waiting. ${note}`, { ...error.details, note }) : error;
 }
 
@@ -537,7 +555,7 @@ const METHODS: Record<string, Method> = {
     // Past the 256 bytes the DHT carries, in a chat on the DHT only: it waits for a live session, which comes only once
     // the chat leaves DHT only. A one-shot sat 30 s, then answered `timeout` saying it goes with the next command.
     const ref = str(params, "chat", true);
-    const dhtOnly = message?.delivery === "waiting" ? dhtOnlyWait(link, text, ref) : undefined;
+    const dhtOnly = message?.delivery === "waiting" ? dhtOnlyWait(link, text, ref, ctx) : undefined;
     // An explicit `--wait` still waits as asked, and a wait that ends short says that note, not that the text goes by itself.
     if (wait !== "none" && !(dhtOnly && params.wait === undefined)) {
       message = await waitForMessage(ctx, link.id, result.messageId, wait, ms).catch((error: unknown) => { throw dhtOnlyTimeout(ctx, link.id, text, ref, ms, error); });
@@ -1315,19 +1333,22 @@ const DHT_TEXT_FITS = 248, DHT_EDIT_FITS = 214;
 /**
  * The engine's refusal of a text or an edit within 256 bytes that the DHT packet cannot carry (`DHT_PACKET_BUDGET`,
  * "Text and authentication exceed the DHT packet budget"), said as the apps and `dhtOnlyWait` say it: too long for the
- * DHT, about how much fits, and what ends it, by whose choice keeps the chat on the DHT only. Any other error as is.
+ * DHT, about how much fits, and what ends it, by whose choice keeps the chat on the DHT only (this side's hold: when
+ * it ends, and the command that ends it now). Any other error as is.
  */
 function dhtTooLong(ctx: ApiContext, asked: LinkView, error: string, kind: "text" | "edit", ref: string): string {
   if (error !== DHT_PACKET_BUDGET) return error;
   // Read again: the contact's choice may have come with the envelope the engine read since the chat was looked up.
   const link = state(ctx).links.find((l) => l.id === asked.id) ?? asked;
   const mine = link.deliveryMode === "dht", theirs = link.dhtDelivery?.peerMode === "dht";
+  const held = mine ? holdEnds(ctx, link.id) : null, chosen = mine && held === null;
   const fits = kind === "text" ? `a text fits about ${DHT_TEXT_FITS} bytes there` : `an edit fits about ${DHT_EDIT_FITS} bytes there`;
   const act = kind === "text" ? "send it" : "make the edit";
   const switchBack = `ghostly chat transport ${shellWord(ref, "<chat>")} auto`;
-  const who = mine && theirs ? `you and the contact keep this chat on the DHT only: ${act} once both choose a live transport (${switchBack}), or shorten it`
-    : mine ? `this chat is on the DHT only: ${act} once you choose a live transport (${switchBack}), or shorten it`
+  const who = chosen && theirs ? `you and the contact keep this chat on the DHT only: ${act} once both choose a live transport (${switchBack}), or shorten it`
+    : chosen ? `this chat is on the DHT only: ${act} once you choose a live transport (${switchBack}), or shorten it`
     : theirs ? `the contact keeps this chat on the DHT only: ${act} once they choose a live transport, or shorten it`
+    : held !== null ? `${heldWords(held, ref, act)}, or shorten it`
     : `shorten it, or ${act} once the chat is live`;
   return `Too long for the DHT (${fits} once sealed): ${who}`;
 }
