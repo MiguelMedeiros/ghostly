@@ -58,7 +58,9 @@ export function runnerPolicy(url: string, fetcher: typeof fetch = fetch, interne
       if (checked.get(key) === asking) checked.delete(key);
       return status;
     };
-    const asking: Promise<RunnerAnswer> = fetcher(url, { cache: "no-store", credentials: "omit", redirect: "error" })
+    // `no-cache`, not `no-store`: the server is asked every time, but an unchanged page answers 304 with its headers
+    // instead of its whole body (9.6 KiB gzip at every start, most of what a warm start downloaded).
+    const asking: Promise<RunnerAnswer> = fetcher(url, { cache: "no-cache", credentials: "omit", redirect: "error" })
       .then((response) => notAnswered(response.status) ? unasked(response.status) : response.ok && isRunnerPolicy(response.headers.get("content-security-policy") ?? "", internet), () => unasked());
     answer = asking;
     checked.set(key, answer);
