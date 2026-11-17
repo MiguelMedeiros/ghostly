@@ -20,7 +20,7 @@ import { openAppSettings, useCameraRefusal } from "../desktop/androidCameraRefus
 import { AppsGlyph, CameraGlyph, DocumentGlyph, IdentityGlyph, MediaGlyph, PaymentGlyph, ServicesGlyph, SmileIcon, TranslateIcon } from "./composer/icons";
 import type { ComposerServices } from "./composer/servicesRow";
 import { useMentionPicker, type ComposerMentions } from "./composer/MentionPicker";
-import type { GroupMention } from "@ghostly/core";
+import { dhtTextBytes, type GroupMention } from "@ghostly/core";
 import { LinkPreviewDraftCard } from "./composer/LinkPreviewDraft";
 import { EditBar, ReplyBar } from "./chat/ReplyQuote";
 import { useLinkPreviewDraft } from "../hooks/useLinkPreviewDraft";
@@ -60,8 +60,9 @@ interface MessageInputProps {
   maxLength?: number;
   maxBytes?: number;
   /**
-   * What the DHT carries while the chat is not live: past it the counter turns amber, and its title says what becomes
-   * of a text that long (`softTitle`, by its bytes; else that it waits for a live connection).
+   * What the DHT carries while the chat is not live, counted as its packet counts a text (`dhtTextBytes`, escaped): past
+   * it the counter turns amber, and its title says what becomes of a text that long (`softTitle`, by its raw UTF-8
+   * bytes; else that it waits for a live connection).
    */
   softBytes?: number;
   softTitle?: (bytes: number) => string;
@@ -1014,7 +1015,9 @@ export function MessageInput({
 
   const bytes = maxBytes || softBytes || textBytes ? new TextEncoder().encode(text.trim()).length : 0;
   const remaining = maxBytes ? maxBytes - bytes : textBytes ? textBytes - bytes : maxLength - text.length;
-  const overSoft = !!softBytes && bytes > softBytes;
+  // The DHT's count is on what its packet carries: a new line, a quote or a backslash takes one more byte there.
+  const packetBytes = softBytes ? dhtTextBytes(text) : 0;
+  const overSoft = !!softBytes && packetBytes > softBytes;
   // Near the limit that refuses, its count wins over the DHT's (past 16 KiB is past 256 B too).
   const nearHard = remaining < 100 && (!softBytes || !!maxBytes || !!textBytes);
 
@@ -1160,10 +1163,10 @@ export function MessageInput({
               dir={draftDirection(text)}
               className="composer-textarea"
             />
-            {softBytes && !maxBytes && !nearHard && bytes > softBytes - 60 && (
+            {softBytes && !maxBytes && !nearHard && packetBytes > softBytes - 60 && (
               <span data-testid="dht-byte-count" title={overSoft ? softTitle?.(bytes) ?? t("composer.overSoft", { bytes: softBytes }) : undefined}
                 className={`absolute end-2.5 bottom-1 text-[10px] ${overSoft ? "text-warn-ink" : "text-text-muted"}`}>
-                {bytes} / {softBytes} B
+                {packetBytes} / {softBytes} B
               </span>
             )}
             {nearHard && (

@@ -20,6 +20,7 @@
   "chooseFiles": "Choose files",
   "closeCamera": "Close camera",
   "dhtFits": {
+    "both": "Too long for the DHT, which carries about {{fits}} bytes. You and your contact keep this chat on DHT only: shorten it, or both change it from the connection icon.",
     "contact": "Too long for the DHT, which carries about {{fits}} bytes. Your contact's chat is on DHT only: shorten it, or wait until they allow live again.",
     "editLive": "Too long for the DHT as an edit, which carries about {{fits}} bytes: it goes when you are live.",
     "held": "Longer than the DHT carries (about {{fits}} bytes): it is kept for your contact until they are online.",

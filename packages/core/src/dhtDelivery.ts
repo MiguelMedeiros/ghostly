@@ -21,6 +21,18 @@ export const DHT_TEXT_BYTES = 256;
 export const DHT_MESSAGE_TTL = 5 * 60_000;
 export const DHT_TEXT_TOO_LONG = `DHT text is limited to ${DHT_TEXT_BYTES} UTF-8 bytes. Shorten it or choose a live connection.`;
 export const DHT_PACKET_BUDGET = "Text and authentication exceed the DHT packet budget. Shorten the message.";
+/**
+ * About the longest ASCII text, and edit, the DHT packet carries once sealed and signed: within the 256 bytes, the
+ * envelope's authentication (and an edit's element) takes the rest. The edge moves by a byte or two with the chat (the
+ * envelope's sequence, the edit's number), so the apps and the CLI say "about"; the CLI's `dhtBudgetWords.test.ts`
+ * sends both sizes on two paired daemons.
+ */
+export const DHT_TEXT_FITS = 248, DHT_EDIT_FITS = 214;
+/**
+ * The bytes a text takes in the DHT packet, as `bodyFits` measures it: its UTF-8 once JSON-escaped, so a new line, a
+ * quote or a backslash costs two and a control character six. What `DHT_TEXT_FITS` and `DHT_EDIT_FITS` are counted on.
+ */
+export const dhtTextBytes = (text: string): number => utf8Encode(JSON.stringify(text.trim())).length - 2;
 const CONTROL_TTL = 10 * 60_000;
 /**
  * How far apart two devices' clocks may be for an envelope's expiry: a reader takes one until this long after `expires`

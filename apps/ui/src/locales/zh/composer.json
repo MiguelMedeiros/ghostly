@@ -20,6 +20,7 @@
   "chooseFiles": "选择文件",
   "closeCamera": "关闭相机",
   "dhtFits": {
+    "both": "对 DHT 来说太长（DHT 约可承载 {{fits}} 字节）。你和联系人都将此聊天设为仅 DHT：请缩短，或双方都通过连接图标更改。",
     "contact": "对 DHT 来说太长（DHT 约可承载 {{fits}} 字节）。联系人的聊天为仅 DHT：请缩短，或等对方重新允许直连。",
     "editLive": "作为编辑对 DHT 来说太长（DHT 约可承载 {{fits}} 字节）：直连后发送。",
     "held": "超过 DHT 可承载的量（约 {{fits}} 字节）：为联系人保存，直到对方上线。",

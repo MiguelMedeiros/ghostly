@@ -20,6 +20,7 @@
   "chooseFiles": "Scegli i file",
   "closeCamera": "Chiudi fotocamera",
   "dhtFits": {
+    "both": "Troppo lungo per la DHT, che porta circa {{fits}} byte. Tu e il tuo contatto tenete questa chat in Solo DHT: accorcialo, o cambiatelo entrambi dall'icona di connessione.",
     "contact": "Troppo lungo per la DHT, che porta circa {{fits}} byte. La chat del tuo contatto è in Solo DHT: accorcialo, o aspetta che consenta di nuovo la connessione diretta.",
     "editLive": "Troppo lungo per la DHT come modifica, che porta circa {{fits}} byte: parte quando sei connesso direttamente.",
     "held": "Più di quanto porta la DHT (circa {{fits}} byte): viene conservato per il tuo contatto finché non è online.",

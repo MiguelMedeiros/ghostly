@@ -1,5 +1,6 @@
 import type { Server } from "node:http";
 import { afterAll, beforeAll, expect, it } from "vitest";
+import { DHT_EDIT_FITS, DHT_TEXT_FITS } from "@ghostly/core";
 import { error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
 // covers: chat.dht.delivery, chat.edit.wire, headless.chat
 
@@ -47,9 +48,9 @@ it("a text or an edit too long for the DHT packet says how much fits and what en
   expect(text).toBe("Too long for the DHT (a text fits about 248 bytes there once sealed): this chat is on the DHT only: send it once you choose a live transport (ghostly chat transport bob auto), or shorten it");
   const edit = error(await as(alice, "edit", "bob", id, "e".repeat(230), "--wait", "none"), "refused", 1).message;
   expect(edit).toBe("Too long for the DHT (an edit fits about 214 bytes there once sealed): this chat is on the DHT only: make the edit once you choose a live transport (ghostly chat transport bob auto), or shorten it");
-  // What the words name fits: an edit and a text of those sizes are taken.
-  expect(ok(await as(alice, "edit", "bob", id, "e".repeat(214), "--wait", "none"))).toMatchObject({ edits: 1 });
-  expect(ok(await as(alice, "send", "bob", "x".repeat(248), "--wait", "none")).messageId).toBeTruthy();
+  // What the words name fits: an edit and a text of those sizes (core's, which the apps count against too) are taken.
+  expect(ok(await as(alice, "edit", "bob", id, "e".repeat(DHT_EDIT_FITS), "--wait", "none"))).toMatchObject({ edits: 1 });
+  expect(ok(await as(alice, "send", "bob", "x".repeat(DHT_TEXT_FITS), "--wait", "none")).messageId).toBeTruthy();
 
   // The contact's choice: nothing this side runs ends it.
   ok(await as(alice, "chat", "transport", "bob", "auto"));

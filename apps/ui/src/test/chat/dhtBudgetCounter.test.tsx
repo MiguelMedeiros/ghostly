@@ -14,6 +14,8 @@ const BUDGET = "Text and authentication exceed the DHT packet budget. Shorten th
 const LIVE_LATER = "Too long for the DHT, which carries about 248 bytes. Shorten it, or send it once you're connected peer to peer.";
 const MINE = "Too long for the DHT, which carries about 248 bytes. This chat is on DHT only: shorten it, or change it from the connection icon.";
 const THEIRS = "Too long for the DHT, which carries about 248 bytes. Your contact's chat is on DHT only: shorten it, or wait until they allow live again.";
+const BOTH = "Too long for the DHT, which carries about 248 bytes. You and your contact keep this chat on DHT only: shorten it, or both change it from the connection icon.";
+const WAITS = "Over the 248 bytes the DHT carries: it is sent when you are live";
 
 /**
  * A 1:1 chat off the live link, on the DHT floor. The engine refuses a text of about 249-256 bytes there (sealed, it
@@ -53,6 +55,7 @@ describe("the DHT byte count off the live link", () => {
     ["a chat that goes live", {}, LIVE_LATER],
     ["a chat on DHT only by this side", { deliveryMode: "dht" }, MINE],
     ["a chat on DHT only by the contact", { dhtDelivery: { peerMode: "dht" } }, THEIRS],
+    ["a chat on DHT only by both sides", { deliveryMode: "dht", dhtDelivery: { peerMode: "dht" } }, BOTH],
   ])("past them in %s, warns before Send with what the refusal says after it", async (_, link, said) => {
     const { user } = openChat(link);
     const field = await type("x".repeat(250));
@@ -68,7 +71,27 @@ describe("the DHT byte count off the live link", () => {
   it("past 256 bytes, in a chat that goes live, says it is sent when live", async () => {
     openChat({});
     await type("x".repeat(300));
-    expect(await screen.findByTestId("dht-byte-count")).toHaveAttribute("title", "Over the 248 bytes the DHT carries: it is sent when you are live");
+    expect(await screen.findByTestId("dht-byte-count")).toHaveAttribute("title", WAITS);
+  });
+
+  // The packet carries the text JSON-escaped: a new line, a quote or a backslash takes two bytes there.
+  it.each([
+    ["new lines", `${"x".repeat(60)}\n`.repeat(4) + "x".repeat(1), 249],
+    ["quotes", 'xxxxxxxxx"'.repeat(23), 253],
+    ["backslashes", "x".repeat(240) + "\\".repeat(9), 258],
+  ])("counts a text with %s as the packet does", async (_, text, escaped) => {
+    openChat({});
+    await type(text);
+    const counter = await screen.findByTestId("dht-byte-count");
+    expect(counter).toHaveTextContent(`${escaped} / 248 B`);
+    expect(counter.className).toContain("text-warn-ink");
+    expect(counter).toHaveAttribute("title", LIVE_LATER);
+  });
+
+  it("with no DHT to carry it, says a text that long waits for live, not to shorten it", async () => {
+    openChat({ textDelivery: "unavailable" });
+    await type("x".repeat(250));
+    expect(await screen.findByTestId("dht-byte-count")).toHaveAttribute("title", WAITS);
   });
 
   it("where both sides allow held messages, says it is held", async () => {

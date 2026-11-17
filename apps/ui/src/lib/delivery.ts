@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
+import { DHT_EDIT_FITS, DHT_TEXT_BYTES, DHT_TEXT_FITS } from "@ghostly/core";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { useOnline } from "../hooks/useOnline";
 import type { PeerLinkState } from "./platform";
@@ -49,26 +50,22 @@ export function waitsForLive(message: Pick<ChatMessage, "delivery" | "file"> | u
 }
 
 /**
- * About the longest ASCII text, and edit, the DHT packet carries once sealed: within its 256 bytes, the envelope's
- * authentication (and an edit's element) takes the rest. The CLI says the same (packages/cli/src/api.ts DHT_TEXT_FITS,
- * DHT_EDIT_FITS); quotes, backslashes and new lines take more once escaped, so it is "about".
- */
-export const DHT_FITS = { text: 248, edit: 214 } as const;
-
-/**
  * What the engine does with a text, or an edit, past what the DHT packet carries (engine/node.ts sendChatText,
  * editMessage), said on the composer's count before Send and in place of its refusal (DHT_PACKET_BUDGET) after it.
- * A text goes held where both sides allow it; a chat on DHT only by choice refuses it, or keeps it for a live connection
- * it never makes, until the side that chose leaves it; otherwise a text past 256 bytes waits for live, one within them is
- * refused, and an edit waits for live.
+ * A text goes held where both sides allow it, and waits whatever its size with no DHT to carry it; past 256 bytes (raw
+ * UTF-8: `bytes`) it waits for live, which a chat on DHT only by choice never makes until the side(s) that chose leave
+ * it. Within them it is refused, as an edit is in a chat on DHT only; any other edit waits for live.
  */
 export function dhtOverLine(t: Translate, link: Pick<PeerLinkState, "deliveryMode" | "textDelivery" | "dhtDelivery"> | null | undefined, bytes: number, edit: boolean): string {
-  const fits = edit ? DHT_FITS.edit : DHT_FITS.text;
+  const fits = edit ? DHT_EDIT_FITS : DHT_TEXT_FITS;
+  const mine = link?.deliveryMode === "dht", theirs = link?.dhtDelivery?.peerMode === "dht";
   if (!edit && link?.textDelivery === "hold") return t("composer.dhtFits.held", { fits });
-  if (link?.deliveryMode === "dht") return t("composer.dhtFits.you", { fits });
-  if (link?.dhtDelivery?.peerMode === "dht") return t("composer.dhtFits.contact", { fits });
+  if (!edit && link?.textDelivery !== "dht") return t("composer.overSoft", { bytes: fits });
+  if (mine && theirs) return t("composer.dhtFits.both", { fits });
+  if (mine) return t("composer.dhtFits.you", { fits });
+  if (theirs) return t("composer.dhtFits.contact", { fits });
   if (edit) return t("composer.dhtFits.editLive", { fits });
-  return bytes > (link?.dhtDelivery?.maxTextBytes ?? 256) ? t("composer.overSoft", { bytes: fits }) : t("composer.dhtFits.live", { fits });
+  return bytes > (link?.dhtDelivery?.maxTextBytes ?? DHT_TEXT_BYTES) ? t("composer.overSoft", { bytes: fits }) : t("composer.dhtFits.live", { fits });
 }
 
 /**

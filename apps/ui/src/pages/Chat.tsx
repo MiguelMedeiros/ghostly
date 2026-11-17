@@ -63,7 +63,7 @@ import { heldOriginal, messageSnippet, quoteFor, replyIndexer, replyTarget, sent
 import { useKeptEdit } from "../lib/keptEdits";
 import { buttonsViews, compactPresses } from "../lib/buttons";
 import { ChatOnScreen } from "../lib/chatOnScreen";
-import { DHT_PACKET_BUDGET, replySnippet, type RoutineCard } from "@ghostly/core";
+import { DHT_EDIT_FITS, DHT_PACKET_BUDGET, DHT_TEXT_FITS, replySnippet, type RoutineCard } from "@ghostly/core";
 import { composerServices } from "../components/composer/servicesRow";
 import { CallButtons } from "../components/CallButtons";
 import { CallOverlay } from "../components/CallOverlay";
@@ -146,7 +146,7 @@ import { showChatOnScreen } from "../lib/appBadge";
 import { setSaved, useSavedIn } from "../hooks/useSavedMessages";
 import { problemText, type Problem, problemLine } from "../lib/problemText";
 import { rawError } from "../lib/errorText";
-import { DHT_FITS, dhtOverLine } from "../lib/delivery";
+import { dhtOverLine } from "../lib/delivery";
 
 /** What a call captures from: the devices the profile chose, read when it asks. */
 const callDevicePreferences = () => ({ audio: preferredDevice("audioinput"), video: preferredDevice("videoinput") });
@@ -1313,7 +1313,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         disabled={paired && (!!chatStop || engine.state?.settings.online === false)}
         disabledPlaceholder={t("chat.disabledPlaceholder")}
         // The DHT carries a few hundred characters, fewer for an edit; the direct link has room for long invoices and ecash tokens.
-        softBytes={paired && !chatLive ? editing ? DHT_FITS.edit : DHT_FITS.text : undefined}
+        softBytes={paired && !chatLive ? editing ? DHT_EDIT_FITS : DHT_TEXT_FITS : undefined}
         softTitle={(bytes) => dhtOverLine(t, deliveryPeer, bytes, !!editing)}
         maxLength={paired ? 16_384 : platform?.getPeer(params.peerPubKeyB64)?.dataLink === "open" ? 4000 : undefined}
         // The engine's limit is 16 KiB of UTF-8, not characters: "é" counts two, an emoji four.

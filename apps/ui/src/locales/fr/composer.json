@@ -20,6 +20,7 @@
   "chooseFiles": "Choisir des fichiers",
   "closeCamera": "Fermer l'appareil photo",
   "dhtFits": {
+    "both": "Trop long pour la DHT, qui porte environ {{fits}} octets. Votre contact et vous gardez cette discussion en DHT seule : raccourcissez-le, ou changez-le tous les deux depuis l'icône de connexion.",
     "contact": "Trop long pour la DHT, qui porte environ {{fits}} octets. La discussion de votre contact est en DHT seule : raccourcissez-le, ou attendez qu'il autorise à nouveau la liaison directe.",
     "editLive": "Trop long pour la DHT en tant que modification, qui porte environ {{fits}} octets : elle part dès que la liaison directe est là.",
     "held": "Plus long que ce que porte la DHT (environ {{fits}} octets) : il est gardé pour votre contact jusqu'à ce qu'il soit en ligne.",
