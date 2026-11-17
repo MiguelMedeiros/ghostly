@@ -155,22 +155,58 @@ async function holdsKey(keyPair, options, onLeave) {
  * Every other way a dial connects follows a packet from the far peer. The relays a far server names go too: HyperDHT
  * keeps them for the next dial to that key and sends its handshake and lookup there first, wherever they are; without
  * them it keeps the DHT nodes it reached the far server through itself.
+ *
+ * The address "the DHT node saw it at" is only that node's word, though: a reply relayed by a DHT node carries the far
+ * server's address as that node writes it, and a node run by whoever owns the dialled key writes any it likes, loopback
+ * and LAN addresses of the relay's own host too. HyperDHT connects the stream there at once when the far server says it
+ * is open or names no relays to holepunch through. A relayed reply has neither here: an open far server is taken as one
+ * to wait for, which HyperDHT does when the relay's node names its own address (the far server connects to it, and the
+ * stream goes where that packet came from), and holepunches otherwise. One that names no relays is passed on only to a
+ * relay's node that names its address, with the DHT node that relayed it as its relay so HyperDHT waits there too: a
+ * relay's node that names none could only send the stream to the address it was told, so that reply is dropped. A
+ * reply that comes straight from the node that answered (unrelayed) has HyperDHT connect to that node, where it came from.
  */
 const { isBogon } = hyperdht('bogon')
+const { FIREWALL } = hyperdht('./lib/constants.js')
+const Router = hyperdht('./lib/router.js')
 const NoiseWrap = hyperdht('./lib/noise-wrap.js')
 const noiseWrap = (keyPair, remotePublicKey) => new NoiseWrap(keyPair, remotePublicKey)
-const reached = payload => payload && {
-  ...payload,
-  ...(payload.addresses4?.length && { addresses4: payload.addresses4.filter(address => isBogon(address.host)) }),
-  relayAddresses: null
+// A relayed reply's Noise message → the DHT node that relayed it, as HyperDHT's router hands it on.
+const relayedReplies = new WeakMap()
+const peerHandshake = Router.prototype.peerHandshake
+Router.prototype.peerHandshake = async function (target, request, to) {
+  const reply = await peerHandshake.call(this, target, request, to)
+  if (reply.relayed) relayedReplies.set(reply.noise, to)
+  return reply
+}
+const reached = (payload, relayedBy, open) => {
+  if (!payload) return payload
+  const own = {
+    ...payload,
+    ...(payload.addresses4?.length && { addresses4: payload.addresses4.filter(address => isBogon(address.host)) }),
+    relayAddresses: null
+  }
+  if (!relayedBy) return own
+  if (own.holepunch?.relays?.length) return { ...own, firewall: own.firewall === FIREWALL.OPEN ? FIREWALL.CONSISTENT : own.firewall }
+  if (!open) return null
+  return { ...own, firewall: FIREWALL.CONSISTENT, holepunch: { id: own.holepunch?.id ?? 0, relays: [{ relayAddress: relayedBy, peerAddress: relayedBy }] } }
 }
 const reachedOnly = create => (...args) => {
   const handshake = create(...args)
+  // Whether the relay's node named its own address in the dial's request (HyperDHT's `c.firewall`).
+  let open = false
+  const send = handshake.send.bind(handshake)
+  handshake.send = (payload, ...rest) => {
+    open = payload?.firewall === FIREWALL.OPEN
+    return send(payload, ...rest)
+  }
   const recv = handshake.recv.bind(handshake)
   // NoiseWrap answers at once, the client's handshake (HandshakeProxy) in a promise.
-  handshake.recv = (...message) => {
-    const payload = recv(...message)
-    return typeof payload?.then === 'function' ? payload.then(reached) : reached(payload)
+  handshake.recv = (noise, ...rest) => {
+    const relayedBy = relayedReplies.get(noise)
+    const payload = recv(noise, ...rest)
+    const pass = answer => reached(answer, relayedBy, open)
+    return typeof payload?.then === 'function' ? payload.then(pass) : pass(payload)
   }
   return handshake
 }

@@ -10,13 +10,35 @@ import { expect, it } from "vitest";
  * A far server that says it is open names a "canary" UDP socket as its address: the canary gets nothing, and the dial
  * still reaches the far server. HyperDHT skips loopback as a bogon in that pick, so this test's process (its own, as
  * every test file's) counts 127.0.0.1 as public, before HyperDHT loads, as a relay on a public address sees one.
- * The far server never sends to the relay first, as one that wants this would not.
+ * The far server never sends to the relay first, as one that wants this would not. Nor does a DHT node that relays the
+ * far server's reply get the stream sent where it says it saw the far server.
  */
 
 const require = createRequire(import.meta.url);
 const bogon = require(require.resolve("bogon", { paths: [dirname(require.resolve("hyperdht"))] }));
 const isBogon = bogon.isBogon;
 bogon.isBogon = (ip: string) => ip !== "127.0.0.1" && isBogon(ip);
+
+/**
+ * While `forged` is set, every DHT node in this process that relays a far server's handshake reply back to a dialler
+ * writes `forged` as the address it saw the far server at, as a node run by whoever owns the dialled key could.
+ */
+let forged: { host: string; port: number } | null = null;
+const hyperdht = createRequire(require.resolve("hyperdht"));
+const Router = hyperdht("./lib/router.js");
+const { handshake } = hyperdht("./lib/messages.js");
+const encoding = hyperdht("compact-encoding");
+const REPLY = 4;
+const onpeerhandshake = Router.prototype.onpeerhandshake;
+Router.prototype.onpeerhandshake = function (req: { reply(value: Buffer | null, opts: unknown): unknown }) {
+  const reply = req.reply;
+  req.reply = function (value, opts) {
+    const hs = forged && value ? encoding.decode(handshake, value) : null;
+    if (hs?.mode === REPLY && hs.peerAddress) value = encoding.encode(handshake, { ...hs, peerAddress: forged });
+    return reply.call(this, value, opts);
+  };
+  return onpeerhandshake.call(this, req);
+};
 
 const { default: DHT } = await import("hyperdht");
 const { default: RelayedDHT } = await import("@hyperswarm/dht-relay");
@@ -29,17 +51,19 @@ const MARKER = Buffer.from("canary-marker-");
 /**
  * A client (non-custodial as a browser is, unless `custodial`: it hands the relay its key, which runs its handshake)
  * dials a far server that names `names` as its address (and the canary as its relays, if `relays`), and writes to it,
- * `dials` times.
+ * `dials` times. `forge`: the DHT nodes that relay the far server's reply say they saw it at the canary. `open`: the
+ * relay's node names its own address, so a far server that is open connects back to it.
  */
-async function dial(names: (canary: number) => { host: string; port: number } | null, { custodial = false, relays = false, dials = 1 } = {}) {
+async function dial(names: (canary: number) => { host: string; port: number } | null, { custodial = false, relays = false, dials = 1, forge = false, open = false } = {}) {
   const relay = await startRelay({ testnet: 3 });
   // With no address of its own to name, the relay's node waits for the far server to answer it: a far server that is
   // open connects back to a dialler that names its address, and that packet would decide where the stream goes.
-  relay.dht.remoteAddress = () => null;
+  if (!open) relay.dht.remoteAddress = () => null;
   const canary = createSocket("udp4");
   let packets = 0;
   canary.on("message", () => { packets++; });
   await new Promise<void>(resolve => canary.bind(0, "127.0.0.1", resolve));
+  if (forge) forged = { host: "127.0.0.1", port: canary.address().port };
   const node = new DHT({ bootstrap: relay.bootstrap, host: "127.0.0.1", firewalled: false });
   let socket: WebSocket | undefined;
   try {
@@ -64,7 +88,8 @@ async function dial(names: (canary: number) => { host: string; port: number } | 
     for (let n = 0; n < dials; n++) {
       received = 0;
       const stream = client.connect(keyPair.publicKey).on("error", () => {});
-      await new Promise(resolve => stream.once("open", resolve));
+      // A dial that cannot reach the far server fails, and that one is counted as not reaching it.
+      if (!await new Promise(resolve => { stream.once("open", () => resolve(true)); stream.once("close", () => resolve(false)); })) continue;
       for (let i = 0; i < 20; i++) stream.write(Buffer.concat([MARKER, Buffer.alloc(1016, i)]));
       for (const end = Date.now() + 5000; received === 0 && Date.now() < end;) await new Promise(resolve => setTimeout(resolve, 50));
       // Whatever was on its way to the canary has come by now.
@@ -74,6 +99,7 @@ async function dial(names: (canary: number) => { host: string; port: number } | 
     }
     return { packets, received: reached };
   } finally {
+    forged = null;
     socket?.close();
     await node.destroy();
     canary.close();
@@ -82,25 +108,43 @@ async function dial(names: (canary: number) => { host: string; port: number } | 
 }
 
 it("sends a dial's stream to where the far server was reached, not to an address it names", async () => {
-  const { packets, received } = await dial(canary => ({ host: "127.0.0.1", port: canary }));
+  expect((await dial(canary => ({ host: "127.0.0.1", port: canary }))).packets).toBe(0);
+  const { packets, received } = await dial(canary => ({ host: "127.0.0.1", port: canary }), { open: true });
   expect(packets).toBe(0);
   expect(received).toBeGreaterThan(0);
 }, 30_000);
 
 it("does the same for a custodial client's dial", async () => {
-  const { packets, received } = await dial(canary => ({ host: "127.0.0.1", port: canary }), { custodial: true });
+  expect((await dial(canary => ({ host: "127.0.0.1", port: canary }), { custodial: true })).packets).toBe(0);
+  const { packets, received } = await dial(canary => ({ host: "127.0.0.1", port: canary }), { custodial: true, open: true });
   expect(packets).toBe(0);
   expect(received).toBeGreaterThan(0);
 }, 30_000);
 
 it("still connects a far server that names its own address", async () => {
-  const { packets, received } = await dial(() => null);
+  const { packets, received } = await dial(() => null, { open: true });
   expect(packets).toBe(0);
   expect(received).toBeGreaterThan(0);
 }, 30_000);
 
+it("sends a dial's stream nowhere a DHT node that relays the far server's reply names", async () => {
+  const { packets } = await dial(() => null, { forge: true, dials: 3 });
+  expect(packets).toBe(0);
+}, 60_000);
+
+it("does the same for a custodial client's dial", async () => {
+  const { packets } = await dial(() => null, { forge: true, custodial: true, dials: 3 });
+  expect(packets).toBe(0);
+}, 60_000);
+
+it("still reaches an open far server through such a node, by the packet the far server sends", async () => {
+  const { packets, received } = await dial(() => null, { forge: true, open: true, dials: 3 });
+  expect(packets).toBe(0);
+  expect(received).toBe(3);
+}, 60_000);
+
 it("does not dial again through relays a far server names", async () => {
-  const { packets, received } = await dial(() => null, { relays: true, dials: 2 });
+  const { packets, received } = await dial(() => null, { relays: true, dials: 2, open: true });
   expect(packets).toBe(0);
   expect(received).toBe(2);
 }, 30_000);
