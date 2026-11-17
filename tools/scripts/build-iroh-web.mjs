@@ -6,7 +6,7 @@
 //
 // wasm-bindgen's output is not byte-for-byte reproducible (the order of its
 // exports varies between runs), so CI cannot rebuild and compare. Instead
-// pkg/BUILD.json records a hash of the crate's sources and of the wasm, and
+// pkg/BUILD.json records a hash of the crate's sources and of every pkg file, and
 // tools/scripts/test/irohWebBuild.test.ts fails when either no longer matches: a
 // crate changed without a rebuild, or a pkg file edited by hand.
 //
@@ -15,10 +15,10 @@
 // or have /opt/homebrew/opt/llvm), and wasm-bindgen-cli at the crate's pinned version.
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { gzipSync } from 'node:zlib'
-import { irohWebSourceHash } from './iroh-web-source.mjs'
+import { irohWebFileHash, irohWebSourceHash } from './iroh-web-source.mjs'
 
 const root = resolve(import.meta.dirname, '../..')
 const crate = join(root, 'native/transports/iroh-web')
@@ -61,6 +61,9 @@ const build = {
   sha256: createHash('sha256').update(wasm).digest('hex'),
   bytes: wasm.length,
   gzipBytes: gzipSync(wasm, { level: 9 }).length,
+  // The JavaScript and types wasm-bindgen wrote beside the wasm.
+  files: Object.fromEntries(readdirSync(pkg).filter((name) => name !== 'BUILD.json' && name !== 'ghostly_iroh_web_bg.wasm').sort()
+    .map((name) => [name, irohWebFileHash(join(pkg, name))])),
 }
 writeFileSync(join(pkg, 'BUILD.json'), JSON.stringify(build, null, 2) + '\n')
 console.log(`Built Iroh ${iroh} for browsers: ${(build.bytes / 1e6).toFixed(2)} MB wasm, ${(build.gzipBytes / 1e6).toFixed(2)} MB gzip`)

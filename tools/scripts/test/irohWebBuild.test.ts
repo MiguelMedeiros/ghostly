@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { irohWebSourceHash } from "../iroh-web-source.mjs";
+import { irohWebFileHash, irohWebSourceHash } from "../iroh-web-source.mjs";
 // covers: transport.iroh-web
 
 /**
@@ -25,4 +25,12 @@ it("runs the iroh the Desktop runs, so both speak the same QUIC and TLS", () => 
 it("ships the wasm that build produced", () => {
   const wasm = readFileSync(join(root, "packages/iroh-web/pkg/ghostly_iroh_web_bg.wasm"));
   expect(createHash("sha256").update(wasm).digest("hex")).toBe(build.sha256);
+});
+
+it("ships the JavaScript and types that build produced beside it", () => {
+  // The JavaScript runs in the page that loads the wasm: a hand edit there must fail as one to the wasm does.
+  const glue = readdirSync(join(root, "packages/iroh-web/pkg")).filter((name) => name !== "BUILD.json" && name !== "ghostly_iroh_web_bg.wasm");
+  expect(glue.length).toBeGreaterThan(0);
+  expect(Object.keys(build.files ?? {}).sort()).toEqual(glue.sort());
+  for (const name of glue) expect(irohWebFileHash(join(root, "packages/iroh-web/pkg", name)), name).toBe(build.files?.[name]);
 });
