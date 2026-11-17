@@ -209,6 +209,8 @@
     "noMatch": "Nessuna chat con questo nome",
     "partial": "{{sent}} di {{count}} inviati",
     "pick": "Scegline fino a {{count}}",
+    "refused": "{{name}}: {{error}}",
+    "refusedPartial": "{{name}} ({{partial}}): {{error}}",
     "search": "Cerca chat",
     "select": "Seleziona",
     "selected": "{{count}} selezionati",
