@@ -182,6 +182,8 @@ const RULES: readonly Rule[] = [
   exact("Too many files are waiting here", "errors.files.floor.tooMany", "errors.files.floor.tooManyNext"),
   exact("It was refused here", "errors.files.floor.refused", "errors.files.askAgain"),
   exact("It did not come within a week", "errors.files.floor.notInAWeek", "errors.files.askAgain"),
+  // Accept on an offer larger than the room left now (engine/fileDesk.ts `accept`): it keeps waiting, its room shown.
+  { match: /^No room on this device for this file \((?<free>.+) free\)$/, key: "errors.files.noRoomHere", next: "errors.app.noRoomNext" },
   // A group's file every holder served damaged (packages/browser groupFiles.ts DAMAGED): the group is asked, not a contact.
   exact("Every copy of this file arrived damaged and was deleted. Ask for it again later.", "errors.files.refused.damaged", "errors.files.askGroupAgain"),
   // A received file this device had no room for (packages/core chatFiles.ts `storeFailure`): named QuotaExceededError

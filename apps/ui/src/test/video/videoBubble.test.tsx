@@ -667,11 +667,12 @@ describe("a video not here yet", () => {
     expect(accept.className).toContain("max-w-[calc(100%-8px)]");
   });
 
-  it("an offer larger than the room here cannot be accepted", () => {
+  it("an offer larger than the room shown says so, and still takes Download: the engine reads the room again", async () => {
     const file = video();
     show(file, { state: "transferring", stage: "asking", direction: "in", transferred: 0, size: file.size, room: 10 * MB });
-    expect(screen.getByTestId("video-accept")).toBeDisabled();
     expect(screen.getByTestId("video-room")).toHaveTextContent("Not enough space: 10.0 MB free");
+    fireEvent.click(screen.getByTestId("video-accept"));
+    await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))).toEqual({ linkId: "chat1", fileId: file.id, action: "accept" }));
   });
 
   it("while it arrives: the ring with how much is here, the status, and pause/cancel", async () => {

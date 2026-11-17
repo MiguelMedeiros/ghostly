@@ -284,8 +284,10 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
             </p>
           )}
           <div className="flex gap-2">
+            {/* Not turned off when the room shown is less than its size: that room may be old, and Accept reads it again
+                (the engine refuses one that does not fit, and says so under the bubble). */}
             <button type="button" className={`${answerButton} bg-accent text-on-accent disabled:opacity-50`}
-              data-testid="file-accept" disabled={typeof transfer.room === "number" && transfer.room < file.size} onClick={() => act("accept")}>{t("chat.file.accept")}</button>
+              data-testid="file-accept" onClick={() => act("accept")}>{t("chat.file.accept")}</button>
             <button type="button" className={`${answerButton} bg-black/20 text-inherit`} data-testid="file-decline" onClick={() => act("decline")}>{t("chat.file.decline")}</button>
           </div>
         </div>
