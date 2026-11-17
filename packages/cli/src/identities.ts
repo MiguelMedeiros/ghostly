@@ -162,7 +162,11 @@ export const IDENTITY_METHODS: Record<string, Method> = {
       }
       // The signer waits as long (a NIP-46 signer's own 2 minutes are the app's), or at most what it can (Pubky's relay).
       const most = signer.maxWaitMs ? Math.floor(signer.maxWaitMs / 1000) : 3600;
-      if (typeof params.timeout === "number" && params.timeout > most) throw new CliError("bad_request", `timeout must be a number from 5 to ${most}: ${signer.label} waits at most ${most} s for an approval`);
+      // A usage error naming the flag and this signer's own range, as `identity add` checks 5 to 3600 before the profile opens.
+      if (typeof params.timeout === "number" && !(params.timeout >= 5 && params.timeout <= most)) {
+        const why = signer.maxWaitMs ? ` for ${signer.label} (it waits at most ${most} s for an approval)` : "";
+        throw new CliError("usage", `--timeout takes a number of seconds from 5 to ${most}${why}, not ${params.timeout}`);
+      }
       const seconds = num(params, "timeout", Math.min(300, most), { min: 5, max: most });
       const signal = AbortSignal.timeout(seconds * 1000);
       // Once the signer's last step answered, nothing waits on the person any more: what fails after it (the engine's
@@ -210,7 +214,8 @@ export const IDENTITY_METHODS: Record<string, Method> = {
       // One level of parentheses: SSH's "ssh-ed25519 AAAA… (or SHA256:…)" reads "(ssh-ed25519 AAAA…, or SHA256:…)".
       const example = p.subject?.placeholder?.replace(/ \((.+)\)$/, ", $1");
       const what = p.subject ? `, its ${p.subject.label.toLowerCase()}${example ? ` (${example})` : ""}` : "";
-      throw new CliError("bad_request", `${p.label} takes a subject${what}: ghostly identity add ${p.id} <subject>`);
+      // A usage error (exit 2), as a missing <provider> and a missing signer field are.
+      throw new CliError("usage", `${p.label} takes a subject${what}: ghostly identity add ${p.id} <subject>`);
     }
     const { draftId, binding } = await begin(ctx, p, subject, params);
     const statement = identityStatement(binding);

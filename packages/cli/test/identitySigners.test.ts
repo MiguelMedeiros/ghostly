@@ -110,15 +110,19 @@ describe("identity signers on Node", () => {
     expect(node.beginIdentityProof).not.toHaveBeenCalled();
   });
 
-  // It said "subject is required", the API's parameter, to `ghostly identity add domain` (the usage shows [subject]).
-  it("asks for a missing subject in the provider's words, and where it goes", async () => {
+  // It said "subject is required", the API's parameter, to `ghostly identity add domain` (the usage shows [subject]);
+  // then `bad_request` (exit 1), where a missing <provider> or signer field is a usage error (exit 2).
+  it("asks for a missing subject in the provider's words, and where it goes, as a usage error", async () => {
     const { ctx, node } = fake();
     await expect(callApi(ctx, "identity.add", { provider: "domain" })).rejects.toMatchObject({
-      code: "bad_request", message: "Domain takes a subject, its domain (example.com): ghostly identity add domain <subject>",
+      code: "usage", message: "Domain takes a subject, its domain (example.com): ghostly identity add domain <subject>",
     });
     // A placeholder with its own parentheses read "(ssh-ed25519 AAAA… (or SHA256:…))".
     await expect(callApi(ctx, "identity.add", { provider: "ssh" })).rejects.toMatchObject({
-      message: "SSH key takes a subject, its public key (ssh-ed25519 AAAA…, or SHA256:…): ghostly identity add ssh <subject>",
+      code: "usage", message: "SSH key takes a subject, its public key (ssh-ed25519 AAAA…, or SHA256:…): ghostly identity add ssh <subject>",
+    });
+    await expect(callApi(ctx, "identity.add", { provider: "did" })).rejects.toMatchObject({
+      code: "usage", message: "DID takes a subject, its did (did:key:z6Mk… or did:web:example.com): ghostly identity add did <subject>",
     });
     expect(node.beginIdentityProof).not.toHaveBeenCalled();
   });
@@ -309,15 +313,18 @@ describe("identity signers on Node", () => {
     });
   });
 
-  // Pubky's relay keeps a request five minutes: --timeout 600 waited 300 s and ended as `engine`.
-  it("refuses a --timeout longer than the Pubky relay keeps the request, before the signer runs", async () => {
+  // Pubky's relay keeps a request five minutes: --timeout 600 waited 300 s and ended as `engine`; then `bad_request`
+  // (exit 1) in the API's words, where a --timeout under 5 is a usage error naming the flag.
+  it("refuses a --timeout longer than the Pubky relay keeps the request, before the signer runs, as a usage error", async () => {
     const { ctx } = fake();
     const signer = IDENTITY_PROVIDERS.find((p) => p.id === "pubky")!.signers.find((s) => s.kind === "in-app") as InAppSigner<unknown>;
     const run = vi.spyOn(signer, "run");
     try {
-      await expect(callApi(ctx, "identity.add", { provider: "pubky", timeout: 600 })).rejects.toMatchObject({
-        code: "bad_request", message: "timeout must be a number from 5 to 300: Pubky Ring or Pubky Passport waits at most 300 s for an approval",
-      });
+      for (const timeout of [600, 900, 3]) {
+        await expect(callApi(ctx, "identity.add", { provider: "pubky", timeout })).rejects.toMatchObject({
+          code: "usage", message: `--timeout takes a number of seconds from 5 to 300 for Pubky Ring or Pubky Passport (it waits at most 300 s for an approval), not ${timeout}`,
+        });
+      }
       expect(run).not.toHaveBeenCalled();
       // At 300 its own five minutes may end before the CLI's: still a timeout, not "Nobody approved the request in time".
       run.mockImplementation(async (sctx) => { expect(sctx.waitMs).toBe(300_000); throw new SignerTimeout("Nobody approved the request in time. Start again for a new one."); });
