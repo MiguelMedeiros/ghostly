@@ -1298,7 +1298,9 @@ function leaveRefused(group: GroupView, ref: string, error: unknown): unknown {
 
 /**
  * `group join` the engine refused for a group held here under the link's id, in the app's words ("Delete it from this
- * device", its menu item), said with the CLI's command. The code stays the engine's.
+ * device", its menu item), said with the CLI's command. The code stays the engine's. "Answer it first" comes only for
+ * an invitation taken back (a live one is kept and the link goes on beside it), which `group accept` refuses: its way
+ * out is `group decline`.
  */
 function joinRefused(link: string, error: unknown): unknown {
   if (!(error instanceof Error)) return error;
@@ -1307,7 +1309,7 @@ function joinRefused(link: string, error: unknown): unknown {
     return new CliError("engine", `You are out of this group and its history is still here: ghostly group forget ${id} --yes deletes it from this device, then join with the link`);
   }
   if (error.message === "You have an invitation to this group. Answer it first.") {
-    return new CliError("engine", `You have an invitation to this group: answer it first (ghostly group accept ${id} or ghostly group decline ${id})`);
+    return new CliError("engine", `Its invitation to this group was taken back: ghostly group decline ${id} drops it, then join with the link`);
   }
   return error;
 }
