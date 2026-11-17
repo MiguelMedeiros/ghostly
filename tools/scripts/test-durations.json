@@ -594,6 +594,8 @@
   "packages/cli/test/dhtNodeBounds.test.ts": 1.7,
   "packages/cli/test/dhtOnlyAwayBudget.test.ts": 9.2,
   "packages/cli/test/dhtOnlyContact.test.ts": 67.9,
+  "packages/cli/test/dhtOnlyLongText.test.ts": 65.3,
+  "packages/cli/test/dhtPacketBudget.test.ts": 60.1,
   "packages/cli/test/disconnectUntakenInvite.test.ts": 2.8,
   "packages/cli/test/echoBotExample.test.ts": 0,
   "packages/cli/test/editTimeout.test.ts": 0,
