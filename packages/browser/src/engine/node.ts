@@ -1016,6 +1016,8 @@ export class GhostlyNode implements EngineImplementation {
   private readonly nativeTurns = new Map<NativeTransport, { busy: boolean; waiting: { linkId: string; inUse: boolean; go: () => void }[] }>();
   /** Every listener start asked for so far has ended. */
   private get nativeQueue(): Promise<void> { return Promise.all(this.nativeQueues.values()).then(() => {}); }
+  /** Per chat, how many transport choices it was given (`setChatTransport`): one still settling knows a later one came. */
+  private readonly transportChoices = new Map<string, number>();
   private shuttingDown = false;
   /** Settles as `shutdown` begins: what is still starting is not waited for past it. */
   private stopBegan!: () => void;
@@ -5723,18 +5725,22 @@ export class GhostlyNode implements EngineImplementation {
    * Iroh's relay or the HyperDHT out of reach, so `chat disconnect --hold 0` blocked that long.
    */
   async setDeliveryMode({ linkId, mode }: { linkId: string; mode: DeliveryMode }): Promise<void> {
-    await this.switchDeliveryMode(linkId, mode, false);
+    await this.switchDeliveryMode(linkId, mode);
   }
 
-  /** `setDeliveryMode`; `native`: back on a live link, wait for its native listeners too (a choice that names one). */
-  private async switchDeliveryMode(linkId: string, mode: DeliveryMode, native: boolean): Promise<void> {
+  /**
+   * `setDeliveryMode`; `native`: back on a live link, wait for a native listener too: the one a choice names, or every
+   * one (Automatic on an app with no WebRTC). Not every one for a named choice: HyperDHT chosen waited 10 s for Iroh's
+   * listener with its relay out of reach, the chat live on the HyperDHT at 2 s.
+   */
+  private async switchDeliveryMode(linkId: string, mode: DeliveryMode, native?: NativeTransport | "all"): Promise<void> {
     const live = this.links.get(linkId);
     if (!live?.stored.profile || !live.link || (mode !== "stream" && mode !== "dht")) throw new Error("Delivery method unavailable.");
     await db.patchLink(linkId, { deliveryMode: mode });
     live.stored = { ...live.stored, deliveryMode: mode };
     await live.link.setDeliveryMode(mode);
     if (mode === "stream") {
-      const listening = this.ensureNativeEndpoints(linkId);
+      const listening = this.ensureNativeEndpoints(linkId, false, native === "all" ? undefined : native);
       if (native) await listening;
     }
     this.observeTransport(linkId);
@@ -5778,20 +5784,34 @@ export class GhostlyNode implements EngineImplementation {
    * (WISP 400: it travels as the DHT envelope's mode; either side choosing it keeps both off the live link). Choosing
    * anything else while on DHT only leaves it first. Fallback stays as it was. A live session moves over without
    * reconnecting; if the new transport fails, it stays where it was.
+   *
+   * The last choice wins: one still waiting for its listener when a later one comes stops there, the chat as the later
+   * one left it (as that one is recorded, so it stays after a restart). It ended on the earlier one, with nothing
+   * said, the later one already answered (Automatic 3 s after HyperDHT, Iroh's relay out of reach: bug hunt, 2026-11-17).
    */
   async setChatTransport({ linkId, transport }: { linkId: string; transport: PairedTransport | "auto" | "dht" }): Promise<void> {
     const live = this.links.get(linkId);
+    const choice = (this.transportChoices.get(linkId) ?? 0) + 1;
+    this.transportChoices.set(linkId, choice);
     if (transport === "dht") { await this.setDeliveryMode({ linkId, mode: "dht" }); return; }
     if (live?.stored.deliveryMode === "dht") {
       // The choice is recorded first, so the line that says the chat left DHT only names it. The native adapters
       // were released with DHT only: the preference reaches the link once they are back. Only a choice that names one
-      // waits for them: WebRTC, or Automatic on an app with WebRTC, goes live without them, and waiting kept the web's
-      // Connection panel greyed out 24 to 44 s with Iroh's relay out of reach, the chat live again in a second.
+      // waits, for that one's listener alone: WebRTC, or Automatic on an app with WebRTC, goes live without them, and
+      // waiting kept the web's Connection panel greyed out 24 to 44 s with Iroh's relay out of reach, the chat live
+      // again in a second.
       const preferredTransport = transport === "auto" ? undefined : transport;
-      const native = transport === "auto" ? !live.link?.availableTransports.includes("webrtc/1") : transport !== "webrtc/1";
+      const native = transport === "auto" ? (live.link?.availableTransports.includes("webrtc/1") ? undefined : "all")
+        : transport === "webrtc/1" ? undefined : transport;
       live.stored = { ...live.stored, preferredTransport };
       await db.patchLink(linkId, { preferredTransport });
       await this.switchDeliveryMode(linkId, "stream", native);
+      if (this.transportChoices.get(linkId) !== choice) {
+        // Put back on DHT only meanwhile: this choice is not where the chat is, as it said before (a hold made then,
+        // `chat disconnect --hold`, stays).
+        if (this.links.get(linkId)?.stored.deliveryMode === "dht") throw new Error("Transport unavailable");
+        return;
+      }
     }
     if (transport !== "auto") {
       // A choice on the wire too; out of DHT only, the log leaves the row to the one that says so (it names it).
@@ -10102,8 +10122,11 @@ export class GhostlyNode implements EngineImplementation {
     }
   }
 
-  /** `inUse`: a text is going or coming in the chat now, which counts as the chat on screen does for taking a listener. */
-  private ensureNativeEndpoints(linkId: string, inUse = false): Promise<void> {
+  /**
+   * `inUse`: a text is going or coming in the chat now, which counts as the chat on screen does for taking a listener.
+   * `only`: what it answers on is that transport's start alone (each still starts); otherwise every one's.
+   */
+  private ensureNativeEndpoints(linkId: string, inUse = false, only?: NativeTransport): Promise<void> {
     const expected = this.links.get(linkId)?.link;
     // Each transport's listener starts in that transport's own queue, the transports side by side. HyperDHT with its
     // DHT out of reach (UDP blocked, a VPN) takes 6 s to listen, and a browser's Iroh up to 10 s for its relay: in one
@@ -10116,7 +10139,8 @@ export class GhostlyNode implements EngineImplementation {
       this.nativeQueues.set(key, Promise.all([this.nativeQueues.get(key), operation.then(() => {}, () => {})]).then(() => {}));
       return operation;
     });
-    return Promise.all(starts).then(full => {
+    const named = only ? Object.keys(this.nativeFactories).indexOf(only) : -1;
+    const all = Promise.all(starts).then(full => {
       const live = this.links.get(linkId), link = live?.link;
       if (this.shuttingDown || !live || !link || link !== expected) return;
       // A group's link with no native endpoint because none was free: its member's row says so, and it is tried
@@ -10138,6 +10162,9 @@ export class GhostlyNode implements EngineImplementation {
       } else this.nativeFailed.delete(linkId);
       this.emitState();
     });
+    if (named < 0) return all;
+    void all.catch(() => {});
+    return starts[named].then(() => {});
   }
 
   /**
