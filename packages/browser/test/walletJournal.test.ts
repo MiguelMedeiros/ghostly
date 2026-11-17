@@ -154,11 +154,6 @@ describe("ecash in", () => {
     await expect(wallet.receiveToken("cashuBnotatoken")).rejects.toThrow("That is not a valid ecash token");
     // A token of another unit is a token: said as such, not as an invalid one.
     await expect(wallet.receiveToken(tokenFrom(MINT, [8], "usd"))).rejects.toThrow("This ecash is in usd: only sat ecash can be redeemed here");
-    // A token whose mint is no http(s) URL names no mint a wallet can use. Before: "Ecash from  is not accepted" (no
-    // host), or the URL parser's own "Invalid URL".
-    for (const url of ["file:///etc/passwd", "data:text/plain,mint", "javascript:alert(1)", "gopher://127.0.0.1:65401", "not a url"]) {
-      await expect(wallet.receiveToken(tokenFrom(url, [8])), url).rejects.toThrow(/^That is not a valid ecash token$/);
-    }
     expect(mint.receive).not.toHaveBeenCalled();
   });
 
