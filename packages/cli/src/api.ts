@@ -1,4 +1,4 @@
-import { AWAITING_PEER_MS, DHT_TEXT_BYTES, decodeGroupEntryLink, inviteLink, LIMITS, MENTION_EVERYONE, normalizeRelayUrl, ownInviteRefusal, relayUrlProblem, replySnippet, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type TypingKind } from "@ghostly/core";
+import { AWAITING_PEER_MS, DHT_PACKET_BUDGET, DHT_TEXT_BYTES, decodeGroupEntryLink, inviteLink, LIMITS, MENTION_EVERYONE, normalizeRelayUrl, ownInviteRefusal, relayUrlProblem, replySnippet, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type TypingKind } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
 import { DEFAULT_HYPERDHT_RELAY } from "@ghostly/browser/shared/hyperdhtRelay";
@@ -530,7 +530,7 @@ const METHODS: Record<string, Method> = {
     // A `--reply` to a message this chat does not have is not_found (exit 3), as `file send --reply` and `group send` say.
     if (result.error) {
       throw (replyTo && notHere(result.error, replyTo, { group: false, ref: str(params, "chat", true) }))
-        || (/not in this chat|cannot be replied to/.test(result.error) ? new CliError("not_found", result.error) : new CliError(result.refused ? "refused" : "unavailable", result.error));
+        || (/not in this chat|cannot be replied to/.test(result.error) ? new CliError("not_found", result.error) : new CliError(result.refused ? "refused" : "unavailable", dhtTooLong(ctx, link, result.error, "text", str(params, "chat", true))));
     }
     if (!result.messageId) throw new CliError("bad_request", "Nothing to send");
     let message = await node(ctx).getMessage(link.id, result.messageId);
@@ -564,7 +564,7 @@ const METHODS: Record<string, Method> = {
     }
     const { wait, ms } = confirmWait(ctx, params, link.id);
     const result = await node(ctx).editMessage({ linkId: link.id, messageId, text });
-    if (result.error) throw editRefused(await messageOf(ctx, link.id, messageId), messageId, { group: false, ref: str(params, "chat", true) }, result.error, result.refused);
+    if (result.error) throw editRefused(await messageOf(ctx, link.id, messageId), messageId, { group: false, ref: str(params, "chat", true) }, dhtTooLong(ctx, link, result.error, "edit", str(params, "chat", true)), result.refused);
     const id = result.messageId ?? messageId;
     let message = await node(ctx).getMessage(link.id, id);
     if (wait === "confirmed" && message?.edit?.pending) message = await waitForEdit(ctx, link.id, id, ms);
@@ -1299,6 +1299,34 @@ function chatNotGroup(ctx: ApiContext, params: Params, command: string, rest = "
 function editRefused(message: StoredMessage | undefined, ref: string, place: RefPlace, error: string, refused: boolean | undefined): CliError {
   if (refused && !message) return noMessage(ref, place);
   return new CliError(refused ? "refused" : "unavailable", error);
+}
+
+/**
+ * About the longest ASCII text, and edit, the DHT packet carries once sealed and signed: within the 256 bytes, the
+ * envelope's authentication (and an edit's element) takes the rest. The edge moves by a byte or two with the chat (the
+ * envelope's sequence, the edit's number), so the words say "about"; `dhtBudgetWords.test.ts` sends both sizes on two
+ * paired daemons.
+ */
+const DHT_TEXT_FITS = 248, DHT_EDIT_FITS = 214;
+
+/**
+ * The engine's refusal of a text or an edit within 256 bytes that the DHT packet cannot carry (`DHT_PACKET_BUDGET`,
+ * "Text and authentication exceed the DHT packet budget"), said as the apps and `dhtOnlyWait` say it: too long for the
+ * DHT, about how much fits, and what ends it, by whose choice keeps the chat on the DHT only. Any other error as is.
+ */
+function dhtTooLong(ctx: ApiContext, asked: LinkView, error: string, kind: "text" | "edit", ref: string): string {
+  if (error !== DHT_PACKET_BUDGET) return error;
+  // Read again: the contact's choice may have come with the envelope the engine read since the chat was looked up.
+  const link = state(ctx).links.find((l) => l.id === asked.id) ?? asked;
+  const mine = link.deliveryMode === "dht", theirs = link.dhtDelivery?.peerMode === "dht";
+  const fits = kind === "text" ? `a text fits about ${DHT_TEXT_FITS} bytes there` : `an edit fits about ${DHT_EDIT_FITS} bytes there`;
+  const act = kind === "text" ? "send it" : "make the edit";
+  const switchBack = `ghostly chat transport ${shellWord(ref, "<chat>")} auto`;
+  const who = mine && theirs ? `you and the contact keep this chat on the DHT only: ${act} once both choose a live transport (${switchBack}), or shorten it`
+    : mine ? `this chat is on the DHT only: ${act} once you choose a live transport (${switchBack}), or shorten it`
+    : theirs ? `the contact keeps this chat on the DHT only: ${act} once they choose a live transport, or shorten it`
+    : `shorten it, or ${act} once the chat is live`;
+  return `Too long for the DHT (${fits} once sealed): ${who}`;
 }
 
 /**
