@@ -30,7 +30,9 @@ import { handOut, openTreeFile, openTreeReader, rollback, SqlTree, type TreeFile
  *   TURN password): a journal that holds such a delete or a settings write is folded once the snapshot is an hour old,
  *   at a write, a close or a start;
  * - a journal begins by naming the snapshot it follows: one found beside another snapshot is in that snapshot already
- *   (the process died between writing the snapshot and removing the journal), and is not replayed over it;
+ *   (the process died between writing the snapshot and removing the journal), and is not replayed over it; and rows.db
+ *   names the snapshot a fold took its transactions there with: one found whole beside the old one (the process died
+ *   before it took its place) takes it at the next start;
  * - the engine's messages and file states, and their indexes, are kept in `rows.db` (SQLite: ./sqlTree.ts), not in memory: their
  *   store's tree and its indexes' are SQL trees in place of fake-indexeddb's, and the snapshot (format 3) says only that
  *   they are there. A transaction's writes go to SQLite once the journal has them (each entry is numbered, and SQLite
@@ -247,8 +249,20 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
 
   const snapshotPath = join(dir, SNAPSHOT);
   const journalPath = join(dir, JOURNAL);
+  const temporaryPath = snapshotPath + ".tmp";
+  /** The last entry the snapshot on disk holds: one that waited behind its fold is not written to the journal after it. */
+  let foldedUpTo = 0;
   const ratchetDue = () => holdsRatchet && Date.now() - (statSync(snapshotPath, { throwIfNoEntry: false })?.mtimeMs ?? 0) >= RATCHET_FOLD_MS;
   const deleteDue = () => holdsDelete && Date.now() - (statSync(snapshotPath, { throwIfNoEntry: false })?.mtimeMs ?? 0) >= DELETE_FOLD_MS;
+
+  // A process killed in a fold after rows.db took its transactions, before its snapshot (written whole and synced) took
+  // the old one's place: rows.db names that snapshot. It is what the store is, and the old journal is in it; the old
+  // snapshot and journal brought those transactions back half (their writes in rows.db, not the rest).
+  const foldedTo = trees?.snapshot();
+  if (foldedTo !== undefined && existsSync(temporaryPath) && journalNamed(temporaryPath) === foldedTo) {
+    renameSync(temporaryPath, snapshotPath);
+    rmSync(journalPath, { force: true });
+  }
 
   // Load what the disk holds before any connection opens; a snapshot with no journal after it is already what is held.
   const snapshotFound = existsSync(snapshotPath), journalFound = existsSync(journalPath);
@@ -413,6 +427,9 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     held++;
     void enqueue(async () => {
       try {
+        // In the snapshot of the fold it waited behind, and in rows.db: replayed over that snapshot, which holds the
+        // transactions after it too, it brought back what they changed (a file's record, renamed, without its state).
+        if (entry <= foldedUpTo) return;
         if (writeEntry(serialize(await Promise.all(ops.map(async (op) => (op.kind === "put" ? { ...op, value: await blobsToDisk(op.value) } : op)))), lazy ? "lazy" : "now")) {
           // A fold it waited behind cleared the mark, with a snapshot taken before it: the new journal holds its delete.
           holdsDelete ||= deleting;
@@ -716,11 +733,10 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     const live = trees ? liveTrees() : null;
     // What is held now is in this snapshot: a write that fails while it is written says so again (one that fails it, too).
     unsaved = false;
-    const temporary = snapshotPath + ".tmp";
     // A page at a time, and synced off the thread: serialized whole and synced in place, the hourly fold of a profile
     // with 100,000 notes in the event hub's seen set held the daemon 218 ms (835 ms at 300,000). The transactions that
     // commit meanwhile wait behind it in the queue (`append`), so the journal it replaces gets none of them.
-    const file = await open(temporary, "w", 0o600);
+    const file = await open(temporaryPath, "w", 0o600);
     try { await writeSnapshotTo(file, snapshot); await file.sync(); } finally { await file.close(); }
     // A scrub's checkpoint stops at an export's reader: rows.db kept the pages from before it, a purged text in them,
     // after `message delete --purge` answered. None begins between this wait and the checkpoint: no turn passes.
@@ -730,12 +746,14 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
       // journal's place: also one whose entry waits behind this snapshot in the queue (the snapshot holds what it did
       // elsewhere). Its entry, written after, is then one SQLite holds, which a replay skips. Not before the snapshot is
       // written: a process killed meanwhile came back to the old snapshot and journal, without such a transaction, and
-      // to rows.db with it, half of it (a file's state deleted, its record kept).
-      trees.apply(upTo);
+      // to rows.db with it, half of it (a file's state deleted, its record kept). rows.db names this snapshot with
+      // them: a process killed before the rename below comes back to it (at open).
+      trees.apply(upTo, name);
       if (scrub) trees.scrub();
       trees.sync();
     }
-    renameSync(temporary, snapshotPath);
+    renameSync(temporaryPath, snapshotPath);
+    foldedUpTo = upTo;
     // Trees of stores and indexes gone from the schema: once no snapshot on disk names them, nor the schema now.
     try { if (live) trees!.sweep(new Set([...live, ...liveTrees()])); } catch (error) { process.stderr.write(`ghostly: storage: old trees not removed: ${error instanceof Error ? error.message : String(error)}\n`); }
     snapshotName = name;
@@ -980,6 +998,11 @@ function follows(journal: Buffer): string | undefined {
     const [op] = deserialize(journal.subarray(4, 4 + journal.readUInt32BE(0))) as (Op & { snapshot?: string })[];
     return op?.db === FOLLOWS ? op.snapshot : undefined;
   } catch { return undefined; }
+}
+
+/** The name a snapshot file gives the journal after it; undefined for one cut short (a fold killed while it wrote it). */
+function journalNamed(path: string): string | undefined {
+  try { return (deserialize(readFileSync(path)) as Snapshot).journal; } catch { return undefined; }
 }
 
 /** fake-indexeddb's raw classes, from a throwaway database (they are not exported). */
