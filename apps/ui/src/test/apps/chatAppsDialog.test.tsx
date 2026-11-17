@@ -302,6 +302,25 @@ describe("the chat's Apps when the installed apps could not be read", () => {
     expect(screen.getByTestId("chat-app-open")).toHaveFocus();
   });
 
+  it("is busy while Try again reads, and a read that fails again puts its line back, read out again", async () => {
+    const { user } = renderApp(<ChatAppsDialog linkId="link-1" name="Ana" onClose={() => {}} />);
+    const line = await screen.findByTestId("chat-apps-error");
+    const before = within(line).getByRole("alert");
+    const fails: (() => void)[] = [];
+    lists.mockImplementation(() => new Promise<never>((_, reject) => { fails.push(() => reject(new Error(STORAGE))); }) as unknown as InstalledAppView[]);
+    const again = within(line).getByRole("button", { name: "Try again" });
+    await user.click(again);
+    expect(again).toHaveAttribute("aria-busy", "true");
+    expect(again).toHaveFocus();
+    await act(async () => { for (const fail of fails) fail(); });
+    await waitFor(() => expect(again).not.toHaveAttribute("aria-busy"));
+    // The same words left in place say nothing to a screen reader: the alert is a new one.
+    const after = within(screen.getByTestId("chat-apps-error")).getByRole("alert");
+    expect(after).not.toBe(before);
+    expect(after).toHaveTextContent("This browser can't keep apps here (private browsing?). Try a normal window.");
+    expect(again).toHaveFocus();
+  });
+
   it("says it in the person's language", async () => {
     renderApp(<ChatAppsDialog linkId="link-1" name="Ana" onClose={() => {}} />, { language: "pt" });
     expect(await screen.findByTestId("chat-apps-error")).toHaveTextContent("Este navegador não consegue guardar apps aqui");
