@@ -124,6 +124,9 @@ describe("a one-shot about one chat", { timeout: 180_000 }, () => {
     // app), and `call answer` and `call flush`, which a one-shot refuses whatever the chats say.
     for (const method of ["status.set", "status.clear", "x401.key.new", "x401.credential.add", "x401.credential.remove", "service.add",
       "identity.cancel", "app.serve", "app.unserve", "call.answer", "call.flush"]) expect(readsNoHistory(method), method).toBe(true);
+    // The wallet's own stores: an address, a Lightning card's name or default, a wallet removed. Each started every
+    // chat and read its history: with 10 chats and 30,000 messages, 20 relay requests and 0.35 s more, a refusal too.
+    for (const method of ["wallet.address", "lightning.rename", "lightning.default", "wallet.remove"]) expect(readsNoHistory(method), method).toBe(true);
     // A change about a message reads the chat it names (`startNamedChats`).
     for (const method of ["saved.add", "saved.remove", "chat.rename"]) expect(readsNoHistory(method), method).toBe(false);
   });
