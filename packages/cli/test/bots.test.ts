@@ -429,28 +429,55 @@ describe("chat disconnect --hold", () => {
   });
 
   // It waited its whole --timeout (a bot's up to a day) and said only "Timed out after N s waiting for chat <id> to be
-  // live", read as a slow network, while the chat could never go live and `chat connect` said why at once.
-  it("chat wait --until live that times out on a chat on DHT only says why and what ends it, naming the chat as given", async () => {
+  // live", exit 4, read as a slow network, while the chat could never go live and `chat connect` refused it at once.
+  it("chat wait --until live on a chat on DHT only is refused at once, as chat connect refuses it; a hold's timeout says when it ends", async () => {
     const { ctx, setLink } = fake();
-    const failure = (chat: string, until?: string) => callApi(ctx, "chat.wait", { chat, timeout: 1, ...(until && { until }) }).then(() => undefined, (error: unknown) => error as CliError);
+    const failure = (chat: string, until?: string, timeout = 1) => callApi(ctx, "chat.wait", { chat, timeout, ...(until && { until }) }).then(() => undefined, (error: unknown) => error as CliError);
     setLink("chat-two", { deliveryMode: "dht", textDelivery: "dht" });
-    const mine = await failure("Bob");
-    expect(mine).toMatchObject({ code: "timeout", message: "Timed out after 1 s waiting for chat Bob to be live. This chat is on DHT only on this side: choose a live method first (chat transport auto)" });
-    expect(mine?.details).toBeUndefined();
+    let from = Date.now();
+    expect(await failure("Bob", undefined, 30)).toMatchObject({ code: "refused", message: "This chat is on DHT only on this side: choose a live method first (chat transport auto)", details: { reason: "dht-only" } });
+    expect(Date.now() - from).toBeLessThan(1000);
     setLink("chat-two", { deliveryMode: "stream", textDelivery: "dht", dhtDelivery: { mode: "stream", peerMode: "dht", authenticated: true, maxTextBytes: 256 } });
-    const theirs = await failure("Bob");
-    expect(theirs).toMatchObject({ code: "timeout", message: "Timed out after 1 s waiting for chat Bob to be live. Your contact keeps this chat on DHT only: it goes live once they choose a live method. Short texts still go on the DHT" });
-    expect(theirs?.details).toBeUndefined();
-    // A hold of this side's ends by itself: said with when, and what ends it now.
+    from = Date.now();
+    expect(await failure("Bob", "live", 30)).toMatchObject({ code: "refused", message: "Your contact keeps this chat on DHT only: it goes live once they choose a live method. Short texts still go on the DHT", details: { reason: "peer-dht-only" } });
+    expect(Date.now() - from).toBeLessThan(1000);
+    // Other states are not about a live session: a DHT only chat carries text, or waits for it as before.
+    expect(await callApi(ctx, "chat.wait", { chat: "Bob", until: "text", timeout: 1 })).toMatchObject({ id: "chat-two" });
+    // A hold of this side's ends by itself: waited for, its timeout said with when it ends and what ends it now.
     await callApi(ctx, "chat.disconnect", { chat: "Alice", hold: 30 });
     const held = await failure("Alice");
     expect(held).toMatchObject({ code: "timeout" });
     expect(held?.message).toMatch(/^Timed out after 1 s waiting for chat Alice to be live\. This chat is held on the DHT only until \d\d:\d\d: it goes live then, or now with ghostly chat connect Alice$/);
-    // Off DHT only: the usual words, the chat still as given; other states are not about DHT only.
+    expect(held?.details).toBeUndefined();
+    // Off DHT only: the usual words, the chat as given.
     setLink("chat-two", { dhtDelivery: { mode: "stream", peerMode: "stream", authenticated: true, maxTextBytes: 256 } });
     expect(await failure("Bob")).toMatchObject({ code: "timeout", message: "Timed out after 1 s waiting for chat Bob to be live" });
     setLink("chat-two", { deliveryMode: "dht", textDelivery: "unavailable" });
     expect(await failure("Bob", "text")).toMatchObject({ code: "timeout", message: "Timed out after 1 s waiting for chat Bob to carry text" });
+  });
+
+  it("chat wait --until live on a chat that turns DHT only while it waits is refused then; a held chat that goes live answers", async () => {
+    const { ctx, linkChanged } = fake();
+    const failure = (chat: string) => callApi(ctx, "chat.wait", { chat, timeout: 5 }).then(() => undefined, (error: unknown) => error as CliError);
+    let from = Date.now();
+    let waiting = failure("Bob");
+    await new Promise((r) => setTimeout(r, 20));
+    linkChanged("chat-two", { deliveryMode: "dht", textDelivery: "dht" });
+    expect(await waiting).toMatchObject({ code: "refused", details: { reason: "dht-only" } });
+    expect(Date.now() - from).toBeLessThan(1000);
+    linkChanged("chat-two", { deliveryMode: "stream" });
+    from = Date.now();
+    waiting = failure("Bob");
+    await new Promise((r) => setTimeout(r, 20));
+    linkChanged("chat-two", { dhtDelivery: { mode: "stream", peerMode: "dht", authenticated: true, maxTextBytes: 256 } });
+    expect(await waiting).toMatchObject({ code: "refused", details: { reason: "peer-dht-only" } });
+    expect(Date.now() - from).toBeLessThan(1000);
+    // A hold is not refused: the chat goes live when it ends.
+    await callApi(ctx, "chat.disconnect", { chat: "Alice", hold: 30 });
+    const live = callApi(ctx, "chat.wait", { chat: "Alice", timeout: 5 });
+    await new Promise((r) => setTimeout(r, 20));
+    linkChanged("chat-one", { deliveryMode: "stream", textDelivery: "stream", pairing: { status: "ready", transport: "iroh/1" } as LinkView["pairing"] });
+    expect(await live).toMatchObject({ id: "chat-one", live: true });
   });
 
   // A `chat transport dht` chosen during a hold was taken back when the hold's time was up, and one that left DHT
