@@ -82,6 +82,23 @@ describe("group mentions", () => {
     expect(() => mentionsFor("ping Al", ["Al"], crew)).toThrow(expect.objectContaining({ code: "bad_request", message: "Write @Al in the text to mention Al" }));
   });
 
+  // More than the 16 a message carries went to the engine, which dropped the list whole: the message mentioned no one.
+  it("more members than a message mentions are refused before any is looked up, a ref given twice counts once", async () => {
+    const members = Array.from({ length: 20 }, (_, i) => ({ key: `key${i}`.padEnd(10, "x"), role: "member", me: false, online: true, missing: 0, nick: `M${i}` }));
+    const big = { ...crew, members: [crew.members[0], ...members] } as unknown as GroupView;
+    const text = members.map((m) => `@${m.nick}`).join(" ");
+    const names = members.map((m) => m.nick);
+    expect(mentionsFor(text, names.slice(0, 16), big)).toHaveLength(16);
+    expect(() => mentionsFor(text, names.slice(0, 17), big)).toThrow(expect.objectContaining({ code: "bad_request", message: "A message mentions at most 16 members (17 given): send it to fewer, or mention everyone" }));
+    const lookups = vi.spyOn(big.members, "filter");
+    expect(() => mentionsFor(text, Array.from({ length: 50_000 }, (_, i) => `M${i % 20}x${i}`), big)).toThrow(expect.objectContaining({ code: "bad_request" }));
+    expect(lookups).not.toHaveBeenCalled();
+    expect(mentionsFor("@Al hi", Array(50_000).fill("Al"), crew)).toEqual([{ k: AL, o: 0, l: 3 }]);
+    const { ctx, node } = fake();
+    await expect(callApi(ctx, "group.send", { group: "Crew", text: "@Al hi", mentions: Array.from({ length: 17 }, (_, i) => `x${i}`) })).rejects.toMatchObject({ code: "bad_request" });
+    expect(node.sendGroupMessage).not.toHaveBeenCalled();
+  });
+
   it("group send hands the engine the mention on the whole @name", async () => {
     const { ctx, node } = fake();
     await callApi(ctx, "group.send", { group: "Crew", text: "@Alice @Al ping", mentions: ["Al"] });
