@@ -483,6 +483,44 @@ describe("a profile made for a code", () => {
     expect(regions).toEqual([spoken]);
   });
 
+  it("not finished: a screen reader hears it from the same line, and the focus goes to Continue, the one thing to press", async () => {
+    catchReload();
+    sessionStorage.setItem(JOIN_REQUEST, JSON.stringify({ id: activeProfileId(), code: code(), start: "go", name: "Pixel" }));
+    fakeEngine.on("deviceEnrollJoin", () => ({ role: "joiner", step: "connecting" }));
+    let view: EnrollView = { role: "joiner", step: "finishing", device: "MacBook" };
+    fakeEngine.on("deviceEnrollView", () => view);
+    Object.defineProperty(navigator, "storage", { configurable: true, value: { persisted: async () => true, persist: async () => true } });
+    try {
+      renderApp(<JoinHost />);
+      await screen.findByText("Finishing…", {}, { timeout: 3_000 });
+      const spoken = screen.getByTestId("device-join-spoken");
+      expect(spoken).toHaveTextContent(/^$/);
+      view = { role: "joiner", step: "unfinished", device: "MacBook" };
+      await waitFor(() => expect(spoken).toHaveTextContent("Not finished: your other device has not listed this one yet."), { timeout: 3_000 });
+      expect(screen.getByTestId("device-join-spoken")).toBe(spoken);
+      await waitFor(() => expect(screen.getByTestId("device-join-continue")).toHaveFocus());
+    } finally { Reflect.deleteProperty(navigator, "storage"); }
+  });
+
+  it("done, with the browser free to clear this device's data: a screen reader hears it from the same line, and the focus goes to Continue", async () => {
+    const reload = catchReload();
+    sessionStorage.setItem(JOIN_REQUEST, JSON.stringify({ id: activeProfileId(), code: code(), start: "go", name: "Pixel" }));
+    fakeEngine.on("deviceEnrollJoin", () => ({ role: "joiner", step: "connecting" }));
+    let view: EnrollView = { role: "joiner", step: "finishing", device: "MacBook" };
+    fakeEngine.on("deviceEnrollView", () => view);
+    Object.defineProperty(navigator, "storage", { configurable: true, value: { persisted: async () => false, persist: async () => false } });
+    try {
+      renderApp(<JoinHost />);
+      await screen.findByText("Finishing…", {}, { timeout: 3_000 });
+      const spoken = screen.getByTestId("device-join-spoken");
+      view = { role: "joiner", step: "done", device: "MacBook" };
+      await waitFor(() => expect(spoken).toHaveTextContent("This device is on standby for your profile."), { timeout: 3_000 });
+      expect(screen.getByTestId("device-join-persist")).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByTestId("device-join-continue")).toHaveFocus());
+      expect(reload).not.toHaveBeenCalled();
+    } finally { Reflect.deleteProperty(navigator, "storage"); }
+  });
+
   it("once added, opens the standby screen by itself, the lock handed over across that reload", async () => {
     const hash = await hashPassword("a long lock password");
     localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: hash, timeoutMinutes: 5 } }));
@@ -501,6 +539,8 @@ describe("a profile made for a code", () => {
       sessionStorage.removeItem(HANDOVER);
       expect(await screen.findByTestId("device-join-done", {}, { timeout: 3_000 })).toHaveAttribute("data-step", "done");
       expect(screen.queryByTestId("device-join-continue")).toBeNull();
+      // Said from the line that was there before: "Opening…" comes with the step, and may not be read.
+      expect(screen.getByTestId("device-join-spoken")).toHaveTextContent("This device is on standby for your profile.");
       await waitFor(() => expect(reload).toHaveBeenCalled(), { timeout: 4_000 });
       expect(JSON.parse(sessionStorage.getItem(HANDOVER)!)).toMatchObject({ profile: activeProfileId(), hash });
       expect(nameStepPending()).toBe(false);
