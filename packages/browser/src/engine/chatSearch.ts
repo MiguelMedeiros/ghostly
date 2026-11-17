@@ -1,4 +1,5 @@
 import { foldText } from "../shared/fold";
+import { isSystemLine } from "../shared/systemLines";
 import type { StoredMessage } from "../shared/types";
 
 /**
@@ -18,9 +19,13 @@ const MARKS = /[*_~|`[\]]/g;
 const LINK = /\]\([^)\s]*\)/g;
 const loose = (folded: string) => folded.replace(MARKS, "");
 
-/** What a message offers the chat list's search, folded and loose: a file's name, a text's words; nothing for a payment. */
+/**
+ * What a message offers the chat list's search, folded and loose: a file's name, a text's words; nothing for a payment
+ * or a line the pages draw as the app's own (a joined line, a refused payment's: `isSystemLine`), which their search
+ * leaves out too.
+ */
 function searchTexts(message: StoredMessage): string[] {
-  if (message.paymentId) return [];
+  if (message.paymentId || isSystemLine(message)) return [];
   if (message.file) return [loose(foldText(message.file.name))];
   if (!message.text) return [];
   const folded = foldText(message.text);
