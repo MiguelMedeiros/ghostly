@@ -360,7 +360,7 @@ describe("Send's result is said to a screen reader", () => {
 
   for (const [paid, rail, line] of [
     [true, "cashu", "Paid."],
-    [false, "cashu", "The payment is still pending at the mint."],
+    [false, "cashu", "The payment is still pending at the mint. It settles by itself; nothing is paid again. Until the mint answers, the amount shows as set aside under the balance."],
     [false, "lightning", "The payment is still pending. It is being checked; nothing is paid again."],
   ] as const) {
     it(`${rail} card, ${paid ? "paid" : "pending"}: "${line}" comes into a status line that was already there`, async () => {
