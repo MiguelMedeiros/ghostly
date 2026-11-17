@@ -398,7 +398,9 @@ export function CashuWallet({ wallet, state, rail, sharedWith, onOpenCashu, focu
                       <span className={`font-semibold shrink-0 tabular-nums ${incoming ? "text-accent" : "text-text-primary"}`}><Signed sign={incoming ? "+" : "−"} amount={formatAmount(tx.amount, t.language)} /> <span className="text-xs font-normal text-text-muted">{unitFor(t, unit, tx.amount)}</span></span>
                     </div>
                     <div className="flex items-baseline justify-between gap-2 text-xs text-text-muted">
-                      <span className="truncate">{formatAt(tx.timestamp, MOVED_AT, t.language)} · {mint?.name ?? new URL(tx.mint).hostname}{tx.note ? ` · ${noteText(t, tx)}` : ""}</span>
+                      {/* A mint's name and a contact's memo are someone else's text, in any script: each in its own
+                          direction, so the two never swap around the " · " between them. */}
+                      <span className="truncate">{formatAt(tx.timestamp, MOVED_AT, t.language)} · <bdi>{mint?.name ?? new URL(tx.mint).hostname}</bdi>{tx.note && <> · <bdi>{noteText(t, tx)}</bdi></>}</span>
                       <span className={`shrink-0 ${tx.fee > 0 ? "text-warn-ink" : ""}`}>{tx.fee > 0 ? t("wallet.cashu.history.fee", { amount: formatAmount(tx.fee, t.language), unit }) : t("wallet.cashu.history.noFee")}</span>
                     </div>
                   </div>
@@ -441,7 +443,7 @@ export function CashuWallet({ wallet, state, rail, sharedWith, onOpenCashu, focu
           <Section title={t("wallet.cashu.mints")} testId="wallet-mints">
             <Block><Notice>{t("wallet.cashu.mintsHint")}</Notice></Block>
             {state.mints.map((mint, index) => <Fragment key={mint.url}>
-              <Row testId="mint-row" label={<>{mint.name}{index === 0 && <span className="text-accent ms-2 text-[10px] uppercase tracking-wider">{t("wallet.cashu.primary")}</span>}</>}
+              <Row testId="mint-row" label={<><bdi>{mint.name}</bdi>{index === 0 && <span className="text-accent ms-2 text-[10px] uppercase tracking-wider">{t("wallet.cashu.primary")}</span>}</>}
                 hint={<><span data-testid="mint-fees">{mint.info ? shortFee(t, mint.info.inputFeePpk, mintNetwork(mint.url) === "testnet") : t("wallet.cashu.unreachable")}</span><Truncate className="font-mono" title={mint.url}>{mint.url.replace(/^https?:\/\//, "")}</Truncate></>}
                 value={sats(mint.balance)}>
                 {index !== 0 && <Button onClick={() => void run(() => wallet.setPrimaryMint(mint.url), "primary")}>{t("wallet.cashu.makePrimary")}</Button>}
