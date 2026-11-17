@@ -95,6 +95,9 @@ export function Services() {
   // Share waits on the host's permission (Chrome's prompt, Desktop's dialog): pressed again meanwhile, it added the app twice.
   const sharing = useRef(false);
   const [busy, setBusy] = useState(false);
+  // Counted up once a card's Allow or Share asked for its address: every card reads its own again, as the address one
+  // allowed may be another app's too.
+  const [accessAsked, setAccessAsked] = useState(0);
   if (!platform || !view) return null;
 
   const { online, services, canShare } = view;
@@ -138,7 +141,7 @@ export function Services() {
     }>
       <Section title={t("services.yourApps")} testId="your-apps">
         {services.length === 0 && !adding && <Block><Notice>{canShare ? t("services.nothingShared") : t("services.needsApp")}</Notice></Block>}
-        {services.map((service, i) => <ServiceCard key={service.id} service={service} online={online} contacts={contacts} onRemove={() => remove(service, (services[i + 1] ?? services[i - 1])?.id ?? null)} />)}
+        {services.map((service, i) => <ServiceCard key={service.id} service={service} online={online} contacts={contacts} accessAsked={accessAsked} onAccessAsked={() => setAccessAsked((n) => n + 1)} onRemove={() => remove(service, (services[i + 1] ?? services[i - 1])?.id ?? null)} />)}
         {canShare && (adding ? (
           <Block>
             <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); void shareThenLand(); }}>
@@ -196,7 +199,7 @@ export function Services() {
   );
 }
 
-function ServiceCard({ service, online, contacts, onRemove }: { service: SharedService; online: boolean; contacts: { key: string; name: string; short: string }[]; onRemove: () => void }) {
+function ServiceCard({ service, online, contacts, accessAsked, onAccessAsked, onRemove }: { service: SharedService; online: boolean; contacts: { key: string; name: string; short: string }[]; accessAsked: number; onAccessAsked: () => void; onRemove: () => void }) {
   const platform = servicesPlatform!;
   const { t } = useI18n();
   const [showPeople, setShowPeople] = useState(false);
@@ -206,14 +209,15 @@ function ServiceCard({ service, online, contacts, onRemove }: { service: SharedS
   // An address not yet allowed on this device (one that came with a restored or moved profile): its contacts are
   // refused until the person allows it here, from this click. Asked again when Share turns on or off: taking back
   // Chrome's site access turns the app off, and the card mounted before it would say "Shared" once it is on again.
-  const [needsAccess, setNeedsAccess] = useState(false), [checked, setChecked] = useState(0);
+  // And once any card asked (`accessAsked`): another app at the same address is allowed by that click too.
+  const [needsAccess, setNeedsAccess] = useState(false);
   // A grant the engine refused (that contact already has as many apps as it can see): said under its switch.
   const [notGranted, setNotGranted] = useState<{ contact: string; problem: Problem } | null>(null);
   useEffect(() => {
     let live = true;
     void platform.localAccessNeeded?.(service.target).then((needed) => { if (live) setNeedsAccess(needed); }, () => {});
     return () => { live = false; };
-  }, [platform, service.target, service.enabled, checked]);
+  }, [platform, service.target, service.enabled, accessAsked]);
   const granted = service.sharedWith ?? [];
   const reached = granted.length;
   const shared = service.enabled && online && reached > 0 && !needsAccess;
@@ -238,9 +242,9 @@ function ServiceCard({ service, online, contacts, onRemove }: { service: SharedS
           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${shared ? "bg-accent" : "bg-gray-500"}`} />{status}
           {service.requests > 0 && <span className="text-text-muted">{t("services.requestCount", { count: service.requests })}</span>}
         </span>}>
-          {needsAccess && <Button variant="primary" data-testid="service-allow" onClick={() => void platform.allowLocalAccess?.(service.target).catch(() => {}).finally(() => setChecked((n) => n + 1))}>{t("settings.media.allow")}</Button>}
+          {needsAccess && <Button variant="primary" data-testid="service-allow" onClick={() => void platform.allowLocalAccess?.(service.target).catch(() => {}).finally(onAccessAsked)}>{t("settings.media.allow")}</Button>}
           <Button onClick={() => setShowPeople(!showPeople)} data-testid="service-people" aria-expanded={showPeople}>{showPeople ? t("services.peopleDone") : t("services.people")}</Button>
-          <Switch label={t("services.shareNamed", { app: service.name })} testId="service-sharing" checked={service.enabled} onChange={(on) => void platform.setServiceEnabled(service.id, on).catch(() => setChecked((n) => n + 1))} />
+          <Switch label={t("services.shareNamed", { app: service.name })} testId="service-sharing" checked={service.enabled} onChange={(on) => void platform.setServiceEnabled(service.id, on).catch(() => {}).finally(onAccessAsked)} />
           {!asking && <button type="button" aria-label={t("services.removeNamed", { app: service.name })} title={t("services.remove")} autoFocus={asked} onClick={() => { setAsking(true); setAsked(true); }} className="grid place-items-center w-10 h-10 rounded-lg text-text-muted hover:text-danger hover:bg-surface-alt transition-colors cursor-pointer">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /></svg>
           </button>}

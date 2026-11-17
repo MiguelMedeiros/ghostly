@@ -57,6 +57,28 @@ describe("a shared app whose address this browser has not allowed", () => {
     expect(within(card).queryByText("Shared with 1 contact")).toBeNull();
   });
 
+  it("Allow on one app's card also clears it on another app's card at the same address", async () => {
+    fakeEngine.features = { ...fakeEngine.features, shareLocalServices: true };
+    const allowed = new Set<string>();
+    fakeEngine.localAccessAllowed = async (origin) => allowed.has(origin);
+    vi.spyOn(fakeEngine, "requestLocalAccess").mockImplementation(async (_pattern, origin) => { allowed.add(origin); return true; });
+    const { user } = renderApp(<Services />, { route: "/services" });
+    const shared = { enabled: true, requests: 0, createdAt: 1, sharedWith: ["p".repeat(52)] };
+    fakeEngine.update({ services: [
+      { id: "notes", name: "Notes", target: "localhost:9000", ...shared },
+      { id: "admin", name: "Admin", target: "localhost:9000/admin", ...shared },
+    ] });
+
+    const [notes, admin] = await screen.findAllByTestId("service-item");
+    await waitFor(() => expect(within(admin).queryByTestId("service-allow")).toBeTruthy());
+    await user.click(within(notes).getByTestId("service-allow"));
+
+    await waitFor(() => expect(within(notes).queryByTestId("service-allow")).toBeNull());
+    await waitFor(() => expect(within(admin).queryByTestId("service-allow")).toBeNull());
+    expect(within(admin).queryByText("Ghostly needs your permission to reach that local address")).toBeNull();
+    expect(within(admin).getByText("Shared with 1 contact")).toBeTruthy();
+  });
+
   it("shows nothing of it where the host does not ask (the web app, Desktop)", async () => {
     fakeEngine.features = { ...fakeEngine.features, shareLocalServices: true };
     renderApp(<Services />, { route: "/services" });
