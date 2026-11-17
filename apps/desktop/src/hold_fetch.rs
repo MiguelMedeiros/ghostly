@@ -23,6 +23,9 @@ use crate::link_preview::{is_public, PublicOnly};
 
 /// The largest held item: one bundle (`HOLD_LIMITS.maxBundleBytes`, packages/core/src/storeForward.ts).
 const MAX_BODY: usize = 8 * 1024 * 1024;
+/// The most of an error answer's body kept: room for an API to name the cause (Bluesky's `{"error":"AccountDeactivated"}`
+/// is how a profile reader tells an account that is gone from a failed read); the engine refuses a held item's unread.
+const MAX_ERROR_BODY: usize = 64 * 1024;
 /// Past the engine's own limit for the largest item (`holdFetchTimeoutMs`, packages/browser/src/engine/hold.ts).
 const TIMEOUT: Duration = Duration::from_secs(150);
 /// The request headers an identity read sends (`accept`; a Pubky homeserver's `pubky-host`); any other is dropped.
@@ -34,7 +37,7 @@ pub struct HoldResponse {
     pub status: u16,
     /// The answer's `Content-Type`, empty when it has none.
     pub content_type: String,
-    /// Empty for any status but 2xx: the engine refuses those without reading them.
+    /// For a status but 2xx, a short body only (`MAX_ERROR_BODY`), else empty.
     pub body_b64: String,
 }
 
@@ -114,20 +117,23 @@ async fn get(
         .and_then(|v| v.to_str().ok())
         .unwrap_or_default()
         .to_string();
-    if !response.status().is_success() {
-        return Ok(HoldResponse {
-            status,
-            content_type,
-            body_b64: String::new(),
-        });
-    }
+    let success = response.status().is_success();
+    let limit = if success { MAX_BODY } else { MAX_ERROR_BODY };
     // Word for word what apps/ui/src/desktop/holdFetch.ts answers as an item past the largest, for the engine to refuse.
-    let too_large = || "The held item is too large".to_string();
-    if response
-        .content_length()
-        .is_some_and(|n| n > MAX_BODY as u64)
-    {
-        return Err(too_large());
+    // An error answer's body past its limit is only left out: the status says what happened.
+    let too_large = || {
+        if success {
+            Err("The held item is too large".to_string())
+        } else {
+            Ok(HoldResponse {
+                status,
+                content_type: content_type.clone(),
+                body_b64: String::new(),
+            })
+        }
+    };
+    if response.content_length().is_some_and(|n| n > limit as u64) {
+        return too_large();
     }
     let mut body = Vec::new();
     while let Some(chunk) = response
@@ -135,8 +141,8 @@ async fn get(
         .await
         .map_err(|e| format!("Body: {}", reason(e)))?
     {
-        if body.len() + chunk.len() > MAX_BODY {
-            return Err(too_large());
+        if body.len() + chunk.len() > limit {
+            return too_large();
         }
         body.extend_from_slice(&chunk);
     }
@@ -335,6 +341,27 @@ mod tests {
             !request.contains("cookie") && !request.contains("accept-x"),
             "{request}"
         );
+    }
+
+    #[tokio::test]
+    async fn an_error_answer_keeps_a_short_body_that_names_its_cause() {
+        // Bluesky says a deactivated account is gone this way; the reader takes it as "no profile", not a failure.
+        let (port, _) = serve(b"HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: 30\r\n\r\n{\"error\":\"AccountDeactivated\"}").await;
+        let read = get(&build(Storage).unwrap(), at(port), vec![])
+            .await
+            .unwrap();
+        assert_eq!(read.status, 400);
+        assert_eq!(
+            STANDARD.decode(read.body_b64).unwrap(),
+            br#"{"error":"AccountDeactivated"}"#
+        );
+
+        // A long one is not kept, and is no failure either: the status still says what happened.
+        let (port, _) = serve(b"HTTP/1.1 404 Not Found\r\nContent-Length: 9000000\r\n\r\n").await;
+        let read = get(&build(Storage).unwrap(), at(port), vec![])
+            .await
+            .unwrap();
+        assert_eq!((read.status, read.body_b64.as_str()), (404, ""));
     }
 
     #[tokio::test]
