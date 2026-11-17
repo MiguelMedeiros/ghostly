@@ -332,6 +332,19 @@ function dhtOnlyWait(link: LinkView, text: string, ref: string): string | undefi
   return `Longer than the ${DHT_TEXT_BYTES} bytes the DHT carries, and ${who}`;
 }
 
+/**
+ * A `--wait sent|delivered` on a text `dhtOnlyWait` holds back, ended short (its timeout, the daemon's stop): it said the
+ * text still goes by itself, or with this profile's next command, which it does not while the chat stays on the DHT
+ * only. It says why instead, with the note in `details.note` too; same code and exit. Read again at the end: a chat
+ * taken off DHT only meanwhile keeps the usual words.
+ */
+function dhtOnlyTimeout(ctx: ApiContext, chat: string, text: string, ref: string, ms: number, error: unknown): unknown {
+  if (!(error instanceof CliError) || error.code !== "timeout" || error.details?.delivery !== "waiting") return error;
+  const link = state(ctx).links.find((l) => l.id === chat);
+  const note = link && dhtOnlyWait(link, text, ref);
+  return note ? new CliError("timeout", `${ended(ctx, ms)}: the message is waiting. ${note}`, { ...error.details, note }) : error;
+}
+
 const METHODS: Record<string, Method> = {
   ...WALLET_METHODS,
   ...FILE_METHODS,
@@ -523,8 +536,12 @@ const METHODS: Record<string, Method> = {
     let message = await node(ctx).getMessage(link.id, result.messageId);
     // Past the 256 bytes the DHT carries, in a chat on the DHT only: it waits for a live session, which comes only once
     // the chat leaves DHT only. A one-shot sat 30 s, then answered `timeout` saying it goes with the next command.
-    const dhtOnly = message?.delivery === "waiting" ? dhtOnlyWait(link, text, str(params, "chat", true)) : undefined;
-    if (wait !== "none" && !(dhtOnly && params.wait === undefined)) message = await waitForMessage(ctx, link.id, result.messageId, wait, ms);
+    const ref = str(params, "chat", true);
+    const dhtOnly = message?.delivery === "waiting" ? dhtOnlyWait(link, text, ref) : undefined;
+    // An explicit `--wait` still waits as asked, and a wait that ends short says that note, not that the text goes by itself.
+    if (wait !== "none" && !(dhtOnly && params.wait === undefined)) {
+      message = await waitForMessage(ctx, link.id, result.messageId, wait, ms).catch((error: unknown) => { throw dhtOnlyTimeout(ctx, link.id, text, ref, ms, error); });
+    }
     return {
       chat: link.id, messageId: result.messageId, delivery: message?.delivery ?? null, ...(card ? { buttons: card.id, card, pressable: pressable(link) } : {}),
       ...(unjoined && message?.delivery === "waiting" && { note: `Nobody joined this chat yet: the message goes once they join${ctx.mode === "one-shot" ? " while this profile is online (`ghostly daemon --detach`)" : ""}` }),
