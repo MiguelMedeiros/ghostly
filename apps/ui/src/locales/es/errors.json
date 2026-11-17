@@ -84,6 +84,7 @@
     "ecashFeeTakesAll": "La mint se queda con los {{amount}} sats de este ecash como comisión por recibirlo: no se canjeó nada, y quien lo envió aún puede recuperarlo",
     "ecashFeeTakesAll_one": "La mint se queda con el {{amount}} sat de este ecash como comisión por recibirlo: no se canjeó nada, y quien lo envió aún puede recuperarlo",
     "ecashOtherUnit": "Este ecash está en {{unit}}: aquí solo se puede canjear ecash en sat",
+    "ecashUnnamedUnit": "Este ecash está en otra unidad: aquí solo se puede canjear ecash en sat",
     "fedimintAlreadyJoined": "Ya te uniste a esta federación",
     "fedimintConnecting": "Espera a que la federación se conecte",
     "fedimintNotEnough": "No hay suficiente en esta federación",
