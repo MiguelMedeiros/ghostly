@@ -685,12 +685,12 @@ const METHODS: Record<string, Method> = {
     if (!messageIds.length) throw new CliError("bad_request", "Name the messages to forward (their ids, from history or an event)");
     if (messageIds.length > FORWARD_MESSAGES) throw new CliError("bad_request", `Forward at most ${FORWARD_MESSAGES} messages at once, not ${messageIds.length}`);
     // A chat or group named twice (by its name and its id too) is one of them, as the engine counts.
-    const to: ReturnType<typeof chatOrGroup>[] = [];
+    const to: (ReturnType<typeof chatOrGroup> & { ref: string })[] = [];
     for (const ref of new Set(list(params, "to"))) {
       const target = chatOrGroup(ctx, ref, s);
       if (to.some((t) => t.linkId === target.linkId)) continue;
       if (to.length === FORWARD_TARGETS) throw new CliError("bad_request", `Forward to at most ${FORWARD_TARGETS} chats and groups at once`);
-      to.push(target);
+      to.push({ ...target, ref });
     }
     if (!to.length) throw new CliError("bad_request", "Forward to which chat? Name one or more with --to");
     // Each by its id here, one row each: never the whole history of the chat or group.
@@ -712,8 +712,20 @@ const METHODS: Record<string, Method> = {
     let results;
     try { ({ results } = await node(ctx).forwardMessages({ linkId: from.linkId, messageIds, to: to.map((t) => t.linkId) })); }
     catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); }
-    const out: { to: string; kind: "group" | "chat"; messageIds: string[]; sent: string[]; error: string | null; edges?: number }[] =
+    const out: { to: string; kind: "group" | "chat"; messageIds: string[]; sent: string[]; error: string | null; edges?: number; note?: string }[] =
       results.map((result, i) => ({ to: to[i]!.id, kind: to[i]!.group ? "group" as const : "chat" as const, messageIds: result.messageIds, sent: result.sent, error: result.error }));
+    // A text past the 256 bytes the DHT carries, forwarded into a chat on the DHT only, waits as `send`'s does: the
+    // chat's result says why in a `note`, and a `--wait sent` that ends short says it too. It said nothing, and the
+    // timeout that the text still goes by itself.
+    for (const [i, result] of out.entries()) {
+      const link = to[i]!.group ? undefined : state(ctx).links.find((l) => l.id === to[i]!.id);
+      // Its copies read only in a chat on the DHT only, by either side's choice.
+      if (!link || (link.deliveryMode !== "dht" && link.dhtDelivery?.peerMode !== "dht")) continue;
+      for (const messageId of result.messageIds) {
+        const copy = await node(ctx).getMessage(link.id, messageId);
+        if (copy && !copy.file && copy.delivery === "waiting") result.note ??= dhtOnlyWait(link, copy.text, to[i]!.ref);
+      }
+    }
     // A copy's wait that ends short (its time ran out, its delivery failed) ends the waits, not the answer: it threw
     // alone with that copy's id, every target's result and another's refusal lost, and a bot that sent again sent twice.
     let short: CliError | undefined;
@@ -736,7 +748,7 @@ const METHODS: Record<string, Method> = {
       await waited(async () => {
         const sent = await node(ctx).getMessage(to[i]!.id, messageId);
         if (sent?.file) await FILE_METHODS["file.wait"](ctx, { chat: to[i]!.id, file: sent.file.id, timeout: ms / 1000 });
-        else await waitForMessage(ctx, to[i]!.id, messageId, "sent", ms);
+        else await waitForMessage(ctx, to[i]!.id, messageId, "sent", ms).catch((error: unknown) => { throw dhtOnlyTimeout(ctx, to[i]!.id, sent?.text ?? "", to[i]!.ref, ms, error); });
       }, () => undefined);
     }
     // A refusal first, then what ended a wait: each with every target's result.
