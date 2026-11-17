@@ -718,6 +718,16 @@ export interface NodeOptions {
    * names. Default: `fetch`. The CLI passes one that connects only to public addresses, which a page cannot check.
    */
   identityFetch?: typeof fetch;
+  /**
+   * How a group's call node is asked (WISP 602) at the origin the group's admin named. Default: `fetch`. The CLI
+   * passes one that connects only to public addresses, which a page cannot check.
+   */
+  groupCallFetch?: typeof fetch;
+  /**
+   * A group call's pass may send its LiveKit client to `ws://` on this machine: the e2e suite's LiveKit. Default off,
+   * and off in every shipped app: the group's node names that address.
+   */
+  groupCallLoopback?: boolean;
   /** How to reach Pkarr. Default: HTTP relays, the only way out of a browser. */
   transport?: PkarrTransport;
   pollIntervals?: PollIntervals;
@@ -6649,7 +6659,7 @@ export class GhostlyNode implements EngineImplementation {
     if (!me) throw engineError("groupCallNotMember");
     const sfu = groupCallSfu(me.meta);
     if (!sfu) throw engineError("groupNoCall");
-    return fetchGroupCallToken({ sfu, g: groupId, k: me.key, seed: identityFromSeedB64(me.seedB64).seed, name: this.sharedNick });
+    return fetchGroupCallToken({ sfu, g: groupId, k: me.key, seed: identityFromSeedB64(me.seedB64).seed, name: this.sharedNick, fetch: (...request) => (this.options.groupCallFetch ?? globalThis.fetch)(...request), loopback: this.options.groupCallLoopback === true });
   }
 
   /**
@@ -6668,7 +6678,7 @@ export class GhostlyNode implements EngineImplementation {
     if (!me?.isAdmin) return { ok: false, code: "not_admin" };
     const sfu = groupCallSfu(me.meta);
     if (!sfu) return { ok: false, code: "unsupported" };
-    return sendGroupCallModeration({ sfu, g: groupId, seed: identityFromSeedB64(me.seedB64).seed, act, target: act === "state" ? "" : target, src: takesSources ? src : [] });
+    return sendGroupCallModeration({ sfu, g: groupId, seed: identityFromSeedB64(me.seedB64).seed, act, target: act === "state" ? "" : target, src: takesSources ? src : [], fetch: (...request) => (this.options.groupCallFetch ?? globalThis.fetch)(...request) });
   }
 
   /**
