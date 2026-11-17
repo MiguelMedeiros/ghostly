@@ -785,6 +785,16 @@ describe("listen with an allowlist and --turns", () => {
     expect(() => start(undefined, join(dir, "garbage"))).toThrow("holds no event number");
     expect(start(3, join(dir, "garbage"))).toBe(3);
     expect(said).toEqual([]);
+    // A cursor that cannot be read (left root's by a sudo run) or a folder is refused with --since too: before, --since
+    // started it without a word, and every event it had handled went to the hook again.
+    writeFileSync(join(dir, "unreadable"), "41\n");
+    chmodSync(join(dir, "unreadable"), 0o000);
+    mkdirSync(join(dir, "folder"));
+    for (const since of [undefined, 0]) {
+      expect(() => start(since, join(dir, "unreadable"))).toThrow(`Not allowed to write or read ${join(dir, "unreadable")}`);
+      expect(() => start(since, join(dir, "folder"))).toThrow(`${join(dir, "folder")} is a folder: name a file`);
+    }
+    expect(said).toEqual([]);
   });
 
   // A profile restored from a backup, a journal reset, a cursor copied from another profile: the listen starts with new
