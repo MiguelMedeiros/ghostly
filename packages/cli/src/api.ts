@@ -1,4 +1,4 @@
-import { AWAITING_PEER_MS, COMMUNITY_LIMITS, DHT_PACKET_BUDGET, decodeCommunityLink, decodeGroupEntryLink, GROUP_EDIT_TEXT_BYTES, GROUP_LIMITS, inviteLink, LIMITS, MENTION_EVERYONE, normalizeRelayUrl, ownInviteRefusal, relayUrlProblem, replySnippet, STATUS_CARD_LIMITS, statusCardBytes, TYPING_KINDS, type GroupMention, type TypingKind } from "@ghostly/core";
+import { AWAITING_PEER_MS, COMMUNITY_LIMITS, DHT_PACKET_BUDGET, decodeCommunityLink, decodeGroupEntryLink, GROUP_EDIT_TEXT_BYTES, GROUP_LIMITS, inviteLink, LIMITS, MENTION_EVERYONE, MENTION_LIMITS, normalizeRelayUrl, ownInviteRefusal, relayUrlProblem, replySnippet, STATUS_CARD_LIMITS, statusCardBytes, TYPING_KINDS, type GroupMention, type TypingKind } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
 import { DEFAULT_HYPERDHT_RELAY } from "@ghostly/browser/shared/hyperdhtRelay";
@@ -175,9 +175,13 @@ function mentionIn(text: string, name: string, whole: boolean): RegExpExecArray 
  * whole is the mention (with none whole, the first place one starts a longer word, as before). A ref
  * more than one member answers to, none does, or this profile itself (`myName`: reads its own name, only for a ref no
  * member answers to) is refused as `group remove` refuses it: before, its own name was "No member", and two members
- * of one name gave no key. `groupRef`: the group as the command named it, for the refusal's hint.
+ * of one name gave no key. `groupRef`: the group as the command named it, for the refusal's hint. A ref given twice is
+ * one mention; more refs than a message carries (`MENTION_LIMITS.count`) are refused before any is looked up: the
+ * engine dropped the whole list, and the message went out mentioning no one.
  */
-export function mentionsFor(text: string, refs: readonly string[], group: GroupView, myName?: () => string | undefined, groupRef?: string): GroupMention[] {
+export function mentionsFor(text: string, given: readonly string[], group: GroupView, myName?: () => string | undefined, groupRef?: string): GroupMention[] {
+  const refs = [...new Set(given)];
+  if (refs.length > MENTION_LIMITS.count) throw new CliError("bad_request", `A message mentions at most ${MENTION_LIMITS.count} members (${refs.length} given): send it to fewer, or mention everyone`, { mentions: refs.length, max: MENTION_LIMITS.count });
   const out: GroupMention[] = [];
   for (const ref of refs) {
     let key: string, spelled: string[];
