@@ -774,6 +774,8 @@ export class RelayTransport implements PkarrTransport {
       .map(normalizeRelayUrl)
       .filter((r): r is string => r !== null);
     this.relays = [...new Set(normalized)];
+    // A relay taken off the list gets none of the packets queued for it (`catchUpLater`): before, they still went there.
+    for (const item of [...this.catchUp.values()]) if (!this.relays.includes(item.relay)) this.dropCatchUp(item.relay, item.key);
   }
 
   describe(): { protocol: string; relays: string[] } {
@@ -1434,6 +1436,8 @@ export class RelayTransport implements PkarrTransport {
   }
 
   private keepCatchUp(slot: string, item: { relay: string; key: string; payload: Uint8Array; timestamp: bigint; who: Asker }): void {
+    // One that was going out as the relay was taken off the list (`setRelays`) does not queue again.
+    if (!this.relays.includes(item.relay)) return;
     if (!this.catchUp.has(slot)) this.catchUpWaiting.set(item.relay, (this.catchUpWaiting.get(item.relay) ?? 0) + 1);
     this.catchUp.set(slot, item);
   }
