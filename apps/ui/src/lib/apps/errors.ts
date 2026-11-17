@@ -120,6 +120,15 @@ function hostStatus(error: unknown): number {
 const hostTrouble = (status: number) => status >= 500 || status === 429 || status === 408;
 
 /**
+ * A read that found nothing at the link: the host answered 404, or the file there is no bundle (`magic`). Add reads such
+ * a link as a store; any other refusal (too large, not signed, too slow, the host's own trouble) is the app's own.
+ */
+export function appNothingThere(error: unknown): boolean {
+  const code = appErrorCode(error);
+  return code === "magic" || hostStatus(error) === 404;
+}
+
+/**
  * A read that trying again may change: the host's own trouble (an outage, a rate limit), offline, the host not
  * reached, too slow. A wrong link, a refused bundle, a revoked or removed version stay as they are.
  */
