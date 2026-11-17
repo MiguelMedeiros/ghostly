@@ -45,7 +45,7 @@ it("on the DHT floor, an edit its packet cannot carry is refused at once, and a 
   // 252 bytes, 230 (a text that long fits the packet; with the edit's element it does not), and 230 of two-byte letters.
   for (const text of ["e".repeat(252), "e".repeat(230), "é".repeat(115)]) {
     const refused = error(await as(alice, "edit", "bob", id, text, "--wait", "none"), "refused", 1);
-    expect(refused.message, `${Buffer.byteLength(text)} bytes`).toContain("DHT packet budget");
+    expect(refused.message, `${Buffer.byteLength(text)} bytes`).toBe("Too long for the DHT (an edit fits about 214 bytes there once sealed): you and the contact keep this chat on the DHT only: make the edit once both choose a live transport (ghostly chat transport bob auto), or shorten it");
   }
   const mine = async () => (ok(await as(alice, "chat", "history", "bob", "--limit", "10")).messages as { id: string; text: string; editPending?: boolean }[]).find((m) => m.id === id);
   expect(await mine()).toMatchObject({ text: "first on the DHT" });
