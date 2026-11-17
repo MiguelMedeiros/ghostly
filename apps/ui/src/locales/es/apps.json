@@ -194,6 +194,8 @@
     "removeAppsOne": "Incluye una app que instalaste: {{titles}}. Ya no recibirá actualizaciones ni retiradas de esta tienda.",
     "removeNamed": "Quitar {{name}}",
     "removeNone": "Para añadirla de nuevo, necesitarás su enlace.",
+    "removeTakenDown": "Retiró apps que instalaste: {{titles}}. Quitar la tienda pone fin a esa retirada.",
+    "removeTakenDownOne": "Retiró una app que instalaste: {{titles}}. Quitar la tienda pone fin a esa retirada.",
     "removeTitle": "¿Quitar {{name}}?",
     "rollback": "El enlace de esta tienda ahora tiene una lista más antigua que la tuya. Ghostly conservó la tuya.",
     "showMore": "Mostrar más ({{count}})",
