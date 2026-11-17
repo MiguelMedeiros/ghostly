@@ -1,6 +1,7 @@
-import { TYPING_REFRESH_MS, type TypingKind } from "@ghostly/core";
+import { sanitizeDisplayText, sanitizeTypingStatus, TYPING_REFRESH_MS, TYPING_STATUS_MAX, type TypingKind } from "@ghostly/core";
 import type { EngineState } from "@ghostly/browser/shared/types";
 import { node, state, type ApiContext } from "./apiKit";
+import { CliError, type ErrorCode } from "./errors";
 
 /**
  * `typing --for` and `group typing --for`: a `start` holds 6 s on the other side (WISP 401 § Typing, WISP 902 · Group
@@ -24,6 +25,23 @@ function keepersOf(ctx: ApiContext): Map<string, () => void> {
 }
 
 const keyOf = (target: TypingTarget) => "groupId" in target ? `group:${target.groupId}` : target.linkId;
+
+/**
+ * A typing status as the contact's app shows it, checked as `status set` checks its text (ownStatus.ts): one line,
+ * counted as shown, each refusal named by `name` (the command's `--status`, or the socket's `status`). Blank once trimmed
+ * (spaces, an unset variable) is no status, as an empty one already was: it was refused as "no link or markup".
+ */
+export function typingStatus(raw: string | undefined, name: string, code: ErrorCode): string | undefined {
+  const oneLine = raw?.replace(/\s+/g, " ").trim();
+  if (!oneLine) return undefined;
+  const shown = sanitizeDisplayText(oneLine, Infinity) ?? "";
+  const length = [...shown].length;
+  if (length > TYPING_STATUS_MAX) throw new CliError(code, `${name} is up to ${TYPING_STATUS_MAX} characters, not ${length} characters`);
+  if (!shown) throw new CliError(code, `${name} needs a character that shows`);
+  const status = sanitizeTypingStatus(shown);
+  if (!status) throw new CliError(code, `${name} is plain text: no link or markup`);
+  return status;
+}
 
 /** Says it once: this side is typing (with its word), or stopped. */
 export function sayTyping(ctx: ApiContext, target: TypingTarget, typing: boolean, word: Word = {}): void {
@@ -57,9 +75,10 @@ export const ONE_SHOT_LIVE_GRACE_MS = 15_000;
 /**
  * A one-shot's `--for` (it holds the profile while it runs): kept the whole time once the chat or group is live, as a
  * daemon keeps it; ended when it is not live within `ONE_SHOT_LIVE_GRACE_MS`, since nobody would see it, and `--stop`
- * or a send from another shell could not end it.
+ * or a send from another shell could not end it. Whether it was live: false when it ended with nobody to see it (not
+ * live in time, or its time or a send ended it first), so the answer says so rather than `typing: true`.
  */
-export async function keepOneShot(ctx: ApiContext, target: TypingTarget, kept: Promise<void>, live: (state: EngineState) => boolean): Promise<void> {
+export async function keepOneShot(ctx: ApiContext, target: TypingTarget, kept: Promise<void>, live: (state: EngineState) => boolean): Promise<boolean> {
   let stop = () => {};
   const cameLive = new Promise<boolean>((resolve) => {
     if (live(state(ctx))) return resolve(true);
@@ -67,8 +86,12 @@ export async function keepOneShot(ctx: ApiContext, target: TypingTarget, kept: P
     const off = ctx.hub.onState((next) => { if (live(next)) { clearTimeout(timer); off(); resolve(true); } });
     stop = () => { clearTimeout(timer); off(); resolve(true); };
   });
-  if (await Promise.race([kept.then(() => true), cameLive])) { stop(); await kept; return; }
-  endTyping(ctx, target, false);
+  const first = await Promise.race([kept.then(() => "ended" as const), cameLive]);
+  if (first === false) { endTyping(ctx, target, false); return false; }
+  stop();
+  if (first === "ended") return live(state(ctx));
+  await kept;
+  return true;
 }
 
 /** Ends a kept `--for` in the chat or group; `tell`: and says this side stopped. Whether one was kept. */

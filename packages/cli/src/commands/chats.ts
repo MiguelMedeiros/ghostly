@@ -1,7 +1,7 @@
 import { CliError } from "../errors";
 import type { OptionSpec } from "../args";
 import { TRANSPORT_NAMES } from "../words";
-import { type Command, CONNECT_SECONDS, force, groupWait, cursor, HOLD_MINUTES, inRange, LONG_WAIT_SECONDS, needs, pageLimit, prLinked, quota, reaction, refs, routineFields, routineOptions, runOf, secret, showInvite, taskFields, taskOptions, timeout, translate, typingFor, typingKind, usageFields, usageOptions, wait } from "./shared";
+import { type Command, CONNECT_SECONDS, force, groupWait, cursor, HOLD_MINUTES, inRange, LONG_WAIT_SECONDS, needs, pageLimit, prLinked, quota, reaction, refs, routineFields, routineOptions, runOf, secret, showInvite, taskFields, taskOptions, timeout, translate, typingFor, typingKind, typingWords, usageFields, usageOptions, wait } from "./shared";
 
 /** `react` and `pin` in a 1:1 chat: until the contact confirmed it, by default without a daemon (the process leaves). */
 const confirmWait: Record<string, OptionSpec> = {
@@ -198,7 +198,7 @@ export const commands: Record<string, Command> = {
       status: { type: "string", description: "A short line shown instead, e.g. \"Transcribing your audio…\" (40 characters, no links)" },
       for: { type: "number", description: "Keep saying it for this many seconds (up to 600), until a send or --stop" },
     },
-    params: ({ options }, { chat }) => ({ chat, stop: options.stop === true, kind: options.kind, status: options.status, for: typingFor(options) }),
+    params: ({ options }, { chat }) => ({ chat, stop: options.stop === true, ...typingWords(options), for: typingFor(options) }),
   },
   "usage send": {
     method: "usage.send", usage: "usage send [<chat|group>] [--all] --left <percent> [--window \"5 h\"] [--resets <time>] [--label Claude] [--account <name>] [--also week=80@<time>]... [--used n --limit n] [--id id] [--text <text>] [--json json|-|file] [--force] [--wait none|sent] [--timeout s]",

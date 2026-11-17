@@ -216,20 +216,35 @@ describe("typing --for", () => {
 
   // Without a daemon, `--for 600` on a chat whose contact is away held the terminal, and the profile, for 10 minutes
   // with nobody to see it: `typing --stop` and `send` from another shell answered busy.
-  it("a one-shot whose chat is not live within 15 s stops there, and says it was not live", async () => {
+  // It then answered `typing: true` with an `until` to come and no note: a script believed the contact saw it.
+  it("a one-shot whose chat is not live within 15 s stops there, and says it is off and reached nobody", async () => {
     vi.useFakeTimers();
     const { ctx, node, setLink } = fake("one-shot");
     setLink("chat-one", { dataLink: "connecting", textDelivery: "dht" });
-    let answer: { live?: boolean } | undefined;
-    const typing = callApi(ctx, "chat.typing", { chat: "Alice", for: 600 }).then((a) => { answer = a as { live: boolean }; });
+    let answer: Record<string, unknown> | undefined;
+    const typing = callApi(ctx, "chat.typing", { chat: "Alice", for: 600, kind: "thinking", status: "Working" }).then((a) => { answer = a as Record<string, unknown>; });
     await vi.advanceTimersByTimeAsync(14_900);
     expect(answer).toBeUndefined();
     await vi.advanceTimersByTimeAsync(200);
     await typing;
-    expect(answer).toMatchObject({ typing: true, live: false });
+    expect(answer).toMatchObject({ chat: "chat-one", typing: false, live: false, note: expect.stringMatching(/reached nobody.*ghostly daemon --detach/) });
+    expect(answer).not.toHaveProperty("until");
+    expect(answer).not.toHaveProperty("kind");
     const calls = node.setTyping.mock.calls.length;
     await vi.advanceTimersByTimeAsync(10_000);
     expect(node.setTyping, "nothing kept on after it").toHaveBeenCalledTimes(calls);
+  });
+
+  it("a one-shot --for shorter than the wait that ends before the chat is live says it reached nobody too", async () => {
+    vi.useFakeTimers();
+    const { ctx, setLink } = fake("one-shot");
+    setLink("chat-one", { dataLink: "connecting", textDelivery: "dht" });
+    let answer: Record<string, unknown> | undefined;
+    const typing = callApi(ctx, "chat.typing", { chat: "Alice", for: 3 }).then((a) => { answer = a as Record<string, unknown>; });
+    await vi.advanceTimersByTimeAsync(3_100);
+    await typing;
+    expect(answer).toMatchObject({ typing: false, live: false, note: expect.stringContaining("reached nobody") });
+    expect(answer).not.toHaveProperty("until");
   });
 
   it("a one-shot whose chat comes live within 15 s stays the whole time", async () => {
@@ -245,6 +260,7 @@ describe("typing --for", () => {
     await vi.advanceTimersByTimeAsync(200);
     await typing;
     expect(answer).toMatchObject({ typing: true, live: true });
+    expect(answer).not.toHaveProperty("note");
   });
 });
 
