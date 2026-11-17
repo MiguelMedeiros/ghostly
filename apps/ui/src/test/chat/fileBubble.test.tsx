@@ -80,7 +80,7 @@ describe("FileBubble: files/3", () => {
   it("an offer asks the person, with the room here, and answers through the engine", async () => {
     show({ state: "transferring", stage: "asking", direction: "in", transferred: 0, size: 4.2 * GB, room: 12 * GB });
     expect(screen.getByTestId("file-offer")).toHaveTextContent("Ana wants to send movie.mkv (4.2 GB).");
-    expect(screen.getByTestId("file-room")).toHaveTextContent("12.0 GB free on this device");
+    expect(screen.getByTestId("file-room")).toHaveTextContent("12.0 GB left on this device");
     expect(screen.queryByTestId("file-progress")).toBeNull();
     fireEvent.click(screen.getByTestId("file-accept"));
     await waitFor(() => expect(fakeEngine.callsTo("fileAction")).toEqual([{ linkId: "chat1", fileId: "chat1-in-abc", action: "accept" }]));
@@ -139,7 +139,7 @@ describe("FileBubble: files/3", () => {
 
   it("an offer larger than the room shown still takes Accept, which reads the room again: refused, it says why and keeps waiting", async () => {
     show({ state: "transferring", stage: "asking", direction: "in", transferred: 0, size: 4.2 * GB, room: 1 * GB });
-    expect(screen.getByTestId("file-room")).toHaveTextContent("Not enough space: 1.0 GB free on this device");
+    expect(screen.getByTestId("file-room")).toHaveTextContent("Not enough space: 1.0 GB left on this device");
     // The room shown may be old (space made since): Accept is not turned off, and the engine reads the room again.
     expect(screen.getByTestId("file-accept")).not.toBeDisabled();
     fakeEngine.on("fileAction", () => { throw new Error("No room on this device for this file (1.0 GB free)"); });
@@ -154,8 +154,9 @@ describe("FileBubble: files/3", () => {
 
   it("Accept refused for the files still coming says so, with the room left, beside the room line that says it does not fit", async () => {
     // As the engine shows it: the room left beside a file still coming (13.4 MB of 38.9 MB free), below the file's size.
+    // Said "left", as the refusal does: "13.4 MB free on this device" beside "13.4 MB left of 38.9 MB free" read as two disks.
     show({ state: "transferring", stage: "asking", direction: "in", transferred: 0, size: 27_262_976, room: 14_050_000 });
-    expect(screen.getByTestId("file-room")).toHaveTextContent("Not enough space: 13.4 MB free on this device");
+    expect(screen.getByTestId("file-room")).toHaveTextContent("Not enough space: 13.4 MB left on this device");
     fakeEngine.on("fileAction", () => { throw new Error("No room on this device for this file beside the files still coming (13.4 MB left of 38.9 MB free)"); });
     fireEvent.click(screen.getByTestId("file-accept"));
     fireEvent.click(await screen.findByTestId("file-why"));
