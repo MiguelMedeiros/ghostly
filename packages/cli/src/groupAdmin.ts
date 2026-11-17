@@ -181,6 +181,8 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
   },
   async "group.hub"(ctx, params) {
     const group = joined(ctx, params);
+    // Refused here as `group call` refuses a private group: the engine's refusal came out as `engine`, read as a fault.
+    if (group.profile === "community") throw new CliError("refused", `${group.name} is a community: it chooses its hubs by itself; group hub is for a private group past 16 members`);
     const role = str(params, "role") ?? "auto";
     if (!["pin", "exclude", "auto"].includes(role)) throw new CliError("bad_request", "role is pin, exclude or auto");
     await node(ctx).setGroupHub({ groupId: group.id, key: member(ctx, group, params, role === "pin").key, role: role === "auto" ? null : role as "pin" | "exclude" });
