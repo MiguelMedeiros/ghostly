@@ -147,6 +147,30 @@ describe("pay and wallet redeem refusals, at a fake test mint", { timeout: 60_00
     expect(node.getState().wallet.networks?.testnet.balance).toBe(10_000);
   });
 
+  // Found in a bug hunt: the way out was offered for any mint a token named, so a contact's token offered a command
+  // `wallet add-mint` refuses, or one that makes a server on this machine or the local network a mint of this wallet.
+  it("offers add-mint only for a mint add-mint takes that is not on this machine or a local network", async () => {
+    for (const url of ["http://10.1.2.3", "http://169.254.169.254/latest", "http://[::1]:65401", "http://mint.example"]) {
+      const host = new URL(url).hostname;
+      expect(await refusal("wallet.redeem", { token: mint.token(4, url) }), url).toEqual({
+        code: "engine",
+        message: `Ecash from ${host} is not accepted: its mint is not one of yours, and not one a wallet can add (Mints must use https)`,
+      });
+    }
+    for (const url of ["http://127.0.0.1:65401", "http://localhost:65401/x", "https://192.168.1.1/cashu", "https://10.0.0.5:3338", "https://mint.lan", "https://[fd00::1]"]) {
+      const host = new URL(url).hostname;
+      expect(await refusal("wallet.redeem", { token: mint.token(4, url) }), url).toEqual({
+        code: "engine",
+        message: `Ecash from ${host} is not accepted: its mint is not one of yours, and it is on this machine or a local network (add a mint there only if you run it yourself)`,
+      });
+    }
+    // A mint that is no http(s) URL makes no token this wallet can use: said as such, never an empty host or `Invalid URL`.
+    for (const url of ["gopher://127.0.0.1:65401", "file:///etc/passwd", "data:text/plain,mint", "not a url"]) {
+      expect(await refusal("wallet.redeem", { token: mint.token(4, url) }), url).toEqual({ code: "bad_request", message: "That is not a valid ecash token" });
+    }
+    expect(node.getState().wallet.networks?.testnet.balance).toBe(10_000);
+  });
+
   it("a token of one of the mints is still taken", async () => {
     expect(await callApi(ctx, "wallet.redeem", { token: mint.token(8, TEST_MINT) })).toEqual({ amount: 8, fee: 0 });
   });
