@@ -25,7 +25,7 @@ export function NeedsYouList({ items }: { items: NeedsYou[] }) {
         <p key={item.id} data-testid="needs-you-item" data-id={item.id} className="flex items-center gap-3 px-4 py-2 min-h-11 text-sm text-text-primary">
           <span className="nav-dot-inline" aria-hidden="true" />
           <span className="flex-1 min-w-0 break-words">{item.text}</span>
-          <button type="button" onClick={item.show} aria-label={`${t("common.needsYou.show")}: ${item.text}`}
+          <button type="button" onClick={item.show} aria-label={t("common.labelValue", { label: t("common.needsYou.show"), value: item.text })}
             className="shrink-0 px-2 py-1 min-h-9 rounded-lg text-accent font-medium hover:bg-surface-alt transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
             {t("common.needsYou.show")}
           </button>
