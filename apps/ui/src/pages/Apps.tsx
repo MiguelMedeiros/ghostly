@@ -461,10 +461,14 @@ export function Apps() {
   useEffect(() => {
     if (!installed) return;
     const before = wasStopped.current;
-    wasStopped.current = new Map(installed.map((a) => [a.ref, appStopped(a)]));
+    const now = new Map(installed.map((a) => [a.ref, appStopped(a)]));
+    wasStopped.current = now;
     if (!before) return;
     const stopped = installed.filter((a) => appStopped(a) && before.get(a.ref) === false && a.ref !== details);
     if (stopped.length) setStopSaid(stopped.map((a) => stoppedSaid(a.title, a.run, t)).join(" "));
+    // One that may run again, or is gone (uninstalled), empties the line, so the same app stopping again for the same
+    // reason is a change, and said.
+    else if ([...before].some(([ref, was]) => was && now.get(ref) !== true)) setStopSaid("");
   }, [installed, details, t]);
 
   // A store that reads as before stays the object held, and the list held when all do: the update check and each
