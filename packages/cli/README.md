@@ -291,7 +291,9 @@ add` prints the statement and the command, `identity complete` takes its output.
 then `identity complete` asks the engine to look it up. The last of the steps `identity add` answers is that `identity
 complete` command, with its draft (the app's "press Check" and "paste it into Ghostly" point to it). In-app signers (a Nostr signer over NIP-46, Pubky) run in one
 `identity add`, with their fields in `--field` (a NIP-46 `bunker://` link on stdin: `printf 'bunker=%s\n' "$LINK" | ghostly
-identity add nostr --signer nip46 --stdin`), and print what they wait on (a link, a code) to stderr. OpenID Connect,
+identity add nostr --signer nip46 --stdin`), and print what they wait on (a link, a code) to stderr: on a terminal as
+`ghostly: …` lines, the link or code on its own line; on a pipe as the JSON of its `identity.approval` and
+`identity.progress` events. Each command prints only its own: the events carry the `request` id it gave. OpenID Connect,
 AT Protocol and a NIP-07 browser extension need a browser window: make those proofs in the app. `identity providers`
 marks each signer that runs here as `headless`.
 
@@ -351,7 +353,7 @@ unless `--show-secret`.
   `file.stage`, `file.done`, `file.failed` (each with `chat`, or `group` for a group's file, `file`, `messageId`), `chat.held` and
   `chat.released` (`chat disconnect --hold`), `identity.received` and `identity.status` (what a contact
   showed, as checked here: `identity` with `status`, and `error`, why it is not verified, or null; each change of
-  status is a new `identity.status`, even back to one it had before), `identity.approval` and `identity.progress` (a signer waits on a link or a code), `group.deleted` (`{group, messageId}`: a group's message deleted, not the group), `group.removed`, `payment.created` and
+  status is a new `identity.status`, even back to one it had before), `identity.approval` and `identity.progress` (a signer waits on a link or a code; `request`: the id the `identity.add` call gave, when it gave one), `group.deleted` (`{group, messageId}`: a group's message deleted, not the group), `group.removed`, `payment.created` and
   `payment.updated` (`payment`: id, chat, kind request|payment, direction in|out, amount, memo, state pending|
   settled|failed, network, method, and `group` for a group's payment, whichever member's link it went over), `call.incoming`, `call.outgoing`, `call.connected` and `call.ended` (voice
   calls: see [Calls](#calls)), `app.opened` (`chat`, `app`, `version`), `app.closed` (`chat`, `app`, and `offline`

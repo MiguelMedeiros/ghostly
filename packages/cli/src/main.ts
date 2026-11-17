@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { connect } from "node:net";
 import { closeSync, fstatSync, openSync, readFileSync, readSync, rmSync } from "node:fs";
 import { dirname, sep } from "node:path";
@@ -12,6 +13,7 @@ import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULT
 import { asCliError, CliError, type ErrorCode, EXIT, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import type { Host } from "./host";
+import { identityWaitLines } from "./identityWait";
 import { jsonOut } from "./jsonOut";
 import { ownProfile } from "./privateFolder";
 import { shellWord } from "./shellWord";
@@ -1615,9 +1617,12 @@ async function identityAddCommand(argv: string[]): Promise<void> {
   // A signer's secret (a bunker:// link) on the command line shows in ps for as long as the approval is waited for.
   const { fields, warning } = await identityFields(items, parsed.options.stdin === true, identitySecretFields(known, parsed.options.signer as string | undefined), readStdin, process.stdin.isTTY === true);
   if (warning) process.stderr.write(`ghostly: ${warning}\n`);
-  const params ={ provider, subject: subject.join(" ") || undefined, signer: parsed.options.signer, fields, days: parsed.options.days, timeout: parsed.options.timeout };
+  // This call's own id: the daemon's watcher hears every proof's wait, and prints only this one's.
+  const request = randomUUID();
+  const params ={ provider, subject: subject.join(" ") || undefined, signer: parsed.options.signer, fields, days: parsed.options.days, timeout: parsed.options.timeout, request };
   const tell = (event: GhostlyEvent) => {
-    if (event.type === "identity.approval" || event.type === "identity.progress") process.stderr.write(JSON.stringify(event) + "\n");
+    const lines = identityWaitLines(event, request, process.stderr.isTTY === true);
+    if (lines) process.stderr.write(lines);
   };
   const addThroughDaemon = async (client: DaemonClient) => {
     await warnVersion(client);
