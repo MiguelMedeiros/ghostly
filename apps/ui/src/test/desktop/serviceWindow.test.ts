@@ -77,7 +77,7 @@ describe("a Desktop viewer window's answer", () => {
       const response = await answerServiceWindow(server, request, t, "Demo");
       expect(response.status).toBe(502);
       expect(response.headers).toEqual([["content-type", "text/plain; charset=utf-8"]]);
-      expect(page(response)).toBe(t("services.window.notAnswering", { app: "Demo" }));
+      expect(page(response)).toBe(t("services.window.notAnswering", { app: "⁨Demo⁩" }));
       expect(page(response)).toContain("Demo");
       said.add(page(response));
     }

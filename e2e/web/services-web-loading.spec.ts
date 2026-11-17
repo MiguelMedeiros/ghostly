@@ -49,12 +49,12 @@ test("a contact's app the contact's machine is slow to answer is said as opening
     const frame = view.getByTestId("service-view-frame");
     // Said, and busy, while the contact's machine has not answered; the frame (the bridge's white page) under it unseen.
     // It was the bridge's white page alone, with nothing said, for as long as the contact took.
-    await expect(notice.locator("p")).toHaveText("Opening Demo on your contact's machine…");
+    await expect(notice.locator("p")).toHaveText("Opening ⁨Demo⁩ on your contact's machine…");
     await expect(notice).toHaveAttribute("aria-busy", "true");
     await expect(view.getByTestId("service-view-retry")).toBeHidden();
     await expect(frame).toBeHidden();
     await person.page.waitForTimeout(5_000);
-    await expect(notice.locator("p")).toHaveText("Opening Demo on your contact's machine…");
+    await expect(notice.locator("p")).toHaveText("Opening ⁨Demo⁩ on your contact's machine…");
 
     release();
     const demo = person.page.frameLocator("[data-testid=service-view-frame]").frameLocator("iframe");
