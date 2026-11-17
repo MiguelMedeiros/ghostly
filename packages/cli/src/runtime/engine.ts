@@ -14,7 +14,7 @@ import { nodeFedimintSdk } from "./fedimint";
 import { installFileFetch } from "./fileFetch";
 import { nodeGroupCallFetch } from "./groupCallFetch";
 import { nodeHoldFetch } from "./holdFetch";
-import { nodePublicFetch } from "./publicFetch";
+import { nodeLnurlFetch, nodePublicFetch } from "./publicFetch";
 import { nodePublicRelay } from "./irohRelay";
 import { nodePushSend } from "./pushSend";
 import { openPersistentIndexedDb, type PersistentIndexedDb } from "./storage";
@@ -371,6 +371,8 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     identityFetch: nodePublicFetch(),
     // A group's call node is asked on public addresses only, as an identity proof is read (./groupCallFetch.ts).
     groupCallFetch: nodeGroupCallFetch(),
+    // A Lightning address's service, each of its redirects and its callback, the same way (./publicFetch.ts).
+    lnurlFetch: nodeLnurlFetch(),
     // libdatachannel keeps only its own candidates out of the offer under `iceTransportPolicy: "relay"`: its ICE still
     // checks from this machine's sockets. With Hide my IP from contacts on, chats and group edges go over the relays.
     webrtcIgnoresRelayOnly: true,

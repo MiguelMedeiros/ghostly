@@ -80,7 +80,7 @@ const REDIRECTS = [301, 302, 303, 307, 308];
 /**
  * A host that is not on the public internet, as far as its name tells: this machine, a single label, `.local` and its
  * kin, private and reserved IP addresses. (What a public name resolves to is checked where the client resolves names
- * itself, as Ghostly Desktop does.)
+ * itself, as Ghostly Desktop and the CLI do.)
  */
 function isLocalHost(hostname: string): boolean {
   const host = hostname.toLowerCase().replace(/\.+$/, "").replace(/^\[|\]$/g, "");
