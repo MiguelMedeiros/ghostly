@@ -112,6 +112,26 @@ describe("the Apps page, when a check stops an installed app", () => {
     expect(said).toHaveTextContent(SAID_REMOVED);
   });
 
+  it("says it again when the app, uninstalled and installed again, stops for the same reason", async () => {
+    let list = [app("chess", "Chess", { status: "ok" })];
+    fakeEngine.on("appList", () => list);
+    renderApp(<Apps />, { route: "/apps" });
+    expect(await screen.findByTestId("installed-app-open")).toBeInTheDocument();
+    const said = screen.getByTestId("apps-stop-said");
+    const check = async (next: InstalledAppView[]) => {
+      list = next;
+      await act(async () => { fakeEngine.emit({ kind: "apps-checked" }); });
+      await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    };
+    await check([app("chess", "Chess", REMOVED)]);
+    expect(said).toHaveTextContent(SAID_REMOVED);
+    await check([]);
+    expect(said).toBeEmptyDOMElement();
+    await check([app("chess", "Chess", { status: "ok" })]);
+    await check([app("chess", "Chess", REMOVED)]);
+    expect(said).toHaveTextContent(SAID_REMOVED);
+  });
+
   it("leaves it to the app's own screen when that screen is open", async () => {
     const { said, user } = await page();
     await user.click(screen.getByRole("button", { name: /^Chess .*: details$/ }));
@@ -158,6 +178,22 @@ describe("an installed app's screen", () => {
     list = [app("chess", "Chess", REVOKED)];
     await act(() => refreshInstalledApps());
     expect(within(question).getByTestId("app-stop-said")).toHaveTextContent(SAID_REVOKED);
+  });
+
+  it("allowed to run again: never says a bare \"stopped\" on the way", async () => {
+    let list = [app("chess", "Chess", { status: "ok" })];
+    fakeEngine.on("appList", () => list);
+    renderApp(<Shown />);
+    const said = within(await screen.findByTestId("app-details")).getByTestId("app-stop-said");
+    const heard: string[] = [];
+    const watch = new MutationObserver(() => heard.push(said.textContent ?? ""));
+    watch.observe(said, { childList: true, characterData: true, subtree: true });
+    list = [app("chess", "Chess", REVOKED)];
+    await act(() => refreshInstalledApps());
+    list = [app("chess", "Chess", { status: "ok" })];
+    await act(() => refreshInstalledApps());
+    watch.disconnect();
+    expect(heard.filter(Boolean)).toEqual([SAID_REVOKED]);
   });
 
   it("opened on an app already revoked: described by its run line, with nothing said on opening", async () => {
