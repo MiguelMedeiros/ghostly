@@ -62,13 +62,13 @@ describe("status set's line", () => {
   });
 });
 
-function fake(initial?: PersonStatus) {
+function fake(initial?: PersonStatus, presence?: { presence?: "active" | "idle"; sharePresence?: boolean }) {
   let own = initial;
   const node = {
     getState: () => ({ links: [], groups: [], settings: {}, transport: {} }) as unknown as EngineState,
     setOwnStatus: vi.fn(async ({ status }: { status: PersonStatus }) => { own = status; }),
     clearOwnStatus: vi.fn(async () => { own = undefined; }),
-    getOwnStatus: vi.fn(() => ({ ...(own ? { status: own } : {}), sharePresence: true })),
+    getOwnStatus: vi.fn(() => ({ ...(own ? { status: own } : {}), ...(presence?.presence && { presence: presence.presence }), sharePresence: presence?.sharePresence ?? true })),
     setPresence: vi.fn(),
   };
   const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
@@ -78,17 +78,24 @@ function fake(initial?: PersonStatus) {
 describe("the socket's status.set|clear|get", () => {
   it("sets, shows and clears through the engine, answering every field, and never says presence", async () => {
     const { ctx, node } = fake();
-    expect(await callApi(ctx, "status.get", {})).toEqual({ status: null });
+    expect(await callApi(ctx, "status.get", {})).toEqual({ status: null, presence: null });
     const until = Date.now() + 60_000;
     const set = { status: { text: "At lunch", emoji: "🍕", availability: "busy", until } };
     expect(await callApi(ctx, "status.set", { text: "At lunch", emoji: "🍕", availability: "busy", until })).toEqual(set);
     expect(node.setOwnStatus).toHaveBeenLastCalledWith({ status: { text: "At lunch", emoji: "🍕", availability: "busy", until } });
-    expect(await callApi(ctx, "status.get", {})).toEqual(set);
+    expect(await callApi(ctx, "status.get", {})).toEqual({ ...set, presence: null });
     // A new one replaces it whole: what it leaves out is null.
     expect(await callApi(ctx, "status.set", { text: "Back" })).toEqual({ status: { text: "Back", emoji: null, availability: null, until: null } });
     expect(await callApi(ctx, "status.clear", {})).toEqual({ status: null });
     expect(node.clearOwnStatus).toHaveBeenCalledOnce();
     expect(node.setPresence).not.toHaveBeenCalled();
+  });
+
+  it("status.get says the presence contacts see: the engine's own while it shares it, else null", async () => {
+    expect(await callApi(fake(undefined, { presence: "active" }).ctx, "status.get", {})).toEqual({ status: null, presence: "active" });
+    expect(await callApi(fake(undefined, { presence: "idle" }).ctx, "status.get", {})).toEqual({ status: null, presence: "idle" });
+    // A profile restored with "Share when I'm online" off says none, even from a daemon with daemonPresence on.
+    expect(await callApi(fake(undefined, { presence: "active", sharePresence: false }).ctx, "status.get", {})).toEqual({ status: null, presence: null });
   });
 
   it("refuses a bad parameter as bad_request named by it, and a secret unless force", async () => {
@@ -130,15 +137,15 @@ describe("ghostly status set|clear|show", { timeout: 120_000 }, () => {
 
   it("sets, shows and clears this profile's status as a one-shot, and plain status is unchanged", async () => {
     ok(await ghostly(["--home", dir, "profile", "create", "bot", "--use"]));
-    expect(ok(await ghostly(["--home", dir, "status", "show"]))).toEqual({ status: null });
+    expect(ok(await ghostly(["--home", dir, "status", "show"]))).toEqual({ status: null, presence: null });
     const set = ok(await ghostly(["--home", dir, "status", "set", "At", "lunch", "--emoji", "🍕", "--availability", "busy", "--until", "2h"]));
     expect(set).toEqual({ status: { text: "At lunch", emoji: "🍕", availability: "busy", until: expect.any(Number) } });
-    expect(ok(await ghostly(["--home", dir, "status", "show"]))).toEqual(set);
+    expect(ok(await ghostly(["--home", dir, "status", "show"]))).toEqual({ ...set, presence: null });
     const plain = ok(await ghostly(["--home", dir, "status"]));
     expect(plain).toMatchObject({ profile: "bot", mode: "one-shot" });
     expect(plain).not.toHaveProperty("status");
     expect(ok(await ghostly(["--home", dir, "status", "clear"]))).toEqual({ status: null });
-    expect(ok(await ghostly(["--home", dir, "status", "show"]))).toEqual({ status: null });
+    expect(ok(await ghostly(["--home", dir, "status", "show"]))).toEqual({ status: null, presence: null });
   });
 
   it("refuses a bad line with exit 2 and changes nothing; plain status still takes no word", async () => {
@@ -155,9 +162,16 @@ describe("ghostly status set|clear|show", { timeout: 120_000 }, () => {
     await daemon.waitFor((l) => l.daemon === "ready");
     expect(ok(await ghostly(["--home", dir, "status"]))).toMatchObject({ mode: "daemon" });
     expect(ok(await ghostly(["--home", dir, "status", "set", "On", "call", "--availability", "dnd"]))).toEqual({ status: { text: "On call", emoji: null, availability: "dnd", until: null } });
-    expect(ok(await ghostly(["--home", dir, "status", "show"]))).toMatchObject({ status: { text: "On call", availability: "dnd" } });
+    expect(ok(await ghostly(["--home", dir, "status", "show"]))).toMatchObject({ status: { text: "On call", availability: "dnd" }, presence: null });
+    // Shown online only while the daemon says it (settings set daemonPresence true), and no more once turned off.
+    ok(await ghostly(["--home", dir, "settings", "set", "daemonPresence", "true"]));
+    expect(ok(await ghostly(["--home", dir, "status", "show"]))).toMatchObject({ presence: "active" });
+    ok(await ghostly(["--home", dir, "settings", "set", "daemonPresence", "false"]));
+    expect(ok(await ghostly(["--home", dir, "status", "show"]))).toMatchObject({ presence: null });
+    ok(await ghostly(["--home", dir, "settings", "set", "daemonPresence", "true"]));
     await daemon.stop();
-    expect(ok(await ghostly(["--home", dir, "status", "show"]))).toMatchObject({ status: { text: "On call", availability: "dnd" } });
+    // A one-shot never says it, daemonPresence on or not.
+    expect(ok(await ghostly(["--home", dir, "status", "show"]))).toMatchObject({ status: { text: "On call", availability: "dnd" }, presence: null });
     expect(ok(await ghostly(["--home", dir, "status", "clear"]))).toEqual({ status: null });
   });
 });
