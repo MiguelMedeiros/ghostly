@@ -98,8 +98,15 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
     try {
       const first = await engine.call("deviceEnrollInvite", { name: defaultDeviceName(isDesktopApp() ? { userAgent: navigator.userAgent, desktop: true } : undefined, t) });
       // Closed while the code was being made (× and Escape close "Preparing" too): the enrollment the engine just started
-      // would run its ten minutes with no page showing it, and Remove, Rename and a move refused all along.
-      if (closed.current) { void engine.call("deviceEnrollCancel").catch(() => {}); return; }
+      // would run its ten minutes with no page showing it, and Remove, Rename and a move refused all along. The engine
+      // cancels whichever enrollment it holds: only while that is still this code, not one a dialog opened since started.
+      if (closed.current) {
+        const code = first.role === "inviter" && first.step === "waiting" ? first.code : null;
+        if (code) void engine.call("deviceEnrollView").then((now) => {
+          if (now?.role === "inviter" && now.step === "waiting" && now.code === code) return engine.call("deviceEnrollCancel");
+        }).catch(() => {});
+        return;
+      }
       ended.current = false; dismissed.current = false;
       setView(first); setStep("enroll");
     } catch (cause) {
@@ -124,6 +131,8 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
       const made = await engine.call("deviceHandoffVerifier", { password, current: password }).then(() => true, () => false);
       setBusy(false);
       if (!made) { fail(t("devices.handoff.verifierFailed")); return; }
+      // Closed while the password was checked: no code for a dialog that is gone.
+      if (closed.current) return;
       await start();
       return;
     }
@@ -134,6 +143,7 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
     const made = await engine.call("deviceHandoffVerifier", { password, current: previous.current }).then(() => true, () => false);
     setBusy(false);
     if (!made) { fail(t("devices.handoff.verifierFailed")); return; }
+    if (closed.current) return;
     await start();
   };
 
