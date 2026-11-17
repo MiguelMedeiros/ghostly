@@ -122,7 +122,7 @@ describe("message delete --purge", () => {
     // same: the journal is empty, the text only in rows.db, where the message still is.
     await put({ linkId: "group:g1", id: "k:1:0", text: `in the group: ${SECRET}`, sender: "peer", member: "k", timestamp: 4, via: "datalink" });
     const theirs = { chat: "group:g1", message: "k:1:0", everyone: true, purge: true };
-    const refusal = { code: "not_found", message: `${folded}No message "k:1:0" of yours in this group: only your own messages are deleted for everyone (ghostly group history group:g1)`, details: { purged: true } };
+    const refusal = { code: "refused", message: `${folded}"k:1:0" is another member's message: only its author deletes a group's message, for everyone`, details: { purged: true } };
     expect(holding()).toContain("journal.bin");
     await expect(callApi(ctx, "chat.delete", theirs)).rejects.toMatchObject(refusal);
     expect(store.journalBytes()).toBe(0);
@@ -134,7 +134,7 @@ describe("message delete --purge", () => {
     const after = callApi(ctx, "chat.delete", theirs);
     await expect(after).rejects.toThrow();
     expect(holding()).toEqual([]);
-    await expect(after).rejects.toMatchObject(refusal);
+    await expect(after).rejects.toMatchObject({ code: "not_found", message: `${folded}No message "k:1:0" in this group (ghostly group history group:g1)`, details: { purged: true } });
     // A usage mistake folds nothing.
     await put({ linkId: "chat-one", id: "peer_4", text: `last: ${SECRET}`, sender: "peer", timestamp: 5, via: "datalink" });
     await expect(callApi(ctx, "chat.delete", { chat: "group:g1", message: "k:1:0", everyone: true, wait: "confirmed", purge: true })).rejects.toMatchObject({ code: "bad_request", details: undefined });

@@ -572,14 +572,21 @@ const METHODS: Record<string, Method> = {
       if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; edit with --force if you mean to`, { kind: secret.kind });
     }
     const { wait, ms } = confirmWait(ctx, params, link.id);
+    // The edit number before, as `group edit` reads it: the text the message already has makes no edit. Undefined for
+    // a message named by its wire id (no row goes by it): then only a message never edited is known unchanged.
+    const prior = await node(ctx).getMessage(link.id, messageId);
+    const before = prior ? prior.edit?.seq ?? 0 : undefined;
     const result = await node(ctx).editMessage({ linkId: link.id, messageId, text });
     if (result.error) throw await editRefused(ctx, link.id, messageId, { group: false, ref: str(params, "chat", true) }, dhtTooLong(ctx, link, result.error, "edit", str(params, "chat", true)), result);
     const id = result.messageId ?? messageId;
     let message = await node(ctx).getMessage(link.id, id);
+    const edits = message?.edit?.seq ?? 0;
+    // It answered `edits` as before with no flag, so a script could not tell it from an edit that went.
+    const unchanged = !!message && edits === (before ?? 0);
     if (wait === "confirmed" && message?.edit?.pending) message = await waitForEdit(ctx, link.id, id, ms);
     const confirmed = !!message && !message.edit?.pending;
     // Too long for the DHT packet as an edit: it waits for the live session (`note`), refused where none comes.
-    return { chat: link.id, messageId: id, edits: message?.edit?.seq ?? 0, confirmed, ...(!confirmed && result.note && { note: result.note }), ...(!confirmed && keptForJoin(ctx, link.id, "the edit")) };
+    return { chat: link.id, messageId: id, edits: message?.edit?.seq ?? 0, confirmed, ...(unchanged && { unchanged: true }), ...(!confirmed && result.note && { note: result.note }), ...(!confirmed && keptForJoin(ctx, link.id, "the edit")) };
   },
   /**
    * WISP 401 § Typing: said on the live session only, and a start only while `sendTyping` is on; it holds 6 s there.
@@ -803,8 +810,13 @@ const METHODS: Record<string, Method> = {
       if (!target.group && wait === "sent") throw new CliError("bad_request", "--wait sent is for a group: a chat's removal waits with --wait confirmed");
       const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
       const ref = str(params, "message", true);
-      const message = await messageOf(ctx, target.linkId, ref, (m) => m.sender === "me");
-      if (!message) throw noMessage(ref, { group: target.group, ref: str(params, "chat", true) }, { whose: "of yours", tail: ": only your own messages are deleted for everyone" });
+      // Another's message the ref names (by its id or wire id), seen in the same reads that look for mine.
+      let theirs: StoredMessage | undefined;
+      const message = await messageOf(ctx, target.linkId, ref, (m) => {
+        if (m.sender !== "me" && (m.id === ref || m.wireId === ref)) theirs ??= m;
+        return m.sender === "me";
+      });
+      if (!message) throw deleteNotMine(ctx, target, ref, theirs, { group: target.group, ref: str(params, "chat", true) }, purge);
       const result = await node(ctx).removeMessage({ linkId: target.linkId, messageId: message.id });
       if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
       // Gone here at once: the fold need not wait for the contact or an edge.
@@ -1368,7 +1380,38 @@ function chatNotGroup(ctx: ApiContext, params: Params, command: string, rest = "
 async function editRefused(ctx: ApiContext, linkId: string, ref: string, place: RefPlace, error: string, result: { refused?: boolean; missing?: boolean }): Promise<CliError> {
   if (!result.refused) return new CliError("unavailable", error);
   if (result.missing ?? !(await messageOf(ctx, linkId, ref))) return noMessage(ref, place);
-  return new CliError("refused", error);
+  return new CliError("refused", editRefusalWords(error, ref, place));
+}
+
+/**
+ * The engine's refusal of an edit with what to run instead: it named none, so a bot that hit the edit cap had a sentence
+ * and exit 1 to go on. Matched by the engine's exact words (`editMessage`, `GroupEdits.edit`); any other sentence, or
+ * one these no longer match, stays the engine's.
+ */
+function editRefusalWords(error: string, ref: string, place: RefPlace): string {
+  const chat = shellWord(place.ref, place.group ? "<group>" : "<chat>"), id = shellWord(ref, "<message>");
+  const send = `ghostly ${place.group ? "group send" : "send"} ${chat}`;
+  // A contact's message (or another member's), or one of mine that is no text: neither is edited, a reply answers it.
+  if (error === "Only your own text messages can be edited") return `${error}: to answer this one, reply to it (${send} --reply ${id} <text>)`;
+  const most = /^(This message was edited \d+ times, the most one takes)\.$/.exec(error);
+  if (most) return `${most[1]}: send the new text as a new message (${send} <text>); ghostly message delete ${chat} ${id} --everyone takes the old one away`;
+  // The text alone decides it (`isJoinNotice`: "👋 <name> joined", whole): other first words make it a text.
+  if (error === "An edit cannot read as a join notice.") return "An edit cannot read as a join notice (\"👋 … joined\"): change its first words";
+  return error;
+}
+
+/**
+ * `message delete --everyone` given no message of mine. It said "No message … of yours" for all of them, as if one of
+ * mine deleted already were the contact's: another's message says whose it is (in a chat, with the delete that takes
+ * it off this device), one of mine deleted already says so (the chat's deleted ids), and any other is not here.
+ * Another's is `refused` (exit 1), as `edit` refuses it: it was `not_found` (exit 3), so one `case $?` could not take
+ * both, and a message that is there read as one that is not.
+ */
+function deleteNotMine(ctx: ApiContext, target: { linkId: string; group: boolean }, ref: string, theirs: StoredMessage | undefined, place: RefPlace, purge: boolean): CliError {
+  if (theirs && target.group) return new CliError("refused", `${JSON.stringify(ref)} is another member's message: only its author deletes a group's message, for everyone`);
+  if (theirs) return new CliError("refused", `${JSON.stringify(ref)} is the contact's message: only your own messages are deleted for everyone (ghostly message delete ${shellWord(place.ref, "<chat>")} ${shellWord(theirs.id, "<message>")}${purge ? " --purge" : ""} deletes it on this device)`);
+  const deleted = !target.group && node(ctx).deletedIdsOf(target.linkId).includes(ref);
+  return noMessage(ref, place, deleted ? { tail: ": it was deleted already" } : {});
 }
 
 /**
