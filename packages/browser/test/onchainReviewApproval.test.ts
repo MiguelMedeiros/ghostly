@@ -27,7 +27,8 @@ async function engineOn(db: string, esplora: FakeEsplora) {
   const idb = await import("../src/shared/idb");
   idb.setDatabaseName(db);
   const { BitcoinService } = await import("../src/engine/paymentAdapters/providers/bitcoinService");
-  const { BdkOnchain, bdk } = await import("../src/engine/paymentAdapters/providers/bdk");
+  const { BdkOnchain } = await import("../src/engine/paymentAdapters/providers/bdk");
+  const { bdk } = await import("../src/engine/paymentAdapters/providers/bdkProvider");
   const { PaymentCoordinator } = await import("../src/engine/paymentAdapters/coordinator");
   const { intentRepository } = await import("../src/engine/paymentAdapters/persistence");
   const descriptor = { ...bdk, create: (s: never, h: never) => BdkOnchain.open(s, h, { bdk: nodeBdk, fetch: esplora.fetch }) };
