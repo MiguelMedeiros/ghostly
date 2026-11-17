@@ -27,7 +27,8 @@ describe("the account bar's Profile place", () => {
     expect(place).toHaveAccessibleName(shownInName(place));
   });
 
-  it.each([["ja", /, (オンライン|オフライン)$/], ["ar", /, (متصل|غير متصل)$/]] as const)("says Online or Offline in the app's language (%s)", (language, state) => {
+  // Listed the way the language lists ("、", "و"), not with an English comma.
+  it.each([["ja", /^プロフィール：.+、.+、(オンライン|オフライン)$/], ["ar", / و(متصل|غير متصل)$/]] as const)("says Online or Offline in the app's language (%s)", (language, state) => {
     renderApp(<AccountBar />, { language });
     const name = screen.getByTestId("account-profile").getAttribute("aria-label");
     expect(name).toMatch(state);

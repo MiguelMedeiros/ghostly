@@ -241,6 +241,8 @@
     "noMatch": "لا توجد محادثة بهذا الاسم",
     "partial": "أُرسل {{sent}} من {{count}}",
     "pick": "اختر حتى {{count}}",
+    "refused": "{{name}}: {{error}}",
+    "refusedPartial": "{{name}} ({{partial}}): {{error}}",
     "search": "ابحث في المحادثات",
     "select": "تحديد",
     "selected": "تم تحديد {{count}}",
