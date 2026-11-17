@@ -27,7 +27,8 @@ import { ColorSwatches } from "../components/ColorSwatches";
 import { ProfileBadge } from "../components/ProfileBadge";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useMyAvatar } from "../hooks/useAvatars";
-import { currentProfile, listProfiles } from "../lib/profiles";
+import { activeProfileId, currentProfile, listProfiles } from "../lib/profiles";
+import { tryLockPassword, waitSeconds } from "../lib/lockAttempts";
 import { openProfileSwitcher, useProfileGlances } from "../hooks/useProfileSwitcher";
 import { NeedsYouDot, NeedsYouList } from "../components/NeedsYou";
 import type { NeedsYou } from "../lib/needsYou";
@@ -53,7 +54,6 @@ import { useEngineValue } from "../lib/engineState";
 import { engine } from "@ghostly/browser/platform/engine";
 import {
   hashPassword,
-  verifyPassword,
   getStorageUsage,
   formatBytes,
   LANGUAGE_OPTIONS,
@@ -406,6 +406,14 @@ export function Settings() {
     focusToRetype(passwordInputs[which].current);
   };
 
+  /** The current password typed, paced with the lock screen's own count; refused under its field when wrong or waiting. */
+  const currentPasswordAccepted = async (storedHash: string, title: string) => {
+    const tried = await tryLockPassword(activeProfileId(), currentPassword, storedHash);
+    if (tried.waited) refusePassword("current", t("lockScreen.tooManyAttempts", { seconds: waitSeconds(tried.retryAt!) }), title);
+    else if (!tried.ok) refusePassword("current", t("settings.incorrectPassword"), title);
+    return tried.ok;
+  };
+
   const handleSetPassword = async () => {
     const title = hasPassword ? t("settings.passwordNotChanged") : t("settings.passwordNotSet");
     setPasswordError(null);
@@ -415,10 +423,7 @@ export function Settings() {
       // The current one first, as stored (another tab may have set or changed it): nothing changes for someone who
       // does not know it.
       const storedHash = followStored().lockScreen.passwordHash;
-      if (storedHash && !(await verifyPassword(currentPassword, storedHash))) {
-        refusePassword("current", t("settings.incorrectPassword"), title);
-        return;
-      }
+      if (storedHash && !(await currentPasswordAccepted(storedHash, title))) return;
       if (newPassword.length < lockPasswordMin(deviceSet)) {
         refusePassword("new", deviceSet ? t("devices.password.keep") : t("settings.passwordTooShort"), title);
         return;
@@ -460,10 +465,7 @@ export function Settings() {
         return;
       }
       const storedHash = followStored().lockScreen.passwordHash;
-      if (storedHash && !(await verifyPassword(currentPassword, storedHash))) {
-        refusePassword("current", t("settings.incorrectPassword"), title);
-        return;
-      }
+      if (storedHash && !(await currentPasswordAccepted(storedHash, title))) return;
 
       updateLockScreen({
         enabled: false,
