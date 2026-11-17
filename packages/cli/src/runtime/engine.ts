@@ -6,7 +6,7 @@ import { ACTIVE_DHT_POLL_MS, DAEMON_WATCH_PEER_IDLE_MS, fromBase64Url, RTC_CONFI
 import { MAX_IROH_RELAYS, irohRelayProblem } from "@ghostly/browser/platform/irohWeb";
 import type { EngineServer } from "@ghostly/browser/engine/server";
 import { loadCallStack } from "../calls/media";
-import { CliError } from "../errors";
+import { CliError, shownValue } from "../errors";
 import { joinLogLine } from "../joinLog";
 import { nativePublicKey } from "../nativeEd25519";
 import { nodeLocalFetch } from "../services";
@@ -65,7 +65,7 @@ function bootstrapNodes(name: string, env: string | undefined): string[] {
     const port = /^[^\s:;/@[\]]+:(\d{1,5})$/.exec(node)?.[1];
     return !port || Number(port) < 1 || Number(port) > 65535;
   });
-  if (bad !== undefined) throw new CliError("usage", `${name} takes host:port nodes, comma-separated, not ${JSON.stringify(bad)}`);
+  if (bad !== undefined) throw new CliError("usage", `${name} takes host:port nodes, comma-separated, not ${shownValue(bad)}`);
   return nodes;
 }
 
@@ -79,7 +79,7 @@ export function pkarrRelays(env = process.env): string[] | null {
   if (!relays.length) return null;
   // Two relays split by ';' or a space were taken as one URL.
   const bad = relays.find((url) => !/^https?:\/\/[^/\s]/i.test(url) || /[\s;]/.test(url) || !URL.canParse(url));
-  if (bad) throw new CliError("usage", `GHOSTLY_PKARR_RELAYS takes http:// or https:// URLs, comma-separated, not ${JSON.stringify(bad)}`);
+  if (bad) throw new CliError("usage", `GHOSTLY_PKARR_RELAYS takes http:// or https:// URLs, comma-separated, not ${shownValue(bad)}`);
   return relays;
 }
 
