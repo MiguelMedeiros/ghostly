@@ -451,7 +451,7 @@ export class FileDesk {
     const room = await (await fileBytes()).room().catch(() => null);
     if (room !== null && file.size > room) return { refuse: "no-room", room };
     // Beside what the files already taken still need: one that fits only without them is asked about.
-    if (room !== null && file.size + this.stillComing(held) > room) return "ask";
+    if (room !== null && file.size + this.stillComing(held, room) > room) return "ask";
     const taken = this.deps.receivedBytes(linkId) + this.autoTaken(linkId);
     return file.size <= FILE_LIMITS.askAboveBytes && taken + file.size <= FILE_LIMITS.autoAcceptBytesPerPeer ? "accept" : "ask";
   }
@@ -461,16 +461,23 @@ export class FileDesk {
    * chat's unfinished files only: copying every record each chat ever had cost every offer ~10 ms at 100,000 files.
    * The offers decided before `own` count too, while still being decided or taken until their record is kept: each
    * counts only the ones before it, so of several that fit only one at a time the first is taken and the rest asked.
+   * Of those, only what each will take without asking, once per file: one above 25 MiB, or past `room` beside the
+   * ones before it, is asked about or refused, and held back a smaller offer that fits.
    */
-  private stillComing(own: object): number {
+  private stillComing(own: object, room: number): number {
     let due = 0;
     for (const chat of this.chats.values()) due += chat.files.stillToCome();
+    const seen = new Set<string>();
     for (const held of this.deciding) {
       if (held === own) break;
       const chat = this.chats.get(held.linkId), record = chat?.files.get("in", held.id);
+      const file = `${held.linkId}\n${held.id}`;
       // Kept now (taken again: under way again), it counts itself; its chat gone, it is not coming.
       if (!chat || (record && (!held.again || !transferEnded(record)))) this.deciding.delete(held);
-      else due += held.size;
+      else if (held.size <= FILE_LIMITS.askAboveBytes && due + held.size <= room && !seen.has(file)) {
+        seen.add(file);
+        due += held.size;
+      }
     }
     return due;
   }
