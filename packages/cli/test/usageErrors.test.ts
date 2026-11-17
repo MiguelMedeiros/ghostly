@@ -1,3 +1,4 @@
+import { readdirSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { error, ghostly, home } from "./support/cli";
 // covers: headless.cli
@@ -52,5 +53,19 @@ describe("a usage error", { timeout: 120_000 }, () => {
     for (const args of [[""], ["help", ""], ["", "--help"]]) {
       expect(error(await ghostly(args), "usage", 2).message, JSON.stringify(args)).toBe("Unknown command: \"\" (ghostly help)");
     }
+  });
+
+  it("for group call --sfu with no https origin, or one past the limit, comes before the profile opens", async () => {
+    // Before: bad_request (exit 1) once the profile was open and the group found, and for a group not there not_found
+    // (exit 3) first. The value is not repeated in the message.
+    const dir = home("usage-sfu");
+    const origin = "--sfu takes the call node's https origin, like https://call.example.com";
+    for (const [sfu, message] of [["not-a-url", origin], ["http://x", origin], [`https://${"a".repeat(200)}.com`, "--sfu is too long: a call node is an https origin of at most 200 characters"]]) {
+      for (const group of ["hunters", "nosuch"]) {
+        expect(error(await ghostly(["--home", dir, "group", "call", group, "--sfu", sfu]), "usage", 2).message, `${group} ${sfu}`).toBe(message);
+      }
+    }
+    // No profile was made or opened.
+    expect(readdirSync(dir)).toEqual([]);
   });
 });

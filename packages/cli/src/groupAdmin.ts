@@ -1,8 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { MAX_AVATAR_LENGTH, MAX_AVATAR_SIDE, MAX_GROUP_CALL_SFU, NO_PICTURE_METADATA, groupCallSfu, sanitizeAvatar, stripPictureMetadata } from "@ghostly/core";
+import { MAX_AVATAR_LENGTH, MAX_AVATAR_SIDE, MAX_GROUP_CALL_SFU, NO_PICTURE_METADATA, sanitizeAvatar, stripPictureMetadata } from "@ghostly/core";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { bool, contactKeyOf, groupById, groupNameOf, groupOf, node, ownChatOf, settingsOf, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { callNodeProblem } from "./callNode";
 import { CliError, localFileError } from "./errors";
 import { shellWord } from "./shellWord";
 import { guardText } from "./secretGuard";
@@ -92,17 +93,12 @@ async function picture(params: Params): Promise<string | null> {
  * origin, and an origin past the limit is told the limit: before, both were told of a path, query or `/` it may not have.
  */
 function callNode(raw: string, ref: string, groupId: string): string {
-  const sfu = groupCallSfu(raw);
-  if (sfu) return sfu;
-  let origin: string | undefined;
-  try {
-    const url = new URL(raw);
-    if (url.protocol === "https:") origin = url.origin;
-  } catch { /* no URL at all */ }
+  const wrong = callNodeProblem(raw);
+  if (!wrong) return raw;
   const quoted = JSON.stringify(raw);
-  if (!origin) throw new CliError("bad_request", `${quoted} is not an https origin: a call node is like https://call.example.com`);
-  if (origin.length > MAX_GROUP_CALL_SFU) throw new CliError("bad_request", `${quoted} is too long: a call node is an https origin of at most ${MAX_GROUP_CALL_SFU} characters`);
-  throw new CliError("bad_request", `${quoted} is not in its one spelling (lower case, no default port, path, query or trailing /): ghostly group call ${shellWord(ref, groupId)} --sfu ${origin}`);
+  if (wrong.problem === "origin") throw new CliError("bad_request", `${quoted} is not an https origin: a call node is like https://call.example.com`);
+  if (wrong.problem === "long") throw new CliError("bad_request", `${quoted} is too long: a call node is an https origin of at most ${MAX_GROUP_CALL_SFU} characters`);
+  throw new CliError("bad_request", `${quoted} is not in its one spelling (lower case, no default port, path, query or trailing /): ghostly group call ${shellWord(ref, groupId)} --sfu ${wrong.origin}`);
 }
 
 /**

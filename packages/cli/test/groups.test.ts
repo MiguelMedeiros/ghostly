@@ -561,6 +561,14 @@ describe("group call", () => {
     expect(params(["Thursday", "--no-e2ee"])).toEqual({ group: "Thursday", e2ee: false });
     expect(() => params(["Thursday", "--clear", "--e2ee"])).toThrow("--clear removes the call node: not with --e2ee or --no-e2ee");
     expect(() => params(["Thursday", "--e2ee", "--no-e2ee"])).toThrow("--e2ee or --no-e2ee, not both");
+    // No https origin, or one past the limit, is wrong whatever the profile holds: a usage error before it opens, with
+    // the value not repeated. Before: bad_request (exit 1) from the API. Another spelling is left to the API (above).
+    const longOrigin = `https://${"a".repeat(200)}.com`;
+    for (const sfu of ["not-a-url", "http://call.example.com", "wss://call.example.com", "call.example.com", ""]) {
+      expect(() => params(["Thursday", "--sfu", sfu, "--no-e2ee"]), sfu).toThrow(expect.objectContaining({ code: "usage", message: "--sfu takes the call node's https origin, like https://call.example.com" }));
+    }
+    expect(() => params(["Thursday", "--sfu", longOrigin])).toThrow(expect.objectContaining({ code: "usage", message: "--sfu is too long: a call node is an https origin of at most 200 characters" }));
+    for (const sfu of ["https://Call.Example.com:443", "https://call.example.com/", "https://call.example.com:8443"]) expect(params(["Thursday", "--sfu", sfu]), sfu).toEqual({ group: "Thursday", sfu });
   });
 });
 
