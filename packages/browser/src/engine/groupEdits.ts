@@ -57,9 +57,10 @@ export interface GroupEditsHost {
 
 /**
  * What `edit` answers: `refused` when it is not something to edit (the page says so and keeps the edit open). `e`: a
- * removal's edit number (`removeMine`), what `Groups.taken` counts it by.
+ * removal's edit number (`removeMine`), what `Groups.taken` counts it by. `missing`, with a refusal once the message
+ * was looked for: whether the group has no message of that id (the CLI says "not found" without reading for it again).
  */
-export interface GroupEditResult { error: string | null; refused?: boolean; messageId?: string; e?: number }
+export interface GroupEditResult { error: string | null; refused?: boolean; missing?: boolean; messageId?: string; e?: number }
 
 /** My edits said again on an edge in one window (`GROUP_EDIT_RESEND_WINDOW_MS`): below what a receiver takes in one. */
 export const GROUP_EDIT_RESEND = 16;
@@ -129,12 +130,14 @@ export class GroupEdits {
    * of the new version, already checked (WISP 405 · Status Cards); a card message then takes `STATUS_CARD_LIMITS.edits`.
    */
   async edit(groupId: string, messageId: string, raw: string, added: readonly GroupMention[] = [], card?: StatusCard): Promise<GroupEditResult> {
-    const refuse = (error: string) => ({ error, refused: true });
+    const looked: { missing?: boolean } = {};
+    const refuse = (error: string) => ({ error, refused: true, ...looked });
     const membership = this.host.membership(groupId);
     if (!membership) return refuse(this.notMember(groupId));
     if (typeof messageId !== "string" || typeof raw !== "string") return refuse("No message to edit");
     const chat = chatOf(groupId);
     const message = await this.find(chat, messageId);
+    looked.missing = !message;
     if (!message || !canEditInGroup(message) || underOldKey(message, membership)) return refuse("Only your own text messages can be edited");
     const text = raw.trim();
     if (!text) return refuse("An edit cannot be empty. Delete the message instead.");
