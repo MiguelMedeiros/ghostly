@@ -63,7 +63,7 @@ import { heldOriginal, messageSnippet, quoteFor, replyIndexer, replyTarget, sent
 import { useKeptEdit } from "../lib/keptEdits";
 import { buttonsViews, compactPresses } from "../lib/buttons";
 import { ChatOnScreen } from "../lib/chatOnScreen";
-import { replySnippet, type RoutineCard } from "@ghostly/core";
+import { DHT_PACKET_BUDGET, replySnippet, type RoutineCard } from "@ghostly/core";
 import { composerServices } from "../components/composer/servicesRow";
 import { CallButtons } from "../components/CallButtons";
 import { CallOverlay } from "../components/CallOverlay";
@@ -145,6 +145,8 @@ import { useWindowAway, windowAway } from "../lib/windowAway";
 import { showChatOnScreen } from "../lib/appBadge";
 import { setSaved, useSavedIn } from "../hooks/useSavedMessages";
 import { problemText, type Problem, problemLine } from "../lib/problemText";
+import { rawError } from "../lib/errorText";
+import { DHT_FITS, dhtOverLine } from "../lib/delivery";
 
 /** What a call captures from: the devices the profile chose, read when it asks. */
 const callDevicePreferences = () => ({ audio: preferredDevice("audioinput"), video: preferredDevice("videoinput") });
@@ -395,6 +397,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     : paired ? callsBlockedText(t, deliveryPeer?.callsUnavailable) : null;
   // The one chat (WISP 400): live over layer 1, or not; what cannot go now waits (a clock beside its time) or is held.
   const chatLive = pairedReady && deliveryPeer?.dataLink === "open";
+  // The engine's refusal of a text or an edit the DHT packet cannot carry, said as the composer's count said it before
+  // Send: about how much fits, and what ends it in this chat. Any other refusal in the app's language (lib/errorText.ts).
+  const sendProblem = (error: unknown, text: string, edit: boolean) => rawError(error) === DHT_PACKET_BUDGET
+    ? dhtOverLine(t, deliveryPeer, new TextEncoder().encode(text.trim()).length, edit) : problemLine(error, t);
   // A security rejection (a stream authenticated another key than the pinned one) stops the chat on both layers until the person acts.
   // The hints say it in the app's language; the engine's English sentence (pairing.error) is the connection panel's.
   const chatStop = paired && deliveryPeer?.pairing?.keyMismatch ? t("chat.keyChanged") : undefined;
@@ -1289,14 +1295,14 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           const error = await sendMessage(text, answering ? { ...options, replyTo: answering.id } : options);
           if (!error && answering) replied(answering);
           // The engine says why in English: said here in the app's language (lib/errorText.ts), as a group's composer does.
-          return error && problemLine(error, t);
+          return error && sendProblem(error, text, false);
         }}
         reply={replyBar}
         translation={composerTranslation}
         // Editing one of mine (WISP 400 § Edits): the new text shows here at once and reaches the contact when it can.
         edit={editing && chatLink ? { key: editing.id, text: editing.text, snippet: replySnippet(editing.text), preview: editing.preview, onClose: () => setEditing(null),
           onSave: async (text, extra) => (await engine.call("editMessage", { linkId: chatLink.id, messageId: editing.id, text, ...(extra?.preview && { preview: extra.preview }) })
-            .then(result => ({ error: result.error && problemLine(result.error, t) }), (e: unknown) => ({ error: e instanceof Error ? problemLine(e, t) : t("chat.editFailed") }))).error } : undefined}
+            .then(result => ({ error: result.error && sendProblem(result.error, text, true) }), (e: unknown) => ({ error: e instanceof Error ? sendProblem(e, text, true) : t("chat.editFailed") }))).error } : undefined}
         onEditLast={paired && chatLink ? () => {
           const last = [...messages].reverse().find(editableText);
           if (last) { setReplyingTo(null); setEditing(last); }
@@ -1306,8 +1312,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         // The composer sends one at a time itself, and an Enter pressed meanwhile goes next.
         disabled={paired && (!!chatStop || engine.state?.settings.online === false)}
         disabledPlaceholder={t("chat.disabledPlaceholder")}
-        // The DHT carries a few hundred characters; the direct link has room for long invoices and ecash tokens.
-        softBytes={paired && !chatLive ? deliveryPeer?.dhtDelivery?.maxTextBytes ?? 256 : undefined}
+        // The DHT carries a few hundred characters, fewer for an edit; the direct link has room for long invoices and ecash tokens.
+        softBytes={paired && !chatLive ? editing ? DHT_FITS.edit : DHT_FITS.text : undefined}
+        softTitle={(bytes) => dhtOverLine(t, deliveryPeer, bytes, !!editing)}
         maxLength={paired ? 16_384 : platform?.getPeer(params.peerPubKeyB64)?.dataLink === "open" ? 4000 : undefined}
         // The engine's limit is 16 KiB of UTF-8, not characters: "é" counts two, an emoji four.
         textBytes={paired ? 16_384 : undefined}

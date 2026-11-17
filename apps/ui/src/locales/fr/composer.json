@@ -19,6 +19,13 @@
   },
   "chooseFiles": "Choisir des fichiers",
   "closeCamera": "Fermer l'appareil photo",
+  "dhtFits": {
+    "contact": "Trop long pour la DHT, qui porte environ {{fits}} octets. La discussion de votre contact est en DHT seule : raccourcissez-le, ou attendez qu'il autorise à nouveau la liaison directe.",
+    "editLive": "Trop long pour la DHT en tant que modification, qui porte environ {{fits}} octets : elle part dès que la liaison directe est là.",
+    "held": "Plus long que ce que porte la DHT (environ {{fits}} octets) : il est gardé pour votre contact jusqu'à ce qu'il soit en ligne.",
+    "live": "Trop long pour la DHT, qui porte environ {{fits}} octets. Raccourcissez-le, ou envoyez-le une fois connectés en direct.",
+    "you": "Trop long pour la DHT, qui porte environ {{fits}} octets. Cette discussion est en DHT seule : raccourcissez-le, ou changez-le depuis l'icône de connexion."
+  },
   "dhtTooLong": "Trop long pour la DHT ({{bytes}} sur {{max}} octets). Raccourcissez ou passez en direct ; le brouillon est gardé.",
   "document": "Document",
   "dropFiles": "Déposez pour envoyer",
