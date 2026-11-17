@@ -223,6 +223,57 @@ describe("an engine refusal in a 1:1 chat's composer, in Portuguese", () => {
 });
 
 // covers: chat.paired.send
+describe("a text or an edit the DHT packet cannot carry, in a chat on DHT only", () => {
+  const PEER = "peer".padEnd(52, "p");
+  /** The engine's DHT_PACKET_BUDGET (packages/core dhtDelivery.ts): refused, not kept, in a chat that never goes live. */
+  const BUDGET = "Text and authentication exceed the DHT packet budget. Shorten the message.";
+  const MINE = { deliveryMode: "dht" };
+  const THEIRS = { textDelivery: "dht", dhtDelivery: { mode: "stream", peerMode: "dht", authenticated: true, maxTextBytes: 256 } };
+
+  /**
+   * No peer-to-peer connection comes to a chat kept on DHT only until the side that chose it leaves it: the refusal's
+   * next step said "send it once you're connected peer to peer", which never happens, and "send it" of an edit too.
+   */
+  function openChat(link: Record<string, unknown>) {
+    saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", createdAt: 1_700_000_000_000,
+      messages: [{ id: "me_w1", ref: "w1", text: "first", sender: "me", timestamp: 1_700_000_000_500, delivery: "delivered" } as never] });
+    const utils = renderApp(<Chat sessionId="chat-1" visible onCallChange={() => {}} callLayer={null} />, { language: "en" });
+    utils.engine.on("sendMessage", async () => ({ error: BUDGET, refused: true }))
+      .on("editMessage", async () => ({ error: BUDGET, refused: true }))
+      .update({ links: [linkView({ peerPubKeyZ32: PEER, profile: "paired-chat/1", ...link } as never)] });
+    return utils;
+  }
+
+  afterEach(() => { localStorage.clear(); setProfile(""); });
+
+  it.each([
+    ["this side chose it", MINE, "Too long for the DHT. Shorten it, or leave DHT only from the connection icon and try again."],
+    ["the contact chose it", THEIRS, "Too long for the DHT. Shorten it, or try again once your contact leaves DHT only."],
+  ])("a send refused when %s says what ends DHT only", async (_, link, said) => {
+    const { user } = openChat(link);
+    await user.click(await screen.findByPlaceholderText("Message…"));
+    await user.keyboard("olá{Enter}");
+    expect(await screen.findByText(said)).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("peer to peer");
+  });
+
+  it.each([
+    ["this side chose it", MINE, "Too long for the DHT. Shorten it, or leave DHT only from the connection icon and try again."],
+    ["the contact chose it", THEIRS, "Too long for the DHT. Shorten it, or try again once your contact leaves DHT only."],
+  ])("an edit refused when %s says it too, with no \"send it\"", async (_, link, said) => {
+    const { user } = openChat(link);
+    const field = await screen.findByPlaceholderText("Message…");
+    await screen.findByText("first");
+    await user.click(field);
+    await user.keyboard("{ArrowUp}");
+    await waitFor(() => expect(field).toHaveValue("first"));
+    await user.keyboard(" again{Enter}");
+    expect(await screen.findByText(said)).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("send it");
+  });
+});
+
+// covers: chat.paired.send
 describe("typing on while a message goes (a 1:1 chat)", () => {
   const PEER = "peer".padEnd(52, "p");
 

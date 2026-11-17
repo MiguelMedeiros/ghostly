@@ -52,7 +52,9 @@
   },
   "chat": {
     "dhtTooLong": "Demasiado largo para la DHT",
+    "dhtTooLongContactNext": "Acórtalo, o vuelve a intentarlo cuando tu contacto salga de Solo DHT.",
     "dhtTooLongNext": "Acórtalo, o envíalo cuando estéis conectados directamente.",
+    "dhtTooLongYouNext": "Acórtalo, o sal de Solo DHT desde el icono de conexión y vuelve a intentarlo.",
     "editTooMany": "Este mensaje ya no se puede editar",
     "editTooManyNext": "Un mensaje admite {{max}} ediciones como máximo.",
     "forwardNone": "No hay nada que reenviar",

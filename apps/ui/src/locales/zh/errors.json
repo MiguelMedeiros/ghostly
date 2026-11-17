@@ -52,7 +52,9 @@
   },
   "chat": {
     "dhtTooLong": "对 DHT 来说太长",
+    "dhtTooLongContactNext": "请缩短，或在联系人退出仅 DHT 后重试。",
     "dhtTooLongNext": "请缩短，或在直接连接后再发送。",
+    "dhtTooLongYouNext": "请缩短，或通过连接图标退出仅 DHT 后重试。",
     "editTooMany": "这条消息无法再编辑",
     "editTooManyNext": "一条消息最多可编辑 {{max}} 次。",
     "forwardNone": "没有可转发的消息",

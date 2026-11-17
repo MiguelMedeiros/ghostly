@@ -52,7 +52,9 @@
   },
   "chat": {
     "dhtTooLong": "DHT には長すぎます",
+    "dhtTooLongContactNext": "短くするか、相手が DHT のみを解除してからもう一度お試しください。",
     "dhtTooLongNext": "短くするか、直接つながってから送信してください。",
+    "dhtTooLongYouNext": "短くするか、接続アイコンから DHT のみを解除してもう一度お試しください。",
     "editTooMany": "このメッセージはこれ以上編集できません",
     "editTooManyNext": "1つのメッセージの編集は{{max}}回までです。",
     "forwardNone": "転送するメッセージがありません",
