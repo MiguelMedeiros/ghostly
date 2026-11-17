@@ -11,13 +11,15 @@
  *
  * Checked in `apps/web/dist/`, as the build left it:
  *
- *  1. index.html asks for at least one script and no more than a few: `main`, rolldown's runtime and the sign-in
- *     page's `popup`. Finding none means this script no longer reads the page (a relative or CDN base, another tag
+ *  1. index.html asks for at least one script and no more than a few: `main`, `vendor`, rolldown's runtime and the
+ *     sign-in page's `popup`. Finding none means this script no longer reads the page (a relative or CDN base, another tag
  *     shape), not that the first load is fine.
  *  2. Its entry is `main-*.js`, the name the e2e specs hold back to test a slow or failed start (boot-unsupported,
  *     language-early).
  *  3. What loads later (`LATER`) stays files of its own, each with its code (not a stub passing on main's), none of
  *     them named by index.html.
+ *     Those made of packages alone (`PACKAGES`) import nothing from `main`: `main` changes at every deploy, and a file
+ *     importing it is renamed with it, so a deploy that changed only the app's own code downloaded them all again.
  *  4. index.html's scripts weigh no more than `MAX_FIRST_LOAD_BYTES` together: a backstop for what `LATER` doesn't name.
  *  5. oidc-callback.html, the page a provider returns to after an identity-proof sign-in, loads none of the app.
  *
@@ -27,7 +29,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-/** Files index.html may ask for: `main`, the runtime and `popup` (shared with the sign-in page). */
+/** Files index.html may ask for: `main`, `vendor`, the runtime and `popup` (shared with the sign-in page). */
 const MAX_SCRIPTS = 4;
 
 /**
@@ -39,6 +41,12 @@ const MAX_SCRIPTS = 4;
  * name behind (`ownCode`).
  */
 const LATER = ["pubky", "keet-identity-key", "esm", "usdt", "arkade", "groupCallLivekit", "openpgp.min"];
+
+/**
+ * The later chunks made of packages alone, no code of the app's: what they share with the first load is in `vendor`
+ * (the packages it runs, the runtime, Vite's preload helper), which a deploy of the app's own code leaves as it was.
+ */
+const PACKAGES = ["pubky", "keet-identity-key", "esm", "openpgp.min"];
 
 /** What index.html's scripts may weigh together, raw: twice the 4.5 MB they weighed when this was written. */
 const MAX_FIRST_LOAD_BYTES = 9_000_000;
@@ -95,6 +103,9 @@ if (app.length > 0) {
       problems.push(`${stubs.join(", ")} only passes on main's exports: ${name} was folded into main and loads with it. ${fold}.`);
     } else if (first.length > 0) {
       problems.push(`index.html loads ${first.join(", ")}, which the app should load only when it is used: something on the first load imports it statically.`);
+    } else if (PACKAGES.includes(name)) {
+      const renamed = own.filter((file) => /(?:import|export)\b[^;"']*?from\s*["']\.\/main-[\w-]+\.js["']/.test(readFileSync(join(dist, "assets", file), "utf8")));
+      if (renamed.length > 0) problems.push(`${renamed.join(", ")} imports from main, so every deploy renames it and the browser downloads it again: what it takes from main belongs in the vendor group (apps/web/vite.config.ts).`);
     }
   }
 
