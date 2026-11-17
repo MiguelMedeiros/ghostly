@@ -581,14 +581,20 @@ const METHODS: Record<string, Method> = {
       if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; edit with --force if you mean to`, { kind: secret.kind });
     }
     const { wait, ms } = confirmWait(ctx, params, link.id);
-    const result = await node(ctx).editMessage({ linkId: link.id, messageId, text });
+    // A hold (`chat disconnect --hold`) is this side's DHT only for a while: an edit the DHT packet cannot carry waits
+    // for its end, as a text does, where a DHT only chosen for good refuses it.
+    const held = holdEnds(ctx, link.id) !== null;
+    const result = await node(ctx).editMessage({ linkId: link.id, messageId, text, ...(held && { held }) });
     if (result.error) throw await editRefused(ctx, link.id, messageId, { group: false, ref: str(params, "chat", true) }, dhtTooLong(ctx, link, result.error, "edit", str(params, "chat", true)), result);
     const id = result.messageId ?? messageId;
     let message = await node(ctx).getMessage(link.id, id);
     if (wait === "confirmed" && message?.edit?.pending) message = await waitForEdit(ctx, link.id, id, ms);
     const confirmed = !!message && !message.edit?.pending;
     // Too long for the DHT packet as an edit: it waits for the live session (`note`), refused where none comes.
-    return { chat: link.id, messageId: id, edits: message?.edit?.seq ?? 0, confirmed, ...(!confirmed && result.note && { note: result.note }), ...(!confirmed && keptForJoin(ctx, link.id, "the edit")) };
+    // Read again: a hold still on says when it ends; one that ended meanwhile leaves the engine's words.
+    const until = result.note ? holdEnds(ctx, link.id) : null, onDht = state(ctx).links.find((l) => l.id === link.id)?.deliveryMode === "dht";
+    const note = until !== null && onDht ? `Too long for the DHT packet as an edit: ${heldWords(until, str(params, "chat", true), "it goes", ctx.mode === "one-shot")}` : result.note;
+    return { chat: link.id, messageId: id, edits: message?.edit?.seq ?? 0, confirmed, ...(!confirmed && note && { note }), ...(!confirmed && keptForJoin(ctx, link.id, "the edit")) };
   },
   /**
    * WISP 401 § Typing: said on the live session only, and a start only while `sendTyping` is on; it holds 6 s there.

@@ -69,12 +69,11 @@ it("a text or an edit too long for the DHT packet says how much fits and what en
 });
 
 /**
- * A hold (`chat disconnect --hold`) is this side's DHT only for a while, which ends by itself. A text or an edit the
- * DHT packet cannot carry (about 249-256 bytes, an edit about 215 and up) is refused there, and the words said to
- * choose a live transport (`chat transport <chat> auto`, which ends the hold the person asked for). They say when the
- * hold ends, and the command that ends it now; once it ended, the same edit is taken and reaches the contact.
+ * A hold (`chat disconnect --hold`) is this side's DHT only for a while, which ends by itself. An edit the DHT packet
+ * cannot carry (about 215 bytes and up) is kept and goes once the hold ends, as in a chat that is only away, and the
+ * answer says when; a text the packet cannot carry (refused anywhere on the DHT floor) names the hold's end.
  */
-it("under a hold, a text or an edit too long for the DHT packet says to make it when the hold ends, which then goes", { timeout: 300_000 }, async () => {
+it("under a hold, an edit too long for the DHT packet is kept and goes when the hold ends; a too-long text's refusal names the hold", { timeout: 300_000 }, async () => {
   for (const dir of [carol, dave]) {
     ok(await as(dir, "settings", "set", "relays", JSON.stringify(relays.map((r) => r.url))));
     const daemon = new Running(["--home", dir, "daemon"], env);
@@ -87,16 +86,16 @@ it("under a hold, a text or an edit too long for the DHT packet says to make it 
   const id = ok(await as(carol, "send", "dave", "first, live", "--wait", "delivered", "--timeout", "90")).messageId as string;
   const until = ok(await as(carol, "chat", "disconnect", "dave", "--hold", "0.5")).heldUntil as number;
   await expect.poll(async () => ok(await as(carol, "chat", "show", "dave")).live, { timeout: 30_000 }).toBe(false);
-  const held = (act: string) => `this chat is held on the DHT only until ${clock(until)}: ${act} then, or now with ghostly chat connect dave, or shorten it`;
+  const held = (act: string) => `this chat is held on the DHT only until ${clock(until)}: ${act} then, or now with ghostly chat connect dave`;
 
   const longEdit = "e".repeat(223);
-  const edit = error(await as(carol, "edit", "dave", id, longEdit, "--wait", "none"), "refused", 1).message;
-  expect(edit).toBe(`Too long for the DHT (an edit fits about 214 bytes there once sealed): ${held("make the edit")}`);
+  const kept = ok(await as(carol, "edit", "dave", id, longEdit, "--wait", "none"));
+  expect(kept).toMatchObject({ edits: 1, confirmed: false, note: `Too long for the DHT packet as an edit: ${held("it goes")}` });
   const text = error(await as(carol, "send", "dave", "x".repeat(252), "--wait", "none"), "refused", 1).message;
-  expect(text).toBe(`Too long for the DHT (a text fits about 248 bytes there once sealed): ${held("send it")}`);
+  expect(text).toBe(`Too long for the DHT (a text fits about 248 bytes there once sealed): ${held("send it")}, or shorten it`);
 
-  // What the words say: the hold ends by itself, with no transport chosen, and the edit made then reaches the contact.
-  await expect.poll(async () => ok(await as(carol, "chat", "show", "dave")), { timeout: 150_000, interval: 2_000 }).toMatchObject({ heldUntil: null, deliveryMode: "stream", live: true });
-  ok(await as(carol, "edit", "dave", id, longEdit, "--wait", "confirmed", "--timeout", "60"));
-  expect((ok(await as(dave, "chat", "history", "carol", "--limit", "10")).messages as { text: string; from: string }[]).some((m) => m.from === "peer" && m.text === longEdit)).toBe(true);
+  // The hold ends by itself, and the edit reaches the contact with no transport chosen.
+  await expect.poll(async () => (ok(await as(dave, "chat", "history", "carol", "--limit", "10")).messages as { text: string; from: string }[])
+    .some((m) => m.from === "peer" && m.text === longEdit), { timeout: 150_000, interval: 2_000 }).toBe(true);
+  expect(ok(await as(carol, "chat", "show", "dave"))).toMatchObject({ heldUntil: null, deliveryMode: "stream" });
 });

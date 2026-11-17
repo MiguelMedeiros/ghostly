@@ -85,7 +85,7 @@ export const ENGINE_PARAMS: Readonly<Record<string, string>> = {
   renameLink: "{ linkId, label }",
   setActiveLink: "{ linkId }",
   sendMessage: "{ linkId, text, timestamp?, preview?, replyTo?, card? }",
-  editMessage: "{ linkId, messageId, text, preview?, mentions?, card? }",
+  editMessage: "{ linkId, messageId, text, preview?, mentions?, card?, held? }",
   retryMessage: "{ linkId, messageId }",
   react: "{ linkId, messageId, emoji }",
   pinMessage: "{ linkId, messageId?, remove? }",

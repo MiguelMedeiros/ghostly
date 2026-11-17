@@ -4443,9 +4443,13 @@ export class GhostlyNode implements EngineImplementation {
     return message.replyTo && pairedWireReply(message.replyTo);
   }
 
-  /** The chat is on the DHT by choice: this side's DHT only, or the contact's (its records say so). It goes live for neither. */
-  private static dhtByChoice(live: LiveLink | undefined): boolean {
-    return live?.stored.deliveryMode === "dht" || live?.link?.dhtDelivery?.peerMode === "dht";
+  /**
+   * The chat is on the DHT by choice: this side's DHT only, or the contact's (its records say so). It goes live for
+   * neither. `held`: this side's DHT only is a hold the host ends by itself (the CLI's `chat disconnect --hold`), so
+   * only the contact's counts.
+   */
+  private static dhtByChoice(live: LiveLink | undefined, held = false): boolean {
+    return (!held && live?.stored.deliveryMode === "dht") || live?.link?.dhtDelivery?.peerMode === "dht";
   }
 
   /**
@@ -4478,7 +4482,7 @@ export class GhostlyNode implements EngineImplementation {
    * (`editsFor`) once the chat is live and both sides offer edit/1. Only texts, at most `MAX_EDITS_PER_MESSAGE` times each,
    * and never empty (deleting is for that). What an edit says is checked like a message: its length, its preview.
    */
-  async editMessage(params: { linkId: string; messageId: string; text: string; preview?: LinkPreview; mentions?: GroupMention[]; card?: unknown }): Promise<{ error: string | null; refused?: boolean; missing?: boolean; messageId?: string; note?: string }> {
+  async editMessage(params: { linkId: string; messageId: string; text: string; preview?: LinkPreview; mentions?: GroupMention[]; card?: unknown; held?: boolean }): Promise<{ error: string | null; refused?: boolean; missing?: boolean; messageId?: string; note?: string }> {
     const { linkId } = params;
     // `missing`, once the message was looked for: whether the chat has none by that id or wire id, said with each
     // refusal so the CLI tells a message not there from one it cannot edit without reading for it again.
@@ -4522,9 +4526,10 @@ export class GhostlyNode implements EngineImplementation {
     const at = Date.now();
     // On the DHT floor an edit goes as a text with its element (WISP 403 § Edits), which the packet may not carry: it
     // waited there for good with no reason said, and the contact kept the old text. A chat that never goes live (DHT
-    // only, on either side) refuses it as a text is refused; otherwise it goes once live, and the answer says so.
+    // only, on either side) refuses it as a text is refused; otherwise it goes once live, and the answer says so. A
+    // hold (`held`) ends by itself: it was refused there while a text of the same chat waited and went.
     const tooBig = !card && message.wireId && this.takesDhtEdits(live) ? live.link?.dhtEditTooBig({ id: message.wireId, e: seq, ts: at, m: text }) : null;
-    if (tooBig && GhostlyNode.dhtByChoice(live)) return refuse(tooBig);
+    if (tooBig && GhostlyNode.dhtByChoice(live, params.held === true)) return refuse(tooBig);
     const edited = withEdit(message, { seq, at, text, preview, card, pending: true });
     await db.patchMessage(linkId, message.id, () => ({ text: edited.text, edit: edited.edit, preview: edited.preview, card: edited.card }));
     await this.messagesChanged(linkId, [message.id]);
