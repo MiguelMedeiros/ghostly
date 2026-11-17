@@ -1,5 +1,5 @@
 import { concatBytes, fromBase64, toBase64, utf8Encode, viewerResponseHeaders, viewerServicePolicy, withViewerPolicy } from "@ghostly/core";
-import { VIEWER_PORT, type EngineStatus, type HttpRequest, type HttpRequestReply, type RuntimeMessage, type ViewerAsk, type ViewerPage, type ViewerReply } from "./messages";
+import { VIEWER_PORT, type EngineStatus, type HttpRequest, type HttpRequestReply, type RuntimeMessage, type ViewerAsk, type ViewerPage, type ViewerReply, type ViewerTaken } from "./messages";
 import { fromOwnPage } from "./shared/sender";
 import { isViewerOrigin, parseViewerUrl, viewerUrl, VIEWER_URL_PATTERN } from "./shared/viewer";
 import { rememberPendingUpdate, takePagesToReopen } from "./updates";
@@ -741,14 +741,16 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
   let reply: HttpRequestReply;
   try {
     // Straight to the peer that served the tab so far; only when no peer takes it is one started (or replaced) and asked.
+    // One the peer took and lost goes again only for a GET or a HEAD: a browser never sends a form or an XHR's POST
+    // twice by itself, and the contact's app may have it already (an order, a payment, a message).
     let answer = await askPeer(request);
-    if (!answer) {
+    if (!answer || (answer === LOST && RESENDABLE.has(request.method.toUpperCase()))) {
       await ensureEngine();
       // The peer may be another profile's now, or a new one: that closed this tab (`closeViewers`) and nothing goes to it.
       if (!(await bindingOf(tabId))) return;
       answer = await askPeer(request);
     }
-    reply = answer ?? { ok: false, code: "error", message: "The Ghostly peer did not answer" };
+    reply = !answer || answer === LOST ? { ok: false, code: "error", message: "The Ghostly peer did not answer" } : answer;
   } catch (error) {
     reply = { ok: false, code: "error", message: String(error) };
   }
@@ -790,37 +792,57 @@ async function answerFailed(tabId: number, requestId: string, binding: ViewerBin
   }, binding);
 }
 
+/** A request the document took (`ViewerTaken`) whose answer never came: its document went away meanwhile. */
+const LOST = Symbol("lost");
+type PeerAnswer = HttpRequestReply | null | typeof LOST;
+
+/** A request a peer may already have sent is sent again only when sending it twice does what sending it once does. */
+const RESENDABLE = new Set(["GET", "HEAD"]);
+
+/** A waiting ask: `taken` once the document said so, then the answer once it comes (or the port closes). */
+interface Waiting {
+  taken: boolean;
+  answer: (answer: PeerAnswer) => void;
+}
+
 /**
  * The port the requests go to the peer on, opened once per document (`VIEWER_PORT`): a `runtime.sendMessage` reaches
  * every page of the extension too, and each app tab read every request, its body included, only to drop it.
  */
-let viewerPort: { port: chrome.runtime.Port; waiting: Map<number, (reply: HttpRequestReply | null) => void> } | null = null;
+let viewerPort: { port: chrome.runtime.Port; waiting: Map<number, Waiting> } | null = null;
 let nextAsk = 0;
 
 /**
- * The peer's answer, or null when no peer took the request: no document, one whose script does not listen yet, one that
- * went away meanwhile (a switch closes it), or one whose peer stopped for good. The next ask opens the port again.
+ * The peer's answer; null when no peer took the request: no document, one whose script does not listen yet, one that
+ * went away before taking it (a switch closes it), or one whose peer stopped for good; `LOST` when the document took
+ * it and went away before the answer, so it may have reached the contact. The next ask opens the port again.
  */
-function askPeer(request: HttpRequest): Promise<HttpRequestReply | null> {
+function askPeer(request: HttpRequest): Promise<PeerAnswer> {
   if (!viewerPort) {
-    const opened = { port: chrome.runtime.connect({ name: VIEWER_PORT }), waiting: new Map<number, (reply: HttpRequestReply | null) => void>() };
+    const opened = { port: chrome.runtime.connect({ name: VIEWER_PORT }), waiting: new Map<number, Waiting>() };
     viewerPort = opened;
-    opened.port.onMessage.addListener(({ id, reply }: ViewerReply) => {
-      opened.waiting.get(id)?.(reply);
-      opened.waiting.delete(id);
+    opened.port.onMessage.addListener((message: ViewerReply | ViewerTaken) => {
+      const ask = opened.waiting.get(message.id);
+      if (!ask) return;
+      if ("taken" in message) {
+        ask.taken = true;
+        return;
+      }
+      ask.answer(message.reply);
+      opened.waiting.delete(message.id);
     });
     opened.port.onDisconnect.addListener(() => {
       // "Receiving end does not exist" when no document listens: what the null below says.
       void chrome.runtime.lastError;
       if (viewerPort === opened) viewerPort = null;
-      for (const answer of opened.waiting.values()) answer(null);
+      for (const ask of opened.waiting.values()) ask.answer(ask.taken ? LOST : null);
       opened.waiting.clear();
     });
   }
   const { port, waiting } = viewerPort;
   const id = nextAsk++;
   return new Promise((resolve) => {
-    waiting.set(id, resolve);
+    waiting.set(id, { taken: false, answer: resolve });
     try {
       port.postMessage({ id, request } satisfies ViewerAsk);
     } catch {
