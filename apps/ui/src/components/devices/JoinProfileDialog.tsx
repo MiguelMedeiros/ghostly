@@ -113,8 +113,13 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
     return () => clearInterval(timer);
   }, [step, view]);
   useEffect(() => () => { if (!ended.current) void engine.call("deviceEnrollCancel").catch(() => {}); }, []);
-  // Add, or Scan again, went away with its step: the focus stays in the dialog.
-  useEffect(() => { if (step === "enroll") keepFocusIn(body.current); }, [step, view?.step, failure]);
+  // Add, or Scan again, went away with its step: the focus stays in the dialog. So does Continue, once the browser said it
+  // keeps this device's data.
+  useEffect(() => { if (step === "enroll") keepFocusIn(body.current); }, [step, view?.step, failure, kept]);
+  // The end: Continue, when it shows, takes the focus, the one thing left to press. Not again later: once there, the
+  // focus is the person's.
+  const continueButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => { if (view?.step === "done" || view?.step === "unfinished") continueButton.current?.focus(); }, [view?.step]);
 
   // Done: the standby screen opens by itself, unless the browser may clear the data, which the person reads first, or
   // still asks them whether to keep it (a reload would drop its prompt): Continue, or the answer, opens it.
@@ -208,10 +213,12 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
   const title = step === "choose" ? t("devices.join.already")
     : step === "home" ? t("devices.join.homeTitle")
       : profile ? t(titles.named, { profile }) : t(titles.yours);
-  // The digits to check are plain lines: a screen reader hears them, one by one, from a line that is there from the
-  // dialog's start and changes its text (one that comes with its step is often not read).
-  const spoken = view?.role === "joiner" && view.step === "confirm"
-    ? <>{t("devices.join.check")} <span dir="ltr">{view.digits.split("").join(" ")}</span></> : "";
+  // The digits to check, and the end, are plain lines: a screen reader hears them (the digits one by one) from a line that
+  // is there from the dialog's start and changes its text (one that comes with its step is often not read).
+  const spoken = view?.role !== "joiner" ? ""
+    : view.step === "confirm" ? <>{t("devices.join.check")} <span dir="ltr">{view.digits.split("").join(" ")}</span></>
+    : view.step === "done" ? t("devices.join.done")
+    : view.step === "unfinished" ? t("devices.join.unfinished") : "";
   return (
     <DeviceDialog title={title} onClose={close} testId="device-join">
       <p role="status" className="sr-only" data-testid="device-join-spoken">{spoken}</p>
@@ -252,7 +259,7 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
             {kept === false && <Notice tone="warning" testId="device-join-persist">{fillNames(t("devices.join.persist"), { device: view.device || t("devices.join.otherDevice") })}</Notice>}
             {view.step === "done" && kept !== false && kept !== "asking"
               ? <Status>{t("devices.join.opening")}</Status>
-              : <button type="button" data-testid="device-join-continue" onClick={() => void reloadIntoGate({ keepUnlocked: lockPassedNow() })} className={primaryButton}>{t("devices.join.continue")}</button>}
+              : <button ref={continueButton} type="button" data-testid="device-join-continue" onClick={() => void reloadIntoGate({ keepUnlocked: lockPassedNow() })} className={primaryButton}>{t("devices.join.continue")}</button>}
           </>}
           {view.step === "failed" && <>
             <div data-testid="device-join-failed" data-reason={view.reason}><Notice problem={said(failureKey(view.reason), t)} /></div>
