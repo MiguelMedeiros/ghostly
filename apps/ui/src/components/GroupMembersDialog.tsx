@@ -15,6 +15,8 @@ import { agoIn } from "../lib/relativeTime";
 import { GroupLinkPanel } from "./GroupLinkPanel";
 import { RemoveMemberDialog } from "./RemoveMemberDialog";
 import { MakeAdminDialog } from "./MakeAdminDialog";
+import { SecretGuardDialog } from "./SecretGuardDialog";
+import { findSecret, type SecretFinding } from "../lib/parse/secrets";
 import { GroupAvatar } from "./GroupAvatar";
 import { AvatarOpener } from "./AvatarViewer";
 import { useContactFaces } from "./identities/contactFace";
@@ -91,12 +93,16 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
     backToRename.current = false;
     if (focusLost()) renameButton.current?.focus();
   }, [naming]);
-  const rename = async () => {
+  // A name that looks like a secret asks first, as the chat composer does: every member reads it.
+  const [secret, setSecret] = useState<SecretFinding | null>(null);
+  const rename = async (confirmed = false) => {
     if (busy !== null) return;
     const name = naming ?? "";
     if (name.trim() === live.name) { endNaming(); return; }
     // Nothing visible in it: Save is off, and Enter does nothing either.
     if (!groupName(name)) return;
+    const found = confirmed ? null : findSecret(name);
+    if (found) { setSecret(found); return; }
     await run("rename", async () => { await engine.call("renameGroup", { groupId: live.id, name }); endNaming(); });
   };
   // Change picture's file field: where the focus goes once Remove, gone with the picture, has done its work.
@@ -232,6 +238,7 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
       onConfirm={() => { const key = removing.key; setRemoving(null); void run(key, () => engine.call("removeGroupMember", { groupId: live.id, key })); }} />}
     {promoting && <MakeAdminDialog name={memberName(promoting, t, sameNamed(live.members))} linkEnds={!!live.entryLink && live.profile !== "community"} returnFocus={list} onClose={() => setPromoting(null)}
       onConfirm={() => { const key = promoting.key; setPromoting(null); void run(key, () => engine.call("makeGroupAdmin", { groupId: live.id, key })); }} />}
+    {secret && <SecretGuardDialog finding={secret} onCancel={() => setSecret(null)} onConfirm={() => { setSecret(null); void rename(true); }} />}
     {/* A community whose link is off says so here too: "anyone with the link can join" no longer holds, and a member has no link panel. */}
     <p data-testid="group-read-note" className="mt-4 rounded-lg bg-surface-alt/80 p-3 text-xs leading-relaxed text-text-secondary">{live.profile === "community" ? t(live.status === "active" && !live.entryLink ? "group.readNoteCommunityOff" : "group.readNoteCommunity", { count: COMMUNITY_LIMITS.store }) : t("group.readNote", { count: GROUP_LIMITS.relay })}</p>
   </dialog>, document.body);

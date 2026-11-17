@@ -42,6 +42,8 @@ export interface IdentityLinkHost {
   online(): boolean;
   /** How a proof is read from the addresses it names. Default: `fetch`. */
   fetcher?: typeof fetch;
+  /** How the profile's own Pkarr relays are read for a did:dht (`boundedIdentityFetch`). Default: `fetcher`. */
+  relayFetcher?: typeof fetch;
   /** Settings → Hide my IP from contacts: a contact's proof is then checked only on hosts this app names (`fixedIdentityHosts`). */
   relayOnly?(): boolean;
   emit(): void;
@@ -186,7 +188,7 @@ export class IdentityProofs {
   private readonly fetch: ReturnType<typeof boundedIdentityFetch>;
 
   constructor(private host: IdentityLinkHost, private providers: () => readonly IdentityProofProvider[] = loadedIdentityProviders) {
-    this.fetch = boundedIdentityFetch({ online: host.online, ...(host.fetcher && { fetcher: host.fetcher }) });
+    this.fetch = boundedIdentityFetch({ online: host.online, ...(host.fetcher && { fetcher: host.fetcher }), ...(host.relayFetcher && { relayFetcher: host.relayFetcher }) });
   }
 
   /** The profile's proofs, and the providers that check and show them: loaded here, not with the app. */

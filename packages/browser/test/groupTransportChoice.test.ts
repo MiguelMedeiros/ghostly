@@ -45,6 +45,7 @@ vi.mock("@ghostly/core", async (importOriginal) => {
     setTyping = vi.fn();
     supportsFiles = true;
     canSendText = true;
+    textRoom = true;
     textDelivery = "stream";
     peerAllowsPayment = vi.fn(() => false);
     peerChoosesPayment = vi.fn(() => false);

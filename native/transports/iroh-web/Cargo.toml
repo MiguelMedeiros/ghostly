@@ -21,6 +21,9 @@ wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 getrandom = { version = "0.3", features = ["wasm_js"] }
 
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
+
 [profile.release]
 opt-level = "s"
 lto = true
