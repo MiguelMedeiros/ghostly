@@ -156,7 +156,8 @@ function Permissions({ asks, update }: { asks: readonly string[]; update: boolea
 /**
  * Who learns the person's address (WISP 1200 § Permissions): one line, the rest behind its ⓘ. On the install screen,
  * the host the bundle comes from; for an app without `internet`, that its publisher may still learn the address. On
- * the web in WebKit (Safari, every browser on iPhone and iPad), one more line: any app can reach other servers there.
+ * the web in WebKit (Safari, every browser on iPhone and iPad), one more line on every screen, installed apps' too: any
+ * app can reach other servers there.
  */
 function Privacy({ from, internet, carried }: { from?: string; internet: boolean; carried?: boolean }) {
   const { t } = useI18n();
@@ -177,7 +178,8 @@ function Privacy({ from, internet, carried }: { from?: string; internet: boolean
       {from
         ? <InfoLine testId="app-ip-line" info={`${t("apps.install.ipInfo", { host: hostOf(from) })}${offline}`}>{t("apps.install.ipLine", { host: hostOf(from) })}</InfoLine>
         : !internet && <InfoLine testId="app-ip-line" info={t("apps.install.ipInfoOffline")}>{t("apps.install.ipLineInstalled")}</InfoLine>}
-      {from && webKitAppLeak() && <InfoLine testId="app-webkit-line" info={t("apps.install.webkitInfo")}>{t("apps.install.webkit")}</InfoLine>}
+      {/* On an installed app's screen too: there, without it, "no internet access" said less than the app can reach. */}
+      {webKitAppLeak() && <InfoLine testId="app-webkit-line" info={t("apps.install.webkitInfo")}>{t("apps.install.webkit")}</InfoLine>}
     </div>
   );
 }
