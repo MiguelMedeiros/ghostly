@@ -2456,6 +2456,7 @@ export class GhostlyNode implements EngineImplementation {
     if (!this.limitedMode) await this.startWallets();
 
     const links = await db.getLinks();
+    this.unshareServicesOfGone(links);
     if (this.options.deferChats) for (const stored of links) {
       if (!stored.group) this.deferredChats.add(stored.id);
       // A group's edges, not the entry sessions of a join that waits for its admin: those go on as they did.
@@ -7664,6 +7665,21 @@ export class GhostlyNode implements EngineImplementation {
       void db.putService(service);
     }
     if (granted.length) this.servicesChanged();
+  }
+
+  /**
+   * At start, the same rule for contacts whose chats are already gone: a chat deleted on a release that kept its
+   * contact's grants left that key shared for good, with no chat to turn it off from. Before any link runs, so no
+   * session or answer has it yet.
+   */
+  private unshareServicesOfGone(links: StoredLink[]): void {
+    const contacts = new Set(links.filter((l) => !l.group && l.peerPubKeyZ32).map((l) => l.peerPubKeyZ32));
+    for (const service of this.services) {
+      const kept = service.sharedWith?.filter((k) => contacts.has(k));
+      if (!kept || kept.length === service.sharedWith!.length) continue;
+      service.sharedWith = kept;
+      void db.putService(service);
+    }
   }
 
   setServiceEnabled({ serviceId, enabled }: { serviceId: string; enabled: boolean }): void {
