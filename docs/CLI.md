@@ -301,8 +301,8 @@ Safety rules the CLI enforces:
   the `--reason` of `app revoke`, and the engine's own `sendMessage`, `sendGroupMessage`, `editMessage`,
   `forwardMessages`, `sendGroupFile` caption and file name, `sendFile`'s file name, payment memos of `sendPayment`,
   `requestPayment`, `requestGroupPayment`, `askToPay` and `preparePayment`, `fedimintInvoice`'s memo,
-  `lnurlInvoice`'s comment, the name of `createGroup` and `renameGroup` and `updateSettings`' nick through
-  `ghostly engine`) refuses text that looks like a recovery phrase, a private key or a Cashu token (exit 5) unless
+  `lnurlInvoice`'s comment, the name of `createGroup` and `renameGroup`, `updateSettings`' nick, `setOwnStatus`'
+  text and the note or profile fields of `nostrDraft` through `ghostly engine`) refuses text that looks like a recovery phrase, a private key or a Cashu token (exit 5) unless
   `--force`, before anything is sent or asked of a server.
 - **Secrets stay hidden.** Seeds, keys, wallet phrases, backups, group entry links and a pending chat's invite code are printed only with `--show-secret` (or `group create` and `group link`, for a group's link, and `invite create`, for the invite it makes).
 

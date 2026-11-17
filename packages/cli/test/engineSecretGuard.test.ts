@@ -22,6 +22,22 @@ describe("ghostly engine and the secret guard", { timeout: 60_000 }, () => {
     expect(ok(await ghostly(["--home", dir, "engine", "sendGroupMessage", JSON.stringify(sends[1][1]), "--force"]))).toMatchObject({ error: expect.any(String) });
   });
 
+  it("refuses a seed in a Nostr note or profile drafted by nostrDraft (exit 5) unless --force", async () => {
+    const dir = home("nostr-secret");
+    ok(await ghostly(["--home", dir, "profile", "create", "bot", "--use"]));
+    const drafts: Record<string, unknown>[] = [
+      { subject: "a".repeat(64), action: "note", content: SEED },
+      { subject: "a".repeat(64), action: "profile", fields: { name: "bot", about: SEED } },
+    ];
+    for (const params of drafts) {
+      expect(error(await ghostly(["--home", dir, "engine", "nostrDraft", JSON.stringify(params)]), "confirm", 5).message, String(params.action)).toMatch(/looks like a secret.*call nostrDraft with --force/);
+    }
+    // With --force it reaches the engine, which has no Nostr publishing on in this profile.
+    expect((await ghostly(["--home", dir, "engine", "nostrDraft", JSON.stringify(drafts[0]), "--force"])).code).not.toBe(5);
+    // Words that are no secret are not asked about either.
+    expect((await ghostly(["--home", dir, "engine", "nostrDraft", JSON.stringify({ ...drafts[0], content: "hello" })])).code).not.toBe(5);
+  });
+
   it("refuses a seed in a payment's memo or a group file's caption (exit 5) unless --force", async () => {
     const dir = home("memo-secret");
     ok(await ghostly(["--home", dir, "profile", "create", "bot", "--use"]));

@@ -1242,11 +1242,14 @@ const ENGINE_SENDS: ReadonlySet<string> = new Set([
   "createGroup", "renameGroup", "updateSettings", "sendFile",
   // The status every contact reads, as `status set` guards it.
   "setOwnStatus",
+  // A Nostr note or profile, public on relays: the app asks before it is signed (NostrPublishDialog).
+  "nostrDraft",
 ]);
 
 async function guardEngineSend(ctx: ApiContext, method: string, args: Params): Promise<void> {
   const of = (value: unknown, key: string) => (value && typeof value === "object" ? (value as Params)[key] : undefined);
-  let texts: unknown = [args.text, args.card, args.caption, args.memo, args.comment, args.name, of(args.settings, "nick"), of(args.file, "name"), of(args.status, "text")];
+  let texts: unknown = [args.text, args.card, args.caption, args.memo, args.comment, args.name, of(args.settings, "nick"), of(args.file, "name"), of(args.status, "text"), args.content,
+    ...(args.fields && typeof args.fields === "object" ? Object.values(args.fields) : [])];
   if (method === "forwardMessages") {
     const ids = Array.isArray(args.messageIds) ? args.messageIds.filter((id): id is string => typeof id === "string") : [];
     const linkId = args.linkId;
