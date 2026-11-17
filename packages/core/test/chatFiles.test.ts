@@ -3,7 +3,7 @@ import { appendFileSync } from "node:fs";
 import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChatFiles, FILE_LIMITS, refusalText, sentWhole, transferStalled, type ChatFilesHost, type FileTransferRecord, type IncomingTarget, type OfferDecision, type OutgoingSource } from "../src/chatFiles";
+import { ChatFiles, FILE_LIMITS, coarseRoom, refusalText, sentWhole, transferStalled, type ChatFilesHost, type FileTransferRecord, type IncomingTarget, type OfferDecision, type OutgoingSource } from "../src/chatFiles";
 import type { FileInfo } from "../src/files";
 // covers: files.video.meta, files.image.meta, files.large.offer, files.large.resume, files.large.integrity, files.large.limits, files.large.resend, files.large.request, apps.offer.wire
 
@@ -104,6 +104,8 @@ function wire(options: {
   writeMs?: number;
   /** Storage that takes this long (ms) to open a received file, as a database lookup does. */
   openMs?: number;
+  /** The free space each side's host reads (10 GiB by default). */
+  room?: number;
 } = {}) {
   let open = true;
   const queued = { a: 0, b: 0 };
@@ -165,7 +167,7 @@ function wire(options: {
       },
       openSource: async (record) => side.sources.get(record.id)!,
       changed: (record, transferred, progress) => { if (!progress) side.stateChanges++; side.records.set(`${record.direction}:${record.id}`, record); side.transferred.set(`${record.direction}:${record.id}`, transferred); },
-      room: async () => 10 * 1024 ** 3,
+      room: async () => options.room ?? 10 * 1024 ** 3,
       ...(options.budget && options.writable && {
         writable: () => queued[name] < options.budget! / 4 ? undefined
           : (async () => { while (queued[name] >= options.budget! / 4) await new Promise<void>((resolve) => drains[name].push(resolve)); })(),
@@ -369,7 +371,7 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     w.attach();
     send(w, file("room-001", 6 * 1024 ** 3));
     await until(() => state(w.a, "out", "room-001") === "failed");
-    expect(w.a.records.get("out:room-001")?.error).toBe("Not enough space on your contact's device (5.0 GB free)");
+    expect(w.a.records.get("out:room-001")?.error).toBe("Not enough space on your contact's device (4.0 GB free)");
     expect(w.b.records.has("in:room-001")).toBe(false);
     expect(refusalText("too-many").error).toContain("too many files");
   });
@@ -1597,9 +1599,33 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
   it("each side tells the other how much it can take", async () => {
     const w = wire();
     w.attach();
-    await until(() => w.a.files.peerRoom === 10 * 1024 ** 3);
+    await until(() => w.a.files.peerRoom === 8 * 1024 ** 3);
     w.drop();
     expect(w.a.files.peerRoom).toBeNull();
+  });
+
+  it("the room told to a contact is coarse: never the exact free bytes, the same for a disk that moved a little", async () => {
+    // Free space as a disk reads it, to the byte, and the same disk a few KiB later.
+    const exact = 968_106_913_792, moved = 968_106_934_272, told = 1.5 * 2 ** 39;
+    const w = wire({ room: exact });
+    w.attach();
+    await until(() => w.a.files.peerRoom !== null);
+    expect(w.a.files.peerRoom).toBe(told);
+    expect(w.b.sent.find((frame) => frame.t === "pf-room")?.max).toBe(told);
+    // A file larger than any disk is refused with the same coarse room, whatever the room read for it.
+    w.b.decide = async () => ({ refuse: "no-room", room: moved });
+    send(w, file("huge-001", Number.MAX_SAFE_INTEGER));
+    await until(() => state(w.a, "out", "huge-001") === "failed");
+    expect(w.b.sent.find((frame) => frame.t === "pf-refuse" && frame.id === "huge-001")?.room).toBe(told);
+    expect(coarseRoom(0)).toBe(0);
+    for (const room of [1, 2, 3, 4095, 4096, 6144, 10 * 1024 ** 3, exact, Number.MAX_SAFE_INTEGER]) {
+      const coarse = coarseRoom(room)!;
+      expect(coarse).toBeLessThanOrEqual(room);
+      expect(coarse).toBeGreaterThan(room / 2);
+      expect(coarseRoom(coarse)).toBe(coarse);
+    }
+    expect(coarseRoom(-1)).toBe(0);
+    expect(coarseRoom(1.5)).toBeNull();
   });
 });
 

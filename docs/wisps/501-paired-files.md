@@ -33,9 +33,9 @@ All are JSON on the authenticated session, at most one 16 KiB chunk each. `id` i
 | `pf-got {id, offset}` | receiver | Every byte before `offset` is stored (cumulative) |
 | `pf-sum {id, size, digest}` | sender | Every byte confirmed; SHA-256 of the file, base64url |
 | `pf-done {id}` | receiver | Stored and checked |
-| `pf-refuse {id, why, room?}` | receiver | `declined`, `cancelled`, `no-room` (with the bytes it can take), `too-many`, `damaged`, `expired`, `invalid` |
+| `pf-refuse {id, why, room?}` | receiver | `declined`, `cancelled`, `no-room` (with the bytes it can take, rounded as `pf-room`), `too-many`, `damaged`, `expired`, `invalid` |
 | `pf-abort {id}` | sender | Cancelled |
-| `pf-room {max}` | either | Bytes this side can take for files now (free disk, or the browser's storage quota) |
+| `pf-room {max}` | either | Bytes this side can take for files now (free disk, or the browser's storage quota), rounded down to a power of two or one and a half of one, never the exact bytes |
 
 ### Rules
 
