@@ -8144,20 +8144,24 @@ export class GhostlyNode implements EngineImplementation {
   private async moveDeviceSet(remove?: string): Promise<DeviceSetView> {
     this.setMoveAllowed();
     if (this.settingMove) throw new Error("remove-busy: The device set is already changing.");
-    // Removed already, by a move cut short after its write (Remove pressed again): that removal is finished, not refused.
-    const record = remove === undefined ? null : await readDeviceRecord(databaseName()).catch(() => null);
-    if (record?.state === "active" && record.earlierSets.some((set) => set.removed === remove) && !record.deviceSet.some((slot) => slot?.key === remove)) {
+    // Taken before the first await: a second move that came during the record's read would plan from the same record.
+    const work = (async () => {
+      // Removed already, by a move cut short after its write (Remove pressed again): that removal is finished, not refused.
+      const record = remove === undefined ? null : await readDeviceRecord(databaseName()).catch(() => null);
+      if (record?.state === "active" && record.earlierSets.some((set) => set.removed === remove) && !record.deviceSet.some((slot) => slot?.key === remove)) return false;
+      const ports = await this.setMovePorts();
+      if (!ports) throw new Error("remove-state: This device cannot sign for its device set.");
+      await moveSet(ports, remove === undefined ? {} : { remove });
+      return true;
+    })();
+    this.settingMove = work;
+    let moved: boolean;
+    try { moved = await work; } finally { this.settingMove = null; }
+    if (!moved) {
       await this.finishRemovals().catch(() => {});
       this.watchTombstones();
       return this.deviceSet();
     }
-    const work = (async () => {
-      const ports = await this.setMovePorts();
-      if (!ports) throw new Error("remove-state: This device cannot sign for its device set.");
-      await moveSet(ports, remove === undefined ? {} : { remove });
-    })();
-    this.settingMove = work;
-    try { await work; } finally { this.settingMove = null; }
     if (remove !== undefined) await this.finishRemovals().catch(() => {});
     // The giver signs releases over the turn address, which moved with the secret: it is made again for the new one.
     if (this.handoffGiver) { this.deviceLinks?.setHandoff(null); this.handoffGiver = null; await this.startHandoff().catch(() => {}); }
