@@ -466,11 +466,20 @@ const TRANSPORT_TITLES: Record<PairedTransport, string> = { "webrtc/1": "WebRTC"
  * app too, by its last word. `chat transport` took any: toward a contact with no WebRTC (`GHOSTLY_WEBRTC=0`) the choice
  * was kept and the chat stayed where it was, saying nothing; for one this app lacks, the engine answered `engine`,
  * "Transport unavailable". Refused instead, saying whose app lacks it (`details.reason`, as a chat's wait says it).
+ * This app's lack names the way out, as the contact's does: the transports both apps run, `auto`, and for an Iroh
+ * whose relays did not answer, where they are set. It read "This app has no Iroh running", with no next step.
  */
 export function transportOffered(link: LinkView, transport: PairedTransport): void {
   const mine = (link.deliveryMode === "dht" ? link.runnableTransports : undefined) ?? link.availableTransports;
   const title = TRANSPORT_TITLES[transport], error = link.transportErrors?.[transport];
-  if (mine && !mine.includes(transport)) throw new CliError("refused", `This app has no ${title} running${error ? `: ${error}` : ""}`, { reason: "app-lacks", transport });
+  if (mine && !mine.includes(transport)) {
+    const both = mine.filter((t) => !link.peerTransports?.length || link.peerTransports.includes(t)).map((t) => t.split("/")[0]);
+    const choose = both.length ? `choose another (${both.join(", ")}), or auto` : "choose auto";
+    // `GHOSTLY_IROH_RELAYS` pins the relays of this process: the setting is not read then (runtime/engine.ts `irohRelays`).
+    const relays = transport === "iroh/1" && error && /relay/i.test(error)
+      ? `check its relays (${process.env.GHOSTLY_IROH_RELAYS?.trim() ? "GHOSTLY_IROH_RELAYS" : "irohRelays in ghostly settings get"}), or ` : "";
+    throw new CliError("refused", `This app has no ${title} running${error ? ` (${error})` : ""}: ${relays}${choose}`, { reason: "app-lacks", transport });
+  }
   if (link.peerTransports?.length && !link.peerTransports.includes(transport)) throw new CliError("refused", `Your contact's app doesn't have ${title}: choose another, or auto`, { reason: "contact-lacks", transport });
 }
 

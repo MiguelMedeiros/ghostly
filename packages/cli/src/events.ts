@@ -1183,7 +1183,8 @@ function splitState(state: string): [string, number] {
 function chatShape(link: LinkView): ChatShape {
   const view = chatJson(link);
   return {
-    stage: view.stage, live: view.live, transport: view.transport, name: view.name, typing: !!link.peerTyping,
+    // The engine's own stage (`chatJson` drops a `live` one once its session ended): `chat.pairing` says each step once.
+    stage: link.pairingProgress?.stage ?? null, live: view.live, transport: view.transport, name: view.name, typing: !!link.peerTyping,
     typingKind: link.peerTyping ? link.peerTypingKind ?? "typing" : "typing", typingStatus: link.peerTyping ? link.peerTypingStatus ?? null : null, pin: link.pin ?? null,
     peer: view.peer || null,
   };

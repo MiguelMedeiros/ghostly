@@ -31,7 +31,10 @@ export interface ChatJson {
    * or on a chat whose text goes by the DHT the DHT delivery's (its relays refusing the publish). Null when none.
    */
   connectionError: string | null;
-  /** How far the first pairing got (publishing, waiting, resolving, on-dht, live, …), while it is under way. */
+  /**
+   * How far the first pairing got (publishing, waiting, resolving, on-dht, live, …), while it is under way. `live` only
+   * while the session it opened is (`live`); null once that session ended, as after a restart.
+   */
   stage: string | null;
   verified: boolean;
   /**
@@ -54,6 +57,15 @@ export interface ChatJson {
 export function isLive(link: LinkView): boolean {
   if (link.textDelivery !== "stream" || link.dataLink !== "open") return false;
   return !link.profile || (link.pairing?.status === "ready" && !!link.pairing.transport);
+}
+
+/**
+ * The first pairing's progress while it says something of the chat now. The engine keeps it at `live` once the pairing
+ * opened a session, for the rest of the run: after that session ended, `stage` read "live" beside `live: false` until the
+ * next start, which reads none. So `live` counts only while the chat is live (`isLive`).
+ */
+export function pairingNow(link: LinkView, live = isLive(link)): LinkView["pairingProgress"] {
+  return link.pairingProgress?.stage === "live" && !live ? undefined : link.pairingProgress;
 }
 
 /**
@@ -91,7 +103,7 @@ export function chatJson(link: LinkView, showSecret?: boolean): ChatJson {
     text: link.textDelivery ?? (link.profile ? "unavailable" : "dht"),
     pairing: link.pairing?.status ?? null,
     connectionError: connectionError(link),
-    stage: link.pairingProgress?.stage ?? null,
+    stage: pairingNow(link, live)?.stage ?? null,
     verified: !!link.peerVerified,
     invite: link.pairing?.status === "ready" || !link.inviteCode ? null : showSecret === true ? link.inviteCode : "<hidden>",
     compatibility: !link.profile,
@@ -112,7 +124,7 @@ export function pinJson(pin: PinView | undefined) {
 export function chatDetailsJson(link: LinkView, showSecret?: boolean) {
   return {
     ...chatJson(link, showSecret),
-    progress: link.pairingProgress ?? null,
+    progress: pairingNow(link) ?? null,
     transports: { mine: link.availableTransports ?? [], peer: link.peerTransports ?? [], preferred: link.preferredTransport ?? null, fallback: link.transportFallback ?? null, automatic: link.transportAutomatic ?? null, relayed: link.relayedTransports ?? [] },
     wait: link.transportWait ?? null,
     lastAttempt: link.liveAttempt ?? null,
