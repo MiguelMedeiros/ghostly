@@ -155,7 +155,7 @@ export const home = {
         icon: "video",
         title: "Be a little closer.",
         body: "Voice, video and screen sharing, one to one. Turn the camera on or share your screen without calling again.",
-        extra: "In the browser, the extension and the desktop app, Linux included. Screen sharing needs a computer, not Linux yet. A call rings while the chat is live, not over the DHT. No group calls yet.",
+        extra: "In the browser, the extension and the desktop app, Linux included. Screen sharing needs a computer, not Linux yet. A call rings while the chat is live, not over the DHT. Group calls in communities, through the node their admin names, but not from the desktop app on Linux yet.",
       },
       {
         id: "sats",
@@ -169,7 +169,7 @@ export const home = {
         icon: "group",
         title: "Bring the whole group.",
         body: "A private group of up to 32, or a community of up to 256 that anyone with its link can join. Invite people from your chats or share the link.",
-        extra: "Text, @mentions, replies, edits, reactions, a group picture and payments between members. Files, photos and voice messages too, up to 100 MB each, fetched from whoever in the group has them. Typing shows in private groups. No calls yet.",
+        extra: "Text, @mentions, replies, edits, reactions, a group picture and payments between members. Files, photos and voice messages too, up to 100 MB each, fetched from whoever in the group has them. Typing shows in private groups. A community can hold group calls through the node its admin names, joined from anywhere but the desktop app on Linux.",
       },
       {
         id: "identities",
