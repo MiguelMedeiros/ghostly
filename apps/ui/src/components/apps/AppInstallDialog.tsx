@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { AppListedBy, AppPreview, AppRunStatus, AppSource, InstalledAppView } from "@ghostly/browser/engine/apps";
@@ -11,8 +11,9 @@ import { AppIcon, Fingerprint } from "./AppIcon";
 import { AppDescription } from "./AppDescription";
 import { NAME, withName } from "./aroundName";
 import { removedLine } from "./removedLine";
-import { appErrorCode, appErrorText, appErrorView, appUpdateErrorView, type AppErrorView } from "../../lib/apps/errors";
+import { appErrorCode, appErrorRetryable, appErrorText, appErrorView, appUpdateErrorView, type AppErrorView } from "../../lib/apps/errors";
 import { refreshInstalledApps } from "../../lib/apps/installed";
+import { useTryAgain } from "../../lib/apps/tryAgain";
 import { saveAppData } from "../../lib/apps/exportData";
 import { webKitAppLeak } from "../../lib/apps/flag";
 import { forgetLinkedFiles, type OpenAppOptions } from "../../lib/apps/open";
@@ -60,10 +61,11 @@ type BuiltIn = "carried" | "installed";
 /**
  * Why it cannot run, if it cannot: revoked by its publisher, removed by a store, its files gone. The publisher's reason
  * (one line of at most 200 characters, signed, read by appStatements) is its own text: isolated, so its direction or
- * marks cannot reorder the words around it.
+ * marks cannot reorder the words around it. A revoked version says, on its own line, what is left to do on this screen
+ * (`next`): no next step, and the person was left with Cancel or Keep it stopped and no idea whether it ever comes back.
  */
-function runLine(run: AppRunStatus, t: Translate): ReactNode {
-  if (run.status === "revoked") return run.reason ? t("apps.install.revokedReason", { reason: `⁨${run.reason}⁩` }) : t("apps.install.revoked");
+function runLine(run: AppRunStatus, t: Translate, next: TranslationKey): ReactNode {
+  if (run.status === "revoked") return `${run.reason ? t("apps.install.revokedReason", { reason: `⁨${run.reason}⁩` }) : t("apps.install.revoked")}\n${t(next)}`;
   // A store's own words, one line each, as on the listing.
   if (run.status === "removed") return run.by.length > 0 && run.by.map((b) => <span key={b.store} className="block">{removedLine(b.name, b.reason, t)}</span>);
   if (run.status === "needs-files") return t("apps.app.needsFiles");
@@ -180,7 +182,7 @@ function Privacy({ from, internet, carried }: { from?: string; internet: boolean
   );
 }
 
-function Shell({ titleId, onClose, children, testId, box }: { titleId: string; onClose: () => void; children: ReactNode; testId: string; box?: RefObject<HTMLDivElement | null> }) {
+function Shell({ titleId, describedBy, onClose, children, testId, box }: { titleId: string; describedBy?: string; onClose: () => void; children: ReactNode; testId: string; box?: RefObject<HTMLDivElement | null> }) {
   const backdrop = useBackdropDismiss(onClose);
   const own = useRef<HTMLDivElement>(null);
   const ref = box ?? own;
@@ -188,7 +190,7 @@ function Shell({ titleId, onClose, children, testId, box }: { titleId: string; o
   // Over the whole window: opened from a card in the chat's timeline, whose scrolling box would hold a fixed layer.
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 sm:p-4 animate-fade-in" {...backdrop}>
-      <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titleId} data-testid={testId}
+      <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={describedBy} data-testid={testId}
         className="focus:outline-none w-full sm:max-w-md bg-panel-header border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl p-5 space-y-4 max-h-[90dvh] overflow-y-auto pb-[calc(1.25rem+env(safe-area-inset-bottom))]">
         {children}
       </div>
@@ -254,19 +256,44 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
   // Fetched once per source: a new language while it loads must not fetch it again.
   const tr = useRef(t);
   tr.current = t;
+  // The first read failed for a reason trying again may change (the host's own trouble, offline): Try again reads it.
+  // Only the newest read is shown: one for a source left meanwhile, or the screen gone, is dropped.
+  const [retryable, setRetryable] = useState(false);
+  const reading = useRef(0);
+  const firstRead = useCallback((from: AppSource) => {
+    const mine = ++reading.current;
+    return engine.call("appPreview", from).then((p) => {
+      if (reading.current !== mine) return;
+      setPreview(p); setError(null); setRetryable(false);
+    }, (e: unknown) => {
+      if (reading.current !== mine) return;
+      setError(appErrorView(e, tr.current)); setRetryable(appErrorRetryable(e));
+    });
+  }, []);
   useEffect(() => {
     if (have) return;
-    let live = true;
-    setPreview(null); setError(null);
-    engine.call("appPreview", JSON.parse(key) as AppSource).then((p) => { if (live) setPreview(p); }, (e: unknown) => { if (live) setError(appErrorView(e, tr.current)); });
-    return () => { live = false; };
-  }, [key, have]);
+    const reads = reading;
+    setPreview(null); setError(null); setRetryable(false);
+    void firstRead(JSON.parse(key) as AppSource);
+    return () => { reads.current++; };
+  }, [key, have, firstRead]);
 
   // The app asks for more than this screen lists, and reading it again failed (offline, the host down): what the screen
   // shows is not what Install would be asked to grant, so Install waits until Try again reads it.
   const [stale, setStale] = useState(false);
   const [rechecking, setRechecking] = useState(false);
   const retryButton = useRef<HTMLButtonElement>(null), confirmButton = useRef<HTMLButtonElement>(null);
+  // Busy while it reads, its line read out again when it fails again (lib/apps/tryAgain.ts). Once it reads (or fails in
+  // a way trying again cannot change), the button goes with its line, and the focus it had goes to Install, or to the
+  // screen when nothing here installs: not to the page.
+  const readAgain = useTryAgain(() => firstRead(source));
+  // The screen Try again was pressed on, to hold the focus when nothing on it installs.
+  const screenOf = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (readAgain.tries === 0) return;
+    const active = document.activeElement;
+    if (!active || active === document.body) (confirmButton.current ?? screenOf.current)?.focus({ preventScroll: true });
+  }, [readAgain.tries]);
   // Why the screen is read again: what it asks changed, or the engine no longer holds what it fetched (`expired`).
   const rereadFor = useRef<"asks" | "expired">("asks");
   const recheck = async (): Promise<AppPreview | null> => {
@@ -330,11 +357,17 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
 
   const shownTitle = preview?.manifest.title ?? title ?? t("apps.title");
   const blocked = preview && (preview.run.status === "revoked" || preview.run.status === "removed" || preview.install === "rollback" || preview.install === "equivocation" || preview.install === "same");
-  const why = preview && (runLine(preview.run, t) ?? (preview.install === "rollback" ? t("apps.install.rollback")
+  const why = preview && (runLine(preview.run, t, "apps.install.revokedNext") ?? (preview.install === "rollback" ? t("apps.install.rollback")
     : preview.install === "equivocation" ? t("apps.install.equivocation")
       : preview.install === "same" ? t("apps.install.same") : null));
+  // What the check found, said to a screen reader: the focus is on the screen, named by its title only, and the result
+  // came in plain lines, so nothing said whether it can be installed. Said from the start (it also describes the
+  // screen), so the change is read out; a failed read says itself (its alert).
+  const saidId = useId();
+  const said = !preview ? !error && t("apps.install.fetching") : blocked ? why : t(preview.install === "update" ? "apps.install.readyUpdate" : "apps.install.ready");
   return (
-    <Shell titleId={titleId} onClose={close} testId="app-install">
+    <Shell titleId={titleId} describedBy={saidId} onClose={close} testId="app-install">
+      <p id={saidId} role="status" className="sr-only" data-testid="app-install-said">{said}</p>
       <Head titleId={titleId} title={shownTitle} version={preview?.manifest.version} tagline={preview?.manifest.tagline} icon={preview?.icon} />
       {!preview && !error && <p className="text-sm text-text-muted" data-testid="app-install-checking">{t("apps.install.fetching")}</p>}
       {preview && (
@@ -346,11 +379,14 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
           {preview.manifest.description && <AppDescription text={preview.manifest.description} from="publisher" testId="app-description" />}
         </>
       )}
-      {error && <ErrorLine error={error} testId="app-install-error" />}
+      {error && <ErrorLine key={readAgain.tries} error={error} testId="app-install-error" />}
       {/* Too wide for one line (a phone at a large text size), the buttons wrap: unwrapped, "Install and open" pushed
           Cancel off the screen's start, where nothing scrolls to it. */}
       <div className="flex flex-wrap justify-end gap-2">
         <Button disabled={busy} onClick={onClose}>{t("common.cancel")}</Button>
+        {!preview && error && retryable && (
+          <Button data-testid="app-install-read-again" loading={readAgain.busy} onClick={(e) => { screenOf.current = e.currentTarget.closest<HTMLElement>("[role=dialog]"); readAgain.again(); }}>{t("apps.page.tryAgain")}</Button>
+        )}
         {preview && !blocked && stale && (
           <Button ref={retryButton} data-testid="app-install-retry" loading={rechecking} onClick={() => void retry()}>{t("apps.page.tryAgain")}</Button>
         )}
@@ -447,7 +483,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
   const close = () => { if (!busy) onClose(); };
   // Each screen says only its own error: a Fetch files that failed was read out again on the question, as Uninstall's.
   const keepIt = () => { if (!busy) { setError(null); setRemoving(false); } };
-  const why = runLine(app.run, t);
+  const why = runLine(app.run, t, "apps.app.revokedNext");
   const canRun = app.run.status === "ok";
   if (removing) {
     return (

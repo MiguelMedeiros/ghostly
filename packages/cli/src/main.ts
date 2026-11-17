@@ -15,7 +15,7 @@ import type { Host } from "./host";
 import { jsonOut } from "./jsonOut";
 import { ownProfile } from "./privateFolder";
 import { shellWord } from "./shellWord";
-import { waitNotice, waitsFor, type WaitNotice } from "./waitNotice";
+import { dhtOnlyNotice, longTextChat, waitNotice, waitsFor, type WaitNotice } from "./waitNotice";
 import type { RuntimeOptions } from "./runtime/engine";
 import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, followDaemon, PAUSE_HOLD_MS, startAt } from "./listen";
 import { format } from "node:util";
@@ -536,10 +536,13 @@ function interruptible(s: Session): { run<T>(work: (s: Session) => Promise<T>): 
     promise.then((value) => { if (!interrupted || done) resolve(value); }, (error: unknown) => { if (!interrupted || done) reject(error); });
   });
   const call = (method: string, params?: unknown): Promise<unknown> => {
-    const entry = { method, notice: waitNotice(method, (params ?? {}) as Record<string, unknown>, s.mode) };
+    const given = (params ?? {}) as Record<string, unknown>;
+    const entry = { method, notice: waitNotice(method, given, s.mode) };
     pending.add(entry);
-    const notice = entry.notice;
-    const timer = notice && process.stderr.isTTY ? setTimeout(() => process.stderr.write(`ghostly: ${notice.waiting}\n`), WAIT_NOTICE_MS) : undefined;
+    // A long text's chat, read beside the send: on the DHT only, the notice and Ctrl-C say why it waits, not that it goes.
+    const chat = entry.notice && longTextChat(method, given);
+    if (chat) void s.call("chat.get", { chat }).then((view) => { if (entry.notice) entry.notice = dhtOnlyNotice(entry.notice, given, view as Record<string, unknown>, s.mode); }, () => {});
+    const timer = entry.notice && process.stderr.isTTY ? setTimeout(() => process.stderr.write(`ghostly: ${entry.notice!.waiting}\n`), WAIT_NOTICE_MS) : undefined;
     return held(s.call(method, params).finally(() => { clearTimeout(timer); pending.delete(entry); }));
   };
   return {
@@ -620,7 +623,7 @@ export const SPECIAL: [usage: string, summary: string, options?: Record<string, 
   ["identity add <provider> [subject] [--signer id] [--field name=value]... [--stdin] [--days n] [--timeout s]", "Make an identity proof (a tool's or a published one finishes with identity complete)", {
     signer: o("string", "Which signer makes the proof (identity providers lists them)"), field: o("list", "A field of the provider's form, name=value"),
     stdin: o("boolean", "Take the fields as name=value lines on stdin (a signer's link: out of ps and the shell's history)"),
-    days: o("number", "How long the proof holds"), timeout: o("number", "Seconds to wait for an approval"),
+    days: o("number", "How long the proof holds"), timeout: o("number", "Seconds to wait for an approval (default 300, 5 to 3600; Pubky at most 300)"),
   }],
   ["version", "This CLI's version (also ghostly --version)"],
 ];

@@ -361,10 +361,11 @@ export class FileDesk {
         void this.rooms(room);
         // It fits the free space, not beside the files still coming: said so, with the room left beside them. Before,
         // "No room (38.9 MB free)" for a 27.3 MB file, and the person was told to free space the disk already had.
+        // With the file's size and what still comes, for the CLI to say what fills the room in its own words.
         const free = formatFileSize(room);
         throw Object.assign(new Error(record.file.size <= room
           ? `No room on this device for this file beside the files still coming (${formatFileSize(Math.max(0, room - coming))} left of ${free} free)`
-          : `No room on this device for this file (${free} free)`), { room });
+          : `No room on this device for this file (${free} free)`), { room, size: record.file.size, coming });
       }
     }
     return this.act(linkId, fileId, "accept");

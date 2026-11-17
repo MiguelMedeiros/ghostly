@@ -26,6 +26,11 @@ import { FocusSafeButton } from "../ui/FocusSafeButton";
 const LOADING_WAIT_MS = 60_000;
 /** The done screen stays this long before the standby screen opens by itself. */
 const DONE_PAUSE_MS = 1_500;
+/**
+ * The joins this page asked of the engine, counted. The engine's cancel ends whichever enrollment it runs now: a join
+ * that answers after its dialog closed cancels it only while no later join was asked, which ended this one already.
+ */
+let joins = 0;
 
 /** "Add this phone to <profile>" and "Add this phone to your profile", by what this device is. */
 const TITLES: Record<ReturnType<typeof deviceNoun>, { named: TranslationKey; yours: TranslationKey }> = {
@@ -140,8 +145,9 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
     const until = Date.now() + LOADING_WAIT_MS;
     for (;;) {
       try {
+        const mine = ++joins;
         const first = await engine.call("deviceEnrollJoin", { code: device, name: name.trim(), app: getBrowserHost().version });
-        if (closed.current) { void engine.call("deviceEnrollCancel").catch(() => {}); return; }
+        if (closed.current) { if (mine === joins) void engine.call("deviceEnrollCancel").catch(() => {}); return; }
         ended.current = false;
         setPreparing(false); setView(first);
         return;

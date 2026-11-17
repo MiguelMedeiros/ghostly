@@ -5,12 +5,49 @@
  */
 
 import { basename } from "node:path";
+import { DHT_TEXT_BYTES } from "@ghostly/core";
 import { shellWord } from "./shellWord";
 
 /** What happens next to what a wait was waiting on: a daemon goes on, a one-shot's profile closes now. */
 export const goesOn = (mode: "daemon" | "one-shot"): string => mode === "one-shot"
   ? "goes with this profile's next command, or keep it online with `ghostly daemon --detach`"
   : "still goes by itself while this profile is online";
+
+/**
+ * A chat this side holds on the DHT only (`chat disconnect --hold`) until `until`: what waits for its end (`act`)
+ * goes then by itself, or at once with `chat connect`, which ends the hold. A hold whose time is up and that is still
+ * ending (`holdEnds`) says so. The time is this machine's: the hour and minute, with the day when it is not today.
+ */
+export function heldWords(until: number, ref: string, act: string, oneShot = false): string {
+  const connect = `ghostly chat connect ${shellWord(ref, "<chat>")}`;
+  const online = oneShot ? " while this profile is online (ghostly daemon --detach)" : "";
+  if (until <= Date.now()) return `this chat's hold on the DHT only is ending: ${act} once the chat is live${online}, or now with ${connect}`;
+  const at = new Date(until), two = (n: number) => String(n).padStart(2, "0");
+  const day = at.toDateString() === new Date().toDateString() ? "" : `${at.getFullYear()}-${two(at.getMonth() + 1)}-${two(at.getDate())} `;
+  return `this chat is held on the DHT only until ${day}${two(at.getHours())}:${two(at.getMinutes())}: ${act} then${online}, or now with ${connect}`;
+}
+
+/** Where a chat stands for `dhtOnlyNote`: this side's DHT only (and its hold's end, if a hold), the contact's. */
+export interface DhtOnly { mine: boolean; theirs: boolean; heldUntil: number | null; oneShot: boolean }
+
+/**
+ * Why a text that waits will not go by itself, or undefined: longer than the 256 bytes the DHT carries, in a chat on
+ * the DHT only (this side's choice, the contact's, or both). It goes once the chat is live, which neither side's app
+ * tries while either keeps it on the DHT only, so it is said with what ends that, or to shorten it. This side's DHT
+ * only that is a hold (`chat disconnect --hold`) ends by itself: said with when, and the command that ends it now. The
+ * engine says it on `send` and `forward` (api.ts), the command's process on its notice and Ctrl-C (`dhtOnlyNotice`).
+ */
+export function dhtOnlyNote(chat: DhtOnly, text: string, ref: string): string | undefined {
+  const { mine, theirs, heldUntil: held } = chat;
+  if ((!mine && !theirs) || new TextEncoder().encode(text.trim()).length <= DHT_TEXT_BYTES) return undefined;
+  const chosen = mine && held === null;
+  const switchBack = `ghostly chat transport ${shellWord(ref, "<chat>")} auto`;
+  const who = chosen && theirs ? `you and the contact keep this chat on the DHT only: it goes once both choose a live transport (${switchBack}), or shorten it`
+    : theirs ? "the contact keeps this chat on the DHT only: it goes once they choose a live transport, or shorten it"
+    : held !== null ? heldWords(held, ref, "it goes", chat.oneShot)
+    : `this chat is on the DHT only: it goes once you choose a live transport (${switchBack}), or shorten it`;
+  return `Longer than the ${DHT_TEXT_BYTES} bytes the DHT carries, and ${who}`;
+}
 
 /**
  * The wait a one-shot does when no `--wait` is given (`ctx.mode === "one-shot"` defaults in api.ts, files.ts, buttons.ts
@@ -126,4 +163,26 @@ export function waitNotice(method: string, given: Record<string, unknown>, mode:
     : params.wait === "sent" ? `it to go out to ${chat}`
     : `${chat}'s app to confirm it`;
   return { waiting: `waiting for ${what} (${upTo}, it still goes)`, stopped: `it is kept here and ${goesOn(mode)}` };
+}
+
+/**
+ * A `send` that waits on a text past the 256 bytes the DHT carries: its notice said "it still goes" and
+ * Ctrl-C that it "still goes by itself", which it does not while the chat stays on the DHT only. Only the chat's state
+ * says so, which the command's process reads (`chat.get`) and hands to `dhtOnlyNotice`; the chat to read, or undefined.
+ */
+export function longTextChat(method: string, params: Record<string, unknown>): string | undefined {
+  if (method !== "chat.send" || typeof params.text !== "string" || new TextEncoder().encode(params.text.trim()).length <= DHT_TEXT_BYTES) return undefined;
+  const chat = word(params.chat);
+  return chat?.startsWith("group:") ? undefined : chat;
+}
+
+/**
+ * That `send`'s notice once its chat was read (`chat.get`): said with why it waits when the chat is on the DHT only,
+ * else as it was. A hold whose time is up and still ending reads as no hold there (`heldUntil`), so as a DHT only chosen.
+ */
+export function dhtOnlyNotice(notice: WaitNotice, params: Record<string, unknown>, chat: { deliveryMode?: unknown; peerDeliveryMode?: unknown; heldUntil?: unknown }, mode: "daemon" | "one-shot"): WaitNotice {
+  const mine = chat.deliveryMode === "dht";
+  const heldUntil = mine && typeof chat.heldUntil === "number" ? chat.heldUntil : null;
+  const note = dhtOnlyNote({ mine, theirs: chat.peerDeliveryMode === "dht", heldUntil, oneShot: mode === "one-shot" }, params.text as string, params.chat as string);
+  return note ? { waiting: `${notice.waiting.replace(/, it still goes\)$/, ")")}. ${note}`, stopped: `it is kept here. ${note}` } : notice;
 }
