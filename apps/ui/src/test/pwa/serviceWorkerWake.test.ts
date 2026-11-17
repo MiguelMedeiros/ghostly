@@ -684,6 +684,17 @@ describe("the worker's limit on wake-ups", () => {
       expect(await takeWakeSlot("own", "tok-own", false, T0 + 31 * 60_000 + 1_000)).toBe(false);
     });
 
+    it("keeps a row another push wrote a little later than its own time (two pushes handled at once)", async () => {
+      expect(await takeWakeSlot("race", "tok-b", false, T0 + 100)).toBe(true);
+      expect(await takeWakeSlot("race", "tok-a", false, T0)).toBe(true);
+      expect(await takeWakeSlot("race", "tok-b", false, T0 + 10_000)).toBe(false);
+      vi.stubGlobal("indexedDB", undefined);
+      resetWakeLimitMemory();
+      expect(await takeWakeSlot("race", "tok-d", false, T0 + 100)).toBe(true);
+      expect(await takeWakeSlot("race", "tok-c", false, T0)).toBe(true);
+      expect(await takeWakeSlot("race", "tok-d", false, T0 + 10_000)).toBe(false);
+    });
+
     it("drops spent rows from the memory fallback too", async () => {
       vi.stubGlobal("indexedDB", undefined);
       resetWakeLimitMemory();

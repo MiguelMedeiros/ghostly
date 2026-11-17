@@ -11,11 +11,14 @@ const SHOWN = "shown";
 
 const memory = new Map<string, number>();
 
-/** The longest gap: a row older than this (or from a clock set back) answers as no row would, so it can go. */
+/**
+ * The longest gap: a row older than this answers as no row would, so it can go. One as far ahead goes too (a clock set
+ * back); one only a little ahead stays: two pushes handled at once may write their rows out of order.
+ */
 const KEEP_MS = Math.max(...Object.values(WAKE_NOTICE_GAP_MS));
 
 function spent(last: number, now: number): boolean {
-  return last > now || now - last >= KEEP_MS;
+  return Math.abs(now - last) >= KEEP_MS;
 }
 
 function open(): Promise<IDBDatabase> {
