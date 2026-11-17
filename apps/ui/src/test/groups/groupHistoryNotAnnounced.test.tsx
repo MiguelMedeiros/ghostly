@@ -1,6 +1,6 @@
 import { act, screen } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GroupMemberView, StoredMessage } from "@ghostly/browser/shared/types";
 import { ANNOUNCE_WINDOW_MS } from "../../components/chat/MessageAnnouncer";
 import { GroupChat } from "../../pages/GroupChat";
@@ -22,8 +22,9 @@ const line = (id: string, from: string, text: string, at: number): StoredMessage
   ({ linkId: "group:group-1", id, text, sender: "peer", member: from, timestamp: 1_700_000_000_000 + at, via: "datalink" });
 const HISTORY = [line("m1", ALICE, "Morning all", 1), line("m2", BOB, "Coffee at ten?", 2)];
 
-/** Past the window in which messages that come together are read out as one line. */
-const pastWindow = () => act(() => new Promise(resolve => setTimeout(resolve, ANNOUNCE_WINDOW_MS + 200)));
+/** Past the window in which messages that come together are read out as one line (on the fake clock: at once). */
+const pastWindow = () => act(() => vi.advanceTimersByTimeAsync(ANNOUNCE_WINDOW_MS + 200));
+afterEach(() => { vi.useRealTimers(); });
 
 function openGroup() {
   fakeEngine.on("groupMessages", () => HISTORY).on("updateSettings", () => undefined);
@@ -33,6 +34,8 @@ function openGroup() {
 
 describe("GroupChat: a history that comes after the group opened", () => {
   it("is not read out as new messages; one that comes after it is", { timeout: 10_000 }, async () => {
+    // The announcer's window runs on a fake clock that also keeps real time.
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["setTimeout", "clearTimeout"] });
     const view = openGroup();
     expect(await screen.findByText("Coffee at ten?")).toBeInTheDocument();
     await pastWindow();
