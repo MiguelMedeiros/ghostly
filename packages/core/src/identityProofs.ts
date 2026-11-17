@@ -466,7 +466,9 @@ export class IdentityExchange {
       if (a && dueAt(a) > at) { wake = Math.min(wake, dueAt(a)); continue; }
       if (a && (!paced || a.tries > IDENTITY_RESENDS)) continue;
       if (kind === "request" && open >= maxOpen) continue;
-      if (this.sentAt.length + owed >= limit) { wake = Math.min(wake, roomAt(limit - owed)); break; }
+      // A request needs room for itself and for its presentation, beside the presentations still owed.
+      const need = kind === "request" ? 2 : 1;
+      if (this.sentAt.length + owed + need > limit) { wake = Math.min(wake, roomAt(limit - owed - need + 1)); break; }
       const frame = kind === "request" ? { t: "idp-request", id: s.id, provider: s.provider } : { t: "idp-withdraw", id: s.id };
       if (!this.transmit(frame, at)) return;
       if (kind === "request") { this.requested.add(s.id); open++; owed++; }

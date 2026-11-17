@@ -29,7 +29,9 @@ vi.mock("../src/engine/paymentAdapters/persistence", async importOriginal => {
  */
 
 type Me = "a" | "b";
-function pair() {
+/** A test key under another kind's name: one a contact may not verify. */
+const otherKey = { ...fakeKey, id: "fake-other" };
+function pair({ bVerifies = [fakeKey] as (typeof fakeKey)[] } = {}) {
   const keys = { a: createIdentity().pubKeyZ32, b: createIdentity().pubKeyZ32 };
   const ledgers: Record<Me, IdentityLedger> = { a: emptyIdentityLedger(), b: emptyIdentityLedger() };
   const state = { connected: true, lose: (_from: Me, _frame: Record<string, unknown>) => false };
@@ -38,6 +40,10 @@ function pair() {
   const dropped = { a: 0, b: 0 };
   /** Every frame each side sent, in order. */
   const sent = { a: [] as Record<string, unknown>[], b: [] as Record<string, unknown>[] };
+  /** When each of those frames left (ms); the contact reads it in the same moment. */
+  const sentAt = new Map<Record<string, unknown>, number>();
+  /** Both sides' frames, in the order they left. */
+  const wire: Record<string, unknown>[] = [];
   const engines = {} as Record<Me, IdentityProofs>;
   const deliver = (from: Me, frame: Record<string, unknown>) => {
     const to: Me = from === "a" ? "b" : "a";
@@ -54,22 +60,22 @@ function pair() {
       updateLedger: async (_id, change) => (ledgers[me] = change(structuredClone(ledgers[me]))),
       channel: linkId => linkId === "chat" && state.connected ? {
         scope: () => ({ subject: keys[me], audience: keys[them], context: "c".repeat(64), session: "s".repeat(64) }),
-        send: frame => { const f = frame as Record<string, unknown>; sent[me].push(f); deliver(me, f); },
+        send: frame => { const f = frame as Record<string, unknown>; sent[me].push(f); wire.push(f); sentAt.set(f, Date.now()); deliver(me, f); },
       } : undefined,
       keys: () => ({ mine: keys[me], theirs: keys[them] }),
       linkIds: () => ["chat"], online: () => true, emit: vi.fn(),
       publish: async () => {}, resolve: async () => null,
     };
   };
-  engines.a = new IdentityProofs(host("a"), () => [fakeKey]);
-  engines.b = new IdentityProofs(host("b"), () => [fakeKey]);
+  engines.a = new IdentityProofs(host("a"), () => [fakeKey, otherKey]);
+  engines.b = new IdentityProofs(host("b"), () => bVerifies);
   const connect = () => { state.connected = true; engines.a.ready("chat"); engines.b.ready("chat"); };
   const disconnect = () => { engines.a.closed("chat"); engines.b.closed("chat"); state.connected = false; };
-  return { engines, ledgers, state, dropped, sent, deliver, connect, disconnect };
+  return { engines, ledgers, state, dropped, sent, sentAt, wire, deliver, connect, disconnect };
 }
 
-/** `count` proofs of A, each of its own test key (a contact keeps one proof per identity). */
-async function proofs(engine: IdentityProofs, count: number): Promise<string[]> {
+/** `count` proofs of A, each of its own test key (a contact keeps one proof per identity); `kinds` names some of another kind. */
+async function proofs(engine: IdentityProofs, count: number, kinds: Record<number, string> = {}): Promise<string[]> {
   await transact([STORES.settings], stores => {
     for (const key of ["identityProofs", "identityRevocations", "identityRevocationsCheckedAt", "identityRevocationsRound"]) stores[STORES.settings].delete(key);
   });
@@ -77,7 +83,7 @@ async function proofs(engine: IdentityProofs, count: number): Promise<string[]> 
   const ids: string[] = [];
   for (let i = 0; i < count; i++) {
     const seed = ed25519.utils.randomSecretKey();
-    const { draftId, binding } = engine.begin({ provider: "fake-key", subject: fakeKeySubject(seed) });
+    const { draftId, binding } = engine.begin({ provider: kinds[i] ?? "fake-key", subject: fakeKeySubject(seed) });
     ids.push((await engine.complete({ draftId, evidence: fakeKeySign(identityStatement(binding), seed) })).id);
   }
   return ids;
@@ -177,6 +183,79 @@ describe("sharing and stopping many identities at once", () => {
     expect(took).toBeGreaterThanOrEqual(IDENTITY_RESEND_MS);
     expect(took).toBeLessThan(IDENTITY_RESEND_MS + 5_000);
     p.disconnect();
+  });
+
+  it("a share of a kind the contact does not verify is asked once a connection and holds no open place: the 8 others queued with it are verified at once", async () => {
+    const p = pair({ bVerifies: [fakeKey] });
+    const [unsupported, ...ids] = await proofs(p.engines.a, 9, { 0: otherKey.id });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    p.disconnect();
+    // The unsupported one first, so it takes one of the 8 open places.
+    for (const id of [unsupported, ...ids]) await p.engines.a.share({ linkId: "chat", id });
+    p.connect();
+    const accepted = () => p.ledgers.a.shared.filter(s => ids.includes(s.id) && s.status === "accepted").length;
+    const took = await until(() => accepted() === 8, 5 * MINUTE);
+    expect(accepted()).toBe(8);
+    expect(took, "the 8th did not wait for the unsupported one's place").toBeLessThan(IDENTITY_RESEND_MS);
+    // Its refusal freed its place at once: all 8 others were asked before the first of them was answered.
+    const eighth = p.wire.filter(f => f.t === "idp-request" && ids.includes(f.id as string))[7];
+    const firstAnswer = p.wire.find(f => f.t === "idp-result" && f.ok === true);
+    expect(p.wire.indexOf(eighth), "the 8th asked before any of the others was answered").toBeLessThan(p.wire.indexOf(firstAnswer!));
+    // Well past every resend of this connection.
+    await vi.advanceTimersByTimeAsync(16 * IDENTITY_RESEND_MS);
+    expect(p.sent.a.filter(f => f.t === "idp-request" && f.id === unsupported), "asked once, then left for the next connection").toHaveLength(1);
+    expect(p.ledgers.a.shared.find(s => s.id === unsupported)?.status).toBe("queued");
+    expect(statuses(p.ledgers.b.received)).toEqual({ verified: 8 });
+    p.disconnect();
+  });
+
+  it("a reconnect with 16 stops and 16 new shares queued: every presentation leaves as its challenge arrives, none waits for room in the window", async () => {
+    const p = pair();
+    const ids = await proofs(p.engines.a, 32);
+    const [old, fresh] = [ids.slice(0, 16), ids.slice(16)];
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    p.connect();
+    for (const id of old) await p.engines.a.share({ linkId: "chat", id });
+    await until(() => p.ledgers.b.received.filter(r => r.status === "verified").length === 16, 5 * MINUTE);
+    // Offline for an hour (the contact's checks of the hour went on those 16): all 16 stopped, 16 others shared.
+    p.disconnect();
+    await vi.advanceTimersByTimeAsync(61 * MINUTE);
+    for (const id of fresh) await p.engines.a.share({ linkId: "chat", id });
+    for (const id of old) await p.engines.a.withdraw({ linkId: "chat", id });
+    p.connect();
+    // 1 hello + 16 stops + 16 requests + 16 presentations: more than one window carries.
+    await until(() => p.ledgers.a.shared.every(s => s.status === "accepted" || s.status === "withdrawn"), 10 * MINUTE);
+    expect(statuses(p.ledgers.a.shared)).toEqual({ accepted: 16, withdrawn: 16 });
+    // The contact keeps the 16 new ones in the places the stopped ones gave up.
+    expect(statuses(p.ledgers.b.received)).toEqual({ verified: 16 });
+    expect(p.ledgers.b.received.map(r => r.id).sort()).toEqual([...fresh].sort());
+    // The room kept for the presentations still owed: none waited for the window behind requests and stops.
+    const challengedAt = new Map(p.sent.b.filter(f => f.t === "idp-challenge").map(f => [f.nonce, p.sentAt.get(f)!]));
+    const waits = p.sent.a.filter(f => f.t === "idp-present").map(f => p.sentAt.get(f)! - challengedAt.get(f.nonce)!);
+    expect(waits).toHaveLength(32);
+    expect(Math.max(...waits)).toBeLessThanOrEqual(2_000);
+    expect(p.dropped).toEqual({ a: 0, b: 0 });
+    p.disconnect();
+  });
+
+  it("the engine stopped: no request or stop is sent again after it", async () => {
+    const p = pair();
+    const [id, other] = await proofs(p.engines.a, 2);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    p.connect();
+    await p.engines.a.share({ linkId: "chat", id });
+    await until(() => p.ledgers.b.received[0]?.status === "verified", MINUTE);
+    // Neither is answered: both wait to be sent again.
+    p.state.lose = from => from === "a";
+    await p.engines.a.share({ linkId: "chat", id: other });
+    await p.engines.a.withdraw({ linkId: "chat", id });
+    const again = () => p.sent.a.filter(f => f.t === "idp-request" || f.t === "idp-withdraw").length;
+    const before = again();
+    p.engines.a.stop();
+    p.engines.b.stop();
+    expect(vi.getTimerCount(), "no timer outlives the engines").toBe(0);
+    await vi.advanceTimersByTimeAsync(24 * 60 * MINUTE);
+    expect(again()).toBe(before);
   });
 });
 
