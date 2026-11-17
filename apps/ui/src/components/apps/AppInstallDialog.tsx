@@ -60,10 +60,11 @@ type BuiltIn = "carried" | "installed";
 /**
  * Why it cannot run, if it cannot: revoked by its publisher, removed by a store, its files gone. The publisher's reason
  * (one line of at most 200 characters, signed, read by appStatements) is its own text: isolated, so its direction or
- * marks cannot reorder the words around it.
+ * marks cannot reorder the words around it. A revoked version says, on its own line, what is left to do on this screen
+ * (`next`): no next step, and the person was left with Cancel or Keep it stopped and no idea whether it ever comes back.
  */
-function runLine(run: AppRunStatus, t: Translate): ReactNode {
-  if (run.status === "revoked") return run.reason ? t("apps.install.revokedReason", { reason: `⁨${run.reason}⁩` }) : t("apps.install.revoked");
+function runLine(run: AppRunStatus, t: Translate, next: TranslationKey): ReactNode {
+  if (run.status === "revoked") return `${run.reason ? t("apps.install.revokedReason", { reason: `⁨${run.reason}⁩` }) : t("apps.install.revoked")}\n${t(next)}`;
   // A store's own words, one line each, as on the listing.
   if (run.status === "removed") return run.by.length > 0 && run.by.map((b) => <span key={b.store} className="block">{removedLine(b.name, b.reason, t)}</span>);
   if (run.status === "needs-files") return t("apps.app.needsFiles");
@@ -180,7 +181,7 @@ function Privacy({ from, internet, carried }: { from?: string; internet: boolean
   );
 }
 
-function Shell({ titleId, onClose, children, testId, box }: { titleId: string; onClose: () => void; children: ReactNode; testId: string; box?: RefObject<HTMLDivElement | null> }) {
+function Shell({ titleId, describedBy, onClose, children, testId, box }: { titleId: string; describedBy?: string; onClose: () => void; children: ReactNode; testId: string; box?: RefObject<HTMLDivElement | null> }) {
   const backdrop = useBackdropDismiss(onClose);
   const own = useRef<HTMLDivElement>(null);
   const ref = box ?? own;
@@ -188,7 +189,7 @@ function Shell({ titleId, onClose, children, testId, box }: { titleId: string; o
   // Over the whole window: opened from a card in the chat's timeline, whose scrolling box would hold a fixed layer.
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 sm:p-4 animate-fade-in" {...backdrop}>
-      <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titleId} data-testid={testId}
+      <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={describedBy} data-testid={testId}
         className="focus:outline-none w-full sm:max-w-md bg-panel-header border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl p-5 space-y-4 max-h-[90dvh] overflow-y-auto pb-[calc(1.25rem+env(safe-area-inset-bottom))]">
         {children}
       </div>
@@ -330,11 +331,17 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
 
   const shownTitle = preview?.manifest.title ?? title ?? t("apps.title");
   const blocked = preview && (preview.run.status === "revoked" || preview.run.status === "removed" || preview.install === "rollback" || preview.install === "equivocation" || preview.install === "same");
-  const why = preview && (runLine(preview.run, t) ?? (preview.install === "rollback" ? t("apps.install.rollback")
+  const why = preview && (runLine(preview.run, t, "apps.install.revokedNext") ?? (preview.install === "rollback" ? t("apps.install.rollback")
     : preview.install === "equivocation" ? t("apps.install.equivocation")
       : preview.install === "same" ? t("apps.install.same") : null));
+  // What the check found, said to a screen reader: the focus is on the screen, named by its title only, and the result
+  // came in plain lines, so nothing said whether it can be installed. Said from the start (it also describes the
+  // screen), so the change is read out; a failed read says itself (its alert).
+  const saidId = useId();
+  const said = !preview ? !error && t("apps.install.fetching") : blocked ? why : t(preview.install === "update" ? "apps.install.readyUpdate" : "apps.install.ready");
   return (
-    <Shell titleId={titleId} onClose={close} testId="app-install">
+    <Shell titleId={titleId} describedBy={saidId} onClose={close} testId="app-install">
+      <p id={saidId} role="status" className="sr-only" data-testid="app-install-said">{said}</p>
       <Head titleId={titleId} title={shownTitle} version={preview?.manifest.version} tagline={preview?.manifest.tagline} icon={preview?.icon} />
       {!preview && !error && <p className="text-sm text-text-muted" data-testid="app-install-checking">{t("apps.install.fetching")}</p>}
       {preview && (
@@ -447,7 +454,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
   const close = () => { if (!busy) onClose(); };
   // Each screen says only its own error: a Fetch files that failed was read out again on the question, as Uninstall's.
   const keepIt = () => { if (!busy) { setError(null); setRemoving(false); } };
-  const why = runLine(app.run, t);
+  const why = runLine(app.run, t, "apps.app.revokedNext");
   const canRun = app.run.status === "ok";
   if (removing) {
     return (
