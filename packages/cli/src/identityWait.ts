@@ -2,11 +2,13 @@ import type { GhostlyEvent } from "./events";
 
 /**
  * What `identity add` writes on stderr while an in-app signer waits: only the events of its own call (`request`, the
- * id it gave `identity.add`), never another proof's waiting on the same daemon. On a terminal in words, as every
- * other wait (`ghostly: …`), the link or code on its own line; on a pipe the event's JSON line.
+ * id it gave `identity.add`), never another proof's waiting on the same daemon. One naming no request is said too: a
+ * daemon started before an upgrade takes `request` and does not say it back, and dropping its events hid the only link
+ * or code to approve with. On a terminal in words, as every other wait (`ghostly: …`), the link or code on its own
+ * line; on a pipe the event's JSON line.
  */
 export function identityWaitLines(event: GhostlyEvent, request: string, terminal: boolean): string {
-  if ((event.type !== "identity.approval" && event.type !== "identity.progress") || event.request !== request) return "";
+  if ((event.type !== "identity.approval" && event.type !== "identity.progress") || (event.request !== undefined && event.request !== request)) return "";
   if (!terminal) return JSON.stringify(event) + "\n";
   if (event.type === "identity.progress") return `ghostly: ${String(event.message)}\n`;
   const lines: string[] = [];

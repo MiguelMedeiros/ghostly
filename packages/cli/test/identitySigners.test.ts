@@ -183,6 +183,14 @@ describe("identity signers on Node", () => {
       .toBe("ghostly: Approve the request at this link:\nhttps://bunker.test/auth\n");
   });
 
+  // A daemon started before an upgrade takes `request` and does not say it back: every event of its wait was dropped,
+  // and the person waited out --timeout with no link or code to approve with.
+  it("an older daemon's wait, which names no request, is still said", () => {
+    const event: GhostlyEvent = { seq: 1, id: "x", type: "identity.approval", at: 1, provider: "nostr", url: "https://bunker.test/auth" };
+    expect(identityWaitLines(event, "r", true)).toBe("ghostly: Approve the request at this link:\nhttps://bunker.test/auth\n");
+    expect(JSON.parse(identityWaitLines(event, "r", false))).toMatchObject({ url: "https://bunker.test/auth" });
+  });
+
   // Nobody approved a Pubky sign-in: it ended as `engine`, "The operation was aborted due to timeout", after 300 s,
   // naming neither the approval it waited for nor --timeout. A local double, not the public relay.
   it("an approval that does not come in time is a timeout naming it and --timeout", async () => {
