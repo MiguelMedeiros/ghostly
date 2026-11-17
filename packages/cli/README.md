@@ -239,7 +239,8 @@ ghostly listen --type message.received --exec '
 `chat disconnect <chat>` closes the live session, but the contact's app dials again within seconds.
 `chat disconnect <chat> --hold <minutes>` (up to a week) keeps the chat off its direct link for that long: it is the
 chat's own "DHT only" choice (WISP 400: either side choosing it keeps both off the live link), taken back when the
-time is up. Meanwhile text still goes over the DHT (up to 256 bytes a message; longer ones wait), files, calls and
+time is up. Meanwhile text still goes over the DHT (a text of about 248 bytes at most once sealed, an edit about
+214; a longer one is refused up to 256 bytes, and waits past them), files, calls and
 typing wait, and the contact's app shows the chat as DHT only. A hold, or `chat transport <chat> dht`, while a call
 is on in the chat is refused (`busy`): hang the call up first. `chat connect`, or `--hold 0`, ends it early. The
 hold is kept in the profile folder, and a `profile backup` carries it: a daemon that restarts (or a restored copy
