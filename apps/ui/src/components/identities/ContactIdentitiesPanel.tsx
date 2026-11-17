@@ -25,8 +25,10 @@ import { ProviderMark } from "./ProviderMark";
 import { PublicProfileDetails } from "./PublicProfileDetails";
 import "./contact-panel.css";
 import { deckArrows } from "../deck/arrows";
+import { ownDirection } from "../../lib/ownDirection";
 import { problemLine } from "../../lib/problemText";
 import { fillNames } from "../../lib/fillNodes";
+import { isolate } from "../../lib/ownStatus";
 import { sourceWords } from "../../lib/providerWords";
 import { focusLost } from "../../lib/focus";
 import { FocusSafeButton } from "../ui/FocusSafeButton";
@@ -99,7 +101,7 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
             <PeerAvatar peerPubKey={peerKey} label={name} photo={face?.photo} testId="chat-identities-picture" presence />
           </AvatarOpener>
           <div className="min-w-0">
-            <h2 id={titleId} className="contact-panel-title">{t("identities.contact.title", { name })}</h2>
+            <h2 id={titleId} className="contact-panel-title">{fillNames(t("identities.contact.title"), { name })}</h2>
             {/* Whether they are online, in words (the dot is on their picture), and the status they set. */}
             <PeerPresenceLine peerKey={peerKey} testId="chat-identities-presence" className="mt-0.5 text-[13px]" />
             <p className="contact-panel-lead">{t("identities.contact.lead")}</p>
@@ -111,13 +113,13 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
       </div>
       <div className="contact-panel-body">
         <ContactFacePicker peerKey={peerKey} received={received} />
-        <section className="contact-panel-section" data-testid="chat-identities-received" aria-label={t("identities.contact.sharedBy", { name })}>
-          <h3 className="contact-panel-heading">{t("identities.contact.sharedBy", { name })}</h3>
+        <section className="contact-panel-section" data-testid="chat-identities-received" aria-label={t("identities.contact.sharedBy", { name: isolate(name) })}>
+          <h3 className="contact-panel-heading">{fillNames(t("identities.contact.sharedBy"), { name })}</h3>
           {link
             ? <TheirCards t={t} entries={entries} link={link} links={links} name={name} nostr={link.nostr ?? []} initial={card?.side === "theirs" ? card.id : undefined} />
-            : <p className="contact-panel-note" data-testid="chat-identities-none">{t("identities.ghostly.nothingElse", { name })}</p>}
+            : <p className="contact-panel-note" data-testid="chat-identities-none">{fillNames(t("identities.ghostly.nothingElse"), { name })}</p>}
         </section>
-        {link?.identities?.error && <p className="contact-panel-note" role="alert" data-testid="chat-identities-link-error">{problemLine(link.identities.error, t)}</p>}
+        {link?.identities?.error && <p className="contact-panel-note" role="alert" dir={ownDirection(problemLine(link.identities.error, t))} data-testid="chat-identities-link-error">{problemLine(link.identities.error, t)}</p>}
         <p className="contact-panel-note" data-testid="chat-identities-share-yours">{t("identities.contact.shareYours")}</p>
       </div>
     </div>
@@ -175,13 +177,13 @@ function TheirCards({ t, entries, link, links, name, nostr, initial }: { t: Tran
           : <TheirCardBack t={t} entry={showing} linkId={link.id} name={name} nostr={nostr.find(v => v.subject === showing.r.subject)} turning={turning} onCards={turnBack} />} />
       : <>
         <Deck<Entry> compact cards={entries} selected={entry.id} onSelect={setChosen} onChoose={id => { setChosen(id); turn(); }}
-          kind="radios" label={t("identities.contact.deckLabel", { name })} name="contact-identity-deck" arrows={deckArrows(t)} className="id-deck" size={{ max: 300, share: .78 }}
+          kind="radios" label={t("identities.contact.deckLabel", { name: isolate(name) })} name="contact-identity-deck" arrows={deckArrows(t)} className="id-deck" size={{ max: 300, share: .78 }}
           testId={e => (e.ghostly ? "chat-identity-ghostly" : "chat-identity-received")}
           face={(e, { after }) => <IdCardFace card={e.card} after={after} />}
           mark={e => <IdCardMark provider={e.card.provider} subject={e.card.bound} />}
           tone={tone} />
         {entries.length === 1
-          ? <p className="contact-panel-note" data-testid="chat-identities-none">{t("identities.ghostly.nothingElse", { name })}</p>
+          ? <p className="contact-panel-note" data-testid="chat-identities-none">{fillNames(t("identities.ghostly.nothingElse"), { name })}</p>
           : <p className="contact-panel-hint">{t("identities.contact.tapHint")}</p>}
         {!entry.ghostly && (entry.card.status === "verified" || entry.card.status === "expiring") && hasIdentityActivity(entry.r.provider) &&
           <IdentityActivity key={entry.id} provider={entry.r.provider} subject={entry.r.verified.subject} profile={entry.r.publicProfile} links={links} />}
@@ -283,7 +285,7 @@ function TheirCardBack({ t, entry, linkId, name, nostr, turning, onCards }: { t:
         </div>
         {/* What Check again does, only where there is one: a withdrawn or revoked card is not checked again. */}
         {canCheck && <p className="id-card-back-note">{provider?.recheck ? t("identities.contact.recheckNoteRepeat") : t("identities.contact.recheckNote")}{provider?.lookupDisplay && ok ? ` ${t("identities.contact.lookupNote")}` : ""}</p>}
-        {error && <p role="alert" className="m-0 text-xs text-danger" data-testid="chat-identities-error">{error}</p>}
+        {error && <p role="alert" dir={ownDirection(error)} className="m-0 text-xs text-danger" data-testid="chat-identities-error">{error}</p>}
         {r.provider === "nostr" && ok && nostr && <div className="contact-card-nostr"><NostrContactCard linkId={linkId} view={nostr} name={name} compact turning={turning} /></div>}
       </div>
       <span className="id-card-mrz id-card-back-mrz" aria-hidden="true">{machineLine(card.label, card.subject)}</span>

@@ -25,6 +25,7 @@ vi.mock("node:fs", async (original) => {
       if (disk.held) void disk.held.then(go); else go();
     },
     renameSync: (from: string, to: string) => {
+      disk.beforeRename?.(to);
       if (faults.next[0] === "rename") faults.next.shift();
       else if (!faults.rename) return fs.renameSync(from, to);
       throw new Error("ENOSPC: no space left on device");
@@ -53,9 +54,9 @@ vi.mock("node:fs", async (original) => {
 const faults = vi.hoisted(() => ({ rename: false, short: false, full: false, sync: false, next: [] as ("rename" | "write")[] }));
 /**
  * How long a sync off the thread takes, at least: a slow disk's (a test's own; 0, as fast as this one is), and what it
- * waits for first, when a test holds it. And the syncs done.
+ * waits for first, when a test holds it. And the syncs done. `beforeRename`, when a test sets it, runs before each rename.
  */
-const disk = vi.hoisted(() => ({ syncMs: 0, held: null as Promise<void> | null, synced: 0, snapshotSync: null as (() => Promise<void>) | null }));
+const disk = vi.hoisted(() => ({ syncMs: 0, held: null as Promise<void> | null, synced: 0, snapshotSync: null as (() => Promise<void>) | null, beforeRename: null as ((to: string) => void) | null }));
 /** A fold's snapshot is synced through its own file handle: `disk.snapshotSync`, when a test sets it, runs first. */
 vi.mock("node:fs/promises", async (original) => {
   const fsp = await original<typeof import("node:fs/promises")>();
@@ -1547,6 +1548,60 @@ describe("messages kept in rows.db", () => {
     // And once the fold is done, the delete is whole after a kill.
     const t = (await profile(await open(copyOf(dir)))).transaction(["files", "fileState"]);
     expect({ file: await read(t.objectStore("files").get("f1")), state: await read(t.objectStore("fileState").get("f1")) }).toEqual({ file: undefined, state: undefined });
+  });
+
+  it("transactions that wait behind the fold are all or nothing in a process killed just before its snapshot takes the old one's place, or between their entries after", async () => {
+    const profile = (factory: IDBFactory) => new Promise<IDBDatabase>((resolve, reject) => {
+      const request = factory.open("ghostly", 1);
+      request.onupgradeneeded = () => {
+        request.result.createObjectStore("files", { keyPath: "id" });
+        request.result.createObjectStore("fileState", { keyPath: "id" });
+        request.result.createObjectStore("settings");
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    opened.push(store);
+    const d = await profile(store.factory);
+    await tx(d, ["files", "fileState"], (s) => { s.files.put({ id: "f1" }); s.fileState.put({ id: "f1", state: "done" }); });
+    await tx(d, ["settings"], (s) => { s.settings.put({}, "settings"); });
+    await store.flush();
+    // The snapshot an hour old: the next entry written folds the store, which waits for that entry's sync.
+    const then = (Date.now() - 2 * 60 * 60_000) / 1000;
+    utimesSync(join(dir, "snapshot.bin"), then, then);
+    let synced = () => {};
+    disk.held = new Promise<void>((go) => { synced = go; });
+    const copies: Record<string, string> = {};
+    disk.beforeRename = (to) => { if (to.endsWith("snapshot.bin")) { disk.beforeRename = null; copies["before the rename"] = copyOf(dir); } };
+    try {
+      const folding = tx(d, ["settings"], (s) => { s.settings.put({ v: 1 }, "settings"); });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      // A file renamed, then deleted: both wait behind the fold, which holds them both.
+      const renamed = new Promise<void>((resolve, reject) => {
+        const t = d.transaction(["files"], "readwrite");
+        t.objectStore("files").put({ id: "f1", name: "a.txt" });
+        // The folder as a process killed now leaves it: the rename's entry handled, the delete's not yet.
+        t.oncomplete = () => { copies["between the entries"] = copyOf(dir); resolve(); };
+        t.onabort = () => reject(t.error);
+      });
+      const deleting = tx(d, ["files", "fileState"], (s) => { s.files.delete("f1"); s.fileState.delete("f1"); });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      disk.held = null;
+      synced();
+      await folding;
+      await renamed;
+      await deleting;
+      await store.flush();
+    } finally { disk.held = null; disk.beforeRename = null; }
+    const found: Record<string, unknown> = {};
+    for (const [when, copy] of Object.entries(copies)) {
+      const t = (await profile(await open(copy))).transaction(["files", "fileState"]);
+      found[when] = { file: await read(t.objectStore("files").get("f1")), state: await read(t.objectStore("fileState").get("f1")) };
+    }
+    // The fold holds the delete, and rows.db with it: not the file's record back without its state.
+    expect(found).toEqual({ "before the rename": { file: undefined, state: undefined }, "between the entries": { file: undefined, state: undefined } });
   });
 
   it("a put a unique index refuses in a store kept on disk leaves the store writable by the next transaction", async () => {

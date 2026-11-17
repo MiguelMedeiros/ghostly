@@ -2,7 +2,7 @@ import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { profilePaths } from "../src/profiles";
-import { waitNotice } from "../src/waitNotice";
+import { dhtOnlyNotice, longTextChat, waitNotice } from "../src/waitNotice";
 import { ghostly, home, ok, Running } from "./support/cli";
 // covers: headless.cli
 
@@ -163,5 +163,26 @@ describe("what a wait says", () => {
     });
     // A chat named in words a shell would split: the command names it quoted.
     expect(waitNotice("file.send", { chat: "Ann Lee", path: "/f", wait: "sent" }, "daemon")?.stopped).toContain("(ghostly file list 'Ann Lee' says which)");
+  });
+
+  it("a send of a text past the 256 bytes the DHT carries reads its chat, and on the DHT only says why it waits instead of that it goes", () => {
+    // Its notice said "it still goes" and Ctrl-C that it "still goes by itself" (dhtOnlyLongText.test.ts runs it).
+    const long = "x".repeat(300);
+    expect(longTextChat("chat.send", { chat: "bob", text: long, wait: "sent" })).toBe("bob");
+    expect(longTextChat("chat.send", { chat: "bob", text: ` ${"é".repeat(128)} ` })).toBeUndefined();
+    expect(longTextChat("chat.send", { chat: "group:crew", text: long })).toBeUndefined();
+    expect(longTextChat("chat.edit", { chat: "bob", text: long })).toBeUndefined();
+    const params = { chat: "Ann Lee", text: long, wait: "sent", timeout: 6 };
+    const notice = waitNotice("chat.send", params, "daemon")!;
+    expect(dhtOnlyNotice(notice, params, { deliveryMode: "dht", peerDeliveryMode: null }, "daemon")).toEqual({
+      waiting: "waiting for it to go out to Ann Lee (up to 6 s; Ctrl-C stops waiting). Longer than the 256 bytes the DHT carries, and this chat is on the DHT only: it goes once you choose a live transport (ghostly chat transport 'Ann Lee' auto), or shorten it",
+      stopped: "it is kept here. Longer than the 256 bytes the DHT carries, and this chat is on the DHT only: it goes once you choose a live transport (ghostly chat transport 'Ann Lee' auto), or shorten it",
+    });
+    expect(dhtOnlyNotice(notice, params, { deliveryMode: "auto", peerDeliveryMode: "dht" }, "daemon").stopped).toBe("it is kept here. Longer than the 256 bytes the DHT carries, and the contact keeps this chat on the DHT only: it goes once they choose a live transport, or shorten it");
+    // Held (`chat disconnect --hold`): it goes by itself when the hold ends, said with when and `chat connect`.
+    const until = new Date(2099, 0, 2, 9, 5).getTime();
+    expect(dhtOnlyNotice(notice, params, { deliveryMode: "dht", peerDeliveryMode: null, heldUntil: until }, "one-shot").stopped).toBe("it is kept here. Longer than the 256 bytes the DHT carries, and this chat is held on the DHT only until 2099-01-02 09:05: it goes then while this profile is online (ghostly daemon --detach), or now with ghostly chat connect 'Ann Lee'");
+    // A chat that can be live: the text goes once it is, as the notice says.
+    expect(dhtOnlyNotice(notice, params, { deliveryMode: "auto", peerDeliveryMode: null }, "daemon")).toBe(notice);
   });
 });

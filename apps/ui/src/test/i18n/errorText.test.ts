@@ -262,6 +262,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   // A file said on the DHT floor that ended here before it came (engine/fileDesk.ts `floorRefusal`, `sweep`).
   ["No room on this device for this file", `${BROWSER}/engine/fileDesk.ts`],
   ["No room on this device for this file (16.2 MB free)", `${BROWSER}/engine/fileDesk.ts`, "No room on this device for this file ("],
+  ["No room on this device for this file beside the files still coming (13.4 MB left of 38.9 MB free)", `${BROWSER}/engine/fileDesk.ts`, "No room on this device for this file beside the files still coming ("],
   ["Too many files are waiting here", `${BROWSER}/engine/fileDesk.ts`],
   ["It was refused here", `${BROWSER}/engine/fileDesk.ts`],
   ["It did not come within a week", `${BROWSER}/engine/fileDesk.ts`],
@@ -885,6 +886,14 @@ describe("errors in the app's language", () => {
     const t = translators[language];
     // As fileDesk.ts `accept` throws it: the offer keeps waiting, so the next step is to try again, not to ask for it.
     expect(problemText(new Error("No room on this device for this file (16.2 MB free)"), t)).toEqual({ tone: "error", title: t("errors.files.noRoomHere"), next: t("errors.app.noRoomNext") });
+  });
+
+  it.each(LANGUAGES)("Accept on an offer that fits the free space but not beside the files still coming names them, the room left, and waiting or cancelling, in %s", (language) => {
+    const t = translators[language];
+    // Not "free some space": the disk has more than the file needs, the files still coming hold it.
+    expect(problemText(new Error("No room on this device for this file beside the files still coming (13.4 MB left of 38.9 MB free)"), t)).toEqual({
+      tone: "error", title: t("errors.files.noRoomBesideComing"), next: t("errors.files.noRoomBesideComingNext", { left: "13.4 MB", free: "38.9 MB" }),
+    });
   });
 
   it.each(LANGUAGES)("a 1:1 file declined or cancelled says who did it behind its ⓘ in %s, never the engine's English", (language) => {

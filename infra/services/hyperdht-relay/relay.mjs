@@ -1059,6 +1059,13 @@ export async function startRelay(options = {}) {
     ws.on('error', () => drop('socket error'))
     const stream = new WsStream(false, ws)
     stream.on('error', () => drop('stream error'))
+    // A client that resets right after its upgrade has a closed socket by the time the stream opens: dht-relay's open
+    // failed then with an error its handshake also rejected with, where nothing catches it (one `unhandled` line per
+    // client). The stream ends without an error instead; the socket's close has let the client go.
+    stream._open = cb => {
+      if (ws.readyState !== ws.OPEN) stream.destroy()
+      cb(null)
+    }
     // dht-relay 0.4.3 hands the WebSocket every chunk a HyperDHT stream brings, however slowly the client reads, and
     // a UDX stream has no receive window to slow its far end: a client that reads slowly or not at all would have the
     // relay hold everything its far peers send. Past `queuedBytes` waiting for it (with what waits for its far peers), it

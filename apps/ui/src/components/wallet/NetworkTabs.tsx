@@ -5,6 +5,7 @@ import { NetworkTag, moneyLabel } from "../NetworkTag";
 import { useI18n } from "../../contexts/I18nContext";
 import { NETWORK_NAME } from "./names";
 import { NeedsYouDot } from "../NeedsYou";
+import { listText } from "../../lib/listText";
 import type { WalletNetwork } from "../../lib/platform";
 
 /**
@@ -46,7 +47,7 @@ export function NetworkTabs({ network, counts, onChange, label, testId, tabTestI
         const count = counts[n], on = n === network;
         return (
           <button key={n} ref={(el) => { tabs.current[n] = el; }} type="button" role="tab" id={`${idPrefix}-${n}`} data-testid={`${tabTestId}-${n}`} data-network={n}
-            aria-label={`${t(count === 1 ? "wallet.networks.tabOne" : "wallet.networks.tab", { money: moneyLabel(t, n), network: NETWORK_NAME[n], count })}${marked?.[n] ? `, ${t("common.needsYou.mark")}` : ""}`}
+            aria-label={listText([t(count === 1 ? "wallet.networks.tabOne" : "wallet.networks.tab", { money: moneyLabel(t, n), network: NETWORK_NAME[n], count }), ...(marked?.[n] ? [t("common.needsYou.mark")] : [])], t)}
             aria-selected={on} aria-controls={controls} tabIndex={on ? 0 : -1} className="wallet-network" onClick={() => onChange(n)}>
             <NetworkTag network={n} testId={`${tabTestId}-${n}-tag`} />
             <span className="wallet-network-name">{NETWORK_NAME[n]} <span aria-hidden="true">·</span> <span data-testid={`${tabTestId}-${n}-count`}>{count}</span></span>
