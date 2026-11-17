@@ -48,6 +48,8 @@ describe("help", () => {
     expect(daemon.stdout).not.toContain("Put options before --.");
     // A refusal and a default the README gave and the help did not.
     expect((await ghostly(["help", "file", "accept"])).stdout).toContain("refused when it does not fit in the room left on this device, and it keeps waiting");
+    // What `paid: false` means: before, neither the help nor the README said.
+    expect((await ghostly(["help", "pay"])).stdout.replace(/\s+/g, " ")).toContain("paid false: not settled yet (pending at the mint or the card's source, or its answer lost); it settles by itself, is never paid twice");
     expect((await ghostly(["help", "identity", "add"])).stdout).toMatch(/--timeout <n>\s+Seconds to wait for an approval \(default 300, 5 to 3600; Pubky at most 300\)/);
   });
 
