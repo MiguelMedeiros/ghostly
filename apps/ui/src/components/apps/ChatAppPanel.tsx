@@ -6,6 +6,7 @@ import { useBackCloses, useTabTrap } from "../../hooks/useDismiss";
 import { takedownText, useAppOpener } from "../../lib/apps/open";
 import { appErrorText } from "../../lib/apps/errors";
 import { ChatOnScreen } from "../../lib/chatOnScreen";
+import { ownDirection } from "../../lib/ownDirection";
 import { chatApp, noteChoice, registerAppSlot, setChatApp, setChatAppNarrow, updateChatApp, useChatApp, useChatAppNarrow, type AppContact } from "../../lib/apps/running";
 import { PeerAvatar } from "../Avatar";
 import { ChatConnection } from "../ChatConnection";
@@ -264,7 +265,7 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
           {t("apps.view.openAgain")}
         </button>
       )}
-      {shown && app?.stopped && againHere?.error && <p role="alert" data-testid="mini-app-open-again-error" className="m-0 px-6 py-2 text-center text-sm text-danger-ink">
+      {shown && app?.stopped && againHere?.error && <p role="alert" dir={ownDirection(againHere.error)} data-testid="mini-app-open-again-error" className="m-0 px-6 py-2 text-center text-sm text-danger-ink">
         {againHere.error}
       </p>}
       <div ref={box} data-testid="mini-app-frame" className="chat-app-frame" />
