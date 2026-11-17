@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { RELAY_POLL_INTERVALS, newDeviceSetSecret, toBase64Url, type PkarrTransport } from "@ghostly/core";
+import { DHT_POLL_INTERVALS, RELAY_POLL_INTERVALS, newDeviceSetSecret, toBase64Url, type PkarrTransport, type PollIntervals } from "@ghostly/core";
 import { openDeviceGate, resetDeviceGates } from "../src/devices/gate";
 import { DeviceLinkOnlyServer } from "../src/devices/linkOnly";
 import { deviceNetworkOf, saveDeviceNetwork, standbyNetwork } from "../src/devices/network";
@@ -193,6 +193,33 @@ describe("a standby's network", () => {
       const stopping = engine.stop();
       for (let i = 0; i < 40; i++) await vi.advanceTimersByTimeAsync(100);
       await stopping;
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("reads the relays at a browser's pace where the host gives none (the web app, the extension), not at the DHT's", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+    // The relay reads of a standby started with `pace`, its active device away, over ten minutes.
+    const linkReads = async (pace: { pollIntervals?: PollIntervals }) => {
+      setDeviceMirror(null); resetDeviceGates();
+      await closeDevicesDb(); await closeDeviceKeysDb(); await dropDevicesDatabase(); await dropKeys();
+      await standbyRecord();
+      const gate = await openDeviceGate("ghostly");
+      const pkarr = new MemoryPkarr(DESKTOP_NETWORK);
+      const engine = (await standbyEngine(gate, { transport: pkarr.transport(), ...pace }))!;
+      await engine.start({ gate, show: () => {} });
+      for (let i = 0; i < 600; i++) await vi.advanceTimersByTimeAsync(1_000);
+      const reads = pkarr.reads;
+      const stopping = engine.stop();
+      for (let i = 0; i < 40; i++) await vi.advanceTimersByTimeAsync(100);
+      await stopping;
+      return reads;
+    };
+    try {
+      const relays = await linkReads({ pollIntervals: RELAY_POLL_INTERVALS });
+      const dht = await linkReads({ pollIntervals: DHT_POLL_INTERVALS });
+      expect(relays).toBeGreaterThan(0);
+      expect(dht).toBeGreaterThan(relays);
+      expect(await linkReads({})).toBe(relays);
     } finally { vi.useRealTimers(); }
   });
 
