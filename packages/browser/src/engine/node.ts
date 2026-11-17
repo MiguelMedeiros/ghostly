@@ -394,6 +394,8 @@ const RTT_SAVE_MS = 5 * 60_000;
 const REACTION_RESEND_MS = 30_000;
 /** An edit the DHT packet cannot carry, in a chat that goes live (`editMessage`): kept, it waits for the live session. */
 const DHT_EDIT_WAITS = "Too long for the DHT packet as an edit: it goes when you are live.";
+/** A text within 256 bytes the DHT packet cannot carry, in a chat that goes live (`sendChatText`): it waits for the live session. */
+const DHT_TEXT_WAITS = "Too long for the DHT packet: it is sent when you are live.";
 /** How long a deleted chat's session stays up once the ends of its moving files are said, so they get there (as a yield's goodbye). */
 const FILES_END_MS = 300;
 /** A link event that only asks something and acts on nothing: a deleted chat's link may still ask it (`whileChat`). */
@@ -4311,9 +4313,11 @@ export class GhostlyNode implements EngineImplementation {
       void this.hold.hold(linkId, { kind: "text", id: wireId, messageId: id, bytes, timestamp }).catch(() => {});
       return { error: null, messageId: id };
     }
-    // Kept, it waited for good as behind an earlier text, and the ones written after it went first: it is shortened.
-    if (tooBig) return { error: tooBig, refused: true };
-    const reason = delivery === "dht" && bytes <= DHT_TEXT_BYTES ? "Waits for the text before it to be confirmed."
+    // A chat on the DHT by choice never carries it: kept, it waited for good, so it is shortened. One that goes live
+    // keeps it for the live session, as one past 256 bytes: the floor never tries it (`ready`), so later texts pass it.
+    if (tooBig && GhostlyNode.dhtByChoice(live)) return { error: tooBig, refused: true };
+    const reason = tooBig ? DHT_TEXT_WAITS
+      : delivery === "dht" && bytes <= DHT_TEXT_BYTES ? "Waits for the text before it to be confirmed."
       : delivery === "dht" ? `Longer than the ${DHT_TEXT_BYTES} bytes the DHT carries: it is sent when you are live.`
       : "Sent when your contact is reachable.";
     await this.storeMessage({ linkId, id, wireId, text: trimmed, sender: "me", timestamp, via: "datalink", delivery: "waiting", deliveryError: reason, ...(preview && { preview }), ...answers });

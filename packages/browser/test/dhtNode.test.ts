@@ -82,6 +82,39 @@ it("a contact that chose DHT only gets every text of a burst from this side, whi
   } finally { await contact.stop(); await node.shutdown(); if (linkId) await db.deleteLink(linkId); vi.unstubAllGlobals(); }
 }, 70000);
 
+it("in a chat that goes live, a text within 256 bytes the DHT packet cannot carry waits for live, and a later one goes on the floor", async () => {
+  await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true });
+  vi.stubGlobal("RTCPeerConnection", undefined);
+  const packets = new Map<string, SignedPacket>();
+  const transport = { publish: async (identity: Parameters<typeof createRelayPayload>[0], records: Parameters<typeof createRelayPayload>[1]) => {
+    packets.set(identity.pubKeyZ32, parseRelayPayload(identity.pubKeyZ32, createRelayPayload(identity, records)));
+  }, resolve: async (key: string) => packets.get(key) ?? null, describe: () => ({ protocol: "signed packet fixture", relays: [] }) };
+  const native = vi.fn();
+  const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() }, { transport, automaticWallets: false, nativeTransports: { "iroh/1": native, "hyperdht/1": native } });
+  const invitation = createLink(); let linkId = "";
+  const received = vi.fn();
+  // Both sides on Automatic: the chat is on the floor only until it is live.
+  const contact = new DhtDelivery({ params: invitation.invite, mode: "stream", credentials: { seedB64: createIdentity().seedB64 }, transport,
+    save: async () => {}, pin: async () => {}, message: async m => { received(m); }, receipt: async () => {}, changed: () => {}, pollMs: 100 });
+  try {
+    await node.start();
+    ({ linkId } = await node.ensureLink({ ...invitation.mine, profile: "paired-chat/1" }));
+    node.setActiveLink({ linkId });
+    await contact.start();
+    await vi.waitFor(() => expect(node.getState().links.find(l => l.id === linkId)?.textDelivery).toBe("dht"), { timeout: 20000 });
+    // 251 bytes; each quote takes two in the sealed body, so the packet has no room for it.
+    const t = Date.now(), long = `"quoted" `.repeat(28).trim();
+    // Refused before: the person had to write it again, while one past 256 bytes waited for live.
+    expect(await node.sendMessage({ linkId, text: long, timestamp: t })).toMatchObject({ error: null });
+    expect((await db.getMessages(linkId)).find(m => m.text === long)).toMatchObject({ delivery: "waiting", deliveryError: "Too long for the DHT packet: it is sent when you are live." });
+    // It waits off the floor: the text written after it goes there, and it does not.
+    expect((await node.sendMessage({ linkId, text: "after the long one", timestamp: t + 1 })).error).toBeNull();
+    await vi.waitFor(() => expect(received).toHaveBeenCalledWith(expect.objectContaining({ text: "after the long one" })), { timeout: 30000 });
+    await vi.waitFor(async () => expect((await db.getMessages(linkId)).filter(m => m.sender === "me").map(m => [m.text.length, m.delivery])).toEqual([[251, "waiting"], [18, "delivered"]]), { timeout: 12000 });
+    expect(received.mock.calls.map(([m]) => m.text)).not.toContain(long);
+  } finally { await contact.stop(); await node.shutdown(); if (linkId) await db.deleteLink(linkId); vi.unstubAllGlobals(); }
+}, 70000);
+
 it("a text deleted while the profile is offline leaves the saved floor: back online, the contact never gets it (agents#6005)", async () => {
   await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true });
   vi.stubGlobal("RTCPeerConnection", undefined);
