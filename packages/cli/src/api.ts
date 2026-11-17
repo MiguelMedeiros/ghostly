@@ -278,6 +278,8 @@ const NO_ROOM: Record<string, string> = {
 const JOIN_STOPS = new Set(["replaced", ...Object.keys(NO_ROOM)]);
 /** How long a one-shot `group join` waits to be let in: as long as a one-shot `invite join` waits to pair. */
 const ONE_SHOT_JOIN_S = 60;
+/** A replaced link never lets it in: the next step is a new link, not a daemon. */
+const REPLACED = "This link was replaced or turned off: ask someone in the group for the current link, then ghostly group join <link>";
 
 /**
  * A one-shot `group join` waits to be let in, as a one-shot invite join waits to pair: a member's app lets the joiner
@@ -312,15 +314,18 @@ async function letIn(ctx: ApiContext, groupId: string, link: string, held: Group
   }
   if (ctx.mode !== "one-shot") {
     const now = seen(state(ctx));
-    return { group: groupId, joined: now?.status === "active", stage: now?.invitation?.stage ?? null };
+    const joined = now?.status === "active", stage = now?.invitation?.stage ?? null;
+    if (joined || !now?.invitation?.viaLink) return { group: groupId, joined, stage };
+    if (stage === "replaced") return { group: groupId, joined, stage, warning: REPLACED };
+    // Not in yet, it named no way to follow the knock, as the one-shot's warning does.
+    return { group: groupId, joined, stage, warning: `Not in yet: the daemon goes on knocking at the group's link until a member's app lets you in: ghostly group show ${id} follows it, ghostly group decline ${id} stops it` };
   }
   const done = (g: GroupView | undefined) => !g || g.status === "active" || JOIN_STOPS.has(g.invitation?.stage ?? "");
   const group = await waitForState(ctx, (s) => { const g = seen(s); return done(g) ? { g } : undefined; }, ONE_SHOT_JOIN_S * 1000, `group ${groupId} to let this profile in`)
     .then(({ g }) => g, (error: unknown) => { if (error instanceof CliError && error.code === "timeout") return seen(state(ctx)); throw error; });
   const joined = group?.status === "active", stage = group?.invitation?.stage ?? null;
   if (joined || !group) return { group: groupId, joined, stage };
-  // A replaced link never lets it in: the next step is a new link, not a daemon.
-  if (stage === "replaced") return { group: groupId, joined, stage, warning: "This link was replaced or turned off: ask someone in the group for the current link, then ghostly group join <link>" };
+  if (stage === "replaced") return { group: groupId, joined, stage, warning: REPLACED };
   const show = `keep it running (ghostly daemon --detach), then ghostly group show ${shellWord(groupId, groupId)}`;
   const full = stage === "full" ? group.invitation?.full : undefined;
   const noRoom = stage ? NO_ROOM[stage] : undefined;
