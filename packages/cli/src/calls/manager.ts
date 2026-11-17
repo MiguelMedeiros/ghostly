@@ -298,9 +298,15 @@ export class CallManager {
     call.video = signalHasVideo(offer);
     // Unanswered, an offer goes stale: the contact's app has given up or will, and answering it would be refused.
     this.arm(call, Math.max(1000, callSignalHeardAt(offer) + CALL_SIGNAL_MAX_AGE_MS - this.now), "missed", false);
-    this.host.emit("call.incoming", `call.incoming:${call.id}`, { call: call.id, chat, name: link ? nameOf(link) : null, video: call.video, auto: this.autoFor(chat) });
+    // Hide my IP from contacts: no call is answered here (`callable`), so auto-answer answers none either. The event
+    // says `auto: false` then, and the daemon does not try: it said `auto: true` while its answer failed, and a program
+    // that trusted it neither answered nor declined a call left ringing.
+    const relayOnly = this.host.engine.getSettings()?.relayOnly === true;
+    const wanted = this.autoFor(chat), auto = wanted && !relayOnly;
+    if (this.host.answers !== false && wanted && relayOnly) process.stderr.write(`ghostly: call ${call.id}: not answered by itself: ${CALLS_OFF_RELAY_ONLY}\n`);
+    this.host.emit("call.incoming", `call.incoming:${call.id}`, { call: call.id, chat, name: link ? nameOf(link) : null, video: call.video, auto });
     this.prepare(call);
-    if (this.host.answers !== false && this.autoFor(chat)) {
+    if (this.host.answers !== false && auto) {
       void this.answer(call.id, {}).catch((error) => process.stderr.write(`ghostly: auto-answer failed: ${error instanceof Error ? error.message : String(error)}\n`));
     }
   }
