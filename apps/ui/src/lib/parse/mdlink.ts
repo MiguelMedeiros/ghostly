@@ -38,6 +38,12 @@ const FILE_IN_PATH = /\.(?:md|py|rs|sh)$/i;
  */
 const DOTS =
   /[\u00b7\u02d9\u0660\u06d4\u06f0\u0701\u0702\u0f0b\u0f0c\u1427\u16eb\u2022\u2024\u2027\u2219\u22c5\u2e30\u2e31\u2e33\u2e3c\u3002\u30fb\u318d\ua4f8\ua60e\ua78f\uff0e\uff61\u{10a50}\u2981]|\u0323|\u{1d16d}/gu;
+/**
+ * The typographic spaces (en quad to hair space, the narrow no-break and the medium mathematical space) beside a dot:
+ * a gap of a pixel or two that reads as none ("paypal .com"). Read before NFKC, which makes them a word's space; a
+ * word's space, a no-break one and an ideographic one show their gap and are left alone.
+ */
+const SPACE_BY_DOT = /[\u2000-\u200a\u202f\u205f]+(?=\.)|(?<=\.)[\u2000-\u200a\u202f\u205f]+/gu;
 
 /**
  * A whole emoji: a keycap ("1️⃣"), a flag drawn from tags (🏴 and its tag letters), or pictographs joined by zero-width
@@ -59,7 +65,7 @@ export function labelMisleads(label: string, url: string): boolean {
   const target = hostOf(url);
   if (!target) return true;
   if (new RegExp(INVISIBLE.source, "u").test(label.replace(EMOJI, ""))) return true;
-  const text = label.replace(DOTS, ".").normalize("NFKC").replace(DOTS, ".");
+  const text = label.replace(DOTS, ".").replace(SPACE_BY_DOT, "").normalize("NFKC").replace(DOTS, ".");
   for (const found of text.matchAll(ADDRESS)) {
     const written = found[0];
     const bare = written.replace(/^[a-z][a-z\d+.-]*:\/\//i, "");
