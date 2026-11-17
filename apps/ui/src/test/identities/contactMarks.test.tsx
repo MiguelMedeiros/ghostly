@@ -138,7 +138,7 @@ describe("IdentityStack (the chat's header)", () => {
     expect(screen.getByTestId("chat-identity-more-2")).toHaveTextContent("+5");
     expect(screen.getByTestId("chat-identity-more-1")).toHaveTextContent("+6");
     for (const n of [1, 2, 3]) expect(screen.getByTestId(`chat-identity-check-${n}`)).toBeInTheDocument();
-    expect(stack).toHaveAccessibleName(/^Identities with Alice: Domain: example.org · verified .*; GitHub \(SSH key\): octocat · verified/);
+    expect(stack).toHaveAccessibleName(/^Identities with \u2068Alice\u2069: Domain: example.org · verified .*; GitHub \(SSH key\): octocat · verified/);
     // Proofs take the Ghostly mark's place: it is for a contact who shared none.
     expect(screen.queryByTestId("chat-identity-ghostly-mark")).not.toBeInTheDocument();
     await user.click(stack);
@@ -210,7 +210,8 @@ function Header() {
 }
 
 describe("IdentityStack for a contact who shared no proof", () => {
-  const NOTHING = "Their Ghostly identity. Nothing else shared by Alice yet.";
+  // The contact's name between isolate marks: in an attribute and a plain line it cannot have a <bdi>.
+  const NOTHING = "Their Ghostly identity. Nothing else shared by \u2068Alice\u2069 yet.";
 
   it("still has a mark, their Ghostly identity: quiet, no check, no +N, named for what it opens", () => {
     const { engine } = renderApp(<IdentityStack peerKey="peer" name="Alice" onOpen={() => {}} />);
@@ -219,7 +220,7 @@ describe("IdentityStack for a contact who shared no proof", () => {
       if (received) act(() => engine.update(withReceived(received)));
       const stack = screen.getByTestId("chat-identity-badges");
       expect(stack).toHaveAttribute("data-count", "0");
-      expect(stack).toHaveAccessibleName(`Identities with Alice: ${NOTHING}`);
+      expect(stack).toHaveAccessibleName(`Identities with \u2068Alice\u2069: ${NOTHING}`);
       const mark = within(stack).getByTestId("chat-identity-ghostly-mark");
       expect(mark).toHaveAttribute("data-icon", "ghostly");
       expect(mark.querySelector(".badge-mark-plain")).not.toBeNull();
