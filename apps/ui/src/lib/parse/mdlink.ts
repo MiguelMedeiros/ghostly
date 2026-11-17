@@ -51,8 +51,9 @@ const EMOJI =
  * Whether a link's text would make a reader think it goes somewhere else: it names a host that is not the link's (nor
  * one the link's host sits under), or it holds an invisible or direction character, which can turn "moc.lapyap"
  * into "paypal.com" on screen. The text is read as a browser would read a host ("ghostly。tools" and "ｇｈｏｓｔｌｙ.tools"
- * are "ghostly.tools"). File names are left alone ("report.pdf", "docs/CHAT.md"); anything else that reads as a
- * host counts, which errs on the safe side: the bubble shows the address.
+ * are "ghostly.tools"); a host still not ASCII after that counts even when it is the link's own, as a bare link shows
+ * it in punycode. File names are left alone ("report.pdf", "docs/CHAT.md"); anything else that reads as a host
+ * counts, which errs on the safe side: the bubble shows the address.
  */
 export function labelMisleads(label: string, url: string): boolean {
   const target = hostOf(url);
@@ -68,6 +69,9 @@ export function labelMisleads(label: string, url: string): boolean {
       const at = found.index;
       if (FILE_IN_PATH.test(bare) && text[at - 1] === "/" && at > 1 && !/[/:]/.test(text[at - 2])) continue;
     }
+    // A host in other letters than ASCII: even the link's own is drawn as written ("раураl.com"), while a bare link
+    // of it shows its punycode.
+    if (/[\u0080-\uffff]/.test(bare)) return true;
     const host = hostOf(`https://${bare}`);
     if (!host) return true;
     if (host !== target && !target.endsWith(`.${host}`)) return true;

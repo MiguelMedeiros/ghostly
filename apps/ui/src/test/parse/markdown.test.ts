@@ -224,6 +224,20 @@ describe("[text](url) links", () => {
     expect(link("[paypal\ua4f8com](https://evil.example/login)")).toMatchObject({ data: { showUrl: true } });
   });
 
+  it("shows the address when the text is the link's own host in letters a bare link shows in punycode", () => {
+    for (const [label, url] of [
+      ["\u0440\u0430\u0443\u0440\u0430l.com", "https://xn--l-7sba6dbr.com/login"],
+      ["\u0430pple.com", "https://xn--pple-43d.com/"],
+      ["www.\u0430pple.com", "https://xn--pple-43d.com/"],
+      ["g\u043e\u043egle.com", "https://xn--ggle-55da.com/"],
+      ["https://\u0430pple.com/x", "https://xn--pple-43d.com/"],
+    ]) {
+      expect(labelMisleads(label, url), label).toBe(true);
+      expect(link(`[${label}](${url})`), label).toMatchObject({ data: { showUrl: true } });
+      expect(plainText(`[${label}](${url})`), label).toBe(url);
+    }
+  });
+
   it.each([
     0x034f, 0x115f, 0x1160, 0x3164, 0xffa0, 0xfe00, 0xfe0f, 0xe0100, 0xe01ef, 0xe0000, 0xe0020, 0xe007f,
     0x17b4, 0x17b5, 0x180b, 0x180e, 0x180f, 0x2028, 0x2029, 0xfff9, 0xfffb, 0x1bca0, 0x1bca3, 0x1d173, 0x1d17a,
