@@ -737,6 +737,44 @@ describe("a memo that looks like a seed or a key", () => {
     expect(view.onClose).not.toHaveBeenCalled();
   });
 
+  // Send anyway gives the focus back to the button that asked, which the work it starts makes busy at that moment: a
+  // natively disabled button takes no focus, so it fell to the page while the work ran and stayed there on a refusal.
+  it("keeps a keyboard's focus on Request after Send anyway, while it works and when it is refused", async () => {
+    let refuse!: (why: string) => void;
+    const { user } = open({ onRequest: () => new Promise<string | null>((resolve) => { refuse = resolve; }) });
+    await user.click(tab("mainnet"));
+    await user.click(card("lightning-mainnet"));
+    await user.type(amount(), "12");
+    await user.type(memo(), SEED);
+    request().focus();
+    await user.keyboard("{Enter}");
+    const guard = await screen.findByTestId("secret-guard");
+    within(guard).getByTestId("secret-guard-send").focus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(screen.queryByTestId("secret-guard")).not.toBeInTheDocument());
+    expect(document.activeElement).toBe(request());
+    expect(request()).toHaveTextContent("Requesting");
+    expect(request()).toHaveAttribute("aria-disabled", "true");
+    await act(async () => refuse("The contact's app is offline"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("The contact's app is offline");
+    expect(document.activeElement).toBe(request());
+  });
+
+  it("keeps a keyboard's focus on Send after Send anyway when the send is refused", async () => {
+    const view = open({ wallet: everyWallet({ mints: [mint(TEST_MINT, 500)], balance: 500 }) });
+    view.engine.on("preparePayment", () => { throw new Error("Mint is offline"); });
+    await view.user.click(tab("testnet"));
+    await view.user.click(card("cashu-testnet"));
+    await view.user.type(amount(), "30");
+    await view.user.type(memo(), SEED);
+    send().focus();
+    await view.user.keyboard("{Enter}");
+    within(await screen.findByTestId("secret-guard")).getByTestId("secret-guard-send").focus();
+    await view.user.keyboard("{Enter}");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Mint is offline");
+    expect(document.activeElement).toBe(send());
+  });
+
   it("asks nothing of an ordinary memo", async () => {
     const { user, onRequest } = open();
     await user.click(tab("mainnet"));
