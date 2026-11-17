@@ -120,6 +120,62 @@ describe("reconnecting, in an open chat", () => {
   });
 });
 
+// covers: extension.reconnecting
+describe("reconnecting, on a menu page", () => {
+  /**
+   * An extension tab that lost its peer, on Services, Settings or Profile at a phone width: the chat list (and its
+   * "Reconnecting…") is kept mounted but hidden, so the page looked live while nothing it did reached Ghostly. The page
+   * says it over itself, in its own words; wider, the list beside it does.
+   */
+
+  const SENTENCE = "Reconnecting… · This tab lost Ghostly and keeps trying. Wait until it's back to change anything here.";
+
+  afterEach(async () => {
+    fakeEngine.refuse = null;
+    await engine.connect();
+    window.location.hash = "";
+  });
+
+  function losePeer() {
+    fakeEngine.refuse = new Error("The offscreen document did not start");
+    fakeEngine.drop();
+  }
+
+  it.each(["/services", "/settings", "/profile"])("on a phone, %s says it over the page, and it goes once the page is connected again", async (page) => {
+    windowIs(true);
+    window.location.hash = `#${page}`;
+    render(<Root />);
+    await screen.findByTestId("mobile-tabs");
+    expect(screen.queryByTestId("page-reconnecting-banner")).toBeNull();
+    losePeer();
+    const banner = await screen.findByTestId("page-reconnecting-banner", {}, { timeout: 3000 });
+    expect(banner).toBeVisible();
+    expect(banner).toHaveAttribute("role", "status");
+    expect(banner).toHaveTextContent(SENTENCE);
+    fakeEngine.refuse = null;
+    await waitFor(() => expect(screen.queryByTestId("page-reconnecting-banner")).toBeNull(), { timeout: 3000 });
+  });
+
+  it("on a phone's chat list, only the list says it", async () => {
+    windowIs(true);
+    render(<Root />);
+    await screen.findByTestId("sidebar");
+    losePeer();
+    await screen.findByTestId("reconnecting-banner", {}, { timeout: 3000 });
+    expect(screen.queryByTestId("page-reconnecting-banner")).toBeNull();
+  });
+
+  it("wider than a phone, leaves it to the chat list beside the page", async () => {
+    windowIs(false);
+    window.location.hash = "#/settings";
+    render(<Root />);
+    await screen.findByTestId("sidebar");
+    losePeer();
+    await screen.findByTestId("reconnecting-banner", {}, { timeout: 3000 });
+    expect(screen.queryByTestId("page-reconnecting-banner")).toBeNull();
+  });
+});
+
 // covers: app.pwa.offline
 describe("offline", () => {
   /**
