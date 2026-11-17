@@ -123,9 +123,15 @@ function trimEnd(whole: string, tails: boolean): string {
 /** Characters of a link worth reading: a longer one is no address anyone shares, and is left as text. */
 export const LINK_MAX_CHARS = 4 * 1024;
 
+/**
+ * An http(s) link's run in a text, as a `RegExp` source: up to a space or a `LINK_STOP_CHARS` character, as the bubble
+ * reads it. A link written right after another one's "。" or "،", with no space, is a run of its own.
+ */
+export const LINK_RUN = String.raw`https?:\/\/[^\s${LINK_STOP_CHARS}]+`;
+
 /** The http(s) links of a text, in order, each ending as the bubble ends it. */
 export function linksIn(text: string): string[] {
-  return [...text.matchAll(/https?:\/\/\S+/gi)].filter(match => match[0].length <= LINK_MAX_CHARS).map(match => linkEnd(match[0])).filter(url => url.length > 8);
+  return [...text.matchAll(new RegExp(LINK_RUN, "gi"))].filter(match => match[0].length <= LINK_MAX_CHARS).map(match => linkEnd(match[0])).filter(url => url.length > 8);
 }
 
 /**
