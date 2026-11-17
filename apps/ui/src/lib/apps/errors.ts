@@ -37,6 +37,8 @@ const KEYS: Record<string, TranslationKey> = {
   // Its stored files are not what was installed: the engine dropped them, and Get its files fetches them again.
   damaged: "apps.errors.damaged",
   storage: "apps.errors.storage",
+  // A store removed meanwhile (another tab): its block reads the list again (Apps.tsx), and goes.
+  "no-store": "apps.errors.noStore",
 };
 
 /**

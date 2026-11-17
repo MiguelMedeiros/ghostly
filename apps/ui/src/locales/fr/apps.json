@@ -73,6 +73,7 @@
     "locked": "Le profil s'est verrouillé avant que l'app ne s'ouvre. Ouvrez-la à nouveau.",
     "needsFiles": "Ses fichiers ne sont pas encore sur cet appareil.",
     "network": "Impossible de joindre le serveur.",
+    "noStore": "Cette boutique n'est plus ajoutée.",
     "notListed": "Cette boutique ne propose plus cette app.",
     "notSigned": "Signature invalide. Ghostly ne l'installera pas.",
     "notStore": "Ce lien ne contient pas de boutique valide.",
