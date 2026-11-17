@@ -709,8 +709,8 @@ export class FileDesk {
       if (rate) view.rate = rate;
     } else this.speeds.delete(id);
     if (view.stage === "asking" && record.direction === "in") { this.asking.add(id); view.room = this.deps.transfers.get(id)?.room; void this.rooms(); }
-    // Taken: the offers still waiting show the room it will use.
-    else if (this.asking.delete(id) && !transferEnded(record)) void this.rooms();
+    // Taken, asked about or not (first seen under way): the offers still waiting show the room it will use.
+    else if ((this.asking.delete(id) || (record.direction === "in" && !this.underway.has(id))) && !transferEnded(record)) void this.rooms();
     // One that finished before this run (a session opening walks them all) gets no view back (`restore`).
     if (record.state !== "done" || this.underway.has(id) || this.deps.transfers.has(id)) {
       this.deps.transfers.set(id, view);
@@ -783,6 +783,9 @@ export class FileDesk {
     }
   }
 
+  /** The free space being read for `rooms`, while it is. */
+  private freeRead?: Promise<number | null>;
+
   /**
    * The room the offers waiting for the person are decided against, shown with them: the free space (`known` when an
    * Accept read it) less what the files taken here still need (`stillComing`), as Accept counts it. Read again when one
@@ -791,7 +794,9 @@ export class FileDesk {
    */
   private async rooms(known?: number | null): Promise<void> {
     if (!this.asking.size) return;
-    const free = known !== undefined ? known : await (await fileBytes()).room().catch(() => null);
+    // One read for a burst (a session's files shown again as it opens): the calls made meanwhile share it.
+    const free = known !== undefined ? known : await (this.freeRead ??= fileBytes().then((bytes) => bytes.room()).catch(() => null)
+      .finally(() => { this.freeRead = undefined; }));
     const room = free === null ? null : Math.max(0, free - this.stillComing({}, free));
     let shown = false;
     for (const id of this.asking) {

@@ -77,3 +77,18 @@ it("an offer waiting shows the room left beside the files taken that still come,
   expect(t.transfers.get(small)?.room).toBe(90 * MiB);
   for (const link of ["chat-a", "chat-b", "chat-c"]) t.files.drop(link);
 });
+
+/**
+ * A file taken without asking (25 MiB or less) holds room as well: the offers waiting show the room it leaves from the
+ * moment it starts. Before, only a file the person was asked about refreshed them, and a 90 MiB offer kept showing
+ * "100 MB free" beside a 20 MiB file taken by itself, then Accept refused it.
+ */
+it("an offer waiting shows the room a file taken without asking will use", async () => {
+  const t = desk(() => 100 * MiB);
+  const big = await t.offered("chat-b", "wUnasked001", 90 * MiB);
+  expect(t.transfers.get(big)?.room).toBe(100 * MiB);
+  await t.files.handle("chat-a", { t: "pf-offer", id: "wUnasked002", name: "small.mp4", mime: "video/mp4", size: 20 * MiB, ts: 1_700_000_000_000 });
+  await vi.waitFor(() => expect(t.accepted()).toEqual(["wUnasked002"]));
+  await vi.waitFor(() => expect(t.transfers.get(big)?.room).toBe(80 * MiB));
+  for (const link of ["chat-a", "chat-b", "chat-c"]) t.files.drop(link);
+});
