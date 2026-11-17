@@ -603,6 +603,60 @@ describe("an invitation not yet joined", () => {
   });
 });
 
+describe("a group not joined yet, said the same by every command", () => {
+  // Found in a bug hunt: `group leave` on an invitation answered the engine's "Group not found" of a group `group show`
+  // listed; send, react, pin and typing said "You are not in this group (yet)" with no way in; a group joined by its
+  // link, which has no name yet, read "You are not in  yet: you accepted its invitation", an invitation nobody sent.
+  const invited = { id: "g2", name: "Lab group", createdAt: 1, profile: "mesh", isAdmin: false, canSend: false, lastMessageAt: 0, invited: [], memberLinks: {}, members: [],
+    invitation: { linkId: "chat-ana", contact: "anakey", admin: "anakey", members: 2, accepted: false } } as unknown as GroupView;
+  const knocking = { ...invited, id: "ZmoZar972sOso_z8IAP0ng", name: "", invitation: { linkId: "l1", contact: "", admin: "anakey", members: 0, accepted: true, viaLink: true, stage: "knocking" } } as unknown as GroupView;
+  function notIn(held: GroupView) {
+    const { ctx, node } = fake();
+    node.getState = () => ({ links: [], groups: [group, held], settings: {}, transport: {} }) as unknown as EngineState;
+    Object.assign(node, {
+      sendGroupMessage: vi.fn(async () => ({ error: "You are not in this group yet" })),
+      react: vi.fn(async () => ({ error: "You are not in this group", refused: true })),
+      pinMessage: vi.fn(async () => ({ error: "You are not in this group", refused: true })),
+      chatView: () => undefined,
+      leaveGroup: vi.fn(async () => { throw new Error("Group not found"); }),
+    });
+    return ctx;
+  }
+
+  it("names the way in, or out for leave, keeping each command's code", async () => {
+    for (const [held, ref, message, out] of [
+      [invited, "Lab group", "You are not in Lab group yet: ghostly group accept 'Lab group' joins it", "You are not in Lab group yet: ghostly group decline 'Lab group' turns it down"],
+      [knocking, knocking.id, "You are not in this group yet: you opened its link, and no member's app has let you in", `You are not in this group yet: ghostly group decline ${knocking.id} turns it down`],
+    ] as const) {
+      const ctx = notIn(held);
+      await expect(callApi(ctx, "group.send", { group: ref, text: "hi" }), ref).rejects.toMatchObject({ code: "unavailable", message });
+      await expect(callApi(ctx, "group.react", { group: ref, message: "m1", emoji: "👍" }), ref).rejects.toMatchObject({ code: "refused", message });
+      await expect(callApi(ctx, "chat.pin", { chat: `group:${held.id}`, message: "m1" }), ref).rejects.toMatchObject({ code: "refused", message: message.replace(`'${ref}'`, `group:${held.id}`) });
+      await expect(callApi(ctx, "group.typing", { group: ref }), ref).rejects.toMatchObject({ code: "refused", message });
+      await expect(callApi(ctx, "group.rotate", { group: ref }), ref).rejects.toMatchObject({ code: "refused", message });
+      await expect(callApi(ctx, "group.leave", { group: ref, yes: true }), ref).rejects.toMatchObject({ code: "engine", message: out });
+    }
+  });
+
+  it("an admin alone online is told the command that hands the role on", async () => {
+    const { ctx, node } = fake();
+    Object.assign(node, { leaveGroup: vi.fn(async () => { throw new Error("You are the admin and nobody else in the group is online to take over. Try again when a member is, or make someone the admin first."); }) });
+    await expect(callApi(ctx, "group.leave", { group: "Crew", yes: true })).rejects.toMatchObject({ code: "engine",
+      message: "You are the admin and nobody else in Crew is online to take over: try again when a member is, or make one the admin first (ghostly group admin Crew <member key>)" });
+  });
+
+  it("a link to a group held here names the CLI's command, not the app's menu", async () => {
+    const id = "AbCdEfGhIjKlMnOpQrStUv";
+    const link = `https://ghostly.tools/#/join/${encodeGroupEntryLink({ g: id, host: createIdentity().pubKeyZ32 })}`;
+    const answer = (error: Error) => ({ getState: () => ({ links: [], groups: [], settings: {}, transport: {} }) as unknown as EngineState, joinGroupByLink: vi.fn(async () => { throw error; }) });
+    const ctx = (node: ReturnType<typeof answer>) => ({ runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" }) as unknown as ApiContext;
+    await expect(callApi(ctx(answer(new Error("You are out of this group and its history is still here. Delete it from this device to join with a link."))), "group.join", { link })).rejects.toMatchObject({ code: "engine",
+      message: `You are out of this group and its history is still here: ghostly group forget ${id} --yes deletes it from this device, then join with the link` });
+    await expect(callApi(ctx(answer(new Error("You have an invitation to this group. Answer it first."))), "group.join", { link })).rejects.toMatchObject({ code: "engine",
+      message: `You have an invitation to this group: answer it first (ghostly group accept ${id} or ghostly group decline ${id})` });
+  });
+});
+
 describe("an invitation that will not go on by itself", () => {
   it("says a link join nobody answered and an invitation taken back, which read as a live invitation", () => {
     const invited = (invitation: Record<string, unknown>) => ({ ...group, status: undefined, isAdmin: false, members: [], canSend: false, entryLink: undefined,
