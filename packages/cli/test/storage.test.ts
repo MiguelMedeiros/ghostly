@@ -1330,6 +1330,45 @@ describe("messages kept in rows.db", () => {
     for (let i = 0; i < 6; i++) expect(bytes.includes(`purged-${i}-secret`), `m${i}`).toBe(false);
   });
 
+  /** A store whose messages m0…m{n-1} say `purged-<i>-secret`, folded, and whether rows.db still holds message i's text. */
+  const purgeable = async (n: number) => {
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    opened.push(store);
+    const d = await db(store.factory);
+    await tx(d, ["messages"], (s) => { for (let i = 0; i < n; i++) s.messages.put({ linkId: "chat", id: `m${i}`, text: `purged-${i}-secret` }); });
+    await store.compact();
+    return { store, d, gone: (i: number) => !readFileSync(join(dir, "rows.db")).includes(`purged-${i}-secret`) };
+  };
+
+  it("a scrub asked after the one before answered scrubs again: its delete is gone from rows.db too", async () => {
+    const { store, d, gone } = await purgeable(2);
+    await tx(d, ["messages"], (s) => s.messages.delete(["chat", "m0"]));
+    await store.compact({ scrub: true });
+    await tx(d, ["messages"], (s) => s.messages.delete(["chat", "m1"]));
+    await store.compact({ scrub: true });
+    d.close();
+    expect([gone(0), gone(1)]).toEqual([true, true]);
+  });
+
+  it("a scrub asked while another's snapshot is written does not join it: that one captured the store before its delete", async () => {
+    const { store, d, gone } = await purgeable(1);
+    let reached!: () => void, release!: () => void;
+    const begun = new Promise<void>((resolve) => { reached = resolve; });
+    disk.snapshotSync = () => { disk.snapshotSync = null; reached(); return new Promise<void>((resolve) => { release = resolve; }); };
+    try {
+      const first = store.compact({ scrub: true });
+      await begun;
+      // Its `complete` waits behind the fold (a write committed meanwhile is on the disk only after it): not awaited here.
+      const deleted = tx(d, ["messages"], (s) => s.messages.delete(["chat", "m0"]));
+      const second = store.compact({ scrub: true });
+      release();
+      await Promise.all([first, deleted, second]);
+    } finally { disk.snapshotSync = null; }
+    d.close();
+    expect(gone(0)).toBe(true);
+  });
+
   it("a deleted chat and its messages leave the journal once the snapshot is an hour old, at a start, a write or a close", async () => {
     const chats = (factory: IDBFactory) => new Promise<IDBDatabase>((resolve, reject) => {
       const request = factory.open("ghostly", 1);
