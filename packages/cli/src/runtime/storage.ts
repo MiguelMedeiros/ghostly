@@ -395,7 +395,8 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
    * text the engine had told the contact it held.
    */
   function append(ops: Op[], lazy: boolean, entry: number, owner: unknown[], complete: () => void): { error: unknown } | "unsynced" | "queued" | null {
-    holdsDelete ||= ops.some(deletes);
+    const deleting = ops.some(deletes);
+    holdsDelete ||= deleting;
     if (trees) ops = [{ db: SEQ, store: "", kind: "clear", seq: entry }, ...ops];
     if (queued === 0 && !ops.some((op) => op.kind === "put" && hasBlob(op.value))) {
       let done: boolean;
@@ -410,7 +411,11 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     held++;
     void enqueue(async () => {
       try {
-        if (writeEntry(serialize(await Promise.all(ops.map(async (op) => (op.kind === "put" ? { ...op, value: await blobsToDisk(op.value) } : op)))), lazy ? "lazy" : "now")) written(entry);
+        if (writeEntry(serialize(await Promise.all(ops.map(async (op) => (op.kind === "put" ? { ...op, value: await blobsToDisk(op.value) } : op)))), lazy ? "lazy" : "now")) {
+          // A fold it waited behind cleared the mark, with a snapshot taken before it: the new journal holds its delete.
+          holdsDelete ||= deleting;
+          written(entry);
+        }
       } catch (error) {
         // Too late to refuse it (the transactions after it ran on what it wrote): the store is folded into a whole
         // snapshot before its `complete` goes, as when a sync fails.
