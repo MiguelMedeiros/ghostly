@@ -394,6 +394,13 @@ describe("a page that follows a switch starts again where the profile in use was
     expect(overlays).toEqual([{ name, reloadsBefore: 0 }]);
     expect(JSON.parse(session.get("ghostly_switching")!)).toMatchObject({ id: WORK, name });
   });
+
+  // Its overlay says the switch was made in another tab: nothing else here tells the person why their profile changed.
+  it("as a switch another tab made, for its overlay's words", async () => {
+    useProfile(world, WORK);
+    await startAgain();
+    expect(JSON.parse(session.get("ghostly_switching")!)).toMatchObject({ id: WORK, elsewhere: true });
+  });
 });
 
 describe("pages follow a peer started again in another tab", () => {
