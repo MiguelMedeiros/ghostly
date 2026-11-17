@@ -28,8 +28,11 @@ describe("one-shot saved list", { timeout: 120_000 }, () => {
     const { openPersistentIndexedDb } = await import("../src/runtime/storage");
     const store = await openPersistentIndexedDb(profilePaths(dir, "default").db);
     const { db } = await import("@ghostly/browser/engine/db");
+    const { STORES, store: settings, wrap } = await import("@ghostly/browser/shared/idb");
+    const { SAVED_MESSAGES_KEY } = await import("@ghostly/browser/engine/saved");
     await db.putLink(chat("chat-alice", "Alice", "Alice Liddell"));
     await db.putLink(chat("chat-bob", "Bob"));
+    await db.putLink(chat("chat-carol", "Carol"));
     for (const m of [
       row("chat-alice", "peer_orig", 1, { text: "the original" }),
       row("chat-alice", "me_reply", 2, reply("peer_orig", "the original")),
@@ -37,21 +40,28 @@ describe("one-shot saved list", { timeout: 120_000 }, () => {
       row("chat-alice", "peer_edited", 4, { text: "now reads this", edit: { seq: 1, at: 5 } } as Partial<StoredMessage>),
       row("chat-alice", "me_on_edit", 6, reply("peer_edited", "first words")),
       ...Array.from({ length: 50 }, (_, i) => row("chat-bob", `peer_b${i}`, 10 + i)),
+      // Mine, saved, and the process that sent them stopped before a receipt came: the chat's outbox has them again.
+      row("chat-carol", "me_sending", 1, { delivery: "sending" }),
+      row("chat-carol", "me_sent", 2, { delivery: "sent" }),
     ]) await db.putMessage(m);
+    const marks = [{ linkId: "chat-carol", id: "me_sending", savedAt: 1 }, { linkId: "chat-carol", id: "me_sent", savedAt: 2 }];
+    await wrap((await settings(STORES.settings, "readwrite")).put({ at: 2, items: marks }, SAVED_MESSAGES_KEY));
     await store.close();
 
     for (const [ref, id] of [["Alice", "peer_orig"], ["Alice", "me_reply"], ["Alice", "me_lost"], ["Alice", "me_on_edit"], ["Bob", "peer_b7"]]) {
       ok(await ghostly(["--home", dir, "saved", "add", ref, id]));
     }
     const { saved } = ok(await ghostly(["--home", dir, "saved", "list"])) as {
-      saved: { chat: string; message: { id: string; text: string; nick?: string; replyTo?: { snippet: string; found: boolean; deleted?: boolean } } }[];
+      saved: { chat: string; message: { id: string; text: string; nick?: string; delivery?: string; replyTo?: { snippet: string; found: boolean; deleted?: boolean } } }[];
     };
     const byId = new Map(saved.map((s) => [s.message.id, s]));
-    expect(saved.map((s) => s.message.id)).toEqual(["peer_b7", "me_on_edit", "me_lost", "me_reply", "peer_orig"]);
+    expect(saved.map((s) => s.message.id)).toEqual(["peer_b7", "me_on_edit", "me_lost", "me_reply", "peer_orig", "me_sent", "me_sending"]);
     expect(byId.get("peer_orig")).toMatchObject({ chat: "chat-alice", message: { text: "the original", nick: "Alice Liddell" } });
     expect(byId.get("peer_b7")).toMatchObject({ chat: "chat-bob", message: { text: "text of peer_b7" } });
     expect(byId.get("me_reply")!.message.replyTo).toMatchObject({ snippet: "the original", found: true });
     expect(byId.get("me_lost")!.message.replyTo).toMatchObject({ snippet: "", found: false, deleted: true });
     expect(byId.get("me_on_edit")!.message.replyTo).toMatchObject({ snippet: "now reads this", found: true });
+    // As `chat history` says them: queued, sent again under the same id once the contact is reachable.
+    expect([byId.get("me_sent")!.message.delivery, byId.get("me_sending")!.message.delivery]).toEqual(["queued", "queued"]);
   });
 });
