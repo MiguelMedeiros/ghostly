@@ -68,7 +68,9 @@ it.each(["ark", "bark", "spark", "usdt"] as const)("%s: the engine checks the re
   const refresh = vi.spyOn(node as unknown as { refreshWallet(): Promise<void> }, "refreshWallet").mockResolvedValue();
   const desk = node["desk"] as unknown as Record<string, () => Promise<void>>;
   const receipts = vi.spyOn(desk, `reconcile${{ ark: "Ark", bark: "Bark", spark: "Spark", usdt: "Usdt" }[kind]}Receipts`).mockResolvedValue();
-  const wallet = (node as unknown as Record<string, { testnet: { changed(viewChanged?: boolean): void } }>)[`${kind}Wallets`].testnet;
+  const wallet = (node as unknown as Record<string, { testnet: { changed(viewChanged?: boolean): void; exportBackup(password: string): Promise<string> } }>)[`${kind}Wallets`].testnet;
+  // None saved: its class loads with a first call (lazyWallet.ts), here one it refuses before anything changes.
+  await wallet.exportBackup("short").catch(() => {});
   wallet.changed(false);
   expect(refresh).not.toHaveBeenCalled();
   expect(receipts).toHaveBeenCalledTimes(1);

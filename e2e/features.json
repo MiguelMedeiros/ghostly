@@ -1174,7 +1174,7 @@
     "packages/browser/src/engine/paymentAdapters/{arkWallet,arkade}.ts": ["wallet.ark.*","payments.arkade.*","wallet.ready","wallet.mode"],
     "packages/browser/src/engine/paymentAdapters/{bark,barkSdk,barkWallet}.ts": ["wallet.bark.*","payments.bark.*","wallet.ready","wallet.mode"],
     "packages/browser/src/engine/paymentAdapters/{fedimint,fedimintSdk,fedimintWallet,fedimintWorker,fedimintWasm.d}.ts": ["wallet.fedimint.*","payments.fedimint.*","wallet.lightning.fedimint","wallet.mode"],
-    "packages/browser/src/engine/paymentAdapters/{perNetwork,walletInstances,walletNetworks}.ts": ["wallet.instances.*","wallet.mode","payments.chat.networks"],
+    "packages/browser/src/engine/paymentAdapters/{lazyWallet,perNetwork,walletInstances,walletModes,walletNetworks}.ts": ["wallet.instances.*","wallet.mode","payments.chat.networks"],
     "packages/browser/src/engine/paymentAdapters/{spark,sparkWallet}.ts": ["wallet.spark.*","payments.spark.*","wallet.ready","wallet.mode"],
     "packages/browser/src/engine/paymentAdapters/{usdt,usdtWallet}.ts": ["wallet.usdt.*","payments.usdt.*","wallet.ready","wallet.mode"],
     "packages/browser/src/engine/pins.ts": ["chat.pins.wire","groups.protocol.pins"],

@@ -8,8 +8,8 @@ import { newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from "./persis
 import { snapshotArkDatabase,restoreArkDatabase,encodeBackup,decodeBackup,type ArkDatabaseSnapshot } from "./backup";
 import type { SavedIntent } from "./coordinator";
 import type { WalletNetwork } from "@ghostly/core";
-import type { WalletMode } from "../../shared/mints";
 import { ModeChanged, ModeGate, WrongNetworkError, networkLabel } from "./modeGate";
+import { RETIRE_READ_MS, arkMode } from "./walletModes";
 import { walletKey } from "./walletNetworks";
 import { viewNews } from "./viewNews";
 /** `read`: the balances were read once since this wallet opened (until then `balance` says nothing). */
@@ -21,15 +21,12 @@ interface StoredArk {config:ArkConfig;seed:EncryptedSeed;deviceKey?:string}
 export interface ArkCreate {network:ArkConfig["network"];provider:string;explorer:string;password?:string;mnemonic?:string}
 /** The Ark SDK, a large part of the app: loaded once an Ark wallet is made, opened or restored, not with the engine. */
 const loadArkade=()=>import("./arkade");
-/** How long a Testnet wallet about to make way for another waits for its server to say what it holds. */
-export const RETIRE_READ_MS=10_000;
+export { RETIRE_READ_MS, arkMode };
 /** Every new profile starts with this wallet: nothing to set up before receiving. */
 export const DEFAULT_ARK = {network:"bitcoin",provider:"https://arkade.computer",explorer:"https://mempool.space/api"} as const satisfies Omit<ArkCreate,"password"|"mnemonic">;
 const checkProviders=(network:ArkConfig["network"],...urls:string[])=>{for(const provider of urls)validatePaymentTarget({method:"arkade",network,provider,asset:"BTC",unit:"sat",address:`${arkAddressPrefix(network)}configuration`,expiresAt:Date.now()+60000});};
 /** A Testnet Ark wallet starts on Mutinynet: a public test network with its own Ark server. */
 export const TESTNET_ARK = {network:"mutinynet",provider:"https://mutinynet.arkade.sh",explorer:"https://mutinynet.com/api"} as const satisfies Omit<ArkCreate,"password"|"mnemonic">;
-/** Bitcoin is real money; every other Ark network is for testing. */
-export const arkMode=(network:ArkConfig["network"]):WalletMode=>network==="bitcoin"?"mainnet":"testnet";
 /** The defaults a new wallet of this network is made with, in one click. */
 export const arkDefaults=(network:WalletNetwork)=>network==="testnet"?TESTNET_ARK:DEFAULT_ARK;
 /**
