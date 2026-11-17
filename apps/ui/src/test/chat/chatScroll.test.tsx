@@ -45,6 +45,26 @@ let observed: ResizeObserverCallback[] = [];
 /** A picture or a video changed a row's height: what the ResizeObserver would say. */
 const resized = () => act(() => { for (const callback of observed) callback([], {} as ResizeObserver); });
 
+/** The lists whose scroll events wait for the next frame (`inFrames`); null: each comes at once. */
+let frame: Set<HTMLElement> | null = null;
+/**
+ * `fn` with scroll events as a browser sends them: at the next frame, one per list, after the code that moved it went
+ * on (and noted where it put it). Then the frames go by until none is left.
+ */
+function inFrames(fn: () => void) {
+  frame = new Set();
+  try {
+    fn();
+    for (let i = 0; i < 10 && frame.size; i++) {
+      const due = [...frame];
+      frame.clear();
+      act(() => { for (const el of due) el.dispatchEvent(new Event("scroll")); });
+    }
+  } finally {
+    frame = null;
+  }
+}
+
 beforeAll(() => {
   const top = inherited("scrollTop");
   const rect = Element.prototype.getBoundingClientRect;
@@ -59,7 +79,8 @@ beforeAll(() => {
         const next = Math.min(maxTop(this), Math.max(0, value));
         if (next === (positions.get(this) ?? 0)) return;
         positions.set(this, next);
-        this.dispatchEvent(new Event("scroll"));
+        if (frame) frame.add(this);
+        else this.dispatchEvent(new Event("scroll"));
       },
     },
     scrollTo: { configurable: true, value(this: HTMLElement, options: ScrollToOptions) { this.scrollTop = options.top ?? 0; } },
@@ -558,6 +579,22 @@ describe("the chat timeline's scrolling", () => {
     expect(pill()).toHaveAttribute("data-count", "1");
   });
 
+  it("a scrolling key on the way down stops it there, as a wheel does", async () => {
+    const { user } = renderApp(<Timeline rows={theirs(0, 30)} />);
+    scrollTo(0);
+    const halfway = vi.spyOn(HTMLElement.prototype, "scrollTo").mockImplementation(function (this: HTMLElement, options?: ScrollToOptions | number) {
+      this.scrollTop = ((options as ScrollToOptions).top ?? 0) / 2;
+    });
+    await user.click(pill()!);
+    halfway.mockRestore();
+    fireEvent.keyDown(document.body, { key: "PageUp" });
+    scrollTo(400);
+    // A row laying out after it: the view stays where the key put it, not back on the way down.
+    resized();
+    expect(list().scrollTop).toBe(400);
+    expect(pill()).toHaveAttribute("data-count", "0");
+  });
+
   it("End or Ctrl/Cmd+↓ jumps to the bottom, but not from a text field", () => {
     renderApp(<Timeline rows={theirs(0, 30)} />);
     scrollTo(0);
@@ -997,6 +1034,29 @@ describe("a long timeline's window of rows", () => {
     expect(lastInPage()).toBe("peer_999");
     expect(inPage()).toBe(OPEN_ROWS);
     expect(list().scrollTop).toBe(OPEN_ROWS * ROW - VIEW);
+  });
+
+  it("↓ taken the rest of the way at once by a row laying out, a move up with no wheel or touch shows ↓ again and stays up", () => {
+    renderApp(<WindowTimeline rows={theirs(0, 300)} />);
+    scrollTo(0);
+    expect(pill()).toHaveAttribute("data-count", "0");
+    // The glide down: halfway when a row on its way lays out at its real size.
+    const halfway = vi.spyOn(HTMLElement.prototype, "scrollTo").mockImplementation(function (this: HTMLElement, options?: ScrollToOptions | number) {
+      this.scrollTop = ((options as ScrollToOptions).top ?? 0) / 2;
+    });
+    fireEvent.click(pill()!);
+    halfway.mockRestore();
+    expect(list().scrollTop).toBeLessThan(list().scrollHeight - VIEW);
+    // The layout puts it at the bottom at once, and that frame's scroll event finds it where it was put.
+    inFrames(resized);
+    expect(list().scrollTop).toBe(list().scrollHeight - VIEW);
+    expect(pill()).toBeNull();
+    // Up again with no wheel or touch on the list (a screen reader, find in page): the page above comes in, and the
+    // view stays up on its row with ↓ shown. It went back down, ↓ never showing, while the way down still counted.
+    scrollTo(0);
+    expect(atTop()).toBe(`peer_${300 - OPEN_ROWS - PAGE_ROWS}`);
+    expect(list().scrollTop).toBe(PAGE_ROWS * ROW);
+    expect(pill()).toHaveAttribute("data-count", "0");
   });
 
   it("what I send from up the history brings the last rows back, at the bottom", () => {

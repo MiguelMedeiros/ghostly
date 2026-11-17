@@ -38,6 +38,9 @@ test("on a 375px phone at a larger text size the chat's jump to the latest stays
   for (const px of [24, 32]) {
     await cdp.send("Page.setFontSizes", { fontSizes: { standard: px, fixed: Math.round(px * 13 / 16) } });
     await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).fontSize)).toBe(`${px}px`);
+    // The chat laid out at the new size, and its scroll event seen, before it moves: a move in the same frame as the
+    // layout is the browser's, not a hand's, and the chat goes back to its bottom.
+    await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(done)))));
     // Far up the chat with nothing new: a plain ↓.
     await chat(alice).evaluate((el) => { el.scrollTop = 0; });
     await expect(jump(page)).toBeVisible();
