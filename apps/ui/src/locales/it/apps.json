@@ -22,6 +22,7 @@
     "revokedNext": "Resta ferma finché il suo editore non pubblica una nuova versione, oppure puoi disinstallarla.",
     "runAnyway": "Avvia comunque",
     "stopped": "Ferma",
+    "stoppedSaid": "{{title}} si è fermata.",
     "uninstall": "Disinstalla",
     "uninstallText": "I suoi file e i suoi dati in tutte le chat vengono cancellati. Esporta prima i dati per tenerli.",
     "uninstallTitle": "Disinstallare {{title}}?",
