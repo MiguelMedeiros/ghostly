@@ -359,7 +359,7 @@ function joiningText(stage: GroupJoinStage, name: string, community: boolean, t:
   if (stage === "full" && full) return { title: t("group.join.full"), body: t("group.join.fullBody", { n: full.n, max: full.max }) };
   // Or that it grows only once every member's app is updated: the same, until they are.
   if (stage === "blocked") return { title: t("group.join.blocked"), body: t("group.join.blockedBody") };
-  if (stage === "admitted") return { title: name ? t("group.join.joiningName", { name }) : t("group.join.joiningGroup"),
+  if (stage === "admitted") return { title: name ? t("group.join.joiningName", { name: isolate(name) }) : t("group.join.joiningGroup"),
     body: !community ? t("group.join.admitted") : admittedLong ? t("group.join.admittedStuck") : t("group.join.admittedCommunity") };
   if (stage === "answered") return { title: community ? t("group.join.answeredTitleCommunity") : waiting,
     body: community ? t("group.join.answeredCommunity") : t("group.join.answered") };
