@@ -7,6 +7,7 @@ import { addressChain, btcToSats, chainAccepts, findBitcoinAddress } from "../..
 import { decodeBolt12Offer } from "../../lib/parse/money-bolt12";
 import { decodeArkAddress } from "../../lib/parse/money-ark";
 import { eip681Number, findUsdtAddress, isEvmAddress } from "../../lib/parse/money-usdt";
+import { trimUriEnd } from "../../lib/parse/money-text";
 import { loadLocale, translatorFor } from "../../locales";
 import { decodeMoneroAddress, findMoneroAddress, moneroBase58Decode, xmrToPiconero } from "../../lib/parse/money-monero";
 import {
@@ -87,6 +88,15 @@ describe("BIP 21 links", () => {
     });
     const mainnet = findMoney(`BITCOIN:${BC1Q.toUpperCase()}?amount=0.000021&lightning=${INVOICE}`);
     expect(mainnet).toMatchObject({ type: "onchain", request: { address: BC1Q.toUpperCase(), network: "mainnet", amountSat: 2100, lightning: { amountSat: 2100 } } });
+  });
+
+  it("leaves a direction mark typed after the link out of it, as a web link does", () => {
+    // Arabic and Hebrew writers type one so the full stop sits on the right side: the address kept it and was refused.
+    expect(findMoney(`\u0627\u062f\u0641\u0639 bitcoin:${BC1Q}\u200f.`)).toMatchObject({ type: "onchain", request: { address: BC1Q } });
+    expect(findMoney(`bitcoin:${BC1Q}?amount=0.001\u200f.`)).toMatchObject({ type: "onchain", request: { amountSat: 100_000 } });
+    expect(findMoney(`\u2067bitcoin:${BC1Q}?label=Rent\u2069`)).toMatchObject({ type: "onchain", request: { label: "Rent" } });
+    // An emoji the label ends with stays in it.
+    expect(trimUriEnd(`bitcoin:${BC1Q}?label=Pizza%20\u{1f355}\u200f.`)).toBe(`bitcoin:${BC1Q}?label=Pizza%20\u{1f355}`);
   });
 
   it("keeps the Lightning fallback only when it is the same payment: the link's amount, a link that may be paid", () => {

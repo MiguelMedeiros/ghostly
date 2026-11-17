@@ -65,6 +65,12 @@ export const LINK_TRAILING = /[.,;:!?'"*_>…»’”]/;
  */
 const LINK_TAIL = /^(?:\p{Extended_Pictographic}|\p{Emoji_Modifier}|\p{Regional_Indicator}|[\u200b\u200c\u2060\ufeff\u{e0020}-\u{e007f}]|[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]|\u200d|\ufe0e|\ufe0f)$/u;
 
+/**
+ * What a payment link leaves out at its end of `LINK_TAIL`: the direction marks, isolates and zero-width spaces, none
+ * of them part of an emoji its label may end with ("…&label=Pizza 🍕\u200f." pays with the label "Pizza 🍕").
+ */
+const URI_TAIL = /[\u200b\u2060\ufeff\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/;
+
 /** How many UTF-16 units of `url` before `end` are an emoji's or an invisible character's last code point (0: none). */
 export function linkTail(url: string, end: number): number {
   const units = end > 1 && /[\udc00-\udfff]/.test(url[end - 1]) && /[\ud800-\udbff]/.test(url[end - 2]) ? 2 : 1;
@@ -88,7 +94,8 @@ export function linkEnd(whole: string): string {
 
 /**
  * A payment link (`bitcoin:`, `monero:`…) ends as a web link does, but keeps an emoji at its end: its label or message
- * is text written as it is ("…&label=Pizza 🍕"), cut at 140 characters wherever that falls.
+ * is text written as it is ("…&label=Pizza 🍕"), cut at 140 characters wherever that falls. A direction mark after it
+ * is left out (`URI_TAIL`), as after a web link.
  */
 export function uriEnd(whole: string): string {
   return trimEnd(whole, false);
@@ -103,7 +110,7 @@ function trimEnd(whole: string, tails: boolean): string {
   while (end > 0) {
     const last = url[end - 1];
     const opener = LINK_CLOSERS[last];
-    const tail = tails ? linkTail(url, end) : 0;
+    const tail = tails ? linkTail(url, end) : URI_TAIL.test(last) ? 1 : 0;
     if (tail) { end -= tail; continue; }
     if (!LINK_TRAILING.test(last) && !(opener && count[last] > count[opener])) break;
     if (opener) count[last]--;
