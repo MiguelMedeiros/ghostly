@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { MAX_NICK_LENGTH } from "@ghostly/core";
 import { cleanName, shownName } from "./apiKit";
 import { childEnv } from "./childEnv";
-import { CliError } from "./errors";
+import { CliError, shownValue } from "./errors";
 import { runtimePath } from "./privateFolder";
 
 /**
@@ -44,7 +44,7 @@ export function userPath(path: string, home = false): string {
 const isProfileName = (name: string): boolean => NAME.test(name) && !name.includes("..");
 
 export function checkProfileName(name: string): string {
-  if (!isProfileName(name)) throw new CliError("usage", `Not a profile name: ${JSON.stringify(name)} (letters, digits, ".", "_" and "-", up to 64)`);
+  if (!isProfileName(name)) throw new CliError("usage", `Not a profile name: ${shownValue(name)} (letters, digits, ".", "_" and "-", up to 64)`);
   return name;
 }
 
