@@ -85,6 +85,21 @@ describe("the admin's menu on a member's tile", () => {
     expect(screen.getByTestId("group-call-mute-microphone")).toHaveTextContent("Mute mic");
   });
 
+  it("keeps the state after the admin's last act when an earlier ask answers after it", async () => {
+    // The read sent on joining answers late, after a mute made meanwhile: its state is from before the mute.
+    let readLate: (result: GroupCallModerationResult) => void = () => {};
+    answerModerate(({ act, target, src }) => act === "state"
+      ? new Promise<GroupCallModerationResult>((resolve) => { readLate = resolve; })
+      : { ok: true, state: { muted: { [target!]: src! }, banned: [] } });
+    const { user } = adminView();
+    await user.click(menuButton(ANA));
+    await user.click(screen.getByTestId("group-call-mute-microphone"));
+    await waitFor(() => expect(acts()).toHaveLength(1));
+    await act(async () => readLate({ ok: true, state: EMPTY }));
+    await user.click(menuButton(ANA));
+    expect(screen.getByTestId("group-call-allow-microphone")).toHaveTextContent("Allow mic");
+  });
+
   it("asks before removing from the call, saying behind the ⓘ that the call's key stays; Cancel sends nothing", async () => {
     answerModerate(({ act, target }) => ({ ok: true, state: act === "remove" ? { muted: {}, banned: [target!] } : EMPTY }));
     const { user } = adminView();
