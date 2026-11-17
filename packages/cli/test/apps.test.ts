@@ -844,6 +844,25 @@ describe("store sign", () => {
     expect((error(await ghostly(["store", "sign", join(dir, "unknown.json"), "--key", key, "--out", tmp()]), "refused", 1) as { details?: { reason?: string } }).details?.reason).toBe("unknown-key");
   }, 60_000);
 
+  it("refuses an index past the 4 MiB a client reads, though the format takes 16 MiB", async () => {
+    const dir = tmp();
+    const out = tmp();
+    const key = join(tmp(), "store.pem");
+    const { key: _key, ...index } = JSON.parse(vector.index) as Record<string, unknown> & { apps: { ref: string; urls: string[] }[] };
+    const [listing] = index.apps;
+    const commit = "0123456789abcdef0123456789abcdef01234567";
+    // 2500 listings with four long jsDelivr URLs each: about 5 MiB, every listing within the format's bounds.
+    const urls = [0, 1, 2, 3].map((n) => `https://cdn.jsdelivr.net/gh/ghostly-vectors/chess@${commit}/${n}/${"x".repeat(400)}.ghostlyapp`);
+    const apps = Array.from({ length: 2500 }, (_, i) => ({ ...listing, ref: `${listing.ref}-${i}`, urls }));
+    writeFileSync(join(dir, "index.json"), JSON.stringify({ ...index, apps, removed: [], revoked: [] }));
+    const refusal = error(await ghostly(["store", "sign", join(dir, "index.json"), "--key", key, "--out", out]), "refused", 1) as { message: string; details?: { reason?: string } };
+    expect(refusal.details?.reason).toBe("too-large");
+    expect(refusal.message).toContain("4 MiB");
+    expect(existsSync(join(out, "ghostly-store.json"))).toBe(false);
+    expect(existsSync(join(out, "ghostly-store.sig"))).toBe(false);
+    expect(existsSync(key)).toBe(false);
+  }, 60_000);
+
   it("refuses an index that writes a key twice, where a reader sees the first and JSON.parse keeps the last", async () => {
     const dir = tmp();
     const key = vectorKey(tmp(), "store");
