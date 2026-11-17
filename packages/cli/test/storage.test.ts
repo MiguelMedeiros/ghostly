@@ -1362,11 +1362,29 @@ describe("messages kept in rows.db", () => {
       // Its `complete` waits behind the fold (a write committed meanwhile is on the disk only after it): not awaited here.
       const deleted = tx(d, ["messages"], (s) => s.messages.delete(["chat", "m0"]));
       const second = store.compact({ scrub: true });
+      // Its settle gives up (CLOSE_WAIT_MS) while the first is still held: it asks while that one runs.
+      const now = Date.now.bind(Date);
+      const clock = vi.spyOn(Date, "now").mockImplementation(() => now() + 6_000);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      clock.mockRestore();
       release();
       await Promise.all([first, deleted, second]);
     } finally { disk.snapshotSync = null; }
     d.close();
     expect(gone(0)).toBe(true);
+  });
+
+  it("a scrub that failed is not joined by the purges after it: the next one scrubs", async () => {
+    const { store, d, gone } = await purgeable(3);
+    const scrubs = vi.spyOn(TreeFile.prototype, "scrub").mockImplementationOnce(() => { throw new Error("disk full"); });
+    try {
+      const results = await Promise.allSettled([0, 1].map((i) => tx(d, ["messages"], (s) => s.messages.delete(["chat", `m${i}`])).then(() => store.compact({ scrub: true }))));
+      expect(results[0]!.status).toBe("rejected");
+    } finally { scrubs.mockRestore(); }
+    await tx(d, ["messages"], (s) => s.messages.delete(["chat", "m2"]));
+    await store.compact({ scrub: true });
+    d.close();
+    expect([gone(0), gone(1), gone(2)]).toEqual([true, true, true]);
   });
 
   it("a deleted chat and its messages leave the journal once the snapshot is an hour old, at a start, a write or a close", async () => {
