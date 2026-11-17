@@ -183,9 +183,9 @@ describe("the chat's Services dialog's Open", () => {
       act(() => view.engine.update({ links: [live({ peerServices: [{ id: "demo", type: "http", name: "Demo" }, { id: "wiki", type: "http" }] })] }));
       const dialog = screen.getByRole("dialog");
       expect(within(dialog).getAllByTestId("chat-service-open").map((b) => b.textContent)).toEqual(["Open", "Open"]);
-      await view.user.click(within(dialog).getByRole("button", { name: "Open Demo, served from your contact's machine" }));
+      await view.user.click(within(dialog).getByRole("button", { name: "Open ⁨Demo⁩, served from your contact's machine" }));
       // An app with no name of its own goes by its ID, as its row shows it.
-      await view.user.click(within(dialog).getByRole("button", { name: "Open wiki, served from your contact's machine" }));
+      await view.user.click(within(dialog).getByRole("button", { name: "Open ⁨wiki⁩, served from your contact's machine" }));
       expect(opened).toEqual(["demo", "wiki"]);
     } finally {
       fakeEngine.openService = openService;

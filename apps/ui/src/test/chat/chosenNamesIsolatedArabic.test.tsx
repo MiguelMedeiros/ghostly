@@ -8,8 +8,11 @@ import { ComposerIdentityPicker } from "../../components/identities/ComposerIden
 import { ContactIdentitiesPanel } from "../../components/identities/ContactIdentitiesPanel";
 import { IdentityMenuItem, IdentityStack } from "../../components/identities/ContactMarks";
 import { MakeAdminDialog } from "../../components/MakeAdminDialog";
+import { PeerServices } from "../../components/PeerServices";
 import { RemoveMemberDialog } from "../../components/RemoveMemberDialog";
 import type { PeerHoldState, PeerLinkState } from "../../lib/platform";
+import { hostErrorText, serviceAppWords, serviceFraming } from "../../lib/serviceWindows";
+import { translatorFor } from "../../locales";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { identitiesView, proofView, sharedView } from "../identities/views";
 import { renderApp } from "../render";
@@ -27,6 +30,9 @@ import { renderApp } from "../render";
 const NAME = "Ana (work)";
 /** The name between the isolate marks (U+2068 FSI, U+2069 PDI). */
 const ISOLATED = `\u2068${NAME}\u2069`;
+/** A contact's app, its name Latin with punctuation at its end: "Notes!" read "!Notes" in an Arabic line. */
+const APP = "Notes!";
+const APP_ISOLATED = `\u2068${APP}\u2069`;
 
 /** The <bdi> holding exactly this name inside the element, if any. */
 const isolated = (el: Element, name = NAME) => [...el.querySelectorAll("bdi")].some((bdi) => bdi.textContent === name);
@@ -103,6 +109,33 @@ describe("names a contact or a member chose, in Arabic, each isolated", () => {
       expect(within(grant).getByTestId("chat-service-toggle")).toHaveAttribute("aria-label", `السماح لـ ${ISOLATED} بفتح \u2068Notes\u2069`);
     } finally {
       fakeEngine.features = { ...fakeEngine.features, shareLocalServices: false };
+    }
+  });
+
+  it("a contact's app, named in the view it opens in: its notices, the host's error page and the view's name", () => {
+    const t = translatorFor("ar");
+    const words = serviceAppWords(APP, t);
+    expect(words.loading).toBe(`جارٍ فتح ${APP_ISOLATED} على جهاز جهة اتصالك…`);
+    for (const [line, said] of Object.entries(words)) expect(said, line).toContain(APP_ISOLATED);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(hostErrorText([["x-ghostly-error", "unreachable"]], APP, t)).toContain(`${APP_ISOLATED} لا يستجيب`);
+    expect(serviceFraming(APP, { nick: "Demo bot" }, "peer", t).label).toBe(`${APP_ISOLATED}، يشاركه ⁨Demo bot⁩`);
+  });
+
+  it("a contact's app on its Open buttons: the Shared services dialog's and the chat strip's", () => {
+    fakeEngine.features = { ...fakeEngine.features, openServices: true };
+    try {
+      const view = renderApp(<>
+        <PeerServices peerPubKey="peer" onManage={vi.fn()} />
+        <ChatServicesDialog peerPubKey="peer" name={NAME} onClose={vi.fn()} />
+      </>, { language: "ar" });
+      act(() => view.engine.update({ links: [paired({ sessionOffers: { mine: ["services/1"], peer: ["services/1"] },
+        capabilities: { files: true, payments: false, services: true }, peerServices: [{ id: "notes", type: "http", name: APP }] })] }));
+      const said = `فتح ${APP_ISOLATED}، يُقدَّم من جهاز جهة اتصالك`;
+      expect(screen.getByTestId("chat-service-open")).toHaveAttribute("aria-label", said);
+      expect(screen.getByTestId("open-service")).toHaveAttribute("title", said);
+    } finally {
+      fakeEngine.features = { ...fakeEngine.features, openServices: false };
     }
   });
 

@@ -229,7 +229,7 @@ test("a person on the web opens the web app a bot shares, on an origin of its ow
     await bot.stop();
     const offline = person.page.getByTestId("service-view-offline");
     await expect(offline).toBeVisible({ timeout: 120_000 });
-    await expect(offline).toContainText("Your contact is offline, so Demo cannot open now.");
+    await expect(offline).toContainText("Your contact is offline, so ⁨Demo⁩ cannot open now.");
     await expect(person.page.getByTestId("service-view-frame")).toBeHidden();
     await expect(person.page.getByTestId("service-view-retry")).toBeVisible();
   } catch (error) {

@@ -88,7 +88,7 @@ export function ChatServicesDialog({ peerPubKey, name, onClose }: { peerPubKey: 
                     <p className="flex-1 min-w-0 flex"><span dir="auto" className="min-w-0 text-sm text-text-primary truncate">{service.name ?? service.id}</span></p>
                     {platform.features.openServices
                       // Named with its app: a screen reader reaching each by Tab heard only "Open", whichever app it opens.
-                      ? <button type="button" data-testid="chat-service-open" aria-label={t("chat.services.openTheirs", { service: service.name ?? service.id })} onClick={() => {
+                      ? <button type="button" data-testid="chat-service-open" aria-label={t("chat.services.openTheirs", { service: isolate(service.name ?? service.id) })} onClick={() => {
                         setRefused(null);
                         // A refusal (a call on screen on the web, a window Desktop could not open) is said under its app.
                         platform.openService(peerPubKey, service.id).catch((e) => setRefused({ id: service.id, problem: problemText(e, t) }));
