@@ -188,8 +188,7 @@ export function installList(precache: readonly string[], languages: Readonly<Rec
 /**
  * What the build precaches: the app's page, its hashed files except the WebAssembly (wallets load theirs when
  * one is used, and they are most of the build's weight), the Desktop-only chunks and the optional ones (`leaveOut`), and the static
- * files beside it. Never the update check, the sign-in callback or the worker itself, nor the language detector's
- * worker: a build emits it as an asset, whether it translates or not.
+ * files beside it. Never the update check, the sign-in callback or the worker itself.
  */
 export function precacheList(files: readonly string[], leaveOut: readonly string[] = []): string[] {
   const left = new Set(leaveOut.map((file) => "/" + file.replace(/^\/+/, "")));
@@ -197,7 +196,6 @@ export function precacheList(files: readonly string[], leaveOut: readonly string
     .map((file) => "/" + file.replace(/^\/+/, ""))
     .filter((path) => !NEVER.has(path) && !left.has(path))
     .filter((path) => !/\.(wasm|map)$/.test(path))
-    .filter((path) => !path.startsWith("/assets/translateDetector.worker-"))
     .filter((path) => path !== "/index.html");
   return ["/", ...new Set(paths)].sort((a, b) => (a === "/" ? -1 : b === "/" ? 1 : a.localeCompare(b)));
 }
