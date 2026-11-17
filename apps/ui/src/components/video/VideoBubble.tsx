@@ -18,6 +18,7 @@ import { FORCED_EDGE, RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry"
 import { useT } from "../../contexts/I18nContext";
 import { NAME, withName } from "../apps/aroundName";
 import { problemLine, saveProblemLine } from "../../lib/problemText";
+import { ownDirection } from "../../lib/ownDirection";
 
 type Phase = "poster" | "loading" | "playing";
 type Problem = "unsupported" | "too-large" | "no-room" | "missing" | "left-out" | "not-yet";
@@ -456,7 +457,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
           )}
         </p>
       )}
-      {actionError && !status && <p className="chat-text-media-line text-danger-ink px-1 m-0" role="alert">{actionError}</p>}
+      {actionError && !status && <p className="chat-text-media-line text-danger-ink px-1 m-0" role="alert" dir={ownDirection(actionError)}>{actionError}</p>}
     </div>
   );
 }
