@@ -27,10 +27,6 @@ const percent = filePercent;
  */
 export const isGroupFile = (file: Pick<ChatFile, "id">): boolean => file.id.startsWith("group-");
 
-/** A group's file this device has not fetched, waiting for its person's Download. */
-export const groupFileOffered = (file: Pick<ChatFile, "id">, transfer: FileTransferState | null): boolean =>
-  isGroupFile(file) && transfer?.state === "transferring" && transfer.direction === "in" && transfer.stage === "asking";
-
 /**
  * Whether a file sent from here that did not go can be sent again: not one the contact declined or the sender
  * cancelled (files/3 says so with `retry`), and only where the platform sends files. Never a group's: it is announced
