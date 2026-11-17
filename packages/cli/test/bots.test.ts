@@ -445,7 +445,8 @@ describe("chat disconnect --hold", () => {
     await callApi(ctx, "chat.disconnect", { chat: "Alice", hold: 30 });
     const held = await failure("Alice");
     expect(held).toMatchObject({ code: "timeout" });
-    expect(held?.message).toMatch(/^Timed out after 1 s waiting for chat Alice to be live\. This chat is held on the DHT only until \d\d:\d\d: it goes live then, or now with ghostly chat connect Alice$/);
+    // The hold's end carries its day when it is not today: a run from 23:30 crosses midnight.
+    expect(held?.message).toMatch(/^Timed out after 1 s waiting for chat Alice to be live\. This chat is held on the DHT only until (\d{4}-\d\d-\d\d )?\d\d:\d\d: it goes live then, or now with ghostly chat connect Alice$/);
     // Off DHT only: the usual words, the chat still as given; other states are not about DHT only.
     setLink("chat-two", { dhtDelivery: { mode: "stream", peerMode: "stream", authenticated: true, maxTextBytes: 256 } });
     expect(await failure("Bob")).toMatchObject({ code: "timeout", message: "Timed out after 1 s waiting for chat Bob to be live" });
