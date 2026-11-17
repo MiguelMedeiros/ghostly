@@ -80,7 +80,7 @@ describe("delete", () => {
     expect(store.compact).toHaveBeenCalledTimes(3);
     expect(store.compact).toHaveBeenCalledWith({ scrub: true });
     // The --everyone that was offered says the same thing in its own words.
-    await expect(callApi(ctx, "chat.delete", { chat: "Crew", message: "k:0:1", everyone: true })).rejects.toMatchObject({ code: "not_found", message: expect.stringMatching(/only your own/) });
+    await expect(callApi(ctx, "chat.delete", { chat: "Crew", message: "k:0:1", everyone: true })).rejects.toMatchObject({ code: "not_found", message: "\"k:0:1\" is another member's message: only its author deletes a group's message, for everyone" });
     expect(node.deleteMessage).not.toHaveBeenCalled();
     expect(node.removeMessage).not.toHaveBeenCalled();
   });
