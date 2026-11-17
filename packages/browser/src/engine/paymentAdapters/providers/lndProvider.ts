@@ -15,7 +15,7 @@ export const LND_BAKE = `lncli bakemacaroon ${LND_SCOPE.join(" ")}`;
 /** Read-only powers a macaroon may carry beyond the scope without being refused: none of them moves money. */
 const HARMLESS = new Set(["onchain:read", "address:read", "peers:read", "message:read"]);
 /** The RPCs this provider calls, for macaroons scoped by method (`uri:` permissions). */
-export const URIS = {
+const URIS = {
   info: "/lnrpc.Lightning/GetInfo",
   addInvoice: "/lnrpc.Lightning/AddInvoice",
   lookupInvoice: "/lnrpc.Lightning/LookupInvoice",
