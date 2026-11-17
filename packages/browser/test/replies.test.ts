@@ -1,4 +1,5 @@
 import "fake-indexeddb/auto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GhostLink, createIdentity, createLink, identityFromSeedB64, readStatusCard, type IncomingMessage, type PairingState } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
@@ -254,6 +255,28 @@ describe("a received reply in a long history", () => {
     expect((await row(10))?.replyTo).toMatchObject({ messageId: `peer_${at + 1}` });
     // 11 replies and a file, as 11 replies to texts plus the file's row cost, and one read of the chat in a run.
     expect(reads() - 2 * keyed).toBeLessThanOrEqual(2);
+  });
+
+  it("in a chat, replies I send to the contact's file or to ids no message goes by read the whole history once in a run, not each", async () => {
+    // Each `send --reply` naming an id the chat lacks (a typo, a message deleted since) read the chat whole: 0.8-1.2 s a
+    // call at 100,000 messages, with the daemon's other clients waiting.
+    const t = await setup();
+    const replyFor = (id: string) => measuring.run(true, () => (t.node as unknown as { replyFor(l: string, m: string): Promise<unknown> }).replyFor(t.id, id));
+    const at = 1_700_000_001_000;
+    const photo = (id: string, fileWire: string, timestamp: number): StoredMessage => ({ linkId: t.id, id, wireId: fileWire, text: "📎 photo.jpg", sender: "peer", timestamp, via: "datalink",
+      file: { id: `${t.id}-in-${fileWire}`, name: "photo.jpg", size: 5, mime: "image/jpeg" } });
+    await db.putMessage(photo(`peer_${at}`, "F".repeat(22), at));
+    // Only the replies' own reads count: the node reads on its own too.
+    const [measuring, read] = [new AsyncLocalStorage<true>(), db.getMessages.bind(db)];
+    let whole = 0;
+    const history = vi.spyOn(db, "getMessages").mockImplementation(linkId => { if (measuring.getStore() && linkId === t.id) whole++; return read(linkId); });
+    cleanup.push(async () => { history.mockRestore(); });
+    for (const unknown of ["me_typo", "Z".repeat(22), "Y".repeat(22), "nope"]) expect(await replyFor(unknown)).toMatch(/not in this chat/);
+    expect(await replyFor("F".repeat(22))).toMatchObject({ id: "F".repeat(22), messageId: `peer_${at}` });
+    // A file stored after that read is found by its wire id too.
+    await (t.node as unknown as { storeMessage(m: StoredMessage): Promise<void> }).storeMessage(photo(`peer_${at + 1}`, "G".repeat(22), at + 1));
+    expect(await replyFor("G".repeat(22))).toMatchObject({ id: "G".repeat(22), messageId: `peer_${at + 1}` });
+    expect(whole).toBe(1);
   });
 });
 
