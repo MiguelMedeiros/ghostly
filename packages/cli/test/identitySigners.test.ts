@@ -110,13 +110,65 @@ describe("identity signers on Node", () => {
     expect(node.beginIdentityProof).not.toHaveBeenCalled();
   });
 
-  // It said "subject is required", the API's parameter, to `ghostly identity add domain` (the usage shows [subject]).
-  it("asks for a missing subject in the provider's words, and where it goes", async () => {
+  // It said "subject is required", the API's parameter, to `ghostly identity add domain` (the usage shows [subject]);
+  // then `bad_request` (exit 1), where a missing <provider> or signer field is a usage error (exit 2).
+  it("asks for a missing subject in the provider's words, and where it goes, as a usage error", async () => {
     const { ctx, node } = fake();
     await expect(callApi(ctx, "identity.add", { provider: "domain" })).rejects.toMatchObject({
-      code: "bad_request", message: "Domain takes a subject, its domain (example.com): ghostly identity add domain <subject>",
+      code: "usage", message: "Domain takes a subject, its domain (example.com): ghostly identity add domain <subject>",
+    });
+    // A placeholder with its own parentheses read "(ssh-ed25519 AAAA… (or SHA256:…))".
+    await expect(callApi(ctx, "identity.add", { provider: "ssh" })).rejects.toMatchObject({
+      code: "usage", message: "SSH key takes a subject, its public key (ssh-ed25519 AAAA…, or SHA256:…): ghostly identity add ssh <subject>",
+    });
+    await expect(callApi(ctx, "identity.add", { provider: "did" })).rejects.toMatchObject({
+      code: "usage", message: "DID takes a subject, its did (did:key:z6Mk… or did:web:example.com): ghostly identity add did <subject>",
     });
     expect(node.beginIdentityProof).not.toHaveBeenCalled();
+  });
+
+  /**
+   * A bunker link whose relay nothing answers on, and a signer that refuses the link's connect (a wrong secret): both
+   * ended as `engine` in nostr-tools' or the signer's raw words ("nostr-tools/nip46: subscription to the remote signer
+   * was closed", "Not authorized"), with no next step. The person's link or signer, not a Ghostly failure.
+   */
+  describe("a remote signer that cannot be reached or refuses the link", () => {
+    const signers = [["nostr", "nip46", {}], ["domain", "nip05-nip46", { domain: "example.com" }]] as const;
+
+    it("a relay nothing answers on is unavailable, naming the relay and the way out", async () => {
+      const fixture = await startTestBunker(0);
+      const { port } = fixture;
+      const bunker = fixture.bunker;
+      await fixture.close();
+      for (const [provider, signer, fields] of signers) {
+        const { ctx, node } = fake();
+        const error = await callApi(ctx, "identity.add", { provider, signer, fields: { ...fields, bunker }, timeout: 30 }).then(() => undefined, (e: unknown) => e);
+        expect(asCliError(error).toJSON(), provider).toEqual({
+          code: "unavailable",
+          message: `Could not reach the remote signer through its relay (ws://127.0.0.1:${port}): check the relay in the bunker link, or make a new link in your signer`,
+          details: { rawError: expect.stringMatching(/^nostr-tools\/nip46: /) },
+        });
+        expect(node.beginIdentityProof).not.toHaveBeenCalled();
+      }
+    });
+
+    it("a signer that refuses the connect is refused, with the signer's words behind it", async () => {
+      const fixture = await startTestBunker(0);
+      try {
+        for (const [provider, signer, fields] of signers) {
+          const { ctx, node } = fake();
+          const bunker = fixture.bunker.replace("secret=isolated-test-only", "secret=wrong");
+          const error = await callApi(ctx, "identity.add", { provider, signer, fields: { ...fields, bunker }, timeout: 30 }).then(() => undefined, (e: unknown) => e);
+          expect(asCliError(error).toJSON(), provider).toEqual({
+            code: "refused",
+            message: "The remote signer refused the request: approve Ghostly in your signer, or make a new link there",
+            details: { rawError: "Not authorized" },
+          });
+          expect(EXIT.refused).toBe(1);
+          expect(node.beginIdentityProof).not.toHaveBeenCalled();
+        }
+      } finally { await fixture.close(); }
+    });
   });
 
   // The link or code a signer waits on holds the request's secret: it went into the event journal, kept on disk and
@@ -135,7 +187,7 @@ describe("identity signers on Node", () => {
       throw new Error("stopped here");
     });
     try {
-      await expect(callApi(ctx, "identity.add", { provider: "nostr", fields: { bunker: `bunker://${"a".repeat(64)}?relay=wss://relay.test` } })).rejects.toThrow("stopped here");
+      await expect(callApi(ctx, "identity.add", { provider: "nostr", fields: { bunker: `bunker://${"a".repeat(64)}?relay=wss://relay.test` } })).rejects.toMatchObject({ details: { rawError: "stopped here" } });
     } finally { run.mockRestore(); }
     expect(live.filter((e) => e.type === "identity.approval").map((e) => e.url ?? e.qr)).toEqual(["https://bunker.test/auth?secret=s3cret", "pubkyauth://signin?secret=s3cret"]);
     expect(JSON.stringify(hub.replay(0))).not.toContain("s3cret");
@@ -261,15 +313,18 @@ describe("identity signers on Node", () => {
     });
   });
 
-  // Pubky's relay keeps a request five minutes: --timeout 600 waited 300 s and ended as `engine`.
-  it("refuses a --timeout longer than the Pubky relay keeps the request, before the signer runs", async () => {
+  // Pubky's relay keeps a request five minutes: --timeout 600 waited 300 s and ended as `engine`; then `bad_request`
+  // (exit 1) in the API's words, where a --timeout under 5 is a usage error naming the flag.
+  it("refuses a --timeout longer than the Pubky relay keeps the request, before the signer runs, as a usage error", async () => {
     const { ctx } = fake();
     const signer = IDENTITY_PROVIDERS.find((p) => p.id === "pubky")!.signers.find((s) => s.kind === "in-app") as InAppSigner<unknown>;
     const run = vi.spyOn(signer, "run");
     try {
-      await expect(callApi(ctx, "identity.add", { provider: "pubky", timeout: 600 })).rejects.toMatchObject({
-        code: "bad_request", message: "timeout must be a number from 5 to 300: Pubky Ring or Pubky Passport waits at most 300 s for an approval",
-      });
+      for (const timeout of [600, 900, 3]) {
+        await expect(callApi(ctx, "identity.add", { provider: "pubky", timeout })).rejects.toMatchObject({
+          code: "usage", message: `--timeout takes a number of seconds from 5 to 300 for Pubky Ring or Pubky Passport (it waits at most 300 s for an approval), not ${timeout}`,
+        });
+      }
       expect(run).not.toHaveBeenCalled();
       // At 300 its own five minutes may end before the CLI's: still a timeout, not "Nobody approved the request in time".
       run.mockImplementation(async (sctx) => { expect(sctx.waitMs).toBe(300_000); throw new SignerTimeout("Nobody approved the request in time. Start again for a new one."); });
@@ -292,9 +347,14 @@ describe("identity signers on Node", () => {
     for (const evidence of [undefined, "", " \n"]) {
       await expect(callApi(ctx, "identity.complete", { draft: ssh.draft, evidence })).rejects.toMatchObject({
         code: "usage", details: { needs: "evidence" },
-        message: `Missing what ssh-keygen printed: give it from a file (--evidence-file f) or on stdin (… | ghostly identity complete ${ssh.draft})`,
+        message: `Missing the output of the signing step (ssh-keygen): give it from a file (--evidence-file f) or on stdin (… | ghostly identity complete ${ssh.draft})`,
       });
     }
+    // The label put in a sentence where it does not read: "Missing what Sign with a key of the DID printed".
+    const did = await callApi(ctx, "identity.add", { provider: "did", subject: "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK", signer: "sign" }) as { draft: string };
+    await expect(callApi(ctx, "identity.complete", { draft: did.draft })).rejects.toMatchObject({
+      code: "usage", message: `Missing the output of the signing step (Sign with a key of the DID): give it from a file (--evidence-file f) or on stdin (… | ghostly identity complete ${did.draft})`,
+    });
     expect(node.completeIdentityProof).not.toHaveBeenCalled();
     const domain = await callApi(ctx, "identity.add", { provider: "domain", subject: "example.com", signer: "dns" }) as { draft: string };
     await expect(callApi(ctx, "identity.complete", { draft: domain.draft })).resolves.toMatchObject({ done: true });
@@ -406,5 +466,20 @@ describe("identity signers on Node", () => {
       await expect(callApi(ctx, "identity.cancel", { draft: old.draft })).rejects.toMatchObject(gone);
     } finally { vi.useRealTimers(); }
     expect(node.completeIdentityProof).toHaveBeenCalledTimes(1);
+  });
+
+  // A second `identity complete` of a draft just finished here (a script retrying after a lost answer) was told the
+  // draft expired or is another daemon's, not that it became the proof `identity list` shows.
+  it("a draft finished here says so, naming its proof", async () => {
+    const { ctx, node } = fake();
+    node.beginIdentityProof.mockResolvedValue({ draftId: "done1", binding: { v: 1, provider: "domain", subject: "example.com", key: "y".repeat(52), issuedAt: 1_800_000_000, expiresAt: 1_800_086_400, nonce: "A".repeat(22) } });
+    node.completeIdentityProof.mockResolvedValue({ id: "p1", provider: "domain", subject: "example.com", verified: true, issuedAt: 1, expiresAt: 2, sharedWith: [] });
+    const added = await callApi(ctx, "identity.add", { provider: "domain", subject: "example.com", signer: "dns" }) as { draft: string };
+    await expect(callApi(ctx, "identity.complete", { draft: added.draft })).resolves.toMatchObject({ done: true, proof: { id: "p1" } });
+    const finished = { code: "not_found", message: "This draft is already finished: its proof is p1 (ghostly identity list)" };
+    await expect(callApi(ctx, "identity.complete", { draft: added.draft })).rejects.toMatchObject(finished);
+    await expect(callApi(ctx, "identity.cancel", { draft: added.draft })).rejects.toMatchObject(finished);
+    expect(node.completeIdentityProof).toHaveBeenCalledTimes(1);
+    expect(node.cancelIdentityProof).not.toHaveBeenCalled();
   });
 });
