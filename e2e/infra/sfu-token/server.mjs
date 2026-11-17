@@ -238,7 +238,9 @@ export function startTokenService({ port = 0, host = "127.0.0.1", origin, liveki
       }
       if (act === "unban") banned.delete(target);
     } catch (error) {
-      return send(res, 502, { error: String(error.message ?? error) });
+      // The reason stays in the double's log: the engine reads only the status, and a reply carries no stack.
+      console.error("group-moderate:", error);
+      return send(res, 502, { error: "livekit" });
     }
     send(res, 200, { state: { muted: Object.fromEntries([...muted].sort(([a], [b]) => (a < b ? -1 : 1))), banned: [...banned].sort() } });
   }
