@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import {
-  DEVICE_INVITE_LIFETIME_S, ENROLL_GRANT, enrollCancelFrame, fromBase64Url, randomBytes, readTurnPacket, signTurnPacket, toBase64Url, turnKeys,
+  DEVICE_INVITE_LIFETIME_S, ENROLL_GRANT, enrollCancelFrame, fromBase64Url, identityFromSeed, randomBytes, readTurnPacket, sign, signTurnPacket, toBase64Url, turnKeys,
   type DeviceFrame, type LinkParams, type Signer, type TurnRecord,
 } from "@ghostly/core";
 import {
@@ -13,7 +13,7 @@ import { viewOf } from "../src/devices/gate";
 import { deviceSetView } from "../src/devices/links";
 import { openTurnKeeper } from "../src/devices/setup";
 import { DEVICE_KEYS_DB, closeDeviceKeysDb, loadDeviceSigningKey } from "../src/devices/signingKey";
-import type { DeviceRecord } from "../src/devices/state";
+import { firstRecord, type DeviceRecord } from "../src/devices/state";
 import { closeDevicesDb, readDeviceRecord, setDeviceMirror } from "../src/devices/store";
 import { dropDevicesDatabase, putDeviceRecord } from "./helpers/deviceRecord";
 import { FakeTurnNetwork } from "./helpers/turnNetwork";
@@ -637,6 +637,21 @@ describe("what the security review asked for", () => {
     expect(a.current()).toMatchObject({ step: "done", device: "Phone", published: true });
     expect((await readDeviceRecord(A))!.deviceSet.filter(Boolean)).toHaveLength(2);
     expect(b.current()).toMatchObject({ step: "done" });
+  });
+
+  it("an enrollment that finishes on a record another slot forced takes only that slot of it, not a key swapped in elsewhere", async () => {
+    // The joiner (slot 2) was granted the set with the MacBook active. A holder of `D` in the phone's slot writes a
+    // record that lists the joiner and swaps a key of its own in for the MacBook's, under the MacBook's name.
+    const D = randomBytes(32);
+    const [mac, phone, joined, swapped] = [11, 12, 13, 14].map((n) => identityFromSeed(new Uint8Array(32).fill(n)));
+    const granted = [{ key: toBase64Url(mac.publicKey), name: "MacBook" }, { key: toBase64Url(phone.publicKey), name: "Phone" }, { key: toBase64Url(joined.publicKey), name: "Firefox" }, null];
+    await putDeviceRecord(firstRecord(B, "standby", { turn: 5, d: toBase64Url(D), deviceSet: granted, ownSlot: 2, activeSlot: 0 }));
+    network.seed(await signTurnPacket(turnKeys(D), {
+      turn: 6, rev: 0, author: 1, active: 1, instance: randomBytes(8),
+      slots: [{ key: swapped.publicKey, name: "MacBook" }, { key: phone.publicKey, name: "Phone" }, { key: joined.publicKey, name: "Firefox" }, null],
+    }, (bytes) => sign(bytes, phone.seed)));
+    expect(await finishEnrollment(B, network, { sleep: noSleep, rounds: 2 })).toBe(true);
+    expect((await readDeviceRecord(B))!).toMatchObject({ activeSlot: 1, deviceSet: granted });
   });
 
   it("the new device gives up when no grant comes after the digits, and holds nothing", async () => {
