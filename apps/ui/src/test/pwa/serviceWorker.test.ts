@@ -155,6 +155,21 @@ describe("the worker's policy", () => {
         "/assets/ethers-abc.js", "/assets/keet-identity-key-abc.js", "/assets/pubky-abc.js", "/assets/usdt-abc.js", "/assets/wallet-abc.wasm", "/assets/zod-abc.js"]);
     });
 
+    /**
+     * Vite's own `generateBundle` deletes an entry chunk that is nothing but imports and names those in index.html. Read
+     * after that, the walk had no entry to start from: every chunk the app loads counted as online-only, and the worker
+     * precached none of them (the installed app no longer opened offline). Read before, with the names the build writes.
+     */
+    it("an entry chunk the build does not write is left out, and what it loads is still precached", () => {
+      const written = BUNDLE.map((file) => file.fileName).filter((name) => name !== "assets/index-abc.js");
+      const { precache, languages, lazy } = serviceWorkerFiles(["manifest.json", "version.json"], BUNDLE, written);
+      expect(precache).toEqual(["/", "/assets/cashu-ts-abc.js", "/assets/Chat-abc.js", "/assets/handoff-abc.js", "/assets/index-abc.css",
+        "/assets/sodium-abc.js", "/assets/vendor-abc.js", "/assets/Wallet-abc.js", "/manifest.json"]);
+      expect(languages).toEqual({ fr: ["/assets/fr-abc.js"], ja: ["/assets/ja-abc.js"] });
+      expect(lazy).not.toContain("/assets/index-abc.js");
+      expect(lazy).not.toContain("/assets/vendor-abc.js");
+    });
+
     it("an online-only module another screen imports as it loads stays: the path to it is not the online flow's", () => {
       const bundle = BUNDLE.map((file) => file.fileName === "assets/Chat-abc.js" ? { ...file, imports: ["assets/vendor-abc.js", "assets/pubky-abc.js"] } : file);
       expect(optionalFiles(bundle).onlineOnly).not.toContain("assets/pubky-abc.js");
