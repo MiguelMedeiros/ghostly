@@ -73,6 +73,7 @@
     "locked": "O perfil foi bloqueado antes de o app abrir. Abra-o de novo.",
     "needsFiles": "Os arquivos dele ainda não estão neste dispositivo.",
     "network": "Não foi possível acessar o servidor.",
+    "notInstalled": "Este app não está mais instalado.",
     "notListed": "Esta loja não lista mais esse app.",
     "notSigned": "Assinatura inválida. O Ghostly não vai instalar.",
     "notStore": "Esse link não tem uma loja válida.",
