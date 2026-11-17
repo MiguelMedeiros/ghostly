@@ -257,6 +257,13 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
       if (message.sentAt !== undefined) row.sentAt = message.sentAt;
       moved = true;
     }
+    // A file that waited for the contact and went live: the engine's row has no delivery since, the row here loses its
+    // waiting state with it (only the engine sets it; a text of mine keeps the status the chat gave it).
+    if (previous?.delivery === "waiting" && message.sender === "me" && !message.delivery) {
+      const row = change();
+      delete row.delivery;
+      delete row.deliveryError;
+    }
     if (previous && mirrorable(message)) {
       if (message.delivery && (previous.delivery !== message.delivery || previous.deliveryError !== message.deliveryError)) {
         change().delivery = message.delivery;
