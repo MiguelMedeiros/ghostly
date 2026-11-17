@@ -1004,8 +1004,12 @@ const METHODS: Record<string, Method> = {
   },
   /** Invitations over the chats named accepted by the daemon itself (`group auto on --from`); no argument: the setting. */
   async "group.auto"(ctx, params) {
-    if (params.on === undefined) return { autoJoin: ctx.groupAuto.get() };
-    return { autoJoin: ctx.groupAuto.set({ on: bool(params, "on"), from: list(params, "from") }) };
+    const on = params.on === undefined ? undefined : bool(params, "on");
+    // The chats go with on: true, as `group auto --from` refuses them without on: before, from with on: false dropped
+    // every chat on the list, and from alone only read the setting, each without a word.
+    if (on !== true && list(params, "from").length > 0) throw new CliError("bad_request", "from goes with on: true");
+    if (on === undefined) return { autoJoin: ctx.groupAuto.get() };
+    return { autoJoin: ctx.groupAuto.set({ on, from: list(params, "from") }) };
   },
   async "group.get"(ctx, params) {
     return groupJson(groupOf(ctx, params, "chat show <chat>"), bool(params, "showSecret"));
