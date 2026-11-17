@@ -19,6 +19,7 @@ import { PublicProfileDetails } from "./PublicProfileDetails";
 import "./composer-identities.css";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
 import { deckArrows } from "../deck/arrows";
+import { ownDirection } from "../../lib/ownDirection";
 import { problemLine } from "../../lib/problemText";
 
 type Shared = NonNullable<LinkView["identities"]>["shared"][number];
@@ -253,7 +254,7 @@ export function IdentityPicker({ peerKey, contact, initial, onManage, onAdding, 
               {entry.card.attested ? t("identities.picker.useAccount") : t("identities.picker.use", { label: entry.card.label })}<ForwardArrow />
             </button>}
         </>}
-        {ids?.error && <p role="alert" className="px-1 m-0 text-xs text-danger" data-testid="composer-identities-error">{problemLine(ids.error, t)}</p>}
+        {ids?.error && <p role="alert" dir={ownDirection(problemLine(ids.error, t))} className="px-1 m-0 text-xs text-danger" data-testid="composer-identities-error">{problemLine(ids.error, t)}</p>}
         {mine.length > 0 && <button type="button" data-testid="composer-identities-manage" onClick={manage} className="composer-identities-manage">{t("identities.picker.manageAll")}</button>}
       </>}
     </div>)
@@ -305,7 +306,7 @@ function GhostlyBack({ t, card, contact, others, busy, turning, done, error, act
           </button>
         </div>}
         {failed && <p role="alert" className="id-card-back-note" data-testid="composer-identity-copy-error">{t("identities.add.copyError")}</p>}
-        {error && <p role="alert" className="m-0 text-xs text-danger" data-testid="composer-identities-error">{error}</p>}
+        {error && <p role="alert" dir={ownDirection(error)} className="m-0 text-xs text-danger" data-testid="composer-identities-error">{error}</p>}
       </div>
       <span className="id-card-mrz id-card-back-mrz" aria-hidden="true">{card.mrz ?? machineLine(card.label, card.subject)}</span>
     </div>
@@ -369,7 +370,7 @@ function IdentityBack({ t, entry, contact, now, busy, turning, stopping, done, e
           {retry ? <button type="button" data-testid="composer-identity-stop" className="composer-identities-manage" disabled={turning} aria-disabled={!!busy || undefined} aria-busy={(working && stopping) || undefined} onClick={onStop}>{working && stopping ? t("identities.ghostly.stopping") : t("identities.stopSharing")}</button>
             : on && <p className="id-card-back-note">{t("identities.picker.stopNote", { contact })}</p>}
         </div>}
-        {error && <p role="alert" className="m-0 text-xs text-danger" data-testid="composer-identities-error">{error}</p>}
+        {error && <p role="alert" dir={ownDirection(error)} className="m-0 text-xs text-danger" data-testid="composer-identities-error">{error}</p>}
       </div>
       <span className="id-card-mrz id-card-back-mrz" aria-hidden="true">{machineLine(card.label, card.subject)}</span>
     </div>
