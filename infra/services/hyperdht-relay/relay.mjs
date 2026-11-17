@@ -572,6 +572,9 @@ function guardProtocol(protocol, drop) {
  * protomux hands every error a client's messages raise (one it cannot decode, a throw in dht-relay's handler for it) to
  * safety-catch, which throws a TypeError or a RangeError again where nothing catches it: one client's message would end
  * the process and every client with it. The client's own mux now drops that client only.
+ *
+ * A client opens one session, dht-relay's, and protomux keeps a slot for every session a client opens (a rejected one
+ * too) until it leaves: one that opens a second is dropped, the rest of what it sent read as nothing.
  */
 function guardMux(mux, drop) {
   const fail = error => {
@@ -582,6 +585,20 @@ function guardMux(mux, drop) {
   mux._safeDestroy = fail
   mux._safeDestroyBound = fail
   mux._warn = error => mux.stream.emit('warning', error)
+  const onopensession = mux._onopensession.bind(mux)
+  let opened = false
+  mux._onopensession = state => {
+    if (!opened) {
+      opened = true
+      return onopensession(state)
+    }
+    if (!mux._destroying) {
+      drop('sessions')
+      mux._destroying = true
+      mux.stream.destroy()
+    }
+    return null
+  }
 }
 
 // Not in the package's exports: loaded by path, the same module dht-relay itself uses (0.4.3 is pinned).
