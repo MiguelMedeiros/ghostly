@@ -18,6 +18,7 @@
   "notNow": "Agora não",
   "offline": "Offline",
   "offlineHint": "Suas conversas estão aqui. Nada sai até você voltar a ficar online.",
+  "reconnected": "Conectado ao Ghostly de novo",
   "reconnecting": "Reconectando…",
   "reconnectingHint": "Esta aba perdeu o Ghostly e continua tentando. As mensagens novas aparecem aqui quando ele voltar.",
   "shareDropped": "Mais {{count}} compartilhamentos não puderam ser guardados: {{waiting}} já estavam esperando.",
