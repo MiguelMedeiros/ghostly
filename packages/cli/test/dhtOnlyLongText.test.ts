@@ -32,6 +32,12 @@ function saysWhy(result: Result) {
   expect(failure.message).toContain(details!.note as string);
 }
 
+/** `forward` of such a text into the chat: its result there has the note `send` answers. */
+function forwardSaysWhy(answer: Record<string, unknown>) {
+  const [result] = answer.results as Record<string, unknown>[];
+  expect(result).toMatchObject({ kind: "chat", error: null, note: expect.stringContaining("you and the contact keep this chat on the DHT only: it goes once both choose a live transport (ghostly chat transport bob auto), or shorten it") });
+}
+
 beforeAll(async () => {
   relays = await Promise.all([localRelay(), localRelay()]);
   dht = await hyperdhtTestnet();
@@ -66,6 +72,11 @@ it("a text past 256 bytes in a DHT-only chat answers at once (or at an explicit 
   expect(kept.note).toContain("256 bytes the DHT carries");
   expect(kept.note).toContain("ghostly chat transport bob auto");
   for (const wait of ["sent", "delivered"]) saysWhy(await as(alice, "send", "bob", waited, "--wait", wait, "--timeout", "2"));
+  // Forwarded into the same chat it waits as well: the chat's result says why, and so does a `--wait sent` timeout.
+  forwardSaysWhy(ok(await as(alice, "forward", "bob", kept.messageId as string, "--to", "bob")));
+  const forwardWait = await as(alice, "forward", "bob", kept.messageId as string, "--to", "bob", "--wait", "sent", "--timeout", "2");
+  saysWhy(forwardWait);
+  forwardSaysWhy((forwardWait.json.error as { details: Record<string, unknown> }).details);
 
   // A one-shot: no 30 s wait for a send that cannot come, no timeout.
   await daemons.get(alice)!.stop();
@@ -76,7 +87,7 @@ it("a text past 256 bytes in a DHT-only chat answers at once (or at an explicit 
   expect(oneShot.note).toContain("you and the contact keep this chat on the DHT only");
   for (const wait of ["sent", "delivered"]) saysWhy(await as(alice, "send", "bob", waited, "--wait", wait, "--timeout", "2"));
 
-  // What the note says ends the wait does: both choose a live transport, and both texts reach the contact.
+  // What the note says ends the wait does: both choose a live transport, and every text, the forwarded ones too, reaches the contact.
   const back = new Running(["--home", alice, "daemon"], env);
   running.push(back);
   await back.waitFor((l) => l.daemon === "ready");
@@ -84,5 +95,5 @@ it("a text past 256 bytes in a DHT-only chat answers at once (or at an explicit 
   ok(await as(bob, "chat", "transport", "alice", "auto"));
   ok(await as(alice, "chat", "wait", "bob", "--until", "live", "--timeout", "90"));
   await expect.poll(async () => (ok(await as(bob, "chat", "history", "alice", "--limit", "10")).messages as { text: string; from: string }[])
-    .filter((m) => m.from === "peer" && (m.text === long || m.text === waited)).length, { timeout: 60_000, interval: 1_000 }).toBe(6);
+    .filter((m) => m.from === "peer" && (m.text === long || m.text === waited)).length, { timeout: 60_000, interval: 1_000 }).toBe(8);
 });
