@@ -62,9 +62,6 @@ export const ANDROID_CERT_SHA256 = "DE:9A:AB:A1:32:50:BC:4B:0D:22:0F:17:95:F2:32
 /** The oldest Android the app installs on: minSdkVersion 26 in apps/desktop/tauri.android.conf.json. */
 export const ANDROID_MIN = "8.0";
 
-/** The release the site offers, for the finale. */
-export const RELEASE_URL = releaseUrl(VERSION);
-
 export const DOWNLOADS = downloads(VERSION);
 
 /** The installer a download strip should lead with. */

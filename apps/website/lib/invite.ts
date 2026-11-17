@@ -49,11 +49,6 @@ function payloadBytes(words: number[]): number | null {
   return Math.floor(bits / 8);
 }
 
-/** Is this fragment meant as an invite? Anything starting `ghostly1`, in any case. */
-export function looksLikeInvite(fragment: string): boolean {
-  return /^ghostly1/i.test(fragment.trim());
-}
-
 /** What a token is copied with before it, and after it (packages/core/src/text.ts `unwrapPasted`). */
 const PASTE_OPENERS = "\"'“‘«‹<[({`";
 const PASTE_CLOSERS = "\"'”’»›>])}`.,!?;:…";
