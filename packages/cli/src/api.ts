@@ -10,7 +10,7 @@ import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PA
 import { asCliError, CliError } from "./errors";
 import { shellWord } from "./shellWord";
 import {
-  bool, chatOf, chatOrGroup, dhtOnly, findChat, findChatOrGroup, findGroup, groupById, groupCalled, groupNameOf, groupOf, groupPrefixed, inviteTaken, keptForJoin, list, messageOf, noMessage, nobodyJoined, node, notInYet, notInYetError, num, oneOf, oneShotWaits, settingsOf, shownName, sinceSeq, somebodyJoined, state, str, transportOffered, waitForState,
+  bool, chatOf, chatOrGroup, dhtOnly, findChat, findChatOrGroup, findGroup, groupById, groupCalled, groupNameOf, groupOf, groupPrefixed, inviteTaken, keptForJoin, list, messageOf, noMessage, nobodyJoined, node, notInYet, notInYetError, num, oneOf, oneShotWaits, settingsOf, sharedGroupIds, shownName, sinceSeq, somebodyJoined, state, str, transportOffered, waitForState,
   type ApiContext, type CallScope, type Method, type Params, type RefPlace,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
@@ -910,7 +910,7 @@ const METHODS: Record<string, Method> = {
     let link: ReturnType<typeof chatOf>;
     try {
       // `--purge` stays in the command offered: pasted without it, the text stayed in the profile's folder up to an hour.
-      link = notAGroup(ctx, params, () => chatOf(ctx, params), (shown, id) => `ghostly message delete ${groupPrefixed(typed) === null && reachesGroup(typed) ? shown : shellWord(groupPrefixed(typed) === null ? `group:${typed}` : typed, `group:${id}`)} ${ref === "<message>" ? ref : shellWord(ref, "<message>")} --everyone${purge ? " --purge" : ""}`);
+      link = notAGroup(ctx, params, () => chatOf(ctx, params), (shown, id) => `ghostly message delete ${id === undefined || (groupPrefixed(typed) === null && reachesGroup(typed)) ? shown : shellWord(groupPrefixed(typed) === null ? `group:${typed}` : typed, `group:${id}`)} ${ref === "<message>" ? ref : shellWord(ref, "<message>")} --everyone${purge ? " --purge" : ""}${byItsId(id)}`);
     } catch (error) {
       // Another member's message: only its author deletes it, so the `--everyone` offered was then refused as not mine,
       // a second command to learn it cannot be deleted at all. A history that cannot be read keeps that hint.
@@ -1458,30 +1458,38 @@ function joinRefused(link: string, error: unknown): unknown {
  * never has the group.
  */
 function chatNotGroupLink(ctx: ApiContext, params: Params) {
-  return notAGroup(ctx, params, () => chatOf(ctx, params), (shown) => `it connects through its members' chats, with no transport of its own (ghostly group show ${shown})`);
+  return notAGroup(ctx, params, () => chatOf(ctx, params), (shown, id) => `it connects through its members' chats, with no transport of its own (${id === undefined ? "ghostly group list" : `ghostly group show ${shown}`})`);
 }
 
 /**
  * A chat command given a group's id, prefix or name: `not_found` that says it is a group, with `hint`: the group
  * command that takes it (`react` on a group, where `group react` is meant), or what to do where none does. `group:<id>`,
  * the form `pin` and `saved` take, is that group too (it read "No chat" before). A name no chat and no group has stays
- * the chat's error.
+ * the chat's error. A name more than one group has says so too, with no `id` for `hint` (`shown` is `<group>`): the
+ * group to name is one of theirs, by its id (`ghostly group list`).
  */
-function notAGroup<T>(ctx: ApiContext, params: Params, chat: () => T, hint: (shown: string, id: string) => string): T {
+function notAGroup<T>(ctx: ApiContext, params: Params, chat: () => T, hint: (shown: string, id?: string) => string): T {
   try { return chat(); } catch (error) {
     if (!(error instanceof CliError) || error.code !== "not_found") throw error;
     const ref = str(params, "chat", true);
     const named = groupPrefixed(ref) ?? ref;
     let group: GroupView;
-    try { group = findGroup(state(ctx).groups, named); } catch { throw error; }
+    try { group = findGroup(state(ctx).groups, named); } catch (inner) {
+      // A name two groups share is still a group's (it read `No chat`): the hint, with no one group's id to name.
+      if (sharedGroupIds(inner)) throw new CliError("not_found", `${JSON.stringify(ref)} names more than one group, not a chat: ${hint("<group>")}`);
+      throw error;
+    }
     const shown = shellWord(named, group.id);
     throw new CliError("not_found", `${JSON.stringify(ref)} is a group, not a chat: ${hint(shown, group.id)}`, { group: group.id });
   }
 }
 
+/** Where a command offered for a name more than one group has (no `id`) finds the id of the one meant. */
+const byItsId = (id: string | undefined) => (id === undefined ? ", with the id of the group meant (ghostly group list)" : "");
+
 /** The chat a chat command with a group twin names: a group's name says so, with `command`, the twin (see `notAGroup`). */
 function chatNotGroup(ctx: ApiContext, params: Params, command: string, rest = "") {
-  return notAGroup(ctx, params, () => chatOf(ctx, params), (shown) => `ghostly ${command} ${shown}${rest ? ` ${rest}` : ""}`);
+  return notAGroup(ctx, params, () => chatOf(ctx, params), (shown, id) => `ghostly ${command} ${shown}${rest ? ` ${rest}` : ""}${byItsId(id)}`);
 }
 
 /**
