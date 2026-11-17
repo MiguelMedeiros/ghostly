@@ -5,6 +5,7 @@ import { ChatTextSearch, SEARCH_KEPT_MS } from "../src/engine/chatSearch";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { STORES, transact } from "../src/shared/idb";
+import { refusedRow } from "../src/shared/refusals";
 import type { StoredLink, StoredMessage } from "../src/shared/types";
 // covers: chats.list.search
 
@@ -78,6 +79,28 @@ describe("the chats' texts searched in the engine", () => {
     await expect(search.found(["a"], "hello")).rejects.toThrow("store closed");
     fail = false;
     expect(await search.found(["a"], "hello")).toEqual(["a"]);
+  });
+
+  it("finds no chat by a line the pages draw as the app's own: a joined line, a refused payment's", async () => {
+    const reason = "Ecash from 127.0.0.1 is not accepted";
+    const stored: Record<string, StoredMessage[]> = {
+      // Every paired chat has its joined line: theirs (as the engine took it) and mine.
+      joined: [{ ...row("joined", "1", "👋 Alice joined"), joinLine: true }, row("joined", "2", "👋 joined", "me")],
+      refused: [{ ...row("refused", "peer_7_refused", ""), ...refusedRow({ amount: 21, network: "mainnet", reason }) }],
+      // A line an older version stored in English, without its values.
+      older: [row("older", "peer_8_refused", "Could not receive 1,000 sats: This ecash was already spent somewhere else")],
+      // The same words written by a person are their messages.
+      texts: [row("texts", "peer_9", "We joined the club"), row("texts", "peer_10", "Could not receive 5 sats: try again", "peer")],
+    };
+    const search = new ChatTextSearch(async (linkId) => stored[linkId] ?? []);
+    const found = (query: string) => search.found(Object.keys(stored), query);
+    expect(await found("joined")).toEqual(["texts"]);
+    expect(await found("alice")).toEqual([]);
+    expect(await found("sats")).toEqual(["texts"]);
+    expect(await found("could not receive")).toEqual(["texts"]);
+    expect(await found(reason)).toEqual([]);
+    expect(await found("already spent")).toEqual([]);
+    expect(await found("the club")).toEqual(["texts"]);
   });
 });
 
