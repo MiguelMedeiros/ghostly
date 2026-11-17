@@ -72,7 +72,8 @@ Other settings:
   Left out, any origin may connect. A
   refused one gets 403, and the log says `refused origin "<origin>"` once an hour per origin, for at most 16 origins
   an hour. It keeps other websites from using the relay; it is no defence against other programs.
-- `GHOSTLY_RELAY_CLOUDFLARE=1` counts each client by `CF-Connecting-IP`, behind Cloudflare (a tunnel).
+- `GHOSTLY_RELAY_CLOUDFLARE=1` counts each client by `CF-Connecting-IP`, behind Cloudflare (a tunnel). It does not go
+  with `GHOSTLY_RELAY_PROXIES`: both set stops the start, since behind nginx or Caddy a client writes that header.
 - `GHOSTLY_RELAY_PROXIES` is the number of reverse proxies in front of it (`1` for one nginx): each client then
   counts by the `X-Forwarded-For` entry that many from the end, the ones before it being the client's to write.
   Without either, the headers are ignored, and the first request that carries one logs which setting is missing
@@ -116,7 +117,7 @@ machine or no name at all: one line names the setting instead of a stack trace, 
 shell or an `.env` file next to it):
 
 - `GHOSTLY_RELAY_CLOUDFLARE=0`, or every client could name its own address in that header; behind nginx or Caddy add
-  `GHOSTLY_RELAY_PROXIES=1`;
+  `GHOSTLY_RELAY_PROXIES=1` (with the default `GHOSTLY_RELAY_CLOUDFLARE=1` left on, the relay does not start);
 - `GHOSTLY_RELAY_ORIGINS` with the origins of the web app you serve, and `tauri://localhost,http://tauri.localhost`
   for the Desktop, or every browser on it is refused (403), and so is every Desktop with Hide my IP on.
 

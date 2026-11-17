@@ -1300,7 +1300,8 @@ export const networkOf = ({ testnet, bootstrap }) =>
  * The relay's settings from its environment (server.mjs): PORT (49443), HOST (0.0.0.0; 127.0.0.1 behind proxies
  * or Cloudflare), GHOSTLY_HYPERDHT_BOOTSTRAP,
  * GHOSTLY_HYPERDHT_TESTNET, GHOSTLY_RELAY_ORIGINS, GHOSTLY_RELAY_CLOUDFLARE (1 or 0), GHOSTLY_RELAY_PROXIES (0) and
- * GHOSTLY_RELAY_<LIMIT>. Throws on one present but not of its kind, and on a testnet with bootstrap nodes. `ignored`
+ * GHOSTLY_RELAY_<LIMIT>. Throws on one present but not of its kind, on a testnet with bootstrap nodes, and on
+ * GHOSTLY_RELAY_CLOUDFLARE with GHOSTLY_RELAY_PROXIES. `ignored`
  * names the other GHOSTLY_RELAY_* and GHOSTLY_HYPERDHT_* variables (see ignoredSettings), for server.mjs to print.
  */
 export function readSettings (env) {
@@ -1315,6 +1316,8 @@ export function readSettings (env) {
   if (testnet && bootstrap.length) throw new Error(`GHOSTLY_HYPERDHT_TESTNET=${JSON.stringify(env.GHOSTLY_HYPERDHT_TESTNET)}: expected no GHOSTLY_HYPERDHT_BOOTSTRAP with it (the testnet is a network of its own)`)
   const proxies = setting(env, 'GHOSTLY_RELAY_PROXIES', 0, 'count')
   const cloudflare = setting(env, 'GHOSTLY_RELAY_CLOUDFLARE', false, 'flag')
+  // forwardedAddress reads CF-Connecting-IP before X-Forwarded-For: behind nginx or Caddy a client writes its own.
+  if (proxies && cloudflare) throw new Error(`GHOSTLY_RELAY_PROXIES=${JSON.stringify(env.GHOSTLY_RELAY_PROXIES)}: expected no GHOSTLY_RELAY_CLOUDFLARE=1 with it (behind Cloudflare set GHOSTLY_RELAY_CLOUDFLARE alone; behind nginx or Caddy set GHOSTLY_RELAY_CLOUDFLARE=0)`)
   return {
     port: setting(env, 'PORT', 49443, 'port'),
     // Behind a proxy only the proxy should reach it: anyone else could write the header a client is counted by.
