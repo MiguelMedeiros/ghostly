@@ -1465,8 +1465,8 @@ function chatNotGroupLink(ctx: ApiContext, params: Params) {
  * A chat command given a group's id, prefix or name: `not_found` that says it is a group, with `hint`: the group
  * command that takes it (`react` on a group, where `group react` is meant), or what to do where none does. `group:<id>`,
  * the form `pin` and `saved` take, is that group too (it read "No chat" before). A name no chat and no group has stays
- * the chat's error. A name more than one group has says so too, with no `id` for `hint` (`shown` is `<group>`): the
- * group to name is one of theirs, by its id (`ghostly group list`).
+ * the chat's error. A name more than one group has says so too, with no `id` for `hint` (`shown` is `<group>`) and
+ * their ids in `details.groups`: the group to name is one of theirs, by its id.
  */
 function notAGroup<T>(ctx: ApiContext, params: Params, chat: () => T, hint: (shown: string, id?: string) => string): T {
   try { return chat(); } catch (error) {
@@ -1476,7 +1476,8 @@ function notAGroup<T>(ctx: ApiContext, params: Params, chat: () => T, hint: (sho
     let group: GroupView;
     try { group = findGroup(state(ctx).groups, named); } catch (inner) {
       // A name two groups share is still a group's (it read `No chat`): the hint, with no one group's id to name.
-      if (sharedGroupIds(inner)) throw new CliError("not_found", `${JSON.stringify(ref)} names more than one group, not a chat: ${hint("<group>")}`);
+      const shared = sharedGroupIds(inner);
+      if (shared) throw new CliError("not_found", `${JSON.stringify(ref)} names more than one group, not a chat: ${hint("<group>")}`, { groups: shared });
       throw error;
     }
     const shown = shellWord(named, group.id);

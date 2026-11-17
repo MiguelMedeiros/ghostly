@@ -61,4 +61,17 @@ describe("a name two groups share, where only a 1:1 chat goes", () => {
     expect(remove.message).toBe(`"group:zz" names more than one group, not a chat: ghostly message delete <group> m1 --everyone, with the id of the group meant (ghostly group list)`);
     expect(remove.code).toBe("not_found");
   });
+
+  // `details.groups`: the ids of the groups that have the name, as `findGroup` refuses it with (`details.matches`).
+  it.each([
+    ["call.hangup", { call: "zz" }],
+    ["call.start", { chat: "group:zz" }],
+    ["chat.connect", { chat: "zz" }],
+    ["chat.react", { chat: "ZZ", message: "m1", emoji: "👍" }],
+    ["chat.delete", { chat: "zz", message: "m1" }],
+  ] as const)("%s answers not_found, as for one group's name, with the groups' ids in details.groups", async (method, params) => {
+    const error = await refusal(callApi(fake(), method, params));
+    expect(error).toMatchObject({ code: "not_found", details: { groups: ["g1zz", "g2zz"] } });
+    expect(error.details).toEqual({ groups: ["g1zz", "g2zz"] });
+  });
 });
