@@ -1124,7 +1124,7 @@ const METHODS: Record<string, Method> = {
     const group = groupOf(ctx, params);
     if (!bool(params, "yes")) throw new CliError("confirm", "Leaving a group deletes its history and files on this device; pass --yes (yes: true over the socket) to go on");
     const ref = str(params, "group", true);
-    const { admin } = await node(ctx).leaveGroup({ groupId: group.id }).catch((error) => { throw leaveRefused(group, ref, error); });
+    const { admin } = await node(ctx).leaveGroup({ groupId: group.id }).catch((error) => { throw leaveRefused(ctx, group, ref, error); });
     // The member who became the admin, named from the roster read before leaving: the group is gone from the state now.
     const next = admin ? group.members.find((m) => m.key === admin) : undefined;
     return { left: group.id, ...(admin ? { admin: { key: admin, name: next?.nick ?? null } } : {}) };
@@ -1132,8 +1132,11 @@ const METHODS: Record<string, Method> = {
   async "group.forget"(ctx, params) {
     const group = groupOf(ctx, params, "chat remove <chat> --yes");
     if (!bool(params, "yes")) throw new CliError("confirm", "Forgetting a group deletes its history on this device; pass --yes (yes: true over the socket) to go on");
-    await node(ctx).forgetGroup({ groupId: group.id });
-    return { forgotten: group.id };
+    // A community's member nobody is connected to: the engine deletes it here anyway, its leave unsaid (the app's
+    // `unsaidNext`). An admin's is refused, as its leave is.
+    const unsaid = group.profile === "community" && group.status === "active" && !group.isAdmin && group.members.some((m) => !m.me) && !group.community?.connected;
+    await node(ctx).forgetGroup({ groupId: group.id }).catch((error) => { throw nobodyForLeave(ctx, group, str(params, "group", true), error) ?? error; });
+    return { forgotten: group.id, ...(unsaid && { warning: `Nobody in ${groupCalled(group)} was connected to take your leave: it went from this device anyway, and the others will still list you as a member` }) };
   },
   async "group.accept"(ctx, params) {
     const group = groupOf(ctx, params);
@@ -1331,13 +1334,31 @@ export function groupSendRefused(error: string): CliError {
 /** The engine's admin who may not leave: the app's words say "make someone the admin", which names no command here. */
 const ADMIN_ALONE = "You are the admin and nobody else in the group is online to take over. Try again when a member is, or make someone the admin first.";
 
+/** A community's leave (or an admin's forget, which leaves first) with no edge to a member to carry it. */
+const NOBODY_FOR_LEAVE = "Nobody in the group is connected right now to take your leave. Try again in a moment.";
+
+/**
+ * A community's leave nobody was connected to take, said with the CLI's next step: "Try again in a moment" never passed
+ * in a one-shot, which has no edge yet when it runs, and every member is refused alike (`group admin` hands nothing on
+ * here). The code stays the engine's. Undefined for other errors.
+ */
+function nobodyForLeave(ctx: ApiContext, group: GroupView, ref: string, error: unknown): CliError | undefined {
+  if (!(error instanceof Error) || error.message !== NOBODY_FOR_LEAVE) return undefined;
+  const shown = shellWord(ref, group.id), show = `ghostly group show ${shown} says who is`;
+  return new CliError("engine", ctx.mode === "one-shot"
+    ? `Nobody in ${groupCalled(group)} is connected to take your leave, and a command without a daemon has no connection yet: keep this profile online (ghostly daemon --detach), then ghostly group leave ${shown} --yes once a member is (${show})`
+    : `Nobody in ${groupCalled(group)} is connected to take your leave: try again when a member is online (${show})`);
+}
+
 /**
  * `group leave` the engine refused, said with the CLI's next step: an invitation not joined yet answered "Group not
- * found" of a group `group show` lists (its way out is `group decline`), and an admin alone online "make someone the
- * admin", the app's words. The code stays the engine's.
+ * found" of a group `group show` lists (its way out is `group decline`), an admin alone online "make someone the
+ * admin", the app's words, and a community nobody is connected to (`nobodyForLeave`). The code stays the engine's.
  */
-function leaveRefused(group: GroupView, ref: string, error: unknown): unknown {
+function leaveRefused(ctx: ApiContext, group: GroupView, ref: string, error: unknown): unknown {
   if (!(error instanceof Error)) return error;
+  const nobody = nobodyForLeave(ctx, group, ref, error);
+  if (nobody) return nobody;
   const shown = shellWord(ref, group.id);
   if (error.message === ADMIN_ALONE) return new CliError("engine", `You are the admin and nobody else in ${groupCalled(group)} is online to take over: try again when a member is, or make one the admin first (ghostly group admin ${shown} <member key>)`);
   const yet = error.message === "Group not found" ? notInYet(group, ref, true) : undefined;
