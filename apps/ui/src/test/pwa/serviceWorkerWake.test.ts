@@ -656,6 +656,53 @@ describe("the worker's limit on wake-ups", () => {
       expect(keys).toContain("kept|tok-kept2|call");
       expect(await takeWakeSlot("kept", "tok-kept2", true, T0 + 5_000)).toBe(false);
     });
+
+    it("does not keep the rows of tokens that no longer limit anything (a chat muted or deleted gets a new token)", async () => {
+      const DAY = 24 * 60 * 60_000;
+      for (let era = 0; era < 20; era++) {
+        for (let chat = 0; chat < 5; chat++) {
+          expect(await takeWakeSlot("rot", `tok-${era}-${chat}`, false, T0 + era * DAY)).toBe(true);
+          expect(await takeWakeSlot("rot", `tok-${era}-${chat}`, "online", T0 + era * DAY)).toBe(true);
+        }
+      }
+      resetWakeLimitMemory();
+      const db = await new Promise<IDBDatabase>((resolve, reject) => { const r = indexedDB.open("ghostly-wake-limit", 1); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
+      const keys = await new Promise<IDBValidKey[]>((resolve) => { const r = db.transaction("shown").objectStore("shown").getAllKeys(); r.onsuccess = () => resolve(r.result); });
+      db.close();
+      // Only the last era's rows: every older one is past the longest gap.
+      expect(keys.filter((key) => String(key).startsWith("rot|")).sort()).toEqual(
+        Array.from({ length: 5 }, (_, chat) => [`rot|tok-19-${chat}|message`, `rot|tok-19-${chat}|online`]).flat().sort(),
+      );
+      // And the rows kept still hold: the same chat is not shown again inside its gap.
+      expect(await takeWakeSlot("rot", "tok-19-0", false, T0 + 19 * DAY + 60_000)).toBe(false);
+      expect(await takeWakeSlot("rot", "tok-19-0", "online", T0 + 19 * DAY + 10 * 60_000)).toBe(false);
+    });
+
+    it("keeps the row it takes when that token's own row was spent", async () => {
+      expect(await takeWakeSlot("own", "tok-own", false, T0)).toBe(true);
+      expect(await takeWakeSlot("own", "tok-own", false, T0 + 31 * 60_000)).toBe(true);
+      expect(await takeWakeSlot("own", "tok-own", false, T0 + 31 * 60_000 + 1_000)).toBe(false);
+    });
+
+    it("keeps a row another push wrote a little later than its own time (two pushes handled at once)", async () => {
+      expect(await takeWakeSlot("race", "tok-b", false, T0 + 100)).toBe(true);
+      expect(await takeWakeSlot("race", "tok-a", false, T0)).toBe(true);
+      expect(await takeWakeSlot("race", "tok-b", false, T0 + 10_000)).toBe(false);
+      vi.stubGlobal("indexedDB", undefined);
+      resetWakeLimitMemory();
+      expect(await takeWakeSlot("race", "tok-d", false, T0 + 100)).toBe(true);
+      expect(await takeWakeSlot("race", "tok-c", false, T0)).toBe(true);
+      expect(await takeWakeSlot("race", "tok-d", false, T0 + 10_000)).toBe(false);
+    });
+
+    it("drops spent rows from the memory fallback too", async () => {
+      vi.stubGlobal("indexedDB", undefined);
+      resetWakeLimitMemory();
+      expect(await takeWakeSlot("", "tok-old", true, T0)).toBe(true);
+      expect(await takeWakeSlot("", "tok-new", true, T0 + 31 * 60_000)).toBe(true);
+      // tok-old's row went when tok-new took its slot: read with the clock set back, it is not there to hold a call back.
+      expect(await takeWakeSlot("", "tok-old", true, T0 + 1_000)).toBe(true);
+    });
   });
 });
 
