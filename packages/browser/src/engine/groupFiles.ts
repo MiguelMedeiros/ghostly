@@ -123,6 +123,11 @@ export interface GroupFilesHost {
   sendData?(linkId: string, id: string, offset: number, data: Uint8Array): boolean;
   /** Resolves once the edge's session can take another data frame. */
   writable?(linkId: string): Promise<void> | undefined;
+  /**
+   * Bytes still to come of the files the 1:1 chats took here (`FileDesk.chatsComing`), with `room` left: a group file
+   * is fetched only where it fits beside them too. Absent: none.
+   */
+  chatsComing?(room: number): number;
 }
 
 /** Me in a group I am active in, and who could read one of its messages. */
@@ -336,6 +341,8 @@ export class GroupFileDesk {
   /** `<group>\n<message id>` → local id. */
   private readonly byMessage = new Map<string, string>();
   private readonly wants = new Map<string, Want>();
+  /** Files just chosen to be fetched by themselves, before their want counts them: the room they will take (`reserve`). */
+  private readonly reserved = new Set<{ size: number }>();
   /**
    * The want last asked on each edge (by link id), and its file: whether a file is asked of an edge's member is read here,
    * not by going through every want each time (`askedOf`). An entry the want has moved on from is dropped when read.
@@ -550,8 +557,10 @@ export class GroupFileDesk {
     // Pace). Counted as they come, so a catch-up of files sent over hours is one burst: none of them is lost to it.
     const paced = this.pace(this.takenPace, `${groupId}\n${m.sender}`, GROUP_FILE_LIMITS.announceTaken, GROUP_FILE_LIMITS.announceWindowMs).take();
     const id = groupFileId(groupId, "in");
-    // No room here for it: it waits for a Download, which says so, rather than be asked for and refused here.
-    const auto = paced && this.deps.settings().autoDownloads && fetchesByItself(m.file, this.keptAutomatically(groupId)) && await this.hasRoom(m.file.size);
+    // No room here for it beside what is still to come: it waits for a Download, which says so, rather than be asked for
+    // and refused here. The room it fits in is held for it from now (`reserve`): announcements at once each see the others.
+    const reserved = paced && this.deps.settings().autoDownloads && fetchesByItself(m.file, this.keptAutomatically(groupId)) ? await this.reserve(m.file.size) : undefined;
+    const auto = !!reserved;
     const holders = this.ahead.get(`${groupId}\n${m.id}`) ?? [];
     this.ahead.delete(`${groupId}\n${m.id}`);
     const arrived = laterEpoch(m.id, m.epoch);
@@ -559,10 +568,15 @@ export class GroupFileDesk {
     const { name, size, mime, voice, video, image } = m.file;
     // Known at once: the same message coming again meanwhile (another copy of it) is this file.
     this.add(kept);
-    // No bytes yet: where they go is decided when they come (`GroupFileStore.write`).
-    await this.deps.store.put({ id, linkId: `group:${groupId}`, direction: "in", digest: m.file.d, createdAt: this.deps.now(),
-      metadata: { name, size, mime, timestamp: this.deps.now(), voice, video, image },
-      transfer: { state: "transferring", transferred: 0, size }, group: { message: m.id, author: m.sender, ...(arrived !== undefined && { arrived }), ...(auto && { auto: true }) } });
+    try {
+      // No bytes yet: where they go is decided when they come (`GroupFileStore.write`).
+      await this.deps.store.put({ id, linkId: `group:${groupId}`, direction: "in", digest: m.file.d, createdAt: this.deps.now(),
+        metadata: { name, size, mime, timestamp: this.deps.now(), voice, video, image },
+        transfer: { state: "transferring", transferred: 0, size }, group: { message: m.id, author: m.sender, ...(arrived !== undefined && { arrived }), ...(auto && { auto: true }) } });
+    } finally {
+      // Its want counts it from here on.
+      if (reserved) this.reserved.delete(reserved);
+    }
     if (auto) { this.wants.set(id, this.newWant()); this.ask(kept); }
     else this.waiting(kept);
     return messageFile(kept);
@@ -587,7 +601,7 @@ export class GroupFileDesk {
     if (kept.held) return;
     const out = this.deps.out?.(kept.groupId);
     if (out) throw new Error(out);
-    if (!await this.hasRoom(kept.meta.size)) throw new Error(NO_ROOM);
+    if (!await this.hasRoom(kept.meta.size, kept.id)) throw new Error(NO_ROOM);
     if (!kept.asked || kept.paused) {
       kept.asked = true; kept.paused = false;
       await this.deps.store.patch(kept.id, { group: this.groupField(kept) }).catch(() => {});
@@ -1204,19 +1218,74 @@ export class GroupFileDesk {
     const kept = this.kept.get(edge.taking.get(file.id) ?? ""), want = kept && this.wants.get(kept.id);
     if (!kept || kept.held || want?.linkId !== edge.linkId || want.wire !== file.id || file.size !== kept.meta.size) return { refuse: "invalid" };
     const room = await this.deps.store.room().catch(() => null);
-    if (room === null || file.size <= room) return "accept";    // A refused offer makes no transfer here, so nothing else ends the want.
+    // What it still needs (what came of it before is stored already), beside the group files asked for before it and
+    // the files the chats took, still to come: each counts only the ones before it, so the first of those that fit only
+    // one at a time is taken.
+    const need = file.size - (kept.stored ?? 0);
+    if (room === null || need + this.due(room, kept.id) <= room) return "accept";    // A refused offer makes no transfer here, so nothing else ends the want.
     edge.taking.delete(file.id);
     if (this.wants.get(kept.id) === want && want.wire === file.id) {
-      this.stopFailed(kept, NO_ROOM);
+      // Larger than the room, or asked for by its person: it stops and says so. Fetched by itself and fitting only without
+      // the others, it waits for a Download, as one that did not fit when it came (`announced`).
+      if (need > room || kept.asked) this.stopFailed(kept, NO_ROOM);
+      else this.postpone(kept);
       this.retry(kept.groupId, edge.linkId);
     }
     return { refuse: "no-room", room };
   }
 
-  /** This device has room for a file of this size, or does not say. */
-  private async hasRoom(size: number): Promise<boolean> {
+  /** This device has room for a file of this size beside what is still to come before `before` (`due`), or does not say. */
+  private async hasRoom(size: number, before?: string): Promise<boolean> {
     const room = await this.deps.store.room().catch(() => null);
-    return room === null || size <= room;
+    return room === null || size + this.due(room, before) <= room;
+  }
+
+  /**
+   * Room for a file to be fetched by itself, beside what is still to come here, held for it from now until its want
+   * counts it: announcements decided at once each see the ones before. Undefined when it does not fit.
+   */
+  private async reserve(size: number): Promise<{ size: number } | undefined> {
+    const room = await this.deps.store.room().catch(() => null);
+    if (room !== null && size + this.due(room) > room) return undefined;
+    const held = { size };
+    this.reserved.add(held);
+    return held;
+  }
+
+  /** Bytes still to come here beside a file (`coming`): the group files' and the 1:1 chats', with `room` left. */
+  private due(room: number, before?: string): number {
+    return this.coming(before) + (this.deps.chatsComing?.(room) ?? 0);
+  }
+
+  /**
+   * Bytes still to come of the group files this device fetches (each asked for, less what it stored) and of those just
+   * chosen to be (`reserved`): the room they will take. With `before`, only the files asked for before that one.
+   */
+  private coming(before?: string): number {
+    let due = 0;
+    for (const [id] of this.wants) {
+      if (id === before) return due;
+      const kept = this.kept.get(id);
+      if (kept && !kept.held) due += Math.max(0, kept.meta.size - (kept.stored ?? 0));
+    }
+    for (const held of this.reserved) due += held.size;
+    return due;
+  }
+
+  /** Bytes still to come of the group files this device fetches: what a 1:1 chat's offer is decided beside (`FileDesk`). */
+  stillComing(): number {
+    return this.coming();
+  }
+
+  /**
+   * A file fetched by itself that no longer fits beside what is still to come here: it is asked for no more and waits
+   * for a Download. What came of it stays, for the transfer that Download starts to go on from.
+   */
+  private postpone(kept: Kept): void {
+    this.wants.delete(kept.id);
+    kept.auto = false;
+    void this.deps.store.patch(kept.id, { group: this.groupField(kept) }).catch(() => {});
+    this.waiting(kept);
   }
 
   private async openTarget(edge: Edge, record: FileTransferRecord): Promise<IncomingTarget> {

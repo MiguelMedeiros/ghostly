@@ -59,6 +59,11 @@ export interface FileDeskDeps {
   /** A transfer ended, either way: its local file id and how (for the message's details). */
   /** `seen`: this desk saw the transfer under way before it ended (not a finished one shown again on a restart). */
   settled?(linkId: string, fileId: string, record: FileTransferRecord, seen: boolean): void;
+  /**
+   * Bytes still to come of the group files this device fetches (`GroupFileDesk.stillComing`): an offer is taken
+   * without asking only where it fits beside them too. Absent: none.
+   */
+  groupsComing?(): number;
 }
 
 interface Chat {
@@ -463,9 +468,10 @@ export class FileDesk {
    * counts only the ones before it, so of several that fit only one at a time the first is taken and the rest asked.
    * Of those, only what each will take without asking, once per file: one above 25 MiB, or past `room` beside the
    * ones before it, is asked about or refused, and held back a smaller offer that fits.
+   * The group files this device fetches count first (`groups`, `FileDeskDeps.groupsComing`): they were asked for already.
    */
-  private stillComing(own: object, room: number): number {
-    let due = 0;
+  private stillComing(own: object, room: number, groups = this.deps.groupsComing?.() ?? 0): number {
+    let due = groups;
     for (const chat of this.chats.values()) due += chat.files.stillToCome();
     const seen = new Set<string>();
     for (const held of this.deciding) {
@@ -480,6 +486,14 @@ export class FileDesk {
       }
     }
     return due;
+  }
+
+  /**
+   * Bytes still to come of the files the chats took here, and of the offers being taken (`stillComing`, every one, with
+   * `room` left): what a group file is fetched beside (`GroupFileDesk`). The group files' own are not in it.
+   */
+  chatsComing(room: number): number {
+    return this.stillComing({}, room, 0);
   }
 
   /** A taken offer's record is kept, under way: it counts itself from now (`stillComing`), even if forgotten later. */

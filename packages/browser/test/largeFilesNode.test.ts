@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { afterEach, expect, it, vi } from "vitest";
 import { ChatFiles, FILE_LIMITS, GhostLink, createIdentity, createLink, identityFromSeedB64, randomBytes, toBase64Url, type FileTransferRecord, type IncomingTarget, type OfferDecision } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
+import type { GroupFileDesk } from "../src/engine/groupFiles";
 import { db } from "../src/engine/db";
 import { STORES, fileStore } from "../src/shared/idb";
 import { knownErrorParts } from "../../../apps/ui/src/lib/errorText";
@@ -873,3 +874,17 @@ it("a received file IndexedDB has no room for says there is no room here, not to
   // What the app shows for it: no room here and its next step, the storage's words behind the ⓘ.
   expect(knownErrorParts(error)).toMatchObject({ title: "No room on this device", next: "Free some space, then ask for it again." });
 }, 60_000);
+
+/**
+ * The engine's 1:1 files and group files fill one room: an offer is decided beside the group files still coming
+ * (`GroupFileDesk.stillComing`), as a group file is beside the chats' files (`FileDesk.chatsComing`).
+ */
+it("an offer that fits only without the group files still coming is asked about, not taken", async () => {
+  const t = await setup();
+  const MiB = 1024 ** 2;
+  left = 30 * MiB;
+  const engine = t.node() as unknown as { groups: { files: GroupFileDesk } };
+  vi.spyOn(engine.groups.files, "stillComing").mockReturnValue(16 * MiB);
+  t.offer("beside-0001", 20 * MiB);
+  await vi.waitFor(() => expect(t.records.get("out:beside-0001")).toMatchObject({ state: "asking", waitingFor: "consent" }));
+}, 30_000);
