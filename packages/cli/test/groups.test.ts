@@ -642,6 +642,24 @@ describe("a group not joined yet, said the same by every command", () => {
     }
   });
 
+  it("edit and delete --everyone say it too, not that the message is not there", async () => {
+    // Found in a bug hunt: an invitation holds no message, so both answered "No message … in group" (not_found, exit 3),
+    // as if the id were mistyped, where send, react and pin named the way in.
+    for (const [held, ref, message] of [
+      [invited, "Lab group", "You are not in Lab group yet: ghostly group accept 'Lab group' joins it"],
+      [knocking, knocking.id, "You are not in this group yet: you opened its link, and no member's app has let you in"],
+      [takenBack, "Lab group", "Its invitation to Lab group was taken back: ghostly group decline 'Lab group' drops it"],
+    ] as const) {
+      const ctx = notIn(held);
+      const node = (ctx as unknown as { runtime: { server: { node: Record<string, unknown> } } }).runtime.server.node;
+      const removeMessage = vi.fn(async () => ({ error: null, e: 1 }));
+      Object.assign(node, { getMessage: vi.fn(async () => undefined), editMessage: vi.fn(async () => ({ error: "You are not in this group", refused: true })), removeMessage });
+      await expect(callApi(ctx, "group.edit", { group: ref, message: "m1", text: "fixed" }), ref).rejects.toMatchObject({ code: "refused", message });
+      await expect(callApi(ctx, "chat.delete", { chat: `group:${held.id}`, message: "m1", everyone: true }), ref).rejects.toMatchObject({ code: "refused", message: message.replace(`'${ref}'`, `group:${held.id}`) });
+      expect(removeMessage).not.toHaveBeenCalled();
+    }
+  });
+
   it("an admin alone online is told the command that hands the role on", async () => {
     const { ctx, node } = fake();
     Object.assign(node, { leaveGroup: vi.fn(async () => { throw new Error("You are the admin and nobody else in the group is online to take over. Try again when a member is, or make someone the admin first."); }) });
