@@ -1,6 +1,7 @@
 import {
-  APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, APP_ICON_PATH, APP_STATEMENT_LIMITS, APP_STORE_LIMITS, appDigest, appViewOf, appFingerprint, appRef, appRefPublisher, appRevocationFor, appStoreDecision,
+  APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, APP_ICON_PATH, APP_STORE_LIMITS, appDigest, appViewOf, appFingerprint, appRef, appRefPublisher, appRevocationFor, appStoreDecision,
   addedAppPermissions, appUpdateDecision, canonicalJson, canonicalJsonBytes, checkAppBeforeRun, isAppHash, isAppKey, isAppRef, planAppUpdate, readAppBundleAsync, readAppRevocation, readAppRevocationShape,
+  appRevocationsFileEntries,
   pacer, readAppStoreSteps, readCanonicalJson, sha256Paced, toBase64Url, utf8Decode, utf8Encode,
   type AppBundle, type AppListing, type AppManifest, type AppPermission, type AppRemoval, type AppRevocationsChecked, type AppStoreIndex, type AppStoreKind,
   type AppStoreRead,
@@ -1506,23 +1507,24 @@ export class Apps {
   }
 
   /**
-   * The revocations of a `ghostly-revoke.json`, by app; null when one entry does not verify. A file whose bytes verified
-   * before (`verdict`) is canonical by its digest: parsed with no canonical check, and each entry's shape taken alone.
+   * The revocations of a `ghostly-revoke.json`, by app; null when one entry does not verify. Each entry is found
+   * (`appRevocationsFileEntries`: nothing parsed, past 4096 or one too large refuses the file) and read in its own
+   * step. A file whose bytes verified before (`verdict`) is canonical by its digest: each entry parsed with no canonical
+   * check, and its shape taken alone.
    */
   private async splitRevocations(id: string, bytes: Uint8Array, verdict: boolean | undefined): Promise<Map<string, SignedAppRevocation[]> | null> {
-    const read = verdict ? { ok: true as const, value: JSON.parse(utf8Decode(bytes)) as JsonValue } : readCanonicalJson(bytes);
-    let out: Map<string, SignedAppRevocation[]> | null = null;
-    if (read.ok && Array.isArray(read.value) && read.value.length <= APP_STATEMENT_LIMITS.revocations) {
-      out = new Map();
-      const pause = pacer(REVOCATIONS_SLICE_MS);
-      for (const entry of read.value) {
-        await pause();
-        const one = verdict ? readAppRevocationShape(entry) : readAppRevocation(entry);
-        if (!one.ok) { out = null; break; }
-        const app = one.revocation.statement.app;
-        const list = out.get(app);
-        if (list) list.push(one.revocation); else out.set(app, [one.revocation]);
-      }
+    let out: Map<string, SignedAppRevocation[]> | null = new Map();
+    const pause = pacer(REVOCATIONS_SLICE_MS);
+    const entries = appRevocationsFileEntries(bytes);
+    for (let next = entries.next(); ; next = entries.next()) {
+      if (next.done) { if (next.value) out = null; break; }
+      await pause();
+      const read = verdict ? { ok: true as const, value: JSON.parse(utf8Decode(next.value)) as JsonValue } : readCanonicalJson(next.value);
+      const one = !read.ok ? read : verdict ? readAppRevocationShape(read.value) : readAppRevocation(read.value);
+      if (!one.ok) { out = null; break; }
+      const app = one.revocation.statement.app;
+      const list = out.get(app);
+      if (list) list.push(one.revocation); else out.set(app, [one.revocation]);
     }
     this.revocationVerdicts.delete(id);
     this.revocationVerdicts.set(id, out !== null);
