@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppStoreSummary, InstalledAppView } from "@ghostly/browser/engine/apps";
 import { Apps } from "../../pages/Apps";
@@ -129,6 +129,27 @@ describe("the Apps page when its reads fail", () => {
     await act(async () => { fireEvent.click(again); });
     expect(screen.getByTestId("apps-installed-error")).toBeInTheDocument();
     expect(document.activeElement).toBe(again);
+  });
+
+  it("is busy while Try again reads, and a read that fails again puts its line back, read out again", async () => {
+    renderApp(<Apps />, { route: "/apps" });
+    for (const [testId, method] of [["apps-installed-error", "appList"], ["apps-stores-error", "appStoreList"]] as const) {
+      const block = await screen.findByTestId(testId);
+      const before = within(block).getByRole("alert");
+      const fails: (() => void)[] = [];
+      fakeEngine.on(method, () => new Promise((_, reject) => { fails.push(() => reject(new Error(STORAGE))); }));
+      const again = within(block).getByRole("button", { name: "Try again" });
+      again.focus();
+      await act(async () => { fireEvent.click(again); });
+      expect(again).toHaveAttribute("aria-busy", "true");
+      await act(async () => { for (const fail of fails) fail(); });
+      await waitFor(() => expect(again).not.toHaveAttribute("aria-busy"));
+      // The same words left in place say nothing to a screen reader: the alert is a new one.
+      const after = within(screen.getByTestId(testId)).getByRole("alert");
+      expect(after).not.toBe(before);
+      expect(after).toHaveTextContent("This browser can't keep apps here (private browsing?). Try a normal window.");
+      expect(again).toHaveFocus();
+    }
   });
 
   it("still says No apps yet. and No stores yet. when the reads found none", async () => {
