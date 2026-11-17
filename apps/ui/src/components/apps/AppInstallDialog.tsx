@@ -362,9 +362,10 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
       : preview.install === "same" ? t("apps.install.same") : null));
   // What the check found, said to a screen reader: the focus is on the screen, named by its title only, and the result
   // came in plain lines, so nothing said whether it can be installed. Said from the start (it also describes the
-  // screen), so the change is read out; a failed read says itself (its alert).
+  // screen), so the change is read out; a failed read says itself (its alert), as one read again does while Install
+  // waits for Try again (`stale`): "Ready to install." over a disabled Install was not so.
   const saidId = useId();
-  const said = !preview ? !error && t("apps.install.fetching") : blocked ? why : t(preview.install === "update" ? "apps.install.readyUpdate" : "apps.install.ready");
+  const said = !preview ? !error && t("apps.install.fetching") : stale ? null : blocked ? why : t(preview.install === "update" ? "apps.install.readyUpdate" : "apps.install.ready");
   return (
     <Shell titleId={titleId} describedBy={saidId} onClose={close} testId="app-install">
       <p id={saidId} role="status" className="sr-only" data-testid="app-install-said">{said}</p>

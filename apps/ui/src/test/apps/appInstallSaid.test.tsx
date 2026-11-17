@@ -1,4 +1,4 @@
-import { act, screen, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppPreview, InstalledAppView } from "@ghostly/browser/engine/apps";
 import { AppInstallDialog, InstalledAppDialog } from "../../components/apps/AppInstallDialog";
@@ -88,6 +88,27 @@ describe("the install screen says what its check found", () => {
     await arrive(preview({ run: { status: "revoked" } }));
     expect(screen.getByTestId("app-install-blocked")).toHaveTextContent(`Its publisher revoked this version. ${INSTALL_NEXT}`);
     expect(said).toHaveTextContent(`Its publisher revoked this version. ${INSTALL_NEXT}`);
+  });
+
+  it("says nothing is ready while Install waits for Try again, and ready again once it reads", async () => {
+    const manifest = { ...preview().manifest, permissions: ["chat", "name"] as AppPreview["manifest"]["permissions"] };
+    let read: () => AppPreview = () => preview({ install: "update", asks: [], manifest });
+    fakeEngine.on("appPreview", () => read()).on("appInstall", () => { throw new Error("permissions-changed: This install now asks for name; look at it again"); });
+    const { user } = renderApp(<AppInstallDialog source={{ store: "s1", ref: REF }} title="Chess" onClose={() => {}} />);
+    const confirm = await screen.findByTestId("app-install-confirm");
+    const said = screen.getByTestId("app-install-said");
+    expect(said).toHaveTextContent("Ready to update.");
+    read = () => { throw new Error("offline: You are offline"); };
+    await user.click(confirm);
+    await screen.findByTestId("app-install-retry");
+    expect(screen.getByTestId("app-install-confirm")).toBeDisabled();
+    // Update is off until Try again reads it: the screen is described by the read's alert, not as ready.
+    expect(said).not.toHaveTextContent("Ready to update.");
+    expect(screen.getByTestId("app-install")).not.toHaveAccessibleDescription("Ready to update.");
+    read = () => preview({ install: "update", asks: ["name"], manifest });
+    await user.click(screen.getByTestId("app-install-retry"));
+    await waitFor(() => expect(screen.getByTestId("app-install-confirm")).toBeEnabled());
+    expect(said).toHaveTextContent("Ready to update.");
   });
 
   it("leaves a failed read to its own alert", async () => {
