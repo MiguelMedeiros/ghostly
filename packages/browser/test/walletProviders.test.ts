@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { lightningJournalWritten } from "../src/engine/paymentAdapters/providers/lightningService";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ONCHAIN_PROVIDER, type PaymentTarget } from "@ghostly/core";
+import { ONCHAIN_PROVIDER, engineError, type PaymentTarget } from "@ghostly/core";
 import { STORES, store, transact, wrap } from "../src/shared/idb";
 import type { CashuWallet } from "../src/engine/wallet";
 import type { LightningProviderDescriptor } from "../src/engine/paymentAdapters/providers/lightning";
@@ -273,6 +273,28 @@ describe("the Cashu mints as a Lightning source", () => {
     cashu.quoteInvoice.mockResolvedValue({ quote: "m1", mint: MINT, amount: 40, feeReserve: 1 });
     cashu.payQuote.mockRejectedValue(new Error("The Lightning payment did not go through. The sats are back in your wallet."));
     await expect(provider.payInvoice(invoice, 10)).rejects.toBeInstanceOf(NothingSpentError);
+  });
+
+  // Found in a bug hunt: the refusal was thrown again with its words only, so a host could no longer tell a melt the mint
+  // refused (the CLI's `refused`) or a mint that did not answer the quote (`unavailable`) from the engine failing.
+  it("a refusal keeps the wallet's engineCode and values, with its words", async () => {
+    const cashu = wallet(), provider = new CashuMintLightning(cashu as unknown as CashuWallet, "testnet");
+    cashu.quoteInvoice.mockResolvedValue({ quote: "m1", mint: MINT, amount: 40, feeReserve: 1 });
+    cashu.payQuote.mockRejectedValue(engineError("lightningRefused", { reason: "Lightning payment failed" }));
+    const refused = await provider.payInvoice(invoice, 10).catch((error: unknown) => error);
+    expect(refused).toBeInstanceOf(NothingSpentError);
+    expect(refused).toMatchObject({ engineCode: "lightningRefused", values: { reason: "Lightning payment failed" }, message: "The mint refused this Lightning payment, and no sats left your wallet: it is safe to try again. The mint said: Lightning payment failed" });
+    cashu.quoteInvoice.mockRejectedValue(engineError("mintFailedQuote", { host: "mint.example", reason: "Internal Server Error" }));
+    expect(await provider.payInvoice(invoice, 10).catch((error: unknown) => error)).toMatchObject({ name: "NothingSpentError", engineCode: "mintFailedQuote", values: { host: "mint.example" } });
+    // A fee above the cap is the engine's own refusal: its code too.
+    cashu.quoteInvoice.mockResolvedValue({ quote: "m1", mint: MINT, amount: 40, feeReserve: 50 });
+    expect(await provider.payInvoice(invoice, 10).catch((error: unknown) => error)).toMatchObject({ name: "NothingSpentError", engineCode: "lightningFeeTooHigh" });
+    // A plain error has none to keep.
+    cashu.quoteInvoice.mockResolvedValue({ quote: "m1", mint: MINT, amount: 40, feeReserve: 1 });
+    cashu.payQuote.mockRejectedValue(new Error("no route"));
+    const plain = await provider.payInvoice(invoice, 10).catch((error: unknown) => error);
+    expect(plain).toBeInstanceOf(NothingSpentError);
+    expect(plain).not.toHaveProperty("engineCode");
   });
 });
 

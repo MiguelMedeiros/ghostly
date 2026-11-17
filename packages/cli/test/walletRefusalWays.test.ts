@@ -107,6 +107,7 @@ function fakeMint() {
   return { cfg, token };
 }
 
+const invoice = (sats: number, fill: number) => fakeInvoice(sats, new Uint8Array(32).fill(fill), "", 3600);
 const fakeDht = () => ({ get: async (): Promise<SignedPacket | null> => null, put: async () => 8, destroy: async () => {} }) as unknown as Mainline;
 
 let node: GhostlyNode;
@@ -134,21 +135,59 @@ describe("pay and wallet redeem refusals, at a fake test mint", { timeout: 60_00
   // Found in a bug hunt: the refusal named the token mint's host only, and no command: a person at a terminal had to
   // rebuild the URL (its path too) to add it.
   it("ecash from a mint not added names the whole mint URL in the command that adds it", async () => {
+    // `refused`: sending the same token again changes nothing. Before, `engine`, which a bot reads as the engine failing.
     expect(await refusal("wallet.redeem", { token: mint.token(4, "https://other-mint.example/cashu") })).toEqual({
-      code: "engine",
+      code: "refused",
       message: "Ecash from other-mint.example is not accepted: its mint is not one of yours (if you trust it to hold your sats: ghostly wallet add-mint https://other-mint.example/cashu)",
+      details: { reason: "mint_not_added", mint: "https://other-mint.example/cashu" },
     });
     // A URL a shell would read as more than a word is offered quoted; one no quoting survives is not printed.
     expect((await refusal("wallet.redeem", { token: mint.token(4, "https://odd-mint.example/$(id)") })).message)
       .toBe("Ecash from odd-mint.example is not accepted: its mint is not one of yours (if you trust it to hold your sats: ghostly wallet add-mint 'https://odd-mint.example/$(id)')");
     expect((await refusal("wallet.redeem", { token: mint.token(4, "https://odd-mint.example/it's") })).message)
       .toBe("Ecash from odd-mint.example is not accepted: its mint is not one of yours (if you trust it to hold your sats: ghostly wallet add-mint <the token's mint URL>)");
+    // Not printed in the words, the URL is still in `details` for a bot.
+    expect((await refusal("wallet.redeem", { token: mint.token(4, "https://odd-mint.example/it's") })).details).toEqual({ reason: "mint_not_added", mint: "https://odd-mint.example/it's" });
     // Nothing was taken: the balance is the faucet's.
     expect(node.getState().wallet.networks?.testnet.balance).toBe(10_000);
   });
 
   it("a token of one of the mints is still taken", async () => {
     expect(await callApi(ctx, "wallet.redeem", { token: mint.token(8, TEST_MINT) })).toEqual({ amount: 8, fee: 0 });
+  });
+
+  // Found in a bug hunt: the Cashu card threw the mint's refusal again with its words only, so `pay` said `engine`
+  // where the same refusal is `refused` everywhere else.
+  it("pay whose melt the mint refuses is refused: nothing left the wallet, and sending it again changes nothing", async () => {
+    const before = node.getState().wallet.networks?.testnet.balance;
+    mint.cfg.melt = "fail";
+    try {
+      expect(await refusal("pay", { target: invoice(10, 6) })).toEqual({ code: "refused", message: "The mint refused this Lightning payment, and no sats left your wallet: it is safe to try again. The mint said: Lightning payment failed" });
+    } finally { mint.cfg.melt = "pay"; }
+    expect(node.getState().wallet.networks?.testnet.balance).toBe(before);
+  });
+
+  // Found in a bug hunt: the same mint outage was `unavailable` for `wallet receive` and `engine` for `pay` and the faucet.
+  it("a mint that does not answer pay's quote or the faucet is unavailable, as wallet receive's", async () => {
+    mint.cfg.down = ["/v1/melt/quote"];
+    try {
+      expect(await refusal("pay", { target: invoice(10, 7) })).toEqual({ code: "unavailable", message: "testnut.cashu.space could not take this payment right now, and no sats left your wallet: try again later. The mint said: Failed to fetch at https://testnut.cashu.space" });
+    } finally { mint.cfg.down = []; }
+    mint.cfg.down = ["/v1/mint/quote"];
+    try {
+      expect(await refusal("wallet.faucet", { type: "cashu" })).toEqual({ code: "unavailable", message: "testnut.cashu.space could not give test coins right now: try again later. The mint said: Failed to fetch at https://testnut.cashu.space" });
+      expect((await refusal("wallet.receive", { amount: 10 })).code).toBe("unavailable");
+    } finally { mint.cfg.down = []; }
+  });
+
+  // Last: it leaves a melt pending at the mint.
+  it("paying an invoice again while its first payment is pending is refused, never paid twice", async () => {
+    mint.cfg.melt = "pending";
+    const target = invoice(10, 10);
+    try {
+      expect(await callApi(ctx, "pay", { target })).toMatchObject({ amount: 10, paid: false });
+      expect(await refusal("pay", { target })).toEqual({ code: "refused", message: "This invoice is already being paid" });
+    } finally { mint.cfg.melt = "pay"; }
   });
 
 });
