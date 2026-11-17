@@ -71,6 +71,15 @@ export interface ViewerReply {
   reply: HttpRequestReply | null;
 }
 
+/**
+ * Sent before the reply, as the document hands ask `id` to its peer: from here on the request may have reached the
+ * contact. A port that closes after this and before the reply lost a request that was taken, not one nobody took.
+ */
+export interface ViewerTaken {
+  id: number;
+  taken: true;
+}
+
 export interface HttpRequest {
   peerPubKeyZ32: string;
   serviceId: string;
