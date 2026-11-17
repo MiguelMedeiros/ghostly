@@ -389,6 +389,15 @@ function runExec(command: string, event: GhostlyEvent, toStderr: boolean, profil
 const RETRY_MAX_MS = 60_000;
 
 /**
+ * The TLS error a failed post met, as Node names it (`DEPTH_ZERO_SELF_SIGNED_CERT`, `ERR_SSL_WRONG_VERSION_NUMBER` for
+ * https:// to a plain http server), or null for any other failure.
+ */
+function tlsFailure(error: unknown): string | null {
+  const code = (error as { cause?: { code?: unknown } } | null)?.cause?.code;
+  return typeof code === "string" && /^ERR_(SSL|TLS)_|CERT|SELF_SIGNED|UNABLE_TO_/.test(code) ? code : null;
+}
+
+/**
  * Posts one event; resolves true once the bridge took it, or the status it refused it with (a 4xx or a redirect, posted
  * once: before, three times with backoff, three refusals in the bridge's log for an event stderr said was not tried again).
  * A bridge that is not there (refused connection, timeout, 5xx, 408, 429) has not handled the event: it is tried again,
@@ -398,7 +407,7 @@ const RETRY_MAX_MS = 60_000;
 async function post(url: URL, event: GhostlyEvent, retryMs: number): Promise<true | number> {
   let wait = retryMs, holding = false;
   for (let attempt = 0; ; attempt++) {
-    let down = true, status = 0;
+    let down = true, status = 0, tls: string | null = null;
     try {
       // A redirect is not followed: it would post the event to wherever it points, off this machine too. stderr names the
       // bridge by its origin only: its token is in the path or query (no user:password@, `checkWebhook`).
@@ -410,11 +419,18 @@ async function post(url: URL, event: GhostlyEvent, retryMs: number): Promise<tru
       }
       status = response.status;
       down = status >= 500 || status === 408 || status === 429;
-    } catch { /* not there: tried again */ }
+    } catch (error) {
+      // Not there: tried again. A TLS failure answers each try and fails the same way; it is held too (the cursor stays
+      // before the event, so a listen restarted with the way out below delivers it), but said for what it is. Before, it
+      // was "not answering", and waiting changed nothing.
+      tls = tlsFailure(error);
+    }
     if (!down) return status;
     if (down && attempt >= 2 && !holding) {
       holding = true;
-      process.stderr.write(`ghostly: the webhook at ${url.origin} is not answering: holding event ${event.seq} (${event.type}) until it does\n`);
+      process.stderr.write(tls
+        ? `ghostly: the webhook at ${url.origin} failed TLS (${tls}): holding event ${event.seq} (${event.type}) until it passes; on this machine give it as http://, or restart listen with NODE_EXTRA_CA_CERTS set to the file of the certificate that signed the bridge's\n`
+        : `ghostly: the webhook at ${url.origin} is not answering: holding event ${event.seq} (${event.type}) until it does\n`);
     }
     await new Promise((resolve) => setTimeout(resolve, wait));
     wait = Math.min(wait * 2, RETRY_MAX_MS);
