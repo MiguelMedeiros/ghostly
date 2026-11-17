@@ -308,11 +308,31 @@ export function groupPayTwins(messages: readonly StoredMessage[], notes: Readonl
   return twins;
 }
 
+/** A replaced (or turned-off) link reaches nobody, and nothing tells the joiner so: the next step is the current link. */
+export const LINK_MAYBE_REPLACED = "If the link was replaced or turned off, nobody answers it: ask someone in the group for the current link, then ghostly group join <link>";
+/** As long as the app's group page waits on a knock before it says the link may have been replaced (GroupChat.tsx). */
+const LONG_KNOCK_MS = 2 * 60_000;
+
+/**
+ * A link join still knocking after the app's 2 minutes, said in the app's words (GroupChat.tsx `knockedLong`): others
+ * waiting with it, a slow door; else maybe a replaced link. Before, `group show` read "knocked" for the hour with no word.
+ */
+function longKnockNote(group: GroupView, since: number, now: number): string | undefined {
+  const invitation = group.invitation!;
+  const knock = invitation.stage ?? (invitation.admin ? "admitted" : "knocked");
+  if (knock !== "knocked" || invitation.unanswered || now - since < LONG_KNOCK_MS) return undefined;
+  if (invitation.waiting || invitation.othersKnocked) return "Still waiting: the group lets people in a few at a time";
+  return `Still no answer after 2 minutes. ${LINK_MAYBE_REPLACED}`;
+}
+
 /**
  * A group as the CLI prints it. The entry link lets anyone who reads it join, so it is `<hidden>` unless asked for
- * (`--show-secret`, or `group link`); null when the group has none.
+ * (`--show-secret`, or `group link`); null when the group has none. A link join gives when its knock started (`since`,
+ * timed as the app does: a private group's knock from the group's creation) and, past the app's 2 minutes, a `note`.
  */
-export function groupJson(group: GroupView, showSecret = false) {
+export function groupJson(group: GroupView, showSecret = false, now = Date.now()) {
+  const since = group.invitation?.viaLink ? group.invitation.since ?? group.createdAt : undefined;
+  const note = since !== undefined ? longKnockNote(group, since, now) : undefined;
   return {
     id: group.id,
     name: group.name,
@@ -331,7 +351,8 @@ export function groupJson(group: GroupView, showSecret = false) {
     // A join nobody answered (the knocks stopped: `group accept` knocks again) and an invitation its sender took back
     // (`group accept` refuses it) said, as the app's card does: before, both read as a live "invited", stage "knocked".
     invitation: group.invitation ? { chat: group.invitation.linkId, accepted: group.invitation.accepted, viaLink: !!group.invitation.viaLink, stage: group.invitation.stage ?? null,
-      ...(group.invitation.unanswered ? { unanswered: true } : {}), ...(group.invitation.takenBack ? { takenBack: true } : {}) } : null,
+      ...(group.invitation.unanswered ? { unanswered: true } : {}), ...(group.invitation.takenBack ? { takenBack: true } : {}),
+      ...(since !== undefined ? { since } : {}), ...(note ? { note } : {}) } : null,
     // Other groups that came under this id (a contact's invitation, with the chat it came over, or a link opened): kept
     // beside it until the person picks (`engine keepGroup {groupId}`, or `engine switchGroup {groupId, to: <chat or link>}`).
     ...(group.others?.length ? { others: group.others.map((o) => ("link" in o ? { link: showSecret ? o.link : "<hidden>" } : { chat: o.linkId, name: o.name, members: o.members })) } : {}),

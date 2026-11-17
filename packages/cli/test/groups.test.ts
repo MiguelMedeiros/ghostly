@@ -87,8 +87,10 @@ describe("a one-shot group join", () => {
       const { ctx } = oneShot();
       const answer = callApi(ctx, "group.join", { link: LINK });
       await vi.advanceTimersByTimeAsync(60_000);
+      // Found in a bug hunt: a link replaced (or turned off) reaches nobody and nothing says so; the line named only a
+      // daemon, which knocks for an hour at a link nobody reads. The app says the other cause after 2 minutes.
       expect(await answer).toEqual({ group: "g9", joined: false, stage: "knocking",
-        warning: "Not in yet: no member's app has let you in. A member's app lets you in only while this profile is running: keep it running (ghostly daemon --detach), then ghostly group show g9" });
+        warning: "Not in yet: no member's app has let you in. A member's app lets you in only while this profile is running: keep it running (ghostly daemon --detach), then ghostly group show g9. If the link was replaced or turned off, nobody answers it: ask someone in the group for the current link, then ghostly group join <link>" });
     } finally { vi.useRealTimers(); }
   });
 
@@ -668,11 +670,36 @@ describe("an invitation that will not go on by itself", () => {
     const invited = (invitation: Record<string, unknown>) => ({ ...group, status: undefined, isAdmin: false, members: [], canSend: false, entryLink: undefined,
       invitation: { linkId: "l1", contact: "", admin: "anakey", members: 2, accepted: false, ...invitation } }) as unknown as GroupView;
     expect(groupJson(invited({ accepted: true, viaLink: true, stage: "knocked", unanswered: true })).invitation)
-      .toEqual({ chat: "l1", accepted: true, viaLink: true, stage: "knocked", unanswered: true });
+      .toEqual({ chat: "l1", accepted: true, viaLink: true, stage: "knocked", unanswered: true, since: 1 });
     expect(groupJson(invited({ linkId: "chat-ana", takenBack: true })).invitation)
       .toEqual({ chat: "chat-ana", accepted: false, viaLink: false, stage: null, takenBack: true });
     // One still going on is as before, with neither.
     expect(groupJson(invited({ linkId: "chat-ana" })).invitation).toEqual({ chat: "chat-ana", accepted: false, viaLink: false, stage: null });
+  });
+
+  // Found in a bug hunt: a join on a replaced link stayed "knocked" for the hour with no word and no start time, where
+  // the app says after 2 minutes that the link may have been replaced (GroupChat.tsx `LONG_KNOCK_MS`).
+  it("a link join still knocked after 2 minutes says the link may have been replaced, and when the knock started", async () => {
+    const t0 = 1_700_000_000_000;
+    const invited = (invitation: Record<string, unknown>) => ({ ...group, status: undefined, isAdmin: false, members: [], canSend: false, entryLink: undefined, createdAt: t0 - 5_000,
+      invitation: { linkId: "l1", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "knocked", since: t0, ...invitation } }) as unknown as GroupView;
+    const stale = "Still no answer after 2 minutes. If the link was replaced or turned off, nobody answers it: ask someone in the group for the current link, then ghostly group join <link>";
+    expect(groupJson(invited({}), false, t0 + 119_999).invitation).toEqual({ chat: "l1", accepted: true, viaLink: true, stage: "knocked", since: t0 });
+    expect(groupJson(invited({}), false, t0 + 120_000).invitation).toEqual({ chat: "l1", accepted: true, viaLink: true, stage: "knocked", since: t0, note: stale });
+    // A private group's knock has no `since`: timed from the group's creation, as the app does.
+    expect(groupJson(invited({ since: undefined }), false, t0 + 116_000).invitation).toMatchObject({ since: t0 - 5_000, note: stale });
+    // Others waiting with it: a slow door, not a dead link.
+    expect(groupJson(invited({ waiting: 2 }), false, t0 + 200_000).invitation).toMatchObject({ note: "Still waiting: the group lets people in a few at a time" });
+    expect(groupJson(invited({ othersKnocked: true }), false, t0 + 200_000).invitation).toMatchObject({ note: "Still waiting: the group lets people in a few at a time" });
+    // Past knocking, or knocks stopped (`unanswered` says it): no note.
+    for (const more of [{ stage: "admitted" }, { stage: "answered" }, { stage: "replaced" }, { unanswered: true }])
+      expect(groupJson(invited(more), false, t0 + 200_000).invitation).not.toHaveProperty("note");
+    // A contact's invitation knocks nowhere: neither.
+    expect(groupJson(invited({ viaLink: false }), false, t0 + 200_000).invitation).not.toHaveProperty("since");
+    // group show says it on stderr too, as a person reads it.
+    const { ctx, node } = fake();
+    node.getState = () => ({ links: [], groups: [{ ...invited({}), invitation: { ...invited({}).invitation!, since: Date.now() - 180_000 } }], settings: {}, transport: {} }) as unknown as EngineState;
+    expect(await callApi(ctx, "group.get", { group: group.id })).toMatchObject({ warning: stale });
   });
 });
 
