@@ -1,4 +1,4 @@
-import { AWAITING_PEER_MS, DHT_PACKET_BUDGET, DHT_TEXT_BYTES, decodeGroupEntryLink, inviteLink, LIMITS, MENTION_EVERYONE, normalizeRelayUrl, ownInviteRefusal, relayUrlProblem, replySnippet, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type TypingKind } from "@ghostly/core";
+import { AWAITING_PEER_MS, DHT_PACKET_BUDGET, DHT_TEXT_BYTES, decodeCommunityLink, decodeGroupEntryLink, inviteLink, LIMITS, MENTION_EVERYONE, normalizeRelayUrl, ownInviteRefusal, relayUrlProblem, replySnippet, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type TypingKind } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
 import { DEFAULT_HYPERDHT_RELAY } from "@ghostly/browser/shared/hyperdhtRelay";
@@ -10,7 +10,7 @@ import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PA
 import { asCliError, CliError } from "./errors";
 import { shellWord } from "./shellWord";
 import {
-  bool, chatOf, chatOrGroup, dhtOnly, findChat, findChatOrGroup, findGroup, groupById, groupNameOf, groupOf, groupPrefixed, inviteTaken, keptForJoin, list, messageOf, noMessage, nobodyJoined, node, num, oneOf, oneShotWaits, settingsOf, shownName, sinceSeq, somebodyJoined, state, str, transportOffered, waitForState,
+  bool, chatOf, chatOrGroup, dhtOnly, findChat, findChatOrGroup, findGroup, groupById, groupCalled, groupNameOf, groupOf, groupPrefixed, inviteTaken, keptForJoin, list, messageOf, noMessage, nobodyJoined, node, notInYet, notInYetError, num, oneOf, oneShotWaits, settingsOf, shownName, sinceSeq, somebodyJoined, state, str, transportOffered, waitForState,
   type ApiContext, type CallScope, type Method, type Params, type RefPlace,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
@@ -650,7 +650,11 @@ const METHODS: Record<string, Method> = {
     const result = await node(ctx).pinMessage({ linkId: target.linkId, ...(messageId && { messageId }), remove });
     const gone = result.error && messageId ? notHere(result.error, messageId, { group: target.group, ref: str(params, "chat", true) }) : undefined;
     if (gone) throw gone;
-    if (result.error) throw new CliError(result.refused || /Only the admin/.test(result.error) ? "refused" : /not in this (?:chat|group)|Nothing is pinned/.test(result.error) ? "not_found" : "bad_request", result.error);
+    if (result.error) {
+      const error = new CliError(result.refused || /Only the admin/.test(result.error) ? "refused" : /not in this (?:chat|group)|Nothing is pinned/.test(result.error) ? "not_found" : "bad_request", result.error);
+      const group = target.group ? groupById(ctx, target.id) : undefined;
+      throw group ? notInYetError(group, str(params, "chat", true), error) : error;
+    }
     if (target.group) {
       // A one-shot leaves once its command is done, and its groups with it: what no edge took yet went nowhere.
       const n = result.n, pinned = remove ? null : messageId;
@@ -967,7 +971,7 @@ const METHODS: Record<string, Method> = {
     } catch (error) {
       // Not a link to a group at all: the caller's input, as `invite join` answers a word that is no invite.
       if (error instanceof Error && error.message === "This is not a link to a group") throw new CliError("bad_request", error.message);
-      throw error;
+      throw joinRefused(link, error);
     }
     return letIn(ctx, groupId, link, before.find((g) => g.id === groupId));
   },
@@ -1009,7 +1013,7 @@ const METHODS: Record<string, Method> = {
     // Not a member (removed, say): refused, and nothing was sent. Anything else by what a bot can do about it.
     // A `--reply` the group lacks says "group": the engine's line says "chat".
     if (result.error) throw (replyTo && notHere(result.error, replyTo, { group: true, ref: str(params, "group", true) }))
-      || (result.refused ? new CliError("refused", result.error) : groupSendRefused(result.error));
+      || notInYetError(group, str(params, "group", true), result.refused ? new CliError("refused", result.error) : groupSendRefused(result.error));
     const messageId = result.messageId ?? null;
     // `edges`: how many took it so far (none yet is not an error: it goes when one opens). `sent`: whether one did.
     // Before 2026-10-02 `sent` was always true, also for a message no edge had taken.
@@ -1059,7 +1063,8 @@ const METHODS: Record<string, Method> = {
     const group = groupOf(ctx, params, "react <chat> <message> <emoji>");
     const wait = oneOf(params, "wait", ["none", "sent"] as const, ctx.mode === "one-shot" ? "sent" : "none");
     const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
-    const { n, ...said } = await react(ctx, `group:${group.id}`, params, { group: true, ref: str(params, "group", true) });
+    const ref = str(params, "group", true);
+    const { n, ...said } = await react(ctx, `group:${group.id}`, params, { group: true, ref }).catch((error) => { throw error instanceof CliError ? notInYetError(group, ref, error) : error; });
     const edges = !n ? 0 : wait === "sent" ? await waitForGroupFrame(ctx, group.id, said.messageId, { reaction: n }, ms)
       : node(ctx).groupTaken({ groupId: group.id, messageId: said.messageId, reaction: n });
     return { group: group.id, ...said, sent: edges > 0, edges };
@@ -1076,8 +1081,8 @@ const METHODS: Record<string, Method> = {
     const word = { ...(kind !== "typing" ? { kind } : {}), ...(status ? { status } : {}) };
     const seconds = params.for === undefined ? 0 : num(params, "for", 0, { min: 1, max: 600 });
     if (!typing && seconds) throw new CliError("bad_request", "for keeps typing on: not with stop");
-    // Removed or gone, as `group send` says it: `refused`, with the group's reason.
-    if (typing && group.status !== "active") throw new CliError("refused", group.statusReason ?? "You are not in this group");
+    // Removed or gone, as `group send` says it: `refused`, with the group's reason; not in yet, with the next step.
+    if (typing && group.status !== "active") throw new CliError("refused", group.statusReason ?? notInYet(group, str(params, "group", true)) ?? "You are not in this group");
     const target = { groupId: group.id };
     endTyping(ctx, target, false);
     sayTyping(ctx, target, typing, word);
@@ -1094,7 +1099,8 @@ const METHODS: Record<string, Method> = {
   async "group.leave"(ctx, params) {
     const group = groupOf(ctx, params);
     if (!bool(params, "yes")) throw new CliError("confirm", "Leaving a group deletes its history and files on this device; pass --yes (yes: true over the socket) to go on");
-    const { admin } = await node(ctx).leaveGroup({ groupId: group.id });
+    const ref = str(params, "group", true);
+    const { admin } = await node(ctx).leaveGroup({ groupId: group.id }).catch((error) => { throw leaveRefused(group, ref, error); });
     // The member who became the admin, named from the roster read before leaving: the group is gone from the state now.
     const next = admin ? group.members.find((m) => m.key === admin) : undefined;
     return { left: group.id, ...(admin ? { admin: { key: admin, name: next?.nick ?? null } } : {}) };
@@ -1296,6 +1302,38 @@ export function groupSendRefused(error: string): CliError {
   if (/not in this chat|cannot be replied to/.test(error)) return new CliError("not_found", error);
   if (/^You (were removed from|left|are no longer in) this group$|Membership changes are halted/.test(error)) return new CliError("refused", error);
   return new CliError("unavailable", error);
+}
+
+/** The engine's admin who may not leave: the app's words say "make someone the admin", which names no command here. */
+const ADMIN_ALONE = "You are the admin and nobody else in the group is online to take over. Try again when a member is, or make someone the admin first.";
+
+/**
+ * `group leave` the engine refused, said with the CLI's next step: an invitation not joined yet answered "Group not
+ * found" of a group `group show` lists (its way out is `group decline`), and an admin alone online "make someone the
+ * admin", the app's words. The code stays the engine's.
+ */
+function leaveRefused(group: GroupView, ref: string, error: unknown): unknown {
+  if (!(error instanceof Error)) return error;
+  const shown = shellWord(ref, group.id);
+  if (error.message === ADMIN_ALONE) return new CliError("engine", `You are the admin and nobody else in ${groupCalled(group)} is online to take over: try again when a member is, or make one the admin first (ghostly group admin ${shown} <member key>)`);
+  const yet = error.message === "Group not found" ? notInYet(group, ref, true) : undefined;
+  return yet ? new CliError("engine", yet) : error;
+}
+
+/**
+ * `group join` the engine refused for a group held here under the link's id, in the app's words ("Delete it from this
+ * device", its menu item), said with the CLI's command. The code stays the engine's.
+ */
+function joinRefused(link: string, error: unknown): unknown {
+  if (!(error instanceof Error)) return error;
+  const id = (decodeCommunityLink(link) ?? decodeGroupEntryLink(link))?.g ?? "<group>";
+  if (error.message === "You are out of this group and its history is still here. Delete it from this device to join with a link.") {
+    return new CliError("engine", `You are out of this group and its history is still here: ghostly group forget ${id} --yes deletes it from this device, then join with the link`);
+  }
+  if (error.message === "You have an invitation to this group. Answer it first.") {
+    return new CliError("engine", `You have an invitation to this group: answer it first (ghostly group accept ${id} or ghostly group decline ${id})`);
+  }
+  return error;
 }
 
 /**
