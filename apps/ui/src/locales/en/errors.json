@@ -202,6 +202,8 @@
     "gone": "This file is no longer here",
     "incomplete": "This file is incomplete: part of it is missing",
     "noRoom": "No room on your contact's device",
+    "noRoomBesideComing": "No room beside the files still coming",
+    "noRoomBesideComingNext": "{{left}} left of {{free}} free. Wait for them to arrive, or cancel one, then try again.",
     "noRoomHere": "No room on this device",
     "noRoomHereNext": "Free some space, then ask for it again.",
     "noRoomNext": "{{free}} free.",
