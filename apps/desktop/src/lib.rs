@@ -151,6 +151,7 @@ macro_rules! commands {
             commands::generate_enc_key,
             commands::get_profile,
             commands::get_public_key,
+            commands::group_call_fetch,
             commands::hide_from_switcher,
             commands::hold_fetch,
             commands::link_preview_fetch,

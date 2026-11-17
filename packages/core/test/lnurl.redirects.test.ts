@@ -64,6 +64,17 @@ describe("a redirect of an LNURL service", () => {
     }
   });
 
+  it("has the rule of the first address: nothing on this machine or its network is asked, but a test server here", async () => {
+    for (const first of ["https://192.168.1.1/.well-known/lnurlp/alice", "https://router.lan/.well-known/lnurlp/alice", "https://nas.local/x",
+      "https://10.0.0.7:8443/x", "https://[fd00::1]/x", "https://169.254.169.254/x", "https://router/x"]) {
+      const { fetch, asked } = table({ [first]: { tag: "payRequest" } });
+      await expect(fetchLnurlJson(first, { fetch })).rejects.toThrow(/local address/);
+      expect(asked).toEqual([]);
+    }
+    const service = await serve(() => ({ status: 200, body: '{"ok":true}' }));
+    await expect(fetchLnurlJson(`http://127.0.0.1:${service.port}/x`)).resolves.toEqual({ ok: true });
+  });
+
   it("stops after a few hops", async () => {
     const routes: Record<string, unknown> = {};
     for (let i = 0; i <= LNURL_LIMITS.maxRedirects; i++) routes[`https://ln.example.com/${i}`] = `/${i + 1}`;
