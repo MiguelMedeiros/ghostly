@@ -193,6 +193,9 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
     // The digits one by one, as the new device says them: "482 913" would be read as two numbers, unlike over there.
     : view.step === "confirm" ? <>{fillNames(t("devices.add.found"), { device: view.device })} <span dir="ltr">{view.digits.split("").join(" ")}</span></>
     : view.step === "done" ? fillNames(t("devices.add.done"), { device: view.device }) : "";
+  // Another device tried the code: the one warning of the code step, said at once from a line of its own that is there
+  // from the code on, like the one above. The notice under the code shows it.
+  const urgent = view?.role === "inviter" && (view.step === "waiting" || view.step === "confirm") && !!view.refused ? t("devices.add.refused") : "";
 
   // From They match until the device is added or the enrollment failed, × and Escape do nothing: the grant may have gone
   // out, and closing would cancel it, leaving "Not finished" on both devices. The engine ends the step on its own.
@@ -204,6 +207,7 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
       <Toast toast={notice.toast} onDismiss={notice.dismiss} place="dialog" testId="device-add-notice" />
       <div ref={body} tabIndex={-1} className="space-y-3 focus:outline-none">
       <p role="status" className="sr-only" data-testid="device-add-spoken">{spoken}</p>
+      <p role="alert" className="sr-only" data-testid="device-add-alert">{urgent}</p>
       {/* Try again, until the engine answers: a new code, or why there is none. */}
       {!view && busy && <Status testId="device-add-preparing" step="preparing">{t("devices.join.preparing")}</Status>}
       {view?.role === "inviter" && view.step === "waiting" && <>

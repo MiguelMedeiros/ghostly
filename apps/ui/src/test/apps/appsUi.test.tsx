@@ -973,11 +973,11 @@ describe("with the apps flag on", () => {
     // Untrusted text: a right-to-left reason or one with its own direction marks must not reorder the line's words.
     const reason = "‮مفتاح مسرّب";
     const { unmount } = renderApp(<InstalledAppDialog app={installed({ run: { status: "revoked", reason } })} onClose={() => {}} onOpen={() => {}} />);
-    expect((await screen.findByTestId("app-run-line")).textContent).toBe(`Its publisher revoked this version: ⁨${reason}⁩`);
+    expect((await screen.findByTestId("app-run-line")).textContent).toBe(`Its publisher revoked this version: ⁨${reason}⁩\nIt stays stopped until its publisher releases a new version, or you can uninstall it.`);
     unmount();
     fakeEngine.on("appPreview", () => preview({ run: { status: "revoked", reason: "Leaked key" } }));
     renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} />);
-    expect((await screen.findByTestId("app-install-blocked")).textContent).toBe("Its publisher revoked this version: ⁨Leaked key⁩");
+    expect((await screen.findByTestId("app-install-blocked")).textContent).toBe("Its publisher revoked this version: ⁨Leaked key⁩\nIt can't be installed. Look for a newer version from its publisher.");
     expect(screen.queryByTestId("app-install-confirm")).not.toBeInTheDocument();
   });
 

@@ -115,14 +115,32 @@ describe("file actions on an ended 1:1 transfer", () => {
   });
 
   it("accept of an offer larger than the room left now is refused with the room (it keeps waiting); before, it started and failed part way", async () => {
+    await fileStore.put({ id: IN, linkId: "chat-one", createdAt: 1, direction: "in", metadata: { name: "big.bin", size: 24_465_408, mime: "application/octet-stream", timestamp: 1 }, transfer: { state: "transferring", transferred: 0, size: 24_465_408 } } as never);
     const { ctx, node } = world({ [IN]: { state: "transferring", stage: "asking", transferred: 0, size: 24_465_408, direction: "in", room: 16_228_352 } as FileTransferView });
     // As the engine's `FileDesk.accept` refuses it.
-    node.fileAction.mockRejectedValueOnce(Object.assign(new Error("No room on this device for this file (15.5 MB free)"), { room: 16_228_352 }));
+    node.fileAction.mockRejectedValueOnce(Object.assign(new Error("No room on this device for this file (15.5 MB free)"), { room: 16_228_352, size: 24_465_408, coming: 0 }));
     await expect(callApi(ctx, "file.action", { file: IN, action: "accept" })).rejects.toMatchObject({
-      code: "refused", message: "No room on this device for this file (15.5 MB free)", details: { reason: "no_room", room: 16_228_352 },
+      code: "refused", message: `big.bin (24.5 MB) does not fit: 16.2 MB free. Free some space, then ghostly file accept ${IN} again (or file decline)`,
+      details: { reason: "no_room", room: 16_228_352 },
     });
     // Any other engine error goes on as it came (the daemon's `asCliError` names it, as before).
     node.fileAction.mockRejectedValueOnce(new Error("No such file transfer"));
     await expect(callApi(ctx, "file.action", { file: IN, action: "accept" })).rejects.not.toHaveProperty("code");
+  });
+
+  /**
+   * A file that fits the room but not beside a file already taken that still comes: the line said "No room … (38.8 MB
+   * free)" for a 27.3 MB file, the room in binary MB and the size in decimal, and neither the other file nor the way out.
+   */
+  it("accept refused for no room beside a file still coming names the file, its size, the room and what still comes, in file save's MB", async () => {
+    const id = "chat-one-in-room";
+    await fileStore.put({ id, linkId: "chat-one", createdAt: 1, direction: "in", metadata: { name: "b26.bin", size: 27_262_976, mime: "application/octet-stream", timestamp: 1 }, transfer: { state: "transferring", transferred: 0, size: 27_262_976 } } as never);
+    const { ctx, node } = world({ [id]: { state: "transferring", stage: "asking", transferred: 0, size: 27_262_976, direction: "in", room: 40_714_240 } as FileTransferView });
+    node.fileAction.mockRejectedValueOnce(Object.assign(new Error("No room on this device for this file (38.8 MB free)"), { room: 40_714_240, size: 27_262_976, coming: 27_262_976 }));
+    await expect(callApi(ctx, "file.action", { file: id, action: "accept" })).rejects.toMatchObject({
+      code: "refused",
+      message: `b26.bin (27.3 MB) does not fit: 40.7 MB free, and 27.3 MB of files still coming need it first. Free some space, then ghostly file accept ${id} again (or file decline)`,
+      details: { reason: "no_room", room: 40_714_240 },
+    });
   });
 });

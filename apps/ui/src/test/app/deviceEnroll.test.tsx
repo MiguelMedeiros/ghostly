@@ -179,6 +179,32 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     expect(screen.getByTestId("device-add-spoken")).toBe(spoken);
   }, 20_000);
 
+  it("a screen reader hears at once that another device tried the code, from a live line there from the code on", async () => {
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: await hashPassword("a long password"), timeoutMinutes: 5 } }));
+    const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
+    engine.on("deviceEnrollInvite", () => waiting);
+    engine.on("deviceHandoffVerifier", () => undefined);
+    let view: EnrollView = waiting;
+    engine.on("deviceEnrollView", () => view);
+    await user.type(screen.getByTestId("device-add-password"), "a long password");
+    await user.click(screen.getByTestId("device-add-next"));
+    await screen.findByTestId("device-add-code");
+    // A live region is read out when its text changes, not when it comes with its text: the ones there before it says anything.
+    const live = () => [...screen.getByTestId("device-add").querySelectorAll<HTMLElement>("[role=alert], [role=status], [aria-live]")];
+    const before = live();
+    const refused = "Another device tried to use this code. It got nothing.";
+    view = { ...waiting, refused: 1 };
+    await waitFor(() => expect(screen.getByTestId("device-add-refused")).toHaveTextContent(refused), { timeout: 3_000 });
+    const saying = live().filter((region) => region.textContent?.includes(refused));
+    // Urgent, the code step's one warning: an alert, said over whatever else is being read.
+    expect(saying.map((region) => region.getAttribute("role"))).toEqual(["alert"]);
+    expect(before).toContain(saying[0]);
+    // Still said once the other device is found, in the same line (no second announcement of it).
+    view = { role: "inviter", step: "confirm", digits: "482913", device: "Phone", kind: "web", refused: 1 };
+    await screen.findByTestId("device-add-digits", {}, { timeout: 3_000 });
+    expect(live().filter((region) => region.textContent?.includes(refused))).toEqual(saying);
+  }, 20_000);
+
   it("the focus stays in the dialog when Next and They match go away with their step", async () => {
     localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: await hashPassword("a long password"), timeoutMinutes: 5 } }));
     const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
