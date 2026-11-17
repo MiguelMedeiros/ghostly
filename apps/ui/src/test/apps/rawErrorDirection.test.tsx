@@ -1,6 +1,6 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
-import type { InstalledAppView } from "@ghostly/browser/engine/apps";
+import type { AppStoreSummary, InstalledAppView } from "@ghostly/browser/engine/apps";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import { InstalledAppDialog } from "../../components/apps/AppInstallDialog";
 import { ChatAppPanel } from "../../components/apps/ChatAppPanel";
@@ -9,15 +9,40 @@ import { ComposerIdentityPicker } from "../../components/identities/ComposerIden
 import { ContactIdentitiesPanel } from "../../components/identities/ContactIdentitiesPanel";
 import { IdentityActivity } from "../../components/identities/IdentityActivity";
 import { Notice } from "../../components/ui/Notice";
+import { Toast } from "../../components/ui/Toast";
 import type { RunningApp } from "../../lib/apps/broker";
+import { appErrorText } from "../../lib/apps/errors";
+import { forgetAppsAvailable } from "../../lib/apps/flag";
 import { forgetInstalledApps } from "../../lib/apps/installed";
-import { setAppOpener } from "../../lib/apps/open";
+import { setAppOpener, takedownText } from "../../lib/apps/open";
 import { setChatApp } from "../../lib/apps/running";
+import { webOpener } from "../../lib/apps/webOpener";
+import type { AppsPlatform } from "../../lib/platform";
+import { translateWith } from "../../locales/translate";
+import { Apps } from "../../pages/Apps";
 import { fakeEngine, linkView } from "../fakeEngine";
+import { LOCALES as locales } from "../i18n/locales";
 import { identitiesView, proofView, receivedView, sharedView } from "../identities/views";
 import { renderApp } from "../render";
 
 // covers: apps.page, app.i18n, apps.takedown, proofs.composer, proofs.recheck, proofs.public-activity
+
+// The runner page's header, answered here, never fetched; an app's frame, stopped by hand (`stop(reason)` stands for
+// the broker's own stops, as the watchdog's "unresponsive").
+vi.mock("../../lib/apps/runnerCheck", () => ({ runnerAvailable: vi.fn(async () => true), runnerPolicy: vi.fn(async () => true), forgetRunnerCheck: () => {}, isRunnerPolicy: () => true }));
+const started: { stop: (reason?: string) => void }[] = [];
+vi.mock("../../lib/apps/broker", async (actual) => ({
+  ...(await actual<typeof import("../../lib/apps/broker")>()),
+  startApp: ({ container, launch, onStop }: { container: HTMLElement; launch: { title: string }; onStop?: (reason: string) => void }) => {
+    const frame = document.createElement("iframe");
+    frame.title = launch.title;
+    container.appendChild(frame);
+    let done = false;
+    const stop = (reason = "stopped") => { if (done) return; done = true; frame.remove(); onStop?.(reason); };
+    started.push({ stop });
+    return { frame, phase: "running", stop };
+  },
+}));
 
 /**
  * An error the app has no words for is shown as it came: the engine's short English (problemText). In Arabic it took the
@@ -146,5 +171,62 @@ describe("in Arabic, an English error shown as it came, on the lines beside an a
     const { user } = renderApp(<IdentityActivity provider="pubky" subject={"y".repeat(52)} profile={{ found: true, name: "Pat", hosts: ["nexus.pubky.app"], fetchedAt: now }} links={[]} />, { language: "ar" });
     await user.click(await screen.findByTestId("contact-activity-post-image"));
     expect(await shownOwnWay("contact-activity-post-image-error")).toBe(true);
+  });
+});
+
+describe("in Arabic, an English error shown as it came, on the Apps page's card and a full-screen app's Open again", () => {
+  const store: AppStoreSummary = {
+    key: KEY, fingerprint: "yz7m oxuc bd4u 8aqt", url: "https://raw.githubusercontent.com/ana/store/HEAD/ghostly-store.json", preloaded: false,
+    name: "Hunt", kind: "curated", sequence: 4, expires: 4_000_000_000, expired: false, fetchedAt: 1, apps: [], removed: [],
+  };
+
+  it("keeps its own direction on the Apps page's card when removing a store fails", async () => {
+    forgetAppsAvailable();
+    vi.stubEnv("VITE_APPS_TEST", "1");
+    fakeEngine.appRunner = "/app-frame.html";
+    setAppOpener(vi.fn(async () => {}));
+    onTestFinished(() => { vi.unstubAllEnvs(); setAppOpener(null); forgetAppsAvailable(); });
+    fakeEngine.on("appList", () => []).on("appBuiltIns", () => []).on("appCheckUpdates", () => []).on("appStoreList", () => [store])
+      .on("appStoreRemove", () => { throw new Error(RAW); });
+    const { user } = renderApp(<Apps />, { route: "/apps", language: "ar" });
+    await user.click(await screen.findByTestId("app-store-remove"));
+    await user.click(screen.getByTestId("app-store-remove-confirm"));
+    expect(await shownOwnWay("toast-text")).toBe(true);
+  });
+
+  it("leaves a card in Arabic words to the page's direction", () => {
+    renderApp(<Toast toast={{ id: 1, tone: "error", text: "Cashu متوقف في هذه المحادثة", ms: 60_000 }} onDismiss={() => {}} />, { language: "ar" });
+    expect(screen.getByTestId("toast-text")).not.toHaveAttribute("dir");
+  });
+
+  it("keeps its own direction under a full-screen app's Open again when opening it again fails, and Arabic words keep the page's", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    started.length = 0;
+    onTestFinished(() => document.querySelectorAll("[data-place=alone]").forEach((node) => node.remove()));
+    const ar = translateWith(locales.ar, "ar");
+    let refusal: Error | null = null;
+    const host = {
+      runnerUrl: "/app-frame.html",
+      entry: async () => {
+        if (refusal) throw refusal;
+        return { ref: app.ref, digest: app.digest, version: app.version, title: app.title, permissions: app.permissions, entry: "<!doctype html>" };
+      },
+    } as unknown as AppsPlatform;
+    fakeEngine.on("appList", () => [{ ...app, view: "full" }]);
+    const open = webOpener({ apps: () => host, nameIn: () => undefined, closeLabel: () => ar("common.close"), openAgainLabel: () => ar("apps.view.openAgain"),
+      errorText: (error) => appErrorText(error, ar), stoppedLabel: (title, takedown) => takedownText(title, takedown, ar) });
+    await open(app.ref, null);
+    act(() => started[0]!.stop("unresponsive"));
+    const again = within(screen.getByTestId("mini-app")).getByTestId("mini-app-open-again");
+    refusal = new Error(RAW);
+    again.click();
+    expect(await shownOwnWay("mini-app-open-again-error")).toBe(true);
+    // Said in Arabic the next time (offline): the page's direction again.
+    refusal = new Error("offline: the runner page could not be reached");
+    again.click();
+    const line = screen.getByTestId("mini-app-open-again-error");
+    await waitFor(() => expect(line).not.toHaveTextContent(RAW));
+    await waitFor(() => expect(line).not.toBeEmptyDOMElement());
+    expect(line).not.toHaveAttribute("dir");
   });
 });

@@ -20,7 +20,7 @@ import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { HARNESS_PORTS, REMOTE, VARIABLES } from "../../e2e/infra/env.mjs";
 import { codeFiles as repoCode, knownFiles, workspacePackages } from "./affected/files.mjs";
-import { plan as makePlan, parseUnitGroup, unitGroupOf } from "./affected/select.mjs";
+import { plan as makePlan, parseUnitGroup, unitPartsOf } from "./affected/select.mjs";
 import { COMMANDS, SHARED, blanked, envTarget, gatedTests, stackDecision, statusWhy } from "./affected/stack.mjs";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..", "..");
@@ -70,15 +70,25 @@ const noStack = flag("--no-stack");
 const port = option("--port") ?? process.env.E2E_WEB_PORT;
 const webUrl = process.env.E2E_WEB_URL;
 // --unit-group <i>/<n>: only the unit projects of group i of n (CI's draft tier runs one group per runner; select.mjs
-// UNIT_ALONE says which project goes where). Lint, typecheck, Rust and e2e are as without it.
+// UNIT_ALONE says which project goes where, UNIT_HALVED which run in two halves, `vitest --shard`, in two groups).
+// Lint, typecheck, Rust and e2e are as without it.
 const unitGroupText = flag("--unit-group") ? option("--unit-group") ?? "" : null;
 const unitGroup = unitGroupText === null ? null : parseUnitGroup(unitGroupText);
 if (unitGroupText !== null && !unitGroup) {
   console.error(`--unit-group ${unitGroupText}: give <i>/<n>, 1 ≤ i ≤ n (e.g. --unit-group 2/4)`);
   process.exit(2);
 }
+/** This group's part of a unit project: { shard } (null: all of it), or null when only other groups run it. */
+const partHere = (u) => (unitGroup === null ? { shard: null } : unitPartsOf(u.name, unitGroup.count).find((part) => part.group === unitGroup.index) ?? null);
 // One nothing reaches is skipped in every group: "group N runs it" would send the reader to a group that skips it too.
-const otherGroup = (u) => unitGroup !== null && u.mode !== "skip" && unitGroupOf(u.name, unitGroup.count) !== unitGroup.index;
+const otherGroup = (u) => u.mode !== "skip" && partHere(u) === null;
+/** Where the other halves of a halved project run, for the plan's line: "; group 4 runs 2/2". */
+const otherParts = (u) => (unitGroup === null ? "" : unitPartsOf(u.name, unitGroup.count).filter((part) => part.group !== unitGroup.index && part.shard).map((part) => `; group ${part.group} runs ${part.shard}`).join(""));
+/** Where a project this group leaves out runs: "group 2 runs it", or "groups 3 and 4 run it in halves". */
+const runsIt = (u) => {
+  const parts = unitPartsOf(u.name, unitGroup.count);
+  return parts.length === 1 ? `group ${parts[0].group} runs it` : `groups ${parts.map((part) => part.group).join(" and ")} run it in halves`;
+};
 
 const git = (...args) => {
   const r = spawnSync("git", args, { cwd: ROOT, encoding: "utf8" });
@@ -153,8 +163,8 @@ console.log(`\nworkers: vitest ${JOBS} (JOBS), playwright ${E2E_WORKERS} (E2E_WO
 
 console.log(`unit (vitest)${unitGroup ? `: group ${unitGroup.index} of ${unitGroup.count} (--unit-group)` : ""}`);
 for (const u of p.unit) {
-  if (otherGroup(u)) console.log(`  ${"other".padEnd(7)} ${u.name.padEnd(9)} group ${unitGroupOf(u.name, unitGroup.count)} runs it (${u.mode}: ${u.reason})`);
-  else console.log(`  ${u.mode.padEnd(7)} ${u.name.padEnd(9)} ${u.reason}`);
+  if (otherGroup(u)) console.log(`  ${"other".padEnd(7)} ${u.name.padEnd(9)} ${runsIt(u)} (${u.mode}: ${u.reason})`);
+  else console.log(`  ${u.mode.padEnd(7)} ${u.name.padEnd(9)} ${u.mode !== "skip" && partHere(u).shard ? `half ${partHere(u).shard} (vitest --shard${otherParts(u)}): ` : ""}${u.reason}`);
 }
 console.log("lint (eslint)");
 if (noLint && p.lint.mode !== "skip") console.log(`  ${"off".padEnd(7)} --no-lint`);
@@ -241,12 +251,14 @@ const started = Date.now();
 
 // unit
 for (const u of p.unit) {
-  if (otherGroup(u)) { skipped.push(`unit ${u.name}: group ${unitGroupOf(u.name, unitGroup.count)} runs it (--unit-group ${unitGroup.index}/${unitGroup.count})`); continue; }
+  if (otherGroup(u)) { skipped.push(`unit ${u.name}: ${runsIt(u)} (--unit-group ${unitGroup.index}/${unitGroup.count})`); continue; }
   if (u.mode === "skip") { skipped.push(`unit ${u.name}: ${u.reason}`); continue; }
   const cwd = join(ROOT, u.cwd);
-  const common = [...u.args, `--maxWorkers=${JOBS}`, "--passWithNoTests"];
-  if (u.mode === "whole") await run(`unit ${u.name} (whole: ${u.reason})`, "npx", ["vitest", "run", ...common], { cwd });
-  else await run(`unit ${u.name} (related)`, "npx", ["vitest", "related", ...u.files.map((f) => join(ROOT, f)), "--run", ...common], { cwd });
+  const { shard } = partHere(u);
+  const common = [...u.args, `--maxWorkers=${JOBS}`, "--passWithNoTests", ...(shard ? [`--shard=${shard}`] : [])];
+  const half = shard ? `, half ${shard}` : "";
+  if (u.mode === "whole") await run(`unit ${u.name} (whole: ${u.reason}${half})`, "npx", ["vitest", "run", ...common], { cwd });
+  else await run(`unit ${u.name} (related${half})`, "npx", ["vitest", "related", ...u.files.map((f) => join(ROOT, f)), "--run", ...common], { cwd });
 }
 
 // lint

@@ -1,4 +1,4 @@
-import { AWAITING_PEER_MS, DHT_PACKET_BUDGET, DHT_TEXT_BYTES, decodeCommunityLink, decodeGroupEntryLink, inviteLink, LIMITS, MENTION_EVERYONE, normalizeRelayUrl, ownInviteRefusal, relayUrlProblem, replySnippet, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type TypingKind } from "@ghostly/core";
+import { AWAITING_PEER_MS, DHT_PACKET_BUDGET, decodeCommunityLink, decodeGroupEntryLink, inviteLink, LIMITS, MENTION_EVERYONE, normalizeRelayUrl, ownInviteRefusal, relayUrlProblem, replySnippet, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type TypingKind } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
 import { DEFAULT_HYPERDHT_RELAY } from "@ghostly/browser/shared/hyperdhtRelay";
@@ -32,7 +32,7 @@ import { APP_CHAT_METHODS } from "./appChat";
 import { WALLET_METHODS } from "./wallets";
 import { checkOwnStatus, statusJson } from "./ownStatus";
 import { TRANSPORT_NAMES } from "./words";
-import { chatState } from "./waitNotice";
+import { chatState, dhtOnlyNote, heldWords } from "./waitNotice";
 import { chatDetailsJson, chatJson, chatMessageJson, groupJson, groupMessageJson, groupPayTwins, isLive, messageJson, type MessageJson } from "./views";
 
 /**
@@ -318,36 +318,12 @@ async function letIn(ctx: ApiContext, groupId: string, link: string, held: Group
 }
 
 /**
- * Why a text that waits will not go by itself, or undefined: longer than the 256 bytes the DHT carries, in a chat on
- * the DHT only (this side's choice, the contact's, or both). It goes once the chat is live, which neither side's app
- * tries while either keeps it on the DHT only, so it is said with what ends that, or to shorten it. This side's DHT
- * only that is a hold (`chat disconnect --hold`) ends by itself: said with when, and the command that ends it now
- * (read from `ctx`'s profile; without it, as a DHT only chosen).
+ * Why a text that waits will not go by itself, or undefined (waitNotice.ts `dhtOnlyNote`). This side's DHT only that is
+ * a hold (`chat disconnect --hold`) is read from `ctx`'s profile; without it, as a DHT only chosen.
  */
 function dhtOnlyWait(link: LinkView, text: string, ref: string, ctx?: ApiContext): string | undefined {
-  const mine = link.deliveryMode === "dht", theirs = link.dhtDelivery?.peerMode === "dht";
-  if ((!mine && !theirs) || new TextEncoder().encode(text.trim()).length <= DHT_TEXT_BYTES) return undefined;
-  const held = mine && ctx ? holdEnds(ctx, link.id) : null, chosen = mine && held === null;
-  const switchBack = `ghostly chat transport ${shellWord(ref, "<chat>")} auto`;
-  const who = chosen && theirs ? `you and the contact keep this chat on the DHT only: it goes once both choose a live transport (${switchBack}), or shorten it`
-    : theirs ? "the contact keeps this chat on the DHT only: it goes once they choose a live transport, or shorten it"
-    : held !== null ? heldWords(held, ref, "it goes", ctx?.mode === "one-shot")
-    : `this chat is on the DHT only: it goes once you choose a live transport (${switchBack}), or shorten it`;
-  return `Longer than the ${DHT_TEXT_BYTES} bytes the DHT carries, and ${who}`;
-}
-
-/**
- * A chat this side holds on the DHT only (`chat disconnect --hold`) until `until`: what waits for its end (`act`)
- * goes then by itself, or at once with `chat connect`, which ends the hold. A hold whose time is up and that is still
- * ending (`holdEnds`) says so. The time is this machine's: the hour and minute, with the day when it is not today.
- */
-function heldWords(until: number, ref: string, act: string, oneShot = false): string {
-  const connect = `ghostly chat connect ${shellWord(ref, "<chat>")}`;
-  const online = oneShot ? " while this profile is online (ghostly daemon --detach)" : "";
-  if (until <= Date.now()) return `this chat's hold on the DHT only is ending: ${act} once the chat is live${online}, or now with ${connect}`;
-  const at = new Date(until), two = (n: number) => String(n).padStart(2, "0");
-  const day = at.toDateString() === new Date().toDateString() ? "" : `${at.getFullYear()}-${two(at.getMonth() + 1)}-${two(at.getDate())} `;
-  return `this chat is held on the DHT only until ${day}${two(at.getHours())}:${two(at.getMinutes())}: ${act} then${online}, or now with ${connect}`;
+  const mine = link.deliveryMode === "dht";
+  return dhtOnlyNote({ mine, theirs: link.dhtDelivery?.peerMode === "dht", heldUntil: mine && ctx ? holdEnds(ctx, link.id) : null, oneShot: ctx?.mode === "one-shot" }, text, ref);
 }
 
 /**

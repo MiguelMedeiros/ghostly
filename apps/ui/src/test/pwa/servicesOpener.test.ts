@@ -1695,7 +1695,8 @@ describe("a contact's app while Hide my IP is on", () => {
     vi.unstubAllEnvs();
   });
 
-  it("opens no contact's app while Hide my IP from contacts is on, and says why", async () => {
+  // Its time is the web host's fresh import (its whole graph, after vi.resetModules()), not the check: a bound of its own.
+  it("opens no contact's app while Hide my IP from contacts is on, and says why", { timeout: 30_000 }, async () => {
     const host = await webHost();
     await expect(host.openService!("o".repeat(52), "demo", "ybndrfg8ejkmcpqx", true))
       .rejects.toThrow("A contact's app does not open in the web app while Hide my IP from contacts is on");

@@ -1,5 +1,7 @@
 import { useId } from "react";
 import { useI18n } from "../../contexts/I18nContext";
+import { fillNames } from "../../lib/fillNodes";
+import { isolate } from "../../lib/ownStatus";
 import { BADGE_LIMITS, contactBadges, isGood, takeBadges, useReceived } from "./contactBadges";
 import { BadgeMark } from "./BadgeMark";
 import { MenuItem } from "../Menu";
@@ -68,7 +70,7 @@ export function IdentityStack({ peerKey, name, onOpen, open, footer }: { peerKey
   const shown = badges.slice(0, BADGE_LIMITS.header);
   const allGood = (n: number) => shown.length > 0 && shown.slice(0, n).every(b => isGood(b.state));
   // Nothing shared: the Ghostly mark says what the panel holds, the way a proof's mark names the proof.
-  const ghostly = shown.length ? undefined : `${t("identities.ghostly.theirs")}. ${t("identities.ghostly.nothingElse", { name })}`;
+  const ghostly = shown.length ? undefined : `${t("identities.ghostly.theirs")}. ${t("identities.ghostly.nothingElse", { name: isolate(name) })}`;
   const pick = (key: string) => (key === ALL_MARKS ? badges : badges.filter(b => b.id === key));
   // A mark named on screen is a card on screen: its public profile's name comes into the card once read.
   const { tip, handlers, swallow } = useMarkTip(key => loadShownProfiles(pick(key)));
@@ -77,7 +79,7 @@ export function IdentityStack({ peerKey, name, onOpen, open, footer }: { peerKey
   const inTip = tip && !ghostly ? pick(tip.key) : [];
   return (
     <>
-      <button type="button" className="identity-stack" data-testid="chat-identity-badges" data-count={badges.length} aria-expanded={open} aria-label={t("identities.badge.stackLabel", { name, list: label })}
+      <button type="button" className="identity-stack" data-testid="chat-identity-badges" data-count={badges.length} aria-expanded={open} aria-label={t("identities.badge.stackLabel", { name: isolate(name), list: label })}
         aria-describedby={tip ? tipId : undefined} {...handlers}
         onClick={e => { if (!swallow(e)) onOpen(); }}>
         <span className="identity-stack-marks">
@@ -109,7 +111,7 @@ export function IdentityMenuItem({ peerKey, name, keyLabel, onOpen }: { peerKey:
   return (
     <MenuItem testId="chat-identity-badges" data={{ "data-count": badges.length }} onClick={onOpen} hint={[keyLabel, ...badges.map(b => b.label)].join(" · ")}
       icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2" /><circle cx="9" cy="11" r="2" /><path d="M6 16c.6-1.4 1.7-2 3-2s2.4.6 3 2M15 10h3M15 14h3" /></svg>}>
-      {t("identities.contact.title", { name })}
+      {fillNames(t("identities.contact.title"), { name })}
     </MenuItem>
   );
 }

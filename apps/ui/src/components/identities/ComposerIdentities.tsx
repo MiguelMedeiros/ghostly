@@ -7,6 +7,7 @@ import { useOutsideDismiss } from "../../hooks/useDismiss";
 import { useCopyKey } from "../../hooks/useCopyKey";
 import { addableProviders, daysLeft, date, expiringSoon, providerLabel, sharedStatus, useEngineValue, useNewProof } from "../../lib/identities";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
+import { fillNames } from "../../lib/fillNodes";
 import { ComposerSheet, ComposerSheetHead, ForwardArrow } from "../ComposerSheet";
 import { Deck } from "../deck/Deck";
 import { CardFlip, FlipTurnButton } from "../deck/Flip";
@@ -278,7 +279,7 @@ function GhostlyBack({ t, card, contact, others, busy, turning, done, error, act
     <div className="id-card-back" data-testid="composer-identity-back" data-ghostly="true">
       <div className="id-card-back-band">
         {!done && <FlipTurnButton testId="composer-identity-change-card" label={t("identities.picker.chooseAnother")} onClick={onCards} />}
-        <span className="id-card-back-title">{t("identities.picker.whatSees", { contact })}</span>
+        <span className="id-card-back-title">{fillNames(t("identities.picker.whatSees"), { contact })}</span>
       </div>
       <div className="id-card-back-body">
         <div className="id-card-back-sees" data-testid="composer-identity-sees">
@@ -341,7 +342,7 @@ function IdentityBack({ t, entry, contact, now, busy, turning, stopping, done, e
     <div className="id-card-back" data-testid="composer-identity-back">
       <div className="id-card-back-band">
         {!done && <FlipTurnButton testId="composer-identity-change-card" label={t("identities.picker.chooseAnother")} onClick={onCards} />}
-        <span className="id-card-back-title">{t("identities.picker.whatSees", { contact })}</span>
+        <span className="id-card-back-title">{fillNames(t("identities.picker.whatSees"), { contact })}</span>
       </div>
       <div className="id-card-back-body">
         <div className="id-card-back-sees" data-testid="composer-identity-sees">
@@ -368,7 +369,7 @@ function IdentityBack({ t, entry, contact, now, busy, turning, stopping, done, e
             {working && stopping === stops ? (stops ? t("identities.ghostly.stopping") : t("identities.picker.sharing")) : stops ? t("identities.stopSharing") : retry ? <>{t("identities.picker.shareAgain")}<ForwardArrow /></> : <>{t("identities.picker.shareWith", { contact })}<ForwardArrow /></>}
           </button>
           {retry ? <button type="button" data-testid="composer-identity-stop" className="composer-identities-manage" disabled={turning} aria-disabled={!!busy || undefined} aria-busy={(working && stopping) || undefined} onClick={onStop}>{working && stopping ? t("identities.ghostly.stopping") : t("identities.stopSharing")}</button>
-            : on && <p className="id-card-back-note">{t("identities.picker.stopNote", { contact })}</p>}
+            : on && <p className="id-card-back-note">{fillNames(t("identities.picker.stopNote"), { contact })}</p>}
         </div>}
         {error && <p role="alert" dir={ownDirection(error)} className="m-0 text-xs text-danger" data-testid="composer-identities-error">{error}</p>}
       </div>
