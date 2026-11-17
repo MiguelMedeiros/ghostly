@@ -175,6 +175,25 @@ describe("the admin's menu on a member's tile", () => {
     expect(await axeViolations(screen.getByTestId("group-call"))).toEqual([]);
   });
 
+  it("puts a member's name in its own <bdi> in the remove headings and in Let back in: a Latin name keeps its punctuation in Arabic", async () => {
+    answerModerate(({ act }) => ({ ok: true, state: act === "state" ? { muted: {}, banned: [BO] } : EMPTY }));
+    const isolated = (el: HTMLElement, name: string) => [...el.querySelectorAll("bdi")].some((bdi) => bdi.textContent === name);
+    const { user } = adminView();
+    await user.click(menuButton(ANA));
+    await user.click(screen.getByTestId("group-call-remove-from-call"));
+    const heading = within(screen.getByTestId("group-call-remove-call-dialog")).getByRole("heading");
+    expect(heading).toHaveTextContent("Remove Ana from the call?");
+    expect(isolated(heading, "Ana")).toBe(true);
+    await user.click(within(screen.getByTestId("group-call-remove-call-dialog")).getByRole("button", { name: "Cancel" }));
+    await user.click(menuButton(ANA));
+    await user.click(screen.getByTestId("group-call-remove-from-group"));
+    expect(isolated(within(screen.getByTestId("group-call-remove-group-dialog")).getByRole("heading"), "Ana")).toBe(true);
+    await user.click(within(screen.getByTestId("group-call-remove-group-dialog")).getByRole("button", { name: "Cancel" }));
+    await user.click(await screen.findByTestId("group-call-removed"));
+    const row = screen.getByRole("button", { name: "Let Bo back in" });
+    expect(isolated(row, "Bo")).toBe(true);
+  });
+
   it("is not in the small window", async () => {
     answerModerate(() => ({ ok: true, state: EMPTY }));
     localStorage.setItem("ghostly_group_call_mini", "1");
