@@ -44,6 +44,13 @@ describe("⋮ → Copy invite link", () => {
     expect(execCommand).not.toHaveBeenCalled();
   });
 
+  it("says Copied in a status outside the menu, which the same click closed", async () => {
+    const { user, menu } = await openMenu(vi.fn(async () => {}));
+    await user.click(menu.getByTestId("chat-copy-invite"));
+    expect(screen.queryByTestId("chat-options-menu")).toBeNull();
+    await vi.waitFor(() => expect(screen.getAllByRole("status").map(s => s.textContent)).toContain("Copied!"));
+  });
+
   it("a refused marked copy copies nothing unmarked: it shows the link to copy by hand", async () => {
     const copySecret = vi.fn(async () => { throw new Error("refused"); });
     const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
