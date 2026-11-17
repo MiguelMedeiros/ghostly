@@ -17,6 +17,7 @@ import type { Translate } from "../../locales/translate";
 import type { InstalledAppView } from "@ghostly/browser/engine/apps";
 import type { OpenAppOptions } from "./open";
 import { MOBILE_QUERY } from "../../hooks/useIsMobile";
+import { isolate } from "../ownStatus";
 
 export interface ChatApp {
   ref: string;
@@ -215,9 +216,10 @@ export function takeOpenRequest(linkId: string): OpenRequest | undefined {
 
 /**
  * "Chess with Ana": a panel's name, and a Desktop app window's title; "Chess · sharing a file with Ana" while it serves
- * the contact a file (`serving`). Only the title when opened alone.
+ * the contact a file (`serving`). Only the title when opened alone. Each name keeps its own direction (an Arabic name in
+ * an English title, "Hunt!" in an Arabic one).
  */
 export function appWithContact(title: string, linkId: string | null, t: Translate, serving = false): string {
   const contact = linkId ? appContact(linkId) : undefined;
-  return contact ? t(serving ? "apps.view.withSharing" : "apps.view.with", { title, name: contact.name }) : title;
+  return contact ? t(serving ? "apps.view.withSharing" : "apps.view.with", { title: isolate(title), name: isolate(contact.name) }) : title;
 }

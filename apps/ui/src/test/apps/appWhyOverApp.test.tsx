@@ -72,7 +72,7 @@ describe("an app opened from the Apps page in a chat an app covers", () => {
 
     const card = await screen.findByTestId("chat-app-why");
     expect(card).toHaveAttribute("data-tone", "error");
-    expect(screen.getByTestId("chat-app-why-title")).toHaveTextContent("Chess with Ana");
+    expect(screen.getByTestId("chat-app-why-title")).toHaveTextContent("⁨Chess⁩ with ⁨Ana⁩");
     expect(screen.getByTestId("chat-app-why-text")).toHaveTextContent("You are offline.");
     expect(screen.queryByTestId("chat-apps")).not.toBeInTheDocument();
 
