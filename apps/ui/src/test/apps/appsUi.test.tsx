@@ -1042,6 +1042,21 @@ describe("with the apps flag on", () => {
     expect(screen.queryByTestId("app-card-run-anyway")).not.toBeInTheDocument();
   });
 
+  it("a stopped app's card with nothing to run says no one need be online; Run anyway keeps the line", async () => {
+    fakeEngine.on("appList", () => [installed({ run: { status: "revoked" } })]);
+    const { unmount } = renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
+    act(() => fakeEngine.update({ links: [ana(false)] }));
+    await waitFor(() => expect(screen.getByTestId("app-card-check")).toHaveTextContent(/^Stopped$/));
+    expect(screen.queryByTestId("app-card-waiting")).not.toBeInTheDocument();
+    unmount();
+    forgetInstalledApps();
+    fakeEngine.on("appList", () => [installed({ run: { status: "removed", by: [{ store: "k", name: "Ghostly", reason: "Malware", at: 1 }] } })]);
+    renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
+    act(() => fakeEngine.update({ links: [ana(false)] }));
+    expect(await screen.findByTestId("app-card-run-anyway")).toBeInTheDocument();
+    expect(screen.getByTestId("app-card-waiting")).toHaveTextContent(/needs you both online$/);
+  });
+
   it("a store read again that removed an installed app stops it on the page at once", async () => {
     const removedRun = { status: "removed" as const, by: [{ store: "s", name: "Ghostly", reason: "Malware", at: 1 }] };
     let refreshed = false;
