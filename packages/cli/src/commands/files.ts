@@ -32,7 +32,7 @@ function sendable(path: string): string {
 
 /** Files: one entry per command, in alphabetical order (test/commands.test.ts checks). */
 export const commands: Record<string, Command> = {
-  "file accept": { method: "file.action", usage: "file accept [<chat>] <file>", summary: "Take a file the contact offers, or download a group's file that did not come by itself (<chat> may be the group)", args: ["chat?", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "accept" }) },
+  "file accept": { method: "file.action", usage: "file accept [<chat>] <file>", summary: "Take a file the contact offers, or download a group's file that did not come by itself (<chat> may be the group); refused when it does not fit in the room left on this device, and it keeps waiting", args: ["chat?", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "accept" }) },
   "file cancel": { method: "file.action", usage: "file cancel [<chat>] <file>", summary: "Cancel a transfer", args: ["chat?", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "cancel" }) },
   "file decline": { method: "file.action", usage: "file decline [<chat>] <file>", summary: "Refuse a file the contact offers", args: ["chat?", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "decline" }) },
   "file list": { method: "file.list", usage: "file list <chat|group>", summary: "A chat's or a group's files and their transfers", args: ["chat"], params: (_, { chat }) => ({ chat }) },
