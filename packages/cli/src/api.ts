@@ -1,4 +1,4 @@
-import { AWAITING_PEER_MS, DHT_PACKET_BUDGET, decodeCommunityLink, decodeGroupEntryLink, inviteLink, LIMITS, MENTION_EVERYONE, normalizeRelayUrl, ownInviteRefusal, relayUrlProblem, replySnippet, TYPING_KINDS, type GroupMention, type TypingKind } from "@ghostly/core";
+import { AWAITING_PEER_MS, COMMUNITY_LIMITS, DHT_PACKET_BUDGET, decodeCommunityLink, decodeGroupEntryLink, GROUP_EDIT_TEXT_BYTES, GROUP_LIMITS, inviteLink, LIMITS, MENTION_EVERYONE, normalizeRelayUrl, ownInviteRefusal, relayUrlProblem, replySnippet, STATUS_CARD_LIMITS, statusCardBytes, TYPING_KINDS, type GroupMention, type TypingKind } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
 import { DEFAULT_HYPERDHT_RELAY } from "@ghostly/browser/shared/hyperdhtRelay";
@@ -1312,9 +1312,37 @@ const ENGINE_SENDS: ReadonlySet<string> = new Set([
   "nostrDraft",
 ]);
 
+/**
+ * The most a message's text carries, in a chat or a group, sent or edited: UTF-8 bytes of the trimmed text, as the
+ * engine counts them. The engine refuses a longer one before it keeps or sends anything.
+ */
+const ENGINE_TEXT_BYTES = Math.max(LIMITS.maxChatMessageBytes, GROUP_LIMITS.textBytes, COMMUNITY_LIMITS.textBytes, GROUP_EDIT_TEXT_BYTES);
+
+/**
+ * Per call, the fields the engine refuses the whole call for past their bound, before it keeps or sends anything:
+ * a message's or an edit's text and a group file's caption past `ENGINE_TEXT_BYTES`, a status card past
+ * `STATUS_CARD_LIMITS.bytes`. Only these: other fields (a memo, a name, a status) may go at other sizes.
+ */
+const REFUSED_PAST_BOUND: Readonly<Record<string, readonly ("text" | "caption" | "card")[]>> = {
+  sendMessage: ["text", "card"], editMessage: ["text", "card"], sendGroupMessage: ["text", "card"], sendGroupFile: ["caption"],
+};
+
+/** Whether the engine refuses `value` as this field of the call, by its size alone (`REFUSED_PAST_BOUND`). */
+function pastEngineBound(method: string, field: "text" | "caption" | "card", value: unknown): boolean {
+  if (!REFUSED_PAST_BOUND[method]?.includes(field)) return false;
+  if (field === "card") return value !== undefined && statusCardBytes(value) > STATUS_CARD_LIMITS.bytes;
+  return typeof value === "string" && new TextEncoder().encode(value.trim()).length > ENGINE_TEXT_BYTES;
+}
+
+/**
+ * The secret guard of a raw engine send. A text the engine refuses by its size alone is not read for a secret (a
+ * 15 MB one held the daemon's thread for seconds): the engine answers it with its size, as it did once the guard was
+ * done, and nothing of it is kept or sent.
+ */
 async function guardEngineSend(ctx: ApiContext, method: string, args: Params): Promise<void> {
   const of = (value: unknown, key: string) => (value && typeof value === "object" ? (value as Params)[key] : undefined);
-  let texts: unknown = [args.text, args.card, args.caption, args.memo, args.comment, args.name, of(args.settings, "nick"), of(args.file, "name"), of(args.status, "text"), args.content,
+  const read = (field: "text" | "caption" | "card") => (pastEngineBound(method, field, args[field]) ? undefined : args[field]);
+  let texts: unknown = [read("text"), read("card"), read("caption"), args.memo, args.comment, args.name, of(args.settings, "nick"), of(args.file, "name"), of(args.status, "text"), args.content,
     ...(args.fields && typeof args.fields === "object" ? Object.values(args.fields) : [])];
   if (method === "forwardMessages") {
     const ids = Array.isArray(args.messageIds) ? args.messageIds.filter((id): id is string => typeof id === "string") : [];
