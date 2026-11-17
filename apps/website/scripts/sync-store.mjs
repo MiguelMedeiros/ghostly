@@ -1,7 +1,8 @@
 // The official store's bytes for the /apps pages, read once when the site is built (npm run sync:references, so
 // predev and prebuild too): the signed index `ghostly-store.json`, its `ghostly-store.sig`, and each listing's bundle
 // from each of its URLs (at most 4, as core's index reader allows) on a host the app reads from, so a URL that holds
-// another version than the listed one leaves the next to show it. Then each publisher's own `ghostly-revoke.json`, beside
+// another version than the listed one leaves the next to show it (every listing's first URLs before any listing's
+// mirrors, bundleOrder, so all of them share one byte budget). Then each publisher's own `ghostly-revoke.json`, beside
 // each of those URLs and beside each `sources` URL its bundles' manifests name, as the app reads them before Install
 // (packages/browser/src/engine/apps.ts, readRevocations): a version its publisher revoked is left out before the store
 // copies the revocation into its index. Nothing is checked here: lib/storeRead.ts verifies all
@@ -10,13 +11,15 @@
 // it read, icons included.
 //
 // Writes lib/store-snapshot.json (not committed): `revocations` holds each revocation file read, by its own URL (an
-// older snapshot has none, which revokes nothing). A failed read does not fail the build unless GHOSTLY_STORE_REQUIRED
+// older snapshot has none, which revokes nothing). A bundle whose bytes another URL already holds is kept once: `sameAs`
+// names that URL, and the bytes count against the budget once. A failed read does not fail the build unless GHOSTLY_STORE_REQUIRED
 // is set: the snapshot then says why, and the pages say the store could not be read.
 //
 //   GHOSTLY_STORE_FIXTURE=1 npm run sync:references     # the committed test store (e2e/fixtures/store), no network
 //   GHOSTLY_STORE_REQUIRED=1 npm run sync:references    # fail when the official store cannot be read
 //
 // CI sets GHOSTLY_STORE_FIXTURE, so its builds never ask GitHub. The fixture's README says how it was made.
+import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -143,6 +146,23 @@ export function revocationUrls(listing, bundles) {
 }
 
 /**
+ * The bundle URLs in the order their bytes take the budget: each listing's URLs in the order lib/storeRead.ts tries them
+ * (its jsDelivr copies before its raw `HEAD`: a copy names a commit, where `HEAD` moves on after review), and every
+ * listing's first before any listing's second. So one listing's mirrors, however large they turn, never leave a listing
+ * after it with none of its URLs read: what is over the budget is a later mirror.
+ */
+function bundleOrder(listings) {
+  const pinned = (u) => new URL(u).hostname.toLowerCase() === "cdn.jsdelivr.net";
+  const tried = listings.map((listing) => {
+    const urls = listing.urls.filter((u) => typeof u === "string" && isFetchUrl(u));
+    return [...urls.filter(pinned), ...urls.filter((u) => !pinned(u))];
+  });
+  const order = new Set();
+  for (let rank = 0; rank < LIMITS.urls; rank++) for (const urls of tried) if (rank < urls.length) order.add(urls[rank]);
+  return [...order];
+}
+
+/**
  * Reads the official store and everything its pages show, with `fetcher` (the network's `fetch` unless a test gives its
  * own). A revocation file that is not there is no problem: most publishers have none.
  */
@@ -160,16 +180,26 @@ export async function fromStore(fetcher = fetch) {
     problems.push(`a listing has no URLs or more than ${LIMITS.urls}: the index will not verify`);
     return { source: "store", index: b64(index), sig: b64(sig), bundles, revocations, problems };
   }
+  const sameAs = {};
   const readBundles = new Map();
+  // The URL that holds each kept bundle's bytes first, by their hash: a mirror of them is kept as that URL, for nothing.
+  const kept = new Map();
   let total = index.length + sig.length;
-  const bundleUrls = new Set(listings.flatMap((listing) => listing.urls.filter((u) => typeof u === "string" && isFetchUrl(u))));
-  await readInOrder([...bundleUrls], LIMITS.bundleBytes, fetcher, (url, bytes, error) => {
+  await readInOrder(bundleOrder(listings), LIMITS.bundleBytes, fetcher, (url, bytes, error) => {
     try {
       if (error) throw error;
+      const hash = createHash("sha256").update(bytes).digest("hex");
+      const first = kept.get(hash);
+      if (first !== undefined) {
+        sameAs[url] = first;
+        readBundles.set(url, readBundles.get(first));
+        return;
+      }
       if (total + bytes.length > LIMITS.totalBytes) throw new Error(`${url}: over the ${LIMITS.totalBytes} bytes all bundles may take`);
       total += bytes.length;
       bundles[url] = b64(bytes);
       readBundles.set(url, bytes);
+      kept.set(hash, url);
     } catch (error) {
       problems.push(String(error?.message ?? error));
     }
@@ -219,7 +249,7 @@ export async function fromStore(fetcher = fetch) {
       else answers.set(use.url, answer.bytes && revocations[use.url] === undefined ? null : answer);
     }
   });
-  return { source: "store", index: b64(index), sig: b64(sig), bundles, revocations, problems };
+  return { source: "store", index: b64(index), sig: b64(sig), bundles, sameAs, revocations, problems };
 }
 
 function fromFixture(dir) {
@@ -247,7 +277,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     snapshot = { source: "none", error: String(error?.message ?? error), bundles: {}, revocations: {}, problems: [] };
   }
   writeFileSync(out, JSON.stringify({ readAt: new Date().toISOString(), ...snapshot }) + "\n");
-  const count = Object.keys(snapshot.bundles).length;
+  const count = Object.keys(snapshot.bundles).length + Object.keys(snapshot.sameAs ?? {}).length;
   if (snapshot.source === "none" && process.env.GHOSTLY_STORE_REQUIRED) {
     console.error(`The store: not read (${snapshot.error}), and GHOSTLY_STORE_REQUIRED is set.`);
     process.exit(1);
