@@ -2,6 +2,7 @@ import { engineError } from "./engineErrors";
 import { bech32 } from "@scure/base";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { decodeBolt11, type Bolt11Invoice } from "./bolt11";
+import { linkEnd, linkTail } from "./linkPreview";
 import { stripHidden } from "./text";
 
 /**
@@ -114,9 +115,19 @@ function acceptUrl(text: string): URL {
   return url;
 }
 
+/**
+ * Text without what a link leaves out at its end (`linkTail`): a direction mark a right-to-left sentence puts after it,
+ * another character that draws as nothing, an emoji. Taken off one by one: linear however many there are.
+ */
+function withoutTail(text: string): string {
+  let end = text.length;
+  for (let tail = linkTail(text, end); tail; tail = linkTail(text, end)) end -= tail;
+  return text.slice(0, end);
+}
+
 /** Reads what was pasted as a Lightning address or an LNURL; null when it is neither. Throws when it is one, but a bad one. */
 export function parseLightningDestination(input: string): LightningDestination | null {
-  const text = input.trim().replace(/^(lightning:|⚡\s*)/i, "").trim();
+  const text = withoutTail(input.trim()).replace(/^(lightning:|⚡\s*)/i, "").trim();
   if (!text) return null;
   if (LNURL_BECH32.test(text)) {
     let decoded: { prefix: string; words: number[] };
@@ -148,11 +159,9 @@ export function findLightningDestination(text: string): { destination: Lightning
   if (!match) return null;
   // Take the whole token the match starts in: an lnurl runs to the next space, an address stops at its domain.
   const start = match.index, end = text.slice(start).search(/\s|$/);
-  // The sentence's closing punctuation stays out, taken off one by one: `/[…]+$/` retries from every character of a
-  // long run that does not reach the end, which is quadratic.
-  let stop = start + end;
-  while (stop > start && "),.;:!?".includes(text[stop - 1])) stop--;
-  const token = text.slice(start, stop);
+  // It ends where a link would (`linkEnd`, in linear time): at the first Chinese, Japanese or Arabic stop ("。", "،"),
+  // and before the sentence's closing punctuation, a bracket it did not open, an emoji or a direction mark.
+  const token = linkEnd(text.slice(start, start + end));
   let destination: LightningDestination | null;
   try { destination = parseLightningDestination(token); } catch { return null; }
   if (!destination) return null;
