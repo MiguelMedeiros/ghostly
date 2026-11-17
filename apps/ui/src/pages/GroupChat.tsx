@@ -1076,8 +1076,14 @@ export function GroupChat() {
             ? (group.invitation.contact ? t("group.forget.invitationKept", { contact: isolate(group.invitation.contact) }) : t("group.forget.invitationKeptUnknown"))
             : (group.invitation.contact ? t("group.forget.invitation", { contact: isolate(group.invitation.contact) }) : t("group.forget.invitationUnknown")))
           : t("group.forget.kept")}
-        // A group I am no longer in (removed, left, an invitation): nothing to leave, only its history here goes.
-        onConfirm={() => { setConfirmForget(false); void act(async () => { await engine.call("forgetGroup", { groupId }); goneHere(); nav.home(); }); }} />}
+        // A group I am no longer in (removed, left, an invitation): nothing to leave, only its history here goes. The
+        // dialog gives the focus back to ⋮, which goes with the page: it goes to the list's next row, or New, as
+        // Cancel joining's does; it was left on the page's body.
+        onConfirm={() => {
+          const next = rowAfter(groupId);
+          setConfirmForget(false);
+          void act(async () => { await engine.call("forgetGroup", { groupId }); goneHere(); nav.home(); focusPastRow(next, optionsRef.current); });
+        }} />}
     </div>
     </MemberColorsProvider>
     </NowPlayingChat.Provider>

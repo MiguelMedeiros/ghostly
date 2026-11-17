@@ -890,6 +890,32 @@ describe("GroupChat: the options menu", () => {
     expect(engine.callsTo("forgetGroup")).toEqual([{ groupId: "group-1" }]);
   });
 
+  it.each(["removed", "left"] as const)(
+    "Delete from the keyboard on a %s group's page hands the focus to the next row of the list, or to New after the last", async status => {
+    // The ⋮ the dialog gives it back to goes with the page: it was left on the page's body once home.
+    const gone = active({ status, canSend: false });
+    const other = active({ id: "group-2", name: "Others" });
+    fakeEngine.on("groupMessages", () => []).on("updateSettings", () => undefined);
+    for (const [groups, next] of [[[gone, other], "group-2"], [[gone], undefined]] as const) {
+      fakeEngine.update({ groups: [...groups] });
+      const { user, engine, unmount } = renderApp(<UpdateProvider><Sidebar /><Routes>
+        <Route path="/" element={<p>Chat list</p>} />
+        <Route path="/group/:groupId" element={<GroupChat />} />
+      </Routes></UpdateProvider>, { route: "/group/group-1" });
+      engine.on("forgetGroup", () => { fakeEngine.update({ groups: groups.slice(1) }); });
+      screen.getByTestId("group-options").focus();
+      await user.keyboard("{Enter}");
+      screen.getByTestId("group-forget").focus();
+      await user.keyboard("{Enter}");
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Delete from this device" }).focus();
+      await user.keyboard("{Enter}");
+      expect(await screen.findByText("Chat list")).toBeInTheDocument();
+      const row = next && screen.getAllByTestId("group-row").find(r => r.dataset.group === next)!;
+      await vi.waitFor(() => expect(row ? within(row).getByTestId("group-row-open") : screen.getByTestId("sidebar-new-chat")).toHaveFocus());
+      unmount();
+    }
+  });
+
   it("deleting an invitation says its sender is told it was declined", async () => {
     const { user } = openGroup(groupView({ canSend: false, invitation: { linkId: "link-1", contact: "Ana", admin: ALICE, members: 3, accepted: false } }));
     await user.click(screen.getByTestId("group-options"));
