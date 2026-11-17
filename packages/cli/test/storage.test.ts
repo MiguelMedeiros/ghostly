@@ -1495,6 +1495,60 @@ describe("messages kept in rows.db", () => {
     expect(left).toEqual({ "chat during the fold": [], "settings during the fold": [], "chat after the fold": [], "settings after the fold": [] });
   });
 
+  it("a transaction over a store kept on disk and a held one that waits behind the fold is all or nothing in a process killed while its snapshot is written", async () => {
+    const profile = (factory: IDBFactory) => new Promise<IDBDatabase>((resolve, reject) => {
+      const request = factory.open("ghostly", 1);
+      request.onupgradeneeded = () => {
+        request.result.createObjectStore("files", { keyPath: "id" });
+        request.result.createObjectStore("fileState", { keyPath: "id" });
+        request.result.createObjectStore("settings");
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    opened.push(store);
+    const d = await profile(store.factory);
+    // A file's record (held) and its state (rows.db), and a settings write: the journal holds a delete.
+    await tx(d, ["files", "fileState"], (s) => { s.files.put({ id: "f1" }); s.fileState.put({ id: "f1", state: "done" }); });
+    await tx(d, ["settings"], (s) => { s.settings.put({}, "settings"); });
+    await store.flush();
+    // The snapshot an hour old: the next entry written folds the store, which waits for that entry's sync.
+    const then = (Date.now() - 2 * 60 * 60_000) / 1000;
+    utimesSync(join(dir, "snapshot.bin"), then, then);
+    let synced = () => {};
+    disk.held = new Promise<void>((go) => { synced = go; });
+    let written = () => {};
+    const writing = new Promise<void>((reached) => {
+      disk.snapshotSync = () => { disk.snapshotSync = null; reached(); return new Promise<void>((go) => { written = go; }); };
+    });
+    try {
+      const renamed = tx(d, ["files"], (s) => { s.files.put({ id: "f1", name: "a.txt" }); });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      // `file delete`, its two stores in one transaction, waits behind the fold.
+      const deleting = tx(d, ["files", "fileState"], (s) => { s.files.delete("f1"); s.fileState.delete("f1"); });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      disk.held = null;
+      synced();
+      await writing;
+      // The folder as a process killed while the fold's snapshot is written leaves it.
+      const killed = copyOf(dir);
+      written();
+      await store.flush();
+      await renamed;
+      await deleting;
+      const after = await profile(await open(killed));
+      const t = after.transaction(["files", "fileState"]);
+      // The file and its state as they were before the delete, which never completed: not its state gone, its record kept.
+      expect({ file: await read(t.objectStore("files").get("f1")), state: await read(t.objectStore("fileState").get("f1")) })
+        .toEqual({ file: { id: "f1", name: "a.txt" }, state: { id: "f1", state: "done" } });
+    } finally { disk.held = null; disk.snapshotSync = null; }
+    // And once the fold is done, the delete is whole after a kill.
+    const t = (await profile(await open(copyOf(dir)))).transaction(["files", "fileState"]);
+    expect({ file: await read(t.objectStore("files").get("f1")), state: await read(t.objectStore("fileState").get("f1")) }).toEqual({ file: undefined, state: undefined });
+  });
+
   it("a put a unique index refuses in a store kept on disk leaves the store writable by the next transaction", async () => {
     const dir = folder();
     const factory = await open(dir);
@@ -1522,6 +1576,8 @@ describe("messages kept in rows.db", () => {
     for (let i = 0; i < 12; i++) await tx(d, ["messages"], (s) => { s.messages.put(message(i)); });
     d.close();
     (await upgrade(store.factory, 2, (u) => { u.objectStore("messages").createIndex("byCard", "card.kind"); })).close();
+    // In rows.db with the snapshot the schema change asked for.
+    await store.flush();
     expect(await entryCount(dir, "byCard")).toBe(3);
     await store.close();
     const again = await openPersistentIndexedDb(dir);
