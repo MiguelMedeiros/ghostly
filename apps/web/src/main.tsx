@@ -82,12 +82,13 @@ const missing = await missingEssentials();
 if (missing.length) await cannotRun(missing);
 
 const peerLock = profile ? `ghostly-peer-${profile}` : "ghostly-peer";
+// Read once, as the page opened: a link that reaches it later takes the address, the share is still this page's.
+const sharing = openedForShare();
 let stopLink = () => {};
 await becomeThePeer(peerLock, () => {
   const draw = (state: OtherTabState) => root.render(<OtherTab state={state} t={profileTranslator()} />);
   // Opened for a share while the app runs in another tab: that tab gets it (after a wait, or as this tab goes), and
   // this one says it went only once the worker handed it over. Once the lock is this tab's, it asks for it itself.
-  const sharing = openedForShare();
   if (sharing) handShareOver(() => isPeer, draw);
   // Opened for a link (an invite, a group's, a device code's): that tab opens it, with the same wait. Taken there, it
   // leaves this address, so this tab opens nothing twice if it takes over later; until then, this tab keeps it. A tab
@@ -131,7 +132,7 @@ if (gate.full) {
   startSessionSync();
   // Shares for this tab: the one it opened for, and any another tab forwards while this one is the app.
   listenForShares(peerLock);
-  askForShare();
+  askForShare(sharing);
   // Links another tab of this profile opened: here, as if this tab's address had changed to them.
   takeLinks(peerLock, (route) => { window.location.hash = route; });
 } else {
