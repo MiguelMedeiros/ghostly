@@ -618,6 +618,35 @@ describe("DHT delivery: sending and lifecycle", () => {
     await h.bob.stop();
   });
 
+  it("deleting texts on the floor one after the other, each followed by the next text, waits out the publication spacing", async () => {
+    // A chat in the background, read every 30 s once no text of its awaits a receipt.
+    const h = setup({ pollMs: null }); await h.bob.start();
+    const id = (i: number) => "q".repeat(21) + String.fromCharCode(97 + i);
+    expect(await h.bob.send("text 0", Date.now(), id(0))).toBeNull();
+    // Retried at 4 s, then at 12 s: the floor is quiet at 10 s.
+    await vi.advanceTimersByTimeAsync(10_000);
+    const published = h.transport.publish.mock.calls.length;
+    for (let i = 0; i < 10; i++) {
+      await h.bob.withdraw(id(i));
+      await vi.advanceTimersByTimeAsync(0);
+      // Every withdrawal of a text that went goes at once: only the first one's did.
+      expect(h.transport.publish.mock.calls.length, `withdrawal ${i}`).toBe(published + 1);
+      expect(h.openPublished()[6], `withdrawal ${i}`).toBeNull();
+      expect(await h.bob.send(`text ${i + 1}`, Date.now(), id(i + 1))).toBeNull();
+      await vi.advanceTimersByTimeAsync(100);
+    }
+    // The text left goes once the spacing allows, in one envelope.
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(h.transport.publish.mock.calls.length - published).toBe(2);
+    expect((h.openPublished()[6] as unknown[])[0], "the last envelope holds the text left, no withdrawn one").toBe(id(10));
+    // Deleted now, it is withdrawn at once again.
+    await h.bob.withdraw(id(10));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.transport.publish.mock.calls.length - published).toBe(3);
+    expect(h.openPublished()[6]).toBeNull();
+    await h.bob.stop();
+  });
+
   it("replays a confirmed receipt on start, and starting twice polls once", async () => {
     const h = setup({ state: { ...emptyDhtDeliveryState(), confirmed: ID } });
     await h.bob.start(); await h.bob.start();

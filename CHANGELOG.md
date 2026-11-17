@@ -4,6 +4,76 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.13.0
+
+Ghostly 1.13 lets a group's admin moderate a group call live: mute a member's microphone, camera or screen, allow it again, or remove them from the call.
+
+### For users
+
+**Group call moderation**
+
+- Group calls: the group's admin has a menu on each other member's tile to mute their mic, stop their camera or screen, and allow each again. Remove from call keeps them out until the admin lets them back in or the call ends, and Remove from group uses the group's own remove. Both ask first. The call's node must support moderation; until it does, the menu says so.
+- In a group call, a member the admin muted sees "Muted by the admin" on that button, which stays off until the admin allows it again, with the details behind its ⓘ. Everyone else sees a muted-by-admin mark on that member's tile. A member the admin removed sees "The admin removed you from this call", and Join call stays off with that reason while the call's node refuses them.
+- In a group call, a member the admin muted on every source (microphone, camera and screen) now sees it as muted by the admin, and their microphone and camera stop on their device. Before, nothing said so and the device kept capturing.
+
+### Fixed
+
+- With many contacts away, the app and the CLI daemon no longer ask the relays for each of them every few seconds while the relays' budget holds those reads back. A contact's read now comes back near its turn: with 200 contacts away, about 1,600 asks a minute that stay flat, where it was 2,500 at first and 4,500 after four hours, for the same reads.
+
+**Devices**
+
+- The Android app no longer checks the device handoff every 5 seconds once a second device is paired, and no longer shows a "Keep this computer awake" switch that did nothing there. A file on its way still keeps the app running.
+
+**Calls**
+
+- When the person who called you loses their app mid-call (it crashed, was closed by the phone, or lost its network) and calls you again at once, their new call now rings, and the first call ends as "Call ended" with its length. Before, the new call never rang, and once your side gave up reconnecting their chat said you had declined it.
+- When the person you called loses their app mid-call (it crashed, was closed by the phone, or lost its network) and calls you back at once, their new call now rings, and your first call ends as "Call ended" with its length. Before, the new call never rang, and once your side gave up reconnecting their chat said you had declined it.
+- A microphone or camera unplugged, or plugged back in, while a call is still switching devices is now seen once the switch ends. A microphone that went while the call was switching to it gave no notice, and the call did not fall back to the default; one plugged back in while the call was falling back was never offered back.
+
+**Wallets**
+
+- When you pay a Lightning invoice from Cashu and the mint gives the quote but never answers where the payment stands, your other payments at that mint (chat payments, ecash a contact sends you, other Lightning payments) are no longer stuck waiting for 5 minutes. The same holds at every start, and every few minutes after, while a Lightning payment stays pending there. The wallet gives up on that question after 30 seconds, says the mint did not answer, and asks again later.
+
+**CLI**
+
+- When the person who called a CLI program loses their app mid-call (it crashed, was closed by the phone, or lost its network) and calls again at once, their new call now rings as `call.incoming`, and the first call ends as `remote-hangup`. Before, the new call never rang, and once the CLI gave the dead call up their chat said it had been declined.
+- When the person a CLI program called loses their app mid-call (it crashed, was closed by the phone, or lost its network) and calls back at once, their new call now rings as `call.incoming`, and the first call ends as `remote-hangup`. Before, the new call never rang, and once the CLI gave the dead call up their chat said it had been declined.
+- `ghostly group call <group> --sfu "" --e2ee` (or `--no-e2ee`), as a script sends it with an unset variable, is refused with `sfu is required`, as an empty `--sfu` is on its own, instead of signing the group's old call node again.
+- `ghostly help group join` says that without a daemon it waits up to 60 s to be let in, as `invite join`'s help says of its own wait.
+- `ghostly message delete <chat|group> <message> --purge` on a message no longer here (the contact deleted it for everyone, or a delete without `--purge` came first) or on another member's group message still answers not found, but now folds the store all the same and says so (`details.purged: true` in the error), so what a deleted copy said leaves the profile's folder too.
+- A text, a payment or a setting saved while the profile's store was folding its journal into a fresh snapshot (about once an hour on a profile with chats) is now on the disk before the CLI says it is saved. A process killed in that moment no longer loses a text it had already told the contact it received.
+- A daemon with many contacts away now gets each chat's packet onto every relay within minutes. With 50 contacts away, the relays had the packets of 15 chats after 40 minutes: the background reads took every request the relays' budget freed, so a contact coming back on the web app or the extension (which read only the relays) found the daemon's packet from before its restart, or none.
+
+**Chat**
+
+- A reaction waiting behind a long text for a contact who is away no longer uses up the text's retries on the DHT within half a minute: the text is retried at its usual pace until it expires, so a contact who comes back minutes later still finds it.
+- A text of about 249 to 256 bytes sent while the chat is on the DHT, too long for its packet once sealed, no longer waits for good as "Waits for the text before it to be confirmed" while later texts go first. It is refused at once with "Too long for the DHT" in the app's language, or held when both sides allow it.
+- Deleting several texts in a row while they wait on the DHT floor for a contact who is away no longer puts a new envelope on every relay for each delete: each deleted text still leaves the relays at once, and the text that takes its place waits a few seconds, so a burst of 10 deletes costs 2 envelopes instead of 20.
+- A text you delete while it waits on the DHT floor is tried again with a text's backoff even when this device cannot save or seal the envelope that replaces it, not at every turn of the timer.
+
+**Files**
+
+- A file a contact sends is answered without going through every file the profile ever sent or received. Each incoming file read all of them, in every chat, to count what is still on its way: on a long-lived profile with 100,000 files that took about 10 ms per file, a few hundred ms to a second for a batch of photos on a phone. It now reads only the transfers still under way.
+
+**Groups**
+
+- A group's new admin who removes the former admin no longer takes the group's name, picture or call node from them in the minutes after the hand-over.
+
+**Web**
+
+- On the web, a contact's shared app that makes a worker from its own code (a `blob:` URL) works again. Since 1.11.1 such a worker could not load its other scripts (`importScripts`) or evaluate code; now it runs as it does in a browser tab. The same goes for the Desktop app with Hide my IP from contacts on.
+
+### For developers
+
+**CI**
+
+- CI fails when package-lock.json brings an `@ghostly/*` package from anywhere but a workspace link, or resolves any package from a registry tarball in the `@ghostly` scope: that npm scope is not ours, and the workspaces depend on each other with `"*"`. `node tools/scripts/ghostly-scope-lock.mjs` names each such entry on one line.
+
+**Calls**
+
+- The engine's `groupCallModerate` lets a group's admin mute, allow, remove or unban a member in the group's call, or read who is muted and banned, through the node the group's `call` names (WISP 602 § Moderation). It answers the room's state, or a code: `not_admin` and `unsupported` before anything is sent, `refused`, `rate_limited` with the wait, `unreachable`.
+- The core signs and checks a group admin's call-moderation request (mute, allow, remove, unban, state) as a call's node does, matching WISP 602's moderation test vector byte for byte.
+
 ## 1.12.1
 
 ### Security
@@ -142,7 +212,7 @@ Ghostly 1.12 brings group calls to community groups: voice, video and screen sha
 **CLI**
 
 - `ghostly engine groupCallToken` prints the group call's pass (`token`) and its TURN servers' `credential` as `<hidden>` unless `--show-secret`: whoever holds them can join the call as you until the pass expires.
-- `ghostly group call <group> --sfu <https origin>` lets a community's admin name the node its group calls go through, and `--clear` turns them off. `--e2ee` asks for sealed call media (WISP 602 § End-to-end encryption) and `--no-e2ee` turns it off, with the node or alone; naming the node again without either keeps what the group had. `ghostly group show --json` prints it as `call: {sfu, e2ee}`, or null. A URL that is not an https origin (http, a path, a trailing slash) is refused before anything is signed, with the origin to use when there is one. A member removed from the group, or an admin who left it, is told that, not that only the admin sets it. Renaming the group or changing its picture keeps its call setting as the admin signed it, sealed call media (`e2ee: 1`) included. Over the socket API, `group.call` refuses `clear` with `sfu` or `e2ee`, as the command line refuses `--clear` with them, instead of clearing the node.
+- `ghostly group call <group> --sfu <https origin>` lets a community's admin name the node its group calls go through, and `--clear` turns them off. `--e2ee` asks for sealed call media (WISP 602 § End-to-end encryption) and `--no-e2ee` turns it off, with the node or alone; naming the node again without either keeps what the group had. `ghostly group show <group>` prints it as `call: {sfu, e2ee}`, or null. A URL that is not an https origin (http, a path, a trailing slash) is refused before anything is signed, with the origin to use when there is one. A member removed from the group, or an admin who left it, is told that, not that only the admin sets it. Renaming the group or changing its picture keeps its call setting as the admin signed it, sealed call media (`e2ee: 1`) included. Over the socket API, `group.call` refuses `clear` with `sfu` or `e2ee`, as the command line refuses `--clear` with them, instead of clearing the node.
 
 **Calls**
 

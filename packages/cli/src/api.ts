@@ -15,7 +15,7 @@ import {
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
 import { checkShownName } from "./profiles";
-import { ended, goesOn, nobodyElseIn, outOf, purgeMessage, waitForConfirmed, waitForEdit, waitForGroupFrame, waitForMessage, waitForRemoval } from "./waits";
+import { ended, foldsAnyway, goesOn, nobodyElseIn, outOf, purgeMessage, waitForConfirmed, waitForEdit, waitForGroupFrame, waitForMessage, waitForRemoval } from "./waits";
 import { STATUS_CARD_METHODS, secretIn } from "./statusCards";
 import { BUTTON_METHODS, buttonsCard, pressable } from "./buttons";
 import { forgetHold, HOLD_MAX_MINUTES, holdChat, holdOf, releaseHold } from "./holds";
@@ -721,7 +721,8 @@ const METHODS: Record<string, Method> = {
     await node(ctx).retryMessage({ linkId: link.id, messageId });
     return { chat: link.id, messageId };
   },
-  async "chat.delete"(ctx, params) {
+  // `--purge` folds the store even when the delete answers no (`foldsAnyway`): a message already gone, another's.
+  "chat.delete": foldsAnyway(async (ctx, params) => {
     // `--purge`: what it said leaves the profile's folder before the answer (`purgeMessage`), and the answer says so.
     const purge = bool(params, "purge"), purged = purge ? { purged: true } : {};
     // For everyone (WISP 400 § Delete for everyone): a message of mine, in a chat or a group, gone from every device.
@@ -787,7 +788,7 @@ const METHODS: Record<string, Method> = {
     const { everyone } = node(ctx).deleteMessage({ linkId: link.id, messageId });
     if (purge) await purgeMessage(ctx, message);
     return { chat: link.id, messageId, deleted: messageId, everyone, ...purged };
-  },
+  }),
   /** A chat's or a group's (`group:<id>`, or its name) message, as the app's details show it; a group's said `No chat`. */
   async "chat.details"(ctx, params) {
     const target = chatOrGroup(ctx, str(params, "chat", true));

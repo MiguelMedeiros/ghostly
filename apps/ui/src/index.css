@@ -698,6 +698,27 @@ html[data-standalone="true"] {
   font-size: 11px;
 }
 
+/* A group call's mic or camera that did not come on (GroupCallView), in the small window: its title on three lines at
+   most, just above the controls as the share notice, after the corner button (30 px at 8 px), and the next step only
+   said. Centred over the whole width with that step, a phone's 190 × 136 window began it above its top, the title cut
+   off ("…desligado"), the corner button over it. */
+.call-mini .call-group-error {
+  bottom: 54px;
+  left: 46px;
+  right: 8px;
+  width: auto;
+  max-width: none;
+  translate: none;
+}
+
+.call-mini .call-group-error > :first-child {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+}
+
 /* The whole window lets a notice's words run onto a second line; the small one has room for one, cut short. */
 .call-mini .call-notice-words {
   overflow: hidden;
@@ -819,6 +840,12 @@ html[data-standalone="true"] {
 
   .call-mini .call-share-error {
     bottom: 100px;
+  }
+
+  /* After the 44 px corner button at 4 px. */
+  .call-mini .call-group-error {
+    bottom: 76px;
+    left: 56px;
   }
 }
 

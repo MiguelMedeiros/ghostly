@@ -16,6 +16,9 @@ import { callWindowShown } from "../lib/serviceWindows";
 import { mediaProblemKeys } from "../lib/mediaProblemText";
 import { openAppSettings } from "../desktop/androidCameraRefusal";
 import { DeviceMenu, DeviceNoticeBar } from "./CallOverlay";
+import { InfoButton } from "./layout/Section";
+import { useCallModeration, type GroupCallModerator } from "../hooks/useCallModeration";
+import { ModerationProblem, RemovedFromCall, TileModerationMenu } from "./GroupCallModerationMenu";
 
 /** One person in a group call, as `useGroupCall` gives them: what they send, and the tracks to show and play. */
 export interface GroupCallParticipant {
@@ -25,6 +28,8 @@ export interface GroupCallParticipant {
   camera: boolean;
   screen: boolean;
   speaking: boolean;
+  /** What the group's admin took away from them in this call (WISP 602 § Moderation): off until the admin allows it. */
+  byAdmin?: { mic: boolean; camera: boolean; screen: boolean };
   /** Played and shown here: the hook attaches none of them to the page itself. */
   tracks: { audio?: MediaStreamTrack | null; camera?: MediaStreamTrack | null; screen?: MediaStreamTrack | null };
 }
@@ -59,6 +64,8 @@ interface GroupCallViewProps {
   nameOf?: (identity: string) => string;
   /** Moves each time Join call is pressed while in the call: the small window opens whole again. */
   raised?: number;
+  /** You are the group's admin: each other member's tile has a menu to mute or remove them (WISP 602 § Moderation). */
+  moderator?: GroupCallModerator;
 }
 
 const MINI_KEY = "ghostly_group_call_mini";
@@ -160,9 +167,11 @@ function TrackAudio({ track, speaker }: { track: MediaStreamTrack; speaker?: str
   return <audio ref={ref} autoPlay className="hidden" data-testid="group-call-audio" />;
 }
 
-function MutedMark({ label }: { label: string }) {
+/** Muted, or muted by the admin (`byAdmin`): ringed, and named so, on the tile and to a screen reader. */
+function MutedMark({ label, byAdmin = false }: { label: string; byAdmin?: boolean }) {
   return (
-    <span data-testid="group-call-muted" role="img" aria-label={label} title={label} className="grid place-items-center w-6 h-6 rounded-full bg-black/60 text-danger shrink-0">
+    <span data-testid="group-call-muted" data-by-admin={byAdmin} role="img" aria-label={label} title={label}
+      className={`grid place-items-center w-6 h-6 rounded-full bg-black/60 text-danger shrink-0 ${byAdmin ? "ring-2 ring-danger forced-colors:border forced-colors:border-[color:CanvasText]" : ""}`}>
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <line x1="1" y1="1" x2="23" y2="23" />
         <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6M17 16.95A7 7 0 0 1 5 12v-2m14 0v2c0 .76-.13 1.49-.35 2.17M12 19v4" />
@@ -172,7 +181,7 @@ function MutedMark({ label }: { label: string }) {
 }
 
 /** A face (camera or avatar) or a shared screen, with the name and a muted mark; the active speaker wears a ring. */
-function Tile({ person, you, kind, speaking, name, face }: { person: GroupCallParticipant; you: boolean; kind: "face" | "screen"; speaking: boolean; name: ReactNode; face: string }) {
+function Tile({ person, you, kind, speaking, name, face, menu }: { person: GroupCallParticipant; you: boolean; kind: "face" | "screen"; speaking: boolean; name: ReactNode; face: string; menu?: ReactNode }) {
   const { t } = useI18n();
   const track = kind === "screen" ? person.tracks.screen : person.camera ? person.tracks.camera : null;
   return (
@@ -193,9 +202,10 @@ function Tile({ person, you, kind, speaking, name, face }: { person: GroupCallPa
         </div>
       )}
       <div className="absolute bottom-1.5 inset-x-1.5 flex items-center gap-1.5">
-        {kind === "face" && !person.mic && <MutedMark label={t("calls.group.muted")} />}
+        {kind === "face" && (person.byAdmin?.mic ? <MutedMark label={t("calls.group.mutedByAdmin")} byAdmin /> : !person.mic && <MutedMark label={t("calls.group.muted")} />)}
         <span dir="auto" className="min-w-0 truncate rounded-md bg-black/60 px-1.5 py-0.5 text-xs text-white">{name}</span>
       </div>
+      {menu}
     </div>
   );
 }
@@ -204,8 +214,9 @@ function Tile({ person, you, kind, speaking, name, face }: { person: GroupCallPa
  * A group call through the group's node: everyone's tile in a grid, the active speaker ringed, and a shared screen
  * large with the faces beside it. Drawn from `useGroupCall`'s state, passed in; it imports no LiveKit.
  */
-export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, onToggleScreen, onLeave, canShareScreen = false, pinned = false, onReturnToChat, layer, devices = null, connected = true, error = null, nameOf: groupNameOf, raised = 0 }: GroupCallViewProps) {
+export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, onToggleScreen, onLeave, canShareScreen = false, pinned = false, onReturnToChat, layer, devices = null, connected = true, error = null, nameOf: groupNameOf, raised = 0, moderator }: GroupCallViewProps) {
   const { t } = useI18n();
+  const moderation = useCallModeration(moderator, connected);
   // Each new error is said anew (its own alert), and goes after a few seconds; a failed join has no window to say it in.
   const [said, setSaid] = useState({ error, id: 0, over: false });
   if (said.error !== error) setSaid({ error, id: said.id + 1, over: false });
@@ -218,6 +229,8 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
   const errorShown = shownError && errorLines(shownError, t);
   const infoId = useId();
   const [info, setInfo] = useState(false);
+  const heldInfoId = useId();
+  const [heldInfo, setHeldInfo] = useState(false);
   const [miniPreference, setMiniState] = useState(() => localStorage.getItem(MINI_KEY) === "1");
   const mini = pinned || miniPreference;
   const setMini = (next: boolean) => {
@@ -274,8 +287,11 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
   const presenter = everyone.find((p) => p.identity === order[order.length - 1]) ?? null;
   // The other screens are tiles beside the faces.
   const otherScreens = order.slice(0, -1).map((id) => everyone.find((p) => p.identity === id)!);
+  // The admin's menu, on the others' faces in the whole window: the small one has no room for it.
+  const menuOf = (p: GroupCallParticipant) => moderation && !mini && p !== local
+    ? <TileModerationMenu identity={p.identity} name={shown(p)} moderation={moderation} host={box} /> : undefined;
   const faces = everyone.map((p) => (
-    <Tile key={p.identity} person={p} you={p === local} kind="face" speaking={p.identity === activeSpeaker} name={nameOf(p)} face={shown(p)} />
+    <Tile key={p.identity} person={p} you={p === local} kind="face" speaking={p.identity === activeSpeaker} name={nameOf(p)} face={shown(p)} menu={menuOf(p)} />
   ));
   const screenTiles = otherScreens.map((p) => (
     <Tile key={`${p.identity}-screen`} person={p} you={p === local} kind="screen" speaking={false} name={fillNames(t("calls.group.screenOf"), { name: nameOf(p) })} face={shown(p)} />
@@ -285,6 +301,11 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
   const columns = gridColumns(faces.length + screenTiles.length);
 
   const roundButton = "w-14 h-14 max-md:w-16 max-md:h-16 rounded-full flex items-center justify-center transition-colors cursor-pointer";
+  // What the admin took from you stays off, its button says so, and the ⓘ beside the controls says until when.
+  const held = local.byAdmin;
+  const anyHeld = !!held && (held.mic || held.camera || held.screen);
+  const heldLook = "aria-disabled:opacity-50 aria-disabled:cursor-not-allowed";
+  const screenLabel = held?.screen ? t("calls.group.offByAdmin") : local.screen ? t("calls.stopSharing") : t("calls.shareScreen");
   return createPortal(
     <div
       {...miniWindow.boxProps}
@@ -331,6 +352,7 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
               className="grid h-5 w-5 shrink-0 cursor-pointer place-items-center rounded-full text-text-muted transition-colors hover:text-accent aria-expanded:text-accent">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5" /><path d="M12 11v5.5M12 7.5v.01" /></svg>
             </button>
+            {moderation && <RemovedFromCall moderation={moderation} nameOf={(identity) => (groupNameOf ? groupNameOf(identity) : identity)} host={box} />}
           </div>
           {info && <p id={infoId} data-testid="group-call-info-text" className="mx-auto max-w-md px-4 pb-2 text-center text-xs text-text-secondary break-words">{t("calls.group.info")}</p>}
           {presenter ? (
@@ -352,9 +374,10 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
 
       {shownError && errorShown && (
         <p key={said.id} role="alert" data-testid="group-call-error" data-action={shownError.action}
-          className="call-share-error absolute bottom-32 max-md:bottom-[calc(8.5rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-10 w-max max-w-[calc(100%-2rem)] rounded-lg bg-black/70 px-3 py-2 text-center text-xs text-white">
+          className="call-share-error call-group-error absolute bottom-32 max-md:bottom-[calc(8.5rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-10 w-max max-w-[calc(100%-2rem)] rounded-lg bg-black/70 px-3 py-2 text-center text-xs text-white">
           <span className="block font-medium">{errorShown.title}</span>
-          {errorShown.next && <span className="block">{errorShown.next}</span>}
+          {/* The small window has no room for it (index.css): there it is only said. */}
+          {errorShown.next && (mini ? <span className="sr-only"> {errorShown.next}</span> : <span className="block">{errorShown.next}</span>)}
           {errorShown.android && (
             <button type="button" data-testid="group-call-error-settings" onClick={() => void openAppSettings()}
               className="relative mt-1 cursor-pointer rounded underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent before:absolute before:-inset-y-3 before:-inset-x-2 before:content-['']">
@@ -364,20 +387,31 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
         </p>
       )}
 
+      {anyHeld && heldInfo && !mini && (
+        <p id={heldInfoId} data-testid="group-call-by-admin-text"
+          className="absolute bottom-48 max-md:bottom-[calc(12rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-10 w-max max-w-[min(24rem,calc(100%-2rem))] rounded-lg bg-black/70 px-3 py-2 text-center text-xs text-white">
+          {t("calls.group.byAdminInfo")}
+        </p>
+      )}
+
+      {!mini && <ModerationProblem moderation={moderation} />}
+
       {/* A headset unplugged, the chosen microphone back: said over the controls, in the whole window (the small one has no room). */}
       {!mini && devices?.notice && <DeviceNoticeBar devices={devices} />}
 
       <div className="call-controls absolute bottom-12 max-md:bottom-[calc(2rem+env(safe-area-inset-bottom))] left-0 right-0 flex items-center justify-center gap-6 max-md:gap-8 z-10">
-        <button onClick={onToggleMic} data-testid="group-call-mic" title={local.mic ? t("calls.mute") : t("calls.unmute")}
-          className={`${roundButton} ${local.mic ? "bg-white/10 text-white hover:bg-white/20" : "bg-danger/30 text-danger"}`}>
+        <button onClick={held?.mic ? undefined : onToggleMic} {...(held?.mic && { "aria-disabled": true })} data-testid="group-call-mic"
+          title={held?.mic ? t("calls.group.mutedByAdmin") : local.mic ? t("calls.mute") : t("calls.unmute")}
+          className={`${roundButton} ${heldLook} ${local.mic ? "bg-white/10 text-white hover:bg-white/20" : "bg-danger/30 text-danger"}`}>
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             {local.mic
               ? <><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8" /></>
               : <><line x1="1" y1="1" x2="23" y2="23" /><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6M17 16.95A7 7 0 0 1 5 12v-2m14 0v2c0 .76-.13 1.49-.35 2.17M12 19v4M8 23h8" /></>}
           </svg>
         </button>
-        <button onClick={onToggleCamera} data-testid="group-call-camera" title={local.camera ? t("calls.turnCameraOff") : t("calls.turnCameraOn")}
-          className={`${roundButton} ${local.camera ? "bg-white/10 text-white hover:bg-white/20" : "bg-danger/30 text-danger"}`}>
+        <button onClick={held?.camera ? undefined : onToggleCamera} {...(held?.camera && { "aria-disabled": true })} data-testid="group-call-camera"
+          title={held?.camera ? t("calls.group.offByAdmin") : local.camera ? t("calls.turnCameraOff") : t("calls.turnCameraOn")}
+          className={`${roundButton} ${heldLook} ${local.camera ? "bg-white/10 text-white hover:bg-white/20" : "bg-danger/30 text-danger"}`}>
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             {local.camera
               ? <><path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" /></>
@@ -386,14 +420,16 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
         </button>
         {devices && <DeviceMenu devices={devices} overVideo={false} host={mini ? null : box} />}
         {canShareScreen && (
-          <button onClick={onToggleScreen} data-testid="group-call-screen" aria-label={local.screen ? t("calls.stopSharing") : t("calls.shareScreen")} title={local.screen ? t("calls.stopSharing") : t("calls.shareScreen")}
-            className={`${roundButton} ${local.screen ? "bg-accent text-on-accent forced-colors:forced-color-adjust-none forced-colors:bg-[color:Highlight] forced-colors:text-[color:HighlightText]" : "bg-white/10 text-white hover:bg-white/20"}`}>
+          <button onClick={held?.screen ? undefined : onToggleScreen} {...(held?.screen && { "aria-disabled": true })} data-testid="group-call-screen"
+            aria-label={screenLabel} title={screenLabel}
+            className={`${roundButton} ${heldLook} ${local.screen ? "bg-accent text-on-accent forced-colors:forced-color-adjust-none forced-colors:bg-[color:Highlight] forced-colors:text-[color:HighlightText]" : "bg-white/10 text-white hover:bg-white/20"}`}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <rect x="2" y="4" width="20" height="13" rx="2" />
               <path d="M8 21h8M12 17v4M12 13V8m0 0l-2.5 2.5M12 8l2.5 2.5" />
             </svg>
           </button>
         )}
+        {anyHeld && !mini && <InfoButton open={heldInfo} onToggle={() => setHeldInfo(!heldInfo)} controls={heldInfoId} testId="group-call-by-admin-info" className="text-white/80" />}
         <button onClick={onLeave} data-testid="group-call-leave" title={t("calls.group.leave")}
           className="w-16 h-16 max-md:w-[72px] max-md:h-[72px] rounded-full bg-danger-fill flex items-center justify-center text-white hover:bg-danger-fill/80 transition-colors cursor-pointer">
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

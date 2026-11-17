@@ -1397,11 +1397,11 @@ export class Groups {
     return { me: session.myKey, community: false, onHubs: this.hubs.active(groupId, session, this.now()), inRoster: key => rosterHas(session.roster, key), couldRead: (key, messageId, ts) => session.couldRead(key, messageId, ts) };
   }
 
-  /** Me in a group I am active in, private or community alike, for its call (WISP 602): my member key, its seed, and the admin's metadata. */
-  callMember(groupId: string): { key: string; seedB64: string; meta?: GroupMeta } | undefined {
+  /** Me in a group I am active in, private or community alike, for its call (WISP 602): my member key, its seed, the admin's metadata, and whether I am the admin. */
+  callMember(groupId: string): { key: string; seedB64: string; meta?: GroupMeta; isAdmin: boolean } | undefined {
     if (this.isCommunity(groupId)) return this.communities.callMember(groupId);
     const session = this.sessions.get(groupId);
-    return session?.status === "active" ? { key: session.myKey, seedB64: session.state.seedB64, meta: session.state.meta } : undefined;
+    return session?.status === "active" ? { key: session.myKey, seedB64: session.state.seedB64, meta: session.state.meta, isAdmin: session.isAdmin } : undefined;
   }
 
   /**

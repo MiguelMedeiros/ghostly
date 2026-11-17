@@ -59,18 +59,27 @@ class FakeRoom {
   static rooms: FakeRoom[] = [];
   /** Who is already in the next room joined. */
   static others: ReturnType<typeof remote>[] = [];
+  /** The next room's connect waits on it, when set. */
+  static connecting: Promise<void> | null = null;
   readonly remoteParticipants = new Map(FakeRoom.others.map((p) => [p.identity, p]));
   readonly activeSpeakers = [];
-  private readonly listeners = new Map<string, () => void>();
+  private readonly listeners = new Map<string, (...args: unknown[]) => void>();
   readonly localParticipant = {
     identity: ME, name: "Me", isMicrophoneEnabled: false, isCameraEnabled: false, isScreenShareEnabled: false, isSpeaking: false,
     trackPublications: new Map(), getTrackPublication: () => undefined,
     setMicrophoneEnabled: vi.fn(async function (this: { isMicrophoneEnabled: boolean }, on: boolean) { this.isMicrophoneEnabled = on; }),
   };
-  readonly connect = vi.fn(async (_url: string, _token: string, _options?: unknown) => {});
+  readonly connect = vi.fn(async (_url: string, _token: string, _options?: unknown) => { if (FakeRoom.connecting) await FakeRoom.connecting; });
   readonly disconnect = vi.fn(async () => this.listeners.get("disconnected")?.());
   constructor() { FakeRoom.rooms.push(this); }
-  on(event: string, listener: () => void) { this.listeners.set(event, listener); return this; }
+  on(event: string, listener: (...args: unknown[]) => void) { this.listeners.set(event, listener); return this; }
+  /** The node closing the room on this device, with LiveKit's reason (`DisconnectReason`). */
+  drop(reason: number) { this.listeners.get("disconnected")?.(reason); }
+  /** Someone comes into the room, as LiveKit says it. */
+  arrive(person: ReturnType<typeof remote>) {
+    this.remoteParticipants.set(person.identity, person);
+    this.listeners.get("ParticipantConnected")?.();
+  }
 }
 const RoomEvent = new Proxy({}, { get: (_, name) => (name === "Disconnected" ? "disconnected" : String(name)) });
 const loadLivekit = async () => ({ Room: FakeRoom, RoomEvent, Track: { Source: {} } }) as unknown as LivekitModule;
@@ -83,6 +92,7 @@ function joinButton(group = community()) {
 afterEach(() => {
   FakeRoom.rooms = [];
   FakeRoom.others = [];
+  FakeRoom.connecting = null;
   endOtherCalls(Symbol("none"));
   vi.useRealTimers();
 });
@@ -264,6 +274,27 @@ describe("Join call in a group's header", () => {
     expect(tileOf(other)).not.toHaveTextContent("Miguel");
     expect(tileOf(stranger)).toHaveTextContent("Not in this group (…zzz333)");
   });
+
+  it("says Connected to a screen reader once in the room, not while connecting, and not the people already there as joining", async () => {
+    const ana = "ana".padEnd(52, "a"), bo = "bo".padEnd(52, "b");
+    const members = [{ key: ME, role: "member", me: true, online: true, missing: 0 }, ...[[ana, "Ana"], [bo, "Bo"]].map(([key, nick]) => ({ key, role: "member", me: false, online: true, missing: 0, nick }))];
+    FakeRoom.others = [remote(ana, "Ana")];
+    let connect!: () => void;
+    FakeRoom.connecting = new Promise<void>((resolve) => { connect = resolve; });
+    answerPass(() => pass());
+    const { user } = joinButton(community({ members } as Partial<GroupView>));
+    await user.click(screen.getByTestId("group-call-join"));
+    await waitFor(() => expect(FakeRoom.rooms[0]?.connect).toHaveBeenCalled());
+    const news = () => [...screen.getByTestId("group-call-news").querySelectorAll("p")].map((p) => p.textContent);
+    expect(news()).toEqual([]);
+
+    await act(async () => { connect(); });
+    await waitFor(() => expect(screen.getAllByTestId("group-call-tile")).toHaveLength(2));
+    expect(news()).toEqual(["Connected"]);
+
+    act(() => FakeRoom.rooms[0].arrive(remote(bo, "Bo")));
+    await waitFor(() => expect(news()).toEqual(["Bo joined"]));
+  });
 });
 
 describe("a group call in the Android app", () => {
@@ -375,6 +406,57 @@ describe("Join call with Hide my IP from contacts on", () => {
 
     // Hide my IP off: Join call is back.
     act(() => fakeEngine.update({ settings: { ...fakeEngine.state.settings, relayOnly: false } }));
+    expect(screen.getByTestId("group-call-join")).not.toHaveAttribute("aria-disabled");
+  });
+});
+
+describe("Join call after the admin removed you from the call (WISP 602 § Moderation)", () => {
+  /** LiveKit's `DisconnectReason.PARTICIPANT_REMOVED`, and a room the node closed for everyone. */
+  const REMOVED = 4, ROOM_DELETED = 5;
+  const refused = () => { throw new Error("The call node refused the pass (403)"); };
+
+  it("says the admin removed you, and Join call stays off with that reason while the node refuses the pass", async () => {
+    answerPass(() => pass());
+    const { user } = joinButton();
+    await user.click(screen.getByTestId("group-call-join"));
+    await waitFor(() => expect(FakeRoom.rooms[0]?.connect).toHaveBeenCalled());
+    answerPass(refused);
+    await act(async () => FakeRoom.rooms[0].drop(REMOVED));
+    expect(screen.queryByTestId("group-call")).toBeNull();
+    expect(screen.getByTestId("group-call-problem-notice-title")).toHaveTextContent("The admin removed you from this call");
+    const join = screen.getByTestId("group-call-join");
+    expect(join).toHaveAttribute("aria-disabled", "true");
+    expect(join).toHaveAccessibleDescription(/The admin removed you from this call/);
+    expect(screen.queryByTestId("group-call-retry")).toBeNull();
+
+    // Pressed, the node is asked again (the pass held is not used: the node bans the key), and still refuses.
+    await user.click(join);
+    await waitFor(() => expect(passAsks()).toHaveLength(2));
+    expect(screen.getByTestId("group-call-problem-notice-title")).toHaveTextContent("The admin removed you from this call");
+    expect(FakeRoom.rooms).toHaveLength(1);
+
+    // The admin let you back (unban): the next press joins.
+    answerPass(() => pass({ token: "pass-2" }));
+    await user.click(join);
+    await waitFor(() => expect(FakeRoom.rooms[1]?.connect).toHaveBeenCalledWith("wss://sfu.ghostly.test", "pass-2", undefined));
+    expect(screen.getByTestId("group-call-join")).not.toHaveAttribute("aria-disabled");
+    expect(screen.queryByTestId("group-call-problem")).toBeNull();
+  });
+
+  it("never says it for your own Leave, or a room the node closed for everyone", async () => {
+    answerPass(() => pass());
+    const { user } = joinButton();
+    await user.click(screen.getByTestId("group-call-join"));
+    await waitFor(() => expect(FakeRoom.rooms[0]?.connect).toHaveBeenCalled());
+    await user.click(screen.getByTestId("group-call-leave"));
+    expect(screen.queryByTestId("group-call-problem")).toBeNull();
+    expect(screen.getByTestId("group-call-join")).not.toHaveAttribute("aria-disabled");
+
+    await user.click(screen.getByTestId("group-call-join"));
+    await waitFor(() => expect(FakeRoom.rooms[1]?.connect).toHaveBeenCalled());
+    await act(async () => FakeRoom.rooms[1].drop(ROOM_DELETED));
+    expect(screen.queryByTestId("group-call")).toBeNull();
+    expect(screen.queryByTestId("group-call-problem")).toBeNull();
     expect(screen.getByTestId("group-call-join")).not.toHaveAttribute("aria-disabled");
   });
 });

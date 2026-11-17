@@ -2,8 +2,8 @@ import type { Server } from "node:http";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { deserialize } from "node:v8";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ghostly, home, hyperdhtTestnet, localRelay, ok, Running, type Result } from "./support/cli";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running, type Result } from "./support/cli";
 // covers: headless.chat
 
 /** The profile's rows.db, under its home. */
@@ -97,6 +97,15 @@ describe("message delete --purge and the replies that quote it", { timeout: 240_
     return said.join("; ");
   };
   const quotes = async (dir: string, chat: string) => (ok(await as(dir, "chat", "history", chat)).messages as { replyTo?: { snippet: string } }[]).filter((m) => m.replyTo).map((m) => m.replyTo!.snippet);
+  const messages = async (dir: string, chat: string) => (ok(await as(dir, "chat", "history", chat)).messages as { id: string; text?: string }[]);
+  /** Waits until the message is out of the chat's history here: the engine takes its row out on a later turn. */
+  const gone = (dir: string, chat: string, id: string) => vi.waitFor(async () => expect((await messages(dir, chat)).map((m) => m.id)).not.toContain(id), { timeout: 30_000, interval: 100 });
+  /** `--purge` on a message no longer here: not found (exit 3), and the store folded all the same. */
+  const foldedAnyway = (result: Result, id: string) => {
+    const failure = error(result, "not_found", 3) as { message: string; details?: unknown };
+    expect(failure.message).toBe(`The store was folded anyway, so a deleted copy of it is gone from the profile's folder. No message ${JSON.stringify(id)} in this chat (ghostly chat history alice)`);
+    expect(failure.details).toEqual({ purged: true });
+  };
 
   beforeAll(async () => {
     relays = await Promise.all([localRelay(), localRelay()]);
@@ -143,5 +152,37 @@ describe("message delete --purge and the replies that quote it", { timeout: 240_
       const files = holding(alice, secret);
       expect(files, files.includes(`/${ROWS}`) ? await rowsHolding(alice, secret) : undefined).toEqual([]);
     }
+  });
+
+  /*
+   * A message already gone here, which `--purge` cannot delete again: it answered not found and folded nothing, so
+   * what it said stayed in `db/journal.bin` and rows.db's WAL until the fold within the hour.
+   */
+  it("a message the contact deleted for everyone: --purge still folds, and says it is not here", async () => {
+    const secret = "contact-took-it-back-4f1d9e2a";
+    const sent = ok(await as(alice, "send", "bob", `the token: ${secret}`, "--wait", "delivered")).messageId as string;
+    const received = (await messages(bob, "alice")).find((m) => m.text?.includes(secret))!.id;
+    ok(await as(alice, "message", "delete", "bob", sent, "--everyone", "--wait", "confirmed"));
+    await gone(bob, "alice", received);
+    expect(holding(bob, secret)).not.toEqual([]);
+
+    const purge = await as(bob, "message", "delete", "alice", received, "--purge");
+    const files = holding(bob, secret);
+    expect(files, files.includes(`/${ROWS}`) ? await rowsHolding(bob, secret) : undefined).toEqual([]);
+    foldedAnyway(purge, received);
+  });
+
+  it("a message deleted here first without --purge: --purge on it again still folds", async () => {
+    const secret = "deleted-then-purged-7b3c0a51";
+    ok(await as(alice, "send", "bob", `the key: ${secret}`, "--wait", "delivered"));
+    const received = (await messages(bob, "alice")).find((m) => m.text?.includes(secret))!.id;
+    ok(await as(bob, "message", "delete", "alice", received));
+    await gone(bob, "alice", received);
+    expect(holding(bob, secret)).not.toEqual([]);
+
+    const purge = await as(bob, "message", "delete", "alice", received, "--purge");
+    const files = holding(bob, secret);
+    expect(files, files.includes(`/${ROWS}`) ? await rowsHolding(bob, secret) : undefined).toEqual([]);
+    foldedAnyway(purge, received);
   });
 });

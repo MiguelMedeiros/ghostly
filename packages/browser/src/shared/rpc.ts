@@ -15,6 +15,8 @@ import type { LinkParams, LinkPreview, PairedTransport, DeliveryMode } from "@gh
 import type { CardIndexRow, CashuInspection, EngineState, MessageDetailsView, MessageFile, MessagePage, PublicGraphView, PublicPostImageView, PublicPostsView, SavedMessage, SettingsPatch, StoredMessage, WalletCreate, WalletInstanceView, WalletRemove, WalletTestCoins, WalletType, TestCoinsResult, WakeSubscription } from "./types";
 import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrNoteView, NostrPublishResult } from "../nostr/types";
 import type { MessageChanges } from "./messageChanges";
+import type { GroupCallModerationAct, GroupCallSource } from "@ghostly/core";
+import type { GroupCallModerationResult } from "../engine/groupCall";
 
 /** UI → engine calls. The extension carries them over a runtime port, the web app calls the peer in the same page. */
 export interface EngineApi {
@@ -477,6 +479,14 @@ export interface EngineApi {
    * engine error a page says in one line: no call, not a member, refused, busy, unreachable, timed out.
    */
   groupCallToken(params: { groupId: string }): { url: string; token: string; room: string; identity: string; expiresIn: number; iceServers?: RTCIceServer[] };
+  /**
+   * The group's admin acts on a member in its call, through the node its `call` names (WISP 602 § Moderation): `mute`
+   * or `allow` the sources `src` of `target`, `remove` `target` from the call and ban it, `unban` it, or read the
+   * room's `state`. Answers the room's state after the act, or why nothing happened: `not_admin` and `unsupported`
+   * (no node named, or one older than the route) before anything is sent, `refused`, `rate_limited` (with
+   * `retryAfter` seconds), `unreachable`.
+   */
+  groupCallModerate(params: { groupId: string; act: GroupCallModerationAct; target?: string; src?: GroupCallSource[] }): GroupCallModerationResult;
   /**
    * The key that seals the group's call media for its newest epoch (WISP 602 § End-to-end encryption): base64url of
    * 32 bytes, and that epoch. Null until the epoch's secret arrives, once out of the group, or in a private group.

@@ -9,7 +9,7 @@ import { groupCallRelayConfig, NO_CALL_KEY, NO_SEALING, useGroupCall, type Group
 import { useGroupCallSupport } from "../hooks/useGroupCallSupport";
 import { useHandler } from "../hooks/useHandler";
 import { useCallService } from "../lib/callService";
-import { askGroupCallPass, groupCallOf, groupCallProblem, PASS_REFRESH_LEAD_S, passRefreshInMs, type GroupCallPass } from "../lib/groupCallPass";
+import { askGroupCallPass, groupCallOf, groupCallProblem, PASS_REFRESH_LEAD_S, passRefreshInMs, passRefused, type GroupCallPass } from "../lib/groupCallPass";
 import { focus } from "../lib/connection";
 import { askGroupCallKey, canSealCallMedia, groupCallSealed, groupCallSealProblem } from "../lib/groupCallPass";
 import { useEngineValue } from "../lib/engineState";
@@ -70,11 +70,22 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
   const [canSeal] = useState(canSealCallMedia);
   const unsealable = sealed && !canSeal;
   const [seal, setSeal] = useState<GroupCallSeal | null>(null);
-  const blocked = !support.supported || (relayOnly && noRelay) || unsealable;
+  // The admin took you out of the call (WISP 602 § Moderation): Join call stays off and says so while the node refuses
+  // you a pass. Pressed, it asks the node once more, so an unban lets you back in.
+  const [removed, setRemoved] = useState(false);
+  const removedProblem: Problem = { tone: "error", title: t("calls.group.removed"), info: t("calls.group.removedInfo") };
+  const cannot = !support.supported || (relayOnly && noRelay) || unsealable;
+  const blocked = cannot || removed;
   const noRelayProblem: Problem = { tone: "error", title: t("calls.group.noRelay"), info: t("calls.group.noRelayInfo") };
   const noSealingProblem = groupCallSealProblem(NO_SEALING, t)!;
   const unsupported: Problem | null = support.reason === null ? null : { tone: "error", title: support.reason };
-  const call = useGroupCall({ url: joined?.url ?? "", token: joined?.token ?? "", iceServers: joined?.iceServers, relayOnly, e2ee: sealed ? seal : undefined, loadLivekit });
+  // Hide my IP turned on in the room joins it again: with the newest pass for that room while it holds, as the first
+  // may have run out.
+  const newest = () => {
+    const kept = held.current;
+    return kept && kept.pass.url === joined?.url && kept.until > Date.now() ? kept.pass : null;
+  };
+  const call = useGroupCall({ url: joined?.url ?? "", token: joined?.token ?? "", iceServers: joined?.iceServers, relayOnly, e2ee: sealed ? seal : undefined, newest, loadLivekit });
   /** The group's call key for its newest epoch, before a sealed join; says why when it isn't here. */
   const takeKey = async (): Promise<boolean> => {
     setAsking(true);
@@ -104,10 +115,11 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
     try {
       const from = sfu;
       const pass = await askGroupCallPass(groupId);
+      setRemoved(false);
       hold(pass, from);
       enter(pass);
     } catch (cause) {
-      setProblem(groupCallProblem(cause, t));
+      setProblem(removed && passRefused(cause) ? removedProblem : groupCallProblem(cause, t));
     } finally {
       setAsking(false);
     }
@@ -127,13 +139,16 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
     if (asking) return;
     if (joined) return setRaised((n) => n + 1);
     if (unsupported) return setProblem(problem ? null : unsupported);
-    if (blocked) return setProblem(unsealable ? noSealingProblem : noRelayProblem);
+    // Removed by the admin, it goes on as a join: the node is asked again, and while it refuses, its reason stays.
+    if (cannot) return setProblem(unsealable ? noSealingProblem : noRelayProblem);
     if (relayOnly && !joinedShowingIp.has(ipShownTo)) setAskIp(true);
     else go();
   };
   // Not believed from the node: each tile is named by the group's roster, a key outside it said to be so.
-  const nameOf = (identity: string) => group.members.some((m) => m.key === identity)
-    ? authorName(group, identity, t) : t("calls.group.notMember", { key: identity.slice(-6) });
+  const inGroup = (identity: string) => group.members.some((m) => m.key === identity);
+  const nameOf = (identity: string) => inGroup(identity) ? authorName(group, identity, t) : t("calls.group.notMember", { key: identity.slice(-6) });
+  // Only the group's admin moderates its call; the node checks it again on its roster.
+  const moderator = group.isAdmin ? { groupId, inGroup } : undefined;
 
   useEffect(() => {
     if (!joined) return;
@@ -190,9 +205,15 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
   useCallService(on && heard ? { name: group.name || t("group.chat.unnamed"), video: call.local.camera } : null, leave,
     settings.lockScreen.enabled && !!settings.lockScreen.passwordHash);
 
-  // The room closed (the node dropped you) or would not take you: the window goes, and a failed join says why.
+  // The room closed (the node dropped you) or would not take you: the window goes, and a failed join says why. Taken
+  // out by the admin, the pass held is dropped (the node bans the key) and Join call says why.
   useEffect(() => {
     if (call.status === "failed") setProblem(groupCallSealProblem(call.error?.message, t, call.error?.cause) ?? groupCallProblem(call.error?.cause ?? call.error?.message, t));
+    if (call.status === "left" && call.removedByAdmin) {
+      held.current = null;
+      setRemoved(true);
+      setProblem(removedProblem);
+    }
     if (call.status === "failed" || call.status === "left") setJoined(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only the status moving there ends it
   }, [call.status]);
@@ -217,7 +238,7 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
           {!blocked && <button type="button" onClick={() => void join()} data-testid="group-call-retry" className={`min-h-8 rounded-md px-2 font-semibold text-accent hover:bg-surface-hover max-md:min-h-11 ${focus}`}>{t("calls.group.retry")}</button>}
         </div>
       </div>}
-      {joined && <GroupCallView call={call} groupName={group.name || t("group.chat.unnamed")} canShareScreen={canShareScreen} nameOf={nameOf} raised={raised}
+      {joined && <GroupCallView call={call} groupName={group.name || t("group.chat.unnamed")} canShareScreen={canShareScreen} nameOf={nameOf} raised={raised} moderator={moderator} connected={call.status === "connected"}
         onToggleMic={() => void call.toggleMic()} onToggleCamera={() => void call.toggleCamera()} onToggleScreen={() => void call.toggleScreen()} onLeave={leave} />}
       {askIp && <HideIpDialog onClose={() => setAskIp(false)} onConfirm={() => { setAskIp(false); joinedShowingIp.add(ipShownTo); go(); }} />}
       {askEnd && <EndOtherCallDialog onClose={() => setAskEnd(false)} onConfirm={() => { setAskEnd(false); endOtherCalls(key); void join(); }} />}

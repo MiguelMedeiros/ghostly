@@ -22,6 +22,7 @@
   "ended": "Call ended",
   "endsCurrent": "Answering ends your current call",
   "group": {
+    "byAdminInfo": "The group's admin turned this off for you in this call. You can turn it on again once they allow it.",
     "endAndJoin": "End and join",
     "endOtherBody": "Joining the group's call ends the call you're on.",
     "endOtherTitle": "End your call?",
@@ -37,6 +38,7 @@
     "left": "{{name}} left",
     "leftMany": "{{names}} left",
     "muted": "Muted",
+    "mutedByAdmin": "Muted by the admin",
     "noCallKey": "Can't join yet: the call's key isn't here",
     "noCallKeyInfo": "This group's calls are sealed end to end, and their key hasn't reached this device yet. Try again in a moment.",
     "noRelay": "Can't join while Hide my IP is on",
@@ -46,7 +48,10 @@
     "notMember": "Not in this group (…{{key}})",
     "notSealed": "This call couldn't be sealed, so you left it",
     "notSealedInfo": "In the room, this app couldn't seal what you send, so you left before anything went out unsealed. Try again, or use a recent browser.",
+    "offByAdmin": "Turned off by the admin",
     "refused": "You're not let into this call yet",
+    "removed": "The admin removed you from this call",
+    "removedInfo": "The group's node won't let you back into this call unless the admin allows it. You stay in the group.",
     "retry": "Try again",
     "screenOf": "{{name}}'s screen",
     "unreachable": "Couldn't reach the group's call"

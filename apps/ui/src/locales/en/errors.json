@@ -51,6 +51,8 @@
     "unreachableNext": "Check the address: it should be a Cashu mint."
   },
   "chat": {
+    "dhtTooLong": "Too long for the DHT",
+    "dhtTooLongNext": "Shorten it, or send it once you're connected peer to peer.",
     "editTooMany": "This message can't be edited again",
     "editTooManyNext": "A message takes {{max}} edits at most.",
     "forwardNone": "Nothing left to forward",

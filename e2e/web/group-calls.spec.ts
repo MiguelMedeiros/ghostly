@@ -42,6 +42,10 @@ async function routeSfu(peer: Peer): Promise<void> {
   });
 }
 
+/** How many of the others this member hears: remote microphones playing, each in its own <audio>. */
+const hearing = (peer: Peer): Promise<number> =>
+  peer.page.getByTestId("group-call-audio").evaluateAll((els) => (els as HTMLAudioElement[]).filter((el) => el.srcObject && !el.paused).length);
+
 async function joinGroup(peer: Peer, link: string): Promise<void> {
   await peer.page.goto(link.includes("#") ? "/" + link.slice(link.indexOf("#")) : `/#/join/${link}`);
   await expect(peer.page.getByTestId("group-chat")).toHaveAttribute("data-status", "active", { timeout: 180_000 });
@@ -86,7 +90,7 @@ test("three members join a community group's call, see and hear each other, see 
     expect(new Set([a, b, c])).toEqual(new Set(keys));
     // Everyone hears everyone: each remote microphone plays in its own <audio>, and nobody shows the muted mark.
     for (const p of callers) {
-      await expect.poll(() => p.page.getByTestId("group-call-audio").evaluateAll((els) => (els as HTMLAudioElement[]).filter((el) => el.srcObject && !el.paused).length), { timeout: 30_000 }).toBe(2);
+      await expect.poll(() => hearing(p), { timeout: 30_000 }).toBe(2);
       await expect(p.page.getByTestId("group-call-muted")).toHaveCount(0);
     }
 
@@ -237,7 +241,7 @@ test.describe("a sealed group call", () => {
 
       // Sealed both ways: Ana hears Bia and Bia hears Ana, and Bia's shared screen (the pattern) plays for Ana.
       for (const p of [ana, bia]) {
-        await expect.poll(() => p.page.getByTestId("group-call-audio").evaluateAll((els) => (els as HTMLAudioElement[]).filter((el) => el.srcObject && !el.paused).length), { timeout: 30_000 }).toBe(1);
+        await expect.poll(() => hearing(p), { timeout: 30_000 }).toBe(1);
       }
       await bia.page.getByTestId("group-call-screen").click();
       await plays(ana, b, "screen");
@@ -332,6 +336,165 @@ test.describe("a sealed group call", () => {
       throw error;
     } finally {
       for (const page of outsiders) await page.context().close().catch(() => {});
+      await node.stop();
+    }
+  });
+});
+
+/*
+ * The group's admin moderates its call (WISP 602 § Moderation). The headless node makes Ana the group's admin, so her
+ * app signs the moderation requests and shows the ⋮ on the others' tiles; the stack's token mock is the group's node
+ * here too, keeping the room's mutes and bans and acting on LiveKit for them (e2e/infra/sfu-token).
+ */
+const MUTED_BY_ADMIN = "Muted by the admin";
+const REMOVED = "The admin removed you from this call";
+
+test.describe("group call moderation", () => {
+  test("the admin mutes a member's mic and allows it again, removes a member and lets them back in; nobody else gets the menu", { tag: ["@feature:calls.group.moderation"] }, async ({ peer, relay }, testInfo) => {
+    const started = Date.now();
+    const node = new HeadlessBot();
+    try {
+      await node.start(await relay.listen(), "Thursday node");
+      const group = (await node.run("group", "create", "Thursday")).group as string;
+      await node.run("group", "call", group, "--sfu", endpoints.sfu.origin);
+      const link = (await node.run("group", "link", group)).link as string;
+
+      const [ana, bia, cleo] = await Promise.all(["Ana", "Bia", "Cleo"].map((name) => peer(name)));
+      for (const p of [ana, bia, cleo]) await routeSfu(p);
+      await servesThisCheckout(ana.page);
+      const callers = [ana, bia, cleo];
+
+      // Ana joins first and the node hands her the admin role.
+      type Shown = { id: string; admin: boolean; call: { sfu: string } | null; members: { key: string; me: boolean }[] };
+      const shown = async () => (await node.run("group", "show", group)) as unknown as Shown;
+      await joinGroup(ana, link);
+      await expect.poll(async () => (await shown()).members.length, { timeout: 180_000, intervals: [2_000] }).toBe(2);
+      const a = (await shown()).members.find((m) => !m.me)!.key;
+      // She has the node's statement naming the call node before the role moves: made the admin before her first sync,
+      // she takes the role commit first and then refuses the former admin's statement, and the group's call is lost.
+      await expect(ana.page.getByTestId("group-call-join")).toBeVisible({ timeout: 120_000 });
+      await node.run("group", "admin", group, a);
+      await expect(ana.page.getByTestId("group-event").filter({ hasText: "You are now the admin" })).toHaveCount(1, { timeout: 60_000 });
+
+      await Promise.all([bia, cleo].map((p) => joinGroup(p, link)));
+      await expect.poll(async () => (await shown()).members.length, { timeout: 180_000, intervals: [2_000] }).toBe(4);
+      const before = await shown();
+      expect(before.admin).toBe(false);
+      expect(before.call?.sfu).toBe(endpoints.sfu.origin);
+      const keys = before.members.filter((m) => !m.me).map((m) => m.key);
+      // The node's roster names Ana its admin: the only key whose moderation requests it takes.
+      const roster = await fetch(`${endpoints.sfu.token}/test/roster/${before.id}`, { method: "PUT", body: JSON.stringify({ members: Object.fromEntries(keys.map((k) => [k, "Member"])), admin: a }) });
+      expect(roster.status).toBe(204);
+
+      for (const p of callers) {
+        await expect(p.page.getByTestId("group-call-join")).toBeVisible({ timeout: 120_000 });
+        await p.page.getByTestId("group-call-join").click();
+      }
+      const faces = '[data-testid="group-call-tile"][data-kind="face"]';
+      for (const p of callers) {
+        await expect(p.page.getByTestId("group-call")).toBeVisible({ timeout: 30_000 });
+        await expect(p.page.locator(faces)).toHaveCount(3, { timeout: 60_000 });
+      }
+      const [me, b, c] = await Promise.all(callers.map(async (p) => (await p.page.locator(faces).filter({ has: p.page.getByText("You", { exact: true }) }).getAttribute("data-identity"))!));
+      expect(me).toBe(a);
+      expect(new Set([a, b, c])).toEqual(new Set(keys));
+      for (const p of callers) await expect.poll(() => hearing(p), { timeout: 30_000 }).toBe(2);
+
+      // The admin has the ⋮ on the others' tiles, not on her own; Bia and Cleo have it on none.
+      for (const k of [b, c]) await expect(tile(ana, k, "face").getByTestId("group-call-moderate")).toHaveAttribute("aria-label", /^Moderate .+/);
+      await expect(tile(ana, a, "face").getByTestId("group-call-moderate")).toHaveCount(0);
+      for (const p of [bia, cleo]) await expect(p.page.getByTestId("group-call-moderate")).toHaveCount(0);
+      const menuOn = async (k: string) => {
+        await tile(ana, k, "face").getByTestId("group-call-moderate").click();
+        const menu = ana.page.getByTestId("group-call-moderate-menu");
+        await expect(menu).toBeVisible();
+        return menu;
+      };
+
+      // Ana mutes Bia's mic. Bia's mic button and her own tile say why, and its ⓘ says until when.
+      let menu = await menuOn(b);
+      await expect(menu.getByTestId("group-call-mute-microphone")).toHaveText("Mute mic");
+      await menu.getByTestId("group-call-mute-microphone").click();
+      const mic = bia.page.getByTestId("group-call-mic");
+      await expect(mic).toHaveAttribute("aria-disabled", "true", { timeout: 15_000 });
+      await expect(mic).toHaveAttribute("title", MUTED_BY_ADMIN);
+      await expect(tile(bia, b, "face").getByRole("img", { name: MUTED_BY_ADMIN })).toBeVisible();
+      await bia.page.getByTestId("group-call-by-admin-info").click();
+      await expect(bia.page.getByTestId("group-call-by-admin-text")).toContainText("The group's admin turned this off for you in this call.");
+      // Ana and Cleo see the admin's mark on her tile, and no longer hear her: one microphone each, the other's.
+      for (const p of [ana, cleo]) {
+        await expect(tile(p, b, "face").getByTestId("group-call-muted")).toHaveAttribute("data-by-admin", "true", { timeout: 15_000 });
+        await expect.poll(() => hearing(p), { timeout: 30_000 }).toBe(1);
+      }
+      // Bia presses her mic (aria-disabled, which Playwright would wait out: a person can still press it): it stays
+      // muted, and still nobody hears her once Ana's menu offers Allow mic.
+      await mic.click({ force: true });
+      await expect(mic).toHaveAttribute("aria-disabled", "true");
+      await expect(mic).toHaveAttribute("title", MUTED_BY_ADMIN);
+      menu = await menuOn(b);
+      await expect(menu.getByTestId("group-call-allow-microphone")).toHaveText("Allow mic");
+      for (const p of [ana, cleo]) expect(await hearing(p)).toBe(1);
+
+      // Ana allows it: Bia's mic is hers again but stays off until she turns it on; then both hear her.
+      await menu.getByTestId("group-call-allow-microphone").click();
+      await expect(mic).not.toHaveAttribute("aria-disabled", "true", { timeout: 15_000 });
+      await expect(mic).toHaveAttribute("title", "Unmute");
+      for (const p of [ana, cleo]) await expect(tile(p, b, "face").getByTestId("group-call-muted")).toHaveAttribute("data-by-admin", "false", { timeout: 15_000 });
+      await mic.click();
+      await expect(mic).toHaveAttribute("title", "Mute");
+      for (const p of [ana, cleo]) {
+        await expect(tile(p, b, "face").getByTestId("group-call-muted")).toHaveCount(0, { timeout: 15_000 });
+        await expect.poll(() => hearing(p), { timeout: 30_000 }).toBe(2);
+      }
+
+      // Ana removes Cleo from the call, asked first.
+      menu = await menuOn(c);
+      await expect(menu.getByTestId("group-call-remove-from-call")).toHaveText("Remove from call");
+      await menu.getByTestId("group-call-remove-from-call").click();
+      const ask = ana.page.getByTestId("group-call-remove-call-dialog");
+      await expect(ask).toContainText("from the call?");
+      await ask.getByTestId("group-call-remove-call-confirm").click();
+      // Cleo is out of the room, Join call is off and says why; Ana and Bia lose her tile and her voice.
+      const notice = cleo.page.getByTestId("group-call-problem-notice");
+      await expect(cleo.page.getByTestId("group-call")).toHaveCount(0, { timeout: 30_000 });
+      await expect(notice).toContainText(REMOVED, { timeout: 30_000 });
+      await expect(cleo.page.getByTestId("group-call-join")).toHaveAttribute("aria-disabled", "true");
+      for (const p of [ana, bia]) {
+        await expect(tile(p, c, "face")).toHaveCount(0, { timeout: 30_000 });
+        await expect.poll(() => hearing(p), { timeout: 30_000 }).toBe(1);
+      }
+      await expect(ana.page.getByTestId("group-call-removed")).toHaveText("Removed (1)");
+      await expect(bia.page.getByTestId("group-call-removed")).toHaveCount(0);
+
+      // Her rejoin is refused: the notice closed, Join call asks the node again, and the same reason comes back.
+      await cleo.page.getByTestId("group-call-problem").getByRole("button", { name: "Close" }).click();
+      await expect(cleo.page.getByTestId("group-call-problem")).toHaveCount(0);
+      // Join call stays aria-disabled while she is removed, and pressed it still asks the node (GroupCallButton's press).
+      await cleo.page.getByTestId("group-call-join").click({ force: true });
+      await expect(notice).toContainText(REMOVED, { timeout: 60_000 });
+      await expect(cleo.page.getByTestId("group-call")).toHaveCount(0);
+      await expect(ana.page.locator(faces)).toHaveCount(2);
+
+      // Ana lets her back in, and Cleo's Join call takes her into the room: three tiles, everyone heard again.
+      await ana.page.getByTestId("group-call-removed").click();
+      const unban = ana.page.getByTestId("group-call-removed-menu").locator(`[data-testid="group-call-unban"][data-identity="${c}"]`);
+      await expect(unban).toHaveText(/^Let .+ back in$/);
+      await unban.click();
+      await expect(ana.page.getByTestId("group-call-removed")).toHaveCount(0, { timeout: 15_000 });
+      await cleo.page.getByTestId("group-call-join").click({ force: true });
+      await expect(cleo.page.getByTestId("group-call")).toBeVisible({ timeout: 60_000 });
+      await expect(cleo.page.getByTestId("group-call-problem")).toHaveCount(0);
+      for (const p of callers) {
+        await expect(p.page.locator(faces)).toHaveCount(3, { timeout: 60_000 });
+        await expect.poll(() => hearing(p), { timeout: 30_000 }).toBe(2);
+      }
+      await expect(cleo.page.getByTestId("group-call-moderate")).toHaveCount(0);
+
+      testInfo.annotations.push({ type: "run time", description: `${Math.round((Date.now() - started) / 1000)} s` });
+    } catch (error) {
+      await node.attachLogs(testInfo);
+      throw error;
+    } finally {
       await node.stop();
     }
   });

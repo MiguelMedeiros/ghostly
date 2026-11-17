@@ -48,7 +48,7 @@ Content-Type: application/json
 |---|---|
 | `v` | `1` |
 | `g` | The group id, base64url without padding, 22 characters ([903 § Identity](903-group-community.md#identity-and-declaration)). |
-| `k` | The member's key in this group, z-base32, 52 characters, in its one canonical spelling, as `GroupMemberView.key` and `ghostly group show --json` print it. |
+| `k` | The member's key in this group, z-base32, 52 characters, in its one canonical spelling, as `GroupMemberView.key` and `ghostly group show <group>` print it. |
 | `room` | `"g_" + g`, 24 characters. |
 | `ts` | Unix time in seconds, an integer, on the member's clock. |
 | `n` | 16 random bytes, base64url without padding (22 characters), new for each request. |
@@ -145,7 +145,111 @@ where the epoch secret is the 32-byte secret of the newest commit on the member'
 
 ## Removal
 
-A member taken out of the roster gets no new token: check 5 refuses it. A participant already in the room may stay until its token expires; the node may remove it from the room when it takes the commit, and this revision does not require it.
+A member taken out of the roster gets no new token: check 5 refuses it. That does not end a stay already begun: the token is checked only when a participant joins, and LiveKit sends a connected participant fresh tokens, which its client also uses to reconnect, so a participant already in the room stays until it leaves or the node removes it. `expiresIn` bounds only a new join.
+
+So the node SHOULD remove from `"g_" + g` every participant whose identity is no longer in its roster of `g`, as soon as it takes the commit that takes that key out (with LiveKit, `RoomService.RemoveParticipant` with that identity). A node that cannot tell yet whether a key is in the roster (its roster could not be read) keeps the participant and asks again later. Ghostly's own app leaves the call by itself when its group is no longer active; this is for a client that does not, or one that missed the commit.
+
+To take a member out of the call while keeping them in the group, the admin uses the moderation route (§ Moderation, `act: "remove"`).
+
+## Moderation
+
+The group's admin can act on the other members inside the call: take a source away (mute), give it back, take a member out of the call and keep them out, and let them back in. The node does it, so it holds for every member, whatever app they run; only the admin's app needs to know this route.
+
+```
+POST <sfu>/sfu/group-moderate
+Content-Type: application/json
+
+{ "v": 1, "g": "<group id>", "k": "<admin key>", "room": "g_<group id>", "act": "mute", "target": "<member key>", "src": ["microphone"], "ts": 1794700800, "n": "<nonce>", "sig": "<signature>" }
+```
+
+| Field | Value |
+|---|---|
+| `v`, `g`, `room`, `ts`, `n` | As in the token request. |
+| `k` | The admin's key in this group, z-base32, 52 characters, in its canonical spelling. |
+| `act` | One of `"mute"`, `"allow"`, `"remove"`, `"unban"`, `"state"`. |
+| `target` | The member acted on: a key in the same form as `k`, never `k` itself. `""` for `state`. |
+| `src` | For `mute` and `allow`: a non-empty array of distinct sources from `"microphone"`, `"camera"`, `"screen_share"`, sorted as strings. `[]` for the other acts. |
+| `sig` | base64url (86 characters) of the Ed25519 signature, by `k`, over the bytes below. |
+
+There is no `name`. Any other field is refused.
+
+**The acts.**
+
+- `mute`: the node takes each source in `src` away from `target` (with LiveKit, `UpdateParticipant` with `canPublishSources` without them) and mutes what `target` already publishes from them (`MutePublishedTrack`). `screen_share` covers `screen_share_audio` too. The member cannot publish those sources again until the admin allows them.
+- `allow`: the node gives each source in `src` back. It does not unmute anything: the member turns it on again if they want to.
+- `remove`: the node takes `target` out of the room (`RemoveParticipant`) and bans the key from the room: the token route refuses it (below).
+- `unban`: the node lifts `target`'s ban. It does not bring them back: they join again if they want to.
+- `state`: the node changes nothing and answers the room's state. The admin's app reads it this way, for example to list who is banned.
+
+A `mute` of a source already taken away, an `allow` of one not taken, an `unban` of a key not banned, or an act on a key not in the room, changes nothing and is still answered `200`. A `mute` or `remove` of a key that is in the roster but not in the room holds for when it joins.
+
+**Signed bytes.** `sig` signs, exactly:
+
+```
+utf8(JSON.stringify(["ghostly-sfu/1 moderate", sfuOrigin, g, room, k, act, target, src, ts, n]))
+```
+
+with `src` as the JSON array of strings it is in the body, and `ts` a JSON number. The tag differs from the token request's `"ghostly-sfu/1 token"`, so neither request can be taken for the other.
+
+**What the node checks.** Checks 1 to 4 of the token request (§ What the node checks), with this body's fields and its 4 KiB bound, then:
+
+5. `k` is the admin of `g` in the node's current roster (its main branch).
+6. `target` is not `k`.
+
+Every refusal is the same `403` with the same body as the token route's. Past 30 requests in a minute from one address, or for one `k`, the node answers `429` with a `Retry-After` header. The route answers CORS as the token route does (§ CORS). A node that does not have this route answers `404`, and the admin's app says that this call's node cannot moderate yet.
+
+**The reply.**
+
+```
+200 OK
+{ "state": { "muted": { "<key>": ["microphone"] }, "banned": ["<key>"] } }
+```
+
+`state` is the room's state after the act: in `muted`, each key with the sources taken away from it, sorted; in `banned`, the banned keys, sorted. A key with nothing taken away is not in `muted`.
+
+**The token route honours it.** A token request from a banned key gets the same `403` as any refusal. A token for a key in `muted` leaves its muted sources out of `canPublishSources`, so leaving and joining again does not undo a mute.
+
+**How long it lasts.** The state belongs to the room and lasts until the call ends or the admin lifts each entry. The node keeps it across its own restart (the reference node keeps it in memory and in a file readable only by its own user). It drops a room's state once the room is gone from the SFU (with LiveKit, absent from `ListRooms`) on two looks in a row: the next call in the group starts with nothing muted and nobody banned.
+
+**What the members see.** A muted member's client loses the permission to publish those sources (with LiveKit, `ParticipantPermissionsChanged`), and its published tracks from them are muted. A removed member is disconnected (with LiveKit, reason `PARTICIPANT_REMOVED`), and its next token request is refused. The others see the same as when a member mutes or leaves by themselves. Taking someone out of the group is a separate act: the group remove of [903](903-group-community.md#membership-chain).
+
+### Moderation test vector
+
+The admin is the token request's test key. The target's seed is the bytes `20` to `3f`.
+
+| Input | Value |
+|---|---|
+| `k` | `yqooxx9u3aemh8mo5wcqq16yufu6jitouq1o4za751dger1igghy` |
+| Target's public key (hex) | `29acbae141bccaf0b22e1a94d34d0bc7361e526d0bfe12c89794bc9322966dd7` |
+| `target` | `fgsmiakbzufxbctqdkkpguemah5bhwupbx9bf1rz116jgewspzmo` |
+| `sfuOrigin` | `https://call.ghostly.tools` |
+| `g` | `oKGio6SlpqeoqaqrrK2urw` |
+| `room` | `g_oKGio6SlpqeoqaqrrK2urw` |
+| `act` | `mute` |
+| `src` | `["microphone"]` |
+| `ts` | `1794700800` |
+| `n` | `EBESExQVFhcYGRobHB0eHw` |
+
+The signed text (275 bytes):
+
+```
+["ghostly-sfu/1 moderate","https://call.ghostly.tools","oKGio6SlpqeoqaqrrK2urw","g_oKGio6SlpqeoqaqrrK2urw","yqooxx9u3aemh8mo5wcqq16yufu6jitouq1o4za751dger1igghy","mute","fgsmiakbzufxbctqdkkpguemah5bhwupbx9bf1rz116jgewspzmo",["microphone"],1794700800,"EBESExQVFhcYGRobHB0eHw"]
+```
+
+Its bytes in hex:
+
+```
+5b2267686f73746c792d7366752f31206d6f646572617465222c2268747470733a2f2f63616c6c2e67686f73746c792e746f6f6c73222c226f4b47696f36536c7071656f71617172724b32757277222c22675f6f4b47696f36536c7071656f71617172724b32757277222c2279716f6f787839753361656d68386d6f3577637171313679756675366a69746f7571316f347a6137353164676572316967676879222c226d757465222c226667736d69616b627a75667862637471646b6b706775656d6168356268777570627839626631727a3131366a67657773707a6d6f222c5b226d6963726f70686f6e65225d2c313739343730303830302c2245424553457851564668635947526f62484230654877225d
+```
+
+The signature, in hex and as `sig`:
+
+```
+da979e3b50058293985b871cf5050e8ee98243b0d925ddb5ab81a5fbe8e84748f3045ee1aa68eb372e61b808a0d6e86180d102dadcf9bd38b5e9b7d5b924360c
+2peeO1AFgpOYW4cc9QUOjumCQ7DZJd21q4Gl--joR0jzBF7hqmjrNy5huAig1uhhgNEC2tz5vTi16bfVuSQ2DA
+```
+
+`node:crypto` reproduces it as it does the token request's vector.
 
 ## Compatibility
 
@@ -155,15 +259,18 @@ A member taken out of the roster gets no new token: check 5 refuses it. A partic
 
 The node learns who joins the call, when, from which address, and the name it gives them; with end-to-end encryption off it can also see and hear the media. It learns nothing a member does not already know. The token request proves a key of the roster asked, for this node, within the last minute; a request seen by someone else cannot be used at another node or again later. `name` is not signed and is used only when the node has no name for `k`. A TURN server in `iceServers` sees the media as the node sends it: DTLS-SRTP, and sealed once more when end-to-end encryption is on.
 
+A moderation request proves the admin asked, for this node, within the last minute, and the node acts only for the admin its roster names. Taking someone out of the call (§ Moderation) does not change the call key: a member banned from the call but still in the group keeps the current epoch's secret, so it could open the call's sealed media if it got it some other way (from the node, or from a member), until the group moves to a new epoch. A group remove ([903](903-group-community.md#membership-chain)) moves it, and the call key with it. The node learns nothing new from a moderation request: the admin and the roster are already known to it.
+
 ## Open decisions
 
-- Removing a removed member's live participant from the room at once, not when its token expires.
 - Turning end-to-end encryption on by default once every client that can join supports it.
 - Group calls in `group-mesh/1` groups.
 
 ## Conformance
 
 The test vector above. An implementation of the node refuses each of the five checks with the same `403`, answers the preflight, and never admits a request to a room that is not `"g_" + g`.
+
+The moderation test vector. A node that has the moderation route refuses each of its six checks with the same `403`, refuses a banned key's token request with it too, leaves a muted key's sources out of its next token, and drops a room's state once the call has ended.
 
 ## Revision log
 

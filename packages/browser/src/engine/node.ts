@@ -54,6 +54,7 @@ import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
 import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
 import { COMMUNITY_EDIT_FRAME, INVITE_TAKEN, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, MAX_GROUP_NAME_LENGTH, engineError, engineText, groupName, parseCommunityEdit, parseEngineError, sanitizeDisplayText, traceLink } from "@ghostly/core";
 import { ClockWatch, DirectPathWatch, firstDeviceSetSecret } from "@ghostly/core";
+import { GROUP_CALL_MODERATION_ACTS, GROUP_CALL_SOURCES, isZ32Key, type GroupCallModerationAct, type GroupCallSource } from "@ghostly/core";
 import { GROUP_WAKE_FRAME, GROUP_WAKE_RECEIVE_LIMIT, GroupWakeLimiter, RateWindow, WAKE_CALL_INTERVAL_MS, WAKE_ONLINE_BATCH, WAKE_ONLINE_BATCH_MS, WAKE_ONLINE_DELAY_MS, WAKE_ONLINE_INTERVAL_MS, WakeLimiter, groupWakeFrame, groupWakes, parseGroupWakeFrame, checkPushEndpoint, newWakeToken, vapidKeysMatch, wakeRequest, type PushRequest, type WakeKind, type WakeTarget } from "@ghostly/core";
 import { COMMUNITY_REACTION_FRAME, GROUP_REACTION_FRAME, REACTION_LIMITS, ReactionWindow, queueReaction, readReaction, validReactionNumber, wireReaction, type WireReaction } from "@ghostly/core";
 import { COMMUNITY_PIN_FRAME, PIN_LIMITS, mayPin, pinIsNewer, pinNumberHolds, readPin, type GroupPinFrame, type WirePin } from "@ghostly/core";
@@ -157,7 +158,7 @@ import { isRefusalId } from "../shared/refusals";
 import { FileAppender, readStored, removeStored, storedSize, streamStored } from "../shared/storedFiles";
 import { FileDesk } from "./fileDesk";
 import { groupFileId, storedGroupFiles } from "./groupFiles";
-import { fetchGroupCallToken, groupCallSfu, type GroupCallPass } from "./groupCall";
+import { fetchGroupCallToken, groupCallSfu, sendGroupCallModeration, type GroupCallModerationResult, type GroupCallPass } from "./groupCall";
 import { DEFAULT_MINTS, TEST_MINT, mintNetwork } from "../shared/mints";
 import type {
   ContactLinkView,
@@ -4286,6 +4287,7 @@ export class GhostlyNode implements EngineImplementation {
     // Not live: the contact's app may be closed. Wake it, if it shared how; it then connects and takes this message.
     if (delivery !== "stream") this.wakePeer(live);
     // A card rides with the row; the DHT floor and a hold carry its text alone (WISP 405 · Status Cards).
+    let tooBig: string | undefined;
     if (delivery === "stream" || (delivery === "dht" && bytes <= DHT_TEXT_BYTES)) {
       const validationError = link.validateText(trimmed, timestamp, wireId, reply && pairedWireReply(reply));
       if (!validationError) {
@@ -4296,6 +4298,8 @@ export class GhostlyNode implements EngineImplementation {
         return { error: null, messageId: id };
       }
       if (/Payment tokens|does not match/.test(validationError)) return { error: validationError, refused: true };
+      // Within 256 bytes, but not within the packet once sealed: the floor never carries it, whatever goes before it.
+      if (/packet budget/.test(validationError)) tooBig = validationError;
     }
     if (this.holdingFor(live) && bytes <= HOLD_LIMITS.maxTextBytes) {
       // Longer than the DHT carries, and both sides allow held items: it waits in this device's storage, sealed for them.
@@ -4305,6 +4309,8 @@ export class GhostlyNode implements EngineImplementation {
       void this.hold.hold(linkId, { kind: "text", id: wireId, messageId: id, bytes, timestamp }).catch(() => {});
       return { error: null, messageId: id };
     }
+    // Kept, it waited for good as behind an earlier text, and the ones written after it went first: it is shortened.
+    if (tooBig) return { error: tooBig, refused: true };
     const reason = delivery === "dht" && bytes <= DHT_TEXT_BYTES ? "Waits for the text before it to be confirmed."
       : delivery === "dht" ? `Longer than the ${DHT_TEXT_BYTES} bytes the DHT carries: it is sent when you are live.`
       : "Sent when your contact is reachable.";
@@ -6613,6 +6619,25 @@ export class GhostlyNode implements EngineImplementation {
     const sfu = groupCallSfu(me.meta);
     if (!sfu) throw engineError("groupNoCall");
     return fetchGroupCallToken({ sfu, g: groupId, k: me.key, seed: identityFromSeedB64(me.seedB64).seed, name: this.sharedNick });
+  }
+
+  /**
+   * The group's admin acts on a member in its call (WISP 602 § Moderation): `mute` or `allow` the sources `src` of
+   * `target`, `remove` `target` from the call (and ban it), `unban` it, or read the room's `state`. Signed with my
+   * member key for the node the group's `call` names. Answers the room's state after the act, or a code: `not_admin`
+   * and `unsupported` (no node named) before anything is sent. A request that is not one of these throws.
+   */
+  async groupCallModerate({ groupId, act, target, src }: { groupId: string; act: GroupCallModerationAct; target?: string; src?: GroupCallSource[] }): Promise<GroupCallModerationResult> {
+    if (!(GROUP_CALL_MODERATION_ACTS as readonly unknown[]).includes(act)) throw new Error(`act must be one of ${GROUP_CALL_MODERATION_ACTS.join(", ")}`);
+    const me = typeof groupId === "string" ? this.groups.callMember(groupId) : undefined;
+    if (act !== "state" && (!isZ32Key(target) || target === me?.key)) throw new Error("target must be the key of another member");
+    const takesSources = act === "mute" || act === "allow";
+    if (takesSources && (!Array.isArray(src) || !src.length || !src.every(s => (GROUP_CALL_SOURCES as readonly unknown[]).includes(s))))
+      throw new Error(`src must list one or more of ${GROUP_CALL_SOURCES.join(", ")}`);
+    if (!me?.isAdmin) return { ok: false, code: "not_admin" };
+    const sfu = groupCallSfu(me.meta);
+    if (!sfu) return { ok: false, code: "unsupported" };
+    return sendGroupCallModeration({ sfu, g: groupId, seed: identityFromSeedB64(me.seedB64).seed, act, target: act === "state" ? "" : target, src: takesSources ? src : [] });
   }
 
   /**
