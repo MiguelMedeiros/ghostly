@@ -11,6 +11,19 @@ import { openPersistentIndexedDb, type PersistentIndexedDb } from "../src/runtim
 import { chatViewOf, groupViewOf } from "./support/chatView";
 // covers: headless.chat
 
+// A fold held where it opens its snapshot's file, while `foldHeld` is set: the test starts an export meanwhile.
+const foldHeld = vi.hoisted(() => ({ gate: null as Promise<void> | null, reached: () => {} }));
+vi.mock("node:fs/promises", async (original) => {
+  const fs = await original<typeof import("node:fs/promises")>();
+  return {
+    ...fs,
+    open: async (...args: Parameters<typeof fs.open>) => {
+      if (foldHeld.gate && String(args[0]).endsWith(".tmp")) { foldHeld.reached(); await foldHeld.gate; }
+      return fs.open(...args);
+    },
+  };
+});
+
 /**
  * `message delete --purge`: what the message said leaves the profile's folder before the command answers. Without it
  * the store's journal keeps it until its fold, within the hour (a token a bot saved, then deleted, was still in
@@ -129,31 +142,59 @@ describe("message delete --purge", () => {
   });
 
   // A FIFO nobody reads yet holds the export where it is, rows.db read as it was when it began.
-  it.skipIf(process.platform === "win32")("during a backup's export, answers once the export ends, nothing of the text left in rows.db", async () => {
-    const ctx = fake();
-    // A secret of its own: the one above is still in a message here.
-    const backedUp = "sk-made-up-backed-up-fedcba9876543210";
-    const holds = () => readdirSync(dir).filter((file) => readFileSync(join(dir, file)).includes(backedUp));
-    await put({ linkId: "chat-one", id: "peer_5", text: `under a backup: ${backedUp}`, sender: "peer", timestamp: 6, via: "datalink" });
-    // Past a pipe's buffer, so the export waits on its writes.
-    for (let i = 0; i < 300; i++) await put({ linkId: "chat-one", id: `filler_${i}`, text: "x".repeat(1000), sender: "peer", timestamp: 7 + i, via: "datalink" });
-    await store.compact();
-    expect(holds()).toEqual(["rows.db"]);
+  async function heldExport() {
     const fifo = join(mkdtempSync(join(tmpdir(), "ghostly-purge-export-")), "store.bin");
     execFileSync("mkfifo", [fifo]);
     const exported = store.exportSnapshot(fifo);
     const out = createReadStream(fifo);
     out.pause();
     await new Promise((resolve) => setTimeout(resolve, 200));
+    return async () => {
+      out.resume();
+      // Read whole, then refused at its sync: a FIFO has nothing to sync.
+      await expect(exported).rejects.toMatchObject({ code: "EINVAL" });
+    };
+  }
+
+  /** A message whose text, its own secret, is in rows.db only (the one above is still in a message here). */
+  async function folded(id: string, secret: string) {
+    await put({ linkId: "chat-one", id, text: `under a backup: ${secret}`, sender: "peer", timestamp: 6, via: "datalink" });
+    // Past a pipe's buffer, so the export waits on its writes.
+    for (let i = 0; i < 300; i++) await put({ linkId: "chat-one", id: `${id}_filler_${i}`, text: "x".repeat(1000), sender: "peer", timestamp: 7 + i, via: "datalink" });
+    await store.compact();
+    const holds = () => readdirSync(dir).filter((file) => readFileSync(join(dir, file)).includes(secret));
+    expect(holds()).toEqual(["rows.db"]);
+    return holds;
+  }
+
+  it.skipIf(process.platform === "win32")("during a backup's export, answers once the export ends, nothing of the text left in rows.db", async () => {
+    const holds = await folded("peer_5", "sk-made-up-backed-up-fedcba9876543210");
+    const release = await heldExport();
     let held: string[] | null = null;
-    const purge = callApi(ctx, "chat.delete", { chat: "Alice", message: "peer_5", purge: true }).then((answer) => { held = holds(); return answer; });
+    const purge = callApi(fake(), "chat.delete", { chat: "Alice", message: "peer_5", purge: true }).then((answer) => { held = holds(); return answer; });
     await new Promise((resolve) => setTimeout(resolve, 300));
     // Not while the export holds rows.db: its checkpoint would stop there, the text kept in rows.db's pages.
     expect(held).toBeNull();
-    out.resume();
-    // Read whole, then refused at its sync: a FIFO has nothing to sync.
-    await expect(exported).rejects.toMatchObject({ code: "EINVAL" });
+    await release();
     expect(await purge).toEqual({ chat: "chat-one", messageId: "peer_5", deleted: "peer_5", everyone: false, purged: true });
+    expect(held).toEqual([]);
+  });
+
+  it.skipIf(process.platform === "win32")("an export that begins while the purge's fold is written is waited for too", async () => {
+    const holds = await folded("peer_6", "sk-made-up-begun-later-0123fedcba987654");
+    let open!: () => void;
+    const reached = new Promise<void>((resolve) => { foldHeld.reached = resolve; });
+    foldHeld.gate = new Promise<void>((resolve) => { open = resolve; });
+    let held: string[] | null = null;
+    const purge = callApi(fake(), "chat.delete", { chat: "Alice", message: "peer_6", purge: true }).then((answer) => { held = holds(); return answer; });
+    await reached;
+    const release = await heldExport();
+    foldHeld.gate = null;
+    open();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(held).toBeNull();
+    await release();
+    expect(await purge).toEqual({ chat: "chat-one", messageId: "peer_6", deleted: "peer_6", everyone: false, purged: true });
     expect(held).toEqual([]);
   });
 });
