@@ -649,6 +649,43 @@ describe("a group not joined yet, said the same by every command", () => {
       message: "You are the admin and nobody else in Crew is online to take over: try again when a member is, or make one the admin first (ghostly group admin Crew <member key>)" });
   });
 
+  describe("a community nobody is connected to", () => {
+    // Found in a bug hunt: a one-shot's `group leave` has no edge yet, so a community's leave was always refused with the
+    // engine's "Try again in a moment", code `engine`, which no retry could pass; `group forget` then dropped it with
+    // exit 0 and no word that the others still list this member.
+    const NOBODY = "Nobody in the group is connected right now to take your leave. Try again in a moment.";
+    const community = (isAdmin: boolean, connected: number) => ({ ...group, profile: "community", status: "active", isAdmin, community: { hub: false, hubs: 0, connected },
+      members: group.members.map((m) => ({ ...m, role: m.me === isAdmin ? "admin" : "member", online: m.me || connected > 0 })) }) as unknown as GroupView;
+    function held(view: GroupView, mode: "one-shot" | "daemon", refuse: boolean) {
+      const { ctx, node } = fake();
+      node.getState = () => ({ links: [], groups: [view], settings: {}, transport: {} }) as unknown as EngineState;
+      const engine = { leaveGroup: vi.fn(async () => { if (refuse) throw new Error(NOBODY); return {}; }), forgetGroup: vi.fn(async () => { if (refuse) throw new Error(NOBODY); }) };
+      Object.assign(node, engine);
+      return { ctx: { ...ctx, mode } as ApiContext, ...engine };
+    }
+
+    it("a leave says it waits for a member online, with the step a one-shot needs", async () => {
+      for (const isAdmin of [true, false]) {
+        await expect(callApi(held(community(isAdmin, 0), "one-shot", true).ctx, "group.leave", { group: "Crew", yes: true })).rejects.toMatchObject({ code: "engine",
+          message: "Nobody in Crew is connected to take your leave, and a command without a daemon has no connection yet: keep this profile online (ghostly daemon --detach), then ghostly group leave Crew --yes once a member is (ghostly group show Crew says who is)" });
+        await expect(callApi(held(community(isAdmin, 0), "daemon", true).ctx, "group.leave", { group: "Crew", yes: true })).rejects.toMatchObject({ code: "engine",
+          message: "Nobody in Crew is connected to take your leave: try again when a member is online (ghostly group show Crew says who is)" });
+      }
+      // The admin's forget is the same leave first, refused the same way.
+      await expect(callApi(held(community(true, 0), "daemon", true).ctx, "group.forget", { group: "Crew", yes: true })).rejects.toMatchObject({ code: "engine",
+        message: "Nobody in Crew is connected to take your leave: try again when a member is online (ghostly group show Crew says who is)" });
+    });
+
+    it("a member's forget with nobody connected warns that the others still list them", async () => {
+      const unsaid = held(community(false, 0), "one-shot", false);
+      expect(await callApi(unsaid.ctx, "group.forget", { group: "Crew", yes: true })).toEqual({ forgotten: "g1",
+        warning: "Nobody in Crew was connected to take your leave: it went from this device anyway, and the others will still list you as a member" });
+      expect(unsaid.forgetGroup).toHaveBeenCalledWith({ groupId: "g1" });
+      // Connected, the leave goes with it: nothing to warn of.
+      expect(await callApi(held(community(false, 1), "one-shot", false).ctx, "group.forget", { group: "Crew", yes: true })).toEqual({ forgotten: "g1" });
+    });
+  });
+
   it("a link to a group held here names the CLI's command, not the app's menu", async () => {
     const id = "AbCdEfGhIjKlMnOpQrStUv";
     const link = `https://ghostly.tools/#/join/${encodeGroupEntryLink({ g: id, host: createIdentity().pubKeyZ32 })}`;
