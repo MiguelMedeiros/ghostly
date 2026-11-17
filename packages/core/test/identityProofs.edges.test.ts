@@ -94,7 +94,8 @@ describe("what the verifier shows", () => {
 // The exchange between two contacts
 
 type Frame = Record<string, unknown>;
-function world() {
+/** `paced: false` for a test that plays a contact sending past the per-chat limits, its frames handed over by hand. */
+function world({ paced = true } = {}) {
   let now = NOW;
   const ids = { alice: createIdentity().pubKeyZ32, bob: createIdentity().pubKeyZ32 };
   const ledgers = { alice: emptyIdentityLedger(), bob: emptyIdentityLedger() } as Record<"alice" | "bob", IdentityLedger>;
@@ -115,7 +116,7 @@ function world() {
       storage: { read: () => ledgers[me], update: async change => { ledgers[me] = change(structuredClone(ledgers[me])); } },
       providers: () => ["test"],
       localProof: id => proofs.get(id),
-      verify, now: () => now, onError: e => errors.push(e),
+      verify, now: () => now, onError: e => errors.push(e), paced,
       revoked: async st => { if (state.revokedFails) throw new Error("resolver down"); return state.revoked.has(st.id); },
     });
   }
@@ -513,7 +514,7 @@ describe("verifying a presentation", () => {
     expect(w.ledgers.bob.received.map(r => r.id).sort()).toEqual([other, newer].sort());
   });
   it("keeps a bounded number of a contact's proofs, refusing one more before checking or looking it up", async () => {
-    const w = world();
+    const w = world({ paced: false }); // more of the contact's frames than a minute carries, at once
     const presentAs = async (subject: string) => { w.state.subject = subject; const id = w.addProof({ subject }); await w.peers.bob.receive(await present(w, id)); return id; };
     const kept: string[] = [];
     for (let i = 0; i < IDENTITY_MAX_RECEIVED; i++) kept.push(await presentAs(`subject-${i}`));
@@ -542,7 +543,7 @@ describe("verifying a presentation", () => {
   });
 
   it("holds the bound for presentations checked at the same time", async () => {
-    const w = world();
+    const w = world({ paced: false }); // more of the contact's frames than a minute carries, at once
     const keep = IDENTITY_MAX_RECEIVED - 4;
     for (let i = 0; i < keep; i++) { w.state.subject = `subject-${i}`; await w.peers.bob.receive(await present(w, w.addProof({ subject: w.state.subject }))); }
     // Eight answered challenges in flight (all a verifier keeps), each checked before any is stored: four fit.
@@ -555,7 +556,7 @@ describe("verifying a presentation", () => {
   });
 
   it("answers the same proof presented again from the check it already passed, without asking its provider or looking it up", async () => {
-    const w = world();
+    const w = world({ paced: false }); // more of the contact's frames than a minute carries, at once
     const id = w.addProof();
     const revoked = vi.spyOn(w.state.revoked, "has");
     // At the frame limit (a check is two frames): 65 presentations of one proof in a little over three minutes.
@@ -591,7 +592,7 @@ describe("verifying a presentation", () => {
   });
 
   it("checks at most a bounded number of a contact's proofs an hour with their provider", async () => {
-    const w = world();
+    const w = world({ paced: false }); // more of the contact's frames than a minute carries, at once
     // Fresh proofs of one identity (each a new statement, so none is held yet), at the frame limit.
     const results: Frame[] = [];
     for (let i = 0; i < 65; i++) {
