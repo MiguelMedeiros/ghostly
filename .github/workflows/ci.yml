@@ -464,6 +464,10 @@ jobs:
       - name: Build web app
         run: npm run build:web
 
+      # What the web app runs on load stays one file (see tools/scripts/check-web-first-load.mjs).
+      - name: Web first load is one file
+        run: npm run check:web-first-load
+
       # The adapter SDK, the way an outside author gets it: packed into a tarball, installed into
       # packages/sdk/examples/adapter (not a workspace member), whose adapters must pass the contract suites.
       - name: SDK tarball and the example built on it
