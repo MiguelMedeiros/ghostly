@@ -11,6 +11,7 @@ import { AppIcon, Fingerprint } from "./AppIcon";
 import { AppDescription } from "./AppDescription";
 import { NAME, withName } from "./aroundName";
 import { removedLine } from "./removedLine";
+import { stopReason, stoppedSaid } from "./stoppedSaid";
 import { appErrorCode, appErrorRetryable, appErrorText, appErrorView, appUpdateErrorView, type AppErrorView } from "../../lib/apps/errors";
 import { refreshInstalledApps } from "../../lib/apps/installed";
 import { useTryAgain } from "../../lib/apps/tryAgain";
@@ -65,7 +66,7 @@ type BuiltIn = "carried" | "installed";
  * (`next`): no next step, and the person was left with Cancel or Keep it stopped and no idea whether it ever comes back.
  */
 function runLine(run: AppRunStatus, t: Translate, next: TranslationKey): ReactNode {
-  if (run.status === "revoked") return `${run.reason ? t("apps.install.revokedReason", { reason: `⁨${run.reason}⁩` }) : t("apps.install.revoked")}\n${t(next)}`;
+  if (run.status === "revoked") return `${stopReason(run, t)}\n${t(next)}`;
   // A store's own words, one line each, as on the listing.
   if (run.status === "removed") return run.by.length > 0 && run.by.map((b) => <span key={b.store} className="block">{removedLine(b.name, b.reason, t)}</span>);
   if (run.status === "needs-files") return t("apps.app.needsFiles");
@@ -74,9 +75,9 @@ function runLine(run: AppRunStatus, t: Translate, next: TranslationKey): ReactNo
 
 // A store's takedown reason (200 characters, which may hold no space: a link) and a store's or contact's name break
 // anywhere: unbroken, a reason pushed the screen 933 px sideways on a phone, its start off the left side in Arabic.
-function Line({ children, tone = "muted", testId }: { children: ReactNode; tone?: "muted" | "danger" | "warning"; testId?: string }) {
+function Line({ children, tone = "muted", testId, id }: { children: ReactNode; tone?: "muted" | "danger" | "warning"; testId?: string; id?: string }) {
   const color = { muted: "text-text-secondary", danger: "text-danger-ink", warning: "text-test-money-ink" }[tone];
-  return <p data-testid={testId} className={`text-xs whitespace-pre-line [overflow-wrap:anywhere] ${color}`}>{children}</p>;
+  return <p id={id} data-testid={testId} className={`text-xs whitespace-pre-line [overflow-wrap:anywhere] ${color}`}>{children}</p>;
 }
 
 /** The publisher and the stores, as a person checks them. */
@@ -458,11 +459,17 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
   // A check while the screen is open stops the app (revoked, removed by a store) or lets it run again: Open, or Run anyway
   // and Keep stopped, go with the focus one of them had. The screen takes it, as when the update's section goes. Files
   // fetched again hand it on above, once Fetch files ends.
+  // Stopped meanwhile, it is also said, politely, with why: the focus landing on the screen read only its title (the
+  // screen is described by its run line too). Only on that change, once: a screen opened on an app already stopped
+  // says why as its description, as the focus lands there.
   const status = app.run.status, ran = useRef(status);
+  const [toldStop, setToldStop] = useState(false);
   useEffect(() => {
     const was = ran.current;
     ran.current = status;
-    if (was === status || was === "needs-files") return;
+    if (was === status) return;
+    setToldStop(status === "revoked" || status === "removed");
+    if (was === "needs-files") return;
     const active = document.activeElement;
     if (!active || active === document.body) box.current?.focus({ preventScroll: true });
   }, [status]);
@@ -484,6 +491,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
   // Each screen says only its own error: a Fetch files that failed was read out again on the question, as Uninstall's.
   const keepIt = () => { if (!busy) { setError(null); setRemoving(false); } };
   const why = runLine(app.run, t, "apps.app.revokedNext");
+  const runId = useId();
   const canRun = app.run.status === "ok";
   if (removing) {
     return (
@@ -500,10 +508,11 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
     );
   }
   return (
-    <Shell titleId={titleId} onClose={close} testId="app-details" box={box}>
+    <Shell titleId={titleId} describedBy={why ? runId : undefined} onClose={close} testId="app-details" box={box}>
+      <p role="status" aria-live="polite" className="sr-only" data-testid="app-stop-said">{toldStop ? stoppedSaid(app.title, app.run, t) : ""}</p>
       <Head titleId={titleId} title={app.title} version={app.version} tagline={app.tagline} installed={app} />
       <Publisher fingerprint={app.fingerprint} unknown={app.unknownPublisher} listedBy={app.listedBy} builtIn={app.builtIn && "installed"} />
-      {why && <Line tone={app.run.status === "needs-files" ? "warning" : "danger"} testId="app-run-line">{why}</Line>}
+      {why && <Line id={runId} tone={app.run.status === "needs-files" ? "warning" : "danger"} testId="app-run-line">{why}</Line>}
       {/* The version's internal `sequence` is never shown: the person knows it by the version in the header. */}
       {app.equivocation && <Line tone="warning" testId="app-equivocation">{t("apps.install.equivocation")}</Line>}
       {/* What it may do now stays while an update waits: that update's "also asks to" adds to this list. */}
