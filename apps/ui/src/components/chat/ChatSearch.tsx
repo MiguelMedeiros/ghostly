@@ -1,7 +1,10 @@
 import { useId, useState, type ReactNode } from "react";
+import type { GroupPayNote } from "@ghostly/browser/shared/types";
 import { useI18n } from "../../contexts/I18nContext";
 import type { ChatSearch } from "../../hooks/useChatSearch";
 import { matchRanges } from "../../lib/chatSearch";
+import type { ChatMessage } from "../../lib/types";
+import { spokenShort } from "./spokenMessage";
 import { draftDirection } from "../../lib/documentLanguage";
 import { useComposition } from "../../hooks/useComposition";
 
@@ -43,9 +46,15 @@ const button = "shrink-0 grid place-items-center w-8 h-8 max-md:w-11 max-md:h-11
 /**
  * The bar under a chat's header while its search is open (useChatSearch): the words, how many messages hold them and
  * which one is shown, ↑ for an older match and ↓ for a newer one (Enter and Shift+Enter), ✕ or Escape to close (the focus
- * goes back to what had it before).
+ * goes back to what had it before). A screen reader hears the count with the match: who wrote it and the start of what
+ * it says, as the chat reads out a message that comes in (`nameOf`, `appCards`, `noteLine`: MessageAnnouncer's).
  */
-export function ChatSearchBar({ search }: { search: ChatSearch }) {
+export function ChatSearchBar({ search, nameOf, appCards = false, noteLine }: {
+  search: ChatSearch;
+  nameOf(message: ChatMessage): string;
+  appCards?: boolean;
+  noteLine?(note: GroupPayNote): string | null;
+}) {
   const { t } = useI18n();
   const [info, setInfo] = useState(false);
   const infoId = useId();
@@ -53,6 +62,9 @@ export function ChatSearchBar({ search }: { search: ChatSearch }) {
   if (!search.open) return null;
   const total = search.results.length;
   const searched = !!search.term.trim() && search.term === search.query;
+  const count = searched ? (total ? t("chat.search.count", { current: String(Math.max(search.place, 0) + 1), total: String(total) }) : t("chat.search.none")) : "";
+  // Before, only "2 of 5" was said, nothing of the message found. Once it is gone (deleted, edited away): the count alone.
+  const said = count && search.match ? t("chat.search.found", { count, name: nameOf(search.match), text: spokenShort(search.match, t, appCards, noteLine) }) : count;
   const more = t("common.moreInfo");
   return (
     <div data-testid="chat-search" className="chat-search-bar @container shrink-0 border-b border-border bg-panel-header px-3 py-1.5 max-md:px-2">
@@ -81,9 +93,11 @@ export function ChatSearchBar({ search }: { search: ChatSearch }) {
           aria-label={t("chat.search.placeholder")}
           className="min-w-0 flex-1 rounded-md bg-transparent px-1.5 py-1 text-sm text-text-primary placeholder:text-text-muted outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus-ring [&::-webkit-search-cancel-button]:hidden"
         />
-        <span data-testid="chat-search-count" role="status" aria-live="polite" className="shrink-0 px-1 text-xs tabular-nums text-text-muted max-md:@max-[28rem]:order-last max-md:@max-[28rem]:basis-full max-md:@max-[28rem]:ps-5.5 max-md:@max-[20rem]:ps-1.5">
-          {searched ? (total ? t("chat.search.count", { current: String(Math.max(search.place, 0) + 1), total: String(total) }) : t("chat.search.none")) : ""}
+        {/* The count as it is seen; a screen reader reads the line under it, the same count with the match. */}
+        <span data-testid="chat-search-count" aria-hidden="true" className="shrink-0 px-1 text-xs tabular-nums text-text-muted max-md:@max-[28rem]:order-last max-md:@max-[28rem]:basis-full max-md:@max-[28rem]:ps-5.5 max-md:@max-[20rem]:ps-1.5">
+          {count}
         </span>
+        <span data-testid="chat-search-said" role="status" aria-live="polite" className="sr-only">{said}</span>
         <button type="button" data-testid="chat-search-info" aria-expanded={info} aria-controls={infoId} aria-label={more} title={more} onClick={() => setInfo(!info)}
           className={`${button} aria-expanded:text-accent`}>
           <svg {...icon} width={15} height={15}><circle cx="12" cy="12" r="9.5" /><path d="M12 11v5.5M12 7.5v.01" /></svg>

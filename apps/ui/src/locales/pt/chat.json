@@ -405,6 +405,7 @@
   "search": {
     "close": "Fechar busca",
     "count": "{{current}} de {{total}}",
+    "found": "{{count}}: {{name}}, {{text}}",
     "info": "Busca nas mensagens e nomes de arquivos guardados neste aparelho. Nada sai dele.",
     "newer": "Resultado mais novo (Shift+Enter)",
     "none": "Nenhum resultado",

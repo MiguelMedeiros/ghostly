@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import { busyUntil, earlierGifs, keptGifs, searchGifs, type GifAnswer, type PickerGif } from "../../lib/gifSearch";
 import { GIF_CATEGORY_ICONS } from "./icons";
-import { CategoryBar, PanelSearch } from "./PanelParts";
+import { CategoryBar, PanelSearch, type TabPanel } from "./PanelParts";
 
 /** A search's answer, kept with the search it answers: the grid shows it only while that is still the search. */
 type Results = GifAnswer & { query: string };
@@ -42,7 +42,7 @@ const formatWait = (ms: number) => {
  * until the wait is over, and nothing asks again by itself. Meanwhile it shows the GIFs it has from earlier, or offers
  * the emoji instead.
  */
-export function GifTab({ onSelect, onEmojiTab, autoFocus }: { onSelect: (url: string) => void; onEmojiTab?: () => void; autoFocus?: boolean }) {
+export function GifTab({ onSelect, onEmojiTab, autoFocus, panel }: { onSelect: (url: string) => void; onEmojiTab?: () => void; autoFocus?: boolean; panel?: TabPanel }) {
   const { t } = useI18n();
   const [category, setCategory] = useState(GIF_CATEGORIES[0].id);
   const [query, setQuery] = useState("");
@@ -124,7 +124,7 @@ export function GifTab({ onSelect, onEmojiTab, autoFocus }: { onSelect: (url: st
   };
   const shown = current?.kind === "ok" ? current.gifs.filter((gif) => !broken.has(gif.id)) : [];
   return (
-    <div className="expression-tab" data-testid="gif-tab">
+    <div className="expression-tab" data-testid="gif-tab" {...panel}>
       <CategoryBar label={t("composer.gifCategories")} testIdPrefix="gif-category" active={typed ? null : category}
         onChoose={(id) => { setCategory(id); setQuery(""); }}
         items={GIF_CATEGORIES.map((c) => ({ id: c.id, label: t(`composer.gifCategory.${c.id}` as Parameters<typeof t>[0]), icon: GIF_CATEGORY_ICONS[c.id] }))} />

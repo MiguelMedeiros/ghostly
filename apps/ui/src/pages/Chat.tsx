@@ -1170,7 +1170,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       {(webrtc.noPath || noPathShown) && !webrtc.mediaProblem && (
         <CallNoPathNotice iceServers={engine.state?.settings.iceServers} returnFocus={optionsRef} onClose={() => { webrtc.dismissNoPath(); setCallNoPath(sessionId, false); }} />
       )}
-      <ChatSearchBar search={search} />
+      <ChatSearchBar search={search} nameOf={m => nameOf(m.sender === "me" ? "me" : "peer") ?? shownName} appCards={appCards} />
       {appHere && <ChatAppResume linkId={appHere} />}
       <PinnedBar pin={pin} index={quoteIndex} onUnpin={() => pinMessage(undefined, true)} returnFocus={optionsRef} appCards={appCards} />
 

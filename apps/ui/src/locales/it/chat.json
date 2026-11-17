@@ -406,6 +406,7 @@
   "search": {
     "close": "Chiudi ricerca",
     "count": "{{current}} di {{total}}",
+    "found": "{{count}}: {{name}}, {{text}}",
     "info": "Cerca nei messaggi e nei nomi dei file salvati su questo dispositivo. Non esce nulla.",
     "newer": "Risultato più recente (Maiusc+Invio)",
     "none": "Nessun risultato",

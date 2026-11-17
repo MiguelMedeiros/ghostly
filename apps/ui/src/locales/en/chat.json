@@ -405,6 +405,7 @@
   "search": {
     "close": "Close search",
     "count": "{{current}} of {{total}}",
+    "found": "{{count}}: {{name}}, {{text}}",
     "info": "Searches the messages and file names kept on this device. Nothing leaves it.",
     "newer": "Newer match (Shift+Enter)",
     "none": "No results",

@@ -52,6 +52,7 @@ const settle = (ms = 50) => act(() => vi.advanceTimersByTimeAsync(ms));
 const row = (id: string) => document.querySelector<HTMLElement>(`[data-message-id="${id}"]`)!;
 const field = () => screen.getByTestId<HTMLInputElement>("chat-search-input");
 const count = () => screen.getByTestId("chat-search-count").textContent;
+const said = () => screen.getByTestId("chat-search-said");
 const ctrlF = () => fireEvent.keyDown(window, { key: "f", ctrlKey: true });
 const marked = () => [...document.querySelectorAll("[data-search-match]")].map(mark => mark.textContent);
 const type = async (text: string) => { fireEvent.change(field(), { target: { value: text } }); await settle(SEARCH_DEBOUNCE_MS + 10); };
@@ -138,10 +139,45 @@ describe("search inside a chat", () => {
     expect(status).not.toHaveClass("order-last");
     expect(status).not.toHaveClass("basis-full");
     expect(status.previousElementSibling).toBe(field());
-    // The same live region either way, with the same words: moving it would have read the count twice or not at all.
-    expect(status).toHaveAttribute("role", "status");
-    expect(status).toHaveAttribute("aria-live", "polite");
+    // What is said is not the count seen but a live line of its own, which stays where it is either way: moving the
+    // live region would have read the count twice or not at all.
+    expect(status).toHaveAttribute("aria-hidden", "true");
+    expect(status).not.toHaveAttribute("role");
+    expect(said()).toHaveAttribute("role", "status");
+    expect(said()).toHaveAttribute("aria-live", "polite");
+    expect(said()).toHaveClass("sr-only");
     expect(count()).toBe("No results");
+    expect(said().textContent).toBe("No results");
+  });
+
+  it("says the match with the count, who wrote it and the start of what it says, as Enter and Shift+Enter move", async () => {
+    openChat();
+    await screen.findByText(`Message ${COUNT - 1}`);
+    ctrlF();
+    await type("CAFE");
+    // Before, only "1 of 1": a screen reader heard nothing of the message found, the focus staying in the field.
+    expect(said().textContent).toBe("1 of 1: Ana, Um Café amanhã?");
+
+    await type("message 29");
+    expect(said().textContent).toBe("1 of 11: Ana, Message 299");
+    fireEvent.keyDown(field(), { key: "Enter" });
+    fireEvent.keyDown(field(), { key: "Enter" });
+    // One of mine: "You", as a reply's quote names it.
+    expect(said().textContent).toBe("3 of 11: You, Message 297");
+    expect(count()).toBe("3 of 11");
+    fireEvent.keyDown(field(), { key: "Enter", shiftKey: true });
+    expect(said().textContent).toBe("2 of 11: Ana, Message 298");
+
+    // A file is said as the chat list says it, by its name.
+    await type("relatorio");
+    expect(said().textContent).toMatch(/^1 of 1: Ana, .*Relatório Final\.pdf/);
+
+    // The match gone (deleted): the count alone, where it stood.
+    await type("message 29");
+    fireEvent.keyDown(field(), { key: "Enter" });
+    act(() => { deleteMessage("chat-1", "m298"); notifySessionsChanged(); });
+    await vi.waitFor(() => expect(row("m298")).toBeNull());
+    expect(said().textContent).toBe("2 of 10");
   });
 
   it("gives the focus back as it closes: to ⋮ when opened from its menu, to the composer after Ctrl+F there", async () => {

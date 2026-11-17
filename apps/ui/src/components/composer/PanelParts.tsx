@@ -3,6 +3,9 @@ import { SearchIcon } from "./icons";
 import { useComposition } from "../../hooks/useComposition";
 import { draftDirection } from "../../lib/documentLanguage";
 
+/** What makes a tab of the panel (Emoji, GIF) the panel its switch's tab names: spread on the tab's own box. */
+export interface TabPanel { id: string; role: "tabpanel"; "aria-labelledby": string }
+
 /**
  * The row of category icons over the emoji/GIF panel's grid; the chosen one is underlined. On a phone the row scrolls
  * sideways when its icons don't fit (composer.css): the underlined one, which follows the grid's scroll, is kept in view.

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { isLetterKey } from "../lib/appCommands";
-import { searchable, searchMessages, type Searchable } from "../lib/chatSearch";
+import { searchable, searchMessages, shownText, type Searchable } from "../lib/chatSearch";
 import { jumpToMessage } from "../lib/replies";
 import type { Translate } from "../locales/translate";
 import type { ChatMessage } from "../lib/types";
@@ -124,6 +124,19 @@ export function useChatSearch({ messages, chat, active, t, returnFocus }: { mess
   }, [term]);
 
   const index = current ? results.indexOf(current) : -1;
+  /**
+   * The match being read, as the chat has it now: what a screen reader is told with the count. A text as its bubble shows
+   * it, the words it was found by (a group's mentions by the names they show, a translation shown in its place). None
+   * once it is gone.
+   */
+  const match = useMemo(() => {
+    if (index < 0) return undefined;
+    let message: ChatMessage | undefined;
+    for (let at = messages.length - 1; at >= 0 && !message; at--) if (messages[at].id === current) message = messages[at];
+    if (!message || message.file || message.card) return message;
+    const translation = translated?.(message);
+    return { ...message, text: translation !== undefined ? shownText(translation) : shownText(message.text, message.mentions) };
+  }, [messages, current, index, translated]);
   /** The matches as they were while the one being read was among them: where it stood, once it is gone. */
   const held = useRef(results);
   if (index >= 0) held.current = results;
@@ -152,7 +165,7 @@ export function useChatSearch({ messages, chat, active, t, returnFocus }: { mess
   /** The words to mark in a message: the search's, when that message is one of its matches. */
   const highlight = useCallback((id: string) => (found.has(id) ? term : undefined), [found, term]);
 
-  return { open, show, close, dismiss, query, setQuery, term, results, index, place, current, older, newer, highlight, inputRef };
+  return { open, show, close, dismiss, query, setQuery, term, results, index, place, current, match, older, newer, highlight, inputRef };
 }
 
 export type ChatSearch = ReturnType<typeof useChatSearch>;
