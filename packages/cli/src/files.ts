@@ -220,7 +220,10 @@ async function stageWhileAsked(bytes: FileBytes, id: string, path: string, sourc
  * the announcement. This device is its first holder and serves the members who ask.
  */
 async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, path: string, name: string, picked: number, gone: AbortSignal | undefined) {
-  if (picked > GROUP_FILE_LIMITS.maxBytes) throw new CliError("refused", `Too large for a group (at most ${GROUP_FILE_LIMITS.maxBytes} bytes)`);
+  // Said as `help file send` says the cap, with the file and its size: a 1:1 chat has no cap, which is the way out.
+  if (picked > GROUP_FILE_LIMITS.maxBytes) {
+    throw new CliError("refused", `Too large for a group: ${name} is ${megabytes(picked)}, a group takes up to ${GROUP_FILE_LIMITS.maxBytes / 1_048_576} MiB (send it in a 1:1 chat)`, { reason: "too_large", size: picked, max: GROUP_FILE_LIMITS.maxBytes });
+  }
   if (!picked) throw new CliError("refused", "An empty file cannot go to a group");
   const mime = mimeOf(path, str(params, "mime"), params.voice !== undefined);
   const replyTo = str(params, "reply");
@@ -313,6 +316,30 @@ async function markDownloaded(path: string): Promise<void> {
 const ACTIONS = ["accept", "decline", "pause", "resume", "cancel", "resend", "request"] as const;
 
 /**
+ * Who ended a transfer, and how, from the engine's words for it (core's `chatFiles.ts`): its view says only `failed`,
+ * and a script could not tell "the contact said no" from "I already did it" without reading the English.
+ */
+const ENDS: Record<string, { reason: "cancelled" | "declined"; by: "me" | "contact" }> = {
+  "You cancelled it": { reason: "cancelled", by: "me" },
+  "You declined it": { reason: "declined", by: "me" },
+  "Cancelled by your contact": { reason: "cancelled", by: "contact" },
+  "Declined by your contact": { reason: "declined", by: "contact" },
+  "Cancelled by the sender": { reason: "cancelled", by: "contact" },
+};
+const endOf = (transfer: Pick<FileTransferView, "error">) => ENDS[transfer.error ?? ""] ?? { reason: "failed" as const, by: null };
+
+/**
+ * A transfer that ended, refused with its words and the way out: the sender still has the bytes and sends them again
+ * (`file resend` goes on from what the contact holds, while it may); the receiver asks the contact for them.
+ */
+function endedFile(fileId: string, where: { chat: string } | { group: string } | undefined, transfer: Pick<FileTransferView, "error" | "retry">, outgoing: boolean): CliError {
+  const way = where && "chat" in where
+    ? outgoing ? transfer.retry ? " (file resend sends it again)" : ` (send it again: ghostly file send ${where.chat} <path>)` : " (ask the contact to send it again)"
+    : "";
+  return new CliError("refused", `It ended: ${transfer.error ?? "failed"}${way}`, { file: fileId, ...where, ...endOf(transfer) });
+}
+
+/**
  * `file wait`: until a transfer ends: done answers, failed is an `engine` error with the transfer's words (and whether
  * `file resend` can go on). A file whose transfer this run has not seen answers from the file store. `stopping`: the
  * daemon's stop ends it as well (`waitForState`), for `file send --wait`, which answers with what it knows then.
@@ -334,7 +361,7 @@ async function waitForFile(ctx: ApiContext, params: Params, stopping?: AbortSign
     if (error instanceof CliError && error.code === "timeout" && now) throw new CliError("timeout", `${error.message} (${now.transferred} of ${now.size} bytes${now.stage ? `, ${stageWords(now)}` : ""})`, { file: fileId, transferred: now.transferred, size: now.size, stage: now.stage ?? null, ...(error.details?.reason ? { reason: error.details.reason } : {}) });
     throw error;
   });
-  if (transfer.state === "failed") throw new CliError("engine", transfer.error ?? "The transfer failed", { file: fileId, ...where, retry: !!transfer.retry });
+  if (transfer.state === "failed") throw new CliError("engine", transfer.error ?? "The transfer failed", { file: fileId, ...where, retry: !!transfer.retry, ...endOf(transfer) });
   if (transfer.state !== "done") throw waitsForYou((stored ?? await fileStore.get(fileId).catch(() => undefined))?.metadata?.name, fileId, where, transfer.size);
   return { ...where, file: fileId, state: "done", size: transfer.size };
 }
@@ -473,7 +500,7 @@ export const FILE_METHODS: Record<string, Method> = {
       if (outgoing !== (action === "resend")) throw new CliError("bad_request", outgoing ? "A file sent from here is sent again: file resend" : "A received file is asked for again: file request");
       const transfer = state(ctx).transfers[fileId];
       if (!transfer || transfer.state === "done") throw new CliError("refused", outgoing ? "Nothing to send again: it arrived whole" : "Nothing to ask for: the file is all here");
-      if (transfer.state === "failed" && (!outgoing || !transfer.retry)) throw new CliError("refused", `It ended: ${transfer.error ?? "failed"}`);
+      if (transfer.state === "failed" && (!outgoing || !transfer.retry)) throw endedFile(fileId, where, transfer, outgoing);
     } else {
       const outgoing = fileId.startsWith(`${linkId}-out-`);
       if (outgoing && (action === "accept" || action === "decline")) throw new CliError("bad_request", "A file sent from here is not accepted or declined: file cancel stops it");
@@ -482,7 +509,11 @@ export const FILE_METHODS: Record<string, Method> = {
       const transfer = state(ctx).transfers[fileId] ?? (await fileStore.get(fileId).catch(() => undefined))?.transfer;
       // Being checked (sent: the contact checks it; received: its digest here): the engine takes no pause and it ends done.
       if (action === "pause" && transfer?.stage === "verifying") throw new CliError("refused", "Too late to pause: it is being checked");
-      if (transfer?.state === "failed") throw new CliError("refused", `It ended: ${transfer.error ?? "failed"}${outgoing && transfer.retry ? " (file resend sends it again)" : ""}`);
+      if (transfer?.state === "failed") {
+        // A second cancel (or decline) of what this side ended answers as the first did, not as an error.
+        if ((action === "cancel" || action === "decline") && endOf(transfer).by === "me") return { ...where, file: fileId, action, transfer: state(ctx).transfers[fileId] ?? transfer };
+        throw endedFile(fileId, where, transfer, outgoing);
+      }
       // Sent whole (the engine's `sentWhole`): the engine takes no cancel or pause and it ends done, so it is refused, not echoed.
       const whole = outgoing && transfer?.state === "transferring" && (transfer.stage === "verifying"
         || (transfer.size > 0 && transfer.transferred >= transfer.size && transfer.stage !== "asking" && transfer.stage !== "queued" && transfer.stage !== "paused"));
@@ -532,7 +563,7 @@ export const FILE_METHODS: Record<string, Method> = {
     // A group's file waiting for a Download has no transfer in the engine's state: its record says it waits.
     const transfer = stored.direction === "out" ? undefined : state(ctx).transfers[fileId] ?? waitingGroupFile(stored) ?? stored.transfer;
     // One that ended will not come: its partial bytes were dropped, so "not all here yet" would have a script wait for good.
-    if (transfer?.state === "failed") throw new CliError("refused", `It ended: ${transfer.error ?? "failed"}`);
+    if (transfer?.state === "failed") throw endedFile(fileId, stored.linkId.startsWith("group:") ? { group: stored.linkId.slice(6) } : { chat: stored.linkId }, transfer, false);
     // Nor will one that waits for `file accept`: said naming it, as --wait does. It answered "not all here yet (0 of N
     // bytes)" before, and a script retried it for good.
     if (transfer?.state === "transferring" && transfer.stage === "asking" && transfer.direction === "in") {
