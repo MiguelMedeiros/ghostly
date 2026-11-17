@@ -698,8 +698,14 @@ export function GroupChat() {
   // Mine, taken off every member's device: a refusal (limited mode) rejects, and the bubble says it under the message.
   const removeRow = useHandler((m: StoredMessage) => engine.call("removeMessage", { linkId: `group:${groupId}`, messageId: m.id })
     .then(result => { if (result.error) throw new Error(result.error); forgetSentOriginal(groupChat(groupId), m.id); }));
+  // A reaction or a pin the group refuses ("You are not in this group", a community's admin-only pin) shows nothing
+  // on the row: why is said in the group's notice.
+  const sayRefusal = (call: Promise<{ error?: string | null }>) => {
+    setError(null);
+    void call.then(result => { if (result.error) throw new Error(result.error); }).catch(e => setError(problemText(e, t)));
+  };
   // Reactions (WISP 902 § Reactions): one per member per message, named by the roster.
-  const react = useHandler((messageId: string, emoji: string) => { void engine.call("react", { linkId: `group:${groupId}`, messageId, emoji }).catch(() => {}); });
+  const react = useHandler((messageId: string, emoji: string) => sayRefusal(engine.call("react", { linkId: `group:${groupId}`, messageId, emoji })));
   // One function while the roster's names stay (a row draws the names it answers): not one per draw of the page.
   const reactionName = useMemo(() => {
     const nameOf = group && replyNames(group, t("chat.reply.you"), t);
@@ -708,7 +714,7 @@ export function GroupChat() {
   }, [namesKey, t]);
   // The pinned message (WISP 400 § Pinned message): any member of a private group pins, only the admin of a community.
   const pinMessage = useHandler((messageId: string | undefined, remove: boolean = false) => {
-    void engine.call("pinMessage", { linkId: `group:${groupId}`, messageId, remove }).catch(() => {});
+    sayRefusal(engine.call("pinMessage", { linkId: `group:${groupId}`, messageId, remove }));
   });
   const pinRow = useHandler((m: StoredMessage) => pinMessage(m.id, replyTarget(rowNow(m), true) === group?.pin?.id));
   const saveRow = useHandler((messageId: string) => void setSaved(`group:${groupId}`, messageId, savedHere.has(messageId)).catch(() => {}));
