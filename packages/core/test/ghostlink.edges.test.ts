@@ -1493,6 +1493,22 @@ describe("DHT-only delivery", () => {
     expect(link.textDelivery).toBe("unavailable");
   });
 
+  it("switching to DHT-only stops the link session and closes the native endpoints before it waits on the mailbox", async () => {
+    const { link } = dhtLink();
+    const close = vi.fn(async () => {});
+    link.registerEndpoint({ transport: "hyperdht/1", descriptor: {}, onConnection: null, onDescriptor: null, connect: vi.fn(), close } as unknown as NativeEndpoint);
+    const stop = vi.spyOn(link.session, "stop");
+    // A relay that takes its time: the mailbox's pending work, and with it `setMode`, has not finished.
+    let settle!: () => void;
+    const inner = link as unknown as { dht: { setMode(mode: string): Promise<void> } };
+    vi.spyOn(inner.dht, "setMode").mockImplementation(() => new Promise<void>(resolve => { settle = resolve; }));
+    const switched = link.setDeliveryMode("dht");
+    await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
+    expect(stop).toHaveBeenCalledWith(false);
+    settle();
+    await switched;
+  });
+
   it("an edit the DHT packet cannot carry with its element says so at once, though its text alone fits as a text", async () => {
     const { link } = dhtLink();
     const edit = (m: string) => ({ id: newId(), e: 1, ts: Date.now(), m });
