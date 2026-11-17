@@ -28,7 +28,27 @@ interface Draft { draftId: string; provider: string; signer: string; binding: Id
  * and the oldest dropped when a fifth begins as the engine drops it, so what `identity add` promises still completes.
  */
 const drafts = new Map<string, Draft>();
+/** Drafts finished here, by the proof each became: a second `identity complete` (a retry after a lost answer) names it. */
+const finished = new Map<string, { proofId: string; at: number }>();
 const NO_DRAFT = `No such draft here: it is kept by the daemon that made it, for ${IDENTITY_DRAFT_TTL_MS / 60_000} minutes and while fewer than ${IDENTITY_MAX_DRAFTS} newer ones wait`;
+function noDraft(draftId: string): CliError {
+  const done = finished.get(draftId);
+  return new CliError("not_found", done ? `This draft is already finished: its proof is ${done.proofId} (ghostly identity list)` : NO_DRAFT);
+}
+
+/**
+ * A NIP-46 signer's own failure, before the engine was asked or while it signed: its relay not answering (nostr-tools'
+ * "subscription to the remote signer was closed", "failed to send … to any relay"), or the signer's refusal in its own
+ * words ("Not authorized", a wrong secret). The person's link or signer, not the engine: said with the way out.
+ */
+function remoteSignerError(error: unknown, relays: string[]): CliError | undefined {
+  if (!(error instanceof Error)) return undefined;
+  if (/^nostr-tools\/nip46: (subscription to the remote signer was closed|failed to send )/.test(error.message)) {
+    return new CliError("unavailable", `Could not reach the remote signer through its relay (${relays.join(", ")}): check the relay in the bunker link, or make a new link in your signer`, { rawError: error.message });
+  }
+  if (error.message.startsWith("nostr-tools/")) return undefined;
+  return new CliError("refused", "The remote signer refused the request: approve Ghostly in your signer, or make a new link there", { rawError: error.message });
+}
 
 function provider(id: string): IdentityProofProvider {
   const found = IDENTITY_PROVIDERS.find((p) => p.id === id);
@@ -95,6 +115,7 @@ function howToGive(field: SignerField): string {
 
 function pruneDrafts(now = Date.now()) {
   for (const [id, draft] of drafts) if (now - draft.createdAt > IDENTITY_DRAFT_TTL_MS) drafts.delete(id);
+  for (const [id, done] of finished) if (now - done.at > IDENTITY_DRAFT_TTL_MS) finished.delete(id);
 }
 
 async function begin(ctx: ApiContext, p: IdentityProofProvider, subject: string, params: Params) {
@@ -133,8 +154,9 @@ export const IDENTITY_METHODS: Record<string, Method> = {
       for (const field of signer.fields ?? []) if (!field.optional && !values[field.name]) throw new CliError("usage", `${signer.label} needs ${field.name} (${field.label}): ${howToGive(field)}`);
       // A NIP-46 link read as the signer will read it: one it refuses is the user's input, not an engine failure.
       const bunker = signer.fields?.find((f) => f.name === "bunker");
+      let relays: string[] | undefined;
       if (bunker && values.bunker) {
-        try { parseProofBunker(values.bunker); } catch (error) {
+        try { relays = parseProofBunker(values.bunker).relays; } catch (error) {
           throw new CliError("bad_request", `${bunker.name} (${bunker.label}): ${error instanceof Error ? error.message : String(error)}`);
         }
       }
@@ -146,6 +168,13 @@ export const IDENTITY_METHODS: Record<string, Method> = {
       // Once the signer's last step answered, nothing waits on the person any more: what fails after it (the engine's
       // check, which runs to its end past the deadline) is said as it is, never as a wait that ran out.
       let signed = false;
+      // What fails while the signer is asked (its connect, its key, its signature) is the signer's; the engine's own
+      // steps between them keep their words.
+      let asking = true;
+      const ask = async <T>(step: () => Promise<T>): Promise<T> => {
+        asking = true;
+        try { return await step(); } finally { asking = false; }
+      };
       const proof = await signer.run({
         values, signal, waitMs: seconds * 1000,
         // A link or code to approve with holds the request's secret (contract.ts): to the listeners live, never the journal.
@@ -155,9 +184,10 @@ export const IDENTITY_METHODS: Record<string, Method> = {
           if (request) ctx.hub.emitLive("identity.approval", `identity.approval:${Date.now()}`, { provider: p.id, ...(request.qr ? { qr: request.qr.value, label: request.qr.label } : {}), notes: request.notes ?? [] });
         },
       }, async (session) => {
-        const { draftId, binding } = await begin(ctx, p, await session.subject(), params);
+        const subject = await ask(() => session.subject());
+        const { draftId, binding } = await begin(ctx, p, subject, params);
         try {
-          const evidence = await session.sign(identityStatement(binding));
+          const evidence = await ask(() => session.sign(identityStatement(binding)));
           signed = true;
           return await node(ctx).completeIdentityProof({ draftId, evidence });
         } catch (error) {
@@ -167,7 +197,8 @@ export const IDENTITY_METHODS: Record<string, Method> = {
       }).catch((error: unknown) => {
         // The signer gives up with the signal's own words ("The operation was aborted due to timeout"), or its own wait's
         // at the same time ("Signer timed out"): an engine failure to a bot. Only while it was still waited on.
-        if (signed || !(signal.aborted || error instanceof SignerTimeout) || error instanceof CliError) throw error;
+        if (signed || error instanceof CliError) throw error;
+        if (!(signal.aborted || error instanceof SignerTimeout)) throw (relays && asking && remoteSignerError(error, relays)) || error;
         throw new CliError("timeout", `Timed out after ${seconds} s waiting for ${signer.label} to approve the ${p.label} proof: --timeout <seconds> waits longer`);
       });
       return { done: true, proof: proofJson(proof) };
@@ -176,7 +207,9 @@ export const IDENTITY_METHODS: Record<string, Method> = {
     const subject = str(params, "subject");
     // In the provider's words and where it goes: `identity add <provider> [subject]` shows it optional (in-app signers bring theirs).
     if (!subject) {
-      const what = p.subject ? `, its ${p.subject.label.toLowerCase()}${p.subject.placeholder ? ` (${p.subject.placeholder})` : ""}` : "";
+      // One level of parentheses: SSH's "ssh-ed25519 AAAA… (or SHA256:…)" reads "(ssh-ed25519 AAAA…, or SHA256:…)".
+      const example = p.subject?.placeholder?.replace(/ \((.+)\)$/, ", $1");
+      const what = p.subject ? `, its ${p.subject.label.toLowerCase()}${example ? ` (${example})` : ""}` : "";
       throw new CliError("bad_request", `${p.label} takes a subject${what}: ghostly identity add ${p.id} <subject>`);
     }
     const { draftId, binding } = await begin(ctx, p, subject, params);
@@ -189,8 +222,9 @@ export const IDENTITY_METHODS: Record<string, Method> = {
   /** Finishes a two-step proof: what the tool printed (external-tool), or nothing (publish: the engine looks it up). */
   async "identity.complete"(ctx, params) {
     pruneDrafts();
-    const draft = drafts.get(str(params, "draft", true));
-    if (!draft) throw new CliError("not_found", NO_DRAFT);
+    const draftId = str(params, "draft", true);
+    const draft = drafts.get(draftId);
+    if (!draft) throw noDraft(draftId);
     const p = provider(draft.provider);
     const signer = signerOf(p, draft.signer);
     const statement: IdentityStatement = identityStatement(draft.binding);
@@ -199,7 +233,8 @@ export const IDENTITY_METHODS: Record<string, Method> = {
       if (signer.kind === "external-tool") {
         // Said where the CLI takes it, not as the API's `evidence`; `details.needs`: the CLI reads a pipe then.
         const output = str(params, "evidence");
-        if (!output?.trim()) throw new CliError("usage", `Missing what ${signer.label} printed: give it from a file (--evidence-file f) or on stdin (… | ghostly identity complete ${draft.draftId})`, { needs: "evidence" });
+        // The label is a name ("Sign with a key of the DID", "Another wallet"), not a noun to slot into a sentence.
+        if (!output?.trim()) throw new CliError("usage", `Missing the output of the signing step (${signer.label}): give it from a file (--evidence-file f) or on stdin (… | ghostly identity complete ${draft.draftId})`, { needs: "evidence" });
         evidence = await signer.parse(output, statement);
       } else if (signer.kind === "publish") evidence = await signer.evidence(statement);
       else throw new CliError("bad_request", "This draft needs no completion");
@@ -209,13 +244,14 @@ export const IDENTITY_METHODS: Record<string, Method> = {
     }
     const proof = await node(ctx).completeIdentityProof({ draftId: draft.draftId, evidence });
     drafts.delete(draft.draftId);
+    finished.set(draft.draftId, { proofId: proof.id, at: Date.now() });
     return { done: true, proof: proofJson(proof) };
   },
 
   async "identity.cancel"(ctx, params) {
     const draftId = str(params, "draft", true);
     // As `identity.complete` says it: a draft that is not here was never made, is done, or is another daemon's.
-    if (!drafts.delete(draftId)) throw new CliError("not_found", NO_DRAFT);
+    if (!drafts.delete(draftId)) throw noDraft(draftId);
     await node(ctx).cancelIdentityProof({ draftId });
     return { cancelled: draftId };
   },
