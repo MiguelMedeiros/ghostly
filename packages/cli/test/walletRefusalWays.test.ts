@@ -164,9 +164,27 @@ describe("pay and wallet redeem refusals, at a fake test mint", { timeout: 60_00
         message: `Ecash from ${host} is not accepted: its mint is not one of yours, and it is on this machine or a local network (add a mint there only if you run it yourself)`,
       });
     }
-    // A mint that is no http(s) URL makes no token this wallet can use: said as such, never an empty host or `Invalid URL`.
-    for (const url of ["gopher://127.0.0.1:65401", "file:///etc/passwd", "data:text/plain,mint", "not a url"]) {
-      expect(await refusal("wallet.redeem", { token: mint.token(4, url) }), url).toEqual({ code: "bad_request", message: "That is not a valid ecash token" });
+    expect(node.getState().wallet.networks?.testnet.balance).toBe(10_000);
+  });
+
+  // The error code is the CLI's contract: a token naming a mint that is no http(s) URL answers `engine` as 1.13.1
+  // does, with 1.13.1's words. A different code waits for a minor release.
+  it("a token naming no http(s) mint keeps the code engine", async () => {
+    const released: [string, string][] = [
+      ["file:///etc/passwd", "Ecash from  is not accepted"],
+      ["data:text/plain,mint", "Ecash from  is not accepted"],
+      ["javascript:alert(1)", "Ecash from  is not accepted"],
+      ["not a url", "Invalid URL"],
+    ];
+    for (const [url, message] of released) {
+      expect(await refusal("wallet.redeem", { token: mint.token(4, url) }), url).toEqual({ code: "engine", message });
+    }
+    // A host that names a non-http(s) mint gets the hint's words (no `add-mint` offered), with the same code.
+    for (const [url, host] of [["gopher://127.0.0.1:65401", "127.0.0.1"], ["ftp://mint.example", "mint.example"]]) {
+      expect(await refusal("wallet.redeem", { token: mint.token(4, url) }), url).toEqual({
+        code: "engine",
+        message: `Ecash from ${host} is not accepted: its mint is not one of yours, and not one a wallet can add (Mints must use https)`,
+      });
     }
     expect(node.getState().wallet.networks?.testnet.balance).toBe(10_000);
   });
