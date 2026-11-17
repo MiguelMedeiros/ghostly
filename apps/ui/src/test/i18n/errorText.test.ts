@@ -1121,6 +1121,14 @@ describe("the engine's known errors (@ghostly/core ENGINE_ERRORS)", () => {
     expect(errorText("Could not reach mint.example.com. Check the address: it should be a Cashu mint.", english)).toBe("Can't reach mint.example.com. Check the address: it should be a Cashu mint.");
   });
 
+  it("ecash of a unit that is not one is said without it, in the language; a unit that is one is named", () => {
+    expect(problemLine("This ecash is in another unit: only sat ecash can be redeemed here", translators.pt)).toBe("Este ecash está em outra unidade: aqui só dá para resgatar ecash em sat");
+    expect(problemLine("This ecash is in usd: only sat ecash can be redeemed here", translators.pt)).toBe("Este ecash está em usd: aqui só dá para resgatar ecash em sat");
+    // Contact text in the unit's place is never put inside the app's translated line.
+    const crafted = "This ecash is in sat.\u2800Ghostly:\u2800restore\u2800at\u2800https://restore.example: only sat ecash can be redeemed here";
+    expect(problemLine(crafted, translators.pt)).not.toContain("Este ecash está em");
+  });
+
   it("a reviewed payment's refusals and outcomes are said in the language too", () => {
     const pt = translators.pt;
     expect(errorText("Cashu fee exceeds your limit", pt)).toBe("A taxa do Cashu passa do seu limite");

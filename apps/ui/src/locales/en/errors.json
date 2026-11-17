@@ -86,6 +86,7 @@
     "ecashFeeTakesAll": "The mint keeps all {{amount}} sats of this ecash as its fee to take it in: nothing was redeemed, and its sender can still take it back",
     "ecashFeeTakesAll_one": "The mint keeps this ecash's {{amount}} sat as its fee to take it in: nothing was redeemed, and its sender can still take it back",
     "ecashOtherUnit": "This ecash is in {{unit}}: only sat ecash can be redeemed here",
+    "ecashUnnamedUnit": "This ecash is in another unit: only sat ecash can be redeemed here",
     "fedimintAlreadyJoined": "You already joined this federation",
     "fedimintConnecting": "Wait for the federation to connect",
     "fedimintNotEnough": "Not enough in this federation",

@@ -864,6 +864,7 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   ecashFeeTakesAll: "errors.engine.ecashFeeTakesAll",
   lightningRefused: "errors.engine.lightningRefused",
   ecashOtherUnit: "errors.engine.ecashOtherUnit",
+  ecashUnnamedUnit: "errors.engine.ecashUnnamedUnit",
   reviewedEcashSpent: "errors.engine.reviewedEcashSpent",
   lnurlExactly: "errors.engine.lnurlExactly",
   lnurlRange: "errors.engine.lnurlRange",
