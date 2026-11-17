@@ -82,10 +82,10 @@ function readKey(path: string, kind: KeyKind): LoadedKey {
   const text = readFileSync(path, "utf8");
   const block = PEM.exec(text);
   const openSsh = OPENSSH_KEY.test(text);
-  // Before, an id_ed25519.pub was refused as a key others may read, and after the chmod as holding no private key.
-  // While others may read it, still the `refused` the mode check answered.
+  // Before, an id_ed25519.pub was refused as a key others may read, and after the chmod as holding no private key:
+  // `bad_request` whatever its mode, the wrong file given, as any other file that holds no private key.
   if (!block && !openSsh && PUBLIC_KEY.test(text)) {
-    throw new CliError(openToOthers(mode) ? "refused" : "bad_request", `${path} is a public key, not a private one: --key names a ${kind} key file (an Ed25519 key in a PEM "PRIVATE KEY" block). Name a new path and ghostly makes one`);
+    throw new CliError("bad_request", `${path} is a public key, not a private one: --key names a ${kind} key file (an Ed25519 key in a PEM "PRIVATE KEY" block). Name a new path and ghostly makes one`);
   }
   if (openToOthers(mode)) {
     throw new CliError("refused", `${path} may be read by others (mode ${(mode & 0o777).toString(8)}): run chmod 600 ${path}, and think whether the key was seen`);

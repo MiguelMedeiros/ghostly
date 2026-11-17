@@ -58,8 +58,8 @@ describe.skipIf(process.platform === "win32")("--key given a file that is not a 
     const dir = await appDir();
     const key = throwawayKey();
     const open = keyFile("id_ed25519.pub", key.sshPub, 0o644);
-    // While others may read it: the code the mode check answered before, with the words that name it.
-    expect(error(await ghostly(["app", "publish", dir, "--key", open]), "refused", 1).message).toBe(publicWords(open, "publisher"));
+    // Others may read it, and that is no reason to refuse it: the wrong file given, as at 0600.
+    expect(error(await ghostly(["app", "publish", dir, "--key", open]), "bad_request", 1).message).toBe(publicWords(open, "publisher"));
     const closed = keyFile("id_ed25519.pub", key.sshPub, 0o600);
     expect(error(await ghostly(["app", "publish", dir, "--key", closed]), "bad_request", 1).message).toBe(publicWords(closed, "publisher"));
   }, 60_000);
@@ -68,7 +68,7 @@ describe.skipIf(process.platform === "win32")("--key given a file that is not a 
     const index = join(tmp(), "index.json");
     const { key: _key, ...unsigned } = JSON.parse(storeVectors.valid[0].index) as Record<string, unknown>;
     writeFileSync(index, JSON.stringify(unsigned));
-    const pem = keyFile("store.pub.pem", throwawayKey().spki, 0o600);
+    const pem = keyFile("store.pub.pem", throwawayKey().spki, 0o644);
     expect(error(await ghostly(["store", "sign", index, "--key", pem]), "bad_request", 1).message).toBe(publicWords(pem, "store"));
   }, 60_000);
 
