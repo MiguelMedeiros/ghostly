@@ -77,8 +77,11 @@ export function filesOf(messages: { id: string; file?: MessageFile; sender: stri
   }));
 }
 
-/** A file's size as a person reads it: "40 MB", "26.2 MB". */
-const megabytes = (size: number) => `${Math.round(size / 100_000) / 10} MB`;
+/**
+ * A file's size as a person reads it: "40 MB", "26.2 MB"; under a megabyte "49 KB" or "512 B", as a nearly full disk's
+ * room is met (`noRoomWords`): "0 MB free" beside "(0.1 MB)" said neither.
+ */
+const megabytes = (size: number) => size < 1000 ? `${size} B` : size < 999_500 ? `${Math.round(size / 1000)} KB` : `${Math.round(size / 100_000) / 10} MB`;
 
 /**
  * Where an unfinished transfer stands, in words, for a person reading a timeout: the stage's id ("asking", "waiting")
