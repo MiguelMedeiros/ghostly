@@ -180,7 +180,7 @@ mod tests {
 
     /// WebKitGTK's menu on a page where nothing else is under the pointer.
     #[cfg(target_os = "linux")]
-    const PAGE: [webkit2gtk::ContextMenuAction; 4] = {
+    pub(super) const PAGE: [webkit2gtk::ContextMenuAction; 4] = {
         use webkit2gtk::ContextMenuAction as A;
         [A::GoBack, A::GoForward, A::Stop, A::Reload]
     };
@@ -288,16 +288,31 @@ mod download_tests {
             .any_thread()
             .build(tauri::generate_context!(test = true))
             .expect("app");
-        let menu = ContextMenu::new();
-        for action in super::tests::OFFERED {
-            menu.append(&ContextMenuItem::from_stock_action(action));
+        let kept = |window| -> Vec<_> {
+            let menu = ContextMenu::new();
+            for action in super::tests::OFFERED.into_iter().chain(super::tests::PAGE) {
+                menu.append(&ContextMenuItem::from_stock_action(action));
+            }
+            super::linux::drop_items(&menu, window);
+            menu.items()
+                .iter()
+                .map(|item| item.stock_action())
+                .collect()
+        };
+        let as_ruled = |window| -> Vec<_> {
+            super::tests::OFFERED
+                .into_iter()
+                .chain(super::tests::PAGE)
+                .filter(|action| !super::linux::dead(*action, window))
+                .collect()
+        };
+        use super::Window;
+        assert_eq!(
+            kept(Window::Ghostly),
+            [&super::tests::KEPT[..], &super::tests::PAGE[..]].concat()
+        );
+        for window in [Window::Contact, Window::App] {
+            assert_eq!(kept(window), as_ruled(window), "{window:?}");
         }
-        super::linux::drop_items(&menu, super::Window::Ghostly);
-        let kept: Vec<_> = menu
-            .items()
-            .iter()
-            .map(|item| item.stock_action())
-            .collect();
-        assert_eq!(kept, super::tests::KEPT);
     }
 }
