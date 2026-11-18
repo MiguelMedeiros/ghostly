@@ -379,9 +379,16 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(t.seen.slice(from).filter(s => s.from === "bob" && (s.frame.t === "group-want" || s.frame.t === "group-have"))).toEqual([]);
   });
 
-  it("a member whose device hears a file's Delete for everyone while it takes its announcement keeps nothing of the file, after a start too", async () => {
+  for (const completes of [false, true]) it(`a member whose device hears a file's Delete for everyone while it takes its announcement${completes ? " (the whole copy completing one handed on stripped)" : ""} keeps nothing of the file, after a start too`, async () => {
     const t = new FilesWorld();
     const { peers: [alice, bob], id } = await t.mesh(["alice", "bob", "carol"]);
+    if (completes) {
+      // The file comes with the whole copy that completes a stripped one shown already: its row is stored if missing, as
+      // the node's `completeGroupMessage` does.
+      const session = (bob.groups as unknown as { sessions: Map<string, { provisional: Set<string> }> }).sessions.get(id)!;
+      session.provisional.delete = () => true;
+      bob.host.completeMessage = async message => { await bob.host.storeMessage(message); };
+    }
     // Bob's room for files is read slowly (real I/O): the removal lands while it is read.
     const store = t.files.get(bob)!.store;
     let read: ((room: number | null) => void) | undefined;
