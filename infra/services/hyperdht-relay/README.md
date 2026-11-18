@@ -83,8 +83,8 @@ at most 5 a minute, then one count a minute while it goes on (`refused address (
 The rest name no limit: `refused stopping` (a new client while the relay stops), `refused origin "<origin>"` (see
 `GHOSTLY_RELAY_ORIGINS` below), `refused listen <code>` (HyperDHT refused the listen, `KEYPAIR_ALREADY_USED` for a key
 another client holds), `dropped topic query` (a lookup or an announcement, never relayed), and `dropped protocol error`,
-`dropped unsendable <message>`, `dropped socket error`, `dropped stream error` (a client that broke the protocol or
-its connection).
+`dropped unsendable <message>`, `dropped sessions` (a second relay session on one WebSocket), `dropped socket error`,
+`dropped stream error` (a client that broke the protocol or its connection).
 
 A time limit (`*_MS`) is at most 2147483647 (about 24 days), the longest a Node timer waits; a longer one stops the
 start, as any other value not of its kind does.
