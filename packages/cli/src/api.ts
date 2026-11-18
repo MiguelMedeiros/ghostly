@@ -1132,11 +1132,9 @@ const METHODS: Record<string, Method> = {
   async "group.forget"(ctx, params) {
     const group = groupOf(ctx, params, "chat remove <chat> --yes");
     if (!bool(params, "yes")) throw new CliError("confirm", "Forgetting a group deletes its history on this device; pass --yes (yes: true over the socket) to go on");
-    // A community's member nobody is connected to: the engine deletes it here anyway, its leave unsaid (the app's
-    // `unsaidNext`). An admin's is refused, as its leave is.
-    const unsaid = group.profile === "community" && group.status === "active" && !group.isAdmin && group.members.some((m) => !m.me) && !group.community?.connected;
+    // A community's admin nobody is connected to is refused, as its leave is.
     await node(ctx).forgetGroup({ groupId: group.id }).catch((error) => { throw nobodyForLeave(ctx, group, str(params, "group", true), error) ?? error; });
-    return { forgotten: group.id, ...(unsaid && { warning: `Nobody in ${groupCalled(group)} was connected to take your leave: it went from this device anyway, and the others will still list you as a member` }) };
+    return { forgotten: group.id };
   },
   async "group.accept"(ctx, params) {
     const group = groupOf(ctx, params);

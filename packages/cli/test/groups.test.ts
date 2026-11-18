@@ -651,8 +651,7 @@ describe("a group not joined yet, said the same by every command", () => {
 
   describe("a community nobody is connected to", () => {
     // Found in a bug hunt: a one-shot's `group leave` has no edge yet, so a community's leave was always refused with the
-    // engine's "Try again in a moment", code `engine`, which no retry could pass; `group forget` then dropped it with
-    // exit 0 and no word that the others still list this member.
+    // engine's "Try again in a moment", code `engine`, which no retry could pass.
     const NOBODY = "Nobody in the group is connected right now to take your leave. Try again in a moment.";
     const community = (isAdmin: boolean, connected: number) => ({ ...group, profile: "community", status: "active", isAdmin, community: { hub: false, hubs: 0, connected },
       members: group.members.map((m) => ({ ...m, role: m.me === isAdmin ? "admin" : "member", online: m.me || connected > 0 })) }) as unknown as GroupView;
@@ -674,15 +673,6 @@ describe("a group not joined yet, said the same by every command", () => {
       // The admin's forget is the same leave first, refused the same way.
       await expect(callApi(held(community(true, 0), "daemon", true).ctx, "group.forget", { group: "Crew", yes: true })).rejects.toMatchObject({ code: "engine",
         message: "Nobody in Crew is connected to take your leave: try again when a member is online (ghostly group show Crew says who is)" });
-    });
-
-    it("a member's forget with nobody connected warns that the others still list them", async () => {
-      const unsaid = held(community(false, 0), "one-shot", false);
-      expect(await callApi(unsaid.ctx, "group.forget", { group: "Crew", yes: true })).toEqual({ forgotten: "g1",
-        warning: "Nobody in Crew was connected to take your leave: it went from this device anyway, and the others will still list you as a member" });
-      expect(unsaid.forgetGroup).toHaveBeenCalledWith({ groupId: "g1" });
-      // Connected, the leave goes with it: nothing to warn of.
-      expect(await callApi(held(community(false, 1), "one-shot", false).ctx, "group.forget", { group: "Crew", yes: true })).toEqual({ forgotten: "g1" });
     });
   });
 
