@@ -1599,7 +1599,7 @@ function dhtTooLong(ctx: ApiContext, asked: LinkView, error: string, kind: "text
  * replied to") for the message `id`, said as `noMessage` says it, with that reason kept; undefined for any other error.
  * The engine says "chat" in a group for a reply and a save: `place` says which it is.
  */
-function notHere(error: string, id: string, place: RefPlace): CliError | undefined {
+export function notHere(error: string, id: string, place: RefPlace): CliError | undefined {
   const said = /^That message is not in this (?:chat|group)(?:, or (.+))?$/.exec(error);
   return said ? noMessage(id, place, said[1] ? { tail: `, or it ${said[1]}` } : {}) : undefined;
 }
