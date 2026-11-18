@@ -29,7 +29,8 @@ describe("reads an update check makes again", () => {
     await a.addStore({ url: STORE_URL });
     const preview = await a.preview({ store: keyOf(STORE_KEY), ref: app.ref });
     await a.install({ digest: preview.digest, grant: ["chat"] });
-    expect(modes(net).get(BUNDLE_URL)).toEqual(["no-store"]);
+    // The listing's raw HEAD peeked, then the whole bundle.
+    expect(modes(net).get(BUNDLE_URL)).toEqual(["no-store", "no-store"]);
 
     net.fetch.mockClear();
     await a.checkUpdates();

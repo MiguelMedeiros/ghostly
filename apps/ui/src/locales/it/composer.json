@@ -54,6 +54,7 @@
   "identity": "Identità",
   "identityShared": "{{count}} condivise in questa chat",
   "media": "Foto e video",
+  "nearSoft": "Nella DHT stanno circa {{bytes}} byte una volta sigillato: accorcialo per inviarlo lì",
   "noEmoji": "Nessuna emoji trovata",
   "noGifs": "Nessuna GIF trovata",
   "overSoft": "Oltre i {{bytes}} byte che porta la DHT: viene inviato quando sei connesso direttamente",

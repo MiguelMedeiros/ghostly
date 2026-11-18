@@ -7,7 +7,7 @@ import type { PeerServer } from "@ghostly/browser/devices/linkOnly";
 import type { ClientMessage } from "@ghostly/browser/shared/rpc";
 import { setDatabaseName } from "@ghostly/browser/shared/idb";
 import { defaultWalletsAllowed } from "@ghostly/browser/platform/walletSetupSwitch";
-import { uiPortMark, VIEWER_PORT, type EngineStatus, type HttpRequest, type HttpRequestReply, type RuntimeMessage, type ViewerAsk, type ViewerReply } from "./messages";
+import { uiPortMark, VIEWER_PORT, type EngineStatus, type HttpRequest, type HttpRequestReply, type RuntimeMessage, type ViewerAsk, type ViewerReply, type ViewerTaken } from "./messages";
 import { activeNamespace, databaseFor, peerLockFor } from "./profile";
 import { activeProfileId } from "../../ui/src/lib/profiles";
 import { fromOwnPage } from "./shared/sender";
@@ -71,7 +71,7 @@ const server = new Promise<PeerServer>((resolve, reject) => {
       running = peer;
       // A message that came with no tab open: the peer tells the person, as a tab would have (attentionNotices.ts).
       const engine = engineOf(peer);
-      if (engine) engine.unheardAttention = (event) => void import("./attentionNotices").then(({ noticeUnheard }) => noticeUnheard(event, () => engine.node.getState().links)).catch(() => {});
+      if (engine) engine.unheardAttention = (event) => void import("./attentionNotices").then(({ noticeUnheard }) => noticeUnheard(event, (linkId) => engine.node.chatView(linkId))).catch(() => {});
       // Only in `vite build --mode e2e` (test/attacks.mjs plays a malicious peer through it); gone from real builds.
       if (import.meta.env.MODE === "e2e") Object.assign(globalThis, { __ghostly: running });
       // Heard before any `ping` waits on it, so a ping that comes once it failed knows.
@@ -140,11 +140,18 @@ function withPeer(act: (peer: PeerServer) => void): void {
  * The worker's requests for a contact's app in its tab, on a port of their own: only this document hears them. One
  * that comes once the peer stopped for good, or once a page made another profile the one in use, gets no answer of
  * this peer's (`null`): the worker starts the next one as a `ping` would have it do, which closes the tab (a switch).
+ * Any other is acknowledged (`ViewerTaken`) as it goes to the peer, so the worker can tell one this document took and
+ * lost (it went away before the reply) from one it never took.
  */
 function serveViewers(port: chrome.runtime.Port): void {
   port.onMessage.addListener(({ id, request }: ViewerAsk) => {
     void server.then((s) => s.ready.catch(() => {}), () => {})
-      .then(() => (stoppedForGood() || activeNamespace() !== profile ? null : handleHttpRequest(request)))
+      .then(() => {
+        if (stoppedForGood() || activeNamespace() !== profile) return null;
+        // Taken: should this document go before the reply, the worker must not send it again by another peer.
+        try { port.postMessage({ id, taken: true } satisfies ViewerTaken); } catch { /* port closed */ }
+        return handleHttpRequest(request);
+      })
       .then((reply) => {
         // The worker went away meanwhile (Chrome stopped it): nobody is left to answer.
         try { port.postMessage({ id, reply } satisfies ViewerReply); } catch { /* port closed */ }

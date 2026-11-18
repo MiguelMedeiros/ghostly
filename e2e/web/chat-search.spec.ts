@@ -144,3 +144,39 @@ test("a Portuguese profile finds a voice message by \"voz\", though its file is 
   await field(page).fill("voice message");
   await expect(count(page)).toHaveText("1 de 1");
 });
+
+test("on a 375px phone at a larger text size the search field keeps room for the words, on one line with its buttons", { tag: ["@feature:chat.search", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+  test.setTimeout(3 * 60_000);
+  const alice = await peer("search-phone-alice", { mobile: true, viewport: { width: 375, height: 667 } });
+  const page = alice.page;
+  await seedChat(alice);
+  // The browser's text size (Android Chrome's text scaling): rem grows, the screen stays 375px.
+  const cdp = await page.context().newCDPSession(page);
+  for (const [language, px] of [["ar", 24], ["pt", 32]] as const) {
+    await cdp.send("Page.setFontSizes", { fontSizes: { standard: px, fixed: Math.round(px * 13 / 16) } });
+    await page.evaluate((language) => {
+      const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+      localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language }));
+    }, language);
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("lang", new RegExp(`^${language}`));
+    await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).fontSize)).toBe(`${px}px`);
+    await page.getByTestId("chat-options").click();
+    await page.getByTestId("chat-search-open").click();
+    await field(page).fill("Message 19");
+    await expect(count(page)).toBeVisible();
+
+    // The buttons were 2.75rem each (88px at 32px): four of them left the field 55px ("ssage 19") and put ✕ on a
+    // row of its own. They are 44px taps at any text size; the field holds what was typed.
+    const input = await field(page).evaluate((el) => ({ shown: el.clientWidth, whole: el.scrollWidth }));
+    expect.soft(input.whole, `${language} ${px}px field ${JSON.stringify(input)}`).toBeLessThanOrEqual(input.shown);
+    const fieldBox = (await field(page).boundingBox())!;
+    for (const id of ["chat-search-info", "chat-search-older", "chat-search-newer", "chat-search-close"]) {
+      const box = (await page.getByTestId(id).boundingBox())!;
+      expect.soft(Math.min(box.width, box.height), `${language} ${px}px ${id}`).toBeGreaterThanOrEqual(44);
+      expect.soft(Math.abs(box.y + box.height / 2 - (fieldBox.y + fieldBox.height / 2)), `${language} ${px}px ${id} beside the field`).toBeLessThan(2);
+    }
+    await field(page).press("Escape");
+    await expect(bar(page)).toHaveCount(0);
+  }
+});

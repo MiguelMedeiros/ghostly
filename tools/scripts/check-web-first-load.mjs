@@ -36,11 +36,19 @@ const MAX_SCRIPTS = 4;
  * Chunks the app imports only when they are used, by the name the build gives their file (`<name>-<hash>.js`): the
  * online-only ones the service worker leaves out of its install (`ONLINE_ONLY_MODULES` in apps/web/src/sw/policy.ts:
  * Pubky, Keet proofs, OPAQUE's handoff password proof, named `esm` after @serenity-kit/opaque's esm/index.js, the USDT
- * and Ark wallets) and heavy ones a person may never open (a group call, OpenPGP).
+ * and Ark wallets) and heavy ones a person may never open (a group call, OpenPGP, the clients of the Lightning and
+ * on-chain sources: LND, Core Lightning, WebLN, the BDK wallet, Breez).
  * A chunk folded into another loads with whatever took it in, often the first load, and leaves at most a stub of its
  * name behind (`ownCode`).
  */
-const LATER = ["pubky", "keet-identity-key", "esm", "usdt", "arkade", "groupCallLivekit", "openpgp.min"];
+const LATER = ["pubky", "keet-identity-key", "esm", "usdt", "arkade", "groupCallLivekit", "openpgp.min", "lnd", "coreLightning", "webln", "bdk", "breez"];
+
+/**
+ * Words only the regtest fakes hold (their labels, packages/browser/src/engine/paymentAdapters/providers/testing.ts; not
+ * their ids, which a device handoff names too): a release build leaves them out, the registry's test of the build
+ * folding to `false` there.
+ */
+const TEST_ONLY = ["Fake Lightning (test)", "Fake Bitcoin wallet (test)"];
 
 /**
  * The later chunks made of packages alone, no code of the app's: what they share with the first load is in `vendor`
@@ -112,8 +120,10 @@ if (app.length > 0) {
   let bytes = 0;
   for (const src of app) {
     const path = join(dist, src);
-    if (existsSync(path)) bytes += statSync(path).size;
-    else problems.push(`index.html names ${src}, which the build did not write.`);
+    if (!existsSync(path)) { problems.push(`index.html names ${src}, which the build did not write.`); continue; }
+    bytes += statSync(path).size;
+    const fakes = TEST_ONLY.filter((word) => readFileSync(path, "utf8").includes(word));
+    if (fakes.length > 0) problems.push(`${src} holds ${fakes.join(", ")}: the regtest fakes ship in the first load. A release build leaves them out only while their test of the build is written out where they are listed, not called (defaultRegistry in providers/registry.ts).`);
   }
   if (bytes > MAX_FIRST_LOAD_BYTES) {
     problems.push(`index.html's scripts weigh ${bytes.toLocaleString("en")} B, over the ${MAX_FIRST_LOAD_BYTES.toLocaleString("en")} B ceiling: something that loads later was pulled into the first load. Find what grew in main-*.js and import it where it is used; raise MAX_FIRST_LOAD_BYTES only for something the app needs at start.`);

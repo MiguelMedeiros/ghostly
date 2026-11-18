@@ -116,6 +116,19 @@ describe("app publish", () => {
     expect(readAppBundle(new Uint8Array(readFileSync(join(dir, "app.ghostlyapp"))))).toMatchObject({ ok: true, bundle: { manifest: { sequence: 2 } } });
   }, 60_000);
 
+  it("publishes sources all on hosts no client reads from, and says clients find no update there", async () => {
+    const { manifest, files } = chess();
+    const key = vectorKey(tmp(), "publisher");
+    const elsewhere = appFolder({ ...manifest, sources: ["https://github.com/o/r/releases/download/v1/app.ghostlyapp"] }, files);
+    const published = await ghostly(["app", "publish", elsewhere, "--key", key]);
+    expect(ok(published)).toMatchObject({ sequence: 1 });
+    expect(published.stderr).toContain("no source a client reads from");
+    // One readable source is enough, and no sources at all says nothing.
+    const readable = appFolder({ ...manifest, sources: ["https://github.com/o/r/app.ghostlyapp", "https://raw.githubusercontent.com/o/r/HEAD/app.ghostlyapp"] }, files);
+    expect((await ghostly(["app", "publish", readable, "--key", key])).stderr).not.toContain("a client reads from");
+    expect((await ghostly(["app", "publish", appFolder(manifest, files), "--key", key])).stderr).not.toContain("a client reads from");
+  }, 60_000);
+
   it("a bundle published into another --out never holds the one an earlier publish left in the folder", async () => {
     const { manifest, files } = chess();
     const dir = appFolder(manifest, files);
@@ -629,6 +642,32 @@ describe("app verify <url>", () => {
     expect(pulled).toBeLessThan(20);
   });
 
+  it("never repeats the query of the URL, where a private repository's token rides, in a refusal of the read", async () => {
+    const url = "https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp?token=GHSAT0AAAAAPRIVATEREPOTOKEN#x";
+    const answers: (() => Response)[] = [
+      () => new Response(null, { status: 404 }),
+      () => new Response(null, { status: 503 }),
+      () => { throw new TypeError("fetch failed"); },
+      () => new Response(new Uint8Array([1, 2, 3]), { status: 200 }),
+      () => new Response(stream([bundle]), { status: 200, headers: { "content-length": String(16 * 1024 * 1024 + 1) } }),
+      () => new Response(null, { status: 302, headers: { location: "https://other.example/app.ghostlyapp" } }),
+      () => new Response(null, { status: 302, headers: { location: "?token=GHSAT0AAAAAPRIVATEREPOTOKEN&again=1" } }),
+      () => new Response(null, { status: 302, headers: { location: "http://raw.githubusercontent.com/x?token=GHSAT0AAAAAPRIVATEREPOTOKEN" } }),
+      () => new Response(null, { status: 302, headers: { location: "https://ana:GHSAT0AAAAAPRIVATEREPOTOKEN@raw.githubusercontent.com/x" } }),
+      () => { throw new DOMException("The operation timed out.", "TimeoutError"); },
+      () => new Response(new ReadableStream<Uint8Array>({ pull(c) { c.error(new DOMException("The operation timed out.", "TimeoutError")); } }), { status: 200 }),
+    ];
+    for (const answer of answers) {
+      vi.stubGlobal("fetch", async () => answer());
+      const refusal = await verifyApp(url).then(() => null, (e: unknown) => e as { message: string; details?: unknown });
+      expect(refusal?.message).toContain("https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp?…");
+      expect(JSON.stringify([refusal?.message, refusal?.details])).not.toMatch(/PRIVATEREPOTOKEN|#x/);
+    }
+    // A redirect's user and password are said as "…@".
+    vi.stubGlobal("fetch", async () => new Response(null, { status: 302, headers: { location: "https://ana:GHSAT0AAAAAPRIVATEREPOTOKEN@raw.githubusercontent.com/x" } }));
+    await expect(verifyApp(url)).rejects.toThrow("redirects to https://…@raw.githubusercontent.com/x, which a client does not read");
+  });
+
   it("refuses a version its publisher revoked in the ghostly-revoke.json beside the URL; none there is no error", async () => {
     const dir = tmp();
     writeFileSync(join(dir, "app.ghostlyapp"), bundle);
@@ -644,6 +683,8 @@ describe("app verify <url>", () => {
     const url = "https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp?x=1";
     await expect(verifyApp(url)).rejects.toMatchObject({ code: "refused", details: { reason: "revoked", detail: "Leaked a test move list" } });
     expect(seen).toEqual([url, "https://raw.githubusercontent.com/ana/chess/HEAD/ghostly-revoke.json"]);
+    // Its query is said as "?…": a private repository's token rides there.
+    await expect(verifyApp(url)).rejects.toThrow("https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp?… is a version its publisher revoked");
     revoked = false;
     expect(await verifyApp(url)).toMatchObject({ valid: true, digest: vector.read.digest });
   }, 60_000);
@@ -791,6 +832,19 @@ describe("store sign", () => {
     // Beside the index but outside --out: the index's folder is not published.
     ok(await ghostly(["store", "sign", join(dir, "index.json"), "--key", join(dir, "store.key"), "--out", join(tmp(), "site")]));
     expect(existsSync(join(dir, "store.key"))).toBe(true);
+  }, 60_000);
+
+  it("signs a listing with no URL on a host a client reads from, and says it cannot be installed", async () => {
+    const dir = tmp();
+    const index = JSON.parse(vector.index) as { apps: { ref: string; urls: string[] }[] };
+    const [chessListing] = index.apps;
+    writeFileSync(join(dir, "index.json"), JSON.stringify({ ...index, apps: [{ ...chessListing, urls: ["https://github.com/o/r/releases/download/v1/app.ghostlyapp"] }] }));
+    const signed = await ghostly(["store", "sign", join(dir, "index.json"), "--key", vectorKey(tmp(), "store")]);
+    expect(ok(signed)).toMatchObject({ apps: 1 });
+    expect(signed.stderr).toContain(`${chessListing.ref} has no URL a client reads from`);
+    // One readable URL among others is enough: no word.
+    writeFileSync(join(dir, "index.json"), vector.index);
+    expect((await ghostly(["store", "sign", join(dir, "index.json"), "--key", vectorKey(tmp(), "store"), "--out", tmp()])).stderr).not.toContain("a client reads from");
   }, 60_000);
 
   it("refuses a lower sequence, the same one with other content, another key and a publisher key", async () => {
