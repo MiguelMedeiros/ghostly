@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { configure, screen, waitFor } from "@testing-library/react";
+import { configure, fireEvent, screen, waitFor } from "@testing-library/react";
 import { AddDeviceDialog } from "../../components/devices/AddDeviceDialog";
 import { TakeoverDialog } from "../../components/devices/TakeoverDialog";
 import { UseHereDialog } from "../../components/devices/Handoff";
@@ -51,6 +51,21 @@ describe("the device dialogs, for a screen reader and a keyboard", () => {
     expect(screen.queryByTestId("takeover-lost-first")).toBeNull();
     expect(go).toBeEnabled();
     expect(go).not.toHaveAttribute("aria-describedby");
+  });
+
+  it("an input method's Enter in the name stays in the name while Lost or stolen is unanswered", async () => {
+    const { user } = renderApp(<TakeoverDialog device="私のiPhone" password onClose={() => {}} />);
+    await user.type(screen.getByTestId("takeover-password"), "a long lock password");
+    const name = screen.getByTestId("takeover-name");
+    await user.click(name);
+    // The Enter that confirms a candidate: composing, and WebKit's, right after the composition ended, as 229.
+    fireEvent.keyDown(name, { key: "Enter", isComposing: true });
+    expect(name).toHaveFocus();
+    fireEvent.keyDown(name, { key: "Enter", keyCode: 229 });
+    expect(name).toHaveFocus();
+    // A plain Enter still goes to the question.
+    fireEvent.keyDown(name, { key: "Enter" });
+    expect(screen.getByTestId("takeover-lost-yes")).toHaveFocus();
   });
 
   it("Use here marks the password wrong only when the password was refused, pointing at the reason, the field to retype", async () => {
