@@ -76,6 +76,8 @@
   "noPathNext": "A VPN or firewall, yours or your contact's, may block calls. A TURN server gets them through.",
   "noPathSettings": "Network settings",
   "noPathTurnSet": "It didn't get through your TURN server either. Check its address (TURN over TLS on 443) and credential, or your contact may need one too.",
+  "nowAudio": "Now an audio call",
+  "nowVideo": "Now a video call",
   "onAnother": "You're on another call",
   "outgoing": "Calling...",
   "reconnecting": "Reconnecting...",
