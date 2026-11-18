@@ -16,6 +16,7 @@
   },
   "app": {
     "export": "Export data",
+    "exportNone": "{{title}} kept no data. There is nothing to export.",
     "fetchFiles": "Get its files",
     "keepStopped": "Keep it stopped",
     "needsFiles": "Needs its files",

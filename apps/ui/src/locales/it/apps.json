@@ -16,6 +16,7 @@
   },
   "app": {
     "export": "Esporta i dati",
+    "exportNone": "{{title}} non ha conservato dati. Non c'è niente da esportare.",
     "fetchFiles": "Scarica i suoi file",
     "keepStopped": "Lasciala ferma",
     "needsFiles": "Mancano i suoi file",
