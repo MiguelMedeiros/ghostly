@@ -99,10 +99,13 @@ function stageWords(transfer: FileTransferView, dhtOnly?: string): string {
 
 /**
  * A transfer that waits for a person's decision (`asking`), with whose: `me` (`file accept` takes it here) or `contact`
- * (theirs). A received file's `transferring` alone read as if it were moving.
+ * (theirs). A received file's `transferring` alone read as if it were moving. One that waits in a chat on the DHT only
+ * (`dhtOnly`, `fileWaitsLive`) waits for whoever keeps it there (`me` when this side does), said in its `note`.
  */
-function withWaitingFor(transfer: FileTransferView | undefined): (FileTransferView & { waitingFor?: "me" | "contact" }) | undefined {
-  if (transfer?.state !== "transferring" || transfer.stage !== "asking") return transfer;
+function withWaitingFor<T extends FileTransferView>(transfer: T | undefined, dhtOnly?: { note: string; mine: boolean }): (T & { waitingFor?: "me" | "contact" }) | undefined {
+  if (transfer?.state !== "transferring") return transfer;
+  if (transfer.stage === "waiting" && dhtOnly) return { ...transfer, waitingFor: dhtOnly.mine ? "me" : "contact", note: transfer.note ?? dhtOnly.note };
+  if (transfer.stage !== "asking") return transfer;
   return { ...transfer, waitingFor: transfer.direction === "in" ? "me" : "contact" };
 }
 
@@ -373,7 +376,7 @@ async function waitForFile(ctx: ApiContext, params: Params, stopping?: AbortSign
   }, ms, `file ${fileId} to arrive`, stopping).catch((error: unknown) => {
     const now = state(ctx).transfers[fileId];
     const note = now?.stage === "waiting" && "chat" in where ? fileWaitsLive(ctx, linkId, ref ?? linkId, now.size) : undefined;
-    if (error instanceof CliError && error.code === "timeout" && now) throw new CliError("timeout", `${error.message} (${now.transferred} of ${now.size} bytes${now.stage ? `, ${stageWords(now, note)}` : ""})`, { file: fileId, transferred: now.transferred, size: now.size, stage: now.stage ?? null, ...(error.details?.reason ? { reason: error.details.reason } : {}) });
+    if (error instanceof CliError && error.code === "timeout" && now) throw new CliError("timeout", `${error.message} (${now.transferred} of ${now.size} bytes${now.stage ? `, ${stageWords(now, note)}` : ""})`, { file: fileId, transferred: now.transferred, size: now.size, stage: now.stage ?? null, ...(error.details?.reason ? { reason: error.details.reason } : {}), ...(note && { note }) });
     throw error;
   });
   if (transfer.state === "failed") throw new CliError("engine", transfer.error ?? "The transfer failed", { file: fileId, ...where, retry: !!transfer.retry, ...endOf(transfer) });
@@ -463,11 +466,13 @@ export const FILE_METHODS: Record<string, Method> = {
       const note = fileWaitsLive(ctx, link.id, ref, file.size);
       // Said already where the transfer stands (`file wait`'s timeout), it is not said twice.
       const why = !note ? ` and ${goesOn(ctx, link.id)}` : error.message.includes(note) ? "" : `. ${note}`;
-      throw new CliError("timeout", `${error.message}. It is kept here${why}`, { ...error.details, chat: link.id, messageId, file: file.id });
+      throw new CliError("timeout", `${error.message}. It is kept here${why}`, { ...error.details, chat: link.id, messageId, file: file.id, ...(note && { note }) });
     });
+    const kept = keptForJoin(ctx, link.id, "the file");
+    const note = kept.note ?? fileWaitsLive(ctx, link.id, ref, file.size);
     return {
       chat: link.id, messageId, file: { id: file.id, name: file.name, size: file.size, mime: file.mime, ...(voice ? { voice: true } : {}), ...(image ? { image } : {}) }, ...(warning ? { warning } : {}),
-      ...keptForJoin(ctx, link.id, "the file"),
+      ...(note && { note }),
     };
   },
 
@@ -487,7 +492,15 @@ export const FILE_METHODS: Record<string, Method> = {
     // every one of them each time (75 ms), with the daemon's other calls waiting behind it.
     const linkId = "group" in target ? `group:${target.group.id}` : target.link.id;
     const kept = await keptOf(linkId);
-    const files = filesOf(await node(ctx).fileMessages(linkId), (id) => withWaitingFor(views[id] ?? kept.get(id)));
+    // A chat on the DHT only: a file that waits there waits for whoever keeps it so, not for the contact to be back.
+    const dhtOnly = (size: number) => {
+      const note = "group" in target ? undefined : fileWaitsLive(ctx, linkId, str(params, "chat", true), size);
+      return note === undefined ? undefined : { note, mine: !("group" in target) && target.link.deliveryMode === "dht" };
+    };
+    const files = filesOf(await node(ctx).fileMessages(linkId), (id) => {
+      const transfer = views[id] ?? kept.get(id);
+      return withWaitingFor(transfer, transfer && dhtOnly(transfer.size));
+    });
     return "group" in target ? { group: target.group.id, files } : { chat: target.link.id, files };
   },
 

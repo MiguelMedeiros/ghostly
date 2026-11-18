@@ -16,8 +16,9 @@ import { chatViewOf } from "./support/chatView";
  * A file in a chat on the DHT only (this side's choice, the contact's, or a hold): it goes on a live session only, which
  * neither side's app tries while either keeps the chat there. `file send --wait sent`'s timeout said it "still goes by
  * itself", `file wait`'s said it waited "for a connection to the contact", and the notice and Ctrl-C on a terminal
- * said it still went: a person waited for good. Each says what ends the wait. A chat that holds items for the contact
- * (WISP 404) sends the file without a live session, and says nothing of one.
+ * said it still went: a person waited for good. `file send --json` answered with no note, and `file list` blamed the
+ * contact (`waitingFor: "contact"`), so a bot waited or resent for good. Each says what ends the wait. A chat that
+ * holds items for the contact (WISP 404) sends the file without a live session, and says nothing of one.
  */
 const chatOf = (deliveryMode: string, peerMode?: string) => ({ id: "chat-dht", label: "Bob", peerPubKeyZ32: "pbob", createdAt: 1, lastMessageAt: 0, profile: "paired-chat/1", dataLink: "closed",
   capabilities: { files: true }, pairing: { status: "ready" }, deliveryMode, ...(peerMode ? { dhtDelivery: { peerMode } } : {}) }) as unknown as LinkView;
@@ -57,13 +58,20 @@ async function send(ctx: ApiContext, name: string, params: Record<string, unknow
 }
 
 describe("a file in a chat on the DHT only", () => {
+  it("file send answers a note naming whose choice it is and what ends it", async () => {
+    expect((await send(contextFor(chatOf("dht")), "mine.txt")).note).toBe(mine);
+    expect((await send(contextFor(chatOf("auto", "dht")), "theirs.txt")).note).toBe(theirs);
+    // A chat that can be live: no note, the file goes once it is.
+    expect((await send(contextFor(chatOf("auto")), "live.txt")).note).toBeUndefined();
+  });
+
   it("a --wait sent timeout says the note, not that it goes by itself", async () => {
     const error = await send(contextFor(chatOf("dht")), "wait.txt", { wait: "sent", timeout: 1 }).then(() => null, (e: unknown) => e) as CliError;
     expect(error).toBeInstanceOf(CliError);
     expect(error.code).toBe("timeout");
     expect(error.message).not.toMatch(/goes by itself|connection to the contact/);
     expect(error.message).toContain(`It is kept here. ${mine}`);
-    expect(error.details).toMatchObject({ chat: "chat-dht" });
+    expect(error.details).toMatchObject({ chat: "chat-dht", note: mine });
     const contacts = await send(contextFor(chatOf("auto", "dht")), "theirs.txt", { wait: "sent", timeout: 1 }).then(() => null, (e: unknown) => e) as CliError;
     expect(contacts.message).toContain(`It is kept here. ${theirs}`);
     // A chat that can be live: the file goes once it is.
@@ -73,9 +81,11 @@ describe("a file in a chat on the DHT only", () => {
 
   it("a chat that holds the file for the contact says nothing of a live session: the file goes without one", async () => {
     const held = { ...chatOf("dht"), textDelivery: "hold" } as LinkView;
+    expect((await send(contextFor(held), "held-answer.txt")).note).toBeUndefined();
     const error = await send(contextFor(held), "held.txt", { wait: "sent", timeout: 1 }).then(() => null, (e: unknown) => e) as CliError;
     expect(error.code).toBe("timeout");
     expect(error.message).not.toMatch(/only on a live session/);
+    expect(error.details?.note).toBeUndefined();
   });
 
   it("file wait on a waiting transfer says the note, not a connection to the contact", async () => {
@@ -84,10 +94,21 @@ describe("a file in a chat on the DHT only", () => {
     const error = await callApi(ctx, "file.wait", { chat: "Bob", file: id, timeout: 1 }).then(() => null, (e: unknown) => e) as CliError;
     expect(error.code).toBe("timeout");
     expect(error.message).toContain(`(8650752 of 18000000 bytes, ${mine})`);
-    expect(error.details).toMatchObject({ stage: "waiting" });
+    expect(error.details).toMatchObject({ stage: "waiting", note: mine });
     // Without the chat, the command names it by its id, which always finds it.
     const byId = await callApi(ctx, "file.wait", { file: id, timeout: 1 }).then(() => null, (e: unknown) => e) as CliError;
     expect(byId.message).toContain("(ghostly chat transport chat-dht auto)");
+  });
+
+  it("file list says the note on a kept file, and waits for this side when it is this side's choice", async () => {
+    const ctx = contextFor(chatOf("dht"));
+    const sent = await send(ctx, "listed.txt");
+    const { files } = await callApi(ctx, "file.list", { chat: "Bob" }) as { files: { file: { id: string }; transfer: Record<string, unknown> }[] };
+    expect(files.find((f) => f.file.id === (sent.file as { id: string }).id)?.transfer).toMatchObject({ stage: "waiting", waitingFor: "me", note: mine });
+    const theirsCtx = contextFor(chatOf("auto", "dht"));
+    await send(theirsCtx, "listed2.txt");
+    const listed = await callApi(theirsCtx, "file.list", { chat: "Bob" }) as { files: { transfer: Record<string, unknown> }[] };
+    expect(listed.files[0].transfer).toMatchObject({ stage: "waiting", waitingFor: "contact", note: theirs });
   });
 
   it("a file send's notice and Ctrl-C on a terminal say the note", () => {
