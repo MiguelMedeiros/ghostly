@@ -1,5 +1,6 @@
 {
   "attach": "إرفاق",
+  "bytesLeft": "البايتات المتبقية: {{count}}",
   "camera": "كاميرا",
   "cameraBlocked": "الكاميرا محظورة. اسمح بالكاميرا لـ Ghostly في إعدادات Android.",
   "cameraFailed": "تعذّر تشغيل الكاميرا.",
@@ -17,6 +18,7 @@
     "recent": "الأخيرة",
     "symbols": "الرموز"
   },
+  "charactersLeft": "الأحرف المتبقية: {{count}}",
   "chooseFiles": "اختر ملفات",
   "closeCamera": "إغلاق الكاميرا",
   "dhtTooLong": "أطول من أن يُرسل عبر DHT ({{bytes}} من {{max}} بايت). اختصره أو اتصل مباشرة؛ المسودة محفوظة.",
