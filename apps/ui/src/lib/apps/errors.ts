@@ -39,6 +39,8 @@ const KEYS: Record<string, TranslationKey> = {
   // Uninstalled meanwhile (another tab, the Apps page) while its Open or a read waited: nothing was refused.
   "not-installed": "apps.errors.notInstalled",
   storage: "apps.errors.storage",
+  // A store removed meanwhile (another tab): its block reads the list again (Apps.tsx), and goes.
+  "no-store": "apps.errors.noStore",
 };
 
 /**
