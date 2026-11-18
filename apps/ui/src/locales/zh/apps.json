@@ -16,6 +16,7 @@
   },
   "app": {
     "export": "导出数据",
+    "exportNone": "{{title}} 没有保存任何数据，没有可导出的内容。",
     "fetchFiles": "获取文件",
     "keepStopped": "保持停止",
     "needsFiles": "需要它的文件",
