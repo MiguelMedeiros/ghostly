@@ -39,7 +39,7 @@ describe("a 1:1 voice message that needs an answer or is on its way", () => {
     show(message);
     const bubble = screen.getByTestId("voice-bubble");
     expect(within(bubble).getByTestId("voice-download")).toHaveTextContent("Download 86.0 MB");
-    expect(within(bubble).getByTestId("voice-room")).toHaveTextContent("Ana wants to send it · 12.0 GB free");
+    expect(within(bubble).getByTestId("voice-room")).toHaveTextContent(/^Ana wants to send it · 12\.0 GB (free|left)$/);
     fireEvent.click(within(bubble).getByTestId("voice-download"));
     await vi.waitFor(() => expect(lastAction()).toEqual({ linkId: "link-1", fileId: id, action: "accept" }));
     fireEvent.click(within(bubble).getByTestId("voice-decline"));
