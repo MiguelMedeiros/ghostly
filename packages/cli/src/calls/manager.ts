@@ -876,18 +876,19 @@ export class CallManager {
   /**
    * A chat by id, contact key, prefix or name (the API's rules, `findChat`); a group's says it is one. By its id (as
    * events name it, and a call's own chat), only that chat's view is built: a call placed and hung up built every chat's
-   * five times, one rung and answered six, ~0.2 s of the daemon's thread at 2,000 chats.
+   * five times, one rung and answered six, ~0.2 s of the daemon's thread at 2,000 chats. `onlyChat`: as `findChat`.
    */
-  private chatOf(ref: string): LinkView {
+  private chatOf(ref: string, onlyChat?: string): LinkView {
     const byId = this.link(ref);
     if (byId) return byId;
     const { links, groups } = this.host.engine.getState();
-    return findChat(links, ref, groups);
+    return findChat(links, ref, groups, onlyChat);
   }
 
   /** The chat, if a call can go in it now; else why not (the engine's reason). */
   private callable(ref: string): LinkView {
-    const link = this.chatOf(ref);
+    // A name more than one group has says a call is a chat's: no command calls a group (`group call` names its node).
+    const link = this.chatOf(ref, "a call goes to a contact, in their chat");
     // A one-shot's chat is not live yet, and never would be in time: it said "Calls need a live connection" before
     // the daemon it needs (`stack`).
     if (this.host.answers === false) throw new CliError("unavailable", CALLS_NEED_DAEMON);
