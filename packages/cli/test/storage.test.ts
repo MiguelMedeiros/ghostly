@@ -1625,6 +1625,37 @@ describe("messages kept in rows.db", () => {
     expect({ file: await read(t.objectStore("files").get("f1")), state: await read(t.objectStore("fileState").get("f1")) }).toEqual({ file: undefined, state: undefined });
   });
 
+  it("a fold waits for a transaction running on a store held in memory: what it wrote is not kept when it then aborts", async () => {
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    opened.push(store);
+    const d = await db(store.factory);
+    await tx(d, ["messages"], (s) => { s.messages.put({ linkId: "a", id: "1" }); });
+    await store.flush();
+    // The snapshot an hour old: the delete below folds the store.
+    const then = Date.now() - 2 * 60 * 60_000;
+    utimesSync(join(dir, "snapshot.bin"), then / 1000, then / 1000);
+    const folded = () => statSync(join(dir, "snapshot.bin")).mtimeMs > then + 60_000;
+    // A settings write that goes on with requests, turn after turn, until the fold is done (or a second), then aborts.
+    const running = d.transaction("settings", "readwrite");
+    const settings = running.objectStore("settings");
+    settings.put("aborted secret", "secret");
+    const until = Date.now() + 1_000;
+    const aborted = new Promise<void>((resolve) => {
+      running.onabort = () => resolve();
+      const next = () => { settings.get("secret").onsuccess = () => (folded() || Date.now() > until ? running.abort() : next()); };
+      next();
+    });
+    await tx(d, ["messages"], (s) => { s.messages.delete(["a", "1"]); });
+    await aborted;
+    await store.flush();
+    expect(folded()).toBe(true);
+    expect(readFileSync(join(dir, "snapshot.bin")).includes("aborted secret")).toBe(false);
+    await store.close();
+    const again = await db(await open(dir));
+    expect(await read(again.transaction("settings").objectStore("settings").get("secret"))).toBeUndefined();
+  });
+
   it("transactions that wait behind the fold are all or nothing in a process killed just before its snapshot takes the old one's place, or between their entries after", async () => {
     const profile = (factory: IDBFactory) => new Promise<IDBDatabase>((resolve, reject) => {
       const request = factory.open("ghostly", 1);

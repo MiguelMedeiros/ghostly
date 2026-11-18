@@ -632,6 +632,7 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
    * holds, the transactions whose layers go to the trees with it.
    */
   async function capture(journalName: string): Promise<{ snapshot: Snapshot; upTo: number }> {
+    await unwritten();
     const snapshot: Snapshot = { format: 1, journal: journalName, databases: [] };
     const held: SnapshotStore[] = [];
     for (const db of raw._databases.values()) {
@@ -669,6 +670,7 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     // An export of 100,000 messages read them all in one turn: the daemon answered nothing for 1.1-1.7 s.
     const databases: { name: string; version: number; stores: { meta: Omit<SnapshotStore, "records">; records: RawRecord[] | SqlTree }[] }[] = [];
     let reader: TreeFile | null = null;
+    await unwritten();
     try {
       for (const db of raw._databases.values()) {
         if (db.name === PROBE) continue;
@@ -792,6 +794,25 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
       await new Promise((resolve) => setImmediate(resolve));
       quiet = busy() ? 0 : quiet + 1;
     }
+  }
+
+  /**
+   * Resolves in a turn where no running transaction has written to a store held in memory (or after `CLOSE_WAIT_MS`):
+   * fake-indexeddb puts its writes in the records at once and takes them back if it aborts. A fold read them meanwhile,
+   * and its snapshot kept what the transaction never committed (a refused write, after a restart), or a part of what it
+   * did (its other part in the journal entry a process killed then never wrote). One that commits meanwhile waits behind
+   * the fold in the queue (`append`): the snapshot holds it, whole.
+   */
+  async function unwritten() {
+    const until = Date.now() + CLOSE_WAIT_MS;
+    while (Date.now() < until && writesHeld()) await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  function writesHeld() {
+    return [...raw._databases.values()].some((db) => db.transactions.some((transaction) => {
+      const { _state, _rollbackLog } = transaction as RawTransaction;
+      return _state !== "finished" && !!pending.get(_rollbackLog)?.some((op) => { const store = db.rawObjectStores.get(op.store); return !store || !disk(store); });
+    }));
   }
 
   /** Whether a transaction is running or waiting to, or for the sync or the queued write that tells the engine it completed. */
