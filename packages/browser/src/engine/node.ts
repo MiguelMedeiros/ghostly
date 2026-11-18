@@ -3027,6 +3027,9 @@ export class GhostlyNode implements EngineImplementation {
     this.groupEdits.stop();
     this.reactions.stop();
     this.cardEdits.stop();
+    // Files are swept while their session is open (`ChatFiles`): a session the stop leaves open sweeps no more.
+    this.fileDesk.stop();
+    this.groups.files?.stopSweeps();
     // What is still being written is waited for, side by side: the stop takes as long as the slowest, not their sum.
     await Promise.allSettled([
       linksStopped,
