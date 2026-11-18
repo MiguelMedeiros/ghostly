@@ -1791,6 +1791,21 @@ describe("ringing out (RING_MS) counts from the offer, not from the microphone p
     expect(call.result.current.callState).toBe("offering");
   });
 
+  it("says it rings out (`ringingOut`, the ringback) from the offer, not under the prompt, and no longer once it ends", async () => {
+    const call = renderCall();
+    act(() => { void call.result.current.startCall(false); });
+    expect(call.result.current.callState).toBe("offering");
+    expect(call.result.current.ringingOut).toBe(false);
+
+    devices.userMedia[0].grant();
+    await settle();
+    expect(call.publishedKinds()).toEqual(["o"]);
+    expect(call.result.current.ringingOut).toBe(true);
+
+    act(() => call.result.current.hangUp());
+    expect(call.result.current.ringingOut).toBe(false);
+  });
+
   it("a prompt allowed after 30 s rings out RING_MS after the offer, not after the start", async () => {
     const call = renderCall();
     act(() => { void call.result.current.startCall(false); });

@@ -370,9 +370,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     if (!quiet(callState) && quiet(before)) pauseForCall();
     // A muted chat still rings (lib/chatMute.ts, MUTE_SILENCES).
     if (callState === "incoming") return callRings(sessionId) ? startRinging("ring") : undefined;
-    if (callState === "offering") return startRinging("ringback");
     if (callState === "idle" && before !== "idle") playSound("hangup");
   }, [callState, sessionId]);
+  // Ours rings back once its offer is out: not under the microphone or camera prompt, which rings nobody.
+  const ringingOut = webrtc.ringingOut;
+  useEffect(() => (ringingOut ? startRinging("ringback") : undefined), [ringingOut]);
   // Out of sight, a ringing call is a system notification too: one for every tab that rings it (its offer's time).
   // The call that rings is its offer's, not the contact's latest signal (lib/lockedRing.ts, `ringingCall`).
   const ringing = ringingCall(webrtc.ringingOffer);

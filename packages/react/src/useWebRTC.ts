@@ -1814,6 +1814,11 @@ export function useWebRTC({
      */
     ringingOffer: callState === "incoming" ? rangOffer : null,
     /**
+     * Our call rings the contact: its offer is out. Not while it waits on the microphone or camera prompt, or for its
+     * connection to gather: it has reached nobody yet, and may end there (refused, no path) without ever ringing.
+     */
+    ringingOut: callState === "offering" && offerOut,
+    /**
      * The camera button: a camera or a screen can be turned on right now, even if the call started as audio; or the
      * camera that is on can be turned off, when the answer closed the lane (a contact that takes no picture) and only
      * the self-view shows it. Turned off there, it is not turned back on: nobody would see it.
