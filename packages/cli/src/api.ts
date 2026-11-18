@@ -10,7 +10,7 @@ import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PA
 import { asCliError, CliError } from "./errors";
 import { shellWord } from "./shellWord";
 import {
-  bool, chatOf, chatOrGroup, dhtOnly, findChat, findChatOrGroup, findGroup, groupById, groupCalled, groupNameOf, groupOf, groupPrefixed, inviteTaken, keptForJoin, list, messageOf, noMessage, nobodyJoined, node, notInYet, notInYetError, num, oneOf, oneShotWaits, settingsOf, sharedGroupIds, shownName, sinceSeq, somebodyJoined, state, str, transportOffered, waitForState,
+  bool, chatOf, chatOrGroup, dhtOnly, findChat, findChatOrGroup, findGroup, groupById, groupCalled, groupNameOf, groupOf, groupPrefixed, inviteTaken, keptForJoin, list, messageOf, noMessage, nobodyJoined, node, notInYet, notInYetError, num, oneOf, oneShotWaits, onlyKeys, settingsOf, sharedGroupIds, shownName, sinceSeq, somebodyJoined, state, str, transportOffered, waitForState,
   type ApiContext, type CallScope, type Method, type Params, type RefPlace,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
@@ -873,6 +873,8 @@ const METHODS: Record<string, Method> = {
   },
   // `--purge` folds the store even when the delete answers no (`foldsAnyway`): a message already gone, another's.
   "chat.delete": foldsAnyway(async (ctx, params) => {
+    // A misspelt `everyone` (`Everyone`) deleted the message here only, and the contact kept it.
+    onlyKeys(params, "chat.delete", ["chat", "message", "everyone", "wait", "timeout", "purge"]);
     // `--purge`: what it said leaves the profile's folder before the answer (`purgeMessage`), and the answer says so.
     const purge = bool(params, "purge"), purged = purge ? { purged: true } : {};
     // For everyone (WISP 400 § Delete for everyone): a message of mine, in a chat or a group, gone from every device.
@@ -1067,6 +1069,7 @@ const METHODS: Record<string, Method> = {
   },
   /** Invitations over the chats named accepted by the daemon itself (`group auto on --from`); no argument: the setting. */
   async "group.auto"(ctx, params) {
+    onlyKeys(params, "group.auto", ["on", "from"]);
     const on = params.on === undefined ? undefined : bool(params, "on");
     // The chats go with on: true, as `group auto --from` refuses them without on: before, from with on: false dropped
     // every chat on the list, and from alone only read the setting, each without a word.
