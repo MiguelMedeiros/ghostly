@@ -216,12 +216,27 @@ export function findChat(links: readonly LinkView[], ref: string, groups: readon
  * as if nothing had that name.
  */
 function noChat(ref: string, groups: readonly GroupView[]): CliError {
-  // A name two groups share is still a group's: it read `No chat "Crew"`, as if nothing had it.
-  if (groupsSharing(ref, groups)) return new CliError("not_found", `${JSON.stringify(ref)} names more than one group, not a chat: a group command takes one by its id (ghostly group list)`);
+  // A name two groups share is still a group's: it read `No chat "Crew"`, as if nothing had it. `bad_request` (exit 1),
+  // as `findGroup` refuses it for every group command: a name to make precise, not a thing missing (docs/CLI.md).
+  if (groupsSharing(ref, groups)) {
+    const refusal = new CliError("bad_request", `${JSON.stringify(ref)} names more than one group, not a chat: a group command takes one by its id (ghostly group list)`);
+    sharedNameRefusals.add(refusal);
+    return refusal;
+  }
   const group = groupNamed(ref, groups);
   if (group) return new CliError("not_found", `${JSON.stringify(ref)} is a group, not a chat (ghostly chat list)`, { group: group.id });
   return new CliError("not_found", `No chat ${JSON.stringify(ref)} (ghostly chat list)`);
 }
+
+/**
+ * `noChat`'s refusals of a name more than one group has. A name more than one chat has is refused with the same code
+ * (`chatBy`), so a chat command with a group twin (`notAGroup`) tells the two apart here, and answers only the first
+ * with its twin.
+ */
+const sharedNameRefusals = new WeakSet<CliError>();
+
+/** Whether `error` is `noChat`'s refusal of a name more than one group has (no chat has it). */
+export const groupsNotChat = (error: unknown): boolean => error instanceof CliError && sharedNameRefusals.has(error);
 
 /** A chat or group ref as a next step shows it: as given, quoted only when it holds more than a word (see `shellWord`). */
 const shownRef = (place: RefPlace) => shellWord(place.ref, place.group ? "<group>" : "<chat>");

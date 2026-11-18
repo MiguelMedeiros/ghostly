@@ -41,7 +41,7 @@ describe("a name two groups share, where only a 1:1 chat goes", () => {
     for (const ref of ["zz", "ZZ", "group:zz"]) {
       const error = await refusal(callApi(fake(), method, { [key]: ref, ...params }));
       expect(error.message).toBe(`${JSON.stringify(ref)} names more than one group, not a chat: a group command takes one by its id (ghostly group list)`);
-      expect(error.code).toBe("not_found");
+      expect(error.code).toBe("bad_request");
     }
     // A name nothing has stays `No chat`.
     expect((await refusal(callApi(fake(), method, { [key]: "Nobody", ...params }))).message).toBe(`No chat "Nobody" (ghostly chat list)`);
@@ -50,15 +50,15 @@ describe("a name two groups share, where only a 1:1 chat goes", () => {
   it.each(["chat.connect", "chat.transport"] as const)("%s says a group has no transport of its own, and names group list, not group show", async (method) => {
     const error = await refusal(callApi(fake(), method, { chat: "zz", transport: "dht" }));
     expect(error.message).toBe(`"zz" names more than one group, not a chat: it connects through its members' chats, with no transport of its own (ghostly group list)`);
-    expect(error.code).toBe("not_found");
+    expect(error.code).toBe("bad_request");
   });
 
   it("react and message delete offer the group command, with the id of the group meant", async () => {
     const react = await refusal(callApi(fake(), "chat.react", { chat: "zz", message: "m1", emoji: "👍" }));
     expect(react.message).toBe(`"zz" names more than one group, not a chat: ghostly group react <group> <message> <emoji>, with the id of the group meant (ghostly group list)`);
-    expect(react.code).toBe("not_found");
+    expect(react.code).toBe("bad_request");
     const remove = await refusal(callApi(fake(), "chat.delete", { chat: "group:zz", message: "m1" }));
     expect(remove.message).toBe(`"group:zz" names more than one group, not a chat: ghostly message delete <group> m1 --everyone, with the id of the group meant (ghostly group list)`);
-    expect(remove.code).toBe("not_found");
+    expect(remove.code).toBe("bad_request");
   });
 });
