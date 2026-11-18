@@ -9,7 +9,8 @@
 //   there, waits without losing its place. So does one with `queue:hold` (HOLD), whatever else it has: it never boards
 //   or lands until the label comes off, and the train never takes the hold off itself. So does one with a review
 //   running: a reviewer's newest `Review:` comment is "Review: in progress (head <sha>)" on its head, posted less than
-//   90 minutes ago (REVIEW_HOLD, `reviewHold`); a verdict, a new head or the bound ends it (not for `queue:priority`).
+//   90 minutes ago (REVIEW_HOLD, `reviewHold`), or "Review: changes needed (head <sha>)" on its head, with no time
+//   limit; a later approved, a new head or (for "in progress") the bound ends it (not for `queue:priority`).
 //   A green run of CI that skipped
 //   jobs the pull request's own files turn on (ci.yml planned it from other files: a run for another base) does not
 //   count; the run before it does. Nor does a
@@ -128,10 +129,12 @@ const REVIEW_LINE = /^[\W_]*review:\s*(in progress|approved|changes needed)\b(?:
 // Who may start one: an account that could put `queue:hold` on it as well. Anyone may comment on a public pull request.
 const REVIEWERS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 /**
- * A review running on a pull request's head `sha`, { since, until } (ms), or null. The newest `Review:` comment by a
- * reviewer says it: "in progress" naming this head (all of it, or its first 7 or more digits), posted less than REVIEW_HOLD ago. A later
- * verdict, a new head or the bound passing ends it, with nothing to lift. While it runs, the pull request is held like
- * one with `queue:hold`: it waits in line, keeps its place, and a batch it is aboard stops before landing it.
+ * A review holding a pull request's head `sha`, { since, until } (ms; `until` null: no time limit), or null. The newest
+ * `Review:` comment by a reviewer says it, naming this head (all of it, or its first 7 or more digits): "in progress"
+ * holds it until REVIEW_HOLD after it was posted; "changes needed" holds it with no time limit (as review-verdict reads
+ * it), so a pull request that still has `queue` before its reviewer takes the label off never boards. A later approved,
+ * a new head or (for "in progress") the bound passing ends it, with nothing to lift. While it holds, the pull request is
+ * held like one with `queue:hold`: it waits in line, keeps its place, and a batch it is aboard stops before landing it.
  */
 export function reviewHold(comments, sha, now) {
   let newest = null;
@@ -140,9 +143,10 @@ export function reviewHold(comments, sha, now) {
     const m = REVIEW_LINE.exec((c.body ?? "").trimStart().split("\n", 1)[0]);
     if (m && !(Date.parse(c.created_at) < Date.parse(newest?.at))) newest = { at: c.created_at, what: m[1].toLowerCase(), head: m[2]?.toLowerCase() };
   }
-  const head = newest?.what === "in progress" ? newest.head : null;
+  const head = newest?.what === "approved" ? null : newest?.head;
   if (!head || !sha || !(head === sha.toLowerCase() || (head.length >= 7 && sha.toLowerCase().startsWith(head)))) return null;
   const since = Date.parse(newest.at);
+  if (newest.what === "changes needed") return { since, until: null };
   return now - since < REVIEW_HOLD ? { since, until: since + REVIEW_HOLD } : null;
 }
 /** Held: by `queue:hold`, or by a review running on its head (`pr.review`, from `reviewHold`). */
@@ -409,7 +413,9 @@ const AT_BACK = "again at the back once it is reviewed and queued";
 /** Why a queued pull request cannot board now, or null. It keeps its place while it waits, unless the reason says otherwise. */
 export function waiting(pr) {
   if (onHold(pr)) return `it is on hold (\`${HOLD}\`): it boards once the label comes off`;
-  if (pr.review) return `a review is running on its head since ${hhmm(pr.review.since)} UTC (until ${hhmm(pr.review.until)} UTC at the latest): it boards once the review's verdict is posted, or at that time`;
+  // Nothing starts a train run when a verdict is posted: the next scheduled one sees it.
+  if (pr.review?.until === null) return `a reviewer asked for changes on its head at ${hhmm(pr.review.since)} UTC: it waits for a later \`Review: approved\` on this head or a new head, and boards on the train's next pass after that (up to about 30 minutes later)`;
+  if (pr.review) return `a review is running on its head since ${hhmm(pr.review.since)} UTC (until ${hhmm(pr.review.until)} UTC at the latest): it boards on the train's next pass after the review's verdict is posted (up to about 30 minutes later), or after that time`;
   if (pr.draft) return "it is a draft";
   // First of the rest: GitHub runs no pull_request workflow on a pull request that conflicts with its base, so no CI
   // remedy below can work until the conflict is resolved. `tick` reads it only for one that waits anyway.
@@ -1077,9 +1083,12 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     const changedText = (list, read = (s) => byNumber.get(s.number)) => {
       const holds = list.filter((s) => onHold(read(s)));
       const reviews = list.filter((s) => !onHold(read(s)) && read(s)?.review);
+      const running = reviews.filter((s) => read(s).review.until !== null);
+      const asked = reviews.filter((s) => read(s).review.until === null);
       const why = [
         holds.length && `${names(holds)} ${holds.length > 1 ? "are" : "is"} on hold, \`${HOLD}\``,
-        reviews.length && `${names(reviews)} ${reviews.length > 1 ? "have" : "has"} a review running`,
+        running.length && `${names(running)} ${running.length > 1 ? "have" : "has"} a review running`,
+        asked.length && `a reviewer asked for changes on ${names(asked)}`,
       ].filter(Boolean);
       return `${names(list)} changed or left the line${why.length ? ` (${why.join("; ")})` : ""}`;
     };
