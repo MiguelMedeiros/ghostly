@@ -445,6 +445,7 @@ describe("persistent IndexedDB", () => {
     const onThread = syncs.onThread, before = syncs.count, done = disk.synced;
     // The syncs finished when each transaction's `complete` came: never before the one that covers it.
     const heard: number[] = [];
+    let synced = () => {};
     try {
       const folding = store.compact();
       await begun;
@@ -452,9 +453,16 @@ describe("persistent IndexedDB", () => {
         .then(() => { heard.push(disk.synced - done); }));
       await new Promise((resolve) => setTimeout(resolve, 20));
       expect(heard).toEqual([]);
+      // Their entries are written once the fold is done; with the syncs off the thread held, none may complete yet.
+      disk.held = new Promise<void>((resolve) => { synced = resolve; });
       release();
-      await Promise.all([folding, ...writes]);
-    } finally { release?.(); disk.snapshotSync = null; }
+      await folding;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(heard).toEqual([]);
+      disk.held = null;
+      synced();
+      await Promise.all(writes);
+    } finally { release?.(); disk.held = null; synced(); disk.snapshotSync = null; }
     expect(syncs.onThread - onThread).toBe(0);
     expect(syncs.count - before).toBeLessThanOrEqual(3);
     expect(heard).toHaveLength(50);
