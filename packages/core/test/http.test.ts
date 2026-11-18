@@ -251,7 +251,7 @@ describe("header hygiene", () => {
     const [[name, value]] = features;
     expect(name).toBe("permissions-policy");
     const denied = new Map(value.split(",").map((entry) => entry.trim().split("=") as [string, string]));
-    for (const feature of ["camera", "microphone", "display-capture", "geolocation", "midi", "usb", "serial", "hid", "clipboard-read", "storage-access"]) {
+    for (const feature of ["camera", "microphone", "display-capture", "geolocation", "midi", "usb", "serial", "hid", "clipboard-read", "clipboard-write", "storage-access"]) {
       expect(denied.get(feature), feature).toBe("()");
     }
     expect([...denied.values()].every((allow) => allow === "()")).toBe(true);

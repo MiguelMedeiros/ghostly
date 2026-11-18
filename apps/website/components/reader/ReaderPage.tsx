@@ -213,12 +213,17 @@ export async function ReaderPage({ reference, requested }: { reference: Referenc
               </details>
             )}
 
-            <div className="reader-prose" lang="en">
-              {legacyHeadings.map((id) => (
+            <ReferenceMarkdown
+              className="reader-prose"
+              lang="en"
+              lead={legacyHeadings.map((id) => (
                 <span key={id} id={id} />
               ))}
-              <ReferenceMarkdown body={body} sourcePath={reference.sourcePath} repoLabel={t.repo} belowTitle />
-            </div>
+              body={body}
+              sourcePath={reference.sourcePath}
+              repoLabel={t.repo}
+              belowTitle
+            />
 
             <footer className="reader-foot">
               <div className="reader-source">

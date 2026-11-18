@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { SCREEN_SHARE_ERROR_MS } from "@ghostly/react";
 import { useI18n } from "../contexts/I18nContext";
 import { moderateGroupCall, moderationProblemText, type GroupCallModerationAct, type GroupCallRoomState, type GroupCallSource } from "../lib/groupCallModeration";
@@ -31,12 +31,21 @@ export function useCallModeration(moderator: GroupCallModerator | undefined, con
   const [state, setState] = useState<GroupCallRoomState>(EMPTY);
   const [problem, setProblem] = useState<{ line: string; id: number } | null>(null);
   const say = useCallback((line: string) => setProblem((was) => ({ line, id: (was?.id ?? 0) + 1 })), []);
+  // Each ask is numbered: a reply older than the last one taken (the read on joining answering after a mute, two acts
+  // whose replies cross) is the room before it, and would offer Mute again for a source already taken.
+  const asked = useRef(0), taken = useRef(0);
+  const take = useCallback((n: number, next: GroupCallRoomState) => {
+    if (n <= taken.current) return;
+    taken.current = n;
+    setState(next);
+  }, []);
   useEffect(() => {
     if (!groupId || !connected) return;
     let live = true;
-    void moderateGroupCall({ groupId, act: "state" }).then((result) => { if (live && result.ok) setState(result.state); });
+    const n = ++asked.current;
+    void moderateGroupCall({ groupId, act: "state" }).then((result) => { if (live && result.ok) take(n, result.state); });
     return () => { live = false; };
-  }, [groupId, connected]);
+  }, [groupId, connected, take]);
   useEffect(() => {
     if (!problem) return;
     const timer = setTimeout(() => setProblem((was) => (was === problem ? null : was)), SCREEN_SHARE_ERROR_MS);
@@ -44,9 +53,10 @@ export function useCallModeration(moderator: GroupCallModerator | undefined, con
   }, [problem]);
   const act = useCallback(async (act: GroupCallModerationAct, target: string, src?: GroupCallSource[]) => {
     if (!groupId) return;
+    const n = ++asked.current;
     const result = await moderateGroupCall({ groupId, act, target, ...(src && { src }) });
-    if (result.ok) setState(result.state);
+    if (result.ok) take(n, result.state);
     else say(moderationProblemText(result.code, t));
-  }, [groupId, say, t]);
+  }, [groupId, say, t, take]);
   return moderator ? { moderator, state, act, say, problem } : null;
 }

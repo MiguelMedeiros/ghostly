@@ -40,6 +40,31 @@ describe("test-affected.mjs's arguments", () => {
     expect(r.stderr).toContain(`npm run test:affected -- ${flags}`);
   });
 
+  // A mistyped port was taken as it was: the unit tests, lint, typecheck and the web build ran first, and only the
+  // e2e step found nothing answering there, a minute later. `--port --list` also took the flag as the port.
+  it.each([["5o310"], ["70000"], ["--list"]])("refuses --port %s before anything runs", (value) => {
+    const r = run("--port", value);
+    expect(r.status).toBe(2);
+    expect(r.stdout).toBe("");
+    expect(r.stderr).toContain(`--port ${value}: give a port number from 1 to 65535`);
+  });
+
+  it("refuses an E2E_WEB_PORT that is no port, naming it", () => {
+    const r = runWith({ E2E_WEB_PORT: "50310x" });
+    expect(r.status).toBe(2);
+    expect(r.stdout).toBe("");
+    expect(r.stderr).toContain("E2E_WEB_PORT=50310x: give a port number from 1 to 65535");
+  });
+
+  it("names every flag and option it takes in --help", () => {
+    const r = run("--help");
+    expect(r.status).toBe(0);
+    for (const arg of ["--list", "--no-e2e", "--no-rust", "--no-lint", "--no-typecheck", "--no-stack", "--base", "--port", "--files", "--unit-group"]) {
+      expect(r.stdout).toContain(arg);
+    }
+    expect(r.stdout).toContain("tools/scripts/affected/stack.mjs");
+  });
+
   it("takes every flag and option it documents, as CI's draft job passes them", () => {
     const r = run("--base", "HEAD", "--port", "4999", "--unit-group", "2/4", "--no-e2e", "--no-rust", "--no-lint", "--no-typecheck", "--no-stack", "--list");
     expect(r.stderr).toBe("");

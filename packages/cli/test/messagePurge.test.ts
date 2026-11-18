@@ -122,7 +122,7 @@ describe("message delete --purge", () => {
     // same: the journal is empty, the text only in rows.db, where the message still is.
     await put({ linkId: "group:g1", id: "k:1:0", text: `in the group: ${SECRET}`, sender: "peer", member: "k", timestamp: 4, via: "datalink" });
     const theirs = { chat: "group:g1", message: "k:1:0", everyone: true, purge: true };
-    const refusal = { code: "not_found", message: `${folded}No message "k:1:0" of yours in this group: only your own messages are deleted for everyone (ghostly group history group:g1)`, details: { purged: true } };
+    const refusal = { code: "not_found", message: `${folded}"k:1:0" is another member's message: only its author deletes a group's message, for everyone`, details: { purged: true } };
     expect(holding()).toContain("journal.bin");
     await expect(callApi(ctx, "chat.delete", theirs)).rejects.toMatchObject(refusal);
     expect(store.journalBytes()).toBe(0);
@@ -134,7 +134,7 @@ describe("message delete --purge", () => {
     const after = callApi(ctx, "chat.delete", theirs);
     await expect(after).rejects.toThrow();
     expect(holding()).toEqual([]);
-    await expect(after).rejects.toMatchObject(refusal);
+    await expect(after).rejects.toMatchObject({ code: "not_found", message: `${folded}No message "k:1:0" in this group (ghostly group history group:g1)`, details: { purged: true } });
     // A usage mistake folds nothing.
     await put({ linkId: "chat-one", id: "peer_4", text: `last: ${SECRET}`, sender: "peer", timestamp: 5, via: "datalink" });
     await expect(callApi(ctx, "chat.delete", { chat: "group:g1", message: "k:1:0", everyone: true, wait: "confirmed", purge: true })).rejects.toMatchObject({ code: "bad_request", details: undefined });
@@ -147,12 +147,15 @@ describe("message delete --purge", () => {
     execFileSync("mkfifo", [fifo]);
     const exported = store.exportSnapshot(fifo);
     const out = createReadStream(fifo);
+    const read: Buffer[] = [];
+    out.on("data", (chunk) => read.push(chunk as Buffer));
     out.pause();
     await new Promise((resolve) => setTimeout(resolve, 200));
     return async () => {
       out.resume();
       // Read whole, then refused at its sync: a FIFO has nothing to sync.
       await expect(exported).rejects.toMatchObject({ code: "EINVAL" });
+      return Buffer.concat(read);
     };
   }
 
@@ -180,8 +183,9 @@ describe("message delete --purge", () => {
     expect(held).toEqual([]);
   });
 
-  it.skipIf(process.platform === "win32")("an export that begins while the purge's fold is written is waited for too", async () => {
-    const holds = await folded("peer_6", "sk-made-up-begun-later-0123fedcba987654");
+  it.skipIf(process.platform === "win32")("an export that begins while the purge's fold is written begins after it: no write waits for the export", async () => {
+    const secret = "sk-made-up-begun-later-0123fedcba987654";
+    const holds = await folded("peer_6", secret);
     let open!: () => void;
     const reached = new Promise<void>((resolve) => { foldHeld.reached = resolve; });
     foldHeld.gate = new Promise<void>((resolve) => { open = resolve; });
@@ -191,10 +195,15 @@ describe("message delete --purge", () => {
     const release = await heldExport();
     foldHeld.gate = null;
     open();
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(held).toBeNull();
-    await release();
-    expect(await purge).toEqual({ chat: "chat-one", messageId: "peer_6", deleted: "peer_6", everyone: false, purged: true });
+    // The export is held at its FIFO: the purge answers all the same, and a write commits (its `complete` was behind
+    // the fold, the fold behind the export, every write in the daemon held until the backup's export ended).
+    const late = () => new Promise((resolve) => setTimeout(() => resolve("held"), 2_000));
+    expect(await Promise.race([purge, late()])).toEqual({ chat: "chat-one", messageId: "peer_6", deleted: "peer_6", everyone: false, purged: true });
     expect(held).toEqual([]);
+    expect(await Promise.race([put({ linkId: "chat-one", id: "peer_7", text: "meanwhile", sender: "peer", timestamp: 400, via: "datalink" }).then(() => "written"), late()])).toBe("written");
+    // Begun after the fold, the backup has nothing of the purged text.
+    const exported = await release();
+    expect(exported.length).toBeGreaterThan(300_000);
+    expect(exported.includes(secret)).toBe(false);
   });
 });

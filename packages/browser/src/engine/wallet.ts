@@ -17,7 +17,7 @@ import type {
 import { STORES, newestWalletTx, openDb, store, transact, wrap, committed } from "../shared/idb";
 import { openRow, openRows, proofKey, RowSeals, sealRow, sealedStore } from "./sealedRows";
 import { hasDataKey } from "./dataKey";
-import { LIMITS, PaymentPreflightError, decodeBolt11, engineError, engineText, stripHidden, type PaymentReview, type WalletNetwork } from "@ghostly/core";
+import { LIMITS, PaymentPreflightError, decodeBolt11, ecashUnitError, engineError, engineText, stripHidden, type PaymentReview, type WalletNetwork } from "@ghostly/core";
 import { CASHU_REQUEST_TIMEOUT_MS, MELT_REQUEST_TIMEOUT_MS, SWAP_SETTLED_MS, keysetRefused, mintFailed, mintRefused } from "./paymentAdapters/cashu";
 import { AskBackoff } from "./askBackoff";
 import { INVOICE_PACE, nextInvoiceAsk } from "./invoicePace";
@@ -1318,11 +1318,13 @@ export class CashuWallet {
     } catch {
       throw new Error("That is not a valid ecash token");
     }
-    // A token of another unit is still a token: said as such.
-    if (unit !== UNIT) throw engineError("ecashOtherUnit", { unit });
+    // A token of another unit is still a token: said as such (its unit named only when it looks like one).
+    if (unit !== UNIT) throw ecashUnitError(unit);
     // A mint is a custodian and only the user picks those. The test mint holds nothing of value.
     if (addTestMint && !this.getKnownMints().includes(mint) && isTestMint(mint)) await this.events.onTestMintNeeded(mint);
-    if (!this.getKnownMints().includes(mint)) throw new Error(`Ecash from ${new URL(mint).hostname} is not accepted`);
+    // The words name the host only (a contact reads them in a payment's result); `mint` is the whole URL, which a host
+    // can offer to add (the CLI's `wallet add-mint`).
+    if (!this.getKnownMints().includes(mint)) throw Object.assign(new Error(`Ecash from ${new URL(mint).hostname} is not accepted`), { mint });
 
     return this.locked(mint, async () => {
       // A sender that prepaid the redeem fee put it on top of the amount; what the mint kept is the fee either way.
@@ -1905,7 +1907,7 @@ export class CashuWallet {
       // A dropped connection or a gateway timeout says nothing: the payment may still be going through.
       if (!mintRefused(error) && !(error instanceof MeltChangeError)) return "pending";
       // The mint answered (a refusal), or took the proofs and only the change failed: its word decides.
-      const outcome = await this.settleMelt(melt, true).catch((): MeltOutcome => "pending");
+      const outcome = await this.settleMelt(await this.meltAnswered(melt), true).catch((): MeltOutcome => "pending");
       if (outcome === "unpaid") {
         unpaid();
         const lost = this.takeFailedFee(melt.quote);
@@ -1923,9 +1925,20 @@ export class CashuWallet {
       await this.finishMelt(melt, result.change);
       return "paid";
     }
-    const outcome = await this.settleMelt(melt, true).catch((): MeltOutcome => "pending");
+    const outcome = await this.settleMelt(await this.meltAnswered(melt), true).catch((): MeltOutcome => "pending");
     if (outcome === "unpaid") unpaid();
     return outcome;
+  }
+
+  /**
+   * Writes down that the mint answered this melt's one request: the poll's later UNPAID is then final (`settleMelt`),
+   * with no hold for a request still on its way. Not written, it is held as one whose answer was lost.
+   */
+  private async meltAnswered(melt: PendingMelt): Promise<PendingMelt> {
+    const answered: PendingMelt = { ...melt, answeredAt: Date.now() };
+    try { await committed((await store(STORES.melts, "readwrite")).put(await sealRow(STORES.melts, answered))); }
+    catch { return melt; }
+    return answered;
   }
 
   /**
@@ -1946,26 +1959,19 @@ export class CashuWallet {
     this.meltTimer = null;
     if (this.stopped) return;
     const melts = await this.readMelts();
-
+    // Mints that could not be loaded, or did not answer a melt's read, in this round: their other melts wait for the next.
+    const down = new Set<string>();
+    // Each mint's melts in turn (its lock serializes them anyway), the mints side by side: one that does not answer
+    // holds only its own melts, not those of the mints after it.
+    const byMint = new Map<string, PendingMelt[]>();
     for (const melt of melts) {
-      if (!this.meltAsk.due(melt.quote, Date.now())) continue;
-      try {
-        const outcome = await this.locked(melt.mint, async () => {
-          // It may have been settled while this waited for the lock.
-          const current = await openRow(STORES.melts, await wrap<PendingMelt | undefined>((await store(STORES.melts, "readonly")).get(melt.quote)));
-          return current ? this.settleMelt(current) : null;
-        });
-        if (outcome === "paid" || outcome === "unpaid") {
-          this.takeFailedFee(melt.quote);
-          this.spentAway.delete(melt.quote);
-          this.events.onMeltResolved(melt, outcome === "paid");
-          this.events.onChange();
-        }
-      } catch {
-        // mint unreachable: try again on the next round
-      }
-      this.meltAsk.missed(melt.quote, Date.now(), !this.meltOverdue(melt));
+      const atMint = byMint.get(melt.mint);
+      if (atMint) atMint.push(melt);
+      else byMint.set(melt.mint, [melt]);
     }
+    await Promise.allSettled([...byMint.values()].map(async (atMint) => {
+      for (const melt of atMint) await this.pollMelt(melt, down);
+    }));
 
     const remaining = new Set((await this.readMelts()).map((m) => m.quote));
     this.meltAsk.keepOnly(remaining);
@@ -1974,6 +1980,33 @@ export class CashuWallet {
     const next = Math.min(...[...remaining].map((quote) => this.meltAsk.at(quote, 0)));
     if (this.meltTimer) clearTimeout(this.meltTimer);
     this.meltTimer = setTimeout(() => void this.pollMelts(), Math.max(0, next - Date.now()));
+  }
+
+  /** One pending melt of a `pollMelts` round, if it is due: asked under its mint's lock, unless its mint is `down`. */
+  private async pollMelt(melt: PendingMelt, down: Set<string>): Promise<void> {
+    if (!this.meltAsk.due(melt.quote, Date.now())) return;
+    try {
+      // Its mint could not be loaded, or did not answer, for another melt just now: this one waits as that one does.
+      if (down.has(melt.mint)) throw new Error("mint down");
+      try { await this.wallet(melt.mint); }
+      catch (error) { down.add(melt.mint); throw error; }
+      const outcome = await this.locked(melt.mint, async () => {
+        // It may have been settled while this waited for the lock.
+        const current = await openRow(STORES.melts, await wrap<PendingMelt | undefined>((await store(STORES.melts, "readonly")).get(melt.quote)));
+        return current ? this.settleMelt(current) : null;
+      });
+      if (outcome === "paid" || outcome === "unpaid") {
+        this.takeFailedFee(melt.quote);
+        this.spentAway.delete(melt.quote);
+        this.events.onMeltResolved(melt, outcome === "paid");
+        this.events.onChange();
+      }
+    } catch (error) {
+      // No answer at all (its read timed out, or the connection failed): each of the mint's other melts would wait as
+      // long again, so they are asked next round. An answer, even a refusal or a server error, says the mint is there.
+      if (error instanceof Error && error.name === "NetworkError") down.add(melt.mint);
+    }
+    this.meltAsk.missed(melt.quote, Date.now(), !this.meltOverdue(melt));
   }
 
   /**
@@ -2007,8 +2040,8 @@ export class CashuWallet {
     }
     if (quote.state === "PENDING") return "pending";
     // UNPAID with no answer to the request: it may still reach the mint and be paid with these very proofs. Held
-    // until no request of this melt can land any more.
-    if (!answered && !this.meltOverdue(melt)) return "pending";
+    // until no request of this melt can land any more. One the mint answered (`answeredAt`) has none left on its way.
+    if (!answered && melt.answeredAt === undefined && !this.meltOverdue(melt)) return "pending";
 
     // UNPAID: the payment failed, or never started. The mint says which proofs are still unspent.
     const inputs = await this.reservedProofs(melt);

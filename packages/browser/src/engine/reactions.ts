@@ -179,7 +179,7 @@ export class Reactions {
       if (!e && !current?.e) return { error: "No reaction of yours to take back" };
       let history: StoredMessage[] | undefined;
       const read = async () => history ??= await this.host.messages(chat);
-      if (group && current?.e && current.at < await this.joinedAt(chat, read)) return { error: "Your reaction to this message went out before you were invited back, and stays as it is" };
+      if (group && current?.e && current.at < await this.joinedAt(chat, read)) return { error: "Your reaction to this message is from before you were removed and invited back, and stays as it is" };
       let last = this.last.get(chat) ?? lastMine(await read());
       for (const p of pending) last = Math.max(last, p.n);
       const reaction: WireReaction = { id, e, n: nextReactionNumber(last, this.now()) };

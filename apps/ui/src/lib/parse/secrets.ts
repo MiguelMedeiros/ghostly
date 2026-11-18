@@ -12,9 +12,10 @@ import { MONERO_WORDS } from "./monero-words";
  * ecash, the amount decoded here. Ark, Spark and Fedimint wallets are BIP39 seeds or raw keys, caught by the rules
  * below; Fedimint ecash notes are plain base64 with no prefix, so they are not recognised. A `node-login` is what the
  * wallet sources ask for to reach a node: an LND macaroon, a Core Lightning rune, a bitcoind RPC password or cookie.
+ * A `signer-link` is a NIP-46 remote signer's connection link with its secret (`bunker://…?secret=…`).
  */
 export type SecretFinding =
-  | { kind: "mnemonic" | "nsec" | "bitcoin-key" | "hex-key" | "node-login" }
+  | { kind: "mnemonic" | "nsec" | "bitcoin-key" | "hex-key" | "node-login" | "signer-link" }
   | { kind: "cashu"; amount: number | null; unit: string };
 
 export type SecretKind = SecretFinding["kind"];
@@ -128,7 +129,11 @@ const RUNE = /(?<![\w-])[\w-]{43,}={0,2}(?![\w=-])/g;
 /** The restrictions of a rune that `createrune` made: its unique id first (`=0`, `=3&method=…`). */
 const RUNE_RESTRICTIONS = /^=\d+(?:[&|][ -~]*)?$/;
 const RUNE_WORD = /\brunes?\b/i;
-const CASHU_TOKEN = /\bcashu([AB])([A-Za-z0-9_\-+/]{20,}={0,2})/g;
+/** A NIP-46 signer's connection link, as it is or percent-encoded inside another link. */
+const SIGNER_LINK = /\b(?:bunker|nostrconnect)(?::|%3A)(?:\/\/|%2F%2F)/i;
+/** Its `secret` parameter, with a value: the token the signer takes a new session with. */
+const SIGNER_SECRET = /(?:[?&]|%3F|%26)secret(?:=|%3D)(?![&#]|%26|$)/i;
+const CASHU_TOKEN =/\bcashu([AB])([A-Za-z0-9_\-+/]{20,}={0,2})/g;
 
 /**
  * Characters that take no room on screen: format characters (zero-width space, soft hyphen, word joiner, the joiners,
@@ -169,6 +174,7 @@ export function findSecret(text: string): SecretFinding | null {
   })) return { kind: "mnemonic" };
   if (readings.some((reading) => NSEC.test(reading))) return { kind: "nsec" };
   if (readings.some((reading) => EXTENDED_PRIVATE.test(reading) || hasWif(reading))) return { kind: "bitcoin-key" };
+  if (readings.some(hasSignerLink)) return { kind: "signer-link" };
   if (readings.some(hasNodeLogin)) return { kind: "node-login" };
   if (readings.some(hasHexSecret)) return { kind: "hex-key" };
   const tokens = readings.map(findCashu);
@@ -342,6 +348,18 @@ function hasHexSecret(text: string): boolean {
 
 function hexBeside(text: string, context: RegExp): boolean {
   for (const match of text.matchAll(HEX_SECRET)) if (beside(text, match, context)) return true;
+  return false;
+}
+
+/**
+ * A `bunker://` or `nostrconnect://` link with its secret: whoever reads it can open a session with the person's remote
+ * signer. Read one string at a time, from its first scheme on, so a long string of schemes is read once.
+ */
+function hasSignerLink(text: string): boolean {
+  for (const [word] of text.matchAll(/\S+/g)) {
+    const at = word.search(SIGNER_LINK);
+    if (at >= 0 && SIGNER_SECRET.test(word.slice(at))) return true;
+  }
   return false;
 }
 

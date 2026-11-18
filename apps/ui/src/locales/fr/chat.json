@@ -163,7 +163,7 @@
     "leftHoursMinutes": "{{hours}} h {{minutes}} min restantes",
     "leftMinutes": "{{minutes}} min restantes",
     "leftUnderMinute": "moins d'une minute restante",
-    "noRoomDevice": "Espace insuffisant : {{size}} libres sur cet appareil",
+    "noRoomDevice": "Espace insuffisant : il reste {{size}} sur cet appareil",
     "nobodyHas": "Personne à qui vous êtes connecté n'a encore ce fichier",
     "nobodyHasHint": "Il arrive tout seul quand un membre qui l'a est en ligne.",
     "notDownloaded": "{{size}} · non téléchargé",
@@ -179,7 +179,7 @@
     "resendHint": "Le propose à nouveau. Reprend à partir de ce que votre contact a déjà.",
     "restoring": "Chargement… · {{size}}",
     "resume": "Reprendre",
-    "roomDevice": "{{size}} libres sur cet appareil",
+    "roomDevice": "Il reste {{size}} sur cet appareil",
     "senderOnly": "Pas encore chez vos connexions",
     "senderOnlyHint": "Dans un groupe aussi grand, votre app se connecte via quelques membres, pas à l'expéditeur. Il arrive tout seul dès que l'un d'eux l'a téléchargé, ou demandez à l'expéditeur de vous l'envoyer dans une discussion.",
     "stalled": "Bloqué · {{progress}}",
@@ -209,6 +209,8 @@
     "noMatch": "Aucune discussion de ce nom",
     "partial": "{{sent}} sur {{count}} envoyés",
     "pick": "Choisissez-en jusqu’à {{count}}",
+    "refused": "{{name}} : {{error}}",
+    "refusedPartial": "{{name}} ({{partial}}) : {{error}}",
     "search": "Rechercher des discussions",
     "select": "Sélectionner",
     "selected": "{{count}} sélectionnés",
@@ -259,11 +261,11 @@
   },
   "media": {
     "downloadSize": "Télécharger {{size}}",
-    "noRoom": "Espace insuffisant : {{size}} libres",
+    "noRoom": "Espace insuffisant : il reste {{size}}",
     "noRoomToPlay": "Pas assez d'espace disque libre pour le lire ici. Téléchargez-le.",
     "notYet": "La lecture est possible une fois l'envoi terminé.",
     "positionOf": "{{position}} sur {{duration}}",
-    "wantsToSend": "{{name}} veut l'envoyer · {{size}} libres"
+    "wantsToSend": "{{name}} veut l'envoyer · il reste {{size}}"
   },
   "menu": {
     "continueNew": "Continuer dans une nouvelle discussion",

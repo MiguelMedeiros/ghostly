@@ -30,6 +30,23 @@ export async function disallowLocalOrigin(ns: string, origin: string): Promise<v
   if (list.includes(origin)) await chrome.storage.local.set({ [allowedKey(ns)]: list.filter((o) => o !== origin) });
 }
 
+/**
+ * Chrome no longer grants `patterns` (its site access taken back): every profile's addresses there go, not only the
+ * running one's. Chrome grants a host for every profile at once, so one profile's later Allow would otherwise bring back
+ * another's without its person's click.
+ */
+export async function disallowLocalPatterns(patterns: string[]): Promise<void> {
+  const gone = new Set(patterns);
+  const atGone = (origin: string) => { try { return gone.has(localAccessPattern(origin)); } catch { return false; } };
+  const lists = await chrome.storage.local.get(null);
+  const kept: Record<string, string[]> = {};
+  for (const [key, list] of Object.entries(lists)) {
+    if (!key.startsWith(ALLOWED_PREFIX) || !Array.isArray(list)) continue;
+    if (list.some((origin) => typeof origin === "string" && atGone(origin))) kept[key] = list.filter((origin): origin is string => typeof origin === "string" && !atGone(origin));
+  }
+  if (Object.keys(kept).length) await chrome.storage.local.set(kept);
+}
+
 /** May profile `ns`'s peer reach `origin` for a contact: allowed here by its person, and Chrome still grants the host. */
 export async function localOriginAllowed(ns: string, origin: string): Promise<boolean> {
   if (!(await allowedOrigins(ns)).includes(origin)) return false;

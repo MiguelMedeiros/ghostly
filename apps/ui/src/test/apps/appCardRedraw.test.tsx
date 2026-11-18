@@ -54,7 +54,7 @@ async function setUp(cards: number) {
     {Array.from({ length: cards }, (_, i) => <MessageBubble key={i} message={cardMessage(`m${i}`)} peerPubKey="peer" contactName="Ana" linkId="link-1" />)}
   </Profiler>);
   expect(await screen.findAllByTestId("app-card")).toHaveLength(cards);
-  expect(screen.getAllByTestId("app-card-waiting")[0]).toHaveTextContent("Chess needs you both online");
+  expect(screen.getAllByTestId("app-card-waiting")[0]).toHaveTextContent("⁨Chess⁩ needs you both online");
   // What the page still settles after its first draw (the installed list read) is not counted.
   await act(async () => {});
   return () => draws;

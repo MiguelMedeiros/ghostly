@@ -70,7 +70,7 @@ export function IdentityStack({ peerKey, name, onOpen, open, footer }: { peerKey
   const shown = badges.slice(0, BADGE_LIMITS.header);
   const allGood = (n: number) => shown.length > 0 && shown.slice(0, n).every(b => isGood(b.state));
   // Nothing shared: the Ghostly mark says what the panel holds, the way a proof's mark names the proof.
-  const ghostly = shown.length ? undefined : `${t("identities.ghostly.theirs")}. ${t("identities.ghostly.nothingElse", { name: isolate(name) })}`;
+  const ghostly = shown.length ? undefined : t("common.sentences", { first: t("identities.ghostly.theirs"), second: t("identities.ghostly.nothingElse", { name: isolate(name) }) });
   const pick = (key: string) => (key === ALL_MARKS ? badges : badges.filter(b => b.id === key));
   // A mark named on screen is a card on screen: its public profile's name comes into the card once read.
   const { tip, handlers, swallow } = useMarkTip(key => loadShownProfiles(pick(key)));

@@ -4,10 +4,11 @@ import type { EnrollView } from "@ghostly/browser/devices/enroll";
 import { useI18n } from "../../contexts/I18nContext";
 import { useSettings } from "../../contexts/SettingsContext";
 import { DEVICE_SET_PASSWORD_MIN, defaultDeviceName, deviceLink, deviceLinkQr, enrollErrorKey, failureKey, lockPasswordProblem, timeLeft } from "../../lib/devices";
-import { baseProfileName, currentProfile } from "../../lib/profiles";
+import { activeProfileId, baseProfileName, currentProfile } from "../../lib/profiles";
 import { isDesktopApp } from "../../lib/externalLink";
 import { appLinkOrigin } from "../../lib/url";
-import { hashPassword, verifyPassword } from "../../lib/settings";
+import { hashPassword } from "../../lib/settings";
+import { tryLockPassword, waitSeconds } from "../../lib/lockAttempts";
 import { QRCodeDisplay } from "../QRCode";
 import { Notice } from "../wallet/ui";
 import { Toast } from "../ui/Toast";
@@ -118,10 +119,12 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
   const submitPassword = async () => {
     clear();
     if (step === "type") {
+      // Paced with the lock screen's own count: being at the unlocked device gives no more guesses than its lock does.
       setBusy(true);
-      const valid = !!stored && await verifyPassword(password, stored);
+      const tried = stored ? await tryLockPassword(activeProfileId(), password, stored) : null;
       setBusy(false);
-      if (!valid) { fail(t("devices.password.wrong"), "password"); return; }
+      if (tried?.waited) { fail(t("lockScreen.tooManyAttempts", { seconds: waitSeconds(tried.retryAt!) }), "password"); return; }
+      if (!tried?.ok) { fail(t("devices.password.wrong"), "password"); return; }
       // The hash keeps no length: only the password typed now says whether it is long enough.
       if (password.length < DEVICE_SET_PASSWORD_MIN) { previous.current = password; setPassword(""); setStep("longer"); return; }
       // A password that is stored with the lock off still leaves the profile open: a device set needs the lock on.
@@ -190,7 +193,8 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
   // The digits to check and the device added are plain lines, and the focus stays on the body: a screen reader hears them
   // from a line that is there from the code on and changes its text (one that comes with its step is often not read).
   const spoken = view?.role !== "inviter" ? ""
-    : view.step === "confirm" ? <>{fillNames(t("devices.add.found"), { device: view.device })} <span dir="ltr">{`${view.digits.slice(0, 3)} ${view.digits.slice(3)}`}</span></>
+    // The digits one by one, as the new device says them: "482 913" would be read as two numbers, unlike over there.
+    : view.step === "confirm" ? <>{fillNames(t("devices.add.found"), { device: view.device })} <span dir="ltr">{view.digits.split("").join(" ")}</span></>
     : view.step === "done" ? fillNames(t("devices.add.done"), { device: view.device }) : "";
   // Another device tried the code: the one warning of the code step, said at once from a line of its own that is there
   // from the code on, like the one above. The notice under the code shows it.
@@ -215,7 +219,7 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
             link sent to it, opens Ghostly with the code, on the one screen that names this profile. Join and "Add this
             device to another profile" read the link too. */}
         <div data-testid="device-add-code" data-code={view.code} data-link={deviceLink(view.code, appLinkOrigin(), profileName)}>
-          <QRCodeDisplay value={deviceLink(view.code, appLinkOrigin(), profileName)} qr={deviceLinkQr(view.code, appLinkOrigin(), profileName)} copyLabel={t("devices.add.copy")} />
+          <QRCodeDisplay value={deviceLink(view.code, appLinkOrigin(), profileName)} qr={deviceLinkQr(view.code, appLinkOrigin(), profileName)} copyLabel={t("devices.add.copy")} title={t("devices.add.codeQr")} />
         </div>
         <Status testId="device-add-status" step={view.seen ? "connecting" : "waiting"}>{view.seen ? t("devices.add.connecting") : t("devices.add.waiting")}</Status>
         <p data-testid="device-add-left" className="text-text-muted text-xs">{t("devices.add.left", { time: timeLeft(view.expires, now) })}</p>

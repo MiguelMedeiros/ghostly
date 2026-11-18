@@ -4,5 +4,6 @@
   "copyFailedShare": "Copie impossible. Sélectionnez le lien ci-dessous ou partagez-le.",
   "qrTitle": "QR code de l’invitation",
   "shareFailed": "Partage impossible. Copiez l’invitation.",
+  "shareFailedLink": "Partage impossible. Copiez le lien.",
   "title": "Invitez votre contact"
 }

@@ -86,10 +86,13 @@ describe("Chat: the stored messages of a 1:1 chat that opens", () => {
   const row = (id: string, text: string, at: number): StoredMessage => ({ linkId: LINK, id, text, sender: "peer", timestamp: NOW + at }) as StoredMessage;
   const HISTORY = [row("peer_1", "Morning", -2_000), row("peer_2", "Coffee at ten?", -1_000)];
 
-  /** Past the window in which messages that come together are read out as one line. */
-  const pastWindow = () => act(() => new Promise(resolve => setTimeout(resolve, ANNOUNCE_WINDOW_MS + 200)));
+  /** Past the window in which messages that come together are read out as one line (on the fake clock: at once). */
+  const pastWindow = () => act(() => vi.advanceTimersByTimeAsync(ANNOUNCE_WINDOW_MS + 200));
+  afterEach(() => { vi.useRealTimers(); });
 
   it("are not read out as new messages; one that comes after them is", { timeout: 10_000 }, async () => {
+    // The announcer's window runs on a fake clock that also keeps real time.
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["setTimeout", "clearTimeout"] });
     saveSession({
       id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", label: "Ana", createdAt: NOW - 60_000,
       messages: HISTORY.map(({ id, sender, text, timestamp }): ChatMessage => ({ id, sender, text, timestamp })),

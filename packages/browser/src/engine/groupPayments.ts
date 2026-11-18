@@ -111,6 +111,22 @@ export function mergeGroupPay(current: GroupPayNote | undefined, frame: GroupPay
   return JSON.stringify(next) === JSON.stringify(current) ? undefined : next;
 }
 
+/** Whose note it is: the payee's for a request, the payer's for a payment. */
+const initiatorOf = (note: Pick<GroupPayNote, "kind" | "from" | "to">): string => (note.kind === "request" ? note.to : note.from);
+
+/**
+ * The note `initiator` describes under `id`, and where it is kept. An id is its initiator's to choose, and any member
+ * who learned it can say something else under it first; so each initiator's note under an id is its own: the first
+ * kept goes by the id, another member's by `<id>.<initiator>` (a `.` is never in an id on the wire). `current` reads
+ * as the id itself, as `mergeGroupPay` compares it.
+ */
+function noteFor(notes: ReadonlyMap<string, GroupPayNote>, id: string, initiator: string): { key: string; current: GroupPayNote | undefined } {
+  const alias = `${id}.${initiator}`, held = notes.get(id);
+  const key = notes.has(alias) || (held && initiatorOf(held) !== initiator) ? alias : id;
+  const note = notes.get(key);
+  return { key, current: note && key !== id ? { ...note, id } : note };
+}
+
 /** Where a desk record sits in a group, if it does: the group, and the member at the other end (none for a request to all). */
 export interface Placement { groupId: string; me: string; peer?: string }
 
@@ -220,8 +236,9 @@ export class GroupPayments {
       const frame = parseGroupPay(raw, groupId), membership = this.host.membership(groupId);
       if (!frame || !membership) return;
       const notes = await this.load(groupId);
-      const next = mergeGroupPay(notes.get(frame.id), frame, author, membership.members);
-      if (next) await this.write(groupId, membership.me, next, notes);
+      const { key, current } = noteFor(notes, frame.id, frame.k === "req" ? frame.to : frame.f);
+      const next = mergeGroupPay(current, frame, author, membership.members);
+      if (next) await this.write(groupId, membership.me, { ...next, id: key }, notes);
     });
   }
 
@@ -276,7 +293,8 @@ export class GroupPayments {
       const at = this.placement(p, membership);
       if (!at) continue;
       const notes = await this.load(at.groupId);
-      const current = notes.get(paymentWireId(p.id));
+      // Mine to describe when I made it; else the member at the other end's (a request it made, a payment it sent).
+      const { key, current } = noteFor(notes, paymentWireId(p.id), p.direction === "out" ? at.me : at.peer ?? at.me);
       const frame = authoredNote(p, at, answers.get(p.id) ?? [], current, linkId => this.host.edgeOf(linkId)?.member, federation => this.host.federationNetwork?.(federation));
       if (!frame) continue;
       const members = membership(at.groupId)!.members;
@@ -287,7 +305,7 @@ export class GroupPayments {
       if (!next && JSON.stringify(frame) === JSON.stringify(current?.mine)) continue;
       const merged = next ?? current;
       if (!merged) continue;
-      if (!(await this.write(at.groupId, at.me, { ...merged, mine: frame }, notes))) continue;
+      if (!(await this.write(at.groupId, at.me, { ...merged, id: key, mine: frame }, notes))) continue;
       for (const linkId of this.host.edges(at.groupId).values()) { try { this.host.send(linkId, frame); } catch { /* sent again when that edge opens */ } }
     }
   }
@@ -332,7 +350,7 @@ export class GroupPayments {
     } else waiting?.delete(note.id);
     // Shown once the member it is about described it; what others said about it waits here until then.
     if (note.undescribed) return true;
-    const initiator = note.kind === "request" ? note.to : note.from;
+    const initiator = initiatorOf(note);
     await this.host.putMessage({ linkId: `group:${groupId}`, id: NOTE_ID(note.id), text: summary(note), sender: initiator === me ? "me" : "peer", member: initiator,
       timestamp: note.createdAt, via: "datalink", groupPay: note });
     return true;

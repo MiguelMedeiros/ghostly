@@ -7,6 +7,7 @@ import { encrypt, tryDecrypt } from "./crypto";
 import { isPublicAddress } from "./domainProofs";
 import { identityFromSeed, identityFromSeedB64, publicKeyFromZ32, sign, verify, type Identity } from "./identity";
 import type { LinkParams } from "./invite";
+import { underLocalSuffix } from "./localNames";
 import { measureRecords, MAX_DNS_PACKET_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
 
 /**
@@ -268,9 +269,6 @@ export class HoldKeys {
   }
 }
 
-/** Names only a local network answers (RFC 6762, RFC 8375, ICANN's .internal, and the usual router ones). */
-const LOCAL_SUFFIXES = ["localhost", "local", "internal", "lan", "home", "home.arpa", "localdomain", "intranet", "corp"];
-
 /**
  * A URL a bundle or manifest may be fetched from. The contact chose it and this device fetches it on its own, so it
  * is HTTPS, without a user or password, at a public name or a public IPv4 address: never this machine or its network.
@@ -284,9 +282,9 @@ export function isHoldUrl(value: unknown, loopback = false): value is string {
   let url: URL;
   try { url = new URL(value); } catch { return false; }
   if (url.username || url.password) return false;
-  const host = url.hostname.toLowerCase().replace(/\.$/, "");
+  const host = url.hostname.toLowerCase().replace(/\.+$/, "");
   if (loopback && url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(host)) return true;
-  if (url.protocol !== "https:" || !host.includes(".") || host.startsWith("[") || LOCAL_SUFFIXES.some(s => host === s || host.endsWith(`.${s}`))) return false;
+  if (url.protocol !== "https:" || !host.includes(".") || host.startsWith("[") || underLocalSuffix(host)) return false;
   // A URL's IPv4 host is always written as four decimal numbers, whatever form it was given in.
   return !/^\d+\.\d+\.\d+\.\d+$/.test(host) || isPublicAddress(Uint8Array.from(host.split("."), Number));
 }

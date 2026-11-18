@@ -95,6 +95,46 @@ describe("Reload on a new version", () => {
     expect(registration.active!.posted).toEqual([]);
   });
 
+  it("an older version waits and update() finds a newer one: the newer one is waited for and takes over, the older one is told nothing", async () => {
+    // B's banner was never pressed and C was deployed since: told to skip waiting, B would take over while C still
+    // fills its cache.
+    const older = new FakeWorker("installed");
+    registration.waiting = older;
+    const newer = new FakeWorker("installing");
+    registration.update.mockImplementation(async () => { registration.installing = newer; });
+    const reload = vi.fn();
+    const applying = applyUpdate({ reload });
+    await vi.waitFor(() => expect(registration.update).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(older.posted).toEqual([]);
+    expect(newer.posted).toEqual([]);
+    // C installed: it waits in B's place, which goes redundant.
+    registration.installing = null;
+    registration.waiting = newer;
+    older.become("redundant");
+    newer.become("installed");
+    await vi.waitFor(() => expect(newer.posted).toEqual([{ type: "skip-waiting" }]));
+    container.controller = newer;
+    container.dispatchEvent(new Event("controllerchange"));
+    await applying;
+    expect(older.posted).toEqual([]);
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("an older version waits and the newer one does not finish installing in time: the older one takes over, as before", async () => {
+    const older = new FakeWorker("installed");
+    registration.waiting = older;
+    const newer = new FakeWorker("installing");
+    registration.update.mockImplementation(async () => { registration.installing = newer; });
+    const reload = vi.fn();
+    const applying = applyUpdate({ timeoutMs: 20, reload });
+    await vi.waitFor(() => expect(older.posted).toEqual([{ type: "skip-waiting" }]));
+    container.dispatchEvent(new Event("controllerchange"));
+    await applying;
+    expect(newer.posted).toEqual([]);
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
   it("the newest worker already controls the page (another tab took the update): it reloads at once", async () => {
     // The other tab's Reload activated it and it claimed this page too: nothing is waiting, nothing installs.
     const newest = new FakeWorker("activated");
@@ -221,6 +261,32 @@ describe("Reload when the new worker cannot install", () => {
     expect(steps).toEqual(["reload"]);
     expect(registration.unregister).not.toHaveBeenCalled();
   });
+
+  it("an older version waits and the newer one update() found fails to install while a new build is out: unregistered, the older one told nothing", async () => {
+    answers({ version: "1.13.2", build: "ccc" });
+    const older = new FakeWorker("installed");
+    registration.waiting = older;
+    const newer = installFails();
+    const applying = applyUpdate({ reload });
+    await vi.waitFor(() => expect(steps.length + older.posted.length).toBeGreaterThan(0));
+    expect(older.posted).toEqual([]);
+    await applying;
+    expect(steps).toEqual(["unregister", "reload"]);
+    expect(newer.posted).toEqual([]);
+  });
+
+  it("the same offline (the version file does not answer): the older one, installed whole, takes over as before", async () => {
+    versionFile.mockImplementation(async () => { throw new TypeError("Failed to fetch"); });
+    const older = new FakeWorker("installed");
+    registration.waiting = older;
+    installFails();
+    const applying = applyUpdate({ reload });
+    await vi.waitFor(() => expect(older.posted).toEqual([{ type: "skip-waiting" }]));
+    container.dispatchEvent(new Event("controllerchange"));
+    await applying;
+    expect(steps).toEqual(["reload"]);
+    expect(registration.unregister).not.toHaveBeenCalled();
+  });
 });
 
 describe("another tab took a new version", () => {
@@ -288,6 +354,15 @@ describe("a share, on the page's side", () => {
     window.location.hash = "#/shared";
     expect(openedForShare()).toBe(true);
     askForShare();
+    await vi.waitFor(() => expect(registration.active!.posted).toEqual([{ type: "share-ready" }]));
+  });
+
+  it("the page opened for it asks for it once it is the app, even after a link took its address while it waited", async () => {
+    window.location.hash = "#/shared";
+    const opened = openedForShare();
+    // The tab that was the app closed before the wait was over, with an invite in this tab's address by then.
+    window.location.hash = "#/invite/abc";
+    askForShare(opened);
     await vi.waitFor(() => expect(registration.active!.posted).toEqual([{ type: "share-ready" }]));
   });
 

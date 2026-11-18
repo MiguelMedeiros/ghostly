@@ -90,12 +90,13 @@ export function desktopOnlyFiles(bundle: Iterable<{ type: string; fileName: stri
 /**
  * What only an online flow loads, by module id: a Pubky approval (it waits on a relay for a remote signer) and the
  * homeserver reads, a Keet proof (signed for, or checked from, a contact on a live channel), a device handoff's PAKE
- * (both devices online), and the USDT and Ark wallets' adapters and SDK (nothing without their RPC or Ark server; their
- * wasm is not precached either). 2.4 MiB of the build: cached the first time one is used, not at install.
+ * (both devices online), the USDT and Ark wallets' adapters and SDK (nothing without their RPC or Ark server; their
+ * wasm is not precached either), and a group call's LiveKit client with its E2EE worker (a call joins with a pass the
+ * node hands out, WISP 602). 3 MiB of the build: cached the first time one is used, not at install.
  */
 const ONLINE_ONLY_MODULES = [
   "/node_modules/@synonymdev/pubky/", "/node_modules/keet-identity-key/", "/node_modules/@serenity-kit/opaque/", "/node_modules/@arkade-os/sdk/",
-  "/paymentAdapters/usdt.ts", "/paymentAdapters/arkade.ts",
+  "/paymentAdapters/usdt.ts", "/paymentAdapters/arkade.ts", "/hooks/groupCallLivekit.ts",
 ];
 
 /** A language's dictionary, a chunk of its own (`loadLocale`). English is in the entry. */
@@ -111,15 +112,33 @@ export interface BundleFile {
   facadeModuleId?: string | null;
   imports?: readonly string[];
   dynamicImports?: readonly string[];
+  /** The files a chunk names by URL (a worker it starts, `new URL(…, import.meta.url)`), as Vite records them. */
+  viteMetadata?: { importedAssets?: ReadonlySet<string> } | null;
+  /** An asset's content: the app's page (`index.html`) names the scripts it loads. */
+  source?: string | Uint8Array;
+}
+
+/**
+ * The scripts the app's page loads, by file name: its module scripts and modulepreloads. Vite drops an entry chunk that is
+ * nothing but imports (the `main` group took its code) and names those in the page instead, so the page, not an entry
+ * chunk, is where the app starts.
+ */
+function pageScripts(bundle: readonly BundleFile[]): string[] {
+  const page = bundle.find((file) => file.type === "asset" && file.fileName === "index.html")?.source;
+  const html = typeof page === "string" ? page : page ? new TextDecoder().decode(page) : "";
+  return [...html.matchAll(/<(?:script[^>]*\ssrc|link[^>]*rel="modulepreload"[^>]*\shref)="\/?(assets\/[^"]+\.js)"/g)].map(([, name]) => name!);
 }
 
 /**
  * The build's chunks the install leaves to their first use: those only reached through a dynamic import of an
  * online-only module (`onlineOnly`) or of a language (`languages`, by language: the install takes the person's own,
- * `installList`). Walked from the entries along every import but those: a chunk any other path reaches is kept.
+ * `installList`). Walked from the entries and the scripts the app's page loads, along every import but those: a chunk
+ * any other path reaches is kept. A file an online-only chunk names by URL (its worker) is online-only too, unless a
+ * kept chunk names it as well.
  */
 export function optionalFiles(bundle: Iterable<BundleFile>): { onlineOnly: string[]; languages: Record<string, string[]> } {
-  const chunks = new Map([...bundle].filter((file) => file.type === "chunk").map((file) => [file.fileName, file]));
+  const files = [...bundle];
+  const chunks = new Map(files.filter((file) => file.type === "chunk").map((file) => [file.fileName, file]));
   const facade = (file: BundleFile) => file.facadeModuleId?.replace(/\\/g, "/") ?? "";
   const languageOf = (file: BundleFile) => LANGUAGE_MODULE.exec(facade(file))?.[1];
   const door = (file: BundleFile) => languageOf(file) !== undefined || ONLINE_ONLY_MODULES.some((id) => facade(file).includes(id));
@@ -134,7 +153,7 @@ export function optionalFiles(bundle: Iterable<BundleFile>): { onlineOnly: strin
     }
     return seen;
   };
-  const kept = walk([...chunks.values()].filter((file) => file.isEntry).map((file) => file.fileName), new Set(), true);
+  const kept = walk([...[...chunks.values()].filter((file) => file.isEntry).map((file) => file.fileName), ...pageScripts(files)], new Set(), true);
   const languages: Record<string, string[]> = {};
   for (const file of chunks.values()) {
     const language = languageOf(file);
@@ -142,7 +161,11 @@ export function optionalFiles(bundle: Iterable<BundleFile>): { onlineOnly: strin
     languages[language] = [...walk([file.fileName], new Set(), false)].filter((name) => !kept.has(name)).sort();
   }
   const ofLanguages = new Set(Object.values(languages).flat());
-  const onlineOnly = [...chunks.keys()].filter((name) => !kept.has(name) && !ofLanguages.has(name)).sort();
+  const onlineChunks = [...chunks.keys()].filter((name) => !kept.has(name) && !ofLanguages.has(name));
+  const assetsOf = (names: Iterable<string>) => [...names].flatMap((name) => [...(chunks.get(name)?.viteMetadata?.importedAssets ?? [])]);
+  const keptAssets = new Set(assetsOf([...kept, ...ofLanguages]));
+  const onlineAssets = assetsOf(onlineChunks).filter((name) => !keptAssets.has(name));
+  const onlineOnly = [...new Set([...onlineChunks, ...onlineAssets])].sort();
   return { onlineOnly, languages };
 }
 

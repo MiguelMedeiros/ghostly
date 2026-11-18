@@ -4,6 +4,8 @@ import type { LinkView } from "@ghostly/browser/shared/types";
 import { ChatServicesDialog } from "../../components/ChatServicesDialog";
 import { servicesUnavailable } from "../../lib/servicesAvailability";
 import type { PeerLinkState } from "../../lib/platform";
+import { translateWith } from "../../locales/translate";
+import { LANGUAGES, LOCALES } from "../i18n/locales";
 import { linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 
@@ -22,10 +24,19 @@ describe("shared services in a paired chat: why they cannot travel", () => {
     ["an older chat (no paired session)", { sessionOffers: undefined, capabilities: { files: true, payments: false } }, null],
     ["this app offers nothing (the web app)", { sessionOffers: { mine: ["calls/1"], peer: both.peer }, capabilities: { files: true, payments: false, services: false } }, null],
     ["on the DHT", { dataLink: "idle", pairing: { status: "connecting" } as Pairing, sessionOffers: { mine: both.mine, peer: null }, capabilities: { files: false, payments: false, services: false } }, "Shared services open while you are connected live."],
-    ["live, the contact has not said (older app)", { sessionOffers: { mine: both.mine, peer: null }, capabilities: { files: true, payments: false, services: false } }, "Ana needs an updated Ghostly to open shared services."],
-    ["live, the contact does not offer it", { sessionOffers: { mine: both.mine, peer: ["calls/1"] }, capabilities: { files: true, payments: false, services: false } }, "Ana's app cannot open or share apps (the web app cannot reach local apps)."],
+    ["live, the contact has not said (older app)", { sessionOffers: { mine: both.mine, peer: null }, capabilities: { files: true, payments: false, services: false } }, "⁨Ana⁩ needs an updated Ghostly to open shared services."],
+    ["live, the contact does not offer it", { sessionOffers: { mine: both.mine, peer: ["calls/1"] }, capabilities: { files: true, payments: false, services: false } }, "⁨Ana⁩'s app cannot open or share apps (the web app cannot reach local apps)."],
   ])("%s", (_, patch, want) => {
     expect(servicesUnavailable(peer(patch), "Ana")).toBe(want);
+  });
+
+  // A Hebrew name in a left-to-right line, or a Latin one ending in "!" in an Arabic line, would turn the sentence around.
+  it.each(LANGUAGES)("in %s, the contact's name is isolated from the sentence around it", (language) => {
+    const t = translateWith(LOCALES[language], language);
+    for (const offers of [null, ["calls/1"]]) {
+      const why = servicesUnavailable(peer({ sessionOffers: { mine: both.mine, peer: offers }, capabilities: { files: true, payments: false, services: false } }), "שרה!", t);
+      expect(why).toContain("⁨שרה!⁩");
+    }
   });
 
   it("the chat's Services dialog shows it under the title, and nothing once apps can travel", () => {

@@ -385,7 +385,7 @@
           "fields": {
             "handle": {
               "help": "你的 Bluesky handle、你自己的域名（如果在用），或你的 DID。",
-              "label": "Handle"
+              "label": "用户名"
             }
           },
           "label": "你的服务器（Bluesky 或其他 PDS）"
@@ -396,7 +396,7 @@
           "fields": {
             "handle": {
               "help": "你的 Bluesky handle、你自己的域名（如果在用），或你的 DID。",
-              "label": "Handle"
+              "label": "用户名"
             }
           },
           "label": "你的服务器，完全访问（较旧的服务器）"
@@ -818,6 +818,65 @@
   "received": {
     "checked": "{{category}} · {{time}} 检查",
     "title": "来自你的联系人"
+  },
+  "refusal": {
+    "dhtInvalid": "这不是有效的 did:dht",
+    "dhtMalformed": "did:dht 文档格式错误",
+    "dhtNotFound": "这个 did:dht 没有发布任何文档",
+    "dhtUnsigned": "did:dht 记录不是由该 DID 的密钥签名的",
+    "documentNoId": "DID 文档没有 id",
+    "documentNotList": "DID 文档的 {{name}} 不是列表",
+    "documentNotObject": "DID 文档不是 JSON 对象",
+    "documentOtherDid": "这个 DID 文档属于另一个 DID",
+    "fileOtherStatement": "{{url}} 不是这个证明的声明",
+    "jwkCoordinates": "JWK 坐标是 32 字节",
+    "jwkMalformed": "这个 {{curve}} JWK 格式错误",
+    "jwkNotObject": "这个 JWK 不是对象",
+    "jwsAlgNone": "JWS 没有指定算法：Ghostly 检查 EdDSA、ES256K 和 ES256",
+    "jwsAlgOther": "JWS 使用了其他算法：Ghostly 检查 EdDSA、ES256K 和 ES256",
+    "jwsB64": "JWS 的 b64 头部既不是 true 也不是 false",
+    "jwsB64Crit": "b64 为 false 的 JWS 必须在 crit 中列出它",
+    "jwsB64Detached": "b64 为 false 的 JWS 必须是分离式的（header..signature）",
+    "jwsCrit": "JWS 需要 Ghostly 不认识的扩展（crit）",
+    "jwsHeaderNotJson": "JWS 头部不是 base64url 编码的 JSON",
+    "jwsHeaderNotObject": "JWS 头部不是 JSON 对象",
+    "jwsKeyCurve": "JWS 指定的密钥不是 {{curve}} 密钥：JWS 写的是 {{alg}}",
+    "jwsKeyOtherDid": "JWS 指定的密钥不是这个 DID 的密钥",
+    "jwsKeyUnknown": "DID 文档没有列出 JWS 指定的密钥",
+    "jwsKid": "JWS 的 kid 不是密钥 ID",
+    "jwsMismatch": "JWS 签名不匹配：请用这个 DID 的密钥，完全按照显示的声明签名",
+    "jwsOtherText": "JWS 包含的是另一段文本：请完全按照显示的声明签名",
+    "jwsParts": "紧凑 JWS 由点分隔的三部分组成",
+    "jwsPayloadEncoding": "JWS 载荷不是 base64url",
+    "jwsSignatureEncoding": "JWS 签名不是 base64url",
+    "jwsSignatureLength": "{{alg}} 签名是 64 字节",
+    "keyNotListed": "签名所用的密钥未列在 DID 文档的 authentication 或 assertionMethod 下",
+    "keyNotPoint": "这个 {{curve}} 密钥不是有效的点",
+    "noCurveKey": "DID 文档没有列出用于 {{alg}} 的 {{curve}} 密钥",
+    "notBase64url": "不是 base64url",
+    "notCanonical": "DID 不是规范形式",
+    "notCanonicalBase64url": "不是规范的 base64url",
+    "notJws": "这不是紧凑 JWS",
+    "notSignature": "这不是签名：请粘贴 JWS，或 hex 或 base64 格式的签名",
+    "notWeb": "不是 did:web",
+    "otherKey": "签名所用的密钥不是证明指定的那个",
+    "paste": "请粘贴签名",
+    "pasteJwsAlone": "只粘贴 JWS：它的头部会指明密钥（kid）",
+    "proofId": "证明 ID 无效",
+    "proofKeyOtherDid": "证明指定的密钥不是这个 DID 的密钥",
+    "proofKeyUnknown": "DID 文档没有列出证明指定的密钥",
+    "signatureLength": "签名是 64 字节（ECDSA 也可以是 DER）",
+    "signatureMismatch": "签名不匹配：请用这个 DID 的密钥，完全按照显示的声明签名",
+    "signatureTooLong": "这作为签名太长了",
+    "smallOrder": "这个 Ed25519 密钥是小阶点，没有与之对应的私钥",
+    "statementNotPlain": "该声明无法以纯文本签名",
+    "urlNotText": "{{url}} 不是文本",
+    "urlTooLarge": "{{url}} 太大了",
+    "webAscii": "did:web：请用 ASCII 书写域名（国际化域名用 punycode）",
+    "webPercent": "did:web 域名不使用百分号编码，端口前的 %3A 除外",
+    "webPort": "did:web：该端口无效",
+    "webSegment": "did:web：每个路径段只能包含字母、数字、点、短横线、下划线或波浪号",
+    "webSegments": "did:web：路径最多 8 段"
   },
   "share": {
     "captionMine": "你共享了此身份",

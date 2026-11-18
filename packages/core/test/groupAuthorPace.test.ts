@@ -201,3 +201,24 @@ describe("one member's messages past its pace, every member online", { timeout: 
     expect((await online(burst(100, 0))).live).toBe(2 * GROUP_LIMITS.outlog);
   });
 });
+
+it("a message deleted for everyone leaves no readable copy among the ones kept past the log", async () => {
+  const mesh = new Mesh();
+  const alice = mesh.add(GroupSession.create("Ghosts"), "Alice");
+  await admit(mesh, alice, "Bob");
+  const start = Date.now() + 60_000;
+  mesh.clock = start;
+  const ids: string[] = [];
+  for (let i = 0; i < 100; i++) {
+    const sent = await alice.sendText(`line ${i}`, start); await mesh.settle();
+    if ("error" in sent) throw new Error(sent.error);
+    ids.push(sent.id);
+  }
+  const owed = alice.state.owed ?? [];
+  expect(owed.length).toBeGreaterThan(0);
+  const at = ids.findIndex(id => owed.some(f => alice.messageIdOf(f) === id));
+  alice.forget(ids[at]);
+  const kept = alice.state.owed!.find(f => alice.messageIdOf(f) === ids[at])!;
+  expect(kept).toMatchObject({ c: "", sig: "" });
+  expect(alice.state.owed!.filter(f => f.c)).toHaveLength(owed.length - 1);
+});

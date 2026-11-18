@@ -231,8 +231,10 @@
     "fullInvited": "The group is full ({{max}} of {{max}}), counting invitations not answered yet ({{invited}}). Nobody else can be invited until someone leaves.",
     "invite": "Invite a contact",
     "inviteAction": "Invite",
+    "inviteLabel": "Invite {{name}}",
     "invited": "Invited…",
     "makeAdmin": "Hand over admin",
+    "makeAdminLabel": "Hand over admin to {{name}}",
     "missing": "{{count}} of their messages have not arrived yet",
     "missingOne": "{{count}} of their messages has not arrived yet",
     "needsBothHint": "Groups need both apps connected and updated",
@@ -242,6 +244,7 @@
     "notReachable": "not reachable",
     "reachable": "reachable",
     "remove": "Remove",
+    "removeLabel": "Remove {{name}}",
     "removePicture": "Remove picture"
   },
   "menu": {
