@@ -12,7 +12,9 @@ import { profilePaths, type ProfilePaths } from "../src/profiles";
  * The folder a long-path profile's socket goes in (`runtimePath`) is removed when its socket closes, when nothing else
  * is in it: left behind, one empty folder per profile piled up in the temp folder.
  */
-const root = mkdtempSync(join(tmpdir(), "gh-rtf-"));
+// Under a short base off Windows: a long temp folder (macOS's `/var/folders/…/T/`) would push the runtime socket over
+// the 100-byte limit, and `runtimePath` would fall back to `/tmp` instead of the folder each test means.
+const root = mkdtempSync(process.platform === "win32" ? join(tmpdir(), "gh-rtf-") : "/tmp/gh-rtf-");
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 /** A runtime folder of this user's alone, as `$XDG_RUNTIME_DIR` and macOS's `$TMPDIR` are. */
