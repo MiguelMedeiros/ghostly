@@ -5,7 +5,7 @@ import { bech32m } from "@scure/base";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { describe, expect, it } from "vitest";
 import {
-  DEVICE_INVITE_BYTES, DEVICE_INVITE_LIFETIME_S, createChatInvite, createDeviceInvite, deviceInviteJoinerKeyZ32, deviceInviteJoinerParams, encodeDeviceInvite,
+  DEVICE_INVITE_BYTES, DEVICE_INVITE_LIFETIME_S, createChatInvite, createDeviceInvite, deviceInviteExpired, deviceInviteJoinerKeyZ32, deviceInviteJoinerParams, encodeDeviceInvite,
   enrollCancelFrame, enrollCancelReason, enrollDigits, enrollGrantFrame, enrollHelloFrame, enrollMessage, enrollProofFrame, formatEnrollDigits, fromBase64Url,
   identityFromSeed, identityFromSeedB64, readDeviceInvite, readEnrollGrant, readEnrollHello, readInviteCode, seedSigner, toBase64Url, toZ32, utf8Encode,
   verifyEnrollProof, type DeviceInvite,
@@ -115,9 +115,28 @@ describe("device invite refusals", () => {
     expect(readDeviceInvite(createChatInvite().inviteCode, NOW)).toEqual({ ok: false, reason: "chat" });
   });
 
-  it("refuses a code past its time", () => {
-    expect(readDeviceInvite(encodeDeviceInvite(fixedInvite(NOW)), NOW)).toEqual({ ok: false, reason: "expired" });
-    expect(readDeviceInvite(encodeDeviceInvite(fixedInvite(NOW - 1)), NOW)).toEqual({ ok: false, reason: "expired" });
+  // The bound is a day (DEVICE_INVITE_READ_SLACK_S), written out here so a change to it is a change to this test.
+  const DAY = 86_400;
+
+  it("takes the inviter's word: a fresh code read on a clock that runs ahead of the inviter's is good", () => {
+    // Minutes ahead (no time sync), hours ahead (a wrong time zone set as local time), up to a day.
+    for (const ahead of [0, 599, 600, 660, 3_600, 14 * 3_600, DAY]) {
+      const side = createDeviceInvite(inviter.publicKey, NOW);
+      expect(readDeviceInvite(side.code, NOW + ahead), `${ahead} s ahead`).toMatchObject({ ok: true, invite: { expires: NOW + DEVICE_INVITE_LIFETIME_S } });
+    }
+  });
+
+  it("refuses a code only a day past its time by this clock: old by any likely clock", () => {
+    expect(readDeviceInvite(encodeDeviceInvite(fixedInvite(NOW)), NOW)).toMatchObject({ ok: true });
+    expect(readDeviceInvite(encodeDeviceInvite(fixedInvite(NOW - DAY + 1)), NOW)).toMatchObject({ ok: true });
+    expect(readDeviceInvite(encodeDeviceInvite(fixedInvite(NOW - DAY)), NOW)).toEqual({ ok: false, reason: "expired" });
+    // A code made a day and its ten minutes ago, read on a clock that agrees with the inviter's, or one an hour behind it.
+    const old = createDeviceInvite(inviter.publicKey, NOW - DAY - DEVICE_INVITE_LIFETIME_S).code;
+    expect(readDeviceInvite(old, NOW)).toEqual({ ok: false, reason: "expired" });
+    expect(readDeviceInvite(createDeviceInvite(inviter.publicKey, NOW - 2 * DAY).code, NOW - 3_600)).toEqual({ ok: false, reason: "expired" });
+    // The one rule the reader and the join dialogs share.
+    expect(deviceInviteExpired(NOW - DAY, NOW)).toBe(true);
+    expect(deviceInviteExpired(NOW - DAY + 1, NOW)).toBe(false);
   });
 
   it("a version above every one it knows is a newer Ghostly's, never a device code nor a chat invite", () => {

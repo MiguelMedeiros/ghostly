@@ -9,6 +9,7 @@ import { NostrPublishDialog } from "./NostrPublishDialog";
 import { externalLinkProps } from "../../lib/externalLink";
 import { problemLine } from "../../lib/problemText";
 import { initial } from "../../lib/initial";
+import { shownUrl } from "../../lib/parse";
 
 
 /**
@@ -59,7 +60,8 @@ export function NostrContactCard({ linkId, view, name, compact = false, turning 
               <p className="text-sm text-text-primary break-words" data-testid="nostr-profile-name">{profile.name ? <bdi>{profile.name}</bdi> : t("identities.nostr.noName")}{profile.handle && <span className="text-xs text-text-muted"> · <bdi>@{profile.handle}</bdi></span>}</p>
               {profile.nip05 && <p data-testid="nostr-profile-nip05" className="break-all"><span dir="ltr">{profile.nip05}</span> <span className="text-[11px]">{t("identities.nostr.nip05Unchecked")}</span></p>}
               {profile.about && <p dir="auto" className="whitespace-pre-wrap break-words text-text-secondary" data-testid="nostr-profile-about">{profile.about}</p>}
-              {profile.website && <a {...externalLinkProps(profile.website)} rel="noopener noreferrer nofollow" className="text-accent underline break-all">{profile.website}</a>}
+              {/* An address, left to right as the activity panel's: in Arabic a bare host's closing "/" was drawn first. */}
+              {profile.website && <a {...externalLinkProps(profile.website)} rel="noopener noreferrer nofollow" dir="ltr" data-testid="nostr-profile-website" className="text-accent underline break-all"><bdi>{shownUrl(profile.website)}</bdi></a>}
               {profile.hasPicture && !profile.avatar && <p className="text-[11px]">{t("identities.nostr.pictureHost")}</p>}
             </div>
           </div>

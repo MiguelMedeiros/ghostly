@@ -10,6 +10,7 @@
 //   npm run test:affected -- --files a.ts b.tsx  # these files instead of the diff
 //   npm run test:affected -- --no-e2e --no-rust  # leave those out (also --no-lint, --no-typecheck)
 //   npm run test:affected -- --no-stack          # @gated tests: .env.e2e as it is, the shared stack not asked
+//   npm run test:affected -- --unit-group 3/4    # only CI draft runner 3's unit tests (cli half 1/2)
 //
 // JOBS (default 2): vitest workers, cargo test threads. E2E_WORKERS (default 2): Playwright workers.
 // What is picked and why: tools/scripts/affected/select.mjs. The e2e mapping is e2e/features.json "paths".
@@ -30,7 +31,11 @@ const option = (name) => {
   const i = argv.indexOf(name);
   return i >= 0 ? argv[i + 1] : undefined;
 };
-const usage = () => readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1, 17).map((l) => l.replace(/^\/\/ ?/, "")).join("\n");
+// --help: the comment block at the top of this file, whatever its length.
+const usage = () => {
+  const lines = readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1);
+  return lines.slice(0, lines.findIndex((l) => !l.startsWith("//"))).map((l) => l.replace(/^\/\/ ?/, "")).join("\n");
+};
 if (flag("--help") || flag("-h")) {
   console.log(usage());
   process.exit(0);
@@ -68,6 +73,11 @@ const noLint = flag("--no-lint");
 const noTypecheck = flag("--no-typecheck");
 const noStack = flag("--no-stack");
 const port = option("--port") ?? process.env.E2E_WEB_PORT;
+// A mistyped port would only show at the e2e step, after the unit tests, lint, typecheck and the web build.
+if (port && !(/^\d+$/.test(port) && Number(port) >= 1 && Number(port) <= 65535)) {
+  console.error(`${flag("--port") ? `--port ${port}` : `E2E_WEB_PORT=${port}`}: give a port number from 1 to 65535 (e.g. --port 50310)`);
+  process.exit(2);
+}
 const webUrl = process.env.E2E_WEB_URL;
 // --unit-group <i>/<n>: only the unit projects of group i of n (CI's draft tier runs one group per runner; select.mjs
 // UNIT_ALONE says which project goes where, UNIT_HALVED which run in two halves, `vitest --shard`, in two groups).

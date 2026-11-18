@@ -4,7 +4,7 @@ import { appCardUrl, appRef, isAppRef, isAppUrl, type AppPermission } from "@gho
 import { list, node, str, type ApiContext, type Method } from "./apiKit";
 import { isAppFetchUrl } from "@ghostly/browser/engine/appFetch";
 import { checkedBundle } from "./apps";
-import { CliError } from "./errors";
+import { CliError, shownValue } from "./errors";
 
 /*
  * `app serve` (WISP 1200 § A bot on the other side): the apps this profile speaks for, in chats, as a bot. No app runs
@@ -83,7 +83,7 @@ export const APP_SERVE_METHODS: Record<string, Method> = {
     if (grant.includes("internet")) throw new CliError("refused", "internet cannot be granted here: no app's page runs on the CLI, and a bot reaches the network as its own program");
     if (grant.includes("files")) throw new CliError("refused", "files cannot be granted here: no app's page runs on the CLI to ask a person for a file, and a bot reads files as its own program");
     const ungrantable = grant.filter((p) => !(GRANTABLE as readonly string[]).includes(p));
-    if (ungrantable.length) throw new CliError("bad_request", `grant takes ${GRANTABLE.join(" or ")}, not ${ungrantable.map((p) => JSON.stringify(p)).join(", ")}`);
+    if (ungrantable.length) throw new CliError("bad_request", `grant takes ${GRANTABLE.join(" or ")}, not ${ungrantable.map((p) => shownValue(p)).join(", ")}`);
     const given = str(params, "url");
     if (given !== undefined && !isAppUrl(given)) throw new CliError("bad_request", "url is where a contact's app reads the bundle: https only, no user or password, jsDelivr only at a full commit");
     if (given !== undefined && /[?#]/.test(given)) throw new CliError("bad_request", "url goes to contacts on the app's card: no query or fragment (a private repository's token rides there); publish the app in a public repository");

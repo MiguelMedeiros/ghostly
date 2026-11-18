@@ -54,6 +54,7 @@
   "identity": "Identité",
   "identityShared": "{{count}} partagée(s) dans cette discussion",
   "media": "Photos et vidéos",
+  "nearSoft": "Environ {{bytes}} octets tiennent dans la DHT une fois scellés : raccourcissez-le pour l'y envoyer",
   "noEmoji": "Aucun emoji trouvé",
   "noGifs": "Aucun GIF trouvé",
   "overSoft": "Au-delà des {{bytes}} octets que porte la DHT : il part dès que la liaison directe est là",

@@ -7,9 +7,9 @@ import {
   readAppRevocations, readAppStore, repeatedJsonKey, seedSigner, setAppSignatureFastPath, signAppObject, signAppRevocation, signAppStore, toBase64Url, toZ32, type AppBundle,
   type AppManifest, type AppRevokeStatement, type AppStoreIndex, type AppStoreReading, type SignedAppRevocation, type Signer,
 } from "@ghostly/core";
-import { APP_FETCH_HOSTS, isAppFetchUrl } from "@ghostly/browser/engine/appFetch";
+import { APP_FETCH_HOSTS, APP_FETCH_LIMITS, isAppFetchUrl } from "@ghostly/browser/engine/appFetch";
 import { templateManifest, templatePage, templateReadme } from "./appTemplate";
-import { CliError, localFileError } from "./errors";
+import { CliError, localFileError, shownValue } from "./errors";
 import { jsonOut } from "./jsonOut";
 import { guardText } from "./secretGuard";
 import { nativeEd25519 } from "./nativeEd25519";
@@ -147,6 +147,24 @@ function readBundleFile(path: string): Uint8Array {
 }
 
 /**
+ * A URL as an answer says it: its query and fragment, where a private repository's token rides, as `?…`, and a user
+ * or password (a redirect's) as `…@`.
+ */
+function saidUrl(url: string): string {
+  try {
+    const at = new URL(url);
+    const query = at.search !== "" || at.hash !== "";
+    const user = at.username !== "" || at.password !== "";
+    at.search = "";
+    at.hash = "";
+    at.username = "";
+    at.password = "";
+    const said = user ? at.href.replace("//", "//…@") : at.href;
+    return query ? `${said}?…` : said;
+  } catch { return url; }
+}
+
+/**
  * A bundle at an https URL, as a client fetches one: `https:` only, no user or password, jsDelivr only at a full
  * commit (WISP 1200 · Manifest, "Every URL"); every redirect is held to the same rule, and the download stops past
  * 16 MiB. A redirect stays on the URL's own host and port or goes to a host a client reads from (isAppFetchUrl): never
@@ -160,29 +178,29 @@ async function fetchBundle(url: string): Promise<Uint8Array> {
   for (let hop = 0; ; hop++) {
     if (!isAppUrl(at)) {
       throw new CliError(hop ? "refused" : "usage", hop
-        ? `${url} redirects to ${at}, which a client does not read (https only, no user or password, jsDelivr only at a full commit)`
+        ? `${saidUrl(url)} redirects to ${saidUrl(at)}, which a client does not read (https only, no user or password, jsDelivr only at a full commit)`
         : `Not a URL a client reads: https only, at most ${APP_BUNDLE_LIMITS.url} characters, no user or password, and jsDelivr only as https://cdn.jsdelivr.net/gh/<owner>/<repo>@<40-hex commit>/<path>`);
     }
     if (hop && new URL(at).host !== new URL(url).host && !isAppFetchUrl(at)) {
-      throw new CliError("refused", `${url} redirects to ${at}, on another host: a redirect stays on ${new URL(url).host} or goes to ${APP_FETCH_HOSTS.join(" or ")}`);
+      throw new CliError("refused", `${saidUrl(url)} redirects to ${saidUrl(at)}, on another host: a redirect stays on ${new URL(url).host} or goes to ${APP_FETCH_HOSTS.join(" or ")}`);
     }
     let response: Response;
     try {
       response = await fetch(at, { redirect: "manual", signal });
     } catch (error) {
-      if (error instanceof Error && error.name === "TimeoutError") throw new CliError("timeout", `${at} did not answer in ${FETCH_TIMEOUT_MS / 1000} s`);
-      throw new CliError("unavailable", `Could not read ${at}: ${error instanceof Error ? error.message : String(error)}`);
+      if (error instanceof Error && error.name === "TimeoutError") throw new CliError("timeout", `${saidUrl(at)} did not answer in ${FETCH_TIMEOUT_MS / 1000} s`);
+      throw new CliError("unavailable", `Could not read ${saidUrl(at)}: ${error instanceof Error ? error.message : String(error)}`);
     }
     if (response.status >= 300 && response.status < 400 && response.headers.get("location")) {
       await response.body?.cancel();
-      if (hop >= MAX_REDIRECTS) throw new CliError("refused", `${url} redirects more than ${MAX_REDIRECTS} times`);
+      if (hop >= MAX_REDIRECTS) throw new CliError("refused", `${saidUrl(url)} redirects more than ${MAX_REDIRECTS} times`);
       at = new URL(response.headers.get("location")!, at).href;
       continue;
     }
-    if (response.status === 404 || response.status === 410) { await response.body?.cancel(); throw new CliError("not_found", `${at} answered ${response.status}`); }
-    if (!response.ok || !response.body) { await response.body?.cancel(); throw new CliError("unavailable", `${at} answered ${response.status}`); }
+    if (response.status === 404 || response.status === 410) { await response.body?.cancel(); throw new CliError("not_found", `${saidUrl(at)} answered ${response.status}`); }
+    if (!response.ok || !response.body) { await response.body?.cancel(); throw new CliError("unavailable", `${saidUrl(at)} answered ${response.status}`); }
     const limit = APP_BUNDLE_LIMITS.bundleBytes;
-    const tooLarge = (bytes: number | string) => refused(`${url} is not a valid bundle`, { reason: "too-large", detail: `${bytes} bytes` });
+    const tooLarge = (bytes: number | string) => refused(`${saidUrl(url)} is not a valid bundle`, { reason: "too-large", detail: `${bytes} bytes` });
     const length = Number(response.headers.get("content-length"));
     if (Number.isFinite(length) && length > limit) { await response.body.cancel(); throw tooLarge(length); }
     const chunks: Uint8Array[] = [];
@@ -198,8 +216,8 @@ async function fetchBundle(url: string): Promise<Uint8Array> {
       }
     } catch (error) {
       if (error instanceof CliError) throw error;
-      if (error instanceof Error && error.name === "TimeoutError") throw new CliError("timeout", `${at} did not finish in ${FETCH_TIMEOUT_MS / 1000} s`);
-      throw new CliError("unavailable", `Could not read ${at}: ${error instanceof Error ? error.message : String(error)}`);
+      if (error instanceof Error && error.name === "TimeoutError") throw new CliError("timeout", `${saidUrl(at)} did not finish in ${FETCH_TIMEOUT_MS / 1000} s`);
+      throw new CliError("unavailable", `Could not read ${saidUrl(at)}: ${error instanceof Error ? error.message : String(error)}`);
     }
     const out = new Uint8Array(total);
     let offset = 0;
@@ -226,16 +244,17 @@ export async function verifyApp(source: string): Promise<Record<string, unknown>
 
 /**
  * The revocations of a `ghostly-revoke.json`, a URL or a file, as a client reads it. None there, one that does not
- * answer, or one a client would not read, revokes nothing.
+ * answer, or one a client would not read, revokes nothing. A revocation `checked` holds is not verified again: one
+ * repeated in a file, or in the files beside the URL and its sources, is checked once.
  */
-async function revocationsIn(file: string, isUrl: boolean): Promise<SignedAppRevocation[]> {
+async function revocationsIn(file: string, isUrl: boolean, checked?: Set<string>): Promise<SignedAppRevocation[]> {
   let bytes: Uint8Array;
   try {
     if (isUrl) bytes = await fetchBundle(file);
     else if (!existsSync(file)) return [];
     else bytes = readBundleFile(file);
   } catch { return []; }
-  const read = readAppRevocations(bytes);
+  const read = readAppRevocations(bytes, checked);
   return read.ok ? read.revocations : [];
 }
 
@@ -257,9 +276,10 @@ function besideUrl(url: string): string[] {
  */
 export async function checkedBundle(source: string): Promise<{ bundle: AppBundle; bytes: Uint8Array; url?: string }> {
   const isUrl = /^[a-z][a-z0-9+.-]*:\/\//i.test(source);
+  const said = isUrl ? saidUrl(source) : source;
   const bytes = isUrl ? await fetchBundle(source) : readBundleFile(userPath(source));
   const read = readAppBundle(bytes);
-  if (!read.ok) throw refused(`${source} is not a valid bundle`, read);
+  if (!read.ok) throw refused(`${said} is not a valid bundle`, read);
   const m = read.bundle.manifest;
   const version = { ref: appRef(m.publisher, m.name), sequence: m.sequence, digest: read.bundle.digest };
   // The `sources` are the publisher's words: beside them only on the hosts a client reads from (isAppFetchUrl), never a
@@ -267,12 +287,14 @@ export async function checkedBundle(source: string): Promise<{ bundle: AppBundle
   const files = isUrl
     ? new Set([source, ...(m.sources ?? []).filter(isAppFetchUrl)].flatMap(besideUrl))
     : [join(dirname(userPath(source)), APP_REVOKE_FILE)];
-  // Read together: one host that does not answer holds the check for one wait, not one per file after it.
-  const lists = await Promise.all([...files].map((file) => revocationsIn(file, isUrl)));
+  // Read together: one host that does not answer holds the check for one wait, not one per file after it. Each
+  // revocation's signature is checked once across them all (at most 9 files of 4096).
+  const checked = new Set<string>();
+  const lists = await Promise.all([...files].map((file) => revocationsIn(file, isUrl, checked)));
   for (const [i, file] of [...files].entries()) {
     const revocation = appRevocationFor(version, lists[i]!);
     if (revocation) {
-      throw refused(`${source} is a version its publisher revoked in ${file}: a client stops it`, { reason: "revoked", ...(revocation.statement.reason !== undefined && { detail: revocation.statement.reason }) }, { file });
+      throw refused(`${said} is a version its publisher revoked in ${file}: a client stops it`, { reason: "revoked", ...(revocation.statement.reason !== undefined && { detail: revocation.statement.reason }) }, { file });
     }
   }
   return { bundle: read.bundle, bytes, ...(isUrl && { url: source }) };
@@ -313,9 +335,9 @@ export async function initApp(dirArg: string, what: { name?: string; title?: str
     if (checked.detail === "name is not valid") {
       throw new CliError("usage", what.name === undefined
         ? `The folder's name gives no app name (${JSON.stringify(basename(dir))}): give --name, a lowercase letter then up to 31 lowercase letters, digits or hyphens: ${usage}`
-        : `--name is a lowercase letter then up to 31 lowercase letters, digits or hyphens, not ${JSON.stringify(what.name)}`);
+        : `--name is a lowercase letter then up to 31 lowercase letters, digits or hyphens, not ${shownValue(what.name)}`);
     }
-    if (checked.detail === "title is not valid") throw new CliError("usage", `--title is one line of 1 to ${APP_BUNDLE_LIMITS.title} characters, not ${JSON.stringify(title)}`);
+    if (checked.detail === "title is not valid") throw new CliError("usage", `--title is one line of 1 to ${APP_BUNDLE_LIMITS.title} characters, not ${shownValue(title)}`);
     throw refused("The template makes no valid manifest", checked);
   }
 
@@ -462,7 +484,7 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
     throw refused(`${out} is ${appRef(previous.publisher, previous.name)}, signed by another key (${appFingerprint(previous.publisher)}): a version of an app is signed by its own key`, { reason: "other-app" }, { publisher: previous.publisher });
   }
   if (previous && previous.name !== draft.name) {
-    throw refused(`${out} is the app ${JSON.stringify(previous.name)}, not ${JSON.stringify(draft.name)}: name another --out for another app`, { reason: "other-app" });
+    throw refused(`${out} is the app ${shownValue(previous.name)}, not ${shownValue(draft.name)}: name another --out for another app`, { reason: "other-app" });
   }
 
   if (sequenceArg !== undefined && previous && sequenceArg <= previous.sequence) {
@@ -514,6 +536,12 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
     mkdirSync(dirname(out), { recursive: true });
     writeWhole(out, bundle);
   });
+  // Clients look for updates and ghostly-revoke.json only at the sources on the hosts they read from (isAppFetchUrl).
+  const sources = checked.manifest.sources ?? [];
+  const notes = [
+    ...(key.created ? [madeKeyNote(keyPath, "publisher", key.key)] : []),
+    ...(sources.length && !sources.some(isAppFetchUrl) ? [`${APP_SOURCE} has no source a client reads from (${APP_FETCH_HOSTS.join(" or ")}): clients find no update or revocation of this app; add one there`] : []),
+  ];
 
   return {
     ...described(read.bundle, bundle),
@@ -522,7 +550,7 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
     files: contents.map((f) => f.path),
     ...(skipped.length ? { skipped } : {}),
     keyCreated: key.created,
-    ...(key.created ? { warning: madeKeyNote(keyPath, "publisher", key.key) } : {}),
+    ...(notes.length ? { warning: notes.join("; ") } : {}),
   };
 }
 
@@ -675,6 +703,11 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
   const { indexBytes, sigBytes } = await signAppStore(index as unknown as AppStoreIndex, key.signer, checked);
   const read = readAppStore(indexBytes, sigBytes, now, key.key, checked);
   if (!read.ok) throw refused(`${indexPath} would be refused by a client`, read);
+  // The format takes 16 MiB, but a client reads at most `storeIndexBytes` of an index (4 MiB in phase 1): past it, every
+  // one refuses the whole store as too large.
+  if (indexBytes.length > APP_FETCH_LIMITS.storeIndexBytes) {
+    throw refused(`${indexPath} would be refused by a client`, { reason: "too-large", detail: `${indexBytes.length} bytes signed, a client reads at most ${APP_FETCH_LIMITS.storeIndexBytes} (4 MiB)` });
+  }
   const store = read.store;
   // Unless the signature there is this one's bytes (Ed25519 is deterministic): a run stopped between the signature's
   // rename and the index's, signed again. Not the index's bytes: a held index edited in place is this one's bytes too,
@@ -703,6 +736,8 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
   const notes = [
     ...(key.created ? [madeKeyNote(keyPath, "store", key.key)] : []),
     ...(store.expired ? [`expires (${new Date(store.index.expires * 1000).toISOString()}) is past: clients still install from it and say the store was not updated since then`] : []),
+    // A client installs a listing only from the URLs on the hosts it reads from (isAppFetchUrl).
+    ...store.index.apps.filter((app) => !app.urls.some(isAppFetchUrl)).map((app) => `${app.ref} has no URL a client reads from (${APP_FETCH_HOSTS.join(" or ")}): clients list it and cannot install it; add one there`),
   ];
   return {
     key: key.key, fingerprint: appFingerprint(key.key), name: store.index.name, kind: store.index.kind,

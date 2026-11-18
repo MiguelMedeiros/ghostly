@@ -355,7 +355,7 @@ describe("manifests and storage addresses", () => {
     for (const url of local) { expect(isHoldUrl(url)).toBe(false); expect(isHoldUrl(url, true)).toBe(true); }
     for (const url of [42, null, "", "not a url", "http://10.0.0.1/o", "http://192.168.1.1/cgi-bin/luci?reboot=1", "http://169.254.169.254/latest/meta-data/", "http://s3.example/o",
       "http://localhost.evil.example/o", "file:///etc/passwd", "javascript:alert(1)", `https://s3.example/${"a".repeat(2048)}`,
-      "https://localhost/o", "https://localhost./o", "https://x.localhost:8443/o", "https://127.0.0.1/o", "https://2130706433/o", "https://0x7f.1/o", "https://10.0.0.5:8080/o",
+      "https://localhost/o", "https://localhost./o", "https://localhost../o", "https://localhost.../o", "https://x.localhost:8443/o", "https://127.0.0.1/o", "https://2130706433/o", "https://0x7f.1/o", "https://10.0.0.5:8080/o",
       "https://192.168.1.1/o", "https://169.254.169.254/o", "https://100.64.0.1/o", "https://0.0.0.0/o", "https://[::1]/o", "https://[fd00::1]/o", "https://[::ffff:10.0.0.1]/o",
       "https://user:secret@s3.example/o", "https://user@s3.example/o"]) {
       expect(isHoldUrl(url), String(url)).toBe(false);
@@ -364,7 +364,7 @@ describe("manifests and storage addresses", () => {
   });
 
   it("never trusts a name only a local network answers", () => {
-    for (const url of ["https://router/o", "https://nas.local/o", "https://nas.local./o", "https://gw.lan/o", "https://wiki.internal/o", "https://box.home.arpa/o",
+    for (const url of ["https://router/o", "https://nas.local/o", "https://nas.local./o", "https://nas.local../o", "https://gw.lan/o", "https://wiki.internal/o", "https://box.home.arpa/o",
       "https://fritz.box.home/o", "https://srv.localdomain/o", "https://hr.intranet/o", "https://files.corp/o", "https://NAS.LOCAL/o"]) {
       expect(isHoldUrl(url), url).toBe(false);
       expect(isHoldUrl(url, true), url).toBe(false);

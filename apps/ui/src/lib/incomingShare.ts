@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { LINK_STOP_CHARS } from "@ghostly/core";
 import { linkEnd } from "./parse/links";
 
 /*
@@ -217,24 +218,28 @@ export function keepShareFor(chat: string, share: IncomingShare): void {
 /** How many places `carriesLink` reads, and how far past the link: a sentence's punctuation and closing brackets. */
 const MAX_LINK_LOOKS = 64;
 const MAX_LINK_TAIL = 64;
+/** What may stand right before and right after a link of its own in a shared text. */
+const LINK_BEFORE = new RegExp(`[\\s\\p{Ps}\\p{Pi}"'${LINK_STOP_CHARS}]`, "u");
+const LINK_AFTER = new RegExp(`[\\s${LINK_STOP_CHARS}]`);
 
 /**
- * Whether `text` carries `url` as a link of its own: after the text's start, a space or an opening bracket or quote,
- * and ending where a bubble's link would (`linkEnd`: "https://a.example/p." or "(https://a.example/p)" carry it).
+ * Whether `text` carries `url` as a link of its own: after the text's start, a space, an opening bracket or quote or
+ * the CJK or Arabic punctuation a link stops at ("链接：https://a.example/p"), and ending where a bubble's link would
+ * (`linkEnd`: "https://a.example/p.", "(https://a.example/p)" or "https://a.example/p。見て" carry it).
  * A longer address that starts with it ("https://a.example/p2") or holds it ("…?u=https://a.example/p") does not.
  * Any website can post a share, of megabytes: only the first `MAX_LINK_LOOKS` places it turns up are read, each up to
  * `MAX_LINK_TAIL` characters past it (a word longer than that is not taken for it), so the text is never read once per
  * place. Past those, the link goes in once more, which says nothing wrong.
  */
 function carriesLink(text: string, url: string): boolean {
-  const word = new RegExp(`\\S{0,${url.length + MAX_LINK_TAIL}}`, "y");
+  const word = new RegExp(`[^\\s${LINK_STOP_CHARS}]{0,${url.length + MAX_LINK_TAIL}}`, "y");
   const own = linkEnd(url);
   let looks = 0;
   for (let at = text.indexOf(url); at >= 0 && looks < MAX_LINK_LOOKS; at = text.indexOf(url, at + 1), looks += 1) {
-    if (at > 0 && !/[\s\p{Ps}\p{Pi}"']/u.test(text[at - 1]!)) continue;
+    if (at > 0 && !LINK_BEFORE.test(text[at - 1]!)) continue;
     word.lastIndex = at;
     const found = word.exec(text)![0];
-    if (/\S/.test(text[at + found.length] ?? "")) continue;
+    if (!LINK_AFTER.test(text[at + found.length] ?? " ")) continue;
     if (linkEnd(found) === own) return true;
   }
   return false;

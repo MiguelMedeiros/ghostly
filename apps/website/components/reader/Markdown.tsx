@@ -3,7 +3,8 @@ import Markdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import GithubSlugger from "github-slugger";
 import { resolveReferenceUrl } from "@/lib/references";
-import { ScrollRegion } from "./ScrollRegion";
+import { ScrollRegions } from "./ScrollRegions";
+import { staticHtml } from "./staticHtml";
 
 function textOf(node: ReactNode): string {
   return Children.toArray(node)
@@ -24,6 +25,9 @@ function tableName(table?: HastNode) {
   const heads = (row?.children ?? []).filter((c) => c.tagName === "th").map((c) => hastText(c).trim()).filter(Boolean);
   return heads.length ? `Table: ${heads.join(", ")}` : "Table";
 }
+
+/** A box ScrollRegions watches, a keyboard stop (and, with a name, a region) until it is seen to fit. */
+const scrollBox = (name?: string) => ({ "data-scroll-region": name ?? "", tabIndex: 0, role: name ? "region" : undefined, "aria-label": name });
 
 function Diagram({ source }: { source: string }) {
   const labels = new Map<string, string>();
@@ -54,9 +58,9 @@ function Diagram({ source }: { source: string }) {
       )}
       <details open={!edges.length}>
         <summary>Original Mermaid diagram source</summary>
-        <ScrollRegion as="pre">
+        <pre {...scrollBox()}>
           <code>{source}</code>
-        </ScrollRegion>
+        </pre>
       </details>
     </figure>
   );
@@ -65,7 +69,8 @@ function Diagram({ source }: { source: string }) {
 /**
  * Renders a synced reference document with anchored headings and in-site links. Under a page title (`belowTitle`)
  * the document's own "# Title" repeats it, so it is only an anchor (old links to it still land) and the page keeps
- * a single h1.
+ * a single h1. The article has nothing to hydrate, so it goes into `className`'s box as one HTML string (after
+ * `lead`, plain elements to put before it): the page's flight data then carries that string, not its element tree.
  */
 export function ReferenceMarkdown({
   body,
@@ -73,12 +78,18 @@ export function ReferenceMarkdown({
   idPrefix = "",
   repoLabel = "repository",
   belowTitle = false,
+  className,
+  lang,
+  lead,
 }: {
   body: string;
   sourcePath: string;
   idPrefix?: string;
   repoLabel?: string;
   belowTitle?: boolean;
+  className?: string;
+  lang?: string;
+  lead?: ReactNode;
 }) {
   type MarkdownNode = { type: string; value?: string; children?: MarkdownNode[]; data?: { hProperties?: Record<string, string> } };
   const headingIds = () => (tree: MarkdownNode) => {
@@ -146,9 +157,9 @@ export function ReferenceMarkdown({
     h5: heading("h5"),
     h6: heading("h6"),
     table: ({ node, children, ...props }) => (
-      <ScrollRegion as="div" className="reference-table" name={tableName(node as HastNode | undefined)}>
+      <div className="reference-table" {...scrollBox(tableName(node as HastNode | undefined))}>
         <table {...props}>{children}</table>
-      </ScrollRegion>
+      </div>
     ),
     pre: ({ children }) => {
       const code = Children.toArray(children)[0];
@@ -157,7 +168,7 @@ export function ReferenceMarkdown({
         code.props.className === "language-mermaid"
       )
         return <Diagram source={textOf(code.props.children)} />;
-      return <ScrollRegion as="pre">{children}</ScrollRegion>;
+      return <pre {...scrollBox()}>{children}</pre>;
     },
     a: ({ href, children }) => (
       <a href={href}>
@@ -168,17 +179,21 @@ export function ReferenceMarkdown({
       </a>
     ),
   };
-  return (
-    <Markdown
-      remarkPlugins={[remarkGfm, headingIds]}
-      rehypePlugins={[tableLabels]}
-      skipHtml
-      components={components}
-      urlTransform={(url) =>
-        defaultUrlTransform(url.startsWith("#") ? `#${idPrefix}${url.slice(1)}` : resolveReferenceUrl(url, sourcePath))
-      }
-    >
-      {body}
-    </Markdown>
+  const article = (
+    <>
+      {lead}
+      <Markdown
+        remarkPlugins={[remarkGfm, headingIds]}
+        rehypePlugins={[tableLabels]}
+        skipHtml
+        components={components}
+        urlTransform={(url) =>
+          defaultUrlTransform(url.startsWith("#") ? `#${idPrefix}${url.slice(1)}` : resolveReferenceUrl(url, sourcePath))
+        }
+      >
+        {body}
+      </Markdown>
+    </>
   );
+  return <ScrollRegions className={className} lang={lang} html={staticHtml(article)} />;
 }

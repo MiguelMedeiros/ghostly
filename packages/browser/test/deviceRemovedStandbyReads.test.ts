@@ -29,6 +29,10 @@ const dropKeys = () => new Promise<void>((resolve) => { const r = indexedDB.dele
 async function run(ms: number): Promise<void> {
   for (let t = 0; t < ms; t += 250) { await vi.advanceTimersByTimeAsync(250); await yieldToLoop(); await yieldToLoop(); }
 }
+/** Fake time in 2 s steps: hours of 10-minute reads (a read takes several timer turns: longer steps put them off). */
+async function longRun(ms: number): Promise<void> {
+  for (let t = 0; t < ms; t += 2_000) { await vi.advanceTimersByTimeAsync(2_000); await yieldToLoop(); await yieldToLoop(); }
+}
 async function settled<T>(work: Promise<T>): Promise<T> {
   let done = false;
   const tracked = work.finally(() => { done = true; });
@@ -109,5 +113,40 @@ describe("a standby removed while its screen stays open", () => {
     // One read of its own for it, not one per link event.
     const tabletReads = turn.calls.filter((call) => call.op === "read").length - reads;
     expect(tabletReads).toBeLessThanOrEqual(4);
+
+    // Removed is final: the screen left open reads the turn no more, its 10-minute reads included.
+    const after = turn.calls.filter((call) => call.op === "read").length;
+    await longRun(60 * 60_000);
+    expect(turn.calls.filter((call) => call.op === "read").length - after, "no turn read in the hour after removed").toBe(0);
+  });
+});
+
+describe("a screen that opens on a removed device", () => {
+  async function removedTablet() {
+    const d = newDeviceSetSecret(), keys = turnKeys(d);
+    const turn = new FakeTurnNetwork();
+    const desktop = await makeDevice("Desktop"), tablet = await makeDevice("Tablet");
+    const packet = await signTurnPacket(keys, { turn: 7, rev: 0, author: 0, active: 0, slots: [{ key: desktop.key.publicKey, name: desktop.name }, { key: tablet.key.publicKey, name: tablet.name }, null, null], instance: new Uint8Array(8).fill(1) }, (bytes) => desktop.key.sign(bytes));
+    turn.seed(packet);
+    await write(tablet, "removed", d, [desktop, tablet], packet);
+    const links = new DeviceLinks({ profile: tablet.profile, transport: pkarr.transport(), pollIntervals: RELAY_POLL_INTERVALS, createPeerConnection: () => fakePeerConnection("Tablet"), turn, watchTurn: true });
+    engines.push(links);
+    await settled(links.start({ gate: {} as DeviceGate, show: () => {} }));
+    return { turn, tablet, d, desktop, packet, links };
+  }
+
+  it("reads the turn neither when it opens nor every 10 minutes after", async () => {
+    const { turn } = await removedTablet();
+    await longRun(6 * 60 * 60_000);
+    expect(turn.calls.filter((call) => call.op === "read")).toHaveLength(0);
+  });
+
+  it("reads it again once a new enrollment makes the device a standby", async () => {
+    const { turn, tablet, d, desktop, packet, links } = await removedTablet();
+    await longRun(30 * 60_000);
+    expect(turn.calls.filter((call) => call.op === "read")).toHaveLength(0);
+    await write(tablet, "standby", d, [desktop, tablet], packet);
+    await settled(links.refresh());
+    expect(await until(() => turn.calls.some((call) => call.op === "read"), 5_000)).toBe(true);
   });
 });

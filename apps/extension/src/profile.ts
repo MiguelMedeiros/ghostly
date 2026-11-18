@@ -76,7 +76,8 @@ export function startAsProfileInUse(): void {
     return;
   }
   if (switchUnderWay()) return;
-  announceSwitch(activeProfileId());
+  // Made in another tab: the overlay says so, or the person here sees their profile change for no reason they know.
+  announceSwitch(activeProfileId(), { elsewhere: true });
   history.replaceState(null, "", `#${lastRouteOf(activeProfileId())}`);
   location.reload();
 }

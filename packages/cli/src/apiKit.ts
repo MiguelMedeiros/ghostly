@@ -204,18 +204,24 @@ const namedAs = (key: string, name: string | null | undefined) => key !== "" && 
  * controls both of those (a joiner's chat id is made from the inviter's code), so neither wins over a label, and a ref
  * that fits one chat's prefix and another's name is refused. A ref shaped as a chat's id is only ever an id, or a label
  * given here. `group:<ref>` is never a chat (a group, as everywhere). A ref
- * that names no chat but one of `groups` says it is a group (see `noChat`).
+ * that names no chat but one of `groups` says it is a group (see `noChat`, with `onlyChat`).
  */
-export function findChat(links: readonly LinkView[], ref: string, groups: readonly GroupView[] = []): LinkView {
-  return chatBy(links, ref, groups).link;
+export function findChat(links: readonly LinkView[], ref: string, groups: readonly GroupView[] = [], onlyChat?: string): LinkView {
+  return chatBy(links, ref, groups, onlyChat).link;
 }
 
 /**
  * No chat by `ref`. A group's id, prefix or name (or `group:<id>`) says it is a group, as `groupOf` says a chat is one:
  * `chat connect`, `identity share`, `call start` and the other commands that take only a 1:1 chat read `No chat "Crew"`,
- * as if nothing had that name.
+ * as if nothing had that name. `onlyChat`: why the command takes only a chat ("only a chat has a code to compare"), said
+ * after a name more than one group has. No group command takes the group in their place, so none is named: "a group
+ * command takes one by its id" named none, and `group auto on --from` takes chats.
  */
-function noChat(ref: string, groups: readonly GroupView[]): CliError {
+function noChat(ref: string, groups: readonly GroupView[], onlyChat?: string): CliError {
+  // A name two groups share is still a group's: it read `No chat "Crew"`, as if nothing had it.
+  // Their ids too, as `findGroup`'s refusal carries them, for a script that reads them.
+  const shared = groupsSharing(ref, groups);
+  if (shared) return new CliError("not_found", `${JSON.stringify(ref)} names more than one group, not a chat${onlyChat ? `: ${onlyChat}` : ""} (ghostly chat list)`, { matches: shared });
   const group = groupNamed(ref, groups);
   if (group) return new CliError("not_found", `${JSON.stringify(ref)} is a group, not a chat (ghostly chat list)`, { group: group.id });
   return new CliError("not_found", `No chat ${JSON.stringify(ref)} (ghostly chat list)`);
@@ -248,8 +254,20 @@ function groupNamed(ref: string, groups: readonly GroupView[]): GroupView | unde
   try { return findGroup(groups, ref); } catch { return undefined; }
 }
 
+/** The ids of the groups `ref` names when it names more than one (`findGroup` refuses it, with them); else undefined. */
+function groupsSharing(ref: string, groups: readonly GroupView[]): string[] | undefined {
+  try { findGroup(groups, ref); } catch (error) { return sharedGroupIds(error); }
+  return undefined;
+}
+
+/** The ids in `findGroup`'s refusal of a name more than one group has, if `error` is that refusal. */
+export function sharedGroupIds(error: unknown): string[] | undefined {
+  const matches = error instanceof CliError && error.code === "bad_request" ? error.details?.matches : undefined;
+  return Array.isArray(matches) ? matches.map(String) : undefined;
+}
+
 /** `findChat`, and whether only what the contact controls (`theirName`: a prefix of the id, its own name) found the chat. */
-function chatBy(links: readonly LinkView[], ref: string, groups: readonly GroupView[] = []): { link: LinkView; theirName: boolean } {
+function chatBy(links: readonly LinkView[], ref: string, groups: readonly GroupView[] = [], onlyChat?: string): { link: LinkView; theirName: boolean } {
   // "" (an unset variable in a script) is a prefix of every id: it took the only chat.
   if (!ref.trim()) throw new CliError("bad_request", `${JSON.stringify(ref)} names no chat`);
   const exact = links.find((link) => link.id === ref);
@@ -269,16 +287,16 @@ function chatBy(links: readonly LinkView[], ref: string, groups: readonly GroupV
   // before labels were refused (`chatName`) is named by its id.
   if (groupPrefixed(ref) !== null) {
     if (byLabel.length && !groupNamed(ref, groups)) throw new CliError("not_found", `${JSON.stringify(ref)} names a group, never a chat: name the chat labelled so by its id, and give it another name (ghostly chat rename <chat> <name>)`, { matches: byLabel.map((link) => link.id) });
-    throw noChat(ref, groups);
+    throw noChat(ref, groups, onlyChat);
   }
   // A chat's id no chat has (one removed since: a bot kept it from an event) is no chat. Its contact and whoever saw its
   // invite know it, so another contact could call itself that and take every later command sent by it. A label given
   // here still names the chat: only this side chooses it.
-  if (!byLabel.length && CHAT_ID_SHAPED.test(key)) throw noChat(ref, groups);
+  if (!byLabel.length && CHAT_ID_SHAPED.test(key)) throw noChat(ref, groups, onlyChat);
   const found = byLabel.length ? byLabel : [...new Set([...links.filter((link) => link.id.startsWith(ref)), ...links.filter((link) => named(link.peerNick))])];
   if (found.length === 1) return { link: found[0], theirName: !byLabel.length };
   if (found.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one chat: use its id`, { matches: found.map((link) => link.id) });
-  throw noChat(ref, groups);
+  throw noChat(ref, groups, onlyChat);
 }
 
 /**
@@ -286,8 +304,8 @@ function chatBy(links: readonly LinkView[], ref: string, groups: readonly GroupV
  * label this side gave it name the chat. A prefix of its id or the name its contact gave itself is refused, with the
  * chat it found: the contact chose those, so another contact could take the grant by calling itself that name.
  */
-export function findOwnNamedChat(links: readonly LinkView[], ref: string, groups: readonly GroupView[] = []): LinkView {
-  const chat = chatBy(links, ref, groups);
+export function findOwnNamedChat(links: readonly LinkView[], ref: string, groups: readonly GroupView[] = [], onlyChat?: string): LinkView {
+  const chat = chatBy(links, ref, groups, onlyChat);
   if (chat.theirName) throw namedByThem(ref, { chat: chat.link.id, name: chat.link.peerNick ?? null, contact: chat.link.peerPubKeyZ32 });
   return chat.link;
 }
@@ -383,13 +401,13 @@ export async function startNamedChats(ctx: ApiContext, params: Params): Promise<
 
 /**
  * The chat a call names. `s`: a state the call built already. Each build is a view of every chat (about 15-20 µs a
- * chat, on the daemon's one thread): one lookup builds one, never one per list it reads.
+ * chat, on the daemon's one thread): one lookup builds one, never one per list it reads. `onlyChat`: as `findChat`.
  */
-export function chatOf(ctx: ApiContext, params: Params, s?: EngineState): LinkView {
+export function chatOf(ctx: ApiContext, params: Params, s?: EngineState, onlyChat?: string): LinkView {
   const ref = str(params, "chat", true);
   if (!s) { const chat = byId(ctx, ref); if (chat) return chat; }
   const { links, groups } = s ?? state(ctx);
-  return findChat(links, ref, groups);
+  return findChat(links, ref, groups, onlyChat);
 }
 /** `findOwnNamedChat` for the chat a call names, as `chatOf`. */
 export function ownChatOf(ctx: ApiContext, params: Params, s?: EngineState): LinkView {
@@ -466,11 +484,20 @@ const TRANSPORT_TITLES: Record<PairedTransport, string> = { "webrtc/1": "WebRTC"
  * app too, by its last word. `chat transport` took any: toward a contact with no WebRTC (`GHOSTLY_WEBRTC=0`) the choice
  * was kept and the chat stayed where it was, saying nothing; for one this app lacks, the engine answered `engine`,
  * "Transport unavailable". Refused instead, saying whose app lacks it (`details.reason`, as a chat's wait says it).
+ * This app's lack names the way out, as the contact's does: the transports both apps run, `auto`, and for an Iroh
+ * whose relays did not answer, where they are set. It read "This app has no Iroh running", with no next step.
  */
 export function transportOffered(link: LinkView, transport: PairedTransport): void {
   const mine = (link.deliveryMode === "dht" ? link.runnableTransports : undefined) ?? link.availableTransports;
   const title = TRANSPORT_TITLES[transport], error = link.transportErrors?.[transport];
-  if (mine && !mine.includes(transport)) throw new CliError("refused", `This app has no ${title} running${error ? `: ${error}` : ""}`, { reason: "app-lacks", transport });
+  if (mine && !mine.includes(transport)) {
+    const both = mine.filter((t) => !link.peerTransports?.length || link.peerTransports.includes(t)).map((t) => t.split("/")[0]);
+    const choose = both.length ? `choose another (${both.join(", ")}), or auto` : "choose auto";
+    // `GHOSTLY_IROH_RELAYS` pins the relays of this process: the setting is not read then (runtime/engine.ts `irohRelays`).
+    const relays = transport === "iroh/1" && error && /relay/i.test(error)
+      ? `check its relays (${process.env.GHOSTLY_IROH_RELAYS?.trim() ? "GHOSTLY_IROH_RELAYS" : "irohRelays in ghostly settings get"}), or ` : "";
+    throw new CliError("refused", `This app has no ${title} running${error ? ` (${error})` : ""}: ${relays}${choose}`, { reason: "app-lacks", transport });
+  }
   if (link.peerTransports?.length && !link.peerTransports.includes(transport)) throw new CliError("refused", `Your contact's app doesn't have ${title}: choose another, or auto`, { reason: "contact-lacks", transport });
 }
 
@@ -509,12 +536,15 @@ export const groupCalled = (group: GroupView) => group.name || "this group";
 /**
  * A group this profile is not in yet (only its invitation, or a knock at its link), said with what the person can do,
  * the same sentence for every command; undefined for any other group. `ref`: the group as the command named it.
- * `decline`: the step out of it (`group leave`), not into it.
+ * `decline`: the step out of it (`group leave`), not into it. An invitation its admin took back (left, forgot the group
+ * or handed the role on) has no way in: `group accept` answers "This invitation was taken back", so it names
+ * `group decline`, which drops it from the list.
  */
 export function notInYet(group: GroupView, ref: string, decline = false): string | undefined {
   if (group.status || !group.invitation) return undefined;
   const shown = shellWord(ref, group.id);
-  const { accepted, viaLink } = group.invitation;
+  const { accepted, viaLink, takenBack } = group.invitation;
+  if (takenBack && !decline) return `Its invitation to ${groupCalled(group)} was taken back: ghostly group decline ${shown} drops it`;
   const why = decline ? `ghostly group decline ${shown} turns it down`
     : !accepted ? `ghostly group accept ${shown} joins it`
     : viaLink ? "you opened its link, and no member's app has let you in"

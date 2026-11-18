@@ -4,5 +4,6 @@
   "copyFailedShare": "Could not copy. Select the link below or share it.",
   "qrTitle": "Invite QR code",
   "shareFailed": "Could not share. Copy the invite instead.",
+  "shareFailedLink": "Could not share. Copy the link instead.",
   "title": "Invite your contact"
 }

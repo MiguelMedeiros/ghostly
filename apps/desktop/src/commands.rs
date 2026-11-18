@@ -335,10 +335,20 @@ pub async fn link_preview_fetch(url: String, kind: String) -> Result<PreviewResp
     link_preview::fetch(url, kind).await
 }
 
-/// A held item or manifest from the storage a contact chose (WISP 404): public addresses only, see `hold_fetch`.
+/// A held item or manifest from the storage a contact chose (WISP 404), or an identity's proof or public data:
+/// public addresses only, see `hold_fetch`.
 #[tauri::command]
-pub async fn hold_fetch(url: String) -> Result<HoldResponse, String> {
-    hold_fetch::fetch(url).await
+pub async fn hold_fetch(
+    url: String,
+    headers: Option<Vec<(String, String)>>,
+) -> Result<HoldResponse, String> {
+    hold_fetch::fetch(url, headers.unwrap_or_default()).await
+}
+
+/// A token or moderation request to the call node a group names (WISP 602): public addresses only, see `hold_fetch`.
+#[tauri::command]
+pub async fn group_call_fetch(url: String, body: String) -> Result<HoldResponse, String> {
+    hold_fetch::post(url, body).await
 }
 
 /// Opens a web link from a message (a link preview, a location card) in the

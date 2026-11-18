@@ -1,5 +1,5 @@
-import { CliError } from "../errors";
-import { type Command, groupWait, here, picture, refs, showSecret, secret, cursor, pageLimit, reaction, timeout, typingFor, typingKind } from "./shared";
+import { CliError, shownValue } from "../errors";
+import { type Command, groupWait, here, picture, refs, showSecret, secret, cursor, pageLimit, reaction, timeout, typingFor, typingKind, typingWords } from "./shared";
 
 const nameForce = { type: "boolean", description: "Use the name even if it looks like a seed, a key or ecash" } as const;
 const forced = (options: Record<string, unknown>) => (options.force === true ? { force: true } : {});
@@ -15,7 +15,7 @@ export const commands: Record<string, Command> = {
     method: "group.auto", usage: "group auto [on|off] [--from <chat>]...", summary: "Accept group invitations by themselves, only from the chats named (kept in the profile; the daemon accepts)",
     args: ["mode...?"], options: { from: { type: "list", description: "Invitations from this chat: its id, its contact's key or a label given here with chat rename (again for more: a new on replaces the list)" } },
     params: ({ options }, a) => {
-      if (a.mode !== undefined && a.mode !== "on" && a.mode !== "off") throw new CliError("usage", `group auto takes on or off, not ${JSON.stringify(a.mode)}: ghostly group auto [on|off] [--from <chat>]...`);
+      if (a.mode !== undefined && a.mode !== "on" && a.mode !== "off") throw new CliError("usage", `group auto takes on or off, not ${shownValue(a.mode)}: ghostly group auto [on|off] [--from <chat>]...`);
       // Never from anyone: on names its chats. Without on, the chats would be dropped without a word.
       if (a.mode === "on" && options.from === undefined) throw new CliError("usage", "group auto on needs the chats whose invitations it accepts: ghostly group auto on --from <chat>");
       if (a.mode !== "on" && options.from !== undefined) throw new CliError("usage", "--from goes with on: ghostly group auto on --from <chat>");
@@ -41,7 +41,7 @@ export const commands: Record<string, Command> = {
     },
   },
   "group create": {
-    method: "group.create", usage: "group create <name...> [--mesh] [--force]", summary: "A community (a link anyone can open) or, with --mesh, a private group of up to 32",
+    method: "group.create", usage: "group create <name...> [--mesh] [--force]", summary: "A community (anyone who has its link can join) or, with --mesh, a private group of up to 32",
     args: ["name..."], options: { mesh: { type: "boolean", description: "A private mesh of contacts instead of a community" }, force: nameForce },
     params: ({ options }, { name }) => ({ name, profile: options.mesh ? "mesh" : "community", ...forced(options) }),
   },
@@ -75,7 +75,7 @@ export const commands: Record<string, Command> = {
     options: { yes: { type: "boolean", description: "Confirm" } }, params: ({ options }, { group }) => ({ group, yes: options.yes === true }),
   },
   "group link": {
-    method: "group.link", usage: "group link <group> [--off] [--reset]", summary: "Turn the group's link on (--reset: a new one), or --off", args: ["group"],
+    method: "group.link", usage: "group link <group> [--off] [--reset]", summary: "Print the group's link (anyone who has it can join); --reset: a new one, the old one stops working; --off", args: ["group"],
     options: { off: { type: "boolean", description: "Turn the link off" }, reset: { type: "boolean", description: "Replace it: the old link stops working" } },
     params: ({ options }, a) => {
       if (options.off === true && options.reset === true) throw new CliError("usage", "--off turns the link off: not with --reset");
@@ -126,6 +126,6 @@ export const commands: Record<string, Command> = {
       status: { type: "string", description: "A short line shown instead, e.g. \"Reading the thread…\" (40 characters, no links)" },
       for: { type: "number", description: "Keep saying it for this many seconds (up to 600), until a send or --stop" },
     },
-    params: ({ options }, { group }) => ({ group, stop: options.stop === true, kind: options.kind, status: options.status, for: typingFor(options) }),
+    params: ({ options }, { group }) => ({ group, stop: options.stop === true, ...typingWords(options), for: typingFor(options) }),
   },
 };

@@ -37,8 +37,9 @@ export function SearchIcon({ className }: { className?: string }) {
   return <svg {...icon} className={className}><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>;
 }
 
-// On a phone a thumb's 44 px, as every other control there.
-const button = "shrink-0 grid place-items-center w-8 h-8 max-md:w-11 max-md:h-11 rounded-full text-text-secondary enabled:hover:text-accent enabled:hover:bg-surface-hover disabled:opacity-40 transition-colors cursor-pointer disabled:cursor-default";
+// On a phone a thumb's 44 px, as every other control there: px, not rem, so a larger text size leaves them that size
+// (at 2.75rem, four of them took 352 px of a 375 px phone at 32 px text, and the field kept 55 px).
+const button = "shrink-0 grid place-items-center w-8 h-8 max-md:w-[44px] max-md:h-[44px] rounded-full text-text-secondary enabled:hover:text-accent enabled:hover:bg-surface-hover disabled:opacity-40 transition-colors cursor-pointer disabled:cursor-default";
 
 /**
  * The bar under a chat's header while its search is open (useChatSearch): the words, how many messages hold them and

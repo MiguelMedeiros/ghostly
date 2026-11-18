@@ -54,6 +54,7 @@
     "allow-generate-enc-key",
     "allow-get-profile",
     "allow-get-public-key",
+    "allow-group-call-fetch",
     "allow-hide-from-switcher",
     "allow-hold-fetch",
     "allow-incoming-share-done",

@@ -361,6 +361,8 @@ export function useWebRTC({
   const [screenShareError, setScreenShareErrorState] = useState<string | null>(null);
   /** Our call rang out unanswered, for a few seconds (`NO_ANSWER_SHOWN_MS`). */
   const [noAnswer, setNoAnswer] = useState(false);
+  /** Our call's offer went out: it rings the contact (and RING_MS counts) from then, not while a permission prompt is open. */
+  const [offerOut, setOfferOut] = useState(false);
   /**
    * The microphone or camera a call asked for could not be used, and why, for a few seconds (`MEDIA_PROBLEM_SHOWN_MS`).
    * `id` is new at each time: a call refused again while the reason shows is a new notice, with its whole time.
@@ -495,6 +497,8 @@ export function useWebRTC({
   }, [chatId]);
   /** When the contact's call began to ring here, on the monotonic clock (BURST_RING_MS). */
   const ringingSinceRef = useRef(0);
+  /** The ringing call's "Incoming call" line: a newer offer of the contact's that takes the call's place takes it out. */
+  const receivedLineRef = useRef<string | null>(null);
   /**
    * The contact's last call held back here (QUICK_REDIAL_MS) until its hang-up: its offer, when it was heard (on the
    * monotonic clock), its missed line.
@@ -993,9 +997,14 @@ export function useWebRTC({
         track?.stop();
         throw error;
       }
+      // Hung up while the track was swapped (the Linux Desktop opens the device meanwhile): the call's tracks were stopped without this one.
+      if (attemptRef.current !== attempt || !localStreamRef.current) {
+        track?.stop();
+        return;
+      }
 
       // Read after the prompt: the picture may have changed while it was open.
-      const current = localStreamRef.current!;
+      const current = localStreamRef.current;
       if (next === "screen" && track) {
         track.contentHint = "detail";
         // The browser's (or the system's) own "Stop sharing" ends the track without telling anyone else.
@@ -1045,7 +1054,7 @@ export function useWebRTC({
     const offerHasVideo = signalHasVideo(signal);
     callHadVideoRef.current = offerHasVideo;
     callConnectedEventFiredRef.current = false;
-    addCallEventMessage?.("call_received", offerHasVideo, undefined, signal.ts);
+    receivedLineRef.current = addCallEventMessage?.("call_received", offerHasVideo, undefined, signal.ts) || null;
     ringingSinceRef.current = performance.now();
     updateCallState("incoming");
     setFastPoll(true);
@@ -1078,6 +1087,7 @@ export function useWebRTC({
       const attempt = ++attemptRef.current;
       const cancelled = () => attemptRef.current !== attempt;
       setNoAnswer(false);
+      setOfferOut(false);
       // A call that ended without a hang-up (one that found no path) left its offer's time behind: until this
       // attempt's own goes out, a contact's offer is the earlier one (WISP 601, "Both call at once").
       myOfferTimestampRef.current = 0;
@@ -1139,6 +1149,7 @@ export function useWebRTC({
 
         const signalStr = JSON.stringify(signal);
         publishCallSignal(signalStr);
+        setOfferOut(true);
       } catch (error) {
         // A newer attempt (or none) owns the call now: its state is not ours to reset.
         if (cancelled()) return;
@@ -1571,6 +1582,15 @@ export function useWebRTC({
     } else if (signal.t === "o" && (callStateRef.current === "idle" || yielded)) {
       lastProcessedSignalRef.current = signal.ts;
       ringOffer(signal);
+    } else if (signal.t === "o" && callStateRef.current === "incoming" && signal.ts > (pendingOfferRef.current?.ts ?? 0)) {
+      // The contact calls again while their call still rings here, with no hang-up between (WISP 601, "Ringing"):
+      // their app died or reloaded as it rang out, and its hang-up never came. Their newer offer is their call now and
+      // takes the ringing one's place, under one "Incoming call" line, ringing its own RING_MS (the timer below runs
+      // per offer). Answer names the offer it answers: one their app no longer has, it would ring out to "No answer"
+      // there and never connect here. An offer no newer than the ringing one never reaches here (`lastProcessedSignalRef`).
+      lastProcessedSignalRef.current = signal.ts;
+      if (receivedLineRef.current) removeCallEventMessage?.(receivedLineRef.current);
+      ringOffer(signal);
     } else if (signal.t === "a" && (callStateRef.current === "offering" || callStateRef.current === "connecting")) {
       if (answersOffer(signal, myOfferTimestampRef.current)) {
         lastProcessedSignalRef.current = signal.ts;
@@ -1611,6 +1631,8 @@ export function useWebRTC({
 
   // An unanswered call does not ring forever (RING_MS). Ours hangs up and says "No answer". Theirs stops ringing here
   // with a missed call and sends nothing: the caller's own ring runs out too, and a hang-up would read as declined.
+  // Theirs rings RING_MS from the offer that rings (`rangOffer`): a newer one that took the call's place starts it again,
+  // as the caller's ring started again with it.
   hangUpRef.current = hangUp;
 
   // "Hide my IP from contacts" turned on during a call: its connection was made with this device's own addresses
@@ -1625,9 +1647,10 @@ export function useWebRTC({
     hangUpRef.current(true, true);
     setMediaProblemShown("relayOnlyNow");
   }, [relayOnly, setMediaProblemShown]);
+  // Ours rings from its offer: `offering` starts before the microphone or camera prompt, which may stay open a minute.
+  const ringing = callState === "incoming" || (callState === "offering" && offerOut) ? callState : null;
   useEffect(() => {
-    if (callState !== "offering" && callState !== "incoming") return;
-    const ringing = callState;
+    if (!ringing) return;
     const timer = setTimeout(() => {
       if (callStateRef.current !== ringing) return;
       if (ringing === "offering") {
@@ -1642,7 +1665,7 @@ export function useWebRTC({
       }
     }, RING_MS);
     return () => clearTimeout(timer);
-  }, [callState, setMissedAt]);
+  }, [ringing, rangOffer, setMissedAt]);
 
   // Another page answered or declined the call ringing here (`callHandledElsewhere`): it stops ringing here as though it
   // never had. That page wrote the call's lines into the history both show, and sent its answer; this one sends

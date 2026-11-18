@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { accessSync, constants, existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { contactKeyOf, nameKey, namedByThem } from "./apiKit";
+import { contactKeyOf, nameKey, namedByThem, sharedGroupIds } from "./apiKit";
 import { childEnv } from "./childEnv";
 import { connectDaemon, type DaemonAddress, type DaemonClient } from "./client";
 import { CliError, localFileError } from "./errors";
@@ -120,6 +120,12 @@ async function fromChat(ref: string, call: (method: string, params: Record<strin
 async function otherFlag(lookup: Promise<unknown>, ref: string, flag: "--from" | "--group", call: (method: string, params: Record<string, unknown>) => Promise<unknown>): Promise<unknown> {
   try { return await lookup; } catch (error) {
     const other = flag === "--from" ? "group" : "chat";
+    // A name more than one group has: `--group` with the id of the one meant (`matches`), not `group show`. Asked of the
+    // group lookup: a `not_found` with `matches` may hold chats (`group:<name>` a chat's label has).
+    if (flag === "--from" && error instanceof CliError && error.code === "not_found" && Array.isArray(error.details?.matches)) {
+      const shared = await call("group.get", { group: ref }).then(() => undefined, sharedGroupIds);
+      if (shared) throw new CliError("not_found", `${JSON.stringify(ref)} names more than one group, not a chat: ghostly listen --group <group>, with the id of the group meant (ghostly group list)`, { matches: shared });
+    }
     if (!(error instanceof CliError) || error.code !== "not_found" || typeof error.details?.[other] !== "string") throw error;
     if (other === "chat" && contactKeyOf(ref) === undefined) await fromChat(ref, call);
     const named = other === "chat" ? error.details.chat as string : ref;
@@ -210,9 +216,12 @@ export function checkWebhook(url: string, from = "--webhook"): URL {
   return parsed;
 }
 
+/** A cursor file that is there and read, but holds no event number: the one refusal --since takes as its start. */
+class NoEventNumber extends CliError {}
+
 /**
  * The event number a cursor file holds, or undefined when there is no file (a first start: live events). A file that is
- * there and holds no whole number (empty, half-written, edited by hand) is refused, naming the file and what it holds:
+ * there and holds no whole number (empty, half-written, edited by hand) is refused, naming the file and how much it holds:
  * taken as no cursor, the listener started at the journal's end and skipped every event since the last one handled,
  * without a word, and its next write replaced the file.
  */
@@ -223,14 +232,18 @@ export function readCursor(path: string | undefined): number | undefined {
   const trimmed = text.trim();
   const value = trimmed === "" ? NaN : Number(trimmed);
   if (Number.isSafeInteger(value) && value >= 0 && /^\d+$/.test(trimmed)) return value;
-  const shown = trimmed === "" ? "nothing" : JSON.stringify(trimmed.length > 32 ? `${trimmed.slice(0, 32)}…` : trimmed);
-  throw new CliError("bad_request", `${path} holds no event number (${shown}): fix or remove it, or give --since`);
+  // Measured, never quoted: a --cursor pointed at a seed or key file by mistake put its start on stderr, which a service
+  // manager keeps in its journal.
+  const words = trimmed.split(/\s+/).length, bytes = Buffer.byteLength(trimmed);
+  const shown = trimmed === "" ? "nothing" : `${words} ${words === 1 ? "word" : "words"}, ${bytes} ${bytes === 1 ? "byte" : "bytes"}`;
+  throw new NoEventNumber("bad_request", `${path} holds no event number (${shown}): fix or remove it, or give --since`);
 }
 
 /**
  * Where listen starts: after the event number the cursor file holds, else after `since` (--since: the first start's
  * place). Before, --since won without a word, and a unit with `--since 0 --cursor f` ran every handled event's hook
- * again at each restart. A cursor file that holds no number is refused unless --since is given, which starts it.
+ * again at each restart. A cursor file that holds no number is refused unless --since is given, which starts it; one
+ * that cannot be read, or a folder, is refused either way (before, --since started it too and its hook ran again).
  * `known`, once the journal's last event is: says on stderr where it starts. A cursor past it (a profile restored from a
  * backup, a journal reset, a cursor copied from another profile) starts with new events; before, stderr said "starting
  * after it" (or nothing, without --since) and the next event wrote a lower number over the file.
@@ -238,7 +251,7 @@ export function readCursor(path: string | undefined): number | undefined {
 export function startAt(since: number | undefined, cursor: string | undefined, say: (line: string) => void): { from: number | undefined; known(lastSeq: number): void } {
   let kept: number | undefined;
   if (since === undefined) kept = readCursor(cursor);
-  else try { kept = readCursor(cursor); } catch { /* --since starts it */ }
+  else try { kept = readCursor(cursor); } catch (error) { if (!(error instanceof NoEventNumber)) throw error; /* --since starts it */ }
   return {
     from: kept ?? since,
     known: (lastSeq) => {
