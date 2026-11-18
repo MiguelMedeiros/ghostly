@@ -81,6 +81,7 @@ export class FakeEngineServer {
       return engineControl().respond(peer, service, init);
     },
     getState: () => ({ links: engineControl().links ?? [], services: (engineControl().services ?? []).map((s) => ({ ...s, requests: 0 })) }),
+    chatView: (linkId: string) => engineControl().links?.find((link) => link.id === linkId),
     setServiceEnabled: ({ serviceId, enabled }: { serviceId: string; enabled: boolean }) => {
       const service = engineControl().services?.find((s) => s.id === serviceId);
       if (service) service.enabled = enabled;

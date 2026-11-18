@@ -18,16 +18,17 @@ import type { RuntimeMessage } from "./messages";
 const LIVE_MS = 5000;
 
 /**
- * Tells the person of an event no tab heard, when a tab would have shown a notification for it. `links` builds the
- * engine's whole state (every chat's and group's view): read only for a 1:1 chat's event that may be shown, not for each
- * event the peer hears (a sound's cue, a coin, any message with notifications off, a group's).
+ * Tells the person of an event no tab heard, when a tab would have shown a notification for it. `chatView`: the view of
+ * the one 1:1 chat an event that may be shown is about (`GhostlyNode.chatView`), not the engine's whole state, which
+ * builds every chat's and group's (3.7 ms at 300 chats, for each message of a burst).
  */
-export async function noticeUnheard(event: AttentionEvent, links: () => readonly { id: string; peerPubKeyZ32: string }[]): Promise<void> {
+export async function noticeUnheard(event: AttentionEvent, chatView: (linkId: string) => { id: string; peerPubKeyZ32: string } | undefined): Promise<void> {
   if (Date.now() - event.at > LIVE_MS) return;
   const settings = notificationSettings();
   // Muted or not: nothing a muted chat shows is shown when it is not.
   if (!attentionOutcome(event.type, false, settings, true).notice) return;
-  const chat = chatOfLink(event.linkId, event.linkId && !event.linkId.startsWith("group:") ? links() : []);
+  const view = event.linkId && !event.linkId.startsWith("group:") ? chatView(event.linkId) : undefined;
+  const chat = chatOfLink(event.linkId, view ? [view] : []);
   if (!attentionOutcome(event.type, mutedFor(chat, !!event.mention), settings, true).notice) return;
   const { t } = await profileWords();
   const body = event.type === "reaction" ? t("chat.reactions.notice") : t("settings.privateNotice");
