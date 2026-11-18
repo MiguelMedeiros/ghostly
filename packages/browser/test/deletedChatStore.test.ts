@@ -177,6 +177,25 @@ it("the same invite joined again after the chat is deleted shows none of the del
     .toEqual([false, false, false, false, false]);
 }, 60_000);
 
+it("the same invite joined again after the chat is deleted is not found in the chat list's search by the deleted chat's words", async () => {
+  const t = await setup();
+  const wire = WIRE("s");
+  expect(await t.contact.sendMessage("My PIN is 4711", Date.now(), wire)).toBeNull();
+  await vi.waitFor(async () => expect((await db.getMessages(t.id)).map(m => m.text)).toEqual(["My PIN is 4711"]));
+  await t.settled();
+  // A search typed in the chat list: the chat is found by its message.
+  expect(await t.node.chatsFound({ query: "4711", linkIds: [t.id] })).toEqual([t.id]);
+  t.node.removeLink({ linkId: t.id });
+  const joined = await (t.node as unknown as { addLink: (params: unknown) => Promise<string> }).addLink({ ...t.row, participationSeedB64: t.row.participationSeed });
+  expect(joined).toBe(t.id);
+  expect(await db.getMessages(t.id)).toEqual([]);
+  // The same search, still typed: the chat joined again holds none of those words, before a message comes and after.
+  expect(await t.node.chatsFound({ query: "4711", linkIds: [t.id] })).toEqual([]);
+  await t.node["storeMessage"]({ linkId: t.id, id: "peer_afterjoin0000000000002", text: "A new start", sender: "peer", timestamp: Date.now(), via: "datalink" });
+  expect(await t.node.chatsFound({ query: "4711", linkIds: [t.id] })).toEqual([]);
+  expect(await t.node.chatsFound({ query: "new start", linkIds: [t.id] })).toEqual([t.id]);
+}, 60_000);
+
 it("a message to a chat nobody deletes is stored, told and announced as before, a reply to one not here included", async () => {
   const t = await setup({ history: 3 });
   const before = t.mark();

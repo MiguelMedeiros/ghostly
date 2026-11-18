@@ -77,6 +77,14 @@ export class ChatTextSearch {
     if (kept) for (const id of ids) kept.changed.add(id);
   }
 
+  /**
+   * A chat deleted: its texts go. The same invite joined again is a chat of the same id, and only the rows it changes
+   * are read again: it was found by the deleted chat's words for as long as a search went on.
+   */
+  forget(linkId: string): void {
+    this.texts.delete(linkId);
+  }
+
   private textsOf(linkId: string): Promise<Map<string, string[]>> {
     let kept = this.texts.get(linkId);
     if (!kept) {
