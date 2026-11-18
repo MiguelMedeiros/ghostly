@@ -1,9 +1,13 @@
 import { act, render, screen } from "@testing-library/react";
+import { useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Root } from "../../Root";
+import { LockScreen } from "../../components/LockScreen";
 import { ProfileSwitchSplash } from "../../components/ProfileSwitchSplash";
-import { LockScreenProvider } from "../../contexts/LockScreenContext";
-import { announceSwitch, createProfile, settingsKeyFor } from "../../lib/profiles";
+import { LockScreenProvider, useLockScreen } from "../../contexts/LockScreenContext";
+import { handOverUnlock } from "../../lib/lockHandover";
+import { activeProfileId, announceSwitch, createProfile, settingsKeyFor } from "../../lib/profiles";
+import { hashPassword } from "../../lib/settings";
 import { fakeEngine } from "../fakeEngine";
 import { renderApp } from "../render";
 import { windowIs } from "../viewport";
@@ -110,6 +114,83 @@ for (const language of ["en", "ar"] as const) {
     });
   });
 }
+
+describe("what the overlay holds and gives back", () => {
+  /** Nodes a test puts on the body itself, as a portalled toast or dialog would be. */
+  const onBody: Element[] = [];
+  const putOnBody = (html: string) => {
+    const node = document.createElement("div");
+    node.innerHTML = html;
+    document.body.append(node);
+    onBody.push(node);
+    return node;
+  };
+  const lift = () => {
+    act(() => { vi.advanceTimersByTime(300); });
+    act(() => { vi.advanceTimersByTime(200); });
+    expect(screen.queryByTestId("profile-switch-splash")).not.toBeInTheDocument();
+  };
+  afterEach(() => {
+    onBody.splice(0).forEach((node) => node.remove());
+    localStorage.clear(); sessionStorage.clear();
+  });
+
+  it("holds what comes on the body during the switch too (a toast, a dialog), and lets go of it after", async () => {
+    pendingIn("Work");
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    renderApp(<LockScreenProvider><Page /><ProfileSwitchSplash /></LockScreenProvider>);
+    expect(outsideOverlay()).toEqual([]);
+
+    const toast = putOnBody("<button type=\"button\">Toast</button>");
+    await act(async () => { await Promise.resolve(); });
+    expect(outsideOverlay()).toEqual([]);
+    expect(toast).toHaveAttribute("inert");
+
+    lift();
+    expect(toast).not.toHaveAttribute("inert");
+    expect(document.querySelector("[inert]")).toBeNull();
+  });
+
+  it("leaves inert what the app had made inert before the switch", () => {
+    const asleep = putOnBody("<button type=\"button\">Asleep</button>");
+    asleep.setAttribute("inert", "");
+    pendingIn("Work");
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    renderApp(<LockScreenProvider><Page /><ProfileSwitchSplash /></LockScreenProvider>);
+    expect(outsideOverlay()).toEqual([]);
+
+    lift();
+    expect(asleep).toHaveAttribute("inert");
+    expect(screen.getByRole("button", { name: "New chat" }).closest("[inert]")).toBeNull();
+  });
+
+  it("lets go of the page when the lock screen comes up mid-switch: its password field is in reach", async () => {
+    const hash = await hashPassword("pw");
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: hash, timeoutMinutes: 5 } }));
+    handOverUnlock(activeProfileId(), hash); // the page before the reload had it open
+    pendingIn("Work");
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    /** Lock Now, from outside the page held under the overlay (as another tab's Lock Now reaches it). */
+    function LockOnEvent() {
+      const { lock } = useLockScreen();
+      useEffect(() => {
+        window.addEventListener("test-lock-now", lock);
+        return () => window.removeEventListener("test-lock-now", lock);
+      }, [lock]);
+      return null;
+    }
+    renderApp(<LockScreenProvider><Page /><LockScreen /><LockOnEvent /><ProfileSwitchSplash /></LockScreenProvider>);
+    expect(outsideOverlay()).toEqual([]);
+    expect(document.querySelector("[inert]")).not.toBeNull();
+
+    act(() => { window.dispatchEvent(new Event("test-lock-now")); });
+    const field = screen.getByLabelText("Ghostly is locked").querySelector<HTMLInputElement>("input[type=password]")!;
+    expect(document.querySelector("[inert]")).toBeNull();
+    expect(field.closest("[inert]")).toBeNull();
+    field.focus();
+    expect(field).toHaveFocus();
+  });
+});
 
 describe("a tab that follows another tab's switch", () => {
   it("is told so from the moment it hears of it, before its reload", async () => {
