@@ -68,6 +68,7 @@ import { COMMUNITY_LIMITS, GROUP_FILE_LIMITS, GROUP_LIMITS, isPlayableVideoType,
 import { servicesPlatform } from "../lib/platform";
 import { useEngineReconnecting, useEngineValue } from "../lib/engineState";
 import { formatFileSize } from "../lib/format";
+import { publicKeyLabel } from "../lib/publicKeyLabel";
 import { videoMetaOf } from "../lib/videoPoster";
 import { heldOriginal, messageSnippet, quoteFor, replyIndexer, replyTarget, type NameOf, type QuoteView } from "../lib/replies";
 import { useKeptEdit } from "../lib/keptEdits";
@@ -147,7 +148,7 @@ const replyNames = (group: GroupView, you: string, t: Translate): NameOf => (fro
 
 /** Whom "@" offers in the composer: every other member, by name and the end of their key. */
 function mentionCandidates(group: GroupView, t: Translate): MentionCandidate[] {
-  return group.members.filter(m => !m.me).map(m => ({ key: m.key, name: memberName(m, t), tag: `…${m.key.slice(-6)}` }));
+  return group.members.filter(m => !m.me).map(m => ({ key: m.key, name: memberName(m, t), tag: `…${m.key.slice(-6)}`, ...(m.nick ? {} : { label: publicKeyLabel(m.key) }) }));
 }
 
 /** The note that captions a payment bubble (`groupPayCaption`, shared with the CLI's group history). */
