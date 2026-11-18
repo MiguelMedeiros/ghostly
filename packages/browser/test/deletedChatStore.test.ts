@@ -196,6 +196,21 @@ it("the same invite joined again after the chat is deleted is not found in the c
   expect(await t.node.chatsFound({ query: "new start", linkIds: [t.id] })).toEqual([t.id]);
 }, 60_000);
 
+it("the same invite joined again in the same tick as the delete is not found in the chat list's search by the deleted chat's words once its rows are gone", async () => {
+  const t = await setup({ history: 3 });
+  expect(await t.node.chatsFound({ query: "earlier 2", linkIds: [t.id] })).toEqual([t.id]);
+  t.node.removeLink({ linkId: t.id });
+  // Joined again at once, and the search, still typed, asks again before the deleted chat's rows are gone: it reads them.
+  const joined = (t.node as unknown as { addLink: (params: unknown) => Promise<string> }).addLink({ ...t.row, participationSeedB64: t.row.participationSeed });
+  const meanwhile = t.node.chatsFound({ query: "earlier 2", linkIds: [t.id] });
+  expect(await joined).toBe(t.id);
+  await meanwhile;
+  await vi.waitFor(async () => expect(await db.getMessages(t.id)).toEqual([]));
+  await new Promise(resolve => setTimeout(resolve, 500));
+  // The rows are gone, and so are their words: the chat joined again holds none of them.
+  expect(await t.node.chatsFound({ query: "earlier 2", linkIds: [t.id] })).toEqual([]);
+}, 60_000);
+
 it("a message to a chat nobody deletes is stored, told and announced as before, a reply to one not here included", async () => {
   const t = await setup({ history: 3 });
   const before = t.mark();
