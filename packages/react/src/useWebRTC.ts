@@ -1278,20 +1278,30 @@ export function useWebRTC({
 
         const { stream, cameraError } = await captureForCall(withVideo, cancelled);
         if (cancelled()) { stream.getTracks().forEach((track) => track.stop()); return; }
+        // The contact's newer offer, heard while the microphone or camera was asked for, is their call now (see the
+        // "answering" offer below): the answer answers it, the offer their app still has.
+        const answering = pendingOfferRef.current ?? offer;
+        if (answering !== offer) {
+          applyRemotePicture(answering);
+          callHadVideoRef.current = withVideo || signalHasVideo(answering);
+        }
         const video = withVideo && !cameraError;
         if (cameraError) {
           showCameraOff(cameraError);
-          callHadVideoRef.current = signalHasVideo(offer);
+          callHadVideoRef.current = signalHasVideo(answering);
         }
         localStreamRef.current = stream;
         setLocalStream(stream);
         setPicture(video ? "camera" : null);
 
-        if (!(await answerOffer(offer, stream, video, cancelled))) return;
-        answeredRef.current = { offer, withVideo: video };
+        if (!(await answerOffer(answering, stream, video, cancelled))) return;
+        answeredRef.current = { offer: answering, withVideo: video };
         // Read again (the check above narrowed it to "incoming"): ICE may have connected while our answer gathered.
         if ((callStateRef.current as CallState) === "answering") updateCallState("connecting");
+        const newer = pendingOfferRef.current;
         pendingOfferRef.current = null;
+        // One heard while our answer gathered: answered again on a new connection, as a caller's offer once answered.
+        if (newer && newer.ts > answering.ts) void restartAnswer(newer);
       } catch (error) {
         if (cancelled()) return;
         onErrorRef.current?.(error);
@@ -1314,6 +1324,7 @@ export function useWebRTC({
       showNoPath,
       assertKeepsToRelays,
       callKey,
+      restartAnswer,
     ],
   );
 
@@ -1591,6 +1602,13 @@ export function useWebRTC({
       lastProcessedSignalRef.current = signal.ts;
       if (receivedLineRef.current) removeCallEventMessage?.(receivedLineRef.current);
       ringOffer(signal);
+    } else if (signal.t === "o" && callStateRef.current === "answering" && pendingOfferRef.current && signal.ts > pendingOfferRef.current.ts) {
+      // The same, once Answer was pressed and waits on the microphone or camera, or gathers: the answer answers the
+      // newer offer (`acceptCall`), under its own "Incoming call" line.
+      lastProcessedSignalRef.current = signal.ts;
+      if (receivedLineRef.current) removeCallEventMessage?.(receivedLineRef.current);
+      receivedLineRef.current = addCallEventMessage?.("call_received", signalHasVideo(signal), undefined, signal.ts) || null;
+      pendingOfferRef.current = signal;
     } else if (signal.t === "a" && (callStateRef.current === "offering" || callStateRef.current === "connecting")) {
       if (answersOffer(signal, myOfferTimestampRef.current)) {
         lastProcessedSignalRef.current = signal.ts;
