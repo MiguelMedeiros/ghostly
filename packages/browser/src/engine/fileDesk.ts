@@ -185,7 +185,12 @@ export class FileDesk {
       records.push(file.wire3);
       if (file.wire3.direction === "in") chat.local.set(file.wire3.id, file.id);
       if (!transferEnded(file.wire3)) this.restored.add(file.id);
-      else if (file.wire3.state !== "done" || !unsettled.has(file.id)) this.ended.add(file.id);
+      else if (file.wire3.state !== "done" || !unsettled.has(file.id)) {
+        this.ended.add(file.id);
+        // A sent one that ended cancelled or declined before this run (so the session's walk skips it): its staged copy
+        // goes now, one an older version kept or whose drop a quit cut off.
+        if (file.wire3.direction === "out" && (file.wire3.state === "cancelled" || file.wire3.state === "declined") && file.bytes) this.dropStaged(chat, file.id);
+      }
       // Finished: no transfer (a file with none reads as finished; its record says done). A view for each would go into
       // every state the engine builds, so each state would cost more with every file the chat ever had.
       if (file.wire3.state === "done") continue;
@@ -741,7 +746,18 @@ export class FileDesk {
       this.deps.settled?.(linkId, id, record, this.underway.delete(id));
       // A received file ended (whole, or dropped): the offers waiting show the room it leaves.
       if (record.direction === "in") void this.rooms();
+      // A sent one cancelled or declined is never sent again (`offer`, `ChatFiles.resend`): its staged copy goes, as a
+      // received one's part does. Kept, 7 cancelled big files held 3.5 GB of the sender's disk for good. Its record stays.
+      else if (record.state === "cancelled" || record.state === "declined") this.dropStaged(chat, id);
     }
+  }
+
+  /** The bytes a sent file was staged in, after the chat's writes before; a small one kept whole in its record stays. */
+  private dropStaged(chat: Chat, id: string): void {
+    chat.saving = chat.saving.then(async () => {
+      const stored = await fileStore.get(id);
+      if (stored?.bytes) await (await fileBytesOf(stored.bytes))?.remove(id);
+    }).catch(() => {});
   }
 
   /**
