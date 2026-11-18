@@ -1,4 +1,4 @@
-import { CliError } from "./errors";
+import { CliError, secretValue, shownValue } from "./errors";
 
 export type OptionType = "string" | "number" | "boolean" | "list";
 export interface OptionSpec {
@@ -24,7 +24,7 @@ export interface Parsed { positionals: string[]; options: Record<string, string 
  * `Number()` alone read `1e3` as 1,000, `0x10` as 16 and `" 21"` as 21: `chat pay bob 2e3`, a typo of 23, paid 2,000.
  */
 export const decimalNumber = (value: string): number => /^-?\d+(\.\d+)?$/.test(value) ? Number(value) : NaN;
-const notANumber = (name: string, option: OptionSpec, value: string) => new CliError("usage", `--${name} takes ${option.takes ?? "a number"}, not ${JSON.stringify(value)}`);
+const notANumber = (name: string, option: OptionSpec, value: string) => new CliError("usage", `--${name} takes ${option.takes ?? "a number"}, not ${shownValue(value)}`);
 
 /**
  * The word right after an option that stood alone because it was no number (`--voice 2s`), by the positionals a parse
@@ -131,7 +131,7 @@ export function parseArgs(argv: readonly string[], spec: Record<string, OptionSp
       } else if (option.type === "list") {
         options[name] = [...((options[name] as string[] | undefined) ?? []), value];
       } else {
-        if (option.choices && !option.choices.includes(value)) throw new CliError("usage", `--${name} takes ${listed(option.choices)}, not ${JSON.stringify(value)}`);
+        if (option.choices && !option.choices.includes(value)) throw new CliError("usage", `--${name} takes ${listed(option.choices)}, not ${shownValue(value)}`);
         options[name] = value;
       }
       continue;
@@ -167,7 +167,7 @@ function unknownOption(arg: string, all: Record<string, OptionSpec>, parsing: Pa
  */
 function shownOption(arg: string, privateKey: boolean): string {
   if (privateKey) return "(a private key)";
-  return arg.length > 40 || /[\r\n]/.test(arg) ? `(a ${arg.length}-character word)` : arg;
+  return secretValue(arg) ?? arg;
 }
 
 /**
@@ -226,7 +226,7 @@ export function checkSettingKey(key: string, kinds: Record<string, SettingKind>)
 
 /** A value of another kind than its key takes (`online maybe`): a usage error too, before the profile opens. */
 export function checkSettingValue(key: string, kind: SettingKind, value: unknown, typed: string): void {
-  if (kind === "boolean" && typeof value !== "boolean") throw new CliError("usage", `${key} takes true or false, not ${JSON.stringify(typed)}: ${SETTINGS_SET}`);
+  if (kind === "boolean" && typeof value !== "boolean") throw new CliError("usage", `${key} takes true or false, not ${shownValue(typed)}: ${SETTINGS_SET}`);
   // Not echoed: a TURN password may be in it.
   if (kind === "strings" && !(Array.isArray(value) && value.every((v) => typeof v === "string"))) throw new CliError("usage", `${key} takes a JSON list of strings: ${SETTINGS_SET}`);
   if (kind === "ice" && !(Array.isArray(value) && value.every((v) => v && typeof v === "object"))) throw new CliError("usage", `${key} takes a JSON list of ICE servers: ${SETTINGS_SET}`);

@@ -38,15 +38,36 @@ export interface DhtOnly { mine: boolean; theirs: boolean; heldUntil: number | n
  * engine says it on `send` and `forward` (api.ts), the command's process on its notice and Ctrl-C (`dhtOnlyNotice`).
  */
 export function dhtOnlyNote(chat: DhtOnly, text: string, ref: string): string | undefined {
+  if (new TextEncoder().encode(text.trim()).length <= DHT_TEXT_BYTES) return undefined;
+  const who = dhtOnlyWho(chat, ref, ", or shorten it");
+  return who && `Longer than the ${DHT_TEXT_BYTES} bytes the DHT carries, and ${who}`;
+}
+
+/**
+ * Whose choice keeps the chat on the DHT only and what ends it, for what waits for a live session ("it goes"), or
+ * undefined while neither side keeps it there. `or`: another way out, said after a choice (a hold ends by itself).
+ */
+function dhtOnlyWho(chat: DhtOnly, ref: string, or = ""): string | undefined {
   const { mine, theirs, heldUntil: held } = chat;
-  if ((!mine && !theirs) || new TextEncoder().encode(text.trim()).length <= DHT_TEXT_BYTES) return undefined;
+  if (!mine && !theirs) return undefined;
   const chosen = mine && held === null;
   const switchBack = `ghostly chat transport ${shellWord(ref, "<chat>")} auto`;
-  const who = chosen && theirs ? `you and the contact keep this chat on the DHT only: it goes once both choose a live transport (${switchBack}), or shorten it`
-    : theirs ? "the contact keeps this chat on the DHT only: it goes once they choose a live transport, or shorten it"
+  return chosen && theirs ? `you and the contact keep this chat on the DHT only: it goes once both choose a live transport (${switchBack})${or}`
+    : theirs ? `the contact keeps this chat on the DHT only: it goes once they choose a live transport${or}`
     : held !== null ? heldWords(held, ref, "it goes", chat.oneShot)
-    : `this chat is on the DHT only: it goes once you choose a live transport (${switchBack}), or shorten it`;
-  return `Longer than the ${DHT_TEXT_BYTES} bytes the DHT carries, and ${who}`;
+    : `this chat is on the DHT only: it goes once you choose a live transport (${switchBack})${or}`;
+}
+
+/**
+ * Why my pin (or unpin) in a 1:1 chat waits, or undefined: a pin goes on the live session only (core `sendPin`), never
+ * over the DHT, and a chat on the DHT only (this side's choice or hold, the contact's) has none. It goes once that
+ * ends, said with whose choice it is and what ends it, as `dhtOnlyNote` says it of a long text. The daemon's answer
+ * says it in `note`, a `--wait confirmed` timeout in its words and `details.note` (api.ts `pinWaitsLive`): both said
+ * the pin still goes by itself, and it never did while the chat stayed on the DHT only.
+ */
+export function pinWaitsNote(chat: DhtOnly, ref: string, remove: boolean): string | undefined {
+  const who = dhtOnlyWho(chat, ref);
+  return who && `${remove ? "An unpin" : "A pin"} goes only on a live session, and ${who}`;
 }
 
 /**

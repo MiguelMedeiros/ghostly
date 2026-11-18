@@ -106,7 +106,7 @@ test("a file over 25 MB waits for the receiver's answer; reloaded mid-way, it go
   const sha = await generate(path, size);
   await alice.page.getByTestId("file-input").setInputFiles(path);
 
-  // Bob is asked, with the room left on his device; Alice sees what she waits for.
+  // Bob is asked, with the room he has left; Alice sees what she waits for.
   const incoming = bob.page.getByTestId("file-bubble").filter({ hasText: "season finale.mkv" });
   await expect(incoming.getByTestId("file-offer")).toContainText("wants to send season finale.mkv (300.0 MB)", { timeout: 60_000 });
   await expect(incoming.getByTestId("file-room")).toContainText("left on this device");

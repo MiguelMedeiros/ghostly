@@ -2,6 +2,7 @@
   "add": {
     "adding": "Añadiendo {{device}}…",
     "button": "Añadir un dispositivo",
+    "codeQr": "Código QR del código del dispositivo",
     "connecting": "Un dispositivo se está conectando…",
     "copy": "Copiar enlace",
     "done": "{{device}} añadido. Está en espera.",
@@ -396,6 +397,7 @@
     "hintRestored": "Esto hará que tu otro dispositivo se detenga. Este dispositivo tiene tu perfil como estaba en la copia de seguridad.",
     "info": "Los mensajes y el dinero que llegaron a {{device}} después no están aquí. Si {{device}} vuelve, se detiene, sin decir nada a tus contactos.",
     "lost": "Mi otro dispositivo se perdió o se rompió",
+    "lostFirst": "Responde primero a «¿Perdido o robado?».",
     "lostNo": "Solo roto o borrado",
     "lostNoHint": "Se detiene si alguna vez vuelve.",
     "lostQuestion": "¿Perdido o robado?",

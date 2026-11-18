@@ -71,6 +71,33 @@ describe("revocations an app's uninstall leaves", () => {
     expect(await appRows()).toEqual([]);
   });
 
+  it("a store's index revoking the next version of several installed apps, dropped by the store since: a copy of each is refused", async () => {
+    const store = apps(net);
+    const installed = await Promise.all([0, 1, 2].map((i) => bundle({ name: `app${i}` })));
+    for (const [i, app] of installed.entries()) {
+      net.put(`${REPO}/app${i}.ghostlyapp`, app.bytes);
+      await store.preview({ url: `${REPO}/app${i}.ghostlyapp` });
+      await store.install({ digest: app.digest, grant: ["chat"] });
+    }
+    const next = await Promise.all([0, 1, 2].map((i) => bundle({ name: `app${i}`, sequence: 2 })));
+    await net.putStore(await storeFiles({ apps: [], revoked: await Promise.all(next.map((v2) => revocation(v2.ref, [v2.digest], "Leaked key"))) }));
+    const puts = vi.spyOn(IDBObjectStore.prototype, "put");
+    await store.addStore({ url: STORE_URL });
+    // Kept with one write, not one per app.
+    expect(puts.mock.calls.filter(([, key]) => key === APP_REVOCATIONS_KEY)).toHaveLength(1);
+    puts.mockRestore();
+    await net.putStore(await storeFiles({ sequence: 2, apps: [] }));
+    await store.refreshStores();
+
+    for (const [i, v2] of next.entries()) {
+      const copy = `${MIRROR}/app${i}.ghostlyapp`;
+      net.put(copy, v2.bytes);
+      expect((await store.preview({ url: copy })).run).toEqual({ status: "revoked", reason: "Leaked key" });
+      await expect(store.install({ digest: v2.digest, grant: ["chat"] })).rejects.toThrow(/^revoked/);
+    }
+    expect((await appRows()).map((row) => row.digest)).toEqual(installed.map((app) => app.digest));
+  });
+
   it("a copy previewed while the app was installed, then Install after its uninstall: refused", async () => {
     const v1 = await bundle();
     net.put(BUNDLE_URL, v1.bytes);
@@ -210,6 +237,43 @@ describe("revocations kept while the app is installed", () => {
     await expect(again.acceptUpdate({ ref: v1.ref, sequence: 2, added: ["name"] })).rejects.toThrow(/^revoked/);
     expect(await again.runCheck({ ref: v1.ref })).toEqual({ status: "revoked", reason: "Leaked key" });
     await expect(again.entry({ ref: v1.ref })).rejects.toThrow(/^revoked/);
+  });
+});
+
+describe("a store's revocation of a later version, read before the app was installed", () => {
+  // The store's index revokes v2 while v1 is not installed yet; its next index drops it, and nothing beside a copy of v2
+  // (a contact's card at a mirror) or beside v1's URL revokes it.
+  async function installedAfterTheRead() {
+    const v1 = await bundle();
+    const v2 = await bundle({ sequence: 2 });
+    net.put(BUNDLE_URL, v1.bytes);
+    await net.putStore(await storeFiles({ apps: [listing(v1)], revoked: [await revocation(v1.ref, [v2.digest], "Bad v2")] }));
+    const store = apps(net);
+    await store.addStore({ url: STORE_URL });
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    await store.refreshStores();
+    await net.putStore(await storeFiles({ sequence: 2, apps: [listing(v1)] }));
+    await store.refreshStores();
+    return { v1, v2, store };
+  }
+
+  it("a copy of the revoked version is shown revoked and not installed", async () => {
+    const { v1, v2, store } = await installedAfterTheRead();
+    net.put(MIRROR_URL, v2.bytes);
+    const preview = await store.preview({ card: { ref: v2.ref, url: MIRROR_URL, sequence: v2.sequence, digest: v2.digest } });
+    expect(preview.run).toEqual({ status: "revoked", reason: "Bad v2" });
+    await expect(store.install({ stage: preview.stage, digest: v2.digest, grant: ["chat"] })).rejects.toThrow(/^revoked/);
+    expect(await appRows()).toEqual([expect.objectContaining({ digest: v1.digest })]);
+  });
+
+  it("the store's next index listing it: the update check does not install it", async () => {
+    const { v1, v2, store } = await installedAfterTheRead();
+    net.put(MIRROR_URL, v2.bytes);
+    await net.putStore(await storeFiles({ sequence: 3, apps: [listing(v2, [MIRROR_URL])] }));
+    await store.refreshStores();
+    expect((await store.checkUpdates()).map((r) => r.outcome)).not.toContain("updated");
+    expect(await appRows()).toEqual([expect.objectContaining({ digest: v1.digest })]);
   });
 });
 

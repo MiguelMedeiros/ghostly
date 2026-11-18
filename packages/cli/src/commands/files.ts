@@ -2,7 +2,7 @@ import { sep } from "node:path";
 import { GROUP_FILE_LIMITS } from "@ghostly/core/groupFiles";
 import { VOICE_LIMITS } from "@ghostly/core/voice";
 import type { Parsed } from "../args";
-import { CliError } from "../errors";
+import { CliError, shownValue } from "../errors";
 import { type Command, here, localStat, LONG_WAIT_SECONDS, reply, timeout } from "./shared";
 
 /**
@@ -19,7 +19,7 @@ function voiceOf(options: Parsed["options"]): { voice?: number | true; peaks?: s
   if (voice === undefined) throw new CliError("usage", "--peaks is a voice note's waveform: not without --voice");
   const bars = peaks.split(",");
   if (bars.length > VOICE_LIMITS.maxBars || !bars.every((bar) => /^\d{1,3}$/.test(bar.trim()) && Number(bar) <= 255)) {
-    throw new CliError("usage", `--peaks takes up to ${VOICE_LIMITS.maxBars} numbers from 0 to 255, comma-separated, not ${JSON.stringify(peaks)}`);
+    throw new CliError("usage", `--peaks takes up to ${VOICE_LIMITS.maxBars} numbers from 0 to 255, comma-separated, not ${shownValue(peaks)}`);
   }
   return { voice: voice as number | true, peaks: bars };
 }

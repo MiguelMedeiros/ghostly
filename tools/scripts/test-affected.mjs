@@ -10,6 +10,7 @@
 //   npm run test:affected -- --files a.ts b.tsx  # these files instead of the diff
 //   npm run test:affected -- --no-e2e --no-rust  # leave those out (also --no-lint, --no-typecheck)
 //   npm run test:affected -- --no-stack          # @gated tests: .env.e2e as it is, the shared stack not asked
+//   npm run test:affected -- --unit-group 3/4    # only CI draft runner 3's unit tests (cli half 1/2)
 //
 // JOBS (default 2): vitest workers, cargo test threads. E2E_WORKERS (default 2): Playwright workers.
 // What is picked and why: tools/scripts/affected/select.mjs. The e2e mapping is e2e/features.json "paths".
@@ -30,7 +31,11 @@ const option = (name) => {
   const i = argv.indexOf(name);
   return i >= 0 ? argv[i + 1] : undefined;
 };
-const usage = () => readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1, 17).map((l) => l.replace(/^\/\/ ?/, "")).join("\n");
+// --help: the comment block at the top of this file, whatever its length.
+const usage = () => {
+  const lines = readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1);
+  return lines.slice(0, lines.findIndex((l) => !l.startsWith("//"))).map((l) => l.replace(/^\/\/ ?/, "")).join("\n");
+};
 if (flag("--help") || flag("-h")) {
   console.log(usage());
   process.exit(0);

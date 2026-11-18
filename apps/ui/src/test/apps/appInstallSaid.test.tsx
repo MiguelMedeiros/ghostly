@@ -119,3 +119,26 @@ describe("an installed app its publisher revoked", () => {
     expect(await screen.findByTestId("app-run-line")).toHaveTextContent(`${pt("apps.install.revoked")} ${pt("apps.app.revokedNext")}`);
   });
 });
+
+/*
+ * A revoked version the person has already (a newer one, this one, another copy of it): its install screen, opened from
+ * an old chat card or a listing, told them "It can't be installed. Look for a newer version from its publisher.", about
+ * a version they have, and never said they have a newer one.
+ */
+describe("the install screen of a revoked version the person has", () => {
+  for (const [install, line] of [
+    ["rollback", "You have a newer version."],
+    ["same", "Already installed."],
+    ["equivocation", "Two different copies of this version exist. Ghostly kept the one you have."],
+  ] as const) {
+    it(`says the revocation and what is true (${install}), with no step to look for a newer version`, async () => {
+      const { dialog, said, arrive } = await opened();
+      await arrive(preview({ install, run: { status: "revoked", reason: REASON } }));
+      const blocked = within(dialog).getByTestId("app-install-blocked");
+      expect(blocked).toHaveTextContent(`Its publisher revoked this version: ⁨${REASON}⁩ ${line}`);
+      expect(said).toHaveTextContent(`Its publisher revoked this version: ⁨${REASON}⁩ ${line}`);
+      expect(blocked).not.toHaveTextContent(INSTALL_NEXT);
+      expect(within(dialog).queryByTestId("app-install-confirm")).not.toBeInTheDocument();
+    });
+  }
+});

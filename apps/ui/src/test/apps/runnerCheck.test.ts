@@ -35,6 +35,14 @@ it("asks the runner page once, and says no when its header is missing or the pag
   expect(await runnerAvailable("/app-frame.html", (async () => { throw new TypeError("offline"); }) as typeof fetch)).toBe(false);
 });
 
+it("asks the server each time but lets an unchanged runner page come back as a 304, not its whole body", async () => {
+  const inits: (RequestInit | undefined)[] = [];
+  const fetcher = (async (_url: RequestInfo | URL, init?: RequestInit) => { inits.push(init); return new Response("", { headers: { "content-security-policy": RUNNER_CSP } }); }) as typeof fetch;
+  expect(await runnerAvailable("/app-frame.html", fetcher)).toBe(true);
+  expect(await runnerAvailable("/app-frame-net.html", fetcher, true)).toBe(false);
+  expect(inits.map((init) => init?.cache)).toEqual(["no-cache", "no-cache"]);
+});
+
 it("tells the network runner's policy from the plain one, and takes nothing wider", async () => {
   expect(isRunnerPolicy(NET_RUNNER_CSP, true)).toBe(true);
   expect(isRunnerPolicy(NET_RUNNER_CSP)).toBe(false);

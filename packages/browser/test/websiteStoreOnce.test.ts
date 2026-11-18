@@ -16,7 +16,7 @@ const START_MS = 1_791_417_600_000;
 
 // The build's snapshot (vitest.config.ts points store.ts at this fixture), filled by each test.
 const snapshot = vi.hoisted(() => ({} as Record<string, unknown>));
-const reads = vi.hoisted(() => ({ count: 0 }));
+const reads = vi.hoisted(() => ({ count: 0, bundles: {} as Record<string, Uint8Array> }));
 
 vi.mock("./fixtures/website-store-snapshot.json", () => ({ default: snapshot }));
 vi.mock("../../../apps/website/lib/storeRead", async (original) => {
@@ -25,30 +25,36 @@ vi.mock("../../../apps/website/lib/storeRead", async (original) => {
     ...real,
     // The official store's key is the app's own: these tests sign with a test key.
     STORE_KEY: toZ32(signerOf("store").publicKey),
-    readStore: (...args: Parameters<typeof real.readStore>) => { reads.count++; return real.readStore(...args); },
+    readStore: (...args: Parameters<typeof real.readStore>) => {
+      reads.count++;
+      reads.bundles = args[0].bundles;
+      return real.readStore(...args);
+    },
   };
 });
 
 const b64 = (bytes: Uint8Array) => Buffer.from(bytes).toString("base64");
 
 /** The official store with one app, expiring `expiresInS` after the start, as sync-store.mjs writes it. */
-async function writeSnapshot(expiresInS: number) {
+async function writeSnapshot(expiresInS: number, urls = ["https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp"]) {
   const publisher = signerOf("publisher");
   const made = await buildAppBundle({
     name: "chess", version: "1.0.0", sequence: 1, kind: "mini-app", title: "Chess", tagline: "Play chess with a contact", entry: "index.html",
     permissions: ["chat"], runtime: { host: ">=1.2", clients: ["web", "desktop"] }, license: "MIT",
   }, [{ path: "index.html", bytes: utf8Encode("<p>chess") }], publisher);
-  const url = "https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp";
   const store = signerOf("store");
   const index: AppStoreIndex = {
     ghostlyStore: 1, key: toZ32(store.publicKey), name: "Ghostly", kind: "curated", sequence: 1, expires: START_MS / 1000 + expiresInS,
-    apps: [{ ref: `${toZ32(publisher.publicKey)}/chess`, sequence: 1, digest: made.digest, urls: [url], title: "Chess", tagline: "Play chess with a contact" }],
+    apps: [{ ref: `${toZ32(publisher.publicKey)}/chess`, sequence: 1, digest: made.digest, urls, title: "Chess", tagline: "Play chess with a contact" }],
     removed: [], revoked: [],
   };
   const { indexBytes, sigBytes } = await signAppStore(index, store);
   delete snapshot.revocations;
-  Object.assign(snapshot, { source: "store", readAt: new Date(START_MS).toISOString(), index: b64(indexBytes), sig: b64(sigBytes), bundles: { [url]: b64(made.bytes) } });
-  return { publisher, ref: index.apps[0]!.ref };
+  delete snapshot.sameAs;
+  // The first URL holds the bytes; a later one with the same bytes is only named by `sameAs`, as sync-store.mjs keeps it.
+  const sameAs = Object.fromEntries(urls.slice(1).map((u) => [u, urls[0]!]));
+  Object.assign(snapshot, { source: "store", readAt: new Date(START_MS).toISOString(), index: b64(indexBytes), sig: b64(sigBytes), bundles: { [urls[0]!]: b64(made.bytes) }, sameAs });
+  return { publisher, ref: index.apps[0]!.ref, bytes: made.bytes };
 }
 
 async function fresh() {
@@ -97,6 +103,16 @@ describe("website store, read once", () => {
     vi.setSystemTime(START_MS + HOUR_MS);
     storeView();
     expect(reads.count).toBe(2);
+  });
+
+  it("gives a mirror the build kept by `sameAs` the bytes of the URL it names", async () => {
+    const pinned = `https://cdn.jsdelivr.net/gh/ana/chess@${"0123abcd".repeat(5)}/app.ghostlyapp`;
+    const raw = "https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp";
+    const { bytes } = await writeSnapshot(30 * 24 * 3600, [pinned, raw]);
+    const { storeView } = await fresh();
+    expect(storeView()).toMatchObject({ ok: true, apps: [{ name: "chess", link: pinned }] });
+    expect(reads.bundles[raw]).toEqual(bytes);
+    expect(reads.bundles[pinned]).toEqual(bytes);
   });
 
   it("leaves out a version the publisher's ghostly-revoke.json the build read revokes", async () => {

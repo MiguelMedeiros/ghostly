@@ -1,8 +1,7 @@
-import { base64urlnopad } from "@scure/base";
 import { decodeBolt11 } from "@ghostly/core";
 import { COMMANDO_NOT_RUN, CommandoClient, CommandoError, CommandoTransportError, type SocketFactory } from "./commando";
-import type { InvoiceStatus, LightningInfo, LightningInvoice, LightningPayResult, LightningPaymentRef, LightningPaymentStatus, LightningProvider, LightningProviderDescriptor } from "./lightning";
-import { NothingSpentError, PROVIDER_PLATFORMS, type ProviderNetwork, type ProviderSettings } from "./types";
+import type { InvoiceStatus, LightningInfo, LightningInvoice, LightningPayResult, LightningPaymentRef, LightningPaymentStatus, LightningProvider } from "./lightning";
+import { NothingSpentError, type ProviderNetwork } from "./types";
 
 /**
  * Lightning through the person's own Core Lightning node, over Commando (see commando.ts): the browser is
@@ -14,10 +13,6 @@ import { NothingSpentError, PROVIDER_PLATFORMS, type ProviderNetwork, type Provi
  * (needed for the web app, which only opens wss://) never sees a rune or a payment.
  */
 
-/** What Ghostly calls, and all a rune for it should allow. */
-export const CLN_METHODS = ["getinfo", "invoice", "listinvoices", "xpay", "pay", "listpays", "listfunds"] as const;
-export const CLN_RUNE_COMMAND = `lightning-cli createrune restrictions='[[${CLN_METHODS.map((m) => `"method=${m}"`).join(",")}]]'`;
-
 const PAY_TIMEOUT_S = 60;
 const CALL_TIMEOUT_MS = 30_000;
 const PAY_CALL_TIMEOUT_MS = (PAY_TIMEOUT_S + 30) * 1000;
@@ -25,46 +20,11 @@ const INVOICE_EXPIRY_S = 3600;
 
 const NETWORKS: Record<string, ProviderNetwork> = { bitcoin: "bitcoin", testnet: "testnet", testnet4: "testnet", signet: "signet", regtest: "regtest" };
 const HEX64 = /^[0-9a-f]{64}$/;
-const NODE_ID = /^0[23][0-9a-f]{64}$/;
 const msatToSat = (msat: unknown) => {
   const value = typeof msat === "number" ? msat : typeof msat === "string" ? Number(msat.replace(/msat$/, "")) : NaN;
   if (!Number.isSafeInteger(value) || value < 0) throw new Error("The node returned an amount that cannot be read");
   return Math.floor(value / 1000);
 };
-
-// -- runes ----------------------------------------------------------------------
-
-/**
- * The restrictions a rune carries, read without the node: a rune is base64url of a 32-byte hash state
- * followed by its restrictions (`&` between restrictions, `|` between alternatives, `\` escapes).
- */
-export function runeRestrictions(rune: string): string[][] {
-  let bytes: Uint8Array;
-  try { bytes = base64urlnopad.decode(rune.trim().replace(/=+$/, "")); } catch { throw new Error("That is not a rune"); }
-  if (bytes.length < 32) throw new Error("That is not a rune");
-  const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes.slice(32));
-  const restrictions: string[][] = [];
-  let alternatives: string[] = [], current = "";
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (c === "\\" && i + 1 < text.length) { current += text[++i]; continue; }
-    if (c === "|") { alternatives.push(current); current = ""; continue; }
-    if (c === "&") { alternatives.push(current); restrictions.push(alternatives); alternatives = []; current = ""; continue; }
-    current += c;
-  }
-  if (text.length) { alternatives.push(current); restrictions.push(alternatives); }
-  return restrictions;
-}
-
-/**
- * Refuses a rune that could run anything but what Ghostly calls: at least one of its restrictions must
- * be only `method=<one of CLN_METHODS>` alternatives. Other restrictions (a rate, amounts) only narrow it.
- */
-export function checkRune(rune: string) {
-  const allowed = new Set<string>(CLN_METHODS);
-  const limited = runeRestrictions(rune).some((alternatives) => alternatives.length > 0 && alternatives.every((alt) => alt.startsWith("method=") && allowed.has(alt.slice(7))));
-  if (!limited) throw new Error(`This rune is not restricted to the methods Ghostly uses. Create one with: ${CLN_RUNE_COMMAND}`);
-}
 
 // -- node replies -------------------------------------------------------------
 
@@ -186,31 +146,3 @@ export class CoreLightning implements LightningProvider {
 
   async close() { await this.rpc.close(); }
 }
-
-// -- the descriptor -------------------------------------------------------------
-
-const settingsOf = ({ config, secrets }: ProviderSettings) => ({ url: config.url?.trim() ?? "", nodeId: config.nodeId?.trim().toLowerCase() ?? "", rune: secrets.rune?.trim() ?? "" });
-
-export const coreLightning: LightningProviderDescriptor = {
-  id: "core-lightning",
-  label: "Core Lightning",
-  kind: "lightning",
-  description: "Your own Core Lightning node, over Commando with a rune. Your node holds the sats. The web app reaches it only through wss://.",
-  networks: ["bitcoin", "testnet", "signet", "regtest"],
-  platforms: PROVIDER_PLATFORMS,
-  fields: [
-    { name: "nodeId", label: "Node id", kind: "text", placeholder: "02… or 03… (66 hex characters)", help: "lightning-cli getinfo → id. The connection is authenticated against it." },
-    { name: "url", label: "WebSocket address", kind: "url", placeholder: "wss://node.example.com", help: "The node's bind-addr=ws:… listener, behind a wss:// proxy for the web app; ws:// only to this machine." },
-    { name: "rune", label: "Rune", kind: "secret", placeholder: "A rune restricted to Ghostly's methods", help: `Never an unrestricted rune. Create one with: ${CLN_RUNE_COMMAND}` },
-  ],
-  validate(settings) {
-    const { url, nodeId, rune } = settingsOf(settings);
-    if (!NODE_ID.test(nodeId)) throw new Error("The node id is 66 hex characters, starting with 02 or 03");
-    let parsed: URL;
-    try { parsed = new URL(url); } catch { throw new Error("Enter the node's websocket address, starting with wss:// or ws://"); }
-    if (parsed.protocol !== "wss:" && parsed.protocol !== "ws:") throw new Error("The websocket address starts with wss:// or ws://");
-    if (parsed.username || parsed.password) throw new Error("Put the rune in its own field, not in the address");
-    checkRune(rune);
-  },
-  async create(settings, host) { return CoreLightning.connect(settingsOf(settings), host.signal); },
-};

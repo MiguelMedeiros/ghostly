@@ -154,8 +154,8 @@ describe("FileBubble: files/3", () => {
 
   it("Accept refused for the files still coming says so, with the room left, beside the room line that says it does not fit", async () => {
     // As the engine shows it: the room left beside a file still coming (13.4 MB of 38.9 MB free), below the file's size.
-    // Said "left", as the refusal does: "13.4 MB free on this device" beside "13.4 MB left of 38.9 MB free" read as two disks.
     show({ state: "transferring", stage: "asking", direction: "in", transferred: 0, size: 27_262_976, room: 14_050_000 });
+    // "Left", as Accept says it: the device has 38.9 MB free, and "13.4 MB free" above "13.4 MB left of 38.9 MB free" read as two answers.
     expect(screen.getByTestId("file-room")).toHaveTextContent("Not enough space: 13.4 MB left on this device");
     fakeEngine.on("fileAction", () => { throw new Error("No room on this device for this file beside the files still coming (13.4 MB left of 38.9 MB free)"); });
     fireEvent.click(screen.getByTestId("file-accept"));
