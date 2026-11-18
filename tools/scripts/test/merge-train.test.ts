@@ -243,7 +243,7 @@ function fakeRepo() {
       if (missing.has(p.number)) return { baseSha: tips[base], dropped: "missing" };
       if (conflicts.has(p.number) || unrebasable.has(p.number)) return { baseSha: tips[base], dropped: "conflict" };
       if (!force && sitsOn.get(p.sha) === tips[base]) return { baseSha: tips[base], sha: p.sha };
-      const sha = `r${p.number}.${++rebases}`;
+      const sha = `r${p.number}x${++rebases}`; // a head a `Review:` comment can name, as a real sha
       sitsOn.set(sha, tips[base]);
       rebased.add(sha);
       return { baseSha: tips[base], sha };
@@ -2682,7 +2682,7 @@ describe("one pull request alone", () => {
     expect(merged.log.join("\n")).toMatch(/\(dry run\) would merge #11 at h11 \(squash\) as "fix 11 \(#11\)"/);
     expect(merged.log.join("\n")).not.toMatch(/verified/i); // nothing landed, so nothing to read back
     const rebased = await repo.run({ dry: true, base: "epic/x" });
-    expect(rebased.log.join("\n")).toMatch(/\(dry run\) would push r12\.\d+ to fix-12/);
+    expect(rebased.log.join("\n")).toMatch(/\(dry run\) would push r12x\d+ to fix-12/);
     expect(repo.landed).toEqual([]);
     expect(repo.pushes).toEqual([]);
     expect([...repo.comments.values()].flat()).toEqual([]);
@@ -3236,6 +3236,20 @@ describe("a pull request with a review running (Review: in progress)", () => {
     review(fix, 11);
     await fix.run({ now: start + 10 * 60_000 });
     expect(fix.landed).toEqual(["#11"]);
+  });
+
+  it("never merges a lone one the train rebased and flies alone while its review runs: it waits in line and the others go", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    expect((await repo.run({ now: start - 60 * 60_000 })).inFlight).toBe(11);
+    repo.settle(); // green on the train's rebase: without the review it would land now
+    review(repo, 11, `Review: in progress (head ${repo.pulls.get(11)!.sha})`);
+    repo.add(12);
+    const r = await repo.run({ now: start + 5 * 60_000 });
+    expect(repo.landed).toEqual(["#12"]);
+    expect(r.dropped).toEqual([]);
+    expect(repo.pulls.get(11)).toMatchObject({ open: true, labels: [LABEL.queue] });
+    expect(said(repo, 11)).toMatch(/1st\*\*\. Waiting: a review is running on its head/);
   });
 
   it("stops a green batch's landing on dev at one whose review started since it boarded", async () => {
