@@ -140,6 +140,8 @@ export class FileDesk {
   private readonly deciding = new Set<{ linkId: string; id: string; size: number; again: boolean }>();
   /** Received files whose offer waits for the person, by local id: the room they show is read again (`rooms`). */
   private readonly asking = new Set<string>();
+  /** Ends what was said on the floor and never offered (`sweepAnnounced`), from the first one said. */
+  private announcedSweeper?: ReturnType<typeof setInterval>;
 
   constructor(private readonly deps: FileDeskDeps) {}
 
@@ -255,6 +257,10 @@ export class FileDesk {
     chat.announced.set(wireId, { local: localId, at });
     // No direction: nothing to pause or cancel here before its offer comes.
     this.deps.transfers.set(localId, { state: "transferring", stage: "waiting", transferred: 0, size });
+    if (this.announcedSweeper) return;
+    this.announcedSweeper = setInterval(() => this.sweepAnnounced(), FILE_LIMITS.sweepEveryMs);
+    // A headless app (the CLI) is not kept running for it.
+    (this.announcedSweeper as { unref?: () => void }).unref?.();
   }
 
   /** This device refuses the offer of a file said on the floor: its bubble ends, saying why (`floorRefusal`). */
@@ -410,12 +416,19 @@ export class FileDesk {
     this.unwatch(fileId);
   }
 
-  /** Offers nobody answered in a week end; the peer calls this now and then. */
+  /** Offers nobody answered in a week end (each chat's own sweep does it while its session is open), and so do files said on the floor. */
   sweep(): void {
+    for (const chat of this.chats.values()) chat.files.sweep();
+    this.sweepAnnounced();
+  }
+
+  /**
+   * Said on the floor and never offered live within the week an offer waits: it is not coming. Run every
+   * `FILE_LIMITS.sweepEveryMs` from the first one said (`announcedHere`): nothing called `sweep`, so its bubble waited for good.
+   */
+  private sweepAnnounced(): void {
     const now = Date.now();
     for (const chat of this.chats.values()) {
-      chat.files.sweep();
-      // Said on the floor and never offered live within the week an offer waits: it is not coming.
       for (const [wireId, said] of [...chat.announced]) if (now - said.at > ANNOUNCED_FOR_MS) this.withdrawn(chat, wireId, "It did not come within a week");
     }
   }
@@ -439,9 +452,11 @@ export class FileDesk {
     return said;
   }
 
-  /** The app stops: no chat's files are swept any more (`ChatFiles.stop`). */
+  /** The app stops: no chat's files are swept any more (`ChatFiles.stop`), nor what was said on the floor. */
   stop(): void {
     for (const chat of this.chats.values()) chat.files.stop();
+    clearInterval(this.announcedSweeper);
+    this.announcedSweeper = undefined;
   }
 
   /** Stops tracking whether a transfer is stuck, and the room an offer of it shows. */
