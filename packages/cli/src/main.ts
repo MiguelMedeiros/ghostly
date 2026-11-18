@@ -8,7 +8,7 @@ import { checkSettingKey, checkSettingValue, GLOBAL_OPTIONS, globalOption, liftG
 import { connectDaemon, DaemonClient, endedUnanswered, endedUnsent, isNotTheDaemon, notTheDaemon } from "./client";
 import { childEnv, dropSecretEnv } from "./childEnv";
 import { COMMANDS, idSlot, noMoreThan, numberSlot, positionals, takesText, TEXT_COMMANDS } from "./commands";
-import { here, inRange, INPUT_BYTES, localStat, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
+import { here, inRange, INPUT_BYTES, listAtMost, localStat, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS, hideSecretFields } from "./engineMethods";
 import { asCliError, CliError, type ErrorCode, EXIT, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
@@ -1577,6 +1577,7 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
   if (!target || (spec.message && !message)) throw new CliError("usage", `Missing <${target ? "message" : spec.target}>: ghostly ${spec.usage}`);
   // Before stdin is read and the profile opens: the API's own check answered once a one-shot was online (exit 1).
   timeout(parsed.options);
+  if (spec.target === "group") listAtMost(parsed.options, "mention");
   // Empty (an unset variable in a script), it sent a plain message: an id the chat lacks is exit 3.
   if (parsed.options.reply === "") throw new CliError("usage", "--reply needs a message id");
   // Stdin only when no text word was given at all: `send bob "$line"` with an empty line is no text, not the rest of stdin.
