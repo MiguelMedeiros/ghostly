@@ -1331,6 +1331,68 @@ describe("two call managers", { timeout: 60_000 }, () => {
     await b.calls.stopAll();
   });
 
+  it("a caller whose app died while its call rang here and who calls again: the ringing call ends as missed, sends nothing, and the new one rings and is the one answered", async () => {
+    const { a, b } = pairOfManagers();
+    await a.calls.start("chat-ab", {});
+    const first = await until(() => b.events.find((e) => e.type === "call.incoming")).catch(diagnose(a, b));
+    // Their app reloaded as it rang out (no hang-up) and calls again 5 s later (WISP 601 "Ringing").
+    const [offer] = signalsOf(a, "o").map((s) => JSON.parse(s!));
+    const newer = offer.ts + 5000;
+    b.calls.onSignal("chat-ba", heardCallSignal(JSON.stringify({ ...offer, ts: newer }), Date.now()));
+    await until(() => b.events.filter((e) => e.type === "call.incoming").length === 2).catch(diagnose(a, b));
+    expect(b.events.map((e) => e.type)).toEqual(["call.incoming", "call.ended", "call.incoming"]);
+    expect(b.events[1]).toMatchObject({ call: first.call, direction: "in", reason: "missed" });
+    const ringing = b.events[2]!.call;
+    expect(ringing).not.toBe(first.call);
+    // One call rings, the newer one; a hang-up would end the contact's new call as declined.
+    expect(b.calls.list()).toMatchObject([{ call: ringing, direction: "in", state: "ringing" }]);
+    expect(signalsOf(b, "h")).toEqual([]);
+    await expect(b.calls.answer(first.call as string, {})).rejects.toMatchObject({ code: "not_found" });
+
+    // The same offer heard again, and the older one, change nothing.
+    b.calls.onSignal("chat-ba", heardCallSignal(JSON.stringify({ ...offer, ts: newer }), Date.now()));
+    b.calls.onSignal("chat-ba", heardCallSignal(JSON.stringify(offer), Date.now()));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(b.events.map((e) => e.type)).toEqual(["call.incoming", "call.ended", "call.incoming"]);
+
+    await b.calls.answer(undefined, {});
+    expect(signalsOf(b, "a").map((s) => JSON.parse(s!).o)).toEqual([newer]);
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
+  it("an offer no newer than the call ringing here (one heard again) rings nothing new", async () => {
+    const { a, b } = pairOfManagers();
+    await a.calls.start("chat-ab", {});
+    const first = await until(() => b.events.find((e) => e.type === "call.incoming")).catch(diagnose(a, b));
+    const [offer] = signalsOf(a, "o").map((s) => JSON.parse(s!));
+    b.calls.onSignal("chat-ba", heardCallSignal(JSON.stringify(offer), Date.now()));
+    b.calls.onSignal("chat-ba", heardCallSignal(JSON.stringify({ ...offer, ts: offer.ts - 1000 }), Date.now()));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(b.events.map((e) => e.type)).toEqual(["call.incoming"]);
+    expect(b.calls.list()).toMatchObject([{ call: first.call, state: "ringing" }]);
+    await b.calls.answer(undefined, {});
+    expect(signalsOf(b, "a").map((s) => JSON.parse(s!).o)).toEqual([offer.ts]);
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
+  it("another chat's newer call rings beside the one ringing here, which keeps its offer", async () => {
+    const { a, b } = pairOfManagers({ otherChatB: true });
+    await a.calls.start("chat-ab", {});
+    const first = await until(() => b.events.find((e) => e.type === "call.incoming")).catch(diagnose(a, b));
+    const [offer] = signalsOf(a, "o").map((s) => JSON.parse(s!));
+    b.calls.onSignal("chat-bc", heardCallSignal(JSON.stringify({ ...offer, ts: offer.ts + 5000 }), Date.now()));
+    await until(() => b.events.filter((e) => e.type === "call.incoming").length === 2).catch(diagnose(a, b));
+    expect(b.events.map((e) => e.type)).toEqual(["call.incoming", "call.incoming"]);
+    expect(b.calls.list()).toHaveLength(2);
+    expect(b.calls.list().find((c) => c.chat === "chat-ba")).toMatchObject({ call: first.call, state: "ringing" });
+    await b.calls.answer(first.call as string, {});
+    expect(signalsOf(b, "a").map((s) => JSON.parse(s!).o)).toEqual([offer.ts]);
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
   /** Both sides call each other at once; the side whose offer lost is the one that ends its call as `crossed`. */
   async function glare(a: Side, b: Side) {
     await Promise.allSettled([a.calls.start("chat-ab", {}), b.calls.start("chat-ba", {})]);
