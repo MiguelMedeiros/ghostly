@@ -655,12 +655,30 @@ describe("MessageBubble: delivery", () => {
     expect(mark()).toHaveAccessibleName(label);
     // In the time row, not a line of its own.
     expect(mark().closest(".msg-meta")).not.toBeNull();
-    expect(container).not.toHaveTextContent(label);
+    // Shown, that is: its line is there for a screen reader, hidden.
+    const shown = container.cloneNode(true) as HTMLElement;
+    shown.querySelectorAll("[hidden]").forEach((e) => e.remove());
+    expect(shown).not.toHaveTextContent(label);
     await user.hover(mark());
     expect(screen.getByRole("tooltip")).toHaveTextContent(hint);
     expect(mark()).toHaveAccessibleDescription(hint);
     await user.unhover(mark());
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  });
+
+  it("a keyboard reaches the mark and a screen reader hears its line, without a hover", async () => {
+    // Bug hunt hunt-1118 (issue 7382): Tab skipped the mark, and its line was its description only while hovered.
+    const { user } = bubble({ sender: "me", delivery: "queued" });
+    expect(mark()).toHaveAccessibleName("Sending");
+    expect(mark()).toHaveAccessibleDescription("No receipt yet. Sends again by itself.");
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    act(() => { mark().focus(); });
+    expect(mark()).toHaveFocus();
+    expect(screen.getByRole("tooltip")).toHaveTextContent("No receipt yet. Sends again by itself.");
+    await user.tab();
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    await user.tab({ shift: true });
+    expect(mark()).toHaveFocus();
   });
 
   it.each(["waiting", "sending", "queued"] as const)("with this device offline, a %s message says it waits for this device, not the contact", async (delivery) => {
@@ -715,6 +733,7 @@ describe("MessageBubble: delivery", () => {
       act(() => engine.update({ links: [linkView({ ...link })] }));
       expect(mark()).toHaveAttribute("data-delivery", "waiting");
       expect(mark()).toHaveAccessibleName(LIVE);
+      expect(mark()).toHaveAccessibleDescription(hint);
       await user.hover(mark());
       expect(screen.getByRole("tooltip")).toHaveTextContent(hint);
       expect(screen.getByRole("tooltip").textContent).not.toMatch(/online|—/);
