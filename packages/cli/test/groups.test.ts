@@ -158,7 +158,9 @@ describe("a one-shot group join", () => {
     try {
       const answer = callApi(oneShot("daemon").ctx, "group.join", { link: LINK });
       await vi.advanceTimersByTimeAsync(1_000);
-      expect(await Promise.race([answer, Promise.resolve("still waiting")])).toEqual({ group: "g9", joined: false, stage: "knocking" });
+      // Found in a bug hunt: not in yet, it named no way to follow the knock (the one-shot gives one).
+      expect(await Promise.race([answer, Promise.resolve("still waiting")])).toEqual({ group: "g9", joined: false, stage: "knocking",
+        warning: "Not in yet: the daemon goes on knocking at the group's link until a member's app lets you in: ghostly group show g9 follows it, ghostly group decline g9 stops it" });
       const active = { ...knocking("knocking"), status: "active", invitation: undefined } as unknown as GroupView;
       expect(await callApi(oneShot("daemon", active).ctx, "group.join", { link: LINK })).toEqual({ group: "g9", joined: true, stage: null });
     } finally { vi.useRealTimers(); }
@@ -376,6 +378,37 @@ describe("group link", () => {
     // A community member who lost its hubs is still in it: it asks to be let in again by itself.
     out("lost");
     expect(await callApi(ctx, "group.link", { group: "Crew" })).toEqual({ group: "g1", link: LINK, url: expect.stringMatching(/#\/join\//) });
+  });
+
+  // Found in a bug hunt: a member asking for a community's link the admin turned off was told "Only the admin can
+  // replace or turn off the group's link", which it had not asked; the app tells it the link is off.
+  it("a community member asking for a link the admin turned off is told so, as the app says it", async () => {
+    const { ctx, node } = fake();
+    const enableGroupLink = vi.fn(async () => { throw new Error("Only the admin can replace or turn off the group's link"); });
+    Object.assign(node, { enableGroupLink });
+    node.getState = () => ({ links: [], groups: [{ ...group, profile: "community", isAdmin: false, status: "active", entryLink: undefined }], settings: {}, transport: {} }) as unknown as EngineState;
+    await expect(callApi(ctx, "group.link", { group: "Crew" })).rejects.toMatchObject({ code: "refused",
+      message: "The admin turned the link off: nobody can join with it, and the link shared before will not work again. Only the admin can make a new one." });
+    expect(enableGroupLink).not.toHaveBeenCalled();
+  });
+
+  it("says in its help that it prints the link, and that anyone who has it can join", () => {
+    expect(COMMANDS["group link"].summary).toBe("Print the group's link (anyone who has it can join); --reset: a new one, the old one stops working; --off");
+    expect(COMMANDS["group create"].summary).toContain("anyone who has its link can join");
+  });
+});
+
+describe("group hub", () => {
+  // Found in a bug hunt: on a community it answered the engine's "A community group chooses its hubs by itself" as
+  // `engine` (a fault worth a retry), admin or not; `group call` refuses the wrong profile before the engine.
+  it("is refused on a community before the engine, saying what it is for", async () => {
+    const { ctx, node } = fake();
+    const setGroupHub = vi.fn(async () => undefined);
+    Object.assign(node, { setGroupHub });
+    node.getState = () => ({ links: [], groups: [{ ...group, profile: "community" }], settings: {}, transport: {} }) as unknown as EngineState;
+    await expect(callApi(ctx, "group.hub", { group: "Crew", member: "Ana", role: "pin" })).rejects.toMatchObject({ code: "refused",
+      message: "Crew is a community: it chooses its hubs by itself; group hub is for a private group past 16 members" });
+    expect(setGroupHub).not.toHaveBeenCalled();
   });
 });
 
@@ -668,11 +701,24 @@ describe("an invitation that will not go on by itself", () => {
     const invited = (invitation: Record<string, unknown>) => ({ ...group, status: undefined, isAdmin: false, members: [], canSend: false, entryLink: undefined,
       invitation: { linkId: "l1", contact: "", admin: "anakey", members: 2, accepted: false, ...invitation } }) as unknown as GroupView;
     expect(groupJson(invited({ accepted: true, viaLink: true, stage: "knocked", unanswered: true })).invitation)
-      .toEqual({ chat: "l1", accepted: true, viaLink: true, stage: "knocked", unanswered: true });
+      .toEqual({ chat: null, accepted: true, viaLink: true, stage: "knocked", unanswered: true,
+        note: "You opened its link and nobody let you in: ghostly group accept g1 knocks again, ghostly group decline g1 drops it" });
     expect(groupJson(invited({ linkId: "chat-ana", takenBack: true })).invitation)
       .toEqual({ chat: "chat-ana", accepted: false, viaLink: false, stage: null, takenBack: true });
     // One still going on is as before, with neither.
     expect(groupJson(invited({ linkId: "chat-ana" })).invitation).toEqual({ chat: "chat-ana", accepted: false, viaLink: false, stage: null });
+  });
+
+  // Found in a bug hunt: a link join read `status: "invited"` with no reason, nobody having invited it, and nothing
+  // named the way to stop knocking.
+  it("a link join's invitation carries a note that says it knocks at the link and how to stop it", () => {
+    const knock = (invitation: Record<string, unknown>) => groupJson({ ...group, id: "g9", status: undefined, isAdmin: false, members: [], canSend: false, entryLink: undefined,
+      invitation: { linkId: "fhm4bwkoccyq54h5", contact: "", admin: "", members: 0, accepted: true, viaLink: true, ...invitation } } as unknown as GroupView);
+    // Its `chat` was the engine's id for the knock, which `chat show` does not know.
+    expect(knock({ stage: "knocked" })).toMatchObject({ status: "invited", statusReason: null, invitation: { chat: null, viaLink: true, stage: "knocked",
+      note: "You opened its link and knock until a member's app lets you in (stage says how far): ghostly group decline g9 stops it" } });
+    // A contact's invitation has nothing to add: it is one.
+    expect(groupJson({ ...group, status: undefined, invitation: { linkId: "chat-ana", contact: "Ana", admin: "anakey", members: 2, accepted: false } } as unknown as GroupView).invitation).not.toHaveProperty("note");
   });
 });
 
