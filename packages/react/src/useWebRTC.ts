@@ -1648,7 +1648,8 @@ export function useWebRTC({
     setMediaProblemShown("relayOnlyNow");
   }, [relayOnly, setMediaProblemShown]);
   // Ours rings from its offer: `offering` starts before the microphone or camera prompt, which may stay open a minute.
-  const ringing = callState === "incoming" || (callState === "offering" && offerOut) ? callState : null;
+  const offerSent = callState === "offering" && offerOut;
+  const ringing = callState === "incoming" || offerSent ? callState : null;
   useEffect(() => {
     if (!ringing) return;
     const timer = setTimeout(() => {
@@ -1833,6 +1834,11 @@ export function useWebRTC({
     screenShareError,
     /** Our last call rang out with no answer, for a few seconds. */
     noAnswer,
+    /**
+     * Our call rings the contact: it is `offering` and its offer went out. Not while the microphone or camera prompt is
+     * open, nor while the connection gathers: the caller's ringback plays from here, as `RING_MS` counts.
+     */
+    offerSent,
     mediaProblem: mediaProblemShown?.problem ?? null,
     /** New at each `mediaProblem` shown, the same reason again too: the notice is drawn (and said) anew. */
     mediaProblemId: mediaProblemShown?.id,
