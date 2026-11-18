@@ -22,7 +22,7 @@ export function ReconnectingBanner({ inChat = false, onPage = false }: { inChat?
   if (!reconnecting || ((inChat || onPage) && !phone)) return null;
   const testId = inChat ? "chat-reconnecting-banner" : onPage ? "page-reconnecting-banner" : "reconnecting-banner";
   return (
-    <div role="status" data-testid={testId} className="shrink-0 border-b border-border bg-surface px-4 py-2 flex items-start gap-2.5">
+    <div role="status" data-testid={testId} className={`${inChat ? "chat-banner " : ""}shrink-0 border-b border-border bg-surface px-4 py-2 flex items-start gap-2.5`}>
       <span aria-hidden="true" className="mt-1 h-2 w-2 shrink-0 rounded-full bg-text-muted" />
       <p className="m-0 min-w-0 text-xs text-text-secondary">
         <span className="font-semibold text-text-primary">{t("pwa.reconnecting")}</span>
