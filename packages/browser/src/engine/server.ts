@@ -62,6 +62,14 @@ export class EngineServer implements PeerServer {
    * runs with no tab open, and a message that came then showed nothing until Ghostly was opened.
    */
   unheardAttention?: (event: AttentionEvent) => void;
+  /**
+   * A contact's call that rings while no client is attached (`signal`, its offer), and the end of one told so (`null`:
+   * the contact hung up, or a page that opened since answered or declined it): the host tells the person itself, as it
+   * does a message (`unheardAttention`). A ring nobody answers sends nothing more: the host ends it after the app's ring.
+   */
+  unheardCall?: (linkId: string, signal: string | null) => void;
+  /** The chats whose ringing call the host was told of (`unheardCall`) and not yet of its end. */
+  private readonly unheardRings = new Set<string>();
 
   /**
    * `keepNewest`: the start keeps each chat's and group's newest rows that many, from the whole histories it reads anyway,
@@ -76,9 +84,15 @@ export class EngineServer implements PeerServer {
         onMessages: (linkId, messages) => { this.changed(linkId); void this.inOrder(linkId, () => this.sendHistory(linkId, messages)).catch(() => {}); },
         onMessageChanges: (linkId, changes) => { this.changed(linkId); void this.inOrder(linkId, () => this.sendChanges(linkId, changes)).catch(() => {}); },
         onCallSignal: (linkId, signal) => {
-          if (signalKind(signal) === "o") this.offers.set(linkId, signal);
+          const kind = signalKind(signal);
+          if (kind === "o") this.offers.set(linkId, signal);
           else this.offers.delete(linkId);
           this.broadcast({ kind: "call-signal", linkId, signal });
+          // With no page to ring, the host does (the extension's peer runs with no tab open); and stops once it ends.
+          if (kind === "o" && !this.clients.size && parseCallSignal(signal)?.t === "o") {
+            this.unheardRings.add(linkId);
+            this.unheardCall?.(linkId, signal);
+          } else if (kind === "h") this.unheardRingEnded(linkId);
         },
         // A contact's mini-app frame (WISP 1200 § In a chat): to the pages, where the app runs. Never stored.
         onAppFrame: (linkId, event) => this.broadcast({ kind: "app-frame", linkId, event }),
@@ -371,7 +385,13 @@ export class EngineServer implements PeerServer {
     if (typeof linkId !== "string" || !this.offers.delete(linkId)) return;
     const kind = typeof signal === "string" ? signalKind(signal) : undefined;
     if (kind !== "a" && kind !== "h") return;
+    this.unheardRingEnded(linkId);
     for (const client of [...this.clients]) if (client !== from) this.post(client, { kind: "call-handled", linkId });
+  }
+
+  /** A ring the host was told of (`unheardCall`) is over: it is told so, once. */
+  private unheardRingEnded(linkId: string): void {
+    if (this.unheardRings.delete(linkId)) this.unheardCall?.(linkId, null);
   }
 }
 
