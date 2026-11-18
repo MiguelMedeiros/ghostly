@@ -151,10 +151,12 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
 - `--from <chat|key>` and `--group <group>` (each again for more) are an allowlist: only those chats' and groups'
   events get through. See [Allowlist](#allowlist).
 - `--turns` gives one `agent.turn` event per message to answer. See [Agent turns](#agent-turns).
-- `--translate <lang>` (also on `events` and `chat history`) adds `translation: {from, text}` to a message a contact
-  or a member sent in another language, made on this machine by the translation runtime the Desktop downloads
-  (`translation-runtime/<version>/` and `translation-models/<from>-<to>/` in the data folder). Without the runtime it
-  says so once on stderr and prints messages as they are. See the CLI README's Translation section.
+- `--translate <lang>` (also on `events` and `chat history`): **not in this build yet.** The CLI has no language
+  detector yet, so it translates nothing, with or without the runtime: it says so once on stderr ("--translate cannot
+  translate in this build of the CLI") and prints messages as they are. Once it has one, the flag adds
+  `translation: {from, text}` to a message a contact or a member sent in another language, made on this machine by the
+  translation runtime the Desktop downloads (`translation-runtime/<version>/` and `translation-models/<from>-<to>/` in
+  the data folder); without the runtime it will say so once on stderr. See the CLI README's Translation section.
 - `--exec '<command>'` runs a shell command once per event, in order, with the event on **stdin** (never in its
   arguments, so a contact's text cannot reach the shell), and `GHOSTLY_EVENT_TYPE`, `GHOSTLY_EVENT_ID` and
   `GHOSTLY_EVENT_SEQ` in its environment. It also gets `GHOSTLY_HOME` and `GHOSTLY_PROFILE` of the folder and profile
