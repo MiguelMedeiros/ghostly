@@ -103,7 +103,7 @@ describe("every locale has the same keys as English", () => {
 const ARABIC_COUNT_ALONE = new Set([
   "apps.files.askAgainMore", "apps.store.showMore", "calls.timeline.audioMissedMany", "calls.timeline.videoMissedMany",
   "cards.board.showMore", "cards.board.showOlder", "cards.panel.activeCount", "cards.panel.buttonCount", "cards.panel.failedCount",
-  "cards.panel.finishedCount", "chat.announce.rowMoved", "chat.forward.partial", "chat.forward.pick", "chat.forward.selected",
+  "cards.panel.finishedCount", "chat.announce.rowMoved", "chat.file.comingList", "chat.forward.partial", "chat.forward.pick", "chat.forward.selected",
   "chat.hold.quota", "chat.jump.count", "chat.listTime.days", "chat.listTime.hours", "chat.listTime.minutes",
   "composer.identityShared", "composer.sendCount", "composer.servicesShared", "connection.history.showAll",
   "connection.history.title", "errors.group.growMore", "group.create.communityHint", "group.link.full", "group.link.note",

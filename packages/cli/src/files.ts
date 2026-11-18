@@ -339,14 +339,42 @@ async function waitForFile(ctx: ApiContext, params: Params, stopping?: AbortSign
   return { ...where, file: fileId, state: "done", size: transfer.size };
 }
 
+/** At most this many of the files still coming are named in a refusal; the rest are counted. */
+const HOLDERS_NAMED = 3;
+
+/**
+ * The files still coming that hold this device's room, as the engine counts them (`ChatFiles.stillToCome`): received in
+ * a 1:1 chat, taken (not one still asked about), not ended, largest first; each with its name and its chat's. A group's
+ * file is not counted there.
+ */
+async function roomHolders(s: EngineState, except: string): Promise<{ id: string; name?: string; chat: string; left: number }[]> {
+  const holders: { id: string; linkId: string; left: number }[] = [];
+  for (const [id, view] of Object.entries(s.transfers ?? {})) {
+    if (id === except || view.direction !== "in" || view.state !== "transferring" || view.stage === "asking") continue;
+    const link = s.links.find((l) => id.startsWith(`${l.id}-in-`));
+    const left = Math.max(0, view.size - view.transferred);
+    if (link && left > 0) holders.push({ id, linkId: link.id, left });
+  }
+  holders.sort((a, b) => b.left - a.left || a.id.localeCompare(b.id));
+  return Promise.all(holders.map(async ({ id, linkId, left }) => {
+    const link = s.links.find((l) => l.id === linkId);
+    return { id, left, name: (await fileStore.get(id).catch(() => undefined))?.metadata?.name, chat: link?.label || link?.peerNick || linkId };
+  }));
+}
+
 /**
  * `file accept` of a file that does not fit the room left beside the files still coming (`FileDesk.accept`), in this
  * CLI's MB: the engine's line gave the room in binary MB beside a size in decimal ones, and neither the files still
- * coming that take the rest nor the way out.
+ * coming that take the rest nor the way out. The files still coming are named with their chat and how to cancel each:
+ * "wait for them, or cancel one" said neither which nor where. Only this side reads it; nothing goes to the contact.
  */
-function noRoomWords(fileId: string, name: string | undefined, size: number, room: number, coming: number): string {
-  const rest = coming > 0 ? `, and ${megabytes(coming)} of files still coming need it first` : "";
-  return `${name ?? "The file"} (${megabytes(size)}) does not fit: ${megabytes(room)} free${rest}. Free some space, then ghostly file accept ${fileId} again (or file decline)`;
+function noRoomWords(fileId: string, name: string | undefined, size: number, room: number, coming: number, holders: Awaited<ReturnType<typeof roomHolders>> = []): string {
+  const named = holders.slice(0, HOLDERS_NAMED).map((h) => `${h.name ?? "a file"} from ${h.chat} (${megabytes(h.left)} to come: ghostly file cancel ${shellWord(h.id, "<file>")})`);
+  const more = holders.length > HOLDERS_NAMED ? ` and ${holders.length - HOLDERS_NAMED} more` : "";
+  const which = named.length ? `: ${named.join(", ")}${more}` : "";
+  const rest = coming > 0 ? `, and ${megabytes(coming)} of files still coming need it first${which}` : "";
+  const out = coming > 0 && named.length ? "Free some space or cancel one of them" : "Free some space";
+  return `${name ?? "The file"} (${megabytes(size)}) does not fit: ${megabytes(room)} free${rest}. ${out}, then ghostly file accept ${fileId} again (or file decline)`;
 }
 
 /** A received file that waits for this person's `file accept` (`file wait`, `file save`): said naming the command. */
@@ -504,7 +532,9 @@ export const FILE_METHODS: Record<string, Method> = {
     } catch (error) {
       const { room, size, coming } = (error ?? {}) as { room?: unknown; size?: unknown; coming?: unknown };
       if (action === "accept" && error instanceof Error && typeof room === "number" && error.message.startsWith("No room on this device")) {
-        throw new CliError("refused", noRoomWords(fileId, (await fileStore.get(fileId).catch(() => undefined))?.metadata?.name, typeof size === "number" ? size : view?.size ?? 0, room, typeof coming === "number" ? coming : 0), { reason: "no_room", room });
+        const comes = typeof coming === "number" ? coming : 0;
+        const holders = comes > 0 ? await roomHolders(state(ctx), fileId) : [];
+        throw new CliError("refused", noRoomWords(fileId, (await fileStore.get(fileId).catch(() => undefined))?.metadata?.name, typeof size === "number" ? size : view?.size ?? 0, room, comes, holders), { reason: "no_room", room });
       }
       throw error;
     }

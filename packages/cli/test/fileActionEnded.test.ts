@@ -24,9 +24,9 @@ beforeAll(async () => {
   registerFileBytes("native", async () => new NodeFileBytes(join(dir, "files")), true);
 });
 
-function world(transfers: Record<string, FileTransferView>) {
+function world(transfers: Record<string, FileTransferView>, links: LinkView[] = [link]) {
   const node = {
-    getState: () => ({ links: [link], groups: [], settings: {}, transport: {}, transfers }) as unknown as EngineState,
+    getState: () => ({ links, groups: [], settings: {}, transport: {}, transfers }) as unknown as EngineState,
     fileAction: vi.fn(),
   };
   const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
@@ -142,5 +142,50 @@ describe("file actions on an ended 1:1 transfer", () => {
       message: `b26.bin (27.3 MB) does not fit: 40.7 MB free, and 27.3 MB of files still coming need it first. Free some space, then ghostly file accept ${id} again (or file decline)`,
       details: { reason: "no_room", room: 40_714_240 },
     });
+  });
+
+  /**
+   * The files still coming that hold the room are named, with their chat and the command that cancels each: the line
+   * said only how many MB of them there were, and nothing said which files, nor in which chat, to cancel to make room.
+   */
+  it("accept refused for no room beside the files still coming names them, their chats and how to cancel each", async () => {
+    const id = "chat-one-in-named";
+    const bob = { ...link, id: "chat-two", label: undefined, peerNick: "Bob", peerPubKeyZ32: "pbob" } as unknown as LinkView;
+    const carol = { ...link, id: "chat-three", label: "Carol", peerPubKeyZ32: "pcarol" } as unknown as LinkView;
+    const put = (fileId: string, linkId: string, name: string, size: number) => fileStore.put({ id: fileId, linkId, createdAt: 1, direction: "in", metadata: { name, size, mime: "application/octet-stream", timestamp: 1 }, transfer: { state: "transferring", transferred: 0, size } } as never);
+    await put(id, "chat-one", "holiday.zip", 30_000_000);
+    await put("chat-two-in-big", "chat-two", "backup.iso", 25_000_000);
+    await put("chat-three-in-song", "chat-three", "song.flac", 10_000_000);
+    const taken = (size: number, transferred: number, patch: Partial<FileTransferView> = {}) => ({ state: "transferring", direction: "in", size, transferred, ...patch }) as FileTransferView;
+    const { ctx, node } = world({
+      [id]: taken(30_000_000, 0, { stage: "asking", room: 4_000_000 }),
+      "chat-two-in-big": taken(25_000_000, 1_000_000),
+      "chat-three-in-song": taken(10_000_000, 4_000_000, { stage: "paused", pausedBy: "peer" }),
+      "chat-four-in-nameless": taken(2_000_000, 0),
+      // Not holding the room: one still asked about, one sent from here, one ended, a group's file.
+      "chat-two-in-asked": taken(50_000_000, 0, { stage: "asking" }),
+      "chat-two-out-sent": { state: "transferring", direction: "out", size: 70_000_000, transferred: 0 } as FileTransferView,
+      "chat-two-in-failed": { state: "failed", direction: "in", size: 80_000_000, transferred: 0, error: "You cancelled it" } as FileTransferView,
+      "group-g1-in-x": taken(90_000_000, 0),
+    }, [link, bob, carol, { ...link, id: "chat-four", label: undefined, peerNick: undefined } as unknown as LinkView]);
+    node.fileAction.mockRejectedValueOnce(Object.assign(new Error("No room on this device for this file beside the files still coming (3.8 MB left of 38.1 MB free)"), { room: 40_000_000, size: 30_000_000, coming: 32_000_000 }));
+    await expect(callApi(ctx, "file.action", { file: id, action: "accept" })).rejects.toMatchObject({
+      code: "refused",
+      message: "holiday.zip (30 MB) does not fit: 40 MB free, and 32 MB of files still coming need it first: "
+        + "backup.iso from Bob (24 MB to come: ghostly file cancel chat-two-in-big), "
+        + "song.flac from Carol (6 MB to come: ghostly file cancel chat-three-in-song), "
+        + "a file from chat-four (2 MB to come: ghostly file cancel chat-four-in-nameless). "
+        + `Free some space or cancel one of them, then ghostly file accept ${id} again (or file decline)`,
+      // The contract a script reads is the same: the code, the reason and the room.
+      details: { reason: "no_room", room: 40_000_000 },
+    });
+    // Past three, the rest are counted.
+    await put("chat-two-in-small", "chat-two", "small.bin", 1_000_000);
+    const more = world({ [id]: taken(30_000_000, 0, { stage: "asking" }), "chat-two-in-big": taken(25_000_000, 1_000_000), "chat-three-in-song": taken(10_000_000, 4_000_000),
+      "chat-four-in-nameless": taken(2_000_000, 0), "chat-two-in-small": taken(1_000_000, 0) }, [link, bob, carol, { ...link, id: "chat-four", label: undefined } as unknown as LinkView]);
+    more.node.fileAction.mockRejectedValueOnce(Object.assign(new Error("No room on this device for this file beside the files still coming (3.8 MB left of 38.1 MB free)"), { room: 40_000_000, size: 30_000_000, coming: 33_000_000 }));
+    const error = (await callApi(more.ctx, "file.action", { file: id, action: "accept" }).catch((e: unknown) => e)) as Error;
+    expect(error.message).toContain("(2 MB to come: ghostly file cancel chat-four-in-nameless) and 1 more. Free some space or cancel one of them");
+    expect(error.message).not.toContain("small.bin");
   });
 });
