@@ -497,6 +497,8 @@ export function useWebRTC({
   }, [chatId]);
   /** When the contact's call began to ring here, on the monotonic clock (BURST_RING_MS). */
   const ringingSinceRef = useRef(0);
+  /** The ringing call's "Incoming call" line: a newer offer of the contact's that takes the call's place takes it out. */
+  const receivedLineRef = useRef<string | null>(null);
   /**
    * The contact's last call held back here (QUICK_REDIAL_MS) until its hang-up: its offer, when it was heard (on the
    * monotonic clock), its missed line.
@@ -1052,7 +1054,7 @@ export function useWebRTC({
     const offerHasVideo = signalHasVideo(signal);
     callHadVideoRef.current = offerHasVideo;
     callConnectedEventFiredRef.current = false;
-    addCallEventMessage?.("call_received", offerHasVideo, undefined, signal.ts);
+    receivedLineRef.current = addCallEventMessage?.("call_received", offerHasVideo, undefined, signal.ts) || null;
     ringingSinceRef.current = performance.now();
     updateCallState("incoming");
     setFastPoll(true);
@@ -1580,6 +1582,15 @@ export function useWebRTC({
     } else if (signal.t === "o" && (callStateRef.current === "idle" || yielded)) {
       lastProcessedSignalRef.current = signal.ts;
       ringOffer(signal);
+    } else if (signal.t === "o" && callStateRef.current === "incoming" && signal.ts > (pendingOfferRef.current?.ts ?? 0)) {
+      // The contact calls again while their call still rings here, with no hang-up between (WISP 601, "Ringing"):
+      // their app died or reloaded as it rang out, and its hang-up never came. Their newer offer is their call now and
+      // takes the ringing one's place, under one "Incoming call" line, ringing its own RING_MS (the timer below runs
+      // per offer). Answer names the offer it answers: one their app no longer has, it would ring out to "No answer"
+      // there and never connect here. An offer no newer than the ringing one never reaches here (`lastProcessedSignalRef`).
+      lastProcessedSignalRef.current = signal.ts;
+      if (receivedLineRef.current) removeCallEventMessage?.(receivedLineRef.current);
+      ringOffer(signal);
     } else if (signal.t === "a" && (callStateRef.current === "offering" || callStateRef.current === "connecting")) {
       if (answersOffer(signal, myOfferTimestampRef.current)) {
         lastProcessedSignalRef.current = signal.ts;
@@ -1620,6 +1631,8 @@ export function useWebRTC({
 
   // An unanswered call does not ring forever (RING_MS). Ours hangs up and says "No answer". Theirs stops ringing here
   // with a missed call and sends nothing: the caller's own ring runs out too, and a hang-up would read as declined.
+  // Theirs rings RING_MS from the offer that rings (`rangOffer`): a newer one that took the call's place starts it again,
+  // as the caller's ring started again with it.
   hangUpRef.current = hangUp;
 
   // "Hide my IP from contacts" turned on during a call: its connection was made with this device's own addresses
@@ -1652,7 +1665,7 @@ export function useWebRTC({
       }
     }, RING_MS);
     return () => clearTimeout(timer);
-  }, [ringing, setMissedAt]);
+  }, [ringing, rangOffer, setMissedAt]);
 
   // Another page answered or declined the call ringing here (`callHandledElsewhere`): it stops ringing here as though it
   // never had. That page wrote the call's lines into the history both show, and sent its answer; this one sends
