@@ -249,6 +249,14 @@ export class CallManager {
       const mine = call.offering ? call.offerTs : 0;
       const theirsFirst = !mine || signal.ts < mine || (signal.ts === mine && (signal.f ?? "") < (call.media?.local.f ?? ""));
       if (theirsFirst) void this.yieldTo(call, signal);
+    } else if (signal.t === "o" && call?.direction === "in" && call.state === "ringing" && signal.ts > (call.offer?.ts ?? 0)) {
+      // The contact calls again while their call still rings here, with no hang-up between (WISP 601, "Ringing"):
+      // their app died or reloaded as it rang out, and its hang-up never came. Their newer offer is their call now: the
+      // one that rings ends as `missed`, sending nothing (a hang-up would end the new call there as declined), and the
+      // new one rings (`call.incoming`), so `call answer` names the offer their app has. An answer to the older one
+      // would ring out there to "No answer" and never connect here.
+      this.lastSignal.set(chat, signal.ts);
+      void this.yieldTo(call, signal, "missed");
     } else if (signal.t === "o" && call?.direction === "in" && call.state === "connecting" && call.media && signal.ts > (call.offer?.ts ?? 0)) {
       // The contact's side offered again on a new connection (see `redial`): the answered call starts over on one, up
       // to MAX_REDIALS times, as the apps do (MAX_RESTARTS). Past it the offer is ignored, and the call that did not
@@ -278,9 +286,10 @@ export class CallManager {
   }
 
   /**
-   * The contact's offer won a glare (`crossed`), or came from their app starting over on a connected call
-   * (`remote-hangup`): our call ends, sending no hang-up (it would end the contact's call; a glare's also keeps our
-   * signal, as clearing it could drop an answer we are about to give), and the contact's call rings here.
+   * The contact's offer won a glare (`crossed`), came from their app starting over on a connected call
+   * (`remote-hangup`), or is newer than their call that rings here (`missed`): our call ends, sending no hang-up (it
+   * would end the contact's call; a glare's also keeps our signal, as clearing it could drop an answer we are about to
+   * give), and the contact's call rings here.
    */
   private async yieldTo(call: Call, offer: CallSignal, reason: EndReason = "crossed"): Promise<void> {
     await this.end(call, reason, false);
