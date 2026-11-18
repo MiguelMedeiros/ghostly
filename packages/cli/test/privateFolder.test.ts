@@ -12,7 +12,9 @@ import { profilePaths } from "../src/profiles";
 // covers: headless.daemon
 
 /** Sockets outside the profile's folder (a path too long for one): in a folder of this user's alone, or not at all. */
-const root = mkdtempSync(join(tmpdir(), "gh-priv-"));
+// Under a short base off Windows: a long temp folder (macOS's `/var/folders/…/T/`) would push the runtime socket over
+// the 100-byte limit, and `runtimePath` would fall back to `/tmp` instead of the folder each test means.
+const root = mkdtempSync(process.platform === "win32" ? join(tmpdir(), "gh-priv-") : "/tmp/gh-priv-");
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 describe.skipIf(process.platform === "win32")("sockets outside the profile", () => {
