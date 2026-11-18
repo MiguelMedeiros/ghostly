@@ -79,7 +79,9 @@ Other settings:
   (`requests carry CF-Connecting-IP but GHOSTLY_RELAY_CLOUDFLARE is not set`). With one set, the first request
   without its header (a proxy that does not write it, such as nginx without `proxy_set_header X-Forwarded-For
   $proxy_add_x_forwarded_for`) logs `requests arrive without X-Forwarded-For though GHOSTLY_RELAY_PROXIES is set`
-  (or `CF-Connecting-IP` and `GHOSTLY_RELAY_CLOUDFLARE`): it counts as the proxy, as every other one would. With either set, the
+  (or `CF-Connecting-IP` and `GHOSTLY_RELAY_CLOUDFLARE`): it counts as the proxy, as every other one would. One with
+  fewer `X-Forwarded-For` entries than `GHOSTLY_RELAY_PROXIES` (`2` behind a single nginx) logs `requests carry 1
+  X-Forwarded-For entry though GHOSTLY_RELAY_PROXIES is 2`: set it to the number of proxies that write the header. With either set, the
   relay listens on 127.0.0.1 unless `HOST` says otherwise: only the proxy should reach it, since anyone else could
   write that header. The container sets `HOST=0.0.0.0` inside it and publishes the port where the proxy is
   (`HYPERDHT_RELAY_BIND`, loopback by default).
