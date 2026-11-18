@@ -481,6 +481,38 @@ it("a file the contact deletes for everyone while its offer is taken is not kept
   expect(t.node().getState().transfers[fileId]).toBeUndefined();
 }, 60_000);
 
+/**
+ * The same for a file said on the DHT floor first: its live offer takes over the bubble that waited for it, and the
+ * contact deletes it for everyone before that record is written. The removal took the bubble, and the record written
+ * after it stayed with no message, loaded again at every start. Nothing of it is kept.
+ */
+it("a file said on the floor that the contact deletes for everyone while its offer takes the bubble is not kept", async () => {
+  const t = await setup({ edits: true });
+  await vi.waitFor(() => expect(t.contact.supportsEdits).toBe(true));
+  const wireId = "floorgonetaken0001";
+  await announce(t, wireId, 200_000);
+  const fileId = (await db.getMessages(t.id)).find((m) => m.id === `peer_${wireId}`)!.file!.id;
+  const put = fileStore.put.bind(fileStore);
+  let landed: Promise<unknown> | undefined;
+  // The removal comes and is taken while the offer's record is being written over the floor's.
+  const puts = vi.spyOn(fileStore, "put").mockImplementation(async (file) => {
+    if (file.id === fileId && file.wire3) {
+      expect(await t.contact.sendEdit({ id: wireId, e: 1, ts: Date.now(), m: REMOVED_TEXT, rm: true })).toBeNull();
+      await vi.waitFor(async () => expect((await db.getMessages(t.id)).filter((m) => m.id === `peer_${wireId}`)).toEqual([]));
+      return landed = put(file);
+    }
+    return put(file);
+  });
+  cleanup.push(async () => { puts.mockRestore(); });
+  t.offer(wireId, 200_000);
+  await vi.waitFor(() => expect(t.records.get(`out:${wireId}`)).toMatchObject({ state: "cancelled" }), { timeout: 30_000 });
+  await vi.waitFor(() => expect(landed).toBeDefined(), { timeout: 10_000 });
+  await landed;
+  await vi.waitFor(async () => expect((await fileStore.listForLink(t.id)).filter((f) => f.id === fileId)).toEqual([]));
+  expect(await (await fileBytes()).size(fileId)).toBe(null);
+  expect(t.node().getState().transfers[fileId]).toBeUndefined();
+}, 60_000);
+
 it("a sent file whose every byte arrived is too late to cancel: it ends done on both sides, kept there", async () => {
   const t = await setup();
   let release!: () => void;
