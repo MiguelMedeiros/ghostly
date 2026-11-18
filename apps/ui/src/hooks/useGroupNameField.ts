@@ -16,7 +16,8 @@ import { fitsGroupName } from "../lib/groups";
  * and then put back by script, the field lost the browser's undo history, and Ctrl+Z undid nothing (agents#1154).
  *
  * `onDropped`, when given, hears each change the name had no room for, whole or in part: a field that says its cut
- * (the name step's status). Without it nothing is said, as before.
+ * (the name step's status). Without it nothing is said, as before. It is called after `setValue` for the same change,
+ * so a field that clears its "cut" when the name changes still ends that change with the cut said.
  */
 export function useFittedNameField(value: string, setValue: (value: string) => void, fits: (name: string) => boolean, onDropped?: () => void) {
   const ref = useRef<HTMLInputElement>(null);
@@ -51,8 +52,10 @@ export function useFittedNameField(value: string, setValue: (value: string) => v
   const onChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
     if (composing.current) { setValue(e.target.value); return; }
     const next = fitTextEdit(value, e.target.value, e.target.selectionStart, fits);
-    if (next.value !== e.target.value) { caret.current = next.caret; setRefused(n => n + 1); dropped.current?.(); }
+    const cut = next.value !== e.target.value;
+    if (cut) { caret.current = next.caret; setRefused(n => n + 1); }
     setValue(next.value);
+    if (cut) dropped.current?.();
   }, [value, setValue, fits]);
   const onCompositionStart = useCallback((e: CompositionEvent<HTMLInputElement>) => {
     composing.current = { value, caret: e.currentTarget.selectionStart ?? value.length };
@@ -61,8 +64,9 @@ export function useFittedNameField(value: string, setValue: (value: string) => v
     const start = composing.current, composed = e.currentTarget.value;
     composing.current = null;
     if (!start || fitText(composed, fits) === composed) { setValue(composed); return; }
-    caret.current = start.caret; setRefused(n => n + 1); dropped.current?.();
+    caret.current = start.caret; setRefused(n => n + 1);
     setValue(start.value);
+    dropped.current?.();
   }, [setValue, fits]);
   return { ref, onChange, onCompositionStart, onCompositionEnd, dir: draftDirection(value) };
 }

@@ -48,9 +48,10 @@ export function NameStep() {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const id = useId();
-  // Whether the last keystroke or paste had no room: said once, until a delete makes room again.
+  // Whether the last keystroke or paste had no room: said once, until a delete makes room again. Room is counted by the
+  // name's own rule (one more letter fits), never in UTF-16 units; a change the hook cut says so after this (`onDropped`).
   const [full, setFull] = useState(false);
-  const keep = (next: string) => { if (next.length < name.length) setFull(false); setName(next); };
+  const keep = (next: string) => { if (fitsOwnName(next + "a")) setFull(false); setName(next); };
   // Counted in characters as seen, never cut inside an emoji (`fitsOwnName`): no `maxLength`, which counts UTF-16 units.
   const nameField = useFittedNameField(name, keep, fitsOwnName, () => setFull(true));
   const input = nameField.ref;
