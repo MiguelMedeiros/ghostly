@@ -1398,6 +1398,42 @@ describe("the engine passthrough", () => {
     expect(engine.editMessage).toHaveBeenCalledOnce();
     expect(engine.forwardMessages).toHaveBeenCalledTimes(2);
   });
+
+  it("reads a link preview's title, description and site as the contact's card shows them, sent, edited or forwarded", async () => {
+    const seed = "legal winner thank year wave sausage worth useful legal winner thank yellow";
+    const text = "see https://example.com/page";
+    const shown = { u: "https://example.com/page", t: "Example page", d: seed };
+    const { ctx, node } = fake([msg("m_card", 5, { text, preview: shown }), msg("m_plain", 6, { text, preview: { ...shown, d: "A page" } })]);
+    Object.assign(node, { editMessage: vi.fn(async () => ({ error: null, messageId: "me_1" })), forwardMessages: vi.fn(async () => ({ results: [{ messageIds: ["me:1:0"], sent: [], error: null }] })),
+      sendFile: vi.fn(async () => ({ error: null })) });
+    const engine = node as unknown as Record<"sendMessage" | "editMessage" | "forwardMessages" | "sendFile", ReturnType<typeof vi.fn>>;
+    const preview = (fields: Record<string, unknown>) => ({ u: "https://example.com/page", ...fields });
+    const calls: [keyof typeof engine, Record<string, unknown>][] = [
+      ["sendMessage", { linkId: "chat-one", text, preview: preview({ t: "Example page", d: seed }) }],
+      ["sendMessage", { linkId: "chat-one", text, preview: preview({ t: seed }) }],
+      ["sendMessage", { linkId: "chat-one", text, preview: preview({ t: "x", s: "cashuAeyJ0b2tlbiI6W3sicHJvb2ZzIjpbXX1dfQ" }) }],
+      // As the engine carries it: a control character between two words is a space on the card.
+      ["sendMessage", { linkId: "chat-one", text, preview: preview({ d: seed.replaceAll(" ", "\u0001") }) }],
+      ["editMessage", { linkId: "chat-one", messageId: "me_1", text, preview: preview({ d: seed }) }],
+      ["forwardMessages", { linkId: "chat-one", messageIds: ["m_card"], to: ["chat-two"] }],
+      // A file's type, which the contact's app shows too.
+      ["sendFile", { linkId: "chat-one", file: { name: "a.bin", mime: "application/cashuAeyJ0b2tlbiI6W3sicHJvb2ZzIjpbXX1dfQ", size: 1 }, timestamp: 1 }],
+    ];
+    for (const [method, params] of calls) {
+      await expect(callApi(ctx, "engine.call", { method, params }), method).rejects.toMatchObject({ code: "confirm" });
+    }
+    await expect(callApi(ctx, "chat.forward", { chat: "Alice", messages: ["m_card"], to: ["Bob"] })).rejects.toMatchObject({ code: "confirm", details: { messageId: "m_card" } });
+    for (const call of ["sendMessage", "editMessage", "forwardMessages", "sendFile"] as const) expect(engine[call]).not.toHaveBeenCalled();
+    // A plain preview goes as it did; with force, the secret goes too.
+    await callApi(ctx, "engine.call", { method: "sendMessage", params: { linkId: "chat-one", text, preview: preview({ t: "Example page", d: "A page" }) } });
+    await callApi(ctx, "chat.forward", { chat: "Alice", messages: ["m_plain"], to: ["Bob"] });
+    for (const [method, params] of calls) await callApi(ctx, "engine.call", { method, params, force: true });
+    await callApi(ctx, "chat.forward", { chat: "Alice", messages: ["m_card"], to: ["Bob"], force: true });
+    expect(engine.sendMessage).toHaveBeenCalledTimes(5);
+    expect(engine.editMessage).toHaveBeenCalledOnce();
+    expect(engine.forwardMessages).toHaveBeenCalledTimes(3);
+    expect(engine.sendFile).toHaveBeenCalledOnce();
+  });
 });
 
 describe("groups", () => {

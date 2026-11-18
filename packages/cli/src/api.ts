@@ -1,4 +1,4 @@
-import { AWAITING_PEER_MS, COMMUNITY_LIMITS, DHT_PACKET_BUDGET, decodeCommunityLink, decodeGroupEntryLink, GROUP_EDIT_TEXT_BYTES, GROUP_LIMITS, inviteLink, LIMITS, MENTION_EVERYONE, MENTION_LIMITS, normalizeRelayUrl, ownInviteRefusal, relayUrlProblem, replySnippet, STATUS_CARD_LIMITS, statusCardBytes, TYPING_KINDS, type GroupMention, type TypingKind } from "@ghostly/core";
+import { AWAITING_PEER_MS, COMMUNITY_LIMITS, DHT_PACKET_BUDGET, decodeCommunityLink, decodeGroupEntryLink, GROUP_EDIT_TEXT_BYTES, GROUP_LIMITS, inviteLink, LIMITS, MENTION_EVERYONE, MENTION_LIMITS, normalizeRelayUrl, ownInviteRefusal, parseLinkPreview, relayUrlProblem, replySnippet, STATUS_CARD_LIMITS, statusCardBytes, TYPING_KINDS, type GroupMention, type LinkPreview, type TypingKind } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
 import { DEFAULT_HYPERDHT_RELAY } from "@ghostly/browser/shared/hyperdhtRelay";
@@ -802,7 +802,7 @@ const METHODS: Record<string, Method> = {
       chosen.push(message);
     }
     if (!bool(params, "force")) for (const message of chosen) {
-      const secret = message.file ? null : findSecret(message.text);
+      const secret = message.file ? null : secretIn([message.text, ...previewTexts(message.preview)]);
       if (secret) throw new CliError("confirm", `A message looks like ${secretWords(secret)}; forward it with --force if you mean to`, { kind: secret.kind, messageId: message.id });
     }
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
@@ -1359,8 +1359,11 @@ function pastEngineBound(method: string, field: "text" | "caption" | "card", val
 async function guardEngineSend(ctx: ApiContext, method: string, args: Params): Promise<void> {
   const of = (value: unknown, key: string) => (value && typeof value === "object" ? (value as Params)[key] : undefined);
   const read = (field: "text" | "caption" | "card") => (pastEngineBound(method, field, args[field]) ? undefined : args[field]);
-  let texts: unknown = [read("text"), read("card"), read("caption"), args.memo, args.comment, args.name, of(args.settings, "nick"), of(args.file, "name"), of(args.status, "text"), args.content,
-    ...(args.fields && typeof args.fields === "object" ? Object.values(args.fields) : [])];
+  const text = read("text");
+  let texts: unknown = [text, read("card"), read("caption"), args.memo, args.comment, args.name, of(args.settings, "nick"), of(args.file, "name"), of(args.file, "mime"), of(args.status, "text"), args.content,
+    ...(args.fields && typeof args.fields === "object" ? Object.values(args.fields) : []),
+    // A link preview's card, as the engine carries it with the text (WISP 401 § Link previews).
+    ...previewTexts(typeof text === "string" && args.preview !== undefined ? parseLinkPreview(args.preview, text.trim()) : undefined)];
   if (method === "forwardMessages") {
     // Each id once, and none past the engine's bound, which it refuses before reading any: as `chat.forward` reads them.
     // One id given 50,000 times was read as often, all at once, for the engine's refusal or its one message.
@@ -1368,11 +1371,16 @@ async function guardEngineSend(ctx: ApiContext, method: string, args: Params): P
     const linkId = args.linkId;
     texts = typeof linkId === "string" && linkId && ids.length <= FORWARD_MESSAGES ? await Promise.all(ids.map(async (id) => {
       const message = await node(ctx).getMessage(linkId, id);
-      return message && !message.file ? message.text : null;
+      return message && !message.file ? [message.text, ...previewTexts(message.preview)] : null;
     })) : [];
   }
   const secret = secretIn(texts);
   if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; call ${method} with --force if you mean to`, { kind: secret.kind });
+}
+
+/** What a link preview's card shows the contact besides the link: its title, description and site. */
+function previewTexts(preview: LinkPreview | undefined): (string | undefined)[] {
+  return preview ? [preview.t, preview.d, preview.s] : [];
 }
 
 /**
