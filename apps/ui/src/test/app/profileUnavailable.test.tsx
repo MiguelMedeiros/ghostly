@@ -152,6 +152,32 @@ describe("a profile that cannot be opened", () => {
     expect(story).toHaveTextContent("What the system said: UnknownError: Internal error opening backing store");
   });
 
+  // A part of the app that loads on demand whose file did not come while the peer started (offline at a reload): that
+  // read as a damaged profile ("Ghostly could not open this profile's data … Restart the app or the device").
+  it("a part of the app that did not download as it started: the app's words for that and a reload, not the profile's data", async () => {
+    const reload = vi.fn();
+    vi.stubGlobal("location", { ...location, reload });
+    try {
+      const view = renderGate();
+      fail({ reason: "failed", supportedVersion: 11, detail: "Failed to fetch dynamically imported module: https://app.example/assets/wallet-1a2b3c.js" });
+      const notice = screen.getByTestId("profile-unavailable");
+      expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("This page did not load.");
+      expect(notice).toHaveTextContent("Check your connection, then try again. If it still fails, reload Ghostly.");
+      expect(notice).not.toHaveTextContent(/profile's data|Restart the app or the device|did not open/);
+      expect(screen.queryByTestId("profile-unavailable-reason")).toBeNull();
+      await view.user.click(screen.getByRole("button", { name: "More info" }));
+      const story = screen.getByTestId("profile-unavailable-text");
+      expect(story).toHaveTextContent("What the system said: Failed to fetch dynamically imported module: https://app.example/assets/wallet-1a2b3c.js");
+      expect(story).not.toHaveTextContent("profile data");
+      const retry = screen.getByTestId("profile-unavailable-retry");
+      expect(retry).toHaveTextContent("Try again");
+      await view.user.click(retry);
+      expect(reload).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("is said in the app's language", () => {
     renderGate("pt");
     fail(NEWER);
