@@ -41,6 +41,11 @@ const KEYS: Record<string, TranslationKey> = {
   storage: "apps.errors.storage",
   // A store removed meanwhile (another tab): its block reads the list again (Apps.tsx), and goes.
   "no-store": "apps.errors.noStore",
+  // A built-in app whose copy in this client did not load (a file the host no longer has, after an update of the web
+  // app): nothing was refused, a reload brings this build's file. Offline or the host's trouble come as their own.
+  "not-carried": "apps.errors.notCarried",
+  // A built-in app installed or removed meanwhile (another tab): nothing was refused either.
+  "not-offered": "apps.errors.notOffered",
 };
 
 /**
