@@ -101,6 +101,8 @@ export class EventHub {
   private seen: Seen = new Map();
   private firstRun = false;
   private chats = new Map<string, ChatShape>();
+  /** The chats a live session carried at some state of this run, gone down since or not (`wasLive`). */
+  private liveThisRun = new Set<string>();
   private groups = new Map<string, GroupShape>();
   private payments = new Map<string, string>();
   private transfers = new Map<string, string>();
@@ -281,6 +283,11 @@ export class EventHub {
     this.stateKnown = true;
     this.baselined = true;
     for (const id of [...state.links.map((link) => link.id), ...state.groups.map((group) => `group:${group.id}`)]) this.unread.set(id, reads.files);
+  }
+
+  /** Whether a live session carried the chat at some state of this run: its daemon's start is behind it (`chat connect`). */
+  wasLive(chat: string): boolean {
+    return this.liveThisRun.has(chat);
   }
 
   /** The catch-ups still running (`perChat`): their events are told once they end. */
@@ -680,6 +687,7 @@ export class EventHub {
       if (last.get(id) === link && this.chats.has(id)) continue;
       const shape = chatShape(link), before = this.chats.get(id);
       this.chats.set(id, shape);
+      if (shape.live) this.liveThisRun.add(id);
       if (quiet) continue;
       if (!before) { this.emit("chat.created", `chat.created:${id}:${this.now()}`, { chat: id, summary: { ...chatJson(link), invite: null } }); continue; }
       if (shape.stage && shape.stage !== before.stage) {
@@ -710,6 +718,7 @@ export class EventHub {
       // The contact's key (`peer`) goes with it: `listen --from <key>` cannot ask the daemon for a chat that is gone.
       const peer = this.chats.get(id)?.peer;
       this.chats.delete(id);
+      this.liveThisRun.delete(id);
       if (!quiet) this.emit("chat.removed", `chat.removed:${id}:${this.now()}`, { chat: id, ...(peer ? { peer } : {}) });
     }
     // A chat removed deletes its history here: its events go too, but for its removal.

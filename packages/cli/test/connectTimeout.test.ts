@@ -13,10 +13,11 @@ const link = { id: "chat-one", label: "bia", peerPubKeyZ32: "pchat-one", created
 /** An attempt to go live that ended without it: the contact was dialled and did not answer. */
 const ended = { liveAttempt: { at: 1, side: "dialled", failed: [{ transport: "hyperdht/1", error: "PEER_NOT_FOUND: Peer not found" }] } } as unknown as Partial<LinkView>;
 
-function fake(mode: "one-shot" | "daemon", connect: () => Promise<void>, fields: Partial<LinkView> = {}) {
+function fake(mode: "one-shot" | "daemon", connect: () => Promise<void>, fields: Partial<LinkView> = {}, wasLive = false) {
   const chat = { ...link, ...fields } as LinkView;
   const node = { chatView: chatViewOf, getState: () => ({ links: [chat], groups: [], settings: {}, transport: {} }) as unknown as EngineState, connect: vi.fn(connect) };
-  const ctx = { runtime: { server: { node }, paths: { name: "default", dir: "/nonexistent" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, emit: () => {}, lastSeq: 0, replay: () => [] }, mode, version: "test" } as unknown as ApiContext;
+  const hub = { onEvent: () => () => {}, onState: () => () => {}, emit: () => {}, lastSeq: 0, replay: () => [], wasLive: () => wasLive };
+  const ctx = { runtime: { server: { node }, paths: { name: "default", dir: "/nonexistent" } }, hub, mode, version: "test" } as unknown as ApiContext;
   return { ctx, node };
 }
 const never = () => new Promise<void>(() => {});
@@ -70,6 +71,21 @@ describe("chat connect", () => {
     const again = callApi(tried.ctx, "chat.connect", { chat: "bia", timeout: 2 }).catch((error: unknown) => error);
     await vi.advanceTimersByTimeAsync(2_000);
     expect(await again).toMatchObject({ code: "timeout", message: expect.stringMatching(/^Timed out after 2 s: the contact did not answer\. It reconnects by itself/) });
+  });
+
+  it("right after the daemon's start, a contact read offline did not answer, and a chat live earlier in this run is not resuming", async () => {
+    // B's daemon stopped, A's restarted: A read B's record offline, and still said the chat was resuming for 5 minutes.
+    vi.spyOn(process, "uptime").mockReturnValue(70);
+    vi.useFakeTimers();
+    const offline = callApi(fake("daemon", never, { peerOnline: false, peerLastSeenAt: 1_794_966_364_215 }).ctx, "chat.connect", { chat: "bia", timeout: 5 }).catch((error: unknown) => error);
+    // Live since the start, then held by the contact: nothing is resuming here.
+    const wasLive = callApi(fake("daemon", never, { peerOnline: true }, true).ctx, "chat.connect", { chat: "bia", timeout: 5 }).catch((error: unknown) => error);
+    // No record of the contact read yet: it may still come back.
+    const unread = callApi(fake("daemon", never, { peerOnline: false, peerLastSeenAt: 0 }).ctx, "chat.connect", { chat: "bia", timeout: 5 }).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(await offline).toMatchObject({ code: "timeout", message: expect.stringMatching(/^Timed out after 5 s: the contact did not answer\. It reconnects by itself/) });
+    expect(await wasLive).toMatchObject({ code: "timeout", message: expect.stringMatching(/^Timed out after 5 s: your contact's app reads online, and no attempt to reach it has ended yet\. It reconnects by itself/) });
+    expect(await unread).toMatchObject({ code: "timeout", message: expect.stringMatching(/^Timed out after 5 s: the chat is still resuming after the daemon's start/) });
   });
 
   it("later, a contact that reads online with no attempt ended yet is said so; one that does not, did not answer", async () => {

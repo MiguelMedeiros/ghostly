@@ -1615,12 +1615,15 @@ const RESUMING_MS = 5 * 60_000;
  * Why a daemon's `chat connect` timed out, as the chat reads at the end. No attempt of this run ended yet
  * (`lastAttempt` null) while the daemon just started, or while the contact reads online: the chat is still coming
  * back, nobody failed to answer. It said "the contact did not answer" right after a `daemon restart`, with the
- * contact online. A one-shot always just started: it keeps the words it had.
+ * contact online. A one-shot always just started: it keeps the words it had. Not resuming once the chat was live in
+ * this run (then held by the contact, say), nor with the contact's record read offline (`peerLastSeenAt` is this
+ * run's): those said "still resuming" for the daemon's first 5 minutes too.
  */
 function notLiveYet(ctx: ApiContext, link: LinkView): string {
   const now = state(ctx).links.find((l) => l.id === link.id) ?? link;
   if (ctx.mode !== "daemon" || now.liveAttempt) return "the contact did not answer";
-  if (process.uptime() * 1000 < RESUMING_MS) return "the chat is still resuming after the daemon's start, and no attempt to reach the contact has ended yet";
+  const readOffline = !now.peerOnline && now.peerLastSeenAt > 0;
+  if (process.uptime() * 1000 < RESUMING_MS && !readOffline && !ctx.hub.wasLive(link.id)) return "the chat is still resuming after the daemon's start, and no attempt to reach the contact has ended yet";
   return now.peerOnline ? "your contact's app reads online, and no attempt to reach it has ended yet" : "the contact did not answer";
 }
 
