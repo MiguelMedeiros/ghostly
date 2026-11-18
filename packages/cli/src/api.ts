@@ -397,12 +397,14 @@ function dhtOnlyTimeout(ctx: ApiContext, chat: string, text: string, ref: string
 /**
  * What keeps `link` off a live session, or undefined: a chat on DHT only opens none (WISP 100: no app dials it). A hold
  * of this side's (`chat disconnect --hold`) ends by itself (`held`: when), unless the contact's choice keeps it there
- * too; this side's choice or the contact's is `chat connect`'s refusal (apiKit `dhtOnly`), in its words.
+ * too; this side's choice or the contact's is `chat connect`'s refusal (apiKit `dhtOnly`), in its words. A held chat
+ * the contact keeps there is the contact's refusal, as `chat connect` says it once the hold is gone: it read "on DHT
+ * only on this side" with `chat transport auto`, which only lifted the hold.
  */
 function offLive(ctx: ApiContext, link: LinkView): { held: number } | { refusal: CliError } | undefined {
-  const held = link.deliveryMode === "dht" && link.dhtDelivery?.peerMode !== "dht" ? holdEnds(ctx, link.id) : null;
-  if (held !== null) return { held };
-  try { dhtOnly(link); } catch (error) { if (error instanceof CliError) return { refusal: error }; throw error; }
+  const held = link.deliveryMode === "dht" ? holdEnds(ctx, link.id) : null;
+  if (held !== null && link.dhtDelivery?.peerMode !== "dht") return { held };
+  try { dhtOnly(held === null ? link : { ...link, deliveryMode: "stream" }); } catch (error) { if (error instanceof CliError) return { refusal: error }; throw error; }
   return undefined;
 }
 
