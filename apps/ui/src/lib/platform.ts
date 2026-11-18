@@ -190,7 +190,10 @@ export interface WalletTransaction {
   /** What this movement cost, exactly. */
   fee: number;
   note?: string;
-  /** `lightning-in`: the mint quote of the invoice paid (what `receiveLightning` returned as `quote`). */
+  /**
+   * `lightning-in`: the mint quote of the invoice paid (what `receiveLightning` returned as `quote`). `lightning-out`, and
+   * the `fee` of a failed one: the melt quote paid (what `quoteInvoice` returned on the Cashu card).
+   */
   quote?: string;
 }
 

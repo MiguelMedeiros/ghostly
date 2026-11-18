@@ -108,7 +108,7 @@ export function CashuWallet({ wallet, state, rail, sharedWith, onOpenCashu, focu
    * The last payment's end, shown in Send's place until Done: paid, or on its way. One the mint left pending reads as
    * waiting (never as paid, it may still come back) and says what happens next.
    */
-  const [sent, setSent] = useState<{ line: string; next?: string; paid: boolean } | null>(null);
+  const [sent, setSent] = useState<{ line: string; next?: string; paid: boolean; quote?: string; hash?: string; held?: boolean } | null>(null);
   /** Real money: Pay opens the second step, and only it pays. */
   const [confirming, setConfirming] = useState(false);
   const [notice, setNotice] = useState("");
@@ -155,9 +155,32 @@ export function CashuWallet({ wallet, state, rail, sharedWith, onOpenCashu, focu
   const isToken = route.kind === "token";
   const payQuote = (payable: { quote: string; mint: string }, confirmedReal: boolean) => void run(async () => {
     const paid = await wallet.payQuote(payable.quote, payable.mint, undefined, confirmedReal);
+    // What a pending one is followed by: the Cashu card's melt quote, a Lightning card's invoice in its journal.
+    const follow = rail === "cashu" ? { quote: payable.quote } : { hash: quoted?.paymentHash };
     setQuote(null); setQuoted(null); setConfirming(false); setPayInput("");
-    setSent(paid ? { line: t("wallet.cashu.paid"), paid } : viaMint ? { line: t("wallet.cashu.pendingMint"), next: t("wallet.cashu.pendingMintNext"), paid } : { line: t("wallet.lightning.pending"), paid });
+    setSent(paid ? { line: t("wallet.cashu.paid"), paid } : viaMint ? { line: t("wallet.cashu.pendingMint"), next: t("wallet.cashu.pendingMintNext"), paid, ...follow } : { line: t("wallet.lightning.pending"), paid, ...follow });
   }, "pay");
+  // A payment left pending is followed while its result shows: the result line was what the mint said when Pay was
+  // answered. Paid once its quote is on a payment row; failed once it is on a fee row, or once what was set aside since
+  // is all back with no row of it (a failure that cost no fee writes none). Another payment still set aside only makes
+  // that later, never wrong. A Lightning card reads its journal's entry of the invoice.
+  useEffect(() => {
+    if (sent?.quote && !sent.held && state.setAside) setSent({ ...sent, held: true });
+  }, [sent, state.setAside]);
+  const ended = (() => {
+    if (!sent || sent.paid) return undefined;
+    if (sent.hash) {
+      const op = ln?.recent.find((o) => o.direction === "out" && o.paymentHash === sent.hash);
+      return op?.state === "paid" ? { paid: true, fee: 0 } : op?.state === "failed" ? { paid: false, fee: 0 } : undefined;
+    }
+    if (!sent.quote) return undefined;
+    const row = state.history.find((tx) => tx.quote === sent.quote && (tx.kind === "lightning-out" || tx.kind === "fee"));
+    if (row) return { paid: row.kind === "lightning-out", fee: row.kind === "fee" ? row.fee : 0 };
+    return sent.held && !state.setAside ? { paid: false, fee: 0 } : undefined;
+  })();
+  const result = !sent || !ended ? sent
+    : ended.paid ? { line: t("wallet.cashu.paid"), paid: true }
+    : { line: t("wallet.cashu.payFailed"), next: !viaMint ? undefined : ended.fee > 0 ? t("wallet.cashu.payFailedFee", { amount: formatAmount(ended.fee, t.language), unit: unitFor(t, unit, ended.fee) }) : t("wallet.cashu.payFailedBack"), paid: false, failed: true };
   /** The invoice's review: what paying it costs, from the mint or the source. */
   // `chosen`: the amount typed for an invoice with no amount, which only the mints are asked.
   const quoteFor = (invoice: Bolt11Invoice, chosen?: number) => void run(async () => {
@@ -333,13 +356,14 @@ export function CashuWallet({ wallet, state, rail, sharedWith, onOpenCashu, focu
             {/* The result, paid or pending, as Receive's: Done takes the keys, so only a line that was there, empty,
                 before its text says which. A redeemed token is said here too, once (its line below is only drawn).
                 Refusals are the error's own alert. */}
-            <p role="status" className="sr-only">{sent ? [sent.line, sent.next].filter(Boolean).join(" ") : notice}</p>
-            {sent ? (
+            <p role="status" className="sr-only">{result ? [result.line, result.next].filter(Boolean).join(" ") : notice}</p>
+            {result ? (
               <div className="text-center py-3 space-y-3" data-testid="wallet-send-result">
-                {sent.paid && <svg width="56" height="56" viewBox="0 0 56 56" className="mx-auto text-accent animate-check-ring" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                {result.paid && <svg width="56" height="56" viewBox="0 0 56 56" className="mx-auto text-accent animate-check-ring" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <circle cx="28" cy="28" r="25" /><polyline points="16 29 25 38 41 20" className="animate-check-draw" />
                 </svg>}
-                <Notice tone={sent.paid ? "success" : "wait"} testId="wallet-notice" className={sent.paid ? "text-sm font-semibold" : "text-sm"} title={sent.line} next={sent.next} />
+                {/* A failure is the status line's to say, once: not red with an alert of its own. */}
+                <Notice tone={result.paid ? "success" : "failed" in result ? "warning" : "wait"} testId="wallet-notice" className={result.paid ? "text-sm font-semibold" : "text-sm"} title={result.line} next={result.next} />
                 <Button ref={sentDone} data-testid="wallet-send-done" onClick={() => setSent(null)}>{t("wallet.lightning.done")}</Button>
               </div>
             ) : quote ? (

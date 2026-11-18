@@ -812,7 +812,10 @@ export interface WalletTx {
   amount: number;
   fee: number;
   note?: string;
-  /** `lightning-in`: the mint quote of the invoice paid, so the invoice on screen knows it is the one. Absent on older records. */
+  /**
+   * `lightning-in`: the mint quote of the invoice paid, so the invoice on screen knows it is the one. `lightning-out`, and
+   * the `fee` of a failed one: its melt quote, so a payment left pending on screen knows how it ended. Absent on older records.
+   */
   quote?: string;
 }
 

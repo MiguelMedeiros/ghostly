@@ -446,7 +446,8 @@ describe("Lightning out", () => {
 
     expect(ensure).toHaveBeenCalledWith(["00newkeyset00001"]);
     expect(secrets()).toEqual(["c", "change"]);
-    expect(rows<WalletTx>("walletTx")).toMatchObject([{ fee: 6 }]);
+    // Its melt quote: the screen that left it pending reads from it that the payment went through.
+    expect(rows<WalletTx>("walletTx")).toMatchObject([{ kind: "lightning-out", fee: 6, quote: "m1" }]);
     expect(events.onMeltResolved).toHaveBeenCalledWith(expect.objectContaining({ quote: "m1" }), true);
   });
 

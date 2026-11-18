@@ -413,7 +413,8 @@ describe("Lightning out: melts", () => {
     await pollWhenOverdue(wallet);
 
     expect(balance()).toBe(106);
-    expect(rows<WalletTx>("walletTx")).toMatchObject([{ kind: "fee", amount: 0, fee: 2 }]);
+    // Its melt quote: the screen that left it pending reads from it how the payment ended.
+    expect(rows<WalletTx>("walletTx")).toMatchObject([{ kind: "fee", amount: 0, fee: 2, quote: "m1" }]);
     expect(events.onMeltResolved).toHaveBeenCalledWith(expect.objectContaining({ quote: "m1" }), false);
   });
 
