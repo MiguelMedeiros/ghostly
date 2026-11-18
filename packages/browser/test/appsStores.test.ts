@@ -307,6 +307,35 @@ describe("no request with nothing installed", () => {
     expect(net.fetch, "the check the network missed").toHaveBeenCalled();
     store.stop();
   });
+
+  it("a scheduled check whose read of the installed apps fails once is tried again soon, and the checks go on", async () => {
+    const v1 = await bundle({ sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v1.bytes);
+    const first = apps(net);
+    await first.preview({ url: BUNDLE_URL });
+    await first.install({ digest: v1.digest, grant: ["chat"] });
+    net.fetch.mockClear();
+    clock();
+    const store = apps(net, { now: () => Date.now() });
+    await store.start();
+    // The installed list's read fails once (a lost IndexedDB connection), at the check after start.
+    const getAll = IDBObjectStore.prototype.getAll;
+    let failing = true;
+    const spy = vi.spyOn(IDBObjectStore.prototype, "getAll").mockImplementation(function (this: IDBObjectStore, ...args) {
+      if (failing && this.name === "apps") { failing = false; throw new DOMException("Connection to Indexed Database server lost", "UnknownError"); }
+      return getAll.apply(this, args);
+    });
+    await pass(APP_CHECK_TIMINGS.afterStartMs);
+    spy.mockRestore();
+    expect(failing, "the read failed").toBe(false);
+    expect(net.fetch).not.toHaveBeenCalled();
+    await pass(APP_CHECK_TIMINGS.offlineRetryMs);
+    const retried = net.fetch.mock.calls.length;
+    expect(retried, "the check the failed read missed, 10 minutes later").toBeGreaterThan(0);
+    await pass(APP_CHECK_TIMINGS.everyMs);
+    expect(net.fetch.mock.calls.length, "and the next day's").toBeGreaterThan(retried);
+    store.stop();
+  });
 });
 
 describe("stores", () => {
