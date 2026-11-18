@@ -170,6 +170,31 @@ describe("the worker's policy", () => {
       expect(lazy).not.toContain("/assets/vendor-abc.js");
     });
 
+    it("not a group call's LiveKit client, which only a call's join loads, nor the E2EE worker only that chunk starts", () => {
+      const worker = "assets/livekit-client.e2ee.worker-abc.js";
+      const bundle = [
+        ...BUNDLE.map((file) => file.fileName === "assets/Chat-abc.js" ? { ...file, dynamicImports: ["assets/sodium-abc.js", "assets/groupCallLivekit-abc.js"] } : file),
+        { ...chunk("assets/groupCallLivekit-abc.js", `${app}/hooks/groupCallLivekit.ts`, ["assets/vendor-abc.js"]), viteMetadata: { importedAssets: new Set([worker]) } },
+        { type: "asset", fileName: worker },
+      ];
+      const { precache, lazy } = serviceWorkerFiles(["manifest.json"], bundle);
+      expect(precache).not.toContain("/assets/groupCallLivekit-abc.js");
+      expect(precache).not.toContain(`/${worker}`);
+      expect(lazy).toEqual(expect.arrayContaining(["/assets/groupCallLivekit-abc.js", `/${worker}`]));
+      expect(precache).toContain("/assets/vendor-abc.js");
+    });
+
+    it("a file an online-only chunk loads stays when a chunk the install keeps loads it too", () => {
+      const bundle = [
+        ...BUNDLE.map((file) => file.fileName === "assets/Chat-abc.js" ? { ...file, viteMetadata: { importedAssets: new Set(["assets/ring-abc.mp3"]) } }
+          : file.fileName === "assets/pubky-abc.js" ? { ...file, viteMetadata: { importedAssets: new Set(["assets/ring-abc.mp3", "assets/pubky-abc.wasm"]) } } : file),
+        { type: "asset", fileName: "assets/ring-abc.mp3" },
+        { type: "asset", fileName: "assets/pubky-abc.wasm" },
+      ];
+      expect(optionalFiles(bundle).onlineOnly).not.toContain("assets/ring-abc.mp3");
+      expect(serviceWorkerFiles([], bundle).precache).toContain("/assets/ring-abc.mp3");
+    });
+
     it("an online-only module another screen imports as it loads stays: the path to it is not the online flow's", () => {
       const bundle = BUNDLE.map((file) => file.fileName === "assets/Chat-abc.js" ? { ...file, imports: ["assets/vendor-abc.js", "assets/pubky-abc.js"] } : file);
       expect(optionalFiles(bundle).onlineOnly).not.toContain("assets/pubky-abc.js");

@@ -12,6 +12,7 @@
   "clearAllData": "Borrar todos los datos",
   "clearAllDataConfirm": "Esto borra para siempre:",
   "clearAllDataDescription": "Chats, identidades y ajustes de este perfil. Las billeteras se quedan.",
+  "clearAllDataFailed": "No se pudo borrar todo. Puede que queden datos en este dispositivo: inténtalo de nuevo.",
   "clearAllDataInfo": "Antes, Ghostly retira lo que puede: elementos guardados para contactos, tu DID, tus pruebas y el despertar. Las pruebas que publicaste en otros sitios siguen allí.",
   "clearAllDataItems": {
     "appsData": "Apps instaladas y sus datos",
@@ -24,6 +25,7 @@
     "storage": "Ajustes de S3 y despertar con la app cerrada"
   },
   "clearAllDataKeeps": "Se quedan: tus billeteras, tus copias de seguridad y los otros perfiles.",
+  "clearingData": "Borrando…",
   "colorScheme": "Modo",
   "colorSchemes": {
     "dark": "Oscuro",

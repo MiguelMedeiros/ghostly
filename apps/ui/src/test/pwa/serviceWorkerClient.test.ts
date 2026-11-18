@@ -357,6 +357,15 @@ describe("a share, on the page's side", () => {
     await vi.waitFor(() => expect(registration.active!.posted).toEqual([{ type: "share-ready" }]));
   });
 
+  it("the page opened for it asks for it once it is the app, even after a link took its address while it waited", async () => {
+    window.location.hash = "#/shared";
+    const opened = openedForShare();
+    // The tab that was the app closed before the wait was over, with an invite in this tab's address by then.
+    window.location.hash = "#/invite/abc";
+    askForShare(opened);
+    await vi.waitFor(() => expect(registration.active!.posted).toEqual([{ type: "share-ready" }]));
+  });
+
   it("a page that waits for another tab has it forwarded there", async () => {
     window.location.hash = "#/shared";
     forwardShare();

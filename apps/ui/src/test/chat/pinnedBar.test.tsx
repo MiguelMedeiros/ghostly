@@ -146,8 +146,8 @@ describe("a spoiler where its message is quoted or pinned", () => {
     expect(sentReply(message)?.snippet).toBe("Spoiler: ▒▒▒");
   });
 
-  it("other formatting in the line stays as it was", () => {
-    expect(messageSnippet({ text: "**bold** and ~~gone~~" })).toBe("**bold** and ~~gone~~");
+  it("other formatting in the line reads without its markers, as the chat list does", () => {
+    expect(messageSnippet({ text: "**bold** and ~~gone~~" })).toBe("bold and gone");
   });
 });
 

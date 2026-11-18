@@ -3,7 +3,7 @@ import type { Server } from "node:http";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running, type Result } from "./support/cli";
-// covers: chat.dht.delivery, headless.chat
+// covers: chat.dht.delivery, chat.edit.wire, headless.chat
 
 /**
  * A text past the 256 bytes the DHT carries, in a chat both sides keep on the DHT only: it waits for a live session,
@@ -128,12 +128,14 @@ function clock(until: number): string {
 }
 
 /**
- * A hold (`chat disconnect --hold`) is this side's DHT only for a while: a text past 256 bytes waits through it and goes
- * by itself when it ends. The note and an explicit `--wait`'s timeout said it goes only once you choose a live
+ * A hold (`chat disconnect --hold`) is this side's DHT only for a while, which ends by itself. A text past 256 bytes
+ * waits through it and goes when it ends; a text or an edit the DHT packet cannot carry (about 249-256 bytes, an edit
+ * about 215 and up) is refused there. The note, an explicit `--wait`'s timeout and the refusals said to choose a live
  * transport (`chat transport <chat> auto`, which ends the hold the person asked for). They say when the hold ends, and
- * the command that ends it now.
+ * the command that ends it now; once it ended, both texts reach the contact, and the same edit is taken and reaches
+ * them too. One hold for all of it: each is a real 30 s.
  */
-it("under a hold, a text past 256 bytes says it goes when the hold ends, and goes then with nothing chosen", { timeout: 300_000 }, async () => {
+it("under a hold, a text past 256 bytes and a text or an edit too long for the DHT packet say when the hold ends, and go then with nothing chosen", { timeout: 300_000 }, async () => {
   for (const dir of [carol, dave]) {
     ok(await as(dir, "settings", "set", "relays", JSON.stringify(relays.map((r) => r.url))));
     const daemon = new Running(["--home", dir, "daemon"], env);
@@ -143,7 +145,9 @@ it("under a hold, a text past 256 bytes says it goes when the hold ends, and goe
   const invite = ok(await as(carol, "invite", "create", "--label", "dave"));
   ok(await as(dave, "invite", "join", invite.link as string, "--label", "carol"));
   for (const [dir, chat] of [[carol, "dave"], [dave, "carol"]]) ok(await as(dir, "chat", "wait", chat, "--until", "live", "--timeout", "90"));
+  const id = ok(await as(carol, "send", "dave", "first, live", "--wait", "delivered", "--timeout", "90")).messageId as string;
   const until = ok(await as(carol, "chat", "disconnect", "dave", "--hold", "0.5")).heldUntil as number;
+  await expect.poll(async () => ok(await as(carol, "chat", "show", "dave")).live, { timeout: 30_000 }).toBe(false);
   const held = `this chat is held on the DHT only until ${clock(until)}: it goes then, or now with ghostly chat connect dave`;
 
   const kept = ok(await as(carol, "send", "dave", long));
@@ -155,8 +159,18 @@ it("under a hold, a text past 256 bytes says it goes when the hold ends, and goe
   expect(failure.message).toContain(`the message is waiting. Longer than the 256 bytes the DHT carries, and ${held}`);
   expect((timedOut.json.error as { details?: Record<string, unknown> }).details).toMatchObject({ delivery: "waiting", note: expect.stringContaining(held) });
 
-  // What the words say: the hold ends by itself, and both texts reach the contact with no transport chosen.
+  const refusedHeld = (act: string) => `this chat is held on the DHT only until ${clock(until)}: ${act} then, or now with ghostly chat connect dave, or shorten it`;
+  const longEdit = "e".repeat(223);
+  const edit = error(await as(carol, "edit", "dave", id, longEdit, "--wait", "none"), "refused", 1).message;
+  expect(edit).toBe(`Too long for the DHT (an edit fits about 214 bytes there once sealed): ${refusedHeld("make the edit")}`);
+  const text = error(await as(carol, "send", "dave", "x".repeat(252), "--wait", "none"), "refused", 1).message;
+  expect(text).toBe(`Too long for the DHT (a text fits about 248 bytes there once sealed): ${refusedHeld("send it")}`);
+
+  // What the words say: the hold ends by itself, both texts reach the contact with no transport chosen, and the edit
+  // made then reaches them too.
   await expect.poll(async () => (ok(await as(dave, "chat", "history", "carol", "--limit", "10")).messages as { text: string; from: string }[])
     .filter((m) => m.from === "peer" && (m.text === long || m.text === waited)).length, { timeout: 150_000, interval: 2_000 }).toBe(2);
-  expect(ok(await as(carol, "chat", "show", "dave"))).toMatchObject({ heldUntil: null, deliveryMode: "stream" });
+  await expect.poll(async () => ok(await as(carol, "chat", "show", "dave")), { timeout: 60_000, interval: 2_000 }).toMatchObject({ heldUntil: null, deliveryMode: "stream", live: true });
+  ok(await as(carol, "edit", "dave", id, longEdit, "--wait", "confirmed", "--timeout", "60"));
+  expect((ok(await as(dave, "chat", "history", "carol", "--limit", "10")).messages as { text: string; from: string }[]).some((m) => m.from === "peer" && m.text === longEdit)).toBe(true);
 });

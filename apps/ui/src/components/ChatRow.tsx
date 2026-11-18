@@ -159,8 +159,10 @@ function RowMute({ chat, mentions }: { chat: string; mentions?: boolean }) {
 }
 
 /** The two (or, comfortable, three) lines beside the avatar, shared by chats and groups. */
-function RowText({ name, nameClass, marks, status, time, timeClass = "text-text-muted", sub, preview, previewId, trailing, timeCover }: {
+function RowText({ name, nameClass, nameId, marks, status, time, timeClass = "text-text-muted", sub, preview, previewId, trailing, timeCover }: {
   name: ReactNode; nameClass: string;
+  /** The name's id: what the buttons beside the row's open button (an invitation's Accept, Decline...) are described by. */
+  nameId?: string;
   /** The preview line's id: what the row's button is described by. */
   previewId?: string;
   /** After the name: the contact's verified identities (identities/ContactMarks.tsx), which give way before the time does. */
@@ -176,7 +178,7 @@ function RowText({ name, nameClass, marks, status, time, timeClass = "text-text-
       <div className="contact-row relative flex items-baseline gap-2">
         <span className="flex flex-1 min-w-0 items-center gap-1.5">
           {/* In its own direction, on the box that cuts it: a Latin name in Arabic is cut at its end, not its start. */}
-          <span data-testid="chat-row-name" dir="auto" className={`min-w-0 truncate chat-text-row-name ${nameClass}`}>{name}</span>
+          <span id={nameId} data-testid="chat-row-name" dir="auto" className={`min-w-0 truncate chat-text-row-name ${nameClass}`}>{name}</span>
           {marks}
         </span>
         {(status || time || timeCover) && <span className="relative flex shrink-0 items-baseline gap-2">
@@ -487,7 +489,7 @@ const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen
   // not the list's: the note says what it is (`kind`), and a group draws an app card as its text (`appCardsShown`).
   const reacted = !invitation && group.status === "active" && group.lastReaction && group.lastReaction.at > group.lastMessageAt ? group.lastReaction : undefined;
   const note = reacted && reactionNoteText(reacted, authorName(group, reacted.by, t), t);
-  const previewId = useId();
+  const previewId = useId(), nameId = useId();
   const size = AVATAR[density];
   return (
     <div data-testid="group-row" data-group={group.id} data-muted={muted || undefined} onClick={onOpen} title={group.name || t("group.chat.unnamed")} className={rowClass(active, density)}>
@@ -500,6 +502,7 @@ const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen
         <RowText
           name={group.name || t("group.chat.unnamed")}
           previewId={previewId}
+          nameId={nameId}
           nameClass={unread ? "text-text-primary font-semibold" : "text-text-primary"}
           time={time}
           timeClass={unread && !muted ? "text-accent font-medium" : "text-text-muted"}
@@ -514,10 +517,11 @@ const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen
           </span>}
         />
         {/* Taken back: nothing to answer, only to clear away (it says nothing to whoever took it back). */}
-        {/* On a phone, a thumb's height and apart: a Decline that went is said to the inviter. */}
-        {invitation?.takenBack && <div className="mt-1.5 flex gap-2 max-md:gap-3"><TakenBackDelete busy={busy} answer={answer} /></div>}
-        {invitation && answerable(invitation) && <div className="mt-1.5 flex gap-2 max-md:gap-3"><InvitationButtons busy={busy} answer={answer} /></div>}
-        {invitation?.viaLink && invitation.unanswered && <div className="mt-1.5 flex gap-2 max-md:gap-3"><LinkTryAgain busy={busy} answer={answer} /></div>}
+        {/* On a phone, a thumb's height and apart: a Decline that went is said to the inviter. Outside the open button,
+            each is described by the group's name, or two invitations' buttons all sounded alike ("Accept", "Accept"). */}
+        {invitation?.takenBack && <div className="mt-1.5 flex gap-2 max-md:gap-3"><TakenBackDelete busy={busy} answer={answer} describedBy={nameId} /></div>}
+        {invitation && answerable(invitation) && <div className="mt-1.5 flex gap-2 max-md:gap-3"><InvitationButtons busy={busy} answer={answer} describedBy={nameId} /></div>}
+        {invitation?.viaLink && invitation.unanswered && <div className="mt-1.5 flex gap-2 max-md:gap-3"><LinkTryAgain busy={busy} answer={answer} describedBy={nameId} /></div>}
         {invitation && refused && <InvitationRefusal refused={refused} className="mt-1" />}
       </div>
     </div>

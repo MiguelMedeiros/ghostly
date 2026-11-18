@@ -8,6 +8,7 @@ import { errorText } from "../lib/errorText";
 import { fillNames } from "../lib/fillNodes";
 import type { GroupCallSource } from "../lib/groupCallModeration";
 import { ownDirection } from "../lib/ownDirection";
+import { isolate } from "../lib/ownStatus";
 import { InfoButton } from "./layout/Section";
 import { Menu, MenuItem, MenuSeparator } from "./Menu";
 
@@ -26,7 +27,7 @@ export function TileModerationMenu({ identity, name, moderation, host }: { ident
   const [open, setOpen] = useState(false);
   const [asking, setAsking] = useState<"call" | "group" | null>(null);
   const anchor = useRef<HTMLDivElement>(null);
-  const label = t("groupCallModeration.menu", { name });
+  const label = t("groupCallModeration.menu", { name: isolate(name) });
   const muted = moderation.state.muted[identity] ?? [];
   const pick = (run: () => void) => () => { setOpen(false); run(); };
   const removeFromGroup = async () => {

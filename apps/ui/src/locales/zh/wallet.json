@@ -215,6 +215,7 @@
     "payAmount": "支付 {{amount}} {{unit}}",
     "payLine": "支付 {{amount}}{{fees}}",
     "pendingMint": "付款仍在铸币厂处理中。",
+    "pendingMintNext": "付款会自动完成，不会重复支付。在铸币厂答复之前，这笔金额会在余额下方显示为已预留。",
     "primary": "主要",
     "received": "⚡ 已收到 {{amount}} {{unit}}",
     "redeem": "兑换 ecash 代币",

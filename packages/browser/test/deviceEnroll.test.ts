@@ -325,12 +325,13 @@ describe("refusals", () => {
     expect(a.current()).toMatchObject({ step: "failed", reason: "proof" });
   });
 
-  it("a code past its ten minutes, a chat invite, and a device that already has a set are refused before anything is made", async () => {
+  it("a code a day past its ten minutes, a chat invite, and a device that already has a set are refused before anything is made", async () => {
     let now = Date.now();
     const a = new EnrollInviter({ profile: A, network, open: pipe.openInviter, didSeed: async () => didSeed, name: "MacBook", now: () => now, sleep: noSleep, forceSeed: true });
     const waiting = await a.start();
     if (waiting.step !== "waiting") throw new Error("no code");
-    now += 601_000;
+    // Only a day past: a new device's clock may run ahead of the inviter's, whose own check refuses a code past its ten minutes.
+    now += (DEVICE_INVITE_LIFETIME_S + 86_400) * 1000;
     const late = new EnrollJoiner({ profile: B, network, open: pipe.openJoiner, about: { name: "Phone", kind: "web", app: "1" }, now: () => now, forceSeed: true, install: null });
     await expect(late.start(waiting.code)).rejects.toMatchObject({ reason: "expired" });
     const chat = (await import("@ghostly/core")).createChatInvite().inviteCode;
@@ -713,6 +714,21 @@ describe("a new device whose clock is off", () => {
     expect(b.current()).toMatchObject({ step: "failed", reason: "unanswered" });
     await a.cancel();
   });
+
+  // Minutes ahead (a shortened wait on dev), and past the code's ten minutes (refused outright on dev).
+  for (const seconds of [300, 660, 3_600]) {
+    it(`${seconds} s ahead: it takes the code, and waits for the grant a code's lifetime from the moment it read it`, async () => {
+      // The monotonic clock too: the wait counts on it, never on either device's wall clock.
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+      const { a, b } = await skewedToDigits(seconds * 1000);
+      await vi.advanceTimersByTimeAsync(DEVICE_INVITE_LIFETIME_S * 1000 + ENROLL_DONE_TIMEOUT_MS - 3_000);
+      expect(b.current()).toMatchObject({ step: "confirm" });
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(b.current()).toMatchObject({ step: "failed", reason: "unanswered" });
+      expect(await readDeviceRecord(B)).toBeNull();
+      await a.cancel();
+    });
+  }
 
   it("a clock ahead, past the code's expiry: the code is refused before anything is made", async () => {
     const base = Date.now();
