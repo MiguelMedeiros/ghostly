@@ -561,7 +561,8 @@ export function Settings() {
     const scheme = t(`settings.colorSchemes.${settings.colorScheme}` as const);
     const language = LANGUAGE_OPTIONS.find((option) => option.value === settings.language)?.native;
     const summary: Partial<Record<SettingsSection, ReactNode>> = {
-      profile: settings.defaultNickname || undefined,
+      // The one summary in the user's own words, which may run long without a space: cut. The app's own wrap (LinkRow).
+      profile: settings.defaultNickname ? <span className="block truncate">{settings.defaultNickname}</span> : undefined,
       appearance: listText([scheme, language].filter((item): item is string => !!item), t),
       notifications: t("settings.notificationsHint"),
       media: t("settings.mediaHint"),
