@@ -346,9 +346,9 @@ export function forwardShare(answered: (forwarded: boolean) => void = () => {}, 
  * page that holds the peer's lock and still does a moment later, so never to the page on its way out; none, it keeps
  * it for the next app page. `answered`: the worker handed it over, or there was none. A link that reaches this tab
  * meanwhile takes its address (and the tab that is the app takes it out again): the share is forwarded all the same.
+ * `opened`: whether this page was opened for one, read as it opened (a link may have taken the address since).
  */
-export function handShareOver(peer: () => boolean, answered: (state: "shared" | "shareNone") => void, afterMs = SHARE_FORWARD_AFTER_MS): void {
-  const opened = openedForShare();
+export function handShareOver(peer: () => boolean, answered: (state: "shared" | "shareNone") => void, opened = openedForShare(), afterMs = SHARE_FORWARD_AFTER_MS): void {
   let asked = false;
   const forward = () => {
     if (asked || peer()) return;
