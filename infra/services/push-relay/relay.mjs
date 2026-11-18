@@ -316,7 +316,8 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
         nearbyHinted = true
         log(`requests refused at the rate of ${perMinute} a minute from one address come from a loopback or private address: if they come through a proxy, have it write X-Forwarded-For and set GHOSTLY_RELAY_PROXIES, or every client shares that rate`)
       }
-      return refuse('rate', 429, { error: 'Too many' })
+      // The first line of a minute names the limit: the code holds it, no setting moves it.
+      return refuse('rate', 429, { error: 'Too many' }, `(${perMinute} ${perMinute === 1 ? 'request' : 'requests'} a minute from one address)`)
     }
 
     if (Number(req.headers['content-length']) > requestBytes) return refuse('size', 413, { error: 'Too large' })
@@ -334,7 +335,7 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
       if (request.error) return refuse(request.error.endsWith(' twice') ? 'header twice' : request.error, 400, { error: request.error })
       // Counted only for a request it would forward: a refused one wakes nobody.
       const taken = monotonicNow()
-      if (!subscriptions.take(request.subscription, taken)) return refuse('subscription rate', 429, { error: 'Too many' })
+      if (!subscriptions.take(request.subscription, taken)) return refuse('subscription rate', 429, { error: 'Too many' }, `(${perEndpoint} ${perEndpoint === 1 ? 'forward' : 'forwards'} a minute to one subscription)`)
       forwarding++
       try {
         const response = await fetch(request.endpoint, { method: 'POST', headers: request.headers, body: request.body, redirect: 'error', signal: AbortSignal.timeout(10_000) })

@@ -27,7 +27,8 @@ it("writes a few lines a minute for upgrades refused from one address, however m
     const refused = await Promise.allSettled(Array.from({ length: 200 }, () => open(relay.url)));
     expect(refused.every(result => result.status === "rejected")).toBe(true);
     expect(relay.stats().refused).toBe(200);
-    expect(lines.filter(line => line === "refused address")).toHaveLength(5);
+    // The first names the limit and its setting; the ones after it are short.
+    expect(lines.filter(line => line.startsWith("refused address"))).toEqual(["refused address: 1 client from one address (GHOSTLY_RELAY_CLIENTS_PER_ADDRESS)", ...Array(4).fill("refused address")]);
     expect(lines.filter(line => line.startsWith("refused"))).toHaveLength(5);
   } finally {
     for (const socket of sockets) socket.close();

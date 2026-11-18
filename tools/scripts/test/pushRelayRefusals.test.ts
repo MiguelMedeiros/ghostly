@@ -27,7 +27,7 @@ describe("the push relay's log of refusals (infra/services/push-relay)", () => {
     expect((await post()).status).toBe(400);
     expect((await post()).status).toBe(429);
     // From loopback with no proxy setting, the rate's refusal also says once that a proxy may be in front (relayProxyHint).
-    expect(lines.filter(line => line.startsWith("refused"))).toEqual(["refused method", 'refused origin "https://evil.example"', "refused size", "refused Not a push service", "refused rate"]);
+    expect(lines.filter(line => line.startsWith("refused"))).toEqual(["refused method", 'refused origin "https://evil.example"', "refused size", "refused Not a push service", "refused rate (3 requests a minute from one address)"]);
   });
 
   it("names no header the client chose", async () => {
@@ -77,6 +77,6 @@ describe("the push relay's log of refusals (infra/services/push-relay)", () => {
     const post = () => fetch(`http://127.0.0.1:${relay.port}/`, { method: "POST", headers: { Origin: "https://app.ghostly.tools" }, body: request() });
     for (let i = 0; i < 4; i++) await post();
     await relay.close();
-    expect(lines.filter(line => line.startsWith("refused"))).toEqual(["refused Not a push service", "refused rate", "refused rate 2 more"]);
+    expect(lines.filter(line => line.startsWith("refused"))).toEqual(["refused Not a push service", "refused rate (1 request a minute from one address)", "refused rate 2 more"]);
   });
 });
