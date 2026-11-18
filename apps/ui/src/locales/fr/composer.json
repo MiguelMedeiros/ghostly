@@ -1,5 +1,6 @@
 {
   "attach": "Joindre",
+  "bytesLeft": "Octets restants : {{count}}",
   "camera": "Appareil photo",
   "cameraBlocked": "Appareil photo bloqué. Autorisez l'appareil photo pour Ghostly dans les réglages d'Android.",
   "cameraFailed": "Impossible de démarrer l'appareil photo.",
@@ -17,6 +18,7 @@
     "recent": "Récents",
     "symbols": "Symboles"
   },
+  "charactersLeft": "Caractères restants : {{count}}",
   "chooseFiles": "Choisir des fichiers",
   "closeCamera": "Fermer l'appareil photo",
   "dhtTooLong": "Trop long pour la DHT ({{bytes}} sur {{max}} octets). Raccourcissez ou passez en direct ; le brouillon est gardé.",

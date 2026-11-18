@@ -1,5 +1,6 @@
 {
   "attach": "Adjuntar",
+  "bytesLeft": "Bytes restantes: {{count}}",
   "camera": "Cámara",
   "cameraBlocked": "Cámara bloqueada. Permite la cámara en los ajustes de Android para Ghostly.",
   "cameraFailed": "No se pudo iniciar la cámara.",
@@ -17,6 +18,7 @@
     "recent": "Recientes",
     "symbols": "Símbolos"
   },
+  "charactersLeft": "Caracteres restantes: {{count}}",
   "chooseFiles": "Elegir archivos",
   "closeCamera": "Cerrar cámara",
   "dhtTooLong": "Demasiado largo para la DHT ({{bytes}} de {{max}} bytes). Acórtalo o conéctate en vivo; el borrador se guarda.",

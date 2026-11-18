@@ -886,6 +886,38 @@ describe("the composer counts a message's bytes", () => {
     expect(screen.getByTestId("dht-byte-count")).toHaveAttribute("title", "About 248 bytes fit the DHT once sealed: shorten it to send it there");
   });
 
+  it("the count's warning reaches the field and is said once as it changes, not only as a mouse tooltip", () => {
+    // Its sentence was a `title` on a span no keyboard reaches: a screen reader typing on heard nothing as the count
+    // turned amber at about 248 B, nor past 256 B, where the text silently waits for live.
+    composer({ softBytes: 256 });
+    const live = () => screen.getByTestId("composer-count-said");
+    fireEvent.change(field(), { target: { value: "x".repeat(240) } });
+    expect(field()).not.toHaveAccessibleDescription();
+    expect(live()).toHaveTextContent("");
+    fireEvent.change(field(), { target: { value: "x".repeat(252) } });
+    expect(field()).toHaveAccessibleDescription("About 248 bytes fit the DHT once sealed: shorten it to send it there");
+    expect(live()).toHaveTextContent("About 248 bytes fit the DHT once sealed: shorten it to send it there");
+    fireEvent.change(field(), { target: { value: "x".repeat(300) } });
+    expect(field()).toHaveAccessibleDescription("Over the 256 bytes the DHT carries: it is sent when you are live");
+    expect(live()).toHaveTextContent("Over the 256 bytes the DHT carries: it is sent when you are live");
+    // Each keystroke within a state says nothing new.
+    live().textContent = "";
+    fireEvent.change(field(), { target: { value: "x".repeat(301) } });
+    expect(live()).toHaveTextContent("");
+    fireEvent.change(field(), { target: { value: "x".repeat(10) } });
+    expect(field()).not.toHaveAccessibleDescription();
+  });
+
+  it("the 16 KiB count's warning, red under 50 left and past the limit, reaches the field too", () => {
+    composer();
+    const live = () => screen.getByTestId("composer-count-said");
+    fireEvent.change(field(), { target: { value: "x".repeat(16_350) } });
+    expect(field()).toHaveAccessibleDescription("Bytes left: 34");
+    expect(live()).toHaveTextContent("Bytes left: 34");
+    fireEvent.change(field(), { target: { value: "é".repeat(8_200) } });
+    expect(field()).toHaveAccessibleDescription("That is too long to send (16,400 bytes, the limit is 16,384). Shorten it, or send it as a file.");
+  });
+
   it("off the live link, past 16 KiB the hard count shows instead of the DHT's", () => {
     composer({ softBytes: 256 });
     fireEvent.change(field(), { target: { value: "x".repeat(300) } });

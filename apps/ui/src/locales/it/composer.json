@@ -1,5 +1,6 @@
 {
   "attach": "Allega",
+  "bytesLeft": "Byte rimanenti: {{count}}",
   "camera": "Fotocamera",
   "cameraBlocked": "Fotocamera bloccata. Consenti la fotocamera a Ghostly nelle impostazioni di Android.",
   "cameraFailed": "Impossibile avviare la fotocamera.",
@@ -17,6 +18,7 @@
     "recent": "Recenti",
     "symbols": "Simboli"
   },
+  "charactersLeft": "Caratteri rimanenti: {{count}}",
   "chooseFiles": "Scegli i file",
   "closeCamera": "Chiudi fotocamera",
   "dhtTooLong": "Troppo lungo per la DHT ({{bytes}} di {{max}} byte). Accorcialo o connettiti dal vivo; la bozza resta.",
