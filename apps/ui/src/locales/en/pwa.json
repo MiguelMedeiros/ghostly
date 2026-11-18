@@ -18,6 +18,7 @@
   "notNow": "Not now",
   "offline": "Offline",
   "offlineHint": "Your chats are here. Nothing goes out until you're back online.",
+  "offlinePageHint": "What needs the network here won't work until you're back online.",
   "reconnected": "Connected to Ghostly again",
   "reconnecting": "Reconnecting…",
   "reconnectingHint": "This tab lost Ghostly and keeps trying. New messages show here once it's back.",
