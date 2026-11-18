@@ -3422,8 +3422,12 @@ export class Groups {
         // Mine are followed too: a member's rows placed again take along the lines written after them, mine included.
         if (!completed && stored !== false) this.authorOrder.placed(state.id, { ...row, at: this.now() }, placedAbove);
         // A copy of a line deleted for everyone, refused: it moves no mark (agents#1645). A member away when it was
-        // written and deleted got an "@" for a line it never sees.
-        if (stored === false && !completed && this.isRemoved(state.id, m.id)) { this.typings.messageFrom(state.id, m.sender); return; }
+        // written and deleted got an "@" for a line it never sees. Deleted while its file was being taken: the file goes too.
+        if (stored === false && !completed && this.isRemoved(state.id, m.id)) {
+          if (file) await this.files?.forget(state.id, m.id);
+          this.typings.messageFrom(state.id, m.sender);
+          return;
+        }
         const came = m.sender === session.myKey ? timestamp : cameAt(timestamp, stored, arrivalNow(this.now()));
         markCame(this.marks, state.id, m.id, came, m.sender !== session.myKey, mentioned);
         noteCame(this.stored.get(state.id), came, m.sender !== session.myKey, mentioned);

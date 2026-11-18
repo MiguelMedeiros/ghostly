@@ -379,6 +379,30 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(t.seen.slice(from).filter(s => s.from === "bob" && (s.frame.t === "group-want" || s.frame.t === "group-have"))).toEqual([]);
   });
 
+  it("a member whose device hears a file's Delete for everyone while it takes its announcement keeps nothing of the file, after a start too", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob], id } = await t.mesh(["alice", "bob", "carol"]);
+    // Bob's room for files is read slowly (real I/O): the removal lands while it is read.
+    const store = t.files.get(bob)!.store;
+    let read: ((room: number | null) => void) | undefined;
+    store.room = () => read ? Promise.resolve(null) : new Promise(resolve => { read = resolve; });
+    const { messageId } = await t.send(alice, id, pattern(150_000, 11));
+    await t.world.until(() => !!read, 60_000);
+    await bob.groups.removed(id, messageId);
+    read!(null);
+    await t.world.run(30_000);
+    expect(t.got(bob, id, messageId).message).toBeUndefined();
+    expect([...store.records.values()]).toEqual([]);
+    expect(store.bytes.size).toBe(0);
+    // Not asked for again: neither now nor once its app starts again.
+    const from = t.seen.length;
+    await t.world.run(60_000);
+    await t.restart(bob);
+    await t.world.run(60_000);
+    expect([...store.records.values()]).toEqual([]);
+    expect(t.seen.slice(from).filter(s => s.from === "bob" && s.frame.t === "group-want")).toEqual([]);
+  });
+
   it("a member back from away gets every file a connected member holds, its app started again and the authors gone, past what one group-have names", async () => {
     const t = new FilesWorld();
     limits.haveIds = 2;
@@ -2195,6 +2219,35 @@ describe("a file in a community", { timeout: 120_000 }, () => {
       expect(from.length).toBeGreaterThan(0);
       expect(from.every(name => hubs.some(h => h.name === name))).toBe(true);
     }
+  });
+
+  it("a member whose device hears a file's Delete for everyone while it takes its announcement keeps nothing of the file", async () => {
+    const t = new FilesWorld();
+    const admin = t.add("admin");
+    const id = await admin.groups.create("Open door");
+    const link = await admin.groups.enableLink(id);
+    const others = Array.from({ length: 3 }, (_, i) => t.add(`p${i}`));
+    for (const p of others) await p.groups.joinByLink(`https://app.ghostly.tools/#/join/${link}`);
+    await t.world.until(() => others.every(p => t.world.member(p, id)), 10 * 60_000);
+    await t.world.run(30_000);
+    const members = [admin, ...others].filter(p => !p.groups.communities.isHub(id));
+    expect(members.length).toBeGreaterThanOrEqual(2);
+    const [author, reader] = members;
+    // The reader's room for files is read slowly (real I/O): its author's removal lands while it is read.
+    const store = t.files.get(reader)!.store, desk = reader.groups.files!, announced = desk.announced.bind(desk);
+    let messageId: string | undefined, removing: Promise<void> | undefined;
+    desk.announced = (groupId, m, me) => { messageId ??= m.id; return announced(groupId, m, me); };
+    store.room = async () => { if (!removing) { removing = reader.groups.removed(id, messageId!); await removing; } return null; };
+    await t.send(author, id, pattern(120_000, 12));
+    await t.world.until(() => !!removing, 5 * 60_000);
+    await t.world.run(30_000);
+    expect(t.got(reader, id, messageId!).message).toBeUndefined();
+    expect([...store.records.values()]).toEqual([]);
+    expect(store.bytes.size).toBe(0);
+    // Not asked for again.
+    const from = t.seen.length;
+    await t.world.run(60_000);
+    expect(t.seen.slice(from).filter(s => s.from === reader.name && s.frame.t === "group-want")).toEqual([]);
   });
 
   it("the same bytes a member sends twice at once are two files, each reaching everyone, and no copy is left over", async () => {
