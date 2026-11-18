@@ -165,7 +165,8 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
   without `--print`, it is listen's stdout. One still running after a minute is said once on stderr (the events after
   it wait). The command runs in a process group of its own: a stop (SIGTERM, SIGINT, Ctrl-C) gives a running command
   5 s to end, then sends its group SIGTERM, and SIGKILL 5 s later. A command the stop ended leaves the cursor before
-  its event, so the next start runs it again, never alongside the old one.
+  its event, so the next start runs it again, never alongside the old one. Without `--cursor` nothing keeps that place:
+  stderr says the event is not handed again and the `--since` that runs it again.
 - `--webhook <url>` POSTs each event to a local bridge (`127.0.0.1`, `localhost` or `[::1]` only; a redirect is not
   followed; no `user:password@` in the URL, so put a token in its path or query). Give a URL with a token in
   `GHOSTLY_WEBHOOK` instead of `--webhook` (one or the other): a running `listen`'s arguments show in `ps` to every
