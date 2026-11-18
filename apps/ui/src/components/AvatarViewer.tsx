@@ -4,6 +4,7 @@ import { useBackdropDismiss, useBackCloses } from "../hooks/useDismiss";
 import { holdRow } from "../hooks/useRowWindow";
 import { usePictureZoom } from "../hooks/usePictureZoom";
 import { useI18n } from "../contexts/I18nContext";
+import { isolate } from "../lib/ownStatus";
 
 /** How large a picture is drawn at most, in CSS pixels, when it arrived smaller: 2.5× a 128 px profile picture. */
 const SHOWN = 320;
@@ -105,7 +106,7 @@ export function AvatarOpener({ src, name, className = "", testId, children }: { 
   if (!src && open) setOpen(false);
   if (!src) return <div className={className}>{children}</div>;
   return <>
-    <button ref={button} type="button" aria-label={t("common.viewPhoto", { name })} data-testid={testId} onClick={() => setOpen(true)}
+    <button ref={button} type="button" aria-label={t("common.viewPhoto", { name: isolate(name) })} data-testid={testId} onClick={() => setOpen(true)}
       className={`${className} cursor-zoom-in focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent`}>
       {children}
     </button>

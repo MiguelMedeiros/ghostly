@@ -53,7 +53,7 @@ test("a profile picture goes to paired contacts, without anything of the file, a
   expect(name).toMatch(/^Contact · \S{6}$/);
   await expect(bob.page.getByTestId("chat-name")).toHaveText("Contact");
   const opener = bob.page.getByTestId("chat-avatar-open");
-  await expect(opener).toHaveAttribute("aria-label", `View photo of ${name}`);
+  await expect(opener).toHaveAttribute("aria-label", `View photo of \u2068${name}\u2069`);
   await opener.click();
   const viewer = bob.page.getByTestId("avatar-viewer");
   await expect(viewer).toBeVisible();

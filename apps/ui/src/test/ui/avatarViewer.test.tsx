@@ -18,12 +18,14 @@ vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRing
 const PHOTO = "data:image/jpeg;base64,/9j/alice", GROUP_PICTURE = "data:image/jpeg;base64,/9j/group";
 const viewer = () => screen.queryByTestId("avatar-viewer");
 const Face = () => <img src={PHOTO} alt="" />;
+/** The opener's name: the contact's or the group's name between isolate marks, as in the other labels that carry one. */
+const viewPhoto = (name: string) => `View photo of \u2068${name}\u2069`;
 
 /** A contact's or a group's picture, large: opened from an avatar, closed by Escape, a click outside or its button. */
 describe("the picture viewer", () => {
   it("opens on a click, shows the picture as it arrived and the name, and gives the focus back on Escape", async () => {
     const { user } = renderApp(<AvatarOpener src={PHOTO} name="Alice" testId="opener"><Face /></AvatarOpener>);
-    const opener = screen.getByRole("button", { name: "View photo of Alice" });
+    const opener = screen.getByRole("button", { name: viewPhoto("Alice") });
     await user.click(opener);
     const dialog = screen.getByRole("dialog", { name: "Alice" });
     expect(dialog).toHaveAttribute("open");
@@ -36,7 +38,7 @@ describe("the picture viewer", () => {
   it("opens from the keyboard, and closes on a click outside the picture but not on it", async () => {
     const { user } = renderApp(<AvatarOpener src={PHOTO} name="Alice"><Face /></AvatarOpener>);
     await user.tab();
-    const opener = screen.getByRole("button", { name: "View photo of Alice" });
+    const opener = screen.getByRole("button", { name: viewPhoto("Alice") });
     expect(opener).toHaveFocus();
     await user.keyboard("{Enter}");
     expect(viewer()).toBeInTheDocument();
@@ -51,6 +53,11 @@ describe("the picture viewer", () => {
     expect(opener).toHaveFocus();
   });
 
+  it("keeps the name in its own direction in an Arabic sentence: \"Notes!\" never reads \"!Notes\"", () => {
+    renderApp(<AvatarOpener src={PHOTO} name="Notes!" testId="opener"><Face /></AvatarOpener>, { language: "ar" });
+    expect(screen.getByTestId("opener")).toHaveAttribute("aria-label", "عرض صورة \u2068Notes!\u2069");
+  });
+
   it("has nothing to open without a picture: the initial is not a button", () => {
     renderApp(<AvatarOpener src={undefined} name="Alice"><span>A</span></AvatarOpener>);
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
@@ -59,7 +66,7 @@ describe("the picture viewer", () => {
 
   it("closes when the picture goes while it is open, and a new one does not open by itself", async () => {
     const { user, rerender } = renderApp(<AvatarOpener src={PHOTO} name="Alice"><Face /></AvatarOpener>);
-    await user.click(screen.getByRole("button", { name: "View photo of Alice" }));
+    await user.click(screen.getByRole("button", { name: viewPhoto("Alice") }));
     expect(viewer()).toBeInTheDocument();
     rerender(<AvatarOpener src={undefined} name="Alice"><span>A</span></AvatarOpener>);
     expect(viewer()).not.toBeInTheDocument();
@@ -72,7 +79,7 @@ describe("the picture viewer", () => {
     saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", messages: [], createdAt: 1_700_000_000_000 });
     const { user, engine } = renderApp(<Chat sessionId="chat-1" visible onCallChange={() => {}} callLayer={null} />);
     act(() => { engine.update({ links: [linkView({ peerPubKeyZ32: PEER, profile: "paired-chat/1", peerNick: "Alice", peerAvatar: PHOTO })] }); });
-    await user.click(await screen.findByRole("button", { name: "View photo of Alice" }));
+    await user.click(await screen.findByRole("button", { name: viewPhoto("Alice") }));
     expect(within(screen.getByRole("dialog", { name: "Alice" })).getByTestId("avatar-viewer-image")).toHaveAttribute("src", PHOTO);
   });
 
@@ -80,12 +87,12 @@ describe("the picture viewer", () => {
     const onClose = vi.fn();
     fakeEngine.update({ links: [linkView({ peerAvatar: PHOTO })] });
     const { user } = renderApp(<ContactIdentitiesPanel peerKey="peer" name="Alice" onClose={onClose} />);
-    await user.click(screen.getByRole("button", { name: "View photo of Alice" }));
+    await user.click(screen.getByRole("button", { name: viewPhoto("Alice") }));
     expect(viewer()).toBeInTheDocument();
     await user.keyboard("{Escape}");
     expect(viewer()).not.toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "View photo of Alice" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: viewPhoto("Alice") })).toHaveFocus();
     await user.keyboard("{Escape}");
     expect(onClose).toHaveBeenCalledTimes(1);
   });
@@ -106,7 +113,7 @@ describe("the picture viewer", () => {
       fakeEngine.on("groupMessages", () => []).on("updateSettings", () => undefined);
       fakeEngine.update({ groups: [group({ picture: GROUP_PICTURE })] });
       const { user } = renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1" });
-      const opener = screen.getByRole("button", { name: "View photo of Friends" });
+      const opener = screen.getByRole("button", { name: viewPhoto("Friends") });
       await user.click(opener);
       expect(within(screen.getByRole("dialog", { name: "Friends" })).getByTestId("avatar-viewer-image")).toHaveAttribute("src", GROUP_PICTURE);
       await user.keyboard("{Escape}");
@@ -119,6 +126,13 @@ describe("the picture viewer", () => {
       expect(screen.getByTestId("group-members-dialog")).toBeInTheDocument();
     });
 
+    it("the header's avatar keeps the group's name in its own direction in an Arabic sentence", () => {
+      fakeEngine.on("groupMessages", () => []).on("updateSettings", () => undefined);
+      fakeEngine.update({ groups: [group({ picture: GROUP_PICTURE, name: "Notes!" })] });
+      renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1", language: "ar" });
+      expect(screen.getByTestId("group-avatar-open")).toHaveAttribute("aria-label", "عرض صورة \u2068Notes!\u2069");
+    });
+
     it("the members list opens a contact's picture and the group's, over the members, which stay open", async () => {
       fakeEngine.update({ groups: [group({ picture: GROUP_PICTURE })], links: [linkView({ peerPubKeyZ32: "alice-z32", peerAvatar: PHOTO })] });
       const onClose = vi.fn();
@@ -127,13 +141,13 @@ describe("the picture viewer", () => {
       const row = (key: string) => rows.find(r => r.dataset.key === key)!;
       // Bob is not a contact: no picture, no button. Alice sent hers in our chat.
       expect(within(row(BOB)).queryByRole("button", { name: /View photo/ })).not.toBeInTheDocument();
-      const alice = within(row(ALICE)).getByRole("button", { name: "View photo of Alice" });
+      const alice = within(row(ALICE)).getByRole("button", { name: viewPhoto("Alice") });
       await user.click(alice);
       expect(within(screen.getByRole("dialog", { name: "Alice" })).getByTestId("avatar-viewer-image")).toHaveAttribute("src", PHOTO);
       await user.keyboard("{Escape}");
       expect(viewer()).not.toBeInTheDocument();
       expect(alice).toHaveFocus();
-      await user.click(screen.getByRole("button", { name: "View photo of Friends" }));
+      await user.click(screen.getByRole("button", { name: viewPhoto("Friends") }));
       expect(within(screen.getByTestId("avatar-viewer")).getByTestId("avatar-viewer-image")).toHaveAttribute("src", GROUP_PICTURE);
       await user.click(screen.getByTestId("avatar-viewer-backdrop"));
       expect(viewer()).not.toBeInTheDocument();
