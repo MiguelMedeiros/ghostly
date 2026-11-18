@@ -18,7 +18,7 @@ import {
 } from "@ghostly/core";
 import { blobDigest, fileBytes, fileBytesOf } from "../shared/fileBytes";
 import { fileStore, type StoredFile } from "../shared/idb";
-import { FileAppender, readStored } from "../shared/storedFiles";
+import { FileAppender, readStored, removeStored } from "../shared/storedFiles";
 import type { FileTransferView, MessageFile, StoredMessage } from "../shared/types";
 import { receivedPairedReply } from "../shared/replies";
 import { fileWire } from "./messageDetails";
@@ -356,9 +356,16 @@ export class FileDesk {
     if (wireId && chat.files.get("in", wireId)?.state === "asking") {
       const room = await (await fileBytes()).room().catch(() => null);
       const record = chat.files.get("in", wireId);
-      if (room !== null && record?.state === "asking" && record.file.size + this.stillComing({}, room) > room) {
+      const coming = room === null ? 0 : this.stillComing({}, room);
+      if (room !== null && record?.state === "asking" && record.file.size + coming > room) {
         void this.rooms(room);
-        throw Object.assign(new Error(`No room on this device for this file (${formatFileSize(room)} free)`), { room });
+        // It fits the free space, not beside the files still coming: said so, with the room left beside them. Before,
+        // "No room (38.9 MB free)" for a 27.3 MB file, and the person was told to free space the disk already had.
+        // With the file's size and what still comes, for the CLI to say what fills the room in its own words.
+        const free = formatFileSize(room);
+        throw Object.assign(new Error(record.file.size <= room
+          ? `No room on this device for this file beside the files still coming (${formatFileSize(Math.max(0, room - coming))} left of ${free} free)`
+          : `No room on this device for this file (${free} free)`), { room, size: record.file.size, coming });
       }
     }
     return this.act(linkId, fileId, "accept");
@@ -430,6 +437,11 @@ export class FileDesk {
     this.chats.delete(linkId);
     for (const id of [...this.moved.keys(), ...this.restored, ...this.stallChecks.keys(), ...this.asking]) if (id.startsWith(`${linkId}-`)) this.unwatch(id);
     return said;
+  }
+
+  /** The app stops: no chat's files are swept any more (`ChatFiles.stop`). */
+  stop(): void {
+    for (const chat of this.chats.values()) chat.files.stop();
   }
 
   /** Stops tracking whether a transfer is stuck, and the room an offer of it shows. */
@@ -597,6 +609,9 @@ export class FileDesk {
           ...(place !== undefined && sentAt !== undefined ? { timestamp: place, sentAt } : { timestamp: file.timestamp }),
           ...(file.reply && { replyTo: receivedPairedReply(file.reply) }), ...(file.forwarded && { forwarded: file.forwarded }),
           details: { wire: fileWire("files/3", file.size) } });
+        // Deleted for everyone by its sender meanwhile: the removal found no row to take, and the row was refused. The
+        // file kept no message to show or delete it, and arrived whole for good: it ends on both sides, and goes.
+        if (this.deps.deleted(linkId, `peer_${record.id}`)) this.deletedMeanwhile(linkId, id);
       }).catch((error) => this.unkept(linkId, chat, record.id, id, error));
     }
     const offered = record.direction === "in" && !this.deps.transfers.has(chat.local.get(record.id)!);
@@ -646,6 +661,15 @@ export class FileDesk {
     }
     // Refused, a file said on the floor ends its bubble (`refusedHere`).
     chat.files.refuse(wireId, (error as { name?: unknown } | null)?.name === "QuotaExceededError" ? "no-room" : "invalid");
+    this.deps.changed();
+  }
+
+  /** A new offer whose message was deleted before its row was kept: forgotten as a deleted message's file is. */
+  private deletedMeanwhile(linkId: string, id: string): void {
+    this.forget(linkId, id);
+    this.deps.transfers.delete(id);
+    const chat = this.chats.get(linkId);
+    if (chat) chat.saving = chat.saving.then(() => removeStored(id)).catch(() => {});
     this.deps.changed();
   }
 
@@ -703,7 +727,8 @@ export class FileDesk {
       if (rate) view.rate = rate;
     } else this.speeds.delete(id);
     if (view.stage === "asking" && record.direction === "in") { this.asking.add(id); view.room = this.deps.transfers.get(id)?.room; void this.rooms(); }
-    else this.asking.delete(id);
+    // Taken, asked about or not (first seen under way): the offers still waiting show the room it will use.
+    else if ((this.asking.delete(id) || (record.direction === "in" && !this.underway.has(id))) && !transferEnded(record)) void this.rooms();
     // One that finished before this run (a session opening walks them all) gets no view back (`restore`).
     if (record.state !== "done" || this.underway.has(id) || this.deps.transfers.has(id)) {
       this.deps.transfers.set(id, view);
@@ -776,13 +801,21 @@ export class FileDesk {
     }
   }
 
+  /** The free space being read for `rooms`, while it is. */
+  private freeRead?: Promise<number | null>;
+
   /**
-   * The free space the offers waiting for the person are decided against, shown with them: read again when one is
-   * shown, when another received file ends, and when an Accept found less (`known`). Read once for all of them.
+   * The room the offers waiting for the person are decided against, shown with them: the free space (`known` when an
+   * Accept read it) less what the files taken here still need (`stillComing`), as Accept counts it. Read again when one
+   * is shown, when one is taken, when another received file ends, and when an Accept found less; once for all of them.
+   * Before, the free space alone: an offer that fit it read as fitting, and Accept refused it for the file still coming.
    */
   private async rooms(known?: number | null): Promise<void> {
     if (!this.asking.size) return;
-    const room = known !== undefined ? known : await (await fileBytes()).room().catch(() => null);
+    // One read for a burst (a session's files shown again as it opens): the calls made meanwhile share it.
+    const free = known !== undefined ? known : await (this.freeRead ??= fileBytes().then((bytes) => bytes.room()).catch(() => null)
+      .finally(() => { this.freeRead = undefined; }));
+    const room = free === null ? null : Math.max(0, free - this.stillComing({}, free));
     let shown = false;
     for (const id of this.asking) {
       const current = this.deps.transfers.get(id);

@@ -594,9 +594,10 @@ export class GroupSession {
   private adminSeen: string | undefined;
   /**
    * After the admin role moved to me (`metaFollowsChain`): whom from, until when I take their statement, and the last
-   * one of theirs I signed again (what I held then, until one of theirs comes). In memory only.
+   * one of theirs I signed again (what I held then, until one of theirs comes). `vouched`: the latest of theirs another
+   * member's sync said it holds; `held`: the latest of theirs no other member has shown it holds yet. In memory only.
    */
-  private takeover: { from: string; until: number; base: GroupMeta | undefined } | undefined;
+  private takeover: { from: string; until: number; base: GroupMeta | undefined; vouched?: { e: number; r: number }; held?: { from: string; raw: unknown; s: GroupMetaStatement } } | undefined;
   /** While `handle` runs: the frames it took that a hub passes on (`handle`'s result). */
   private passOn: GroupEdgeFrame[] | null = null;
   /** The frames kept to hand on that the app holds with its messages, oldest first; undefined when the state holds them all. */
@@ -1363,13 +1364,32 @@ export class GroupSession {
    * My message `id` was deleted for everyone: its frame, and each copy said again, keep their place in my log (`nextSeq`,
    * `couldRead`, the removal's copies) and lose what they said. The log is in the saved state beside the epochs' secrets,
    * so the text stayed readable from the profile until 32 later sends pushed it out (`message delete --purge` promises
-   * it leaves the folder). Saved soon, as a community's `forget`; `flush` writes it now.
+   * it leaves the folder). A reply of mine that quotes it keeps its place and its reply, its line sealed again empty
+   * and signed whole again (`sig` does not cover the box). A member's frame of it, or quoting it, I kept to hand on goes:
+   * I cannot sign theirs, and its author hands it on. Saved soon, as a community's `forget`; `flush` writes it now.
    */
   forget(id: string): void {
-    if (!this.state.sent.some(f => f.c && this.messageIdOf(f) === id)) return;
-    this.state.sent = this.state.sent.map(f => !f.c || this.messageIdOf(f) !== id ? f
-      : { t: f.t, g: f.g, e: f.e, s: f.s, n: f.n, ts: f.ts, nn: "", c: "", sig: "", ...(f.o ? { o: f.o } : {}) });
+    const sent = this.state.sent.map(f => !f.c ? f : this.messageIdOf(f) === id
+      ? { t: f.t, g: f.g, e: f.e, s: f.s, n: f.n, ts: f.ts, nn: "", c: "", sig: "", ...(f.o ? { o: f.o } : {}) } : this.unquoted(f, id));
+    const gone = (f: GroupMessageFrame) => this.messageIdOf(f) === id || !!this.quoting(f, id);
+    const relay = this.state.relay?.filter(f => !gone(f)), rows = this.onRows?.filter(f => !gone(f));
+    if (sent.every((f, i) => f === this.state.sent[i]) && relay?.length === this.state.relay?.length && rows?.length === this.onRows?.length) return;
+    this.state.sent = sent;
+    if (relay) this.state.relay = relay;
+    if (rows) this.onRows = rows;
     this.persistSoon();
+  }
+  /** The reply a frame's box holds, when it quotes `id` with a line of it. */
+  private quoting(f: GroupMessageFrame, id: string): WireReply | undefined {
+    const secret = f.r && this.secret(f.e), reply = secret ? this.openReply(epochKeys(secret, this.id, f.e).message, f) : undefined;
+    return reply?.i === id && reply.s ? reply : undefined;
+  }
+  /** My frame `f` without the line of `id` it quotes (`forget`); `f` itself when it quotes none. */
+  private unquoted(f: GroupMessageFrame, id: string): GroupMessageFrame {
+    const reply = this.quoting(f, id);
+    if (!reply) return f;
+    const r = encryptText(epochKeys(this.secret(f.e)!, this.id, f.e).message, replyAad(f), JSON.stringify({ ...reply, s: "" }));
+    return { ...f, r, xs: toBase64Url(sign(messageSignedWhole({ ...f, r }), this.identity.seed)) };
   }
 
   /**
@@ -2223,6 +2243,7 @@ export class GroupSession {
     if (!answered) this.syncsAnswered.set(from, answered = new RateWindow(GROUP_LIMITS.syncAnswers, GROUP_LIMITS.syncWindowMs, () => this.hooks.clock?.() ?? Date.now()));
     if (!answered.take()) return;
     this.hear(frame);
+    await this.vouch(from, frame.mt);
     if (frame.e > this.epoch) {
       this.syncedEpoch.set(from, frame.e);
       if (!this.awaitsAnswer(from)) this.ask(from);
@@ -2412,7 +2433,11 @@ export class GroupSession {
     if (!secret) { this.waitMeta(from, raw, s); return; }
     const opened = openGroupMeta(frame, epochKeys(secret, this.id, frame.k).message);
     if (!opened) return;
-    if (taking) { await this.signAgainTaken(opened.meta, opened.body); return; }
+    if (taking) {
+      if (this.vouches(from, s)) await this.signAgainTaken(opened.meta, opened.body);
+      else this.holdTaken(from, raw, s);
+      return;
+    }
     const before = this.state.meta;
     this.state.meta = opened.meta;
     this.state.metaPast = keepPastGroupMeta(this.state.metaPast, before, opened.meta);
@@ -2434,6 +2459,35 @@ export class GroupSession {
   private takesOver(s: GroupMetaStatement): boolean {
     const t = this.takeover;
     return !!t && this.isAdmin && s.by === t.from && this.clock() <= t.until && groupMetaNewer(s, t.base);
+  }
+
+  /**
+   * Whether a statement I would take (`takesOver`) was on its way when the role moved, as far as I can tell: a member
+   * other than its signer handed it to me, or said in a sync it holds that one or a later one under the same commit.
+   * The former admin alone could sign new ones after the hand-over, each taken for the whole group.
+   */
+  private vouches(from: string, s: GroupMetaStatement): boolean {
+    const v = this.takeover?.vouched;
+    return from !== s.by || (!!v && v.e === s.e && v.r >= s.r);
+  }
+
+  /** The former admin's statement nobody else has shown it holds: the latest is kept until a sync does (`vouch`). */
+  private holdTaken(from: string, raw: unknown, s: GroupMetaStatement): void {
+    const t = this.takeover!;
+    if (!t.held || groupMetaNewer(s, t.held.s)) t.held = { from, raw, s };
+  }
+
+  /**
+   * A member's sync names the statement it holds: one signed under a commit of the admin before me, by another member
+   * than them, vouches for theirs up to it, and the one held is taken if it now is.
+   */
+  private async vouch(from: string, tag: unknown): Promise<void> {
+    const t = this.takeover, v = parseGroupMetaTag(tag);
+    if (!t || !v || from === t.from || !this.state.chain[v.e] || rosterAdmin(this.state.chain[v.e].m) !== t.from) return;
+    if (t.vouched && !groupMetaNewer(v, t.vouched)) return;
+    t.vouched = v;
+    const held = t.held;
+    if (held && this.vouches(held.from, held.s)) { t.held = undefined; await this.receiveMeta(held.from, held.raw); }
   }
 
   /**

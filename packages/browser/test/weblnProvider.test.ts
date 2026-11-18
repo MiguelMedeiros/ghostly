@@ -8,7 +8,8 @@ import { LightningService, type LightningEvents } from "../src/engine/paymentAda
 import { LIGHTNING_PROVIDERS, offeredIn } from "../src/engine/paymentAdapters/providers/registry";
 import { fakeInvoice } from "../src/engine/paymentAdapters/providers/testing";
 import { NothingSpentError } from "../src/engine/paymentAdapters/providers/types";
-import { findWebln, provesPayment, webln, WeblnLightning, type WebLNProvider } from "../src/engine/paymentAdapters/providers/webln";
+import { findWebln, provesPayment, WeblnLightning, type WebLNProvider } from "../src/engine/paymentAdapters/providers/webln";
+import { webln } from "../src/engine/paymentAdapters/providers/weblnProvider";
 import { FakeWebln, FakeWeblnLedger, type FakeWeblnOptions } from "./helpers/fakeWebln";
 import { describeLightningProvider } from "./helpers/providerContract";
 // covers: wallet.lightning.webln.connect, wallet.lightning.webln.pay, wallet.lightning.provider-contract

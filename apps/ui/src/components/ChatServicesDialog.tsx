@@ -6,6 +6,8 @@ import { problemText, type Problem } from "../lib/problemText";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { servicesUnavailable } from "../lib/servicesAvailability";
 import { useI18n } from "../contexts/I18nContext";
+import { fillNames } from "../lib/fillNodes";
+import { isolate } from "../lib/ownStatus";
 
 const GLOBE = <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>;
 
@@ -33,8 +35,8 @@ export function ChatServicesDialog({ peerPubKey, name, onClose }: { peerPubKey: 
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 animate-fade-in" {...backdrop}>
       <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="chat-services-title" data-testid="chat-services" className="focus:outline-none w-full max-w-md bg-panel-header border border-border rounded-2xl shadow-2xl p-5 space-y-4 max-h-[85dvh] overflow-y-auto">
         <div>
-          <h2 id="chat-services-title" className="text-lg font-medium text-text-primary">{t("chat.services.titleShared", { name })}</h2>
-          <p className="text-xs text-text-muted mt-1">{t("chat.services.pick", { name })}</p>
+          <h2 id="chat-services-title" className="text-lg font-medium text-text-primary">{fillNames(t("chat.services.titleShared"), { name })}</h2>
+          <p className="text-xs text-text-muted mt-1">{fillNames(t("chat.services.pick"), { name })}</p>
           {unavailable && <p data-testid="chat-services-unavailable" className="text-xs text-text-secondary mt-2">{unavailable}</p>}
         </div>
 
@@ -58,7 +60,7 @@ export function ChatServicesDialog({ peerPubKey, name, onClose }: { peerPubKey: 
                       <p dir="auto" className="max-w-full text-[11px] text-text-muted font-mono truncate">{service.target.replace(/^https?:\/\//, "")}</p>
                       <p className="text-[11px] text-text-secondary">{note}</p>
                     </div>
-                    <Switch label={t("chat.services.let", { name, service: service.name })} testId="chat-service-toggle" checked={on} onChange={(next) => {
+                    <Switch label={t("chat.services.let", { name: isolate(name), service: isolate(service.name) })} testId="chat-service-toggle" checked={on} onChange={(next) => {
                       setNotGranted(null);
                       platform.setServiceShared(service.id, peerPubKey, next).catch((e) => setNotGranted({ id: service.id, problem: problemText(e, t) }));
                     }} />
@@ -76,7 +78,7 @@ export function ChatServicesDialog({ peerPubKey, name, onClose }: { peerPubKey: 
         </section>
 
         <section className="space-y-2">
-          <h3 className="text-xs font-semibold text-accent uppercase tracking-wide">{t("chat.services.from", { name })}</h3>
+          <h3 className="text-xs font-semibold text-accent uppercase tracking-wide">{fillNames(t("chat.services.from"), { name })}</h3>
           <div className="bg-surface rounded-xl divide-y divide-border">
             {theirs.length === 0 ? <p className="px-4 py-3 text-xs text-text-muted">{t("chat.services.nothing")}</p>
               : theirs.map((service) => (

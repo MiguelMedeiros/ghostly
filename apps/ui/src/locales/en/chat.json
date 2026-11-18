@@ -163,7 +163,7 @@
     "leftHoursMinutes": "{{hours}} h {{minutes}} min left",
     "leftMinutes": "{{minutes}} min left",
     "leftUnderMinute": "less than a minute left",
-    "noRoomDevice": "Not enough space: {{size}} free on this device",
+    "noRoomDevice": "Not enough space: {{size}} left on this device",
     "nobodyHas": "Nobody you are connected to has this file yet",
     "nobodyHasHint": "It comes by itself when a member who has it is online.",
     "notDownloaded": "{{size}} · not downloaded",
@@ -179,7 +179,7 @@
     "resendHint": "Offers it again. It goes on from what your contact already has.",
     "restoring": "Loading… · {{size}}",
     "resume": "Resume",
-    "roomDevice": "{{size}} free on this device",
+    "roomDevice": "{{size}} left on this device",
     "senderOnly": "Not with your connections yet",
     "senderOnlyHint": "In a group this large, your app connects through a few members, not to the sender. It comes by itself once one of them downloads it, or ask the sender to send it to you in a chat.",
     "stalled": "Not moving · {{progress}}",
@@ -208,6 +208,8 @@
     "noMatch": "No chat by that name",
     "partial": "{{sent}} of {{count}} sent",
     "pick": "Pick up to {{count}}",
+    "refused": "{{name}}: {{error}}",
+    "refusedPartial": "{{name}} ({{partial}}): {{error}}",
     "search": "Search chats",
     "select": "Select",
     "selected": "{{count}} selected",
@@ -258,11 +260,11 @@
   },
   "media": {
     "downloadSize": "Download {{size}}",
-    "noRoom": "Not enough space: {{size}} free",
+    "noRoom": "Not enough space: {{size}} left",
     "noRoomToPlay": "Not enough free disk space to play it here. Download it instead.",
     "notYet": "It plays once it has been sent.",
     "positionOf": "{{position}} of {{duration}}",
-    "wantsToSend": "{{name}} wants to send it · {{size}} free"
+    "wantsToSend": "{{name}} wants to send it · {{size}} left"
   },
   "menu": {
     "continueNew": "Continue in a new chat",

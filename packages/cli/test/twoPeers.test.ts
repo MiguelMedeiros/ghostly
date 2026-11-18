@@ -372,9 +372,9 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     for (const i of stops) expect((typing[i + 1].at as number) - (typing[i].at as number), shown).toBeLessThan(TYPING_REFRESH_MS);
     const ended = listen.lines.length;
     await listen.waitFor((l) => l.type === "typing.stopped" && listen.lines.indexOf(l) >= ended);
-    // What the contact's app would not show is refused here.
-    const refused = error(await as(alice, "typing", "bob", "--status", "see https://x.example"), "bad_request", 1);
-    expect(refused.message).toContain("no link or markup");
+    // What the contact's app would not show is refused here, as a usage error that names the option.
+    const refused = error(await as(alice, "typing", "bob", "--status", "see https://x.example"), "usage", 2);
+    expect(refused.message).toBe("--status is plain text: no link or markup");
     await listen.stop();
   });
 

@@ -46,11 +46,13 @@
 .payment-back-actions[data-turning]{opacity:0}
 .payment-back-actions button{padding:10px 12px;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;transition:filter .2s,opacity .2s}
 .payment-back-actions button:disabled{opacity:.4;cursor:not-allowed}
+.payment-back-actions button[aria-disabled="true"]{opacity:.4;cursor:not-allowed}
+.payment-back-actions button[aria-busy="true"]{opacity:.8;cursor:progress}
 .payment-back-actions button:focus-visible{outline:2px solid #fff;outline-offset:2px}
 .payment-back-secondary{border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.08);color:#fff}
-.payment-back-secondary:not(:disabled):hover{background:rgba(255,255,255,.14)}
+.payment-back-secondary:not(:disabled):not([aria-disabled="true"]):hover{background:rgba(255,255,255,.14)}
 .payment-back-primary{border:0;background:rgb(var(--card-rgb,36,211,194));color:#10181d}
-.payment-back-primary:not(:disabled):hover{filter:brightness(1.08)}
+.payment-back-primary:not(:disabled):not([aria-disabled="true"]):hover{filter:brightness(1.08)}
 /* The review keeps its own look, on the card's back. */
 .payment-back [data-testid=payment-review]{border-color:rgba(255,255,255,.14);background:rgba(0,0,0,.25)}
 

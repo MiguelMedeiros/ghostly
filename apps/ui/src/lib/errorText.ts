@@ -121,7 +121,9 @@ const RULES: readonly Rule[] = [
   // The page's way to the peer and its services (packages/browser/src/platform).
   exact("Ghostly is starting…", "errors.app.starting"),
   exact("Ghostly is still starting. Try again in a moment.", "errors.app.stillStarting"),
-  exact("Lost the Ghostly peer", "errors.app.lostPeer"),
+  // A call the peer was answering when it went away (an extension's offscreen restart, Clear all data or a profile
+  // switch in another tab): the old peer may have done it before it went, so it says to look before trying again.
+  exact("Lost the Ghostly peer", "errors.app.lostPeer", "errors.app.lostPeerNext"),
   // A part that loads on demand (a wallet's library, the identity providers) whose file did not come: offline before the
   // worker kept it, or a deploy replaced it under an open tab. Each browser says it its own way (Chromium, WebKit, Firefox).
   { match: /^(?:Failed to fetch dynamically imported module|error loading dynamically imported module)(?::[\s\S]*)?$|^Importing a module script failed\.?$/, key: "errors.app.partNotLoaded", next: "app.pageNotLoaded.hint", detail: true },
@@ -132,7 +134,8 @@ const RULES: readonly Rule[] = [
   exact("This device has no room left to save this", "errors.app.noRoomToSave", "errors.app.noRoomToSaveNext"),
   // A call refused in limited mode (packages/browser/src/engine/node.ts LIMITED_MODE_ERROR): the banner's own words, and what to do.
   exact("Ghostly could not check which device is active yet. This works once it can.", "devices.limited.title", "errors.app.limitedNext"),
-  exact("Ghostly needs your permission to reach that local address", "errors.app.localAddress"),
+  // A no in the host's question (Chrome's prompt, Desktop's dialog), from Share or a card's Allow: it can be asked again.
+  exact("Ghostly needs your permission to reach that local address", "errors.app.localAddress", "errors.app.localAddressNext"),
   // The Share form's address checks (packages/core http.ts parseLocalTarget; the CLI matches the English) and its name
   // check (engine/node.ts addService): what is wrong, then what to type.
   exact("Not a valid URL", "errors.services.badAddress", "errors.services.addressNext"),
@@ -183,6 +186,8 @@ const RULES: readonly Rule[] = [
   exact("It was refused here", "errors.files.floor.refused", "errors.files.askAgain"),
   exact("It did not come within a week", "errors.files.floor.notInAWeek", "errors.files.askAgain"),
   // Accept on an offer larger than the room left now (engine/fileDesk.ts `accept`): it keeps waiting, its room shown.
+  // One that fits the free space but not beside the files still coming: waiting for them, or cancelling one, makes room.
+  { match: /^No room on this device for this file beside the files still coming \((?<left>.+) left of (?<free>.+) free\)$/, key: "errors.files.noRoomBesideComing", next: "errors.files.noRoomBesideComingNext" },
   { match: /^No room on this device for this file \((?<free>.+) free\)$/, key: "errors.files.noRoomHere", next: "errors.app.noRoomNext" },
   // A group's file every holder served damaged (packages/browser groupFiles.ts DAMAGED): the group is asked, not a contact.
   exact("Every copy of this file arrived damaged and was deleted. Ask for it again later.", "errors.files.refused.damaged", "errors.files.askGroupAgain"),
@@ -860,6 +865,7 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   ecashFeeTakesAll: "errors.engine.ecashFeeTakesAll",
   lightningRefused: "errors.engine.lightningRefused",
   ecashOtherUnit: "errors.engine.ecashOtherUnit",
+  ecashUnnamedUnit: "errors.engine.ecashUnnamedUnit",
   reviewedEcashSpent: "errors.engine.reviewedEcashSpent",
   lnurlExactly: "errors.engine.lnurlExactly",
   lnurlRange: "errors.engine.lnurlRange",

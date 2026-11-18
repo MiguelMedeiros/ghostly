@@ -87,7 +87,8 @@ function askRunner(url: string): void {
   asking.add(url);
   void runnerPolicy(url).then((ok) => {
     asking.delete(url);
-    if (ok === null) {
+    // Not asked (offline, a dropped request) or not answered (its server's 502 or 429): asked again later.
+    if (typeof ok !== "boolean") {
       unreachable.add(url);
       if (!listening && typeof window !== "undefined") { listening = true; window.addEventListener("online", askAgain); }
       retry ??= setTimeout(askAgain, RUNNER_RETRY_MS);

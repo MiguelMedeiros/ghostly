@@ -155,10 +155,66 @@ describe("the worker's policy", () => {
         "/assets/ethers-abc.js", "/assets/keet-identity-key-abc.js", "/assets/pubky-abc.js", "/assets/usdt-abc.js", "/assets/wallet-abc.wasm", "/assets/zod-abc.js"]);
     });
 
+    /**
+     * Vite's own `generateBundle` deletes an entry chunk that is nothing but imports and names those in index.html. Read
+     * after that, the walk had no entry to start from: every chunk the app loads counted as online-only, and the worker
+     * precached none of them (the installed app no longer opened offline). Read before, with the names the build writes.
+     */
+    it("an entry chunk the build does not write is left out, and what it loads is still precached", () => {
+      const written = BUNDLE.map((file) => file.fileName).filter((name) => name !== "assets/index-abc.js");
+      const { precache, languages, lazy } = serviceWorkerFiles(["manifest.json", "version.json"], BUNDLE, written);
+      expect(precache).toEqual(["/", "/assets/cashu-ts-abc.js", "/assets/Chat-abc.js", "/assets/handoff-abc.js", "/assets/index-abc.css",
+        "/assets/sodium-abc.js", "/assets/vendor-abc.js", "/assets/Wallet-abc.js", "/manifest.json"]);
+      expect(languages).toEqual({ fr: ["/assets/fr-abc.js"], ja: ["/assets/ja-abc.js"] });
+      expect(lazy).not.toContain("/assets/index-abc.js");
+      expect(lazy).not.toContain("/assets/vendor-abc.js");
+    });
+
+    it("not a group call's LiveKit client, which only a call's join loads, nor the E2EE worker only that chunk starts", () => {
+      const worker = "assets/livekit-client.e2ee.worker-abc.js";
+      const bundle = [
+        ...BUNDLE.map((file) => file.fileName === "assets/Chat-abc.js" ? { ...file, dynamicImports: ["assets/sodium-abc.js", "assets/groupCallLivekit-abc.js"] } : file),
+        { ...chunk("assets/groupCallLivekit-abc.js", `${app}/hooks/groupCallLivekit.ts`, ["assets/vendor-abc.js"]), viteMetadata: { importedAssets: new Set([worker]) } },
+        { type: "asset", fileName: worker },
+      ];
+      const { precache, lazy } = serviceWorkerFiles(["manifest.json"], bundle);
+      expect(precache).not.toContain("/assets/groupCallLivekit-abc.js");
+      expect(precache).not.toContain(`/${worker}`);
+      expect(lazy).toEqual(expect.arrayContaining(["/assets/groupCallLivekit-abc.js", `/${worker}`]));
+      expect(precache).toContain("/assets/vendor-abc.js");
+    });
+
+    it("a file an online-only chunk loads stays when a chunk the install keeps loads it too", () => {
+      const bundle = [
+        ...BUNDLE.map((file) => file.fileName === "assets/Chat-abc.js" ? { ...file, viteMetadata: { importedAssets: new Set(["assets/ring-abc.mp3"]) } }
+          : file.fileName === "assets/pubky-abc.js" ? { ...file, viteMetadata: { importedAssets: new Set(["assets/ring-abc.mp3", "assets/pubky-abc.wasm"]) } } : file),
+        { type: "asset", fileName: "assets/ring-abc.mp3" },
+        { type: "asset", fileName: "assets/pubky-abc.wasm" },
+      ];
+      expect(optionalFiles(bundle).onlineOnly).not.toContain("assets/ring-abc.mp3");
+      expect(serviceWorkerFiles([], bundle).precache).toContain("/assets/ring-abc.mp3");
+    });
+
     it("an online-only module another screen imports as it loads stays: the path to it is not the online flow's", () => {
       const bundle = BUNDLE.map((file) => file.fileName === "assets/Chat-abc.js" ? { ...file, imports: ["assets/vendor-abc.js", "assets/pubky-abc.js"] } : file);
       expect(optionalFiles(bundle).onlineOnly).not.toContain("assets/pubky-abc.js");
       expect(serviceWorkerFiles([], bundle).precache).toContain("/assets/pubky-abc.js");
+    });
+
+    it("starts where the app's page does: Vite drops an entry that is nothing but imports and names its `main` chunk in index.html", () => {
+      // As the plugin reads it after `vite:build-html`: no entry chunk for the app, only the sign-in page's.
+      const bundle = [
+        ...BUNDLE.filter((file) => file.fileName !== "assets/index-abc.js"),
+        chunk("assets/main-abc.js", null, ["assets/vendor-abc.js"],
+          ["assets/Wallet-abc.js", "assets/Chat-abc.js", "assets/pubky-abc.js", "assets/handoff-abc.js", "assets/keet-identity-key-abc.js", "assets/fr-abc.js", "assets/ja-abc.js"]),
+        chunk("assets/rolldown-runtime-abc.js", null),
+        chunk("assets/oidcCallback-abc.js", "/home/me/ghostly/apps/web/oidc-callback.html", [], [], true),
+        { type: "asset", fileName: "index.html", source: `<script type="module" crossorigin src="/assets/main-abc.js"></script>\n<link rel="modulepreload" crossorigin href="/assets/rolldown-runtime-abc.js">` },
+      ];
+      const { precache, languages } = serviceWorkerFiles(["manifest.json"], bundle);
+      expect(precache).toEqual(["/", "/assets/cashu-ts-abc.js", "/assets/Chat-abc.js", "/assets/handoff-abc.js", "/assets/index-abc.css", "/assets/main-abc.js",
+        "/assets/oidcCallback-abc.js", "/assets/rolldown-runtime-abc.js", "/assets/sodium-abc.js", "/assets/vendor-abc.js", "/assets/Wallet-abc.js", "/manifest.json"]);
+      expect(languages).toEqual({ fr: ["/assets/fr-abc.js"], ja: ["/assets/ja-abc.js"] });
     });
 
     const LANGUAGES = { fr: ["/assets/fr-abc.js"], ja: ["/assets/ja-abc.js", "/assets/ja-extra-abc.js"], pt: ["/assets/pt-abc.js"] };

@@ -504,7 +504,7 @@ describe("with the apps flag on", () => {
     fakeEngine.on("appList", () => [installed()]);
     renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
     act(() => fakeEngine.update({ links: [ana(false)] }));
-    expect(await screen.findByTestId("app-card-waiting")).toHaveTextContent("Chess needs you both online");
+    expect(await screen.findByTestId("app-card-waiting")).toHaveTextContent("⁨Chess⁩ needs you both online");
     expect(await screen.findByTestId("app-card-open")).toBeInTheDocument();
     expect(screen.queryByTestId("app-card-install")).not.toBeInTheDocument();
   });
@@ -524,7 +524,7 @@ describe("with the apps flag on", () => {
     expect(within(shown).getByTestId("app-card-title")).not.toHaveTextContent("Chess");
     // The card's name for a screen reader is the same app's, not Ana's word for it.
     expect(shown.closest("[data-message-card]")).toHaveAttribute("aria-label", "App: Private Notes");
-    expect(within(shown).getByTestId("app-card-waiting")).toHaveTextContent("Private Notes needs you both online");
+    expect(within(shown).getByTestId("app-card-waiting")).toHaveTextContent("⁨Private Notes⁩ needs you both online");
     await user.click(within(shown).getByTestId("app-card-open"));
     await waitFor(() => expect(opener).toHaveBeenCalledWith(REF, "link-1", { runAnyway: false }));
   });
@@ -763,6 +763,20 @@ describe("with the apps flag on", () => {
     expect(screen.getByTestId("app-webkit-line-text")).toHaveTextContent("The desktop app blocks them.");
   });
 
+  it("says in Safari, on an installed app's screen too, that an app without internet can still contact other servers", async () => {
+    const safari = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
+    const agent = vi.spyOn(navigator, "userAgent", "get").mockReturnValue(safari);
+    const { unmount } = renderApp(<InstalledAppDialog app={installed()} onClose={() => {}} onOpen={() => {}} />);
+    const details = await screen.findByTestId("app-details");
+    expect(within(details).getByTestId("app-ip-line")).toHaveTextContent("Its publisher may learn your IP address.");
+    expect(within(details).getByTestId("app-webkit-line")).toHaveTextContent("In this browser, an app can still contact other servers.");
+    unmount();
+
+    agent.mockReturnValue("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36");
+    renderApp(<InstalledAppDialog app={installed()} onClose={() => {}} onOpen={() => {}} />);
+    expect(within(await screen.findByTestId("app-details")).queryByTestId("app-webkit-line")).not.toBeInTheDocument();
+  });
+
   it("refuses to install a version a store removed or its publisher revoked", async () => {
     fakeEngine.on("appPreview", () => preview({ run: { status: "removed", by: [{ store: "k", name: "Ghostly", reason: "Malware", at: 1 }] } }));
     renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} />);
@@ -973,11 +987,11 @@ describe("with the apps flag on", () => {
     // Untrusted text: a right-to-left reason or one with its own direction marks must not reorder the line's words.
     const reason = "‮مفتاح مسرّب";
     const { unmount } = renderApp(<InstalledAppDialog app={installed({ run: { status: "revoked", reason } })} onClose={() => {}} onOpen={() => {}} />);
-    expect((await screen.findByTestId("app-run-line")).textContent).toBe(`Its publisher revoked this version: ⁨${reason}⁩`);
+    expect((await screen.findByTestId("app-run-line")).textContent).toBe(`Its publisher revoked this version: ⁨${reason}⁩\nIt stays stopped until its publisher releases a new version, or you can uninstall it.`);
     unmount();
     fakeEngine.on("appPreview", () => preview({ run: { status: "revoked", reason: "Leaked key" } }));
     renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} />);
-    expect((await screen.findByTestId("app-install-blocked")).textContent).toBe("Its publisher revoked this version: ⁨Leaked key⁩");
+    expect((await screen.findByTestId("app-install-blocked")).textContent).toBe("Its publisher revoked this version: ⁨Leaked key⁩\nIt can't be installed. Look for a newer version from its publisher.");
     expect(screen.queryByTestId("app-install-confirm")).not.toBeInTheDocument();
   });
 
@@ -1026,6 +1040,21 @@ describe("with the apps flag on", () => {
     await user.click(await screen.findByTestId("app-card-open"));
     expect(await screen.findByTestId("app-card-error")).toHaveTextContent("Its publisher revoked this version.");
     expect(screen.queryByTestId("app-card-run-anyway")).not.toBeInTheDocument();
+  });
+
+  it("a stopped app's card with nothing to run says no one need be online; Run anyway keeps the line", async () => {
+    fakeEngine.on("appList", () => [installed({ run: { status: "revoked" } })]);
+    const { unmount } = renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
+    act(() => fakeEngine.update({ links: [ana(false)] }));
+    await waitFor(() => expect(screen.getByTestId("app-card-check")).toHaveTextContent(/^Stopped$/));
+    expect(screen.queryByTestId("app-card-waiting")).not.toBeInTheDocument();
+    unmount();
+    forgetInstalledApps();
+    fakeEngine.on("appList", () => [installed({ run: { status: "removed", by: [{ store: "k", name: "Ghostly", reason: "Malware", at: 1 }] } })]);
+    renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
+    act(() => fakeEngine.update({ links: [ana(false)] }));
+    expect(await screen.findByTestId("app-card-run-anyway")).toBeInTheDocument();
+    expect(screen.getByTestId("app-card-waiting")).toHaveTextContent(/needs you both online$/);
   });
 
   it("a store read again that removed an installed app stops it on the page at once", async () => {
@@ -1290,6 +1319,31 @@ describe("with the apps flag on", () => {
     await user.click(screen.getByTestId("app-store-remove-confirm"));
     expect(fakeEngine.callsTo("appStoreRemove")).toEqual([{ key: "s" }]);
     await waitFor(() => expect(screen.queryByTestId("app-store")).not.toBeInTheDocument());
+  });
+
+  it("a store's Remove names the installed apps it took down, listed or not, and says their takedown ends with it", async () => {
+    const store = (apps: { ref: string; sequence: number; digest: string; urls: string[]; title: string; tagline: string }[]) => ({ key: "s", fingerprint: "abcd efgh ijkl mnop",
+      url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json", preloaded: false, name: "Hunt", kind: "curated" as const, sequence: 2,
+      expires: 2_000_000_000, expired: false, fetchedAt: 1, apps, removed: [{ ref: REF, digest: DIGEST, reason: "It steals your messages", at: 1 }] });
+    let stores = [store([])];
+    fakeEngine.on("appList", () => [installed({ run: { status: "removed", by: [{ store: "s", name: "Hunt", reason: "It steals your messages", at: 1 }] } })])
+      .on("appStoreList", () => stores).on("appCheckUpdates", () => []);
+    const { user, unmount } = renderApp(<Apps />, { route: "/apps" });
+    await user.click(await screen.findByTestId("app-store-remove"));
+    // No longer listed: the question named no app, and Remove gave Chess its Open back with no word.
+    let question = screen.getByTestId("app-store-remove-question");
+    expect(question).toHaveTextContent("Chess");
+    expect(question).toHaveTextContent("took down");
+    expect(question).toHaveTextContent("ends that takedown");
+    unmount();
+
+    // Still listed (a newer version), it is named once, as taken down, not only as an app that gets no more takedowns.
+    stores = [store([{ ref: REF, sequence: 8, digest: "b".repeat(43), urls: [URL_], title: "Chess", tagline: "Play chess with a contact" }])];
+    renderApp(<Apps />, { route: "/apps" });
+    await user.click(await screen.findByTestId("app-store-remove"));
+    question = screen.getByTestId("app-store-remove-question");
+    expect(question).toHaveTextContent("ends that takedown");
+    expect(question).not.toHaveTextContent("updates or takedowns");
   });
 
   it("a store that lists none of the installed apps says only how to get it back", async () => {

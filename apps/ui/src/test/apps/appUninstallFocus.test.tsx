@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { InstalledAppView } from "@ghostly/browser/engine/apps";
 import { InstalledAppDialog } from "../../components/apps/AppInstallDialog";
@@ -62,5 +62,20 @@ describe("an installed app's Uninstall question and details, each with its own e
     await user.click(within(screen.getByTestId("app-uninstall")).getByRole("button", { name: "Cancel" }));
     expect(screen.getByTestId("app-details")).toBeInTheDocument();
     expect(screen.queryByTestId("app-details-error")).toBeNull();
+  });
+});
+
+describe("an installed app's Export data, for an app that kept nothing", () => {
+  it("says the app kept no data, and reads it out, instead of saving nothing in silence", async () => {
+    fakeEngine.on("appList", () => [app]).on("appBuiltIns", () => []).on("appDataExportText", () => []);
+    const { user } = renderApp(<InstalledAppDialog app={app} onClose={() => {}} onOpen={() => {}} />);
+    await user.click(screen.getByTestId("app-uninstall-open"));
+    // Under "Export the data first to keep it.", nothing saved and nothing said read as a download that was blocked.
+    const said = screen.getByTestId("app-export-none");
+    expect(said).toHaveRole("status");
+    expect(said).toBeEmptyDOMElement();
+    await user.click(screen.getByTestId("app-export"));
+    await waitFor(() => expect(said).toHaveTextContent("Chess kept no data."));
+    expect(within(screen.getByTestId("app-uninstall")).queryByRole("alert")).toBeNull();
   });
 });

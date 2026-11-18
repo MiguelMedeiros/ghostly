@@ -6,7 +6,7 @@ import type { Readable, Writable } from "node:stream";
 import runtimePackage from "../../../native/translation/package.json" with { type: "json" };
 import { translateFrom, type DetectLanguages } from "../../../apps/ui/src/lib/translateWhich";
 import { childEnv } from "./childEnv";
-import { CliError } from "./errors";
+import { CliError, shownValue } from "./errors";
 import type { GhostlyEvent } from "./events";
 
 /**
@@ -27,7 +27,7 @@ export function translationPaths(home: string): { runtime: string; models: strin
 /** `--translate`'s language, checked before anything starts: an ISO 639 code, as the runtime's pairs take. */
 export function translateTarget(value: unknown): string | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== "string" || !/^[a-z]{2,3}$/.test(value)) throw new CliError("usage", `--translate takes a language code (en, pt, es, ...), not ${JSON.stringify(value)}`);
+  if (typeof value !== "string" || !/^[a-z]{2,3}$/.test(value)) throw new CliError("usage", `--translate takes a language code (en, pt, es, ...), not ${shownValue(value)}`);
   return value;
 }
 

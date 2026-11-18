@@ -1,9 +1,9 @@
 import { concatBytes, fromBase64, toBase64, utf8Encode, viewerResponseHeaders, viewerServicePolicy, withViewerPolicy } from "@ghostly/core";
-import { VIEWER_PORT, type EngineStatus, type HttpRequest, type HttpRequestReply, type RuntimeMessage, type ViewerAsk, type ViewerPage, type ViewerReply } from "./messages";
+import { VIEWER_PORT, type EngineStatus, type HttpRequest, type HttpRequestReply, type RuntimeMessage, type ViewerAsk, type ViewerPage, type ViewerReply, type ViewerTaken } from "./messages";
 import { fromOwnPage } from "./shared/sender";
 import { isViewerOrigin, parseViewerUrl, viewerUrl, VIEWER_URL_PATTERN } from "./shared/viewer";
 import { rememberPendingUpdate, takePagesToReopen } from "./updates";
-import { localOriginAllowed } from "./localAllowList";
+import { disallowLocalPatterns, localOriginAllowed } from "./localAllowList";
 import servicesEn from "../../ui/src/locales/en/services.json";
 import { isLocalHost } from "../../ui/src/lib/localHost";
 
@@ -219,7 +219,7 @@ async function openNotification(id: string): Promise<void> {
   const key = `notice:${id}`;
   const chat = await inNoticeOrder(async () => {
     const kept: unknown = (await chrome.storage.session.get(key))[key];
-    await chrome.storage.session.remove(key);
+    await chrome.storage.session.remove([key, `ring:${id}`]);
     return kept;
   });
   const owned = await chrome.runtime.sendMessage({ target: "app", type: "notification-open", id } satisfies RuntimeMessage).catch(() => false);
@@ -250,7 +250,7 @@ async function clearNoticesNow(next?: string): Promise<void> {
   const gone = (chat: string) => !chat.startsWith("profile:") || (typeof next === "string" && chat === `profile:${next}`);
   const keys = Object.keys(kept).filter((key) => key.startsWith("notice:") && gone(String(kept[key])));
   if (!keys.length) return;
-  await chrome.storage.session.remove(keys).catch(() => {});
+  await chrome.storage.session.remove([...keys, ...keys.map((key) => `ring:${key.slice("notice:".length)}`)]).catch(() => {});
   await Promise.all(keys.map((key) => chrome.notifications?.clear(key.slice("notice:".length)).catch(() => false)));
 }
 
@@ -273,17 +273,33 @@ function inNoticeOrder<T>(task: () => Promise<T>): Promise<T> {
  * one's (`notice:<id>`), so a click opens it. A chat's next one takes the place of the one before, as a burst's do in a tab,
  * also when the burst's messages are asked for at once.
  */
-function showNotice(body: string, chat?: string): Promise<void> {
-  return inNoticeOrder(() => showNoticeNow(body, chat));
+function showNotice(body: string, chat?: string, own?: string): Promise<void> {
+  return inNoticeOrder(() => showNoticeNow(body, chat, own));
 }
 
-async function showNoticeNow(body: string, chat?: string): Promise<void> {
+/**
+ * `own`: the id the peer gave it (a ringing call's), which it takes back (`unnotify`). It is marked (`ring:<id>`) so a
+ * message of its chat gets a notification of its own, as in a tab, and does not take the call's place.
+ */
+async function showNoticeNow(body: string, chat?: string, own?: string): Promise<void> {
   if (!chrome.notifications) return;
-  const kept = chat ? await chrome.storage.session.get(null).catch(() => ({}) as Record<string, unknown>) : {};
-  const id = Object.keys(kept).find((key) => key.startsWith("notice:") && kept[key] === chat)?.slice("notice:".length) ?? crypto.randomUUID();
-  if (chat) await chrome.storage.session.set({ [`notice:${id}`]: chat });
+  const kept = chat && !own ? await chrome.storage.session.get(null).catch(() => ({}) as Record<string, unknown>) : {};
+  const chats = (key: string) => key.startsWith("notice:") && kept[key] === chat && !(`ring:${key.slice("notice:".length)}` in kept);
+  const id = own ?? Object.keys(kept).find(chats)?.slice("notice:".length) ?? crypto.randomUUID();
+  if (chat) await chrome.storage.session.set({ [`notice:${id}`]: chat, ...(own && { [`ring:${id}`]: true }) });
   await chrome.notifications.create(id, { type: "basic", iconUrl: chrome.runtime.getURL("icons/128.png"), title: "Ghostly", message: body, silent: true });
 }
+
+/** The peer's notification `id` (a ring's, `showNotice`'s `own`) is over: it leaves the system's list, and its chat with it. */
+function takeBackNotice(id: string): Promise<void> {
+  return inNoticeOrder(async () => {
+    await chrome.storage.session.remove([`notice:${id}`, `ring:${id}`]).catch(() => {});
+    await chrome.notifications?.clear(id).catch(() => false);
+  });
+}
+
+/** A notification id the peer gave (`notify`'s `id`): a random UUID, nothing else. */
+const NOTICE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** `chrome.notifications` exists only once the optional permission is granted, maybe while the worker runs. */
 function listenToNotifications(): void {
@@ -297,11 +313,14 @@ chrome.permissions.onAdded.addListener(listenToNotifications);
 /**
  * The person turned off the extension's site access to a host of this machine (`chrome://extensions`, or the puzzle
  * menu): the peer stops sharing the apps there, as "Share" turned off does, until they are turned on again. Ghostly's own
- * `permissions.remove` fires this too, once no app is left at that host: then there is nothing to turn off.
+ * `permissions.remove` fires this too, once no app is left at that host: then there is nothing to turn off. Every
+ * profile's allowed addresses there go first (`disallowLocalPatterns`): each needs its own Allow again.
  */
 chrome.permissions.onRemoved.addListener(({ origins }) => {
   if (!origins?.length) return;
-  void ensureEngine()
+  void disallowLocalPatterns(origins)
+    .catch(() => {})
+    .then(() => ensureEngine())
     .then(() => chrome.runtime.sendMessage({ target: "engine", type: "local-access-removed", origins } satisfies RuntimeMessage))
     .catch(() => {});
 });
@@ -335,7 +354,13 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
   }
   if (message.type === "notify") {
     if (typeof message.body !== "string" || !message.body || (message.chat !== undefined && typeof message.chat !== "string")) return false;
-    void showNotice(message.body.slice(0, 200), message.chat).catch(() => {}).then(() => sendResponse(true));
+    if (message.id !== undefined && (typeof message.id !== "string" || !NOTICE_ID.test(message.id))) return false;
+    void showNotice(message.body.slice(0, 200), message.chat, message.id).catch(() => {}).then(() => sendResponse(true));
+    return true;
+  }
+  if (message.type === "unnotify") {
+    if (typeof message.id !== "string" || !NOTICE_ID.test(message.id)) return false;
+    void takeBackNotice(message.id).catch(() => {}).then(() => sendResponse(true));
     return true;
   }
   if (message.type === "open-payment-link") {
@@ -738,14 +763,16 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
   let reply: HttpRequestReply;
   try {
     // Straight to the peer that served the tab so far; only when no peer takes it is one started (or replaced) and asked.
+    // One the peer took and lost goes again only for a GET or a HEAD: a browser never sends a form or an XHR's POST
+    // twice by itself, and the contact's app may have it already (an order, a payment, a message).
     let answer = await askPeer(request);
-    if (!answer) {
+    if (!answer || (answer === LOST && RESENDABLE.has(request.method.toUpperCase()))) {
       await ensureEngine();
       // The peer may be another profile's now, or a new one: that closed this tab (`closeViewers`) and nothing goes to it.
       if (!(await bindingOf(tabId))) return;
       answer = await askPeer(request);
     }
-    reply = answer ?? { ok: false, code: "error", message: "The Ghostly peer did not answer" };
+    reply = !answer || answer === LOST ? { ok: false, code: "error", message: "The Ghostly peer did not answer" } : answer;
   } catch (error) {
     reply = { ok: false, code: "error", message: String(error) };
   }
@@ -787,37 +814,57 @@ async function answerFailed(tabId: number, requestId: string, binding: ViewerBin
   }, binding);
 }
 
+/** A request the document took (`ViewerTaken`) whose answer never came: its document went away meanwhile. */
+const LOST = Symbol("lost");
+type PeerAnswer = HttpRequestReply | null | typeof LOST;
+
+/** A request a peer may already have sent is sent again only when sending it twice does what sending it once does. */
+const RESENDABLE = new Set(["GET", "HEAD"]);
+
+/** A waiting ask: `taken` once the document said so, then the answer once it comes (or the port closes). */
+interface Waiting {
+  taken: boolean;
+  answer: (answer: PeerAnswer) => void;
+}
+
 /**
  * The port the requests go to the peer on, opened once per document (`VIEWER_PORT`): a `runtime.sendMessage` reaches
  * every page of the extension too, and each app tab read every request, its body included, only to drop it.
  */
-let viewerPort: { port: chrome.runtime.Port; waiting: Map<number, (reply: HttpRequestReply | null) => void> } | null = null;
+let viewerPort: { port: chrome.runtime.Port; waiting: Map<number, Waiting> } | null = null;
 let nextAsk = 0;
 
 /**
- * The peer's answer, or null when no peer took the request: no document, one whose script does not listen yet, one that
- * went away meanwhile (a switch closes it), or one whose peer stopped for good. The next ask opens the port again.
+ * The peer's answer; null when no peer took the request: no document, one whose script does not listen yet, one that
+ * went away before taking it (a switch closes it), or one whose peer stopped for good; `LOST` when the document took
+ * it and went away before the answer, so it may have reached the contact. The next ask opens the port again.
  */
-function askPeer(request: HttpRequest): Promise<HttpRequestReply | null> {
+function askPeer(request: HttpRequest): Promise<PeerAnswer> {
   if (!viewerPort) {
-    const opened = { port: chrome.runtime.connect({ name: VIEWER_PORT }), waiting: new Map<number, (reply: HttpRequestReply | null) => void>() };
+    const opened = { port: chrome.runtime.connect({ name: VIEWER_PORT }), waiting: new Map<number, Waiting>() };
     viewerPort = opened;
-    opened.port.onMessage.addListener(({ id, reply }: ViewerReply) => {
-      opened.waiting.get(id)?.(reply);
-      opened.waiting.delete(id);
+    opened.port.onMessage.addListener((message: ViewerReply | ViewerTaken) => {
+      const ask = opened.waiting.get(message.id);
+      if (!ask) return;
+      if ("taken" in message) {
+        ask.taken = true;
+        return;
+      }
+      ask.answer(message.reply);
+      opened.waiting.delete(message.id);
     });
     opened.port.onDisconnect.addListener(() => {
       // "Receiving end does not exist" when no document listens: what the null below says.
       void chrome.runtime.lastError;
       if (viewerPort === opened) viewerPort = null;
-      for (const answer of opened.waiting.values()) answer(null);
+      for (const ask of opened.waiting.values()) ask.answer(ask.taken ? LOST : null);
       opened.waiting.clear();
     });
   }
   const { port, waiting } = viewerPort;
   const id = nextAsk++;
   return new Promise((resolve) => {
-    waiting.set(id, resolve);
+    waiting.set(id, { taken: false, answer: resolve });
     try {
       port.postMessage({ id, request } satisfies ViewerAsk);
     } catch {

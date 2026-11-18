@@ -12,10 +12,13 @@ import { useChatTargets, type ChatTarget } from "../../hooks/useChatTargets";
 import { rawError } from "../../lib/errorText";
 import { problemLine } from "../../lib/problemText";
 import { listParts, listText } from "../../lib/listText";
+import { fillNodes } from "../../lib/fillNodes";
 import type { Translate } from "../../locales/translate";
 import { useBackCloses } from "../../hooks/useDismiss";
 import { SearchStatus } from "../ui/SearchStatus";
 import { FocusSafeButton } from "../ui/FocusSafeButton";
+import { neighbourOptions } from "../MessageBubble";
+import { focusLost } from "../../lib/focus";
 
 /**
  * "Forward to…" (WISP 400 § Forwards): the chats and groups to send messages on to, most recent first, found by name,
@@ -40,6 +43,7 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
   const [secret, setSecret] = useState<SecretFinding | null>(null);
   const [busy, setBusy] = useState(false);
   useBackCloses(() => { if (!busy) onClose(); });
+  /** `partial`: how much of it the chat got, when it got some ("1 of 2 sent"). */
   const [problems, setProblems] = useState<{ name: string; partial?: string; error: string }[]>([]);
   /** The chats a send that others refused went to: out of the selection, so Send again does not send them it twice. */
   const [sentTo, setSentTo] = useState<string[]>([]);
@@ -50,10 +54,18 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
   const [got, setGot] = useState<Record<string, string[]>>({});
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
+    // Opened from a message's ⋮: the message can leave the chat while the dialog is open (the contact deleted it for
+    // everyone, and the dialog closes with it). The focus then goes to the ⋮ of the message now in its place, as a
+    // delete of mine leaves it, not to the page.
+    const around = neighbourOptions(previous);
     const element = dialog.current!;
     element.showModal();
     search.current?.focus();
-    return () => { element.close(); if (previous?.isConnected) previous.focus(); };
+    return () => {
+      element.close();
+      if (previous?.isConnected) previous.focus();
+      else if (focusLost()) around.find((el) => el.isConnected)?.focus({ preventScroll: true });
+    };
   }, []);
 
   const shown = useMemo(() => findChatTargets(targets, query), [targets, query]);
@@ -95,7 +107,7 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
     const failed = outcome.filter(o => o.error !== null).map(o => {
       const name = chosen.find(c => c.target === o.to)?.name ?? "", part = gotNow[o.to]?.length ?? 0;
       const error = problemLine(o.error, t);
-      return { name, partial: part ? ` (${t("chat.forward.partial", { sent: String(part), count: String(messages.length) })})` : "", error };
+      return { name, partial: part ? t("chat.forward.partial", { sent: String(part), count: String(messages.length) }) : undefined, error };
     });
     if (failed.length) {
       setProblems(failed);
@@ -139,7 +151,9 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
     {problems.length > 0 && (
       <div className="mx-4 mt-2" role="alert" data-testid="forward-error">
         <ul className="m-0 list-none space-y-1 p-0">
-          {problems.map((p, i) => <li key={i} className="text-xs text-danger">{p.name ? <><bdi>{p.name}</bdi>{p.partial}: {p.error}</> : p.error}</li>)}
+          {/* The name in its `<bdi>`, the brackets and colon the language's own ("Ana（2 件中 1 件送信済み）：…"). */}
+          {problems.map((p, i) => <li key={i} className="text-xs text-danger">{!p.name ? p.error
+            : fillNodes(p.partial ? t("chat.forward.refusedPartial", { partial: p.partial }) : t("chat.forward.refused"), { name: <bdi>{p.name}</bdi>, error: p.error })}</li>)}
         </ul>
       </div>
     )}

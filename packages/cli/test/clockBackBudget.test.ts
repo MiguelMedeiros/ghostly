@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BACKGROUND_REQUESTS_PER_MINUTE, BACKGROUND_WRITES_SHARE, DAEMON_WATCH_PEER_IDLE_MS, REQUESTS_PER_MINUTE, createIdentity } from "@ghostly/core";
+import { BACKGROUND_REQUESTS_PER_MINUTE, BACKGROUND_WRITES_SHARE, DAEMON_WATCH_PEER_IDLE_MS, FRESH_READ_MS, REQUESTS_PER_MINUTE, identityFromSeed } from "@ghostly/core";
 import { GhostlyNode } from "@ghostly/browser/engine/node";
 import { db } from "@ghostly/browser/engine/db";
 import { STORES, transact } from "@ghostly/browser/shared/idb";
@@ -29,15 +29,23 @@ const BACKGROUND_SHARE = Math.min(BACKGROUND_REQUESTS_PER_MINUTE, Math.ceil(REQU
 const READS_SHARE = BACKGROUND_SHARE - Math.max(1, Math.floor(BACKGROUND_SHARE * BACKGROUND_WRITES_SHARE));
 const mean = (list: number[]) => list.reduce((sum, n) => sum + n, 0) / list.length;
 
-const chat = (i: number) => ({ id: `chat-${i}`, profile: "paired-chat/1", createdAt: 1, label: `c${i}`, seedB64: createIdentity().seedB64,
-  encKeyB64: createIdentity().seedB64, peerPubKeyZ32: createIdentity().pubKeyZ32, participationSeed: createIdentity().seedB64,
-  pairedPeerKey: createIdentity().pubKeyZ32, peerTrust: { version: 1 } }) as StoredLink;
+/**
+ * The same keys every run, in the order they are made (`identityFromSeed` of 1, 2, 3, ...): the relays' turns among the
+ * contacts' keys go the same way each time. With random keys the per-minute reads differed from run to run.
+ */
+let seeds = 0;
+const identity = () => { const seed = new Uint8Array(32); new DataView(seed.buffer).setUint32(0, ++seeds); return identityFromSeed(seed); };
 
-const dht = {
-  get: async () => { await new Promise((r) => setTimeout(r, 1_500)); return null; },
+const chat = (i: number) => ({ id: `chat-${i}`, profile: "paired-chat/1", createdAt: 1, label: `c${i}`, seedB64: identity().seedB64,
+  encKeyB64: identity().seedB64, peerPubKeyZ32: identity().pubKeyZ32, participationSeed: identity().seedB64,
+  pairedPeerKey: identity().pubKeyZ32, peerTrust: { version: 1 } }) as StoredLink;
+
+/** A DHT node with nothing on it. `gets`: every key read there. */
+const dhtNode = (gets: string[]) => ({
+  get: async (key: string) => { gets.push(key); await new Promise((r) => setTimeout(r, 1_500)); return null; },
   put: async () => { await new Promise((r) => setTimeout(r, 200)); return 8; },
   destroy: async () => {},
-} as unknown as Mainline;
+}) as unknown as Mainline;
 
 let node: GhostlyNode | undefined;
 afterEach(async () => {
@@ -47,25 +55,37 @@ afterEach(async () => {
 }, 60_000);
 
 async function daemon(contacts: number) {
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
   vi.stubGlobal("RTCPeerConnection", undefined);
+  // The saved state first, on the real clock: the fake one below holds the database's work until it is advanced.
   await transact([STORES.links, STORES.messages], (s) => { s[STORES.links].clear(); s[STORES.messages].clear(); });
   await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true });
   const rows = Array.from({ length: contacts }, (_, i) => chat(i));
   for (const row of rows) await db.putLink(row);
-  /** Every relay read: the key read. Every relay write: when. */
-  const gets: string[] = [], puts: number[] = [];
+  // The minutes are fake, and so is all the engine's work in them: left real, it went on in real time while
+  // `advanceTimersByTimeAsync` fired the fake timers one real tick apart, so which minute a read fell in followed the
+  // runner's load (one minute read 10 on CI, every run's minutes differed). `setImmediate`: fake-indexeddb runs each
+  // request's step on it. `performance`: the links' start lets the thread go after so many ms of it (`pacer`).
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "setImmediate", "clearImmediate", "Date", "performance"] });
+  /** Every relay read: the key read, and when it went and was answered. Every relay write: when. Every DHT read: the key read. */
+  const gets: string[] = [], reads: { key: string; at: number; answeredAt: number }[] = [], puts: number[] = [], dhtGets: string[] = [];
   const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    if ((init?.method ?? "GET") === "GET") gets.push(new URL(String(input)).pathname.slice(1)); else puts.push(Date.now());
+    const read = (init?.method ?? "GET") === "GET" ? { key: new URL(String(input)).pathname.slice(1), at: Date.now(), answeredAt: Infinity } : undefined;
+    if (read) { gets.push(read.key); reads.push(read); } else puts.push(Date.now());
     await new Promise((r) => setTimeout(r, 50));
+    if (read) read.answeredAt = Date.now();
     return init?.method === "PUT" ? new Response(null, { status: 204 }) : new Response(null, { status: 404 });
   }) as typeof fetch;
-  const transport = new RelaysAndDht(dht, { relays: RELAYS, fetch: fetchFn, log: () => {} }, true);
+  const transport = new RelaysAndDht(dhtNode(dhtGets), { relays: RELAYS, fetch: fetchFn, log: () => {} }, true);
   node = new GhostlyNode({ onState: () => {}, onMessages: () => {}, onCallSignal: () => {} }, {
     transport, automaticWallets: false, nativeTransports: {}, singleDevice: true, staysOnline: true, watchPeerIdleMs: DAEMON_WATCH_PEER_IDLE_MS,
   });
-  await node.start();
-  return { rows, gets, puts, node };
+  // Its start reads the database, so the fake clock goes on a millisecond at a time until it is up.
+  let up = false;
+  const started = node.start();
+  void started.then(() => { up = true; }, () => { up = true; });
+  while (!up) await vi.advanceTimersByTimeAsync(1);
+  await started;
+  return { rows, gets, reads, puts, dhtGets, node };
 }
 
 describe("a daemon after the device clock is set back", { timeout: 120_000 }, () => {
@@ -84,27 +104,46 @@ describe("a daemon after the device clock is set back", { timeout: 120_000 }, ()
     // Before: 3-4 of the 50 after an hour back, 0-8 relay reads a minute. The minute of the step
     // counts as just spent, at most.
     expect(rows.filter((row) => read.has(row.peerPubKeyZ32)).length).toBeGreaterThanOrEqual(48);
-    // The rate, from the budget's shares, and no minute stalled. The reads get at least what the background writes leave
+    // The rate, from the budget's shares, and no stall. The reads get at least what the background writes leave
     // them (10 a relay), and with the writes they spend the background's whole share (20 a relay). Not a fixed 30 reads:
     // since the chats' upkeep held back has its share again (#7760) the reads go at 29-33 a minute, steady
-    // clock or not, and a run of 29.9 failed. Not every single minute either: the minutes are fake but the reads wait on
-    // real work, so on a loaded runner one minute's reads spill into the next (26-29 then 58-60 under a 40% CPU quota).
+    // clock or not, and a run of 29.9 failed.
+    // No stall, over two minutes in a row, not each one: the budget counts the requests of the last 60 s (`within` in
+    // core's relay.ts), not a minute of the clock, and frees them in bursts as the oldest age out, so a minute after one
+    // whose requests went late reads little (40 then 10 on CI; 40 then 12 here with the clock never set back). A read is
+    // held back only while the 60 s before it hold the relay's background share, of which the background writes take
+    // at most `BACKGROUND_WRITES_SHARE`: those 60 s read `READS_SHARE` there. The 50 contacts' reads always outnumber
+    // the share, so one is held back in every minute, and the 60 s before it lie within that minute and the one before.
+    // Before the clock-back fix the reads stalled at 0-8 a minute, under that.
     const later = perMinute.slice(2), writes = writesPerMinute.slice(2);
     const seen = `reads ${perMinute.join(",")}, writes ${writesPerMinute.join(",")}`;
     expect(mean(later), seen).toBeGreaterThan(RELAYS.length * READS_SHARE);
     expect(mean(later.map((n, i) => n + writes[i]!)), seen).toBeGreaterThanOrEqual(RELAYS.length * BACKGROUND_SHARE);
-    expect(Math.min(...later), seen).toBeGreaterThan(10);
+    const twoMinutes = perMinute.slice(1, -1).map((n, i) => n + perMinute[i + 2]!);
+    expect(Math.min(...twoMinutes), seen).toBeGreaterThanOrEqual(RELAYS.length * READS_SHARE);
   });
 
   it("set back an hour: a chat opened reads its contact at once", async () => {
-    const { rows, gets, node } = await daemon(50);
+    const { rows, gets, reads, dhtGets, node } = await daemon(50);
     await vi.advanceTimersByTimeAsync(5 * MIN);
     vi.setSystemTime(Date.now() - 60 * MIN);
     await vi.advanceTimersByTimeAsync(15 * MIN);
-    const from = gets.length;
+    const key = rows[7]!.peerPubKeyZ32, from = gets.length, fromDht = dhtGets.length, opened = Date.now();
     node.setActiveLink({ linkId: rows[7]!.id });
-    await vi.advanceTimersByTimeAsync(10_000);
-    expect(gets.slice(from)).toContain(rows[7]!.peerPubKeyZ32);
+    // At once, clock set back or not: on the relays, or on the DHT in their place when their minute is full of the away
+    // contacts' requests (`RelaysAndDht.heldBack`). A relay read of the contact under way when the chat opened, or answered
+    // just before (`FRESH_READ_MS`), is that read: the chat's own read waits for it, or the relays answer it with that.
+    await vi.advanceTimersByTimeAsync(1_000);
+    const relayRead = reads.some((read) => read.key === key && read.answeredAt >= opened - FRESH_READ_MS);
+    const seen = `relay reads of it (ms from the opening): ${reads.filter((read) => read.key === key).slice(-3).map((read) => read.at - opened).join(", ")}`;
+    expect(relayRead || dhtGets.slice(fromDht).includes(key), seen).toBe(true);
+    // And on the relays soon after; before the fix they held it for as long as the clock went back. Not within a fixed
+    // 10 s: the relays take the keys' reads in turn, the away contacts' reads held back over a minute first
+    // (`READ_STARVED_MS`). Since the relay copies wait for every relay (#7760) there are more of those: the relay read came
+    // 10-12.5 s after in 4 of 50 runs under load (3.5 s at most before #7760), past 10 s once on CI. Waited for in steps.
+    let waited = 1_000;
+    while (!gets.slice(from).includes(key) && waited < 2 * MIN) { await vi.advanceTimersByTimeAsync(1_000); waited += 1_000; }
+    expect(gets.slice(from), `relay reads in the ${waited / 1_000} s after it was opened`).toContain(key);
   });
 });
 

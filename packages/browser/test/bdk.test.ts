@@ -1,7 +1,8 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { STORES, store, transact, wrap } from "../src/shared/idb";
-import { ADDRESS_HOLD_MS, BdkOnchain, bdk, parseBdkSettings, type BdkStore } from "../src/engine/paymentAdapters/providers/bdk";
+import { ADDRESS_HOLD_MS, BdkOnchain, type BdkStore } from "../src/engine/paymentAdapters/providers/bdk";
+import { bdk, parseBdkSettings } from "../src/engine/paymentAdapters/providers/bdkProvider";
 import { fakeAddress } from "../src/engine/paymentAdapters/providers/testing";
 import { NothingSpentError, SourceConfigError, SourceUnreachableError, type ProviderSettings } from "../src/engine/paymentAdapters/providers/types";
 import { newBdkPhrase } from "../src/engine/paymentAdapters/providers/bdkPhrase";

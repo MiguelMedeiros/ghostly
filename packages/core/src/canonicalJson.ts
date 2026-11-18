@@ -83,3 +83,41 @@ export function readCanonicalJson(bytes: Uint8Array): CanonicalJsonReading {
   if (!bytesEqual(again, bytes)) return { ok: false, reason: "not-canonical" };
   return { ok: true, value };
 }
+
+/**
+ * The entries of bytes that must be a canonical JSON list, each as its own bytes, one at a time: a scan that builds no
+ * value and goes no further than the entry it yields, so a caller reads (and may refuse) each before the next is
+ * found. It ends with null at the closing `]`; `not-list` past `maxEntries` entries, at an entry over `maxEntryBytes`,
+ * or when the bytes are not within `[` and `]`; `not-json` when brackets or quotes do not close. A canonical list is
+ * `[`, its entries' canonical texts joined by `,`, then `]`, so the bytes are canonical exactly when the scan ends with
+ * null and each entry read alone with `readCanonicalJson` is.
+ */
+export function* canonicalJsonListEntries(bytes: Uint8Array, maxEntries: number, maxEntryBytes: number): Generator<Uint8Array, "not-json" | "not-list" | null, void> {
+  const end = bytes.length - 1;
+  if (end < 1 || bytes[0] !== 0x5b /* [ */ || bytes[end] !== 0x5d /* ] */) return "not-list";
+  if (end === 1) return null;
+  let depth = 0;
+  let inString = false;
+  let start = 1;
+  let count = 0;
+  for (let i = 1; i <= end; i++) {
+    const b = bytes[i];
+    if (i === end || (b === 0x2c /* , */ && depth === 0 && !inString)) {
+      if (i === end && (depth !== 0 || inString)) return "not-json";
+      if (count === maxEntries || i - start > maxEntryBytes) return "not-list";
+      count++;
+      yield bytes.subarray(start, i);
+      start = i + 1;
+      continue;
+    }
+    if (i - start >= maxEntryBytes) return "not-list";
+    if (inString) {
+      if (b === 0x5c /* \ */) i++;
+      else if (b === 0x22 /* " */) inString = false;
+    } else if (b === 0x22) inString = true;
+    else if (b === 0x5b || b === 0x7b /* { */) depth++;
+    else if ((b === 0x5d || b === 0x7d /* } */) && --depth < 0) return "not-json";
+  }
+  // An escape just before the closing `]` skipped it: the last string never closed.
+  return start === end + 1 ? null : "not-json";
+}

@@ -2,6 +2,7 @@ import { engineError } from "./engineErrors";
 import { bech32 } from "@scure/base";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { decodeBolt11, type Bolt11Invoice } from "./bolt11";
+import { underLocalSuffix } from "./localNames";
 import { stripHidden } from "./text";
 
 /**
@@ -78,22 +79,26 @@ export const LIGHTNING_DESTINATION_PATTERN = /(?:lightning:|lnurlp:\/\/|lnurl1|[
 const REDIRECTS = [301, 302, 303, 307, 308];
 
 /**
- * A host that is not on the public internet, as far as its name tells: this machine, a single label, `.local` and its
- * kin, private and reserved IP addresses. (What a public name resolves to is checked where the client resolves names
- * itself, as Ghostly Desktop does.)
+ * A host that is not on the public internet, as far as its name tells: this machine, a single label, a name under a
+ * local suffix (`localNames.ts`), private and reserved IP addresses. (What a public name resolves to is checked where
+ * the client resolves names itself, as Ghostly Desktop and the CLI do, for every request.)
  */
 function isLocalHost(hostname: string): boolean {
-  const host = hostname.toLowerCase().replace(/\.$/, "").replace(/^\[|\]$/g, "");
+  const host = hostname.toLowerCase().replace(/\.+$/, "").replace(/^\[|\]$/g, "");
   if (!host.includes(".") && !host.includes(":")) return true;
-  if (/(^|\.)(localhost|local|internal|lan|home\.arpa)$/.test(host)) return true;
+  if (underLocalSuffix(host)) return true;
   const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
   if (v4) {
     const [a, b] = [Number(v4[1]), Number(v4[2])];
     return a === 0 || a === 10 || a === 127 || a >= 224 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b < 32)
       || (a === 192 && b === 168) || (a === 100 && b >= 64 && b < 128) || (a === 198 && (b === 18 || b === 19)) || (a === 192 && b === 0);
   }
-  // Any IPv6 literal but a global unicast one (2000::/3), and none that embeds an IPv4 address.
-  if (host.includes(":")) return !/^[23][0-9a-f]{0,3}:/.test(host) || host.includes(".") || /^2001:0?db8:/.test(host);
+  // Any IPv6 literal but a global unicast one (2000::/3: a first group of four digits, as `2::` is `0002::`), none
+  // that embeds an IPv4 address (dotted, 6to4 2002::/16, Teredo 2001::/32: `new URL()` writes them all in hex), and
+  // no documentation one (2001:db8::/32). Kept the same as apps/ui/src/lib/localHost.ts.
+  if (host.includes(":")) {
+    return !/^[23][0-9a-f]{3}:/.test(host) || host.includes(".") || host.startsWith("2002:") || /^2001:(0{0,4}|0{0,3}db8):/.test(host);
+  }
   return false;
 }
 
@@ -185,6 +190,8 @@ async function readBounded(response: Response, maxBytes: number): Promise<string
 /** One GET to an LNURL service (and to each checked redirect of it): bounded in time and size, no credentials, no referrer, and the answer must be JSON. */
 export async function fetchLnurlJson(url: string, options: LnurlFetchOptions = {}): Promise<unknown> {
   const target = acceptUrl(url);
+  // The rule a redirect has: this machine or the local network is never asked, but for a test server on this machine.
+  if (!isLoopback(target.hostname) && isLocalHost(target.hostname)) throw new Error(`${target.host} is a local address`);
   const doFetch = options.fetch ?? globalThis.fetch;
   if (!doFetch) throw new Error("No way to reach the network here");
   const controller = new AbortController();

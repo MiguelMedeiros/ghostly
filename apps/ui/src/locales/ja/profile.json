@@ -132,6 +132,9 @@
   "nameLabel": "プロフィール名",
   "nameSaved": "名前を保存しました",
   "nameStep": {
+    "full": "上限の {{count}} 文字に達しました。",
+    "limit": "最大 {{count}} 文字。",
+    "needName": "続けるには名前を入力してください。",
     "placeholder": "あなたの名前",
     "save": "続ける",
     "skip": "スキップ",

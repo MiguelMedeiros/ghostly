@@ -34,7 +34,7 @@ export function SecretGuardDialog({ finding, recipient, onCancel, onConfirm }: {
     title = worth === null ? t("secretGuard.cashuUnknownTitle", { contact }) : t("secretGuard.cashuTitle", { amount: worth, contact });
     body = t("secretGuard.cashu");
   } else {
-    const key = ({ mnemonic: "mnemonic", nsec: "nsec", "bitcoin-key": "bitcoinKey", "hex-key": "hexKey", "node-login": "nodeLogin" } as const)[finding.kind];
+    const key = ({ mnemonic: "mnemonic", nsec: "nsec", "bitcoin-key": "bitcoinKey", "hex-key": "hexKey", "node-login": "nodeLogin", "signer-link": "signerLink" } as const)[finding.kind];
     title = t(`secretGuard.${key}Title`);
     body = t(`secretGuard.${key}`);
   }
