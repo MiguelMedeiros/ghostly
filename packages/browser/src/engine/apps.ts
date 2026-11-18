@@ -59,6 +59,8 @@ export const APP_CHECK_TIMINGS = {
   /** After the engine starts, so the chats come up first. */
   afterStartMs: 60_000,
   everyMs: 24 * 60 * 60 * 1000,
+  /** A check the network was off for is tried again this soon, not a day later. */
+  offlineRetryMs: 10 * 60 * 1000,
   /** A check at start is skipped when every app was checked this recently (a page reloaded several times). */
   freshMs: 60 * 60 * 1000,
 } as const;
@@ -387,9 +389,12 @@ function listingUrls(urls: readonly string[]): string[] {
   return [...readable.filter(pinned), ...readable.filter((u) => !pinned(u))];
 }
 
-/** A read that failed for a reason that may pass: offline, the host not reached or too slow, its own trouble (5xx, 429). */
+/**
+ * A read that failed for a reason that may pass: offline, the host not reached or too slow, its own trouble (5xx, 429,
+ * its own timeout 408), as the install screen says it with Try again (apps/ui lib/apps/errors.ts `appErrorRetryable`).
+ */
 const passing = (error: unknown): boolean => error instanceof AppFetchError
-  && (error.code === "offline" || error.code === "network" || error.code === "slow" || (error.status ?? 0) >= 500 || error.status === 429);
+  && (error.code === "offline" || error.code === "network" || error.code === "slow" || (error.status ?? 0) >= 500 || error.status === 429 || error.status === 408);
 
 /** An error whose message starts with its code (`<code>: words`), as it crosses the engine's RPC. */
 function fail(code: string, words: string): never {
@@ -859,12 +864,12 @@ export class Apps {
       this.timer = null;
       void (async () => {
         if (this.stopped) return;
-        if (this.host.online()) {
-          const apps = await this.installed();
-          const fresh = atStart && apps.length > 0 && apps.every((a) => this.checkedWithin(a.checkedAt, APP_CHECK_TIMINGS.freshMs));
-          // No app installed: no request, to a store or anywhere (WISP 1200 § Updates and rollback, "When").
-          if (apps.length && !fresh) await this.checkUpdates().catch(() => {});
-        }
+        // The network off: the check is tried again soon (as the one after start, if it was that one), not a day later.
+        if (!this.host.online()) return this.schedule(APP_CHECK_TIMINGS.offlineRetryMs, atStart);
+        const apps = await this.installed();
+        const fresh = atStart && apps.length > 0 && apps.every((a) => this.checkedWithin(a.checkedAt, APP_CHECK_TIMINGS.freshMs));
+        // No app installed: no request, to a store or anywhere (WISP 1200 § Updates and rollback, "When").
+        if (apps.length && !fresh) await this.checkUpdates().catch(() => {});
         if (!this.stopped) this.schedule(APP_CHECK_TIMINGS.everyMs);
       })();
     }, ms);

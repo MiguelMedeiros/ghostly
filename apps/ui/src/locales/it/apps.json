@@ -16,6 +16,7 @@
   },
   "app": {
     "export": "Esporta i dati",
+    "exportNone": "{{title}} non ha conservato dati. Non c'è niente da esportare.",
     "fetchFiles": "Scarica i suoi file",
     "keepStopped": "Lasciala ferma",
     "needsFiles": "Mancano i suoi file",
@@ -74,6 +75,7 @@
     "locked": "Il profilo si è bloccato prima che l'app si aprisse. Aprila di nuovo.",
     "needsFiles": "I suoi file non sono ancora su questo dispositivo.",
     "network": "Impossibile raggiungere il server.",
+    "notInstalled": "Questa app non è più installata.",
     "notListed": "Questo store non elenca più quell'app.",
     "notSigned": "Firma non valida. Ghostly non la installerà.",
     "notStore": "Quel link non contiene uno store valido.",

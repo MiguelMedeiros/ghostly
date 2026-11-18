@@ -1002,7 +1002,7 @@ const METHODS: Record<string, Method> = {
     return { ...chatJson(findChat(state(ctx).links, link.id)), heldUntil: holdOf(ctx, link.id) };
   },
   async "chat.verify"(ctx, params) {
-    const link = chatOf(ctx, params);
+    const link = chatOf(ctx, params, undefined, "only a chat has a code to compare");
     const code = str(params, "code", true).replace(/\s+/g, "").toLowerCase();
     const mine = link.pairing?.code?.replace(/\s+/g, "").toLowerCase();
     if (!mine) throw new CliError("unavailable", "This chat shows no comparison code yet (it needs a live session)");

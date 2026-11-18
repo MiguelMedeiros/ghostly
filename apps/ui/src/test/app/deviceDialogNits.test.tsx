@@ -63,6 +63,10 @@ describe("the device dialogs, for a screen reader and a keyboard", () => {
     expect(name).toHaveFocus();
     fireEvent.keyDown(name, { key: "Enter", keyCode: 229 });
     expect(name).toHaveFocus();
+    // WebKit's other order: the composition ends first, then the Enter that confirmed it, saying neither.
+    fireEvent.compositionEnd(name, { data: "私" });
+    fireEvent.keyDown(name, { key: "Enter" });
+    expect(name).toHaveFocus();
     // A plain Enter still goes to the question.
     fireEvent.keyDown(name, { key: "Enter" });
     expect(screen.getByTestId("takeover-lost-yes")).toHaveFocus();
