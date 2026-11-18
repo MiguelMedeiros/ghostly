@@ -3,6 +3,8 @@ import { configure, fireEvent, screen, waitFor } from "@testing-library/react";
 import { AddDeviceDialog } from "../../components/devices/AddDeviceDialog";
 import { TakeoverDialog } from "../../components/devices/TakeoverDialog";
 import { UseHereDialog } from "../../components/devices/Handoff";
+import { RemoveDeviceDialog } from "../../components/devices/RemoveDeviceDialog";
+import { RenameDeviceDialog } from "../../components/devices/RenameDeviceDialog";
 import { renderApp } from "../render";
 import type { EnrollView } from "@ghostly/browser/devices/enroll";
 // covers: devices.takeover, devices.handoff, devices.enroll
@@ -115,11 +117,30 @@ describe("the device dialogs, for a screen reader and a keyboard", () => {
     const saying = live().filter((region) => region.contains(notice));
     expect(saying).toHaveLength(1);
     expect(before).toContain(saying[0]);
-    // Asked again and still waiting: the line empties while it checks, and says the wait again after.
+    // Asked again and still waiting: the same line says the check while it runs, and the wait again after.
     await user.click(screen.getByTestId("takeover-go"));
-    await waitFor(() => expect(saying[0]).toBeEmptyDOMElement());
+    await waitFor(() => expect(saying[0]).toHaveTextContent(/^Checking which device is active/));
     answer({ kind: "wait" });
     await waitFor(() => expect(saying[0]).toHaveTextContent("Waiting for the network. Try again in a moment."));
+  });
+
+  // The busy lines of Take over (about half a minute), Remove and Rename: their text comes into a live line that was
+  // there, empty, before the press, and only that one says it.
+  it.each([
+    ["Take over", "takeover-dialog", "takeover-go", "takeover-checking", "deviceTakeover", () => <TakeoverDialog password={false} ownSet onClose={() => {}} />],
+    ["Remove", "device-remove", "device-remove-go", "device-remove-busy", "deviceRemove", () => <RemoveDeviceDialog device="Phone" deviceKey="aa" onClose={() => {}} />],
+    ["Rename", "device-rename", "device-rename-save", "device-rename-busy", "deviceRename", () => <RenameDeviceDialog device="Phone" deviceKey="aa" onClose={() => {}} />],
+  ] as const)("%s's busy line is said from a live line there before the press", async (name, dialogId, goId, busyId, call, dialog) => {
+    const { user, engine } = renderApp(dialog());
+    engine.on(call, () => new Promise(() => {}));
+    if (name === "Rename") await user.type(screen.getByTestId("device-rename-name"), "x");
+    const live = () => [...screen.getByTestId(dialogId).querySelectorAll<HTMLElement>("[role=status], [aria-live]")];
+    const before = live();
+    await user.click(screen.getByTestId(goId));
+    const busy = await screen.findByTestId(busyId);
+    const saying = live().filter((region) => region.contains(busy));
+    expect(saying).toHaveLength(1);
+    expect(before).toContain(saying[0]);
   });
 
   it("Take over's wrong password points the field at its reason", async () => {
