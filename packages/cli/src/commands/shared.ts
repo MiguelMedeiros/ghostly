@@ -150,12 +150,13 @@ export const buttonOptions: Record<string, OptionSpec> = {
   id: { type: "string", description: "The question's id (default: made up, ask-…)" },
 };
 /**
- * Bounds of list flags the engine counts, written out (the packages that hold them are not loaded here; test/commands.test.ts
- * checks they match): `forward --to` (FORWARD_TARGETS) and `group send --mention` (MENTION_LIMITS.count). Each value is
- * counted once, as the method counts it. Past them, a usage error (exit 2) naming the flag before the profile opens:
- * before, the method refused them after the profile opened (`bad_request`, exit 1), a one-shot online first.
+ * Bounds of list flags the engine counts, written out (the packages that hold them are not loaded here; test/flagCaps.test.ts
+ * checks they match): `group send --mention` (MENTION_LIMITS.count). Each value is counted once, as the method counts it.
+ * Past them, a usage error (exit 2) naming the flag before the profile opens: before, the method refused them after the
+ * profile opened (`bad_request`, exit 1), a one-shot online first. Not `forward --to`: the method counts the chats and
+ * groups its words name, and a chat named by its name and its id is one of the 5, which only the open profile knows.
  */
-export const LIST_LIMITS = { to: 5, mention: 16 } as const;
+export const LIST_LIMITS = { mention: 16 } as const;
 export const listAtMost = (options: Parsed["options"], flag: keyof typeof LIST_LIMITS): void =>
   given(flag, Array.isArray(options[flag]) ? [...new Set(options[flag] as unknown[])] : undefined, LIST_LIMITS[flag]);
 
