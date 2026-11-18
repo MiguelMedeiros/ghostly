@@ -13,11 +13,20 @@ function rateOf(options: Parsed["options"]): number | undefined {
   return value;
 }
 
+/**
+ * `[<chat|call>]`: left out for the only call, never empty. Before, `call hangup "$CALL"` with nothing in it hung up
+ * (or declined) whatever call was on.
+ */
+export function callRef(value: string | undefined, usage: string): string | undefined {
+  if (value !== undefined && !value.trim()) throw new CliError("usage", `An empty <chat|call> names no call; leave it out for the only one: ghostly ${usage}`);
+  return value;
+}
+
 /** Voice calls: one entry per command, in alphabetical order (test/commands.test.ts checks). */
 export const commands: Record<string, Command> = {
   "call answer": {
     method: "call.answer", usage: "call answer [<chat|call>] [--rate 48000]", summary: "Answer a call that rings (the only one, or the one named)",
-    args: ["call...?"], options: { rate: rate }, params: ({ options }, a) => ({ call: a.call, rate: rateOf(options) }),
+    args: ["call...?"], options: { rate: rate }, params: ({ options }, a) => ({ call: callRef(a.call, "call answer [<chat|call>] [--rate 48000]"), rate: rateOf(options) }),
   },
   "call auto": {
     method: "call.auto", usage: "call auto [on|off] [--from <chat>]... [--rate 48000]", summary: "Answer calls by themselves: from anyone, or the chats named (kept in the profile)",
@@ -31,8 +40,8 @@ export const commands: Record<string, Command> = {
       return a.mode === "on" ? { on: true, from: options.from, rate: rateOf(options) } : { on: false };
     },
   },
-  "call flush": { method: "call.flush", usage: "call flush [<chat|call>]", summary: "Drop the audio queued and not played yet (barge-in)", args: ["call...?"], params: (_, a) => ({ call: a.call }) },
-  "call hangup": { method: "call.hangup", usage: "call hangup [<chat|call>]", summary: "Hang up, or decline a call that rings", args: ["call...?"], params: (_, a) => ({ call: a.call }) },
+  "call flush": { method: "call.flush", usage: "call flush [<chat|call>]", summary: "Drop the audio queued and not played yet (barge-in)", args: ["call...?"], params: (_, a) => ({ call: callRef(a.call, "call flush [<chat|call>]") }) },
+  "call hangup": { method: "call.hangup", usage: "call hangup [<chat|call>]", summary: "Hang up, or decline a call that rings", args: ["call...?"], params: (_, a) => ({ call: callRef(a.call, "call hangup [<chat|call>]") }) },
   "call list": { method: "call.list", usage: "call list", summary: "Calls on now, their audio sockets, and auto-answer" },
   "call start": {
     method: "call.start", usage: "call start <chat> [--rate 48000]", summary: "Call a contact (voice); the result names the call's audio socket (daemon)",

@@ -4,7 +4,9 @@ import { join } from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { heardCallSignal } from "@ghostly/core";
 import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
+import { CALL_METHODS } from "../src/calls/api";
 import { CallManager } from "../src/calls/manager";
+import { COMMANDS, positionals } from "../src/commands";
 // covers: headless.calls
 
 /**
@@ -71,6 +73,28 @@ describe("a call that is no call on now", () => {
     const id = ring(calls, "0123456789ab");
     expect(calls.get("0123456789ab")).toMatchObject({ call: id, chat: "0123456789ab", state: "ringing" });
     await calls.hangup("0123456789ab");
+    await calls.stopAll();
+  });
+});
+
+describe("an empty call name", () => {
+  it("is refused by answer, flush and hangup, and over the socket, and the call that rings goes on", async () => {
+    const calls = managerWith([chat("chat-ba")]);
+    const id = ring(calls, "chat-ba");
+    // `ghostly call hangup "$CALL"` with nothing in $CALL: before, it hung up the only call.
+    for (const name of ["call answer", "call flush", "call hangup"]) {
+      const command = COMMANDS[name];
+      for (const value of ["", "  "]) {
+        expect(() => command.params!({ positionals: [value], options: {} } as never, positionals(command, [value])), `${name} ${JSON.stringify(value)}`)
+          .toThrow(expect.objectContaining({ code: "usage", message: `An empty <chat|call> names no call; leave it out for the only one: ghostly ${command.usage}` }));
+      }
+    }
+    for (const method of ["call.answer", "call.flush", "call.get", "call.hangup"]) {
+      await expect(CALL_METHODS[method]({ calls } as never, { call: "" }), method).rejects.toMatchObject({ code: "bad_request", message: "call names no call; leave it out for the only one" });
+    }
+    expect(calls.list()).toEqual([expect.objectContaining({ call: id, state: "ringing" })]);
+    // Left out, it is still the only call.
+    expect(await CALL_METHODS["call.get"]({ calls } as never, {})).toMatchObject({ call: id });
     await calls.stopAll();
   });
 });

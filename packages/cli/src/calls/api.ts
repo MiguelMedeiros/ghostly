@@ -1,5 +1,11 @@
-import { bool, list, str, type Method } from "../apiKit";
+import { bool, list, type Method, type Params, str } from "../apiKit";
 import { CliError } from "../errors";
+
+/** The call a method names: none for the only one, never an empty name (it took whatever call was on). */
+function callRef(params: Params): string | undefined {
+  if (typeof params.call === "string" && !params.call.trim()) throw new CliError("bad_request", "call names no call; leave it out for the only one");
+  return str(params, "call");
+}
 
 /** Voice calls (WISP 1100 § Calls): the API methods. The audio itself goes over each call's own socket. */
 export const CALL_METHODS: Record<string, Method> = {
@@ -7,19 +13,19 @@ export const CALL_METHODS: Record<string, Method> = {
     return ctx.calls.start(str(params, "chat", true), { rate: params.rate });
   },
   async "call.answer"(ctx, params) {
-    return ctx.calls.answer(str(params, "call"), { rate: params.rate });
+    return ctx.calls.answer(callRef(params), { rate: params.rate });
   },
   async "call.hangup"(ctx, params) {
-    return ctx.calls.hangup(str(params, "call"));
+    return ctx.calls.hangup(callRef(params));
   },
   async "call.list"(ctx) {
     return { calls: ctx.calls.list(), autoAnswer: ctx.calls.getAuto(), available: ctx.runtime.callsUnavailable === null, ...(ctx.runtime.callsUnavailable ? { unavailable: ctx.runtime.callsUnavailable } : {}) };
   },
   async "call.get"(ctx, params) {
-    return ctx.calls.get(str(params, "call"));
+    return ctx.calls.get(callRef(params));
   },
   async "call.flush"(ctx, params) {
-    return ctx.calls.flush(str(params, "call"));
+    return ctx.calls.flush(callRef(params));
   },
   async "call.auto"(ctx, params) {
     const on = params.on === undefined ? undefined : bool(params, "on");
