@@ -229,10 +229,11 @@ export function sanitizeResponseHeaders(headers: HeaderList, target: LocalTarget
 /**
  * The contact's headers a viewer does not pass on: each makes the browser send something to a place it names, outside
  * `connect-src` (violation and network-error reports, and the endpoints they go to; `Link` preloads, prefetches and
- * early connections). With Hide my IP from contacts on, that place would learn this device's address. The same list
- * as the CLI's `OPENED_SERVICE_DROPPED_HEADERS` and Desktop's `DROPPED_HEADERS`.
+ * early connections; `Speculation-Rules` prefetches and prerenders). With Hide my IP from contacts on, that place would
+ * learn this device's address. The same list as the CLI's `OPENED_SERVICE_DROPPED_HEADERS` and Desktop's
+ * `DROPPED_HEADERS`.
  */
-export const VIEWER_DROPPED_HEADERS = ["content-security-policy-report-only", "reporting-endpoints", "report-to", "nel", "link"];
+export const VIEWER_DROPPED_HEADERS = ["content-security-policy-report-only", "reporting-endpoints", "report-to", "nel", "link", "speculation-rules"];
 
 /** The directives of a contact's policy that send reports to a URL it names, dropped from it (`OPENED_SERVICE_DROPPED_DIRECTIVES`). */
 export const VIEWER_DROPPED_DIRECTIVES = ["report-uri", "report-to"];
