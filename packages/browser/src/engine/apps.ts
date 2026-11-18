@@ -952,12 +952,17 @@ export class Apps {
 
   /**
    * The bundle the build carries for a built-in app, checked as a fetched one is, and against its entry: the digest the
-   * list pins and the entry's reference. Anything else in that file is not this app, and nothing of it is kept.
+   * list pins and the entry's reference. Anything else in that file is not this app, and nothing of it is kept. A read
+   * that says why it failed (`AppFetchError`: offline, the host not reached, its status) says so as is, so the screen
+   * offers Try again: only an unexplained failure is a build that does not carry the app.
    */
   private async bundled(app: BuiltInApp): Promise<{ bundle: AppBundle; bytes: Uint8Array }> {
     if (!this.host.readBuiltIn) fail("not-carried", "This build does not carry this app");
     let bytes: Uint8Array;
-    try { bytes = await this.host.readBuiltIn(app); } catch { fail("not-carried", "This build does not carry this app"); }
+    try { bytes = await this.host.readBuiltIn(app); } catch (error) {
+      if (error instanceof AppFetchError) throw error;
+      fail("not-carried", "This build does not carry this app");
+    }
     if (!(bytes instanceof Uint8Array) || bytes.length > APP_BUNDLE_LIMITS.bundleBytes) fail("not-carried", "This build does not carry this app");
     const read = await readAppBundleAsync(bytes);
     if (!read.ok) fail(read.reason, `This is not an app Ghostly can install${read.detail ? ` (${read.detail})` : ""}`);
