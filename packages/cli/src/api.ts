@@ -10,7 +10,7 @@ import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PA
 import { asCliError, CliError } from "./errors";
 import { shellWord } from "./shellWord";
 import {
-  bool, chatOf, chatOrGroup, dhtOnly, findChat, findChatOrGroup, findGroup, groupById, groupCalled, groupNameOf, groupOf, groupPrefixed, inviteTaken, keptForJoin, list, messageOf, noMessage, nobodyJoined, node, notInYet, notInYetError, num, oneOf, oneShotWaits, settingsOf, sharedGroupIds, shownName, sinceSeq, somebodyJoined, state, str, transportOffered, waitForState,
+  bool, chatOf, chatOrGroup, dhtOnly, findChat, findChatOrGroup, findGroup, groupById, groupCalled, groupNameOf, groupOf, groupPrefixed, groupsNotChat, inviteTaken, keptForJoin, list, messageOf, noMessage, nobodyJoined, node, notInYet, notInYetError, num, oneOf, oneShotWaits, settingsOf, sharedGroupIds, shownName, sinceSeq, somebodyJoined, state, str, transportOffered, waitForState,
   type ApiContext, type CallScope, type Method, type Params, type RefPlace,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
@@ -1495,17 +1495,19 @@ function chatNotGroupLink(ctx: ApiContext, params: Params) {
  * the form `pin` and `saved` take, is that group too (it read "No chat" before). A name no chat and no group has stays
  * the chat's error. A name more than one group has says so too, with no `id` for `hint` (`shown` is `<group>`): the
  * group to name is one of theirs, by its id (`ghostly group list`, and `details.matches`, as `findGroup` gives them).
+ * That one is `bad_request` (exit 1), as every group command and `noChat` refuse it: it was `not_found` here and
+ * `bad_request` there for the same name.
  */
 function notAGroup<T>(ctx: ApiContext, params: Params, chat: () => T, hint: (shown: string, id?: string) => string): T {
   try { return chat(); } catch (error) {
-    if (!(error instanceof CliError) || error.code !== "not_found") throw error;
+    if (!(error instanceof CliError) || (error.code !== "not_found" && !groupsNotChat(error))) throw error;
     const ref = str(params, "chat", true);
     const named = groupPrefixed(ref) ?? ref;
     let group: GroupView;
     try { group = findGroup(state(ctx).groups, named); } catch (inner) {
       // A name two groups share is still a group's (it read `No chat`): the hint, with no one group's id to name.
       const shared = sharedGroupIds(inner);
-      if (shared) throw new CliError("not_found", `${JSON.stringify(ref)} names more than one group, not a chat: ${hint("<group>")}`, { matches: shared });
+      if (shared) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one group, not a chat: ${hint("<group>")}`, { matches: shared });
       throw error;
     }
     const shown = shellWord(named, group.id);

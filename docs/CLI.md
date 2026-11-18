@@ -286,6 +286,11 @@ key), which every answer and event carries. What the CLI does when names meet:
   <chat> <name>` gives it a label.
 - A group's creator chooses both its name and its id, so neither wins: a ref that is one group's name and a prefix of
   another's id is refused (exit 1, `bad_request`, `details.matches` with both ids). Use its id, or `group:<id>`.
+- A name more than one group has (or `group:<name>`) is refused the same way by every command that looks for a chat or
+  a group, a chat command's included (`send`, `chat show`, `message delete`, `call start`, `listen --from`): exit 1,
+  `bad_request`, `details.matches` with the groups' ids, as for a name more than one chat has (`listen --from` offers
+  `listen --group`). It is a name to make precise, not a thing missing; only a name nothing has answers `not_found`
+  (exit 3). Use the group's id (`ghostly group list`).
 - A group you are in wins over an invitation with the same name or id prefix; an invitation is found by its id, and
   by a name or prefix none of your groups has.
 - A member's whole key is that member, whatever another member calls itself. A prefix or a name that fits two members

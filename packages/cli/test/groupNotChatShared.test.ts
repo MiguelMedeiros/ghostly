@@ -47,7 +47,7 @@ describe("a name two groups share, where only a 1:1 chat goes", () => {
     for (const ref of ["zz", "ZZ", "group:zz"]) {
       const error = await refusal(callApi(fake(), method, { [key]: ref, ...params }));
       expect(error.message).toBe(`${JSON.stringify(ref)} names more than one group, not a chat${why} (ghostly chat list)`);
-      expect(error.code).toBe("not_found");
+      expect(error.code).toBe("bad_request");
       // The ids it asks for, as `group show zz` gives them (`--json` had none).
       expect(error.details).toEqual({ matches: ["g1zz", "g2zz"] });
     }
@@ -59,24 +59,24 @@ describe("a name two groups share, where only a 1:1 chat goes", () => {
     for (const ref of ["zz", "group:zz"]) {
       const error = await refusal(callApi(fake(), "group.auto", { on: true, from: [ref] }));
       expect(error.message).toBe(`${JSON.stringify(ref)} names more than one group, not a chat: --from takes the chats whose invitations it accepts (ghostly chat list)`);
-      expect(error.code).toBe("not_found");
+      expect(error.code).toBe("bad_request");
     }
   });
 
   it.each(["chat.connect", "chat.transport"] as const)("%s says a group has no transport of its own, and names group list, not group show", async (method) => {
     const error = await refusal(callApi(fake(), method, { chat: "zz", transport: "dht" }));
     expect(error.message).toBe(`"zz" names more than one group, not a chat: it connects through its members' chats, with no transport of its own (ghostly group list)`);
-    expect(error.code).toBe("not_found");
+    expect(error.code).toBe("bad_request");
   });
 
   it("react and message delete offer the group command, with the id of the group meant", async () => {
     const react = await refusal(callApi(fake(), "chat.react", { chat: "zz", message: "m1", emoji: "👍" }));
     expect(react.message).toBe(`"zz" names more than one group, not a chat: ghostly group react <group> <message> <emoji>, with the id of the group meant (ghostly group list)`);
-    expect(react.code).toBe("not_found");
+    expect(react.code).toBe("bad_request");
     expect(react.details).toEqual({ matches: ["g1zz", "g2zz"] });
     const remove = await refusal(callApi(fake(), "chat.delete", { chat: "group:zz", message: "m1" }));
     expect(remove.message).toBe(`"group:zz" names more than one group, not a chat: ghostly message delete <group> m1 --everyone, with the id of the group meant (ghostly group list)`);
-    expect(remove.code).toBe("not_found");
+    expect(remove.code).toBe("bad_request");
     expect(remove.details).toEqual({ matches: ["g1zz", "g2zz"] });
   });
 
@@ -84,7 +84,7 @@ describe("a name two groups share, where only a 1:1 chat goes", () => {
     const call = (method: string, params: Record<string, unknown>) => callApi(fake(), method, params);
     for (const ref of ["zz", "group:zz"]) {
       await expect(allowlist([ref], [], call, async () => null)).rejects.toMatchObject({
-        code: "not_found",
+        code: "bad_request",
         message: `${JSON.stringify(ref)} names more than one group, not a chat: ghostly listen --group <group>, with the id of the group meant (ghostly group list)`,
         details: { matches: ["g1zz", "g2zz"] },
       });
