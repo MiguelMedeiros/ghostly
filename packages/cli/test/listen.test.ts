@@ -690,6 +690,32 @@ describe("listen with an allowlist and --turns", () => {
     expect(node.getMessages).toHaveBeenCalledTimes(2);
   });
 
+  it("an agent catching up on old turns, one reply each, reads the whole history once, not once per turn", async () => {
+    const history = Array.from({ length: 5000 }, (_, i) => ({ id: `peer_m${i}`, sender: "peer", text: `m${i}`, timestamp: i }));
+    const node = {
+      chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [{ id: "c1", peerPubKeyZ32: KEY, label: "Alice", pairing: { status: "ready" } }], groups: [], settings: {}, transport: {} }),
+      messagePage: vi.fn(async () => ({ messages: history.slice(-200), more: true })),
+      getMessages: vi.fn(async () => history),
+      getMessage: vi.fn(async (_linkId: string, id: string) => history.find((m) => m.id === id)),
+      sendMessage: vi.fn(async () => ({ error: null, messageId: "me_2" })),
+    };
+    const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
+
+    // 300 turns behind the newest page, answered oldest first as a --cursor catch-up hands them.
+    for (let i = 4500; i < 4800; i++) {
+      await callApi(ctx, "chat.send", { chat: "c1", text: "yes", reply: turnRef("c1", `peer_m${i}`) });
+      expect(node.sendMessage).toHaveBeenLastCalledWith({ linkId: "c1", text: "yes", replyTo: `peer_m${i}` });
+    }
+    expect(node.getMessages).toHaveBeenCalledTimes(1);
+    // One older than what that read kept reads it again, and a message deleted since names none.
+    await callApi(ctx, "chat.send", { chat: "c1", text: "yes", reply: turnRef("c1", "peer_m3000") });
+    expect(node.getMessages).toHaveBeenCalledTimes(2);
+    history.splice(4600, 1);
+    await callApi(ctx, "chat.send", { chat: "c1", text: "yes", reply: turnRef("c1", "peer_m4600") });
+    expect(node.sendMessage).toHaveBeenLastCalledWith({ linkId: "c1", text: "yes", replyTo: turnRef("c1", "peer_m4600") });
+    expect(node.getMessages).toHaveBeenCalledTimes(2);
+  });
+
   it("a cursor in a folder that is not there, or that takes no file, is refused before anything starts", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ghostly-listen-"));
     // Nothing to check without one; a folder that is there takes it, and the check leaves nothing behind.

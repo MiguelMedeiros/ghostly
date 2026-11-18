@@ -58,11 +58,18 @@ export async function withStoredIds(ctx: ApiContext, params: Params): Promise<Pa
       if (now !== null) found.set(ref, now);
     }
     if (unknown.size) {
-      look(group ? await node(ctx).groupMessages({ groupId: id }) : await node(ctx).getMessages(linkId));
-      for (const ref of unknown) {
-        known.set(`${id}\n${ref}`, found.get(ref) ?? null);
-        if (known.size > REMEMBERED) known.delete(known.keys().next().value!);
-      }
+      const all = group ? await node(ctx).groupMessages({ groupId: id }) : await node(ctx).getMessages(linkId);
+      const keep = (key: string, value: string | null) => { known.delete(key); known.set(key, value); };
+      // What the newest messages' turns name too, from the same hashes: an agent catching up answers one old turn after
+      // another, and each of them read the whole history again (1,000 turns at 50,000 messages: 86 s of hashing alone).
+      const newest = all.length - REMEMBERED;
+      all.forEach((message, at) => {
+        const ref = turnRef(id, message.id);
+        if (wanted.has(ref)) found.set(ref, message.id);
+        if (at >= newest) keep(`${id}\n${ref}`, message.id);
+      });
+      for (const ref of unknown) keep(`${id}\n${ref}`, found.get(ref) ?? null);
+      while (known.size > REMEMBERED) known.delete(known.keys().next().value!);
     }
   }
   const stored = (value: unknown) => (isRef(value) ? found.get(value) ?? value : value);
