@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { useBackCloses, useTabTrap } from "../hooks/useDismiss";
+import { useFocusKept } from "../hooks/useFocusKept";
 import { initial } from "../lib/initial";
 import { callWindowShown } from "../lib/serviceWindows";
 
@@ -63,6 +64,9 @@ export function IncomingCallNotification({
   // Back (Android's back gesture) answers nothing either: it would move the page hidden under the ringing, or leave the
   // app. The call takes an entry again.
   useBackCloses(() => {});
+  // Its choices change while it rings (the call that was on ends: End and answer becomes Accept; the contact calls
+  // again as audio: Accept video goes): the focus on the one that went stays in the box, not on the page under it.
+  useFocusKept(box);
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null;
     box.current?.focus({ preventScroll: true });
