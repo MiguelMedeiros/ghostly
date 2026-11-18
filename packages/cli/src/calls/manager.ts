@@ -3,7 +3,7 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { answersOffer, callSignalHeardAt, parseCallSignal, signalHasVideo, BURST_RING_MS, CALL_SIGNAL_MAX_AGE_MS, QUICK_REDIAL_MS, type CallSignal } from "@ghostly/core";
 import type { EngineState, LinkView, Settings } from "@ghostly/browser/shared/types";
-import { findChat, findOwnNamedChat } from "../apiKit";
+import { dhtOnly, findChat, findOwnNamedChat } from "../apiKit";
 import { CliError } from "../errors";
 import { AudioSocket, audioSocketPath, clearAudioSockets, feedQueue, sharedFolder } from "./audioSocket";
 import { callIceServers, CallMedia, callUsesTurn, EarlyAnswer, loadCallStack, type CallStack, type MediaOptions } from "./media";
@@ -894,6 +894,12 @@ export class CallManager {
     if (!link.profile) throw new CliError("unavailable", "Calls are in chats made since 0.4 (the chat session): this is a compatibility chat");
     // Not live (the contact's app closed or asleep): the engine's words alone left the person with nothing to do next.
     if (link.callsUnavailable === CALLS_NEED_LIVE) {
+      // On DHT only (either side's choice) no session ever opens: say whose choice it is, as `chat connect` does, not a
+      // wait that never ends. Still `unavailable`, this command's code.
+      try { dhtOnly(link); } catch (error) {
+        if (!(error instanceof CliError)) throw error;
+        throw new CliError("unavailable", `${CALLS_NEED_LIVE}. ${error.message}`, { chat: link.id, ...error.details });
+      }
       const shown = /^[\w.:-]+$/.test(link.label ?? "") ? link.label! : link.id;
       throw new CliError("unavailable", `${CALLS_NEED_LIVE}, and your contact's app is not connected now: ghostly chat wait ${shown} --until live waits for it, then call again`, { chat: link.id });
     }
