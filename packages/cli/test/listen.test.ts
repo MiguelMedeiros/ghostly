@@ -1,5 +1,7 @@
+import { createPrivateKey } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
+import { createServer as createHttpsServer } from "node:https";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +14,8 @@ import { Allowlist, allowlist, checkCursor, checkTypes, checkWebhook, EVENT_FAMI
 import { turnRef } from "../src/turnRefs";
 import { ghostly, Running } from "./support/cli";
 import { chatViewOf, groupViewOf } from "./support/chatView";
+import { toBase64Url } from "../../core/src/bytes";
+import { pem, testCertificate } from "../../core/test/support/x509";
 // covers: headless.hooks, headless.events
 
 /**
@@ -280,6 +284,33 @@ describe("hooks", () => {
     } finally {
       stderr.mockRestore();
       bridge.close();
+    }
+  }, 10_000);
+
+  it("a webhook whose TLS fails is held, said as a TLS failure with the way out, never as not answering", async () => {
+    // https:// to a plain http server, and a bridge with a self-signed certificate: both answer every try.
+    const plain = createServer((request, response) => { request.resume(); response.writeHead(204).end(); });
+    const leaf = testCertificate({ subject: "localhost", dns: ["localhost"] });
+    const key = createPrivateKey({ key: { kty: "EC", crv: "P-256", d: toBase64Url(leaf.secret), x: toBase64Url(leaf.publicKey.slice(1, 33)), y: toBase64Url(leaf.publicKey.slice(33)) }, format: "jwk" });
+    const selfSigned = createHttpsServer({ cert: pem(leaf), key: key.export({ type: "pkcs8", format: "pem" }) }, (request, response) => { request.resume(); response.writeHead(204).end(); });
+    for (const server of [plain, selfSigned]) await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const said = () => stderr.mock.calls.map(([text]) => String(text)).join("");
+    try {
+      for (const [server, code] of [[plain, "ERR_SSL_WRONG_VERSION_NUMBER"], [selfSigned, "DEPTH_ZERO_SELF_SIGNED_CERT"]] as const) {
+        stderr.mockClear();
+        const origin = `https://localhost:${(server.address() as AddressInfo).port}`;
+        const handle = eventHandler({ types: [], print: false, write: () => {}, retryMs: 10, webhook: `${origin}/hook` });
+        const event = other("daemon.started", {});
+        handle(event);
+        await vi.waitFor(() => expect(said()).toMatch(`holding event ${event.seq}`));
+        expect(said()).toBe(`ghostly: the webhook at ${origin} failed TLS (${code}): holding event ${event.seq} (daemon.started) until it passes; on this machine give it as http://, or restart listen with NODE_EXTRA_CA_CERTS set to the file of the certificate that signed the bridge's\n`);
+        expect(handle.behind()).toBe(1);
+        await handle.stop();
+      }
+    } finally {
+      stderr.mockRestore();
+      plain.close(); selfSigned.close();
     }
   }, 10_000);
 
