@@ -207,6 +207,7 @@ export async function standbyHandoff(options: StandbyHandoffOptions): Promise<De
         default: return undefined;
       }
     },
+    dropStaging: () => taker.abandon(),
     stop: () => { giver.stop(); taker.stop(); },
   };
 }
