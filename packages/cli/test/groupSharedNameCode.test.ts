@@ -35,7 +35,7 @@ function fake(): ApiContext {
   return { runtime: { server: { node }, store, paths: { name: "default", dir }, callsUnavailable: null }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, calls, groupAuto, mode: "daemon", version: "test" } as unknown as ApiContext;
 }
 
-type Refusal = { code: keyof typeof EXIT; message: string };
+type Refusal = { code: keyof typeof EXIT; message: string; details?: Record<string, unknown> };
 const refusal = (run: Promise<unknown>) => run.then(() => { throw new Error("not refused"); }, (error: Refusal) => error);
 
 describe("a name more than one group has: one code, chat and group commands alike", () => {
@@ -62,6 +62,8 @@ describe("a name more than one group has: one code, chat and group commands alik
     expect(error.message).toMatch(/names more than one group/);
     expect(error.code).toBe("bad_request");
     expect(EXIT[error.code]).toBe(1);
+    // The ids to choose from, as `group show zz` gives them.
+    expect(error.details?.matches).toEqual(["g1zz", "g2zz"]);
   });
 
   it("message delete --purge folds nothing for it, as for any bad_request", async () => {
@@ -81,6 +83,8 @@ describe("a name more than one group has: one code, chat and group commands alik
     expect(error.message).toMatch(/names more than one group/);
     expect(error.code).toBe("bad_request");
     expect(EXIT[error.code]).toBe(1);
+    // The ids to choose from, as `group show zz` gives them.
+    expect(error.details?.matches).toEqual(["g1zz", "g2zz"]);
   });
 
   it("one group's name, and a name nothing has, keep not_found (exit 3)", async () => {
@@ -101,5 +105,9 @@ describe("a name more than one group has: one code, chat and group commands alik
     const error = await refusal(callApi(ctx, "chat.send", { chat: "zz", text: "hi" }));
     expect(error.message).toBe(`"zz" names more than one chat: use its id`);
     expect(error.code).toBe("bad_request");
+    // `listen --from` too: the chats' ids in `matches` are not the groups', so it offers no `--group`.
+    const from = await refusal(allowlist(["zz"], [], (method, params) => callApi(ctx, method, params), async () => null));
+    expect(from.message).toBe(`"zz" names more than one chat: use its id`);
+    expect(from.details?.matches).toEqual(["chat-two", "chat-three"]);
   });
 });

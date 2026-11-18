@@ -5,6 +5,8 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import type { EngineState, GroupView, LinkView } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
 import { CallManager, type CallEngine } from "../src/calls/manager";
+import { GroupAutoJoin, type GroupAutoEngine } from "../src/groupAuto";
+import { allowlist } from "../src/listen";
 import { chatViewOf, groupViewOf } from "./support/chatView";
 // covers: headless.groups
 
@@ -26,25 +28,39 @@ function fake(): ApiContext {
   const dir = mkdtempSync(join(tmpdir(), "gncs-"));
   dirs.push(dir);
   const calls = new CallManager({ engine: { chatView: chatViewOf, groupView: groupViewOf, getState: state, setCallSignal: async () => {} } as unknown as CallEngine, emit: () => {}, profileDir: dir });
+  const groupAuto = new GroupAutoJoin({ engine: { getState: state } as unknown as GroupAutoEngine, profileDir: dir, joins: false });
   const store = { compact: async () => {} };
-  return { runtime: { server: { node }, store, paths: { name: "default", dir }, callsUnavailable: null }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, calls, mode: "daemon", version: "test" } as unknown as ApiContext;
+  return { runtime: { server: { node }, store, paths: { name: "default", dir }, callsUnavailable: null }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, calls, groupAuto, mode: "daemon", version: "test" } as unknown as ApiContext;
 }
 
 const refusal = (run: Promise<unknown>) => run.then(() => { throw new Error("not refused"); }, (error: { code: string; message: string; details?: unknown }) => error);
 
 describe("a name two groups share, where only a 1:1 chat goes", () => {
+  // No group command takes the group in their place, so none is named: it read "a group command takes one by its id",
+  // which named no command, and `group auto on --from` takes chats.
   it.each([
-    ["call.hangup", "call", {}],
-    ["call.start", "chat", {}],
-    ["identity.share", "chat", { id: "proof1" }],
-  ] as const)("%s says it names more than one group, and where their ids are", async (method, key, params) => {
+    ["call.hangup", "call", {}, ""],
+    ["call.start", "chat", {}, ": a call goes to a contact, in their chat"],
+    ["identity.share", "chat", { id: "proof1" }, ""],
+    ["chat.verify", "chat", { code: "1234" }, ": only a chat has a code to compare"],
+  ] as const)("%s says it names more than one group, and that it takes a chat", async (method, key, params, why) => {
     for (const ref of ["zz", "ZZ", "group:zz"]) {
       const error = await refusal(callApi(fake(), method, { [key]: ref, ...params }));
-      expect(error.message).toBe(`${JSON.stringify(ref)} names more than one group, not a chat: a group command takes one by its id (ghostly group list)`);
+      expect(error.message).toBe(`${JSON.stringify(ref)} names more than one group, not a chat${why} (ghostly chat list)`);
       expect(error.code).toBe("bad_request");
+      // The ids it asks for, as `group show zz` gives them (`--json` had none).
+      expect(error.details).toEqual({ matches: ["g1zz", "g2zz"] });
     }
     // A name nothing has stays `No chat`.
     expect((await refusal(callApi(fake(), method, { [key]: "Nobody", ...params }))).message).toBe(`No chat "Nobody" (ghostly chat list)`);
+  });
+
+  it("group auto on --from says the name is groups', and that --from takes chats", async () => {
+    for (const ref of ["zz", "group:zz"]) {
+      const error = await refusal(callApi(fake(), "group.auto", { on: true, from: [ref] }));
+      expect(error.message).toBe(`${JSON.stringify(ref)} names more than one group, not a chat: --from takes the chats whose invitations it accepts (ghostly chat list)`);
+      expect(error.code).toBe("bad_request");
+    }
   });
 
   it.each(["chat.connect", "chat.transport"] as const)("%s says a group has no transport of its own, and names group list, not group show", async (method) => {
@@ -57,8 +73,21 @@ describe("a name two groups share, where only a 1:1 chat goes", () => {
     const react = await refusal(callApi(fake(), "chat.react", { chat: "zz", message: "m1", emoji: "👍" }));
     expect(react.message).toBe(`"zz" names more than one group, not a chat: ghostly group react <group> <message> <emoji>, with the id of the group meant (ghostly group list)`);
     expect(react.code).toBe("bad_request");
+    expect(react.details).toEqual({ matches: ["g1zz", "g2zz"] });
     const remove = await refusal(callApi(fake(), "chat.delete", { chat: "group:zz", message: "m1" }));
     expect(remove.message).toBe(`"group:zz" names more than one group, not a chat: ghostly message delete <group> m1 --everyone, with the id of the group meant (ghostly group list)`);
     expect(remove.code).toBe("bad_request");
+    expect(remove.details).toEqual({ matches: ["g1zz", "g2zz"] });
+  });
+
+  it("listen --from offers listen --group with the ids, not group show", async () => {
+    const call = (method: string, params: Record<string, unknown>) => callApi(fake(), method, params);
+    for (const ref of ["zz", "group:zz"]) {
+      await expect(allowlist([ref], [], call, async () => null)).rejects.toMatchObject({
+        code: "bad_request",
+        message: `${JSON.stringify(ref)} names more than one group, not a chat: ghostly listen --group <group>, with the id of the group meant (ghostly group list)`,
+        details: { matches: ["g1zz", "g2zz"] },
+      });
+    }
   });
 });

@@ -260,11 +260,11 @@
   },
   "media": {
     "downloadSize": "Descargar {{size}}",
-    "noRoom": "No hay espacio suficiente: {{size}} libres",
+    "noRoom": "No hay espacio suficiente: quedan {{size}}",
     "noRoomToPlay": "No hay espacio libre en disco para reproducirlo aquí. Descárgalo.",
     "notYet": "Se reproduce cuando se haya enviado.",
     "positionOf": "{{position}} de {{duration}}",
-    "wantsToSend": "{{name}} quiere enviarlo · {{size}} libres"
+    "wantsToSend": "{{name}} quiere enviarlo · quedan {{size}}"
   },
   "menu": {
     "continueNew": "Continuar en un chat nuevo",

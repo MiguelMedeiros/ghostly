@@ -116,6 +116,19 @@ describe("app publish", () => {
     expect(readAppBundle(new Uint8Array(readFileSync(join(dir, "app.ghostlyapp"))))).toMatchObject({ ok: true, bundle: { manifest: { sequence: 2 } } });
   }, 60_000);
 
+  it("publishes sources all on hosts no client reads from, and says clients find no update there", async () => {
+    const { manifest, files } = chess();
+    const key = vectorKey(tmp(), "publisher");
+    const elsewhere = appFolder({ ...manifest, sources: ["https://github.com/o/r/releases/download/v1/app.ghostlyapp"] }, files);
+    const published = await ghostly(["app", "publish", elsewhere, "--key", key]);
+    expect(ok(published)).toMatchObject({ sequence: 1 });
+    expect(published.stderr).toContain("no source a client reads from");
+    // One readable source is enough, and no sources at all says nothing.
+    const readable = appFolder({ ...manifest, sources: ["https://github.com/o/r/app.ghostlyapp", "https://raw.githubusercontent.com/o/r/HEAD/app.ghostlyapp"] }, files);
+    expect((await ghostly(["app", "publish", readable, "--key", key])).stderr).not.toContain("a client reads from");
+    expect((await ghostly(["app", "publish", appFolder(manifest, files), "--key", key])).stderr).not.toContain("a client reads from");
+  }, 60_000);
+
   it("a bundle published into another --out never holds the one an earlier publish left in the folder", async () => {
     const { manifest, files } = chess();
     const dir = appFolder(manifest, files);
@@ -819,6 +832,19 @@ describe("store sign", () => {
     // Beside the index but outside --out: the index's folder is not published.
     ok(await ghostly(["store", "sign", join(dir, "index.json"), "--key", join(dir, "store.key"), "--out", join(tmp(), "site")]));
     expect(existsSync(join(dir, "store.key"))).toBe(true);
+  }, 60_000);
+
+  it("signs a listing with no URL on a host a client reads from, and says it cannot be installed", async () => {
+    const dir = tmp();
+    const index = JSON.parse(vector.index) as { apps: { ref: string; urls: string[] }[] };
+    const [chessListing] = index.apps;
+    writeFileSync(join(dir, "index.json"), JSON.stringify({ ...index, apps: [{ ...chessListing, urls: ["https://github.com/o/r/releases/download/v1/app.ghostlyapp"] }] }));
+    const signed = await ghostly(["store", "sign", join(dir, "index.json"), "--key", vectorKey(tmp(), "store")]);
+    expect(ok(signed)).toMatchObject({ apps: 1 });
+    expect(signed.stderr).toContain(`${chessListing.ref} has no URL a client reads from`);
+    // One readable URL among others is enough: no word.
+    writeFileSync(join(dir, "index.json"), vector.index);
+    expect((await ghostly(["store", "sign", join(dir, "index.json"), "--key", vectorKey(tmp(), "store"), "--out", tmp()])).stderr).not.toContain("a client reads from");
   }, 60_000);
 
   it("refuses a lower sequence, the same one with other content, another key and a publisher key", async () => {

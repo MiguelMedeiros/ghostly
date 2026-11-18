@@ -4,6 +4,7 @@ import { useI18n } from "../../contexts/I18nContext";
 import { useLockPassedNow } from "../../contexts/LockScreenContext";
 import { reloadIntoGate, takeoverErrorKey } from "../../lib/devices";
 import { focusToRetype } from "../../lib/focus";
+import { useComposition } from "../../hooks/useComposition";
 import { InfoButton } from "../layout/Section";
 import { DeviceDialog, field, primaryButton } from "./DeviceDialog";
 import { type Problem, problemText } from "../../lib/problemText";
@@ -35,6 +36,7 @@ export function TakeoverDialog({ device, password: asks, restored, ownSet, onClo
   const other = device ?? t("devices.join.otherDevice");
   const ready = (!asks || !!password) && (!device || name.trim().length > 0) && lost !== null;
   const lostGroup = useRef<HTMLFieldSetElement>(null);
+  const { composing, inputProps } = useComposition();
   const submit = async () => {
     setBusy(true); setError(null); setRefused(null);
     try {
@@ -82,9 +84,10 @@ export function TakeoverDialog({ device, password: asks, restored, ownSet, onClo
         </fieldset>
       )}
       {/* Enter in a field with "Lost or stolen?" still unanswered (Take over is off, so Enter would do nothing): the
-          keyboard goes to the question, the one thing left to do. */}
-      <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); if (ready && !busy) void submit(); }}
-        onKeyDown={(event) => { if (event.key === "Enter" && lost === null && event.target instanceof HTMLInputElement) { event.preventDefault(); lostGroup.current?.querySelector("input")?.focus(); } }}>
+          keyboard goes to the question, the one thing left to do. An input method's Enter confirms its candidate; asked
+          first, so every keydown answers for the end of a composition (which bubbles here from both fields). */}
+      <form className="space-y-3" {...inputProps} onSubmit={(event) => { event.preventDefault(); if (ready && !busy) void submit(); }}
+        onKeyDown={(event) => { if (!composing(event) && event.key === "Enter" && lost === null && event.target instanceof HTMLInputElement) { event.preventDefault(); lostGroup.current?.querySelector("input")?.focus(); } }}>
         {asks && <input ref={passwordInput} type="password" autoFocus autoComplete="current-password" data-testid="takeover-password" aria-label={t("devices.password.current")} placeholder={t("devices.password.current")}
           aria-invalid={refused === "password" || undefined} aria-describedby={refused === "password" ? `${id}-error` : undefined} value={password} onChange={(event) => setPassword(event.target.value)} className={field} />}
         {device && (
