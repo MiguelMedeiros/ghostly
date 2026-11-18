@@ -1085,12 +1085,17 @@ function childAnswer(detached: boolean, error: unknown): unknown {
 
 async function daemonCommand(argv: string[]): Promise<void> {
   const sub = argv[0] && !argv[0].startsWith("-") ? argv[0] : undefined;
-  const parsed = parseArgs(sub ? argv.slice(1) : argv, { detach: { type: "boolean", description: "" }, timeout: { type: "number", description: "" } }, undefined, { command: commandOf("daemon", sub) });
+  // `--detach` is the start's alone: `daemon stop --detach` took it and did nothing with it.
+  const timeout: OptionSpec = { type: "number", description: "" };
+  const own = sub !== undefined && ["status", "stop", "restart"].includes(sub);
+  const parsed = parseArgs(sub ? argv.slice(1) : argv, own ? { timeout } : { detach: { type: "boolean", description: "" }, timeout }, undefined, { command: commandOf("daemon", sub) });
   const g = globals(parsed);
   pretty = g.pretty;
-  if (!sub || ["status", "stop", "restart"].includes(sub)) noMoreThan(0, parsed.positionals, sub ? `daemon ${sub} [--timeout s]` : "daemon [--detach] [--timeout s]");
+  if (!sub || own) noMoreThan(0, parsed.positionals, sub ? `daemon ${sub} [--timeout s]` : "daemon [--detach] [--timeout s]");
   if (sub === "status") {
     knownProfile(g);
+    // Checked whether a daemon runs or not: it was a usage error only once one ran.
+    const statusFor = seconds(parsed, 15);
     const client = await connectDaemon(g.paths);
     // The socket, running or not: a program on the socket API (examples/*.mjs) finds it here. It is in the profile's
     // folder, or in /tmp/ghostly-<hash>/ when that path is too long for a socket, so a program cannot guess it.
@@ -1100,7 +1105,7 @@ async function daemonCommand(argv: string[]): Promise<void> {
       print({ running: false, ...(starting === null ? {} : { starting: true, pid: starting }), profile: g.profile, socket: g.paths.socket });
       return;
     }
-    try { print({ running: true, ...(await client.call("status", {}, { timeoutMs: seconds(parsed, 15) * 1000 }) as object), socket: g.paths.socket }); } finally { client.close(); }
+    try { print({ running: true, ...(await client.call("status", {}, { timeoutMs: statusFor * 1000 }) as object), socket: g.paths.socket }); } finally { client.close(); }
     return;
   }
   if (sub === "stop") {
@@ -1507,7 +1512,13 @@ async function listenCommand(argv: string[]): Promise<void> {
 }
 
 async function engineCommand(argv: string[]): Promise<void> {
-  const parsed = parseArgs(argv, { "confirm-real": { type: "boolean", description: "" }, "show-secret": { type: "boolean", description: "" }, yes: { type: "boolean", description: "" }, force: { type: "boolean", description: "" }, list: { type: "boolean", description: "" }, verbose: { type: "boolean", description: "" } }, undefined, { command: "engine" });
+  const flag: OptionSpec = { type: "boolean", description: "" };
+  const call = { "confirm-real": flag, "show-secret": flag, yes: flag, force: flag, list: flag };
+  // Read again with the flags of the form `--list` picks: `engine getState --verbose` and `engine --list --yes` took a
+  // flag of the other form and did nothing with it.
+  // A flag neither form reads is refused here, by its own name: read as the other form, a valid one was named instead.
+  const listing = parseArgs(argv, { ...call, verbose: flag }, undefined, { command: "engine" }).options.list === true;
+  const parsed = parseArgs(argv, listing ? { list: flag, verbose: flag } : call, undefined, { command: "engine" });
   const g = globals(parsed);
   pretty = g.pretty;
   if (parsed.options.list) {
@@ -1541,7 +1552,10 @@ async function engineCommand(argv: string[]): Promise<void> {
 
 async function settingsCommand(sub: string | undefined, argv: string[]): Promise<void> {
   // A JSON value may start with a dash (`settings set k -- -1`).
-  const parsed = parseArgs(argv, { "show-secret": { type: "boolean", description: "" }, force: { type: "boolean", description: "" } }, undefined, { command: commandOf("settings", sub), text: sub === "set" });
+  // Each its own flag: `settings get --force` and `settings set ... --show-secret` took the other's and did nothing.
+  const showSecret: OptionSpec = { type: "boolean", description: "" }, force: OptionSpec = { type: "boolean", description: "" };
+  const specs: Record<string, Record<string, OptionSpec>> = { get: { "show-secret": showSecret }, set: { force } };
+  const parsed = parseArgs(argv, Object.hasOwn(specs, sub ?? "") ? specs[sub!] : { "show-secret": showSecret, force }, undefined, { command: commandOf("settings", sub), text: sub === "set" });
   const g = globals(parsed);
   pretty = g.pretty;
   if (sub === "get") { noMoreThan(0, parsed.positionals, "settings get [--show-secret]"); print(await withSession(g, (s) => s.call("settings.get", { showSecret: parsed.options["show-secret"] === true }), { offline: true, deferChats: readsNoHistory("settings.get") })); return; }
