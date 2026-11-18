@@ -629,7 +629,8 @@ describe("stores", () => {
       if (held) net.put(other, held);
       await net.putStore(await storeFiles({ sequence: held ? 3 : 2, apps: [listing(v1, [BUSY, other])] }));
       if (held) await store.refreshStores(); else await store.addStore({ url: STORE_URL });
-      for (status of [503, 429]) {
+      // 408: the host's own timeout, said as its trouble with Try again on the install screen (apps/ui lib/apps/errors.ts).
+      for (status of [503, 429, 408]) {
         await expect(store.preview({ store: keyOf(STORE_KEY), ref: v1.ref }), `${status}, then ${held ? "another version" : "404"}`)
           .rejects.toThrow(`status: The host answered ${status}`);
       }
