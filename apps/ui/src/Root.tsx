@@ -269,7 +269,7 @@ function DoubledHashLink() {
  * counted once the engine has loaded its groups.
  */
 function GroupLinkIntake() {
-  const { pathname } = useLocation();
+  const { pathname, hash } = useLocation();
   const navigate = useNavigate();
   const nav = useAppNavigation();
   const { isLocked, hasUnlocked } = useLockScreen();
@@ -287,7 +287,9 @@ function GroupLinkIntake() {
   const t = useT();
   useEffect(() => {
     const found = pathname.match(/^\/join\/(.+)$/)?.[1];
-    if (!found) return;
+    // A device code's link whose name reads as a group's (`#/join/…#ghostly1z…`): the invite intake's alone, as a fresh
+    // page takes it (`takeDeviceLinkFromAddress`).
+    if (!found || namedDeviceLink(pathname, hash)) return;
     // A `%` that is not an escape: no group's link, said as one the engine could not read.
     const link = decodePart(found);
     if (link === null) setProblem({ tone: "error", title: t("group.link.broken"), next: t("group.link.brokenNext") });
@@ -295,7 +297,7 @@ function GroupLinkIntake() {
     else { setProblem(null); setCode(link); codeAfter.current = otherLinks.current; }
     linkTaken("group");
     navigate("/", { replace: true });
-  }, [pathname, navigate, t]);
+  }, [pathname, hash, navigate, t]);
   useOtherLink("group", useCallback(() => { otherLinks.current += 1; setProblem(null); }, []));
   useEffect(() => {
     if (!code || isLocked || !hasUnlocked || !groupsLoaded) return;

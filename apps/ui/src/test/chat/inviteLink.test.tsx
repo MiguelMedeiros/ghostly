@@ -247,6 +247,29 @@ describe("a link whose code ends in a `/`", () => {
   });
 });
 
+// covers: invite.link
+describe("a device code's link whose name is a group's link", () => {
+  /*
+   * A device code's link names the profile before the code (`#<profile>#ghostly1z…`), and the name may read as a group's
+   * link (`#/join/group2/…#ghostly1z…`, made by hand). A fresh page takes it as the device code alone. Given to the open
+   * app it was taken twice: the group was joined and opened, and the device-join dialog came over it.
+   */
+
+  afterEach(() => { window.location.hash = ""; takeDeviceLink(); });
+
+  it("given to the open app, it goes to the join host only: no group is joined", async () => {
+    fakeEngine.on("joinGroupByLink", () => ({ groupId: "g1" }));
+    render(<Root />);
+    await screen.findByTestId("sidebar");
+    const code = createDeviceInvite(new Uint8Array(32).fill(7)).code;
+    window.location.hash = `#/join/group2/abc/def#${code}`;
+    act(() => { window.dispatchEvent(new PopStateEvent("popstate")); });
+    expect(await screen.findByTestId("device-join-confirm")).toBeInTheDocument();
+    expect(window.location.hash).toBe("#/");
+    expect(fakeEngine.callsTo("joinGroupByLink")).toHaveLength(0);
+  }, 60_000);
+});
+
 // covers: invite.invalid, invite.link, groups.link.join
 describe("a link's refusal, then a link of the other kind", () => {
   /*
