@@ -75,6 +75,7 @@
     "locked": "应用打开前个人资料已锁定。请再次打开。",
     "needsFiles": "它的文件还不在此设备上。",
     "network": "无法连接到主机。",
+    "noStore": "这个商店已不在你添加的商店中。",
     "notInstalled": "这个应用已不再安装。",
     "notListed": "这个商店不再列出该应用。",
     "notSigned": "签名不正确。Ghostly 不会安装它。",
