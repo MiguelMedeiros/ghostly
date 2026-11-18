@@ -399,6 +399,12 @@ export function MessageInput({
     setToastAction(null);
   }, []);
 
+  // The composer goes (the chat closed): its card's wait goes with it, never to run on a page that is gone.
+  useEffect(() => () => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = null;
+  }, []);
+
   /** The card's time runs again, in full, unless it is pointed at or has the focus: it stays until it has been read. */
   const runToast = useCallback(() => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
