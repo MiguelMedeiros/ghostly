@@ -307,11 +307,11 @@
   },
   "media": {
     "downloadSize": "تنزيل {{size}}",
-    "noRoom": "المساحة غير كافية: {{size}} متاحة",
+    "noRoom": "المساحة غير كافية: يتبقى {{size}}",
     "noRoomToPlay": "لا توجد مساحة كافية على القرص لتشغيله هنا. نزّله بدلًا من ذلك.",
     "notYet": "يُشغَّل بعد إرساله.",
     "positionOf": "{{position}} من {{duration}}",
-    "wantsToSend": "يريد {{name}} إرساله · {{size}} متاحة"
+    "wantsToSend": "يريد {{name}} إرساله · يتبقى {{size}}"
   },
   "menu": {
     "continueNew": "المتابعة في محادثة جديدة",

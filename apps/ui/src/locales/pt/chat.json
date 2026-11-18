@@ -260,11 +260,11 @@
   },
   "media": {
     "downloadSize": "Baixar {{size}}",
-    "noRoom": "Espaço insuficiente: {{size}} livres",
+    "noRoom": "Espaço insuficiente: sobram {{size}}",
     "noRoomToPlay": "Sem espaço livre em disco para tocar aqui. Baixe o arquivo.",
     "notYet": "Toca depois de enviado.",
     "positionOf": "{{position}} de {{duration}}",
-    "wantsToSend": "{{name}} quer enviar · {{size}} livres"
+    "wantsToSend": "{{name}} quer enviar · sobram {{size}}"
   },
   "menu": {
     "continueNew": "Continuar numa nova conversa",

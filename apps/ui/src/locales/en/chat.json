@@ -260,11 +260,11 @@
   },
   "media": {
     "downloadSize": "Download {{size}}",
-    "noRoom": "Not enough space: {{size}} free",
+    "noRoom": "Not enough space: {{size}} left",
     "noRoomToPlay": "Not enough free disk space to play it here. Download it instead.",
     "notYet": "It plays once it has been sent.",
     "positionOf": "{{position}} of {{duration}}",
-    "wantsToSend": "{{name}} wants to send it · {{size}} free"
+    "wantsToSend": "{{name}} wants to send it · {{size}} left"
   },
   "menu": {
     "continueNew": "Continue in a new chat",
