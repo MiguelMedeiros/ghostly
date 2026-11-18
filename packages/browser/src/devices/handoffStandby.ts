@@ -169,11 +169,10 @@ export async function standbyHandoff(options: StandbyHandoffOptions): Promise<De
       void route(from, frame).receive(from, frame);
     },
     linkChanged: (key, live) => { giver.linkChanged(key, live); taker.linkChanged(key, live); },
-    // "Active on <device>": the record of the device this one released to is out, so it took the turn.
+    // "Active on <device>": a record above the turn this one released is out, the taker's or a forced takeover's.
     turnRead: (outcome) => {
       const taken = outcome.kind === "show" && outcome.screen === "active-on" ? outcome.read.record : undefined;
-      const key = taken ? deviceSetOf(taken)[taken.active]?.key : undefined;
-      if (taken && key) void giver.turnTaken(key, taken.turn);
+      if (taken && deviceSetOf(taken)[taken.active]?.key) void giver.turnTaken(taken.turn);
     },
     call: (method, params) => {
       const p = (params ?? {}) as { password?: unknown; later?: unknown };
