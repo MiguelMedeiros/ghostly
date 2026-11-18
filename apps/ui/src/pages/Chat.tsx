@@ -139,7 +139,7 @@ import { appCardsShown, panelCard, routineStacksReader } from "../lib/statusCard
 import { scrollIntoViewGently } from "../lib/motion";
 import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
 import { usePageShown } from "../hooks/usePageShown";
-import { clearChatNotification } from "../lib/notifications";
+import { clearChatNotification, clearExtensionNotices } from "../lib/notifications";
 import { closeWakeNotices } from "../lib/wakePush";
 import { useWindowAway, windowAway } from "../lib/windowAway";
 import { showChatOnScreen } from "../lib/appBadge";
@@ -842,6 +842,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     if (confirmDelete) {
       deleteSession(params.sessionId);
       setChatFolder(params.sessionId, undefined);
+      // Chrome keeps the extension's notifications past the page: a click on one opened a chat that is not there.
+      void clearExtensionNotices(params.sessionId);
       stopPlayingFrom(chatPath(params.sessionId), true);
       // The chat list keeps its own copy: without this it shows the deleted chat until its next refresh.
       window.dispatchEvent(new Event("session-updated"));

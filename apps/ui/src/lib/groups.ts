@@ -5,6 +5,7 @@ import { appLinkOrigin, decodePart } from "./url";
 import { setChatFolder } from "./chatFolders";
 import { forgetChatLanguage } from "./chatLanguage";
 import { forgetChatMute, groupChat } from "./chatMute";
+import { clearExtensionNotices } from "./notifications";
 import { forgetChatTranslate } from "./chatTranslate";
 import { forgetSentOriginals } from "./sentOriginals";
 import { forgetTranslateSend } from "./chatTranslateSend";
@@ -272,10 +273,12 @@ export function markGroupRead(groupId: string, at = Date.now()): void {
 /**
  * What this device keeps of a group beside the engine goes with it (left, deleted here, a join called off): what was
  * typed and not sent, the read mark, the mute, the translation choice, the language and the folder, as a chat's go with the chat (storage.ts deleteSession).
- * A community keeps its id, so a draft left behind was in the field again after joining it again.
+ * A community keeps its id, so a draft left behind was in the field again after joining it again. Its notifications in
+ * the extension go too: Chrome keeps them past the page, and a click on one opened a group that is not there.
  */
 export function forgetGroupLocal(groupId: string): void {
   setSessionDraft(`group:${groupId}`, "");
+  void clearExtensionNotices(groupChat(groupId));
   try { localStorage.removeItem(`${getPrefix()}group_read_${groupId}`); } catch { /* storage unavailable */ }
   forgetTranslateSend(groupChat(groupId));
   forgetChatMute(groupChat(groupId));
