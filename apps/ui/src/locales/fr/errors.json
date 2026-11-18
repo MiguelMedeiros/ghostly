@@ -53,7 +53,9 @@
   },
   "chat": {
     "dhtTooLong": "Trop long pour la DHT",
+    "dhtTooLongContactNext": "Raccourcissez-le, ou réessayez quand votre contact quitte DHT seule.",
     "dhtTooLongNext": "Raccourcissez-le, ou envoyez-le une fois connectés en direct.",
+    "dhtTooLongYouNext": "Raccourcissez-le, ou quittez DHT seule depuis l'icône de connexion et réessayez.",
     "editTooMany": "Ce message ne peut plus être modifié",
     "editTooManyNext": "Un message accepte {{max}} modifications au plus.",
     "forwardNone": "Rien à transférer",
