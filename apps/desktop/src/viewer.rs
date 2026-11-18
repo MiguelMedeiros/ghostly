@@ -877,6 +877,7 @@ pub fn open<R: tauri::Runtime>(
         let _ = window.close();
         return Err(format!("Window: {}", e));
     }
+    crate::downloads::trim(&window, crate::downloads::Window::Contact);
     // With Hide my IP on, a rule list that blocks every HTTP(S) and WS(S) load goes in just after the window is
     // made, as an app window's filter on Linux (`app_sandbox::add_rules`); nothing is served to it before
     // (`handle`), so no page of the contact's runs there without it.

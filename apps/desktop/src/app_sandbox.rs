@@ -755,6 +755,7 @@ fn build_window<R: Runtime>(
     let window = window_builder(app, label, title, guard)?
         .build()
         .map_err(|e| format!("Window: {e}"))?;
+    crate::downloads::trim(&window, crate::downloads::Window::App);
     let store = app
         .path()
         .app_cache_dir()

@@ -5,6 +5,17 @@
 //! its menu on a playing video has Download Video, which wrote the whole file into Downloads named after the stream's
 //! token. Tauri gives the window `tauri.conf.json` makes no download rule, so it is answered here.
 
+/// The windows the app makes, each with rules of its own: its right-click menu offers only what they let through.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Window {
+    /// The Ghostly window: it saves no file and opens no page (a click hands a link to the browser).
+    Ghostly,
+    /// A contact's app (`viewer`): it saves no file; a link or a picture elsewhere opens in the system browser.
+    Contact,
+    /// An installed app (`app_sandbox`): no file, no new window, no other page, and its runner loads once.
+    App,
+}
+
 /// Refuses every download the main window's WebView starts, and takes WebKitGTK's own Download and Open items out of
 /// its right-click menu so it offers none that would do nothing (Linux only; elsewhere the engines ask first or have
 /// none).
@@ -13,6 +24,15 @@ pub fn install<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
     let _ = window.with_webview(|webview| linux::refuse(webview.inner()));
     #[cfg(not(target_os = "linux"))]
     let _ = window;
+}
+
+/// Takes the items `window`'s rules refuse out of a contact's app's or an installed app's right-click menu (Linux
+/// only). Their downloads are refused already (`viewer::may_download`), but the menu is their WebView's own.
+pub fn trim<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>, kind: Window) {
+    #[cfg(target_os = "linux")]
+    let _ = window.with_webview(move |webview| linux::trim(&webview.inner(), kind));
+    #[cfg(not(target_os = "linux"))]
+    let _ = (window, kind);
 }
 
 #[cfg(target_os = "linux")]
@@ -28,23 +48,41 @@ mod linux {
     /// answers) asked first. The menu's Download items would only start one of those, so they are not offered: the
     /// cancel stays a guard.
     pub fn refuse(webview: webkit2gtk::WebView) {
-        webview.connect_context_menu(|_, menu, _, _| {
-            drop_dead_items(menu);
-            false
-        });
+        trim(&webview, super::Window::Ghostly);
         let Some(context) = webview.context() else {
             return;
         };
         context.connect_download_started(|_, download| download.cancel());
     }
 
-    /// Takes out the menu's items that save a file or open a page.
-    pub(super) fn drop_dead_items(menu: &ContextMenu) {
+    /// Takes the items `window` refuses out of the webview's menu each time it opens.
+    pub fn trim(webview: &webkit2gtk::WebView, window: super::Window) {
+        webview.connect_context_menu(move |_, menu, _, _| {
+            drop_items(menu, window);
+            false
+        });
+    }
+
+    /// Takes out the menu's items that `window` refuses.
+    pub(super) fn drop_items(menu: &ContextMenu, window: super::Window) {
         for item in menu.items() {
-            if saves_a_file(item.stock_action()) || opens_a_page(item.stock_action()) {
+            if dead(item.stock_action(), window) {
                 menu.remove(&item);
             }
         }
+    }
+
+    /// Whether `window`'s rules refuse what the item does, so it would only close the menu.
+    pub(super) fn dead(action: ContextMenuAction, window: super::Window) -> bool {
+        use super::Window;
+        saves_a_file(action)
+            || match window {
+                Window::Ghostly => opens_a_page(action),
+                // `on_new_window` opens an outside address in the browser, and the window goes on its own origin.
+                Window::Contact => false,
+                // Never a window, nowhere after the runner (`app_sandbox::may_navigate`), not even itself again.
+                Window::App => opens_a_page(action) || action == ContextMenuAction::Reload,
+            }
     }
 
     /// The items that save the link, image, video or audio under the pointer to disk.
@@ -139,6 +177,78 @@ mod tests {
             .collect();
         assert_eq!(kept, KEPT);
     }
+
+    /// WebKitGTK's menu on a page where nothing else is under the pointer.
+    #[cfg(target_os = "linux")]
+    const PAGE: [webkit2gtk::ContextMenuAction; 4] = {
+        use webkit2gtk::ContextMenuAction as A;
+        [A::GoBack, A::GoForward, A::Stop, A::Reload]
+    };
+
+    /// A contact's app and an installed app make windows of their own, whose menus WebKitGTK fills as it does the
+    /// Ghostly window's: each offers only what that window's rules let through.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn each_window_offers_only_what_its_rules_let_through() {
+        // covers: desktop.window
+        use super::Window;
+        use webkit2gtk::ContextMenuAction as A;
+        let kept = |window| -> Vec<_> {
+            OFFERED
+                .into_iter()
+                .chain(PAGE)
+                .filter(|action| !super::linux::dead(*action, window))
+                .collect()
+        };
+        // The Ghostly window, as before: its page answers a right-click on anything but a field, a link or chosen text.
+        assert_eq!(kept(Window::Ghostly), [&KEPT[..], &PAGE[..]].concat());
+        // A contact's app saves no file (`viewer::may_download`); a link or a picture elsewhere opens in the browser.
+        assert_eq!(
+            kept(Window::Contact),
+            [
+                A::OpenLink,
+                A::OpenLinkInNewWindow,
+                A::CopyLinkToClipboard,
+                A::OpenImageInNewWindow,
+                A::CopyImageToClipboard,
+                A::OpenFrameInNewWindow,
+                A::MediaPlay,
+                A::MediaMute,
+                A::ToggleMediaControls,
+                A::CopyVideoLinkToClipboard,
+                A::OpenVideoInNewWindow,
+                A::OpenAudioInNewWindow,
+                A::EnterVideoFullscreen,
+                A::GoBack,
+                A::GoForward,
+                A::Stop,
+                A::Reload,
+            ]
+        );
+        // An installed app saves no file, opens no window and no other page, and its runner loads once: no Reload.
+        assert_eq!(
+            kept(Window::App),
+            [&KEPT[..], &[A::GoBack, A::GoForward, A::Stop][..]].concat()
+        );
+    }
+
+    /// The part of `source` from `start` to the end of that function.
+    fn body<'a>(source: &'a str, start: &str) -> &'a str {
+        let source = &source[source.find(start).unwrap()..];
+        &source[..source.find("\n}\n").unwrap()]
+    }
+
+    #[test]
+    fn a_contacts_app_and_an_installed_app_trim_their_menus_too() {
+        // covers: desktop.window
+        assert!(body(include_str!("viewer.rs"), "pub fn open<")
+            .contains("crate::downloads::trim(&window, crate::downloads::Window::Contact)"));
+        assert!(body(
+            include_str!("app_sandbox.rs"),
+            "#[cfg(all(target_os = \"linux\", not(test)))]\nfn build_window<"
+        )
+        .contains("crate::downloads::trim(&window, crate::downloads::Window::App)"));
+    }
 }
 
 /// The real window on WebKitGTK: what the Ghostly window can leave on disk.
@@ -182,7 +292,7 @@ mod download_tests {
         for action in super::tests::OFFERED {
             menu.append(&ContextMenuItem::from_stock_action(action));
         }
-        super::linux::drop_dead_items(&menu);
+        super::linux::drop_items(&menu, super::Window::Ghostly);
         let kept: Vec<_> = menu
             .items()
             .iter()
