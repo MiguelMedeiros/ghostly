@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { MAX_AVATAR_LENGTH, MAX_AVATAR_SIDE, MAX_GROUP_CALL_SFU, NO_PICTURE_METADATA, groupCallSfu, sanitizeAvatar, stripPictureMetadata } from "@ghostly/core";
 import type { GroupView } from "@ghostly/browser/shared/types";
-import { bool, contactKeyOf, groupById, groupNameOf, groupOf, node, ownChatOf, settingsOf, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, contactKeyOf, groupById, groupNameOf, groupOf, node, notInYet, ownChatOf, settingsOf, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError, localFileError } from "./errors";
 import { shellWord } from "./shellWord";
 import { guardText } from "./secretGuard";
@@ -19,16 +19,16 @@ import { outOf } from "./waits";
  * A whole key is that member, whatever another member calls itself; a prefix and a name stand side by side (two
  * members is an error, not a guess). For a grant (`byKeyOnly`: admin, a pinned hub) a member found only by the name it
  * gave itself is refused, with its key: another member could call itself that name while the one meant is away, as
- * `findOwnNamedChat` refuses a contact's own name.
+ * `findOwnNamedChat` refuses a contact's own name. `groupRef`: the group as the command named it, for the hint.
  */
-export function findMember(group: GroupView, ref: string, myName?: string, byKeyOnly = false) {
+export function findMember(group: GroupView, ref: string, myName?: string, byKeyOnly = false, groupRef?: string) {
   const lower = ref.toLowerCase();
   // A ref shaped as a key (a line break, a space or capitals left on it too) is only ever that key, never a name.
   const asKey = contactKeyOf(ref);
   if (asKey !== undefined) {
     const member = group.members.find((m) => !m.me && m.key === asKey);
     if (member) return member;
-    throw noMember(group, asKey, myName);
+    throw noMember(group, asKey, myName, groupRef);
   }
   const others = group.members.filter((m) => !m.me);
   const byKey = others.filter((m) => m.key === ref);
@@ -39,17 +39,42 @@ export function findMember(group: GroupView, ref: string, myName?: string, byKey
     }
     return matches[0];
   }
-  throw matches.length ? new CliError("bad_request", `${JSON.stringify(ref)} names more than one member`) : noMember(group, ref, myName);
+  throw matches.length ? moreThanOneMember(group, ref, matches, groupRef) : noMember(group, ref, myName, groupRef);
+}
+
+/** How many of the members a ref names the words list (all of them are in `details.matches`). */
+const SHOWN_MATCHES = 5;
+
+/**
+ * Where a group's members and their keys are listed: `ghostly group show <group>`, with the group as the command named
+ * it (`groupRef`, as `joined` says it), else by its id. Never by its name alone: the inviter picks it, so another group
+ * may have it too, and `group show Tea` then answers that "Tea" names more than one group.
+ */
+const memberList = (group: GroupView, groupRef?: string) => `ghostly group show ${shellWord(groupRef ?? group.id, group.id)}`;
+
+/**
+ * A ref more than one member answers to (two members who call themselves "Bia", a prefix of two keys): refused as a
+ * ref that names more than one chat or group is, with each one's key and name in `details.matches`. The words name
+ * them too, by name and key prefix, and where their keys are listed: before, it was only "names more than one
+ * member", and a person or a bot had to guess that a key is taken and go find it.
+ */
+export function moreThanOneMember(group: GroupView, ref: string, matches: readonly GroupView["members"][number][], groupRef?: string): CliError {
+  const shown = matches.slice(0, SHOWN_MATCHES).map((m) => `${m.nick?.trim() || "no name"} (${m.key.slice(0, 8)}…)`).join(", ");
+  const more = matches.length > SHOWN_MATCHES ? ` and ${matches.length - SHOWN_MATCHES} more` : "";
+  return new CliError("bad_request", `${JSON.stringify(ref)} names more than one member of ${group.name}: ${shown}${more}. Use its key (${memberList(group, groupRef)})`, {
+    matches: matches.map((m) => ({ key: m.key, name: m.nick?.trim() || null })),
+  });
 }
 
 /**
  * A ref no other member answers to. When it is this profile's own key (or a prefix of it), or its own name, it says
- * so: "No member" read as if this profile were not in the group.
+ * so: "No member" read as if this profile were not in the group. Otherwise it says where the members are listed, as
+ * `No group "x" (ghostly group list)` does.
  */
-export function noMember(group: GroupView, ref: string, myName?: string): CliError {
+export function noMember(group: GroupView, ref: string, myName?: string, groupRef?: string): CliError {
   const mine = !!myName?.trim() && myName.trim().toLowerCase() === ref.toLowerCase();
   if (mine || group.members.some((m) => m.me && m.key.startsWith(ref))) return new CliError("bad_request", `${JSON.stringify(ref)} is you: name another member of ${group.name}`);
-  return new CliError("not_found", `No member ${JSON.stringify(ref)} in ${group.name}`);
+  return new CliError("not_found", `No member ${JSON.stringify(ref)} in ${group.name} (${memberList(group, groupRef)})`);
 }
 
 /**
@@ -112,15 +137,13 @@ function callNode(raw: string, ref: string, groupId: string): string {
  */
 function joined(ctx: ApiContext, params: Params, twin?: string): GroupView {
   const group = groupOf(ctx, params, twin);
-  if (group.status || !group.invitation) return group;
-  const shown = shellWord(str(params, "group", true), group.id);
-  throw new CliError("refused", group.invitation.accepted
-    ? `You are not in ${group.name} yet: you accepted its invitation, and its admin has not let you in`
-    : `You are not in ${group.name} yet: ghostly group accept ${shown} joins it`);
+  const yet = notInYet(group, str(params, "group", true));
+  if (yet) throw new CliError("refused", yet);
+  return group;
 }
 
 /** The member `params.member` names in `group`, this profile's own name said to be it; by its key only for a grant. */
-const member = (ctx: ApiContext, group: GroupView, params: Params, grant = false) => findMember(group, str(params, "member", true), settingsOf(ctx).nick, grant);
+const member = (ctx: ApiContext, group: GroupView, params: Params, grant = false) => findMember(group, str(params, "member", true), settingsOf(ctx).nick, grant, str(params, "group", true));
 
 /** Where the app opens a group's link, as its Share gives it (WISP 903: `https://…/#/join/group2/…`). */
 export const GROUP_LINK_ORIGIN = "https://app.ghostly.tools";

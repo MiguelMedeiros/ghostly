@@ -151,6 +151,11 @@ const TOAST_DURATION = 5_000;
 const PROGRESS_EVERY_MS = 250;
 /** The pause in the typing after which the draft is written (and the secret guard reads it). */
 const DRAFT_SAVE_PAUSE = 400;
+/**
+ * What a text's envelope takes of the DHT's bytes once sealed: about 248 of the 256 fit (the CLI's `DHT_TEXT_FITS`). The
+ * edge moves by a byte or two with the chat's sequence, so the composer's count says "about".
+ */
+const DHT_SEAL_BYTES = 8;
 
 /** The same file on disk, picked again: a picker gives a new File each time. */
 
@@ -1013,6 +1018,9 @@ export function MessageInput({
   const bytes = maxBytes || softBytes || textBytes ? new TextEncoder().encode(text.trim()).length : 0;
   const remaining = maxBytes ? maxBytes - bytes : textBytes ? textBytes - bytes : maxLength - text.length;
   const overSoft = !!softBytes && bytes > softBytes;
+  // Within the DHT's 256 bytes, but past what its packet carries once sealed (about 248, core dhtDelivery.ts
+  // `DHT_PACKET_BUDGET`): it does not go there either, so it reads amber as one past 256 does.
+  const nearSoft = !!softBytes && !overSoft && bytes > softBytes - DHT_SEAL_BYTES;
   // Near the limit that refuses, its count wins over the DHT's (past 16 KiB is past 256 B too).
   const nearHard = remaining < 100 && (!softBytes || !!maxBytes || !!textBytes);
 
@@ -1159,8 +1167,9 @@ export function MessageInput({
               className="composer-textarea"
             />
             {softBytes && !maxBytes && !nearHard && bytes > softBytes - 60 && (
-              <span data-testid="dht-byte-count" title={overSoft ? t("composer.overSoft", { bytes: softBytes }) : undefined}
-                className={`absolute end-2.5 bottom-1 text-[10px] ${overSoft ? "text-warn-ink" : "text-text-muted"}`}>
+              <span data-testid="dht-byte-count"
+                title={overSoft ? t("composer.overSoft", { bytes: softBytes }) : nearSoft ? t("composer.nearSoft", { bytes: softBytes - DHT_SEAL_BYTES }) : undefined}
+                className={`absolute end-2.5 bottom-1 text-[10px] ${overSoft || nearSoft ? "text-warn-ink" : "text-text-muted"}`}>
                 {bytes} / {softBytes} B
               </span>
             )}

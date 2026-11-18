@@ -190,7 +190,8 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
   // The digits to check and the device added are plain lines, and the focus stays on the body: a screen reader hears them
   // from a line that is there from the code on and changes its text (one that comes with its step is often not read).
   const spoken = view?.role !== "inviter" ? ""
-    : view.step === "confirm" ? <>{fillNames(t("devices.add.found"), { device: view.device })} <span dir="ltr">{`${view.digits.slice(0, 3)} ${view.digits.slice(3)}`}</span></>
+    // The digits one by one, as the new device says them: "482 913" would be read as two numbers, unlike over there.
+    : view.step === "confirm" ? <>{fillNames(t("devices.add.found"), { device: view.device })} <span dir="ltr">{view.digits.split("").join(" ")}</span></>
     : view.step === "done" ? fillNames(t("devices.add.done"), { device: view.device }) : "";
   // Another device tried the code: the one warning of the code step, said at once from a line of its own that is there
   // from the code on, like the one above. The notice under the code shows it.
@@ -215,7 +216,7 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
             link sent to it, opens Ghostly with the code, on the one screen that names this profile. Join and "Add this
             device to another profile" read the link too. */}
         <div data-testid="device-add-code" data-code={view.code} data-link={deviceLink(view.code, appLinkOrigin(), profileName)}>
-          <QRCodeDisplay value={deviceLink(view.code, appLinkOrigin(), profileName)} qr={deviceLinkQr(view.code, appLinkOrigin(), profileName)} copyLabel={t("devices.add.copy")} />
+          <QRCodeDisplay value={deviceLink(view.code, appLinkOrigin(), profileName)} qr={deviceLinkQr(view.code, appLinkOrigin(), profileName)} copyLabel={t("devices.add.copy")} title={t("devices.add.codeQr")} />
         </div>
         <Status testId="device-add-status" step={view.seen ? "connecting" : "waiting"}>{view.seen ? t("devices.add.connecting") : t("devices.add.waiting")}</Status>
         <p data-testid="device-add-left" className="text-text-muted text-xs">{t("devices.add.left", { time: timeLeft(view.expires, now) })}</p>

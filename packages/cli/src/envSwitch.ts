@@ -1,4 +1,4 @@
-import { CliError } from "./errors";
+import { CliError, shownValue } from "./errors";
 
 const OFF = /^(0|false|off|no)$/i, ON = /^(1|true|on|yes)$/i;
 
@@ -14,5 +14,5 @@ export function envSwitch(name: string, fallback: boolean, env: NodeJS.ProcessEn
   if (value === undefined || value.trim() === "") return fallback;
   if (OFF.test(value.trim())) return false;
   if (ON.test(value.trim())) return true;
-  throw new CliError("usage", `${name} takes 0 or 1 (or false/true, off/on, no/yes), not ${JSON.stringify(value)}`);
+  throw new CliError("usage", `${name} takes 0 or 1 (or false/true, off/on, no/yes), not ${shownValue(value)}`);
 }

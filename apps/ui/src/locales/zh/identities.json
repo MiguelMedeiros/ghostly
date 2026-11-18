@@ -385,7 +385,7 @@
           "fields": {
             "handle": {
               "help": "你的 Bluesky handle、你自己的域名（如果在用），或你的 DID。",
-              "label": "Handle"
+              "label": "用户名"
             }
           },
           "label": "你的服务器（Bluesky 或其他 PDS）"
@@ -396,7 +396,7 @@
           "fields": {
             "handle": {
               "help": "你的 Bluesky handle、你自己的域名（如果在用），或你的 DID。",
-              "label": "Handle"
+              "label": "用户名"
             }
           },
           "label": "你的服务器，完全访问（较旧的服务器）"

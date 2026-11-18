@@ -504,7 +504,7 @@ describe("with the apps flag on", () => {
     fakeEngine.on("appList", () => [installed()]);
     renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
     act(() => fakeEngine.update({ links: [ana(false)] }));
-    expect(await screen.findByTestId("app-card-waiting")).toHaveTextContent("Chess needs you both online");
+    expect(await screen.findByTestId("app-card-waiting")).toHaveTextContent("⁨Chess⁩ needs you both online");
     expect(await screen.findByTestId("app-card-open")).toBeInTheDocument();
     expect(screen.queryByTestId("app-card-install")).not.toBeInTheDocument();
   });
@@ -524,7 +524,7 @@ describe("with the apps flag on", () => {
     expect(within(shown).getByTestId("app-card-title")).not.toHaveTextContent("Chess");
     // The card's name for a screen reader is the same app's, not Ana's word for it.
     expect(shown.closest("[data-message-card]")).toHaveAttribute("aria-label", "App: Private Notes");
-    expect(within(shown).getByTestId("app-card-waiting")).toHaveTextContent("Private Notes needs you both online");
+    expect(within(shown).getByTestId("app-card-waiting")).toHaveTextContent("⁨Private Notes⁩ needs you both online");
     await user.click(within(shown).getByTestId("app-card-open"));
     await waitFor(() => expect(opener).toHaveBeenCalledWith(REF, "link-1", { runAnyway: false }));
   });
@@ -761,6 +761,20 @@ describe("with the apps flag on", () => {
     expect(line).toHaveTextContent("In this browser, an app can still contact other servers.");
     await user.click(within(line).getByTestId("app-webkit-line-info"));
     expect(screen.getByTestId("app-webkit-line-text")).toHaveTextContent("The desktop app blocks them.");
+  });
+
+  it("says in Safari, on an installed app's screen too, that an app without internet can still contact other servers", async () => {
+    const safari = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
+    const agent = vi.spyOn(navigator, "userAgent", "get").mockReturnValue(safari);
+    const { unmount } = renderApp(<InstalledAppDialog app={installed()} onClose={() => {}} onOpen={() => {}} />);
+    const details = await screen.findByTestId("app-details");
+    expect(within(details).getByTestId("app-ip-line")).toHaveTextContent("Its publisher may learn your IP address.");
+    expect(within(details).getByTestId("app-webkit-line")).toHaveTextContent("In this browser, an app can still contact other servers.");
+    unmount();
+
+    agent.mockReturnValue("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36");
+    renderApp(<InstalledAppDialog app={installed()} onClose={() => {}} onOpen={() => {}} />);
+    expect(within(await screen.findByTestId("app-details")).queryByTestId("app-webkit-line")).not.toBeInTheDocument();
   });
 
   it("refuses to install a version a store removed or its publisher revoked", async () => {
@@ -1026,6 +1040,21 @@ describe("with the apps flag on", () => {
     await user.click(await screen.findByTestId("app-card-open"));
     expect(await screen.findByTestId("app-card-error")).toHaveTextContent("Its publisher revoked this version.");
     expect(screen.queryByTestId("app-card-run-anyway")).not.toBeInTheDocument();
+  });
+
+  it("a stopped app's card with nothing to run says no one need be online; Run anyway keeps the line", async () => {
+    fakeEngine.on("appList", () => [installed({ run: { status: "revoked" } })]);
+    const { unmount } = renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
+    act(() => fakeEngine.update({ links: [ana(false)] }));
+    await waitFor(() => expect(screen.getByTestId("app-card-check")).toHaveTextContent(/^Stopped$/));
+    expect(screen.queryByTestId("app-card-waiting")).not.toBeInTheDocument();
+    unmount();
+    forgetInstalledApps();
+    fakeEngine.on("appList", () => [installed({ run: { status: "removed", by: [{ store: "k", name: "Ghostly", reason: "Malware", at: 1 }] } })]);
+    renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
+    act(() => fakeEngine.update({ links: [ana(false)] }));
+    expect(await screen.findByTestId("app-card-run-anyway")).toBeInTheDocument();
+    expect(screen.getByTestId("app-card-waiting")).toHaveTextContent(/needs you both online$/);
   });
 
   it("a store read again that removed an installed app stops it on the page at once", async () => {

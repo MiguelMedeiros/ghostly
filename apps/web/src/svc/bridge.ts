@@ -5,7 +5,7 @@
  * to the app, with the request's own port, so the answer goes straight back to the worker. Built on its own into
  * `/_ghostly-svc/bridge.js` (apps/web/svcBuild.ts).
  */
-import { BRIDGE_CLEAR, BRIDGE_CLEARED, BRIDGE_OPEN_LINK, BRIDGE_PORT, BRIDGE_READY, BRIDGE_REFUSED, BRIDGE_SHOWN, SERVICE_FRAME_ALLOW, WORKER_SCRIPT, isServiceHostname, parseServicesHost, type BridgeRefusal } from "./protocol";
+import { BRIDGE_CLEAR, BRIDGE_CLEARED, BRIDGE_OPEN_LINK, BRIDGE_PORT, BRIDGE_READY, BRIDGE_REFUSED, BRIDGE_SHOWN, SERVICE_FRAME_ALLOW, isServiceHostname, parseServicesHost, workerScript, type BridgeRefusal } from "./protocol";
 import { clearSite, dropSharedCookies } from "./clearSite";
 import { VIEWER_GUARD_SCRIPT } from "../../../../packages/core/src/viewerGuard";
 import { CLIPBOARD_GUARD_SCRIPT } from "../../../../packages/core/src/clipboardGuard";
@@ -27,6 +27,7 @@ const ownNavigator = navigator;
 const activationOf = describe(Navigator.prototype, "userActivation")?.get;
 const activeOf = typeof UserActivation === "undefined" ? undefined : describe(UserActivation.prototype, "isActive")?.get;
 const clock = Date.now;
+const portPost = MessagePort.prototype.postMessage;
 
 /**
  * How long a tap or a key in the app's page counts as the person's (a browser's activation lasts about 5 s): a link the
@@ -156,6 +157,23 @@ export function parsedPage(frame: HTMLIFrameElement): boolean {
 /** How often the bridge looks whether a page of the app is parsed, until it is. */
 const PARSED_LOOK_MS = 100;
 
+/** How long the bridge waits for the worker it registered to take over, and how often it looks. */
+const WORKER_WAIT_MS = 15_000;
+const WORKER_LOOK_MS = 50;
+
+/** Settles once the worker of `registration` is the one registered from `script`; refused if it is not in time. */
+export function activeIs(registration: ServiceWorkerRegistration, script: string): Promise<void> {
+  const until = clock() + WORKER_WAIT_MS;
+  return new Promise((resolve, reject) => {
+    const look = () => {
+      if (registration.active?.scriptURL === script) resolve();
+      else if (clock() > until) reject(new Error("The services worker did not take over"));
+      else setTimeout(look, WORKER_LOOK_MS);
+    };
+    look();
+  });
+}
+
 function say(text: string): void {
   document.body.textContent = text;
 }
@@ -246,7 +264,7 @@ function start(): void {
     const reply = event.ports[0];
     if (!reply) return;
     const body = (event.data as { body?: unknown } | null)?.body;
-    appPort.postMessage(event.data, body instanceof ArrayBuffer ? [reply, body] : [reply]);
+    apply(portPost, appPort, [event.data, body instanceof ArrayBuffer ? [reply, body] : [reply]]);
   });
   workers.startMessages();
 
@@ -262,17 +280,21 @@ function start(): void {
     appPort = event.ports[0];
     // Hide my IP from contacts: the app's frame is on this origin and reaches this window, so the WebRTC guard runs here
     // too, before the frame is made. Inline, as this page's policy allows it by its hash (`bridgeHtml`).
-    if ((event.data as { relayOnly?: unknown }).relayOnly === true) {
+    const relayOnly = (event.data as { relayOnly?: unknown }).relayOnly === true;
+    if (relayOnly) {
       guardHere(VIEWER_GUARD_SCRIPT);
       if ("RTCPeerConnection" in window || "webkitRTCPeerConnection" in window) {
         refused("the WebRTC guard");
         return;
       }
     }
+    const script = new URL(workerScript(relayOnly), location.href).href;
     // One left by another contact's app (any chat, any profile) is not this one's to read: not framed while it stays.
     void dropSharedCookies(host.suffix)
-      .then(() => workers.register(WORKER_SCRIPT, { scope: "/", updateViaCache: "none" }))
-      .then(() => workers.ready)
+      .then(() => workers.register(script, { scope: "/", updateViaCache: "none" }))
+      // Framed only once this worker answers: the one before it (another build's, or Hide my IP the other way) still
+      // would until then, and it is what guards the app's pages.
+      .then((registration) => activeIs(registration, script))
       .then(() => {
         const frame = document.createElement("iframe");
         frame.title = document.title;

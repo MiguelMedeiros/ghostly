@@ -26,7 +26,14 @@ export const IDENTITY_PLATFORMS: readonly IdentityPlatform[] = ["web", "extensio
  * unless the provider says so. `text` is the body as UTF-8; `bytes` is the same body raw (binary
  * answers such as DNS-over-HTTPS `application/dns-message`).
  */
-export interface IdentityFetchOptions { headers?: Record<string, string>; maxBytes?: number; signal?: AbortSignal; redirect?: "follow" | "error" }
+export interface IdentityFetchOptions {
+  headers?: Record<string, string>; maxBytes?: number; signal?: AbortSignal; redirect?: "follow" | "error";
+  /**
+   * A read of one of the profile's own Pkarr relays (a did:dht): read as the chats read them, http:// and a private
+   * address included, since the person chose them. Ignored for any other URL.
+   */
+  ownPkarrRelay?: boolean;
+}
 export interface IdentityFetchResponse { status: number; contentType: string; text: string; bytes: Uint8Array }
 export type IdentityFetch = (url: string, options?: IdentityFetchOptions) => Promise<IdentityFetchResponse>;
 

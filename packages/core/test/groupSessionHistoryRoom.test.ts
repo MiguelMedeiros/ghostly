@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { MAX_GROUP_CHAIN } from "../src/groupCommits";
 import { createIdentity } from "../src/identity";
 import { GroupSession } from "../src/groupSession";
@@ -10,6 +10,14 @@ import { GroupSession } from "../src/groupSession";
  * commit, and a leaving admin hands the role over first (two), so an add or a rotate stops while that room would no
  * longer be there. Members who join by the link and leave make two commits each: churn alone filled it.
  */
+
+// What is sealed to each member goes out through `hooks.send` (or the welcome the test drops) and is never read here:
+// the ~1,000 commits sealed a secret to every member each (X25519), most of this test's time. The chain is the subject.
+vi.mock("../src/groupCrypto", async (original) => ({
+  ...await original<typeof import("../src/groupCrypto")>(),
+  sealSecret: () => ({ e: "", n: "", c: "" }),
+}));
+
 const hooks = { save: async () => {}, send: () => {}, message: () => {}, changed: () => {} };
 const FULL = /membership history limit/;
 
