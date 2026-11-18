@@ -439,6 +439,11 @@ export class FileDesk {
     return said;
   }
 
+  /** The app stops: no chat's files are swept any more (`ChatFiles.stop`). */
+  stop(): void {
+    for (const chat of this.chats.values()) chat.files.stop();
+  }
+
   /** Stops tracking whether a transfer is stuck, and the room an offer of it shows. */
   private unwatch(id: string): void {
     clearTimeout(this.stallChecks.get(id));
