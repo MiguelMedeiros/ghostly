@@ -343,6 +343,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const callDevices = useCallDevices(webrtc);
 
   const callState = webrtc.callState;
+  const offerSent = webrtc.offerSent;
   const previousCallState = useRef(callState);
   // A call's window and its ring say "Calling..." and "Connected" to a screen reader, and go as the call ends: the
   // line the call left ("Audio call declined", "Missed audio call") is said then, once, since the chat's call lines
@@ -370,9 +371,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     if (!quiet(callState) && quiet(before)) pauseForCall();
     // A muted chat still rings (lib/chatMute.ts, MUTE_SILENCES).
     if (callState === "incoming") return callRings(sessionId) ? startRinging("ring") : undefined;
-    if (callState === "offering") return startRinging("ringback");
+    // Ours rings back once its offer went out (`offerSent`): not while the microphone or camera prompt is open, when
+    // nothing rings the contact yet. The call window says "Calling..." meanwhile.
+    if (callState === "offering") return offerSent ? startRinging("ringback") : undefined;
     if (callState === "idle" && before !== "idle") playSound("hangup");
-  }, [callState, sessionId]);
+  }, [callState, offerSent, sessionId]);
   // Out of sight, a ringing call is a system notification too: one for every tab that rings it (its offer's time).
   // The call that rings is its offer's, not the contact's latest signal (lib/lockedRing.ts, `ringingCall`).
   const ringing = ringingCall(webrtc.ringingOffer);
