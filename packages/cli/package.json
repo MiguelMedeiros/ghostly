@@ -34,12 +34,12 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@arkade-os/sdk": "0.5.4",
+    "@arkade-os/sdk": "0.5.6",
     "@atproto/jwk-webcrypto": "^0.3.4",
     "@atproto/oauth-client": "^0.9.3",
     "@bitcoindevkit/bdk-wallet-web": "0.4.0",
     "@bitcoinerlab/descriptors-scure": "^3.2.1",
-    "@cashu/cashu-ts": "^4.13.0",
+    "@cashu/cashu-ts": "^4.13.1",
     "@fedimint/core": "0.0.0-canary-eea6a3c98909fa8e736d6dadb1f1243fd3322b27",
     "@fedimint/fedimint-client-wasm-bundler": "0.0.0-canary-eea6a3c98909fa8e736d6dadb1f1243fd3322b27",
     "@fedimint/types": "0.0.0-canary-eea6a3c98909fa8e736d6dadb1f1243fd3322b27",
@@ -58,7 +58,7 @@
     "b4a": "1.9.0",
     "bittorrent-dht": "11.0.12",
     "ethers": "6.17.0",
-    "eventsource": "^5.1.4",
+    "eventsource": "^5.1.5",
     "fake-indexeddb": "6.2.8",
     "hyperdht": "6.36.0",
     "keet-identity-key": "3.2.0",
@@ -67,7 +67,7 @@
     "nostr-tools": "2.26.0",
     "opus-decoder": "0.7.12",
     "opusscript": "0.1.1",
-    "ws": "8.22.1"
+    "ws": "8.23.0"
   },
   "devDependencies": {
     "@ghostly/browser": "*",
@@ -76,7 +76,7 @@
     "@types/node": "^26.6.6",
     "openpgp": "6.3.2",
     "typescript": "^5.9.3",
-    "vite": "^8.3.6",
+    "vite": "^8.3.8",
     "vitest": "^5.1.0"
   }
 }

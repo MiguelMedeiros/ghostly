@@ -20,12 +20,12 @@
     "test:group-load": "vitest run test/communityLoad.test.ts --reporter=verbose"
   },
   "dependencies": {
-    "@arkade-os/sdk": "0.5.4",
+    "@arkade-os/sdk": "0.5.6",
     "@atproto/jwk-webcrypto": "^0.3.4",
     "@atproto/oauth-client": "^0.9.3",
     "@bitcoindevkit/bdk-wallet-web": "0.4.0",
-    "@breeztech/breez-sdk-spark": "0.28.2",
-    "@cashu/cashu-ts": "^4.13.0",
+    "@breeztech/breez-sdk-spark": "0.28.4",
+    "@cashu/cashu-ts": "^4.13.1",
     "@fedimint/core": "0.0.0-canary-eea6a3c98909fa8e736d6dadb1f1243fd3322b27",
     "@fedimint/fedimint-client-wasm-bundler": "0.0.0-canary-eea6a3c98909fa8e736d6dadb1f1243fd3322b27",
     "@fedimint/types": "0.0.0-canary-eea6a3c98909fa8e736d6dadb1f1243fd3322b27",
@@ -59,8 +59,8 @@
     "hyperdht": "6.36.0",
     "noise-curve-ed": "2.1.0",
     "typescript": "^5.9.3",
-    "vite": "^8.3.6",
+    "vite": "^8.3.8",
     "vitest": "^5.1.0",
-    "ws": "8.22.1"
+    "ws": "8.23.0"
   }
 }
