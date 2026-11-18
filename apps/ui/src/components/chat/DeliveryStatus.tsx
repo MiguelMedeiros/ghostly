@@ -79,6 +79,9 @@ export function DeliveryStatus({ delivery, acked = false, onPicture = false, onR
   const failed = shape === "failed" && !!onRetry;
   // The contact's storage has no room (WISP 404): sending again now is refused again, so the mark says why and when.
   const full = delivery === "failed" && !!error && holdFull(error) ? problemLine(error, t) : undefined;
+  // Not sent, with nothing to send again (a file that never left this device): no "Tap to send again".
+  const line = full ?? (state === "failed" && !onRetry ? words.label(state) : words.hint(state, live, group));
+  const lineId = useId();
 
   const handlers = {
     // The message's own long press (its details) and swipe (a reply) start from here otherwise.
@@ -125,16 +128,20 @@ export function DeliveryStatus({ delivery, acked = false, onPicture = false, onR
           <DeliveryIcon shape={shape} cutout={onPicture ? "#0b141a" : undefined} />
         </button>
       ) : (
-        <span role="img" {...common} aria-label={words.label(state, live)}
+        // Focusable, and its line its description at all times: a keyboard or a screen reader learns why it waits
+        // (a DHT-only chat, what to change) as a hover does.
+        <span role="img" {...common} aria-label={words.label(state, live)} aria-describedby={line === words.label(state, live) ? undefined : lineId}
+          tabIndex={0} onFocus={() => show(false)} onBlur={() => setTip(false)}
+          className={`${common.className} rounded-full focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-current`}
           onClick={(e) => { e.stopPropagation(); if (press.current?.fired) { press.current = null; return; } press.current = null; show(true); }}>
           <DeliveryIcon shape={shape} cutout={onPicture ? "#0b141a" : undefined} />
         </span>
       )}
+      {!failed && <span id={lineId} hidden>{line}</span>}
       {tip && (
         <span role="tooltip" id={tipId} data-testid="message-delivery-tip"
           className="absolute bottom-full end-0 mb-1.5 z-20 w-max max-w-[15rem] whitespace-normal rounded-md border border-border bg-surface-alt px-2 py-1 text-start text-[11.5px] leading-snug text-text-primary shadow-lg pointer-events-none animate-fade-in">
-          {/* Not sent, with nothing to send again (a file that never left this device): no "Tap to send again". */}
-          {full ?? (state === "failed" && !onRetry ? words.label(state) : words.hint(state, live, group))}
+          {line}
         </span>
       )}
     </span>
