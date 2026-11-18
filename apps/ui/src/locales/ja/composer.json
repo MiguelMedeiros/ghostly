@@ -54,6 +54,7 @@
   "identity": "ID",
   "identityShared": "このチャットで {{count}} 件共有中",
   "media": "写真と動画",
+  "nearSoft": "封をすると DHT に入るのは約 {{bytes}} バイトです。DHT で送るには短くしてください",
   "noEmoji": "絵文字が見つかりません",
   "noGifs": "GIF が見つかりません",
   "overSoft": "DHT で送れる {{bytes}} バイトを超えています。直接接続されると送信されます",

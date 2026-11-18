@@ -803,6 +803,28 @@ describe("NewGroupDialog", () => {
     expect(screen.getByTestId("new-group-create")).toBeEnabled();
   });
 
+  // Disabled while the group was made, the Create pressed from the keyboard dropped the focus to the page, and it
+  // stayed there after a refusal. It stays a button the focus can be on, and a second press does nothing.
+  it("keeps Create, pressed from the keyboard, a button the focus stays on while the group is made and after a refusal", async () => {
+    const { user, engine, onCreated } = open();
+    let refuse!: (error: Error) => void;
+    engine.on("createGroup", () => new Promise((_, reject) => { refuse = reject; }));
+    await user.type(screen.getByTestId("new-group-name"), "Climbing");
+    const create = screen.getByTestId("new-group-create");
+    act(() => create.focus());
+    await user.keyboard("{Enter}");
+    expect(create).toBeEnabled();
+    expect(create).toHaveAttribute("aria-disabled", "true");
+    expect(create).toHaveAttribute("aria-busy", "true");
+    await user.keyboard("{Enter}");
+    expect(engine.callsTo("createGroup")).toHaveLength(1);
+    await act(async () => refuse(new Error("Ghostly is still starting")));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Ghostly is still starting");
+    expect(create).toHaveFocus();
+    expect(create).not.toHaveAttribute("aria-disabled");
+    expect(onCreated).not.toHaveBeenCalled();
+  });
+
   it("on an app with no WebRTC, creates the group: its links go over Iroh or HyperDHT", async () => {
     // Ghostly Desktop on Linux (WISP 902 § Transports): no WebRTC, but native transports carry its group links.
     const { user, engine } = open();

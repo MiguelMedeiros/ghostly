@@ -51,6 +51,11 @@ interface Slot {
 }
 
 const slots = new Map<string, Slot>();
+/**
+ * Who the contact was in each chat whose panel showed, kept once the panel goes: a Desktop app's window outlives its
+ * chat page, and its title still names the contact while the app serves them a file.
+ */
+const contacts = new Map<string, AppContact>();
 const apps = new Map<string, ChatApp>();
 const listeners = new Set<() => void>();
 let sessions: readonly string[] = [];
@@ -66,7 +71,7 @@ function changed() {
  * running there stops. Called again as the contact's name changes.
  */
 export function registerAppSlot(linkId: string, slot: Slot | null): void {
-  if (slot) { slots.set(linkId, slot); return; }
+  if (slot) { slots.set(linkId, slot); contacts.set(linkId, slot.contact); return; }
   slots.delete(linkId);
   const app = apps.get(linkId);
   if (app?.stopped) setChatApp(linkId, null);
@@ -77,9 +82,9 @@ export function appSlot(linkId: string): HTMLElement | undefined {
   return slots.get(linkId)?.box;
 }
 
-/** Who the contact is in `linkId`, as its chat shows them. */
+/** Who the contact is in `linkId`, as its chat shows them, or last showed them once it closed. */
 export function appContact(linkId: string): AppContact | undefined {
-  return slots.get(linkId)?.contact;
+  return contacts.get(linkId);
 }
 
 export function chatApp(linkId: string): ChatApp | undefined {

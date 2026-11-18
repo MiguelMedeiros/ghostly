@@ -55,6 +55,9 @@ describe("the relays' hint that proxy headers arrive untrusted (infra/services)"
   // A proxy that writes no header (nginx without `proxy_set_header X-Forwarded-For`, a TCP pass-through): every client
   // reaches the relay from the proxy's address, so they share one address's limits, and the log only said `refused address`.
   const missing = (header: string, setting: string) => `requests arrive without ${header} though ${setting} is set: each counts as the proxy, so have the proxy write it or leave the setting out`;
+  // The header there with fewer entries than the setting (GHOSTLY_RELAY_PROXIES=2 behind one proxy): "without" would
+  // send the operator to a proxy that does write it, and leaving the setting out would count every client as the proxy.
+  const fewer = (entries: number, proxies: number) => `requests carry ${entries} X-Forwarded-For ${entries === 1 ? "entry" : "entries"} though GHOSTLY_RELAY_PROXIES is ${proxies}: each counts as the proxy, so set it to the number of proxies that write the header`;
 
   it("the push relay told of a proxy says once per start that requests arrive without the X-Forwarded-For entry it counts by", async () => {
     const run = async (proxies: number, sent: Record<string, string>[]) => {
@@ -65,11 +68,12 @@ describe("the relays' hint that proxy headers arrive untrusted (infra/services)"
       } finally {
         await relay.close();
       }
-      return lines.filter((line) => line.startsWith("requests arrive"));
+      return lines.filter((line) => line.startsWith("requests arrive") || line.includes("X-Forwarded-For entr"));
     };
     expect(await run(1, [{}, {}, {}])).toEqual([missing("X-Forwarded-For", "GHOSTLY_RELAY_PROXIES")]);
-    // Fewer entries than proxies counts by the socket too.
-    expect(await run(2, [{ "X-Forwarded-For": "198.51.100.1" }])).toEqual([missing("X-Forwarded-For", "GHOSTLY_RELAY_PROXIES")]);
+    // Fewer entries than proxies counts by the socket too, and the line says how many came.
+    expect(await run(2, [{ "X-Forwarded-For": "198.51.100.1" }, {}])).toEqual([fewer(1, 2)]);
+    expect(await run(3, [{ "X-Forwarded-For": "198.51.100.1, 203.0.113.9" }])).toEqual([fewer(2, 3)]);
     expect(await run(1, [{ "X-Forwarded-For": "198.51.100.1" }, { "X-Forwarded-For": "198.51.100.2" }])).toEqual([]);
     expect(await run(0, [{}, {}])).toEqual([]);
   });
@@ -93,10 +97,10 @@ describe("the relays' hint that proxy headers arrive untrusted (infra/services)"
         for (const ws of sockets) ws.terminate();
         await relay.close();
       }
-      return lines.filter((line) => line.startsWith("requests arrive"));
+      return lines.filter((line) => line.startsWith("requests arrive") || line.includes("X-Forwarded-For entr"));
     };
     expect(await run({ proxies: 1 }, [{}, {}])).toEqual([missing("X-Forwarded-For", "GHOSTLY_RELAY_PROXIES")]);
-    expect(await run({ proxies: 2 }, [{ "x-forwarded-for": "198.51.100.1" }])).toEqual([missing("X-Forwarded-For", "GHOSTLY_RELAY_PROXIES")]);
+    expect(await run({ proxies: 2 }, [{ "x-forwarded-for": "198.51.100.1" }, {}])).toEqual([fewer(1, 2)]);
     expect(await run({ cloudflare: true }, [{}, { "x-forwarded-for": "198.51.100.1" }])).toEqual([missing("CF-Connecting-IP", "GHOSTLY_RELAY_CLOUDFLARE")]);
     // Cloudflare's header missing but the proxies' entry there: the client still counts by its own address.
     expect(await run({ cloudflare: true, proxies: 1 }, [{ "x-forwarded-for": "198.51.100.1" }])).toEqual([]);

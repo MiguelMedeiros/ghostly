@@ -241,8 +241,10 @@
     "fullInvited": "المجموعة ممتلئة ({{max}} من {{max}})، بما في ذلك دعوات لم يُرد عليها بعد: {{invited}}. لا يمكن دعوة أي شخص آخر حتى يغادر أحدهم.",
     "invite": "دعوة جهة اتصال",
     "inviteAction": "دعوة",
+    "inviteLabel": "دعوة {{name}}",
     "invited": "تمت الدعوة…",
     "makeAdmin": "تسليم الإشراف",
+    "makeAdminLabel": "تسليم الإشراف إلى {{name}}",
     "missing": "لم تصل بعد {{count}} من رسائل هذا العضو",
     "missingOne": "لم تصل بعد {{count}} رسالة من هذا العضو",
     "needsBothHint": "تتطلب المجموعات أن يكون التطبيقان متصلين ومحدَّثين",
@@ -252,6 +254,7 @@
     "notReachable": "غير متاح",
     "reachable": "متاح",
     "remove": "إزالة",
+    "removeLabel": "إزالة {{name}}",
     "removePicture": "إزالة الصورة"
   },
   "menu": {

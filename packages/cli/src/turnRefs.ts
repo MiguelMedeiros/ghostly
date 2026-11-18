@@ -21,6 +21,18 @@ const REMEMBERED = 1000;
  * everyone (never stored again) once at all. Oldest asked first out.
  */
 const remembered = new WeakMap<object, Map<string, string | null>>();
+/**
+ * Per node, the same for the newest messages of the last whole histories read, kept apart so that one read never pushes
+ * out a turn that was asked for: an agent catching up answers one old turn after another, and each of them read the whole
+ * history again (1,000 turns at 50,000 messages: 50 million hashes). Oldest read first out.
+ */
+const newestRead = new WeakMap<object, Map<string, string>>();
+const mapOf = <V>(maps: WeakMap<object, Map<string, V>>, owner: object) => {
+  let map = maps.get(owner);
+  if (!map) maps.set(owner, map = new Map());
+  return map;
+};
+const trim = (map: Map<string, unknown>) => { while (map.size > REMEMBERED) map.delete(map.keys().next().value!); };
 
 /**
  * `params` with each turn's id in `message`, `reply`, `messages`, `before` and `after` as the id its message is stored
@@ -44,26 +56,31 @@ export async function withStoredIds(ctx: ApiContext, params: Params): Promise<Pa
     return found.size === wanted.size;
   };
   if (!look((await node(ctx).messagePage({ linkId, limit: 200 })).messages)) {
-    let known = remembered.get(node(ctx));
-    if (!known) remembered.set(node(ctx), known = new Map());
+    const known = mapOf(remembered, node(ctx)), bulk = mapOf(newestRead, node(ctx));
     const unknown = new Set<string>();
     for (const ref of wanted) {
       if (found.has(ref)) continue;
-      const key = `${id}\n${ref}`, kept = known.get(key);
+      const key = `${id}\n${ref}`, kept = known.has(key) ? known.get(key) : bulk.get(key);
       if (kept === undefined) { unknown.add(ref); continue; }
       known.delete(key);
+      bulk.delete(key);
       // Deleted since: it names none now (and its refusal names the turn's id, not the one its sender chose).
       const now = kept !== null && await node(ctx).getMessage(linkId, kept) ? kept : null;
       known.set(key, now);
       if (now !== null) found.set(ref, now);
     }
     if (unknown.size) {
-      look(group ? await node(ctx).groupMessages({ groupId: id }) : await node(ctx).getMessages(linkId));
-      for (const ref of unknown) {
-        known.set(`${id}\n${ref}`, found.get(ref) ?? null);
-        if (known.size > REMEMBERED) known.delete(known.keys().next().value!);
-      }
+      const all = group ? await node(ctx).groupMessages({ groupId: id }) : await node(ctx).getMessages(linkId);
+      const newest = all.length - REMEMBERED;
+      all.forEach((message, at) => {
+        const ref = turnRef(id, message.id);
+        if (wanted.has(ref)) found.set(ref, message.id);
+        else if (at >= newest) { const key = `${id}\n${ref}`; bulk.delete(key); bulk.set(key, message.id); }
+      });
+      for (const ref of unknown) known.set(`${id}\n${ref}`, found.get(ref) ?? null);
     }
+    trim(known);
+    trim(bulk);
   }
   const stored = (value: unknown) => (isRef(value) ? found.get(value) ?? value : value);
   return {

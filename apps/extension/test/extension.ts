@@ -128,7 +128,10 @@ export async function askPeer(
 ): Promise<unknown> {
   const port = world.connectFrom(sender, "viewer");
   return new Promise((resolve) => {
-    port.onMessage.addListener((message: unknown) => resolve((message as { reply: unknown }).reply));
+    // The document says it took the ask (`ViewerTaken`) before its reply.
+    port.onMessage.addListener((message: unknown) => {
+      if (message && typeof message === "object" && "reply" in message) resolve(message.reply);
+    });
     port.onDisconnect.addListener(() => resolve(undefined));
     port.postMessage({ id: 1, request: { peerPubKeyZ32: PEER, serviceId: SERVICE, method: "GET", path: "/", headers: [], bodyB64: null, ...request } });
   });

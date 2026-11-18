@@ -215,6 +215,7 @@
     "payAmount": "Paga {{amount}} {{unit}}",
     "payLine": "Paga {{amount}}{{fees}}",
     "pendingMint": "Il pagamento è ancora in sospeso presso il mint.",
+    "pendingMintNext": "Si risolve da solo; non viene pagato nulla due volte. Finché il mint non risponde, l'importo risulta messo da parte sotto il saldo.",
     "primary": "Principale",
     "received": "⚡ {{amount}} {{unit}} ricevuti",
     "redeem": "Riscatta token ecash",

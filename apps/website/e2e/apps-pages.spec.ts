@@ -188,6 +188,13 @@ test.describe("once the released Ghostly has Apps", () => {
     await expect.poll(() => main.locator("img.ap-icon").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(96);
     await expect(main).toContainText("Clocks for both players.");
     await expect(main).toContainText("Listed by Test Store, reviewed by its maintainers.");
+    // The publisher's description, under a heading that says whose words they are, after every block of Ghostly's own:
+    // drawn first, a line like "✓ Verified by Ghostly, no internet" read as the site's, above the permissions.
+    const description = main.getByRole("region", { name: "From the publisher" });
+    await expect(description.locator("p")).toHaveText(["A test app for the site's store pages.", "Two players, one board, moves sent over the chat."]);
+    await expect(description.locator("p").first()).toHaveAttribute("dir", "auto");
+    const blocks = await main.locator(".ap-main > .ap-block").evaluateAll((els) => els.map((el) => el.getAttribute("aria-labelledby")));
+    expect(blocks).toEqual(["ap-can", "ap-runs", "ap-install", "ap-from"]);
     expect(others()).toEqual([]);
   });
 

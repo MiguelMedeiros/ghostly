@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmodSync, lstatSync, mkdirSync, readdirSync, statSync, type Stats } from "node:fs";
+import { chmodSync, lstatSync, mkdirSync, readdirSync, rmdirSync, statSync, type Stats } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { CliError } from "./errors";
@@ -8,16 +8,44 @@ import { CliError } from "./errors";
  * Where a socket goes when its path in the profile is longer than a Unix socket may be: `<base>/<prefix>-<hash of the
  * profile>/<leaf>`, in `$XDG_RUNTIME_DIR` or else the temp folder (macOS gives each user one) when that folder is the
  * user's alone, so no other user can make the folder first. When neither is, or the path would still be too long:
- * `/tmp/<prefix>-<uid>-<hash>/<leaf>`. Either way `privateFolder` checks the folder before use.
+ * `/tmp/<prefix>-<uid>-<hash>/<leaf>`. Either way `privateFolder` checks the folder before use, and
+ * `dropRuntimeFolder` removes it once its socket is gone.
  */
 export function runtimePath(prefix: string, profileDir: string, leaf: string): string {
   const hash = createHash("sha256").update(profileDir).digest("hex").slice(0, 24);
   for (const base of [process.env.XDG_RUNTIME_DIR, tmpdir()]) {
     if (!base || !isAbsolute(base) || !usersAlone(base)) continue;
     const path = join(base, `${prefix}-${hash}`, leaf);
-    if (Buffer.byteLength(path) <= 100) return path;
+    if (Buffer.byteLength(path) <= 100) return runtimeFolder(path);
   }
-  return join("/tmp", `${prefix}-${process.getuid?.() ?? 0}-${hash}`, leaf);
+  return runtimeFolder(join("/tmp", `${prefix}-${process.getuid?.() ?? 0}-${hash}`, leaf));
+}
+
+/** The folders `runtimePath` gave in this process: the only ones `dropRuntimeFolder` removes. */
+const runtimeFolders = new Set<string>();
+
+function runtimeFolder(path: string): string {
+  runtimeFolders.add(dirname(path));
+  return path;
+}
+
+/**
+ * Removes the folder `runtimePath` gave for `socket`, once that socket is gone (a daemon that stopped, a call that
+ * ended): left behind, one empty folder per long-path profile piled up in the temp folder. Only an empty folder of this
+ * user's that is not a link goes (`rmdir`, never what is in it): another socket in it (another call of the daemon's)
+ * keeps it, and it goes with the last one. Any other folder (the profile's own, `GHOSTLY_CALL_SOCKET_DIR`) is left
+ * alone. Nothing here fails the stop: a folder that cannot go stays, and is used again.
+ */
+export function dropRuntimeFolder(socket: string): void {
+  const folder = dirname(socket);
+  if (process.platform === "win32" || !runtimeFolders.has(folder)) return;
+  try {
+    const info = lstatSync(folder);
+    if (!info.isDirectory() || (process.getuid && info.uid !== process.getuid())) return;
+    rmdirSync(folder);
+  } catch {
+    // Not empty (ENOTEMPTY: another socket or file in it), or gone already (ENOENT): it stays as it is.
+  }
 }
 
 function usersAlone(path: string): boolean {
