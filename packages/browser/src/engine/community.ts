@@ -1588,7 +1588,7 @@ export class Communities {
       return false;
     }
     live.beaconFailedAt = 0; live.beaconKnown = true;
-    const first = !live.beaconAt, listed = new Set(freshHubs(live.beacon, now).map(h => h.key));
+    const first = !live.beaconAt, listed = new Set(freshHubs(this.hubs(live), now).map(h => h.key));
     // Hubs I do not know yet are members newer than my view of the roster: exactly whom I need to catch up.
     live.beacon = live.hubClocks.inMyTime(readBeacon(keys, records ?? []), now);
     // Both our apps were closed, and one is back before the other: each looks fast for the other's side of their edge,
@@ -1596,10 +1596,12 @@ export class Communities {
     // the first, while the apps of its last run may be coming back (`restartedUntil`), reads the second listed anew. At
     // the background pace each found the other's side half a minute later, and the second back waited 27-61 s for what
     // was said meanwhile (web build and CommunityWorld, 2026-11-17).
+    // Only the hubs I count: any member can write a key of nobody in the beacon, which no edge is ever opened to. Looked
+    // for, it stayed expected for the rest of the run, and kept this hub's reads at the door's share (CommunityWorld).
     if (first || now < (live.restartedUntil ?? 0)) {
       const edges = this.host.edges(groupId);
-      for (const h of freshHubs(live.beacon, now)) {
-        if (h.key === live.session.myKey || listed.has(h.key)) continue;
+      for (const h of freshHubs(this.hubs(live), now)) {
+        if (h.key === live.session.myKey || listed.has(h.key) || this.hubDead(groupId, live, h, now)) continue;
         const id = edges.get(h.key);
         if (!id) { if (live.hub) live.expect.add(h.key); }
         else if (!this.host.linkReady(id, 2)) this.host.expectPeer?.(id);
@@ -1886,6 +1888,8 @@ export class Communities {
       else wanted.add(key);
     }
     for (const [key, id] of existing) if (!wanted.has(key)) await this.host.closeEdge(id);
+    // Expected and no edge wanted to it: none will open, and kept, I would go on letting it in (`admitting`) for good.
+    for (const key of live.expect) if (!wanted.has(key)) live.expect.delete(key);
     for (const key of wanted) if (!existing.has(key) && key !== s.myKey) {
       const expect = live.expect.delete(key);
       try { await this.host.openEdge(s.state, key, expect); if (expect) live.awaited.set(key, now); } catch { /* next tick */ }
