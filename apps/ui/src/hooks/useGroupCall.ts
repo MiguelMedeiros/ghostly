@@ -418,7 +418,19 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
         const E = lk.RoomEvent;
         for (const event of [E.ParticipantConnected, E.ParticipantDisconnected, E.ParticipantNameChanged, E.TrackPublished,
           E.TrackUnpublished, E.TrackSubscribed, E.TrackUnsubscribed, E.TrackMuted, E.TrackUnmuted, E.LocalTrackPublished,
-          E.LocalTrackUnpublished, E.ActiveSpeakersChanged, E.Reconnected]) room.on(event, s.refresh);
+          E.LocalTrackUnpublished, E.ActiveSpeakersChanged, E.Reconnected, E.ActiveDeviceChanged]) room.on(event, s.refresh);
+        // LiveKit restarts your own microphone or camera by itself (a device came or went, access given back): the old
+        // capture is stopped and a new one taken, told only on the track, and as a device change only when the device
+        // differs. Read again then, or the device checks would take the stopped one for an unplugged device.
+        const restarted = lk.TrackEvent?.Restarted;
+        const followRestarts = () => s.refresh();
+        if (restarted) {
+          room.on(E.LocalTrackPublished, (pub?: LocalTrackPublication) => {
+            pub?.track?.off(restarted, followRestarts);
+            pub?.track?.on(restarted, followRestarts);
+          });
+          room.on(E.LocalTrackUnpublished, (pub?: LocalTrackPublication) => void pub?.track?.off(restarted, followRestarts));
+        }
         if (encryption) {
           room.on(E.TrackPublished, (pub: RemoteTrackPublication) => admit(pub));
           // Not asked for with autoSubscribe off; a track in the clear that comes all the same is dropped.
