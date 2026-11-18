@@ -52,6 +52,7 @@
     "leaveBody": "La valeur affichée ne fonctionne qu’avec ces étapes. Une fois fermées, un nouvel essai donne une nouvelle valeur, et celle que vous avez publiée devra être remplacée.",
     "leaveTitle": "Fermer sans enregistrer ?",
     "linkable": "Partager la même identité avec plusieurs contacts leur permet de savoir qu'il s'agit de la même personne.",
+    "lookedUp": "Trouvé : {{what}}",
     "lookingUp": "Recherche…",
     "none": "Aucun type d'identité ne peut encore être ajouté dans cette app.",
     "openSigner": "Ouvrez votre signataire pour approuver",
