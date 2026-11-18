@@ -110,7 +110,8 @@ export interface NetworkSettings {
   pushRelay: string;
   /**
    * The push relay answered the last wake-up, but not as a push relay: its HTTP status and its own error text, when it
-   * gave one (`EngineState.pushRelayRefused`). Absent while it forwards them, or where this app posts them itself.
+   * gave one (`EngineState.pushRelayRefused`); `http` 0 when its address answered without CORS, which the page may not
+   * read. Absent while it forwards them, or where this app posts them itself.
    */
   pushRelayRefused?: { http: number; text?: string };
   /**
