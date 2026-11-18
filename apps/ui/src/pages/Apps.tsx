@@ -237,8 +237,11 @@ const StoreBlock = memo(function StoreBlock({ store, alone, installed, onInstall
     focusBack();
     setBusy(true); setPending(which);
     // A store removed meanwhile (another tab): said so, and the stores read again, so its block goes rather than staying
-    // to say it at each Refresh.
-    try { await call(); done?.(); onChanged(); } catch (e) { onError(e); if (appErrorCode(e) === "no-store") onChanged(); } finally { setBusy(false); setPending(null); }
+    // to say it at each Refresh. The button that had the focus goes with it, as after a Remove here: removed, too.
+    try { await call(); done?.(); onChanged(); } catch (e) {
+      onError(e);
+      if (appErrorCode(e) === "no-store") { onRemoved(store.key); onChanged(); }
+    } finally { setBusy(false); setPending(null); }
   };
   // A store may list up to 4096 apps: one page of them at a time, and a search over them all.
   const [limit, setLimit] = useState(LISTING_PAGE);
