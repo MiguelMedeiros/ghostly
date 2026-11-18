@@ -73,6 +73,11 @@ const noLint = flag("--no-lint");
 const noTypecheck = flag("--no-typecheck");
 const noStack = flag("--no-stack");
 const port = option("--port") ?? process.env.E2E_WEB_PORT;
+// A mistyped port would only show at the e2e step, after the unit tests, lint, typecheck and the web build.
+if (port && !(/^\d+$/.test(port) && Number(port) >= 1 && Number(port) <= 65535)) {
+  console.error(`${flag("--port") ? `--port ${port}` : `E2E_WEB_PORT=${port}`}: give a port number from 1 to 65535 (e.g. --port 50310)`);
+  process.exit(2);
+}
 const webUrl = process.env.E2E_WEB_URL;
 // --unit-group <i>/<n>: only the unit projects of group i of n (CI's draft tier runs one group per runner; select.mjs
 // UNIT_ALONE says which project goes where, UNIT_HALVED which run in two halves, `vitest --shard`, in two groups).
