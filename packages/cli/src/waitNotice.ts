@@ -72,9 +72,9 @@ export function pinWaitsNote(chat: DhtOnly, ref: string, remove: boolean): strin
 
 /**
  * Why a file in a 1:1 chat waits, or undefined: its bytes go on the live session only (files/3), never over the DHT,
- * as a pin's. `file send` says it in `note`, a `--wait sent` or `file wait` timeout in its words and `details.note`,
- * `file list` on the waiting row (files.ts `fileWaitsLive`): they said it still goes by itself, or that it waited for
- * a connection to the contact, and it never went while the chat stayed on the DHT only.
+ * as a pin's. A `--wait sent` or `file wait` timeout says it in its words (files.ts `fileWaitsLive`): they said it
+ * still goes by itself, or that it waited for a connection to the contact, and it never went while the chat stayed on
+ * the DHT only.
  */
 export function fileWaitsNote(chat: DhtOnly, ref: string): string | undefined {
   const who = dhtOnlyWho(chat, ref);
@@ -214,13 +214,14 @@ export function dhtOnlyChat(method: string, params: Record<string, unknown>): st
  * That call's notice once its chat was read (`chat.get`): said with why it waits when the chat is on the DHT only,
  * else as it was. A hold whose time is up and still ending reads as no hold there (`heldUntil`), so as a DHT only chosen.
  */
-export function dhtOnlyNotice(notice: WaitNotice, method: string, params: Record<string, unknown>, chat: { deliveryMode?: unknown; peerDeliveryMode?: unknown; heldUntil?: unknown }, mode: "daemon" | "one-shot"): WaitNotice {
+export function dhtOnlyNotice(notice: WaitNotice, method: string, params: Record<string, unknown>, chat: { deliveryMode?: unknown; peerDeliveryMode?: unknown; heldUntil?: unknown; text?: unknown }, mode: "daemon" | "one-shot"): WaitNotice {
   const mine = chat.deliveryMode === "dht";
   const heldUntil = mine && typeof chat.heldUntil === "number" ? chat.heldUntil : null;
   const where: DhtOnly = { mine, theirs: chat.peerDeliveryMode === "dht", heldUntil, oneShot: mode === "one-shot" };
   if (method === "file.send") {
-    // A file send: a daemon's that does not wait answers once the file is copied in, and its answer's `note` says it.
-    if (mode === "daemon" && params.wait !== "sent") return notice;
+    // A file send: a daemon's that does not wait answers once the file is copied in, with no wait to say it of.
+    // A chat that holds for the contact (WISP 404) sends the file without a live session (node.ts `sendFile`).
+    if ((mode === "daemon" && params.wait !== "sent") || chat.text === "hold") return notice;
     const note = fileWaitsNote(where, params.chat as string);
     return note ? { waiting: `${notice.waiting}. ${note}`, stopped: `${notice.stopped.replace(` and ${goesOn(mode)}`, "")}. ${note}` } : notice;
   }
