@@ -4,7 +4,7 @@ import { MessageInput } from "../../components/MessageInput";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { renderApp } from "../render";
 
-// covers: app.composer.toast
+// covers: chat.paired.send
 
 /*
  * The composer's notice card hides itself after a while. A composer that goes away (the chat closed, the test's page
