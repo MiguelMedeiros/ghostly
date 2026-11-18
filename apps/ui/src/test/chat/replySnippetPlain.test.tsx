@@ -90,6 +90,18 @@ describe("a message with a link and formatting where it is quoted or pinned", ()
     expect(spoiled.snippet).not.toContain("secret");
   });
 
+  it("a button press keeps the question's line as it came, shown plain, its spoiler covered", () => {
+    // The press quotes the question as the presser answered it (WISP 406): the kept wire line, read as the chat list does.
+    const original = message("Which one?");
+    const press = (snippet: string) => quoteFor({ id: WIRE, snippet, from: "peer", messageId: original.id, button: "b1" }, replyIndex([original]), names);
+    const quote = press("See [the docs](https://ghostly.tools/docs) **now**");
+    expect(quote.state).toBe("found");
+    expect(quote.snippet).toBe("See the docs now");
+    const spoiled = press("Pick one ||secret||");
+    expect(spoiled.snippet).toContain("\u2592\u2592\u2592");
+    expect(spoiled.snippet).not.toContain("secret");
+  });
+
   it("what a reply sends is unchanged: the wire's line is the core snippet of the text", () => {
     expect(sentReply(message(TEXT))?.snippet).toBe(replySnippet(TEXT));
   });
