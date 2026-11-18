@@ -342,6 +342,9 @@ describe("the audio socket", () => {
     const socket = await AudioSocket.open(path, 48000, { onAudio: () => {} });
     expect(statSync(join(path, "..")).mode & 0o777).toBe(0o700);
     await socket.close();
+    // Its folder goes with its last socket; a shared one made in its place is refused.
+    expect(existsSync(join(path, ".."))).toBe(false);
+    mkdirSync(join(path, ".."), { mode: 0o755 });
     chmodSync(join(path, ".."), 0o755);
     await expect(AudioSocket.open(path, 48000, { onAudio: () => {} })).rejects.toThrow(/not a folder of this user's alone/);
     rmSync(join(path, ".."), { recursive: true, force: true });
