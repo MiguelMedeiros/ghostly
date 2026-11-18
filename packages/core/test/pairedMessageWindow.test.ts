@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GhostLink, MESSAGE_PACED, MESSAGE_RECEIVE_LIMITS, pairedMessageFrame, type GhostLinkOptions } from "../src/ghostlink";
+import { GhostLink, MESSAGE_PACED, MESSAGE_RECEIVE_LIMITS, MessagePace, pairedMessageFrame, type GhostLinkOptions } from "../src/ghostlink";
 import { createLink } from "../src/invite";
 import { createIdentity } from "../src/identity";
 import type { BoundChannel, NativeBinding, NativeEndpoint } from "../src/pairedTransports";
@@ -13,7 +13,8 @@ const hex = (c: string) => c.repeat(64);
 const links: GhostLink[] = [];
 afterEach(async () => { vi.useRealTimers(); await Promise.all(links.splice(0).map(link => link.stop(false))); });
 
-function channelPair(sent: string[]): [FrameChannel, FrameChannel] {
+/** `latencyMs`: each frame lands that long after it is sent (a network's), else at once. */
+function channelPair(sent: string[], latencyMs = 0): [FrameChannel, FrameChannel] {
   type End = FrameChannel & { peer?: End; closed: boolean; receive(data: string): void };
   const make = (log?: string[]): End => {
     let reader: FrameChannel["onMessage"] = null;
@@ -27,7 +28,8 @@ function channelPair(sent: string[]): [FrameChannel, FrameChannel] {
         if (this.closed) throw new Error("Channel closed");
         if (typeof data !== "string") throw new Error("Text only");
         log?.push(data);
-        queueMicrotask(() => this.peer?.receive(data));
+        if (latencyMs) setTimeout(() => this.peer?.receive(data), latencyMs);
+        else queueMicrotask(() => this.peer?.receive(data));
       },
       close() { if (this.closed) return; this.closed = true; this.onClose?.(); this.peer?.close(); },
     };
@@ -38,7 +40,7 @@ function channelPair(sent: string[]): [FrameChannel, FrameChannel] {
 }
 
 /** A dials B; `a.sent` is what A says on the session, `a.messages` the texts A was handed. */
-function pair() {
+function pair(bOptions: Partial<GhostLinkOptions> = {}, latencyMs = 0) {
   const invitation = createLink();
   const [ia, ib] = [createIdentity(), createIdentity()];
   const binding: NativeBinding = { transport: "iroh/1", context: hex("c"), identities: [hex("a"), hex("b")] };
@@ -50,7 +52,7 @@ function pair() {
       transport: "iroh/1", descriptor: { id: name.repeat(64), relay: null, addresses: ["127.0.0.1:1"] }, onConnection: null, onDescriptor: null,
       close: async () => {},
       connect: async (): Promise<BoundChannel> => {
-        const [mine, other] = channelPair(sent);
+        const [mine, other] = channelPair(sent, latencyMs);
         theirs = other;
         queueMicrotask(() => endpoints.b.onConnection?.({ channel: other, binding }));
         return { channel: mine, binding };
@@ -72,7 +74,7 @@ function pair() {
     return link;
   };
   const a = make("a", invitation.mine, ia, ib, { events: { onMessage: message => { messages.push(message.text); } } });
-  const b = make("b", invitation.invite, ib, ia);
+  const b = make("b", invitation.invite, ib, ia, bOptions);
   return { a, b, sent, messages, theirs: () => theirs! };
 }
 
@@ -156,6 +158,51 @@ describe("texts a contact sends on a paired session", () => {
     expect(messages).toHaveLength(hourly + 1);
     expect(receipts(sent)).toBe(hourly + 1);
   }, 60_000);
+
+  it("the sender hears once when the contact's windows have room again, not before", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    const onTextRoom = vi.fn();
+    const { a, b, sent, messages } = pair({ events: { onTextRoom } }, 20);
+    void a.connect(10_000);
+    for (let i = 0; i < 100 && !(a.isDataLinkOpen && b.isDataLinkOpen); i++) await vi.advanceTimersByTimeAsync(10);
+    expect(a.isDataLinkOpen && b.isDataLinkOpen).toBe(true);
+    const { burst, burstWindowMs } = MESSAGE_RECEIVE_LIMITS;
+    for (let n = 0; n < burst; n++) expect(await b.sendMessage(`text ${n}`, 1_790_000_000_000 + n, id(n))).toBeNull();
+    // The next one finds no room before any receipt is in (a burst goes faster than they come): the room it waits for
+    // is counted from them once they come, not a minute past the sends.
+    expect(await b.sendMessage("one more", 1_790_000_001_000, id(burst))).toBe(MESSAGE_PACED);
+    expect(receipts(sent)).toBe(0);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(messages).toHaveLength(burst);
+    expect(receipts(sent)).toBe(burst);
+    expect(b.textRoom).toBe(false);
+    await vi.advanceTimersByTimeAsync(burstWindowMs - 100);
+    expect(onTextRoom).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(onTextRoom).toHaveBeenCalledOnce();
+    expect(b.textRoom).toBe(true);
+    expect(await b.sendMessage("one more", 1_790_000_001_000, id(burst))).toBeNull();
+  });
+
+  it("the room a sender waits for comes as its texts leave the contact's windows: the burst's, the hour's, and a minute late with no receipt", () => {
+    let now = 1_000_000;
+    const pace = new MessagePace(() => now);
+    const { burst, burstWindowMs, hourly, hourWindowMs } = MESSAGE_RECEIVE_LIMITS;
+    for (let n = 0; n < burst; n++) { pace.took(id(n)); now++; }
+    expect(pace.roomIn()).toBe(burstWindowMs + 60_000 - burst);
+    for (let n = 0; n < burst; n++) pace.answered(id(n));
+    expect(pace.roomIn()).toBe(burstWindowMs);
+    now += burstWindowMs;
+    expect(pace.roomIn()).toBe(0);
+    // Up to the hour's total, window after window: the hour's first text leaving is the next room.
+    const first = now;
+    for (let n = burst; n < hourly; n++) {
+      if (pace.roomIn()) now += pace.roomIn();
+      pace.took(id(n));
+      pace.answered(id(n));
+    }
+    expect(pace.roomIn()).toBe(first - burstWindowMs + hourWindowMs - now);
+  });
 
   it("a refused text is counted, not read: a flood of malformed ones does not reach the app either", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
