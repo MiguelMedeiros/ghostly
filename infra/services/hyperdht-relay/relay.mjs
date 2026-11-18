@@ -813,8 +813,9 @@ export function addressKey(address) {
  * the first `most` of each kind in a minute, then, once a minute while it goes on, one line with how many were left out
  * (`refused address (812 more this minute, not logged)`). A client repeating what it is refused for would otherwise write
  * a line per attempt, thousands a second, and rotate the whole log away. The push relay's refusalLog, with a few lines.
+ * `explain` names what a kind means (limitReasons): it goes on the kind's first line only, the short ones follow it.
  */
-export function refusalLines (log, { most = 5 } = {}) {
+export function refusalLines (log, { most = 5, explain = new Map() } = {}) {
   // Kind → lines written and lines left out since the last flush. Present: the kind has had a line in this minute.
   const kinds = new Map()
   return {
@@ -822,7 +823,11 @@ export function refusalLines (log, { most = 5 } = {}) {
       const kind = words.join(' ')
       const seen = kinds.get(kind) ?? { shown: 0, more: 0 }
       kinds.set(kind, seen)
-      if (seen.shown < most) { seen.shown++; log(...words) } else seen.more++
+      if (seen.shown < most) {
+        const reason = seen.shown++ === 0 ? explain.get(kind) : undefined
+        if (reason) log(`${kind}:`, reason)
+        else log(...words)
+      } else seen.more++
     },
     flush: () => {
       for (const [kind, seen] of kinds) {
@@ -831,6 +836,36 @@ export function refusalLines (log, { most = 5 } = {}) {
       }
     },
   }
+}
+
+const seconds = ms => ms % 1000 ? `${ms} ms` : `${ms / 1000} s`
+const counted = (count, word) => `${count} ${count === 1 ? word : `${word}s`}`
+const mebibytes = bytes => bytes % (1024 * 1024) ? `${bytes} bytes` : `${bytes / 1024 / 1024} MiB`
+
+/**
+ * Each limit's log kind (`refused address`, `dropped idle`), with the limit it reached and the setting that moves it,
+ * for its first line: `refused address: 16 clients from one address (GHOSTLY_RELAY_CLIENTS_PER_ADDRESS)`. An operator
+ * whose users cannot connect reads the setting to change there, not in this file.
+ */
+export function limitReasons (limits) {
+  const quarter = Math.max(1, Math.floor(limits.handshakes / 4))
+  return new Map([
+    ['refused full', `${counted(limits.clients, 'client')} (${limitVariable('clients')})`],
+    ['refused address', `${counted(limits.clientsPerAddress, 'client')} from one address (${limitVariable('clientsPerAddress')})`],
+    ['dropped room', `the oldest client of the address holding the most, for a newcomer on a relay full at ${counted(limits.clients, 'client')} (${limitVariable('clients')})`],
+    ['dropped idle', `no listen and no dial for ${seconds(limits.idleMs)} (${limitVariable('idleMs')})`],
+    ['dropped no pong', `no answer to the last ping by the next, ${seconds(limits.pingMs)} later (${limitVariable('pingMs')})`],
+    ['dropped listen rate', `${counted(limits.listensPerMinute, 'listen')} a minute (${limitVariable('listensPerMinute')})`],
+    ['dropped listen limit', `${counted(limits.listens, 'key')} listened on at once (${limitVariable('listens')})`],
+    ['dropped dial limit', `${counted(limits.connectsPerMinute, 'dial')} a minute (${limitVariable('connectsPerMinute')})`],
+    ['dropped stream limit', `${counted(limits.streams, 'stream')} open at once (${limitVariable('streams')})`],
+    ['dropped queue', `${mebibytes(limits.queuedBytes)} waiting for the client and its far peers (${limitVariable('queuedBytes')})`],
+    ['closed far queue', `a far peer leaving half of ${mebibytes(limits.queuedBytes)} untaken on one stream (${limitVariable('queuedBytes')})`],
+    ['dropped queue total', `${mebibytes(limits.queuedTotalBytes)} waiting over all clients, the one holding the most dropped (${limitVariable('queuedTotalBytes')})`],
+    ['refused handshake limit', `${counted(limits.handshakes, 'handshake')} waiting on one client (${limitVariable('handshakes')})`],
+    ['refused handshake listen share', `${counted(quarter, 'incoming handshake')} waiting on one key, a quarter of ${limitVariable('handshakes')}`],
+    ['refused handshake incoming', `${counted(limits.handshakes - quarter, 'incoming handshake')} waiting on one client, the rest of ${limitVariable('handshakes')} kept for its dials`],
+  ])
 }
 
 /** How often one address may have a client dropped to make room for its own on a full relay (see makeRoom). */
@@ -909,7 +944,7 @@ export async function startRelay(options = {}) {
   // Compared as a browser writes them: `https://app.example/` in the settings still lets https://app.example in.
   const origins = new Set((options.origins ?? []).map(origin => originOf(origin) ?? origin))
   const refusedOrigin = originRefusals(log)
-  const refusals = refusalLines(log)
+  const refusals = refusalLines(log, { explain: limitReasons(limits) })
   const flushing = setInterval(refusals.flush, 60_000)
   flushing.unref?.()
   // Once per start each: a proxy in front the relay was not told about, or one it was told about that does not write
