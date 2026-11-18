@@ -411,6 +411,38 @@ describe("Join's Scan and Cancel by keyboard", () => {
   });
 });
 
+// covers: app.accessibility
+/**
+ * Join's own Join, under a code typed in the field, pressed from the keys: disabled while the group's link was joined,
+ * it dropped the focus to the page behind the dialog (Chromium), and it stayed there after a refusal. happy-dom keeps
+ * the focus on a disabled button, so this checks what the button is (focusSafeButton.test.tsx).
+ */
+describe("Join's Join by keyboard", () => {
+  it("stays a button the focus is on while a group's link is joined and after a refusal, a second press ignored", async () => {
+    let refuse!: (cause: Error) => void;
+    const onJoinGroup = vi.fn(() => new Promise<void>((_, reject) => { refuse = reject; }));
+    const { user, engine } = renderApp(<JoinDialog onJoin={() => {}} onJoinGroup={onJoinGroup} onClose={() => {}} />);
+    engine.readClipboardText = vi.fn(async () => "hello there");
+    await user.click(screen.getByRole("button", { name: "Paste from clipboard", hidden: true }));
+    const field = await screen.findByRole("textbox", { name: "Invite code", hidden: true });
+    await user.clear(field);
+    await user.paste(encodeGroupEntryLink({ g: "AbCdEfGhIjKlMnOpQrStUv", host: createIdentity().pubKeyZ32 }));
+    const join = screen.getByRole("button", { name: "Join chat", hidden: true });
+    act(() => join.focus());
+    await user.keyboard("{Enter}");
+    expect(onJoinGroup).toHaveBeenCalledTimes(1);
+    expect(join).toBeEnabled();
+    expect(join).toHaveAttribute("aria-disabled", "true");
+    await user.keyboard("{Enter}");
+    expect(onJoinGroup).toHaveBeenCalledTimes(1);
+    await act(async () => refuse(new Error("Ghostly is still starting")));
+    expect(await screen.findByRole("alert", { hidden: true })).toHaveTextContent("Ghostly is still starting");
+    expect(join).toHaveFocus();
+    expect(join).toBeEnabled();
+    expect(join).not.toHaveAttribute("aria-disabled");
+  });
+});
+
 // covers: invite.qr.camera
 /**
  * Join's camera scan (apps/ui/src/components/JoinDialog.tsx, lib/qrReader.ts `scanQrFrames`) when the camera ends under
@@ -512,6 +544,23 @@ describe("A QR screenshot pasted or dropped on Join", () => {
     expect(open).not.toHaveBeenCalled();
     expect(location.href).toBe(before);
     open.mockRestore();
+  });
+
+  it("Open image, picked from the keys, keeps the focus while the picture is read and after it is refused", async () => {
+    let read!: () => void;
+    vi.stubGlobal("createImageBitmap", vi.fn(() => new Promise((resolve) => { read = () => resolve({ width: 400, height: 400, close() {} }); })));
+    const { user } = renderApp(<JoinDialog onJoin={() => {}} onClose={() => {}} />);
+    const open = screen.getByLabelText<HTMLInputElement>("Open image");
+    act(() => open.focus());
+    await user.upload(open, png());
+    await waitFor(() => expect(createImageBitmap).toHaveBeenCalledTimes(1));
+    // Disabled, a file field drops the focus to the page as a button does.
+    expect(open).toBeEnabled();
+    expect(open).toHaveAttribute("aria-disabled", "true");
+    await act(async () => read());
+    expect(await screen.findByRole("alert")).toHaveTextContent("No QR found. Try a clearer image.");
+    expect(open).toHaveFocus();
+    expect(open).not.toHaveAttribute("aria-disabled");
   });
 
   it("a picture with no QR says so", async () => {
