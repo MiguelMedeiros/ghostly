@@ -943,6 +943,8 @@ export class RelayTransport implements PkarrTransport {
 
   /** What `put` refuses a request to this relay with before its budget is asked; null when it gets that far. */
   private refusal(relay: string, probe: boolean): Error | null {
+    // Taken off the list (`setRelays`) while a publish that started before waited on it: it gets nothing more.
+    if (!this.relays.includes(relay)) return new RelayLeftAloneError(`${relay} is no longer a listed relay`);
     if (!probe && this.networkCoolingDown(relay, "PUT")) return new RelayNoAnswerError(`${relay} did not answer a moment ago; retry shortly`, false);
     const limited = this.rateLimitedFor(relay);
     if (limited > 0) return new DiscoveryBudgetError(limited, "Discovery relay is cooling down after a 429; retry shortly");
@@ -956,7 +958,7 @@ export class RelayTransport implements PkarrTransport {
 
   /** One relay's packet for a key, read now: its time, kept for `nextTimestamp`. Null when it has none or does not answer. */
   private async heldAt(relay: string, pubKeyZ32: string, who: Asker): Promise<bigint | null> {
-    if (!this.take(relay, who, pubKeyZ32)) return null;
+    if (!this.relays.includes(relay) || !this.take(relay, who, pubKeyZ32)) return null;
     try {
       let payload: Uint8Array | undefined;
       const response = await this.request(`${relay}/${pubKeyZ32}`, { method: "GET" }, async (r, signal) => {
@@ -1072,8 +1074,10 @@ export class RelayTransport implements PkarrTransport {
     const edgeSignal = isGroupSignal(asker(options, true));
     const failed = new Set<string>();
     // Each relay that surely does not hold the packet: not asked now, refused in an answer (a 4xx), or never reached.
-    const nowhere = this.relays.map(() => false);
-    const puts = this.relays.map(async (relay, i) => {
+    // The list this publish started with: `setRelays` may change `this.relays` while its puts are out.
+    const relays = this.relays;
+    const nowhere = relays.map(() => false);
+    const puts = relays.map(async (relay, i) => {
       const slot = `${relay} ${pubKeyZ32}`;
       const previous = this.lastPut.get(slot);
       this.lastPut.set(slot, timestamp);
@@ -1139,7 +1143,8 @@ export class RelayTransport implements PkarrTransport {
           // Its budget (or its rate limit) held it back there: that relay gets it once it frees a request (`catchUp`).
           results.forEach((r, i) => {
             if (r.status !== "rejected") return;
-            if (isDiscoveryBudgetError(r.reason) || (edgeSignal && failed.has(this.relays[i]))) this.catchUpLater(this.relays[i], pubKeyZ32, payload, timestamp, edgeSignal ? asker(options, true) : CATCH_UP_ASKER);
+            if (!this.relays.includes(relays[i])) return;
+            if (isDiscoveryBudgetError(r.reason) || (edgeSignal && failed.has(relays[i]))) this.catchUpLater(relays[i], pubKeyZ32, payload, timestamp, edgeSignal ? asker(options, true) : CATCH_UP_ASKER);
           });
           return;
         }
@@ -1204,7 +1209,8 @@ export class RelayTransport implements PkarrTransport {
      */
     const next = (hedge: boolean): string | null => {
       for (const relay of order) {
-        if (tried.has(relay)) continue;
+        // Taken off the list (`setRelays`) since this read began: not asked, not even as a hedge or in a failed one's place.
+        if (tried.has(relay) || !this.relays.includes(relay)) continue;
         if (relay !== probe && this.networkCoolingDown(relay, "GET")) { tried.add(relay); down = true; continue; }
         const limited = this.rateLimitedFor(relay);
         if (limited > 0) { tried.add(relay); budgetWait = Math.min(budgetWait, limited); continue; }
