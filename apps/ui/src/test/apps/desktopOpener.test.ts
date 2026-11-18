@@ -173,7 +173,7 @@ describe("opening an app on Desktop", () => {
     const serve = (await answer("app-1", 2)).value as string;
     request("app-1", { id: 3, type: "files.unserve", args: [serve] });
     await answer("app-1", 3);
-    expect(calls.filter((c) => c.command === "app_title").map((c) => c.args.title)).toEqual(["Chess · sharing a file with Ana", "Chess with Ana"]);
+    expect(calls.filter((c) => c.command === "app_title").map((c) => c.args.title)).toEqual(["⁨Chess⁩ · sharing a file with ⁨Ana⁩", "⁨Chess⁩ with ⁨Ana⁩"]);
   });
 
   it("opens a window with the checked entry and what the person granted, and runs the web broker for it", async () => {
