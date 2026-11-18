@@ -114,10 +114,12 @@ describe("a chat's header on a phone", () => {
   });
 });
 
-// A phone on its side (844x390 with an iPhone's safe areas) left the chat a 330 px pane beside the list: the header
-// followed the window, had every button, and cut the name to "Con…". On a touch screen it follows the pane now.
-describe("a chat's header in a pane as narrow as a phone, in a wide window", () => {
-  let paneWidth = 330;
+// A phone on its side (844x390 with an iPhone's safe areas) left the chat a 330 px column beside the list: the header
+// followed the window, had every button, and cut the name to "Con…". On a touch screen it follows the column now.
+describe("a chat's header in a column as narrow as a phone, in a wide window", () => {
+  let columnWidth = 330;
+  /** The chat's pane: as wide as its column, unless a mini-app or the identities dock beside it. */
+  let paneWidth: number | undefined;
   const resized: (() => void)[] = [];
   /** A touch screen with no mouse (`any-pointer` coarse, never fine), or a mouse. */
   function pointer(touch: boolean) {
@@ -128,15 +130,17 @@ describe("a chat's header in a pane as narrow as a phone, in a wide window", () 
         : matchMedia(query));
   }
   beforeEach(() => {
-    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) { return this.classList.contains("chat-pane") ? paneWidth : 0; });
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("chat-column") ? columnWidth : this.classList.contains("chat-pane") ? paneWidth ?? columnWidth : 0;
+    });
     vi.stubGlobal("ResizeObserver", class {
       constructor(private readonly callback: ResizeObserverCallback) {}
-      observe(target: Element) { if (target.classList.contains("chat-pane")) resized.push(() => this.callback([], this as never)); }
+      observe(target: Element) { if (target.classList.contains("chat-column")) resized.push(() => this.callback([], this as never)); }
       unobserve() {}
       disconnect() {}
     });
   });
-  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); resized.length = 0; paneWidth = 330; });
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); resized.length = 0; columnWidth = 330; paneWidth = undefined; });
 
   it("is the phone's on a touch screen: the name, the connection, a voice call and ⋮, and the rest in ⋮", async () => {
     pointer(true);
@@ -148,33 +152,45 @@ describe("a chat's header in a pane as narrow as a phone, in a wide window", () 
     expect(screen.getByRole("heading", { level: 1 })).toHaveClass("shrink-0", "max-w-full");
   });
 
-  // A Desktop window at its default 900x700 leaves the chat a 479 px pane beside the 420 px list: with a mouse, the video
-  // call stays in the row (the macOS calls e2e starts one there).
+  // A Desktop window at its default 900x700 leaves the chat a 479 px column beside the 420 px list: with a mouse, the
+  // video call stays in the row (the macOS calls e2e starts one there).
   it("keeps every button with a mouse, a Desktop window at its default size", async () => {
     pointer(false);
-    paneWidth = 479;
+    columnWidth = 479;
     viewport(900, 700);
     openChat();
     await screen.findByTestId("chat-options");
     for (const id of MOVED) expect(screen.getByTestId(id), id).toBeInTheDocument();
   });
 
-  it("has every button again as the pane grows past a phone's, and the phone's as it narrows", async () => {
+  it("has every button again as the column grows past a phone's, and the phone's as it narrows", async () => {
     pointer(true);
     viewport(1024, 768);
     openChat();
     await screen.findByTestId("chat-options");
     expect(screen.queryByTestId("call-video")).not.toBeInTheDocument();
-    paneWidth = 604;
+    columnWidth = 604;
     act(() => resized.forEach(resize => resize()));
     for (const id of MOVED) expect(screen.getByTestId(id), id).toBeInTheDocument();
-    // Hidden (a chat kept loaded off screen) it is 0 wide: the header stays as it was.
-    paneWidth = 0;
+    // Hidden (a chat kept loaded off screen, or under a full-width app) it is 0 wide: the header stays as it was.
+    columnWidth = 0;
     act(() => resized.forEach(resize => resize()));
     expect(screen.getByTestId("call-video")).toBeInTheDocument();
-    paneWidth = 480;
+    columnWidth = 480;
     act(() => resized.forEach(resize => resize()));
     expect(screen.queryByTestId("call-video")).not.toBeInTheDocument();
+  });
+
+  // An iPad on its side (1024x768) with a mini-app docked beside the chat: the pane is 604 px, the app takes 360 and
+  // the header's column has 244. The header follows the column, not the pane.
+  it("is the phone's in a wide pane whose column is narrow, a mini-app docked beside it", async () => {
+    pointer(true);
+    paneWidth = 604;
+    columnWidth = 244;
+    viewport(1024, 768);
+    openChat();
+    await screen.findByTestId("chat-options");
+    for (const id of MOVED) expect(screen.queryByTestId(id), id).not.toBeInTheDocument();
   });
 });
 
