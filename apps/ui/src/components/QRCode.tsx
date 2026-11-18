@@ -77,7 +77,8 @@ export function QRCodeDisplay({ value, qr, label, copyLabel, title }: QRCodeDisp
       {canShare && <button onClick={() => {
         setError("");
         void navigator.share({text: value}).catch((cause: unknown) => {
-          if (!(cause instanceof DOMException && cause.name === "AbortError")) setError(t("invite.shareFailed"));
+          // Points to the Copy button that is there: Add a device's copies a link, not an invite.
+          if (!(cause instanceof DOMException && cause.name === "AbortError")) setError(t(copyLabel ? "invite.shareFailedLink" : "invite.shareFailed"));
         });
       }} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-4 text-xs text-text-muted cursor-pointer hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 16V3m0 0L7 8m5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>

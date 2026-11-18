@@ -1132,6 +1132,44 @@ describe("MessageBubble: deleting", () => {
     expect(options("text a")).toHaveFocus();
   });
 
+  it.each([
+    ["its ⋮", null],
+    ["its menu", "message-menu"],
+    ["its delete confirmation", "message-delete-menu"],
+    ["its reaction bar", "reaction-bar"],
+    ["its details", "message-details"],
+  ])("a contact's message deleted for everyone with the focus on %s: the focus goes to the next message's ⋮, not to the page", async (_, opened) => {
+    let take = (_id: string) => {};
+    function List() {
+      const [ids, setIds] = useState(["a", "b", "c"]);
+      take = (id) => setIds((all) => all.filter((x) => x !== id));
+      return <div data-message-list>{ids.map((id) => (
+        <MessageBubble key={id} message={message({ id, text: `text ${id}` })} onDelete={() => {}} onReact={() => {}} />
+      ))}</div>;
+    }
+    const { user } = renderApp(<List />);
+    const options = (text: string) => within(screen.getByText(text).closest<HTMLElement>("[data-message-row]")!).getByTestId("message-options");
+    options("text b").focus();
+    if (opened === "message-details") {
+      await user.keyboard("{Enter}");
+      screen.getByTestId("message-details").focus();
+      await user.keyboard("{Enter}");
+    } else if (opened === "reaction-bar") {
+      await user.keyboard("{Enter}");
+      screen.getByTestId("message-react").focus();
+      await user.keyboard("{Enter}");
+    } else if (opened) {
+      await user.keyboard("{Enter}");
+      if (opened === "message-delete-menu") { screen.getByTestId("message-delete").focus(); await user.keyboard("{Enter}"); }
+    }
+    if (opened) expect(await screen.findByTestId(opened)).toContainElement(document.activeElement as HTMLElement);
+    // The contact deletes it for everyone: the row goes, with whatever it opened.
+    act(() => take("b"));
+    expect(screen.queryByText("text b")).not.toBeInTheDocument();
+    if (opened) expect(screen.queryByTestId(opened)).not.toBeInTheDocument();
+    expect(options("text c")).toHaveFocus();
+  });
+
   it("offers no delete where the chat cannot be edited", async () => {
     const { user } = bubble({ text: "kept" });
     await user.click(screen.getByTestId("message-options"));

@@ -334,3 +334,47 @@ for (const screen of [{ name: "a small phone", width: 667, height: 375, keyboard
     await expect(pinned).toBeVisible();
   });
 }
+
+for (const screen of [{ name: "a small phone", width: 667, height: 375, keyboard: 200 }, { name: "two panes", ...LANDSCAPE, keyboard: 240 }]) {
+  test(`a phone on its side with the keyboard up (${screen.name}): a reply or an edit written while the chat's search is open leaves the message field above the keyboard`, { tag: ["@feature:app.mobile-layout", "@feature:chat.search", "@feature:chat.replies", "@feature:chat.edit"] }, async ({ peer }) => {
+    // The search bar and the reply or edit bar between the header and the field: the list was 0px tall and the
+    // field's bottom 30px under the keyboard (113-205 of 175 visible at 667×375).
+    const visible = screen.height - screen.keyboard;
+    const [alice, bob] = await Promise.all([peer(`side-search-a-${screen.width}`), peer(`side-search-b-${screen.width}`, { mobile: true, viewport: { width: screen.width, height: screen.height } })]);
+    await pair(alice, bob);
+    for (let i = 0; i < 3; i++) { await say(alice, `From alice ${i}`); await say(bob, `From bob ${i}`); }
+    const page = bob.page;
+    const row = (text: string) => page.locator(".chat-wallpaper [data-message-row]").filter({ hasText: text }).last();
+    await expect(row("From alice 2")).toBeVisible();
+    await iosKeyboard(page);
+    await expect(row("From alice 2")).toBeVisible();
+    const input = page.getByPlaceholder("Message…");
+    const bar = page.getByTestId("chat-search");
+    const fits = async () => { const box = (await page.locator("[data-composer]").boundingBox())!; return box.y + box.height <= visible + 1; };
+
+    await page.getByTestId("chat-options").click();
+    await page.locator("[data-menu-item]").filter({ hasText: "Search" }).click();
+    await page.getByTestId("chat-search-input").fill("From");
+    await expect(page.getByTestId("chat-search-count")).toBeVisible();
+
+    for (const [text, item] of [["From alice 2", "message-reply"], ["From bob 2", "message-edit"]] as const) {
+      await row(text).hover();
+      await row(text).getByTestId("message-options").click({ force: true });
+      await page.getByTestId(item).click();
+      await input.focus();
+      await keyboard(page, screen.keyboard);
+      await expect(page.locator("html")).toHaveAttribute("data-keyboard", "true");
+      await expect.poll(fits).toBe(true);
+      // The search bar waits behind the keyboard, and the list is no longer 0px tall.
+      await expect(bar).toBeHidden();
+      expect((await page.locator(".chat-wallpaper").boundingBox())!.height).toBeGreaterThan(0);
+      // Keyboard down: the search is back, as it was.
+      await keyboard(page, 0);
+      await input.blur();
+      await expect(bar).toBeVisible();
+      await expect(page.getByTestId("chat-search-input")).toHaveValue("From");
+      await page.keyboard.press("Escape").catch(() => {});
+      await expect(bar).toBeVisible();
+    }
+  });
+}

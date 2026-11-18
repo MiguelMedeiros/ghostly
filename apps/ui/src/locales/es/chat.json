@@ -163,7 +163,7 @@
     "leftHoursMinutes": "quedan {{hours}} h {{minutes}} min",
     "leftMinutes": "quedan {{minutes}} min",
     "leftUnderMinute": "menos de un minuto restante",
-    "noRoomDevice": "No hay espacio suficiente: {{size}} libres en este dispositivo",
+    "noRoomDevice": "No hay espacio suficiente: quedan {{size}} en este dispositivo",
     "nobodyHas": "Nadie con quien estás conectado tiene este archivo todavía",
     "nobodyHasHint": "Llega solo cuando un miembro que lo tiene esté en línea.",
     "notDownloaded": "{{size}} · sin descargar",
@@ -179,7 +179,7 @@
     "resendHint": "Lo ofrece de nuevo. Sigue desde lo que tu contacto ya tiene.",
     "restoring": "Cargando… · {{size}}",
     "resume": "Reanudar",
-    "roomDevice": "{{size}} libres en este dispositivo",
+    "roomDevice": "Quedan {{size}} en este dispositivo",
     "senderOnly": "Aún no está en tus conexiones",
     "senderOnlyHint": "En un grupo tan grande, tu app se conecta a través de unos pocos miembros, no con quien lo envió. Llega solo cuando uno de ellos lo descargue, o pide a quien lo envió que te lo mande en un chat.",
     "stalled": "Detenido · {{progress}}",
@@ -260,11 +260,11 @@
   },
   "media": {
     "downloadSize": "Descargar {{size}}",
-    "noRoom": "No hay espacio suficiente: {{size}} libres",
+    "noRoom": "No hay espacio suficiente: quedan {{size}}",
     "noRoomToPlay": "No hay espacio libre en disco para reproducirlo aquí. Descárgalo.",
     "notYet": "Se reproduce cuando se haya enviado.",
     "positionOf": "{{position}} de {{duration}}",
-    "wantsToSend": "{{name}} quiere enviarlo · {{size}} libres"
+    "wantsToSend": "{{name}} quiere enviarlo · quedan {{size}}"
   },
   "menu": {
     "continueNew": "Continuar en un chat nuevo",

@@ -55,8 +55,10 @@ describe("the admin's menu on a member's tile", () => {
   it("is on each other member's tile, named for them, and never on the admin's own", () => {
     answerModerate(() => ({ ok: true, state: EMPTY }));
     adminView();
-    expect(menuButton(ANA)).toHaveAccessibleName("Moderate Ana");
-    expect(menuButton(BO)).toHaveAccessibleName("Moderate Bo");
+    // The name keeps its own direction in the label and its tooltip ("Bob!" in Arabic keeps its "!").
+    expect(menuButton(ANA)).toHaveAccessibleName("Moderate \u2068Ana\u2069");
+    expect(menuButton(ANA)).toHaveAttribute("title", "Moderate \u2068Ana\u2069");
+    expect(menuButton(BO)).toHaveAccessibleName("Moderate \u2068Bo\u2069");
     expect(within(tileOf(call.local.identity)).queryByTestId("group-call-moderate")).toBeNull();
   });
 

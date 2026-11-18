@@ -351,7 +351,7 @@ describe("an audio file not here yet", () => {
     const file = song({ size: 40 * MB });
     show(file, { state: "transferring", stage: "asking", direction: "in", transferred: 0, size: file.size, room: 12 * 1024 * MB });
     expect(screen.getByTestId("audio-accept")).toHaveTextContent("Download 40.0 MB");
-    expect(screen.getByTestId("audio-room")).toHaveTextContent("Ana wants to send it · 12.0 GB free");
+    expect(screen.getByTestId("audio-room")).toHaveTextContent("Ana wants to send it · 12.0 GB left");
     expect(screen.getByTestId("audio-play")).toBeDisabled();
     fireEvent.click(screen.getByTestId("audio-accept"));
     await waitFor(() => expect(fakeEngine.callsTo("fileAction")).toEqual([{ linkId: "chat1", fileId: file.id, action: "accept" }]));

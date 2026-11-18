@@ -54,6 +54,7 @@
   "identity": "Identity",
   "identityShared": "{{count}} shared in this chat",
   "media": "Photos & videos",
+  "nearSoft": "About {{bytes}} bytes fit the DHT once sealed: shorten it to send it there",
   "noEmoji": "No emoji found",
   "noGifs": "No GIFs found",
   "overSoft": "Over the {{bytes}} bytes the DHT carries: it is sent when you are live",

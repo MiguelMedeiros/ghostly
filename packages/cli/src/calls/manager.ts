@@ -293,7 +293,8 @@ export class CallManager {
     this.held.delete(chat);
     this.bursts.delete(chat);
     const link = this.link(chat);
-    const call = this.add(chat, "in", this.auto.rate);
+    // At the default rate: auto-answer's rate is its own answers' (below), not that of a call answered by hand.
+    const call = this.add(chat, "in", DEFAULT_RATE);
     call.offer = offer;
     call.video = signalHasVideo(offer);
     // Unanswered, an offer goes stale: the contact's app has given up or will, and answering it would be refused.
@@ -301,7 +302,7 @@ export class CallManager {
     this.host.emit("call.incoming", `call.incoming:${call.id}`, { call: call.id, chat, name: link ? nameOf(link) : null, video: call.video, auto: this.autoFor(chat) });
     this.prepare(call);
     if (this.host.answers !== false && this.autoFor(chat)) {
-      void this.answer(call.id, {}).catch((error) => process.stderr.write(`ghostly: auto-answer failed: ${error instanceof Error ? error.message : String(error)}\n`));
+      void this.answer(call.id, { rate: this.auto.rate }).catch((error) => process.stderr.write(`ghostly: auto-answer failed: ${error instanceof Error ? error.message : String(error)}\n`));
     }
   }
 
@@ -469,7 +470,8 @@ export class CallManager {
       throw new CliError("busy", "The contact is calling: their call rings here");
     }
     this.paced(link.id);
-    const rate = rateOf(options.rate, this.auto.rate);
+    // The default rate, as documented: auto-answer's rate is for the calls it answers, not the ones placed here.
+    const rate = rateOf(options.rate, DEFAULT_RATE);
     const stack = await this.stack();
     // The contact's call may have come in while the stack loaded.
     if (this.byChat(link.id)) throw new CliError("busy", "A call is already on in this chat");
@@ -836,12 +838,27 @@ export class CallManager {
     return undefined;
   }
 
-  /** A call by its id, or by its chat; with no ref, the only call (or the only one `prefer` picks). */
+  /**
+   * A call by its id, or by its chat; with no ref, the only call (or the only one `prefer` picks). A ref shaped as a
+   * call's id (`CALL_ID`) that names no call on now and no chat says so as a call: it ended (hung up twice, or a
+   * command racing the call's end) or never was one. It said `No chat "<id>"`, sending a script to the chat list. A
+   * chat whose id or label has that shape is still found as a chat first. An ended call is not kept (`end`), so
+   * whether it ended or never was is not known here.
+   */
   private find(ref: string | undefined, prefer?: (call: Call) => boolean): Call {
     if (ref) {
       const byId = this.calls.get(ref);
       if (byId) return byId;
-      const call = this.byChat(this.chatOf(ref).id);
+      let chat: LinkView;
+      try {
+        chat = this.chatOf(ref);
+      } catch (error) {
+        if (CALL_ID.test(ref) && error instanceof CliError && error.code === "not_found" && !error.details) {
+          throw new CliError("not_found", `No call ${ref}: it ended or never existed (ghostly call list)`);
+        }
+        throw error;
+      }
+      const call = this.byChat(chat.id);
       if (!call) throw new CliError("not_found", `No call in chat ${ref}`);
       return call;
     }
@@ -859,18 +876,19 @@ export class CallManager {
   /**
    * A chat by id, contact key, prefix or name (the API's rules, `findChat`); a group's says it is one. By its id (as
    * events name it, and a call's own chat), only that chat's view is built: a call placed and hung up built every chat's
-   * five times, one rung and answered six, ~0.2 s of the daemon's thread at 2,000 chats.
+   * five times, one rung and answered six, ~0.2 s of the daemon's thread at 2,000 chats. `onlyChat`: as `findChat`.
    */
-  private chatOf(ref: string): LinkView {
+  private chatOf(ref: string, onlyChat?: string): LinkView {
     const byId = this.link(ref);
     if (byId) return byId;
     const { links, groups } = this.host.engine.getState();
-    return findChat(links, ref, groups);
+    return findChat(links, ref, groups, onlyChat);
   }
 
   /** The chat, if a call can go in it now; else why not (the engine's reason). */
   private callable(ref: string): LinkView {
-    const link = this.chatOf(ref);
+    // A name more than one group has says a call is a chat's: no command calls a group (`group call` names its node).
+    const link = this.chatOf(ref, "a call goes to a contact, in their chat");
     // A one-shot's chat is not live yet, and never would be in time: it said "Calls need a live connection" before
     // the daemon it needs (`stack`).
     if (this.host.answers === false) throw new CliError("unavailable", CALLS_NEED_DAEMON);
@@ -889,6 +907,9 @@ export class CallManager {
     return this.auto.on && (this.auto.from.length === 0 || this.auto.from.includes(chat));
   }
 }
+
+/** A call's id as `add` makes it: 6 random bytes in lowercase hex. */
+const CALL_ID = /^[0-9a-f]{12}$/;
 
 const CALLS_NEED_DAEMON = "Calls need the daemon (a call outlives this command): start it with `ghostly daemon --detach`";
 /** The engine's `callsUnavailable` for a chat with no live session (ghostlink's, or node.ts's with no link running). */

@@ -121,7 +121,9 @@ const RULES: readonly Rule[] = [
   // The page's way to the peer and its services (packages/browser/src/platform).
   exact("Ghostly is starting…", "errors.app.starting"),
   exact("Ghostly is still starting. Try again in a moment.", "errors.app.stillStarting"),
-  exact("Lost the Ghostly peer", "errors.app.lostPeer"),
+  // A call the peer was answering when it went away (an extension's offscreen restart, Clear all data or a profile
+  // switch in another tab): the old peer may have done it before it went, so it says to look before trying again.
+  exact("Lost the Ghostly peer", "errors.app.lostPeer", "errors.app.lostPeerNext"),
   // A part that loads on demand (a wallet's library, the identity providers) whose file did not come: offline before the
   // worker kept it, or a deploy replaced it under an open tab. Each browser says it its own way (Chromium, WebKit, Firefox).
   { match: /^(?:Failed to fetch dynamically imported module|error loading dynamically imported module)(?::[\s\S]*)?$|^Importing a module script failed\.?$/, key: "errors.app.partNotLoaded", next: "app.pageNotLoaded.hint", detail: true },
