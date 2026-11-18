@@ -74,6 +74,7 @@
     "locked": "The profile locked before the app opened. Open it again.",
     "needsFiles": "Its files are not on this device yet.",
     "network": "Could not reach the host.",
+    "notInstalled": "This app is no longer installed.",
     "notListed": "This store no longer lists that app.",
     "notSigned": "Not signed correctly. Ghostly won't install it.",
     "notStore": "That link holds no valid store.",
