@@ -248,6 +248,11 @@ export interface SharedIdentity {
   account?: string;
   /** queued: the person chose to share, the contact is not connected yet. */
   status: "queued" | "pending" | "accepted" | "rejected" | "withdrawal-pending" | "withdrawn";
+  /**
+   * Shared again while the contact may still hold an earlier presentation of it (one not withdrawn): a stop before the
+   * new share went still tells the contact.
+   */
+  held?: true;
   /** Seconds. When the status last changed. */
   at: number;
   error?: string;
@@ -534,7 +539,9 @@ export class IdentityExchange {
     const local = await this.options.localProof(id);
     if (!local) throw new Error("That identity is no longer in your profile");
     const { provider, subject } = local.statement.binding;
-    const entry: SharedIdentity = { id, provider, subject, account: local.account ?? subject, status: "queued", at: this.now() };
+    const prior = this.shared(id);
+    const held = prior && prior.status !== "withdrawn" && (prior.status !== "queued" || prior.held) ? { held: true as const } : {};
+    const entry: SharedIdentity = { id, provider, subject, account: local.account ?? subject, status: "queued", at: this.now(), ...held };
     await this.setShared(entry, { type: "shared", side: "mine", proof: id, provider, subject });
     this.attempts.delete(id);
     if (connected) this.pump();
@@ -545,7 +552,8 @@ export class IdentityExchange {
     let s = this.shared(id);
     if (!s || s.status === "withdrawn") return;
     this.requested.delete(id);
-    if (s.status === "queued") {
+    // A queued one never went, unless an earlier share of it did (held): that one is withdrawn as below.
+    if (s.status === "queued" && !s.held) {
       // Unless its challenge was answered meanwhile: that presentation is out, so it is withdrawn as a pending one.
       let answered: SharedIdentity | undefined;
       await this.options.storage.update(l => {

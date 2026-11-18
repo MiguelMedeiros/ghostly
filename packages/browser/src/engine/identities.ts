@@ -127,7 +127,7 @@ const now = () => Math.floor(Date.now() / 1000);
  * A share of mine as every reader gets it (the app, the CLI, `getState`): its reason only in words this app writes
  * (identityRefusal), else none. A ledger kept from before that check holds the contact's own words there.
  */
-const ownRefusal = (s: SharedIdentity): SharedIdentity => {
+const ownRefusal = ({ held: _held, ...s }: SharedIdentity): SharedIdentity => {
   if (s.error === undefined || identityRefusal(s.error) !== undefined) return s;
   const { error: _contactWords, ...rest } = s;
   return rest;
