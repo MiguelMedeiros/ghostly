@@ -55,7 +55,8 @@ describe("a share into the app", () => {
 
     it("its link is not repeated when the text carries it between CJK or Arabic punctuation, which no address holds", () => {
       const url = "https://a.example/p";
-      for (const text of [`链接：${url}`, `記事、${url}。`, `見て ${url}。${"とても面白い記事です".repeat(10)}`, `رابط،${url}؟ ${"ممتاز".repeat(20)}`]) {
+      // Also right after another link's 。 or ، (no space), which the bubble reads as a link of its own since #8104.
+      for (const text of [`链接：${url}`, `記事、${url}。`, `見て ${url}。${"とても面白い記事です".repeat(10)}`, `رابط،${url}؟ ${"ممتاز".repeat(20)}`, `看 https://b.example/x。${url}`, `رابط https://b.example/x،${url}`]) {
         expect(shareText(share({ text, url }))).toBe(text);
       }
       // A longer address after the punctuation still does not carry it.
