@@ -957,7 +957,9 @@ export class Apps {
   private async bundled(app: BuiltInApp): Promise<{ bundle: AppBundle; bytes: Uint8Array }> {
     if (!this.host.readBuiltIn) fail("not-carried", "This build does not carry this app");
     let bytes: Uint8Array;
-    try { bytes = await this.host.readBuiltIn(app); } catch { fail("not-carried", "This build does not carry this app"); }
+    // The client's own copy is kept for use offline only once read: a first read offline, or the host not reached or
+    // in trouble, is a failure that may pass (Try again), not a build without the app.
+    try { bytes = await this.host.readBuiltIn(app); } catch (error) { if (passing(error)) throw error; fail("not-carried", "This build does not carry this app"); }
     if (!(bytes instanceof Uint8Array) || bytes.length > APP_BUNDLE_LIMITS.bundleBytes) fail("not-carried", "This build does not carry this app");
     const read = await readAppBundleAsync(bytes);
     if (!read.ok) fail(read.reason, `This is not an app Ghostly can install${read.detail ? ` (${read.detail})` : ""}`);
