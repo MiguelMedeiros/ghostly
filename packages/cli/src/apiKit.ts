@@ -466,11 +466,20 @@ const TRANSPORT_TITLES: Record<PairedTransport, string> = { "webrtc/1": "WebRTC"
  * app too, by its last word. `chat transport` took any: toward a contact with no WebRTC (`GHOSTLY_WEBRTC=0`) the choice
  * was kept and the chat stayed where it was, saying nothing; for one this app lacks, the engine answered `engine`,
  * "Transport unavailable". Refused instead, saying whose app lacks it (`details.reason`, as a chat's wait says it).
+ * This app's lack names the way out, as the contact's does: the transports both apps run, `auto`, and for an Iroh
+ * whose relays did not answer, where they are set. It read "This app has no Iroh running", with no next step.
  */
 export function transportOffered(link: LinkView, transport: PairedTransport): void {
   const mine = (link.deliveryMode === "dht" ? link.runnableTransports : undefined) ?? link.availableTransports;
   const title = TRANSPORT_TITLES[transport], error = link.transportErrors?.[transport];
-  if (mine && !mine.includes(transport)) throw new CliError("refused", `This app has no ${title} running${error ? `: ${error}` : ""}`, { reason: "app-lacks", transport });
+  if (mine && !mine.includes(transport)) {
+    const both = mine.filter((t) => !link.peerTransports?.length || link.peerTransports.includes(t)).map((t) => t.split("/")[0]);
+    const choose = both.length ? `choose another (${both.join(", ")}), or auto` : "choose auto";
+    // `GHOSTLY_IROH_RELAYS` pins the relays of this process: the setting is not read then (runtime/engine.ts `irohRelays`).
+    const relays = transport === "iroh/1" && error && /relay/i.test(error)
+      ? `check its relays (${process.env.GHOSTLY_IROH_RELAYS?.trim() ? "GHOSTLY_IROH_RELAYS" : "irohRelays in ghostly settings get"}), or ` : "";
+    throw new CliError("refused", `This app has no ${title} running${error ? ` (${error})` : ""}: ${relays}${choose}`, { reason: "app-lacks", transport });
+  }
   if (link.peerTransports?.length && !link.peerTransports.includes(transport)) throw new CliError("refused", `Your contact's app doesn't have ${title}: choose another, or auto`, { reason: "contact-lacks", transport });
 }
 
@@ -501,6 +510,37 @@ export function groupOf(ctx: ApiContext, params: Params, twin?: string): GroupVi
     const shown = shellWord(ref, chat.id);
     throw new CliError("not_found", `${JSON.stringify(ref)} is a chat, not a group${twin ? `: ghostly ${twin.replace("<chat>", shown)}` : " (ghostly group list)"}`, { chat: chat.id });
   }
+}
+
+/** A group as a sentence names it: one joined by its link has no name until a member's app lets this profile in. */
+export const groupCalled = (group: GroupView) => group.name || "this group";
+
+/**
+ * A group this profile is not in yet (only its invitation, or a knock at its link), said with what the person can do,
+ * the same sentence for every command; undefined for any other group. `ref`: the group as the command named it.
+ * `decline`: the step out of it (`group leave`), not into it. An invitation its admin took back (left, forgot the group
+ * or handed the role on) has no way in: `group accept` answers "This invitation was taken back", so it names
+ * `group decline`, which drops it from the list.
+ */
+export function notInYet(group: GroupView, ref: string, decline = false): string | undefined {
+  if (group.status || !group.invitation) return undefined;
+  const shown = shellWord(ref, group.id);
+  const { accepted, viaLink, takenBack } = group.invitation;
+  if (takenBack && !decline) return `Its invitation to ${groupCalled(group)} was taken back: ghostly group decline ${shown} drops it`;
+  const why = decline ? `ghostly group decline ${shown} turns it down`
+    : !accepted ? `ghostly group accept ${shown} joins it`
+    : viaLink ? "you opened its link, and no member's app has let you in"
+    : "you accepted its invitation, and its admin has not let you in";
+  return `You are not in ${groupCalled(group)} yet: ${why}`;
+}
+
+/**
+ * The engine's refusal of a group this profile is not in yet ("You are not in this group", "Group not found"), said as
+ * `notInYet` says it, with the same code; any other error as it is.
+ */
+export function notInYetError(group: GroupView, ref: string, error: CliError, decline = false): CliError {
+  const said = /^(You are not in this group( yet)?|Group not found)$/.test(error.message) ? notInYet(group, ref, decline) : undefined;
+  return said ? new CliError(error.code, said, error.details) : error;
 }
 
 /**

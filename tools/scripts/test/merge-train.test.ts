@@ -3059,6 +3059,61 @@ describe("a pull request on hold (queue:hold)", () => {
     expect(repo.members()).not.toContain(12);
   });
 
+  it("stops a green batch's landing on dev at one put on hold while the ones ahead of it land", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12, 13]) repo.add(n, { behind: true });
+    const b = (await repo.run()).inFlight as number;
+    repo.settle();
+    // The hold goes on #13 right after GitHub merges #11, in the run that lands the batch.
+    const squash = repo.gh.squash;
+    repo.gh.squash = async (n, ...rest) => {
+      const r = await squash(n, ...rest);
+      if (n === 11) hold(repo, 13);
+      return r;
+    };
+    const r = await repo.run();
+    expect(repo.merges).toEqual(["squash #11", "squash #12"]);
+    expect(r.merged).toEqual([11, 12]);
+    expect(said(repo, b)).toBe("Merge train: #11 #12 landed on `dev`, and the landing stopped there: #13 changed or left the line (#13 is on hold, `queue:hold`). #13 did not land; the ones still queued go back to the line.");
+    expect(repo.pulls.get(13)).toMatchObject({ open: true, labels: [LABEL.queue, HELD] });
+    expect(repo.pulls.get(13)!.merged).toBeUndefined();
+  });
+
+  it("stops a green batch's landing on dev at one taken out of the line while the ones ahead of it land", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12, 13]) repo.add(n, { behind: true });
+    const b = (await repo.run()).inFlight as number;
+    repo.settle();
+    const squash = repo.gh.squash;
+    repo.gh.squash = async (n, ...rest) => {
+      const r = await squash(n, ...rest);
+      if (n === 11) repo.pulls.get(12)!.labels = [];
+      return r;
+    };
+    await repo.run();
+    expect(repo.merges).toEqual(["squash #11"]);
+    expect(said(repo, b)).toBe("Merge train: #11 landed on `dev`, and the landing stopped there: #12 changed or left the line. #12 #13 did not land; the ones still queued go back to the line.");
+    expect(repo.pulls.get(12)!.merged).toBeUndefined();
+  });
+
+  it("lands nothing of a green batch on an epic with one put on hold while the run reads it", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12, 13]) repo.add(n, { base: "epic/x", behind: true });
+    const b = (await repo.run({ base: "epic/x" })).inFlight as number;
+    repo.settle();
+    // The hold goes on #13 after the run read the line, while it reads the batch's commits just before the push.
+    const pullCommits = repo.gh.pullCommits;
+    repo.gh.pullCommits = async (n) => {
+      if (n === b) hold(repo, 13);
+      return pullCommits(n);
+    };
+    const r = await repo.run({ base: "epic/x" });
+    expect(repo.landed).toEqual([]);
+    expect(repo.tips["epic/x"]).toBe("epic0");
+    expect(r.closed).toContain(b);
+    expect(said(repo, b)).toMatch(/#13 changed or left the line \(#13 is on hold, `queue:hold`\), so this batch closes/);
+  });
+
   it("closes a green batch with a held first one, and lands nothing of it", async () => {
     const repo = fakeRepo();
     for (const n of [11, 12, 13]) repo.add(n, { behind: true });

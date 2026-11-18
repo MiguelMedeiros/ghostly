@@ -93,14 +93,18 @@ describe("GroupMembersDialog", () => {
     engine.on("removeGroupMember", () => undefined);
     await user.click(within(row(BOB)).getByTestId("group-remove-member"));
     const ask = screen.getByTestId("group-remove-dialog");
-    expect(ask).toHaveAccessibleName("Remove Bob?");
+    // Named by its heading. The name is its own <bdi>, which happy-dom's accessible name counts as a block (a space
+    // before the "?" no browser adds), so the heading's text is read instead.
+    const question = within(ask).getByRole("heading");
+    expect(ask).toHaveAttribute("aria-labelledby", question.id);
+    expect(question.textContent).toBe("Remove Bob?");
     expect(ask).toHaveAccessibleDescription("They won't get the group's new messages.");
     expect(within(ask).getByRole("button", { name: "Cancel" })).toHaveFocus();
     expect(engine.callsTo("removeGroupMember")).toEqual([]);
     await user.click(within(ask).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByTestId("group-remove-dialog")).not.toBeInTheDocument();
     await user.click(within(row(ALICE)).getByTestId("group-remove-member"));
-    expect(screen.getByTestId("group-remove-dialog")).toHaveAccessibleName("Remove Alice?");
+    expect(within(screen.getByTestId("group-remove-dialog")).getByRole("heading").textContent).toBe("Remove Alice?");
     // Escape, as the browser says it to the topmost dialog: only the question closes.
     act(() => { screen.getByTestId("group-remove-dialog").dispatchEvent(new Event("cancel", { cancelable: true })); });
     expect(screen.queryByTestId("group-remove-dialog")).not.toBeInTheDocument();
@@ -797,6 +801,28 @@ describe("NewGroupDialog", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Ghostly is still starting");
     expect(onCreated).not.toHaveBeenCalled();
     expect(screen.getByTestId("new-group-create")).toBeEnabled();
+  });
+
+  // Disabled while the group was made, the Create pressed from the keyboard dropped the focus to the page, and it
+  // stayed there after a refusal. It stays a button the focus can be on, and a second press does nothing.
+  it("keeps Create, pressed from the keyboard, a button the focus stays on while the group is made and after a refusal", async () => {
+    const { user, engine, onCreated } = open();
+    let refuse!: (error: Error) => void;
+    engine.on("createGroup", () => new Promise((_, reject) => { refuse = reject; }));
+    await user.type(screen.getByTestId("new-group-name"), "Climbing");
+    const create = screen.getByTestId("new-group-create");
+    act(() => create.focus());
+    await user.keyboard("{Enter}");
+    expect(create).toBeEnabled();
+    expect(create).toHaveAttribute("aria-disabled", "true");
+    expect(create).toHaveAttribute("aria-busy", "true");
+    await user.keyboard("{Enter}");
+    expect(engine.callsTo("createGroup")).toHaveLength(1);
+    await act(async () => refuse(new Error("Ghostly is still starting")));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Ghostly is still starting");
+    expect(create).toHaveFocus();
+    expect(create).not.toHaveAttribute("aria-disabled");
+    expect(onCreated).not.toHaveBeenCalled();
   });
 
   it("on an app with no WebRTC, creates the group: its links go over Iroh or HyperDHT", async () => {

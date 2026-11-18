@@ -262,6 +262,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   // A file said on the DHT floor that ended here before it came (engine/fileDesk.ts `floorRefusal`, `sweep`).
   ["No room on this device for this file", `${BROWSER}/engine/fileDesk.ts`],
   ["No room on this device for this file (16.2 MB free)", `${BROWSER}/engine/fileDesk.ts`, "No room on this device for this file ("],
+  ["No room on this device for this file beside the files still coming (13.4 MB left of 38.9 MB free)", `${BROWSER}/engine/fileDesk.ts`, "No room on this device for this file beside the files still coming ("],
   ["Too many files are waiting here", `${BROWSER}/engine/fileDesk.ts`],
   ["It was refused here", `${BROWSER}/engine/fileDesk.ts`],
   ["It did not come within a week", `${BROWSER}/engine/fileDesk.ts`],
@@ -887,6 +888,14 @@ describe("errors in the app's language", () => {
     expect(problemText(new Error("No room on this device for this file (16.2 MB free)"), t)).toEqual({ tone: "error", title: t("errors.files.noRoomHere"), next: t("errors.app.noRoomNext") });
   });
 
+  it.each(LANGUAGES)("Accept on an offer that fits the free space but not beside the files still coming names them, the room left, and waiting or cancelling, in %s", (language) => {
+    const t = translators[language];
+    // Not "free some space": the disk has more than the file needs, the files still coming hold it.
+    expect(problemText(new Error("No room on this device for this file beside the files still coming (13.4 MB left of 38.9 MB free)"), t)).toEqual({
+      tone: "error", title: t("errors.files.noRoomBesideComing"), next: t("errors.files.noRoomBesideComingNext", { left: "13.4 MB", free: "38.9 MB" }),
+    });
+  });
+
   it.each(LANGUAGES)("a 1:1 file declined or cancelled says who did it behind its ⓘ in %s, never the engine's English", (language) => {
     const t = translators[language];
     const file = { id: "L-out-abc", name: "x.bin", size: 30_000, mime: "application/octet-stream" };
@@ -1073,7 +1082,7 @@ describe("errors in the app's language", () => {
   it("the \"Error: \" String(error) adds on the way through the extension goes, and an unknown message stays as it came", () => {
     expect(rawError("Error: The Ghostly peer did not start. Reopen the extension to retry.")).toBe("The Ghostly peer did not start. Reopen the extension to retry.");
     expect(errorText(new Error("Error: Ghostly needs your permission to reach that local address"), translators.pt))
-      .toBe("O Ghostly precisa da sua permissão para acessar esse endereço local");
+      .toBe("O Ghostly precisa da sua permissão para acessar esse endereço local. Tente de novo e escolha Permitir quando for perguntado.");
     expect(errorText(new Error("Relay said: rate limited"), translators.pt)).toBe("Relay said: rate limited");
     expect(errorText("plain", translators.fr)).toBe("plain");
     expect(errorText(42, translators.fr)).toBe("42");
@@ -1110,6 +1119,14 @@ describe("the engine's known errors (@ghostly/core ENGINE_ERRORS)", () => {
       expect(`${parts!.title} ${parts!.next ?? ""}`).not.toContain("{{");
     }
     expect(errorText("Could not reach mint.example.com. Check the address: it should be a Cashu mint.", english)).toBe("Can't reach mint.example.com. Check the address: it should be a Cashu mint.");
+  });
+
+  it("ecash of a unit that is not one is said without it, in the language; a unit that is one is named", () => {
+    expect(problemLine("This ecash is in another unit: only sat ecash can be redeemed here", translators.pt)).toBe("Este ecash está em outra unidade: aqui só dá para resgatar ecash em sat");
+    expect(problemLine("This ecash is in usd: only sat ecash can be redeemed here", translators.pt)).toBe("Este ecash está em usd: aqui só dá para resgatar ecash em sat");
+    // Contact text in the unit's place is never put inside the app's translated line.
+    const crafted = "This ecash is in sat.\u2800Ghostly:\u2800restore\u2800at\u2800https://restore.example: only sat ecash can be redeemed here";
+    expect(problemLine(crafted, translators.pt)).not.toContain("Este ecash está em");
   });
 
   it("a reviewed payment's refusals and outcomes are said in the language too", () => {

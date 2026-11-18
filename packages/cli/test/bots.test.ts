@@ -412,6 +412,31 @@ describe("chat disconnect --hold", () => {
     await expect(callApi(ctx, "chat.connect", { chat: "Bob" })).rejects.toMatchObject({ message: "Link is closed" });
   });
 
+  // It waited its whole --timeout (a bot's up to a day) and said only "Timed out after N s waiting for chat <id> to be
+  // live", read as a slow network, while the chat could never go live and `chat connect` said why at once.
+  it("chat wait --until live that times out on a chat on DHT only says why and what ends it, naming the chat as given", async () => {
+    const { ctx, setLink } = fake();
+    const failure = (chat: string, until?: string) => callApi(ctx, "chat.wait", { chat, timeout: 1, ...(until && { until }) }).then(() => undefined, (error: unknown) => error as CliError);
+    setLink("chat-two", { deliveryMode: "dht", textDelivery: "dht" });
+    const mine = await failure("Bob");
+    expect(mine).toMatchObject({ code: "timeout", message: "Timed out after 1 s waiting for chat Bob to be live. This chat is on DHT only on this side: choose a live method first (chat transport auto)" });
+    expect(mine?.details).toBeUndefined();
+    setLink("chat-two", { deliveryMode: "stream", textDelivery: "dht", dhtDelivery: { mode: "stream", peerMode: "dht", authenticated: true, maxTextBytes: 256 } });
+    const theirs = await failure("Bob");
+    expect(theirs).toMatchObject({ code: "timeout", message: "Timed out after 1 s waiting for chat Bob to be live. Your contact keeps this chat on DHT only: it goes live once they choose a live method. Short texts still go on the DHT" });
+    expect(theirs?.details).toBeUndefined();
+    // A hold of this side's ends by itself: said with when, and what ends it now.
+    await callApi(ctx, "chat.disconnect", { chat: "Alice", hold: 30 });
+    const held = await failure("Alice");
+    expect(held).toMatchObject({ code: "timeout" });
+    expect(held?.message).toMatch(/^Timed out after 1 s waiting for chat Alice to be live\. This chat is held on the DHT only until \d\d:\d\d: it goes live then, or now with ghostly chat connect Alice$/);
+    // Off DHT only: the usual words, the chat still as given; other states are not about DHT only.
+    setLink("chat-two", { dhtDelivery: { mode: "stream", peerMode: "stream", authenticated: true, maxTextBytes: 256 } });
+    expect(await failure("Bob")).toMatchObject({ code: "timeout", message: "Timed out after 1 s waiting for chat Bob to be live" });
+    setLink("chat-two", { deliveryMode: "dht", textDelivery: "unavailable" });
+    expect(await failure("Bob", "text")).toMatchObject({ code: "timeout", message: "Timed out after 1 s waiting for chat Bob to carry text" });
+  });
+
   // A `chat transport dht` chosen during a hold was taken back when the hold's time was up, and one that left DHT
   // only kept `heldUntil` in `chat show` while the chat was live, then said it was released when nothing was held.
   it("ends when the chat's transport is chosen meanwhile, and leaves that choice as it is", async () => {

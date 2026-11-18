@@ -231,11 +231,15 @@ export class GroupRows {
  * after the small row's no longer did (`message delete --purge` promises it leaves the profile's folder).
  */
 function holds(written: GroupState, key: string, state: GroupState, removedIds: readonly string[] = []): boolean {
-  return written.seqEpoch === state.seqEpoch && state.seq <= written.seq && key === recordKey(state) && !keepsRemoved(written, removedIds);
+  return written.seqEpoch === state.seqEpoch && state.seq <= written.seq && key === recordKey(state) && !keepsRemoved(written, removedIds, state);
 }
 
-/** Whether `state` keeps the text of a frame of mine whose message (its first place, for one said again) is in `removedIds`. */
-function keepsRemoved(state: GroupState, removedIds: readonly string[]): boolean {
+/**
+ * Whether `state` keeps the text of a frame of mine whose message (its first place, for one said again) is in `removedIds`,
+ * or a frame of mine `now` holds sealed again (a reply's line of a message deleted for everyone, `GroupSession.forget`).
+ */
+function keepsRemoved(state: GroupState, removedIds: readonly string[], now: GroupState): boolean {
+  if (state.sent.some(f => f.c && now.sent.some(g => g.e === f.e && g.n === f.n && g.xs !== f.xs))) return true;
   if (!removedIds.length) return false;
   return state.sent.some(f => f.c && removedIds.includes(f.o ? groupMessageId(f.s, f.o.e, f.o.n) : groupMessageId(f.s, f.e, f.n)));
 }

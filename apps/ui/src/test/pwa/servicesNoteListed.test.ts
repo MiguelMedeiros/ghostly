@@ -103,3 +103,89 @@ it("notes no more of a chat's listed apps than one list holds, however many new 
   await vi.runAllTimersAsync();
   await forgetting;
 });
+
+/** `chats` chats, each listing `apps` apps of its own contact, as a page load sees them. */
+function chats(count: number, apps: number): LinkView[] {
+  return Array.from({ length: count }, (_, c) => {
+    const key = `${c}`.padStart(52, "k");
+    return linkView({ id: `chat-${key}`, myPubKeyZ32: key, peerPubKeyZ32: key.replace(/k/g, "p"), peerServices: Array.from({ length: apps }, (_, i) => ({ id: `app-${i}`, type: "http" as const })) });
+  });
+}
+
+it("reads the opened-apps list once for a page load's listed apps, however many there are", async () => {
+  vi.resetModules();
+  const { noteListed, openedServices, OPENED_KEY } = await import("../../../../web/src/svc/forget");
+  // 160 apps (10 chats at MAX_SERVICES), all new to this page: the list grows to 160 entries.
+  const links = chats(10, MAX_SERVICES);
+  const getItem = vi.spyOn(localStorage, "getItem");
+  const setItem = vi.spyOn(localStorage, "setItem");
+  const reads = () => getItem.mock.calls.filter(([key]) => key === OPENED_KEY).length;
+  const writes = () => setItem.mock.calls.filter(([key]) => key === OPENED_KEY).length;
+  try {
+    await noteListed("", links);
+    expect(reads()).toBe(1);
+    expect(writes()).toBe(1);
+    expect(openedServices()).toHaveLength(10 * MAX_SERVICES);
+
+    // The next state lists the same apps: nothing new, so the list is neither read nor written.
+    getItem.mockClear();
+    setItem.mockClear();
+    await noteListed("", links);
+    expect(reads()).toBe(0);
+    expect(writes()).toBe(0);
+
+    // New apps that all sit past their chats' cap: one read, and nothing written.
+    await noteListed("", links.map((link) => ({ ...link, peerServices: [{ id: "one-more", type: "http" as const }] })));
+    expect(reads()).toBe(1);
+    expect(writes()).toBe(0);
+  } finally {
+    getItem.mockRestore();
+    setItem.mockRestore();
+  }
+});
+
+it("notes the same apps, in the same order and under the same per-chat cap, as noting them one at a time", async () => {
+  vi.resetModules();
+  const { noteListed, noteOpened, openedServices, OPENED_KEY } = await import("../../../../web/src/svc/forget");
+  const [full, over, near, other] = chats(4, 0);
+  const apps = (n: number, prefix = "app") => Array.from({ length: n }, (_, i) => ({ id: `${prefix}-${i}`, type: "http" as const }));
+  // A chat listing more than the cap, one already near it with some of its apps noted, one already full, a voice app,
+  // an app listed twice in one chat, and another profile's entries for the same chat (not counted against this one).
+  const links: LinkView[] = [
+    { ...over, peerServices: [...apps(MAX_SERVICES + 5), { id: "talk", type: "voice" }] },
+    { ...near, peerServices: [...apps(6), ...apps(6), ...apps(8, "new")] },
+    { ...full, peerServices: apps(3, "late") },
+    { ...other, peerServices: null },
+  ];
+  const seed = async () => {
+    const entries = [
+      ...await Promise.all(apps(MAX_SERVICES, "old").map(async ({ id }) => ({ profile: "p", tag: viewerTag(full.myPubKeyZ32), label: await serviceLabel(viewerTag(full.myPubKeyZ32), full.peerPubKeyZ32, id) }))),
+      ...await Promise.all(apps(MAX_SERVICES - 4).map(async ({ id }) => ({ profile: "p", tag: viewerTag(near.myPubKeyZ32), label: await serviceLabel(viewerTag(near.myPubKeyZ32), near.peerPubKeyZ32, id) }))),
+      ...await Promise.all(apps(MAX_SERVICES, "q").map(async ({ id }) => ({ profile: "q", tag: viewerTag(over.myPubKeyZ32), label: await serviceLabel(viewerTag(over.myPubKeyZ32), over.peerPubKeyZ32, id) }))),
+    ];
+    localStorage.setItem(OPENED_KEY, JSON.stringify(entries));
+  };
+
+  // The way the web noted them before: counted and noted one app at a time.
+  await seed();
+  for (const link of links) {
+    for (const service of link.peerServices ?? []) {
+      if (service.type !== "http") continue;
+      const tag = viewerTag(link.myPubKeyZ32);
+      const label = await serviceLabel(tag, link.peerPubKeyZ32, service.id);
+      if (openedServices().filter((o) => o.profile === "p" && o.tag === tag).length >= MAX_SERVICES) continue;
+      noteOpened({ profile: "p", tag, label });
+    }
+  }
+  const oneAtATime = localStorage.getItem(OPENED_KEY);
+  localStorage.clear();
+
+  await seed();
+  await noteListed("p", links);
+  expect(localStorage.getItem(OPENED_KEY)).toBe(oneAtATime);
+  // Each chat of profile p holds at most the cap, and the chat over it holds its first MAX_SERVICES apps.
+  const tags = [over, near, full].map((link) => viewerTag(link.myPubKeyZ32));
+  for (const tag of tags) expect(openedServices().filter((o) => o.profile === "p" && o.tag === tag)).toHaveLength(MAX_SERVICES);
+  const overLabels = await Promise.all(apps(MAX_SERVICES).map(({ id }) => serviceLabel(tags[0], over.peerPubKeyZ32, id)));
+  expect(openedServices().filter((o) => o.profile === "p" && o.tag === tags[0]).map((o) => o.label)).toEqual(overLabels);
+});

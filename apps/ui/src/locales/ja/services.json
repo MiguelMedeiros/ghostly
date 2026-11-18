@@ -1,5 +1,7 @@
 {
   "added": "{{app}} を追加しました。開ける人を「相手」で選んでください。",
+  "allowNamed": "{{app}} を許可",
+  "allowNext": "「許可」はブラウザに {{host}} のすべてのポートへのアクセスを求めます。{{host}} のアプリをすべて削除すると、このアクセスは返されます。",
   "fromContacts": "連絡先から",
   "fromContactsEmpty": "連絡先が共有したアプリがここに表示されます。",
   "ghostlyOnline": "Ghostly オンライン",
@@ -29,6 +31,7 @@
   "shareLocal": "ローカルサービスを共有",
   "shareNamed": "{{app}} を共有",
   "status": {
+    "needsAccess": "このブラウザではまだ許可されていません：連絡先は {{app}} を開けません",
     "notShared": "まだ誰とも共有していません",
     "offline": "オフラインの間は届きません",
     "sharedCount": "{{count}} 人の連絡先と共有中",

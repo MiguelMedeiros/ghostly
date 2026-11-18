@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -784,6 +787,19 @@ describe("a memo that looks like a seed or a key", () => {
     await user.click(request());
     expect(screen.queryByTestId("secret-guard")).not.toBeInTheDocument();
     expect(onRequest).toHaveBeenCalledWith(12, "pizza", "cashu", "lightning", "mainnet");
+  });
+});
+
+// Send or Request at work (or held from the keys) is `aria-disabled`, not disabled: its hover answered as a live one's
+// did, Send brighter and Request lighter under the pointer while they read "Preparing…" or "Requesting…". Hover itself
+// is measured in a browser; here, the rules that give it.
+describe("PaymentComposer: the CSS of Send and Request", () => {
+  const CSS = readFileSync(join(fileURLToPath(import.meta.url), "../../../components/payment-composer.css"), "utf8");
+
+  it("a busy or held Send or Request does not answer the pointer's hover", () => {
+    const hovers = CSS.split(/\r?\n/).filter((line) => /^\.payment-back-(primary|secondary)[^{]*:hover/.test(line.trim()));
+    expect(hovers).toHaveLength(2);
+    for (const line of hovers) expect(line).toMatch(/:not\(\[aria-disabled="?true"?\]\)/);
   });
 });
 

@@ -209,6 +209,8 @@
     "noMatch": "Aucune discussion de ce nom",
     "partial": "{{sent}} sur {{count}} envoyés",
     "pick": "Choisissez-en jusqu’à {{count}}",
+    "refused": "{{name}} : {{error}}",
+    "refusedPartial": "{{name}} ({{partial}}) : {{error}}",
     "search": "Rechercher des discussions",
     "select": "Sélectionner",
     "selected": "{{count}} sélectionnés",

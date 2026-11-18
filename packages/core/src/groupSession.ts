@@ -1364,13 +1364,32 @@ export class GroupSession {
    * My message `id` was deleted for everyone: its frame, and each copy said again, keep their place in my log (`nextSeq`,
    * `couldRead`, the removal's copies) and lose what they said. The log is in the saved state beside the epochs' secrets,
    * so the text stayed readable from the profile until 32 later sends pushed it out (`message delete --purge` promises
-   * it leaves the folder). Saved soon, as a community's `forget`; `flush` writes it now.
+   * it leaves the folder). A reply of mine that quotes it keeps its place and its reply, its line sealed again empty
+   * and signed whole again (`sig` does not cover the box). A member's frame of it, or quoting it, I kept to hand on goes:
+   * I cannot sign theirs, and its author hands it on. Saved soon, as a community's `forget`; `flush` writes it now.
    */
   forget(id: string): void {
-    if (!this.state.sent.some(f => f.c && this.messageIdOf(f) === id)) return;
-    this.state.sent = this.state.sent.map(f => !f.c || this.messageIdOf(f) !== id ? f
-      : { t: f.t, g: f.g, e: f.e, s: f.s, n: f.n, ts: f.ts, nn: "", c: "", sig: "", ...(f.o ? { o: f.o } : {}) });
+    const sent = this.state.sent.map(f => !f.c ? f : this.messageIdOf(f) === id
+      ? { t: f.t, g: f.g, e: f.e, s: f.s, n: f.n, ts: f.ts, nn: "", c: "", sig: "", ...(f.o ? { o: f.o } : {}) } : this.unquoted(f, id));
+    const gone = (f: GroupMessageFrame) => this.messageIdOf(f) === id || !!this.quoting(f, id);
+    const relay = this.state.relay?.filter(f => !gone(f)), rows = this.onRows?.filter(f => !gone(f));
+    if (sent.every((f, i) => f === this.state.sent[i]) && relay?.length === this.state.relay?.length && rows?.length === this.onRows?.length) return;
+    this.state.sent = sent;
+    if (relay) this.state.relay = relay;
+    if (rows) this.onRows = rows;
     this.persistSoon();
+  }
+  /** The reply a frame's box holds, when it quotes `id` with a line of it. */
+  private quoting(f: GroupMessageFrame, id: string): WireReply | undefined {
+    const secret = f.r && this.secret(f.e), reply = secret ? this.openReply(epochKeys(secret, this.id, f.e).message, f) : undefined;
+    return reply?.i === id && reply.s ? reply : undefined;
+  }
+  /** My frame `f` without the line of `id` it quotes (`forget`); `f` itself when it quotes none. */
+  private unquoted(f: GroupMessageFrame, id: string): GroupMessageFrame {
+    const reply = this.quoting(f, id);
+    if (!reply) return f;
+    const r = encryptText(epochKeys(this.secret(f.e)!, this.id, f.e).message, replyAad(f), JSON.stringify({ ...reply, s: "" }));
+    return { ...f, r, xs: toBase64Url(sign(messageSignedWhole({ ...f, r }), this.identity.seed)) };
   }
 
   /**

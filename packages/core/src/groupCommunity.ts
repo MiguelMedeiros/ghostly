@@ -710,6 +710,11 @@ function isMessageFrame(v: unknown): v is CommunityMessageFrame {
     Number.isSafeInteger(f.ts) && (f.ts as number) > 0 && typeof f.nn === "string" && f.nn.length === 32 && B64.test(f.nn) &&
     typeof f.c === "string" && f.c.length <= MAX_TEXT_BOX && B64.test(f.c) && typeof f.sig === "string" && f.sig.length === 86 && B64.test(f.sig);
 }
+/** A message frame's own fields alone: whatever else came beside them is outside its author's signature, so no member's word, and is neither kept nor handed on. */
+function messageFields(f: CommunityMessageFrame): CommunityMessageFrame {
+  const { t, v, g, e, h, s, n, ts, nn, c, sig } = f;
+  return { t, v, g, e, h, s, n, ts, nn, c, sig };
+}
 
 /**
  * One member's view of a community group: the branch it follows and the ones it knows, the
@@ -797,6 +802,8 @@ export class CommunitySession {
     });
     this.rebuild();
     this.pruneSeen();
+    // A reply to a message deleted for everyone while this device ran an app from before `unquote`.
+    if (hooks.removed && this.unquote(id => hooks.removed!(id))) this.persistSoon();
     this.adminSeen = this.admin;
     // A branch kept under the older rule (longest first) may be the better one now: it keeps an admin change mine dropped.
     if ((state.status === "active" || state.status === "lost") && this.bestBranch().tip !== this.topHash) void this.serialize(() => this.chooseBranch());
@@ -2170,11 +2177,48 @@ export class CommunitySession {
   forget(id: string): void {
     const author = id.slice(0, id.indexOf(":"));
     const kept = this.state.store.filter(f => f.s !== author || this.storedId(f) !== id);
-    if (kept.length === this.state.store.length) return;
-    const left = new Set(kept.map(storeKey));
-    for (const f of this.state.store) if (!left.has(storeKey(f))) this.onRows.delete(storeKey(f));
-    this.state.store = kept;
-    this.persistSoon();
+    const dropped = kept.length !== this.state.store.length;
+    if (dropped) {
+      const left = new Set(kept.map(storeKey));
+      for (const f of this.state.store) if (!left.has(storeKey(f))) this.onRows.delete(storeKey(f));
+      this.state.store = kept;
+    }
+    if (this.unquote(quoted => quoted === id) || dropped) this.persistSoon();
+  }
+
+  /**
+   * The frames whose reply quotes a message deleted for everyone (`gone`): the line of it (`r.s`) is sealed with them,
+   * and opens with the epoch secret this profile keeps. Mine is sealed again with an empty line, in its place, time and
+   * reply, and signed again: a member who holds the first drops it as seen, one who missed it gets the reply without
+   * the line. A member's I cannot sign again: it goes, and its author hands it on. Either way the row that held the
+   * first gives it up; mine is saved with the state from then on.
+   */
+  private unquote(gone: (id: string) => boolean): boolean {
+    let changed = false;
+    const store: CommunityMessageFrame[] = [];
+    for (const f of this.state.store) {
+      const key = this.messageKey(f);
+      const plain = key ? decryptText(key, messageAad(f), f.nn, f.c) : null;
+      let parsed: unknown = null;
+      try { parsed = plain === null ? null : JSON.parse(plain); } catch { /* not a payload */ }
+      const r = isObject(parsed) ? parsed.r : undefined;
+      if (!isObject(r) || typeof r.i !== "string" || r.s === "" || !gone(r.i)) { store.push(f); continue; }
+      changed = true;
+      const row = this.onRows.get(storeKey(f));
+      if (row !== undefined) { this.onRows.delete(storeKey(f)); this.hooks.forgetFrame?.(row); }
+      if (f.s !== this.myKey) continue;
+      const { n: nn, c } = encryptText(key!, messageAad(f), JSON.stringify({ ...(parsed as Record<string, unknown>), r: { ...r, s: "" } }));
+      const unsigned = { g: f.g, e: f.e, h: f.h, s: f.s, n: f.n, ts: f.ts, nn, c };
+      store.push({ t: "group-msg", v: 2, ...unsigned, sig: toBase64Url(sign(messageSigned(unsigned), this.identity.seed)) });
+    }
+    if (changed) this.state.store = store;
+    return changed;
+  }
+
+  /** The key a stored frame is sealed with, when I hold its epoch's secret. */
+  private messageKey(f: CommunityMessageFrame): Uint8Array | undefined {
+    const found = this.commitByShort(f.e, f.h), secret = found && this.state.secrets[found.hash];
+    return secret ? epochKeys(fromBase64Url(secret), this.id, f.e).message : undefined;
   }
 
   /** The id of the message a stored frame is, by its first place when it was said again (and I can open it). */
@@ -2207,12 +2251,15 @@ export class CommunitySession {
   /** The frames the app's rows hold, into the store: oldest first by when they were written, with what the record kept from before. */
   private takeRows(rows: readonly { id: string; frame: CommunityMessageFrame }[]): void {
     if (!rows.length) return;
-    const inRecord = new Set(this.state.store.map(storeKey));
+    const inRecord = new Map(this.state.store.map(f => [storeKey(f), f]));
     for (const { id, frame } of rows) {
-      this.onRows.set(storeKey(frame), id);
-      if (!inRecord.has(storeKey(frame))) this.state.store.push(frame);
       // My counter goes above a row of mine an older app stored before it was killed mid-send, its counter unsaved.
       if (frame.s === this.myKey && frame.h === shortHash(this.state.seqH) && frame.n >= this.state.seq && frame.n < OWN_FRAME_LIMIT) this.state.seq = frame.n + 1;
+      // Mine sealed again since (`unquote`), the app stopped before the row gave the first up: the record's stands.
+      const recorded = inRecord.get(storeKey(frame));
+      if (recorded && frame.s === this.myKey && recorded.sig !== frame.sig) { this.hooks.forgetFrame?.(id); continue; }
+      this.onRows.set(storeKey(frame), id);
+      if (!recorded) this.state.store.push(messageFields(frame));
     }
     this.state.store.sort((a, b) => a.ts - b.ts);
     this.trimStore();
@@ -2454,17 +2501,17 @@ export class CommunitySession {
    * once: the mark says it is passed on as it came.
    */
   passOn(frame: object): object {
-    if ((frame as { t?: unknown }).t !== "group-msg") return frame;
-    const { lv: _mark, ...rest } = frame as Record<string, unknown>;
-    return this.cameLive.has(frame) ? { ...rest, lv: this.myKey } : rest;
+    if (!isMessageFrame(frame)) return frame;
+    const fields = messageFields(frame);
+    return this.cameLive.has(frame) ? { ...fields, lv: this.myKey } : fields;
   }
 
   /** `waited`: it waited for a commit or a secret (`replayWaiting`), so it is not live. */
   private async receiveMessage(from: string, input: unknown, waited = false): Promise<boolean> {
     if (!isMessageFrame(input)) return false;
     // The live mark is the hop's, never the frame's: it is not kept, stored or handed on as it came.
-    const { lv: mark, ...unmarked } = input as CommunityMessageFrame & { lv?: unknown };
-    const raw = unmarked as CommunityMessageFrame;
+    const mark = (input as { lv?: unknown }).lv;
+    const raw = messageFields(input);
     if (raw.s === this.myKey) { this.ownFrame(raw); return false; }
     const now = this.hooks.clock?.() ?? Date.now();
     // Straight from its author, outside its answer to my sync; or handed on at once by the member at the other end,

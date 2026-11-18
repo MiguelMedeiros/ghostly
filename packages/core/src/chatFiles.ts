@@ -584,6 +584,20 @@ function storeFailure(error: unknown): string {
   return `Could not store the file: ${quota ? `QuotaExceededError${message ? `: ${message}` : ""}` : message}`;
 }
 
+/**
+ * The room this device tells a contact (`pf-room`, a `no-room` refusal): its free space rounded down to a power of two or
+ * one and a half of one. The exact bytes would be the same from every profile on the device, and move with whatever it
+ * stores, so a contact could tell one device from another, or watch it, by asking. Never more than the room itself.
+ */
+export function coarseRoom(room: number): number | null {
+  if (!Number.isSafeInteger(room)) return null;
+  if (room <= 0) return 0;
+  let step = 2 ** Math.floor(Math.log2(room));
+  while (step > room) step /= 2;
+  while (step * 2 <= room) step *= 2;
+  return room >= step * 1.5 ? step * 1.5 : step;
+}
+
 /** What a refusal means to the sender's person. */
 export function refusalText(why: string, room?: number): { state: TransferState; error: string } {
   switch (why) {
@@ -777,7 +791,13 @@ export class ChatFiles {
 
   private async sayRoom(): Promise<void> {
     const room = await this.host.room?.().catch(() => null);
-    if (typeof room === "number" && Number.isSafeInteger(room)) this.send({ t: "pf-room", max: room });
+    const max = typeof room === "number" ? coarseRoom(room) : null;
+    if (max !== null) this.send({ t: "pf-room", max });
+  }
+
+  private refuseOffer(id: string, decision: { refuse: RefuseReason; room?: number }): void {
+    const room = decision.room !== undefined ? coarseRoom(decision.room) : null;
+    this.send({ t: "pf-refuse", id, why: decision.refuse, ...(room !== null && { room }) });
   }
 
   // ─── Sending ────────────────────────────────────────────────────────────
@@ -1078,7 +1098,7 @@ export class ChatFiles {
     let decision: OfferDecision;
     try { decision = await this.host.decide(file); } catch { decision = { refuse: "invalid" }; }
     if (this.entries.has(key("in", id))) return;
-    if (typeof decision === "object") { this.send({ t: "pf-refuse", id, why: decision.refuse, ...(decision.room !== undefined && { room: decision.room }) }); return; }
+    if (typeof decision === "object") { this.refuseOffer(id, decision); return; }
     const entry: Entry = {
       record: { id, direction: "in", file, state: decision === "ask" ? "asking" : paused ? "paused" : "queued", confirmed: 0, since: this.now(),
         ...(decision !== "ask" && { agreed: true }), ...(paused && decision !== "ask" && { pausedBy: "peer" as const }) },
@@ -1101,7 +1121,7 @@ export class ChatFiles {
     if (!record.consented) {
       let decision: OfferDecision;
       try { decision = await this.host.decide(record.file, true); } catch { decision = { refuse: "invalid" }; }
-      if (typeof decision === "object") { this.send({ t: "pf-refuse", id: record.id, why: decision.refuse, ...(decision.room !== undefined && { room: decision.room }) }); return false; }
+      if (typeof decision === "object") { this.refuseOffer(record.id, decision); return false; }
       if (decision === "ask") {
         if (this.waitingOffers() >= FILE_LIMITS.maxWaitingOffers) { this.send({ t: "pf-refuse", id: record.id, why: "too-many" }); return false; }
         await this.retake(entry);

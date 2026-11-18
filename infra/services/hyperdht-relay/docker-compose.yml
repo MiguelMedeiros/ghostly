@@ -4,7 +4,7 @@
 # Its defaults are zero's: clients counted by CF-Connecting-IP, and Ghostly's own app, extension and Desktop as the
 # origins (the Desktop dials through the relay with "Hide my IP from contacts" on, from its webview: tauri://localhost
 # on macOS and Linux, http://tauri.localhost on Windows and Android).
-# Anywhere else, set GHOSTLY_RELAY_CLOUDFLARE=0 (with GHOSTLY_RELAY_PROXIES=1 behind one nginx or Caddy) and
+# Anywhere else, set GHOSTLY_RELAY_CLOUDFLARE=0 (with GHOSTLY_RELAY_PROXIES=1 behind one nginx or Caddy: not with CLOUDFLARE=1) and
 # GHOSTLY_RELAY_ORIGINS to the origins of the app you serve (and the Desktop's two), in the shell or an .env file next to this one.
 name: ghostly-hyperdht-relay
 services:

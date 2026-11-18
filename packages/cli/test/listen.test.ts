@@ -732,20 +732,26 @@ describe("listen with an allowlist and --turns", () => {
     writeFileSync(join(dir, "kept"), "42\n");
     expect(readCursor(join(dir, "kept"))).toBe(42);
     const refusal = (path: string) => { try { readCursor(path); } catch (error) { return asCliError(error).toJSON(); } return null; };
-    for (const [name, text, shown] of [["empty", "", "nothing"], ["blank", " \n", "nothing"], ["garbage", "abc\n", '"abc"'], ["negative", "-1", '"-1"'], ["fraction", "1.5", '"1.5"']] as const) {
+    for (const [name, text, shown] of [["empty", "", "nothing"], ["blank", " \n", "nothing"], ["garbage", "abc\n", "1 word, 3 bytes"], ["negative", "-1", "1 word, 2 bytes"], ["fraction", "1.5", "1 word, 3 bytes"]] as const) {
       writeFileSync(join(dir, name), text);
       expect(refusal(join(dir, name)), name).toEqual({ code: "bad_request", message: `${join(dir, name)} holds no event number (${shown}): fix or remove it, or give --since` });
     }
-    // Something long is cut where it is shown.
-    writeFileSync(join(dir, "long"), "x".repeat(500));
-    expect(refusal(join(dir, "long"))!.message).toContain(`("${"x".repeat(32)}…")`);
+    // What it holds is measured, never quoted: a --cursor pointed by mistake at a seed or a key file put their start on
+    // stderr, which a service manager keeps in its journal.
+    writeFileSync(join(dir, "seed"), "abandon ".repeat(11) + "about\n");
+    writeFileSync(join(dir, "key"), "994c870a52affc250f3649f639430b5e".repeat(2) + "\n");
+    for (const [name, shown] of [["seed", "12 words, 93 bytes"], ["key", "1 word, 64 bytes"]] as const) {
+      const message = refusal(join(dir, name))!.message;
+      expect(message, name).toBe(`${join(dir, name)} holds no event number (${shown}): fix or remove it, or give --since`);
+      expect(message.slice(join(dir, name).length), name).not.toMatch(/abandon|about|994c|"/);
+    }
 
     // The command says it at once, with the code a bot branches on, and no profile was opened or made for it; the file
     // is left as it was, and --since still starts it.
     const home = mkdtempSync(join(tmpdir(), "ghostly-listen-"));
     const result = await ghostly(["--home", home, "listen", "--cursor", join(dir, "garbage")]);
     expect(result.code, result.stdout + result.stderr).toBe(1);
-    expect(result.json).toEqual({ error: { code: "bad_request", message: `${join(dir, "garbage")} holds no event number ("abc"): fix or remove it, or give --since` } });
+    expect(result.json).toEqual({ error: { code: "bad_request", message: `${join(dir, "garbage")} holds no event number (1 word, 3 bytes): fix or remove it, or give --since` } });
     expect(readdirSync(home)).toEqual([]);
     expect(readFileSync(join(dir, "garbage"), "utf8")).toBe("abc\n");
   });

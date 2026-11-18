@@ -40,6 +40,15 @@ describe("test-affected.mjs's arguments", () => {
     expect(r.stderr).toContain(`npm run test:affected -- ${flags}`);
   });
 
+  it("names every flag and option it takes in --help", () => {
+    const r = run("--help");
+    expect(r.status).toBe(0);
+    for (const arg of ["--list", "--no-e2e", "--no-rust", "--no-lint", "--no-typecheck", "--no-stack", "--base", "--port", "--files", "--unit-group"]) {
+      expect(r.stdout).toContain(arg);
+    }
+    expect(r.stdout).toContain("tools/scripts/affected/stack.mjs");
+  });
+
   it("takes every flag and option it documents, as CI's draft job passes them", () => {
     const r = run("--base", "HEAD", "--port", "4999", "--unit-group", "2/4", "--no-e2e", "--no-rust", "--no-lint", "--no-typecheck", "--no-stack", "--list");
     expect(r.stderr).toBe("");

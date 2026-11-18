@@ -54,7 +54,7 @@ export const commands: Record<string, Command> = {
   "lightning default": { method: "lightning.default", usage: "lightning default <card> [--network testnet]", summary: "The Lightning card that receives by default", args: ["card"], options: { network: net }, params: ({ options }, { card: c }) => ({ card: c, network: options.network }) },
   "lightning rename": { method: "lightning.rename", usage: "lightning rename <card> <name...> [--network testnet]", summary: "Name a Lightning card", args: ["card", "name..."], options: { network: net }, params: ({ options }, a) => ({ card: a.card, name: a.name, network: options.network }) },
   "pay": {
-    method: "pay", usage: "pay <invoice|lightning-address|lnurl> [--amount sats] [--network n] [--max-fee sats] [--card <id>] [--comment t] [--chat <chat>] [--confirm-real] [--force]", summary: "Pay over Lightning from Testnet, or --network mainnet with --confirm-real",
+    method: "pay", usage: "pay <invoice|lightning-address|lnurl> [--amount sats] [--network n] [--max-fee sats] [--card <id>] [--comment t] [--chat <chat>] [--confirm-real] [--force]", summary: "Pay over Lightning from Testnet, or --network mainnet with --confirm-real. paid false: not settled yet (pending at the mint or the card's source, or its answer lost); it settles by itself, is never paid twice, and its note says what is set aside and where to look",
     args: ["target"], options: { amount: { type: "number", description: "Sats, for an address or LNURL; with an invoice, refuse it unless it asks exactly this" }, network: net, "max-fee": { type: "number", description: "Refuse a fee above this" }, card, comment: { type: "string", description: "For the address's owner" }, chat: { type: "string", description: "The chat the invoice came from: on Testnet its contact is told it was paid" }, "confirm-real": confirmReal, force },
     params: ({ options }, { target }) => ({ target, amount: options.amount, network: options.network, maxFee: options["max-fee"], card: options.card, comment: options.comment, chat: options.chat, confirmReal: options["confirm-real"] === true, force: options.force === true }),
   },
@@ -98,7 +98,7 @@ export const commands: Record<string, Command> = {
     method: "wallet.receive", usage: "wallet receive <sats> [--network testnet] [--card <id>]", summary: "A Lightning invoice to be paid",
     args: ["amount"], options: { network: net, card }, params: ({ options }, { amount }) => ({ amount: sats(amount), network: options.network, card: options.card }),
   },
-  "wallet redeem": { method: "wallet.redeem", usage: "wallet redeem [<cashu-token> | -]", summary: "Take the ecash of a Cashu token (its mint must be one of yours); the token on stdin keeps it out of ps", args: ["token?"], params: (_, { token }) => ({ token }) },
+  "wallet redeem": { method: "wallet.redeem", usage: "wallet redeem [<cashu-token> | -]", summary: "Take the ecash of a Cashu token (its mint must be one of yours: wallet add-mint <url>); the token on stdin keeps it out of ps", args: ["token?"], params: (_, { token }) => ({ token }) },
   "wallet remove": {
     method: "wallet.remove", usage: "wallet remove <type> [--network testnet] [--card <id>] [--accept-loss]", summary: "Remove a wallet; refused while it holds money or waits for some, unless --accept-loss",
     args: ["type"], words: { type: WALLET_TYPES }, options: { network: net, card: card, "accept-loss": { type: "boolean", description: "What it holds on this device is lost without its backup" } },

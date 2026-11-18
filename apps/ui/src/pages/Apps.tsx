@@ -14,6 +14,7 @@ import { draftDirection } from "../lib/documentLanguage";
 import { AppIcon, Fingerprint } from "../components/apps/AppIcon";
 import { AppInstallDialog, InstalledAppDialog } from "../components/apps/AppInstallDialog";
 import { removedLine } from "../components/apps/removedLine";
+import { stoppedSaid } from "../components/apps/stoppedSaid";
 import { AddAppDialog } from "../components/apps/AddAppDialog";
 import { AppChatPicker } from "../components/apps/AppChatPicker";
 import { NAME, withName } from "../components/apps/aroundName";
@@ -258,8 +259,14 @@ const StoreBlock = memo(function StoreBlock({ store, alone, installed, onInstall
     const words = filter.trim().toLocaleLowerCase();
     return words ? store.apps.filter((l) => `${l.title}\n${l.tagline}`.toLocaleLowerCase().includes(words)) : store.apps;
   }, [store.apps, filter]);
-  // The installed apps it vouches for: removed, it no longer brings their updates or takedowns.
-  const vouched = useMemo(() => store.apps.flatMap((l) => have.get(l.ref)?.title ?? []), [store.apps, have]);
+  // The installed apps it took down, listed or not: removed, its takedown ends with it (only the person's stores are
+  // checked, WISP 1200 § Takedowns), so the question names them. Those it vouches for and did not take down: removed,
+  // it no longer brings their updates or takedowns.
+  const takenDown = useMemo(() => installed.filter((a) => removals.has(`${a.ref} ${a.digest}`)), [installed, removals]);
+  const vouched = useMemo(() => store.apps.flatMap((l) => {
+    const app = have.get(l.ref);
+    return app && !takenDown.includes(app) ? app.title : [];
+  }), [store.apps, have, takenDown]);
   const read = store.fetchedAt !== undefined || store.apps.length > 0;
   // What its block shows as its name: its link until it is read.
   const storeName = store.name ?? store.url;
@@ -319,9 +326,16 @@ const StoreBlock = memo(function StoreBlock({ store, alone, installed, onInstall
           <div role="group" aria-labelledby={questionId} data-testid="app-store-remove-question" className="basis-full space-y-2"
             onKeyDown={(e) => { if (e.key === "Escape" && !busy) { e.stopPropagation(); setAsking(false); } }}>
             <p id={questionId} dir="auto" className="text-sm text-text-primary [overflow-wrap:anywhere]">{withName(t("apps.store.removeTitle", { name: NAME }), storeName)}</p>
-            <p className="text-xs text-text-secondary">
-              {vouched.length ? t(vouched.length === 1 ? "apps.store.removeAppsOne" : "apps.store.removeApps", { titles: listText(vouched, t) }) : t("apps.store.removeNone")}
-            </p>
+            {takenDown.length > 0 && (
+              <p data-testid="app-store-remove-taken-down" className="text-xs text-danger-ink">
+                {t(takenDown.length === 1 ? "apps.store.removeTakenDownOne" : "apps.store.removeTakenDown", { titles: listText(takenDown.map((a) => a.title), t) })}
+              </p>
+            )}
+            {(vouched.length > 0 || !takenDown.length) && (
+              <p className="text-xs text-text-secondary">
+                {vouched.length ? t(vouched.length === 1 ? "apps.store.removeAppsOne" : "apps.store.removeApps", { titles: listText(vouched, t) }) : t("apps.store.removeNone")}
+              </p>
+            )}
             <div className="flex flex-wrap justify-end gap-2">
               <Button ref={keep} disabled={busy} onClick={() => setAsking(false)}>{t("common.cancel")}</Button>
               <Button variant="danger" data-testid="app-store-remove-confirm" disabled={busy} loading={pending === "remove"}
@@ -452,6 +466,23 @@ export function Apps() {
   const { show } = notice;
   const fail = useCallback((e: unknown) => show(appErrorText(e, t)), [show, t]);
   const said = useCallback((text: string) => show(text, { tone: "success" }), [show]);
+  // An update check or a store stopped an installed app: its row turning to Stopped, its Open going, were seen and never
+  // heard. Said politely, once, with why, in a status there since the page opened. Not for the apps already stopped
+  // when the page first read them, and not for the one whose screen is open (that screen says it).
+  const wasStopped = useRef<ReadonlyMap<string, boolean> | null>(null);
+  const [stopSaid, setStopSaid] = useState("");
+  useEffect(() => {
+    if (!installed) return;
+    const before = wasStopped.current;
+    const now = new Map(installed.map((a) => [a.ref, appStopped(a)]));
+    wasStopped.current = now;
+    if (!before) return;
+    const stopped = installed.filter((a) => appStopped(a) && before.get(a.ref) === false && a.ref !== details);
+    if (stopped.length) setStopSaid(stopped.map((a) => stoppedSaid(a.title, a.run, t)).join(" "));
+    // One that may run again, or is gone (uninstalled), empties the line, so the same app stopping again for the same
+    // reason is a change, and said.
+    else if ([...before].some(([ref, was]) => was && now.get(ref) !== true)) setStopSaid("");
+  }, [installed, details, t]);
 
   // A store that reads as before stays the object held, and the list held when all do: the update check and each
   // Refresh read every store again, and a store's block draws its listings again only when its own list changed.
@@ -487,6 +518,7 @@ export function Apps() {
     <Page title={t("apps.title")} width="md" testId="apps-page" overlay={<Toast toast={notice.toast} onDismiss={notice.dismiss} place="page" />}
       trailing={<PageAction label={t("apps.page.add")} title={t("apps.page.addHint")} testId="apps-add" onClick={() => setAdding(true)} />}>
       <p className="text-sm text-text-secondary">{t("apps.page.intro")}</p>
+      <p role="status" aria-live="polite" aria-atomic="true" className="sr-only" data-testid="apps-stop-said">{stopSaid}</p>
       <Section title={t("apps.page.installed")} testId="apps-installed">
         {installedFailure != null && <ReadFailed error={installedFailure} testId="apps-installed-error" onRetry={() => { setRetried("installed"); return refreshInstalledApps(); }} />}
         {installed === null ? <Block><Notice>{t("apps.page.loading")}</Notice></Block>

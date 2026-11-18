@@ -1,6 +1,7 @@
 import {
-  APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, APP_ICON_PATH, APP_STATEMENT_LIMITS, APP_STORE_LIMITS, appDigest, appViewOf, appFingerprint, appRef, appRefPublisher, appRevocationFor, appStoreDecision,
+  APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, APP_ICON_PATH, APP_STORE_LIMITS, appDigest, appViewOf, appFingerprint, appRef, appRefPublisher, appRevocationFor, appStoreDecision,
   addedAppPermissions, appUpdateDecision, canonicalJson, canonicalJsonBytes, checkAppBeforeRun, isAppHash, isAppKey, isAppRef, planAppUpdate, readAppBundleAsync, readAppRevocation, readAppRevocationShape,
+  appRevocationsFileEntries,
   pacer, readAppStoreSteps, readCanonicalJson, sha256Paced, toBase64Url, utf8Decode, utf8Encode,
   type AppBundle, type AppListing, type AppManifest, type AppPermission, type AppRemoval, type AppRevocationsChecked, type AppStoreIndex, type AppStoreKind,
   type AppStoreRead,
@@ -387,9 +388,25 @@ function listingUrls(urls: readonly string[]): string[] {
   return [...readable.filter(pinned), ...readable.filter((u) => !pinned(u))];
 }
 
+/** A read that failed for a reason that may pass: offline, the host not reached or too slow, its own trouble (5xx, 429). */
+const passing = (error: unknown): boolean => error instanceof AppFetchError
+  && (error.code === "offline" || error.code === "network" || error.code === "slow" || (error.status ?? 0) >= 500 || error.status === 429);
+
 /** An error whose message starts with its code (`<code>: words`), as it crosses the engine's RPC. */
 function fail(code: string, words: string): never {
   throw new Error(`${code}: ${words}`);
+}
+
+/**
+ * Refusals of a bundle whose detail is the bundle's own text (a file path, key names), not Ghostly's words: said
+ * without it, as a dialog shows the detail behind its ⓘ inside Ghostly's own box.
+ */
+const BUNDLE_WORDS: ReadonlySet<string> = new Set(["bad-path", "unknown-key", "path-collision", "files-unsorted", "file-hash"]);
+
+/** A bundle refused by `readAppBundleAsync`, as the engine throws it. */
+function refuseBundle(read: { reason: string; detail?: string }): never {
+  const detail = read.detail && !BUNDLE_WORDS.has(read.reason) ? ` (${read.detail})` : "";
+  fail(read.reason, `This is not an app Ghostly can install${detail}`);
 }
 
 /**
@@ -947,7 +964,7 @@ export class Apps {
     try { bytes = await this.host.readBuiltIn(app); } catch { fail("not-carried", "This build does not carry this app"); }
     if (!(bytes instanceof Uint8Array) || bytes.length > APP_BUNDLE_LIMITS.bundleBytes) fail("not-carried", "This build does not carry this app");
     const read = await readAppBundleAsync(bytes);
-    if (!read.ok) fail(read.reason, `This is not an app Ghostly can install${read.detail ? ` (${read.detail})` : ""}`);
+    if (!read.ok) refuseBundle(read);
     if (read.bundle.digest !== app.digest || versionOf(read.bundle.manifest, read.bundle.digest).ref !== builtInRef(app)) fail("unlisted", "The app this build carries is not the one it names");
     return { bundle: read.bundle, bytes };
   }
@@ -1371,7 +1388,7 @@ export class Apps {
     const read = (async () => {
       const bytes = await this.host.fetch(url, { maxBytes: APP_BUNDLE_LIMITS.bundleBytes });
       const read = await readAppBundleAsync(bytes);
-      if (!read.ok) fail(read.reason, `This is not an app Ghostly can install${read.detail ? ` (${read.detail})` : ""}`);
+      if (!read.ok) refuseBundle(read);
       return { bundle: read.bundle, bytes };
     })().finally(() => { this.bundleReads.delete(url); });
     this.bundleReads.set(url, read);
@@ -1493,23 +1510,24 @@ export class Apps {
   }
 
   /**
-   * The revocations of a `ghostly-revoke.json`, by app; null when one entry does not verify. A file whose bytes verified
-   * before (`verdict`) is canonical by its digest: parsed with no canonical check, and each entry's shape taken alone.
+   * The revocations of a `ghostly-revoke.json`, by app; null when one entry does not verify. Each entry is found
+   * (`appRevocationsFileEntries`: nothing parsed, past 4096 or one too large refuses the file) and read in its own
+   * step. A file whose bytes verified before (`verdict`) is canonical by its digest: each entry parsed with no canonical
+   * check, and its shape taken alone.
    */
   private async splitRevocations(id: string, bytes: Uint8Array, verdict: boolean | undefined): Promise<Map<string, SignedAppRevocation[]> | null> {
-    const read = verdict ? { ok: true as const, value: JSON.parse(utf8Decode(bytes)) as JsonValue } : readCanonicalJson(bytes);
-    let out: Map<string, SignedAppRevocation[]> | null = null;
-    if (read.ok && Array.isArray(read.value) && read.value.length <= APP_STATEMENT_LIMITS.revocations) {
-      out = new Map();
-      const pause = pacer(REVOCATIONS_SLICE_MS);
-      for (const entry of read.value) {
-        await pause();
-        const one = verdict ? readAppRevocationShape(entry) : readAppRevocation(entry);
-        if (!one.ok) { out = null; break; }
-        const app = one.revocation.statement.app;
-        const list = out.get(app);
-        if (list) list.push(one.revocation); else out.set(app, [one.revocation]);
-      }
+    let out: Map<string, SignedAppRevocation[]> | null = new Map();
+    const pause = pacer(REVOCATIONS_SLICE_MS);
+    const entries = appRevocationsFileEntries(bytes);
+    for (let next = entries.next(); ; next = entries.next()) {
+      if (next.done) { if (next.value) out = null; break; }
+      await pause();
+      const read = verdict ? { ok: true as const, value: JSON.parse(utf8Decode(next.value)) as JsonValue } : readCanonicalJson(next.value);
+      const one = !read.ok ? read : verdict ? readAppRevocationShape(read.value) : readAppRevocation(read.value);
+      if (!one.ok) { out = null; break; }
+      const app = one.revocation.statement.app;
+      const list = out.get(app);
+      if (list) list.push(one.revocation); else out.set(app, [one.revocation]);
     }
     this.revocationVerdicts.delete(id);
     this.revocationVerdicts.set(id, out !== null);
@@ -1773,6 +1791,8 @@ export class Apps {
 
     // The install screen opened again on the version it showed (a listing, a card naming its digest): the bundle read and
     // checked from that URL within `STAGED.ms` is taken as it is, and only its revocations are read again.
+    // None read: a URL's passing trouble (its host down, a rate limit, too slow) is what is said, not a later URL's 404 or
+    // refusal, so the screen offers Try again, which may read that URL.
     let last: unknown = null;
     for (const url of urls) {
       try {
@@ -1786,7 +1806,7 @@ export class Apps {
           if (expect.exact && version.digest !== expect.digest) fail("unlisted", "The URL holds a version the store does not list");
         }
         return this.stage(bundle, bytes, url, fromStore);
-      } catch (error) { last = error; }
+      } catch (error) { if (!passing(last) || passing(error)) last = error; }
     }
     throw last instanceof Error ? last : new Error(String(last));
   }

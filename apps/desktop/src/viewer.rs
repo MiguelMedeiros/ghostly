@@ -31,6 +31,14 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 /// the refusal is missing, instead of waiting out the real timeout.
 #[cfg(test)]
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
+/// The largest request body the data link carries (`LIMITS.maxRequestBodyBytes` in core, `MAX_REQUEST_BYTES` on the
+/// web): a larger one is refused here, before it is copied into the main window.
+const MAX_REQUEST_BODY_BYTES: usize = 8 * 1024 * 1024;
+/// What one window may have waiting for an answer at once: requests, and the bytes of their bodies. Past either a
+/// request is refused at once, so the app cannot make the main window hold unbounded memory. The count is the web
+/// runner's sent and waiting ones together (`MAX_PENDING_REQUESTS` + `MAX_WAITING_REQUESTS`), the bytes its own.
+const MAX_PENDING_REQUESTS: usize = 288;
+const MAX_PENDING_BODY_BYTES: usize = 32 * 1024 * 1024;
 
 /// Added to every answer a contact's app gets served, after the contact's own
 /// policies: a WebView enforces every policy it is sent, so the contact's own
@@ -604,6 +612,8 @@ pub struct ViewerState {
     /// Window label → what it shows. The window decides where a request goes, not its URL.
     windows: Mutex<HashMap<String, Bound>>,
     pending: Mutex<HashMap<u64, oneshot::Sender<ServiceResponse>>>,
+    /// Window label → its requests waiting for an answer and the bytes of their bodies (`Room`).
+    held: Mutex<HashMap<String, (usize, usize)>>,
     next_id: AtomicU64,
 }
 
@@ -734,7 +744,8 @@ fn external_target(url: &url::Url, site: &str, service: &str) -> Option<String> 
 }
 
 /// Whether a link names this machine or the local network: an address that is not public (loopback, private,
-/// link-local, …), `localhost` and its subdomains, an mDNS `.local` name, a router's `.lan` name, or a name of one label (`router`, `nas`)
+/// link-local, …), a name under a local suffix (`localhost`, mDNS `.local`, a router's `.lan` or `.home`, a company's
+/// `.corp`: `local_names::LOCAL_SUFFIXES`), or a name of one label (`router`, `nas`)
 /// that only a local resolver answers. The contact's page runs on the contact's side; opening such a link in the
 /// person's browser sends it with the browser's cookies, past the browser's own guard for local addresses
 /// (WebView2 opens one from script, with no click). A public name that resolves to a local address is not caught here.
@@ -744,12 +755,7 @@ fn is_local_host(url: &url::Url) -> bool {
         Some(url::Host::Ipv6(ip)) => !crate::link_preview::is_public(ip.into()),
         Some(url::Host::Domain(name)) => {
             let name = name.trim_end_matches('.').to_ascii_lowercase();
-            !name.contains('.')
-                || name.ends_with(".localhost")
-                || name.ends_with(".local")
-                || name.ends_with(".internal")
-                || name.ends_with(".lan")
-                || name.ends_with(".home.arpa")
+            !name.contains('.') || crate::local_names::under_local_suffix(&name)
         }
         None => true,
     }
@@ -985,6 +991,46 @@ fn plain(status: StatusCode, message: &str) -> Response<Vec<u8>> {
         .expect("static response")
 }
 
+/// One request's place in its window's room (`MAX_PENDING_REQUESTS`, `MAX_PENDING_BODY_BYTES`), given back when it
+/// is dropped: answered, timed out, or let go of by the page.
+struct Room<'a> {
+    held: &'a Mutex<HashMap<String, (usize, usize)>>,
+    label: &'a str,
+    bytes: usize,
+}
+
+impl<'a> Room<'a> {
+    fn take(state: &'a ViewerState, label: &'a str, bytes: usize) -> Option<Self> {
+        let mut held = state.held.lock().ok()?;
+        let (count, total) = held.entry(label.to_string()).or_default();
+        if *count >= MAX_PENDING_REQUESTS || *total + bytes > MAX_PENDING_BODY_BYTES {
+            return None;
+        }
+        *count += 1;
+        *total += bytes;
+        Some(Room {
+            held: &state.held,
+            label,
+            bytes,
+        })
+    }
+}
+
+impl Drop for Room<'_> {
+    fn drop(&mut self) {
+        let Ok(mut held) = self.held.lock() else {
+            return;
+        };
+        if let Some((count, total)) = held.get_mut(self.label) {
+            *count -= 1;
+            *total -= self.bytes;
+            if *count == 0 {
+                held.remove(self.label);
+            }
+        }
+    }
+}
+
 pub async fn handle<R: tauri::Runtime>(
     app: AppHandle<R>,
     label: String,
@@ -1034,6 +1080,21 @@ pub async fn handle<R: tauri::Runtime>(
             "This window only shows the service it was opened for.",
         );
     }
+
+    // Refused before the body is copied and base64'd into the main window, which would only refuse it there.
+    let bytes = request.body().len();
+    if bytes > MAX_REQUEST_BODY_BYTES {
+        return plain(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "The request body is too large.",
+        );
+    }
+    let Some(_room) = Room::take(&state, &label, bytes) else {
+        return plain(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Too many requests are waiting for an answer.",
+        );
+    };
 
     let id = state.next_id.fetch_add(1, Ordering::Relaxed);
     let (sender, receiver) = oneshot::channel();
@@ -1403,6 +1464,10 @@ mod tests {
             "http://nas.home.arpa/",
             "http://router.lan/",
             "http://NAS.Lan./",
+            "http://router.home/",
+            "http://nas.localdomain/",
+            "http://hr.intranet/",
+            "http://files.corp/",
         ] {
             assert_eq!(outside(local), None, "{local}");
         }
@@ -1696,6 +1761,84 @@ mod routing_tests {
             .lock()
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn a_window_holds_only_so_many_requests_and_body_bytes_at_once() {
+        let app = app();
+        bind(&app, "svc-1");
+        bind(&app, "svc-2");
+        let asked = requests(&app);
+        let url = format!("{SCHEME}://atlas.{PEER}.{TAG}/up");
+        let send = |label: &str, body: &[u8]| {
+            tauri::async_runtime::spawn(handle(
+                app.handle().clone(),
+                label.into(),
+                request("POST", &url, body),
+            ))
+        };
+        let carried = || {
+            asked.recv_timeout(Duration::from_secs(5)).unwrap()["id"]
+                .as_u64()
+                .unwrap()
+        };
+        let served = |pending: tauri::async_runtime::JoinHandle<Response<Vec<u8>>>| {
+            tauri::async_runtime::block_on(pending).unwrap().status()
+        };
+        let answer = |id: u64| {
+            respond(
+                app.handle(),
+                id,
+                ServiceResponse {
+                    status: 200,
+                    headers: Vec::new(),
+                    body_b64: String::new(),
+                },
+            )
+        };
+
+        // A body past the data link's limit is refused here, never handed to the main window.
+        let too_large = vec![0u8; MAX_REQUEST_BODY_BYTES + 1];
+        assert_eq!(
+            served(send("svc-1", &too_large)),
+            StatusCode::PAYLOAD_TOO_LARGE
+        );
+        assert!(asked.try_recv().is_err());
+
+        // A request waiting for its answer holds room in its window, and gives it back once answered.
+        let state = app.state::<ViewerState>();
+        let full = vec![0u8; MAX_REQUEST_BODY_BYTES];
+        let pending = send("svc-1", &full);
+        let id = carried();
+        assert_eq!(
+            state.held.lock().unwrap().get("svc-1"),
+            Some(&(1, MAX_REQUEST_BODY_BYTES))
+        );
+        answer(id);
+        assert_eq!(served(pending), StatusCode::OK);
+        assert!(state.held.lock().unwrap().is_empty());
+
+        // Room held by others, taken here rather than by requests that would time out while the test runs: past the
+        // bytes or the count, a request is refused at once and never handed to the main window.
+        let bytes = Room::take(&state, "svc-1", MAX_PENDING_BODY_BYTES).unwrap();
+        assert_eq!(served(send("svc-1", b"x")), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(asked.try_recv().is_err());
+        // Another window has its own room.
+        let other = send("svc-2", b"x");
+        answer(carried());
+        assert_eq!(served(other), StatusCode::OK);
+        drop(bytes);
+        let count: Vec<_> = (0..MAX_PENDING_REQUESTS)
+            .map(|_| Room::take(&state, "svc-1", 0).unwrap())
+            .collect();
+        assert_eq!(served(send("svc-1", b"")), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(asked.try_recv().is_err());
+        drop(count);
+        let again = send("svc-1", b"x");
+        answer(carried());
+        assert_eq!(served(again), StatusCode::OK);
+        assert!(state.pending.lock().unwrap().is_empty());
+        assert!(state.held.lock().unwrap().is_empty());
     }
 
     #[test]
