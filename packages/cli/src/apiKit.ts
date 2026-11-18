@@ -216,6 +216,8 @@ export function findChat(links: readonly LinkView[], ref: string, groups: readon
  * as if nothing had that name.
  */
 function noChat(ref: string, groups: readonly GroupView[]): CliError {
+  // A name two groups share is still a group's: it read `No chat "Crew"`, as if nothing had it.
+  if (groupsSharing(ref, groups)) return new CliError("not_found", `${JSON.stringify(ref)} names more than one group, not a chat: a group command takes one by its id (ghostly group list)`);
   const group = groupNamed(ref, groups);
   if (group) return new CliError("not_found", `${JSON.stringify(ref)} is a group, not a chat (ghostly chat list)`, { group: group.id });
   return new CliError("not_found", `No chat ${JSON.stringify(ref)} (ghostly chat list)`);
@@ -246,6 +248,18 @@ export function noFile(id: string, place?: RefPlace): CliError {
 /** The one group `ref` names, if any (none, or more than one: undefined). */
 function groupNamed(ref: string, groups: readonly GroupView[]): GroupView | undefined {
   try { return findGroup(groups, ref); } catch { return undefined; }
+}
+
+/** The ids of the groups `ref` names when it names more than one (`findGroup` refuses it, with them); else undefined. */
+function groupsSharing(ref: string, groups: readonly GroupView[]): string[] | undefined {
+  try { findGroup(groups, ref); } catch (error) { return sharedGroupIds(error); }
+  return undefined;
+}
+
+/** The ids in `findGroup`'s refusal of a name more than one group has, if `error` is that refusal. */
+export function sharedGroupIds(error: unknown): string[] | undefined {
+  const matches = error instanceof CliError && error.code === "bad_request" ? error.details?.matches : undefined;
+  return Array.isArray(matches) ? matches.map(String) : undefined;
 }
 
 /** `findChat`, and whether only what the contact controls (`theirName`: a prefix of the id, its own name) found the chat. */
