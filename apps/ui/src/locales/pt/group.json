@@ -251,7 +251,9 @@
     "forget": "Apagar deste dispositivo",
     "leave": "Sair do grupo",
     "members": "Membros…",
-    "rotate": "Renovar chaves"
+    "rotate": "Renovar chaves",
+    "rotated": "Chaves renovadas: os membros recebem as novas chaves",
+    "rotating": "Renovando chaves…"
   },
   "others": {
     "body": "Quem sabe o id de um grupo pode criar um grupo seu com ele, e só um deles pode ficar neste dispositivo. Mantenha este ou troque pelo outro: trocar sai deste e o apaga deste dispositivo.",

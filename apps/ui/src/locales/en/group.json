@@ -251,7 +251,9 @@
     "forget": "Delete from this device",
     "leave": "Leave group",
     "members": "Members…",
-    "rotate": "Rotate keys"
+    "rotate": "Rotate keys",
+    "rotated": "Keys rotated: members get the new keys",
+    "rotating": "Rotating keys…"
   },
   "others": {
     "body": "Anyone who knows a group's id can make a group of their own under it, and only one of them can be on this device. Keep this one, or switch to the other: switching leaves this one and deletes it from this device.",

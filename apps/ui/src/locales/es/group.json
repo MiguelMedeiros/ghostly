@@ -251,7 +251,9 @@
     "forget": "Eliminar de este dispositivo",
     "leave": "Salir del grupo",
     "members": "Miembros…",
-    "rotate": "Renovar claves"
+    "rotate": "Renovar claves",
+    "rotated": "Claves renovadas: los miembros reciben las nuevas claves",
+    "rotating": "Renovando claves…"
   },
   "others": {
     "body": "Quien conoce el id de un grupo puede crear un grupo propio con él, y solo uno de ellos puede estar en este dispositivo. Conserva este o cambia al otro: cambiar sale de este y lo borra de este dispositivo.",
