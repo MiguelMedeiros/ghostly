@@ -746,19 +746,27 @@ export class Apps {
   private readonly held = new Map<string, Promise<InstalledApp | undefined>>();
   private heldStores: Promise<Map<string, AddedAppStore>> | null = null;
   /**
-   * Listing URLs whose peek showed nothing to take (`<store> <ref> <url>` → `<index digest> <listed digest> <pin>
-   * <installed digest> <waiting digest>`): the same index listing the same, for the same app, is not peeked again at
-   * every check. Only the ones the last check read or wrote stay (`listingsRead`): a store that lists new URLs at each
-   * index does not grow them, and none the index still lists goes (with a count kept, the oldest going first, a check
-   * of more than that dropped each before it was read, and peeked every one again). A store's go when it is removed.
+   * Listing URLs whose peek showed nothing to take (`<store> <ref> <url>` → `seen`: `<index digest> <listed digest>
+   * <pin> <installed digest> <waiting digest>`, and when): the same index listing the same, for the same app, is not
+   * peeked again at every check. A URL pinned to a commit (`isPinnedAppUrl`) never changes, so its miss lasts while
+   * `seen` does; any other may (a raw HEAD still cached at the old version when the store signed its index, then
+   * caught up), so its miss lasts an hour, as `refusedReads` do, and the next check after that peeks it again. Only the
+   * ones the last check read or wrote stay (`listingsRead`): a store that lists new URLs at each index does not grow
+   * them, and none the index still lists goes (with a count kept, the oldest going first, a check of more than that
+   * dropped each before it was read, and peeked every one again). A store's go when it is removed.
    */
-  private readonly listingMisses = new Map<string, string>();
+  private readonly listingMisses = new Map<string, { seen: string; at: number }>();
   /** The `listingMisses` the update check running now read or wrote; null outside a check. */
   private listingsRead: Set<string> | null = null;
 
   private missListing(missed: string, seen: string): void {
-    this.listingMisses.set(missed, seen);
+    this.listingMisses.set(missed, { seen, at: this.now() });
     this.listingsRead?.add(missed);
+  }
+  /** `url`'s peek for `missed` showed nothing to take against `seen`, and is not due again (`listingMisses`). */
+  private listingMissed(missed: string, seen: string, url: string): boolean {
+    const miss = this.listingMisses.get(missed);
+    return miss?.seen === seen && (isPinnedAppUrl(url) || this.checkedWithin(miss.at, APP_CHECK_TIMINGS.freshMs));
   }
   /**
    * URLs whose whole read the update check, or a fetch of missing files, refused (a file hash that does not hold, a bad
@@ -2143,7 +2151,7 @@ export class Apps {
       for (const url of listingUrls(listing.urls)) {
         const missed = `${s.key} ${app.ref} ${url}`;
         if (candidates.has(url)) continue;
-        if (s.digest !== undefined && this.listingMisses.get(missed) === seen) { this.listingsRead?.add(missed); continue; }
+        if (s.digest !== undefined && this.listingMissed(missed, seen, url)) { this.listingsRead?.add(missed); continue; }
         candidates.set(url, { sequence: listing.sequence, ...(pinned !== undefined && { digest: listing.digest }), peek: true, ...(s.digest !== undefined && { miss: [missed, seen] as [string, string] }) });
       }
     }
@@ -2181,7 +2189,7 @@ export class Apps {
     for (const [url, want] of [...candidates].sort(([, a], [, b]) => b.sequence - a.sequence)) {
       // A listing's URL is peeked first, as a source is: one that does not hold what may be taken (a listing that names
       // a version its URLs do not hold, a raw HEAD that moved on) is not read whole, nor peeked again while the store's
-      // index lists the same.
+      // index lists the same (`listingMisses`: for an hour, unless it is pinned to a commit).
       let holds = want.holds;
       if (want.peek) {
         let peek: ReturnType<typeof peekAppManifest>;
