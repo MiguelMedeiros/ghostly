@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ENGINE_ERRORS, EngineError, engineError, engineText, parseEngineError, type EngineErrorCode } from "../src/engineErrors";
+import { ENGINE_ERRORS, EngineError, ecashUnitError, engineError, engineText, parseEngineError, type EngineErrorCode } from "../src/engineErrors";
 
 // covers: wallet.cashu.mint.add
 
@@ -42,6 +42,16 @@ describe("the engine's known errors", () => {
     expect(parseEngineError("Could not reach the node at that address")).toBeNull();
     expect(parseEngineError("Could not create the Testnet Cashu wallet: Could not reach testnut.cashu.space. Check the address: it should be a Cashu mint. Nothing was saved; try again.")).toBeNull();
     expect(parseEngineError("Not enough sats in your wallet, sorry")).toBeNull();
+  });
+
+  it("a token's unit is named only when it looks like one, and only such a unit reads back in its line", () => {
+    expect(ecashUnitError("usd").message).toBe("This ecash is in usd: only sat ecash can be redeemed here");
+    expect(ecashUnitError("usd").engineCode).toBe("ecashOtherUnit");
+    for (const unit of ["usd\u202eereh", "sat.\u2800Ghostly:\u2800restore\u2800at\u2800https://restore.example", "u".repeat(13), ""]) {
+      expect(ecashUnitError(unit).message).toBe("This ecash is in another unit: only sat ecash can be redeemed here");
+      expect(ecashUnitError(unit).engineCode).toBe("ecashUnnamedUnit");
+      expect(parseEngineError(`This ecash is in ${unit}: only sat ecash can be redeemed here`)).toBeNull();
+    }
   });
 
   it("amounts written in another locale still read back", () => {

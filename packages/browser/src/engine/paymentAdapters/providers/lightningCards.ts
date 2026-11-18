@@ -7,7 +7,8 @@ import { LightningService, readLightningJournal, type LightningEvents, type Ligh
 import { sourceKey } from "./sources";
 import { awayFrom } from "../away";
 import { breezDatabaseInUse } from "./breezDatabases";
-import { BreezLightning } from "./breez";
+import type { BreezLightning } from "./breez";
+import { BREEZ_SOURCE } from "./breezProvider";
 import { nwc, nwcWalletName } from "./nwcProvider";
 import { normalizePhrase } from "./recoveryPhrase";
 import type { ProviderHost } from "./types";
@@ -217,7 +218,7 @@ export class LightningCards {
   /** The card opened the Breez database the network's Spark wallet has open: one wallet behind both cards. */
   private isSpark(service: LightningService): boolean {
     const spark = this.options.sparkStorage?.(), active = service.sources.active;
-    return !!spark && active instanceof BreezLightning && active.storage === spark;
+    return !!spark && service.view.providerId === BREEZ_SOURCE && (active as BreezLightning | undefined)?.storage === spark;
   }
 
   /** The card holding this quote (each card quotes through its own source). */

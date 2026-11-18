@@ -71,7 +71,9 @@ const server = new Promise<PeerServer>((resolve, reject) => {
       running = peer;
       // A message that came with no tab open: the peer tells the person, as a tab would have (attentionNotices.ts).
       const engine = engineOf(peer);
-      if (engine) engine.unheardAttention = (event) => void import("./attentionNotices").then(({ noticeUnheard }) => noticeUnheard(event, () => engine.node.getState().links)).catch(() => {});
+      if (engine) engine.unheardAttention = (event) => void import("./attentionNotices").then(({ noticeUnheard }) => noticeUnheard(event, (linkId) => engine.node.chatView(linkId))).catch(() => {});
+      // And a contact's call ringing then, until its ring ends.
+      if (engine) engine.unheardCall = (linkId, signal) => void import("./attentionNotices").then(({ noticeUnheardCall }) => noticeUnheardCall(linkId, signal, (id) => engine.node.chatView(id))).catch(() => {});
       // Only in `vite build --mode e2e` (test/attacks.mjs plays a malicious peer through it); gone from real builds.
       if (import.meta.env.MODE === "e2e") Object.assign(globalThis, { __ghostly: running });
       // Heard before any `ping` waits on it, so a ping that comes once it failed knows.

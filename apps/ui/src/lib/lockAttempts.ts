@@ -2,8 +2,8 @@ import { prefixOf } from "./profiles";
 import { verifyPassword } from "./settings";
 
 /*
- * Wrong lock passwords are paced wherever a profile's lock password is checked: its lock screen, and another profile's
- * Delete and Back up first (`assertUnlocked`). Each profile has its own count, in its own storage, kept across reloads
+ * Wrong lock passwords are paced wherever a profile's lock password is checked: its lock screen, Add a device, Settings'
+ * current password (to change or remove it), and another profile's Delete and Back up first (`assertUnlocked`). Each profile has its own count, in its own storage, kept across reloads
  * or reloading would reset it; only that profile's right password clears it. The default profile's key,
  * `ghostly_lock_attempts`, is the one every profile shared before: a wait kept there stays the default profile's.
  */
@@ -81,5 +81,8 @@ async function tryOnce(id: string, password: string, hash: string): Promise<Trie
   return { ok: false, retryAt: retryAt || null };
 }
 
+/** The seconds left of a wait, said as "Try again in N s" (`lockScreen.tooManyAttempts`). */
+export const waitSeconds = (retryAt: number) => Math.max(1, Math.ceil((retryAt - Date.now()) / 1000));
+
 /** What a try refused for the wait says. */
-export const waitMessage = (retryAt: number) => `Too many attempts. Try again in ${Math.max(1, Math.ceil((retryAt - Date.now()) / 1000))} s`;
+export const waitMessage = (retryAt: number) => `Too many attempts. Try again in ${waitSeconds(retryAt)} s`;

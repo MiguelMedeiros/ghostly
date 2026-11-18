@@ -1679,6 +1679,31 @@ describe("messages kept in rows.db", () => {
     expect(found).toEqual({ "before the rename": { file: undefined, state: undefined }, "between the entries": { file: undefined, state: undefined } });
   });
 
+  it("a fold whose VACUUM or rename failed is not, in a process killed later, what the transactions completed since come back to", async () => {
+    const errors = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const found: Record<string, unknown> = {};
+    try {
+      for (const fault of ["vacuum", "rename"] as const) {
+        const dir = folder();
+        const store = await openPersistentIndexedDb(dir);
+        opened.push(store);
+        const d = await db(store.factory);
+        await tx(d, ["messages", "settings"], (s) => { s.messages.put({ linkId: "a", id: "1", text: "before" }); s.settings.put("before", "name"); });
+        // A purge's fold with no room for VACUUM's copy, or a backup's whose rename is refused: rows.db names its snapshot.
+        const scrub = fault === "vacuum" ? vi.spyOn(TreeFile.prototype, "scrub").mockImplementationOnce(() => { throw new Error("database or disk is full"); }) : null;
+        if (fault === "rename") faults.next.push("rename");
+        await expect(store.compact({ scrub: fault === "vacuum" })).rejects.toThrow();
+        scrub?.mockRestore();
+        // Completed after it: the message's half in rows.db, the setting's in the journal.
+        await tx(d, ["messages", "settings"], (s) => { s.messages.put({ linkId: "a", id: "2", text: "after" }); s.settings.put("after", "name"); });
+        await store.flush();
+        const t = (await db(await open(copyOf(dir)))).transaction(["messages", "settings"]);
+        found[fault] = { name: await read(t.objectStore("settings").get("name")), message: (await read(t.objectStore("messages").get(["a", "2"])) as { text?: string } | undefined)?.text };
+      }
+    } finally { errors.mockRestore(); faults.next.length = 0; }
+    expect(found).toEqual({ vacuum: { name: "after", message: "after" }, rename: { name: "after", message: "after" } });
+  });
+
   it("a put a unique index refuses in a store kept on disk leaves the store writable by the next transaction", async () => {
     const dir = folder();
     const factory = await open(dir);
@@ -1743,6 +1768,48 @@ describe("messages kept in rows.db", () => {
     const elsewhere = await openPersistentIndexedDb(copy, { rowsOnDisk: () => false });
     opened.push(elsewhere);
     expect(await all(elsewhere.factory)).toEqual(values);
+  });
+
+  it("gives back as it was an object a contact's data gave the Blob marker's key: after a kill, a restart, and a backup restored", async () => {
+    const marked = { t: "group-msg", c: "AAAA", __ghostlyBlob: "x" };
+    const lookalike = { __ghostlyBlob: { type: "text/plain", bytes: new Uint8Array([104, 105]) } };
+    const kept = { __ghostlyBlob: { kept: { a: 1 } } };
+    const group = { store: [marked, lookalike, kept], file: new Blob(["hi"], { type: "text/plain" }) };
+    const messages = [{ ...message(0), ...marked }, { ...message(1), extra: lookalike }, { ...message(2), extra: kept }];
+    const same = async (factory: IDBFactory) => {
+      const d = await db(factory);
+      try {
+        const value = await read(d.transaction("settings").objectStore("settings").get("group")) as typeof group;
+        expect(value.store).toEqual(group.store);
+        expect(value.file).toBeInstanceOf(Blob);
+        expect(await value.file.text()).toBe("hi");
+      } finally { d.close(); }
+      expect(await all(factory)).toEqual(messages);
+    };
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    opened.push(store);
+    await tx(await db(store.factory), ["messages", "settings"], (s) => { for (const m of messages) s.messages.put(m); s.settings.put(group, "group"); });
+    await store.flush();
+    // Killed before rows.db took the messages: the next start replays them into it.
+    const crashed = copyOf(dir);
+    const replayed = await openPersistentIndexedDb(crashed);
+    opened.push(replayed);
+    await same(replayed.factory);
+    await applied();
+    await store.compact();
+    await store.close();
+    const again = await openPersistentIndexedDb(dir);
+    opened.push(again);
+    await same(again.factory);
+
+    const exported = join(folder(), "store.bin");
+    await again.exportSnapshot(exported);
+    const copy = folder();
+    cpSync(exported, join(copy, "snapshot.bin"));
+    const restored = await openPersistentIndexedDb(copy);
+    opened.push(restored);
+    await same(restored.factory);
   });
 
   it("a backup's store carries no chat's ratchet (WISP 4xx), and keeps the rest of the chat", async () => {
