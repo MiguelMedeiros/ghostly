@@ -6,7 +6,7 @@ import { bytesEqual, fromBase64Url, fromZ32, toBase64Url, toZ32, utf8Encode } fr
 import { decodeTxtPacket, encodeTxtPacket, type NsRecord, type TxtRecord } from "./dns";
 import type { Identity } from "./identity";
 import { MAX_DNS_PACKET_BYTES, PacketTooLargeError, openRelayPayload, signRelayPayload } from "./pkarr";
-import { DEFAULT_RELAYS, SLOW_MS, normalizeRelayUrl } from "./relay";
+import { DEFAULT_RELAYS, normalizeRelayUrl } from "./relay";
 
 /**
  * did:dht (the DIF method, https://github.com/decentralized-identity/did-dht/blob/main/spec/spec.md): a W3C DID document written as DNS records into the
@@ -515,8 +515,8 @@ function seqDate(seq: bigint): string {
 /**
  * Resolves a did:dht through Pkarr relays: one GET to each, all at once, and the newest packet that
  * checks out wins (the highest sequence number; on a tie, the relay listed first), so a relay holding
- * an older version cannot bring back a removed key or undo a deactivation. Once a packet checks out,
- * the relays still to answer have `SLOW_MS` to offer a newer one. Each answer is bounded to
+ * an older version cannot bring back a removed key or undo a deactivation. It waits for every relay
+ * that answers within the fetch's timeout, not only the first. Each answer is bounded to
  * a BEP44 item, its signature checked against the DID's key and its records parsed strictly; a relay
  * that has nothing, fails or serves a packet that does not check out does not count. A deactivated DID
  * resolves (`metadata.deactivated`); everything else that goes wrong throws a `DidDhtError`.
@@ -527,44 +527,25 @@ export async function resolveDidDht(did: string, options: ResolveDidDhtOptions):
   if (relays.length === 0) throw new DidDhtError("No Pkarr relay to ask", "unreachable");
   options.signal?.throwIfAborted();
 
-  // Each relay's answer as it comes: a packet that checks out, a status, or what was wrong with its packet. Once one
-  // checks out, the others get `SLOW_MS` to offer a newer one, not the fetch's whole timeout (10 s for a relay that hangs).
-  const answers: ({ opened: DecodedDidDht & { seq: bigint } } | { status: number } | { error: unknown } | undefined)[] = relays.map(() => undefined);
-  await new Promise<void>((resolve) => {
-    let pending = relays.length;
-    let grace: ReturnType<typeof setTimeout> | undefined;
-    const done = () => { clearTimeout(grace); resolve(); };
-    for (const [i, relay] of relays.entries()) {
-      void options.fetch(`${relay}/${z32}`, { maxBytes: DID_DHT_MAX_PAYLOAD, signal: options.signal, redirect: "error" }).catch(() => undefined).then((response) => {
-        if (response?.status === 200) {
-          try {
-            answers[i] = { opened: openDidDhtPayload(did, response.bytes) };
-            grace ??= setTimeout(done, SLOW_MS);
-          } catch (error) {
-            answers[i] = { error };
-          }
-        } else if (response) {
-          answers[i] = { status: response.status };
-        }
-        if (--pending === 0) done();
-      });
-    }
-  });
+  // Every relay that answers within the fetch's timeout counts: stopping at the first packet that checks out would let a
+  // fast relay holding an older version win over a slower one with the newer.
+  const responses = await Promise.all(relays.map((relay) =>
+    options.fetch(`${relay}/${z32}`, { maxBytes: DID_DHT_MAX_PAYLOAD, signal: options.signal, redirect: "error" }).catch(() => undefined)));
   options.signal?.throwIfAborted();
 
   let notFound = false;
   let refused: DidDhtError | undefined;
   let newest: (DecodedDidDht & { seq: bigint; relay: string }) | undefined;
   for (const [i, relay] of relays.entries()) {
-    const answer = answers[i];
-    if (!answer) continue;
-    if ("status" in answer) {
-      if (answer.status === 404) notFound = true;
-    } else if ("error" in answer) {
-      if (!(answer.error instanceof DidDhtError)) throw answer.error;
-      refused = answer.error;
-    } else if (!newest || answer.opened.seq > newest.seq) {
-      newest = { ...answer.opened, relay };
+    const response = responses[i];
+    if (response?.status === 404) notFound = true;
+    if (response?.status !== 200) continue;
+    try {
+      const opened = openDidDhtPayload(did, response.bytes);
+      if (!newest || opened.seq > newest.seq) newest = { ...opened, relay };
+    } catch (error) {
+      if (!(error instanceof DidDhtError)) throw error;
+      refused = error;
     }
   }
   if (newest) {
