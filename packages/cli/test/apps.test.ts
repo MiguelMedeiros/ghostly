@@ -629,6 +629,32 @@ describe("app verify <url>", () => {
     expect(pulled).toBeLessThan(20);
   });
 
+  it("never repeats the query of the URL, where a private repository's token rides, in a refusal of the read", async () => {
+    const url = "https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp?token=GHSAT0AAAAAPRIVATEREPOTOKEN#x";
+    const answers: (() => Response)[] = [
+      () => new Response(null, { status: 404 }),
+      () => new Response(null, { status: 503 }),
+      () => { throw new TypeError("fetch failed"); },
+      () => new Response(new Uint8Array([1, 2, 3]), { status: 200 }),
+      () => new Response(stream([bundle]), { status: 200, headers: { "content-length": String(16 * 1024 * 1024 + 1) } }),
+      () => new Response(null, { status: 302, headers: { location: "https://other.example/app.ghostlyapp" } }),
+      () => new Response(null, { status: 302, headers: { location: "?token=GHSAT0AAAAAPRIVATEREPOTOKEN&again=1" } }),
+      () => new Response(null, { status: 302, headers: { location: "http://raw.githubusercontent.com/x?token=GHSAT0AAAAAPRIVATEREPOTOKEN" } }),
+      () => new Response(null, { status: 302, headers: { location: "https://ana:GHSAT0AAAAAPRIVATEREPOTOKEN@raw.githubusercontent.com/x" } }),
+      () => { throw new DOMException("The operation timed out.", "TimeoutError"); },
+      () => new Response(new ReadableStream<Uint8Array>({ pull(c) { c.error(new DOMException("The operation timed out.", "TimeoutError")); } }), { status: 200 }),
+    ];
+    for (const answer of answers) {
+      vi.stubGlobal("fetch", async () => answer());
+      const refusal = await verifyApp(url).then(() => null, (e: unknown) => e as { message: string; details?: unknown });
+      expect(refusal?.message).toContain("https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp?…");
+      expect(JSON.stringify([refusal?.message, refusal?.details])).not.toMatch(/PRIVATEREPOTOKEN|#x/);
+    }
+    // A redirect's user and password are said as "…@".
+    vi.stubGlobal("fetch", async () => new Response(null, { status: 302, headers: { location: "https://ana:GHSAT0AAAAAPRIVATEREPOTOKEN@raw.githubusercontent.com/x" } }));
+    await expect(verifyApp(url)).rejects.toThrow("redirects to https://…@raw.githubusercontent.com/x, which a client does not read");
+  });
+
   it("refuses a version its publisher revoked in the ghostly-revoke.json beside the URL; none there is no error", async () => {
     const dir = tmp();
     writeFileSync(join(dir, "app.ghostlyapp"), bundle);
@@ -644,6 +670,8 @@ describe("app verify <url>", () => {
     const url = "https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp?x=1";
     await expect(verifyApp(url)).rejects.toMatchObject({ code: "refused", details: { reason: "revoked", detail: "Leaked a test move list" } });
     expect(seen).toEqual([url, "https://raw.githubusercontent.com/ana/chess/HEAD/ghostly-revoke.json"]);
+    // Its query is said as "?…": a private repository's token rides there.
+    await expect(verifyApp(url)).rejects.toThrow("https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp?… is a version its publisher revoked");
     revoked = false;
     expect(await verifyApp(url)).toMatchObject({ valid: true, digest: vector.read.digest });
   }, 60_000);
