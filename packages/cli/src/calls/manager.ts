@@ -528,7 +528,9 @@ export class CallManager {
   }
 
   async hangup(ref: string | undefined): Promise<Record<string, unknown>> {
-    const call = this.find(ref);
+    // A one-shot holds only a call that rang while it ran (and declines it): any other is the daemon's, or nobody's
+    // with none running. It said "No call is on" (exit 3), as if no call were, where `call answer` names the daemon.
+    const call = this.find(ref, undefined, this.host.answers === false ? CALLS_NEED_DAEMON : undefined);
     const view = this.view(call);
     await this.end(call, "hangup", true);
     return { ...view, state: "ended", reason: "hangup" };
@@ -843,9 +845,10 @@ export class CallManager {
    * call's id (`CALL_ID`) that names no call on now and no chat says so as a call: it ended (hung up twice, or a
    * command racing the call's end) or never was one. It said `No chat "<id>"`, sending a script to the chat list. A
    * chat whose id or label has that shape is still found as a chat first. An ended call is not kept (`end`), so
-   * whether it ended or never was is not known here.
+   * whether it ended or never was is not known here. Given `unavailable` (why this process holds no such call), no call found says that instead.
    */
-  private find(ref: string | undefined, prefer?: (call: Call) => boolean): Call {
+  private find(ref: string | undefined, prefer?: (call: Call) => boolean, unavailable?: string): Call {
+    const none = (message: string) => unavailable ? new CliError("unavailable", unavailable) : new CliError("not_found", message);
     if (ref) {
       const byId = this.calls.get(ref);
       if (byId) return byId;
@@ -854,18 +857,18 @@ export class CallManager {
         chat = this.chatOf(ref);
       } catch (error) {
         if (CALL_ID.test(ref) && error instanceof CliError && error.code === "not_found" && !error.details) {
-          throw new CliError("not_found", `No call ${ref}: it ended or never existed (ghostly call list)`);
+          throw none(`No call ${ref}: it ended or never existed (ghostly call list)`);
         }
         throw error;
       }
       const call = this.byChat(chat.id);
-      if (!call) throw new CliError("not_found", `No call in chat ${ref}`);
+      if (!call) throw none(`No call in chat ${ref}`);
       return call;
     }
     const all = [...this.calls.values()];
     const picked = prefer && all.filter(prefer).length === 1 ? all.filter(prefer) : all;
     if (picked.length === 1) return picked[0];
-    if (!picked.length) throw new CliError("not_found", "No call is on");
+    if (!picked.length) throw none("No call is on");
     throw new CliError("bad_request", "More than one call is on: name one (its id or its chat)", { calls: picked.map((c) => c.id) });
   }
 
