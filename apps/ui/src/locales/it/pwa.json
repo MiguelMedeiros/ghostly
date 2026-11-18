@@ -18,6 +18,7 @@
   "notNow": "Non ora",
   "offline": "Offline",
   "offlineHint": "Le tue chat sono qui. Non parte nulla finché non torni online.",
+  "offlinePageHint": "Ciò che qui richiede la rete non funzionerà finché non torni online.",
   "reconnected": "Di nuovo connesso a Ghostly",
   "reconnecting": "Riconnessione…",
   "reconnectingHint": "Questa scheda ha perso Ghostly e continua a riprovare. I nuovi messaggi compariranno qui quando torna.",
