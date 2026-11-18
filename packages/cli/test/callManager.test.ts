@@ -539,6 +539,21 @@ describe("a call to a contact who is away", () => {
     await expect(daemonCalls.answer(undefined, {})).rejects.toMatchObject({ code: "not_found" });
     expect(() => daemonCalls.flush(undefined)).toThrow(expect.objectContaining({ code: "not_found" }));
   });
+
+  it("names the daemon it needs to hang up a call it does not hold", async () => {
+    const link = { id: "chat-ab", label: "bia", profile: "paired-chat/1" } as unknown as LinkView;
+    const engine: CallEngine = engineOf(() => ({ links: [link] }) as unknown as EngineState);
+    const calls = new CallManager({ engine, emit: () => {}, profileDir: tmp(), answers: false });
+    const daemon = { code: "unavailable", message: "Calls need the daemon (a call outlives this command): start it with `ghostly daemon --detach`" };
+    // It said "No call is on" / "No call <id>: it ended or never existed" (exit 3): a script read that no call was.
+    await expect(calls.hangup(undefined)).rejects.toMatchObject(daemon);
+    await expect(calls.hangup("dfc7797f7080")).rejects.toMatchObject(daemon);
+    await expect(calls.hangup("bia")).rejects.toMatchObject(daemon);
+    // A chat that is not there is still the chat's problem.
+    await expect(calls.hangup("nobody")).rejects.toMatchObject({ code: "not_found", message: expect.stringMatching(/^No chat "nobody"/) });
+    // A daemon with no call still says so.
+    await expect(new CallManager({ engine, emit: () => {}, profileDir: tmp(), answers: true }).hangup(undefined)).rejects.toMatchObject({ code: "not_found", message: "No call is on" });
+  });
 });
 
 describe("two call managers", { timeout: 60_000 }, () => {
@@ -1405,7 +1420,7 @@ describe("two call managers", { timeout: 60_000 }, () => {
 
   describe("a call that ends while it is answered or placed", () => {
     /** One manager whose signals go nowhere, and what its profile's folder still holds: socket files, listening servers. */
-    const lone = (chat: string, options: { stack?: () => Promise<CallStack | string>; now?: () => number; quickRedialMs?: number } = {}) => {
+    const lone = (chat: string, options: { stack?: () => Promise<CallStack | string>; now?: () => number; quickRedialMs?: number; answers?: boolean } = {}) => {
       const dir = tmp();
       const side = { events: [], signals: [], link: { id: chat, profile: "paired-chat/1", callsUnavailable: null, label: `to ${chat}` } } as unknown as Side;
       const engine: CallEngine = engineOf(() => ({ links: [side.link] }) as unknown as EngineState, async ({ signal }) => { side.signals.push(signal); });
@@ -1446,6 +1461,17 @@ describe("two call managers", { timeout: 60_000 }, () => {
       expect(callee.servers()).toBe(0);
       // No answer was sent for a call that was over.
       expect(signalsOf(callee.side, "a")).toEqual([]);
+      await caller.side.calls.stopAll();
+      await callee.side.calls.stopAll();
+    });
+
+    it("a one-shot's `call hangup` still declines a call that rings while it runs", async () => {
+      const { caller, offer } = await offered();
+      const callee = lone("chat-ba", { answers: false });
+      callee.side.calls.onSignal("chat-ba", offer());
+      const ringing = callee.side.calls.list()[0] as { call: string };
+      expect(await callee.side.calls.hangup(undefined)).toMatchObject({ call: ringing.call, state: "ended", reason: "hangup" });
+      expect(signalsOf(callee.side, "h")).toHaveLength(1);
       await caller.side.calls.stopAll();
       await callee.side.calls.stopAll();
     });
