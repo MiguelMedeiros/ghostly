@@ -703,7 +703,8 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
           out.begin("A", count);
           let written = 0;
           for (const record of Array.isArray(records) ? records : records.getAllRecords()) {
-            let value = Array.isArray(records) ? await blobsToDisk(record.value) : record.value;
+            // rows.db holds no Blob, but may hold an object with the marker's key: it goes out in a marker too.
+            let value = Array.isArray(records) || hasBlob(record.value) ? await blobsToDisk(record.value) : record.value;
             // A chat's ratchet (WISP 4xx) is this profile's alone, here: a backup never carries it, so a restored copy
             // seals with keys of its own, never the ones this profile goes on using.
             if (meta.name === "links" && value && typeof value === "object" && "ratchetState" in value) {
@@ -1540,15 +1541,20 @@ function keyFromDisk(key: Key): Key {
   return IDBKeyRange.bound(range.lower, range.upper, range.lowerOpen, range.upperOpen);
 }
 
+/** A Blob, or an object of the app's that has the marker's key itself (`blobsToDisk`): what goes to disk changed. */
 function hasBlob(value: unknown, depth = 0): boolean {
   if (value instanceof Blob) return true;
   if (!value || typeof value !== "object" || depth > 32 || ArrayBuffer.isView(value) || value instanceof ArrayBuffer) return false;
   if (value instanceof Map) { for (const [k, v] of value) if (hasBlob(k, depth + 1) || hasBlob(v, depth + 1)) return true; return false; }
+  if (Object.hasOwn(value, BLOB)) return true;
   for (const item of Object.values(value)) if (hasBlob(item, depth + 1)) return true;
   return false;
 }
 
-/** v8 cannot serialize a Blob: it goes to disk as its bytes and type, and comes back a Blob. */
+/**
+ * v8 cannot serialize a Blob: it goes to disk as its bytes and type, and comes back a Blob. An object of the app's
+ * that has the marker's key itself (a contact's data can) goes in a marker too, as it is, so it never comes back a Blob.
+ */
 async function blobsToDisk(value: unknown, depth = 0): Promise<unknown> {
   if (!hasBlob(value, depth)) return value;
   if (value instanceof Blob) return { [BLOB]: { type: value.type, bytes: new Uint8Array(await value.arrayBuffer()) } };
@@ -1556,16 +1562,19 @@ async function blobsToDisk(value: unknown, depth = 0): Promise<unknown> {
   if (value instanceof Map) return new Map(await Promise.all([...value].map(async ([k, v]) => [k, await blobsToDisk(v, depth + 1)] as const)));
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(value as object)) out[k] = await blobsToDisk(v, depth + 1);
-  return out;
+  return Object.hasOwn(out, BLOB) ? { [BLOB]: { kept: out } } : out;
 }
+/** Only a marker this store wrote is one: its key alone, holding bytes (which no JSON makes) or an object it kept. */
 function blobsFromDisk(value: unknown, depth = 0): unknown {
   if (!value || typeof value !== "object" || depth > 32 || ArrayBuffer.isView(value) || value instanceof ArrayBuffer) return value;
-  const blob = (value as Record<string, { type: string; bytes: Uint8Array }>)[BLOB];
-  if (blob) return new Blob([blob.bytes as BlobPart], { type: blob.type });
   if (Array.isArray(value)) return value.map((item) => blobsFromDisk(item, depth + 1));
   if (value instanceof Map) return new Map([...value].map(([k, v]) => [k, blobsFromDisk(v, depth + 1)]));
   if (Object.getPrototypeOf(value) !== Object.prototype) return value;
+  const marker = Object.keys(value).length === 1 ? (value as Record<string, unknown>)[BLOB] : undefined;
+  const { type, bytes, kept } = (marker && typeof marker === "object" ? marker : {}) as { type?: unknown; bytes?: unknown; kept?: unknown };
+  if (bytes instanceof Uint8Array && typeof type === "string") return new Blob([bytes as BlobPart], { type });
+  const fields = kept && typeof kept === "object" && Object.getPrototypeOf(kept) === Object.prototype ? kept : value;
   const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(value)) out[k] = blobsFromDisk(v, depth + 1);
+  for (const [k, v] of Object.entries(fields)) out[k] = blobsFromDisk(v, depth + 1);
   return out;
 }

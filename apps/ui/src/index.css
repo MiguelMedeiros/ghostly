@@ -384,6 +384,19 @@ body {
   padding-right: env(safe-area-inset-right);
 }
 
+/* Locked (components/LockScreen.tsx): a print of the page (Ctrl+P, Save as PDF) is the lock screen only. On screen the
+   app kept under it is out of sight; on paper the whole document is laid out, its text with it. Hidden, not removed:
+   `!important` over an element that makes itself `visible`. */
+@media print {
+  html[data-locked] body,
+  html[data-locked] body :not([data-lock-screen], [data-lock-screen] *) {
+    visibility: hidden !important;
+  }
+  html[data-locked] [data-lock-screen] {
+    visibility: visible !important;
+  }
+}
+
 /* An app opened from the iPhone home screen (iOS 26): with nothing in the page's flow (the body is fixed on
    phones), WebKit sizes the viewport as the screen less the status bar, and draws nothing in a band as tall as
    the status bar at the bottom, under the tab bar and the composer. A document as tall as the screen gets it all.
