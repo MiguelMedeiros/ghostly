@@ -1775,6 +1775,13 @@ describe("auto-answer from the chats named", () => {
     expect(JSON.parse(readFileSync(saved(calls), "utf8"))).toEqual({ autoAnswer: { on: false, from: [], rate: 48000 } });
   });
 
+  it("answers at 48000 when turned on again without --rate, whatever rate it had before", () => {
+    const calls = manager();
+    calls.setAuto({ on: true, rate: 16000 });
+    expect(calls.setAuto({ on: true, from: ["alice"] })).toEqual({ on: true, from: ["chat-real-alice"], rate: 48000 });
+    expect(JSON.parse(readFileSync(saved(calls), "utf8"))).toEqual({ autoAnswer: { on: true, from: ["chat-real-alice"], rate: 48000 } });
+  });
+
   it("leaves auto-answer from anyone on when a chat is removed", () => {
     const calls = manager();
     calls.setAuto({ on: true });
