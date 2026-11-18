@@ -253,11 +253,14 @@ const NO_HISTORY_READS: ReadonlySet<string> = new Set([
  * Changes kept outside any chat (this profile's status, which each chat says on its next session; x401 keys and
  * credentials; a service; a draft; a served app), and `call answer` and `call flush`, which a one-shot refuses whatever
  * the chats say: a one-shot for one leaves every saved chat unstarted too. Each read every 1:1 chat whole first: with
- * 30,000 messages in the profile, about 0.95 s and 200 MB instead of 0.45 s and 140 MB.
+ * 30,000 messages in the profile, about 0.95 s and 200 MB instead of 0.45 s and 140 MB. The wallet's own stores too (an
+ * address, a Lightning card's name or default, a wallet removed): each started every chat, 20 relay requests and 0.35 s
+ * more with 10 chats and 30,000 messages, a refusal too. A removal tells a contact of a request it closes only on a chat
+ * that is open; one away hears when their chat opens.
  */
 const NO_HISTORY_WRITES: ReadonlySet<string> = new Set([
   "status.set", "status.clear", "x401.key.new", "x401.credential.add", "x401.credential.remove", "service.add", "identity.cancel",
-  "app.serve", "app.unserve", "call.answer", "call.flush",
+  "app.serve", "app.unserve", "call.answer", "call.flush", "wallet.address", "lightning.rename", "lightning.default", "wallet.remove",
 ]);
 
 /** Whether a one-shot for this call leaves every saved chat unstarted, its history unread (`NO_HISTORY_READS`, `NO_HISTORY_WRITES`). */
@@ -300,6 +303,8 @@ export function readOnly(method: string, params: Record<string, unknown>): boole
 const LOCAL_WRITES: ReadonlySet<string> = new Set([
   "chat.rename", "chat.remove", "call.auto", "group.auto", "identity.cancel", "service.add", "x401.key.new", "x401.credential.add", "x401.credential.remove",
   "saved.add", "saved.remove", "app.serve", "app.unserve",
+  // A Lightning card's name and its network's default for receiving: this device's settings store only.
+  "lightning.rename", "lightning.default",
   // This profile's status: kept here, and said only on a live session (WISP 401 § Presence and status), never on a
   // relay. A one-shot waits for no session, so online it would only show this device to the contacts for a moment; the
   // daemon says it at once, and any process that runs the profile online says it on each chat's next session.
