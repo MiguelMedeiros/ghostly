@@ -12,18 +12,21 @@ const reconnectingNow = () => engine.reconnecting;
  * trying by itself. Goes once it is connected again.
  * `inChat`: under an open chat's header, on a phone width only, as the offline one (OfflineBanner): there the list is on
  * another screen, and the chat looked live while what was sent stayed in the field.
+ * `onPage`: over a menu page (Services, Settings, Profile…), on a phone width only, for the same reason: what is
+ * changed there does not reach Ghostly, so it says to wait rather than where new messages show.
  */
-export function ReconnectingBanner({ inChat = false }: { inChat?: boolean }) {
+export function ReconnectingBanner({ inChat = false, onPage = false }: { inChat?: boolean; onPage?: boolean }) {
   const { t } = useI18n();
   const reconnecting = useSyncExternalStore(subscribe, reconnectingNow);
   const phone = useIsMobile();
-  if (!reconnecting || (inChat && !phone)) return null;
+  if (!reconnecting || ((inChat || onPage) && !phone)) return null;
+  const testId = inChat ? "chat-reconnecting-banner" : onPage ? "page-reconnecting-banner" : "reconnecting-banner";
   return (
-    <div role="status" data-testid={inChat ? "chat-reconnecting-banner" : "reconnecting-banner"} className="shrink-0 border-b border-border bg-surface px-4 py-2 flex items-start gap-2.5">
+    <div role="status" data-testid={testId} className="shrink-0 border-b border-border bg-surface px-4 py-2 flex items-start gap-2.5">
       <span aria-hidden="true" className="mt-1 h-2 w-2 shrink-0 rounded-full bg-text-muted" />
       <p className="m-0 min-w-0 text-xs text-text-secondary">
         <span className="font-semibold text-text-primary">{t("pwa.reconnecting")}</span>
-        <span className="text-text-muted"> · {t("pwa.reconnectingHint")}</span>
+        <span className="text-text-muted"> · {t(onPage ? "pwa.reconnectingPageHint" : "pwa.reconnectingHint")}</span>
       </p>
     </div>
   );

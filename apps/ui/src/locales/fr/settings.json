@@ -12,6 +12,7 @@
   "clearAllData": "Effacer toutes les données",
   "clearAllDataConfirm": "Ceci efface pour de bon :",
   "clearAllDataDescription": "Discussions, identités et réglages de ce profil. Les portefeuilles restent.",
+  "clearAllDataFailed": "Tout n’a pas pu être effacé. Des données sont peut-être encore sur cet appareil : réessayez.",
   "clearAllDataInfo": "Avant, Ghostly retire ce qu'il peut : éléments gardés pour vos contacts, votre DID, vos preuves et le réveil. Les preuves publiées sur d'autres sites y restent.",
   "clearAllDataItems": {
     "appsData": "Apps installées et leurs données",
@@ -24,6 +25,7 @@
     "storage": "Réglages S3 et réveil, app fermée"
   },
   "clearAllDataKeeps": "Restent : vos portefeuilles, vos sauvegardes et les autres profils.",
+  "clearingData": "Effacement…",
   "colorScheme": "Mode",
   "colorSchemes": {
     "dark": "Sombre",

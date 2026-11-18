@@ -45,6 +45,17 @@ test("a click on a step's dot shows that step and keeps it", async ({ page }) =>
   await expect(current(steps)).toHaveText(TITLES[1], { timeout: 15_000 });
 });
 
+test("each dot's name says the word it shows (WCAG 2.5.3, Label in Name)", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const steps = await open(page);
+  // Wide, a dot shows its word ("Install"): "click Install" in voice control has to find it in the name.
+  for (const dot of await steps.locator(".psx-dot").all()) {
+    const word = (await dot.locator(".psx-dot-label").innerText()).trim();
+    expect(word).not.toBe("");
+    await expect(dot).toHaveAccessibleName(new RegExp(`\\b${word}\\b`));
+  }
+});
+
 test.describe(() => {
   test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
   test("a tap on a dot holds its step on a phone", async ({ page }) => {

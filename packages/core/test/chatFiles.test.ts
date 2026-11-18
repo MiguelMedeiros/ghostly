@@ -1326,9 +1326,11 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     expect(w.b.records.get("in:stuck-003")?.error).toBe("The offer expired");
     expect(w.b.sent).toContainEqual({ t: "pf-refuse", id: "stuck-003", why: "expired" });
     expect(state(w.b, "in", "late-0001")).toBe("queued");
+    // The three under way got no byte in that week of open session either: they ended too, and gave up their turns.
+    for (let i = 0; i < 3; i++) expect(state(w.b, "in", `stuck-00${i}`)).toBe("failed");
     w.b.decide = async () => "accept";
     await offer("stuck-003");
-    expect(state(w.b, "in", "stuck-003")).toBe("queued");
+    await until(() => state(w.b, "in", "stuck-003") === "active");
   });
 
   it("an offer nobody answers ends after a week, on both sides", async () => {
@@ -1373,6 +1375,146 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
       expect(w.a.records.get(`out:${id}`)?.error).toBeUndefined();
       expect(state(w.b, "in", id)).toBe("done");
     }
+  });
+
+  const DAY = 24 * 60 * 60 * 1000;
+
+  /** Two chats on a clock of the test's, the sender's bytes held back while `stalled` says so. */
+  function idleWire() {
+    let now = 1_000;
+    const clock = { now: () => now, pass: (ms: number) => { now += ms; }, stalled: true };
+    const w = wire({ drop: (frame, from) => clock.stalled && from === "a" && frame.t === "pf-data" });
+    const tick = () => { for (const side of [w.a, w.b]) (side.files as unknown as { host: ChatFilesHost }).host.now = clock.now; };
+    tick();
+    return { w, clock, tick };
+  }
+
+  it("a file taken here that gets no byte for a week while a session is open ends as expired, and its sender ends it too", async () => {
+    const { w, clock } = idleWire();
+    w.attach();
+    send(w, file("idle-0001", 4 * 1024 * 1024));
+    await until(() => state(w.b, "in", "idle-0001") === "active" && state(w.a, "out", "idle-0001") === "active");
+    clock.pass(FILE_LIMITS.offerTtlMs - 60_000);
+    w.b.files.sweep();
+    expect(state(w.b, "in", "idle-0001")).toBe("active");
+    clock.pass(60_000);
+    w.b.files.sweep();
+    expect(state(w.b, "in", "idle-0001")).toBe("failed");
+    expect(w.b.records.get("in:idle-0001")?.error).toBe("The offer expired");
+    expect(w.b.sent).toContainEqual({ t: "pf-refuse", id: "idle-0001", why: "expired" });
+    await until(() => state(w.a, "out", "idle-0001") === "failed");
+    expect(w.a.records.get("out:idle-0001")?.error).toBe("Not accepted in time");
+    await until(() => w.b.disks.get("idle-0001")?.discarded);
+  });
+
+  it("a file taken here does not count time with no session: closed for 8 days, it goes on when the session comes back", async () => {
+    const { w, clock } = idleWire();
+    w.attach();
+    send(w, file("away-0001", 4 * 1024 * 1024));
+    await until(() => state(w.b, "in", "away-0001") === "active" && state(w.a, "out", "away-0001") === "active");
+    // Six days of an open session with no byte, then 8 days with none: 14 days, of which 6 count.
+    clock.pass(6 * DAY);
+    w.b.files.sweep();
+    w.drop();
+    clock.pass(8 * DAY);
+    w.b.files.sweep();
+    expect(state(w.b, "in", "away-0001")).toBe("active");
+    w.b.sent.length = 0;
+    clock.stalled = false;
+    w.attach();
+    expect(state(w.b, "in", "away-0001")).toBe("active");
+    expect(w.b.sent.filter((f) => f.t === "pf-refuse")).toEqual([]);
+    await until(() => state(w.a, "out", "away-0001") === "done");
+    expect(state(w.b, "in", "away-0001")).toBe("done");
+    expect(w.a.records.get("out:away-0001")?.error).toBeUndefined();
+  });
+
+  it("a file paused by its sender is not ended by the week, however long the session stays open", async () => {
+    const { w, clock } = idleWire();
+    clock.stalled = false;
+    w.attach();
+    send(w, file("hold-0001", 4 * 1024 * 1024));
+    await until(() => (w.a.records.get("out:hold-0001")?.confirmed ?? 0) > 0);
+    w.a.files.pause("out", "hold-0001");
+    await until(() => state(w.b, "in", "hold-0001") === "paused");
+    expect(w.b.records.get("in:hold-0001")?.pausedBy).toBe("peer");
+    for (let day = 0; day < 8; day++) { clock.pass(DAY); w.b.files.sweep(); w.a.files.sweep(); }
+    expect(state(w.b, "in", "hold-0001")).toBe("paused");
+    expect(state(w.a, "out", "hold-0001")).toBe("paused");
+    w.a.files.resume("out", "hold-0001");
+    await until(() => state(w.a, "out", "hold-0001") === "done");
+    expect(state(w.b, "in", "hold-0001")).toBe("done");
+  });
+
+  it("a file that gets a byte every day is never ended, three weeks on", async () => {
+    // The receiver alone, driven frame by frame: what it says goes nowhere.
+    let now = 1_000;
+    const w = wire({ drop: (_frame, from) => from === "b" });
+    (w.b.files as unknown as { host: ChatFilesHost }).host.now = () => now;
+    w.attach();
+    await w.b.files.handle({ t: "pf-offer", id: "slow-0001", name: "slow.bin", mime: "application/octet-stream", size: 1024 * 1024, ts: 1_700_000_000_000 });
+    await until(() => state(w.b, "in", "slow-0001") === "active");
+    const chunk = FILE_LIMITS.chunkBytes;
+    for (let day = 0; day < 21; day++) {
+      now += DAY;
+      await w.b.files.handle({ t: "pf-data", id: "slow-0001", offset: day * chunk, data: b64(pattern(day * chunk, chunk)) });
+      await until(() => w.b.transferred.get("in:slow-0001") === (day + 1) * chunk);
+      w.b.files.sweep();
+      expect(state(w.b, "in", "slow-0001")).toBe("active");
+    }
+    expect(w.b.sent.filter((f) => f.t === "pf-refuse")).toEqual([]);
+  });
+
+  it("the idle time is kept across a restart, from what its record says; a record without it starts counting at the next session", async () => {
+    const { w, clock, tick } = idleWire();
+    w.attach();
+    send(w, file("kept-idle1", 4 * 1024 * 1024));
+    send(w, file("kept-idle2", 4 * 1024 * 1024));
+    await until(() => state(w.b, "in", "kept-idle1") === "active" && state(w.b, "in", "kept-idle2") === "active");
+    // Five days of an open session with no byte, kept by a sweep; the app then goes with no goodbye.
+    clock.pass(5 * DAY);
+    w.b.files.sweep();
+    expect(w.b.records.get("in:kept-idle1")?.idleMs).toBe(5 * DAY);
+    w.drop();
+    // One kept by an older app, with no idle time at all.
+    delete w.b.records.get("in:kept-idle2")!.idleMs;
+    clock.pass(30 * DAY);
+    w.restart("b");
+    tick();
+    clock.stalled = true;
+    w.attach();
+    const now = (id: string) => w.b.files.get("in", id)?.state;
+    expect(now("kept-idle1")).toBe("active");
+    expect(now("kept-idle2")).toBe("active");
+    // Two more days open: the first one's week is up; the older record has counted only these two.
+    clock.pass(2 * DAY);
+    w.b.files.sweep();
+    expect(now("kept-idle1")).toBe("failed");
+    expect(now("kept-idle2")).toBe("active");
+    clock.pass(5 * DAY);
+    w.b.files.sweep();
+    expect(now("kept-idle2")).toBe("failed");
+  });
+
+  it("while a session is open its files are swept every hour, and no more once it closes or the app stops", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const w = wire();
+    const sweeps = vi.spyOn(w.b.files, "sweep");
+    w.attach();
+    expect(sweeps).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(2);
+    vi.advanceTimersByTime(3 * FILE_LIMITS.sweepEveryMs);
+    expect(sweeps).toHaveBeenCalledTimes(4);
+    w.drop();
+    expect(vi.getTimerCount()).toBe(0);
+    vi.advanceTimersByTime(3 * FILE_LIMITS.sweepEveryMs);
+    expect(sweeps).toHaveBeenCalledTimes(4);
+    w.attach();
+    w.attach();
+    expect(vi.getTimerCount(), "one per chat, however often it attaches").toBe(2);
+    w.a.files.stop();
+    w.b.files.stop();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("an offer that expired unanswered, offered again, is refused: never taken without asking", async () => {
