@@ -80,7 +80,7 @@ export interface SubjectSpec {
 
 export interface SubjectPreview {
   /** Short facts, in order: "Method" → "did:web", "Keys" → "#key-1 (Ed25519)". */
-  facts: readonly { label: string; value: string }[];
+  facts: readonly { label: string; value: string; /** A machine token (a host, URL, key id), not a sentence: shown left to right in any language. */ code?: true }[];
   /** The ids of the signers that apply to this subject; every signer when omitted. */
   signers?: readonly string[];
 }
