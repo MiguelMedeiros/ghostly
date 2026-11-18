@@ -993,9 +993,14 @@ export function useWebRTC({
         track?.stop();
         throw error;
       }
+      // Hung up while the track was swapped (the Linux Desktop opens the device meanwhile): the call's tracks were stopped without this one.
+      if (attemptRef.current !== attempt || !localStreamRef.current) {
+        track?.stop();
+        return;
+      }
 
       // Read after the prompt: the picture may have changed while it was open.
-      const current = localStreamRef.current!;
+      const current = localStreamRef.current;
       if (next === "screen" && track) {
         track.contentHint = "detail";
         // The browser's (or the system's) own "Stop sharing" ends the track without telling anyone else.
