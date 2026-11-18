@@ -68,6 +68,9 @@
     "expiring": "{{time}}已验证，{{expires}}过期",
     "failed": "{{time}}检查失败",
     "listLabel": "已验证的身份：{{list}}",
+    "mark": "{{provider}}：{{subject}} · {{state}}",
+    "markList": "{{list}}；{{next}}",
+    "markNamed": "{{provider}}：{{subject}}（{{name}}）· {{state}}",
     "revoked": "已被所有者撤销，{{time}}发现",
     "stackLabel": "与 {{name}} 的身份：{{list}}",
     "verified": "{{time}}已验证"
