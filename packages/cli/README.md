@@ -614,6 +614,7 @@ busy bot two relays or more.
   (calls are voice only).
 - **A single binary**: the CLI needs Node.
 - Link previews made by the sender, and holding messages for an away contact.
+- **Search** in a chat or the chat list: `ghostly chat history <chat> --limit n` and `jq` find a message meanwhile.
 
 ## Tests
 
