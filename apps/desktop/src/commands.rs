@@ -345,6 +345,12 @@ pub async fn hold_fetch(
     hold_fetch::fetch(url, headers.unwrap_or_default()).await
 }
 
+/// A token or moderation request to the call node a group names (WISP 602): public addresses only, see `hold_fetch`.
+#[tauri::command]
+pub async fn group_call_fetch(url: String, body: String) -> Result<HoldResponse, String> {
+    hold_fetch::post(url, body).await
+}
+
 /// Opens a web link from a message (a link preview, a location card) in the
 /// system's browser or maps app. http(s) only; the page never names a program.
 #[tauri::command]

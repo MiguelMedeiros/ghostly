@@ -48,6 +48,17 @@ describe("Share on the Services page", () => {
 
     expect(asked).toHaveBeenCalledWith("http://localhost/*", "http://localhost:3400");
     expect(engine.callsTo("setServiceEnabled")).toEqual([]);
-    expect(await screen.findByText("Ghostly needs your permission to reach that local address")).toBeInTheDocument();
+    expect(await screen.findByText("Not allowed in this browser yet: contacts can't open Atlas")).toBeInTheDocument();
+  });
+
+  it("says what to do after a no to the permission the form's Share asked", async () => {
+    fakeEngine.features = { ...fakeEngine.features, shareLocalServices: true };
+    vi.spyOn(fakeEngine, "requestLocalAccess").mockResolvedValue(false);
+    const { user } = renderApp(<Services />, { route: "/services" });
+    await user.click(await screen.findByTestId("add-service"));
+    await user.type(screen.getByTestId("service-name"), "Atlas");
+    await user.type(screen.getByTestId("service-target"), "localhost:3400{Enter}");
+
+    expect((await screen.findByRole("alert")).textContent).toBe("Ghostly needs your permission to reach that local address. Try again, and choose Allow when you're asked.");
   });
 });

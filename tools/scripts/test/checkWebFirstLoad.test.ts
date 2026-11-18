@@ -7,8 +7,11 @@ import { afterEach, describe, expect, it } from "vitest";
 const CHECK = join(import.meta.dirname, "../check-web-first-load.mjs");
 const dirs: string[] = [];
 
-/** The chunks today's build keeps for later, each a file of its own: the online-only ones, a group call, OpenPGP. */
-const LATER = ["pubky-a1.js", "keet-identity-key-b2.js", "esm-a7.js", "usdt-c3.js", "arkade-d4.js", "groupCallLivekit-e5.js", "openpgp.min-f6.js"];
+/**
+ * The chunks today's build keeps for later, each a file of its own: the online-only ones, a group call, OpenPGP, the
+ * Lightning and on-chain sources' clients.
+ */
+const LATER = ["pubky-a1.js", "keet-identity-key-b2.js", "esm-a7.js", "usdt-c3.js", "arkade-d4.js", "groupCallLivekit-e5.js", "openpgp.min-f6.js", "lnd-g1.js", "coreLightning-g2.js", "webln-g3.js", "bdk-g4.js", "breez-g5.js"];
 
 interface Page { src: string[]; preload?: string[] }
 
@@ -130,6 +133,27 @@ describe("check-web-first-load", () => {
     const result = check(dist(TODAY, SIGN_IN, { assets: LATER.filter((file) => !file.startsWith("usdt-")) }));
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("No usdt-*.js in assets/: it was folded into another chunk, likely main");
+  });
+
+  it("fails a Lightning source's client imported statically, which folds it into main", () => {
+    const result = check(dist(TODAY, SIGN_IN, { assets: LATER.filter((file) => !file.startsWith("lnd-") && !file.startsWith("bdk-")) }));
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("No lnd-*.js in assets/: it was folded into another chunk, likely main");
+    expect(result.stderr).toContain("No bdk-*.js in assets/");
+  });
+
+  it("fails the regtest fakes in the first load, which a release build leaves out", () => {
+    const main = `var a={id:"fake-lightning",label:"Fake Lightning (test)"},b={id:"fake-onchain",label:"Fake Bitcoin wallet (test)"};`;
+    const result = check(dist(TODAY, SIGN_IN, { text: { "main-c.js": main } }));
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("/assets/main-c.js holds Fake Lightning (test), Fake Bitcoin wallet (test): the regtest fakes ship in the first load");
+  });
+
+  it("passes the fakes' ids alone in the first load: a device handoff names them", () => {
+    const main = `var m=new Set(["nwc","core-lightning","fake-lightning"]),o=new Set(["bdk","fake-onchain"]);`;
+    const result = check(dist(TODAY, SIGN_IN, { text: { "main-c.js": main } }));
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
   });
 
   it("fails a later chunk the first load asks for", () => {

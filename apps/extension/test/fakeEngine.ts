@@ -70,6 +70,8 @@ export class FakeEngineServer {
   shutdowns = 0;
   /** Set by the host: what `attention` hands on while no page is attached (`EngineServer.unheardAttention`). */
   unheardAttention?: (event: AttentionEvent) => void;
+  /** Set by the host: a contact's call ringing with no page attached, and its end (`EngineServer.unheardCall`). */
+  unheardCall?: (linkId: string, signal: string | null) => void;
   /** The whole engine, as `EngineServer` says of itself: device-link-only mode is the other kind of peer (WISP 06). */
   readonly gated = false;
   readonly ready: Promise<void>;
@@ -81,6 +83,7 @@ export class FakeEngineServer {
       return engineControl().respond(peer, service, init);
     },
     getState: () => ({ links: engineControl().links ?? [], services: (engineControl().services ?? []).map((s) => ({ ...s, requests: 0 })) }),
+    chatView: (linkId: string) => engineControl().links?.find((link) => link.id === linkId),
     setServiceEnabled: ({ serviceId, enabled }: { serviceId: string; enabled: boolean }) => {
       const service = engineControl().services?.find((s) => s.id === serviceId);
       if (service) service.enabled = enabled;
@@ -122,6 +125,11 @@ export class FakeEngineServer {
     const pages = this.attached.filter((client) => !this.detached.includes(client));
     if (pages.length) for (const client of pages) client.post({ kind: "attention", event });
     else this.unheardAttention?.(event);
+  }
+
+  /** A contact's call rings with no page attached (an offer), or that ring ends (`null`), as `EngineServer` tells it. */
+  ring(linkId: string, signal: string | null): void {
+    this.unheardCall?.(linkId, signal);
   }
 
   async history(client: EngineClientSink, linkId: unknown): Promise<void> {

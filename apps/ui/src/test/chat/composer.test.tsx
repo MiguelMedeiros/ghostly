@@ -873,6 +873,19 @@ describe("the composer counts a message's bytes", () => {
     expect(onSend).toHaveBeenCalledWith("👻".repeat(4_096));
   });
 
+  it("off the live link, the DHT's count turns amber where the packet stops carrying a text, not only past 256 B", () => {
+    // Its envelope takes about 8 of the 256 bytes once sealed: a 252 B text read "252 / 256 B" in muted ink, then the
+    // DHT refused it (or kept it for live) as one past 256 B.
+    composer({ softBytes: 256 });
+    fireEvent.change(field(), { target: { value: "x".repeat(248) } });
+    expect(screen.getByTestId("dht-byte-count")).toHaveClass("text-text-muted");
+    expect(screen.getByTestId("dht-byte-count")).not.toHaveAttribute("title");
+    fireEvent.change(field(), { target: { value: "x".repeat(252) } });
+    expect(screen.getByTestId("dht-byte-count")).toHaveTextContent("252 / 256 B");
+    expect(screen.getByTestId("dht-byte-count")).toHaveClass("text-warn-ink");
+    expect(screen.getByTestId("dht-byte-count")).toHaveAttribute("title", "About 248 bytes fit the DHT once sealed: shorten it to send it there");
+  });
+
   it("off the live link, past 16 KiB the hard count shows instead of the DHT's", () => {
     composer({ softBytes: 256 });
     fireEvent.change(field(), { target: { value: "x".repeat(300) } });

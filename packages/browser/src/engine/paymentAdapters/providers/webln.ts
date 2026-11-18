@@ -1,7 +1,7 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { decodeBolt11 } from "@ghostly/core";
 import type { WalletMode } from "../../../shared/mints";
-import type { InvoiceStatus, LightningCapabilities, LightningInfo, LightningInvoice, LightningPayResult, LightningPaymentRef, LightningPaymentStatus, LightningProvider, LightningProviderDescriptor } from "./lightning";
+import type { InvoiceStatus, LightningCapabilities, LightningInfo, LightningInvoice, LightningPayResult, LightningPaymentRef, LightningPaymentStatus, LightningProvider } from "./lightning";
 import { NothingSpentError, type ProviderNetwork } from "./types";
 
 /**
@@ -37,7 +37,6 @@ export interface WebLNInfo {
   methods?: string[];
 }
 
-export const WEBLN_SOURCE = "webln";
 type Method = "makeInvoice" | "sendPayment" | "getBalance" | "lookupInvoice";
 
 const PROMPT_MS = 5 * 60_000;
@@ -227,16 +226,3 @@ function sats(balance: { balance?: unknown; currency?: unknown } | undefined): n
   if (currency === "msats" || currency === "msat") return Math.floor(value / 1000);
   return undefined;
 }
-
-export const webln: LightningProviderDescriptor = {
-  id: WEBLN_SOURCE,
-  label: "Browser wallet (WebLN)",
-  kind: "lightning",
-  description: "A Lightning wallet in this browser (Alby and others). That wallet holds the sats and asks you before it pays.",
-  networks: ["bitcoin", "testnet", "signet", "mutinynet", "regtest"],
-  // Only the web app's page sees `window.webln`: not the extension's offscreen engine, not Tauri.
-  platforms: ["web"],
-  fields: [],
-  experimental: true,
-  async create(_settings, host) { return WeblnLightning.connect(await findWebln(), host.mode, host.signal); },
-};

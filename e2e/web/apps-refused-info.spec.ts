@@ -6,9 +6,10 @@ import { composerRow } from "../support/composer";
 import { APP_URL, STORE_URL, serveStore, testStore } from "../support/appStore";
 
 /*
- * A bundle Ghostly refuses says so in a few words on the install screen, with the refusal as it came behind the ⓘ. A
- * refusal can name a file of the bundle, and a path has no space or dash to break at ("assets/ChessBoard_….html", up to
- * 128 characters): on a phone the ⓘ's text ran past the screen's side, and the screen scrolled sideways.
+ * A bundle Ghostly refuses says so in a few words on the install screen, with the refusal behind the ⓘ. A refusal for a
+ * file of the bundle once named it, and a path has no space or dash to break at ("assets/ChessBoard_….html", up to 128
+ * characters): on a phone the ⓘ's text ran past the screen's side, and the screen scrolled sideways. The ⓘ now says the
+ * refusal in Ghostly's own words, never the bundle's text, and still fits the screen.
  */
 const PHONE = { width: 320, height: 640 };
 /** 129 characters: one past what a path may be, so the bundle is refused naming it. */
@@ -39,7 +40,7 @@ function withLongPath(bytes: Uint8Array): Uint8Array {
 }
 
 for (const language of ["en", "ar"]) {
-  test(`${language}: on a phone a refused app's ⓘ breaks a long file name, and the install screen never scrolls sideways`, { tag: ["@feature:apps.chat.card", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+  test(`${language}: on a phone a refused app's ⓘ says the refusal without the bundle's file name, and the install screen never scrolls sideways`, { tag: ["@feature:apps.chat.card", "@feature:app.mobile-layout"] }, async ({ peer }) => {
     const store = await testStore();
     const [ana, bob] = await Promise.all([peer("ana"), peer("bob")]);
     await serveStore(ana.context, store);
@@ -71,7 +72,8 @@ for (const language of ["en", "ar"]) {
     const screen = page.getByTestId("app-install");
     await screen.getByTestId("app-install-error-info").click();
     const info = screen.getByTestId("app-install-error-text");
-    await expect(info).toContainText(PATH);
+    await expect(info).toContainText("This is not an app Ghostly can install");
+    await expect(info).not.toContainText(PATH);
     // Every letter of it inside its box, and nothing to scroll sideways.
     const drawn = await info.evaluate((element) => {
       const box = element.getBoundingClientRect(), range = document.createRange();

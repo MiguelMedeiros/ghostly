@@ -102,8 +102,13 @@ export const FILE_LIMITS = {
   maxUnfinishedIncoming: 256,
   /** Files one contact sends at once; accepted ones beyond wait their turn. */
   maxActiveIncoming: 3,
-  /** An offer nobody answered ends after this long. */
+  /**
+   * An offer nobody answered ends after this long. So does a file taken here and arriving (`active`, not paused) of which
+   * no byte came for this long while a session was open (`ChatFiles.sweep`).
+   */
   offerTtlMs: 7 * 24 * 60 * 60 * 1000,
+  /** While a session is open, its files are swept (`ChatFiles.sweep`) this often. */
+  sweepEveryMs: 60 * 60 * 1000,
   /**
    * No answer while something is outstanding: the sender offers again, which puts both sides back in step. Nothing
    * arriving for a file under way: the receiver says again where it stands.
@@ -193,6 +198,11 @@ export interface FileTransferRecord {
    * and its part there was deleted.
    */
   agreed?: boolean;
+  /**
+   * In: how long it went with no byte and no change of state while a session was open, as of when it was last kept
+   * (`ChatFiles.idleFor`). Time with no session does not count. Absent (an older record): none so far.
+   */
+  idleMs?: number;
 }
 
 const FINAL: ReadonlySet<TransferState> = new Set(["done", "failed", "declined", "cancelled"]);
@@ -524,6 +534,10 @@ interface Incoming {
   starting?: boolean;
   /** What was stored is being removed: nothing more is written. */
   dropped?: boolean;
+  /** While a session is open: since when it went with no byte and no change of state, beyond its record's `idleMs`. */
+  quietFrom?: number;
+  /** The state its idle time was last counted from: another one starts the count again. */
+  quietState?: TransferState;
 }
 
 interface Entry {
@@ -584,6 +598,20 @@ function storeFailure(error: unknown): string {
   return `Could not store the file: ${quota ? `QuotaExceededError${message ? `: ${message}` : ""}` : message}`;
 }
 
+/**
+ * The room this device tells a contact (`pf-room`, a `no-room` refusal): its free space rounded down to a power of two or
+ * one and a half of one. The exact bytes would be the same from every profile on the device, and move with whatever it
+ * stores, so a contact could tell one device from another, or watch it, by asking. Never more than the room itself.
+ */
+export function coarseRoom(room: number): number | null {
+  if (!Number.isSafeInteger(room)) return null;
+  if (room <= 0) return 0;
+  let step = 2 ** Math.floor(Math.log2(room));
+  while (step > room) step /= 2;
+  while (step * 2 <= room) step *= 2;
+  return room >= step * 1.5 ? step * 1.5 : step;
+}
+
 /** What a refusal means to the sender's person. */
 export function refusalText(why: string, room?: number): { state: TransferState; error: string } {
   switch (why) {
@@ -625,6 +653,8 @@ export class ChatFiles {
    * every trial of a larger one (a fifth of the rate on a wavering path). Confirmed chunk by chunk, it is what each sends with.
    */
   private refill = 0;
+  /** Sweeps while a session is open (`FILE_LIMITS.sweepEveryMs`). */
+  private sweeper?: ReturnType<typeof setInterval>;
 
   constructor(private readonly host: ChatFilesHost) {}
 
@@ -644,7 +674,7 @@ export class ChatFiles {
     for (const record of records) {
       const entry: Entry = { record: { ...record } };
       if (record.direction === "out") entry.out = { next: record.confirmed, sent: 0, generation: 0, sends: [] };
-      else entry.in = { written: record.confirmed, stored: record.confirmed, acked: record.confirmed, checkpointed: record.confirmed, writing: Promise.resolve() };
+      else entry.in = { written: record.confirmed, stored: record.confirmed, acked: record.confirmed, checkpointed: record.confirmed, writing: Promise.resolve(), quietState: record.state };
       const replaced = this.entries.get(key(record.direction, record.id));
       if (replaced) this.unended.delete(replaced);
       this.entries.set(key(record.direction, record.id), entry);
@@ -694,8 +724,35 @@ export class ChatFiles {
   }
 
   private changed(entry: Entry, progress = false): void {
+    // Bytes moved, or its state changed: its idle time starts again.
+    if (entry.in && (progress || entry.in.quietState !== entry.record.state)) this.stirred(entry);
     this.track(entry);
     this.host.changed({ ...entry.record }, this.moved(entry), progress);
+  }
+
+  /** An incoming file's idle count starts again: from now while a session is open, from the next one otherwise. */
+  private stirred(entry: Entry): void {
+    const incoming = entry.in!;
+    entry.record.idleMs = undefined;
+    incoming.quietState = entry.record.state;
+    incoming.quietFrom = this.attached ? this.now() : undefined;
+  }
+
+  /**
+   * How long an incoming file went with no byte and no change of state while a session was open: what its record kept,
+   * and this session's stretch. Time with no session (closed, the app gone, either side away) does not count.
+   */
+  private idleFor(entry: Entry, now: number): number {
+    const from = entry.in!.quietFrom;
+    return (entry.record.idleMs ?? 0) + (from === undefined ? 0 : Math.max(0, now - from));
+  }
+
+  /** The idle time so far goes into the record, kept with it from now on; the stretch counted here starts again. */
+  private foldIdle(entry: Entry, now: number): number {
+    const idle = this.idleFor(entry, now);
+    entry.record.idleMs = idle || undefined;
+    entry.in!.quietFrom = this.attached ? now : undefined;
+    return idle;
   }
 
   /**
@@ -726,6 +783,13 @@ export class ChatFiles {
     this.host.uplink?.join(this);
     void this.sayRoom();
     for (const id of this.unsaid) if (this.send({ t: "pf-abort", id })) this.unsaid.delete(id);
+    // The idle time of what arrives counts again from now: none while no session was open (WISP 501 § Consent).
+    const now = this.now();
+    for (const entry of this.unended) if (entry.in) { entry.record.idleMs = this.idleFor(entry, now) || undefined; entry.in.quietFrom = now; entry.in.quietState = entry.record.state; }
+    clearInterval(this.sweeper);
+    this.sweeper = setInterval(() => this.sweep(), FILE_LIMITS.sweepEveryMs);
+    // A headless app (the CLI) is not kept running for it.
+    (this.sweeper as { unref?: () => void }).unref?.();
     this.sweep();
     for (const entry of this.entries.values()) {
       if (transferEnded(entry.record)) continue;
@@ -749,22 +813,53 @@ export class ChatFiles {
     this.peerRoomValue = null;
     this.moving.clear(); this.held.clear();
     this.host.uplink?.leave(this);
+    clearInterval(this.sweeper);
+    this.sweeper = undefined;
+    const now = this.now();
     for (const entry of this.entries.values()) {
       if (entry.out) { entry.out.generation++; clearTimeout(entry.out.timer); clearTimeout(entry.out.wake); entry.out.next = entry.record.confirmed; entry.out.block = undefined; }
       if (entry.in) { clearTimeout(entry.in.timer); clearTimeout(entry.in.ackTimer); entry.in.ackTimer = undefined; }
-      if (entry.in && !transferEnded(entry.record)) void this.checkpoint(entry);
+      if (entry.in && !transferEnded(entry.record)) {
+        // Its idle time stops counting until the next session, and what it came to is kept (a stall, not a moving file).
+        if (entry.in.quietFrom !== undefined && this.foldIdle(entry, now) >= FILE_LIMITS.stallMs && entry.record.state === "active") this.changed(entry);
+        void this.checkpoint(entry);
+      }
     }
   }
 
+  /** The app stops: no more sweeps. */
+  stop(): void {
+    clearInterval(this.sweeper);
+    this.sweeper = undefined;
+  }
+
   /**
-   * Offers ended by their time to live. The host calls it now and then; `attach` does too. A file taken here and waiting
-   * its turn ends too once nothing of it arrived in that time: its sender never sent it. Offered again, it is taken
-   * again (`retakeAgreed`).
+   * Offers ended by their time to live. The host calls it now and then; `attach` does too, and it runs every
+   * `FILE_LIMITS.sweepEveryMs` while a session is open. A file taken here and waiting its turn ends too once nothing of
+   * it arrived in that time: its sender never sent it. Offered again, it is taken again (`retakeAgreed`). So does one
+   * arriving (`active`) that had no byte and no change of state for that long while a session was open (`idleFor`):
+   * paused there or here, or with no session, it waits as long as it takes (WISP 501 § Consent).
    */
   sweep(): void {
     const now = this.now();
+    let freed = false;
     for (const entry of this.entries.values()) {
       const { record } = entry;
+      if (record.direction === "in" && record.state === "active") {
+        const incoming = entry.in!;
+        // Ended only while a session carries it there (`pf-refuse`); its idle time counts only then anyway.
+        if (!this.attached || incoming.verifying || incoming.starting) continue;
+        if (this.idleFor(entry, now) < FILE_LIMITS.offerTtlMs) {
+          // A stall so far is kept with its record, so a restart (the app closed with no goodbye) loses at most a sweep's worth.
+          if (incoming.quietFrom !== undefined && now - incoming.quietFrom >= FILE_LIMITS.stallMs) { this.foldIdle(entry, now); this.changed(entry); }
+          continue;
+        }
+        void this.discardStored(entry);
+        this.end(entry, "failed", "The offer expired");
+        this.send({ t: "pf-refuse", id: record.id, why: "expired" });
+        freed = true;
+        continue;
+      }
       if (!["queued", "offered", "asking"].includes(record.state) || record.since + FILE_LIMITS.offerTtlMs > now) continue;
       // Taken there: what it waits for now is the receiver's to end (its own week to arrive, `pf-refuse`).
       if (record.direction === "out" && record.agreed) continue;
@@ -773,11 +868,19 @@ export class ChatFiles {
       // Ended here, it ends there too: the receiver's week began when the offer arrived, later, and it still showed Accept.
       this.send(record.direction === "in" ? { t: "pf-refuse", id: record.id, why: "expired" } : { t: "pf-abort", id: record.id });
     }
+    // A file that ended arriving gives its turn to the next one waiting.
+    if (freed) this.startNext();
   }
 
   private async sayRoom(): Promise<void> {
     const room = await this.host.room?.().catch(() => null);
-    if (typeof room === "number" && Number.isSafeInteger(room)) this.send({ t: "pf-room", max: room });
+    const max = typeof room === "number" ? coarseRoom(room) : null;
+    if (max !== null) this.send({ t: "pf-room", max });
+  }
+
+  private refuseOffer(id: string, decision: { refuse: RefuseReason; room?: number }): void {
+    const room = decision.room !== undefined ? coarseRoom(decision.room) : null;
+    this.send({ t: "pf-refuse", id, why: decision.refuse, ...(room !== null && { room }) });
   }
 
   // ─── Sending ────────────────────────────────────────────────────────────
@@ -1078,7 +1181,7 @@ export class ChatFiles {
     let decision: OfferDecision;
     try { decision = await this.host.decide(file); } catch { decision = { refuse: "invalid" }; }
     if (this.entries.has(key("in", id))) return;
-    if (typeof decision === "object") { this.send({ t: "pf-refuse", id, why: decision.refuse, ...(decision.room !== undefined && { room: decision.room }) }); return; }
+    if (typeof decision === "object") { this.refuseOffer(id, decision); return; }
     const entry: Entry = {
       record: { id, direction: "in", file, state: decision === "ask" ? "asking" : paused ? "paused" : "queued", confirmed: 0, since: this.now(),
         ...(decision !== "ask" && { agreed: true }), ...(paused && decision !== "ask" && { pausedBy: "peer" as const }) },
@@ -1101,7 +1204,7 @@ export class ChatFiles {
     if (!record.consented) {
       let decision: OfferDecision;
       try { decision = await this.host.decide(record.file, true); } catch { decision = { refuse: "invalid" }; }
-      if (typeof decision === "object") { this.send({ t: "pf-refuse", id: record.id, why: decision.refuse, ...(decision.room !== undefined && { room: decision.room }) }); return false; }
+      if (typeof decision === "object") { this.refuseOffer(record.id, decision); return false; }
       if (decision === "ask") {
         if (this.waitingOffers() >= FILE_LIMITS.maxWaitingOffers) { this.send({ t: "pf-refuse", id: record.id, why: "too-many" }); return false; }
         await this.retake(entry);

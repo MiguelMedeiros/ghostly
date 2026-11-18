@@ -53,6 +53,16 @@ describe("a share into the app", () => {
       expect(shareText(share({ text: "https://a.example/p\nvia app", url: "https://a.example/p" }))).toBe("https://a.example/p\nvia app");
     });
 
+    it("its link is not repeated when the text carries it between CJK or Arabic punctuation, which no address holds", () => {
+      const url = "https://a.example/p";
+      // Also right after another link's 。 or ، (no space), which the bubble reads as a link of its own since #8104.
+      for (const text of [`链接：${url}`, `記事、${url}。`, `見て ${url}。${"とても面白い記事です".repeat(10)}`, `رابط،${url}؟ ${"ممتاز".repeat(20)}`, `看 https://b.example/x。${url}`, `رابط https://b.example/x،${url}`]) {
+        expect(shareText(share({ text, url }))).toBe(text);
+      }
+      // A longer address after the punctuation still does not carry it.
+      expect(shareText(share({ text: `链接：${url}2`, url }))).toBe(`链接：${url}2\n${url}`);
+    });
+
     it("a text where the link turns up at every character is read at once, not once per place (any website can post one)", () => {
       const started = performance.now();
       expect(shareText(share({ text: "(".repeat(60_000), url: "(" })).startsWith("(".repeat(60_000))).toBe(true);

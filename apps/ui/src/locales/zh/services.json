@@ -1,5 +1,7 @@
 {
   "added": "已添加 {{app}}。在“联系人”中选择谁可以打开它。",
+  "allowNamed": "允许 {{app}}",
+  "allowNext": "“允许”会请求浏览器访问 {{host}} 的所有端口。移除 {{host}} 上的所有应用即可收回此访问。",
   "fromContacts": "来自联系人",
   "fromContactsEmpty": "联系人共享的应用会显示在这里。",
   "ghostlyOnline": "Ghostly 在线",
@@ -29,6 +31,7 @@
   "shareLocal": "共享本地服务",
   "shareNamed": "共享 {{app}}",
   "status": {
+    "needsAccess": "尚未在此浏览器中允许：联系人无法打开 {{app}}",
     "notShared": "尚未与任何人共享",
     "offline": "离线时无法访问",
     "sharedCount": "已与 {{count}} 位联系人共享",

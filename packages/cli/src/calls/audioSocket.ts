@@ -4,7 +4,7 @@ import { connect, createServer, type Server, type Socket } from "node:net";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { CliError } from "../errors";
 import { privateFolder, runtimePath } from "../privateFolder";
-import { bytesToMs, type CallRate, type PlaybackQueue } from "./pcm";
+import { bytesToMs, frameBytes, type CallRate, type PlaybackQueue } from "./pcm";
 
 /**
  * A call's audio socket (WISP 1100 § Calls): `<profile>/calls/<call>.sock`, 0600, in a folder only the owner may
@@ -101,8 +101,74 @@ export function feedQueue(queue: PlaybackQueue): { onAudio(chunk: Buffer): void;
   };
 }
 
-/** How far a program may fall behind reading the call's audio before frames are dropped for it. */
+/**
+ * How far a program may fall behind reading the call's audio before frames are dropped for it, what the kernel holds
+ * for it included (`kernelShare`): checked against Node's `writableLength` alone, the kernel's buffer came on top,
+ * seconds more on Linux. Where the kernel holds more than this even in the smallest writes (`MAX_PIECES`), that is
+ * the bound, plus one frame.
+ */
 export const MAX_UNREAD_MS = 1000;
+
+/**
+ * The most pieces a frame is written in (`kernelShare`): 1.25 ms of audio each. Linux counts its socket buffer per
+ * write (~1 KiB each however small, ~200 KiB in all), so it holds 3.6 s of 20 ms frames at 8 or 16 kHz and 1 s at
+ * 48 kHz for a program that stopped reading, and ~0.4 s in 16 pieces. macOS counts bytes (8 KiB): one write a frame.
+ */
+const MAX_PIECES = 16;
+
+/** How the kernel holds a rate's audio, measured once per daemon (`kernelShare`). */
+type KernelShare = { pieces: number; heldMs: number };
+const kernelShares = new Map<CallRate, KernelShare>();
+
+/**
+ * How many pieces each frame of `rate` is written in, and how much of it the kernel then holds for a program that
+ * reads none. Each count, 1, 2, 4, ... `MAX_PIECES`, is measured on the call's own socket before anyone else may open
+ * it (`AudioSocket.open`); the first that leaves the kernel half of `MAX_UNREAD_MS` or less is taken, else the one
+ * that held least (a count is taken only when it holds 5% less than fewer pieces did: macOS stays at one). Once per
+ * rate, since it depends on the system, not on the call. Windows, or no measure (an error): one piece, nothing held,
+ * the bound what waits in the daemon, as before; the next call measures again.
+ */
+async function kernelShare(path: string, rate: CallRate, onConnection: (take: ((socket: Socket) => void) | null) => void): Promise<KernelShare> {
+  const known = kernelShares.get(rate);
+  if (known) return known;
+  const none = { pieces: 1, heldMs: 0 };
+  if (process.platform === "win32") return none;
+  let best: KernelShare | null = null;
+  for (let pieces = 1; pieces <= MAX_PIECES && !(best && best.heldMs <= MAX_UNREAD_MS / 2); pieces *= 2) {
+    const held = await kernelHolds(path, frameBytes(rate) / pieces, (rate * 2 * 30_000) / 1000, onConnection);
+    if (held === null) return none;
+    const heldMs = bytesToMs(rate, held);
+    if (!best || heldMs < best.heldMs * 0.95) best = { pieces, heldMs };
+  }
+  kernelShares.set(rate, best!);
+  return best!;
+}
+
+/**
+ * Bytes the kernel takes in writes of `piece` bytes, one by one as `AudioSocket` writes them, until it holds one back
+ * (or `most`): all in one turn of the event loop, so the reader, this process's own connection, has read none. Null
+ * when no connection came.
+ */
+function kernelHolds(path: string, piece: number, most: number, onConnection: (take: ((socket: Socket) => void) | null) => void): Promise<number | null> {
+  return new Promise((resolve) => {
+    const reader = connect(path);
+    reader.on("error", () => {});
+    const done = (held: number | null) => { clearTimeout(timer); onConnection(null); reader.destroy(); resolve(held); };
+    const timer = setTimeout(() => done(null), 2000);
+    onConnection((writer) => {
+      writer.on("error", () => {});
+      const bytes = Buffer.alloc(piece);
+      let held = 0;
+      while (held < most) {
+        writer.write(bytes);
+        if (writer.writableLength > 0) break;
+        held += piece;
+      }
+      writer.destroy();
+      done(held);
+    });
+  });
+}
 
 /** How long a connection that must send the call's token (`requireToken`) has to send it before it is closed. */
 export const PROVE_MS = 5000;
@@ -124,11 +190,18 @@ export class AudioSocket {
   /** Connections that have not sent the token yet. */
   private readonly unproven = new Set<Socket>();
   private closed = false;
+  /**
+   * Audio for the program that waits in the daemon while the kernel holds a write back (it is full: the program reads
+   * slower than the call speaks), in the pieces `kernelShare` measured. Handed to the kernel one write at a time:
+   * Node's own buffer would join them into one larger write, which the kernel takes more of.
+   */
+  private backlog: Buffer[] = [];
+  private backlogBytes = 0;
   /** Frames the program did not read in time, since the start. */
   dropped = 0;
   readonly token = randomBytes(32).toString("hex");
 
-  private constructor(readonly path: string, private readonly server: Server, private readonly rate: CallRate, private readonly requireToken: boolean, private readonly proveMs: number) {}
+  private constructor(readonly path: string, private readonly server: Server, private readonly rate: CallRate, private readonly requireToken: boolean, private readonly proveMs: number, private readonly kernel: KernelShare) {}
 
   static async open(path: string, rate: CallRate, handlers: { onAudio(chunk: Buffer): void; onClient?(connected: boolean): void }, options: { requireToken?: boolean; proveMs?: number; shared?: boolean } = {}): Promise<AudioSocket> {
     const shared = !!options.shared && process.platform !== "win32";
@@ -138,13 +211,16 @@ export class AudioSocket {
       if (existsSync(path)) rmSync(path, { force: true });
     }
     let self: AudioSocket | null = null;
-    const server = createServer((socket) => self ? self.accept(socket, handlers) : socket.destroy());
+    let probe: ((socket: Socket) => void) | null = null;
+    const server = createServer((socket) => self ? self.accept(socket, handlers) : probe ? probe(socket) : socket.destroy());
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject);
       server.listen(path, () => { server.off("error", reject); resolve(); });
     });
+    // Before the socket is opened up to the program (or the shared folder's group): the measure's own connection only.
+    const kernel = await kernelShare(path, rate, (take) => { probe = take; });
     if (process.platform !== "win32") chmodSync(path, shared ? 0o660 : 0o600);
-    self = new AudioSocket(path, server, rate, options.requireToken ?? (shared || process.platform === "win32"), options.proveMs ?? PROVE_MS);
+    self = new AudioSocket(path, server, rate, options.requireToken ?? (shared || process.platform === "win32"), options.proveMs ?? PROVE_MS, kernel);
     return self;
   }
 
@@ -163,6 +239,8 @@ export class AudioSocket {
       this.unproven.delete(socket);
       const before = this.client;
       this.client = socket;
+      this.backlog = [];
+      this.backlogBytes = 0;
       // The program it replaces reads EOF and is let go 2 s later, as `close` lets the last one go: one that kept its
       // side open held its connection until it died, and the socket's close (a stopping daemon's) waited on it.
       if (before) {
@@ -210,17 +288,37 @@ export class AudioSocket {
       this.unproven.delete(socket);
       if (this.client !== socket) return;
       this.client = null;
+      this.backlog = [];
+      this.backlogBytes = 0;
       handlers.onClient?.(false);
     });
   }
 
-  /** One frame of the caller's audio for the program; dropped when nobody listens or the program stopped reading. */
+  /**
+   * One frame of the caller's audio for the program; dropped when nobody listens or the program stopped reading. A
+   * program that keeps up gets it at once: the kernel takes it, nothing waits. Once the kernel holds one back, it is
+   * full (`kernel.heldMs` the program has not read), and what waits in the daemon may make up the rest of
+   * `MAX_UNREAD_MS`.
+   */
   write(frame: Buffer): void {
     const client = this.client;
     if (!client || client.destroyed) return;
-    if (bytesToMs(this.rate, client.writableLength) > MAX_UNREAD_MS) { this.dropped++; return; }
-    client.write(frame);
+    if ((client.writableLength > 0 || this.backlog.length) && this.kernel.heldMs + bytesToMs(this.rate, client.writableLength + this.backlogBytes + frame.length) > MAX_UNREAD_MS) { this.dropped++; return; }
+    const piece = Math.ceil(frame.length / this.kernel.pieces / 2) * 2;
+    for (let at = 0; at < frame.length; at += piece) this.backlog.push(frame.subarray(at, at + piece));
+    this.backlogBytes += frame.length;
+    this.pump();
   }
+
+  /** Hands the kernel what waits, one write a piece, for as long as it takes each whole (`backlog`). */
+  private readonly pump = (): void => {
+    const client = this.client;
+    while (client && !client.destroyed && client.writableLength === 0 && this.backlog.length) {
+      const piece = this.backlog.shift()!;
+      this.backlogBytes -= piece.length;
+      client.write(piece, this.pump);
+    }
+  };
 
   /** Ends the program's connection (EOF once what was written is read) and removes the socket. */
   close(): Promise<void> {
@@ -228,6 +326,10 @@ export class AudioSocket {
     this.closed = true;
     const client = this.client;
     this.client = null;
+    // What waits in the daemon goes before the end, as Node's own buffer did.
+    if (client && !client.destroyed) for (const piece of this.backlog) client.write(piece);
+    this.backlog = [];
+    this.backlogBytes = 0;
     client?.end();
     if (client) setTimeout(() => client.destroy(), 2000).unref();
     for (const socket of this.unproven) socket.destroy();

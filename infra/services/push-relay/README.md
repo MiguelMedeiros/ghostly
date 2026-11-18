@@ -39,7 +39,9 @@ client's address from `X-Forwarded-For` rather than the proxy's; without it the 
 that carries one logs `requests carry X-Forwarded-For but GHOSTLY_RELAY_PROXIES is not set`. With it set, the first
 request without that entry (a proxy that does not write the header, such as nginx without `proxy_set_header
 X-Forwarded-For $proxy_add_x_forwarded_for`) logs `requests arrive without X-Forwarded-For though
-GHOSTLY_RELAY_PROXIES is set`: it counts as the proxy, as every other one would. With proxies set,
+GHOSTLY_RELAY_PROXIES is set`: it counts as the proxy, as every other one would. One with fewer entries than the
+setting (`2` behind a single proxy) logs `requests carry 1 X-Forwarded-For entry though GHOSTLY_RELAY_PROXIES is 2`:
+set it to the number of proxies that write the header. With proxies set,
 the relay listens on 127.0.0.1 unless `HOST` says otherwise: only the proxy should reach it, since anyone else could
 write that header. Ghostly runs none for you: no relay is set by default.
 
