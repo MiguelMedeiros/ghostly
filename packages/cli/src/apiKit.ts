@@ -219,7 +219,9 @@ export function findChat(links: readonly LinkView[], ref: string, groups: readon
  */
 function noChat(ref: string, groups: readonly GroupView[], onlyChat?: string): CliError {
   // A name two groups share is still a group's: it read `No chat "Crew"`, as if nothing had it.
-  if (groupsSharing(ref, groups)) return new CliError("not_found", `${JSON.stringify(ref)} names more than one group, not a chat${onlyChat ? `: ${onlyChat}` : ""} (ghostly chat list)`);
+  // Their ids too, as `findGroup`'s refusal carries them, for a script that reads them.
+  const shared = groupsSharing(ref, groups);
+  if (shared) return new CliError("not_found", `${JSON.stringify(ref)} names more than one group, not a chat${onlyChat ? `: ${onlyChat}` : ""} (ghostly chat list)`, { matches: shared });
   const group = groupNamed(ref, groups);
   if (group) return new CliError("not_found", `${JSON.stringify(ref)} is a group, not a chat (ghostly chat list)`, { group: group.id });
   return new CliError("not_found", `No chat ${JSON.stringify(ref)} (ghostly chat list)`);

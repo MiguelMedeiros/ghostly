@@ -358,8 +358,14 @@ describe("GroupChat: joining through a link", () => {
   it("says when the admin's app answered", () => {
     openGroup(viaLink(ALICE));
     expect(screen.getByTestId("group-members")).toHaveTextContent("Joining…");
-    expect(screen.getByTestId("group-joining")).toHaveTextContent("Joining Friends…");
+    expect(screen.getByTestId("group-joining")).toHaveTextContent("Joining ⁨Friends⁩…");
     expect(screen.getByTestId("group-joining")).toHaveTextContent("The admin's app answered: getting the group's keys.");
+  });
+
+  it("the joining card's title keeps the group's name in its own direction", () => {
+    // It was put in as it is: in Arabic, "Book club!" read "!Book club" (the "!" taken by the line's direction).
+    openGroup({ ...viaLink(ALICE), name: "Book club!" });
+    expect(screen.getByRole("heading", { name: "Joining ⁨Book club!⁩…" })).toBeInTheDocument();
   });
 
   it("let into a community five minutes ago and still no keys: says no member could finish, and to ask for the current link", () => {

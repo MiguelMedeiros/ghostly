@@ -301,6 +301,8 @@ const NO_ROOM: Record<string, string> = {
 const JOIN_STOPS = new Set(["replaced", ...Object.keys(NO_ROOM)]);
 /** How long a one-shot `group join` waits to be let in: as long as a one-shot `invite join` waits to pair. */
 const ONE_SHOT_JOIN_S = 60;
+/** A replaced link never lets it in: the next step is a new link, not a daemon. */
+const REPLACED = "This link was replaced or turned off: ask someone in the group for the current link, then ghostly group join <link>";
 
 /**
  * A one-shot `group join` waits to be let in, as a one-shot invite join waits to pair: a member's app lets the joiner
@@ -335,15 +337,18 @@ async function letIn(ctx: ApiContext, groupId: string, link: string, held: Group
   }
   if (ctx.mode !== "one-shot") {
     const now = seen(state(ctx));
-    return { group: groupId, joined: now?.status === "active", stage: now?.invitation?.stage ?? null };
+    const joined = now?.status === "active", stage = now?.invitation?.stage ?? null;
+    if (joined || !now?.invitation?.viaLink) return { group: groupId, joined, stage };
+    if (stage === "replaced") return { group: groupId, joined, stage, warning: REPLACED };
+    // Not in yet, it named no way to follow the knock, as the one-shot's warning does.
+    return { group: groupId, joined, stage, warning: `Not in yet: the daemon goes on knocking at the group's link until a member's app lets you in: ghostly group show ${id} follows it, ghostly group decline ${id} stops it` };
   }
   const done = (g: GroupView | undefined) => !g || g.status === "active" || JOIN_STOPS.has(g.invitation?.stage ?? "");
   const group = await waitForState(ctx, (s) => { const g = seen(s); return done(g) ? { g } : undefined; }, ONE_SHOT_JOIN_S * 1000, `group ${groupId} to let this profile in`)
     .then(({ g }) => g, (error: unknown) => { if (error instanceof CliError && error.code === "timeout") return seen(state(ctx)); throw error; });
   const joined = group?.status === "active", stage = group?.invitation?.stage ?? null;
   if (joined || !group) return { group: groupId, joined, stage };
-  // A replaced link never lets it in: the next step is a new link, not a daemon.
-  if (stage === "replaced") return { group: groupId, joined, stage, warning: "This link was replaced or turned off: ask someone in the group for the current link, then ghostly group join <link>" };
+  if (stage === "replaced") return { group: groupId, joined, stage, warning: REPLACED };
   const show = `keep it running (ghostly daemon --detach), then ghostly group show ${shellWord(groupId, groupId)}`;
   const full = stage === "full" ? group.invitation?.full : undefined;
   const noRoom = stage ? NO_ROOM[stage] : undefined;
@@ -1179,7 +1184,7 @@ const METHODS: Record<string, Method> = {
     const group = groupOf(ctx, params);
     if (!bool(params, "yes")) throw new CliError("confirm", "Leaving a group deletes its history and files on this device; pass --yes (yes: true over the socket) to go on");
     const ref = str(params, "group", true);
-    const { admin } = await node(ctx).leaveGroup({ groupId: group.id }).catch((error) => { throw leaveRefused(group, ref, error); });
+    const { admin } = await node(ctx).leaveGroup({ groupId: group.id }).catch((error) => { throw leaveRefused(ctx, group, ref, error); });
     // The member who became the admin, named from the roster read before leaving: the group is gone from the state now.
     const next = admin ? group.members.find((m) => m.key === admin) : undefined;
     return { left: group.id, ...(admin ? { admin: { key: admin, name: next?.nick ?? null } } : {}) };
@@ -1187,7 +1192,8 @@ const METHODS: Record<string, Method> = {
   async "group.forget"(ctx, params) {
     const group = groupOf(ctx, params, "chat remove <chat> --yes");
     if (!bool(params, "yes")) throw new CliError("confirm", "Forgetting a group deletes its history on this device; pass --yes (yes: true over the socket) to go on");
-    await node(ctx).forgetGroup({ groupId: group.id });
+    // A community's admin nobody is connected to is refused, as its leave is.
+    await node(ctx).forgetGroup({ groupId: group.id }).catch((error) => { throw nobodyForLeave(ctx, group, str(params, "group", true), error) ?? error; });
     return { forgotten: group.id };
   },
   async "group.accept"(ctx, params) {
@@ -1416,13 +1422,31 @@ export function groupSendRefused(error: string): CliError {
 /** The engine's admin who may not leave: the app's words say "make someone the admin", which names no command here. */
 const ADMIN_ALONE = "You are the admin and nobody else in the group is online to take over. Try again when a member is, or make someone the admin first.";
 
+/** A community's leave (or an admin's forget, which leaves first) with no edge to a member to carry it. */
+const NOBODY_FOR_LEAVE = "Nobody in the group is connected right now to take your leave. Try again in a moment.";
+
+/**
+ * A community's leave nobody was connected to take, said with the CLI's next step: "Try again in a moment" never passed
+ * in a one-shot, which has no edge yet when it runs, and every member is refused alike (`group admin` hands nothing on
+ * here). The code stays the engine's. Undefined for other errors.
+ */
+function nobodyForLeave(ctx: ApiContext, group: GroupView, ref: string, error: unknown): CliError | undefined {
+  if (!(error instanceof Error) || error.message !== NOBODY_FOR_LEAVE) return undefined;
+  const shown = shellWord(ref, group.id), show = `ghostly group show ${shown} says who is`;
+  return new CliError("engine", ctx.mode === "one-shot"
+    ? `Nobody in ${groupCalled(group)} is connected to take your leave, and a command without a daemon has no connection yet: keep this profile online (ghostly daemon --detach), then ghostly group leave ${shown} --yes once a member is (${show})`
+    : `Nobody in ${groupCalled(group)} is connected to take your leave: try again when a member is online (${show})`);
+}
+
 /**
  * `group leave` the engine refused, said with the CLI's next step: an invitation not joined yet answered "Group not
- * found" of a group `group show` lists (its way out is `group decline`), and an admin alone online "make someone the
- * admin", the app's words. The code stays the engine's.
+ * found" of a group `group show` lists (its way out is `group decline`), an admin alone online "make someone the
+ * admin", the app's words, and a community nobody is connected to (`nobodyForLeave`). The code stays the engine's.
  */
-function leaveRefused(group: GroupView, ref: string, error: unknown): unknown {
+function leaveRefused(ctx: ApiContext, group: GroupView, ref: string, error: unknown): unknown {
   if (!(error instanceof Error)) return error;
+  const nobody = nobodyForLeave(ctx, group, ref, error);
+  if (nobody) return nobody;
   const shown = shellWord(ref, group.id);
   if (error.message === ADMIN_ALONE) return new CliError("engine", `You are the admin and nobody else in ${groupCalled(group)} is online to take over: try again when a member is, or make one the admin first (ghostly group admin ${shown} <member key>)`);
   const yet = error.message === "Group not found" ? notInYet(group, ref, true) : undefined;
@@ -1470,7 +1494,7 @@ function chatNotGroupLink(ctx: ApiContext, params: Params) {
  * command that takes it (`react` on a group, where `group react` is meant), or what to do where none does. `group:<id>`,
  * the form `pin` and `saved` take, is that group too (it read "No chat" before). A name no chat and no group has stays
  * the chat's error. A name more than one group has says so too, with no `id` for `hint` (`shown` is `<group>`): the
- * group to name is one of theirs, by its id (`ghostly group list`).
+ * group to name is one of theirs, by its id (`ghostly group list`, and `details.matches`, as `findGroup` gives them).
  */
 function notAGroup<T>(ctx: ApiContext, params: Params, chat: () => T, hint: (shown: string, id?: string) => string): T {
   try { return chat(); } catch (error) {
@@ -1480,7 +1504,8 @@ function notAGroup<T>(ctx: ApiContext, params: Params, chat: () => T, hint: (sho
     let group: GroupView;
     try { group = findGroup(state(ctx).groups, named); } catch (inner) {
       // A name two groups share is still a group's (it read `No chat`): the hint, with no one group's id to name.
-      if (sharedGroupIds(inner)) throw new CliError("not_found", `${JSON.stringify(ref)} names more than one group, not a chat: ${hint("<group>")}`);
+      const shared = sharedGroupIds(inner);
+      if (shared) throw new CliError("not_found", `${JSON.stringify(ref)} names more than one group, not a chat: ${hint("<group>")}`, { matches: shared });
       throw error;
     }
     const shown = shellWord(named, group.id);

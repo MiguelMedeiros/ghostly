@@ -359,7 +359,7 @@ function joiningText(stage: GroupJoinStage, name: string, community: boolean, t:
   if (stage === "full" && full) return { title: t("group.join.full"), body: t("group.join.fullBody", { n: full.n, max: full.max }) };
   // Or that it grows only once every member's app is updated: the same, until they are.
   if (stage === "blocked") return { title: t("group.join.blocked"), body: t("group.join.blockedBody") };
-  if (stage === "admitted") return { title: name ? t("group.join.joiningName", { name }) : t("group.join.joiningGroup"),
+  if (stage === "admitted") return { title: name ? t("group.join.joiningName", { name: isolate(name) }) : t("group.join.joiningGroup"),
     body: !community ? t("group.join.admitted") : admittedLong ? t("group.join.admittedStuck") : t("group.join.admittedCommunity") };
   if (stage === "answered") return { title: community ? t("group.join.answeredTitleCommunity") : waiting,
     body: community ? t("group.join.answeredCommunity") : t("group.join.answered") };
@@ -875,7 +875,9 @@ export function GroupChat() {
       <MessageAnnouncer chat={groupId} linkId={`group:${groupId}`} messages={messages} nameOf={m => m.member ? authorName(group, m.member, t) : group.name || t("group.chat.unnamed")} noteLine={note => ownNotes.has(note.id) ? null : groupPayNoteLine(note, group, t)} ready={historyIn} />
       {/* On a phone its buttons are sized in px, as the name is (and as a chat's header, pages/Chat.tsx): in rem they grew
           with the browser's text size and left the name 23px at 150%, the members line under the connection button. */}
-      <div className="h-14 header-safe flex items-center justify-between px-4 max-md:pl-1 max-md:pr-1 bg-panel-header border-b border-border shrink-0">
+      {/* A size container: Share keeps its label by the header's width, not the window's. By the window, a phone on its
+          side (844x390 with an iPhone's safe areas) kept it beside the chat list and cut "Clube do livro" to 65 of 92 px. */}
+      <div className="@container/group-head h-14 header-safe flex items-center justify-between px-4 max-md:pl-1 max-md:pr-1 bg-panel-header border-b border-border shrink-0">
         <div className="flex items-center gap-3 max-md:gap-1.5 min-w-0">
           {back}
           {/* With a picture, the avatar opens it large; without one, the members, as the line under the name does. A contact's
@@ -911,7 +913,7 @@ export function GroupChat() {
           {canShare && !narrow && <button ref={shareRef} onClick={() => void openShare()} data-testid="group-share" title={t("group.chat.shareHint")} aria-label={t("group.chat.shareLink")}
             className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-full bg-accent/15 px-3 text-sm font-semibold text-accent hover:bg-accent/25 max-md:min-h-[44px] max-md:min-w-[44px] max-md:px-[10px]">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
-            <span className="max-[480px]:hidden">{t("group.chat.shareLink")}</span>
+            <span className="@max-[480px]/group-head:hidden">{t("group.chat.shareLink")}</span>
           </button>}
           <div className="relative" ref={menuRef}>
             <button ref={optionsRef} onClick={() => setMenuOpen(!menuOpen)} onKeyDown={openOnArrow(() => setMenuOpen(true))} className="flex items-center justify-center p-2 max-md:h-[44px] max-md:w-[44px] max-md:p-0 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer" title={t("chat.options")} aria-haspopup="true" aria-expanded={menuOpen} data-testid="group-options">
