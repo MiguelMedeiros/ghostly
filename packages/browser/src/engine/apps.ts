@@ -59,7 +59,7 @@ export const APP_CHECK_TIMINGS = {
   /** After the engine starts, so the chats come up first. */
   afterStartMs: 60_000,
   everyMs: 24 * 60 * 60 * 1000,
-  /** A check the network was off for is tried again this soon, not a day later. */
+  /** A check the network was off for, or whose read of the installed apps failed, is tried again this soon, not a day later. */
   offlineRetryMs: 10 * 60 * 1000,
   /** A check at start is skipped when every app was checked this recently (a page reloaded several times). */
   freshMs: 60 * 60 * 1000,
@@ -863,7 +863,9 @@ export class Apps {
         if (this.stopped) return;
         // The network off: the check is tried again soon (as the one after start, if it was that one), not a day later.
         if (!this.host.online()) return this.schedule(APP_CHECK_TIMINGS.offlineRetryMs, atStart);
-        const apps = await this.installed();
+        // Storage that failed this once (a lost IndexedDB connection): tried again soon, so the checks don't stop for good.
+        const apps = await this.installed().catch(() => null);
+        if (!apps) { if (!this.stopped) this.schedule(APP_CHECK_TIMINGS.offlineRetryMs, atStart); return; }
         const fresh = atStart && apps.length > 0 && apps.every((a) => this.checkedWithin(a.checkedAt, APP_CHECK_TIMINGS.freshMs));
         // No app installed: no request, to a store or anywhere (WISP 1200 § Updates and rollback, "When").
         if (apps.length && !fresh) await this.checkUpdates().catch(() => {});
