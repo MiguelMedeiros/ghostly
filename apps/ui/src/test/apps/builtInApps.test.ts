@@ -5,6 +5,9 @@ import { appRef, isAppKey, readAppBundleAsync } from "@ghostly/core";
 import { BUILT_IN_APPS } from "@ghostly/browser/engine/appDefaults";
 import { isAppFetchUrl } from "@ghostly/browser/engine/appFetch";
 import { readBuiltInApp } from "../../lib/apps/builtIns";
+import { appErrorCode, appErrorRetryable, appErrorText, appErrorView } from "../../lib/apps/errors";
+import { translateWith } from "../../locales/translate";
+import { LOCALES } from "../i18n/locales";
 // @ts-expect-error a plain script of the build, with no types of its own
 import { bundleDigest, sourcesOf } from "../../../scripts/built-in-apps.mjs";
 // covers: apps.engine.built-in
@@ -80,6 +83,48 @@ describe("the bundles this build carries", () => {
     expect(fetched).toHaveBeenCalledTimes(1);
 
     fetched.mockResolvedValueOnce(new Response("not found", { status: 404 }));
-    await expect(readBuiltInApp(BUILT_IN_APPS[0]!)).rejects.toThrow("did not load (404)");
+    await expect(readBuiltInApp(BUILT_IN_APPS[0]!)).rejects.toThrow("status: The host answered 404");
+  });
+});
+
+describe("a read of the carried file that fails", () => {
+  // The file is kept for use offline only once read (the service worker keeps it on first use): a first Open offline,
+  // the host's own trouble or an old build's file gone after a deploy fail as any read does, and say why.
+  afterEach(() => { vi.restoreAllMocks(); });
+  const failing = async (answer: () => Promise<Response>, online = true): Promise<unknown> => {
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(online);
+    vi.stubGlobal("fetch", vi.fn(answer));
+    return readBuiltInApp(BUILT_IN_APPS[0]!).then(() => null, (e: unknown) => e);
+  };
+
+  it("says offline, the host not reached and its own trouble as passing failures, in the app's words, with nothing in English behind the ⓘ", async () => {
+    const cases = [
+      { error: await failing(() => Promise.reject(new TypeError("Failed to fetch")), false), code: "offline", key: "apps.errors.offline" as const },
+      { error: await failing(() => Promise.reject(new TypeError("Failed to fetch"))), code: "network", key: "apps.errors.network" as const },
+      { error: await failing(async () => new Response("", { status: 503 })), code: "status", key: "apps.errors.hostProblem" as const },
+    ];
+    for (const { error, code, key } of cases) {
+      expect(appErrorCode(error), code).toBe(code);
+      expect(appErrorRetryable(error), code).toBe(true);
+      for (const language of ["en", "pt", "ar"] as const) {
+        const t = translateWith(LOCALES[language], language);
+        const view = appErrorView(error, t);
+        expect(view.text, `${code} ${language}`).toBe(t(key, { status: 503 }));
+        expect(view.text, `${code} ${language}`).not.toBe(t("apps.errors.refused"));
+        expect(view.info, `${code} ${language}`).toBeUndefined();
+      }
+    }
+    expect(appErrorText(cases[2]!.error, translateWith(LOCALES.pt, "pt"))).toContain("503");
+  });
+
+  it("a body cut short is the host not reached; a file the host no longer has is not a passing failure", async () => {
+    const cut = await failing(async () => ({ ok: true, status: 200, arrayBuffer: () => Promise.reject(new TypeError("network error")) }) as unknown as Response);
+    expect(appErrorCode(cut)).toBe("network");
+    const gone = await failing(async () => new Response("not found", { status: 404 }));
+    expect(appErrorCode(gone)).toBe("status");
+    expect(appErrorRetryable(gone)).toBe(false);
+    // An app the build carries no file of: no code, nothing a read again could change.
+    const none = await readBuiltInApp({ name: "notes" }).then(() => null, (e: unknown) => e);
+    expect(appErrorCode(none)).toBeNull();
   });
 });
