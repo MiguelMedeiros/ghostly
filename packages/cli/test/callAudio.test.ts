@@ -50,6 +50,30 @@ describe("the playback queue (program to call)", () => {
     expect(q.next().frame.subarray(0, 2)).toEqual(Buffer.from([3, 4]));
   });
 
+  it("a program writing in tiny pieces costs each frame well under its 20 ms", () => {
+    // 60 s at 48 kHz in 16-byte writes: 360,000 chunks queued. Each chunk used up must not copy the whole queue.
+    const q = new PlaybackQueue(48000, () => 0);
+    const piece = Buffer.alloc(16, 1);
+    for (let i = 0; i < (48000 * 2 * 60) / 16; i++) q.push(piece);
+    const frames = 50;
+    const start = performance.now();
+    for (let i = 0; i < frames; i++) q.next();
+    expect((performance.now() - start) / frames).toBeLessThan(1);
+    expect(q.queuedMs).toBe(60_000 - frames * 20);
+  });
+
+  it("gives back every byte, in order, from many small odd writes", () => {
+    const q = new PlaybackQueue(16000, () => 0);
+    const audio = tone(440, 16000, 2000);
+    for (let at = 0; at < audio.length; at += 7) q.push(audio.subarray(at, at + 7));
+    const out: Buffer[] = [];
+    out.push(q.next().frame);
+    expect(q.skip(40)).toBe(40);
+    while (q.queuedMs >= 20) out.push(q.next().frame);
+    const frame = frameBytes(16000);
+    expect(Buffer.concat(out)).toEqual(Buffer.concat([audio.subarray(0, frame), audio.subarray(3 * frame)]));
+  });
+
   it("flush drops everything queued and says how much", () => {
     const q = new PlaybackQueue(48000);
     q.push(tone(440, 48000, 2000));

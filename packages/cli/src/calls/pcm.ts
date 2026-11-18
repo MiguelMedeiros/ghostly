@@ -38,6 +38,8 @@ export const monotonic = (): number => performance.now();
  */
 export class PlaybackQueue {
   private chunks: Buffer[] = [];
+  /** The chunk being read: the ones before it are used up. */
+  private first = 0;
   private head = 0;
   private length = 0;
   private lastPush = 0;
@@ -97,6 +99,7 @@ export class PlaybackQueue {
     // Half a sample queued: its other half is the program's next byte.
     if (this.length % 2) this.owed = true;
     this.chunks = [];
+    this.first = 0;
     this.head = 0;
     this.length = 0;
     return ms;
@@ -117,6 +120,7 @@ export class PlaybackQueue {
   newWriter(): number {
     const ms = this.queuedMs;
     this.chunks = [];
+    this.first = 0;
     this.head = 0;
     this.length = 0;
     // A flush that cut the last program's half sample owes nothing to the next program: it starts on a whole sample.
@@ -128,12 +132,18 @@ export class PlaybackQueue {
     const out = Buffer.allocUnsafe(bytes);
     let filled = 0;
     while (filled < bytes) {
-      const chunk = this.chunks[0];
+      const chunk = this.chunks[this.first];
       const n = Math.min(bytes - filled, chunk.length - this.head);
       chunk.copy(out, filled, this.head, this.head + n);
       filled += n;
       this.head += n;
-      if (this.head === chunk.length) { this.chunks.shift(); this.head = 0; }
+      if (this.head === chunk.length) { this.first++; this.head = 0; }
+    }
+    // Used-up chunks are dropped now and then, not one shift() each: a program writing a sample per write queues
+    // hundreds of thousands of chunks, and a shift per chunk made one frame cost more than its 20 ms.
+    if (this.first >= 1024 && this.first * 2 >= this.chunks.length) {
+      this.chunks = this.chunks.slice(this.first);
+      this.first = 0;
     }
     this.length -= bytes;
     return out;
