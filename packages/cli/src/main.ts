@@ -1516,9 +1516,8 @@ async function engineCommand(argv: string[]): Promise<void> {
   const call = { "confirm-real": flag, "show-secret": flag, yes: flag, force: flag, list: flag };
   // Read again with the flags of the form `--list` picks: `engine getState --verbose` and `engine --list --yes` took a
   // flag of the other form and did nothing with it.
-  // A line neither form reads is refused by the parse below, in its words.
-  let listing = false;
-  try { listing = parseArgs(argv, { ...call, verbose: flag }).options.list === true; } catch { /* Refused below. */ }
+  // A flag neither form reads is refused here, by its own name: read as the other form, a valid one was named instead.
+  const listing = parseArgs(argv, { ...call, verbose: flag }, undefined, { command: "engine" }).options.list === true;
   const parsed = parseArgs(argv, listing ? { list: flag, verbose: flag } : call, undefined, { command: "engine" });
   const g = globals(parsed);
   pretty = g.pretty;

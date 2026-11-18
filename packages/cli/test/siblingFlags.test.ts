@@ -19,6 +19,8 @@ it("a sibling's flag is an unknown option, and the command acts on nothing", { t
     [["engine", "--list", "--yes"], "Unknown option --yes for ghostly engine (ghostly help engine)"],
     [["engine", "--list", "--no-force"], "Unknown option --no-force for ghostly engine (ghostly help engine)"],
     [["engine", "getState", "--verbose"], "Unknown option --verbose for ghostly engine (ghostly help engine)"],
+    // A typo beside a flag of the form is named, not the flag.
+    [["engine", "--list", "--verbose", "--yess"], "Unknown option --yess for ghostly engine (did you mean --yes? ghostly help engine)"],
   ];
   for (const [args, message] of cases) {
     expect(error(await ghostly(["--home", dir, ...args]), "usage", 2).message, args.join(" ")).toBe(message);
