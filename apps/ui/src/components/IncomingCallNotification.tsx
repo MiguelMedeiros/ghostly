@@ -72,16 +72,21 @@ export function IncomingCallNotification({
   // its kind changes. That change is said once, politely; one of the same kind says nothing. Accept video goes with a
   // video call: had it the focus, the focus goes to Accept audio, never to the page under the card (Enter would do
   // nothing). The focus is never moved onto Accept video: an Enter meant for audio must not turn the camera on.
+  // On a call, End and answer is the one Accept and stays across the change, but it now answers as the new kind: going
+  // to video, the focus leaves it for the card. Going to audio it stays, since it then answers with no camera.
   const [kind, setKind] = useState({ video: hasVideo, changed: false });
   if (kind.video !== hasVideo) setKind({ video: hasVideo, changed: true });
   const acceptAudio = useRef<HTMLButtonElement>(null);
+  const endAndAnswer = useRef<HTMLButtonElement>(null);
   const focusWasInside = useRef(false);
   focusWasInside.current = !!box.current?.contains(document.activeElement);
   const shownVideo = useRef(hasVideo);
   useLayoutEffect(() => {
     if (shownVideo.current === hasVideo) return;
     shownVideo.current = hasVideo;
-    if (focusWasInside.current && !box.current?.contains(document.activeElement)) (acceptAudio.current ?? box.current)?.focus({ preventScroll: true });
+    if (!focusWasInside.current) return;
+    if (!box.current?.contains(document.activeElement)) (acceptAudio.current ?? box.current)?.focus({ preventScroll: true });
+    else if (hasVideo && endAndAnswer.current && document.activeElement === endAndAnswer.current) box.current.focus({ preventScroll: true });
   }, [hasVideo]);
   return (
     // A plain dimmed overlay: a backdrop blur is drawn again with every frame anything under it moves.
@@ -116,7 +121,7 @@ export function IncomingCallNotification({
               <span aria-hidden="true" className="text-text-secondary text-xs">{t("calls.decline")}</span>
             </div>
             <div className="flex w-24 flex-col items-center gap-2">
-              <button onClick={hasVideo ? onAcceptVideo : onAcceptAudio} className={ACCEPT} data-testid="end-and-answer"
+              <button ref={endAndAnswer} onClick={hasVideo ? onAcceptVideo : onAcceptAudio} className={ACCEPT} data-testid="end-and-answer"
                 title={t("calls.endAndAnswer")} aria-label={t("calls.endAndAnswer")}>
                 {hasVideo ? <VideoIcon /> : <PhoneIcon />}
               </button>

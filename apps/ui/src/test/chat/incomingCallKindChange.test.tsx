@@ -74,4 +74,24 @@ describe("the ringing call turns into the other kind", () => {
     await act(async () => {});
     expect(screen.getByRole("button", { name: "Accept audio call" })).not.toHaveFocus();
   });
+
+  it("on a call, audio to video with End and answer focused: the focus leaves it for the card, 'Now a video call' is said", async () => {
+    const { rerender } = renderApp(card(false, true));
+    screen.getByTestId("end-and-answer").focus();
+    rerender(card(true, true));
+    await act(async () => {});
+    // End and answer now answers with the camera: an Enter meant for the audio call must not press it.
+    expect(screen.getByTestId("end-and-answer")).not.toHaveFocus();
+    expect(screen.getByRole("alertdialog")).toHaveFocus();
+    expect(screen.getByTestId("incoming-call-kind-said")).toHaveTextContent("Now a video call");
+  });
+
+  it("on a call, video to audio: End and answer keeps the focus (it then answers with no camera)", async () => {
+    const { rerender } = renderApp(card(true, true));
+    screen.getByTestId("end-and-answer").focus();
+    rerender(card(false, true));
+    await act(async () => {});
+    expect(screen.getByTestId("end-and-answer")).toHaveFocus();
+    expect(screen.getByTestId("incoming-call-kind-said")).toHaveTextContent("Now an audio call");
+  });
 });
