@@ -1566,7 +1566,7 @@ function deleteNotMine(ctx: ApiContext, target: { linkId: string; group: boolean
 /**
  * About the longest ASCII text, and edit, the DHT packet carries once sealed and signed: within the 256 bytes, the
  * envelope's authentication (and an edit's element) takes the rest. The edge moves by a byte or two with the chat (the
- * envelope's sequence, the edit's number), so the words say "about"; `dhtBudgetWords.test.ts` sends both sizes on two
+ * envelope's sequence, the edit's number), so the words say "about"; `dhtPacketBudget.test.ts` sends both sizes on two
  * paired daemons.
  */
 const DHT_TEXT_FITS = 248, DHT_EDIT_FITS = 214;

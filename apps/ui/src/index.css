@@ -1501,7 +1501,7 @@ html .toast-place.toast-place-page[data-at="top"] {
  * Motion that rests (lib/windowAway.ts). The loops below say something is under way; while the window is away
  * (hidden, or not the focused one: behind others, on another workspace) nobody is looking, so they hold still and go
  * on when it is back. Only loops are listed: a finite animation (a bubble coming in) must finish, or it would leave
- * its element half shown. A new loop goes here too (test/idleMotion.test.ts checks the stylesheets).
+ * its element half shown. A new loop goes here too (test/app/idleMotion.test.tsx checks the stylesheets).
  */
 :root[data-away] :is(.animate-spin, .animate-pulse, .typing-dots > span, .profile-switch-badge,
   .voice-bar-dot, .voice-slide-arrow, .new-wallet-spinner, .pi-packet),

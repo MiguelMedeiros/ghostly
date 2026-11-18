@@ -16,7 +16,7 @@ const r = (e: string, n = 1, at = n): MessageReaction => ({ e, n, at });
 const message = (patch: Partial<ChatMessage> = {}): ChatMessage => ({ id: `peer_${WIRE}`, text: "lunch at noon?", sender: "peer", timestamp: 1_700_000_000_000, ...patch });
 const names = (by: string) => by === "peer" ? "Alice" : by === "k1" ? "Bo" : by === "k2" ? "Cy" : by;
 
-// The emoji panel's data set, here before the picker opens (its loading: emojiPanelLoad.test.tsx).
+// The emoji panel's data set, here before the picker opens (its loading: emojiPanel.test.tsx).
 beforeAll(() => loadEmoji());
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
