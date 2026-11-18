@@ -653,19 +653,13 @@ fn window_title(title: &str) -> String {
 }
 
 /// The window, with every layer that does not depend on the platform.
-/// An app window's answer to a permission request (a contact's service window's too, `viewer::open`): never the
-/// microphone, the camera, the screen or the location.
+/// An app window's answer to a permission request (a contact's service window's too, `viewer::open`): no, whatever
+/// it asks for. Never the microphone, the camera, the screen or the location, and no notifications, file pickers or
+/// any other kind either: `Default` would let WebView2 ask the user in its own prompt, inside a Ghostly window.
 pub(crate) fn capture_answer(
-    kind: tauri::webview::PermissionKind,
+    _kind: tauri::webview::PermissionKind,
 ) -> tauri::webview::PermissionResponse {
-    use tauri::webview::{PermissionKind, PermissionResponse};
-    match kind {
-        PermissionKind::Microphone
-        | PermissionKind::Camera
-        | PermissionKind::DisplayCapture
-        | PermissionKind::Geolocation => PermissionResponse::Deny,
-        _ => PermissionResponse::Default,
-    }
+    tauri::webview::PermissionResponse::Deny
 }
 
 fn window_builder<'a, R: Runtime>(
@@ -2145,7 +2139,7 @@ mod tests {
 
     /// No microphone, camera, screen or location for an app: no app permission covers them. Without a handler wry
     /// grants a capture on macOS with no question, so every app window carries one that refuses, and the runner is
-    /// served with a policy that turns the features off.
+    /// served with a policy that turns the features off. The handler refuses every other kind too.
     #[test]
     fn an_app_window_never_captures() {
         let source = include_str!("app_sandbox.rs");
@@ -2153,18 +2147,30 @@ mod tests {
         let body = &source[start..start + source[start..].find("\n}\n").unwrap()];
         assert!(body.contains(".on_permission_request("), "window_builder");
         use tauri::webview::{PermissionKind, PermissionResponse};
+        // Every kind, not only the capture ones: `Default` lets WebView2 ask in the window, as if Ghostly asked.
         for kind in [
             PermissionKind::Microphone,
             PermissionKind::Camera,
-            PermissionKind::DisplayCapture,
             PermissionKind::Geolocation,
+            PermissionKind::Notifications,
+            PermissionKind::ClipboardRead,
+            PermissionKind::DisplayCapture,
+            PermissionKind::Midi,
+            PermissionKind::Sensors,
+            PermissionKind::MediaKeySystemAccess,
+            PermissionKind::LocalFonts,
+            PermissionKind::WindowManagement,
+            PermissionKind::PointerLock,
+            PermissionKind::AutomaticDownloads,
+            PermissionKind::FileSystemAccess,
+            PermissionKind::Autoplay,
+            PermissionKind::Other,
         ] {
-            assert!(matches!(capture_answer(kind), PermissionResponse::Deny));
+            assert!(
+                matches!(capture_answer(kind), PermissionResponse::Deny),
+                "{kind}"
+            );
         }
-        assert!(matches!(
-            capture_answer(PermissionKind::PointerLock),
-            PermissionResponse::Default
-        ));
         let app = app();
         app.state::<AppSandboxState>()
             .windows

@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fromBase64Url, toBase64Url, toZ32 } from "../src/bytes";
 import { decodeTxtPacket, encodeTxtPacket, type NsRecord, type TxtRecord } from "../src/dns";
 import {
@@ -317,6 +317,28 @@ describe("resolveDidDht", () => {
     const micros = signDidDhtPacket(identity, encodeDidDhtPacket(document), seq * 1_000_000);
     const resolved = await resolveDidDht(did, { ...relays({ "https://a.test": micros }), relays: ["https://a.test"] });
     expect(resolved.metadata.updated).toBe(new Date(seq * 1000).toISOString());
+  });
+
+  it("waits for every relay that answers within the fetch's timeout, so a slower one's newer packet wins", async () => {
+    vi.useFakeTimers();
+    try {
+      const ended = signDidDhtPacket(identity, encodeDidDhtDeactivated(identity.publicKey), seq + 1);
+      // The relay with the older packet answers at once, the one with the deactivation 3.5 s later (the fetch allows 10 s).
+      const fetch: DidDhtFetch = async (url) => {
+        const late = new URL(url).origin === "https://b.test";
+        await new Promise((resolve) => setTimeout(resolve, late ? 3_500 : 0));
+        return { status: 200, bytes: late ? ended : payload };
+      };
+      let settled = false;
+      const resolving = resolveDidDht(did, { fetch, relays: ["https://a.test", "https://b.test"] });
+      void resolving.finally(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(3_499);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(resolving).resolves.toMatchObject({ relay: "https://b.test", metadata: { versionId: String(seq + 1), deactivated: true } });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("stops when aborted", async () => {

@@ -438,6 +438,9 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
   // Which button started the work in progress: that one shows it is going.
   const [pending, setPending] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
+  // An app that kept no data has nothing to save: said, or it read as a download that was blocked, under "Export the
+  // data first to keep it.", and the person uninstalled not knowing.
+  const [keptNone, setKeptNone] = useState(false);
   // The question takes the place of the button that asked it, and the focus went with that button: it goes to the
   // question's Cancel (Enter again does not uninstall), and Cancel gives it back to Uninstall, never to the page.
   const keep = useRef<HTMLButtonElement>(null), uninstall = useRef<HTMLButtonElement>(null), asked = useRef(false);
@@ -503,7 +506,8 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
   // still here, and it was deleted a moment later. Escape on the question is its Cancel, as on the other Remove questions.
   const close = () => { if (!busy) onClose(); };
   // Each screen says only its own error: a Fetch files that failed was read out again on the question, as Uninstall's.
-  const keepIt = () => { if (!busy) { setError(null); setRemoving(false); } };
+  const keepIt = () => { if (!busy) { setError(null); setKeptNone(false); setRemoving(false); } };
+  const exportData = async () => { setKeptNone(false); setKeptNone(!await saveAppData(app.ref, await engine.call("appDataExportText", { ref: app.ref }))); };
   const why = runLine(app.run, t, "apps.app.revokedNext");
   const runId = useId();
   const canRun = app.run.status === "ok";
@@ -516,10 +520,14 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
         {stopLine}
         <h2 id={titleId} className="text-lg font-medium text-text-primary [overflow-wrap:anywhere]">{withName(t("apps.app.uninstallTitle", { title: NAME }), app.title)}</h2>
         <p className="text-sm text-text-secondary">{t("apps.app.uninstallText")}</p>
+        {/* There from the start, so the line is read out when it comes; out of the layout while it says nothing. */}
+        <p role="status" data-testid="app-export-none" className={keptNone ? "text-xs text-text-secondary [overflow-wrap:anywhere]" : "sr-only"}>
+          {keptNone && withName(t("apps.app.exportNone", { title: NAME }), app.title)}
+        </p>
         {error && <ErrorLine error={error} />}
         <div className="flex flex-wrap justify-end gap-2">
           <Button ref={keep} disabled={busy} onClick={keepIt}>{t("common.cancel")}</Button>
-          <Button data-testid="app-export" disabled={busy} loading={pending === "export"} onClick={() => void act(async () => saveAppData(app.ref, await engine.call("appDataExportText", { ref: app.ref })), false, "export")}>{t("apps.app.export")}</Button>
+          <Button data-testid="app-export" disabled={busy} loading={pending === "export"} onClick={() => void act(exportData, false, "export")}>{t("apps.app.export")}</Button>
           <Button variant="danger" data-testid="app-uninstall-confirm" disabled={busy} loading={pending === "uninstall"} onClick={() => void act(async () => { await engine.call("appUninstall", { ref: app.ref }); await forgetLinkedFiles(app.ref); onUninstalled?.(); }, true, "uninstall")}>{t("apps.app.uninstall")}</Button>
         </div>
       </Shell>

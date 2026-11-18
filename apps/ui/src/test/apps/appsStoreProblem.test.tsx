@@ -139,6 +139,18 @@ describe("a store's last read that failed", () => {
     expect(screen.getByTestId("toast")).not.toHaveAttribute("data-tone", "success");
   });
 
+  // Removed in another tab: the engine has no such store. Said so, and the list is read again, so its block goes.
+  it("says a Refresh of a store removed meanwhile that it is no longer added, and its block goes", async () => {
+    let held = [store({})];
+    fakeEngine.on("appStoreList", () => held).on("appStoreRefresh", () => { throw new Error("no-store: No such store"); });
+    renderApp(<Apps />, { route: "/apps" });
+    const refresh = within(await screen.findByTestId("app-store")).getByTestId("app-store-refresh");
+    held = [];
+    await userEvent.click(refresh);
+    expect(await screen.findByTestId("toast-text")).toHaveTextContent("This store is no longer added.");
+    await waitFor(() => expect(screen.queryByTestId("app-store")).toBeNull());
+  });
+
   // Its host still serves a list past its date: the read works, and the store is not up to date.
   it("says a Refresh that read a list past its date is out of date, not up to date", async () => {
     const old = store({ expires: Math.floor(SEEN / 1000), expired: true });

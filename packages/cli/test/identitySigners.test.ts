@@ -183,6 +183,15 @@ describe("identity signers on Node", () => {
       .toBe("ghostly: Approve the request at this link:\nhttps://bunker.test/auth\n");
   });
 
+  // A daemon started before the `request` id (upgraded CLI, `daemon restart` not run yet) tags no event: `identity add`
+  // printed none of its waits, so the bunker's approval link never showed and the proof waited out its --timeout.
+  it("a wait from a daemon that tags no request is still told", () => {
+    const untagged: GhostlyEvent = { seq: 1, id: "x", type: "identity.approval", at: 1, provider: "nostr", url: "https://bunker.test/auth" };
+    expect(identityWaitLines(untagged, "r", true)).toBe("ghostly: Approve the request at this link:\nhttps://bunker.test/auth\n");
+    expect(identityWaitLines({ ...untagged, type: "identity.progress", url: undefined, message: "Approve it." }, "r", false)).toContain("\"message\":\"Approve it.\"");
+    expect(identityWaitLines({ ...untagged, request: "other" }, "r", true)).toBe("");
+  });
+
   // Nobody approved a Pubky sign-in: it ended as `engine`, "The operation was aborted due to timeout", after 300 s,
   // naming neither the approval it waited for nor --timeout. A local double, not the public relay.
   it("an approval that does not come in time is a timeout naming it and --timeout", async () => {

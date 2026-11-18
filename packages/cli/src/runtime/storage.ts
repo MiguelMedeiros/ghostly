@@ -245,6 +245,8 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   let holdsDelete = false;
   /** The exports under way (a backup's), each holding rows.db as it was when it began (`openTreeReader`). */
   const exporting = new Set<Promise<void>>();
+  /** The scrubs' folds queued or under way: an export begins after them (`exportSnapshot`). */
+  const scrubbing = new Set<Promise<void>>();
   /** The scrub's fold asked for that has not begun yet: a scrub asked meanwhile is that one (`compact`). */
   let nextScrub: Promise<void> | null = null;
   const pending = new WeakMap<unknown[], Op[]>();
@@ -701,7 +703,8 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
           out.begin("A", count);
           let written = 0;
           for (const record of Array.isArray(records) ? records : records.getAllRecords()) {
-            let value = Array.isArray(records) ? await blobsToDisk(record.value) : record.value;
+            // rows.db holds no Blob, but may hold an object with the marker's key: it goes out in a marker too.
+            let value = Array.isArray(records) || hasBlob(record.value) ? await blobsToDisk(record.value) : record.value;
             // A chat's ratchet (WISP 4xx) is this profile's alone, here: a backup never carries it, so a restored copy
             // seals with keys of its own, never the ones this profile goes on using.
             if (meta.name === "links" && value && typeof value === "object" && "ratchetState" in value) {
@@ -740,9 +743,6 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     // commit meanwhile wait behind it in the queue (`append`), so the journal it replaces gets none of them.
     const file = await open(temporaryPath, "w", 0o600);
     try { await writeSnapshotTo(file, snapshot); await file.sync(); } finally { await file.close(); }
-    // A scrub's checkpoint stops at an export's reader: rows.db kept the pages from before it, a purged text in them,
-    // after `message delete --purge` answered. None begins between this wait and the checkpoint: no turn passes.
-    while (scrub && trees && exporting.size) await Promise.allSettled(exporting);
     if (trees) {
       // Every transaction the snapshot holds goes to the trees, and to the disk, in the turn the snapshot takes the
       // journal's place: also one whose entry waits behind this snapshot in the queue (the snapshot holds what it did
@@ -751,10 +751,18 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
       // to rows.db with it, half of it (a file's state deleted, its record kept). rows.db names this snapshot with
       // them: a process killed before the rename below comes back to it (at open).
       trees.apply(upTo, name);
-      if (scrub) trees.scrub();
-      trees.sync();
     }
-    renameSync(temporaryPath, snapshotPath);
+    try {
+      if (scrub) trees?.scrub();
+      trees?.sync();
+      renameSync(temporaryPath, snapshotPath);
+    } catch (error) {
+      // The fold did not take the journal's place: the store goes on writing to it. Left on disk, that snapshot is the
+      // one rows.db names, and a process killed later came back to it, the journal dropped: every transaction completed
+      // since the failure lost its writes outside rows.db (a purge's VACUUM with no room for its copy, a rename refused).
+      rmSync(temporaryPath, { force: true });
+      throw error;
+    }
     foldedUpTo = upTo;
     // Trees of stores and indexes gone from the schema: once no snapshot on disk names them, nor the schema now.
     try { if (live) trees!.sweep(new Set([...live, ...liveTrees()])); } catch (error) { process.stderr.write(`ghostly: storage: old trees not removed: ${error instanceof Error ? error.message : String(error)}\n`); }
@@ -816,15 +824,20 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
       // 100,000 messages, 4.6 s of it in one stretch.
       if (scrub && nextScrub) return nextScrub;
       const fold = (async () => {
-        // A scrub waits for the exports under way here, out of the queue: the writes meanwhile do not wait with it.
+        // A scrub's checkpoint stops at an export's reader: rows.db kept the pages from before it, a purged text in them,
+        // after `message delete --purge` answered. It waits for the exports under way here, out of the queue: the writes
+        // meanwhile do not wait with it. One that begins later waits for the fold (`scrubbing`, set in this same turn):
+        // waited for in the queue, a backup begun while the fold was written held every write for its whole export.
         while (scrub && exporting.size) await Promise.allSettled(exporting);
         // The caller reads the snapshot next (a backup): a fold that failed is its failure, not a line on stderr.
         let thrown: { error: unknown } | null = null;
-        await enqueue(() => {
+        const queued = enqueue(() => {
           // Begun: a scrub asked from now on may come after what this one captures.
           if (scrub) nextScrub = null;
           return writeSnapshot(scrub).catch((error: unknown) => { thrown = { error }; throw error; });
         });
+        if (scrub) scrubbing.add(queued);
+        try { await queued; } finally { scrubbing.delete(queued); }
         if (thrown) throw (thrown as { error: unknown }).error;
       })();
       if (scrub) nextScrub = fold;
@@ -844,6 +857,9 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     journalBytes,
     async exportSnapshot(path: string) {
       await settled();
+      // Not before a scrub's fold: it reads rows.db once the purged text is out of it. None begins between this wait
+      // and the export's reader (`exporting`, below): no turn passes.
+      while (scrubbing.size) await Promise.allSettled(scrubbing);
       // Written and synced off the thread: 215 ms of the export of 100,000 messages, in one turn when it was sync.
       const run = (async () => {
         const file = await open(path, "w", 0o600);
@@ -1525,15 +1541,20 @@ function keyFromDisk(key: Key): Key {
   return IDBKeyRange.bound(range.lower, range.upper, range.lowerOpen, range.upperOpen);
 }
 
+/** A Blob, or an object of the app's that has the marker's key itself (`blobsToDisk`): what goes to disk changed. */
 function hasBlob(value: unknown, depth = 0): boolean {
   if (value instanceof Blob) return true;
   if (!value || typeof value !== "object" || depth > 32 || ArrayBuffer.isView(value) || value instanceof ArrayBuffer) return false;
   if (value instanceof Map) { for (const [k, v] of value) if (hasBlob(k, depth + 1) || hasBlob(v, depth + 1)) return true; return false; }
+  if (Object.hasOwn(value, BLOB)) return true;
   for (const item of Object.values(value)) if (hasBlob(item, depth + 1)) return true;
   return false;
 }
 
-/** v8 cannot serialize a Blob: it goes to disk as its bytes and type, and comes back a Blob. */
+/**
+ * v8 cannot serialize a Blob: it goes to disk as its bytes and type, and comes back a Blob. An object of the app's
+ * that has the marker's key itself (a contact's data can) goes in a marker too, as it is, so it never comes back a Blob.
+ */
 async function blobsToDisk(value: unknown, depth = 0): Promise<unknown> {
   if (!hasBlob(value, depth)) return value;
   if (value instanceof Blob) return { [BLOB]: { type: value.type, bytes: new Uint8Array(await value.arrayBuffer()) } };
@@ -1541,16 +1562,19 @@ async function blobsToDisk(value: unknown, depth = 0): Promise<unknown> {
   if (value instanceof Map) return new Map(await Promise.all([...value].map(async ([k, v]) => [k, await blobsToDisk(v, depth + 1)] as const)));
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(value as object)) out[k] = await blobsToDisk(v, depth + 1);
-  return out;
+  return Object.hasOwn(out, BLOB) ? { [BLOB]: { kept: out } } : out;
 }
+/** Only a marker this store wrote is one: its key alone, holding bytes (which no JSON makes) or an object it kept. */
 function blobsFromDisk(value: unknown, depth = 0): unknown {
   if (!value || typeof value !== "object" || depth > 32 || ArrayBuffer.isView(value) || value instanceof ArrayBuffer) return value;
-  const blob = (value as Record<string, { type: string; bytes: Uint8Array }>)[BLOB];
-  if (blob) return new Blob([blob.bytes as BlobPart], { type: blob.type });
   if (Array.isArray(value)) return value.map((item) => blobsFromDisk(item, depth + 1));
   if (value instanceof Map) return new Map([...value].map(([k, v]) => [k, blobsFromDisk(v, depth + 1)]));
   if (Object.getPrototypeOf(value) !== Object.prototype) return value;
+  const marker = Object.keys(value).length === 1 ? (value as Record<string, unknown>)[BLOB] : undefined;
+  const { type, bytes, kept } = (marker && typeof marker === "object" ? marker : {}) as { type?: unknown; bytes?: unknown; kept?: unknown };
+  if (bytes instanceof Uint8Array && typeof type === "string") return new Blob([bytes as BlobPart], { type });
+  const fields = kept && typeof kept === "object" && Object.getPrototypeOf(kept) === Object.prototype ? kept : value;
   const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(value)) out[k] = blobsFromDisk(v, depth + 1);
+  for (const [k, v] of Object.entries(fields)) out[k] = blobsFromDisk(v, depth + 1);
   return out;
 }

@@ -1,6 +1,7 @@
 import {
-  APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, APP_ICON_PATH, APP_STATEMENT_LIMITS, APP_STORE_LIMITS, appDigest, appViewOf, appFingerprint, appRef, appRefPublisher, appRevocationFor, appStoreDecision,
+  APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, APP_ICON_PATH, APP_STORE_LIMITS, appDigest, appViewOf, appFingerprint, appRef, appRefPublisher, appRevocationFor, appStoreDecision,
   addedAppPermissions, appUpdateDecision, canonicalJson, canonicalJsonBytes, checkAppBeforeRun, isAppHash, isAppKey, isAppRef, planAppUpdate, readAppBundleAsync, readAppRevocation, readAppRevocationShape,
+  appRevocationsFileEntries,
   pacer, readAppStoreSteps, readCanonicalJson, sha256Paced, toBase64Url, utf8Decode, utf8Encode,
   type AppBundle, type AppListing, type AppManifest, type AppPermission, type AppRemoval, type AppRevocationsChecked, type AppStoreIndex, type AppStoreKind,
   type AppStoreRead,
@@ -59,6 +60,8 @@ export const APP_CHECK_TIMINGS = {
   /** After the engine starts, so the chats come up first. */
   afterStartMs: 60_000,
   everyMs: 24 * 60 * 60 * 1000,
+  /** A check the network was off for, or whose read of the installed apps failed, is tried again this soon, not a day later. */
+  offlineRetryMs: 10 * 60 * 1000,
   /** A check at start is skipped when every app was checked this recently (a page reloaded several times). */
   freshMs: 60 * 60 * 1000,
 } as const;
@@ -376,6 +379,9 @@ function pooled<T, R>(items: readonly T[], limit: number, run: (item: T) => Prom
   return out;
 }
 
+/** A jsDelivr URL, which this client reads only at a full commit (`isAppFetchUrl`): its bytes never move on. */
+const isPinnedAppUrl = (u: string): boolean => new URL(u).hostname.toLowerCase() === "cdn.jsdelivr.net";
+
 /**
  * A listing's URLs this client reads, in order, a jsDelivr copy first: one this client reads names a full commit, so it
  * holds exactly the version the store reviewed, where a raw `HEAD` may have moved on to one it has not (WISP 1200 §
@@ -383,17 +389,31 @@ function pooled<T, R>(items: readonly T[], limit: number, run: (item: T) => Prom
  */
 function listingUrls(urls: readonly string[]): string[] {
   const readable = urls.filter(isAppFetchUrl);
-  const pinned = (u: string) => new URL(u).hostname.toLowerCase() === "cdn.jsdelivr.net";
-  return [...readable.filter(pinned), ...readable.filter((u) => !pinned(u))];
+  return [...readable.filter(isPinnedAppUrl), ...readable.filter((u) => !isPinnedAppUrl(u))];
 }
 
-/** A read that failed for a reason that may pass: offline, the host not reached or too slow, its own trouble (5xx, 429). */
+/**
+ * A read that failed for a reason that may pass: offline, the host not reached or too slow, its own trouble (5xx, 429,
+ * its own timeout 408), as the install screen says it with Try again (apps/ui lib/apps/errors.ts `appErrorRetryable`).
+ */
 const passing = (error: unknown): boolean => error instanceof AppFetchError
-  && (error.code === "offline" || error.code === "network" || error.code === "slow" || (error.status ?? 0) >= 500 || error.status === 429);
+  && (error.code === "offline" || error.code === "network" || error.code === "slow" || (error.status ?? 0) >= 500 || error.status === 429 || error.status === 408);
 
 /** An error whose message starts with its code (`<code>: words`), as it crosses the engine's RPC. */
 function fail(code: string, words: string): never {
   throw new Error(`${code}: ${words}`);
+}
+
+/**
+ * Refusals of a bundle whose detail is the bundle's own text (a file path, key names), not Ghostly's words: said
+ * without it, as a dialog shows the detail behind its ⓘ inside Ghostly's own box.
+ */
+const BUNDLE_WORDS: ReadonlySet<string> = new Set(["bad-path", "unknown-key", "path-collision", "files-unsorted", "file-hash"]);
+
+/** A bundle refused by `readAppBundleAsync`, as the engine throws it. */
+function refuseBundle(read: { reason: string; detail?: string }): never {
+  const detail = read.detail && !BUNDLE_WORDS.has(read.reason) ? ` (${read.detail})` : "";
+  fail(read.reason, `This is not an app Ghostly can install${detail}`);
 }
 
 /**
@@ -859,12 +879,14 @@ export class Apps {
       this.timer = null;
       void (async () => {
         if (this.stopped) return;
-        if (this.host.online()) {
-          const apps = await this.installed();
-          const fresh = atStart && apps.length > 0 && apps.every((a) => this.checkedWithin(a.checkedAt, APP_CHECK_TIMINGS.freshMs));
-          // No app installed: no request, to a store or anywhere (WISP 1200 § Updates and rollback, "When").
-          if (apps.length && !fresh) await this.checkUpdates().catch(() => {});
-        }
+        // The network off: the check is tried again soon (as the one after start, if it was that one), not a day later.
+        if (!this.host.online()) return this.schedule(APP_CHECK_TIMINGS.offlineRetryMs, atStart);
+        // Storage that failed this once (a lost IndexedDB connection): tried again soon, so the checks don't stop for good.
+        const apps = await this.installed().catch(() => null);
+        if (!apps) { if (!this.stopped) this.schedule(APP_CHECK_TIMINGS.offlineRetryMs, atStart); return; }
+        const fresh = atStart && apps.length > 0 && apps.every((a) => this.checkedWithin(a.checkedAt, APP_CHECK_TIMINGS.freshMs));
+        // No app installed: no request, to a store or anywhere (WISP 1200 § Updates and rollback, "When").
+        if (apps.length && !fresh) await this.checkUpdates().catch(() => {});
         if (!this.stopped) this.schedule(APP_CHECK_TIMINGS.everyMs);
       })();
     }, ms);
@@ -951,7 +973,7 @@ export class Apps {
     try { bytes = await this.host.readBuiltIn(app); } catch { fail("not-carried", "This build does not carry this app"); }
     if (!(bytes instanceof Uint8Array) || bytes.length > APP_BUNDLE_LIMITS.bundleBytes) fail("not-carried", "This build does not carry this app");
     const read = await readAppBundleAsync(bytes);
-    if (!read.ok) fail(read.reason, `This is not an app Ghostly can install${read.detail ? ` (${read.detail})` : ""}`);
+    if (!read.ok) refuseBundle(read);
     if (read.bundle.digest !== app.digest || versionOf(read.bundle.manifest, read.bundle.digest).ref !== builtInRef(app)) fail("unlisted", "The app this build carries is not the one it names");
     return { bundle: read.bundle, bytes };
   }
@@ -1375,7 +1397,7 @@ export class Apps {
     const read = (async () => {
       const bytes = await this.host.fetch(url, { maxBytes: APP_BUNDLE_LIMITS.bundleBytes });
       const read = await readAppBundleAsync(bytes);
-      if (!read.ok) fail(read.reason, `This is not an app Ghostly can install${read.detail ? ` (${read.detail})` : ""}`);
+      if (!read.ok) refuseBundle(read);
       return { bundle: read.bundle, bytes };
     })().finally(() => { this.bundleReads.delete(url); });
     this.bundleReads.set(url, read);
@@ -1497,23 +1519,24 @@ export class Apps {
   }
 
   /**
-   * The revocations of a `ghostly-revoke.json`, by app; null when one entry does not verify. A file whose bytes verified
-   * before (`verdict`) is canonical by its digest: parsed with no canonical check, and each entry's shape taken alone.
+   * The revocations of a `ghostly-revoke.json`, by app; null when one entry does not verify. Each entry is found
+   * (`appRevocationsFileEntries`: nothing parsed, past 4096 or one too large refuses the file) and read in its own
+   * step. A file whose bytes verified before (`verdict`) is canonical by its digest: each entry parsed with no canonical
+   * check, and its shape taken alone.
    */
   private async splitRevocations(id: string, bytes: Uint8Array, verdict: boolean | undefined): Promise<Map<string, SignedAppRevocation[]> | null> {
-    const read = verdict ? { ok: true as const, value: JSON.parse(utf8Decode(bytes)) as JsonValue } : readCanonicalJson(bytes);
-    let out: Map<string, SignedAppRevocation[]> | null = null;
-    if (read.ok && Array.isArray(read.value) && read.value.length <= APP_STATEMENT_LIMITS.revocations) {
-      out = new Map();
-      const pause = pacer(REVOCATIONS_SLICE_MS);
-      for (const entry of read.value) {
-        await pause();
-        const one = verdict ? readAppRevocationShape(entry) : readAppRevocation(entry);
-        if (!one.ok) { out = null; break; }
-        const app = one.revocation.statement.app;
-        const list = out.get(app);
-        if (list) list.push(one.revocation); else out.set(app, [one.revocation]);
-      }
+    let out: Map<string, SignedAppRevocation[]> | null = new Map();
+    const pause = pacer(REVOCATIONS_SLICE_MS);
+    const entries = appRevocationsFileEntries(bytes);
+    for (let next = entries.next(); ; next = entries.next()) {
+      if (next.done) { if (next.value) out = null; break; }
+      await pause();
+      const read = verdict ? { ok: true as const, value: JSON.parse(utf8Decode(next.value)) as JsonValue } : readCanonicalJson(next.value);
+      const one = !read.ok ? read : verdict ? readAppRevocationShape(read.value) : readAppRevocation(read.value);
+      if (!one.ok) { out = null; break; }
+      const app = one.revocation.statement.app;
+      const list = out.get(app);
+      if (list) list.push(one.revocation); else out.set(app, [one.revocation]);
     }
     this.revocationVerdicts.delete(id);
     this.revocationVerdicts.set(id, out !== null);
@@ -1779,18 +1802,27 @@ export class Apps {
     // checked from that URL within `STAGED.ms` is taken as it is, and only its revocations are read again.
     // None read: a URL's passing trouble (its host down, a rate limit, too slow) is what is said, not a later URL's 404 or
     // refusal, so the screen offers Try again, which may read that URL.
+    const judge = (version: AppVersion) => {
+      if (!expect) return;
+      if (version.ref !== expect.ref) fail("other-app", "The URL holds another app");
+      if (expect.sequence !== undefined && version.sequence < expect.sequence) fail("rollback", "The URL holds an older version than the one named");
+      if (expect.sequence === version.sequence && expect.digest !== undefined && expect.digest !== version.digest) fail("equivocation", "The URL holds another version under the same number");
+      if (expect.exact && version.digest !== expect.digest) fail("unlisted", "The URL holds a version the store does not list");
+    };
     let last: unknown = null;
     for (const url of urls) {
       try {
         const kept = expect?.digest !== undefined ? this.staged.get(stagedKey(expect.digest, url, fromStore)) : undefined;
-        const { bundle, bytes } = kept && this.checkedWithin(kept.at, STAGED.ms) ? kept : await this.fetchBundle(url);
-        const version = versionOf(bundle.manifest, bundle.digest);
-        if (expect) {
-          if (version.ref !== expect.ref) fail("other-app", "The URL holds another app");
-          if (expect.sequence !== undefined && version.sequence < expect.sequence) fail("rollback", "The URL holds an older version than the one named");
-          if (expect.sequence === version.sequence && expect.digest !== undefined && expect.digest !== version.digest) fail("equivocation", "The URL holds another version under the same number");
-          if (expect.exact && version.digest !== expect.digest) fail("unlisted", "The URL holds a version the store does not list");
+        const fresh = kept && this.checkedWithin(kept.at, STAGED.ms);
+        // A listing's URL that may have moved on (not at a commit: tried once the pinned ones failed) is peeked first, as
+        // the update check does: a raw HEAD holding a newer version is not downloaded whole (up to 16 MiB) only to be
+        // refused, at each Try again while the pinned copy's host has trouble.
+        if (!fresh && expect?.exact && !isPinnedAppUrl(url)) {
+          const peek = await this.peekAt(url);
+          if (peek) judge(peek);
         }
+        const { bundle, bytes } = fresh ? kept : await this.fetchBundle(url);
+        judge(versionOf(bundle.manifest, bundle.digest));
         return this.stage(bundle, bytes, url, fromStore);
       } catch (error) { if (!passing(last) || passing(error)) last = error; }
     }

@@ -143,9 +143,14 @@ export const nearbyAddress = address => isIP(address ?? '') > 0 && NEARBY.check(
 /** The client's address from `X-Forwarded-For` behind `proxies` proxies (see clientAddress), or null without that entry. */
 export function forwardedAddress (req, proxies = 0) {
   if (!proxies) return null
-  const header = req.headers['x-forwarded-for']
-  const hops = (Array.isArray(header) ? header.join(',') : header ?? '').split(',').map(item => item.trim()).filter(Boolean)
+  const hops = forwardedHops(req)
   return hops.length >= proxies ? hops[hops.length - proxies] : null
+}
+
+/** The entries of a request's `X-Forwarded-For`, in order (none without the header). */
+export function forwardedHops (req) {
+  const header = req.headers['x-forwarded-for']
+  return (Array.isArray(header) ? header.join(',') : header ?? '').split(',').map(item => item.trim()).filter(Boolean)
 }
 
 /**
@@ -300,7 +305,10 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
       log('requests carry X-Forwarded-For but GHOSTLY_RELAY_PROXIES is not set: every client counts as the proxy')
     } else if (proxies && !hinted && forwarded === null) {
       hinted = true
-      log('requests arrive without X-Forwarded-For though GHOSTLY_RELAY_PROXIES is set: each counts as the proxy, so have the proxy write it or leave the setting out')
+      // The header there with fewer entries than the setting: it names more proxies than write it.
+      const entries = forwardedHops(req).length
+      if (entries) log(`requests carry ${entries} X-Forwarded-For ${entries === 1 ? 'entry' : 'entries'} though GHOSTLY_RELAY_PROXIES is ${proxies}: each counts as the proxy, so set it to the number of proxies that write the header`)
+      else log('requests arrive without X-Forwarded-For though GHOSTLY_RELAY_PROXIES is set: each counts as the proxy, so have the proxy write it or leave the setting out')
     }
     if (!addresses.take(ip, monotonicNow())) {
       // A proxy that writes no header and was not named: everyone behind it shares this one address's rate. Said once.
