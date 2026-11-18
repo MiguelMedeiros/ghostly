@@ -68,6 +68,9 @@
     "expiring": "{{time}}に確認済み、{{expires}}に期限切れ",
     "failed": "{{time}}に確認失敗",
     "listLabel": "確認済みの ID: {{list}}",
+    "mark": "{{provider}}: {{subject}} · {{state}}",
+    "markList": "{{list}}、{{next}}",
+    "markNamed": "{{provider}}: {{subject}}（{{name}}）· {{state}}",
     "revoked": "所有者により取り消し ({{time}}に確認)",
     "stackLabel": "{{name}} との ID: {{list}}",
     "verified": "{{time}}に確認済み"
