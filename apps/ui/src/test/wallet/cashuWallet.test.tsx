@@ -93,6 +93,19 @@ describe("the Cashu card keeps the keyboard's place while it works", () => {
     expect(calls).toBe(1);
   });
 
+  it("Send's Pay <amount> wraps its label, like Create invoice, instead of leaving the card (a long amount, 200% text size), busy too", async () => {
+    const paid = later<never>();
+    const { user } = show({ quoteInvoice: () => paid.promise }, "mainnet");
+    await user.click(screen.getByRole("tab", { name: "Send" }));
+    await user.click(screen.getByTestId("wallet-pay-input"));
+    await user.paste(liveMainnetInvoice(21_000_000_000));
+    const pay = screen.getByRole("button", { name: /^Pay 21,000,000,000 sats$/ });
+    expect(pay.className).toContain("!whitespace-normal");
+    await user.click(pay);
+    expect(pay).toHaveAttribute("aria-busy", "true");
+    expect(pay.className).toContain("!whitespace-normal");
+  });
+
   it("Add: busy where it was pressed, then the emptied address field takes the keys", async () => {
     const added = later<void>();
     const { user } = show({ addMint: () => added.promise });
