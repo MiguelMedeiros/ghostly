@@ -1005,6 +1005,19 @@ describe("MessageBubble: deleting", () => {
     expect(screen.getByTestId("message-delete-menu")).toHaveTextContent("Deleted only here.");
   });
 
+  it.each([
+    ["message-delete", /^Deleted only here\./],
+    ["message-delete-everyone", /^Deleted from your contact's devices too\./],
+  ])("%s's confirmation says what it does to a screen reader: the hint describes the group and its Delete", async (item, hint) => {
+    const { user } = bubble({ sender: "me", text: "x" }, { onDelete: vi.fn(), onDeleteForEveryone: vi.fn() });
+    await user.click(screen.getByTestId("message-options"));
+    await user.click(screen.getByTestId(item));
+    // The focus is on Cancel, inside the group: the group's description is what is said with it.
+    expect(within(screen.getByTestId("message-delete-menu")).getByRole("button", { name: "Cancel" })).toHaveFocus();
+    expect(screen.getByTestId("message-delete-menu")).toHaveAccessibleDescription(hint);
+    expect(screen.getByTestId("message-delete-confirm")).toHaveAccessibleDescription(hint);
+  });
+
   it("Delete for everyone in a group says it goes from the members' devices, not a contact's", async () => {
     const { user } = bubble({ sender: "me", text: "wrong group" }, { linkId: "group:g1", onDeleteForEveryone: vi.fn() });
     await user.click(screen.getByTestId("message-options"));

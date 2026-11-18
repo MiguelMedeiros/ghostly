@@ -1,5 +1,5 @@
 import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
-import React, { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import React, { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { sameValue } from "../lib/sameValue";
 import { clockTime } from "../lib/time";
 import { useI18n } from "../contexts/I18nContext";
@@ -735,6 +735,9 @@ function MessageMenu({ onDelete, onDeleteForEveryone, group, onDetails, onReply,
   const deleteHint = confirm === "everyone" ? t(group ? "chat.deleteForEveryoneGroupHint" : "chat.deleteForEveryoneHint") : transfer?.state !== "transferring" ? t("chat.deleteMessageHint")
     : t(download?.sender === "me" ? "chat.deleteSendingFileHint" : "chat.deleteArrivingFileHint");
   const confirmed = confirm === "everyone" ? onDeleteForEveryone : onDelete;
+  // The hint describes the confirmation and its Delete: the focus lands on Cancel, and a screen reader said only the
+  // group's name and the button, never what the delete does to the other side.
+  const hintId = useId();
   const trash = <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /></svg>;
 
   return (
@@ -799,9 +802,9 @@ function MessageMenu({ onDelete, onDeleteForEveryone, group, onDetails, onReply,
         </MenuItem>}
       </Menu>
       {confirmed && (
-        <Menu open={!!confirm} onClose={() => setConfirm(null)} anchorRef={ref} testId="message-delete-menu" align={side} prefer="up" portal within={MESSAGE_LIST} focusFirst label={t(confirm === "everyone" ? "chat.deleteForEveryone" : "chat.deleteMessage")}>
+        <Menu open={!!confirm} onClose={() => setConfirm(null)} anchorRef={ref} testId="message-delete-menu" align={side} prefer="up" portal within={MESSAGE_LIST} focusFirst label={t(confirm === "everyone" ? "chat.deleteForEveryone" : "chat.deleteMessage")} describedBy={hintId}>
           <div className="px-3 py-2 md:w-[210px]">
-            <p className="m-0 mb-2 whitespace-normal text-[11px] leading-snug text-text-muted">{deleteHint}</p>
+            <p id={hintId} className="m-0 mb-2 whitespace-normal text-[11px] leading-snug text-text-muted">{deleteHint}</p>
             <div className="flex items-center justify-end gap-2">
               {/* Rows of the menu: Cancel takes the focus as it opens (Enter at once never deletes), the arrow keys move. */}
               <button
@@ -816,6 +819,7 @@ function MessageMenu({ onDelete, onDeleteForEveryone, group, onDetails, onReply,
                 type="button"
                 data-menu-item
                 data-testid="message-delete-confirm"
+                aria-describedby={hintId}
                 onClick={() => {
                   setConfirm(null);
                   playCue("deleted", { chat });
