@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { useBackCloses, useTabTrap } from "../hooks/useDismiss";
 import { initial } from "../lib/initial";
@@ -68,6 +68,21 @@ export function IncomingCallNotification({
     box.current?.focus({ preventScroll: true });
     return () => { if (before?.isConnected && (!document.activeElement || document.activeElement === document.body)) before.focus({ preventScroll: true }); };
   }, []);
+  // A newer offer of the contact's can take the ringing call's place as the other kind (useWebRTC): the card stays and
+  // its kind changes. That change is said once, politely; one of the same kind says nothing. Accept video goes with a
+  // video call: had it the focus, the focus goes to Accept audio, never to the page under the card (Enter would do
+  // nothing). The focus is never moved onto Accept video: an Enter meant for audio must not turn the camera on.
+  const [kind, setKind] = useState({ video: hasVideo, changed: false });
+  if (kind.video !== hasVideo) setKind({ video: hasVideo, changed: true });
+  const acceptAudio = useRef<HTMLButtonElement>(null);
+  const focusWasInside = useRef(false);
+  focusWasInside.current = !!box.current?.contains(document.activeElement);
+  const shownVideo = useRef(hasVideo);
+  useLayoutEffect(() => {
+    if (shownVideo.current === hasVideo) return;
+    shownVideo.current = hasVideo;
+    if (focusWasInside.current && !box.current?.contains(document.activeElement)) (acceptAudio.current ?? box.current)?.focus({ preventScroll: true });
+  }, [hasVideo]);
   return (
     // A plain dimmed overlay: a backdrop blur is drawn again with every frame anything under it moves.
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 max-md:bg-chat-bg animate-fade-in">
@@ -115,7 +130,7 @@ export function IncomingCallNotification({
             <button onClick={onReject} className={DECLINE} title={t("calls.decline")} aria-label={t("calls.decline")}>
               <DeclineIcon />
             </button>
-            <button onClick={onAcceptAudio} className={ACCEPT} title={t("calls.acceptAudio")} aria-label={t("calls.acceptAudio")}>
+            <button ref={acceptAudio} onClick={onAcceptAudio} className={ACCEPT} title={t("calls.acceptAudio")} aria-label={t("calls.acceptAudio")}>
               <PhoneIcon />
             </button>
             {hasVideo && (
@@ -125,6 +140,11 @@ export function IncomingCallNotification({
             )}
           </div>
         )}
+        {/* In the card from the start, empty until a newer offer changes the call's kind: a region added with its text
+            is not read by every screen reader. */}
+        <p role="status" className="sr-only" data-testid="incoming-call-kind-said">
+          {kind.changed ? t(kind.video ? "calls.nowVideo" : "calls.nowAudio") : ""}
+        </p>
       </div>
     </div>
   );
