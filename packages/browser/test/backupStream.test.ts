@@ -195,6 +195,21 @@ describe("a backup written a piece at a time (envelope version 2)", () => {
     await expect(writer.json(text)).rejects.toThrow("A record of this profile is too large for a backup");
   }, 120_000);
 
+  it("a short piece of JSON is written plain, a long one compressed, and both read back", async () => {
+    const short = JSON.stringify({ t: "file", id: "f-1", name: "note.txt", size: 20_480 });
+    const long = JSON.stringify({ t: "head", ids: Array.from({ length: 200 }, (_, i) => `contact-${i}`) });
+    for (const passphrase of [PASS, null]) {
+      const bundle = await make(passphrase, async (writer) => { await writer.json(short); await writer.json(long); });
+      const [first, second] = frames(bundle);
+      // Gzip makes a record of a few dozen bytes larger, and costs a compression to write and another to read.
+      expect(first.kind, "the short one").toBe(2);
+      expect(first.length).toBe(short.length + (passphrase ? 16 : 0));
+      expect(second.kind, "the long one").toBe(1);
+      expect(second.length).toBeLessThan(long.length);
+      expect((await readAll(bundle, passphrase ?? undefined)).map((r) => r.json)).toEqual([short, long]);
+    }
+  });
+
   it("reads a large bundle in ranges: the source is never asked for all of it", async () => {
     const bundle = await make(PASS, async (writer) => { await writer.json("{}"); await writer.bytes(pattern(9 * MIB)); });
     const asks: number[] = [];

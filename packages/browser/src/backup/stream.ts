@@ -23,6 +23,11 @@ const MAX_FRAME_BYTES = 64 * 1024 * 1024;
 /** One piece of JSON, decompressed: past it the backup is refused, not read. */
 const MAX_JSON_BYTES = 256 * 1024 * 1024;
 const MAX_HEADER_BYTES = 4096;
+/**
+ * JSON shorter than this is written plain: gzip makes a record of a file (a few dozen bytes) larger, and costs a
+ * compression per file to write and a decompression per file to restore. Every version 2 reader takes both kinds.
+ */
+const COMPRESS_FROM = 1024;
 const ITERATIONS = 600_000;
 const TAG_BYTES = 16;
 
@@ -164,11 +169,11 @@ export class BackupWriter {
     this.written += out.length;
   }
 
-  /** One piece of JSON, compressed where the platform can. */
+  /** One piece of JSON, compressed where the platform can and it is long enough to gain from it. */
   async json(text: string): Promise<void> {
     const plain = new TextEncoder().encode(text);
     if (plain.length > MAX_JSON_BYTES) throw new Error("A record of this profile is too large for a backup");
-    if (canCompress()) await this.put(KIND.gzipJson, await through(plain, new CompressionStream("gzip")));
+    if (canCompress() && plain.length >= COMPRESS_FROM) await this.put(KIND.gzipJson, await through(plain, new CompressionStream("gzip")));
     else await this.put(KIND.json, plain);
   }
 
