@@ -1192,22 +1192,32 @@ describe("messages kept in rows.db", () => {
     const store = await openPersistentIndexedDb(dir);
     opened.push(store);
     const d = await db(store.factory);
+    // The schema's fold done first: it takes the trees' layers to SQLite too.
+    await applied();
     const apply = vi.spyOn(TreeFile.prototype, "apply");
+    // The batch's 250 ms held while the 20 finish, by the batch and not by the clock: a slow runner (Linux ARM64, under
+    // the whole suite) took longer than that over them, and split them in two.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
       for (let i = 0; i < 20; i++) await tx(d, ["messages"], (s) => { s.messages.put(message(i)); });
       // Read before SQLite has them: from the layers.
       expect(await all(store.factory)).toHaveLength(20);
+      expect(apply).not.toHaveBeenCalled();
+      expect(await entryCount(dir)).toBe(0);
       // Killed now: the journal has them all, and the next start puts them in rows.db.
       const crashed = copyOf(dir);
+      vi.advanceTimersByTime(250);
+      // The 20 in one SQLite transaction.
+      expect(apply).toHaveBeenCalledOnce();
+      expect(await entryCount(dir)).toBe(20);
+      expect(await entryCount(dir, "byLink")).toBe(20);
+      vi.useRealTimers();
+      // Opened after: its probe's schema change folds the first store's journal too (the classes are shared).
       const second = await openPersistentIndexedDb(crashed);
       opened.push(second);
       expect(await all(second.factory)).toHaveLength(20);
       expect(await entryCount(crashed)).toBe(20);
-      await vi.waitFor(async () => expect(await entryCount(dir)).toBe(20), { timeout: 2_000, interval: 20 });
-      expect(await entryCount(dir, "byLink")).toBe(20);
-      // The second open's own start is one more.
-      expect(apply.mock.calls.length).toBeLessThanOrEqual(3);
-    } finally { apply.mockRestore(); }
+    } finally { vi.useRealTimers(); apply.mockRestore(); }
   });
 
   it("after a crash, replays what SQLite did not take, and skips what it did", async () => {
