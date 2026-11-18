@@ -145,6 +145,17 @@ export function forwardedHops (req) {
 }
 
 /**
+ * The line for a request with `entries` X-Forwarded-For entries, fewer than GHOSTLY_RELAY_PROXIES (`proxies`) or than
+ * any request before: the setting names more proxies than write the header. Until then a client writing the header
+ * itself could choose the address it counted as; from then on the relay reads only as deep as `entries`.
+ */
+export function fewerHops (entries, proxies) {
+  const before = 'until now a client writing the header itself could choose the address it counts as'
+  if (!entries) return `requests arrive without X-Forwarded-For though GHOSTLY_RELAY_PROXIES is set: ${before}; from now on the header is ignored and each counts as the proxy, so have the proxy write it or leave the setting out`
+  return `requests carry ${entries} X-Forwarded-For ${entries === 1 ? 'entry' : 'entries'} though GHOSTLY_RELAY_PROXIES is ${proxies}: ${before}; from now on each counts by entry ${entries} from the end, so set it to the number of proxies that write the header`
+}
+
+/**
  * What a limit counts: an IPv4 address as it is (an IPv4-mapped IPv6 one too), an IPv6 address by its /64, the block
  * one subscriber usually holds whole. A port some proxies write with it (`203.0.113.7:51234`, `[2001:db8::1]:51234`)
  * and IPv6 brackets are dropped first: each connection has a new port, so keyed with it the limit never applies.
@@ -256,9 +267,12 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
   let forwarding = 0
   const pruning = setInterval(() => { prune(monotonicNow()); flush() }, 60_000)
   pruning.unref?.()
-  // Once per start: a proxy in front the relay was not told about, or one it was told about that does not write the
-  // header, makes every client count as that proxy.
+  // Once per start: a proxy in front the relay was not told about makes every client count as that proxy.
   let hinted = false
+  // The fewest `X-Forwarded-For` entries a request has come with, from `proxies` down: each proxy in front adds one and
+  // a client can only add more, so no more proxies than that write the header. Read deeper, the counted entry would be
+  // one the client wrote (a new address per request if it likes), so the relay reads no deeper than that from then on.
+  let trusted = proxies
   // Compared as a browser writes them: `https://app.example/` in the settings still lets https://app.example in.
   const allowed = new Set(origins.map(origin => originOf(origin) ?? origin))
 
@@ -288,18 +302,14 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
     // A refusal of kind `origin`, its first line in a minute naming the origin so a misspelt GHOSTLY_RELAY_ORIGINS shows.
     if (refused) return refuse('origin', 403, { error: 'Origin not allowed' }, originShown(origin))
 
-    const forwarded = forwardedAddress(req, proxies)
-    const ip = rateKey(forwarded ?? req.socket.remoteAddress ?? '')
     if (!proxies && !hinted && req.headers['x-forwarded-for'] !== undefined) {
       hinted = true
       log('requests carry X-Forwarded-For but GHOSTLY_RELAY_PROXIES is not set: every client counts as the proxy')
-    } else if (proxies && !hinted && forwarded === null) {
-      hinted = true
-      // The header there with fewer entries than the setting: it names more proxies than write it.
+    } else if (proxies) {
       const entries = forwardedHops(req).length
-      if (entries) log(`requests carry ${entries} X-Forwarded-For ${entries === 1 ? 'entry' : 'entries'} though GHOSTLY_RELAY_PROXIES is ${proxies}: each counts as the proxy, so set it to the number of proxies that write the header`)
-      else log('requests arrive without X-Forwarded-For though GHOSTLY_RELAY_PROXIES is set: each counts as the proxy, so have the proxy write it or leave the setting out')
+      if (entries < trusted) { trusted = entries; log(fewerHops(entries, proxies)) }
     }
+    const ip = rateKey(forwardedAddress(req, trusted) ?? req.socket.remoteAddress ?? '')
     if (!addresses.take(ip, monotonicNow())) return refuse('rate', 429, { error: 'Too many' })
 
     if (Number(req.headers['content-length']) > requestBytes) return refuse('size', 413, { error: 'Too large' })
