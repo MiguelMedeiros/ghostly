@@ -185,7 +185,12 @@ export class FileDesk {
       records.push(file.wire3);
       if (file.wire3.direction === "in") chat.local.set(file.wire3.id, file.id);
       if (!transferEnded(file.wire3)) this.restored.add(file.id);
-      else if (file.wire3.state !== "done" || !unsettled.has(file.id)) this.ended.add(file.id);
+      else if (file.wire3.state !== "done" || !unsettled.has(file.id)) {
+        this.ended.add(file.id);
+        // A sent one that ended cancelled or declined before this run (so the session's walk skips it): its staged copy
+        // goes now, one an older version kept or whose drop a quit cut off.
+        if (file.wire3.direction === "out" && (file.wire3.state === "cancelled" || file.wire3.state === "declined") && file.bytes) this.dropStaged(chat, file.id);
+      }
       // Finished: no transfer (a file with none reads as finished; its record says done). A view for each would go into
       // every state the engine builds, so each state would cost more with every file the chat ever had.
       if (file.wire3.state === "done") continue;

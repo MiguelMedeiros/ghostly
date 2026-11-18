@@ -48,3 +48,27 @@ it("a sent file's staged copy goes once its transfer is cancelled or declined, a
   }
   expect(await bytes.size(failed), "a failed one is sent again from its copy").toBe(SIZE);
 });
+
+/**
+ * One that ended so before this run (its copy kept by an older version, or its drop cut off by a quit) is reported
+ * ended at start, so the walk of its session opening never reaches it: its copy goes at start. A failed one keeps its.
+ */
+it("a sent file cancelled or declined before this run loses its staged copy once the chat is restored, its record kept", async () => {
+  const desk = new FileDesk({ send: () => false, receivedBytes: () => 0, wireIds: () => new Set(), deleted: () => false, storeMessage: async () => {}, transfers: new Map(), changed: () => {} });
+  const inner = desk as unknown as { chat(linkId: string): { saving: Promise<unknown> } };
+  const ids = { cancelled: await staged("w1"), declined: await staged("w2"), failed: await staged("w3") };
+  await fileStore.patch(ids.cancelled, { wire3: record("w1", "cancelled", "Cancelled by your contact") });
+  await fileStore.patch(ids.declined, { wire3: record("w2", "declined", "Declined by your contact") });
+  await fileStore.patch(ids.failed, { wire3: record("w3", "failed", "The connection dropped") });
+
+  desk.restore("link1", await fileStore.listForLink("link1"));
+  desk.session("link1", true);
+  await inner.chat("link1").saving;
+
+  const bytes = await fileBytes();
+  for (const id of [ids.cancelled, ids.declined]) {
+    expect(await bytes.size(id), `${id}: never sent again, its copy goes`).toBeNull();
+    expect(await fileStore.get(id), `${id}: its record stays, for its bubble`).toMatchObject({ direction: "out", wire3: { state: expect.stringMatching(/cancelled|declined/) } });
+  }
+  expect(await bytes.size(ids.failed), "a failed one is sent again from its copy").toBe(SIZE);
+});
