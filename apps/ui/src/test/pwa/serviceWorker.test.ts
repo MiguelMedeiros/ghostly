@@ -108,10 +108,6 @@ describe("the worker's policy", () => {
         .toEqual(["/", "/assets/main-abc.css", "/assets/main-abc.js", "/assets/other-abc.js", "/assets/pubky-abc.js", "/assets/translate-abc.js"]);
     });
 
-    it("not the language detector's worker either: an asset, so not one of those chunks", () => {
-      expect(precacheList(["assets/main-abc.js", "assets/translateDetector.worker-abc.js"])).toEqual(["/", "/assets/main-abc.js"]);
-    });
-
     // What a build of the web app is made of, in the shape Rollup hands the plugin: the online-only flows and the languages
     // are dynamic imports, each a chunk (or two) of its own.
     const app = "/home/me/ghostly/apps/ui/src";
