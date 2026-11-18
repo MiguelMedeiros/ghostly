@@ -4,5 +4,6 @@
   "copyFailedShare": "Não foi possível copiar. Selecione o link abaixo ou compartilhe.",
   "qrTitle": "QR code do convite",
   "shareFailed": "Não foi possível compartilhar. Copie o convite.",
+  "shareFailedLink": "Não foi possível compartilhar. Copie o link.",
   "title": "Convide seu contato"
 }
