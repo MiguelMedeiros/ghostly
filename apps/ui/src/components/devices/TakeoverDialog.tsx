@@ -95,8 +95,10 @@ export function TakeoverDialog({ device, password: asks, restored, ownSet, onClo
           </label>
         )}
         {busy && <p role="status" data-testid="takeover-checking" className="text-text-secondary">{t("devices.takeover.checking")}</p>}
-        {/* A wait is said as news, not as an alert. */}
-        {error && <div id={`${id}-error`} role={error.tone === "wait" ? "status" : undefined}><Notice problem={error} testId="takeover-error" className="" /></div>}
+        {/* A wait is said as news, not as an alert, from a line there from the start: one that comes with its text is
+            often not read. Empty, its margins collapse into the gap there already is. */}
+        <div role="status">{error?.tone === "wait" && <Notice problem={error} testId="takeover-error" className="" />}</div>
+        {error && error.tone !== "wait" && <div id={`${id}-error`}><Notice problem={error} testId="takeover-error" className="" /></div>}
         {/* Why Take over is still off while the rest is filled in: the question above, said under the fields and on the button. */}
         {lost === null && <p id={`${id}-lost-first`} data-testid="takeover-lost-first" className="text-xs text-text-muted">{t("devices.takeover.lostFirst")}</p>}
         {/* `aria-disabled`, not `disabled`, while it runs: a disabled button drops the keyboard focus to the page. */}

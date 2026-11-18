@@ -152,12 +152,18 @@ export const ONE_SHOT_RECEIPT_MS = 2_000;
 /**
  * Waits until the contact confirmed my reaction or pin in a 1:1 chat (WISP 401): until `pending` no longer finds it in
  * what the contact has not confirmed (`chatUnconfirmed`). It goes on the live session, a reaction also on the DHT
- * envelopes; one not confirmed in time is kept and said again.
+ * envelopes; one not confirmed in time is kept and said again. A timeout's `details` carry what was asked
+ * (`asked`: the `messageId`, a reaction's `emoji`), as an edit's and a removal's do: a bot that retries has them there. `waitsLive`,
+ * read at the timeout: why it does not go by itself (a pin in a chat on the DHT only), said in place of "it still goes"
+ * and in `details.note`.
  */
-export async function waitForConfirmed(ctx: ApiContext, chat: string, what: "reaction" | "pin", pending: (left: { reactions: number[]; pin: number | null }) => boolean, ms: number): Promise<void> {
+export async function waitForConfirmed(ctx: ApiContext, chat: string, what: "reaction" | "pin", pending: (left: { reactions: number[]; pin: number | null }) => boolean, ms: number, asked: Record<string, unknown> = {}, waitsLive?: () => string | undefined): Promise<void> {
   const until = performance.now() + ms;
   while (pending(node(ctx).chatUnconfirmed({ linkId: chat }))) {
-    if (performance.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: the contact has not confirmed the ${what} yet. It is kept here and ${goesOn(ctx, chat)}`, known(ctx, { chat }));
+    if (performance.now() >= until || stopped(ctx)) {
+      const note = waitsLive?.();
+      throw new CliError("timeout", `${ended(ctx, ms)}: the contact has not confirmed the ${what} yet. It is kept here${note ? `. ${note}` : ` and ${goesOn(ctx, chat)}`}`, known(ctx, { chat, ...asked, ...(note && { note }) }));
+    }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
 }

@@ -7,8 +7,11 @@ import { afterEach, describe, expect, it } from "vitest";
 const CHECK = join(import.meta.dirname, "../check-web-first-load.mjs");
 const dirs: string[] = [];
 
-/** The chunks today's build keeps for later, each a file of its own: the online-only ones, a group call, OpenPGP. */
-const LATER = ["pubky-a1.js", "keet-identity-key-b2.js", "usdt-c3.js", "arkade-d4.js", "groupCallLivekit-e5.js", "openpgp.min-f6.js"];
+/**
+ * The chunks today's build keeps for later, each a file of its own: the online-only ones, a group call, OpenPGP, the
+ * Lightning and on-chain sources' clients.
+ */
+const LATER = ["pubky-a1.js", "keet-identity-key-b2.js", "esm-a7.js", "usdt-c3.js", "arkade-d4.js", "groupCallLivekit-e5.js", "openpgp.min-f6.js", "lnd-g1.js", "coreLightning-g2.js", "webln-g3.js", "bdk-g4.js", "breez-g5.js"];
 
 interface Page { src: string[]; preload?: string[] }
 
@@ -34,7 +37,7 @@ function dist(app: Page, signIn: Page, { assets = LATER, bytes = {}, text = {} }
     if (text[file] !== undefined) {
       writeFileSync(path, text[file]);
     } else {
-      writeFileSync(path, `import{a as e}from"./main-c.js";export const run=()=>e();`);
+      writeFileSync(path, `import{a as e}from"./vendor-v.js";export const run=()=>e();`);
       truncateSync(path, bytes[file] ?? 1024);
     }
   }
@@ -43,8 +46,8 @@ function dist(app: Page, signIn: Page, { assets = LATER, bytes = {}, text = {} }
 
 const check = (dir: string) => spawnSync(process.execPath, [CHECK, dir], { encoding: "utf8" });
 
-/** Today's first load: the runtime, popup and main, with main at its 4.5 MB. */
-const TODAY = { src: ["rolldown-runtime-a.js", "popup-b.js", "main-c.js"] };
+/** Today's first load: the runtime, popup, vendor and main, with main at its 4.5 MB. */
+const TODAY = { src: ["rolldown-runtime-a.js", "popup-b.js", "vendor-v.js", "main-c.js"] };
 const SIGN_IN = { src: ["oidcCallback-d.js"], preload: ["popup-b.js"] };
 
 afterEach(() => {
@@ -52,7 +55,7 @@ afterEach(() => {
 });
 
 describe("check-web-first-load", () => {
-  it("passes the app in one main file beside the runtime, its later chunks on their own, and a sign-in page sharing only popup", () => {
+  it("passes the app in one main file beside the runtime and vendor, its later chunks on their own, and a sign-in page sharing only popup", () => {
     const result = check(dist(TODAY, SIGN_IN, { bytes: { "main-c.js": 4_499_914 } }));
     expect(result.stderr).toBe("");
     expect(result.status).toBe(0);
@@ -103,10 +106,54 @@ describe("check-web-first-load", () => {
     expect(result.stderr).not.toContain("ceiling");
   });
 
+  it("fails OPAQUE folded into the entry, which a static import of it anywhere on the first load does", () => {
+    // What the build leaves of @serenity-kit/opaque's chunk (named after its esm/index.js) once main takes it in.
+    const stub = `export{N as client,P as ready,F as server}from"./main-c.js";`;
+    const result = check(dist(TODAY, SIGN_IN, { text: { "esm-a7.js": stub }, bytes: { "main-c.js": 4_499_914 + 422_699 } }));
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("esm-a7.js only passes on main's exports: esm was folded into main");
+  });
+
+  it("fails a later chunk of packages alone that imports from main, which every deploy renames", () => {
+    // OpenPGP as the build left it while the preload helper was in main: unchanged code, a new name at each deploy.
+    const openpgp = `import{qu as e}from"./main-c.js";` + "var t=1;".repeat(200);
+    const result = check(dist(TODAY, SIGN_IN, { text: { "openpgp.min-f6.js": openpgp } }));
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("openpgp.min-f6.js imports from main, so every deploy renames it");
+  });
+
+  it("passes a later chunk of the app's own code that imports from main", () => {
+    const usdt = `import{a as e}from"./vendor-v.js";import{R as s}from"./main-c.js";` + "var t=1;".repeat(200);
+    const result = check(dist(TODAY, SIGN_IN, { text: { "usdt-c3.js": usdt } }));
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+  });
+
   it("fails a later chunk with no file of its own", () => {
     const result = check(dist(TODAY, SIGN_IN, { assets: LATER.filter((file) => !file.startsWith("usdt-")) }));
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("No usdt-*.js in assets/: it was folded into another chunk, likely main");
+  });
+
+  it("fails a Lightning source's client imported statically, which folds it into main", () => {
+    const result = check(dist(TODAY, SIGN_IN, { assets: LATER.filter((file) => !file.startsWith("lnd-") && !file.startsWith("bdk-")) }));
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("No lnd-*.js in assets/: it was folded into another chunk, likely main");
+    expect(result.stderr).toContain("No bdk-*.js in assets/");
+  });
+
+  it("fails the regtest fakes in the first load, which a release build leaves out", () => {
+    const main = `var a={id:"fake-lightning",label:"Fake Lightning (test)"},b={id:"fake-onchain",label:"Fake Bitcoin wallet (test)"};`;
+    const result = check(dist(TODAY, SIGN_IN, { text: { "main-c.js": main } }));
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("/assets/main-c.js holds Fake Lightning (test), Fake Bitcoin wallet (test): the regtest fakes ship in the first load");
+  });
+
+  it("passes the fakes' ids alone in the first load: a device handoff names them", () => {
+    const main = `var m=new Set(["nwc","core-lightning","fake-lightning"]),o=new Set(["bdk","fake-onchain"]);`;
+    const result = check(dist(TODAY, SIGN_IN, { text: { "main-c.js": main } }));
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
   });
 
   it("fails a later chunk the first load asks for", () => {
@@ -118,6 +165,6 @@ describe("check-web-first-load", () => {
   it("fails a first load over the byte ceiling, whatever grew it", () => {
     const result = check(dist(TODAY, SIGN_IN, { bytes: { "main-c.js": 9_000_000 } }));
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("index.html's scripts weigh 9,002,048 B, over the 9,000,000 B ceiling");
+    expect(result.stderr).toContain("index.html's scripts weigh 9,003,072 B, over the 9,000,000 B ceiling");
   });
 });

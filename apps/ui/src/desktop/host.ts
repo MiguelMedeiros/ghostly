@@ -34,6 +34,7 @@ import type { NodeOptions } from "@ghostly/browser/engine/node";
 import { createIrohEndpoint, createHyperEndpoint } from "./nativeTransports";
 import { desktopUpdates } from "./updates";
 import { desktopHoldFetch } from "./holdFetch";
+import { desktopIdentityFetch } from "./identityFetch";
 import { desktopLnurlFetch } from "./lnurlFetch";
 import { desktopOidc } from "./oidc";
 import { desktopAtprotoHost } from "./atproto";
@@ -448,6 +449,8 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
     lnurlFetch: desktopLnurlFetch(invoke),
     // Held items are read from the contact's storage on public addresses only, which Rust checks and a WebView cannot.
     holdFetch: desktopHoldFetch(invoke),
+    // A contact's identity proof and public data, the same way: a name the contact points at this network is not reached.
+    identityFetch: desktopIdentityFetch(invoke),
     // A new profile gets its default Mainnet wallets; never under an e2e suite (desktopUnderTest).
     defaultWallets: defaultWalletsAllowed(desktopUnderTest),
     ...apps.node, ...macPeerBudget() };

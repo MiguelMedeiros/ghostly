@@ -90,7 +90,8 @@ export class GroupAutoJoin {
    * every change of the engine's state. One whose accept fails (the contact is not connected yet) is tried again on a
    * later change. Another contact who knows the group's id may have invited first: the engine then keeps the granted
    * one beside it (`others`), and it is the one taken (`switchGroup`, which tells the other contact no), as long as the
-   * group held is only an invitation not answered yet. One beside a group joined or accepted waits for the person.
+   * group held is only an invitation not answered yet. One beside a group joined or accepted, or beside an invitation
+   * that keeps a group this device was in (`kept`: switching would delete its history), waits for the person.
    */
   check(state: EngineState): void {
     if (!this.host.joins || !this.grants.length) return;
@@ -109,7 +110,7 @@ export class GroupAutoJoin {
       const other = group.others?.find((o) => "linkId" in o && granted(o.linkId));
       if (!other || !("linkId" in other)) continue;
       const held = group.invitation;
-      if (group.status === undefined && held && !held.accepted && !held.viaLink) { void this.accept(group.id, other.linkId, true); continue; }
+      if (group.status === undefined && held && !held.accepted && !held.viaLink && !held.kept) { void this.accept(group.id, other.linkId, true); continue; }
       const said = `${group.id}:${other.linkId}`;
       if (this.heldSaid.has(said)) continue;
       this.heldSaid.add(said);

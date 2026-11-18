@@ -5,9 +5,12 @@ import type { EngineState, NetworkWalletsView, PaymentView, WalletInstanceView, 
 import { bool, chatOf, inviteTaken, node, num, oneOf, ownChatOf, sentAt, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { paymentNetwork } from "@ghostly/browser/engine/paymentAdapters/walletInstances";
 import { CASHU_MINT_SOURCE } from "@ghostly/browser/engine/paymentAdapters/providers/cashuMint";
+import { normalizeMintUrl } from "@ghostly/browser/engine/wallet";
 import { CliError, type ErrorCode } from "./errors";
 import { ADDRESS_TYPES, CHAT_METHODS, PAY_METHODS, WALLET_TYPES } from "./words";
 import { findSecret, secretWords } from "./secretGuard";
+import { shellWord } from "./shellWord";
+import { isLocalHost } from "../../../apps/ui/src/lib/localHost";
 
 /**
  * Wallets and payments (WISP 1100, phase 2): the app's wallet deck and a chat's payment sheet, as methods. Test
@@ -206,6 +209,52 @@ function memoOf(params: Params, verb: string, field: "memo" | "comment" = "memo"
   return memo || undefined;
 }
 
+/**
+ * What `pay` reads of its own words, the target's shape among them: checked again before a one-shot opens the profile
+ * (`refuseBeforeStart`), where a target that is no invoice, address or LNURL started every saved chat to be refused.
+ */
+export function payShape(params: Params): { comment?: string; text: string; card?: string } {
+  // A Lightning address's comment reaches its owner as a memo reaches a contact (agents#1624).
+  const comment = memoOf(params, "pay", "comment");
+  const text = str(params, "target", true).trim();
+  const card = cardParam(params);
+  // The chat the invoice was found in: on Testnet its contact is told it was paid, as a chat card's Pay tells it. A test
+  // mint says every invoice is paid, so one from `wallet receive` is credited only on its payer's word.
+  if (params.chat !== undefined && !isInvoice(text)) throw new CliError("usage", "--chat names the chat an invoice came from: an address's or LNURL's invoice is its server's");
+  if (!isInvoice(text) && !isLnurl(text)) throw new CliError("bad_request", "Not a Lightning invoice, Lightning address or LNURL");
+  return { comment, text, card };
+}
+
+/** The token `wallet redeem` takes, refused as the engine refuses one Cashu's library cannot read (`refuseBeforeStart`). */
+export async function tokenShape(params: Params): Promise<string> {
+  const token = str(params, "token", true).trim();
+  const { getTokenMetadata } = await import("@cashu/cashu-ts");
+  try { getTokenMetadata(token); } catch { throw new CliError("bad_request", "That is not a valid ecash token"); }
+  return token;
+}
+
+/** The mint URL `wallet add-mint` takes, refused in the engine's words when it is no URL or not https (`refuseBeforeStart`). */
+export function mintUrlShape(params: Params): string {
+  const url = str(params, "url", true);
+  try { normalizeMintUrl(url); } catch (error) { throw badMintUrl(error) ? new CliError("bad_request", (error as Error).message) : error; }
+  return url;
+}
+
+/**
+ * What `pay` says with `paid: false`: the payment is not known paid yet. The mint (or the card's source) holds it
+ * pending, or its answer was lost; the engine keeps asking and never pays it twice. Before, the answer said `paid:
+ * false` and nothing else, and no read showed the sats the Cashu wallet set aside for it. Said in the
+ * words of the app's Cashu card ("set aside", `wallet.cashu.setAsideInfo`).
+ */
+function notPaidYet(ctx: ApiContext, n: WalletNetwork, source: string, amount: number, feeReserve: number): string {
+  const running = ctx.mode === "one-shot" ? " while this profile runs (`ghostly daemon --detach`)" : "";
+  if (source !== CASHU_MINT_SOURCE) {
+    return `Not paid yet: your Lightning source has not confirmed this payment (it is pending, or its answer was lost). It is asked again${running} and never paid twice: \`ghostly wallet list\` shows the card's balance once it settles.`;
+  }
+  const sats = `${amount + feeReserve} ${n === "testnet" ? "test sats" : "sats"}`;
+  return `Not paid yet: the mint has not settled this payment (it is pending, or its answer was lost). ${sats} are set aside for it, out of the balance: they leave with the payment, or come back to the balance if the mint says it failed. It settles by itself: the wallet keeps asking the mint${running} and never pays it twice. \`ghostly wallet history\` lists it once paid, and \`ghostly wallet list\` shows the balance.`;
+}
+
 function badMintUrl(error: unknown): boolean {
   const code = error instanceof Error ? (error as { engineCode?: unknown }).engineCode : undefined;
   return code === "invalidMintUrl" || code === "mintNotHttps";
@@ -260,6 +309,34 @@ function walletRefusal(error: unknown): unknown {
   if (error.name === "SwapUnsettledError" || (error as { unsettled?: unknown }).unsettled === true) return new CliError("unavailable", error.message);
   const code = WALLET_REFUSALS.find(([pattern]) => pattern.test(error.message))?.[1];
   return code ? new CliError(code, error.message) : error;
+}
+
+/**
+ * `wallet redeem` of ecash from a mint that is not one of the wallet's: the engine names the mint's host only and no
+ * way on. Its words, then the command that adds the whole mint URL (the token's), for one who trusts that mint: a mint
+ * holds the sats, so it is offered, never done. Shell-quoted as any hint's word; a URL no quoting survives is not printed.
+ */
+function mintNotAdded(error: unknown): CliError | undefined {
+  if (!(error instanceof Error) || !/^Ecash from \S+ is not accepted$/.test(error.message)) return undefined;
+  const mint = (error as { mint?: unknown }).mint;
+  if (typeof mint !== "string") return undefined;
+  return new CliError("engine", `${error.message}: its mint is not one of yours (if you trust it to hold your sats: ghostly wallet add-mint ${shellWord(mint, "<the token's mint URL>")})`);
+}
+
+/**
+ * The mints `mintNotAdded` offers no `add-mint` for. A token is what a contact sends, and the way out reads as the
+ * app's advice: never a command `wallet add-mint` refuses (plain http off this machine), nor one that makes a server
+ * on this machine or the local network a mint the wallet then talks to. One who runs such a mint types its URL.
+ */
+function mintNotOffered(error: unknown): CliError | undefined {
+  const mint = error instanceof Error && /^Ecash from \S+ is not accepted$/.test(error.message) ? (error as { mint?: unknown }).mint : undefined;
+  if (typeof mint !== "string") return undefined;
+  const words = (error as Error).message;
+  try { normalizeMintUrl(mint); } catch (refusal) {
+    return new CliError("engine", `${words}: its mint is not one of yours, and not one a wallet can add (${(refusal as Error).message})`);
+  }
+  if (!isLocalHost(new URL(mint).hostname)) return undefined;
+  return new CliError("engine", `${words}: its mint is not one of yours, and it is on this machine or a local network (add a mint there only if you run it yourself)`);
 }
 
 const WALLETS: Record<string, Method> = {
@@ -354,11 +431,11 @@ const WALLETS: Record<string, Method> = {
   },
 
   async "wallet.redeem"(ctx, params) {
-    return node(ctx).walletReceiveToken({ token: str(params, "token", true).trim() });
+    return node(ctx).walletReceiveToken({ token: await tokenShape(params) }).catch((error: unknown) => { throw mintNotOffered(error) ?? mintNotAdded(error) ?? error; });
   },
 
   async "wallet.mint.add"(ctx, params) {
-    return node(ctx).walletAddMint({ url: str(params, "url", true), ...(bool(params, "primary") ? { primary: true } : {}) }).catch((error: unknown) => {
+    return node(ctx).walletAddMint({ url: mintUrlShape(params), ...(bool(params, "primary") ? { primary: true } : {}) }).catch((error: unknown) => {
       throw badMintUrl(error) ? new CliError("bad_request", (error as Error).message) : error;
     });
   },
@@ -377,25 +454,17 @@ const WALLETS: Record<string, Method> = {
 
   /** An invoice, a Lightning address or an LNURL, from the network's Lightning (a card of it, or its default). */
   async "pay"(ctx, params) {
-    // A Lightning address's comment reaches its owner as a memo reaches a contact (agents#1624).
-    const comment = memoOf(params, "pay", "comment");
-    const text = str(params, "target", true).trim();
-    const card = cardParam(params);
+    const { comment, text, card } = payShape(params);
     let invoice = text.replace(/^lightning:/i, "");
-    let n: WalletNetwork;
     let note: string | undefined;
-    // The chat the invoice was found in: on Testnet its contact is told it was paid, as a chat card's Pay tells it. A test
-    // mint says every invoice is paid, so one from `wallet receive` is credited only on its payer's word.
-    if (params.chat !== undefined && !isInvoice(text)) throw new CliError("usage", "--chat names the chat an invoice came from: an address's or LNURL's invoice is its server's");
     // Its contact is told it was paid: a contact's own name or a prefix of its id never names the chat.
     const chat = params.chat === undefined ? undefined : ownChatOf(ctx, params);
     if (chat) inviteTaken(chat);
-    if (isInvoice(text)) {
-      // Which wallet pays is named, never guessed from the invoice: test mints issue `lnbc` invoices too, and a
-      // guess must never be what makes real money move. Testnet unless `network` says mainnet.
-      n = network(params);
-    } else if (isLnurl(text)) {
-      n = network(params);
+    // Which wallet pays is named, never guessed from the invoice: test mints issue `lnbc` invoices too, and a guess
+    // must never be what makes real money move. Testnet unless `network` says mainnet.
+    const n = network(params);
+    if (!isInvoice(text)) {
+      // A Lightning address or an LNURL (`payShape`).
       const amount = num(params, "amount", 0, { min: 1 });
       if (!amount) throw new CliError("bad_request", "amount is required to pay a Lightning address or LNURL");
       // Asked before the address's server hears of the payment (and its comment).
@@ -404,7 +473,7 @@ const WALLETS: Record<string, Method> = {
       if (amount < view.minSat || amount > view.maxSat) throw new CliError("refused", `${view.domain} takes from ${view.minSat} to ${view.maxSat} sats`);
       const got = await node(ctx).lnurlInvoice({ id: view.id, amount, ...(comment ? { comment } : {}), network: n });
       invoice = got.invoice; note = got.note;
-    } else throw new CliError("bad_request", "Not a Lightning invoice, Lightning address or LNURL");
+    }
     if (n === "mainnet" && !bool(params, "confirmReal")) throw new CliError("confirm", "This pays real money (Mainnet): pass --confirm-real to confirm this payment");
     await federationsOpen(ctx);
     const quote =await node(ctx).walletQuoteInvoice({ invoice, network: n, ...(card ? { card } : {}) });
@@ -414,7 +483,8 @@ const WALLETS: Record<string, Method> = {
     const maxFee = params.maxFee === undefined ? null : num(params, "maxFee", 0);
     if (maxFee !== null && quote.feeReserve > maxFee) throw new CliError("refused", `The fee may reach ${quote.feeReserve} sats, more than the ${maxFee} allowed`);
     const paid = await node(ctx).walletPayQuote({ quote: quote.quote, mint: quote.mint, ...(note ? { note } : {}), ...real(params), ...(chat ? { linkId: chat.id, invoice } : {}) });
-    return { network: n, amount: quote.amount, feeReserve: quote.feeReserve, source: (quote as { source?: string }).source ?? quote.mint, paid: paid.paid };
+    const source = (quote as { source?: string }).source ?? quote.mint;
+    return { network: n, amount: quote.amount, feeReserve: quote.feeReserve, source, paid: paid.paid, ...(!paid.paid && { note: notPaidYet(ctx, n, source, quote.amount, quote.feeReserve) }) };
   },
 
   /** Ecash to a contact in a chat (the payment sheet's Pay). */

@@ -14,6 +14,8 @@ type Snapshot = {
   index?: string;
   sig?: string;
   bundles: Record<string, string>;
+  /** A bundle URL whose bytes the build found at another URL of `bundles` already, and that URL; an older snapshot has none. */
+  sameAs?: Record<string, string>;
   /** Each publisher's `ghostly-revoke.json` the build read, by its URL; a snapshot from before it read them has none. */
   revocations?: Record<string, string>;
   error?: string;
@@ -43,11 +45,13 @@ export function storeView(): StoreView {
     return memo.view;
   }
   if (memo?.hour === hour) return memo.view;
+  const bundles: Record<string, Uint8Array> = Object.fromEntries(Object.entries(snap.bundles).map(([u, b]) => [u, bytes(b)]));
+  for (const [url, first] of Object.entries(snap.sameAs ?? {})) if (bundles[first]) bundles[url] = bundles[first];
   const view = readStore(
     {
       index: bytes(snap.index),
       sig: bytes(snap.sig),
-      bundles: Object.fromEntries(Object.entries(snap.bundles).map(([u, b]) => [u, bytes(b)])),
+      bundles,
       revocations: Object.fromEntries(Object.entries(snap.revocations ?? {}).map(([u, b]) => [u, bytes(b)])),
     },
     now,

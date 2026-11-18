@@ -4,8 +4,9 @@ import { reactionEmoji } from "@ghostly/core";
 // protocol (~100 ms to load), which a command a daemon answers never needs.
 import { CRON_LINE, ITEM_STATES, PR_CHECKS, PR_STATES, ROUTINE_STATES, RUN_RESULTS, STATUS_CARD_LIMITS, TASK_STATUSES, cardLine, cardUrl, statusCardBytes } from "@ghostly/core/statusCards";
 import { decimalNumber, type OptionSpec, type Parsed } from "../args";
-import { CliError, localFileError } from "../errors";
+import { CliError, localFileError, shownValue } from "../errors";
 import { userPath } from "../profiles";
+import { typingStatus } from "../typing";
 
 /**
  * The commands that are one API method each: how the command line becomes the method's parameters. Commands with
@@ -113,12 +114,13 @@ export function refs(values: unknown, flag: string, what: string): void {
 
 /**
  * A whole number of sats from the command line (`<sats>`), refused in a number flag's words: `<sats> takes a whole
- * number from 1 up, not -5`, a number as typed, other words quoted. Before: "Not an amount in sats: \"-5\"".
+ * number from 1 up, not -5`, a number as typed, other words quoted, or described when long or secret-looking (a Cashu
+ * token pasted after `wallet receive`). Before: "Not an amount in sats: \"-5\"".
  */
 export function sats(value: string | undefined): number {
   const n = decimalNumber(value ?? "");
   if (!Number.isSafeInteger(n) || n <= 0) {
-    const shown = Number.isNaN(n) ? JSON.stringify(value) : value;
+    const shown = Number.isNaN(n) ? shownValue(value) : value;
     throw new CliError("usage", `<sats> takes a whole number from 1 up, not ${shown}`);
   }
   return n;
@@ -166,9 +168,25 @@ export const typingKind: OptionSpec = { type: "string", choices: ["typing", "rec
 export function typingFor(options: Parsed["options"]): number | undefined {
   const seconds = options.for;
   if (seconds === undefined) return undefined;
-  if (typeof seconds !== "number" || !(seconds >= 1 && seconds <= 600)) throw new CliError("usage", `--for takes a number of seconds from 1 to 600, not ${JSON.stringify(seconds)}`);
+  if (typeof seconds !== "number" || !(seconds >= 1 && seconds <= 600)) throw new CliError("usage", `--for takes a number of seconds from 1 to 600, not ${shownValue(seconds)}`);
   if (options.stop === true) throw new CliError("usage", "--for keeps it on: not with --stop");
   return seconds;
+}
+
+/**
+ * `--kind` and `--status` of the typing commands, checked before the profile opens as `status set` checks its text: a
+ * usage error (exit 2) that names the option, and a status too long gives its count. Before, the API answered after the
+ * profile opened (`bad_request`, exit 1) in its socket words ("status: at most 40 characters"). A blank `--status` is
+ * no status, as `--status ""` already was.
+ */
+export function typingWords(options: Parsed["options"]): { kind?: string; status?: string } {
+  const status = typeof options.status === "string" && options.status.trim() ? options.status : undefined;
+  if (options.stop === true) {
+    const given = options.kind !== undefined ? "--kind" : status !== undefined ? "--status" : undefined;
+    if (given) throw new CliError("usage", `${given} goes with a start, not with --stop`);
+  }
+  typingStatus(status, "--status", "usage");
+  return { kind: options.kind as string | undefined, status };
 }
 
 /**
@@ -180,7 +198,7 @@ export function typingFor(options: Parsed["options"]): number | undefined {
 export function reaction(options: Parsed["options"], emoji: string | undefined): string | undefined {
   if (options.remove === true) return emoji;
   if (!emoji) throw new CliError("usage", "Give one emoji, or --remove to take yours back");
-  if (!reactionEmoji(emoji)) throw new CliError("usage", `<emoji> takes one emoji, not ${JSON.stringify(emoji)}`);
+  if (!reactionEmoji(emoji)) throw new CliError("usage", `<emoji> takes one emoji, not ${shownValue(emoji)}`);
   return emoji;
 }
 
@@ -199,7 +217,7 @@ export function inRange(options: Parsed["options"], flag: string, what: string, 
   const value = options[flag];
   if (value === undefined) return undefined;
   if (typeof value !== "number" || !(value >= min && value <= max) || (whole && !Number.isInteger(value)))
-    throw new CliError("usage", `--${flag} takes ${what} from ${min} to ${max}, not ${JSON.stringify(value)}`);
+    throw new CliError("usage", `--${flag} takes ${what} from ${min} to ${max}, not ${shownValue(value)}`);
   return value;
 }
 
@@ -211,7 +229,7 @@ export const pageLimit = (options: Parsed["options"]) => inRange(options, "limit
 /** `--since` of `events` and `listen`: a seq, a whole number from 0 (a negative one replayed a made-up gap first). */
 export function since(options: Parsed["options"]): number | undefined {
   const value = options.since;
-  if (value !== undefined && !(Number.isSafeInteger(value) && (value as number) >= 0)) throw new CliError("usage", `--since takes a seq from 0 up, not ${JSON.stringify(value)}`);
+  if (value !== undefined && !(Number.isSafeInteger(value) && (value as number) >= 0)) throw new CliError("usage", `--since takes a seq from 0 up, not ${shownValue(value)}`);
   return value as number | undefined;
 }
 
@@ -269,7 +287,7 @@ export function cardLinks(values: unknown): { url: string; label?: string }[] | 
   return (values as string[]).map((value) => {
     const eq = value.indexOf("=");
     const link = eq > 0 && !value.slice(0, eq).includes(":") ? { label: value.slice(0, eq), url: value.slice(eq + 1) } : { url: value };
-    if (!cardUrl(link.url)) throw new CliError("usage", `--link takes an https link of at most ${STATUS_CARD_LIMITS.url} characters, or label=link, not ${JSON.stringify(value)}`);
+    if (!cardUrl(link.url)) throw new CliError("usage", `--link takes an https link of at most ${STATUS_CARD_LIMITS.url} characters, or label=link, not ${shownValue(value)}`);
     cardText("--link's label", link.label, STATUS_CARD_LIMITS.linkLabel, value);
     return link;
   });
@@ -285,14 +303,14 @@ export const listed = (words: readonly string[]) => `${words.slice(0, -1).join("
 function cardText(flag: string, value: unknown, max: number, shown = value): void {
   if (value === undefined) return;
   const line = cardLine(String(value), Infinity);
-  if (!line) throw new CliError("usage", `${flag} takes text, not ${JSON.stringify(shown)}`);
+  if (!line) throw new CliError("usage", `${flag} takes text, not ${shownValue(shown)}`);
   const length = [...line].length;
   if (length > max) throw new CliError("usage", `${flag} takes at most ${max} characters, not ${length}`);
 }
 
 /** `--status`, `--state`, `--pr-state`, `--pr-checks`: one of their words, or a usage error that lists them. */
 function oneWord(options: Parsed["options"], flag: string, words: readonly string[]): void {
-  if (options[flag] !== undefined && !words.includes(options[flag] as string)) throw new CliError("usage", `--${flag} takes ${listed(words)}, not ${JSON.stringify(options[flag])}`);
+  if (options[flag] !== undefined && !words.includes(options[flag] as string)) throw new CliError("usage", `--${flag} takes ${listed(words)}, not ${shownValue(options[flag])}`);
 }
 
 /** A flag given more times than the card holds: a usage error that says how many it takes. */
@@ -314,7 +332,7 @@ export function itemOf(value: string): { state: string; text: string } {
     return { state: "pending", text: value };
   }
   if (!(ITEM_STATES as readonly string[]).includes(word))
-    throw new CliError("usage", `--item takes state:text, and ${JSON.stringify(word)} is not a state: use ${listed(ITEM_STATES)} (pending:<text> keeps a colon in the text), not ${JSON.stringify(value)}`);
+    throw new CliError("usage", `--item takes state:text, and ${shownValue(word)} is not a state: use ${listed(ITEM_STATES)} (pending:<text> keeps a colon in the text), not ${shownValue(value)}`);
   const text = value.slice(colon + 1).trim();
   cardText("--item's text", text, STATUS_CARD_LIMITS.line, value);
   return { state: word, text };
@@ -343,7 +361,7 @@ function cardId(options: Parsed["options"]): void {
 /** `--progress`, `--left`: a percent, or a usage error that names the flag. */
 function percent(options: Parsed["options"], flag: string): void {
   const value = options[flag];
-  if (value !== undefined && !(typeof value === "number" && value >= 0 && value <= 100)) throw new CliError("usage", `--${flag} takes a percent from 0 to 100, not ${JSON.stringify(value)}`);
+  if (value !== undefined && !(typeof value === "number" && value >= 0 && value <= 100)) throw new CliError("usage", `--${flag} takes a percent from 0 to 100, not ${shownValue(value)}`);
 }
 
 /**
@@ -379,12 +397,12 @@ export function taskFields(options: Parsed["options"]): Record<string, unknown> 
   set("branch", options.branch);
   if (options.steps !== undefined) {
     const match = /^(\d+)\s*\/\s*(\d+)$/.exec(String(options.steps));
-    if (!match) throw new CliError("usage", `--steps takes done/total, like 2/5, not ${JSON.stringify(options.steps)}`);
+    if (!match) throw new CliError("usage", `--steps takes done/total, like 2/5, not ${shownValue(options.steps)}`);
     fields.done = Number(match[1]); fields.total = Number(match[2]);
-    if (Number(match[2]) > STATUS_CARD_LIMITS.count) throw new CliError("usage", `--steps takes done/total of at most ${STATUS_CARD_LIMITS.count} steps, like 2/5, not ${JSON.stringify(options.steps)}`);
-    if (Number(match[2]) < 1 || Number(match[1]) > Number(match[2])) throw new CliError("usage", `--steps takes done/total with done at most total, like 2/5, not ${JSON.stringify(options.steps)}`);
+    if (Number(match[2]) > STATUS_CARD_LIMITS.count) throw new CliError("usage", `--steps takes done/total of at most ${STATUS_CARD_LIMITS.count} steps, like 2/5, not ${shownValue(options.steps)}`);
+    if (Number(match[2]) < 1 || Number(match[1]) > Number(match[2])) throw new CliError("usage", `--steps takes done/total with done at most total, like 2/5, not ${shownValue(options.steps)}`);
   }
-  if (options["pr-url"] !== undefined && !cardUrl(options["pr-url"])) throw new CliError("usage", `--pr-url takes an https link of at most ${STATUS_CARD_LIMITS.url} characters, not ${JSON.stringify(options["pr-url"])}`);
+  if (options["pr-url"] !== undefined && !cardUrl(options["pr-url"])) throw new CliError("usage", `--pr-url takes an https link of at most ${STATUS_CARD_LIMITS.url} characters, not ${shownValue(options["pr-url"])}`);
   for (const flag of ["pr-number", "additions", "deletions", "files"]) cardCount(options, flag, flag === "pr-number" ? 1 : 0);
   const pr: Record<string, unknown> = {};
   for (const [flag, key] of PR_FLAGS) if (options[flag] !== undefined) pr[key] = options[flag];
@@ -486,17 +504,17 @@ export function cardTime(value: unknown, flag: string, forms = `a time in millis
   const text = String(value).trim();
   const day = ISO_DAY.exec(text);
   const ms = /^\d+$/.test(text) ? milliseconds(text, flag) : Date.parse(day ? `${text}${day[1] ? "" : "-01"}T00:00` : text);
-  if (!Number.isSafeInteger(ms) || ms <= 0) throw new CliError("usage", `--${flag} takes ${forms}, not ${JSON.stringify(value)}`);
+  if (!Number.isSafeInteger(ms) || ms <= 0) throw new CliError("usage", `--${flag} takes ${forms}, not ${shownValue(value)}`);
   const written = writtenDay(text);
   if (written) {
     const [year, month, date] = written, days = new Date(Date.UTC(year, month, 0)).getUTCDate();
-    if (date > days) throw new CliError("usage", `--${flag} takes a day the month has (${year}-${String(month).padStart(2, "0")} has ${days}), not ${JSON.stringify(value)}`);
+    if (date > days) throw new CliError("usage", `--${flag} takes a day the month has (${year}-${String(month).padStart(2, "0")} has ${days}), not ${shownValue(value)}`);
   }
   const last = new Date(Date.now() + STATUS_CARD_LIMITS.nextRunMs);
   if (ms > last.getTime()) {
     const two = (n: number) => String(n).padStart(2, "0");
     const shown = `${last.getFullYear()}-${two(last.getMonth() + 1)}-${two(last.getDate())} ${two(last.getHours())}:${two(last.getMinutes())}`;
-    throw new CliError("usage", `--${flag} takes a time within a year from now (until ${shown}), not ${JSON.stringify(value)}`);
+    throw new CliError("usage", `--${flag} takes a time within a year from now (until ${shown}), not ${shownValue(value)}`);
   }
   return ms;
 }
@@ -506,7 +524,7 @@ export function runOf(value: unknown): { result: string; summary?: string } | un
   if (value === undefined) return undefined;
   const text = String(value), colon = text.indexOf(":");
   const result = colon === -1 ? text : text.slice(0, colon), summary = colon === -1 ? "" : text.slice(colon + 1).trim();
-  if (!(RUN_RESULTS as readonly string[]).includes(result)) throw new CliError("usage", `--run takes ok, failed or skipped, and :a summary after it if you like, not ${JSON.stringify(value)}`);
+  if (!(RUN_RESULTS as readonly string[]).includes(result)) throw new CliError("usage", `--run takes ok, failed or skipped, and :a summary after it if you like, not ${shownValue(value)}`);
   if (summary) cardText("--run's summary", summary, STATUS_CARD_LIMITS.line);
   return { result, ...(summary && { summary }) };
 }
@@ -519,7 +537,7 @@ export function routineFields(options: Parsed["options"]): Record<string, unknow
   if (options.cron !== undefined && !CRON_LINE.test(String(options.cron).trim())) {
     const length = [...String(options.cron).trim()].length;
     throw new CliError("usage", length > STATUS_CARD_LIMITS.cron ? `--cron takes at most ${STATUS_CARD_LIMITS.cron} characters, not ${length}`
-      : `--cron takes a cron line of 0-9 A-Z a-z * , / ? # - and spaces, not ${JSON.stringify(options.cron)}`);
+      : `--cron takes a cron line of 0-9 A-Z a-z * , / ? # - and spaces, not ${shownValue(options.cron)}`);
   }
   oneWord(options, "state", ROUTINE_STATES);
   cardId(options);
@@ -569,7 +587,7 @@ export const taskOptions: Record<string, OptionSpec> = {
  */
 export function usageWindowOf(value: string): { window: string; left: number; resetsAt?: number } {
   const match = /^([^=]+)=(\d+(?:\.\d+)?)(?:@(.+))?$/.exec(value.trim());
-  if (!match) throw new CliError("usage", `--also takes window=percent or window=percent@time, like week=80@2026-10-10T00:00:00Z, not ${JSON.stringify(value)}`);
+  if (!match) throw new CliError("usage", `--also takes window=percent or window=percent@time, like week=80@2026-10-10T00:00:00Z, not ${shownValue(value)}`);
   cardText("--also's window", match[1], STATUS_CARD_LIMITS.usageWindow, value);
   if (Number(match[2]) > 100) throw new CliError("usage", `--also takes a percent from 0 to 100, not ${match[2]}`);
   const resetsAt = cardTime(match[3], "also");

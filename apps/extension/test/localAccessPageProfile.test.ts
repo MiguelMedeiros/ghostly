@@ -34,6 +34,23 @@ const openPage = () =>
     return (await import("../src/host.ts")).extensionHost;
   });
 
+/** Work's peer database with an app at ORIGIN, as the engine keeps it: Chrome's pattern stays while it is there. */
+async function workShares(): Promise<void> {
+  const db = await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open(`ghostly_${WORK}`);
+    request.onupgradeneeded = () => request.result.createObjectStore("services", { keyPath: "id" });
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction("services", "readwrite");
+    tx.objectStore("services").put({ id: "app", name: "app", target: ORIGIN, enabled: true, createdAt: 0 });
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+  db.close();
+}
+
 const allowed = (ns: string) => world.within("page", async () => (await import("../src/localAllowList.ts")).localOriginAllowed(ns, ORIGIN));
 
 describe("local addresses from a page of the profile before a switch", () => {
@@ -61,12 +78,15 @@ describe("local addresses from a page of the profile before a switch", () => {
       await list.allowLocalOrigin("", ORIGIN);
       await list.allowLocalOrigin(WORK, ORIGIN);
     });
+    await workShares();
     const host = await openPage();
     useProfile(world, WORK, [WORK]);
     await world.within("page", () => host.forgetLocalAccess!(ORIGIN));
-    // The lists themselves: Chrome's pattern goes back too, no app of either profile being at that host.
+    // The lists themselves: Chrome's pattern stays, Work's app being at that host.
     const listed = (ns: string) => world.within("page", async () => (await import("../src/localAllowList.ts")).allowedOrigins(ns));
     expect(await listed(""), "the page's profile's app went").toEqual([]);
     expect(await listed(WORK), "Work's list is Work's").toEqual([ORIGIN]);
+    expect(world.hostAccess.has("http://localhost/*")).toBe(true);
+    await new Promise<void>((resolve) => { const r = indexedDB.deleteDatabase(`ghostly_${WORK}`); r.onsuccess = r.onerror = r.onblocked = () => resolve(); });
   });
 });

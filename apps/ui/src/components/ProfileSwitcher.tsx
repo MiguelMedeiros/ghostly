@@ -81,7 +81,7 @@ export function ProfileSwitcherMenu({ variant, glances, onClose }: {
       </div>
 
       <button type="button" role="menuitem" data-testid="profile-switcher-current"
-        aria-label={`${current.name}, ${nickname}, ${t("profileSwitcher.current")}. ${t("profileSwitcher.open")}`}
+        aria-label={t("common.sentences", { first: listText([current.name, nickname, t("profileSwitcher.current")], t), second: t("profileSwitcher.open") })}
         onClick={() => go("/profile")} className={`${itemClass} min-h-14 py-2`}>
         <span className="shrink-0 rounded-full" style={{ boxShadow: `0 0 0 2px var(--theme-panel-header), 0 0 0 4px ${color}` }}>
           <ProfileBadge entry={current} size={38} avatar={myAvatar} />

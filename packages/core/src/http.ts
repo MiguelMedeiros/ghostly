@@ -290,7 +290,7 @@ export function viewerServicePolicy(relayOnly: boolean): string {
  */
 export const VIEWER_PERMISSIONS_POLICY = [
   "camera", "microphone", "display-capture", "geolocation", "midi", "usb", "serial", "hid", "clipboard-read",
-  "idle-detection", "local-fonts", "window-management", "storage-access", "publickey-credentials-create",
+  "clipboard-write", "idle-detection", "local-fonts", "window-management", "storage-access", "publickey-credentials-create",
 ].map((feature) => `${feature}=()`).join(", ");
 
 /** A contact's headers that would set the page's features: the viewer's own policy takes their place. */
