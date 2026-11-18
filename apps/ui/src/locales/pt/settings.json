@@ -12,6 +12,7 @@
   "clearAllData": "Limpar todos os dados",
   "clearAllDataConfirm": "Isto apaga de vez:",
   "clearAllDataDescription": "Conversas, identidades e ajustes deste perfil. As carteiras ficam.",
+  "clearAllDataFailed": "Não foi possível limpar tudo. Alguns dados podem continuar neste dispositivo: tente de novo.",
   "clearAllDataInfo": "Antes, o Ghostly retira o que puder: itens guardados para contatos, seu DID, suas provas e o despertar. Provas que você publicou em outros sites continuam lá.",
   "clearAllDataItems": {
     "appsData": "Apps instalados e seus dados",
@@ -24,6 +25,7 @@
     "storage": "Ajustes do S3 e despertar com o app fechado"
   },
   "clearAllDataKeeps": "Ficam: suas carteiras, seus backups e os outros perfis.",
+  "clearingData": "Limpando…",
   "colorScheme": "Modo",
   "colorSchemes": {
     "dark": "Escuro",

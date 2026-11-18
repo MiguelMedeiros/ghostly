@@ -11,6 +11,7 @@ import { FieldGrid, InputGroup } from "../layout";
 import { NostrPublishDialog } from "./NostrPublishDialog";
 import { problemLine } from "../../lib/problemText";
 import { exactText } from "../../lib/exactText";
+import { listText } from "../../lib/listText";
 
 
 /**
@@ -100,11 +101,11 @@ function OwnKey({ view, publish, onPublish, onError }: { view: NostrOwnView; pub
             return count === 1 ? t("identities.nostr.youFollowOne") : t("identities.nostr.youFollow", { count });
           })()}</p>}
           {view.mute && <p className="text-xs text-text-muted" data-testid="nostr-own-mute">{(() => {
-            const m = view.mute, list = [
+            const m = view.mute, list = listText([
               m.pubkeys === 1 ? t("identities.nostr.keyOne") : t("identities.nostr.keys", { count: m.pubkeys }),
               m.words === 1 ? t("identities.nostr.wordOne") : t("identities.nostr.words", { count: m.words }),
               m.notes === 1 ? t("identities.nostr.noteOne") : t("identities.nostr.notes", { count: m.notes }),
-            ].join(", ");
+            ], t);
             return m.hasPrivate ? t("identities.nostr.mutePrivate", { list }) : t("identities.nostr.mute", { list });
           })()}</p>}
         </div>

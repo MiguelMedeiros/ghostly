@@ -721,9 +721,14 @@ export function forwardedAddress(request, { proxies = 0, cloudflare = false } = 
     if (connecting) return connecting
   }
   if (!proxies) return null
-  const header = request.headers['x-forwarded-for']
-  const hops = (Array.isArray(header) ? header.join(',') : header ?? '').split(',').map(item => item.trim()).filter(Boolean)
+  const hops = forwardedHops(request)
   return hops.length >= proxies ? hops[hops.length - proxies] : null
+}
+
+/** The entries of a request's `X-Forwarded-For`, in order (none without the header). */
+export function forwardedHops(request) {
+  const header = request.headers['x-forwarded-for']
+  return (Array.isArray(header) ? header.join(',') : header ?? '').split(',').map(item => item.trim()).filter(Boolean)
 }
 
 /**
@@ -864,6 +869,8 @@ export async function startRelay(options = {}) {
   }
   const unset = (header, setting) => hint(header, `requests carry ${header} but ${setting} is not set: every client counts as the proxy`)
   const missing = (header, setting) => hint(header, `requests arrive without ${header} though ${setting} is set: each counts as the proxy, so have the proxy write it or leave the setting out`)
+  // The header there with fewer entries than GHOSTLY_RELAY_PROXIES: the setting names more proxies than write it.
+  const fewer = entries => hint('X-Forwarded-For', `requests carry ${entries} X-Forwarded-For ${entries === 1 ? 'entry' : 'entries'} though GHOSTLY_RELAY_PROXIES is ${options.proxies}: each counts as the proxy, so set it to the number of proxies that write the header`)
 
   /**
    * On a full relay, what makes room for a client from `address` (null: none is made). A client holding one listen and
@@ -923,7 +930,9 @@ export async function startRelay(options = {}) {
       if (request.headers['cf-connecting-ip'] !== undefined) unset('CF-Connecting-IP', 'GHOSTLY_RELAY_CLOUDFLARE')
       else if (request.headers['x-forwarded-for'] !== undefined) unset('X-Forwarded-For', 'GHOSTLY_RELAY_PROXIES')
     } else if (forwarded === null) {
+      const entries = forwardedHops(request).length
       if (options.cloudflare) missing('CF-Connecting-IP', 'GHOSTLY_RELAY_CLOUDFLARE')
+      else if (entries) fewer(entries)
       else missing('X-Forwarded-For', 'GHOSTLY_RELAY_PROXIES')
     }
     const origin = request.headers.origin
@@ -1059,6 +1068,13 @@ export async function startRelay(options = {}) {
     ws.on('error', () => drop('socket error'))
     const stream = new WsStream(false, ws)
     stream.on('error', () => drop('stream error'))
+    // A client that resets right after its upgrade has a closed socket by the time the stream opens: dht-relay's open
+    // failed then with an error its handshake also rejected with, where nothing catches it (one `unhandled` line per
+    // client). The stream ends without an error instead; the socket's close has let the client go.
+    stream._open = cb => {
+      if (ws.readyState !== ws.OPEN) stream.destroy()
+      cb(null)
+    }
     // dht-relay 0.4.3 hands the WebSocket every chunk a HyperDHT stream brings, however slowly the client reads, and
     // a UDX stream has no receive window to slow its far end: a client that reads slowly or not at all would have the
     // relay hold everything its far peers send. Past `queuedBytes` waiting for it (with what waits for its far peers), it

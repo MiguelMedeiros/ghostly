@@ -1037,8 +1037,8 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     const stay = { number: batch.number, members };
     const names = (list) => list.map((s) => `#${s.number}`).join(" ");
     /** Why the landing stops at the ones that changed or left the line, naming those that were put on hold. */
-    const changedText = (list) => {
-      const holds = list.filter((s) => onHold(byNumber.get(s.number)));
+    const changedText = (list, read = (s) => byNumber.get(s.number)) => {
+      const holds = list.filter((s) => onHold(read(s)));
       return `${names(list)} changed or left the line${holds.length ? ` (${names(holds)} ${holds.length > 1 ? "are" : "is"} on hold, \`${HOLD}\`)` : ""}`;
     };
     say(`BATCH #${batch.number} [${names(state.prs)}] CI ${ci}`);
@@ -1064,10 +1064,19 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     }
     // Among the ones still to land: which changed or left the line, and the first of them. Nothing lands from it on.
     // One turned into a draft counts where each is merged by itself: GitHub merges no draft. One put on hold counts
-    // everywhere: the hold says it must not land (the labels are read again at the start of every run, and a batch
-    // never lands in the run that built it).
+    // everywhere: the hold says it must not land (the labels are read again at the start of every run and right before
+    // each lands, and a batch never lands in the run that built it).
     const changed = state.prs.filter((s, i) => i >= before && (!members[i] || members[i].sha !== s.sha || onHold(members[i]) || (bySquash && members[i].draft)));
     const stop = changed.length ? state.prs.indexOf(changed[0]) : state.prs.length;
+    /**
+     * The same check on a fresh read, right before it lands: a hold put on (or `queue` taken off) while this run reads
+     * the line and lands the ones ahead of it counts too. Returns that read when it changed or left the line, else null.
+     */
+    const leftSince = async (s) => {
+      const read = await gh.pull(s.number);
+      const out = !read.open || read.sha !== s.sha || onHold(read) || !(inLine(read.labels) || also.includes(s.number)) || (bySquash && read.draft);
+      return out ? read : null;
+    };
 
     /**
      * The batch's commit of each pull request, as GitHub lists them: { sha, tree, title, message }; null when GitHub
@@ -1087,6 +1096,16 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
 
     /** The whole batch at once: on dev the rebase merge of the batch (GitHub signs none of its commits), on an epic a fast-forward. */
     const landWhole = async () => {
+      const reads = new Map();
+      for (const s of state.prs) {
+        const read = await leftSince(s);
+        if (read) reads.set(s.number, read);
+      }
+      if (reads.size) {
+        const left = state.prs.filter((s) => reads.has(s.number));
+        await retire(batch, `Merge train: ${changedText(left, (s) => reads.get(s.number))}, so this batch closes; the rest go back to the line.`);
+        return null;
+      }
       // dev: the rebase merge, which its strict ruleset refuses unless the batch is up to date and green. An epic has
       // no ruleset, so it lands by a fast-forward push of the tested commits: the push fails if the epic moved since.
       const r =
@@ -1113,13 +1132,18 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       let wrong = false;
       for (; at < stop; at++) {
         const s = state.prs[at];
+        const left = await leftSince(s);
+        if (left) {
+          why = changedText([s], () => left);
+          break;
+        }
         let r = await w.squash(s.number, s.sha, tested[at].title, tested[at].message);
         if (!r.ok && r.status !== 409 && at === from) {
           // The first one refused: read it again (which also has GitHub work its mergeability out). Turned into a draft,
           // closed or pushed to since the run read it, it left the line: nothing lands, nor by the rebase merge below.
-          const read = await gh.pull(s.number);
-          if (!read.open || read.draft || read.sha !== s.sha || onHold(read)) {
-            why = changedText([s]);
+          const read = await leftSince(s);
+          if (read) {
+            why = changedText([s], () => read);
             break;
           }
         }

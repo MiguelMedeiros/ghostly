@@ -1,4 +1,5 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { MessageBubble } from "../../components/MessageBubble";
@@ -79,7 +80,7 @@ describe("the Forward to… picker", () => {
   function Where() {
     return <p data-testid="where">{useLocation().pathname}</p>;
   }
-  const open = (messages: ChatMessage[], from = "link-bo", language?: "pt" | "ar") => renderApp(<Routes>
+  const open = (messages: ChatMessage[], from = "link-bo", language?: "pt" | "ar" | "ja") => renderApp(<Routes>
     <Route path="/here" element={<ForwardDialog from={from} messages={messages} onClose={() => {}} />} />
     <Route path="*" element={<Where />} />
   </Routes>, { route: "/here", language });
@@ -342,6 +343,24 @@ describe("the Forward to… picker", () => {
     expect(screen.queryByTestId("forward-error")).toBeNull();
   });
 
+  // A refusal's brackets and colon were English ones glued around the translated parts: "Ana (2 件中 1 件送信済み): …".
+  it("says how much a chat got with the language's own brackets and colon, its name still isolated", async () => {
+    const all = [message({ id: "a", timestamp: 1 }), message({ id: "b", timestamp: 2 })];
+    fakeEngine.on("forwardMessages", ({ to, messageIds }: { to: string[]; messageIds: string[] }) => ({ results: to.map(t => {
+      const sent = t === "link-ana" ? ["a"] : t === "link-bo" ? [] : messageIds;
+      return { to: t, messageIds: sent.map(id => `me_${id}`), sent, error: sent.length < messageIds.length ? "You are offline" : null };
+    }) }));
+    const { user } = open(all, "link-1", "ja");
+    const rows = screen.getAllByTestId("forward-target");
+    await user.click(rows[0]!);
+    await user.click(rows[2]!);
+    await user.click(screen.getByTestId("forward-send"));
+    const [ana, bo] = within(screen.getByTestId("forward-error")).getAllByRole("listitem");
+    expect(ana).toHaveTextContent(/^Ana（2 件中 1 件送信済み）：\S/);
+    expect(bo).toHaveTextContent(/^Bo：\S/);
+    expect(ana!.querySelector("bdi")).toHaveTextContent(/^Ana$/);
+  });
+
   // In one Arabic string a Latin name's end punctuation went to the line's side: "Ana!" read "!Ana", and the chosen names
   // ran in English order. Each name is isolated, as in the rows above.
   it("keeps each chat's name in its own direction in an Arabic line", async () => {
@@ -526,6 +545,26 @@ describe("choosing several", () => {
     expect(fakeEngine.callsTo("forwardMessages")).toEqual([{ linkId: "link-bo", messageIds: ["a", "b"], to: ["link-ana", "group:g1"] }]);
     // Sent: the choice is over.
     expect(screen.queryByTestId("select-bar")).toBeNull();
+  });
+
+  it("Forward to… open from a ⋮ closes when the contact deletes its message for everyone, the focus on the next message's ⋮", async () => {
+    let take = (_id: string) => {};
+    function Live() {
+      const [shown, setShown] = useState(messages);
+      take = (id) => setShown((all) => all.filter((m) => m.id !== id));
+      return <div data-message-list><Timeline messages={shown} /></div>;
+    }
+    const { user } = renderApp(<Live />);
+    const options = (text: string) => within(screen.getByText(text).closest<HTMLElement>("[data-message-row]")!).getByTestId("message-options");
+    options("first").focus();
+    await user.keyboard("{Enter}");
+    screen.getByTestId("message-forward").focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("forward-dialog")).toContainElement(document.activeElement as HTMLElement);
+    act(() => take("a"));
+    expect(screen.queryByTestId("forward-dialog")).toBeNull();
+    expect(screen.queryByText("first")).toBeNull();
+    expect(document.activeElement).toBe(screen.getAllByTestId("message-options")[0]);
   });
 
   it("Escape, ✕ or taking the last one off ends it", async () => {

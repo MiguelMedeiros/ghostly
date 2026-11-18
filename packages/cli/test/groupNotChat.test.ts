@@ -40,11 +40,7 @@ const noChat = (ref: string) => ({ code: "not_found", message: `No chat ${JSON.s
 
 describe("a group named where only a 1:1 chat goes", () => {
   it.each([
-    ["chat.connect", {}],
-    ["chat.disconnect", {}],
-    ["chat.transport", { transport: "auto" }],
     ["chat.verify", { code: "123" }],
-    ["chat.wait", { until: "live", timeout: 1 }],
     ["chat.accept", {}],
     ["chat.pay", { sats: 10 }],
     ["chat.request", { sats: 10 }],
@@ -59,6 +55,23 @@ describe("a group named where only a 1:1 chat goes", () => {
   ] as const)("%s says it is a group", async (method, params) => {
     const ctx = fake();
     for (const ref of ["Crew", "crew", "g1crew", "g1c", "group:g1crew"]) await expect(callApi(ctx, method, { chat: ref, ...params })).rejects.toMatchObject(isGroup(ref));
+    await expect(callApi(ctx, method, { chat: "Nobody", ...params })).rejects.toMatchObject(noChat("Nobody"));
+  });
+
+  // They pointed to `ghostly chat list`, which never lists the group, and did not say a group has no link of its own.
+  it.each([
+    ["chat.connect", {}],
+    ["chat.disconnect", { hold: 5 }],
+    ["chat.transport", { transport: "dht" }],
+    ["chat.wait", { until: "live", timeout: 1 }],
+  ] as const)("%s says a group connects through its members, and names group show", async (method, params) => {
+    const ctx = fake();
+    for (const [ref, shown] of [["Crew", "Crew"], ["crew", "crew"], ["g1crew", "g1crew"], ["g1c", "g1c"], ["group:g1crew", "g1crew"]]) {
+      await expect(callApi(ctx, method, { chat: ref, ...params })).rejects.toMatchObject({
+        code: "not_found", details: { group: "g1crew" },
+        message: `${JSON.stringify(ref)} is a group, not a chat: it connects through its members' chats, with no transport of its own (ghostly group show ${shown})`,
+      });
+    }
     await expect(callApi(ctx, method, { chat: "Nobody", ...params })).rejects.toMatchObject(noChat("Nobody"));
   });
 
@@ -119,7 +132,9 @@ describe("group:<ref> where only a 1:1 chat goes, beside a contact that calls it
       node.getState = () => ({ ...state(), links: [alice, { ...bob("Carol"), id: "chat-carol", label }] }) as unknown as EngineState;
       return ctx;
     };
-    await expect(callApi(labelled("group:Crew"), "chat.connect", { chat: "group:Crew" })).rejects.toMatchObject(isGroup("group:Crew"));
+    await expect(callApi(labelled("group:Crew"), "chat.connect", { chat: "group:Crew" })).rejects.toMatchObject({
+      code: "not_found", message: "\"group:Crew\" is a group, not a chat: it connects through its members' chats, with no transport of its own (ghostly group show Crew)", details: { group: "g1crew" },
+    });
     for (const method of ["chat.get", "chat.history"]) {
       await expect(callApi(labelled("group:Crew"), method, { chat: "group:Crew" })).rejects.toMatchObject({ code: "not_found", details: { group: "g1crew" } });
     }

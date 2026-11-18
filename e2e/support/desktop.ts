@@ -323,6 +323,7 @@ async function launchDesktop(application: string, options: DesktopOptions): Prom
       env: desktopTestNetworkEnv({
         GHOSTLY_E2E: "1",
         GHOSTLY_FAKE_MEDIA: "1",
+        ...webkitMediaEnv(),
         GHOSTLY_PROFILE: options.profile ?? process.env.GHOSTLY_PROFILE ?? "e2e",
         ...(options.home ? homeEnv(options.home) : {}),
         ...(bus ? { DBUS_SESSION_BUS_ADDRESS: bus.address } : {}),
@@ -392,6 +393,23 @@ async function expectUnderTest(app: Driver): Promise<void> {
 }
 
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
+
+/**
+ * WebKitGTK's media players without its GL video sink, on Linux, unless the run says otherwise
+ * (`WEBKIT_GST_DISABLE_GL_SINK=0`).
+ *
+ * The GL sink draws through one GStreamer GL context per WebKit web process, made once by wrapping WebKit's own EGL
+ * context (WebCore's PlatformDisplayGStreamer.cpp). On the loop's Xvfb (Mesa, no DRI3) that wrap sometimes fails as the
+ * first player starts ("Failed to fill in GStreamer context: could not retrieve egl config id from egl context:
+ * EGL_NOT_INITIALIZED"), and WebKit keeps the broken context for the life of the process: from then on every <video>
+ * in that window fails (`MediaError` 4, `EGL_BAD_CONTEXT` in GStreamer's output), a call window's picture and a fresh
+ * canvas stream alike, though the frames keep coming. No wait in a test brings that window's pictures back. The
+ * fallback sink hands frames to WebKit's compositor without a GStreamer GL context; Xvfb's GL is software anyway.
+ */
+export function webkitMediaEnv(platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  if (platform !== "linux") return {};
+  return { WEBKIT_GST_DISABLE_GL_SINK: env.WEBKIT_GST_DISABLE_GL_SINK ?? "1" };
+}
 
 /**
  * A D-Bus session bus for one app (a `dbus-daemon` of its own, ended by `stop`), or null where there is none to start

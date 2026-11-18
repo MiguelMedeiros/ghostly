@@ -55,8 +55,10 @@ describe("the admin's menu on a member's tile", () => {
   it("is on each other member's tile, named for them, and never on the admin's own", () => {
     answerModerate(() => ({ ok: true, state: EMPTY }));
     adminView();
-    expect(menuButton(ANA)).toHaveAccessibleName("Moderate Ana");
-    expect(menuButton(BO)).toHaveAccessibleName("Moderate Bo");
+    // The name keeps its own direction in the label and its tooltip ("Bob!" in Arabic keeps its "!").
+    expect(menuButton(ANA)).toHaveAccessibleName("Moderate \u2068Ana\u2069");
+    expect(menuButton(ANA)).toHaveAttribute("title", "Moderate \u2068Ana\u2069");
+    expect(menuButton(BO)).toHaveAccessibleName("Moderate \u2068Bo\u2069");
     expect(within(tileOf(call.local.identity)).queryByTestId("group-call-moderate")).toBeNull();
   });
 
@@ -83,6 +85,21 @@ describe("the admin's menu on a member's tile", () => {
     // The reply is the state after it: Mute mic again.
     await user.click(menuButton(ANA));
     expect(screen.getByTestId("group-call-mute-microphone")).toHaveTextContent("Mute mic");
+  });
+
+  it("keeps the state after the admin's last act when an earlier ask answers after it", async () => {
+    // The read sent on joining answers late, after a mute made meanwhile: its state is from before the mute.
+    let readLate: (result: GroupCallModerationResult) => void = () => {};
+    answerModerate(({ act, target, src }) => act === "state"
+      ? new Promise<GroupCallModerationResult>((resolve) => { readLate = resolve; })
+      : { ok: true, state: { muted: { [target!]: src! }, banned: [] } });
+    const { user } = adminView();
+    await user.click(menuButton(ANA));
+    await user.click(screen.getByTestId("group-call-mute-microphone"));
+    await waitFor(() => expect(acts()).toHaveLength(1));
+    await act(async () => readLate({ ok: true, state: EMPTY }));
+    await user.click(menuButton(ANA));
+    expect(screen.getByTestId("group-call-allow-microphone")).toHaveTextContent("Allow mic");
   });
 
   it("asks before removing from the call, saying behind the ⓘ that the call's key stays; Cancel sends nothing", async () => {

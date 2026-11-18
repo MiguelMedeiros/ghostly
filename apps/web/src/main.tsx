@@ -82,21 +82,24 @@ const missing = await missingEssentials();
 if (missing.length) await cannotRun(missing);
 
 const peerLock = profile ? `ghostly-peer-${profile}` : "ghostly-peer";
-let stopLink = () => {};
+/** What stops handing links on, once this tab holds the lock; it returns the last link no tab answered yet. */
+let stopLink = (): string | null => null;
 await becomeThePeer(peerLock, () => {
   const draw = (state: OtherTabState) => root.render(<OtherTab state={state} t={profileTranslator()} />);
   // Opened for a share while the app runs in another tab: that tab gets it (after a wait, or as this tab goes), and
   // this one says it went only once the worker handed it over. Once the lock is this tab's, it asks for it itself.
   const sharing = openedForShare();
   if (sharing) handShareOver(() => isPeer, draw);
-  // Opened for a link (an invite, a group's, a device code's): that tab opens it, with the same wait. Taken there, it
-  // leaves this address, so this tab opens nothing twice if it takes over later; until then, this tab keeps it. A tab
-  // on standby opens none: it refuses it, and the link leaves this address all the same, kept for no one.
-  const stops: (() => void)[] = [];
+  // Opened for a link (an invite, a group's, a device code's): that tab opens it, with the same wait. It leaves this
+  // address (and so the tab's history) as it arrives, and is kept only here until that tab answers: taken there, this
+  // tab opens nothing twice if it takes over later; unanswered by then, this tab opens it itself. A tab on standby
+  // opens none: it refuses it, kept for no one.
+  const pending = new Map<() => void, string>();
   const handOn = (link: string) => {
-    // Out of the address only while it is still this link's: a later one there waits for its own answer.
-    const leave = () => { if (linkInAddress(window.location.hash) === link) history.replaceState(history.state, "", `${window.location.pathname}${window.location.search}#/`); };
-    stops.push(forwardLink(peerLock, link, () => { leave(); draw("linkTaken"); }, SHARE_FORWARD_AFTER_MS, () => { leave(); draw("plain"); }));
+    history.replaceState(history.state, "", `${window.location.pathname}${window.location.search}#/`);
+    const answered = (state: OtherTabState) => { pending.delete(stop); draw(state); };
+    const stop = forwardLink(peerLock, link, () => answered("linkTaken"), SHARE_FORWARD_AFTER_MS, () => answered("plain"));
+    pending.set(stop, link);
   };
   const link = sharing ? null : linkInAddress(window.location.hash);
   if (link) handOn(link);
@@ -109,7 +112,11 @@ await becomeThePeer(peerLock, () => {
     if (!sharing) draw("link");
   };
   addEventListener("hashchange", arrived);
-  stopLink = () => { removeEventListener("hashchange", arrived); for (const stop of stops) stop(); };
+  stopLink = () => {
+    removeEventListener("hashchange", arrived);
+    for (const stop of pending.keys()) stop();
+    return [...pending.values()].pop() ?? null;
+  };
   draw(sharing ? "sharing" : link ? "link" : "plain");
   // The lock is there but the browser refuses it: the same screen as a browser without it.
 }).catch((error: unknown) => (error instanceof PeerLockUnavailable ? cannotRun(["locks"], error) : Promise.reject(error)));
@@ -117,7 +124,11 @@ await becomeThePeer(peerLock, () => {
 await mayStart(() => untilAskedFor(peerLock));
 
 isPeer = true;
-stopLink();
+// A link no tab answered while this one waited is this tab's to open: back in the address, unless another page is there now.
+const unanswered = stopLink();
+if (unanswered && window.location.hash.replace(/^#\/?/, "") === "") {
+  history.replaceState(history.state, "", `${window.location.pathname}${window.location.search}#${unanswered}`);
+}
 // This tab is the app: a visit, once per tab (its reloads are the same one), for the install hint.
 countInstallVisit();
 // The device state, before anything of the profile starts (WISP 06 § The gate): one small local read. A profile that

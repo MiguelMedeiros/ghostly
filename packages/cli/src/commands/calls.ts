@@ -1,6 +1,6 @@
 import type { Parsed } from "../args";
 import { CALL_RATES, isCallRate } from "../calls/pcm";
-import { CliError } from "../errors";
+import { CliError, shownValue } from "../errors";
 import { type Command, rate, refs } from "./shared";
 
 /**
@@ -9,7 +9,7 @@ import { type Command, rate, refs } from "./shared";
  */
 function rateOf(options: Parsed["options"]): number | undefined {
   const value = options.rate;
-  if (value !== undefined && !isCallRate(value)) throw new CliError("usage", `--rate takes ${CALL_RATES.slice(0, -1).join(", ")} or ${CALL_RATES.at(-1)}, not ${JSON.stringify(value)}`);
+  if (value !== undefined && !isCallRate(value)) throw new CliError("usage", `--rate takes ${CALL_RATES.slice(0, -1).join(", ")} or ${CALL_RATES.at(-1)}, not ${shownValue(value)}`);
   return value;
 }
 
@@ -23,7 +23,7 @@ export const commands: Record<string, Command> = {
     method: "call.auto", usage: "call auto [on|off] [--from <chat>]... [--rate 48000]", summary: "Answer calls by themselves: from anyone, or the chats named (kept in the profile)",
     args: ["mode...?"], options: { from: { type: "list", description: "Only calls from this chat: its id, its contact's key or a label given here with chat rename (again for more)" }, rate: rate },
     params: ({ options }, a) => {
-      if (a.mode !== undefined && a.mode !== "on" && a.mode !== "off") throw new CliError("usage", `call auto takes on or off, not ${JSON.stringify(a.mode)}: ghostly call auto [on|off] [--from <chat>]... [--rate 48000]`);
+      if (a.mode !== undefined && a.mode !== "on" && a.mode !== "off") throw new CliError("usage", `call auto takes on or off, not ${shownValue(a.mode)}: ghostly call auto [on|off] [--from <chat>]... [--rate 48000]`);
       // Without `on` the chats and the rate would be dropped without a word.
       if (a.mode !== "on" && (options.from !== undefined || options.rate !== undefined)) throw new CliError("usage", "--from and --rate go with on: ghostly call auto on --from <chat>");
       refs(options.from, "from", "chat");

@@ -594,9 +594,10 @@ export class GroupSession {
   private adminSeen: string | undefined;
   /**
    * After the admin role moved to me (`metaFollowsChain`): whom from, until when I take their statement, and the last
-   * one of theirs I signed again (what I held then, until one of theirs comes). In memory only.
+   * one of theirs I signed again (what I held then, until one of theirs comes). `vouched`: the latest of theirs another
+   * member's sync said it holds; `held`: the latest of theirs no other member has shown it holds yet. In memory only.
    */
-  private takeover: { from: string; until: number; base: GroupMeta | undefined } | undefined;
+  private takeover: { from: string; until: number; base: GroupMeta | undefined; vouched?: { e: number; r: number }; held?: { from: string; raw: unknown; s: GroupMetaStatement } } | undefined;
   /** While `handle` runs: the frames it took that a hub passes on (`handle`'s result). */
   private passOn: GroupEdgeFrame[] | null = null;
   /** The frames kept to hand on that the app holds with its messages, oldest first; undefined when the state holds them all. */
@@ -2223,6 +2224,7 @@ export class GroupSession {
     if (!answered) this.syncsAnswered.set(from, answered = new RateWindow(GROUP_LIMITS.syncAnswers, GROUP_LIMITS.syncWindowMs, () => this.hooks.clock?.() ?? Date.now()));
     if (!answered.take()) return;
     this.hear(frame);
+    await this.vouch(from, frame.mt);
     if (frame.e > this.epoch) {
       this.syncedEpoch.set(from, frame.e);
       if (!this.awaitsAnswer(from)) this.ask(from);
@@ -2412,7 +2414,11 @@ export class GroupSession {
     if (!secret) { this.waitMeta(from, raw, s); return; }
     const opened = openGroupMeta(frame, epochKeys(secret, this.id, frame.k).message);
     if (!opened) return;
-    if (taking) { await this.signAgainTaken(opened.meta, opened.body); return; }
+    if (taking) {
+      if (this.vouches(from, s)) await this.signAgainTaken(opened.meta, opened.body);
+      else this.holdTaken(from, raw, s);
+      return;
+    }
     const before = this.state.meta;
     this.state.meta = opened.meta;
     this.state.metaPast = keepPastGroupMeta(this.state.metaPast, before, opened.meta);
@@ -2434,6 +2440,35 @@ export class GroupSession {
   private takesOver(s: GroupMetaStatement): boolean {
     const t = this.takeover;
     return !!t && this.isAdmin && s.by === t.from && this.clock() <= t.until && groupMetaNewer(s, t.base);
+  }
+
+  /**
+   * Whether a statement I would take (`takesOver`) was on its way when the role moved, as far as I can tell: a member
+   * other than its signer handed it to me, or said in a sync it holds that one or a later one under the same commit.
+   * The former admin alone could sign new ones after the hand-over, each taken for the whole group.
+   */
+  private vouches(from: string, s: GroupMetaStatement): boolean {
+    const v = this.takeover?.vouched;
+    return from !== s.by || (!!v && v.e === s.e && v.r >= s.r);
+  }
+
+  /** The former admin's statement nobody else has shown it holds: the latest is kept until a sync does (`vouch`). */
+  private holdTaken(from: string, raw: unknown, s: GroupMetaStatement): void {
+    const t = this.takeover!;
+    if (!t.held || groupMetaNewer(s, t.held.s)) t.held = { from, raw, s };
+  }
+
+  /**
+   * A member's sync names the statement it holds: one signed under a commit of the admin before me, by another member
+   * than them, vouches for theirs up to it, and the one held is taken if it now is.
+   */
+  private async vouch(from: string, tag: unknown): Promise<void> {
+    const t = this.takeover, v = parseGroupMetaTag(tag);
+    if (!t || !v || from === t.from || !this.state.chain[v.e] || rosterAdmin(this.state.chain[v.e].m) !== t.from) return;
+    if (t.vouched && !groupMetaNewer(v, t.vouched)) return;
+    t.vouched = v;
+    const held = t.held;
+    if (held && this.vouches(held.from, held.s)) { t.held = undefined; await this.receiveMeta(held.from, held.raw); }
   }
 
   /**

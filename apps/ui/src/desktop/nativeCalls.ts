@@ -419,6 +419,14 @@ export class NativePeerConnection extends EventTarget {
    * Rust is still opening (it sends the old one until the new one plays).
    */
   private sending: MediaStreamTrack | null = null;
+  /**
+   * Microphones picked while Rust starts the call: their `replaceTrack` settles once `catchUp` has switched Rust to
+   * the last one, rejected when Rust could not, as it is once the call is up. Resolved, it would have the call hook
+   * swap in a track naming a device Rust never sent (and stop the one it does).
+   */
+  private picking: { done: Promise<void>; settle: (failure: { error: unknown } | null) => void } | null = null;
+  /** `catchUp` has given Rust the microphone: a microphone picked from now on goes to Rust on its own. */
+  private microphoneUp = false;
   private closed = false;
   private muted = false;
   private offer: string | null = null;
@@ -498,22 +506,43 @@ export class NativePeerConnection extends EventTarget {
   }
 
   /**
-   * Rust started the call with `sent`: a camera turned on or switched, a microphone or a speaker picked while it did
-   * (up to its gathering's few seconds) had no call to go to, and goes now.
+   * Rust started the call with `sent` and sends `microphone` (by name, as it said): a camera turned on or switched, a
+   * microphone or a speaker picked while it did (up to its gathering's few seconds) had no call to go to, and goes now.
    */
-  private async catchUp(sent: Devices): Promise<void> {
+  private async catchUp(sent: Devices, microphone: string | null): Promise<void> {
     this.described = true;
     if (this.closed) return;
     this.wantLevels();
     const now = this.devices();
-    const track = this.audio.sender.track;
-    // Each as its own command would have done it: one that fails leaves the call as Rust started it. A device picked
-    // again during these awaits went to Rust on its own (`described`): the older pick does not follow it there.
+    // Each as its own command would have done it: one that fails leaves the call as Rust started it. A camera or a
+    // speaker picked again during these awaits went to Rust on its own (`described`): the older pick does not follow
+    // it there. A microphone picked meanwhile waits with the others (`picking`) and goes below.
     if (now.camera !== sent.camera) await invoke("native_call_camera", { id: this.id, camera: now.camera }).catch(() => {});
     if (now.speaker !== sent.speaker && this.devices().speaker === now.speaker) await invoke("native_call_speaker", { id: this.id, device: now.speaker }).catch(() => {});
-    if (now.microphone !== sent.microphone && this.audio.sender.track === track) {
-      await invoke<string | null>("native_call_microphone", { id: this.id, device: now.microphone }).then((used) => this.using(track, used), () => {});
+    this.microphoneUp = true;
+    const picked = this.audio.sender.track;
+    if (this.closed || picked === this.sending) return this.picked(null);
+    const wanted = picked ? wantedOf.get(picked) ?? null : null;
+    // Picked again, the one Rust started with: that is what it sends, now in the picked track.
+    if (wanted === sent.microphone) {
+      this.using(picked, microphone);
+      return this.picked(null);
     }
+    try {
+      this.using(picked, await invoke<string | null>("native_call_microphone", { id: this.id, device: wanted }));
+      this.picked(null);
+    } catch (error) {
+      // Rust goes on with the one it started with: so does the call (a later offer asks for it, not the failed one).
+      if (this.audio.sender.track === picked) this.audio.sender.track = this.sending;
+      this.picked({ error });
+    }
+  }
+
+  /** Settles the `replaceTrack` of the microphones picked while Rust started the call: `failure` when Rust could not switch. */
+  private picked(failure: { error: unknown } | null): void {
+    const picking = this.picking;
+    this.picking = null;
+    picking?.settle(failure);
   }
 
   /**
@@ -558,12 +587,13 @@ export class NativePeerConnection extends EventTarget {
     try {
       made = await this.hold(() => invoke<Described>("native_call_offer", { id: this.id, ...sent }));
     } catch (error) {
+      this.startFailed();
       relayFailure(error);
     }
     const { sdp, microphone } = made;
     this.using(track, microphone);
     if (this.muted) await this.mute(true);
-    await this.catchUp(sent);
+    await this.catchUp(sent, microphone);
     return { type: "offer", sdp };
   }
 
@@ -583,12 +613,13 @@ export class NativePeerConnection extends EventTarget {
     try {
       made = await this.hold(() => invoke<Described>("native_call_answer", { id: this.id, offer, ...sent }));
     } catch (error) {
+      this.startFailed();
       relayFailure(error);
     }
     const { sdp, microphone } = made;
     this.using(track, microphone);
     if (this.muted) await this.mute(true);
-    await this.catchUp(sent);
+    await this.catchUp(sent, microphone);
     this.negotiated(offer);
     return { type: "answer", sdp };
   }
@@ -649,9 +680,27 @@ export class NativePeerConnection extends EventTarget {
     callOf.set(track, this);
     this.muted = !track.enabled;
     this.audio.sender.track = track;
-    if (!this.described || this.closed) return;
+    // Before the call starts, its offer or answer takes it.
+    if (this.closed || !this.started) return;
+    if (!this.microphoneUp) {
+      if (!this.picking) {
+        let settle!: (failure: { error: unknown } | null) => void;
+        const done = new Promise<void>((resolve, reject) => {
+          settle = (failure) => (failure ? reject(failure.error) : resolve());
+        });
+        this.picking = { done, settle };
+      }
+      return this.picking.done;
+    }
+    if (!this.described) return;
     const used = await invoke<string | null>("native_call_microphone", { id: this.id, device: wantedOf.get(track) ?? null });
     this.using(track, used);
+  }
+
+  /** Rust could not start the call: there is none to switch a microphone picked meanwhile on, nor one picked later. */
+  private startFailed(): void {
+    this.microphoneUp = true;
+    this.picked(null);
   }
 
   /** Plays the call on the speaker named `device` (null: the default). */
@@ -739,6 +788,8 @@ export class NativePeerConnection extends EventTarget {
     this.connectionState = "closed";
     this.signalingState = "closed";
     this.remote.track.stop();
+    // Hung up while Rust started the call: no switch failed, and the call hook lets go of the tracks it picked.
+    this.picked(null);
     void this.opened.then(() => invoke("native_call_close", { id: this.id })).catch(() => {});
   }
 }

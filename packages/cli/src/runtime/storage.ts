@@ -245,6 +245,8 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   let holdsDelete = false;
   /** The exports under way (a backup's), each holding rows.db as it was when it began (`openTreeReader`). */
   const exporting = new Set<Promise<void>>();
+  /** The scrub's fold asked for that has not begun yet: a scrub asked meanwhile is that one (`compact`). */
+  let nextScrub: Promise<void> | null = null;
   const pending = new WeakMap<unknown[], Op[]>();
 
   const snapshotPath = join(dir, SNAPSHOT);
@@ -749,10 +751,18 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
       // to rows.db with it, half of it (a file's state deleted, its record kept). rows.db names this snapshot with
       // them: a process killed before the rename below comes back to it (at open).
       trees.apply(upTo, name);
-      if (scrub) trees.scrub();
-      trees.sync();
     }
-    renameSync(temporaryPath, snapshotPath);
+    try {
+      if (scrub) trees?.scrub();
+      trees?.sync();
+      renameSync(temporaryPath, snapshotPath);
+    } catch (error) {
+      // The fold did not take the journal's place: the store goes on writing to it. Left on disk, that snapshot is the
+      // one rows.db names, and a process killed later came back to it, the journal dropped: every transaction completed
+      // since the failure lost its writes outside rows.db (a purge's VACUUM with no room for its copy, a rename refused).
+      rmSync(temporaryPath, { force: true });
+      throw error;
+    }
     foldedUpTo = upTo;
     // Trees of stores and indexes gone from the schema: once no snapshot on disk names them, nor the schema now.
     try { if (live) trees!.sweep(new Set([...live, ...liveTrees()])); } catch (error) { process.stderr.write(`ghostly: storage: old trees not removed: ${error instanceof Error ? error.message : String(error)}\n`); }
@@ -808,12 +818,25 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     async compact(options) {
       // After the transactions running now: the fold is whole.
       await settled();
-      // A scrub waits for the exports under way here, out of the queue: the writes meanwhile do not wait with it.
-      while (options?.scrub && exporting.size) await Promise.allSettled(exporting);
-      // The caller reads the snapshot next (a backup): a fold that failed is its failure, not a line on stderr.
-      let thrown: { error: unknown } | null = null;
-      await enqueue(() => writeSnapshot(options?.scrub).catch((error: unknown) => { thrown = { error }; throw error; }));
-      if (thrown) throw (thrown as { error: unknown }).error;
+      const scrub = options?.scrub === true;
+      // A scrub asked while another waits to begin is that one: it captures the store after this caller's writes. Each
+      // `message delete --purge` wrote rows.db again whole, the thread held: ten sent at once held the daemon 15 s at
+      // 100,000 messages, 4.6 s of it in one stretch.
+      if (scrub && nextScrub) return nextScrub;
+      const fold = (async () => {
+        // A scrub waits for the exports under way here, out of the queue: the writes meanwhile do not wait with it.
+        while (scrub && exporting.size) await Promise.allSettled(exporting);
+        // The caller reads the snapshot next (a backup): a fold that failed is its failure, not a line on stderr.
+        let thrown: { error: unknown } | null = null;
+        await enqueue(() => {
+          // Begun: a scrub asked from now on may come after what this one captures.
+          if (scrub) nextScrub = null;
+          return writeSnapshot(scrub).catch((error: unknown) => { thrown = { error }; throw error; });
+        });
+        if (thrown) throw (thrown as { error: unknown }).error;
+      })();
+      if (scrub) nextScrub = fold;
+      return fold;
     },
     async close() {
       // Once: what comes after (a second close) finds the rows closed, and nothing left to write.

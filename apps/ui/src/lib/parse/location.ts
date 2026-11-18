@@ -1,4 +1,4 @@
-import { LINK_MAX_CHARS, linkEnd } from "@ghostly/core";
+import { LINK_MAX_CHARS, LINK_RUN, LINK_STOP_CHARS, linkEnd } from "@ghostly/core";
 
 /**
  * A place in a message: a `geo:` URI (RFC 5870, and Android's `?q=` label) or a Google Maps, Apple Maps or
@@ -93,9 +93,15 @@ export function findLocation(link: string): Place | null {
   return /^geo:/i.test(link) ? fromGeo(link) : fromMapLink(link);
 }
 
+/**
+ * A `geo:` URI or a web link, each up to a space or the punctuation a link stops at (`LINK_RUN`): a place written right
+ * after a link's "。" with no space is read on its own, as the bubble draws it.
+ */
+const PLACE_RUN = new RegExp(String.raw`\bgeo:[^\s<>"'${LINK_STOP_CHARS}]+|${LINK_RUN}`, "gi");
+
 /** The first place a message's text names: a `geo:` URI or a map link, in the order they appear. */
 export function locationIn(text: string): Place | null {
-  for (const match of text.matchAll(/\bgeo:[^\s<>"']+|https?:\/\/\S+/gi)) {
+  for (const match of text.matchAll(PLACE_RUN)) {
     if (match[0].length > LINK_MAX_CHARS) continue;
     // Ends as a link does: sentence punctuation and an unopened bracket stay text; Android's `(Label)` stays in.
     const found = findLocation(linkEnd(match[0]));

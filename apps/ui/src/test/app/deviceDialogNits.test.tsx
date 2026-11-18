@@ -83,6 +83,26 @@ describe("the device dialogs, for a screen reader and a keyboard", () => {
     expect(notice.closest("[role=status]")).not.toBeNull();
   });
 
+  it("Take over's wait is said from a live line there before it, as one that comes with its text is often not read", async () => {
+    const { user, engine } = renderApp(<TakeoverDialog password={false} ownSet onClose={() => {}} />);
+    let answer!: (outcome: { kind: "wait" }) => void;
+    engine.on("deviceTakeover", () => new Promise((resolve) => { answer = resolve; }));
+    const live = () => [...screen.getByTestId("takeover-dialog").querySelectorAll<HTMLElement>("[role=status], [aria-live]")];
+    const before = live();
+    await user.click(screen.getByTestId("takeover-go"));
+    await screen.findByTestId("takeover-checking");
+    answer({ kind: "wait" });
+    const notice = await screen.findByTestId("takeover-error");
+    const saying = live().filter((region) => region.contains(notice));
+    expect(saying).toHaveLength(1);
+    expect(before).toContain(saying[0]);
+    // Asked again and still waiting: the line empties while it checks, and says the wait again after.
+    await user.click(screen.getByTestId("takeover-go"));
+    await waitFor(() => expect(saying[0]).toBeEmptyDOMElement());
+    answer({ kind: "wait" });
+    await waitFor(() => expect(saying[0]).toHaveTextContent("Waiting for the network. Try again in a moment."));
+  });
+
   it("Take over's wrong password points the field at its reason", async () => {
     const { user, engine } = renderApp(<TakeoverDialog device="iPhone" password onClose={() => {}} />);
     engine.on("deviceTakeover", () => { throw new Error("takeover-password: Wrong password."); });

@@ -70,10 +70,13 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
     const entry = await host.entry(ref, options?.runAnyway === true);
     if (locked()) throw new Error(LOCKED);
     // The runner from what the person granted; its server must send that runner's policy. The runner pages are never
-    // cached (sw/policy.ts): offline, or when it could not be asked, it would not load, and the person is told so.
+    // cached (sw/policy.ts): offline, or when it could not be asked, it would not load, and the person is told so. Its
+    // server answering with an error of its own (a 502 while it restarts, a 429) while online is the host's trouble,
+    // said as the host's (`apps.errors.hostProblem`), not as the person being offline.
     const internet = entry.permissions.includes("internet");
     const policy = navigator.onLine === false ? null : await runnerPolicy(runnerFor(host, entry), fetch, internet);
-    if (policy === null) throw new Error("offline: the runner page could not be reached");
+    if (typeof policy === "number" && navigator.onLine !== false) throw new Error(`status: The host answered ${policy}`);
+    if (policy === null || typeof policy === "number") throw new Error("offline: the runner page could not be reached");
     if (!policy) throw new Error("runner: This server does not send the policy apps run under");
     if (locked()) throw new Error(LOCKED);
     gone(ref, entry.digest, options?.runAnyway === true);

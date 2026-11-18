@@ -80,7 +80,7 @@ describe("delete", () => {
     expect(store.compact).toHaveBeenCalledTimes(3);
     expect(store.compact).toHaveBeenCalledWith({ scrub: true });
     // The --everyone that was offered says the same thing in its own words.
-    await expect(callApi(ctx, "chat.delete", { chat: "Crew", message: "k:0:1", everyone: true })).rejects.toMatchObject({ code: "not_found", message: expect.stringMatching(/only your own/) });
+    await expect(callApi(ctx, "chat.delete", { chat: "Crew", message: "k:0:1", everyone: true })).rejects.toMatchObject({ code: "not_found", message: "\"k:0:1\" is another member's message: only its author deletes a group's message, for everyone" });
     expect(node.deleteMessage).not.toHaveBeenCalled();
     expect(node.removeMessage).not.toHaveBeenCalled();
   });
@@ -212,6 +212,19 @@ describe("forward", () => {
     await callApi(ctx, "chat.forward", { chat: "Alice", messages: ["peer_1"], to: ["Bob", "chat-two", "Crew", "group:g1", "Cy", "Di", "Ed"] });
     await expect(callApi(ctx, "chat.forward", { chat: "Alice", messages: ["peer_1"], to: ["Bob", "Crew", "Cy", "Di", "Ed", "Flo", "nobody"] })).rejects.toMatchObject({ code: "bad_request", message: "Forward to at most 5 chats and groups at once" });
     expect(node.getMessage).toHaveBeenCalledOnce();
+    expect(node.forwardMessages).toHaveBeenCalledTimes(2);
+  });
+
+  it("the raw engine call's secret guard reads an id named twice once, and none past 30, which the engine refuses", async () => {
+    const { ctx, node } = fake();
+    await callApi(ctx, "engine.call", { method: "forwardMessages", params: { linkId: "chat-one", messageIds: Array(50_000).fill("peer_1").concat("peer_2"), to: ["chat-two"] } });
+    expect(node.getMessage).toHaveBeenCalledTimes(2);
+    node.getMessage.mockClear();
+    await callApi(ctx, "engine.call", { method: "forwardMessages", params: { linkId: "chat-one", messageIds: Array.from({ length: 31 }, (_, i) => `peer_${i}`), to: ["chat-two"] } });
+    expect(node.getMessage).not.toHaveBeenCalled();
+    // A secret among them is still refused.
+    node.getMessage.mockResolvedValueOnce(row("chat-one", "peer_1", { text: "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" }));
+    await expect(callApi(ctx, "engine.call", { method: "forwardMessages", params: { linkId: "chat-one", messageIds: ["peer_1", "peer_1"], to: ["chat-two"] } })).rejects.toMatchObject({ code: "confirm" });
     expect(node.forwardMessages).toHaveBeenCalledTimes(2);
   });
 });
