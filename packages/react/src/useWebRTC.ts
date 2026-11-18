@@ -361,6 +361,8 @@ export function useWebRTC({
   const [screenShareError, setScreenShareErrorState] = useState<string | null>(null);
   /** Our call rang out unanswered, for a few seconds (`NO_ANSWER_SHOWN_MS`). */
   const [noAnswer, setNoAnswer] = useState(false);
+  /** Our call's offer went out: it rings the contact (and RING_MS counts) from then, not while a permission prompt is open. */
+  const [offerOut, setOfferOut] = useState(false);
   /**
    * The microphone or camera a call asked for could not be used, and why, for a few seconds (`MEDIA_PROBLEM_SHOWN_MS`).
    * `id` is new at each time: a call refused again while the reason shows is a new notice, with its whole time.
@@ -1083,6 +1085,7 @@ export function useWebRTC({
       const attempt = ++attemptRef.current;
       const cancelled = () => attemptRef.current !== attempt;
       setNoAnswer(false);
+      setOfferOut(false);
       // A call that ended without a hang-up (one that found no path) left its offer's time behind: until this
       // attempt's own goes out, a contact's offer is the earlier one (WISP 601, "Both call at once").
       myOfferTimestampRef.current = 0;
@@ -1144,6 +1147,7 @@ export function useWebRTC({
 
         const signalStr = JSON.stringify(signal);
         publishCallSignal(signalStr);
+        setOfferOut(true);
       } catch (error) {
         // A newer attempt (or none) owns the call now: its state is not ours to reset.
         if (cancelled()) return;
@@ -1630,9 +1634,10 @@ export function useWebRTC({
     hangUpRef.current(true, true);
     setMediaProblemShown("relayOnlyNow");
   }, [relayOnly, setMediaProblemShown]);
+  // Ours rings from its offer: `offering` starts before the microphone or camera prompt, which may stay open a minute.
+  const ringing = callState === "incoming" || (callState === "offering" && offerOut) ? callState : null;
   useEffect(() => {
-    if (callState !== "offering" && callState !== "incoming") return;
-    const ringing = callState;
+    if (!ringing) return;
     const timer = setTimeout(() => {
       if (callStateRef.current !== ringing) return;
       if (ringing === "offering") {
@@ -1647,7 +1652,7 @@ export function useWebRTC({
       }
     }, RING_MS);
     return () => clearTimeout(timer);
-  }, [callState, setMissedAt]);
+  }, [ringing, setMissedAt]);
 
   // Another page answered or declined the call ringing here (`callHandledElsewhere`): it stops ringing here as though it
   // never had. That page wrote the call's lines into the history both show, and sent its answer; this one sends
