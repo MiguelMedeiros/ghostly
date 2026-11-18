@@ -72,14 +72,17 @@ Other settings:
   Left out, any origin may connect. A
   refused one gets 403, and the log says `refused origin "<origin>"` once an hour per origin, for at most 16 origins
   an hour. It keeps other websites from using the relay; it is no defence against other programs.
-- `GHOSTLY_RELAY_CLOUDFLARE=1` counts each client by `CF-Connecting-IP`, behind Cloudflare (a tunnel).
+- `GHOSTLY_RELAY_CLOUDFLARE=1` counts each client by `CF-Connecting-IP`, behind Cloudflare (a tunnel). It does not go
+  with `GHOSTLY_RELAY_PROXIES`: both set stops the start, since behind nginx or Caddy a client writes that header.
 - `GHOSTLY_RELAY_PROXIES` is the number of reverse proxies in front of it (`1` for one nginx): each client then
   counts by the `X-Forwarded-For` entry that many from the end, the ones before it being the client's to write.
   Without either, the headers are ignored, and the first request that carries one logs which setting is missing
   (`requests carry CF-Connecting-IP but GHOSTLY_RELAY_CLOUDFLARE is not set`). With one set, the first request
   without its header (a proxy that does not write it, such as nginx without `proxy_set_header X-Forwarded-For
   $proxy_add_x_forwarded_for`) logs `requests arrive without X-Forwarded-For though GHOSTLY_RELAY_PROXIES is set`
-  (or `CF-Connecting-IP` and `GHOSTLY_RELAY_CLOUDFLARE`): it counts as the proxy, as every other one would. With either set, the
+  (or `CF-Connecting-IP` and `GHOSTLY_RELAY_CLOUDFLARE`): it counts as the proxy, as every other one would. One with
+  fewer `X-Forwarded-For` entries than `GHOSTLY_RELAY_PROXIES` (`2` behind a single nginx) logs `requests carry 1
+  X-Forwarded-For entry though GHOSTLY_RELAY_PROXIES is 2`: set it to the number of proxies that write the header. With either set, the
   relay listens on 127.0.0.1 unless `HOST` says otherwise: only the proxy should reach it, since anyone else could
   write that header. The container sets `HOST=0.0.0.0` inside it and publishes the port where the proxy is
   (`HYPERDHT_RELAY_BIND`, loopback by default).
@@ -114,7 +117,7 @@ machine or no name at all: one line names the setting instead of a stack trace, 
 shell or an `.env` file next to it):
 
 - `GHOSTLY_RELAY_CLOUDFLARE=0`, or every client could name its own address in that header; behind nginx or Caddy add
-  `GHOSTLY_RELAY_PROXIES=1`;
+  `GHOSTLY_RELAY_PROXIES=1` (with the default `GHOSTLY_RELAY_CLOUDFLARE=1` left on, the relay does not start);
 - `GHOSTLY_RELAY_ORIGINS` with the origins of the web app you serve, and `tauri://localhost,http://tauri.localhost`
   for the Desktop, or every browser on it is refused (403), and so is every Desktop with Hide my IP on.
 

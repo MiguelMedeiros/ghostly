@@ -14,6 +14,7 @@
   "standby": "En espera",
   "switchTo": "Cambiar a {{name}}",
   "switching": "Abriendo {{name}}…",
+  "switchingFromOtherTab": "Otra pestaña de Ghostly abrió {{name}}…",
   "title": "Cambiar de perfil",
   "unread": "{{count}} sin leer"
 }

@@ -1888,11 +1888,13 @@ export class GhostLink {
       if (this.myPubKeyZ32 > this.options.params.peerPubKeyZ32) this.session.presenceDue();
       this.session.start();
     }
-    await this.dht.setMode(mode);
+    // DHT only: no new dial is taken from the moment it is chosen. `setMode` waits for the mailbox's pending read or
+    // publish (a slow relay holds it for seconds), so the native listeners go first.
     if (mode === "dht") {
       await this.session.stop(false);
       await Promise.allSettled([...this.endpoints.keys()].map(t => this.releaseEndpoint(t)));
     }
+    await this.dht.setMode(mode);
     this.streamBlockChanged();
     this.emitDeliveryState();
   }

@@ -1,5 +1,9 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createChatInvite, inviteLink } from "@ghostly/core";
+import { LOCAL_SUFFIXES as CORE_LOCAL_SUFFIXES } from "../../../../../packages/core/src/localNames";
+import { LOCAL_SUFFIXES } from "../../lib/localHost";
 import { decodeEntities, isLocalHost, oEmbedEndpoint, parseOEmbed, parseOpenGraph, previewableLink, videoSite } from "../../lib/parse/linkPreview";
 import { decodePage } from "../../lib/linkPreviewFetch";
 import { findLocation, formatCoordinates, locationIn, mapTiles, mapsUrl } from "../../lib/parse/location";
@@ -69,6 +73,21 @@ describe("which link gets a preview", () => {
       expect(isLocalHost(host), host).toBe(true);
     for (const host of ["example.com", "news.example.org", "93.184.215.14", "[2606:4700::1111]"])
       expect(isLocalHost(host), host).toBe(false);
+  });
+
+  it("a router's or a company's own name, under any suffix a local network answers", () => {
+    for (const host of ["router.lan", "router.home", "fritz.box.home", "nas.localdomain", "hr.intranet", "files.corp", "NAS.Home.", "corp", "nas.home.arpa"])
+      expect(isLocalHost(host), host).toBe(true);
+    for (const host of ["home.example.com", "corp.example.com", "myhome.net", "intranet.example.org"])
+      expect(isLocalHost(host), host).toBe(false);
+  });
+
+  it("the same local suffixes as the rest of the app and Ghostly Desktop", () => {
+    const rust = readFileSync(resolve(__dirname, "../../../../desktop/src/local_names.rs"), "utf8");
+    const list = /LOCAL_SUFFIXES: &\[&str\] = &\[([^\]]*)\]/.exec(rust)?.[1];
+    expect(list).toBeTruthy();
+    expect([...list!.matchAll(/"([^"]+)"/g)].map(m => m[1])).toEqual([...LOCAL_SUFFIXES]);
+    expect([...CORE_LOCAL_SUFFIXES]).toEqual([...LOCAL_SUFFIXES]);
   });
 
   it("no IPv6 address outside global unicast, nor one that tunnels to an IPv4 address", () => {

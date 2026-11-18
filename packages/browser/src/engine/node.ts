@@ -19,7 +19,7 @@ import type { CashuPrepared } from "./wallet";
 import { CASHU_CARD, LightningCards } from "./paymentAdapters/providers/lightningCards";
 import { BitcoinService, type BitcoinPrepared } from "./paymentAdapters/providers/bitcoinService";
 import { CASHU_MINT_SOURCE } from "./paymentAdapters/providers/cashuMint";
-import { BREEZ_SOURCE } from "./paymentAdapters/providers/breez";
+import { BREEZ_SOURCE } from "./paymentAdapters/providers/breezProvider";
 import { defaultRegistry, type ProviderRegistry } from "./paymentAdapters/providers/registry";
 import { onAdaptersChanged } from "../plugins/registry";
 import type { ProviderHost, ProviderPlatform } from "./paymentAdapters/providers/types";
@@ -2456,6 +2456,7 @@ export class GhostlyNode implements EngineImplementation {
     if (!this.limitedMode) await this.startWallets();
 
     const links = await db.getLinks();
+    this.unshareServicesOfGone(links);
     if (this.options.deferChats) for (const stored of links) {
       if (!stored.group) this.deferredChats.add(stored.id);
       // A group's edges, not the entry sessions of a join that waits for its admin: those go on as they did.
@@ -3027,6 +3028,9 @@ export class GhostlyNode implements EngineImplementation {
     this.groupEdits.stop();
     this.reactions.stop();
     this.cardEdits.stop();
+    // Files are swept while their session is open (`ChatFiles`): a session the stop leaves open sweeps no more.
+    this.fileDesk.stop();
+    this.groups.files?.stopSweeps();
     // What is still being written is waited for, side by side: the stop takes as long as the slowest, not their sum.
     await Promise.allSettled([
       linksStopped,
@@ -4123,6 +4127,7 @@ export class GhostlyNode implements EngineImplementation {
     this.reactionNotes.delete(linkId);
     this.reactionNotesBefore.delete(linkId);
     this.reactionNotesWhole.delete(linkId);
+    this.chatSearch.forget(linkId);
     if (filesEnded) setTimeout(() => void live.link?.stop(true), FILES_END_MS);
     else void live.link?.stop(true);
     void live.caps?.stop();
@@ -4137,8 +4142,9 @@ export class GhostlyNode implements EngineImplementation {
     this.wakeLimiter.reset(linkId);
     this.callWakeLimiter.reset(linkId);
     if (live.stored.wakeToken) void this.rotateWake().then(() => this.emitState());
-    // Its apps' storage counts go once its rows have: the same invite joined again is a chat of the same id.
-    void db.deleteLink(linkId).finally(() => this.appShelf?.forgetScope(linkId));
+    // Its apps' storage counts go once its rows have: the same invite joined again is a chat of the same id. So do the
+    // search's texts once more: that chat joined in the same tick, a search before the rows went read and kept them.
+    void db.deleteLink(linkId).finally(() => { this.chatSearch.forget(linkId); this.appShelf?.forgetScope(linkId); });
     void this.desk.forgetLink(linkId);
     // Ecash the contact has not taken is kept: the Wallet page offers it back, now that its bubble is gone.
     this.awaitingSoon();
@@ -5206,9 +5212,12 @@ export class GhostlyNode implements EngineImplementation {
     const side = (id: string) => id.startsWith("peer_") ? "peer" : id.startsWith("me_") ? "me" : undefined;
     const byReference = (reply: MessageReply) => { const id = byRef.get(reply.id); return id === undefined || !reply.from || !side(id) || side(id) === reply.from ? id : undefined; };
     const quoted = (reply: MessageReply | undefined) => !reply ? undefined : reply.messageId !== undefined && removed.has(reply.messageId) ? reply.messageId : byReference(reply);
-    const ids = (await db.getMessages(linkId)).filter(m => { const id = quoted(m.replyTo); return id !== undefined && (m.replyTo!.snippet || m.replyTo!.messageId !== id); }).map(m => m.id);
+    // A member's reply in a group keeps the frame it came in to hand on (`StoredMessage.frame`), the line sealed in it: it
+    // goes too, as the epoch's secret that opens it is in this profile. The reply's author still hands it on.
+    const framed = (m: StoredMessage) => !!m.frame && m.sender !== "me";
+    const ids = (await db.getMessages(linkId)).filter(m => { const id = quoted(m.replyTo); return id !== undefined && (m.replyTo!.snippet || m.replyTo!.messageId !== id || framed(m)); }).map(m => m.id);
     if (!ids.length) return [];
-    await db.patchMessages(linkId, ids, m => { const id = quoted(m.replyTo); return id === undefined ? null : { replyTo: { ...m.replyTo!, snippet: "", messageId: id } }; });
+    await db.patchMessages(linkId, ids, m => { const id = quoted(m.replyTo); return id === undefined ? null : { replyTo: { ...m.replyTo!, snippet: "", messageId: id }, ...(framed(m) && { frame: undefined }) }; });
     return ids;
   }
 
@@ -7661,6 +7670,21 @@ export class GhostlyNode implements EngineImplementation {
       void db.putService(service);
     }
     if (granted.length) this.servicesChanged();
+  }
+
+  /**
+   * At start, the same rule for contacts whose chats are already gone: a chat deleted on a release that kept its
+   * contact's grants left that key shared for good, with no chat to turn it off from. Before any link runs, so no
+   * session or answer has it yet.
+   */
+  private unshareServicesOfGone(links: StoredLink[]): void {
+    const contacts = new Set(links.filter((l) => !l.group && l.peerPubKeyZ32).map((l) => l.peerPubKeyZ32));
+    for (const service of this.services) {
+      const kept = service.sharedWith?.filter((k) => contacts.has(k));
+      if (!kept || kept.length === service.sharedWith!.length) continue;
+      service.sharedWith = kept;
+      void db.putService(service);
+    }
   }
 
   setServiceEnabled({ serviceId, enabled }: { serviceId: string; enabled: boolean }): void {

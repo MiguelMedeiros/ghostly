@@ -51,6 +51,32 @@ describe("the reconnecting notice", () => {
     await waitFor(() => expect(screen.queryByTestId("reconnecting-banner")).toBeNull(), { timeout: 3000 });
     expect(engine.reconnecting).toBe(false);
   });
+
+  it("says once that the tab is connected again, on a page whose list is hidden too, and nothing before it was lost", async () => {
+    // The banner goes with nothing said: a screen-reader user who heard "Reconnecting…" never heard it was over.
+    windowIs(true);
+    window.location.hash = "#/settings";
+    render(<Root />);
+    await screen.findByTestId("mobile-tabs");
+    const said = screen.getByTestId("reconnected-said");
+    expect(said).toHaveAttribute("aria-live", "polite");
+    expect(said).toBeEmptyDOMElement();
+
+    fakeEngine.refuse = new Error("The offscreen document did not start");
+    fakeEngine.drop();
+    await waitFor(() => expect(engine.reconnecting).toBe(true), { timeout: 3000 });
+    expect(said).toBeEmptyDOMElement();
+
+    fakeEngine.refuse = null;
+    await waitFor(() => expect(said).toHaveTextContent("Connected to Ghostly again"), { timeout: 3000 });
+    expect(said).toBeVisible();
+
+    // Lost again: the line clears, to be said anew once it is back.
+    fakeEngine.refuse = new Error("The offscreen document did not start");
+    fakeEngine.drop();
+    await waitFor(() => expect(said).toBeEmptyDOMElement(), { timeout: 3000 });
+    window.location.hash = "";
+  });
 });
 
 // covers: extension.reconnecting
@@ -120,6 +146,62 @@ describe("reconnecting, in an open chat", () => {
   });
 });
 
+// covers: extension.reconnecting
+describe("reconnecting, on a menu page", () => {
+  /**
+   * An extension tab that lost its peer, on Services, Settings or Profile at a phone width: the chat list (and its
+   * "Reconnecting…") is kept mounted but hidden, so the page looked live while nothing it did reached Ghostly. The page
+   * says it over itself, in its own words; wider, the list beside it does.
+   */
+
+  const SENTENCE = "Reconnecting… · This tab lost Ghostly and keeps trying. Wait until it's back to change anything here.";
+
+  afterEach(async () => {
+    fakeEngine.refuse = null;
+    await engine.connect();
+    window.location.hash = "";
+  });
+
+  function losePeer() {
+    fakeEngine.refuse = new Error("The offscreen document did not start");
+    fakeEngine.drop();
+  }
+
+  it.each(["/services", "/settings", "/profile"])("on a phone, %s says it over the page, and it goes once the page is connected again", async (page) => {
+    windowIs(true);
+    window.location.hash = `#${page}`;
+    render(<Root />);
+    await screen.findByTestId("mobile-tabs");
+    expect(screen.queryByTestId("page-reconnecting-banner")).toBeNull();
+    losePeer();
+    const banner = await screen.findByTestId("page-reconnecting-banner", {}, { timeout: 3000 });
+    expect(banner).toBeVisible();
+    expect(banner).toHaveAttribute("role", "status");
+    expect(banner).toHaveTextContent(SENTENCE);
+    fakeEngine.refuse = null;
+    await waitFor(() => expect(screen.queryByTestId("page-reconnecting-banner")).toBeNull(), { timeout: 3000 });
+  });
+
+  it("on a phone's chat list, only the list says it", async () => {
+    windowIs(true);
+    render(<Root />);
+    await screen.findByTestId("sidebar");
+    losePeer();
+    await screen.findByTestId("reconnecting-banner", {}, { timeout: 3000 });
+    expect(screen.queryByTestId("page-reconnecting-banner")).toBeNull();
+  });
+
+  it("wider than a phone, leaves it to the chat list beside the page", async () => {
+    windowIs(false);
+    window.location.hash = "#/settings";
+    render(<Root />);
+    await screen.findByTestId("sidebar");
+    losePeer();
+    await screen.findByTestId("reconnecting-banner", {}, { timeout: 3000 });
+    expect(screen.queryByTestId("page-reconnecting-banner")).toBeNull();
+  });
+});
+
 // covers: app.pwa.offline
 describe("offline", () => {
   /**
@@ -178,6 +260,45 @@ describe("offline", () => {
       openChat();
       await screen.findByTestId("chat-options");
       expect(screen.queryByTestId("chat-offline-banner")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("offline, on a menu page", () => {
+    // The list, which says it, is hidden on a phone's tab pages: Wallet's Pay and Receive, Services' Share and the
+    // Identities checks all need the network, and nothing there said it was gone.
+    const PAGE_SENTENCE = "Offline · What needs the network here won't work until you're back online.";
+
+    it.each(["/wallet", "/settings", "/services", "/identities"])("on a phone, %s says it over the page, and it goes once back online", async (page) => {
+      windowIs(true);
+      window.location.hash = `#${page}`;
+      const spy = offline();
+      render(<Root />);
+      await screen.findByTestId("mobile-tabs");
+      const banner = await screen.findByTestId("page-offline-banner");
+      expect(banner).toBeVisible();
+      expect(banner).toHaveAttribute("role", "status");
+      expect(banner).toHaveTextContent(PAGE_SENTENCE);
+      spy.mockReturnValue(true);
+      act(() => { window.dispatchEvent(new Event("online")); });
+      await waitFor(() => expect(screen.queryByTestId("page-offline-banner")).toBeNull());
+    });
+
+    it("on a phone's chat list, only the list says it", async () => {
+      windowIs(true);
+      window.location.hash = "#/";
+      offline();
+      render(<Root />);
+      expect(await screen.findByTestId("offline-banner")).toBeVisible();
+      expect(screen.queryByTestId("page-offline-banner")).toBeNull();
+    });
+
+    it("wider than a phone, leaves it to the chat list beside the page", async () => {
+      windowIs(false);
+      window.location.hash = "#/wallet";
+      offline();
+      render(<Root />);
+      expect(await screen.findByTestId("offline-banner")).toBeVisible();
+      expect(screen.queryByTestId("page-offline-banner")).toBeNull();
     });
   });
 

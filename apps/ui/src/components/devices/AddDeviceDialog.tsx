@@ -4,10 +4,11 @@ import type { EnrollView } from "@ghostly/browser/devices/enroll";
 import { useI18n } from "../../contexts/I18nContext";
 import { useSettings } from "../../contexts/SettingsContext";
 import { DEVICE_SET_PASSWORD_MIN, defaultDeviceName, deviceLink, deviceLinkQr, enrollErrorKey, failureKey, lockPasswordProblem, timeLeft } from "../../lib/devices";
-import { baseProfileName, currentProfile } from "../../lib/profiles";
+import { activeProfileId, baseProfileName, currentProfile } from "../../lib/profiles";
 import { isDesktopApp } from "../../lib/externalLink";
 import { appLinkOrigin } from "../../lib/url";
-import { hashPassword, verifyPassword } from "../../lib/settings";
+import { hashPassword } from "../../lib/settings";
+import { tryLockPassword, waitSeconds } from "../../lib/lockAttempts";
 import { QRCodeDisplay } from "../QRCode";
 import { Notice } from "../wallet/ui";
 import { Toast } from "../ui/Toast";
@@ -118,10 +119,12 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
   const submitPassword = async () => {
     clear();
     if (step === "type") {
+      // Paced with the lock screen's own count: being at the unlocked device gives no more guesses than its lock does.
       setBusy(true);
-      const valid = !!stored && await verifyPassword(password, stored);
+      const tried = stored ? await tryLockPassword(activeProfileId(), password, stored) : null;
       setBusy(false);
-      if (!valid) { fail(t("devices.password.wrong"), "password"); return; }
+      if (tried?.waited) { fail(t("lockScreen.tooManyAttempts", { seconds: waitSeconds(tried.retryAt!) }), "password"); return; }
+      if (!tried?.ok) { fail(t("devices.password.wrong"), "password"); return; }
       // The hash keeps no length: only the password typed now says whether it is long enough.
       if (password.length < DEVICE_SET_PASSWORD_MIN) { previous.current = password; setPassword(""); setStep("longer"); return; }
       // A password that is stored with the lock off still leaves the profile open: a device set needs the lock on.

@@ -55,8 +55,10 @@ type Outgoing = (Vec<u8>, bool, oneshot::Sender<()>);
 /// connection is read no further: a contact faster than the page waits on QUIC's flow control, not in the WebView's
 /// queue, which a channel's `send` fills without ever waiting.
 const RECEIVE_CREDIT: u32 = 512 * 1024;
+/// What each frame costs of the credit besides its bytes: each is an event of its own for the page, however small.
+const FRAME_COST: u32 = 1024;
 
-/// What the page may still be handed on a connection, and the size of each frame it was handed and not taken, oldest
+/// What the page may still be handed on a connection, and what each frame it was handed and not taken cost, oldest
 /// first.
 struct Credit {
     room: tokio::sync::Semaphore,
@@ -69,8 +71,9 @@ impl Credit {
             handed: Mutex::default(),
         }
     }
-    /// Waits for room for a frame of `size` bytes, and counts it as handed.
+    /// Waits for room for a frame of `size` bytes, and its `FRAME_COST`, and counts it as handed.
     async fn hand(&self, size: u32) -> Result<(), String> {
+        let size = size + FRAME_COST;
         self.room
             .acquire_many(size)
             .await
@@ -535,20 +538,7 @@ fn dialable_relay(relay: Option<&str>, own: &[String]) -> bool {
     }
     match url.host() {
         Some(url::Host::Domain(name)) => {
-            name.contains('.')
-                && ![
-                    "localhost",
-                    "local",
-                    "internal",
-                    "lan",
-                    "home",
-                    "home.arpa",
-                    "localdomain",
-                    "intranet",
-                    "corp",
-                ]
-                .iter()
-                .any(|suffix| name == *suffix || name.ends_with(&format!(".{suffix}")))
+            name.contains('.') && !crate::local_names::under_local_suffix(name)
         }
         Some(url::Host::Ipv4(ip)) => crate::link_preview::is_public(ip.into()),
         Some(url::Host::Ipv6(ip)) => crate::link_preview::is_public(ip.into()),
@@ -1770,6 +1760,60 @@ mod tests {
             order,
             (0..frames).map(|i| format!("{i:05}")).collect::<Vec<_>>()
         );
+    }
+
+    /// A contact that writes the smallest frames there are, faster than the page takes them: each is an event of its
+    /// own for the page, so the credit counts frames as well as bytes, and the page is handed no more of them than it
+    /// allows. Once it takes them, the rest comes.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn the_page_is_handed_no_more_small_frames_than_its_credit_counts() {
+        let app = app();
+        let (alice, _, _) = start(&app, 64).await;
+        let (events, bob_seen) = channel();
+        let bob = app
+            .state::<TransportState>()
+            .start([65; 32], events, true, &[])
+            .await
+            .unwrap();
+        let outgoing = connect(&app, alice, &bob.descriptor).await.unwrap();
+        let incoming = event(&bob_seen, kind("open")).await["id"].as_u64().unwrap();
+
+        let frames = 4 * (RECEIVE_CREDIT / FRAME_COST) as usize;
+        let handle = app.handle().clone();
+        let sending = tokio::spawn(async move {
+            for _ in 0..frames {
+                send(&handle, outgoing, "x".into()).await?;
+            }
+            Ok::<(), String>(())
+        });
+        let count = || {
+            bob_seen
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|e| e["type"] == "frame")
+                .count()
+        };
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        assert!(
+            count() <= (RECEIVE_CREDIT / FRAME_COST) as usize,
+            "the page was handed {} frames it never took",
+            count()
+        );
+
+        let state = app.state::<TransportState>();
+        let mut told = 0;
+        for _ in 0..1000 {
+            let taken = count();
+            paired_native_took(state.clone(), incoming, (taken - told) as u32);
+            told = taken;
+            if taken == frames {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        sending.await.unwrap().unwrap();
+        assert_eq!(count(), frames);
     }
 
     #[tokio::test]

@@ -1,7 +1,7 @@
 import { CliError } from "../errors";
 import type { OptionSpec } from "../args";
 import { TRANSPORT_NAMES } from "../words";
-import { type Command, CONNECT_SECONDS, force, groupWait, cursor, HOLD_MINUTES, inRange, LONG_WAIT_SECONDS, needs, pageLimit, prLinked, quota, reaction, refs, routineFields, routineOptions, runOf, secret, showInvite, taskFields, taskOptions, timeout, translate, typingFor, typingKind, typingWords, usageFields, usageOptions, wait } from "./shared";
+import { type Command, CONNECT_SECONDS, force, groupWait, cursor, HOLD_MINUTES, inRange, listAtMost, LONG_WAIT_SECONDS, needs, pageLimit, prLinked, quota, reaction, refs, routineFields, routineOptions, runOf, secret, showInvite, taskFields, taskOptions, timeout, translate, typingFor, typingKind, typingWords, usageFields, usageOptions, wait } from "./shared";
 
 /** `react` and `pin` in a 1:1 chat: until the contact confirmed it, by default without a daemon (the process leaves). */
 const confirmWait: Record<string, OptionSpec> = {
@@ -105,6 +105,7 @@ export const commands: Record<string, Command> = {
     params: ({ options }, a) => {
       if (!Array.isArray(options.to) || !options.to.length) throw new CliError("usage", "Missing --to: ghostly forward <chat|group> <message>... --to <chat|group>... [--force] [--wait none|sent] [--timeout s]");
       refs(options.to, "to", "chat or group");
+      listAtMost(options, "to");
       return { chat: a.chat, messages: (a.message ?? "").split(" ").filter(Boolean), to: options.to, force: options.force === true, wait: options.wait, timeout: timeout(options) };
     },
   },

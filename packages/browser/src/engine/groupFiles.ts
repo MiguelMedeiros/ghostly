@@ -623,6 +623,11 @@ export class GroupFileDesk {
 
   // -- edges ---------------------------------------------------------------------------------------------------
 
+  /** The app stops: no edge's files are swept any more (`ChatFiles.stop`). */
+  stopSweeps(): void {
+    for (const edge of this.edgesById.values()) edge.files.stop();
+  }
+
   /** An edge's files/3 session opened (both sides agreed it) or closed. */
   session(groupId: string, peer: string, linkId: string, open: boolean): void {
     const edge = this.edge(groupId, peer, linkId);
