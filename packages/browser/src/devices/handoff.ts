@@ -1262,6 +1262,19 @@ export class HandoffTaker {
   }
 
   /**
+   * A forced takeover here (`takeover.ts`), before it writes: a pull with no release ends, verified or not, and its
+   * staging goes whole. The takeover runs the copy this device holds, and its note takes the place of the pull's, so
+   * nothing would name that staging for the drop at start or a later pull. One that holds a release is not touched.
+   */
+  abandon(): Promise<void> {
+    return this.exclusive(async () => {
+      if (this.phase === "installing" || this.phase === "settling" || this.phase === "unsettled" || this.phase === "done") return;
+      if (this.phase !== "idle" && this.phase !== "failed" && this.peer && this.ports.links.live(this.peer)) this.out(handoffCancelFrame("cancelled"));
+      await this.giveUp("cancelled");
+    });
+  }
+
+  /**
    * After a reload: what the device record says. A standby that was receiving goes on when the giver is back (its
    * staged files are kept; the parts of pass 2 are not, and come again). A `taking` device installs, or takes the turn.
    */
