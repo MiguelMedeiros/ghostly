@@ -3,7 +3,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync,
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { appRevocationFor, readAppBundle, readAppRevocations, type AppManifest } from "@ghostly/core";
+import { appRevocationFor, canonicalJsonBytes, readAppBundle, readAppRevocations, seedSigner, signAppRevocation, type AppManifest } from "@ghostly/core";
 import { publishApp, verifyApp, writeWhole } from "../src/apps";
 import { CliError } from "../src/errors";
 import { error, ghostly, home, ok } from "./support/cli";
@@ -314,6 +314,30 @@ describe("app publish", () => {
     expect(ok(await ghostly(["app", "publish", dotted, "--key", key]))).toMatchObject({ files: ["index.html"], skipped: [".DS_Store"] });
   }, 60_000);
 
+  it("refuses a file or folder name that is not UTF-8 as a bad path, as any other name no bundle path may be", async (context) => {
+    const { manifest, files } = chess();
+    const key = vectorKey(tmp(), "publisher");
+    const named = (name: Buffer, folder = false) => {
+      const dir = appFolder(manifest, files);
+      const full = Buffer.concat([Buffer.from(`${dir}/`), name]);
+      try {
+        if (folder) { mkdirSync(full); writeFileSync(Buffer.concat([full, Buffer.from("/a.js")]), "x"); } else writeFileSync(full, "x");
+      } catch { return null; } // a file system that holds UTF-8 names only (macOS)
+      return dir;
+    };
+    const spaced = named(Buffer.from("my file.js"));
+    const bytes = named(Buffer.from([0xff, 0xfe, 0x2e, 0x6a, 0x73]));
+    const folder = named(Buffer.from([0x6c, 0x69, 0x62, 0xff]), true);
+    if (!spaced || !bytes || !folder) return context.skip();
+    expect((error(await ghostly(["app", "publish", spaced, "--key", key]), "refused", 1) as { details?: { reason?: string } }).details?.reason).toBe("bad-path");
+    for (const [dir, detail] of [[bytes, "��.js"], [folder, "lib�"]] as const) {
+      const refusal = error(await ghostly(["app", "publish", dir, "--key", key]), "refused", 1) as { message: string; details?: { reason?: string; detail?: string } };
+      expect(refusal.details).toEqual({ reason: "bad-path", detail });
+      expect(refusal.message).toContain("not UTF-8");
+      expect(existsSync(join(dir, "app.ghostlyapp"))).toBe(false);
+    }
+  }, 60_000);
+
   it("refuses a path option given as \"\" (an unset variable) as naming no file, never the current folder", async () => {
     const { manifest, files } = chess();
     const dir = appFolder(manifest, files);
@@ -395,6 +419,24 @@ describe("app revoke", () => {
     error(await ghostly(["app", "revoke", dir, "--key", key, "--up-to", "1", "--digest", first.digest as string]), "usage", 2);
     expect(error(await ghostly(["app", "revoke", dir, "--key", key, "--digest", "not-a-digest"]), "usage", 2).message).toContain("--digest \"not-a-digest\"");
     expect(readAppRevocations(new Uint8Array(readFileSync(join(dir, "ghostly-revoke.json"))))).toMatchObject({ ok: true, revocations: { length: 2 } });
+  }, 60_000);
+
+  it("signs the digests sorted, so the same digests in another order add nothing", async () => {
+    const { manifest, files } = chess();
+    const dir = appFolder(manifest, files);
+    const key = vectorKey(tmp(), "publisher");
+    ok(await ghostly(["app", "publish", dir, "--key", key]));
+    const [low, high] = ["version a", "version b"].map((v) => createHash("sha256").update(v).digest("base64url")).sort();
+    expect(ok(await ghostly(["app", "revoke", dir, "--key", key, "--digest", high!, "--digest", low!]))).toMatchObject({ digests: [low, high], added: true, revocations: 1 });
+    expect(ok(await ghostly(["app", "revoke", dir, "--key", key, "--digest", low!, "--digest", high!]))).toMatchObject({ digests: [low, high], added: false, revocations: 1 });
+    const read = readAppRevocations(new Uint8Array(readFileSync(join(dir, "ghostly-revoke.json"))));
+    expect(read.ok && read.revocations.map((r) => r.statement)).toEqual([{ ghostlyRevoke: 1, app: `${manifest.publisher}/chess`, digests: [low, high] }]);
+
+    // A list an older CLI signed in the order given is matched too.
+    const seed = createHash("sha256").update("ghostly apps vectors: publisher").digest();
+    const held = await signAppRevocation({ ghostlyRevoke: 1, app: `${manifest.publisher}/chess`, digests: [high!, low!] }, seedSigner(seed));
+    writeFileSync(join(dir, "ghostly-revoke.json"), canonicalJsonBytes([held] as never));
+    expect(ok(await ghostly(["app", "revoke", dir, "--key", key, "--digest", low!, "--digest", high!]))).toMatchObject({ added: false, revocations: 1 });
   }, 60_000);
 
   it("refuses a bad --digest or --reason as a usage error naming the option, and signs no empty reason", async () => {
@@ -772,6 +814,22 @@ describe("store sign", () => {
     expect(error(await ghostly(["store", "sign", join(dir, "index.json"), "--key", publisher]), "refused", 1).message).toContain("a publisher key never signs a store index");
   }, 60_000);
 
+  it("refuses the held index edited in place to a lower sequence, signed where it is", async () => {
+    const dir = tmp();
+    const out = tmp();
+    const key = vectorKey(tmp(), "store");
+    const index = JSON.parse(vector.index) as Record<string, unknown> & { sequence: number };
+    writeFileSync(join(dir, "index.json"), JSON.stringify(index));
+    ok(await ghostly(["store", "sign", join(dir, "index.json"), "--key", key, "--out", out]));
+    const heldSig = readFileSync(join(out, "ghostly-store.sig"), "utf8");
+    const edited = readFileSync(join(out, "ghostly-store.json"), "utf8").replace(`"sequence":${index.sequence}`, `"sequence":${index.sequence - 1}`);
+    writeFileSync(join(out, "ghostly-store.json"), edited);
+    const refusal = error(await ghostly(["store", "sign", join(out, "ghostly-store.json"), "--key", key]), "refused", 1) as { message: string; details?: { reason?: string } };
+    expect(refusal.message).toContain(`${join(out, "ghostly-store.json")} is there and is not a signed store index`);
+    expect(readFileSync(join(out, "ghostly-store.json"), "utf8")).toBe(edited);
+    expect(readFileSync(join(out, "ghostly-store.sig"), "utf8")).toBe(heldSig);
+  }, 60_000);
+
   it("makes a store key for an index that names none, and refuses an index a client would refuse", async () => {
     const dir = tmp();
     const { key: _key, ...index } = JSON.parse(vector.index) as Record<string, unknown>;
@@ -828,7 +886,7 @@ describe("store sign", () => {
     expect(ok(await ghostly(["store", "sign", join(dir, "index.json"), "--key", other, "--out", tmp()]))).toMatchObject({ previous: null, keyCreated: false });
   }, 60_000);
 
-  it("never signs over a ghostly-store.json or .sig there that does not read as a signed index, but for its own bytes", async () => {
+  it("never signs over a ghostly-store.json or .sig there that does not read as a signed index, but for its own signature", async () => {
     const dir = tmp();
     const keys = tmp();
     const key = vectorKey(keys, "store");
@@ -858,9 +916,21 @@ describe("store sign", () => {
     expect((error(await ghostly(["store", "sign", join(lone, "index.json"), "--key", fresh]), "refused", 1) as { details?: { reason?: string } }).details?.reason).toBe("missing-file");
     expect(existsSync(fresh)).toBe(false);
     expect(existsSync(join(lone, "ghostly-store.json"))).toBe(false);
-    // The index there is the one this signs (a run stopped before its signature was written): signed again.
+    // The index there is the one this signs, without its signature (edited in place, or its .sig lost): refused too.
     writeFileSync(draft, JSON.stringify(index));
-    ok(await ghostly(["store", "sign", draft, "--key", key]));
-    expect(readFileSync(join(dir, "ghostly-store.sig"), "utf8")).toBe(heldSig);
+    expect((error(await ghostly(["store", "sign", draft, "--key", key]), "refused", 1) as { details?: { reason?: string } }).details?.reason).toBe("bad-signature-statement");
+    // The signature there is the one this makes (a run stopped before its index was written): signed again.
+    const next = { ...index, sequence: (index.sequence as number) + 1 };
+    const elsewhere = tmp();
+    writeFileSync(draft, JSON.stringify(next));
+    ok(await ghostly(["store", "sign", draft, "--key", key, "--out", elsewhere]));
+    const nextSig = readFileSync(join(elsewhere, "ghostly-store.sig"), "utf8");
+    writeFileSync(join(dir, "ghostly-store.sig"), nextSig);
+    expect(ok(await ghostly(["store", "sign", draft, "--key", key]))).toMatchObject({ sequence: next.sequence, previous: null });
+    expect(readFileSync(join(dir, "ghostly-store.json"), "utf8")).toBe(readFileSync(join(elsewhere, "ghostly-store.json"), "utf8"));
+    expect(readFileSync(join(dir, "ghostly-store.sig"), "utf8")).toBe(nextSig);
+    // And before any index was written: the signature alone, with its key, is signed again.
+    expect(ok(await ghostly(["store", "sign", join(lone, "index.json"), "--key", key]))).toMatchObject({ previous: null });
+    expect(readFileSync(join(lone, "ghostly-store.sig"), "utf8")).toBe(heldSig);
   }, 60_000);
 });

@@ -266,4 +266,17 @@ describe("the HyperDHT relay's container", () => {
     // The compose file turns the Cloudflare setting on by default; the Dockerfile's HOST must still win over it.
     expect(hyperdhtSettings({ HOST: "0.0.0.0", GHOSTLY_RELAY_CLOUDFLARE: "1" }).host).toBe("0.0.0.0");
   });
+
+  // The Desktop with "Hide my IP from contacts" on dials HyperDHT through the relay from its webview, which sends the
+  // webview's own origin (measured in WebKitGTK: `tauri://localhost`): left out, every chat of it was refused (403).
+  it("lets in by default every Ghostly client that opens it from a page: the web app, the extension and the Desktop", async () => {
+    const { readFileSync } = await import("node:fs");
+    const compose = readFileSync(resolve(__dirname, "../../../infra/services/hyperdht-relay/docker-compose.yml"), "utf8");
+    const GHOSTLY_RELAY_ORIGINS = /GHOSTLY_RELAY_ORIGINS: \$\{GHOSTLY_RELAY_ORIGINS:-([^}]*)\}/.exec(compose)?.[1];
+    expect(hyperdhtSettings({ GHOSTLY_RELAY_ORIGINS }).origins).toEqual(expect.arrayContaining([
+      "https://app.ghostly.tools", "chrome-extension://nbedaagicniejlmfcncndfjcejaidbcf",
+      // macOS and Linux, then Windows and Android (apps/ui/src/lib/url.ts).
+      "tauri://localhost", "http://tauri.localhost",
+    ]));
+  });
 });

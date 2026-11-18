@@ -1,5 +1,5 @@
 import type { RatchetBox } from "./ratchet";
-import { DhtDelivery, type DeliveryMode, type DhtDeliveryState, type DhtDeliveryView , type DhtPacketFacts } from "./dhtDelivery";
+import { DhtDelivery, DHT_PACKET_BUDGET, DHT_TEXT_TOO_LONG, type DeliveryMode, type DhtDeliveryState, type DhtDeliveryView , type DhtPacketFacts } from "./dhtDelivery";
 import type { DhtFileAnnouncement, DhtFileOffer } from "./dhtFiles";
 import { PairedFiles } from "./pairedFiles";
 import { TransportSwitch, allowedTransports, type SwitchPlan } from "./transportSwitch";
@@ -144,6 +144,12 @@ export const BLOCKED_DIAL_WAIT_MS = 10_000;
  */
 export const UNPROVEN_AUTH_MS = 15_000;
 /**
+ * Connections dialled in that authenticate at once beside the one waiting to take over (`contend`). Whoever read the
+ * endpoint and dials it over and over pushes out only the oldest of them: the contact's, a few round trips long, is
+ * pushed out only by this many dials within those round trips.
+ */
+export const DIALED_IN_CONTENDERS = 8;
+/**
  * A native connection this side dialled that has not authenticated this long after it opened, while the contact's
  * record names a newer way to dial it: the dial went to an old address (the web app's Iroh homed on another relay after
  * a restart), and the chat dials the new one at once. Sooner, it is a handshake still under way.
@@ -256,7 +262,7 @@ export const LIVENESS_MISSED_PINGS = 3;
 const YIELD_BYE_MS = 300;
 const QUIET_FRAMES = new Set(["paired-ping", "paired-pong", "paired-bye", "paired-policy", "paired-switch-plan", "paired-switch-ready",
   "paired-switch-failed", "paired-switch-keep", "paired-rtc", "paired-adapters", "paired-nick", "paired-avatar", "paired-capabilities",
-  "paired-wake", "paired-hold", "paired-payments", "paired-groups", "paired-services", "paired-reconnect", "paired-reconnect-ack", CONTACT_ASKER_FRAME]);
+  "paired-wake", "paired-hold", "paired-payments", "paired-groups", "paired-services", CONTACT_ASKER_FRAME]);
 /**
  * What a session a move replaced still reads while its channel retires (`SWITCH_RETIRE_MS`): the contact's texts,
  * reactions, pins and edits, and its receipts of this side's, which it sends on that session until its own side moves.
@@ -861,6 +867,9 @@ export function publishFailure(error: unknown): string {
   return `Could not publish connection details: ${text}. ${waits.length ? `Retrying in ${Math.min(...waits)} s.` : "Retrying."}`;
 }
 
+/** A connection that takes over from the session open now once it authenticated (`GhostLink.attach`'s `migration`). */
+interface LinkCandidate { channel: FrameChannel; session: PairedSession; binding?: NativeBinding; plan?: SwitchPlan; reject(error: Error): void }
+
 export class GhostLink {
   readonly session: LinkSession;
   private readonly dht: DhtDelivery | null;
@@ -880,11 +889,14 @@ export class GhostLink {
   private nativeFailures = new Map<PairedTransport, number>();
   private demotedUntil = new Map<PairedTransport, number>();
   private connectionEpoch = 0;
-  private switchAllowedUntil = 0;
-  private switchAck: (() => void) | null = null;
   private readonly switcher: TransportSwitch;
   /** `plan`: a switch both sides agreed; without one, a replacement the contact dialled (`attachReplacement`). */
-  private candidate: { channel: FrameChannel; session: PairedSession; binding?: NativeBinding; plan?: SwitchPlan; reject(error: Error): void } | null = null;
+  private candidate: LinkCandidate | null = null;
+  /**
+   * Connections that authenticate beside a `candidate` dialled in and unproven (`contend`), oldest first: whichever
+   * authenticates first takes over, so one that never does neither holds the place nor takes it from the contact's.
+   */
+  private contenders: LinkCandidate[] = [];
   private candidateEpoch = 0;
   /** The native dial a transport change has in flight, per transport (`prepareSwitch`). */
   private readonly switchDials = new Map<PairedTransport, Promise<void>>();
@@ -1050,6 +1062,8 @@ export class GhostLink {
   private knockingEarly = false;
   /** The attempt (its epoch) of a resume over WebRTC whose offer Iroh joined, its endpoint up only after the dial (`joinRace`). */
   private irohJoinedResume = -1;
+  /** The same for HyperDHT (direct, and already in the race's `afterRtc`). */
+  private hyperdhtJoinedResume = -1;
   /** When this side's offer's answer was applied (`RACE_ANSWERED_MS`); 0 while the data link is not connecting on it. */
   private answeredAt = 0;
   /** This side's offer is out unanswered, or answered and not connected yet: what is ranked after WebRTC may race it. */
@@ -1368,7 +1382,7 @@ export class GhostLink {
           if (isDiscoveryBudgetError(error)) return;
           if (!signal || !options.params.profile) return;
           this.signalPublishFailed = true;
-          events.onPairingState?.({ status: "error",
+          this.sayPairingState({ status: "error",
             error: publishFailure(error) });
         };
         try {
@@ -1633,7 +1647,7 @@ export class GhostLink {
     } else if (credentials?.requireSignedSignals && !this.isDataLinkOpen) {
       this.securityRejected = true;
       this.tracker?.failed("rejected", false);
-      options.events?.onPairingState?.({ status: "error", keyMismatch: false,
+      this.sayPairingState({ status: "error", keyMismatch: false,
         error: "Ignored an unauthenticated discovery signal. Keep both peers on the updated version; the saved key has not been replaced." });
     }
   }
@@ -1718,7 +1732,7 @@ export class GhostLink {
     if (this.stopped || this.keyStopped || this.securityRejected) return;
     if (this.streamBlocked) this.emitDeliveryState();
     else if (this.paired?.state) this.emitPairingState();
-    else this.options.events?.onPairingState?.({ status: "connecting" });
+    else this.sayPairingState({ status: "connecting" });
   }
 
   private emitPairingState(): void {
@@ -1734,7 +1748,7 @@ export class GhostLink {
       if (!open) this.pairedFiles?.closeAll();
       this.options.events?.onDataLinkState?.(open ? "open" : "idle");
     }
-    this.options.events?.onPairingState?.({ ...state,
+    this.sayPairingState({ ...state,
       ...(blocked ? { status: this.transitionError ? "error" as const : "negotiating" as const, error: this.transitionError } : {}),
       transitionTarget: this.transitionTarget, transitionError: this.transitionError,
     });
@@ -1807,12 +1821,25 @@ export class GhostLink {
     this.session.setActive(active);
     this.dht?.setActive(active);
   }
+  /**
+   * What `emitDeliveryState` said last, cleared by any other pairing state: every mailbox read and publication of a
+   * DHT-only chat asks for it again, and one that changed nothing builds no engine state (bug hunt 1109-chat-perf).
+   */
+  private saidDeliveryState: string | undefined;
+  private sayPairingState(state: PairingState): void {
+    this.saidDeliveryState = undefined;
+    this.options.events?.onPairingState?.(state);
+  }
   private emitDeliveryState(): void {
     if (!this.streamBlocked) return;
     const credentials = this.options.pairing?.credentials;
     const error = this.dht?.view.error;
-    this.options.events?.onPairingState?.({ status: error ? "error" : credentials?.peerKey ? "ready" : "connecting",
-      peerKey: credentials?.peerKey, code: this.dht?.comparisonCode, verified: !!credentials?.peerKey && credentials.verifiedPeerKey === credentials.peerKey, error });
+    const state: PairingState = { status: error ? "error" : credentials?.peerKey ? "ready" : "connecting",
+      peerKey: credentials?.peerKey, code: this.dht?.comparisonCode, verified: !!credentials?.peerKey && credentials.verifiedPeerKey === credentials.peerKey, error };
+    const said = JSON.stringify([state.status, state.peerKey, state.code, state.verified, state.error]);
+    if (said === this.saidDeliveryState) return;
+    this.saidDeliveryState = said;
+    this.options.events?.onPairingState?.(state);
   }
   async setDeliveryMode(mode: DeliveryMode): Promise<void> {
     if (!this.dht) throw new Error("DHT delivery is unavailable for this conversation.");
@@ -1919,7 +1946,7 @@ export class GhostLink {
         const message = error instanceof Error ? error.message : String(error);
         this.tracker?.failed("transport", true, message);
         // Waiting for a chosen transport is not a connection error (WISP 100): the wait says why.
-        if (!this.dialFailed(message)) this.options.events?.onPairingState?.({ status: "error", error: message });
+        if (!this.dialFailed(message)) this.sayPairingState({ status: "error", error: message });
         this.rejectWaiters(error instanceof Error ? error : new Error(message));
       });
     });
@@ -2404,7 +2431,6 @@ export class GhostLink {
     if (this.channel && plan?.choices.includes(binding.transport)) {
       void this.attachCandidate(channel, binding, plan).catch(() => {}); return;
     }
-    if (this.channel && Date.now() < this.switchAllowedUntil) { this.switchAllowedUntil = 0; this.disconnect(); }
     // While yielding, the listener closes in a moment, and a session taken on it with it.
     if (this.stopped || this.leaving || this.yielding || !this.transportOffer().includes(binding.transport)) { channel.close(); return; }
     if (this.channel) { this.attachReplacement(channel, binding); return; }
@@ -2604,7 +2630,7 @@ export class GhostLink {
     this.resumeKnockMissed = false;
     const epoch = this.connectionEpoch;
     this.attempt = { side: "dialled", failed: [] };
-    this.options.events?.onPairingState?.({ status: "connecting" });
+    this.sayPairingState({ status: "connecting" });
     try {
       const local = this.transportOffer();
       const relayed = relayedTransports(this.localDescriptors(), this.peerDescriptors);
@@ -2920,11 +2946,16 @@ export class GhostLink {
     // contact quiet or not. Before, the higher key (which the engine dials no more once its endpoints are up) was live
     // again only once the contact noticed: 8.5 to 13.6 s after a kill (two CLI daemons, 2026-11-12), against 0.3 s.
     const iroh = !missed && this.irohJoinedResume === epoch && this.irohRanksFirst();
-    if (!iroh && !(missed || this.offered.woke || this.contactQuiet())) return;
+    // So does a HyperDHT up only after the dial (Iroh's relay out of reach), which the race would dial 8 s on anyway: the
+    // higher key was live again 8.5 s after a kill (two CLI daemons, Iroh relay down, 2026-11-13), against 0.9 s.
+    const hyperdht = !missed && this.hyperdhtJoinedResume === epoch && next.rest.includes("hyperdht/1")
+      && !this.relayedTransports.includes("hyperdht/1") && this.canDial("hyperdht/1");
+    if (!iroh && !hyperdht && !(missed || this.offered.woke || this.contactQuiet())) return;
     // A relayed transport too where both apps move off it once live (`upgrade/1`): the chat is live over the relay in a
     // second, and on the direct path a moment later, its signaling on the session (WISP 100 § Back to a quiet contact).
     const relayed = missed || this.upgradesFromRelay() ? [] : this.relayedTransports;
-    const direct = iroh ? ["iroh/1" as const] : next.rest.filter(t => !relayed.includes(t) && this.canDial(t));
+    const direct = iroh || hyperdht ? [...(iroh ? ["iroh/1" as const] : []), ...(hyperdht ? ["hyperdht/1" as const] : [])]
+      : next.rest.filter(t => !relayed.includes(t) && this.canDial(t));
     if (!direct.length) return;
     this.knockedEarly = epoch;
     void this.knockEarly(epoch, direct);
@@ -2968,6 +2999,7 @@ export class GhostLink {
     this.afterRtc = { epoch: offered.epoch, rest: [...rest, transport] };
     traceLink(this.myPubKeyZ32, "race-join", { transport });
     if (offered.resume && transport === "iroh/1") this.irohJoinedResume = offered.epoch;
+    if (offered.resume && transport === "hyperdht/1") this.hyperdhtJoinedResume = offered.epoch;
     // The offer of a resume whose knock found nothing (the contact holds the old session, its HyperDHT listener
     // unannounced): it reads offers at a live chat's pace, and a transport up now, relayed or not, reaches it at once,
     // as the resume's knock would have. Before, the higher key's Iroh waited for the race, and the contact noticed first.
@@ -3180,6 +3212,10 @@ export class GhostLink {
   dhtWentNowhere(id: string): boolean { return !!this.dht?.wentNowhereFor(id); }
   /** What went on the DHT floor under this id needs no more retries there (it went live, or was withdrawn). */
   async settleDht(id: string): Promise<void> { await this.dht?.acknowledge(id); }
+  /** Whether the DHT floor holds this text of mine, or an edit of it, awaiting its receipt or not (`DhtDelivery.holds`). */
+  dhtHolds(wireId: string): boolean { return !!this.dht?.holds(wireId); }
+  /** A text of mine deleted here leaves the DHT floor, an edit of it waiting there too (`DhtDelivery.withdraw`). */
+  async withdrawDht(wireId: string): Promise<void> { await this.dht?.withdraw(wireId); }
 
   /** Publishes a `_call` signal; a connected peer also gets it right away over the data link. */
   async setCallSignal(signal: string | null): Promise<void> {
@@ -3800,6 +3836,17 @@ export class GhostLink {
     if (dht && this.dht && this.textDelivery === "dht") return this.dht.send(edit.m, edit.ts, dhtEditId(edit.id, edit.e), undefined, [edit.id, edit.e]);
     return "Edits go when you are live";
   }
+  /**
+   * Why the DHT floor can never carry this edit, or null (WISP 403 § Edits): it goes there as a text with the edit's
+   * element, which must fit the packet once sealed, as a text must (`validateText`). One past the 256 bytes never fits
+   * it either, and says so with the same reason. Null off the floor, and for what only makes it wait there (a text
+   * awaiting its receipt): that one goes in its turn.
+   */
+  dhtEditTooBig(edit: WireEdit): string | null {
+    if (this.isDataLinkOpen || this.textDelivery !== "dht") return null;
+    const error = this.dht!.validate(edit.m, edit.ts, dhtEditId(edit.id, edit.e), undefined, [edit.id, edit.e]);
+    return error === DHT_PACKET_BUDGET || error === DHT_TEXT_TOO_LONG ? DHT_PACKET_BUDGET : null;
+  }
   /** Confirms an edit of the contact's that waited for its message (`onMessageEdit` returned false). */
   confirmEdit(id: string, e: number): void {
     if (!this.channel || !this.supportsEdits) return;
@@ -4197,16 +4244,18 @@ export class GhostLink {
     if (this.options.params.profile) throw new Error("This experimental paired profile supports chat only.");
   }
 
-  private cancelCandidate(): void {
+  /** `closeRtc`: a WebRTC attempt under way beside a native session is this change's, and ends with it. */
+  private cancelCandidate(closeRtc = true): void {
     this.candidateEpoch++;
     const candidate = this.candidate;
     this.candidate = null;
     candidate?.session.stop();
     candidate?.reject(new Error("Transport change cancelled"));
     candidate?.channel.close();
+    this.dropContenders("Transport change cancelled");
     this.rtcCandidateWaiter?.reject(new Error("Transport change cancelled"));
     this.rtcCandidateWaiter = null;
-    if (this.activeBinding) this.dataLink.close();
+    if (this.activeBinding && closeRtc) this.dataLink.close();
   }
 
   private async prepareSwitch(plan: SwitchPlan): Promise<void> {
@@ -4267,6 +4316,7 @@ export class GhostLink {
         if (epoch !== this.candidateEpoch || this.switcher.pending !== plan) return;
         const candidate = this.candidate; this.candidate = null;
         candidate?.session.stop(); candidate?.reject(new Error("Candidate failed")); candidate?.channel.close();
+        this.dropContenders("Candidate failed");
         this.rtcCandidateWaiter = null;
         if (transport === "webrtc/1") this.dataLink.close();
       }
@@ -4276,10 +4326,46 @@ export class GhostLink {
   }
 
   private attachCandidate(channel: FrameChannel, binding: NativeBinding | undefined, plan: SwitchPlan): Promise<void> {
-    if (this.candidate || this.switcher.pending !== plan || !plan.choices.includes(binding?.transport ?? "webrtc/1")) {
+    // One dialled in first and unproven keeps no place of its own: the contact's, or this side's own dial, authenticates
+    // beside it (`contend`). So does the WebRTC session a move to WebRTC opened beside one dialled in as a replacement:
+    // refused, the move off a relay failed and was never planned again.
+    const rtcMove = !binding && plan.choices[0] === "webrtc/1";
+    if ((this.candidate && !this.contendable(rtcMove ? this.candidate.plan : plan)) || this.switcher.pending !== plan || !plan.choices.includes(binding?.transport ?? "webrtc/1")) {
       channel.close(); return Promise.reject(new Error("Obsolete or duplicate transport candidate"));
     }
-    return new Promise<void>((resolve, reject) => this.attach(channel, binding, { plan, resolve, reject }));
+    return new Promise<void>((resolve, reject) => this.contend(channel, binding, { plan, resolve, reject }));
+  }
+
+  /** The candidate waiting for `plan` (none: a replacement) was dialled in and has not authenticated yet. */
+  private contendable(plan?: SwitchPlan): boolean {
+    const held = this.candidate;
+    return !!held && held.plan === plan && this.unproven(held.channel) && held.session.state.status !== "ready";
+  }
+  /**
+   * A connection that authenticates beside the candidate held (`contenders`), or takes the place if none is. With
+   * `DIALED_IN_CONTENDERS` waiting already, the oldest dialled in and unproven of them gives its place up.
+   */
+  private contend(channel: FrameChannel, binding: NativeBinding | undefined, migration: { plan?: SwitchPlan; resolve(): void; reject(error: Error): void }): void {
+    if (this.candidate && this.contenders.length >= DIALED_IN_CONTENDERS) {
+      const at = this.contenders.findIndex(c => this.unproven(c.channel));
+      if (at < 0) { channel.close(); migration.reject(new Error("Obsolete or duplicate transport candidate")); return; }
+      const [oldest] = this.contenders.splice(at, 1);
+      traceLink(this.myPubKeyZ32, "dialed-in-dropped", { transport: oldest.binding?.transport });
+      oldest.session.stop(); oldest.reject(new Error("A newer connection took its place")); oldest.channel.close();
+    }
+    this.attach(channel, binding, migration);
+  }
+  /** One of the `contenders` authenticated first: it takes the candidate's place, and the candidate held closes. */
+  private promoteContender(channel: FrameChannel): boolean {
+    const at = this.contenders.findIndex(c => c.channel === channel);
+    if (at < 0) return false;
+    const [won] = this.contenders.splice(at, 1), held = this.candidate;
+    this.candidate = won;
+    if (held) { held.session.stop(); held.reject(new Error("Another connection authenticated first")); held.channel.close(); }
+    return true;
+  }
+  private dropContenders(reason: string): void {
+    for (const c of this.contenders.splice(0)) { c.session.stop(); c.reject(new Error(reason)); c.channel.close(); }
   }
 
   /**
@@ -4327,13 +4413,10 @@ export class GhostLink {
    */
   private attachReplacement(channel: FrameChannel, binding: NativeBinding): void {
     if (!this.options.pairing?.credentials.peerKey || !this.options.params.profile) { channel.close(); return; }
-    // A replacement dialled in that has not authenticated yet keeps no place against a newer one: whoever read the
-    // endpoint could otherwise hold it while the contact, back after a restart, is turned away.
-    const waiting = this.candidate;
-    if (waiting && !waiting.plan && this.unproven(waiting.channel) && waiting.session.state.status !== "ready") {
-      traceLink(this.myPubKeyZ32, "dialed-in-dropped", { transport: waiting.binding?.transport });
-      this.candidate = null; waiting.session.stop(); waiting.channel.close(); waiting.reject(new Error("A newer connection took its place"));
-    }
+    // A replacement dialled in that has not authenticated yet keeps no place of its own: a newer one authenticates beside
+    // it, and whichever does first takes over (`contend`). Whoever read the endpoint could otherwise hold the place, or
+    // take it from the contact's over and over, while the contact, back after a restart, is turned away.
+    if (this.contendable()) { this.contend(channel, binding, { resolve: () => {}, reject: () => {} }); return; }
     if (this.candidate) { channel.close(); return; }
     // Two dials crossed and both connected: the lower key's carries the chat. Here, the lower key's side, holding the
     // one it just dialled, refuses the contact's; the contact takes this one over as a replacement.
@@ -4428,6 +4511,8 @@ export class GhostLink {
       if ((!binding && !fingerprints) || !this.options.pairing) { channel.close(); migration?.reject(new Error("Connection binding unavailable")); return; }
       channel.onClose = () => {
         if (this.candidate?.channel === channel) { this.candidate.session.stop(); this.candidate = null; migration?.reject(new Error("Candidate connection closed")); }
+        const contender = this.contenders.findIndex(c => c.channel === channel);
+        if (contender >= 0) { this.contenders.splice(contender, 1)[0].session.stop(); migration?.reject(new Error("Candidate connection closed")); }
         if (this.channel === channel) {
           const wasLive = this.paired?.state.status === "ready";
           this.rejectWaiters(new Error("The peer closed this connection. Check that both transport preferences allow a common transport, then reconnect."));
@@ -4497,10 +4582,11 @@ export class GhostLink {
           let carried: PairedFiles | null = null;
           let switched: { from?: PairedTransport; to: PairedTransport } | null = null, replaced = false;
           if (migration) {
-            if (this.candidate?.channel !== channel) { paired.stop(); channel.close(); return; }
+            if (this.candidate?.channel !== channel && !this.promoteContender(channel)) { paired.stop(); channel.close(); return; }
             const oldChannel = this.channel, oldPaired = this.paired, oldBinding = this.activeBinding;
             const from = oldPaired?.state.transport;
             this.candidate = null;
+            this.dropContenders("Another connection authenticated first");
             // Transfers in flight carry on over the new channel; they end only if it cannot take files. A replacement is a
             // new session on the contact's side: nothing of the old one carries over.
             const files = this.pairedFiles; this.pairedFiles = null;
@@ -4816,11 +4902,6 @@ export class GhostLink {
             });
             return;
           }
-          if (frame?.t === "paired-reconnect") {
-            this.switchAllowedUntil = Date.now() + 30_000;
-            channel.send(JSON.stringify({ t: "paired-reconnect-ack" })); return;
-          }
-          if (frame?.t === "paired-reconnect-ack") { this.switchAck?.(); return; }
           if (frame?.t === "paired-adapters") {
             if (!frame.descriptors || typeof frame.descriptors !== "object" || JSON.stringify(frame.descriptors).length > 4096) return;
             const descriptors = checkedDescriptors(frame.descriptors);
@@ -4861,7 +4942,10 @@ export class GhostLink {
           }
         },
       });
-      if (migration) this.candidate = { channel, session: paired, binding, ...(migration.plan && { plan: migration.plan }), reject: migration.reject };
+      if (migration) {
+        const entry: LinkCandidate = { channel, session: paired, binding, ...(migration.plan && { plan: migration.plan }), reject: migration.reject };
+        if (this.candidate) this.contenders.push(entry); else this.candidate = entry;
+      }
       else this.paired = paired;
       paired.start();
       return;
@@ -5059,7 +5143,8 @@ export class GhostLink {
   private peerPacketArrived(presence: PeerPresence): void {
     const before = this.peerPacketSeen;
     this.peerPacketSeen = presence.lastPacketAt;
-    if (!before || presence.lastPacketAt === before || !presence.online || this.dialing || this.channel) return;
+    if (!before) { this.leftAsThisStarted(presence); return; }
+    if (presence.lastPacketAt === before || !presence.online || this.dialing || this.channel) return;
     if (!this.options.pairing?.credentials.peerKey || Date.now() - presenceSeenAt(presence) >= EXPECT_PEER_MS) return;
     if (Date.now() > this.lostUntil) return;
     this.lostUntil = 0;
@@ -5067,6 +5152,20 @@ export class GhostLink {
     this.autoConnectFailures = 0;
     this.lastAutoConnectAt = 0;
     this.backDial = true;
+  }
+
+  /**
+   * The first packet of the contact's read since this link started is the one it leaves as it quits (it does not
+   * advertise), put moments ago: both apps stopped and start again together (two bots a service manager restarts, a host
+   * that reboots). The one that stopped first was live then and resumes; this one's session had ended on its goodbye, so
+   * it does not, and read as any contact away, the resumed app's offer waited for the background pace (35 s on the
+   * relays, bug hunt 2026-11-14). Watched instead as a contact that just left a live session is (`peerLost`).
+   */
+  private leftAsThisStarted(presence: PeerPresence): void {
+    if (!presence.lastPacketAt || presence.online || this.dialing || this.channel) return;
+    if (!this.options.pairing?.credentials.peerKey || !this.options.params.profile) return;
+    if (Date.now() - presenceSeenAt(presence) >= EXPECT_PEER_MS) return;
+    this.peerLost("left-as-this-started");
   }
 
   /**
@@ -5247,7 +5346,10 @@ export class GhostLink {
     // A replacement still authenticating may yet carry the chat. Without one, the session a plan meant to move is
     // gone, and so is the plan: its dial must not go on and open a session of its own, or settle the next one. Its
     // target goes too, or the chat's native listeners are held (`canReleaseEndpoint`) until the contact is back.
-    if (!this.candidate) { this.cancelCandidate(); this.switcher.stop(); this.transitionTarget = this.transitionError = undefined; }
+    // With no change under way, a WebRTC attempt beside the native session is the contact's offer answered over the
+    // session it held (`rtcOverHeld`), back after a crash: it carries the chat once open. Closed with the dead session,
+    // the contact's app waited out its offer's 90 s.
+    if (!this.candidate) { this.cancelCandidate(!!this.switcher.pending || !!this.rtcCandidateWaiter); this.switcher.stop(); this.transitionTarget = this.transitionError = undefined; }
     this.activeBinding = undefined;
     this.paired?.stop();
     this.paired = null;
@@ -5306,9 +5408,13 @@ export class GhostLink {
         if (!this.takeMessage()) break;
         this.options.events?.onMessage?.({ text: frame.m, timestamp: frame.ts, via: "datalink" });
         break;
-      case "call":
-        this.options.events?.onCallSignal?.(heardCallSignal(frame.s, Date.now()));
+      case "call": {
+        // Counted before it is read and none handed on twice, as on a paired session (`paired-call`).
+        if (!this.callsReceived.take()) break;
+        const signal = heardCallSignal(frame.s, Date.now());
+        if (this.pairedCalls.heard(signal)) this.options.events?.onCallSignal?.(signal);
         break;
+      }
       case "req":
         this.httpHost?.handleRequest(frame);
         break;

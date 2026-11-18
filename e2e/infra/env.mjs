@@ -84,6 +84,12 @@ export const VARIABLES = {
   GHOSTLY_PUBKY_HTTP_RELAY_URL: ["http://127.0.0.1:47092", "Pubky testnet: its HTTP relay (auth requests and approvals), for httprelay.pubky.app"],
   GHOSTLY_PUBKY_HOMESERVER_URL: ["http://127.0.0.1:47093", "Pubky testnet: the homeserver's ICANN HTTP, for https://pubky-homeserver.e2e.ghostly.tools"],
 
+  // Group calls (WISP 602): a LiveKit SFU, and a mock of a node's group-token route that gives passes into it. The
+  // mock answers for GHOSTLY_SFU_ORIGIN (what a group's `call.sfu` names and requests sign): specs route that name to it.
+  GHOSTLY_SFU_URL: ["http://127.0.0.1:47123", "Group-call token mock (e2e/infra/sfu-token, POST /sfu/group-token): group-call suites"],
+  GHOSTLY_SFU_ORIGIN: ["https://sfu.ghostly.test", "The https origin the token mock answers for, as a group's call.sfu names it"],
+  GHOSTLY_LIVEKIT_URL: ["ws://127.0.0.1:47120", "LiveKit server (--dev, key devkey) the mock's passes connect to"],
+
   // S3 (held messages, profile backups): RustFS with throwaway keys.
   GHOSTLY_S3_ENDPOINT: ["http://127.0.0.1:47080", "S3-compatible endpoint (RustFS)"],
   GHOSTLY_S3_KEY: ["ghostly-e2e", "S3 access key (local server)"],
@@ -136,6 +142,7 @@ export const endpoints = {
   hyperdhtRelay: read("GHOSTLY_HYPERDHT_RELAY_URL"),
   atproto: { pds: read("E2E_ATPROTO_PDS_URL"), plc: read("E2E_ATPROTO_PLC_URL") },
   s3: { endpoint: read("GHOSTLY_S3_ENDPOINT"), key: read("GHOSTLY_S3_KEY"), secret: read("GHOSTLY_S3_SECRET") },
+  sfu: { token: read("GHOSTLY_SFU_URL"), origin: read("GHOSTLY_SFU_ORIGIN"), livekit: read("GHOSTLY_LIVEKIT_URL") },
   pubky: { pkarrRelay: read("GHOSTLY_PUBKY_PKARR_RELAY_URL"), httpRelay: read("GHOSTLY_PUBKY_HTTP_RELAY_URL"), homeserver: read("GHOSTLY_PUBKY_HOMESERVER_URL") },
 };
 

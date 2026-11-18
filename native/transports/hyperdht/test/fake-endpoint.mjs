@@ -5,12 +5,16 @@
 // long in the sender's buffer before it reaches the other end, as a slow link.
 // FAKE_ENDPOINT_DIAL_MS makes a dial to a peer that is not there fail only after
 // that long, as one to a contact whose app died while the DHT still holds its record.
+// FAKE_ENDPOINT_CONNECT_MS makes a dial to a peer that is there connect only after
+// that long, as one made again after it stalled on a slow path.
 const registry = new Map()
 const delay = Number(process.env.FAKE_ENDPOINT_DELAY_MS ?? 0)
 const dialDelay = Number(process.env.FAKE_ENDPOINT_DIAL_MS ?? 0)
+const connectDelay = Number(process.env.FAKE_ENDPOINT_CONNECT_MS ?? 0)
 
 function pair(bindingContext) {
-  const ends = [0, 1].map(() => ({ reader: null, pending: [], closeHandler: null, closed: false, buffered: 0, waiting: [] }))
+  // `held`: what reached an end while it was paused, given to its reader once it resumes.
+  const ends = [0, 1].map(() => ({ reader: null, pending: [], closeHandler: null, closed: false, buffered: 0, waiting: [], paused: false, held: [] }))
   const binding = { transport: 'hyperdht/1', context: bindingContext, identities: [] }
   const channel = (self, other) => ({
     get bufferedAmount() { return self.buffered },
@@ -23,10 +27,15 @@ function pair(bindingContext) {
       self.buffered += text.length
       const deliver = () => {
         self.buffered -= text.length
-        if (!other.closed) { if (other.reader) other.reader(text); else other.pending.push(text) }
+        if (!other.closed) { if (other.paused) other.held.push(text); else if (other.reader) other.reader(text); else other.pending.push(text) }
         if (!self.buffered) for (const { resolve } of self.waiting.splice(0)) resolve()
       }
       if (delay) setTimeout(deliver, delay); else queueMicrotask(deliver)
+    },
+    pause() { self.paused = true },
+    resume() {
+      self.paused = false
+      while (!self.paused && self.held.length && self.reader) self.reader(self.held.shift())
     },
     drained() {
       if (!self.buffered) return Promise.resolve()
@@ -55,6 +64,7 @@ export async function createHyperEndpoint(seed) {
     async connect(address) {
       const target = registry.get(address?.publicKey)
       if (!target && dialDelay) await new Promise(resolve => setTimeout(resolve, dialDelay))
+      if (target && connectDelay) await new Promise(resolve => setTimeout(resolve, connectDelay))
       if (!target || closed) throw new Error('peer not found')
       const [local, remote] = pair(`${publicKey}:${address.publicKey}`)
       target.onConnection?.(remote)

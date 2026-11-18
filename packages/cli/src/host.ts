@@ -8,6 +8,7 @@ import { announceJoins } from "./announce";
 import { reportAppFrames } from "./appEvents";
 import { callApi, type ApiContext } from "./api";
 import { sinceSeq, type Params } from "./apiKit";
+import { callSocketDir } from "./calls/audioSocket";
 import { CallManager } from "./calls/manager";
 import { MAX_LINE } from "./client";
 import { greeting, HELLO, newDaemonSecret, proof, removeDaemonSecret } from "./daemonProof";
@@ -49,6 +50,8 @@ export interface Host {
 export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], version: string, options: RuntimeOptions = {}): Promise<Host> {
   // Before the lock, the store and the events journal are written there (WISP 1100 § Profiles and files).
   ownProfile(paths.dir);
+  // GHOSTLY_CALL_SOCKET_DIR: a wrong one is refused before the engine starts (the folder itself with the calls).
+  const socketDir = mode === "daemon" ? callSocketDir() : undefined;
   const locked = acquireLock(paths);
   // A daemon says it is starting until its socket listens (`serve`): a command that finds the profile held tells it
   // from a one-shot command (`startingDaemon`). Without it, `daemon status` said no daemon ran and `daemon stop` missed it.
@@ -118,7 +121,7 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
       announceJoins(hub, node);
     } else read = await baseline();
     // Calls (WISP 1100 § Calls): only a daemon answers and places them; a one-shot still reports one that rings.
-    calls = new CallManager({ engine: node, emit: (type, id, fields) => hub.emit(type, id, fields), profileDir: paths.dir, answers: mode === "daemon" });
+    calls = new CallManager({ engine: node, emit: (type, id, fields) => hub.emit(type, id, fields), profileDir: paths.dir, socketDir, answers: mode === "daemon" });
     const manager = calls;
     hub.onCallSignal((chat, signal) => manager.onSignal(chat, signal));
     reportAppFrames(hub, node, paths.dir);
@@ -293,6 +296,9 @@ function connection(ctx: ApiContext, socket: Socket, secret: Buffer, answering: 
   // A replay raises the limit by what it wrote; once the client has read everything, it is MAX_UNREAD again.
   let limit = MAX_UNREAD;
   const unsubscribe = () => { for (const off of unsubscribes.splice(0)) off(); };
+  // The client that asked the calls still open went away (Ctrl-C on the command): `CallScope.gone`.
+  const gone = new AbortController();
+  socket.on("close", () => gone.abort());
   // Ended, not destroyed: the client still reads whole lines up to the last one written, then the end.
   const write = (value: unknown, replayed = false) => {
     if (socket.destroyed || socket.writableEnded) return;
@@ -347,7 +353,7 @@ function connection(ctx: ApiContext, socket: Socket, secret: Buffer, answering: 
       for (const event of queued) if (event.seq > last) write({ event });
       return;
     }
-    const answered = callApi(ctx, request.method, request.params ?? {}).then(
+    const answered = callApi(ctx, request.method, request.params ?? {}, { gone: gone.signal }).then(
       (result) => write({ id, result: result ?? null }),
       (error) => write({ id, error: asCliError(error).toJSON() }),
     );

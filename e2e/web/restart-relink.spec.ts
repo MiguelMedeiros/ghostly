@@ -16,7 +16,7 @@ const CRASHED_LIVE_AGAIN_MS = 15_000;
 const connectedOnWebRtc = (peer: Peer, timeout: number) =>
   expect(peer.page.getByTestId("connection-options")).toHaveAttribute("aria-label", /Connected · WebRTC/, { timeout });
 
-test("a reloaded page is live again with its contact within seconds, whichever side reloads", { tag: ["@feature:chat.paired.reconnect", "@feature:core.liveness"] }, async ({ peer }) => {
+test("a reloaded page is live again with its contact within seconds, whichever side reloads", { tag: ["@journey", "@feature:chat.paired.reconnect", "@feature:core.liveness"] }, async ({ peer }) => {
   test.setTimeout(5 * 60_000);
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   await link(alice, bob);

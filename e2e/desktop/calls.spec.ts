@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { attachDesktopLogs, desktopHome } from "../support/desktop";
+import { attachDesktopLogs, desktopHome, openDesktop } from "../support/desktop";
 import { LocalRelay } from "../support/relay";
 import { desktopNetwork } from "../matrix/desktop";
 import { desktopPerson, type DesktopPerson } from "../matrix/people";
@@ -39,29 +39,70 @@ const picture = (p: DesktopPerson) => p.app.execute<{ width: number; time: numbe
 
 /**
  * Why a call window shows no picture, for a failure's report: the state of its <video> and of the stream it was
- * given, and whether a second <video> given that same stream shows a picture within 5 s. One there says the peer's
- * pictures reach the page and the window's own player never started; none says they stopped before it.
+ * given, whether a second <video> given that same stream shows a picture within 5 s, and whether a third given a
+ * canvas stream of its own does. A second one says the peer's pictures reach the page and the window's own player
+ * never started; none says they stopped before it. A player that failed (`error` 4, `network` 3: WebKitGTK found the
+ * stream "not supported") on a live track with frames coming is the engine's: the fresh canvas says whether this
+ * page can play any canvas stream then, or only this one cannot. Twice it could not. A fourth films a canvas drawn in
+ * memory (`willReadFrequently`), not on the GPU (`memory`): on the loop's Intel GPU WebKit's Skia GPU worker crashed in
+ * Mesa, so a failure where only the memory canvas plays points at the GPU canvas.
  */
 const noPicture = (p: DesktopPerson) => p.app.executeAsync<string>(`
   const done = arguments[arguments.length - 1];
   const video = document.querySelector('[data-testid="remote-video"]');
   const stream = video && video.srcObject;
-  const state = (v) => ({ width: v.videoWidth, time: v.currentTime, ready: v.readyState, network: v.networkState, paused: v.paused, error: v.error && v.error.message });
-  if (!stream) return done(JSON.stringify({ video: video && state(video), stream: null }));
+  const state = (v) => ({ width: v.videoWidth, time: v.currentTime, ready: v.readyState, network: v.networkState, paused: v.paused, error: v.error && v.error.message, code: v.error && v.error.code });
+  if (!stream) return done(JSON.stringify({ video: video && state(video), stream: null, hidden: document.hidden }));
   const tracks = stream.getTracks().map((t) => ({ kind: t.kind, state: t.readyState, muted: t.muted, enabled: t.enabled }));
-  const second = document.createElement("video");
-  second.muted = true;
-  second.autoplay = true;
-  second.playsInline = true;
-  second.style.cssText = "position:fixed;left:0;top:0;width:2px;height:2px;opacity:0;pointer-events:none";
-  document.body.append(second);
-  second.srcObject = stream;
+  const player = (source) => {
+    const v = document.createElement("video");
+    v.muted = true;
+    v.autoplay = true;
+    v.playsInline = true;
+    v.style.cssText = "position:fixed;left:0;top:0;width:2px;height:2px;opacity:0;pointer-events:none";
+    document.body.append(v);
+    v.srcObject = source;
+    return v;
+  };
+  const second = player(stream);
+  const filmed = (options) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 64;
+    canvas.height = 48;
+    const g = canvas.getContext("2d", options);
+    return { g, track: canvas.captureStream(15).getVideoTracks()[0] };
+  };
+  const gpu = filmed({});
+  const cpu = filmed({ willReadFrequently: true });
+  const third = player(new MediaStream([gpu.track]));
+  const fourth = player(new MediaStream([cpu.track]));
+  let n = 0;
+  const drawing = setInterval(() => {
+    for (const { g } of [gpu, cpu]) {
+      g.fillStyle = "hsl(" + (n * 30) + " 70% 50%)";
+      g.fillRect(0, 0, 64, 48);
+    }
+    n++;
+  }, 66);
   setTimeout(() => {
-    const seen = { video: state(video), tracks, second: state(second) };
-    second.srcObject = null;
-    second.remove();
+    const seen = { video: state(video), tracks, second: state(second), fresh: state(third), memory: state(fourth), hidden: document.hidden };
+    clearInterval(drawing);
+    gpu.track.stop();
+    cpu.track.stop();
+    for (const v of [second, third, fourth]) {
+      v.srcObject = null;
+      v.remove();
+    }
     done(JSON.stringify(seen));
   }, 5000);`);
+
+/**
+ * What each app and its WebKit processes wrote, by name: the driver's output, with GStreamer's errors and warnings
+ * (`GST_DEBUG=2`) among it. A player WebKitGTK gave up on says only `code` 4 to the page; WebKit's own
+ * `webkitmediaplayer` error and the element that failed are here. (Twice a window's every player, a fresh canvas
+ * stream's too, failed so on a live track with frames coming, and no lab outside the loop made one fail that way.)
+ */
+const output = new Map<string, () => string>();
 
 /** The peer's picture reaches the call window; when it does not, the report says what the window had instead. */
 async function showsPicture(p: DesktopPerson, message: string): Promise<void> {
@@ -69,6 +110,7 @@ async function showsPicture(p: DesktopPerson, message: string): Promise<void> {
     await expect.poll(async () => (await picture(p))?.width ?? 0, { timeout: 30_000, message }).toBeGreaterThan(0);
   } catch (error) {
     test.info().annotations.push({ type: `${p.name}'s picture`, description: await noPicture(p).catch((failed) => String(failed)) });
+    await test.info().attach(`${p.name}'s output`, { body: output.get(p.name)?.() || "(nothing)", contentType: "text/plain" });
     throw error;
   }
 }
@@ -110,7 +152,12 @@ test("two Linux Desktops call each other: decline, then sound and pictures both 
   try {
     const open = async (name: string): Promise<DesktopPerson> => {
       const home = desktopHome(name);
-      const person = await desktopPerson(name, { home: home.dir, env: network.env });
+      const env = { ...network.env, GST_DEBUG: "2", GST_DEBUG_NO_COLOR: "1" };
+      const person = await desktopPerson(name, { home: home.dir, env, open: async () => {
+        const session = await openDesktop({ profile: `matrix-${name}`, home: home.dir, env });
+        output.set(name, session.output);
+        return session;
+      } });
       cleanup.push(async () => {
         // What each side's call looked like at the end, for a failure's report.
         const seen = await stats(person).catch((error) => String(error));

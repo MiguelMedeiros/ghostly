@@ -2,6 +2,7 @@ import { groupName, INVITE_TAKEN, isZ32Key, MAX_GROUP_NAME_BYTES, MAX_GROUP_NAME
 import type { GhostlyNode } from "@ghostly/browser/engine/node";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { CliError } from "./errors";
+import { shellWord } from "./shellWord";
 import type { CallManager } from "./calls/manager";
 import type { EventHub } from "./events";
 import type { GroupAutoJoin } from "./groupAuto";
@@ -33,7 +34,16 @@ export interface ApiContext {
 }
 
 export type Params = Record<string, unknown>;
-export type Method = (ctx: ApiContext, params: Params) => Promise<unknown>;
+/** What a call knows of who asked it. */
+export interface CallScope {
+  /**
+   * Aborted when the daemon's connection the call came on closes (Ctrl-C on the command, its process gone): nobody
+   * reads the answer any more. A call that leaves something behind for its answer (`profile.backup`) stops on it.
+   */
+  gone?: AbortSignal;
+}
+
+export type Method = (ctx: ApiContext, params: Params, call?: CallScope) => Promise<unknown>;
 
 export const node = (ctx: ApiContext): GhostlyNode => ctx.runtime.server.node;
 export const state = (ctx: ApiContext): EngineState => node(ctx).getState();
@@ -211,8 +221,8 @@ function noChat(ref: string, groups: readonly GroupView[]): CliError {
   return new CliError("not_found", `No chat ${JSON.stringify(ref)} (ghostly chat list)`);
 }
 
-/** A chat or group ref as a next step shows it: as given, quoted only when it holds more than a word. */
-const shownRef = (ref: string) => (/^[\w.:-]+$/.test(ref) ? ref : JSON.stringify(ref));
+/** A chat or group ref as a next step shows it: as given, quoted only when it holds more than a word (see `shellWord`). */
+const shownRef = (place: RefPlace) => shellWord(place.ref, place.group ? "<group>" : "<chat>");
 
 /** The chat or the group a message or a file was looked for in, as the command was given it (`ref`). */
 export type RefPlace = { group: boolean; ref: string };
@@ -223,14 +233,14 @@ export type RefPlace = { group: boolean; ref: string };
  * else it may have failed for (", or it takes no reaction", ": only your own messages are sent again").
  */
 export function noMessage(id: string, place: RefPlace, { whose, tail }: { whose?: string; tail?: string } = {}): CliError {
-  const history = `ghostly ${place.group ? "group" : "chat"} history ${shownRef(place.ref)}`;
+  const history = `ghostly ${place.group ? "group" : "chat"} history ${shownRef(place)}`;
   return new CliError("not_found", `No message ${JSON.stringify(id)}${whose ? ` ${whose}` : ""} in this ${place.group ? "group" : "chat"}${tail ?? ""} (${history})`);
 }
 
 /** No file by `id`, as `noMessage` says a message: in the chat or group named (`place`), or in none when none was. */
 export function noFile(id: string, place?: RefPlace): CliError {
   const where = place ? ` in this ${place.group ? "group" : "chat"}` : "";
-  return new CliError("not_found", `No file ${JSON.stringify(id)}${where} (ghostly file list ${place ? shownRef(place.ref) : "<chat|group>"})`);
+  return new CliError("not_found", `No file ${JSON.stringify(id)}${where} (ghostly file list ${place ? shownRef(place) : "<chat|group>"})`);
 }
 
 /** The one group `ref` names, if any (none, or more than one: undefined). */
@@ -397,9 +407,13 @@ const byId = (ctx: ApiContext, ref: string): LinkView | undefined => node(ctx).c
 /** A chat of mine whose invite nobody took yet: no contact's key, so nothing goes out until they join. */
 export const nobodyJoined = (link: LinkView): boolean => !!(link.profile && link.inviteCode && !link.peerParticipationKey);
 
-/** `nobodyJoined` by the chat's id: a group's (`group:<id>`) is never one. */
+/**
+ * `nobodyJoined` by the chat's id: a group's (`group:<id>`) is never one. That chat's view alone: every card send or
+ * update, `file send` and unconfirmed edit asks it, and built every chat for it (once in a daemon, up to three times
+ * in a one-shot `usage send`).
+ */
 export const nobodyJoinedChat = (ctx: ApiContext, chat: string): boolean => {
-  const link = state(ctx).links.find((l) => l.id === chat);
+  const link = byId(ctx, chat);
   return !!link && nobodyJoined(link);
 };
 
@@ -476,16 +490,25 @@ export function chatOrGroup(ctx: ApiContext, ref: string, s?: EngineState): { id
  */
 export function groupOf(ctx: ApiContext, params: Params, twin?: string): GroupView {
   const ref = str(params, "group", true);
+  const byId = groupById(ctx, groupPrefixed(ref) ?? ref);
+  if (byId) return byId;
   const { links, groups } = state(ctx);
   try { return findGroup(groups, ref); } catch (error) {
     // `group:<ref>` names a group only: never a chat, as in `findChatOrGroup`.
     if (!(error instanceof CliError) || error.code !== "not_found" || groupPrefixed(ref) !== null) throw error;
     let chat: LinkView;
     try { chat = findChat(links, ref); } catch { throw error; }
-    const shown = /^[\w.:-]+$/.test(ref) ? ref : JSON.stringify(ref);
+    const shown = shellWord(ref, chat.id);
     throw new CliError("not_found", `${JSON.stringify(ref)} is a chat, not a group${twin ? `: ghostly ${twin.replace("<chat>", shown)}` : " (ghostly group list)"}`, { chat: chat.id });
   }
 }
+
+/**
+ * The group whose id `id` is, built alone with its members' edges, as `byId` builds a chat: a group's own id names it
+ * before anything else does (`findGroup`), and a bot names a group by the id its events give. Undefined for any other
+ * ref, which the whole list is read for.
+ */
+export const groupById = (ctx: ApiContext, id: string): GroupView | undefined => node(ctx).groupView(id);
 
 /**
  * A message of a chat or a group (`group:<id>`) named by its id here, read as one row; only a name that is no such

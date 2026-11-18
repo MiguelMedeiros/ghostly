@@ -182,6 +182,10 @@ const RULES: readonly Rule[] = [
   exact("Too many files are waiting here", "errors.files.floor.tooMany", "errors.files.floor.tooManyNext"),
   exact("It was refused here", "errors.files.floor.refused", "errors.files.askAgain"),
   exact("It did not come within a week", "errors.files.floor.notInAWeek", "errors.files.askAgain"),
+  // Accept on an offer larger than the room left now (engine/fileDesk.ts `accept`): it keeps waiting, its room shown.
+  // One that fits the free space but not beside the files still coming: waiting for them, or cancelling one, makes room.
+  { match: /^No room on this device for this file beside the files still coming \((?<left>.+) left of (?<free>.+) free\)$/, key: "errors.files.noRoomBesideComing", next: "errors.files.noRoomBesideComingNext" },
+  { match: /^No room on this device for this file \((?<free>.+) free\)$/, key: "errors.files.noRoomHere", next: "errors.app.noRoomNext" },
   // A group's file every holder served damaged (packages/browser groupFiles.ts DAMAGED): the group is asked, not a contact.
   exact("Every copy of this file arrived damaged and was deleted. Ask for it again later.", "errors.files.refused.damaged", "errors.files.askGroupAgain"),
   // A received file this device had no room for (packages/core chatFiles.ts `storeFailure`): named QuotaExceededError
@@ -273,6 +277,8 @@ const RULES: readonly Rule[] = [
   exact("Could not share the screen. Try again.", "calls.share.failed", "calls.share.failedNext"),
   exact("Your contact's app cannot show a screen in this call", "calls.share.contactCannot"),
   exact("Screen sharing is not available on Linux yet", "calls.share.notOnLinux"),
+  // Why a group's call button is off on the Linux Desktop (apps/ui/src/desktop/groupCallSupport.ts).
+  exact("Group calls aren't on Linux yet: join from app.ghostly.tools in a browser", "calls.noGroupOnLinux"),
   exact("All native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now.", "errors.transport.slotsFull", "errors.transport.slotsFullNext"),
   // Its listener, which did not start or stopped (packages/browser/src/platform: hyperdhtRelay.ts, irohWeb.ts; the
   // Iroh WASM's own, native/transports/iroh-web/src/lib.rs). A browser sees no status on a refused WebSocket, so a
@@ -295,6 +301,8 @@ const RULES: readonly Rule[] = [
   // A send or an edit a chat refused (engine/node.ts sendMessage, editMessage, replyRef; platform/useChat.ts).
   { match: /^Message exceeds (?<max>\d+) UTF-8 bytes\.$/, key: "errors.chat.tooLong", next: "errors.chat.tooLongNext" },
   exact("Message too long once encoded. Shorten it or send it as a file.", "errors.chat.tooLong", "errors.chat.tooLongNext"),
+  // A text within the DHT's 256 bytes that its envelope, ratchet and receipt still do not fit (core dhtDelivery.ts).
+  exact("Text and authentication exceed the DHT packet budget. Shorten the message.", "errors.chat.dhtTooLong", "errors.chat.dhtTooLongNext"),
   { match: /^This message was edited (?<max>\d+) times, the most one takes\.$/, key: "errors.chat.editTooMany", next: "errors.chat.editTooManyNext" },
   { match: /^That message (?:is not in this chat, or )?cannot be replied to$/, key: "errors.chat.replyGone", next: "errors.chat.replyGoneNext" },
   // A forward of a message deleted meanwhile, or of none (engine/node.ts forwardMessages).
@@ -462,6 +470,7 @@ const RULES: readonly Rule[] = [
   exact("These notes are from a federation I have not joined", "errors.pay.notesUnknownFederation"),
   exact("These notes are worth less than a sat", "errors.pay.notesTooSmall"),
   exact("These notes were already redeemed", "errors.pay.notesRedeemed"),
+  exact("These notes were already received", "errors.pay.notesReceived"),
   exact("The server took too long to answer", "errors.lnurl.tooSlow"),
   exact("No way to reach the network here", "errors.lnurl.noNetwork"),
   { match: /^(?<host>[^\s:/]+\.[^\s:/]+(?::\d+)?) refused: (?<reason>[\s\S]+)$/, key: "errors.lnurl.refused", reason: "next" },
@@ -660,6 +669,15 @@ const RULES: readonly Rule[] = [
   { match: /^(?<domain>\S+) has no address$/, key: "errors.proof.noAddress", next: "errors.proof.noAddressNext", detail: true },
   { match: /^(?<domain>\S+) points to a private network address, so it was not contacted$/, key: "errors.proof.privateAddress", next: "errors.proof.privateAddressNext", detail: true },
   { match: /^[^:]+: (?<login>\S+) does not list the key that signed \([^)]*\)$/, key: "errors.proof.keyNotListed", detail: true },
+  // Add's refusals for an SSH key proof (providers/ssh.ts, core sshsig.ts): what is wrong with the key, the account or the
+  // pasted signature, then what to do. They read as they came, in English, in every language until 2026-11-15.
+  exact("Paste your public key (the one line in ~/.ssh/id_ed25519.pub) or its SHA256: fingerprint", "errors.proof.sshNotKey", "errors.proof.sshNotKeyNext"),
+  { match: /^Unsupported SSH key type(?: "[^"]*")?$/, key: "errors.proof.sshKeyType", next: "errors.proof.sshKeyTypeNext" },
+  { match: /^RSA keys must be (?<min>\d+)-(?<max>\d+) bits$/, key: "errors.proof.sshRsaSize", next: "errors.proof.sshRsaSizeNext" },
+  { match: /^Enter a (?<forge>GitHub|GitLab) username$/, key: "errors.proof.sshForgeLogin" },
+  exact("Paste the whole signature, from -----BEGIN SSH SIGNATURE----- to -----END SSH SIGNATURE-----", "errors.proof.sshWholeSignature", "errors.proof.sshWholeSignatureNext"),
+  { match: /^That signature is for "(?<namespace>[^"]*)", not "ghostly": run the command with -n ghostly$/, key: "errors.proof.sshNamespace", next: "errors.proof.sshNamespaceNext" },
+  exact("The signature is not over this statement: copy the command again and sign exactly what it shows", "errors.proof.sshNotStatement", "errors.proof.sshNotStatementNext"),
   // Why a contact's proof failed this app's check, the first time or on the daily re-check (verify.ts, the providers'
   // verify(), core identityProofs.ts onPresent), and the refusals a contact's app sends back for mine. The account,
   // host or domain stays a value; an address or status code goes behind the ⓘ.
@@ -673,6 +691,11 @@ const RULES: readonly Rule[] = [
   { match: /^The account's DID no longer resolves: .+$/, key: "errors.proof.didNoResolve", detail: true },
   exact("The account's DID could not be resolved", "errors.proof.didUnresolved", "errors.proof.laterNext"),
   exact("This DID is deactivated: its owner retired it", "errors.proof.didDeactivated"),
+  // A DID's lookup that found no document it can use (proofs/did.ts, providers/did.ts previewOf): a DID card in a
+  // message and the Add dialog's preview. The document's address stays a value.
+  { match: /^No DID document at (?<url>https:\/\/\S+)$/, key: "errors.proof.didNoDocument" },
+  { match: /^(?<url>https:\/\/\S+\/did\.json) is not JSON$/, key: "errors.proof.didNotJson" },
+  exact("This DID lists no Ed25519, secp256k1 or P-256 key for authentication or assertionMethod, so it cannot sign", "errors.proof.didNoSigningKey"),
   exact("The proof file is not on the homeserver", "errors.proof.pubkyFileGone"),
   exact("The file on the homeserver is not this proof", "errors.proof.pubkyFileOther"),
   exact("This Pubky key has no records on the Pkarr relays", "errors.proof.pubkyNoRecords"),
@@ -691,6 +714,7 @@ const RULES: readonly Rule[] = [
   exact("Your contact's app cannot verify this kind of identity yet", "errors.proof.contactUnsupported"),
   exact("Your contact's app could not check it. Try again later.", "errors.proof.contactUnavailable", "errors.proof.laterNext"),
   exact("Your contact keeps too many identities from you already", "errors.proof.contactTooMany"),
+  exact("Your contact keeps a newer proof of this identity from you", "errors.proof.contactNewer"),
   exact("That identity is no longer in your profile", "errors.proof.notInProfile"),
   exact("Your contact could not verify it", "errors.proof.contactRefused"),
   // A check that could not run (IdentityCheckUnavailable: sshForges.ts, providers/atproto.ts, atproto/resolve.ts, pubky.ts,
@@ -744,6 +768,21 @@ const RULES: readonly Rule[] = [
   exact("That did:jwk does not hold a JSON Web Key", "errors.proof.didJwkNone"),
   exact("That did:jwk contains a private key. Never share it: make a new key", "errors.proof.didJwkPrivate", "errors.proof.didJwkPrivateNext"),
   exact("That did:jwk is not an Ed25519, secp256k1 or P-256 key", "errors.proof.didJwkUnknown"),
+  // What the Add dialog (or a proof's delete) refuses for the other kinds (proofs/providers: nostr.ts, openpgp.ts, did.ts,
+  // pubky.ts, atproto.ts, oidc.ts). A line also read on a contact's proof (the Nostr event, the did.json) has no next step.
+  exact("Enter a Nostr public key: npub1… or 64 hex characters", "errors.proof.nostrEnterKey", "errors.proof.nostrEnterKeyNext"),
+  exact("That is not a signed Nostr event", "errors.proof.nostrNotEvent"),
+  exact("The signer did not sign the exact Ghostly statement", "errors.proof.nostrOtherStatement"),
+  exact("Use the full fingerprint, not a key ID: gpg --fingerprint shows it.", "errors.proof.pgpKeyId", "errors.proof.pgpKeyIdNext"),
+  exact("Enter your key's fingerprint: 40 hex characters (gpg --fingerprint).", "errors.proof.pgpEnterFingerprint", "errors.proof.pgpEnterFingerprintNext"),
+  exact("Paste your public key too: the second command prints it (-----BEGIN PGP PUBLIC KEY BLOCK-----).", "errors.proof.pgpPastePublicKey", "errors.proof.pgpPastePublicKeyNext"),
+  exact("That is this profile's own Ghostly DID: your contacts already see your Ghostly identity. Add another DID.", "errors.proof.didOwn", "errors.proof.didOwnNext"),
+  exact("Publishing works for did:web only: sign the statement instead", "errors.proof.didWebOnly", "errors.proof.didWebOnlyNext"),
+  exact("The did.json has no Ghostly service for this proof: it was removed, or not added yet", "errors.proof.didNoService", "errors.proof.didNoServiceNext"),
+  exact("That is another Pubky identity: approve with the one this proof is for", "errors.proof.pubkyOtherIdentity", "errors.proof.pubkyOtherIdentityNext"),
+  exact("Not an AT Protocol account (did:plc or did:web)", "errors.proof.atprotoNotAccount", "errors.proof.atprotoNotAccountNext"),
+  exact("Your server only offers full access to your account. Try again to approve that; Ghostly only deletes this one record.", "errors.proof.atprotoFullAccess", "errors.proof.atprotoFullAccessNext"),
+  exact("This provider is not set up in this Ghostly build.", "errors.proof.oidcNotSetUp", "errors.proof.oidcNotSetUpNext"),
   { match: /^Enter at least one relay address \((?:https|wss):\/\/…\)$/, key: "errors.relays.atLeastOne" },
   // "Hide my IP from contacts" without the TURN server it needs (packages/browser/src/engine/node.ts, updateSettings).
   { match: /^Add a TURN server first$/, key: "errors.relayOnly.needsTurn", next: "errors.relayOnly.needsTurnNext" },
@@ -759,6 +798,8 @@ const RULES: readonly Rule[] = [
   // list's line may hold spaces ("relay .example.org").
   { match: /^Use an https:\/\/ relay address: (?<address>\S+)$/, key: "errors.relays.useHttps" },
   { match: /^Not a relay address: (?<address>.+)$/, key: "errors.relays.notAddress" },
+  // An Iroh or HyperDHT relay past what a contact reads (`relayUrlTooLong`): a relay address, one too long.
+  { match: /^Use a shorter relay address: (?<address>\S+)$/, key: "errors.relays.useShorter" },
   // The rest of what Settings, Network refuses before or on Save (packages/browser/src/shared: hyperdhtRelay.ts,
   // pushRelay.ts, ice.ts; engine/node.ts updateSettings). The field it is about is marked there, so no line names it.
   { match: /^Enter a relay address \((?<example>(?:https|wss):\/\/)…\)$/, key: "errors.relays.enterAddress" },
@@ -792,6 +833,7 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   mintHoldsSats: "errors.engine.mintHoldsSats",
   mintFailedQuote: "errors.engine.mintFailedQuote",
   mintFailedFaucet: "errors.engine.mintFailedFaucet",
+  mintFailedInvoice: "errors.engine.mintFailedInvoice",
   lastMint: "errors.engine.lastMint",
   noSharedMint: "errors.engine.noSharedMint",
   reviewedSatsGone: "errors.engine.reviewedSatsGone",
@@ -838,6 +880,12 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   walletAway: "errors.engine.walletAway",
   walletAwayUnnamed: "errors.engine.walletAwayUnnamed",
   groupTurnUnconfirmed: "errors.engine.groupTurnUnconfirmed",
+  groupNoCall: "errors.engine.groupNoCall",
+  groupCallNotMember: "errors.engine.groupCallNotMember",
+  groupCallRefused: "errors.engine.groupCallRefused",
+  groupCallBusy: "errors.engine.groupCallBusy",
+  groupCallFailed: "errors.engine.groupCallFailed",
+  serviceShareFull: "errors.engine.serviceShareFull",
   // As the chat's payment line says them (Chat.tsx).
   contactNoWallet: "chat.payments.noWallet",
   contactNoPayments: "chat.payments.offOrOld",
@@ -848,21 +896,28 @@ const ENGINE_NEXT: Partial<Record<EngineErrorCode, TranslationKey>> = {
   fedimintRealOnTestnet: "errors.engine.fedimintRealOnTestnetNext",
   fedimintRedeemUnheard: "errors.engine.fedimintRedeemUnheardNext",
   fedimintTestOnMainnet: "errors.engine.fedimintTestOnMainnetNext",
+  groupCallBusy: "errors.engine.groupCallBusyNext",
+  groupCallFailed: "errors.engine.groupCallFailedNext",
+  groupCallNotMember: "errors.engine.groupCallNotMemberNext",
+  groupCallRefused: "errors.engine.groupCallRefusedNext",
+  groupNoCall: "errors.engine.groupNoCallNext",
   groupTurnUnconfirmed: "errors.engine.groupTurnUnconfirmedNext",
   lastMint: "errors.engine.lastMintNext",
   lightningRefused: "errors.engine.lightningRefusedNext",
   lnurlUnreachable: "errors.engine.lnurlUnreachableNext",
   mintFailedFaucet: "errors.engine.mintFailedFaucetNext",
+  mintFailedInvoice: "errors.engine.mintFailedInvoiceNext",
   mintFailedQuote: "errors.engine.mintFailedQuoteNext",
   parkedSigned: "errors.engine.parkedSignedNext",
   requestNotAwaiting: "errors.engine.requestNotAwaitingNext",
   reviewedEcashSpent: "errors.engine.reviewedEcashSpentNext",
   reviewedSatsGone: "errors.engine.reviewedSatsGoneNext",
   sentAfterReview: "errors.engine.sentAfterReviewNext",
+  serviceShareFull: "errors.engine.serviceShareFullNext",
   testMintOnMainnet: "errors.engine.testMintOnMainnetNext",
 };
 /** The engine errors whose English goes behind the ⓘ too: a server's own reason in it is not said in the line. */
-const ENGINE_DETAIL: ReadonlySet<EngineErrorCode> = new Set(["lightningRefused", "mintFailedQuote", "mintFailedFaucet"]);
+const ENGINE_DETAIL: ReadonlySet<EngineErrorCode> = new Set(["lightningRefused", "mintFailedQuote", "mintFailedFaucet", "mintFailedInvoice"]);
 /** The values that are amounts: written again the app's way (the engine wrote them its own way). */
 const AMOUNTS = new Set(["amount", "fee", "min", "max"]);
 

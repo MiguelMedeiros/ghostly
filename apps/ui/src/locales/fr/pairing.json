@@ -25,7 +25,7 @@
   },
   "retry": "Réessayer",
   "retrying": "Nouvel essai…",
-  "sayHello": "Vous pouvez discuter. Dites bonjour !",
+  "sayHello": "Vous pouvez discuter. Dites bonjour !",
   "showProgress": "Afficher la progression de l'appairage",
   "slow": {
     "answering": "Échange de clés avec votre contact toujours en cours…",
@@ -33,7 +33,7 @@
     "knocking": "L’app de votre contact n’a pas encore répondu. Elle est peut-être fermée ou hors ligne.",
     "publishing": "Publication toujours en cours. Le réseau tarde à répondre.",
     "resolving": "Toujours à la recherche de votre contact sur le réseau…",
-    "waiting": "Votre contact n’a pas encore ouvert l’invitation. Elle reste valable : vous pouvez la partager à nouveau."
+    "waiting": "Votre contact n’a pas encore ouvert l’invitation. Elle reste valable : vous pouvez la partager à nouveau."
   },
   "stage": {
     "answeringInviter": "Votre contact a frappé. Réponse en cours…",
@@ -43,7 +43,7 @@
     "failed": "Connexion impossible",
     "knocking": "On frappe à la porte de votre contact…",
     "live": "Connecté",
-    "onDht": "Sur la DHT. Vous pouvez discuter ; une liaison directe est tentée",
+    "onDht": "Sur la DHT. Vous pouvez discuter ; une liaison directe est tentée",
     "publishing": "Publication de votre invitation sur le réseau…",
     "resolving": "Recherche de l’invitation sur le réseau…",
     "waiting": "En attente que votre contact ouvre l’invitation"

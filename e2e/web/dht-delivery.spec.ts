@@ -55,7 +55,7 @@ test("DHT-only starts from an invite without streams, preserves drafts and recei
   await expect(await composerRow(a.page,"composer-file")).toBeEnabled();
 });
 
-test("DHT published while contact is away survives sender restart and is received once when contact returns",{ tag: ["@feature:chat.dht.offline"] },async({peer})=>{
+test("DHT published while contact is away survives sender restart and is received once when contact returns",{ tag: ["@journey", "@feature:chat.dht.offline"] },async({peer})=>{
   const a=await peer("dht-away-sender"),b=await peer("dht-away-reader");await watchStreams(a);await watchStreams(b);
   await join(b,await createDht(a));for(const p of[a,b])await expect(p.page.getByPlaceholder("Message…")).toBeEnabled();
   const returnTo=b.page.url();await b.page.goto("about:blank");

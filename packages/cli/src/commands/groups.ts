@@ -24,6 +24,22 @@ export const commands: Record<string, Command> = {
       return a.mode === "on" ? { on: true, from: options.from } : { on: false };
     },
   },
+  "group call": {
+    method: "group.call", usage: "group call <group> --sfu <https origin> [--e2ee | --no-e2ee] | --e2ee | --no-e2ee | --clear [--show-secret]",
+    summary: "Name the node a community group's calls go through, turn sealed call media on or off, or --clear (admin)", args: ["group"],
+    options: {
+      ...showSecret, sfu: { type: "string", description: "The node's https origin, e.g. https://call.example.com" },
+      e2ee: { type: "boolean", eitherWay: true, description: "Seal the call media end to end (--no-e2ee: off); left out, the group keeps what it had" },
+      clear: { type: "boolean", description: "The group has no calls" },
+    },
+    params: ({ options }, a) => {
+      // Every form the usage line takes: before, only --sfu and --clear, though `--e2ee` alone seals the node set already.
+      if (options.sfu === undefined && options.clear !== true && options.e2ee === undefined) throw new CliError("usage", "Missing --sfu, --e2ee, --no-e2ee or --clear: ghostly group call <group> --sfu <https origin> [--e2ee | --no-e2ee] | --e2ee | --no-e2ee | --clear");
+      if (options.sfu !== undefined && options.clear === true) throw new CliError("usage", "--clear removes the call node: not with --sfu");
+      if (options.e2ee !== undefined && options.clear === true) throw new CliError("usage", "--clear removes the call node: not with --e2ee or --no-e2ee");
+      return { group: a.group, ...(options.clear === true ? { clear: true } : options.sfu !== undefined ? { sfu: options.sfu } : {}), ...(options.e2ee !== undefined && { e2ee: options.e2ee === true }), ...secret(options) };
+    },
+  },
   "group create": {
     method: "group.create", usage: "group create <name...> [--mesh] [--force]", summary: "A community (a link anyone can open) or, with --mesh, a private group of up to 32",
     args: ["name..."], options: { mesh: { type: "boolean", description: "A private mesh of contacts instead of a community" }, force: nameForce },
@@ -53,7 +69,7 @@ export const commands: Record<string, Command> = {
     method: "group.invite", usage: "group invite <group> <chat> [--show-secret]", summary: "Invite a contact into a group you administer", args: ["group", "chat"],
     options: showSecret, params: ({ options }, a) => ({ group: a.group, chat: a.chat, ...secret(options) }),
   },
-  "group join": { method: "group.join", usage: "group join [<link> | -]", summary: "Join a group by its link; the link on stdin keeps it out of ps", args: ["link?"], params: (_, { link }) => ({ link }) },
+  "group join": { method: "group.join", usage: "group join [<link> | -]", summary: "Join a group by its link; the link on stdin keeps it out of ps (without a daemon it waits up to 60 s to be let in)", args: ["link?"], params: (_, { link }) => ({ link }) },
   "group leave": {
     method: "group.leave", usage: "group leave <group> --yes", summary: "Leave a group; its history and files go from this device", args: ["group"],
     options: { yes: { type: "boolean", description: "Confirm" } }, params: ({ options }, { group }) => ({ group, yes: options.yes === true }),

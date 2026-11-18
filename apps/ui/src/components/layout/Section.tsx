@@ -17,7 +17,8 @@ export function Section({ title, children, testId }: { title: ReactNode; childre
  * It sizes itself from the space it gets, not from the window. The text keeps at least 12rem (8rem for a
  * bare label, without a hint); when the value and the controls do not fit beside that, they wrap under the
  * text, aligned with it, and a group of buttons wraps inside itself before anything is squeezed. A hint
- * never becomes a one-letter column, and a button is never pushed out of the card.
+ * never becomes a one-letter column, and a button is never pushed out of the card: one wider than the row (a phone at
+ * 200% text size) wraps its label.
  */
 export function Row({ label, hint, info, value, leading, children, testId }: {
   label: ReactNode;
@@ -40,7 +41,8 @@ export function Row({ label, hint, info, value, leading, children, testId }: {
         <RowText label={label} hint={hint} info={info} />
       </div>
       {value !== undefined && <div className="shrink-0 whitespace-nowrap text-sm text-text-secondary tabular-nums">{value}</div>}
-      {children && <div className="flex flex-wrap items-center gap-2 min-w-0 max-w-full">{children}</div>}
+      {/* A button wider than the row (a long label, a larger text size) wraps its words instead of leaving the card. */}
+      {children && <div className="flex flex-wrap items-center gap-2 min-w-0 max-w-full [&>button]:whitespace-normal [&>button]:wrap-anywhere">{children}</div>}
     </div>
   );
 }
@@ -133,7 +135,7 @@ export function LinkRow({ label, hint, value, leading, onClick, testId }: {
       className="w-full flex items-center gap-3 px-4 py-3 min-h-12 text-start hover:bg-surface-alt transition-colors cursor-pointer first:rounded-t-xl last:rounded-b-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent">
       {leading && <span className="shrink-0">{leading}</span>}
       <span className="flex-1 min-w-0">
-        <span className="block truncate text-sm text-text-primary">{label}</span>
+        <span className="block break-words text-sm text-text-primary">{label}</span>
         {hint && <span className="block text-xs text-text-muted mt-0.5 break-words">{hint}</span>}
       </span>
       {value !== undefined && <span className="shrink-0 whitespace-nowrap text-sm text-text-muted tabular-nums">{value}</span>}

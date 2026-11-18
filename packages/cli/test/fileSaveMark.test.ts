@@ -9,6 +9,7 @@ import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
 import { NodeFileBytes } from "../src/runtime/fileBytes";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.files
 
 /** What `xattr` was run with, and whether the saved file was already there with its bytes when it ran. */
@@ -47,6 +48,7 @@ afterEach(() => {
 
 function world() {
   const node = {
+    chatView: chatViewOf,
     getState: () => ({ links: [link], groups: [], settings: {}, transport: {}, transfers: {} }) as unknown as EngineState,
     getMessages: vi.fn(async () => []),
     getMessage: vi.fn(async () => undefined),

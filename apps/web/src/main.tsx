@@ -28,7 +28,7 @@ import { webOpener } from "../../ui/src/lib/apps/webOpener";
 import { profileDatabase } from "../../ui/src/lib/profileData";
 import { activeProfileId } from "../../ui/src/lib/profiles";
 import { nameInChat } from "../../ui/src/lib/apps/nameInChat";
-import { closeWakeNotices, currentPush, pushSupported, subscribePush, syncWakeTable, syncWakeText, unsubscribePush } from "./pwa/push";
+import { closeOnlineWakeNotices, closeWakeNotices, currentPush, pushSupported, subscribePush, syncWakeTable, syncWakeText, unsubscribePush } from "./pwa/push";
 import { SHARE_FORWARD_AFTER_MS, askForShare, followNewVersion, handShareOver, listenForShares, listenForTaps, openedForShare, registerServiceWorker } from "./pwa/serviceWorker";
 
 // A build for the e2e suite runs mini-apps through the real runner and broker before the app has a screen for them.
@@ -48,7 +48,7 @@ listenForTaps(() => isPeer);
 // Another tab took a new version: this one reloads into it rather than run the build whose files its worker deleted.
 const mayStart = followNewVersion();
 // Wake-up push (WISP 401 § Wake-up push): this app can be woken while closed; Settings shows the switch.
-setPushPlatform({ supported: pushSupported, subscribe: subscribePush, current: currentPush, unsubscribe: unsubscribePush, syncTable: syncWakeTable, syncText: syncWakeText, closeNotices: closeWakeNotices });
+setPushPlatform({ supported: pushSupported, subscribe: subscribePush, current: currentPush, unsubscribe: unsubscribePush, syncTable: syncWakeTable, syncText: syncWakeText, closeNotices: closeWakeNotices, closeOnlineNotices: closeOnlineWakeNotices });
 // GNOME Web and other WebKitGTK browsers before 2.52 keep the sounds' output running: waking it froze the page.
 gateSounds();
 
@@ -92,11 +92,24 @@ await becomeThePeer(peerLock, () => {
   // Opened for a link (an invite, a group's, a device code's): that tab opens it, with the same wait. Taken there, it
   // leaves this address, so this tab opens nothing twice if it takes over later; until then, this tab keeps it. A tab
   // on standby opens none: it refuses it, and the link leaves this address all the same, kept for no one.
+  const stops: (() => void)[] = [];
+  const handOn = (link: string) => {
+    // Out of the address only while it is still this link's: a later one there waits for its own answer.
+    const leave = () => { if (linkInAddress(window.location.hash) === link) history.replaceState(history.state, "", `${window.location.pathname}${window.location.search}#/`); };
+    stops.push(forwardLink(peerLock, link, () => { leave(); draw("linkTaken"); }, SHARE_FORWARD_AFTER_MS, () => { leave(); draw("plain"); }));
+  };
   const link = sharing ? null : linkInAddress(window.location.hash);
-  if (link) {
-    const leave = () => history.replaceState(history.state, "", `${window.location.pathname}${window.location.search}#/`);
-    stopLink = forwardLink(peerLock, link, () => { leave(); draw("linkTaken"); }, SHARE_FORWARD_AFTER_MS, () => { leave(); draw("plain"); });
-  }
+  if (link) handOn(link);
+  // One that reaches this tab while it waits (the installed app sends a link to the window used last, or it is typed
+  // into the address bar, or Back returns to one) goes the same way, rather than stay in the address and history.
+  const arrived = () => {
+    const next = linkInAddress(window.location.hash);
+    if (!next) return;
+    handOn(next);
+    if (!sharing) draw("link");
+  };
+  addEventListener("hashchange", arrived);
+  stopLink = () => { removeEventListener("hashchange", arrived); for (const stop of stops) stop(); };
   draw(sharing ? "sharing" : link ? "link" : "plain");
   // The lock is there but the browser refuses it: the same screen as a browser without it.
 }).catch((error: unknown) => (error instanceof PeerLockUnavailable ? cannotRun(["locks"], error) : Promise.reject(error)));

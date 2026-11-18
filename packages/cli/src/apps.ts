@@ -348,11 +348,14 @@ function collectFiles(dir: string, leaveOut: Set<string>): { files: { path: stri
   const skipped: string[] = [];
   let bytes = 0;
   const walk = (folder: string) => {
-    for (const name of readdirSync(folder).sort()) {
+    // Read as bytes: a name that is not UTF-8 comes back from a string read with U+FFFD in it, a path no file has.
+    const names = readdirSync(folder, { encoding: "buffer" }).map((raw) => ({ raw, name: raw.toString("utf8") }));
+    for (const { raw, name } of names.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
       const full = join(folder, name);
       const path = relative(dir, full).split(sep).join("/");
       if (leaveOut.has(full)) continue;
       if (name.startsWith(".")) { skipped.push(path); continue; }
+      if (!Buffer.from(name, "utf8").equals(raw)) throw refused(`${dir} holds a name that is not UTF-8, which no bundle path may be: rename it`, { reason: "bad-path", detail: path });
       const info = lstatSync(full);
       if (info.isSymbolicLink()) throw new CliError("bad_request", `${path} is a link: a bundle holds the folder's own files (copy it in, or remove it)`);
       if (info.isDirectory()) { walk(full); continue; }
@@ -539,7 +542,8 @@ export async function revokeApp(dirArg: string, keyArg: string, what: { digests?
   // from elsewhere stops nothing.
   const listPath = join(dirname(bundlePath), APP_REVOKE_FILE);
   const usage = "ghostly app revoke <dir> --key <file> (--digest <digest>... | --up-to <sequence>) [--reason <text>] [--bundle <file>] [--force]";
-  const digests = what.digests ?? [];
+  // Sorted, so the same digests in another order are the same statement, signed and compared once.
+  const digests = [...(what.digests ?? [])].sort();
   if ((digests.length > 0) === (what.upTo !== undefined)) throw new CliError("usage", `Give --digest (again for each) or --up-to, one of the two: ${usage}`);
   if (what.upTo !== undefined && !(Number.isSafeInteger(what.upTo) && what.upTo >= 1)) throw new CliError("usage", `--up-to takes a sequence, a whole number from 1, not ${what.upTo}`);
   // Checked here as the statement's checker checks them, so a bad value is a usage error naming its option.
@@ -590,7 +594,9 @@ export async function revokeApp(dirArg: string, keyArg: string, what: { digests?
     list = held.revocations;
   }
   const signed = await signAppRevocation(statement, key.signer);
-  const same = list.some((r) => canonicalJson(r.statement) === canonicalJson(signed.statement));
+  // A held list made before the digests were sorted may hold them in another order: compared sorted too.
+  const sorted = (s: AppRevokeStatement) => canonicalJson("digests" in s ? { ...s, digests: [...s.digests].sort() } : s);
+  const same = list.some((r) => sorted(r.statement) === sorted(signed.statement));
   if (!same) {
     if (list.length >= APP_STATEMENT_LIMITS.revocations) throw refused(`${listPath} holds ${list.length} revocations already`, { reason: "bad-revocation", detail: `at most ${APP_STATEMENT_LIMITS.revocations}` });
     list = [...list, signed];
@@ -641,10 +647,11 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
   // `app publish` does not write over a bundle it cannot read: its sequence and key are not known, so neither is a rollback.
   let unread: CliError | null = null;
   const heldIndex = existsSync(indexOut) ? new Uint8Array(readFileSync(indexOut)) : null;
-  if (heldIndex || existsSync(sigOut)) {
+  const heldSig = existsSync(sigOut) ? new Uint8Array(readFileSync(sigOut)) : null;
+  if (heldIndex || heldSig) {
     const read = !heldIndex ? { ok: false as const, reason: "missing-file", detail: `no ${STORE_INDEX_FILE}` }
-      : !existsSync(sigOut) ? { ok: false as const, reason: "bad-signature-statement", detail: `no ${STORE_SIG_FILE}` }
-      : readAppStore(heldIndex, new Uint8Array(readFileSync(sigOut)), now, undefined, checked);
+      : !heldSig ? { ok: false as const, reason: "bad-signature-statement", detail: `no ${STORE_SIG_FILE}` }
+      : readAppStore(heldIndex, heldSig, now, undefined, checked);
     if (read.ok) held = read.store;
     else unread = refused(`${heldIndex ? indexOut : sigOut} is there and is not a signed store index: move ${STORE_INDEX_FILE} and ${STORE_SIG_FILE} away, or name another --out`, read);
   }
@@ -669,8 +676,10 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
   const read = readAppStore(indexBytes, sigBytes, now, key.key, checked);
   if (!read.ok) throw refused(`${indexPath} would be refused by a client`, read);
   const store = read.store;
-  // Unless the index there is this one's bytes: a run stopped between the index's rename and the signature's, signed again.
-  if (unread && !(heldIndex && Buffer.from(heldIndex).equals(indexBytes))) throw unread;
+  // Unless the signature there is this one's bytes (Ed25519 is deterministic): a run stopped between the signature's
+  // rename and the index's, signed again. Not the index's bytes: a held index edited in place is this one's bytes too,
+  // and its own signature is the only trace of the sequence it held.
+  if (unread && !(heldSig && Buffer.from(heldSig).equals(sigBytes))) throw unread;
 
   let previous: number | null = null;
   if (held) {
@@ -684,12 +693,13 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
     }
   }
 
-  // The signature after the index is written keeps the key: the index names it, and a run again signs it with it.
+  // The signature first, so a run stopped before the index leaves what a run again tells apart (above); once it is
+  // written the key stays: the signature names it, and a run again signs with it.
   saveKeyThen(keyPath, key, () => {
     mkdirSync(outDir, { recursive: true });
-    writeWhole(indexOut, indexBytes);
+    writeWhole(sigOut, sigBytes);
   });
-  writeWhole(sigOut, sigBytes);
+  writeWhole(indexOut, indexBytes);
   const notes = [
     ...(key.created ? [madeKeyNote(keyPath, "store", key.key)] : []),
     ...(store.expired ? [`expires (${new Date(store.index.expires * 1000).toISOString()}) is past: clients still install from it and say the store was not updated since then`] : []),

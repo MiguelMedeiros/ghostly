@@ -5,6 +5,7 @@ import { contactKeyOf, nameKey, namedByThem } from "./apiKit";
 import { childEnv } from "./childEnv";
 import { connectDaemon, type DaemonAddress, type DaemonClient } from "./client";
 import { CliError, localFileError } from "./errors";
+import { shellWord } from "./shellWord";
 import type { GhostlyEvent } from "./events";
 import { jsonOut } from "./jsonOut";
 import { turnRef } from "./turnRefs";
@@ -96,26 +97,33 @@ export async function allowlist(from: readonly string[], groups: readonly string
   for (const ref of from) {
     const key = contactKeyOf(ref);
     if (key !== undefined) { keys.add(key); continue; }
-    const chat = (await otherFlag(call("chat.get", { chat: ref }), ref, "--from")) as { id: string; label?: string | null; peerName?: string | null; peer?: string };
-    // A label compared as the lookup compares it (`nameKey`): the string given to `chat rename` names its chat.
-    if (chat.id !== ref && (!nameKey(ref) || nameKey(chat.label) !== nameKey(ref))) throw namedByThem(ref, { chat: chat.id, name: chat.peerName ?? null, contact: chat.peer });
-    chats.add(chat.id);
+    chats.add(await fromChat(ref, call));
   }
-  for (const ref of groups) groupIds.add(((await otherFlag(call("group.get", { group: ref }), ref, "--group")) as { id: string }).id);
+  for (const ref of groups) groupIds.add(((await otherFlag(call("group.get", { group: ref }), ref, "--group", call)) as { id: string }).id);
   return new Allowlist(chats, keys, groupIds, peerOf);
+}
+
+/** The chat `--from <ref>` names (not a contact key): its id, or `namedByThem` when only its contact chose `ref`. */
+async function fromChat(ref: string, call: (method: string, params: Record<string, unknown>) => Promise<unknown>): Promise<string> {
+  const chat = (await otherFlag(call("chat.get", { chat: ref }), ref, "--from", call)) as { id: string; label?: string | null; peerName?: string | null; peer?: string };
+  // A label compared as the lookup compares it (`nameKey`): the string given to `chat rename` names its chat.
+  if (chat.id !== ref && (!nameKey(ref) || nameKey(chat.label) !== nameKey(ref))) throw namedByThem(ref, { chat: chat.id, name: chat.peerName ?? null, contact: chat.peer });
+  return chat.id;
 }
 
 /**
  * A `--from` that names a group, or a `--group` a chat: said with the flag that takes it. The lookup's own hint named
  * `ghostly group show` (or `chat show`), which lists nothing. A chat is named by its id: `--from` refuses a prefix of it
- * or the name its contact chose, which `--group`'s lookup took.
+ * or the name its contact chose, which `--group`'s lookup took, so a `--group` that found its chat only so is refused
+ * as `--from` refuses it, with no `--from` to paste.
  */
-async function otherFlag(lookup: Promise<unknown>, ref: string, flag: "--from" | "--group"): Promise<unknown> {
+async function otherFlag(lookup: Promise<unknown>, ref: string, flag: "--from" | "--group", call: (method: string, params: Record<string, unknown>) => Promise<unknown>): Promise<unknown> {
   try { return await lookup; } catch (error) {
     const other = flag === "--from" ? "group" : "chat";
     if (!(error instanceof CliError) || error.code !== "not_found" || typeof error.details?.[other] !== "string") throw error;
+    if (other === "chat" && contactKeyOf(ref) === undefined) await fromChat(ref, call);
     const named = other === "chat" ? error.details.chat as string : ref;
-    const shown = /^[\w.:-]+$/.test(named) ? named : JSON.stringify(named);
+    const shown = shellWord(named, error.details[other] as string);
     throw new CliError("not_found", `${JSON.stringify(ref)} is a ${other}, not a ${flag === "--from" ? "chat" : "group"}: ghostly listen ${flag === "--from" ? "--group" : "--from"} ${shown}`, error.details);
   }
 }
@@ -217,6 +225,28 @@ export function readCursor(path: string | undefined): number | undefined {
   if (Number.isSafeInteger(value) && value >= 0 && /^\d+$/.test(trimmed)) return value;
   const shown = trimmed === "" ? "nothing" : JSON.stringify(trimmed.length > 32 ? `${trimmed.slice(0, 32)}…` : trimmed);
   throw new CliError("bad_request", `${path} holds no event number (${shown}): fix or remove it, or give --since`);
+}
+
+/**
+ * Where listen starts: after the event number the cursor file holds, else after `since` (--since: the first start's
+ * place). Before, --since won without a word, and a unit with `--since 0 --cursor f` ran every handled event's hook
+ * again at each restart. A cursor file that holds no number is refused unless --since is given, which starts it.
+ * `known`, once the journal's last event is: says on stderr where it starts. A cursor past it (a profile restored from a
+ * backup, a journal reset, a cursor copied from another profile) starts with new events; before, stderr said "starting
+ * after it" (or nothing, without --since) and the next event wrote a lower number over the file.
+ */
+export function startAt(since: number | undefined, cursor: string | undefined, say: (line: string) => void): { from: number | undefined; known(lastSeq: number): void } {
+  let kept: number | undefined;
+  if (since === undefined) kept = readCursor(cursor);
+  else try { kept = readCursor(cursor); } catch { /* --since starts it */ }
+  return {
+    from: kept ?? since,
+    known: (lastSeq) => {
+      if (kept === undefined) return;
+      if (kept > lastSeq) say(`ghostly: ${cursor} holds event ${kept}, past this profile's last event (${lastSeq}): starting with new events`);
+      else if (since !== undefined && kept !== since) say(`ghostly: ${cursor} holds event ${kept}: starting after it, not after --since ${since}`);
+    },
+  };
 }
 
 /**
@@ -590,14 +620,19 @@ export function followDaemon(address: DaemonAddress, client: DaemonClient, handl
     if (current) current.resume(); else reconnect(0);
   });
   // A feed that took no event yet goes on after the last seq the daemon had when it subscribed: one that restarts
-  // otherwise subscribes it from its own now, past what it journaled before the reconnect (its daemon.started).
-  const follow = (c: DaemonClient) => c.subscribe(feed.since, feed.take, () => {
-    if (current !== c) return;
-    current = null;
-    reconnect(1000);
-  }).then((answer) => {
-    if (feed.since === undefined && typeof answer?.lastSeq === "number") feed.since = answer.lastSeq;
-    return answer;
-  });
+  // otherwise subscribes it from its own now, past what it journaled before the reconnect (its daemon.started). So does
+  // one started past the daemon's last event (a cursor from a backup, `startAt`): it waited at the cursor's number, and
+  // the daemon replays nothing up to it. Not once it took an event since: that is where it is.
+  const follow = (c: DaemonClient) => {
+    const asked = feed.since;
+    return c.subscribe(asked, feed.take, () => {
+      if (current !== c) return;
+      current = null;
+      reconnect(1000);
+    }).then((answer) => {
+      if (typeof answer?.lastSeq === "number" && feed.since === asked && (asked === undefined || asked > answer.lastSeq)) feed.since = answer.lastSeq;
+      return answer;
+    });
+  };
   return { subscribed: follow(client), close: () => { clearTimeout(holding); current?.close(); } };
 }

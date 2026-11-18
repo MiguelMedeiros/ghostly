@@ -6,7 +6,7 @@ import {
   APP_PERMISSIONS, APP_STORE_LIMITS, appRef, buildAppBundle, canonicalJson, seedSigner, signAppRevocation, signAppStore, toZ32, utf8Encode, type AppManifestDraft,
   type AppPermission, type AppStoreIndex, type Signer,
 } from "@ghostly/core";
-import { APP_FETCH_HOSTS, APP_FETCH_LIMITS, besideUrl } from "../src/engine/appFetch";
+import { APP_FETCH_HOSTS, APP_FETCH_LIMITS, appPasteUrl, besideUrl } from "../src/engine/appFetch";
 import { DEFAULT_STORE_KEY, DEFAULT_STORE_URL } from "../src/engine/appDefaults";
 import { STORE_HOSTS, STORE_KEY, STORE_LIMITS, STORE_URL, besideUrl as siteBesideUrl, readStore, slugOf, type StoreBytes } from "../../../apps/website/lib/storeRead";
 import { APPS_RELEASE, versionAtLeast } from "../../../apps/website/lib/appsGate";
@@ -180,7 +180,7 @@ describe("the site reads a store as the app does", () => {
     expect(guard?.from).toBe(APPS_RELEASE);
   });
 
-  it("tries a listing's URLs in order, and shows only the version it lists", async () => {
+  it("tries a listing's URLs as the app does, a jsDelivr copy first, and shows only the version it lists", async () => {
     const a = signerOf("publisher a");
     const listed = await buildAppBundle({ ...base("tries", "Tries App"), version: "1.0.1", sequence: 2 }, [page("Tries App")], a);
     const newer = await buildAppBundle({ ...base("tries", "Tries App"), version: "1.1.0", sequence: 3 }, [page("Tries App")], a);
@@ -202,6 +202,41 @@ describe("the site reads a store as the app does", () => {
     // A first URL that was not read gives way too.
     const secondOnly = view({ [second]: listed.bytes });
     expect(secondOnly.ok && secondOnly.apps[0]?.url).toBe(second);
+    // Both hold it: the page offers the jsDelivr copy, as the app reads it first, never the raw HEAD that moves on.
+    const same = view({ [first]: listed.bytes, [second]: listed.bytes });
+    expect(same.ok && same.apps[0]?.url).toBe(second);
+  });
+
+  it("offers under \"add it by its link\" only a listing URL that Apps, Add reads as pasted", async () => {
+    const a = signerOf("publisher a");
+    const bundles: Record<string, Uint8Array> = {};
+    const listings = await Promise.all(Object.entries({
+      query: [`${RAW}/o/HEAD/pub/query/app.ghostlyapp?v=1`],
+      fragment: [`${RAW}/o/HEAD/pub/fragment/app.ghostlyapp#x`],
+      folder: [`${RAW}/o/HEAD/pub/folder/bundle`],
+      plain: [`${RAW}/o/HEAD/pub/plain/app.ghostlyapp`],
+      // The jsDelivr copy is read first but carries a query: the raw one that holds the same version is the link.
+      either: [`${PINNED}/either.ghostlyapp?v=1`, `${RAW}/o/HEAD/pub/either/app.ghostlyapp`],
+    }).map(async ([name, urls]) => {
+      const bundle = await buildAppBundle(base(name, name), [page(name)], a);
+      for (const url of urls) bundles[url] = bundle.bytes;
+      return { ref: appRef(keyOf("publisher a"), name), sequence: 1, digest: bundle.digest, urls, title: name, tagline: name };
+    }));
+    const index: AppStoreIndex = { ghostlyStore: 1, key: keyOf("store"), name: "Test Store", kind: "curated", sequence: 1, expires: NOW + 80 * DAY, apps: listings, removed: [], revoked: [] };
+    const { indexBytes, sigBytes } = await signAppStore(index, signerOf("store"));
+    const view = readStore({ index: indexBytes, sig: sigBytes, bundles }, NOW, keyOf("store"));
+    if (!view.ok) throw new Error(view.reason);
+    // Every app is still shown, from the URL it verified from; only the link block is left out.
+    expect(view.apps.map((x) => [x.name, x.link ?? null])).toEqual([
+      ["query", null], ["fragment", null], ["folder", null],
+      ["plain", `${RAW}/o/HEAD/pub/plain/app.ghostlyapp`], ["either", `${RAW}/o/HEAD/pub/either/app.ghostlyapp`],
+    ]);
+    expect(view.apps.find((x) => x.name === "either")?.url).toBe(`${PINNED}/either.ghostlyapp?v=1`);
+    // The app's own paste rule reads each offered link as it is.
+    for (const { link } of view.apps) if (link) expect(appPasteUrl(link, "app.ghostlyapp")).toBe(link);
+    // The fixture's apps keep theirs.
+    const shown = readStore(fixture().bytes, NOW, fixture().key);
+    expect(shown.ok && shown.apps.map((x) => x.link === x.url)).toEqual([true, true]);
   });
 
   it("keeps every permission the manifest asks for, files too, and the release its runtime.host needs", async () => {

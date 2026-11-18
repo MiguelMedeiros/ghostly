@@ -383,7 +383,7 @@
     "cashuMints": "Cashu 铸币厂",
     "cashuSettings": "Cashu 设置",
     "commentFor": "给 {{to}} 的留言（可选）",
-    "confirmWhat": "{{amount}} sats（另加最多 {{fee}} 的手续费）",
+    "confirmWhat": "{{amount}} {{unit}}（另加最多 {{fee}} {{feeUnit}} 的手续费）",
     "connecting": "正在连接来源…",
     "domainLine": "{{answered}}{{limits}}",
     "done": "完成",

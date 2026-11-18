@@ -32,6 +32,11 @@ interface UseWebRTCParams {
    */
   callHandledElsewhere?: number;
   publishCallSignal: (signal: string | null) => void;
+  /**
+   * The contact's offer of `ts` was kept as missed here, with no ring (QUICK_REDIAL_MS): told so that what waits on a call
+   * ringing (a handoff of the profile) does not wait on it.
+   */
+  offerHeld?: (ts: number) => void;
   setFastPoll: (fast: boolean) => void;
   /**
    * A line for the chat. `call`, on the lines a call has one of on this side (its ring, its miss): the time of the offer
@@ -295,6 +300,7 @@ export function useWebRTC({
   incomingCallSignal,
   callHandledElsewhere,
   publishCallSignal,
+  offerHeld,
   setFastPoll,
   addCallEventMessage,
   removeCallEventMessage,
@@ -1518,6 +1524,18 @@ export function useWebRTC({
       return;
     }
 
+    // The contact starting over (WISP 601, "On a call already"): their app died with no hang-up and calls again, while
+    // our call is still on. Only a later offer reaches here (`lastProcessedSignalRef` passed their answer, or their
+    // offer and restarts). On a call we answered, an offer before media came up is the caller offering again (above),
+    // and once it came up the caller restarts with `r`, never `o`. Our call ends with its line and sends nothing (a
+    // hang-up would end their new call as declined), and their offer rings.
+    if (signal.t === "o" && callStateRef.current === "connected" && (!answeredRef.current || mediaUpRef.current)) {
+      lastProcessedSignalRef.current = signal.ts;
+      hangUp(false);
+      ringOffer(signal);
+      return;
+    }
+
     if (callStateRef.current === "connected") {
       if (signal.t !== "h" && signal.t !== "v") {
         return;
@@ -1549,6 +1567,7 @@ export function useWebRTC({
       lastProcessedSignalRef.current = signal.ts;
       setMissedAt(performance.now());
       heldOfferRef.current = { signal, at: performance.now(), line: addCallEventMessage?.("call_missed", signalHasVideo(signal), undefined, signal.ts) || null };
+      offerHeld?.(signal.ts);
     } else if (signal.t === "o" && (callStateRef.current === "idle" || yielded)) {
       lastProcessedSignalRef.current = signal.ts;
       ringOffer(signal);
@@ -1588,7 +1607,7 @@ export function useWebRTC({
         hangUp(false);
       }
     }
-  }, [incomingCallSignal, handleAnswer, hangUp, updateCallState, setFastPoll, addCallEventMessage, applyRemotePicture, restartAnswer, restartable, cleanupConnection, removeCallEventMessage, answerIceRestart, applyIceRestartAnswer, ringOffer, setMissedAt]);
+  }, [incomingCallSignal, handleAnswer, hangUp, updateCallState, setFastPoll, addCallEventMessage, applyRemotePicture, restartAnswer, restartable, cleanupConnection, removeCallEventMessage, answerIceRestart, applyIceRestartAnswer, ringOffer, setMissedAt, offerHeld]);
 
   // An unanswered call does not ring forever (RING_MS). Ours hangs up and says "No answer". Theirs stops ringing here
   // with a missed call and sends nothing: the caller's own ring runs out too, and a hang-up would read as declined.

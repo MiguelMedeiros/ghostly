@@ -37,6 +37,8 @@ const TRY = `async function attempt(find) {
   try { made = find(); } catch (e) {}
   if (typeof made !== "function") return;
   const connection = new made({ iceServers: [{ urls: "stun:127.0.0.1:${STUN_PORT}" }] });
+  // Kept until the tab closes: one nothing holds may be collected before its first binding request goes.
+  (self.keptConnections = self.keptConnections || []).push(connection);
   connection.createDataChannel("x");
   await connection.setLocalDescription();
 }
@@ -97,7 +99,23 @@ test("a contact's app makes no WebRTC connection of its own in the web app while
 }, async ({ browser }) => {
   let packets = 0;
   const stun = createSocket("udp4");
-  stun.on("message", () => { packets++; });
+  stun.on("message", (request, from) => {
+    packets++;
+    // Answered as a STUN server answers a binding request (RFC 8489, XOR-MAPPED-ADDRESS). Unanswered, Chromium sent
+    // each case's requests again for 40 s to a server it never heard from, and now and then a case's first request
+    // never came within 15 s.
+    if (request.length < 20 || request.readUInt16BE(0) !== 0x0001) return;
+    const answer = Buffer.alloc(32);
+    answer.writeUInt16BE(0x0101, 0);
+    answer.writeUInt16BE(12, 2);
+    request.copy(answer, 4, 4, 20);
+    answer.writeUInt16BE(0x0020, 20);
+    answer.writeUInt16BE(8, 22);
+    answer.writeUInt16BE(0x0001, 24);
+    answer.writeUInt16BE(from.port ^ 0x2112, 26);
+    answer.writeUInt32BE((from.address.split(".").reduce((word, byte) => word * 256 + Number(byte), 0) ^ 0x2112a442) >>> 0, 28);
+    stun.send(answer, from.port, from.address);
+  });
   await new Promise<void>((done) => stun.bind(STUN_PORT, "127.0.0.1", done));
   let relayOnly = false;
   // The contact's answer by path, before Ghostly touches it.
@@ -171,17 +189,30 @@ test("a contact's app makes no WebRTC connection of its own in the web app while
       if (ENGINE[name] && ENGINE[name] !== browser.browserType().name()) continue;
       for (const on of [false, true]) {
         relayOnly = on;
-        packets = 0;
-        const tab = await context.newPage();
-        await tab.goto(`http://127.0.0.1:${PAGE_PORT}/bridge/${index}`, { waitUntil: "load" });
+        const open = async () => {
+          packets = 0;
+          const tab = await context.newPage();
+          await tab.goto(`http://127.0.0.1:${PAGE_PORT}/bridge/${index}`, { waitUntil: "load" });
+          return tab;
+        };
         if (on) {
+          const tab = await open();
           // The same page reached the server within this time with the setting off, a moment ago.
           await tab.waitForTimeout(2_500);
           expect(packets, `Hide my IP on, ${name}: the contact's STUN server is never reached`).toBe(0);
-        } else {
-          await expect.poll(() => packets, { message: `Hide my IP off, ${name}: as before, the connection is made`, timeout: 15_000 }).toBeGreaterThan(0);
+          await tab.close();
+          continue;
         }
-        await tab.close();
+        // The control: the case reaches the server with the setting off. Now and then, about once in a few hundred
+        // cases and any case, a runner's Chromium sends nothing from a fresh tab in 15 s, so the case gets up to three
+        // tabs. The arm above, which must send nothing, still gets one.
+        let reached = false;
+        for (let tab = 0; tab < 3 && !reached; tab++) {
+          const page = await open();
+          reached = await expect.poll(() => packets, { timeout: 15_000 }).toBeGreaterThan(0).then(() => true, () => false);
+          await page.close();
+        }
+        expect(reached, `Hide my IP off, ${name}: as before, the connection is made`).toBe(true);
       }
     }
   } finally {

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { EngineState, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import { EventHub, JOURNAL_KEEP_BYTES, JOURNAL_MAX_BYTES, SEEN_KEEP_MS, type GhostlyEvent } from "../src/events";
-import { toTurn } from "../src/listen";
+import { Allowlist, toTurn } from "../src/listen";
 import { turnRef } from "../src/turnRefs";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 // covers: headless.events, headless.typing, headless.files
@@ -39,6 +39,33 @@ describe("the event stream", () => {
     const created = events.find((e) => e.type === "chat.created") as unknown as { summary: { invite: unknown } };
     expect(created.summary.invite).toBeNull();
     expect(JSON.stringify(events)).not.toContain("ghostly1secret");
+  });
+
+  it("reads no chat whose view is the same object as in the last state", async () => {
+    const { h, events } = await hub("same-view.jsonl");
+    let reads = 0;
+    const kept = link("c1");
+    Object.defineProperty(kept, "label", { get: () => { reads++; return "kept"; }, enumerable: true });
+    h.baseline(state([kept, link("c2")]), new Map());
+    const before = reads;
+    h.sink.post({ kind: "state", state: state([kept, link("c2", { label: "bot" })]) });
+    expect(reads).toBe(before);
+    expect(events.map((e) => e.id)).toEqual(["chat.renamed:c2:1000"]);
+  });
+
+  it("reads no payment while the payments are the same object as in the last state", async () => {
+    const { h, events } = await hub("same-payments.jsonl");
+    let reads = 0;
+    const payment = { id: "p1", linkId: "c1", kind: "payment", direction: "in", amount: 21, unit: "sat", state: "settled", createdAt: 5 };
+    Object.defineProperty(payment, "state", { get: () => { reads++; return "settled"; }, enumerable: true });
+    const payments = { p1: payment };
+    h.baseline({ ...state([link("c1")]), payments } as unknown as EngineState, new Map());
+    const before = reads;
+    h.sink.post({ kind: "state", state: { ...state([link("c1", { label: "bot" })]), payments } as unknown as EngineState });
+    expect(reads).toBe(before);
+    expect(events.map((e) => e.id)).toEqual(["chat.renamed:c1:1000"]);
+    h.sink.post({ kind: "state", state: { ...state([link("c1", { label: "bot" })]), payments: { ...payments, p2: { ...payment, id: "p2", state: "pending" } } } as unknown as EngineState });
+    expect(events.map((e) => e.id)).toEqual(["chat.renamed:c1:1000", "payment.created:p2"]);
   });
 
   it("reports messages, delivery changes, deletions, and chat changes once each", async () => {
@@ -235,6 +262,27 @@ describe("the event stream", () => {
       { type: "group.typing.stopped", group: "g1", member: "bo", kind: undefined, status: undefined },
     ]);
     expect(new Set(events.map((e) => e.id)).size).toBe(events.length);
+  });
+
+  it("says who joined and left a full community, without looking each member up in the other list (O(members²) a state)", async () => {
+    const { h, events } = await hub("group-members.jsonl");
+    const keys = Array.from({ length: 256 }, (_, i) => `member${String(i).padStart(3, "0")}`.padEnd(52, "x"));
+    const group = (members: string[]) => ({ id: "g1", status: "active", members: [...members].reverse().map((key) => ({ key })) });
+    const later = [...keys.slice(0, 100), ...keys.slice(102), "a-newcomer".padEnd(52, "x"), "zz-newcomer".padEnd(52, "x")];
+    h.baseline(state([], [group(keys)]), new Map());
+    // A full member list's lookups, counted: the `includes` diff made 512 of them each state.
+    const includes = vi.spyOn(Array.prototype, "includes");
+    try {
+      for (let i = 0; i < 20; i++) h.sink.post({ kind: "state", state: state([], [group(keys)]) });
+      h.sink.post({ kind: "state", state: state([], [group(later)]) });
+      h.sink.post({ kind: "state", state: state([], [group(later)]) });
+      expect(includes.mock.contexts.filter((list) => (list as unknown[]).length >= 256)).toHaveLength(0);
+    } finally {
+      includes.mockRestore();
+    }
+    expect(events.map(({ type, joined, left }) => ({ type, joined, left }))).toEqual([
+      { type: "group.members", joined: ["a-newcomer".padEnd(52, "x"), "zz-newcomer".padEnd(52, "x")], left: [keys[100], keys[101]] },
+    ]);
   });
 
   it("typing is live only: a contact who keeps changing it pushes no other chat's events out of the journal", async () => {
@@ -1071,6 +1119,37 @@ describe("the event stream", () => {
       vi.advanceTimersByTime(2_000);
       expect(events).toMatchObject([{ type: "file.offered", file: "c1-in-z", chat: "c1", messageId: null, room: 100 }]);
     });
+  });
+
+  // Found in a bug hunt: `listen --group` passed a request to the whole group (its record names the group) and dropped
+  // every payment that went over a member's edge or a community member's link: who paid it, a member's request to me.
+  it("a group's payment names its group, whichever link it went over, and so passes listen --group", async () => {
+    const { h, events } = await hub("group-payments.jsonl");
+    const mesh = "g1", community = "Cmty0123456789abcdefgh", bo = "b".repeat(52);
+    const groups = [{ id: mesh, members: [{ key: "mekey", me: true }, { key: "anakey", edge: { linkId: "edge-ana", state: "open" } }] }, { id: community, members: [] }];
+    h.baseline({ ...state([], groups), payments: {} } as unknown as EngineState, new Map());
+    const pay = (id: string, linkId: string, kind: string, direction: string, fields: Record<string, unknown> = {}) =>
+      ({ id, linkId, kind, direction, amount: 21, unit: "sat", state: "pending", createdAt: 5, ...fields });
+    const payments = {
+      // Mine, to the whole group; Ana paying it over her edge; Ana's request to the group as it came to me; Bo paying
+      // in the community; a plain chat's.
+      r1: pay("r1", `group:${mesh}`, "request", "out", { group: mesh }),
+      p1: pay("p1", "edge-ana", "payment", "in", { requestId: "r1", state: "settled" }),
+      r2: pay("r2", "edge-ana", "request", "in"),
+      p2: pay("p2", `cpay:${community}:${bo}`, "payment", "in", { state: "settled" }),
+      p3: pay("p3", "c1", "payment", "in", { state: "settled" }),
+    };
+    h.sink.post({ kind: "state", state: { ...state([], groups), payments } as unknown as EngineState });
+    const created = events.filter((e) => e.type === "payment.created");
+    expect(created.map((e) => [(e.payment as { id: string }).id, (e.payment as { group?: string }).group ?? null, e.chat]))
+      .toEqual([["r1", mesh, `group:${mesh}`], ["p1", mesh, "edge-ana"], ["r2", mesh, "edge-ana"], ["p2", community, `cpay:${community}:${bo}`], ["p3", null, "c1"]]);
+    const passes = async (groupIds: string[]) => {
+      const allow = new Allowlist(new Set(), new Set(), new Set(groupIds), async () => null), ids: string[] = [];
+      for (const e of created) if (await allow.allows(e)) ids.push((e.payment as { id: string }).id);
+      return ids;
+    };
+    expect(await passes([mesh])).toEqual(["r1", "p1", "r2"]);
+    expect(await passes([community])).toEqual(["p2"]);
   });
 });
 

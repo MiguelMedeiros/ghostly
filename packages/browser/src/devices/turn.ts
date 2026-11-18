@@ -183,6 +183,28 @@ export function deviceSetOf(record: TurnRecord): (DeviceSlot | null)[] {
 }
 
 /**
+ * The set a device keeps from a record of its set that it read, against the set it holds (`held`) and the record it
+ * stored (`stored`). A record written by the device the stored record names active, or under a release that device
+ * signed, is that device's to write: its slots are taken as they are. Any other is a takeover by a holder of `D`, who
+ * signs with the key of the slot it writes from: that slot is taken (the device that took the turn, a restored copy
+ * with a key of its own), so it is named and can be removed; every other slot stays as held, its name aside. A key it
+ * added or swapped in elsewhere is never listed here, so a new device secret never goes to it.
+ */
+export function adoptedSet(held: (DeviceSlot | null)[], stored: TurnRecord | null, record: TurnRecord): (DeviceSlot | null)[] {
+  const set = deviceSetOf(record);
+  const believed = stored && !stored.tombstone ? stored.slots[stored.active]?.key : undefined;
+  const from = (slot: number | undefined) => slot !== undefined && !!believed && !!record.slots[slot] && bytesEqual(record.slots[slot]!.key, believed);
+  if (!stored || from(record.author) || from(record.release?.from)) return set;
+  const author = set[record.author]!;
+  return Array.from({ length: Math.max(set.length, held.length) }, (_, i) => {
+    if (i === record.author) return author;
+    const was = held[i] ?? null;
+    if (!was || was.key === author.key) return null;
+    return set[i]?.key === was.key ? set[i] : was;
+  });
+}
+
+/**
  * The slots of the first record of a turn this device raises (WISP 06 § Who may raise the turn): those of the newest
  * record of the set it knows. The read the raise acts on may return a record above the one it stored (a device added or
  * renamed since its last read); when that record still lists this device in its own slot, its slots are written, with
@@ -196,7 +218,7 @@ export function newestSlots(held: Pick<Held, "record" | "ownSlot" | "ownKey" | "
   if (held.storedRecord && news.sequence <= held.storedRecord.sequence) return undefined;
   const listed = news.slots[held.ownSlot];
   if (!listed || !bytesEqual(listed.key, held.ownKey)) return undefined;
-  const set = deviceSetOf(news);
+  const set = adoptedSet(held.record.deviceSet, held.storedRecord, news);
   return set.map((slot, i) => slot ?? (held.record.deviceSet[i] && !set.some((s) => s?.key === held.record.deviceSet[i]!.key) ? held.record.deviceSet[i] : null));
 }
 
@@ -627,7 +649,7 @@ export class TurnKeeper {
         // device in its own slot; the turn and the packet stay this device's own, below the mark it keeps.
         const listed = read.record?.slots[held.ownSlot];
         const replacedBy = state === "superseded" && read.result === "other" && read.record && !!listed && toBase64Url(listed.key) === toBase64Url(held.ownKey)
-          ? { activeSlot: read.record.active, deviceSet: deviceSetOf(read.record) } : {};
+          ? { activeSlot: read.record.active, deviceSet: adoptedSet(held.record.deviceSet, held.storedRecord, read.record) } : {};
         // Closed by a tombstone: `moving`, with the tombstone kept. When the device its stored record names active is not
         // listed there (or is this device), no `set-update` can ever be accepted: it is enrolled anew; unless it ran the
         // profile and another slot closed its address, when it starts a set of its own instead. So is one that holds no
@@ -654,7 +676,7 @@ export class TurnKeeper {
         // slot out of its record, and with it its key and its links.
         const listed = read.record?.slots[held.ownSlot];
         if (read.result === "other" && !read.known && read.record && read.payload && !!listed && toBase64Url(listed.key) === toBase64Url(held.ownKey)) {
-          held.record = await this.store.amend(this.options.profile, { turn: read.record.turn, rev: read.record.rev, turnPacket: toBase64Url(read.payload), activeSlot: read.record.active, deviceSet: deviceSetOf(read.record) });
+          held.record = await this.store.amend(this.options.profile, { turn: read.record.turn, rev: read.record.rev, turnPacket: toBase64Url(read.payload), activeSlot: read.record.active, deviceSet: adoptedSet(held.record.deviceSet, held.storedRecord, read.record) });
         }
         const active = held.record.activeSlot === undefined ? undefined : held.record.deviceSet[held.record.activeSlot]?.name;
         // The device this one released the turn to: its own release names it (the taker's record is not out yet).

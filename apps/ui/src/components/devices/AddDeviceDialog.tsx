@@ -18,6 +18,7 @@ import { DeviceDialog, Digits, InfoLine, Status, field, primaryButton, quietButt
 import { said } from "../../lib/notices";
 import { fillNames } from "../../lib/fillNodes";
 import { problemLine } from "../../lib/problemText";
+import { FocusSafeButton } from "../ui/FocusSafeButton";
 
 /**
  * Add a device, on the active device (WISP 06 § Adding a device). First the lock password, in the same dialog: a device
@@ -62,20 +63,26 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
    */
   const [profileName] = useState(() => baseProfileName(currentProfile().id) ?? currentProfile().name);
 
-  // While an enrollment runs, its state is read twice a second.
+  // While an enrollment runs, its state is read twice a second. One that ended (added or failed) changes no more, and
+  // Try again's new code starts the reads again; a dialog left open on the outcome reads nothing.
+  const running = step === "enroll" && !!view && view.step !== "done" && view.step !== "failed";
   useEffect(() => {
-    if (step !== "enroll") return;
+    if (!running) return;
     const timer = setInterval(() => void engine.call("deviceEnrollView").then((next) => {
       if (!next || dismissed.current) return;
       ended.current = next.step === "done" || next.step === "failed";
       setView(next);
     }, () => {}), 500);
     return () => clearInterval(timer);
-  }, [step]);
+  }, [running]);
   // The password form, They match or Try again went away with its step: the focus stays in the dialog.
   useEffect(() => { if (step === "enroll") keepFocusIn(body.current); }, [step, view?.step, busy]);
   // Closed before it ended: the code is spent, and nothing was added.
-  useEffect(() => () => { if (!ended.current) void engine.call("deviceEnrollCancel").catch(() => {}); }, []);
+  const closed = useRef(false);
+  useEffect(() => {
+    closed.current = false;
+    return () => { closed.current = true; if (!ended.current) void engine.call("deviceEnrollCancel").catch(() => {}); };
+  }, []);
 
   /** Says what went wrong; a refused field gets the focus back with its text selected, to be typed again. */
   const fail = (text: string, field?: "password" | "again") => {
@@ -90,6 +97,16 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
     clear(); setBusy(true);
     try {
       const first = await engine.call("deviceEnrollInvite", { name: defaultDeviceName(isDesktopApp() ? { userAgent: navigator.userAgent, desktop: true } : undefined, t) });
+      // Closed while the code was being made (× and Escape close "Preparing" too): the enrollment the engine just started
+      // would run its ten minutes with no page showing it, and Remove, Rename and a move refused all along. The engine
+      // cancels whichever enrollment it holds: only while that is still this code, not one a dialog opened since started.
+      if (closed.current) {
+        const code = first.role === "inviter" && first.step === "waiting" ? first.code : null;
+        if (code) void engine.call("deviceEnrollView").then((now) => {
+          if (now?.role === "inviter" && now.step === "waiting" && now.code === code) return engine.call("deviceEnrollCancel");
+        }).catch(() => {});
+        return;
+      }
       ended.current = false; dismissed.current = false;
       setView(first); setStep("enroll");
     } catch (cause) {
@@ -114,6 +131,8 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
       const made = await engine.call("deviceHandoffVerifier", { password, current: password }).then(() => true, () => false);
       setBusy(false);
       if (!made) { fail(t("devices.handoff.verifierFailed")); return; }
+      // Closed while the password was checked: no code for a dialog that is gone.
+      if (closed.current) return;
       await start();
       return;
     }
@@ -124,6 +143,7 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
     const made = await engine.call("deviceHandoffVerifier", { password, current: previous.current }).then(() => true, () => false);
     setBusy(false);
     if (!made) { fail(t("devices.handoff.verifierFailed")); return; }
+    if (closed.current) return;
     await start();
   };
 
@@ -161,7 +181,7 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
             </div>
           )}
           {error && !error.field && <p data-testid="device-add-error" className="text-danger">{error.text}</p>}
-          <button type="submit" data-testid="device-add-next" disabled={busy || !password} className={primaryButton}>{t("devices.password.next")}</button>
+          <FocusSafeButton type="submit" data-testid="device-add-next" disabled={busy || !password} className={primaryButton}>{t("devices.password.next")}</FocusSafeButton>
         </form>
       </DeviceDialog>
     );
@@ -172,12 +192,21 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
   const spoken = view?.role !== "inviter" ? ""
     : view.step === "confirm" ? <>{fillNames(t("devices.add.found"), { device: view.device })} <span dir="ltr">{`${view.digits.slice(0, 3)} ${view.digits.slice(3)}`}</span></>
     : view.step === "done" ? fillNames(t("devices.add.done"), { device: view.device }) : "";
+  // Another device tried the code: the one warning of the code step, said at once from a line of its own that is there
+  // from the code on, like the one above. The notice under the code shows it.
+  const urgent = view?.role === "inviter" && (view.step === "waiting" || view.step === "confirm") && !!view.refused ? t("devices.add.refused") : "";
+
+  // From They match until the device is added or the enrollment failed, × and Escape do nothing: the grant may have gone
+  // out, and closing would cancel it, leaving "Not finished" on both devices. The engine ends the step on its own.
+  const granting = view?.role === "inviter" && (view.step === "adding" || (view.step === "confirm" && busy));
+  const close = () => { if (!granting) onClose(); };
 
   return (
-    <DeviceDialog title={t("devices.add.title")} onClose={onClose} testId="device-add">
+    <DeviceDialog title={t("devices.add.title")} onClose={close} testId="device-add">
       <Toast toast={notice.toast} onDismiss={notice.dismiss} place="dialog" testId="device-add-notice" />
       <div ref={body} tabIndex={-1} className="space-y-3 focus:outline-none">
       <p role="status" className="sr-only" data-testid="device-add-spoken">{spoken}</p>
+      <p role="alert" className="sr-only" data-testid="device-add-alert">{urgent}</p>
       {/* Try again, until the engine answers: a new code, or why there is none. */}
       {!view && busy && <Status testId="device-add-preparing" step="preparing">{t("devices.join.preparing")}</Status>}
       {view?.role === "inviter" && view.step === "waiting" && <>
@@ -194,9 +223,10 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
       {view?.role === "inviter" && view.step === "confirm" && <>
         <p data-testid="device-add-status" data-step="confirm" className="text-text-primary">{fillNames(t("devices.add.found"), { device: view.device })}</p>
         <Digits digits={view.digits} testId="device-add-digits" />
-        <div className="grid grid-cols-2 gap-3">
-          <button type="button" data-testid="device-add-no-match" disabled={busy} onClick={() => void confirm(false)} className={quietButton}>{t("devices.add.noMatch")}</button>
-          <button type="button" data-testid="device-add-match" disabled={busy} onClick={() => void confirm(true)} className={primaryButton}>{t("devices.add.match")}</button>
+        {/* Side by side while each word fits its half; stacked once a larger text size (or a long word) would cut one. */}
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,7rem),1fr))] gap-3">
+          <FocusSafeButton type="button" data-testid="device-add-no-match" disabled={busy} onClick={() => void confirm(false)} className={quietButton}>{t("devices.add.noMatch")}</FocusSafeButton>
+          <FocusSafeButton type="button" data-testid="device-add-match" disabled={busy} onClick={() => void confirm(true)} className={primaryButton}>{t("devices.add.match")}</FocusSafeButton>
         </div>
       </>}
       {view?.role === "inviter" && (view.step === "waiting" || view.step === "confirm") && !!view.refused && <Notice tone="warning" testId="device-add-refused">{t("devices.add.refused")}</Notice>}

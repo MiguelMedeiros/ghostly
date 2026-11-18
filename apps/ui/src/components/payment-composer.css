@@ -46,6 +46,8 @@
 .payment-back-actions[data-turning]{opacity:0}
 .payment-back-actions button{padding:10px 12px;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;transition:filter .2s,opacity .2s}
 .payment-back-actions button:disabled{opacity:.4;cursor:not-allowed}
+.payment-back-actions button[aria-disabled="true"]{opacity:.4;cursor:not-allowed}
+.payment-back-actions button[aria-busy="true"]{opacity:.8;cursor:progress}
 .payment-back-actions button:focus-visible{outline:2px solid #fff;outline-offset:2px}
 .payment-back-secondary{border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.08);color:#fff}
 .payment-back-secondary:not(:disabled):hover{background:rgba(255,255,255,.14)}

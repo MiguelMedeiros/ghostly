@@ -8,6 +8,8 @@ import { Select } from "../ui/Select";
 import { externalLinkProps } from "../../lib/externalLink";
 import { useI18n } from "../../contexts/I18nContext";
 import { problemLine } from "../../lib/problemText";
+import { findSecret, type SecretFinding } from "../../lib/parse/secrets";
+import { SecretGuardDialog } from "../SecretGuardDialog";
 
 
 /**
@@ -41,8 +43,12 @@ export function NostrPublishDialog({ request, onClose, onDone }: { request: Nost
   }, []);
   useEffect(() => () => abort.current?.abort(), []);
 
-  const confirm = async () => {
+  // Text that looks like a secret asks first, as the chat composer does: here it becomes public and stays on the relays.
+  const [secret, setSecret] = useState<SecretFinding | null>(null);
+  const confirm = async (guarded = false) => {
     if (!draft) return;
+    const found = guarded ? null : findSecret(publicText(draft.template));
+    if (found) { setSecret(found); return; }
     const controller = new AbortController(); abort.current = controller;
     setBusy(true); setError(""); setAuthUrl("");
     try {
@@ -99,8 +105,18 @@ export function NostrPublishDialog({ request, onClose, onDone }: { request: Nost
         )}
         {error && <Notice tone="error" testId="nostr-publish-error">{error}</Notice>}
       </div>
+      {secret && <SecretGuardDialog finding={secret} recipient={t("secretGuard.nostrPublic")} onCancel={() => setSecret(null)} onConfirm={() => { setSecret(null); void confirm(true); }} />}
     </div>
   );
+}
+
+/**
+ * What a draft makes public, as the person wrote it: a note's text, or a profile's fields one to a line (its JSON's
+ * escapes would join the words of an About written on several lines).
+ */
+function publicText(template: NostrDraft["template"]): string {
+  if (template.kind !== 0) return template.content;
+  return Object.values(safeJson(template.content)).filter((v): v is string => typeof v === "string").join("\n");
 }
 
 function safeJson(text: string): Record<string, unknown> {

@@ -24,7 +24,7 @@ const Spinner = () => (
 );
 
 export function LockScreen() {
-  const { isLocked, covered, unlock, retryAt, ringing } = useLockScreen();
+  const { isLocked, covered, unlock, retryAt, ringing, callEndSaid } = useLockScreen();
   const { t } = useI18n();
   const [password, setPassword] = useState("");
   const [error, setError] = useState(false);
@@ -170,6 +170,9 @@ export function LockScreen() {
       aria-label={t("lockScreen.title")}
     >
       <LockViewport />
+      {/* How a call that rang here ended ("Missed audio call"): its card goes, the focus back on the password, and the
+          chat's own region is outside this modal dialog, which is all a screen reader hears. */}
+      <p role="status" className="sr-only" data-testid="lock-call-end-spoken">{callEndSaid}</p>
       {/* Centred in what the keyboard leaves (`--app-height`), not in the whole screen: on a phone the field and
           Unlock sat under the keyboard. */}
       <div className="flex items-center justify-center overflow-y-auto" data-app-height style={{ height: "var(--app-height, 100%)" }}>

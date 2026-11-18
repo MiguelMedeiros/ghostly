@@ -3,7 +3,7 @@
  * published one (lib/latestRelease.ts). `tools/scripts/bump-version.mjs` sets it, and
  * /latest.json answers with it.
  */
-export const VERSION = "1.11.3";
+export const VERSION = "1.13.0";
 
 /** The version an app screenshot's caption names ("Ghostly {n}"): that release without its patch, so it follows each bump. */
 export const SHOTS_VERSION = VERSION.split(".").slice(0, 2).join(".");
@@ -61,9 +61,6 @@ export const ANDROID_CERT_SHA256 = "DE:9A:AB:A1:32:50:BC:4B:0D:22:0F:17:95:F2:32
 
 /** The oldest Android the app installs on: minSdkVersion 26 in apps/desktop/tauri.android.conf.json. */
 export const ANDROID_MIN = "8.0";
-
-/** The release the site offers, for the finale. */
-export const RELEASE_URL = releaseUrl(VERSION);
 
 export const DOWNLOADS = downloads(VERSION);
 

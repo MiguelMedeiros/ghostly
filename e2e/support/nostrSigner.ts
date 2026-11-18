@@ -1,5 +1,5 @@
 import { finalizeEvent, generateSecretKey, getPublicKey } from "nostr-tools/pure";
-import { expect, type Peer } from "./fixtures";
+import { expect, openApp, type Peer } from "./fixtures";
 
 /**
  * A NIP-07 signer in the page, like a Nostr browser extension. Its key stays in the test process: the page
@@ -15,8 +15,7 @@ export async function injectNostrSigner(peer: Peer, secret = generateSecretKey()
     const w = window as unknown as Record<string, (...args: unknown[]) => Promise<unknown>> & { nostr?: unknown };
     w.nostr = { getPublicKey: () => w.__testNostrPubkey(), signEvent: (event: unknown) => w.__testNostrSign(event) };
   });
-  await peer.page.reload();
-  await expect(peer.page.getByTitle("New Chat")).toBeVisible();
+  await openApp(peer.page, peer.name, () => peer.page.reload());
   return { pubkey, secret, signed: kind => counts.get(kind) ?? 0 };
 }
 

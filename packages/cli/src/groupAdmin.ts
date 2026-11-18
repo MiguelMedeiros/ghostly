@@ -1,11 +1,13 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { MAX_AVATAR_LENGTH, MAX_AVATAR_SIDE, NO_PICTURE_METADATA, sanitizeAvatar, stripPictureMetadata } from "@ghostly/core";
+import { MAX_AVATAR_LENGTH, MAX_AVATAR_SIDE, MAX_GROUP_CALL_SFU, NO_PICTURE_METADATA, groupCallSfu, sanitizeAvatar, stripPictureMetadata } from "@ghostly/core";
 import type { GroupView } from "@ghostly/browser/shared/types";
-import { bool, contactKeyOf, groupNameOf, groupOf, node, ownChatOf, settingsOf, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, contactKeyOf, groupById, groupNameOf, groupOf, node, ownChatOf, settingsOf, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError, localFileError } from "./errors";
+import { shellWord } from "./shellWord";
 import { guardText } from "./secretGuard";
 import { groupJson } from "./views";
+import { outOf } from "./waits";
 
 /**
  * Group administration and pictures (WISP 1100, phase 3): what the app's group menu and profile screen do. The
@@ -78,8 +80,29 @@ export async function pictureFrom(path: string): Promise<string> {
 }
 
 async function picture(params: Params): Promise<string | null> {
+  // Refused as the command line refuses `--clear` with a <jpeg>: before, `clear` won and the picture went, exit 0.
+  if (bool(params, "clear") && str(params, "path") !== undefined) throw new CliError("bad_request", "clear removes the picture: not with path");
   if (bool(params, "clear")) return null;
   return pictureFrom(str(params, "path", true));
+}
+
+/**
+ * The node a group's calls go through (WISP 602): an https origin in its one spelling, refused here before anything is
+ * signed. A URL that names an https origin in another spelling (a path, a trailing `/`, capitals, `:443`) is told that
+ * origin, and an origin past the limit is told the limit: before, both were told of a path, query or `/` it may not have.
+ */
+function callNode(raw: string, ref: string, groupId: string): string {
+  const sfu = groupCallSfu(raw);
+  if (sfu) return sfu;
+  let origin: string | undefined;
+  try {
+    const url = new URL(raw);
+    if (url.protocol === "https:") origin = url.origin;
+  } catch { /* no URL at all */ }
+  const quoted = JSON.stringify(raw);
+  if (!origin) throw new CliError("bad_request", `${quoted} is not an https origin: a call node is like https://call.example.com`);
+  if (origin.length > MAX_GROUP_CALL_SFU) throw new CliError("bad_request", `${quoted} is too long: a call node is an https origin of at most ${MAX_GROUP_CALL_SFU} characters`);
+  throw new CliError("bad_request", `${quoted} is not in its one spelling (lower case, no default port, path, query or trailing /): ghostly group call ${shellWord(ref, groupId)} --sfu ${origin}`);
 }
 
 /**
@@ -90,7 +113,7 @@ async function picture(params: Params): Promise<string | null> {
 function joined(ctx: ApiContext, params: Params, twin?: string): GroupView {
   const group = groupOf(ctx, params, twin);
   if (group.status || !group.invitation) return group;
-  const ref = str(params, "group", true), shown = /^[\w.:-]+$/.test(ref) ? ref : JSON.stringify(ref);
+  const shown = shellWord(str(params, "group", true), group.id);
   throw new CliError("refused", group.invitation.accepted
     ? `You are not in ${group.name} yet: you accepted its invitation, and its admin has not let you in`
     : `You are not in ${group.name} yet: ghostly group accept ${shown} joins it`);
@@ -99,7 +122,16 @@ function joined(ctx: ApiContext, params: Params, twin?: string): GroupView {
 /** The member `params.member` names in `group`, this profile's own name said to be it; by its key only for a grant. */
 const member = (ctx: ApiContext, group: GroupView, params: Params, grant = false) => findMember(group, str(params, "member", true), settingsOf(ctx).nick, grant);
 
-const view = (ctx: ApiContext, id: string, params: Params) => groupJson(state(ctx).groups.find((g) => g.id === id) ?? groupOf(ctx, { group: id }), bool(params, "showSecret"));
+/** Where the app opens a group's link, as its Share gives it (WISP 903: `https://…/#/join/group2/…`). */
+export const GROUP_LINK_ORIGIN = "https://app.ghostly.tools";
+
+/**
+ * A group's link and the address that opens it in the app, as `invite create` answers `invite` and `link`. Only the
+ * token (`group2/…`) was given: pasted in a chat it is no link anyone can tap, and the app's own Share link is this one.
+ */
+export const withUrl = (group: string, link: string | null) => ({ group, link, ...(link && { url: `${GROUP_LINK_ORIGIN}/#/join/${link}` }) });
+
+const view = (ctx: ApiContext, id: string, params: Params) => groupJson(groupOf(ctx, { group: id }), bool(params, "showSecret"));
 
 export const GROUP_ADMIN_METHODS: Record<string, Method> = {
   async "group.invite"(ctx, params) {
@@ -115,7 +147,7 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
     await node(ctx).removeGroupMember({ groupId: group.id, key: removed.key });
     // While the link is on, whoever holds it joins (WISP 902 § Entry link), the member just removed too: said as the
     // app's Remove dialog says it.
-    const linkOn = !!(state(ctx).groups.find((g) => g.id === group.id) ?? group).entryLink;
+    const linkOn = !!(groupById(ctx, group.id) ?? group).entryLink;
     return { ...view(ctx, group.id, params),
       ...(linkOn && { warning: `${removed.nick ?? "They"} can still join again with the group's link: ghostly group link ${group.id} --reset gives it a new one and keeps them out` }) };
   },
@@ -146,6 +178,10 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
   },
   async "group.link"(ctx, params) {
     const group = joined(ctx, params);
+    // A member removed (or gone) is refused as `group send` is: before, it got the link it held when it was removed,
+    // exit 0, though `group show` said link null and the admin may have reset it or turned it off since.
+    const out = outOf(group);
+    if (out) throw new CliError("refused", out);
     // On unless `on` says otherwise; an `on` that is no boolean ("false", 0) is refused, never read as on.
     const on = params.on === undefined || bool(params, "on"), reset = bool(params, "reset");
     if (!on && reset) throw new CliError("bad_request", "on: false turns the link off: not with reset");
@@ -154,12 +190,35 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
       return { group: group.id, link: null };
     }
     const { link } = await node(ctx).enableGroupLink({ groupId: group.id, ...(reset ? { reset: true } : {}) });
-    return { group: group.id, link };
+    return withUrl(group.id, link);
   },
   async "group.picture"(ctx, params) {
     const group = joined(ctx, params);
     await node(ctx).setGroupPicture({ groupId: group.id, picture: await picture(params) });
     return { group: group.id, picture: !bool(params, "clear") };
+  },
+  async "group.call"(ctx, params) {
+    const group = joined(ctx, params);
+    if (group.profile !== "community") throw new CliError("refused", `${group.name} is a private group: only a community group has calls through a node`);
+    // A profile out of the group (removed, or the admin who left) is told why, as the engine's rename and picture say
+    // it: before, "Only the admin" to them all.
+    const out = outOf(group);
+    if (out) throw new CliError("refused", out);
+    if (!group.isAdmin) throw new CliError("refused", `Only the admin of ${group.name} sets its call node`);
+    const ref = str(params, "group", true), raw = str(params, "sfu");
+    const e2ee = params.e2ee === undefined || params.e2ee === null ? undefined : bool(params, "e2ee");
+    let sfu: string | null;
+    // Refused as the command line refuses them with `--clear`: before, `clear` won and the node went, exit 0.
+    if (bool(params, "clear") && raw !== undefined) throw new CliError("bad_request", "clear removes the call node: not with sfu");
+    if (bool(params, "clear") && e2ee !== undefined) throw new CliError("bad_request", "clear removes the call node: not with e2ee");
+    if (bool(params, "clear")) sfu = null;
+    // An empty `--sfu` ("$NODE" unset) is refused with `--e2ee` too: before, it read as no --sfu and signed the old node again.
+    else if ((params.sfu !== undefined && params.sfu !== null) || e2ee === undefined) sfu = callNode(str(params, "sfu", true), ref, group.id);
+    // `--e2ee` alone turns sealed media on or off for the node the group names already.
+    else if (group.call) sfu = group.call.sfu;
+    else throw new CliError("refused", `${group.name} has no call node: ghostly group call ${shellWord(ref, group.id)} --sfu <https origin>${e2ee ? " --e2ee" : ""}`);
+    await node(ctx).setGroupCall({ groupId: group.id, sfu, ...(sfu !== null && e2ee !== undefined && { e2ee }) });
+    return view(ctx, group.id, params);
   },
   async "profile.picture"(ctx, params) {
     const avatar = await picture(params);

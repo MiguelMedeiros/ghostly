@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join, posix, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { PACKAGES_READ_FROM_SITE, RUST_INPUTS, TESTED_PAGES, WEBSITE_INPUTS, covers, draftBehind, plan, supersededBy, testedAs } from "../ci-changes.mjs";
+import { PACKAGES_READ_FROM_SITE, RUST_INPUTS, TESTED_PAGES, WEBSITE_INPUTS, covers, draftBehind, plan, queuedBehind, supersededBy, testedAs } from "../ci-changes.mjs";
 import { FILES as DECK } from "../../../apps/website/scripts/sync-app-deck.mjs";
 import { FILES as STORE_CORE } from "../../../apps/website/scripts/sync-store-core.mjs";
 
@@ -211,6 +211,17 @@ describe("plan", () => {
     expect(plan(["packages/core/src/invite.ts"], draft)).toMatchObject({ ...fast, rust: false, website: true });
     expect(plan([".github/workflows/ci.yml"], draft)).toMatchObject({ ...fast, rust: false, website: true });
     expect(plan(["apps/ui/src/App.tsx"], draft)).toMatchObject({ ...fast, rust: false, website: false });
+  });
+
+  it("a draft's notice names the jobs its fast tier runs: Website and Tauri Backend when their gates are on", () => {
+    const notice = (files: string[] | null) => plan(files, draft).why.find((w) => w.startsWith("Draft:"));
+    expect(notice(["apps/ui/src/App.tsx"])).toBe("Draft: the fast tier only (lint and types, the affected unit tests). Leaving draft runs everything");
+    expect(notice(["apps/website/app/page.tsx"])).toBe("Draft: the fast tier only (lint and types, the affected unit tests, Website). Leaving draft runs everything");
+    expect(notice(["apps/desktop/src/lib.rs"])).toBe("Draft: the fast tier only (lint and types, the affected unit tests, Tauri Backend). Leaving draft runs everything");
+    expect(notice(["apps/website/app/page.tsx", "apps/desktop/src/lib.rs"])).toBe(
+      "Draft: the fast tier only (lint and types, the affected unit tests, Website, Tauri Backend). Leaving draft runs everything",
+    );
+    expect(notice(null)).toBe("Draft: the fast tier only (lint and types, the affected unit tests, Website). Leaving draft runs everything");
   });
 
   it("draft or ready, the Rust jobs run only when Rust changed", () => {
@@ -585,6 +596,51 @@ describe("a draft run whose pull request left draft after its event", () => {
   });
 });
 
+// A ready pull request that already has `queue` boards the merge train on its fast tier, and the batch's full run on the
+// base's tip is its gate: its own full run would only be cancelled by the train. One at the base's tip keeps the full
+// tier, since the train lands a lone pull request on its own run there.
+describe("a ready pull request labelled queue", () => {
+  const sha = "6".repeat(40);
+  const fake = (labels: string[], behind: number | undefined, base = "dev") => {
+    const asked: string[] = [];
+    const api = async (path: string) => {
+      asked.push(path);
+      if (path === "pulls/7") return { labels: labels.map((name) => ({ name })), base: { ref: base } };
+      if (path === `compare/${base}...${sha}`) return { behind_by: behind };
+      throw new Error(path);
+    };
+    return { api, asked };
+  };
+
+  it("plans the fast tier when its head is behind its base", async () => {
+    const { api, asked } = fake(["kind:fix", "queue"], 3);
+    expect(await queuedBehind({ pull: 7, sha, api })).toBe(3);
+    expect(asked).toEqual(["pulls/7", `compare/dev...${sha}`]);
+    expect(await queuedBehind({ pull: 7, sha, api: fake(["queue"], 1, "epic/calls").api })).toBe(1);
+  });
+
+  it("keeps the full tier without `queue`, so the merge train never sees a ready one it did not queue on the fast tier", async () => {
+    for (const labels of [[], ["queue:priority"], ["queue:hold"], ["queue:failed"]]) {
+      const { api, asked } = fake(labels, 3);
+      expect(await queuedBehind({ pull: 7, sha, api })).toBe(0);
+      expect(asked).toEqual(["pulls/7"]);
+    }
+  });
+
+  it("keeps the full tier at the base's tip: a lone pull request, rebased there by the train, lands on its own run", async () => {
+    expect(await queuedBehind({ pull: 7, sha, api: fake(["queue"], 0).api })).toBe(0);
+    expect(await queuedBehind({ pull: 7, sha, api: fake(["queue"], undefined).api })).toBe(0);
+  });
+
+  it("names the queue and the batch in its notice, not leaving draft", () => {
+    const notice = plan(["apps/website/app/page.tsx"], { draft: true, queued: true }).why.find((w) => w.startsWith("Queued"));
+    expect(notice).toBe(
+      "Queued and behind its base: the fast tier only (lint and types, the affected unit tests, Website). The merge train boards it on this run, and its batch's full run is the gate",
+    );
+    expect(plan(["apps/ui/src/App.tsx"], { draft: true, queued: true })).toMatchObject({ full: false, affected: true, packages: false, app: false });
+  });
+});
+
 // A green "CI Success (draft)" lets a ready pull request board the merge train, which then cancels its full run: the
 // notice must not send a ready one to `gh pr ready`, nor name that full run as where the required check comes from.
 describe("the notice of a green fast tier", () => {
@@ -598,11 +654,14 @@ describe("the notice of a green fast tier", () => {
   const bash = (text: string, env: Record<string, string>, path?: string) =>
     spawnSync("bash", ["-c", text], { encoding: "utf8", env: { PATH: path ?? process.env.PATH ?? "", ...env } });
 
-  /** `changes`' outputs when the API says the pull request is ready, with leaving draft's run behind or not. */
-  const planned = (payloadDraft: string, apiDraft: string, behind: boolean) => {
+  /**
+   * `changes`' outputs when the API says the pull request is ready, with leaving draft's run behind or not, and queued
+   * behind its base or not.
+   */
+  const planned = (payloadDraft: string, apiDraft: string, behind: boolean, queued = false) => {
     const dir = mkdtempSync(join(tmpdir(), "ci-notice-"));
     writeFileSync(join(dir, "gh"), `#!/bin/sh\necho ${apiDraft}\n`, { mode: 0o755 });
-    writeFileSync(join(dir, "node"), `#!/bin/sh\ncase "$*" in *--draft-behind*) exit ${behind ? 0 : 1};; esac\n`, { mode: 0o755 });
+    writeFileSync(join(dir, "node"), `#!/bin/sh\ncase "$*" in *--draft-behind*) exit ${behind ? 0 : 1};; *--queued-behind*) exit ${queued ? 0 : 1};; esac\n`, { mode: 0o755 });
     const output = join(dir, "output");
     writeFileSync(output, "");
     const run = bash(script("changes", "Which jobs this change needs"), { EVENT: "pull_request", PAYLOAD_DRAFT: payloadDraft, CHANGED: "0", GITHUB_OUTPUT: output }, `${dir}:${process.env.PATH}`);
@@ -610,12 +669,12 @@ describe("the notice of a green fast tier", () => {
     return Object.fromEntries(readFileSync(output, "utf8").trim().split("\n").map((l) => l.split("=")));
   };
 
-  const gate = (draft: string, leftDraft: string) => {
+  const gate = (draft: string, leftDraft: string, queued = "") => {
     // The fast tier: lint and the affected tests passed, every other job skipped as its gate said.
     const skipped = ["FRONTEND_TESTS", "FRONTEND_BUILD", "PACKAGES_TESTS", "CLI_ARM64", "TAURI", "WEBSITE", "WEBSITE_E2E", "DESKTOP_MEDIA", "DESKTOP_MACOS"].map((j) => [j, "skipped"]);
     const off = ["RUST", "WEBSITE_GATE", "WEBSITE_E2E_GATE", "APP", "PACKAGES"].map((g) => [g, "false"]);
     const ok = { ...Object.fromEntries([...skipped, ...off]), CHANGES: "success", FRONTEND_CHECKS: "success", AFFECTED: "success", LINT: "true", AFFECTED_GATE: "true" };
-    const run = bash(script("ci-success", "Check all jobs passed"), { ...ok, DRAFT: draft, LEFT_DRAFT: leftDraft, FULL: "false", TESTED: "false" });
+    const run = bash(script("ci-success", "Check all jobs passed"), { ...ok, DRAFT: draft, LEFT_DRAFT: leftDraft, QUEUED: queued, FULL: "false", TESTED: "false" });
     expect(run.status, run.stdout).toBe(0);
     return run.stdout.split("\n").filter((l) => l.startsWith("::notice::"));
   };
@@ -635,6 +694,21 @@ describe("the notice of a green fast tier", () => {
     const notices = gate("true", "true");
     expect(notices).toEqual([
       "::notice::Left draft after this run started: the fast tier passed, and the full run waits behind this one. The merge train may board it on this run and cancel that full run; the batch's run is the check that counts.",
+    ]);
+    expect(notices.join()).not.toContain("gh pr ready");
+  });
+
+  it("gives a ready one with `queue` behind its base the fast tier and the draft's gate, and one without the full tier", () => {
+    expect(planned("false", "false", false, true)).toEqual({ draft: "true", queued: "true" });
+    expect(planned("false", "false", false, false)).toEqual({ draft: "false" });
+    // A draft, or one that left draft with leaving draft's run behind, is the fast tier already: the queue is not asked.
+    expect(planned("true", "true", false, true)).toEqual({ draft: "true" });
+    expect(planned("true", "false", true, true)).toEqual({ draft: "true", left_draft: "true" });
+    expect(job("changes")).toContain("queued: ${{ steps.plan.outputs.queued }}");
+    expect(job("ci-success")).toContain("QUEUED: ${{ needs.changes.outputs.queued }}");
+    const notices = gate("true", "", "true");
+    expect(notices).toEqual([
+      "::notice::Queued and behind its base: the fast tier passed. The merge train boards it on this run, and its batch's full run is the check that counts (alone, the train rebases it onto the tip, where it gets the full tier).",
     ]);
     expect(notices.join()).not.toContain("gh pr ready");
   });

@@ -82,7 +82,7 @@ export function ChatSearchBar({ search }: { search: ChatSearch }) {
           className="min-w-0 flex-1 rounded-md bg-transparent px-1.5 py-1 text-sm text-text-primary placeholder:text-text-muted outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus-ring [&::-webkit-search-cancel-button]:hidden"
         />
         <span data-testid="chat-search-count" role="status" aria-live="polite" className="shrink-0 px-1 text-xs tabular-nums text-text-muted max-md:@max-[28rem]:order-last max-md:@max-[28rem]:basis-full max-md:@max-[28rem]:ps-5.5 max-md:@max-[20rem]:ps-1.5">
-          {searched ? (total ? t("chat.search.count", { current: String(Math.max(search.index, 0) + 1), total: String(total) }) : t("chat.search.none")) : ""}
+          {searched ? (total ? t("chat.search.count", { current: String(Math.max(search.place, 0) + 1), total: String(total) }) : t("chat.search.none")) : ""}
         </span>
         <button type="button" data-testid="chat-search-info" aria-expanded={info} aria-controls={infoId} aria-label={more} title={more} onClick={() => setInfo(!info)}
           className={`${button} aria-expanded:text-accent`}>

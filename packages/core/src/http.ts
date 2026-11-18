@@ -91,12 +91,14 @@ export function resolveTargetUrl(target: LocalTarget, path: string): string | nu
   if (!path.startsWith("/") || path.startsWith("//")) return null;
   for (const char of path) {
     const code = char.codePointAt(0) ?? 0;
-    if (code <= 32 || code === 127 || char === "\\") return null;
+    if (code <= 32 || code === 127) return null;
   }
-  // Encoded separators survive URL normalization here but not in every server:
-  // one that decodes `%2f` before routing would take `/app/..%2fadmin` to `/admin`.
   const queryAt = path.indexOf("?");
   const pathPart = queryAt === -1 ? path : path.slice(0, queryAt);
+  // Some servers read `\` in the path as `/`. In the query a browser's fetch leaves it raw (`?path=C:\x`), so it passes.
+  if (pathPart.includes("\\")) return null;
+  // Encoded separators survive URL normalization here but not in every server:
+  // one that decodes `%2f` before routing would take `/app/..%2fadmin` to `/admin`.
   if (/%(2f|5c|2e)/i.test(pathPart)) return null;
   if (pathPart.split("/").some(climbsOut)) return null;
   let url: URL;
@@ -283,7 +285,8 @@ export function viewerServicePolicy(relayOnly: boolean): string {
  * The browser features a contact's app in the extension's viewer tab may not use. Its tab is a site of its own, so
  * what the person granted it (camera, microphone, location, a device) would be a site setting of the browser's, which
  * no Delete chat, Clear all data or Delete profile reaches; denied here, the browser never asks and ignores a grant
- * made before. The web app's view is a frame of another site, which gets none of them, and Desktop's window grants none.
+ * made before. The web app's view is a frame of another site, which gets none of them, and Desktop's window grants none
+ * and is served the same value (`PERMISSIONS_POLICY` in `apps/desktop/src/viewer.rs`).
  */
 export const VIEWER_PERMISSIONS_POLICY = [
   "camera", "microphone", "display-capture", "geolocation", "midi", "usb", "serial", "hid", "clipboard-read",

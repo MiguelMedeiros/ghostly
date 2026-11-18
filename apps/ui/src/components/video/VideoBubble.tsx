@@ -16,7 +16,9 @@ import { canPlayVideo, videoBox, videoFormat as formatOf } from "../../lib/video
 import { localPoster, posterUrl } from "../../lib/videoPoster";
 import { FORCED_EDGE, RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
 import { useT } from "../../contexts/I18nContext";
+import { NAME, withName } from "../apps/aroundName";
 import { problemLine, saveProblemLine } from "../../lib/problemText";
+import { ownDirection } from "../../lib/ownDirection";
 
 type Phase = "poster" | "loading" | "playing";
 type Problem = "unsupported" | "too-large" | "no-room" | "missing" | "left-out" | "not-yet";
@@ -344,8 +346,8 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
                 type="button"
                 data-testid="video-fullscreen"
                 aria-label={theater ? t("chat.video.exitFullScreen") : t("chat.video.fullScreen")}
+                // Named for what it does next, so it is no toggle: "Exit full screen, pressed" read as left already.
                 title={theater ? t("chat.video.exitFullScreen") : t("chat.video.fullScreen")}
-                aria-pressed={theater}
                 onClick={() => setTheater(!theater)}
                 className="absolute top-[6px] end-[6px] w-8 h-8 rounded-full bg-black/50 hover:bg-black/70 text-white flex items-center justify-center border-none cursor-pointer"
               >
@@ -367,10 +369,10 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/10">
               {offered ? (
                 <>
+                  {/* Not turned off by a room shown less than its size: that room may be old, and the engine reads it again. */}
                   <button
                     type="button"
                     data-testid="video-accept"
-                    disabled={noRoom}
                     onClick={() => act("accept")}
                     className={`flex items-center gap-2 max-w-[calc(100%-8px)] px-3 py-2 rounded-full bg-black/60 hover:bg-black/75 text-white text-[14px] font-medium border-none ${FORCED_EDGE} cursor-pointer disabled:opacity-50 disabled:cursor-default`}
                   >
@@ -418,7 +420,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
       </div>
       {offered && typeof transfer.room === "number" && (
         <p className={`chat-text-media-meta m-0 mt-1 px-1 ${noRoom ? "text-danger-ink" : "text-text-primary/75"}`} data-testid="video-room">
-          {noRoom ? t("chat.media.noRoom", { size: formatFileSize(transfer.room, t) }) : t("chat.media.wantsToSend", { name: peerName, size: formatFileSize(transfer.room, t) })}
+          {noRoom ? t("chat.media.noRoom", { size: formatFileSize(transfer.room, t) }) : withName(t("chat.media.wantsToSend", { name: NAME, size: formatFileSize(transfer.room, t) }), peerName)}
         </p>
       )}
       {(status || canRetry || stuck) && (!offered || reason) && (
@@ -455,7 +457,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
           )}
         </p>
       )}
-      {actionError && !status && <p className="chat-text-media-line text-danger-ink px-1 m-0" role="alert">{actionError}</p>}
+      {actionError && !status && <p className="chat-text-media-line text-danger-ink px-1 m-0" role="alert" dir={ownDirection(actionError)}>{actionError}</p>}
     </div>
   );
 }

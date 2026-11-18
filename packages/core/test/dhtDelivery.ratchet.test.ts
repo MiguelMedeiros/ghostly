@@ -188,3 +188,28 @@ it("a joiner that pinned its inviter from the invite sends its first contact pla
   expect(h.published.some(p => p.labels.includes("_dr"))).toBe(true);
   await a.stop(); await b.stop();
 });
+
+it("a withdrawal whose envelope cannot be sealed is tried again at its backoff, not at every timer turn", async () => {
+  vi.useFakeTimers();
+  const h = setup(), a = h.make(0), b = h.make(1);
+  await a.start(); await b.start(); await vi.advanceTimersByTimeAsync(5_000);
+  expect(await a.send("one", Date.now(), id(1))).toBeNull();
+  await vi.advanceTimersByTimeAsync(6_000);
+  expect(await b.send("two", Date.now(), id(2))).toBeNull();
+  await vi.advanceTimersByTimeAsync(6_000);
+  // The contact is away: the next text waits on the floor, ratcheted, and is deleted there once the spacing has passed.
+  await b.stop();
+  expect(await a.send("three", Date.now(), id(3))).toBeNull();
+  expect(h.published.at(-1)?.labels).toContain("_dr");
+  await vi.advanceTimersByTimeAsync(5_000);
+  // The ratchet's store no longer answers (the database closed under the engine): no envelope can be sealed.
+  const lock = vi.spyOn(h.boxes[0]!, "lock").mockRejectedValue(new Error("database closed"));
+  const published = h.published.length;
+  await a.withdraw(id(3));
+  await vi.advanceTimersByTimeAsync(10_000);
+  // Its own try and the backoff's next ones (4 s, 8 s), not one at every timer turn once 4 s passed since the last envelope.
+  expect(lock.mock.calls.length).toBeLessThanOrEqual(3);
+  expect(h.published.length).toBe(published);
+  lock.mockRestore();
+  await a.stop();
+});

@@ -2,6 +2,7 @@ import { appendFileSync, closeSync, existsSync, fstatSync, ftruncateSync, openSy
 import type { AppFrameEvent } from "@ghostly/core";
 import type { EngineClientSink } from "@ghostly/browser/engine/server";
 import type { EngineEvent, RpcResponse } from "@ghostly/browser/shared/rpc";
+import { parsePayLink } from "@ghostly/browser/shared/payLinks";
 import type { EngineState, FileTransferView, GroupView, LinkView, PinView, StoredMessage } from "@ghostly/browser/shared/types";
 import { chatJson, chatMessageJson, groupJson, groupMessageJson, groupPayTwins, type MessageJson } from "./views";
 import { paymentJson } from "./wallets";
@@ -673,7 +674,10 @@ export class EventHub {
     // A chat's id comes back when its invite is joined again, and a group's when it is joined again: each creation and
     // removal carries its time in its id, or a listener that dedupes on it dropped the second.
     const links = new Map(state.links.map((link) => [link.id, link]));
+    // A chat whose view is the object the last state had did not change (the engine keeps an unchanged chat's view).
+    const last = new Map(this.state?.links.map((link) => [link.id, link]));
     for (const [id, link] of links) {
+      if (last.get(id) === link && this.chats.has(id)) continue;
       const shape = chatShape(link), before = this.chats.get(id);
       this.chats.set(id, shape);
       if (quiet) continue;
@@ -718,8 +722,7 @@ export class EventHub {
       if (quiet) continue;
       if (!before) { this.emit("group.created", `group.created:${id}:${this.now()}`, { group: id, summary: groupJson(group) }); continue; }
       if (shape.status !== before.status) this.emit("group.status", `group.status:${id}:${shape.status}:${this.now()}`, { group: id, status: shape.status });
-      const joined = shape.members.filter((key) => !before.members.includes(key));
-      const left = before.members.filter((key) => !shape.members.includes(key));
+      const { joined, left } = membersDiff(before.members, shape.members);
       if (joined.length || left.length) this.emit("group.members", `group.members:${id}:${this.now()}`, { group: id, joined, left });
       this.pinned("group", id, before.pin, shape.pin);
       // A member started or stopped writing in a private group (WISP 902 · Group Mesh § Typing), as `typing.*` in a chat,
@@ -741,15 +744,25 @@ export class EventHub {
     // A group left or forgotten: the same.
     const groupsGone = new Set(removedGroups);
     this.forget(removedGroups, (event) => groupsGone.has(event.group as string) && event.type !== "group.removed");
-    for (const [id, payment] of Object.entries(state.payments ?? {})) {
+    // A group's payment that went over a member's edge, or a community member's `cpay:` link, has no `group` of its own
+    // (only a request to the whole group does): its event names the group, as `listen --group` reads it.
+    let edgeGroups: Map<string, string> | undefined;
+    const groupOf = (linkId: string) => (edgeGroups ??= new Map(state.groups.flatMap((g) => g.members.flatMap((m) => m.edge ? [[m.edge.linkId, g.id] as const] : [])))).get(linkId)
+      ?? parsePayLink(linkId)?.groupId;
+    // The engine keeps every payment for good and hands the same views object until one changes: the same object as in
+    // the last state is skipped, or each state (every 50 ms under traffic) walked them all, 7 ms at 20,000.
+    const payments = state.payments === this.state?.payments ? {} : state.payments ?? {};
+    for (const [id, payment] of Object.entries(payments)) {
       const shape = `${payment.state}|${payment.error ?? ""}|${payment.closed ? 1 : 0}`, before = this.payments.get(id);
       this.payments.set(id, shape);
       if (quiet || before === shape) continue;
-      const json = paymentJson(payment);
+      const group = payment.group ?? groupOf(payment.linkId);
+      const json = { ...paymentJson(payment), ...(group && { group }) };
       if (before === undefined) this.emit("payment.created", `payment.created:${id}`, { chat: payment.linkId, payment: json });
       else this.emit("payment.updated", `payment.updated:${id}:${payment.state}:${this.now()}`, { chat: payment.linkId, payment: json });
     }
     for (const link of state.links) {
+      if (last.get(link.id) === link) continue;
       for (const identity of link.identities?.received ?? []) {
         const key = `${link.id}:${identity.id}`, shape = identity.status, before = this.received.get(key);
         this.received.set(key, shape);
@@ -1184,6 +1197,22 @@ function typingFields(shape: ChatShape): { kind: string; status?: string } {
 function groupShape(group: GroupView): GroupShape {
   return { status: group.status ?? (group.invitation ? "invited" : null), members: group.members.map((m) => m.key).sort(),
     typing: Object.fromEntries((group.typing ?? []).map((t) => [t.key, { kind: t.kind ?? "typing", ...(t.status ? { status: t.status } : {}) }])), pin: group.pin ?? null };
+}
+
+/**
+ * Who joined and who left between two of `groupShape`'s sorted member lists, in one walk of both: a state comes up to
+ * every 50 ms, and a full community has 256 members, so a lookup of each key in the other list would cost each state
+ * O(members²) per group though nothing changed.
+ */
+function membersDiff(before: readonly string[], after: readonly string[]): { joined: string[]; left: string[] } {
+  const joined: string[] = [], left: string[] = [];
+  let i = 0, j = 0;
+  while (i < before.length || j < after.length) {
+    if (j >= after.length || (i < before.length && before[i] < after[j])) left.push(before[i++]);
+    else if (i >= before.length || after[j] < before[i]) joined.push(after[j++]);
+    else { i++; j++; }
+  }
+  return { joined, left };
 }
 
 /**

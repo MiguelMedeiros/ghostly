@@ -280,6 +280,27 @@ describe("the forced takeover on the standby screen", () => {
     expect(screen.getByTestId("takeover-go")).not.toHaveAttribute("aria-disabled");
   });
 
+  it("Escape and the × do nothing during the check, so its answer is still said in the dialog", async () => {
+    const { user, engine } = renderApp(<DeviceStandby gate={{ state: "superseded", activeDevice: "Phone" }} />);
+    let refuse = () => {};
+    engine.on("deviceTakeoverInfo", () => ({ offered: true, device: "Phone", copy: "frozen", password: true }));
+    engine.on("deviceTakeover", () => new Promise((_, reject) => { refuse = () => reject(new Error("takeover-password: Wrong password.")); }));
+    await user.click(await screen.findByTestId("takeover-open"));
+    await user.type(screen.getByTestId("takeover-password"), "not it");
+    await user.type(screen.getByTestId("takeover-name"), "Phone");
+    await user.click(screen.getByTestId("takeover-lost-no"));
+    await user.click(screen.getByTestId("takeover-go"));
+    expect(await screen.findByTestId("takeover-checking")).toBeInTheDocument();
+    screen.getByTestId("takeover-dialog").dispatchEvent(new Event("cancel", { cancelable: true }));
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.getByTestId("takeover-dialog")).toBeInTheDocument();
+    act(() => refuse());
+    expect(await screen.findByTestId("takeover-error")).toHaveTextContent("Wrong password.");
+    // Once it answered, the × closes it again.
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByTestId("takeover-dialog")).toBeNull());
+  });
+
   it("Use here keeps the keyboard on its button while the pull starts, and starts it once", async () => {
     const { user, engine } = renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "MacBook" }} />);
     engine.on("deviceTakeoverInfo", () => ({ offered: false }));

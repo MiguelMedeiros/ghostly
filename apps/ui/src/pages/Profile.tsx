@@ -29,6 +29,7 @@ import { useFittedNameField } from "../hooks/useGroupNameField";
 import { useFocusLanding } from "../hooks/useFocusLanding";
 import { openJoinAnother } from "../lib/devices";
 import { problemText, type Problem } from "../lib/problemText";
+import { incomingShare } from "../lib/incomingShare";
 
 /**
  * Another tab's write the page shows: the registry, a profile's settings (its colour in the list), this profile's own
@@ -110,18 +111,29 @@ export function Profile() {
   // A backup restored to replace the profile it was made from lands here, the copy running: the original's removal
   // opens, with what it holds, a backup first and its name to confirm (WISP 05 § Restoring on the same device).
   const replacing = new URLSearchParams(location.search).get("replace");
+  // A share that came along with the copy waits in its Share to… picker (`takeReplaceStep`): offered once this is done.
+  const shareAfter = useRef(false);
   useEffect(() => {
     if (!replacing) return;
     const original = listProfiles().find((entry) => entry.id === replacing);
-    if (original && original.id && original.id !== currentProfile().id) setDeleting(original);
+    const offered = !!original && !!original.id && original.id !== currentProfile().id;
+    if (offered) { setDeleting(original); shareAfter.current = !!incomingShare(); }
     // Once: a reload, or Back, does not open it again.
-    navigate("/profile", { replace: true });
+    navigate(!offered && incomingShare() ? "/shared" : "/profile", { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per arrival
   }, [replacing]);
+  const closeDeleting = () => {
+    setDeleting(null);
+    if (!shareAfter.current) return;
+    shareAfter.current = false;
+    if (incomingShare()) navigate("/shared");
+  };
   const [error, setError] = useState<Problem | null>(null);
   useEffect(() => setName(plain), [plain]);
 
-  const chats = useStoredSessions(chatCount, Object.is);
+  // Its groups are chats too, as the chat list shows them.
+  const groups = useEngineValue(state => state?.groups.length ?? 0);
+  const chats = useStoredSessions(chatCount, Object.is) + groups;
   const attempt = (work: () => void) => { try { work(); setError(null); } catch (e) { setError(problemText(e, t)); } };
   const saveName = () => { if (name.trim() && name.trim() !== plain) attempt(() => { renameProfile(current.id, name); setNameSaved(true); }); };
   const schemes: { value: ColorScheme; label: string }[] = [{ value: "light", label: t("settings.colorSchemes.light") }, { value: "dark", label: t("settings.colorSchemes.dark") }, { value: "system", label: t("settings.colorSchemes.system") }];
@@ -140,9 +152,10 @@ export function Profile() {
         </label>
         {/* Enter saves in place: blurring it dropped the keyboard's focus to the page. */}
         {/* Left empty, it shows the saved name again, which an empty name does not replace (as the nickname field does). */}
+        {/* With the focus, a ring as the other fields have: its border's turn to the accent alone was 1.1-1.3:1 from the muted one. */}
         <input data-testid="profile-name" aria-label={t("profile.nameLabel")} value={name} {...nameField} onBlur={() => { if (name.trim()) saveName(); else setName(plain); }}
           onCompositionEnd={(e) => { nameComposition.inputProps.onCompositionEnd(e); nameField.onCompositionEnd(e); }} onKeyDown={(e) => { if (!nameComposition.composing(e) && e.key === "Enter") saveName(); }}
-          className="min-w-0 flex-[1_1_8rem] bg-transparent text-xl font-semibold text-text-primary rounded-lg px-2 -mx-2 py-1 border border-field-border focus:border-accent focus:outline-none" />
+          className="min-w-0 flex-[1_1_8rem] bg-transparent text-xl font-semibold text-text-primary rounded-lg px-2 -mx-2 py-1 border border-field-border focus:border-accent focus:outline-2 focus:outline-offset-1 focus:outline-focus-ring" />
         {current.restored && (
           <span data-testid="profile-restored-tag" title={t("profile.restoredTagHint")} className="inline-flex items-center gap-0.5 shrink-0 whitespace-nowrap rounded-full border border-border bg-surface-alt ps-2.5 pe-0.5 text-xs text-text-muted">
             {t("profile.restoredTag")}
@@ -218,7 +231,7 @@ export function Profile() {
           <button data-testid="profile-join-another" onClick={() => openJoinAnother()} className="w-full px-4 py-3 min-h-12 text-start text-sm text-text-secondary hover:text-accent hover:bg-surface-alt transition-colors cursor-pointer rounded-b-xl">{t("devices.join.another")}</button>
         )}
       </Section>
-      {deleting && <DeleteProfileDialog entry={deleting} onClose={() => setDeleting(null)} />}
+      {deleting && <DeleteProfileDialog entry={deleting} onClose={closeDeleting} />}
     </Page>
   );
 }

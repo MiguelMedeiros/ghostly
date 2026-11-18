@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, readFileSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,6 +13,7 @@ import { nodeLocalFetch } from "../services";
 import { nodeFedimintSdk } from "./fedimint";
 import { installFileFetch } from "./fileFetch";
 import { nodeHoldFetch } from "./holdFetch";
+import { nodePublicFetch } from "./publicFetch";
 import { nodePublicRelay } from "./irohRelay";
 import { nodePushSend } from "./pushSend";
 import { openPersistentIndexedDb, type PersistentIndexedDb } from "./storage";
@@ -283,6 +284,9 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
       if (said) process.stderr.write(said + "\n");
     });
   }
+  // The store a backup wrote for itself (`profile.backup`) and a killed process left: every message and key in the
+  // clear, past what was deleted since. This process holds the profile now, so no backup of it is running.
+  for (const name of existsSync(paths.db) ? readdirSync(paths.db) : []) if (/^backup-store-.*\.bin$/.test(name)) rmSync(join(paths.db, name), { force: true });
   const store = await openPersistentIndexedDb(paths.db);
   // A profile a restore made, started for the first time: its store is the backup's, as old as the backup. Its ecash
   // is checked with the mints and its unfinished payment attempts authorize nothing, as in the app's restore. Done
@@ -362,6 +366,8 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     pushSend: (request) => nodePushSend(request),
     // Held items are read from the contact's storage on public addresses only (./holdFetch.ts).
     holdFetch: nodeHoldFetch(),
+    // A contact's identity proof and public data are read on public addresses only, as a held item (./publicFetch.ts).
+    identityFetch: nodePublicFetch(),
     // libdatachannel keeps only its own candidates out of the offer under `iceTransportPolicy: "relay"`: its ICE still
     // checks from this machine's sockets. With Hide my IP from contacts on, chats and group edges go over the relays.
     webrtcIgnoresRelayOnly: true,

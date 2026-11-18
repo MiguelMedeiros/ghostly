@@ -33,8 +33,8 @@ test.use({
 
 interface Site { server: Server; origin: string; requests: string[] }
 
-/** A site with a page that describes itself, and its picture. It allows reading (CORS), as some sites do. */
-async function site(): Promise<Site> {
+/** A site with a page that describes itself (`title`, `description`), and its picture. It allows reading (CORS), as some sites do. */
+async function site({ title = "Ghosts &amp; peers", description = "Chat with no server in the middle." } = {}): Promise<Site> {
   const requests: string[] = [];
   const server = createServer((request, response) => {
     requests.push(request.url ?? "");
@@ -46,8 +46,8 @@ async function site(): Promise<Site> {
     }
     response.setHeader("content-type", "text/html; charset=utf-8");
     response.end(`<!doctype html><html><head><title>Plain</title>
-      <meta property="og:title" content="Ghosts &amp; peers">
-      <meta property="og:description" content="Chat with no server in the middle.">
+      <meta property="og:title" content="${title}">
+      <meta property="og:description" content="${description}">
       <meta property="og:site_name" content="Ghostly Test News">
       <meta property="og:image" content="/card.png">
       </head><body>…</body></html>`);
@@ -104,6 +104,80 @@ test("a link preview is made by the sender and drawn by the receiver without con
     await expect(bubble(bob, "again").getByTestId("link-preview-card")).toHaveCount(0);
     await expect(bubble(alice, "again").getByTestId("link-preview-card")).toHaveCount(0);
     expect(bobAsked).toEqual([]);
+  } finally {
+    news.server.close();
+  }
+});
+
+test("a preview's title and description show two lines at most, a long word broken inside the card", { tag: ["@feature:chat.link-preview.render"] }, async ({ peer }) => {
+  // A long headline in Arabic, and a description that is one long word (a file name, an address), as pages have.
+  const news = await site({
+    title: "عنوان طويل لمقالة عن الأشباح والأقران والدردشة بدون خادم في المنتصف ".repeat(3),
+    description: `Screenshot_2026-11-14_at_12.34.56${"_with_a_very_long_name".repeat(8)}.png`,
+  });
+  try {
+    const [alice, bob] = await Promise.all([peer("clamp-alice"), peer("clamp-bob")]);
+    await pair(alice, bob);
+    await alice.page.getByPlaceholder("Message…").fill(`look ${news.origin}/long`);
+    await expect(alice.page.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready");
+    await alice.page.getByPlaceholder("Message…").press("Enter");
+
+    for (const side of [alice, bob]) {
+      const card = bubble(side, "look").getByTestId("link-preview-card");
+      await expect(card).toBeVisible();
+      for (const testId of ["link-preview-title", "link-preview-description"]) {
+        // Before, both drew every line they had (the headline 7 lines) and the long word ran past the card's edge, cut with no
+        // "…". Polled: the row is drawn again as the message is delivered, and a node read meanwhile has no style (NaN lines).
+        await expect.poll(() => card.getByTestId(testId).evaluate((element) => ({
+          lines: Math.round(element.getBoundingClientRect().height / parseFloat(getComputedStyle(element).lineHeight)),
+          cut: element.scrollHeight > element.clientHeight,
+          wide: element.scrollWidth > element.clientWidth,
+        })), testId).toEqual({ lines: 2, cut: true, wide: false });
+      }
+    }
+  } finally {
+    news.server.close();
+  }
+});
+
+test("a preview's words read in their own direction, in English and in Arabic", { tag: ["@feature:chat.link-preview.render"] }, async ({ peer }) => {
+  const news = await site({ title: "Hello world!", description: "مرحبا بكم!" });
+  try {
+    const [alice, bob] = await Promise.all([peer("bidi-alice"), peer("bidi-bob")]);
+    await pair(alice, bob);
+    await alice.page.getByPlaceholder("Message…").fill(`${news.origin}/both`);
+    await expect(alice.page.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready");
+    await alice.page.getByPlaceholder("Message…").press("Enter");
+    // Bob turns to Arabic once the card is his: sent while his reload left the chat not live, the message went by the
+    // DHT, which carries no preview (WISP 401), and his side never drew one.
+    await expect(chat(bob).getByTestId("link-preview-card")).toBeVisible();
+    await bob.page.evaluate(() => {
+      const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+      localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language: "ar" }));
+    });
+    await bob.page.reload();
+    await expect(bob.page.locator("html")).toHaveAttribute("dir", "rtl");
+
+    for (const [side, app] of [[alice, "ltr"], [bob, "rtl"]] as const) {
+      const card = chat(side).getByTestId("link-preview-card").last();
+      await expect(card).toBeVisible();
+      for (const [testId, own] of [["link-preview-title", "ltr"], ["link-preview-description", "rtl"]] as const) {
+        // Before, both lines took the app's direction: "!Hello world" in Arabic, "مرحبا بكم!" with its "!" at the far end in
+        // English. Polled: the row is drawn again as the message is delivered, and a node read meanwhile has no box.
+        await expect.poll(() => card.getByTestId(testId).evaluate((element, own) => {
+          const text = element.firstChild as Text;
+          const rect = (from: number, to: number) => { const range = document.createRange(); range.setStart(text, from); range.setEnd(text, to); return range.getBoundingClientRect(); };
+          const first = rect(0, 1), mark = rect(text.data.length - 1, text.data.length), all = rect(0, text.data.length), box = element.getBoundingClientRect();
+          return {
+            direction: getComputedStyle(element).direction,
+            // The final "!" at the end its words read toward: after "Hello" in English, before "مرحبا" in Arabic.
+            markAtEnd: own === "rtl" ? mark.left < first.left : mark.left > first.left,
+            // Starting at its words' own start, as the message's text does.
+            ownStart: own === "rtl" ? Math.abs(box.right - all.right) < 2 : Math.abs(all.left - box.left) < 2,
+          };
+        }, own), `${app} app, ${testId}`).toEqual({ direction: own, markAtEnd: true, ownStart: true });
+      }
+    }
   } finally {
     news.server.close();
   }

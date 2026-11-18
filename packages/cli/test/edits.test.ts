@@ -9,16 +9,16 @@ import { idSlot, TEXT_COMMANDS } from "../src/commands";
 import { EventHub, type GhostlyEvent } from "../src/events";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 import { messageJson } from "../src/views";
-import { chatViewOf } from "./support/chatView";
+import { chatViewOf, groupViewOf } from "./support/chatView";
 // covers: headless.edit, groups.edit
 
 /** `ghostly edit`, and what the stream and the history say about an edited message (WISP 400 § Edits). */
 const link = (id: string, fields: Partial<LinkView> = {}) => ({ id, peerPubKeyZ32: "p" + id, createdAt: 1, lastMessageAt: 0, profile: "paired-chat/1", textDelivery: "stream", pairing: { status: "ready" }, ...fields }) as unknown as LinkView;
 const row = (fields: Partial<StoredMessage> = {}): StoredMessage => ({ linkId: "c1", id: "me_w", wireId: "W".repeat(22), text: "Working", sender: "me", timestamp: 1, via: "datalink", delivery: "delivered", ...fields });
 
-function fake(result: { error: string | null; refused?: boolean; messageId?: string } = { error: null, messageId: "me_w" }, messages: StoredMessage[] = [row({ text: "Done", edit: { seq: 1, at: 5, history: [{ at: 1, text: "Working" }] } })]) {
+function fake(result: { error: string | null; refused?: boolean; missing?: boolean; messageId?: string } = { error: null, messageId: "me_w" }, messages: StoredMessage[] = [row({ text: "Done", edit: { seq: 1, at: 5, history: [{ at: 1, text: "Working" }] } })]) {
   const node = {
-    chatView: chatViewOf, getState: () => ({ links: [link("chat-one", { label: "Alice" })], groups: [], settings: {}, transport: {} }) as unknown as EngineState,
+    chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [link("chat-one", { label: "Alice" })], groups: [], settings: {}, transport: {} }) as unknown as EngineState,
     getMessages: vi.fn(async () => messages),
     getMessage: vi.fn(async (_linkId: string, id: string) => messages.find((m) => m.id === id)),
     editMessage: vi.fn(async () => result),
@@ -72,6 +72,20 @@ describe("ghostly edit", () => {
     expect(refused.node.getMessages).toHaveBeenCalledOnce();
   });
 
+  it("a refusal tells a missing message by the engine's answer, reading nothing again", async () => {
+    // The CLI read the chat again to word it, after the engine had looked: a second whole history for an id no message
+    // goes by, 0.7 s at 100,000 messages.
+    const gone = fake({ error: "Only your own text messages can be edited", refused: true, missing: true }, [row({ id: "peer_x", sender: "peer", wireId: undefined })]);
+    const theirs = fake({ error: "Only your own text messages can be edited", refused: true, missing: false }, []);
+    const errors = [await callApi(gone.ctx, "chat.edit", { chat: "Alice", message: "W".repeat(22), text: "x" }).catch((e: unknown) => e),
+      await callApi(theirs.ctx, "chat.edit", { chat: "Alice", message: "peer_x", text: "x" }).catch((e: unknown) => e)];
+    for (const { node } of [gone, theirs]) {
+      expect(node.getMessages).not.toHaveBeenCalled();
+      expect(node.getMessage).not.toHaveBeenCalled();
+    }
+    expect(errors).toMatchObject([{ code: "not_found", message: `No message "${"W".repeat(22)}" in this chat (ghostly chat history Alice)` }, { code: "refused", message: "Only your own text messages can be edited" }]);
+  });
+
   it("--wait confirmed times out while the contact has not confirmed", async () => {
     const { ctx } = fake(undefined, [row({ text: "Done", edit: { seq: 2, at: 5, history: [], pending: true } })]);
     await expect(callApi(ctx, "chat.edit", { chat: "Alice", message: "me_w", text: "Done", wait: "confirmed", timeout: 1 })).rejects.toMatchObject({ code: "timeout" });
@@ -116,9 +130,9 @@ describe("ghostly group edit", () => {
   const group = { id: "g1", name: "Crew", createdAt: 1, profile: "mesh", isAdmin: true, canSend: true, lastMessageAt: 0, invited: [], memberLinks: {},
     members: [{ key: "mekey", role: "admin", me: true, online: true, missing: 0 }, { key: "bobkey", nick: "Bob", role: "member", me: false, online: true, missing: 0 }] };
   const groupRow = (fields: Partial<StoredMessage> = {}): StoredMessage => ({ linkId: "group:g1", id: "mekey:1:0", text: "Deploy: done", sender: "me", member: "mekey", timestamp: 1, via: "datalink", ...fields });
-  function groupFake(result: { error: string | null; refused?: boolean } = { error: null }, messages = [groupRow({ edit: { seq: 2, at: 5, history: [] } })]) {
+  function groupFake(result: { error: string | null; refused?: boolean; missing?: boolean } = { error: null }, messages = [groupRow({ edit: { seq: 2, at: 5, history: [] } })]) {
     const node = {
-      chatView: chatViewOf, getState: () => ({ links: [], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
+      chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
       groupMessages: vi.fn(async () => messages),
       getMessage: vi.fn(async (_linkId: string, id: string) => messages.find((m) => m.id === id)),
       editMessage: vi.fn(async () => result),
@@ -166,6 +180,20 @@ describe("ghostly group edit", () => {
     const theirs = groupFake({ error: "Only your own text messages can be edited", refused: true }, [groupRow({ id: "bobkey:1:0", sender: "peer", member: "bobkey" })]);
     await expect(callApi(theirs.ctx, "group.edit", { group: "Crew", message: "bobkey:1:0", text: "x" })).rejects.toMatchObject({ code: "refused" });
     expect(theirs.node.groupMessages).not.toHaveBeenCalled();
+  });
+
+  it("a refusal tells a missing message by the engine's answer, reading nothing again", async () => {
+    // A member's group of 100,000 messages was read whole for an id no message goes by, after the engine had looked.
+    const gone = groupFake({ error: "Only your own text messages can be edited", refused: true, missing: true }, [groupRow({ id: "bobkey:1:0", sender: "peer", member: "bobkey" })]);
+    const theirs = groupFake({ error: "Only your own text messages can be edited", refused: true, missing: false }, []);
+    const errors = [await callApi(gone.ctx, "group.edit", { group: "Crew", message: "mekey:9:9", text: "x" }).catch((e: unknown) => e),
+      await callApi(theirs.ctx, "group.edit", { group: "Crew", message: "bobkey:1:0", text: "x" }).catch((e: unknown) => e)];
+    for (const { node } of [gone, theirs]) {
+      expect(node.groupMessages).not.toHaveBeenCalled();
+      // The look at the edit number before the edit only.
+      expect(node.getMessage.mock.calls).toHaveLength(1);
+    }
+    expect(errors).toMatchObject([{ code: "not_found", message: 'No message "mekey:9:9" in this group (ghostly group history Crew)' }, { code: "refused", message: "Only your own text messages can be edited" }]);
   });
 
   it("the text the message already has is no edit: nothing is said to have gone", async () => {

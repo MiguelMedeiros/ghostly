@@ -11,6 +11,7 @@ import { appStopped, refreshInstalledApps, useInstalledApp } from "../../lib/app
 import { appsBlock, appsUnavailable } from "../../lib/apps/availability";
 import { openApp } from "../../lib/apps/open";
 import { appErrorText } from "../../lib/apps/errors";
+import { ownDirection } from "../../lib/ownDirection";
 
 /*
  * An app card in a 1:1 chat (WISP 405 § An app, WISP 1200 § Apps sent in a chat): "Ana opened Chess", drawn from its
@@ -73,9 +74,12 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
   const open = (runAnyway = false) => {
     if (opening) return;
     setError(null); setOpening(runAnyway ? "anyway" : "open");
+    const lacked = app?.run.status === "needs-files";
     // Refused (removed or revoked since the list was read): the list is read again first, so the card says Stopped,
     // and offers Run anyway only for a store's removal, as the Apps page then does.
-    void openApp(card.ref, linkId, { runAnyway }).catch(async (e: unknown) => { await refreshInstalledApps(); setError(appErrorText(e, t)); })
+    void openApp(card.ref, linkId, { runAnyway })
+      // Opening is what fetched its files (a restored profile): every screen's list says so, and the icon shows.
+      .then(() => { if (lacked) void refreshInstalledApps(); }, async (e: unknown) => { await refreshInstalledApps(); setError(appErrorText(e, t)); })
       .finally(() => setOpening(null));
   };
   return (
@@ -98,7 +102,7 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
         </div>
       </div>
       {waiting && <p className="chat-text-card-line text-text-secondary" data-testid="app-card-waiting">{waiting}</p>}
-      {error && <p role="alert" className="chat-text-card-line text-danger-ink" data-testid="app-card-error">{error}</p>}
+      {error && <p role="alert" dir={ownDirection(error)} className="chat-text-card-line text-danger-ink" data-testid="app-card-error">{error}</p>}
       <div className="flex items-center gap-2">
         {stopped ? null : app ? <Button ref={openRef} variant="primary" data-testid="app-card-open" loading={opening === "open"} onClick={() => open()}>{t("apps.page.open")}</Button>
           : card.url ? <Button variant="primary" data-testid="app-card-install" onClick={() => setInstalling(true)}>{t("apps.card.join")}</Button>

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-paired-native-took"
+description = "Enables the paired_native_took command without any pre-configured scope."
+commands.allow = ["paired_native_took"]
+
+[[permission]]
+identifier = "deny-paired-native-took"
+description = "Denies the paired_native_took command without any pre-configured scope."
+commands.deny = ["paired_native_took"]

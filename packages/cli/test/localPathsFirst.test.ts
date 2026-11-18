@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ghostly, home } from "./support/cli";
@@ -34,6 +34,27 @@ describe("local paths checked before the profile opens", () => {
       seen.push({ args, code: result.code, json: result.json });
     }
     expect(seen).toMatchObject(cases.map(([args, code, message]) => ({ args, code: code === "not_found" ? 3 : 1, json: { error: { code, message } } })));
+    expect(existsSync(join(dir, "profiles"))).toBe(false);
+  });
+
+  it("a path that loops through symbolic links is not there, as the API said it, not the engine failing", async () => {
+    // Before: the check's stat threw Node's raw ELOOP, answered as `engine` (exit 1) naming no next step.
+    const dir = home("local-paths-loop");
+    const loop = join(dir, "loop");
+    symlinkSync(loop, loop);
+    const gone = `No such file or folder: ${loop} (its symbolic links go round in a loop)`;
+    const cases: [string[], string][] = [
+      [["file", "send", "bob", loop], `No file ${loop}`],
+      [["profile", "picture", loop], gone],
+      [["group", "picture", "Crew", loop], gone],
+      [["profile", "backup", "--out", join(loop, "x.ghostly-backup"), "--no-passphrase"], gone],
+    ];
+    const seen = [];
+    for (const [args] of cases) {
+      const result = await ghostly(["--home", dir, ...args], { input: "" });
+      seen.push({ args, code: result.code, json: result.json });
+    }
+    expect(seen).toMatchObject(cases.map(([args, message]) => ({ args, code: 3, json: { error: { code: "not_found", message } } })));
     expect(existsSync(join(dir, "profiles"))).toBe(false);
   });
 });

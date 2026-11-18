@@ -54,6 +54,8 @@ import { PinMoveNote } from "./chat/PinOrder";
 import { usePageShown } from "../hooks/usePageShown";
 import { shownContactName, useContactFaces } from "./identities/contactFace";
 import { reactionNoteText } from "../lib/reactions";
+import { appCardsShown } from "../lib/statusCards";
+import { useAppsAvailable } from "../lib/apps/flag";
 import { SidebarTasks } from "./tasks/SidebarTasks";
 import { SidebarSaved } from "./saved/SidebarSaved";
 import { openJoinProfile } from "../lib/devices";
@@ -128,9 +130,12 @@ export function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const { t, language } = useI18n();
+  const appsOn = useAppsAvailable();
   // New and Join keep their words while they fit beside the logo, in this language (French needs more room).
   const headerRef = useRef<HTMLDivElement>(null), brandRef = useRef<HTMLDivElement>(null), actionsRef = useRef<HTMLDivElement>(null);
-  const labelsFit = useLabelsFit(headerRef, brandRef, actionsRef, language);
+  // What the header gives up when it does not fit (a phone at a large text size): the buttons' words, then the wordmark
+  // (the ghost stays), then Join's share of New's width.
+  const givenUp = useLabelsFit(headerRef, brandRef, actionsRef, language, 8, 3);
   const isMobile = useIsMobile();
   const { settings: { chatListDensity: density, chatListCollapsed }, updateChatListCollapsed } = useSettings();
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -379,6 +384,14 @@ export function Sidebar() {
     const face = faceOf(session.peerPubKeyB64);
     return { face, shown: shownContactName({ nickname: session.label, face, nick: session.nick, fallback: t("common.unnamedContact", { key: contactTag(session.peerPubKeyB64) }) }) };
   };
+  /**
+   * What the chat list's reaction line quotes its message from: its row, when the chat holds it (the latest are), read
+   * as its bubble shows it, an app card as a card where the chat draws one (`appCardsShown`).
+   */
+  const reactionQuoted = (session: ChatSession, id: string | undefined) => ({
+    row: id === undefined ? undefined : session.messages.find((m) => m.id === id),
+    appCards: appCardsShown(session.profile === "paired-chat/1" ? session.id : undefined, appsOn),
+  });
   const chatRow = (session: ChatSession) => {
     const lastMsg = session.messages[session.messages.length - 1];
     const isActive = activeSessionId === session.id;
@@ -389,6 +402,7 @@ export function Sidebar() {
     const peerLabel = shown.name;
     const unread = isActive ? 0 : getUnreadCount(session);
     const isCreator = !!getInviteCode(session.id);
+    const reaction = session.lastReaction;
 
     return (
       <ChatRow
@@ -403,7 +417,7 @@ export function Sidebar() {
         keyLabel={peerKey}
         peerPubKey={session.peerPubKeyB64}
         lastMessage={lastMsg}
-        note={(session.lastReaction?.at ?? 0) > Math.max(lastMsg?.timestamp ?? 0, session.identitySharedAt ?? 0) ? reactionNoteText(session.lastReaction!, peerLabel, t)
+        note={reaction && reaction.at > Math.max(lastMsg?.timestamp ?? 0, session.identitySharedAt ?? 0) ? reactionNoteText(reaction, peerLabel, t, reactionQuoted(session, reaction.message))
           : (session.identitySharedAt ?? 0) > (lastMsg?.timestamp ?? 0) ? t("sidebar.sharedIdentity") : undefined}
         time={formatListTime(session.lastSyncAt ?? session.createdAt, undefined, language, t)}
         unread={unread}
@@ -478,17 +492,17 @@ export function Sidebar() {
         </div>
       </> : <>
       {/* Header */}
-      <div ref={headerRef} data-labels={labelsFit ? undefined : "off"} className="sidebar-header h-14 header-safe shrink-0 flex items-center justify-between px-4 bg-panel-header">
+      <div ref={headerRef} data-labels={givenUp >= 1 ? "off" : undefined} data-wordmark={givenUp >= 2 ? "off" : undefined} data-join={givenUp >= 3 ? "own" : undefined} className="sidebar-header h-14 header-safe shrink-0 flex items-center justify-between px-4 bg-panel-header">
         <div ref={brandRef} className="flex shrink-0"><AppBrand onHome={() => nav.home()} /></div>
         <div ref={actionsRef} className="flex shrink-0 items-center gap-1">
         <div className="grid shrink-0 grid-cols-2 items-stretch gap-1 whitespace-nowrap" data-testid="sidebar-chat-actions">
           {/* New: one click is a chat, as always; the arrow beside it also offers a group. */}
           <div ref={newMenuRef} role="group" aria-label={t("sidebar.new")} data-testid="sidebar-new" className="sidebar-new-split relative flex min-w-0">
-            <button onClick={newChat} data-testid="sidebar-new-chat" aria-label={t("sidebar.startChat")} title={t("sidebar.newChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 max-md:min-h-11 max-md:min-w-11 flex-1 items-center justify-center gap-1 rounded-s-lg bg-accent p-2 text-sm font-semibold text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header"><ActionIcon d={NEW_CHAT_PATH} /><span className="sidebar-action-label">{t("sidebar.newChatShort")}</span></button>
+            <button onClick={newChat} data-testid="sidebar-new-chat" aria-label={t("sidebar.startChat")} title={t("sidebar.newChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 max-md:min-h-11 max-md:min-w-11 flex-1 items-center justify-center gap-1 rounded-s-lg bg-accent p-2 text-sm font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header"><ActionIcon d={NEW_CHAT_PATH} /><span className="sidebar-action-label">{t("sidebar.newChatShort")}</span></button>
             {/* On a phone 32px wide, and a thumb's 44px where a tap lands: that reaches past its end, over the gap and
                 Join's start, so New keeps all of its own and the words still fit beside the logo on a 375px phone. */}
             <button ref={newMoreRef} onClick={() => setNewMenuOpen(open => !open)} aria-haspopup="true" aria-expanded={!!newMenuOpen} aria-controls="sidebar-new-menu" aria-label={t("sidebar.newMenu.label")} title={t("sidebar.newMenu.label")} data-testid="sidebar-new-more"
-              className="relative inline-flex min-h-10 w-6 max-md:min-h-11 max-md:w-8 max-md:after:absolute max-md:after:inset-y-0 max-md:after:start-0 max-md:after:-end-3 max-md:after:content-[''] shrink-0 items-center justify-center rounded-e-lg border-s border-panel-header/25 bg-accent text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header">
+              className="relative inline-flex min-h-10 w-6 max-md:min-h-11 max-md:w-8 max-md:after:absolute max-md:after:inset-y-0 max-md:after:start-0 max-md:after:-end-3 max-md:after:content-[''] shrink-0 items-center justify-center rounded-e-lg border-s border-panel-header/25 bg-accent text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header">
               <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${newMenuOpen ? "rotate-180" : ""}`}><path d="m6 9 6 6 6-6"/></svg>
             </button>
             {newMenu()}

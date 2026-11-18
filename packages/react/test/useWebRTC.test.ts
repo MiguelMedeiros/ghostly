@@ -730,6 +730,22 @@ describe("answering a call", () => {
     expect(call.result.current.callState).toBe("connecting");
   });
 
+  it("tells each offer it holds back, and none it rings, so a handoff does not wait on a call that never rings", () => {
+    const call = renderCall();
+    const first = Date.now();
+    call.receive(remote.offer(first));
+    call.receive(remote.hangUp(first + 1));
+    const held: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      act(() => { vi.advanceTimersByTime(1900); });
+      held.push(Date.now());
+      call.receive(remote.offer(Date.now()));
+    }
+
+    expect(call.result.current.callState).toBe("idle");
+    expect(call.offerHeld.mock.calls).toEqual(held.map((ts) => [ts]));
+  });
+
   it("calling back once the held-back call stopped ringing places a call of its own", async () => {
     const call = renderCall();
     call.receive(remote.offer(Date.now()));
@@ -1033,7 +1049,7 @@ describe("a headless caller starting over on a second offer", () => {
     expect(call.addCallEventMessage.mock.calls.filter(([type]) => type === "call_connected")).toHaveLength(1);
   });
 
-  it("an offer is not a restart for a call we placed, nor for one whose connection came up", async () => {
+  it("an offer is not a restart for a call we placed, nor for one whose connection came up: that one is the caller starting over", async () => {
     const call = renderCall();
     const { pc } = await offered(call);
     call.receive(remote.answer(Date.now() + 1));
@@ -1049,8 +1065,11 @@ describe("a headless caller starting over on a second offer", () => {
     act(() => { answeredPc.setIceState("connected"); answeredPc.setConnectionState("connected"); });
     other.receive(remote.offer(Date.now() + 3));
     await settle();
-    expect(answeredPc.close).not.toHaveBeenCalled();
-    expect(other.result.current.callState).toBe("connected");
+    // Not answered on a new connection: the call ends here with no hang-up, and the offer rings as a new call.
+    expect(FakePeerConnection.instances).toHaveLength(2);
+    expect(answeredPc.close).toHaveBeenCalledOnce();
+    expect(other.result.current.callState).toBe("incoming");
+    expect(other.publishedKinds()).toEqual(["a", null]);
   });
 });
 
@@ -1707,14 +1726,17 @@ describe("a call ringing in another chat while one is on (End and answer)", () =
     expect(other.addCallEventMessage).not.toHaveBeenCalled();
   });
 
-  it("the same contact offering again during the call is not a second call: it is ignored, as before", async () => {
-    const { call } = await onACall();
+  it("the same contact offering again during the call we placed is them starting over: ours ends with no hang-up, theirs rings", async () => {
+    const { call, pc } = await onACall();
 
     call.receive(remote.offer(Date.now() + 1));
 
-    expect(call.result.current.callState).toBe("connected");
-    expect(call.result.current.otherCallOn).toBe(false);
-    expect(call.addCallEventMessage).not.toHaveBeenCalledWith("call_received", expect.anything(), undefined, expect.anything());
+    expect(call.result.current.callState).toBe("incoming");
+    expect(pc.close).toHaveBeenCalledOnce();
+    // Our offer is cleared, and no hang-up is sent: it would end their new call there as declined.
+    expect(call.publishedKinds()).toEqual(["o", null]);
+    expect(call.addCallEventMessage).toHaveBeenCalledWith("call_ended", false, expect.any(Number));
+    expect(call.addCallEventMessage).toHaveBeenCalledWith("call_received", false, undefined, expect.any(Number));
   });
 
   it("a chat that goes away with its call on no longer counts as on", async () => {

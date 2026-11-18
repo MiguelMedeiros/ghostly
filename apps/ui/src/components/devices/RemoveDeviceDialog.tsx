@@ -19,6 +19,7 @@ export function RemoveDeviceDialog({ device, deviceKey, onClose, onRemoved }: { 
   const [error, setError] = useState<Problem | null>(null);
   const [checklist, setChecklist] = useState(false);
   const remove = async () => {
+    if (busy) return;
     setBusy(true); setError(null);
     try {
       await engine.call("deviceRemove", { key: deviceKey });
@@ -40,11 +41,16 @@ export function RemoveDeviceDialog({ device, deviceKey, onClose, onRemoved }: { 
       <p className="text-text-muted text-xs">{t("devices.remove.copy")}</p>
       {busy && <p role="status" data-testid="device-remove-busy" className="text-text-secondary">{t("devices.remove.removing")}</p>}
       {error && <Notice problem={error} testId="device-remove-error" className="" />}
-      <button type="button" data-testid="device-remove-go" disabled={busy} onClick={() => void remove()} className={dangerButton}>{t("devices.remove.go")}</button>
-      <button type="button" data-testid="device-remove-lost" disabled={busy} onClick={() => setChecklist(true)} className={quietButton}>{t("devices.remove.lost")}</button>
+      {/* `aria-disabled`, not `disabled`, while it runs: a disabled button drops the keyboard focus to the page, and a
+          refusal left it there. A press while busy does nothing. */}
+      <button type="button" data-testid="device-remove-go" aria-disabled={busy || undefined} aria-busy={busy || undefined} onClick={() => void remove()} className={`${dangerButton} ${BUSY}`}>{t("devices.remove.go")}</button>
+      <button type="button" data-testid="device-remove-lost" aria-disabled={busy || undefined} onClick={() => { if (!busy) setChecklist(true); }} className={`${quietButton} ${BUSY}`}>{t("devices.remove.lost")}</button>
     </DeviceDialog>
   );
 }
+
+/** A button busy by `aria-disabled` looks as a disabled one does. */
+const BUSY = "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const walletOf = () => engine.state?.wallet;

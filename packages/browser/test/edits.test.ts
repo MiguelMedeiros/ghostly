@@ -6,7 +6,7 @@ import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { CARD_RESTORE_GAP_MS, EditBuffer, EditQueue } from "../src/engine/edits";
 import type { GroupEditsHost } from "../src/engine/groupEdits";
-import type { Removal } from "../src/engine/removals";
+import { QUOTE_SWEEP_MS, quoteSweepTiming, type Removal } from "../src/engine/removals";
 import { EDIT_HISTORY_KEEP, EDIT_HISTORY_MAX_BYTES, canEdit, takesPeerEdit, withEdit } from "../src/shared/edits";
 import type { StoredLink, StoredMessage } from "../src/shared/types";
 import { refusedRow } from "../src/shared/refusals";
@@ -23,6 +23,12 @@ Object.defineProperty(globalThis.navigator, "storage", { value: { estimate: asyn
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const step of cleanup.splice(0).reverse()) await step(); });
+
+/** For a test that waits for a gathered sweep of quotes to go (`QuoteSweeps`): 10 s each was most of this file's run. */
+function shortSweeps() {
+  quoteSweepTiming.ms = 2_000;
+  cleanup.push(async () => { quoteSweepTiming.ms = QUOTE_SWEEP_MS; });
+}
 
 async function setup(contactOptions: { editSupport?: boolean; pinSupport?: boolean; confirm?: () => boolean } = {}) {
   const net = new FakeNativeNet();
@@ -188,6 +194,29 @@ describe("editing my message", () => {
     expect((await t.messages()).find(m => m.id === theirs.id)).toBeDefined();
   });
 
+  /**
+   * agents#5945: a file of mine waits for the live link (`delivery: "waiting"`) also once its offer went on the DHT
+   * floor and the contact's chat shows its bubble. Deleted for everyone then, it was taken for one that never left: no
+   * removal went, and the contact kept the bubble, its name and a voice note's waveform, as "Cancelled by the sender".
+   */
+  it("deleting for everyone a waiting file whose offer went on the DHT floor tells the contact; one never said there is only deleted here", async () => {
+    const t = await setup();
+    const file = (c: string, fileOnFloor?: "sent" | "seen"): StoredMessage => ({ linkId: t.id, id: `me_file${c}`, text: "📎 notes.pdf", sender: "me", timestamp: Date.now(), via: "datalink",
+      delivery: "waiting", file: { id: `${t.id}-out-${WIRE(c)}`, name: "notes.pdf", size: 1_000, mime: "application/pdf" }, ...(fileOnFloor && { fileOnFloor }) });
+    for (const [c, fileOnFloor] of [["S", "seen"], ["F", "sent"]] as const) {
+      await db.addMessage(file(c, fileOnFloor));
+      expect(await t.node.removeMessage({ linkId: t.id, messageId: `me_file${c}` })).toEqual({ error: null });
+      expect((await t.messages()).find(m => m.id === `me_file${c}`)).toBeUndefined();
+      await vi.waitFor(() => expect(t.contactEdits.filter(e => e.id === WIRE(c))).toEqual([{ id: WIRE(c), e: 1, ts: expect.any(Number), m: REMOVED_TEXT, rm: true }]));
+    }
+    // Never said on the floor: the contact has nothing of it, and nothing goes.
+    await db.addMessage(file("N"));
+    expect(await t.node.removeMessage({ linkId: t.id, messageId: "me_fileN" })).toEqual({ error: null });
+    expect((await t.messages()).find(m => m.id === "me_fileN")).toBeUndefined();
+    await new Promise(resolve => setTimeout(resolve, 150));
+    expect(t.contactEdits.filter(e => e.id === WIRE("N"))).toEqual([]);
+  });
+
   it("an edit and its confirmation read the edited message, not the chat's whole history", async () => {
     const t = await setup();
     // As the CLI and the web app host it: the pages hear the rows that changed, not the whole history.
@@ -206,6 +235,63 @@ describe("editing my message", () => {
     for (const [i, step] of ["Step 2 of 4", "Step 3 of 4", "Done"].entries()) await edit(step, i + 2);
     expect(history).not.toHaveBeenCalled();
     history.mockRestore();
+  });
+
+  it("an id no message goes by is refused as missing, the chat read whole once in a run, not each; a wire id still names mine, of this chat, while it is here", async () => {
+    // Each such edit read the chat's whole history for a wire id, and the CLI read it again to word the refusal: 0.6-2 s
+    // a call at 100,000 messages, with the daemon's other clients waiting. Now once in a run, for the rows that go by
+    // another id than their own.
+    const t = await setup();
+    // As the CLI and the web app host it: the pages hear the rows that changed, not the whole history.
+    Object.assign((t.node as unknown as { events: object }).events, { onMessageChanges: vi.fn() });
+    const sent = await t.node.sendMessage({ linkId: t.id, text: "Working…" });
+    await vi.waitFor(async () => expect((await t.row(sent.messageId!)).delivery).toBe("delivered"));
+    const mine = await t.row(sent.messageId!);
+    expect(await t.contact.sendMessage("theirs", Date.now(), WIRE("T"))).toBeNull();
+    const theirs = await t.peerRow("theirs");
+    // Another chat's message of the same wire id is never this chat's.
+    await db.addMessage({ linkId: "another-chat", id: `me_${WIRE("O")}`, wireId: WIRE("O"), text: "elsewhere", sender: "me", timestamp: 1, via: "datalink" });
+    cleanup.push(() => db.deleteMessage("another-chat", `me_${WIRE("O")}`));
+    // Only the edits' own reads count: the node reads on its own too (a session's look at what waits).
+    const [measuring, read] = [new AsyncLocalStorage<true>(), db.getMessages.bind(db)];
+    let whole = 0;
+    const history = vi.spyOn(db, "getMessages").mockImplementation(linkId => { if (measuring.getStore()) whole++; return read(linkId); });
+    cleanup.push(async () => { history.mockRestore(); });
+    const edit = (messageId: string, text = "Done") => measuring.run(true, () => t.node.editMessage({ linkId: t.id, messageId, text }));
+    const answers = [];
+    for (const unknown of ["me_typo", WIRE("Z"), WIRE("O"), WIRE("Y")]) answers.push(await edit(unknown));
+    expect(whole).toBe(1);
+    expect(answers).toEqual(Array(4).fill({ error: "Only your own text messages can be edited", refused: true, missing: true }));
+    // There, but not mine: refused as before, and said to be there.
+    expect(await edit(theirs.id)).toMatchObject({ refused: true, missing: false });
+    // Mine, by its wire id (what the contact's side and a bot know it by).
+    expect(await edit(mine.wireId!)).toEqual({ error: null, messageId: sent.messageId });
+    expect((await t.row(sent.messageId!)).text).toBe("Done");
+    // A row of mine that goes by another id than `me_` and its wire id, stored after the chat was read: found by it too.
+    const late = { linkId: t.id, id: "me_late", wireId: WIRE("L"), text: "late", sender: "me", timestamp: Date.now(), via: "datalink", delivery: "delivered" } satisfies StoredMessage;
+    await (t.node as unknown as { storeMessage(m: StoredMessage): Promise<void> }).storeMessage(late);
+    expect(await edit(WIRE("L"), "later")).toEqual({ error: null, messageId: "me_late" });
+    expect(whole).toBe(1);
+    // Deleted here: no longer found by either id.
+    t.node.deleteMessage({ linkId: t.id, messageId: sent.messageId! });
+    await vi.waitFor(async () => expect(await db.getMessage(t.id, sent.messageId!)).toBeUndefined());
+    expect(await edit(mine.wireId!)).toMatchObject({ refused: true, missing: true });
+    expect(await edit(sent.messageId!)).toMatchObject({ refused: true, missing: true });
+    expect(whole).toBe(1);
+  });
+
+  it("a row of mine already in the history under another id than its wire id is found by it", async () => {
+    const t = await setup();
+    Object.assign((t.node as unknown as { events: object }).events, { onMessageChanges: vi.fn() });
+    await db.addMessage({ linkId: t.id, id: "me_123", wireId: WIRE("K"), text: "kept", sender: "me", timestamp: 123, via: "datalink", delivery: "delivered" });
+    const [measuring, read] = [new AsyncLocalStorage<true>(), db.getMessages.bind(db)];
+    let whole = 0;
+    const history = vi.spyOn(db, "getMessages").mockImplementation(linkId => { if (measuring.getStore()) whole++; return read(linkId); });
+    cleanup.push(async () => { history.mockRestore(); });
+    const kept = await measuring.run(true, () => t.node.editMessage({ linkId: t.id, messageId: WIRE("K"), text: "kept, edited" }));
+    const never = await measuring.run(true, () => t.node.editMessage({ linkId: t.id, messageId: WIRE("N"), text: "x" }));
+    expect(whole).toBe(1);
+    expect([kept, never]).toEqual([{ error: null, messageId: "me_123" }, { error: "Only your own text messages can be edited", refused: true, missing: true }]);
   });
 
   it("a backlog of edits on their way costs one read per look, and a confirmation reads its own row alone", async () => {
@@ -267,7 +353,7 @@ describe("editing my message", () => {
     // 12,002 UTF-8 bytes of mostly control characters: six characters each in the frame's JSON, ~72 K against 60 K.
     const controls = `x${"\u0001".repeat(12_000)}x`;
     expect(await t.node.editMessage({ linkId: t.id, messageId: sent.messageId!, text: controls }))
-      .toEqual({ error: "Message too long once encoded. Shorten it or send it as a file.", refused: true });
+      .toEqual({ error: "Message too long once encoded. Shorten it or send it as a file.", refused: true, missing: false });
     expect(await t.row(sent.messageId!)).toMatchObject({ text: "short" });
     expect((await t.row(sent.messageId!)).edit).toBeUndefined();
     // As many quotes (two characters each) fit, and go; the session that carries them stays.
@@ -478,6 +564,7 @@ describe("the contact's edits", () => {
   });
 
   it("removals of ids never here read the chat for their quotes once a while, not once each, and still clear them", async () => {
+    shortSweeps();
     const t = await setup();
     // A reply whose original never came: its quote is only what the contact's app said.
     expect(await t.contact.sendMessage("their answer", Date.now(), WIRE("R"), undefined, { i: WIRE("a"), s: "never here", f: "sender" })).toBeNull();
@@ -491,6 +578,29 @@ describe("the contact's edits", () => {
     await vi.waitFor(async () => expect((await t.row(theirs.id)).replyTo).toMatchObject({ id: WIRE("a"), snippet: "" }), { timeout: 15_000, interval: 200 });
     expect(sweeps).toHaveBeenCalledTimes(2);
   }, 30_000);
+
+  it("purges of one chat at once share its reads for their quotes, and each answers with its quotes gone", async () => {
+    const t = await setup();
+    const originals: string[] = [], replies: string[] = [];
+    for (const n of [1, 2, 3, 4, 5, 6, 7, 8]) {
+      originals.push((await t.node.sendMessage({ linkId: t.id, text: `purge me ${n}` })).messageId!);
+      replies.push((await t.node.sendMessage({ linkId: t.id, text: `about ${n}`, replyTo: originals.at(-1)! })).messageId!);
+    }
+    const rows = await Promise.all(originals.map(id => t.row(id)));
+    const reads = vi.spyOn(t.node as unknown as { forgetQuotes(...args: unknown[]): Promise<string[]> }, "forgetQuotes");
+    // The first purge's read runs while the others come: they share the next.
+    const first = t.node.forgetQuotesOf(rows[0]);
+    await vi.waitFor(() => expect(reads).toHaveBeenCalledTimes(1), { interval: 1 });
+    await Promise.all([first, ...rows.slice(1).map(row => t.node.forgetQuotesOf(row))]);
+    expect(reads).toHaveBeenCalledTimes(2);
+    for (const id of replies) expect((await t.row(id)).replyTo).toMatchObject({ snippet: "" });
+    // Once those are done, a purge reads again: nothing it needs waits for a read that began before it.
+    expect(await t.node.sendMessage({ linkId: t.id, text: "about 1 again", replyTo: originals[0] })).toBeTruthy();
+    const again = (await t.messages()).find(m => m.text === "about 1 again")!;
+    await t.node.forgetQuotesOf(rows[0]);
+    expect(reads).toHaveBeenCalledTimes(3);
+    expect((await t.row(again.id)).replyTo).toMatchObject({ snippet: "" });
+  });
 
   it("a removal of a message already deleted here still leaves no line of it in the replies here that quote it", async () => {
     const t = await setup();
@@ -1136,6 +1246,7 @@ describe("deleting many of my group messages for everyone", () => {
   }, 60_000);
 
   it("a removal, mine or a member's, leaves no line of its message in the replies here that quote it", async () => {
+    shortSweeps();
     const me = createIdentity().pubKeyZ32, bob = createIdentity().pubKeyZ32, g = `quotes-${crypto.randomUUID()}`, chat = `group:${g}`;
     const [myOriginal, bobsOriginal, bobsReply, myReply] = [`${me}:1:1`, `${bob}:1:1`, `${bob}:1:2`, `${me}:1:2`];
     const quote = (id: string, author: string, snippet: string) => ({ id, snippet, from: author === me ? "me" as const : "peer" as const, member: author, messageId: id });
@@ -1225,6 +1336,7 @@ describe("deleting many of my group messages for everyone", () => {
   it("a member's removals of its messages here read the group for their quotes once a while, not once each, and still clear them", async () => {
     // A member (a bot's passing notes, a script) can post and delete for everyone at the pace of edits: each read a long
     // group whole on every member's device.
+    shortSweeps();
     const me = createIdentity().pubKeyZ32, bob = createIdentity().pubKeyZ32, g = `here-${crypto.randomUUID()}`, chat = `group:${g}`;
     const ids = Array.from({ length: 12 }, (_, n) => `${bob}:1:${n + 1}`), reply = `${me}:1:1`;
     for (const [n, id] of ids.entries()) await db.addMessage({ linkId: chat, id, text: `note ${n}`, sender: "peer", member: bob, timestamp: n + 1, via: "datalink" });

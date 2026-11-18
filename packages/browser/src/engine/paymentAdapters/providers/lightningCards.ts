@@ -181,10 +181,13 @@ export class LightningCards {
   /** The cards a person sees: the Cashu card only while the network has mints. In the order they were added. */
   private shown(): StoredLightningCard[] { return this.stored.cards.filter((c) => c.id !== CASHU_CARD || this.options.hasMints()); }
 
-  /** The default for receiving, or the first card shown when that one is not (the Cashu card of a network with no mints). */
+  /**
+   * The default for receiving, or the first card shown here when that one is not (the Cashu card of a network with no
+   * mints): a card at home on another device cannot receive here.
+   */
   get receivingId(): string {
     const shown = this.shown();
-    return shown.find((c) => c.id === this.stored.receive)?.id ?? shown[0]?.id ?? this.stored.receive;
+    return shown.find((c) => c.id === this.stored.receive)?.id ?? shown.find((c) => this.isHere(c.id))?.id ?? shown[0]?.id ?? this.stored.receive;
   }
   get receiving(): LightningService { return this.services.get(this.receivingId) ?? [...this.services.values()][0]; }
 
@@ -279,7 +282,8 @@ export class LightningCards {
 
   /**
    * Removes a card: its source and sealed secrets go (refused while a payment through it has not ended). The default
-   * for receiving moves to the first card of the person's own left, else the mints' card. A network left with no card gets the Cashu card back, as before cards.
+   * for receiving moves to the first card of the person's own left on this device (one at home on another device
+   * cannot receive here), else the mints' card. A network left with no card gets the Cashu card back, as before cards.
    */
   remove(id: string): Promise<void> {
     return this.serial(async () => {
@@ -298,7 +302,7 @@ export class LightningCards {
         await added.start();
       }
       const shown = cards.filter((c) => c.id !== CASHU_CARD || this.options.hasMints());
-      const next = shown.find((c) => c.id !== CASHU_CARD) ?? shown[0] ?? cards[0];
+      const next = shown.find((c) => c.id !== CASHU_CARD && this.isHere(c.id)) ?? shown.find((c) => c.id === CASHU_CARD) ?? shown[0] ?? cards[0];
       const receive = this.stored.receive === id || !cards.some((c) => c.id === this.stored.receive) ? next.id : this.stored.receive;
       await this.save({ cards, receive });
       if (added) void added.ensureReady();
@@ -371,7 +375,8 @@ export class LightningCards {
   }
 
   /** The cards whose source is opened on this device: not one at home on another device (WISP 06 § Wallets that stay home). */
-  private here(): LightningService[] { return [...this.services].filter(([id]) => awayFrom(`lightning:${this.network}:${id}`) === undefined).map(([, s]) => s); }
+  private here(): LightningService[] { return [...this.services].filter(([id]) => this.isHere(id)).map(([, s]) => s); }
+  private isHere(id: string): boolean { return awayFrom(`lightning:${this.network}:${id}`) === undefined; }
   async reconcile() { await Promise.all(this.here().map((s) => s.reconcile())); }
   /** The screen shows this invoice of ours: the card that made it asks about it at the fast pace a while longer. */
   async watch(invoice: string): Promise<boolean> { return (await Promise.all(this.here().map((s) => s.watch(invoice)))).some(Boolean); }

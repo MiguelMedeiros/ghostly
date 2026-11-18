@@ -1,0 +1,16 @@
+{
+  "private": true,
+  "type": "module",
+  "sideEffects": [
+    "*.css",
+    "./src/main.tsx",
+    "./src/lib/apps/installed.ts",
+    "./src/lib/feedbackClaims.ts",
+    "./src/lib/identities.ts",
+    "./src/lib/layerHistory.ts",
+    "./src/lib/parse/seedLists.ts",
+    "./src/lib/qrFrames.worker.ts",
+    "./src/lib/translateDetector.worker.ts",
+    "./src/lib/voiceMp3.worker.ts"
+  ]
+}

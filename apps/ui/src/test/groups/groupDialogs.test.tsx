@@ -93,14 +93,18 @@ describe("GroupMembersDialog", () => {
     engine.on("removeGroupMember", () => undefined);
     await user.click(within(row(BOB)).getByTestId("group-remove-member"));
     const ask = screen.getByTestId("group-remove-dialog");
-    expect(ask).toHaveAccessibleName("Remove Bob?");
+    // Named by its heading. The name is its own <bdi>, which happy-dom's accessible name counts as a block (a space
+    // before the "?" no browser adds), so the heading's text is read instead.
+    const question = within(ask).getByRole("heading");
+    expect(ask).toHaveAttribute("aria-labelledby", question.id);
+    expect(question.textContent).toBe("Remove Bob?");
     expect(ask).toHaveAccessibleDescription("They won't get the group's new messages.");
     expect(within(ask).getByRole("button", { name: "Cancel" })).toHaveFocus();
     expect(engine.callsTo("removeGroupMember")).toEqual([]);
     await user.click(within(ask).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByTestId("group-remove-dialog")).not.toBeInTheDocument();
     await user.click(within(row(ALICE)).getByTestId("group-remove-member"));
-    expect(screen.getByTestId("group-remove-dialog")).toHaveAccessibleName("Remove Alice?");
+    expect(within(screen.getByTestId("group-remove-dialog")).getByRole("heading").textContent).toBe("Remove Alice?");
     // Escape, as the browser says it to the topmost dialog: only the question closes.
     act(() => { screen.getByTestId("group-remove-dialog").dispatchEvent(new Event("cancel", { cancelable: true })); });
     expect(screen.queryByTestId("group-remove-dialog")).not.toBeInTheDocument();
@@ -206,6 +210,20 @@ describe("GroupMembersDialog", () => {
     expect(screen.queryByTestId("group-link")).not.toBeInTheDocument();
     // It fell to the page, out of the open dialog.
     expect(screen.getByTestId("group-member-list")).toHaveFocus();
+  });
+
+  it("no longer says, under a community's link turned off, that anyone with the link can join: to the admin nor to a member", () => {
+    const link = encodeCommunityLink({ g: "AbCdEfGhIjKlMnOpQrStUv", host: createIdentity().pubKeyZ32 });
+    for (const isAdmin of [true, false]) {
+      const group = groupView({ status: "active", isAdmin, profile: "community", entryLink: link, members: [member({ key: ME, me: true, online: true, role: isAdmin ? "admin" : "member" }), member({ key: ALICE, nick: "Alice", role: isAdmin ? "member" : "admin" })] });
+      const { unmount } = members_(group);
+      const note = screen.getByTestId("group-read-note");
+      expect(note, `link on, admin ${isAdmin}`).toHaveTextContent(/^Anyone with the group's link can join, and any member can let people in\./);
+      act(() => fakeEngine.update({ groups: [{ ...group, entryLink: undefined }] }));
+      expect(note, `link off, admin ${isAdmin}`).toHaveTextContent(/^The link is off: nobody can join with it, and only the admin can let people in again, with a new link\. Everyone in the group can read/);
+      expect(note).not.toHaveTextContent("Anyone with the group's link can join");
+      unmount();
+    }
   });
 
   it("says, while the group's link works, that whoever is removed can join again with it until a new link", async () => {

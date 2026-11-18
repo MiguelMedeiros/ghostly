@@ -241,4 +241,19 @@ describe("the invoice callback", () => {
     expect(action({ tag: "url", description: "Receipt ‮", url: "https://ln.example.com/r" })).toEqual({ tag: "url", url: "https://ln.example.com/r", description: "Receipt " });
     expect(action({ tag: "message", message: "Tha​nks ⁦for⁩ ‮paying" })).toEqual({ tag: "message", message: "Thanks for paying" });
   });
+
+  it("keeps a success URL only on the callback's own host (LUD-09)", () => {
+    const pr = testInvoice({ sats: 21, descriptionHash: metadataHash });
+    const action = (successAction: unknown) => parseInvoiceCallback({ pr, successAction }, params, 21).successAction;
+    expect(action({ tag: "url", description: "Your receipt", url: "https://other.example/login" })).toBeUndefined();
+    expect(action({ tag: "url", description: "Your receipt", url: "https://ln.example.com.other.example/r" })).toBeUndefined();
+    expect(action({ tag: "url", description: "Your receipt", url: "https://pay.ln.example.com/r" })).toBeUndefined();
+    expect(action({ tag: "url", description: "Your receipt", url: "https://ln.example.com:8443/r" })).toBeUndefined();
+    expect(action({ tag: "url", description: "Your receipt", url: "https://LN.example.com/r" })).toEqual({ tag: "url", description: "Your receipt", url: "https://LN.example.com/r" });
+  });
+
+  it("keeps no direction control or invisible character in the pay request's description", () => {
+    const metadata = JSON.stringify([["text/plain", "Coffee ‮ for⁦ two​\nthanks"]]);
+    expect(parsePayParams({ ...PARAMS, metadata }, ALICE).description).toBe("Coffee  for two thanks");
+  });
 });

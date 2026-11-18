@@ -101,6 +101,20 @@ it("in one profile, the Spark wallet and a Breez card of one phrase stay one wal
   await spark.close(); await card.close();
 });
 
+it("the Spark wallet and a Breez card of one phrase stay one SDK instance when their API keys differ", async () => {
+  const net = new FakeBreezNetwork();
+  const mnemonic = phrase();
+  const spark = await SparkAdapter.connect({ network: "regtest", mnemonic }, async () => net.sdk);
+  const card = await BreezLightning.connect({ network: "regtest", mnemonic, apiKey: "some-breez-key" }, async () => net.sdk);
+  const other = await BreezLightning.connect({ network: "regtest", mnemonic, apiKey: "another-breez-key" }, async () => net.sdk);
+  expect(card.storage).toBe(spark.storage);
+  expect(net.connects, "one SDK instance over the one database").toHaveLength(1);
+  await spark.close(); await card.close();
+  expect(breezOpen(spark.storage), "the last card still holds it").toBe(true);
+  await other.close();
+  expect(breezOpen(spark.storage)).toBe(false);
+});
+
 it("removing a wallet deletes its Breez databases, unless the other wallet of that phrase still has them open", async () => {
   const net = new FakeBreezNetwork();
   const mnemonic = phrase();

@@ -192,6 +192,19 @@ describe("a secret is copied as one where the platform marks it", () => {
     expect(page).not.toHaveBeenCalled();
   });
 
+  it("a long key's refused Copy is named by the words it shows, and sends no one below for a key beside it", async () => {
+    secret.mockRejectedValue(new Error("refused"));
+    const xprv = "xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jPPqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHi";
+    const { user } = renderApp(<MessageBubble message={message(`my key ${xprv}`)} peerPubKey="peer" />);
+    await user.click(screen.getByTestId("rich-blob-copy"));
+    const copy = screen.getByTestId("rich-blob-copy");
+    await waitFor(() => expect(copy).toHaveTextContent("Not copied"));
+    // A voice control's "click Not copied" finds it: the name starts with the words on it.
+    expect(copy.getAttribute("aria-label")).toMatch(/^Not copied\b/);
+    expect(copy.getAttribute("aria-label")).not.toMatch(/below/);
+    expect(copy.title).toBe(copy.getAttribute("aria-label"));
+  });
+
   it("anything else is copied by the page, unmarked", async () => {
     const { user } = renderApp(<button onClick={() => void copyText("hello there")}>Copy text</button>);
     watchPage();

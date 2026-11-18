@@ -7,6 +7,7 @@ import { useI18n } from "../../contexts/I18nContext";
 import { Button, Notice, input } from "../wallet/ui";
 import { AppInstallDialog } from "./AppInstallDialog";
 import { Fingerprint } from "./AppIcon";
+import { AppDescription } from "./AppDescription";
 import { appErrorCode, appErrorView, appStoreErrorView, type AppErrorView } from "../../lib/apps/errors";
 import { date } from "../../lib/identities";
 
@@ -143,12 +144,13 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
                 <span>{t("apps.store.count", { count: store.apps })}</span>
                 <Fingerprint value={store.fingerprint} />
               </p>
-              {store.description && <p dir="auto" className="text-xs text-text-secondary whitespace-pre-line [overflow-wrap:anywhere]">{store.description}</p>}
               {store.expired && <p className="text-xs text-test-money-ink">{t("apps.store.stale", { date: date(store.expires, t.language) })}</p>}
             </div>
             {heldLine && <Notice testId="apps-add-store-held" tone={held?.equivocation ? "warning" : undefined}>{heldLine}</Notice>}
             {/* A store held is still read from its own link: this one is not where it is read from. */}
             {offered && !held && <Notice>{t("apps.add.storeReads", { host: hostOf(store.url) })}</Notice>}
+            {/* The store's own words come after Ghostly's lines about it (expired, held, where it is read from). */}
+            {store.description && <AppDescription text={store.description} from="store" testId="apps-add-store-description" />}
             {/* Wraps rather than push Cancel off the screen (a phone at a large text size), as the install screen's. */}
             <div className="flex flex-wrap justify-end gap-2">
               <Button ref={storeCancel} disabled={adding} onClick={onClose}>{offered ? t("common.cancel") : t("common.close")}</Button>

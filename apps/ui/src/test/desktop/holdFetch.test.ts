@@ -13,6 +13,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 // The options the host is made with, as they are.
 vi.mock("@ghostly/browser/inPageHost", () => ({ createInPageHost: (options: unknown) => options }));
 
+import { HOLD_LIMITS } from "@ghostly/core";
 import { createDesktopHost } from "../../desktop/host";
 
 /*
@@ -55,6 +56,14 @@ describe("the Desktop host's held-item reads", () => {
   it("fail as a network problem when Rust refuses the address", async () => {
     invoke.mockImplementation(async () => { throw "unreachable: not a public address"; });
     await expect(holdFetch()("https://rebind.example.com/b/o")).rejects.toThrow(/not a public address/);
+  });
+
+  it("answer an item past the largest one as larger than it, not as a network problem", async () => {
+    // A network problem is retried at the next poll, in order: the contact's later items would never come.
+    invoke.mockImplementation(async () => { throw "The held item is too large"; });
+    const response = await holdFetch()("https://s3.example.com/b/o");
+    expect(response.ok).toBe(true);
+    expect(Number(response.headers.get("content-length"))).toBeGreaterThan(HOLD_LIMITS.maxBundleBytes);
   });
 
   it("ask nothing once the pickup gave up", async () => {

@@ -106,11 +106,12 @@ export async function fileHeld(platform: Pick<ServicesPlatform, "fileHeld" | "sa
 /**
  * The line under the file's name: how far it got, and what it waits for. `named` is the contact's name, if it has
  * one: without, the line says "your contact", in lower case, as it sits mid-sentence. `missing`: its bytes are not on
- * this device (`left-out`: a light backup left them out).
+ * this device (`left-out`: a light backup left them out). The name is isolated (FSI … PDI): in a line in the page's
+ * direction, "Bob!" read "!Bob" in Arabic.
  */
 export function fileStatus(file: ChatFile, transfer: FileTransferState | null, named: string | undefined, missing: boolean | "left-out", tr: Translate = englishT): string {
   const size = statusSize(file.size, tr);
-  const peerName = named ?? tr("chat.file.yourContact");
+  const peerName = named === undefined ? tr("chat.file.yourContact") : `\u2068${named}\u2069`;
   if (!transfer || transfer.state === "done") return missing === "left-out" ? tr("chat.file.notInBackup") : missing ? tr("chat.file.gone") : size;
   if (transfer.state === "failed") return failedStatus(file, transfer, tr);
   const done = `${percent(transfer)}%`;

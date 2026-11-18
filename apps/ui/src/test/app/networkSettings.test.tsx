@@ -170,6 +170,31 @@ describe("Settings, Network: Iroh relays", () => {
     expect(field).toHaveAccessibleDescription("Não é um endereço de relay: relay.example.org");
     expect(field).toHaveFocus();
   });
+
+  // A relay address past what a contact reads (`relayUrl`) is one: "not a relay address" sent the person looking for a
+  // typo in it. Said as what to do, in the app's language, for the Iroh list and the HyperDHT relay alike.
+  it("asks for a shorter address when a relay is too long for contacts, not that it is no relay address", async () => {
+    const { engine, user } = renderApp(<NetworkSettings />, { language: "pt" });
+    act(() => engine.update({ transport, settings: { relays: RELAYS } }));
+    engine.on("updateSettings", ({ settings }) => {
+      const problem = (settings as { irohRelays?: string[] }).irohRelays?.map(irohRelayProblem).find(Boolean);
+      if (problem) throw new Error(problem);
+    });
+    const long = `https://${"a".repeat(60)}.example.com/${"p".repeat(60)}`;
+    const field = screen.getByTestId("network-iroh-relays");
+    await user.clear(field);
+    await user.type(field, long);
+    await user.click(screen.getByTestId("network-save"));
+    expect(field).toHaveAccessibleDescription(`Use um endereço de relay mais curto: ${long}`);
+    expect(field).toHaveFocus();
+    await user.clear(field);
+    await user.type(field, DEFAULTS.join("\n"));
+    const hyperdht = screen.getByTestId("network-hyperdht-relay");
+    const longWss = `wss://${"a".repeat(60)}.example.com/${"p".repeat(60)}`;
+    await user.type(hyperdht, longWss);
+    await user.click(screen.getByTestId("network-save"));
+    expect(hyperdht).toHaveAccessibleDescription(`Use um endereço de relay mais curto: ${longWss}`);
+  });
 });
 
 describe("Settings, Network: push relay", () => {
@@ -308,13 +333,15 @@ describe("Settings, Network: Hide my IP from contacts", () => {
   // Every connection to a contact goes through the TURN server then, and the engine keeps it: it is not optional.
   for (const language of LANGUAGES) {
     it(`${language}: while it is on, the TURN server's hint says it is required, not optional`, () => {
+      // toHaveTextContent reads the page's no-break spaces (French's before ":") as plain ones.
+      const said = (key: string) => lookup(language, key)!.replace(/\s+/g, " ");
       const { engine } = renderApp(<NetworkSettings />, { language });
       act(() => engine.update({ transport, settings: { relays: RELAYS, iceServers: [TURN], relayOnly: true } }));
       const field = screen.getByTestId("network-turn-field");
-      expect(field).not.toHaveTextContent(lookup(language, "network.turnHint")!);
-      expect(field).toHaveTextContent(lookup(language, "network.turnHintRelayOnly")!);
+      expect(field).not.toHaveTextContent(said("network.turnHint"));
+      expect(field).toHaveTextContent(said("network.turnHintRelayOnly"));
       act(() => engine.update({ settings: { relays: RELAYS, iceServers: [TURN] } }));
-      expect(screen.getByTestId("network-turn-field")).toHaveTextContent(lookup(language, "network.turnHint")!);
+      expect(screen.getByTestId("network-turn-field")).toHaveTextContent(said("network.turnHint"));
     });
   }
 

@@ -395,6 +395,40 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     expect(state(w.b, "in", "pause-01")).toBe("done");
   });
 
+  it("a sent file that stops mid-way (paused on either side, or the session gone) holds none of its read-ahead", async () => {
+    // Each file sending reads its next MiB ahead. One paused kept it until it ended: 32 files the contact paused held
+    // 32 MiB of the sender's memory, and a session gone left every file under way holding its own.
+    setFlagsFromString("--expose-gc");
+    const gc = runInNewContext("gc") as () => void;
+    const held = () => { gc(); return process.memoryUsage().arrayBuffers; };
+    const w = wire();
+    w.attach();
+    const size = 3 * 1024 * 1024, count = 32;
+    const base = held();
+    // Under 4 MiB within a moment: a read of a file's next MiB under way when it paused or when the session went is let
+    // go once it comes back, and a slow runner measured one at that instant (4.4 MB). Read-ahead kept never goes under.
+    const settled = async (what: string) => {
+      await until(() => held() - base < 4 * 1024 * 1024, 5_000).catch(() => {});
+      expect(held() - base, what).toBeLessThan(4 * 1024 * 1024);
+    };
+    for (let i = 0; i < count; i++) {
+      const id = `ahead-${String(i).padStart(2, "0")}`;
+      send(w, file(id, size));
+      await until(() => (w.b.transferred.get(`in:${id}`) ?? 0) > 0);
+      (i % 2 ? w.a : w.b).files.pause(i % 2 ? "out" : "in", id);
+      await until(() => state(w.a, "out", id) === "paused" && state(w.b, "in", id) === "paused");
+    }
+    await settled("held by the paused files");
+    // Resumed, each reads again from where it stood, and arrives whole.
+    for (let i = 0; i < 3; i++) { const id = `ahead-${String(i).padStart(2, "0")}`; (i % 2 ? w.a : w.b).files.resume(i % 2 ? "out" : "in", id); }
+    await until(() => (w.b.transferred.get("in:ahead-02") ?? 0) > 1024 * 1024);
+    w.drop();
+    await settled("held once the session went");
+    w.attach();
+    await until(() => [0, 1, 2].every((i) => state(w.a, "out", `ahead-0${i}`) === "done"));
+    expect([0, 1, 2].map((i) => w.b.disks.get(`ahead-0${i}`)!.length)).toEqual([size, size, size]);
+  });
+
   it("the sender pauses before the person there answers: it stays paused when they accept, and goes on resume", async () => {
     const w = wire();
     w.b.decide = async () => "ask";
@@ -885,6 +919,28 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     expect(w.a.files.resend("mine-001")).toBe(false);
   });
 
+  it("a sent file that failed after its contact had it whole ends done when sent again: the contact answers the offer that it is done", async () => {
+    let lose = true;
+    const w = wire({ drop: (frame) => lose && frame.t === "pf-done" });
+    w.attach();
+    let unreadable = false;
+    // Past the sender's read-ahead: going back to 0 reads the file again.
+    const size = FILE_LIMITS.readBytes + 50_000, src = source(size);
+    w.a.sources.set("redo-001", { read: (offset, length) => (unreadable ? Promise.reject(new Error("The object can not be found here.")) : src.read(offset, length)), digest: () => src.digest() });
+    w.a.files.offer(file("redo-001", size));
+    await until(() => state(w.b, "in", "redo-001") === "done");
+    // Its pf-done lost, an earlier ask of the receiver's (its idle nudge) comes after it, while the file cannot be read.
+    unreadable = true;
+    await w.a.files.handle({ t: "pf-accept", id: "redo-001", offset: 0 });
+    await until(() => state(w.a, "out", "redo-001") === "failed");
+    expect(state(w.b, "in", "redo-001")).toBe("done");
+    lose = unreadable = false;
+    // Send again: offered from the start, the receiver says it is done. Ignored, the file was offered every 30 s for good.
+    expect(w.a.files.resend("redo-001")).toBe(true);
+    await until(() => state(w.a, "out", "redo-001") === "done", 2_000);
+    expect(w.a.records.get("out:redo-001")).toMatchObject({ confirmed: size });
+  });
+
   it("a lost chunk (a transport switch) makes the receiver say where it stands, and the sender goes back", async () => {
     let lost = false;
     const w = wire({ keepBytes: true, drop: (frame) => {
@@ -1005,6 +1061,106 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
       expect(state(w.b, "in", "chk-0001")).toBe("done");
     });
   }
+
+  it("a receiver checking the digest, offered the file again on a new session, goes on checking: no pause, no Ask again", async () => {
+    const w = wire();
+    const disk = new Disk(false);
+    let release!: () => void;
+    disk.checking = new Promise<void>((resolve) => { release = resolve; });
+    w.b.disks.set("chk-0002", disk);
+    w.attach();
+    send(w, file("chk-0002", 50_000));
+    await until(() => state(w.b, "in", "chk-0002") === "verifying");
+    // The session drops and another opens: the old one's frames still wait on the check, the new one's offer comes now.
+    w.drop();
+    w.attach();
+    const offer = w.a.sent.filter((f) => f.t === "pf-offer").at(-1)!;
+    await w.b.files.handle({ ...offer });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(state(w.b, "in", "chk-0002")).toBe("verifying");
+    // Being checked, it can no longer be paused, and it is not stuck.
+    w.b.files.pause("in", "chk-0002");
+    expect(state(w.b, "in", "chk-0002")).toBe("verifying");
+    expect(transferStalled(w.b.files.get("in", "chk-0002")!, 0, true, Date.now())).toBe(false);
+    release();
+    await until(() => state(w.a, "out", "chk-0002") === "done" && state(w.b, "in", "chk-0002") === "done");
+  });
+
+  it("a receiver that stopped while it checked the digest checks it again when the file is offered after its restart", async () => {
+    const sent: Record<string, unknown>[] = [];
+    const records = new Map<string, FileTransferRecord>();
+    const info = file("chk-0003", 4);
+    const files = new ChatFiles({
+      send: (frame) => { sent.push(frame); return true; },
+      decide: async () => "accept",
+      openTarget: async () => ({ offset: 4, append: async () => {}, flush: async () => {}, verify: async () => true, discard: async () => {} }),
+      openSource: async () => { throw new Error("not sending"); },
+      changed: (record) => { records.set(record.id, record); },
+    });
+    // As it was kept: being checked when the app stopped.
+    files.restore([{ id: info.id, direction: "in", file: info, state: "verifying", confirmed: 4, since: 1_000, agreed: true }]);
+    files.attach();
+    const offer = { t: "pf-offer", id: info.id, name: info.name, mime: info.mime, size: info.size, ts: info.timestamp };
+    await files.handle(offer);
+    await until(() => sent.some((f) => f.t === "pf-accept"));
+    expect(sent).toContainEqual({ t: "pf-accept", id: info.id, offset: 4 });
+    await files.handle({ t: "pf-sum", id: info.id, size: 4, digest: "A".repeat(43) });
+    await until(() => records.get(info.id)?.state === "done");
+  });
+
+  it("a receiver checking a file's digest goes on handling the session's other frames: another file arrives meanwhile", async () => {
+    const w = wire();
+    const disk = new Disk(false);
+    let release!: () => void;
+    // A large file's check takes a while (a 4 GiB one about 20 s at 200 MiB/s); the session's frames come in one queue.
+    disk.checking = new Promise<void>((resolve) => { release = resolve; });
+    w.b.disks.set("chk-0004", disk);
+    w.attach();
+    send(w, file("chk-0004", 50_000));
+    await until(() => state(w.b, "in", "chk-0004") === "verifying");
+    send(w, file("next-0001", 50_000));
+    await until(() => state(w.b, "in", "next-0001") === "done" && state(w.a, "out", "next-0001") === "done", 2_000);
+    expect(state(w.b, "in", "chk-0004")).toBe("verifying");
+    release();
+    await until(() => state(w.a, "out", "chk-0004") === "done" && state(w.b, "in", "chk-0004") === "done");
+  });
+
+  it("a check the sender's abort ended has no say over the file offered again meanwhile: not done empty, its bytes kept", async () => {
+    // `read`: the check had read the whole file before the abort removed it (a file on disk is still read through the
+    // open handle), so it matches; otherwise it reads what is there then, and does not.
+    for (const read of [true, false]) {
+      const id = read ? "chk-0005" : "chk-0006", size = 50_000;
+      let cut = false;
+      const w = wire({ drop: () => cut });
+      const disk = new Disk(false);
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      disk.checking = gate;
+      if (read) {
+        const open = disk.target.bind(disk);
+        disk.target = () => {
+          const target = open();
+          return { ...target, verify: async (sum) => { const digest = disk.hash.copy().digest("base64url"); await gate; return digest === sum; } };
+        };
+      }
+      w.b.disks.set(id, disk);
+      w.attach();
+      send(w, file(id, size));
+      await until(() => state(w.b, "in", id) === "verifying");
+      // From here the receiver alone, as its contact's frames reach it: the sender stops the file, then offers it again.
+      cut = true;
+      await w.b.files.handle({ t: "pf-abort", id });
+      expect(state(w.b, "in", id)).toBe("cancelled");
+      await w.b.files.handle({ t: "pf-offer", id, name: `${id}.bin`, mime: "application/octet-stream", size, ts: 1_700_000_000_000 });
+      await until(() => state(w.b, "in", id) === "active");
+      w.b.files.handle({ t: "pf-data", id, offset: 0, data: b64(pattern(0, 1_000)) });
+      await until(() => disk.length === 1_000);
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(state(w.b, "in", id)).toBe("active");
+      expect(disk.length).toBe(1_000);
+    }
+  });
 
   it("a digest that does not match deletes the file on arrival and says so on both sides", async () => {
     const w = wire();
@@ -1188,6 +1344,35 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     w.a.files.sweep();
     await until(() => state(w.a, "out", "week-001") === "failed");
     expect(w.b.records.get("in:week-001")?.error).toBe("The offer expired");
+  });
+
+  it("a file the contact took is not ended by the offer's week: resumed or offered again after it, it goes on", async () => {
+    let now = 1_000;
+    // While true, nothing the receiver says reaches the sender.
+    let mute = false;
+    const w = wire({ drop: (_frame, from) => mute && from === "b" });
+    for (const side of [w.a, w.b]) (side.files as unknown as { host: ChatFilesHost }).host.now = () => now;
+    w.attach();
+    send(w, file("paused-01", 4 * 1024 * 1024));
+    send(w, file("offered-1", 4 * 1024 * 1024));
+    await until(() => (w.a.records.get("out:paused-01")?.confirmed ?? 0) > 0 && (w.a.records.get("out:offered-1")?.confirmed ?? 0) > 0);
+    // One paused here; the other offered again (as after a quiet spell), and the contact went away before answering.
+    w.a.files.pause("out", "paused-01");
+    mute = true;
+    w.a.files.resend("offered-1");
+    w.drop();
+    mute = false;
+    expect(state(w.a, "out", "offered-1")).toBe("offered");
+    // A week and a day later: the paused one is resumed while the contact is still away, then they come back.
+    now += FILE_LIMITS.offerTtlMs + 24 * 60 * 60 * 1000;
+    w.a.files.resume("out", "paused-01");
+    expect(state(w.a, "out", "paused-01")).toBe("queued");
+    w.attach();
+    for (const id of ["paused-01", "offered-1"]) {
+      await until(() => state(w.a, "out", id) === "done" || state(w.a, "out", id) === "failed");
+      expect(w.a.records.get(`out:${id}`)?.error).toBeUndefined();
+      expect(state(w.b, "in", id)).toBe("done");
+    }
   });
 
   it("an offer that expired unanswered, offered again, is refused: never taken without asking", async () => {

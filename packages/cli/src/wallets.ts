@@ -1,6 +1,6 @@
 import { generateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
-import type { WalletNetwork } from "@ghostly/core";
+import { parsePaymentAmount, type WalletNetwork } from "@ghostly/core";
 import type { EngineState, NetworkWalletsView, PaymentView, WalletInstanceView, WalletOffer, WalletType } from "@ghostly/browser/shared/types";
 import { bool, chatOf, inviteTaken, node, num, oneOf, ownChatOf, sentAt, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { paymentNetwork } from "@ghostly/browser/engine/paymentAdapters/walletInstances";
@@ -51,7 +51,8 @@ function createChecked(type: WalletType, n: WalletNetwork, offer: WalletOffer | 
   const source = sources.find((p) => p.id === provider);
   if (!source) throw new CliError("bad_request", `No ${type} source ${JSON.stringify(provider)} on ${n} (ghostly wallet list)`);
   const unknown = Object.keys(values).find((name) => !source.fields.some((f) => f.name === name));
-  if (unknown) throw new CliError("bad_request", `${provider} takes no --value ${unknown}: ${source.fields.length ? `its fields are ${source.fields.map((f) => f.name).join(", ")}` : "it has no fields"}`);
+  // Never the name itself: a secret given with no name= but with a base64 `=` (a macaroon, a rune) reads as one (`pairs`).
+  if (unknown) throw new CliError("bad_request", `one --value names no field of ${provider}: ${source.fields.length ? `its fields are ${source.fields.map((f) => f.name).join(", ")}` : "it has no fields"}`);
   const missing = source.fields.find((f) => !f.optional && !f.defaults?.[n] && !values[f.name]?.trim());
   if (missing) throw new CliError("bad_request", `${provider} needs --value ${missing.name}=<${missing.options?.map((o) => o.value).join("|") ?? missing.placeholder ?? missing.label.toLowerCase()}>`);
 }
@@ -72,12 +73,21 @@ function lightningCard(ctx: ApiContext, params: Params): void {
 }
 
 /**
+ * The card a payment, a request or a wallet command names. "" (an unset variable in a script: `--card "$CARD"`) is a
+ * usage error: taken as not given, it moved money through, or removed, the network's default card or the whole wallet.
+ */
+function cardParam(params: Params): string | undefined {
+  if (params.card === "") throw new CliError("usage", "--card needs a Lightning card id (ghostly wallet list)");
+  return str(params, "card");
+}
+
+/**
  * The Lightning card `card` names, checked before the engine is asked: given with another type of wallet it is a usage
  * error, and one not on the network is not_found. Before, the engine dropped it for every type but Lightning, so a card
  * that named nothing removed the whole wallet of that type and the answer echoed the card as removed.
  */
 function cardOf(ctx: ApiContext, params: Params, type: WalletType): string | undefined {
-  const card = str(params, "card");
+  const card = cardParam(params);
   if (card === undefined) return undefined;
   if (type !== "lightning") throw new CliError("usage", `--card names a Lightning card: not with ${type}`);
   lightningCard(ctx, params);
@@ -144,9 +154,23 @@ export function walletJson(instance: WalletInstanceView, s: EngineState) {
   };
 }
 
+/** A token amount (USDT) is in base units: its `decimals` say how many make one. Sats carry none. */
+const tokenDecimals = (p: PaymentView): { decimals?: number } => (p.target?.method === "usdt" ? { decimals: p.target.decimals ?? 6 } : {});
+
+/** USDT typed as the app's composer takes it ("5", "0.25") in base units: more decimals than the token has is refused. */
+function tokenUnits(text: string, decimals: number): number {
+  try {
+    const units = parsePaymentAmount(text.trim(), decimals);
+    if (units > 0) return units;
+  } catch (error) {
+    throw new CliError("bad_request", `amount: ${(error as Error).message}`);
+  }
+  throw new CliError("bad_request", "amount must be above 0");
+}
+
 export function paymentJson(p: PaymentView) {
   return {
-    id: p.id, chat: p.linkId, kind: p.kind, direction: p.direction, amount: p.amount, unit: p.unit, memo: p.memo ?? null,
+    id: p.id, chat: p.linkId, kind: p.kind, direction: p.direction, amount: p.amount, unit: p.unit, ...tokenDecimals(p), memo: p.memo ?? null,
     state: p.state, error: p.error ?? null, network: paymentNetwork(p), method: p.target?.method ?? (p.federation || p.federations ? "fedimint" : p.invoice ? "lightning" : p.mint || p.mints ? "cashu" : null),
     createdAt: p.createdAt, ...(p.group ? { group: p.group } : {}), ...(p.closed ? { closed: true } : {}), ...(p.txid ? { txid: p.txid } : {}),
   };
@@ -230,9 +254,10 @@ const engineCode = (error: unknown) => error instanceof Error ? (error as { engi
 const NO_MINT = /^(No mint could create an invoice: No mint configured|You have no (Mainnet|Testnet) Cashu wallet: create one in Wallet → New)$/;
 function walletRefusal(error: unknown): unknown {
   if (!(error instanceof Error) || error instanceof CliError) return error;
-  // A mint asked for a swap that has not answered (the engine's `SwapUnsettledError`, by its name): nothing is known to
-  // have failed, try again later, as a mint that cannot be reached at all is `unavailable`.
-  if (error.name === "SwapUnsettledError") return new CliError("unavailable", error.message);
+  // A mint asked for a swap that has not answered (the engine's `SwapUnsettledError`, by its name, or a chat payment's
+  // error that carries it as `unsettled`): nothing is known to have failed, try again later, as a mint that cannot be
+  // reached at all is `unavailable`.
+  if (error.name === "SwapUnsettledError" || (error as { unsettled?: unknown }).unsettled === true) return new CliError("unavailable", error.message);
   const code = WALLET_REFUSALS.find(([pattern]) => pattern.test(error.message))?.[1];
   return code ? new CliError(code, error.message) : error;
 }
@@ -299,7 +324,8 @@ const WALLETS: Record<string, Method> = {
     const n = network(params);
     const limit = num(params, "limit", 50, { min: 1, max: 10_000, whole: true });
     await federationsOpen(ctx);
-    return { network: n, history: (netView(state(ctx), n)?.history ?? []).slice(0, limit) };
+    // Read from the store: the wallet view keeps only the newest 100.
+    return { network: n, history: await node(ctx).walletHistory({ network: n, limit }) };
   },
 
   async "wallet.receive"(ctx, params) {
@@ -354,7 +380,7 @@ const WALLETS: Record<string, Method> = {
     // A Lightning address's comment reaches its owner as a memo reaches a contact (agents#1624).
     const comment = memoOf(params, "pay", "comment");
     const text = str(params, "target", true).trim();
-    const card = str(params, "card");
+    const card = cardParam(params);
     let invoice = text.replace(/^lightning:/i, "");
     let n: WalletNetwork;
     let note: string | undefined;
@@ -407,21 +433,27 @@ const WALLETS: Record<string, Method> = {
     return { chat: link.id, paymentId };
   },
 
-  /** A request in a chat (the payment sheet's Request): the contact's app pays it. */
+  /**
+   * A request in a chat (the payment sheet's Request): the contact's app pays it. A USDT amount given as text ("5",
+   * "0.25") is USDT, turned into base units with the wallet's decimals as the app's composer does; a number is base units.
+   * The answer says the amount asked: USDT's carries the engine's tag of a few base units, and its decimals.
+   */
   async "chat.request"(ctx, params) {
     const memo = memoOf(params, "request");
+    const card = cardParam(params);
     const link = chatOf(ctx, params);
-    const amount = num(params, "amount", 0, { min: 1 });
-    if (!amount) throw new CliError("bad_request", "amount is required");
     const method = params.method === undefined ? undefined : oneOf(params, "method", PAY_METHODS, "cashu");
+    const n = network(params);
+    const amount = method === "usdt" && typeof params.amount === "string" ? tokenUnits(params.amount, netView(state(ctx), n)?.usdt?.decimals ?? 6) : num(params, "amount", 0, { min: 1 });
+    if (!amount) throw new CliError("bad_request", "amount is required");
     const rail = params.rail === undefined ? undefined : oneOf(params, "rail", ["cashu", "lightning"] as const, "cashu");
     await federationsOpen(ctx);
-    const n = network(params);
     const { paymentId } = await node(ctx).requestPayment({
       linkId: link.id, amount, timestamp: sentAt(), network: n,
-      ...(memo ? { memo } : {}), ...(method ? { method } : {}), ...(rail ? { rail } : {}), ...(str(params, "card") ? { card: str(params, "card") } : {}),
+      ...(memo ? { memo } : {}), ...(method ? { method } : {}), ...(rail ? { rail } : {}), ...(card ? { card } : {}),
     }).catch((error: unknown) => { throw (!method || method === "cashu") && error instanceof Error && NO_MINT.test(error.message) ? noWalletOf(ctx, n, error) : error; });
-    return { chat: link.id, paymentId };
+    const asked = state(ctx).payments[paymentId];
+    return { chat: link.id, paymentId, ...(asked ? { amount: asked.amount, unit: asked.unit, ...tokenDecimals(asked) } : {}) };
   },
 
   /** Pays a request the contact made in a chat. */
@@ -430,14 +462,23 @@ const WALLETS: Record<string, Method> = {
     const s = state(ctx);
     const link = ownChatOf(ctx, params, s);
     const paymentId = str(params, "payment", true);
+    const card = cardParam(params);
     const request = s.payments[paymentId];
-    if (!request || request.linkId !== link.id || request.kind !== "request") throw new CliError("not_found", `No request ${paymentId} in this chat`);
+    // Said as `payment check` says it: the id quoted, where this chat's payments are listed, and a payment of this chat
+    // that is no request named as what it is (it read "No request", as if nothing had that id).
+    const listed = `(ghostly payment list --chat ${link.id})`;
+    if (request?.linkId === link.id && request.kind !== "request") {
+      throw new CliError("not_found", `${JSON.stringify(paymentId)} is ${request.direction === "out" ? "a payment you sent" : "a payment you received"}, not a request: chat pay-request pays a request the contact made of you ${listed}`);
+    }
+    if (!request || request.linkId !== link.id) throw new CliError("not_found", `No request ${JSON.stringify(paymentId)} in this chat ${listed}`);
+    // One I made is the contact's to pay: the engine knew it only as "Unknown payment request" (engine, exit 1).
+    if (request.direction !== "in") throw new CliError("bad_request", `${JSON.stringify(paymentId)} is your own request: the contact pays it`);
     // The request says which network it is paid on: real money or test coins, never the choice of the payer.
     const n = paymentNetwork(request);
     if (n === "mainnet" && !bool(params, "confirmReal")) throw new CliError("confirm", "This request is for real money (Mainnet): pass --confirm-real to confirm this payment", { network: n });
     const via = params.via === undefined ? undefined : oneOf(params, "via", ["lightning"] as const, "lightning");
     await federationsOpen(ctx);
-    await node(ctx).payRequest({ linkId: link.id, paymentId, network: n, ...(via ? { via } : {}), ...(params.maxFee !== undefined ? { maxFee: num(params, "maxFee", 0) } : {}), ...(str(params, "card") ? { card: str(params, "card") } : {}), ...real(params) });
+    await node(ctx).payRequest({ linkId: link.id, paymentId, network: n, ...(via ? { via } : {}), ...(params.maxFee !== undefined ? { maxFee: num(params, "maxFee", 0) } : {}), ...(card ? { card } : {}), ...real(params) });
     return paymentJson(state(ctx).payments[paymentId] ?? request);
   },
 
@@ -450,7 +491,8 @@ const WALLETS: Record<string, Method> = {
       return { chat: link.id, methods: link.paymentMethods ?? null, networks: link.paymentNetworks ?? null };
     }
     const method = oneOf(params, "method", CHAT_METHODS, "cashu");
-    const on = bool(params, "on");
+    // On unless `on` says otherwise, as `chat accept <chat> <method>` does; an `on` that is no boolean is refused.
+    const on = params.on === undefined || bool(params, "on");
     const nets = params.networks === undefined ? undefined : (() => {
       const value = params.networks;
       if (!Array.isArray(value) || !value.every((v) => v === "mainnet" || v === "testnet")) throw new CliError("bad_request", "networks must list mainnet and/or testnet");

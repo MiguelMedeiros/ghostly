@@ -18,12 +18,15 @@ export function CopyButton({ text, label, testId, className = "" }: { text: stri
     clearTimeout(timer.current);
     timer.current = setTimeout(() => setSaid(null), next === "copied" ? 1500 : 4000);
   };
+  // Refused, its name starts with the words it shows (a voice control's "click Not copied"), and sends no one "below":
+  // a long key's text is beside it, or above it once shown whole.
+  const refused = t("chat.rich.notCopiedHint");
   return (
     <button
       type="button"
       data-testid={testId}
-      aria-label={said === "copied" ? t("chat.rich.copied") : said === "failed" ? t("chat.message.copyFailed") : name}
-      title={said === "failed" ? t("chat.message.copyFailed") : undefined}
+      aria-label={said === "copied" ? t("chat.rich.copied") : said === "failed" ? refused : name}
+      title={said === "failed" ? refused : undefined}
       onClick={() => { void copyMessageText(text).then(() => say("copied"), () => say("failed")); }}
       className={`rich-action ${className}`}
     >

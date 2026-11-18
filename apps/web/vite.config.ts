@@ -71,7 +71,17 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
-    // The static page a provider returns to after an identity-proof sign-in (proofs/oidc/popup.ts).
-    rollupOptions: { input: { main: "index.html", oidcCallback: "oidc-callback.html" } },
+    rolldownOptions: {
+      // The static page a provider returns to after an identity-proof sign-in (proofs/oidc/popup.ts).
+      input: { main: "index.html", oidcCallback: "oidc-callback.html" },
+      // Everything the app runs on load is one file, `main`: left to the default split it was some 95 files, each
+      // gzipped on its own (about 66 KB more on the wire) and asked for by a modulepreload apiece, and a deploy changes
+      // nearly all of them anyway. What loads later (menu pages, wallets, a call's window) keeps its own chunks. The
+      // sign-in page shares only `popup` with it (and the preload polyfill both entries carry), never the app.
+      output: { codeSplitting: { groups: [
+        { name: "popup", test: /\/proofs\/oidc\/popup\.ts$|modulepreload-polyfill/, priority: 2 },
+        { name: "main", tags: ["$initial"], test: (id: string) => !/oidc-callback\.html|\/oidcCallback\.ts$/.test(id), priority: 1 },
+      ] } },
+    },
   },
 });
