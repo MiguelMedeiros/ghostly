@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { accessSync, constants, existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { contactKeyOf, nameKey, namedByThem } from "./apiKit";
+import { contactKeyOf, nameKey, namedByThem, sharedGroupIds } from "./apiKit";
 import { childEnv } from "./childEnv";
 import { connectDaemon, type DaemonAddress, type DaemonClient } from "./client";
 import { CliError, localFileError } from "./errors";
@@ -120,6 +120,12 @@ async function fromChat(ref: string, call: (method: string, params: Record<strin
 async function otherFlag(lookup: Promise<unknown>, ref: string, flag: "--from" | "--group", call: (method: string, params: Record<string, unknown>) => Promise<unknown>): Promise<unknown> {
   try { return await lookup; } catch (error) {
     const other = flag === "--from" ? "group" : "chat";
+    // A name more than one group has: `--group` with the id of the one meant (`matches`), not `group show`. Asked of the
+    // group lookup: a `not_found` with `matches` may hold chats (`group:<name>` a chat's label has).
+    if (flag === "--from" && error instanceof CliError && error.code === "not_found" && Array.isArray(error.details?.matches)) {
+      const shared = await call("group.get", { group: ref }).then(() => undefined, sharedGroupIds);
+      if (shared) throw new CliError("not_found", `${JSON.stringify(ref)} names more than one group, not a chat: ghostly listen --group <group>, with the id of the group meant (ghostly group list)`, { matches: shared });
+    }
     if (!(error instanceof CliError) || error.code !== "not_found" || typeof error.details?.[other] !== "string") throw error;
     if (other === "chat" && contactKeyOf(ref) === undefined) await fromChat(ref, call);
     const named = other === "chat" ? error.details.chat as string : ref;

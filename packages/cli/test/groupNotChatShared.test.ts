@@ -5,6 +5,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import type { EngineState, GroupView, LinkView } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
 import { CallManager, type CallEngine } from "../src/calls/manager";
+import { allowlist } from "../src/listen";
 import { chatViewOf, groupViewOf } from "./support/chatView";
 // covers: headless.groups
 
@@ -42,6 +43,8 @@ describe("a name two groups share, where only a 1:1 chat goes", () => {
       const error = await refusal(callApi(fake(), method, { [key]: ref, ...params }));
       expect(error.message).toBe(`${JSON.stringify(ref)} names more than one group, not a chat: a group command takes one by its id (ghostly group list)`);
       expect(error.code).toBe("not_found");
+      // The ids it asks for, as `group show zz` gives them (`--json` had none).
+      expect(error.details).toEqual({ matches: ["g1zz", "g2zz"] });
     }
     // A name nothing has stays `No chat`.
     expect((await refusal(callApi(fake(), method, { [key]: "Nobody", ...params }))).message).toBe(`No chat "Nobody" (ghostly chat list)`);
@@ -57,8 +60,21 @@ describe("a name two groups share, where only a 1:1 chat goes", () => {
     const react = await refusal(callApi(fake(), "chat.react", { chat: "zz", message: "m1", emoji: "👍" }));
     expect(react.message).toBe(`"zz" names more than one group, not a chat: ghostly group react <group> <message> <emoji>, with the id of the group meant (ghostly group list)`);
     expect(react.code).toBe("not_found");
+    expect(react.details).toEqual({ matches: ["g1zz", "g2zz"] });
     const remove = await refusal(callApi(fake(), "chat.delete", { chat: "group:zz", message: "m1" }));
     expect(remove.message).toBe(`"group:zz" names more than one group, not a chat: ghostly message delete <group> m1 --everyone, with the id of the group meant (ghostly group list)`);
     expect(remove.code).toBe("not_found");
+    expect(remove.details).toEqual({ matches: ["g1zz", "g2zz"] });
+  });
+
+  it("listen --from offers listen --group with the ids, not group show", async () => {
+    const call = (method: string, params: Record<string, unknown>) => callApi(fake(), method, params);
+    for (const ref of ["zz", "group:zz"]) {
+      await expect(allowlist([ref], [], call, async () => null)).rejects.toMatchObject({
+        code: "not_found",
+        message: `${JSON.stringify(ref)} names more than one group, not a chat: ghostly listen --group <group>, with the id of the group meant (ghostly group list)`,
+        details: { matches: ["g1zz", "g2zz"] },
+      });
+    }
   });
 });
