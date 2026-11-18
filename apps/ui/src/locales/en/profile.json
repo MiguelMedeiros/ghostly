@@ -132,6 +132,9 @@
   "nameLabel": "Profile name",
   "nameSaved": "Name saved",
   "nameStep": {
+    "full": "That's the most: {{count}} letters.",
+    "limit": "Up to {{count}} letters.",
+    "needName": "Type a name to continue.",
     "placeholder": "Your name",
     "save": "Continue",
     "skip": "Skip",
