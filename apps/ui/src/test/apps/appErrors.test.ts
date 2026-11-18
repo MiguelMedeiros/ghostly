@@ -83,4 +83,15 @@ describe("app errors", () => {
       expect(appErrorView(damaged, t).text, name).not.toMatch(/apps\.errors|stored files/);
     }
   });
+
+  it("an app uninstalled meanwhile (an Open while another tab removed it) says it is no longer installed, never that Ghostly won't install it", () => {
+    const gone = new Error("not-installed: This app is not installed");
+    expect(appErrorView(gone, translateWith(locales.en))).toEqual({ text: "This app is no longer installed." });
+    expect(appErrorView(gone, translateWith(locales.pt)).text).toBe("Este app não está mais instalado.");
+    for (const [name, locale] of Object.entries(locales)) {
+      const t = translateWith(locale);
+      expect(appErrorView(gone, t).text, name).not.toBe(t("apps.errors.refused"));
+      expect(appErrorView(gone, t).text, name).not.toMatch(/apps\.errors|is not installed/);
+    }
+  });
 });
