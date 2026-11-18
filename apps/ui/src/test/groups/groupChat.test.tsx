@@ -785,12 +785,29 @@ describe("GroupChat: the options menu", () => {
       expect(engine.callsTo("rotateGroup")).toHaveLength(2);
     });
 
+    // The menu closes at the press: a polite line says it started and, once done, that it is (the timeline's event line is
+    // not read out); the busy row says why it does nothing.
+    it("says it is rotating, on the busy row and in a live line, then that it is done", async () => {
+      const { user, engine } = openGroup(active({ isAdmin: true }));
+      const calls = pending(engine);
+      await user.click(await rotateRow(user));
+      expect(screen.getByTestId("group-rotate-live")).toHaveAttribute("role", "status");
+      expect(screen.getByTestId("group-rotate-live")).toHaveTextContent("Rotating keys…");
+      expect(await rotateRow(user)).toHaveTextContent("Rotating keys…");
+      await user.keyboard("{Escape}");
+      await act(async () => calls[0]!.resolve());
+      expect(screen.getByTestId("group-rotate-live")).toHaveTextContent("Keys rotated: members get the new keys");
+      expect(await rotateRow(user)).toHaveTextContent(/^Rotate keys$/);
+    });
+
     it("a refused rotation says why and lets it be pressed again", async () => {
       const { user, engine } = openGroup(active({ isAdmin: true }));
       const calls = pending(engine);
       await user.click(await rotateRow(user));
       await act(async () => calls[0]!.reject(new Error("Bob is not reachable")));
       expect(await screen.findByTestId("group-notice")).toHaveTextContent("Bob is not reachable");
+      // Said once, by the notice: not "rotated" too.
+      expect(screen.getByTestId("group-rotate-live")).toBeEmptyDOMElement();
       const again = await rotateRow(user);
       expect(again).not.toHaveAttribute("aria-disabled");
       await user.click(again);

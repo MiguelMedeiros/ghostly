@@ -251,7 +251,9 @@
     "forget": "Elimina da questo dispositivo",
     "leave": "Esci dal gruppo",
     "members": "Membri…",
-    "rotate": "Rinnova chiavi"
+    "rotate": "Rinnova chiavi",
+    "rotated": "Chiavi rinnovate: i membri ricevono le nuove chiavi",
+    "rotating": "Rinnovo delle chiavi…"
   },
   "others": {
     "body": "Chi conosce l'id di un gruppo può crearne uno suo con lo stesso id, e solo uno dei due può stare su questo dispositivo. Tieni questo o passa all'altro: passare esce da questo e lo elimina da questo dispositivo.",
