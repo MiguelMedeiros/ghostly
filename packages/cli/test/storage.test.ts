@@ -431,6 +431,42 @@ describe("persistent IndexedDB", () => {
     expect(await read(second.transaction("messages").objectStore("messages").get(["a", "1"]))).toEqual({ linkId: "a", id: "1" });
   });
 
+  it("lets the writes that wait behind a fold share a sync off the thread, each `complete` once it is on the disk", async () => {
+    // Each was synced in place, one by one: 800 writes that committed during the hourly fold held the daemon 2.9 s.
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    opened.push(store);
+    const d = await db(store.factory);
+    await tx(d, ["messages"], (s) => { s.messages.put({ linkId: "a", id: "0" }); });
+    await store.flush();
+    let reached!: () => void, release!: () => void;
+    const begun = new Promise<void>((resolve) => { reached = resolve; });
+    disk.snapshotSync = () => { disk.snapshotSync = null; reached(); return new Promise<void>((resolve) => { release = resolve; }); };
+    const onThread = syncs.onThread, before = syncs.count, done = disk.synced;
+    // The syncs finished when each transaction's `complete` came: never before the one that covers it.
+    const heard: number[] = [];
+    try {
+      const folding = store.compact();
+      await begun;
+      const writes = Array.from({ length: 50 }, (_, at) => tx(d, ["messages"], (s) => { s.messages.put({ linkId: "a", id: `m${at}`, text: `text ${at}` }); })
+        .then(() => { heard.push(disk.synced - done); }));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(heard).toEqual([]);
+      release();
+      await Promise.all([folding, ...writes]);
+    } finally { release?.(); disk.snapshotSync = null; }
+    expect(syncs.onThread - onThread).toBe(0);
+    expect(syncs.count - before).toBeLessThanOrEqual(3);
+    expect(heard).toHaveLength(50);
+    expect(Math.min(...heard)).toBeGreaterThanOrEqual(1);
+
+    // A process killed now keeps all of them.
+    const killed = folder();
+    cpSync(dir, killed, { recursive: true });
+    const again = await db(await open(killed));
+    expect(await read(again.transaction("messages").objectStore("messages").count())).toBe(51);
+  });
+
   it("keeps on close a write nobody waited for: the transaction made in the turn the process leaves", async () => {
     // The engine writes a removed chat, a new name or a service with `void db.…`. fake-indexeddb runs a transaction on
     // a later turn of the event loop: a one-shot command closed in the same turn, and its answer was never on disk.
