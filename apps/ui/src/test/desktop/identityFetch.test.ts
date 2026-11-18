@@ -63,4 +63,11 @@ describe("the Desktop host's identity reads", () => {
     await expect(identityFetch()("https://contact.example/x", { signal: abort.signal })).rejects.toThrow();
     expect(invoke).not.toHaveBeenCalledWith("hold_fetch", expect.anything());
   });
+
+  it("give up when the engine's time is out, not when Rust's is (a server that never answers)", async () => {
+    invoke.mockImplementation(() => new Promise(() => {}));
+    const answer = boundedIdentityFetch({ online: () => true, timeoutMs: 20, fetcher: identityFetch() })("https://contact.example/.well-known/did.json");
+    const late = new Promise((resolve) => setTimeout(resolve, 1_000, "still waiting"));
+    await expect(Promise.race([answer, late])).rejects.toThrow();
+  });
 });

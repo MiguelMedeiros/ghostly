@@ -3,7 +3,7 @@
  * media when the group asks for end-to-end encryption (WISP 602). Imported only through `import()`, so neither is in
  * the app's first load.
  */
-export { isE2EESupported, Room, RoomEvent, Track } from "livekit-client";
+export { isE2EESupported, Room, RoomEvent, Track, TrackEvent } from "livekit-client";
 /** A sealed call's keys, each epoch's in its own slot of LiveKit's ring. */
 export { GroupCallKeyProvider } from "./groupCallKeys";
 

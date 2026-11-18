@@ -38,9 +38,12 @@ export type RuntimeMessage =
   | { target: "background"; type: "local-access-allowed"; profile: string; origin: string }
   /**
    * The peer heard a message while no tab was open: the worker shows a notification with `body`, which opens `chat`
-   * when clicked (apps/extension/src/attentionNotices.ts).
+   * when clicked (apps/extension/src/attentionNotices.ts). `id`: the notification's own (a call's, a random UUID), which
+   * it is taken back by; without one, a chat's next one takes the place of the one before.
    */
-  | { target: "background"; type: "notify"; body: string; chat?: string }
+  | { target: "background"; type: "notify"; body: string; chat?: string; id?: string }
+  /** The notification the peer showed as `id` (a call's, attentionNotices.ts) is over: it leaves the system's list. */
+  | { target: "background"; type: "unnotify"; id: string }
   /**
    * A notification was clicked: the app page that showed it opens its chat and answers `true`; no answer, and the
    * worker shows the app itself (apps/ui/src/lib/notifications.ts).
