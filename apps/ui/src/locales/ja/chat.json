@@ -260,11 +260,11 @@
   },
   "media": {
     "downloadSize": "ダウンロード {{size}}",
-    "noRoom": "容量が足りません: 空き {{size}}",
+    "noRoom": "容量が足りません: 残り {{size}}",
     "noRoomToPlay": "ここで再生するための空きディスク容量が足りません。ダウンロードしてください。",
     "notYet": "送信が終わると再生できます。",
     "positionOf": "{{duration}} のうち {{position}}",
-    "wantsToSend": "{{name}} が送ろうとしています · 空き {{size}}"
+    "wantsToSend": "{{name}} が送ろうとしています · 残り {{size}}"
   },
   "menu": {
     "continueNew": "新しいチャットで続ける",
