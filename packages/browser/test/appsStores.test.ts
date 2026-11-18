@@ -288,7 +288,7 @@ describe("no request with nothing installed", () => {
     store.stop();
   });
 
-  it("the scheduled check waits while the network is off", async () => {
+  it("the scheduled check waits while the network is off, and runs soon after it comes back, not a day later", async () => {
     const v1 = await bundle({ sources: [BUNDLE_URL] });
     net.put(BUNDLE_URL, v1.bytes);
     const first = apps(net);
@@ -296,11 +296,15 @@ describe("no request with nothing installed", () => {
     await first.install({ digest: v1.digest, grant: ["chat"] });
     net.fetch.mockClear();
     clock();
-    const store = apps(net, { online: () => false });
+    let online = false;
+    const store = apps(net, { online: () => online });
     await store.start();
     await pass(APP_CHECK_TIMINGS.afterStartMs);
     await pass(APP_CHECK_TIMINGS.everyMs);
     expect(net.fetch).not.toHaveBeenCalled();
+    online = true;
+    await pass(APP_CHECK_TIMINGS.offlineRetryMs);
+    expect(net.fetch, "the check the network missed").toHaveBeenCalled();
     store.stop();
   });
 });
@@ -625,7 +629,8 @@ describe("stores", () => {
       if (held) net.put(other, held);
       await net.putStore(await storeFiles({ sequence: held ? 3 : 2, apps: [listing(v1, [BUSY, other])] }));
       if (held) await store.refreshStores(); else await store.addStore({ url: STORE_URL });
-      for (status of [503, 429]) {
+      // 408: the host's own timeout, said as its trouble with Try again on the install screen (apps/ui lib/apps/errors.ts).
+      for (status of [503, 429, 408]) {
         await expect(store.preview({ store: keyOf(STORE_KEY), ref: v1.ref }), `${status}, then ${held ? "another version" : "404"}`)
           .rejects.toThrow(`status: The host answered ${status}`);
       }

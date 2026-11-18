@@ -84,7 +84,12 @@ describe("the pay request (LUD-06)", () => {
       await expect(resolveLightningDestination(ALICE.text, { fetch }), callback).rejects.toThrow(/HTTPS/);
       expect(asked).toEqual([ALICE.url]);
     }
-    for (const callback of ["https://192.168.1.1/cgi-bin/reboot", "https://localhost/cb", "https://10.0.0.2/cb", "https://[fd00::1]/cb"]) {
+    for (const callback of [
+      "https://192.168.1.1/cgi-bin/reboot", "https://localhost/cb", "https://10.0.0.2/cb", "https://[fd00::1]/cb",
+      // IPv4 inside IPv6 (6to4, Teredo), short first groups below 2000::/3, documentation, more than one trailing dot.
+      "https://[2002:7f00:1::]/cb", "https://[2001:0:4136:e378:8000:63bf:80ff:fffe]/cb", "https://[2::1]/cb", "https://[20::1]/cb",
+      "https://[2001:db8::1]/cb", "https://localhost../cb",
+    ]) {
       expect(() => parsePayParams({ ...PARAMS, callback }, ALICE), callback).toThrow(/ln.example.com asks for the invoice at a local address/);
     }
     expect(parsePayParams({ ...PARAMS, callback: "https://pay.example.org/cb" }, ALICE).callbackDomain).toBe("pay.example.org");

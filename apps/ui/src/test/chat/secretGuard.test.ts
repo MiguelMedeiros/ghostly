@@ -328,6 +328,15 @@ describe("what the guard asks about", () => {
     ["a .cookie file's contents after its name", `.cookie ${HEX}`],
   ])("a login to a node: %s", (_, text) => expect(findSecret(text)).toEqual({ kind: "node-login" }));
 
+  it.each([
+    ["a bunker link", `bunker://${HEX}?relay=wss://relay.damus.io&secret=0f3c9a1b`],
+    ["a bunker link with encoded relays and no word beside it",
+      `bunker://${HEX}?relay=wss%3A%2F%2Frelay.damus.io%2F&relay=wss%3A%2F%2Frelay.primal.net%2F&secret=0f3c9a1b`],
+    ["a bunker link in a sentence", `connect with BUNKER://${HEX}?secret=abc&relay=wss://r.example then`],
+    ["a nostrconnect link", `nostrconnect://${HEX}?relay=wss%3A%2F%2Frelay.damus.io&metadata=%7B%22name%22%3A%22App%22%7D&secret=0f3c9a1b`],
+    ["a nostrconnect link inside another link", `https://signer.example/?uri=nostrconnect%3A%2F%2F${HEX}%3Frelay%3Dwss%253A%252F%252Fr.example%26secret%3D0f3c9a1b`],
+  ])("a signer connection link: %s", (_, text) => expect(findSecret(text)).toEqual({ kind: "signer-link" }));
+
   it("64 hex digits beside \"password\" are a key", () => {
     expect(findSecret(`password ${HEX}`)).toEqual({ kind: "hex-key" });
   });
@@ -384,6 +393,7 @@ describe("a secret with characters that take no room on screen inside it", () =>
       ["a macaroon in hex", broken(MACAROON_HEX, mark, 40), "node-login"],
       ["a rune", broken(RUNE.restricted, mark), "node-login"],
       ["a bitcoind cookie", broken(`__cookie__:${HEX}`, mark), "node-login"],
+      ["a bunker link", broken(`bunker://${HEX}?relay=wss://relay.damus.io&secret=0f3c9a1b`, mark), "signer-link"],
       ["a seed with marks inside its words", broken(MNEMONICS[0], mark, 3), "mnemonic"],
       ["a seed with marks for spaces", MNEMONICS[1].split(" ").join(mark), "mnemonic"],
     ])("%s", (_, text, kind) => expect(findSecret(text)).toEqual({ kind }));
@@ -468,6 +478,9 @@ describe("what it lets through", () => {
     "bc1p5d7rjq7g6rdk2yhzks9smlaqtedr4dekq08ge8ztwac72sfr9rusxg3297",
     "02" + "01".repeat(32) + " is the node's pubkey",
     "0201036c6e64 is how a macaroon starts",
+    // A signer's link with no secret in it only says where the signer is.
+    `bunker://${"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"}?relay=wss://relay.damus.io`,
+    `nostrconnect://${"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"}?relay=wss://relay.damus.io&name=App`,
     "",
   ])("%s", (text) => expect(findSecret(text)).toBeNull());
 
@@ -535,6 +548,7 @@ describe("how long it takes", () => {
     ["hex with a zero-width space every few digits", "abcdef01\u200b".repeat(MAX / 9)],
     ["seed words with a soft hyphen in each", "zo\u00ado ".repeat(MAX / 5)],
     ["a numbered word and a line of spaces", `1 a${" ".repeat(MAX - 4)}x`],
+    ["signer link schemes with no secret", "bunker://?relay=".repeat(MAX / 16)],
   ])("a 16 KiB message of %s is read in well under a frame", (_, text) => {
     expect(time(text)).toBeLessThan(50);
   });

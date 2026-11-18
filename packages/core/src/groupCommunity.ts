@@ -769,9 +769,10 @@ export class CommunitySession {
   private adminSeen: string | undefined;
   /**
    * After the admin role moved to me (`metaFollowsChain`): whom from, until when I take their statement, and the last
-   * one of theirs I signed again (what I held then, until one of theirs comes). In memory only.
+   * one of theirs I signed again (what I held then, until one of theirs comes). `vouched`: the latest of theirs another
+   * member's sync said it holds; `held`: the latest of theirs no other member has shown it holds yet. In memory only.
    */
-  private takeover: { from: string; until: number; base: GroupMeta | undefined } | undefined;
+  private takeover: { from: string; until: number; base: GroupMeta | undefined; vouched?: { e: number; r: number }; held?: { from: string; raw: unknown; s: GroupMetaStatement } } | undefined;
   /** The store's frames the app holds with their messages (`storeKey` → message id): in memory here, not in what is saved. */
   private readonly onRows = new Map<string, string>();
   /** The oldest epoch whose seen marks are kept, as of the last `pruneSeen`. In memory only. */
@@ -2678,6 +2679,7 @@ export class CommunitySession {
     let answered = this.syncsAnswered.get(from);
     if (!answered) this.syncsAnswered.set(from, answered = new RateWindow(COMMUNITY_LIMITS.syncAnswers, COMMUNITY_LIMITS.syncWindowMs, () => this.hooks.clock?.() ?? Date.now()));
     if (!answered.take()) return;
+    if (recent) await this.vouch(from, frame.mt);
     // Let in only on a branch that lost: the commits from where it parts up to the one that makes it lose, and nothing
     // else (no secret, no frame, no later link), as `farewell` tells one taken out. Its app then knows to ask again.
     // A new link's commit is never among them: its `x` is the link. When it is what makes the branch lose, the answer
@@ -2923,7 +2925,11 @@ export class CommunitySession {
     if (!secret || !sealedUnder) { this.waitMeta(from, raw, s); return false; }
     const opened = openGroupMeta(frame, epochKeys(fromBase64Url(secret), this.id, sealedUnder.e).message);
     if (!opened) return false;
-    if (taking) { await this.signAgainTaken(opened.meta, opened.body); return false; }
+    if (taking) {
+      if (this.vouches(from, s)) await this.signAgainTaken(opened.meta, opened.body);
+      else this.holdTaken(from, raw, s);
+      return false;
+    }
     const before = this.state.meta;
     this.state.meta = opened.meta;
     this.state.metaPast = keepPastGroupMeta(this.state.metaPast, before, opened.meta);
@@ -2945,6 +2951,35 @@ export class CommunitySession {
   private takesOver(s: GroupMetaStatement): boolean {
     const t = this.takeover;
     return !!t && this.isAdmin && s.by === t.from && (this.hooks.clock?.() ?? Date.now()) <= t.until && groupMetaNewer(s, t.base);
+  }
+
+  /**
+   * Whether a statement I would take (`takesOver`) was on its way when the role moved, as far as I can tell: a member
+   * other than its signer handed it to me (a hub's relay included), or said in a sync it holds that one or a later one
+   * under the same commit. The former admin alone could sign new ones after the hand-over, each taken for the whole group.
+   */
+  private vouches(from: string, s: GroupMetaStatement): boolean {
+    const v = this.takeover?.vouched;
+    return from !== s.by || (!!v && v.e === s.e && v.r >= s.r);
+  }
+
+  /** The former admin's statement nobody else has shown it holds: the latest is kept until a sync does (`vouch`). */
+  private holdTaken(from: string, raw: unknown, s: GroupMetaStatement): void {
+    const t = this.takeover!;
+    if (!t.held || groupMetaNewer(s, t.held.s)) t.held = { from, raw, s };
+  }
+
+  /**
+   * A member's sync names the statement it holds: one signed under a commit of the admin before me, by another member
+   * than them, vouches for theirs up to it, and the one held is taken if it now is.
+   */
+  private async vouch(from: string, tag: unknown): Promise<void> {
+    const t = this.takeover, v = parseGroupMetaTag(tag), commit = v ? this.state.chain[v.e] : undefined;
+    if (!t || !v || !commit || from === t.from || rosterAdmin(this.rosterAt(this.hashOf(commit)) ?? []) !== t.from) return;
+    if (t.vouched && !groupMetaNewer(v, t.vouched)) return;
+    t.vouched = v;
+    const held = t.held;
+    if (held && this.vouches(held.from, held.s)) { t.held = undefined; await this.receiveMeta(held.from, held.raw); }
   }
 
   /**

@@ -145,6 +145,7 @@ import { useWindowAway, windowAway } from "../lib/windowAway";
 import { showChatOnScreen } from "../lib/appBadge";
 import { setSaved, useSavedIn } from "../hooks/useSavedMessages";
 import { problemText, type Problem, problemLine } from "../lib/problemText";
+import { refusalLine, useDhtOnly } from "../lib/delivery";
 
 /** What a call captures from: the devices the profile chose, read when it asks. */
 const callDevicePreferences = () => ({ audio: preferredDevice("audioinput"), video: preferredDevice("videoinput") });
@@ -225,6 +226,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         : null,
     [session, sharedNick],
   );
+  // Whose choice keeps this chat on DHT only, if anyone's: what a refusal of a text too long for the DHT says to do.
+  const dhtOnly = useDhtOnly(params?.peerPubKeyB64);
 
   const {
     messages,
@@ -802,7 +805,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // A phone held upright: the header keeps the name, the connection, a voice call and ⋮; the video call, the bot's
   // Tasks and the contact's identities are rows of the ⋮ menu, and the running tasks are counted on ⋮.
   // The connection stays in the row: it is the one mark that changes by itself, and a failure has to be seen.
-  const phoneHeader = usePhoneHeader();
+  // So is a chat's column as narrow on a touch screen: beside the chat list (a phone on its side, a tablet upright), or
+  // beside a docked mini-app or the identities (a tablet on its side). The column, not the pane: they dock in the pane.
+  const [column, setColumn] = useState<HTMLDivElement | null>(null);
+  const phoneHeader = usePhoneHeader(column);
   // The tasks still going and the routines not paused: a phone's ⋮ counts them, and has Tasks while there is one.
   const [pickCardRow] = useState(() => rowPicker<ChatMessage, ChatMessage>(m => panelCard(m.card) ? m : undefined));
   const cardRows = useMemo(() => pickCardRow(messages), [pickCardRow, messages]);
@@ -917,7 +923,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     {/* A message that comes while the chat is open, read out once to a screen reader. */}
     <MessageAnnouncer chat={sessionId} linkId={paired ? chatLink?.id : undefined} messages={messages} nameOf={() => shownName} active={visible} ready={loaded} />
     {/* Files dropped anywhere on the column go to the composer (`data-file-drop`). */}
-    <div data-file-drop className={`chat-column relative flex-1 ${appCovers ? "hidden" : "flex"} flex-col h-full min-w-0 bg-chat-bg`}>
+    <div ref={setColumn} data-file-drop className={`chat-column relative flex-1 ${appCovers ? "hidden" : "flex"} flex-col h-full min-w-0 bg-chat-bg`}>
       {visible && wakeNotice}
       {/* Our call rang out (RING_MS): it ended by itself, and says why. */}
       {webrtc.noAnswer && (
@@ -929,7 +935,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       {!mediaNoticeInLayer && mediaNotice}
       {/* Chat Header. On a phone held upright (`phoneHeader`) it is the back button, the avatar, the name with the room
           it needs, the connection, a voice call and ⋮, and one quiet line under the name; the video call, a bot's Tasks
-          and the contact's identities are in the ⋮ menu. Wider (a phone on its side, a narrow window), every button is
+          and the contact's identities are in the ⋮ menu; so in a column as narrow on a touch screen (most phones on their
+          side, a tablet upright, a tablet on its side with a mini-app docked). Wider (a Pro Max on its side), or with a
+          mouse (a Desktop window at its default 900x700, a 479 px column), every button is
           in the row, a little narrower than on a desktop. On the narrowest phone (320px) the back button gives 8px to
           the name, so "Cérebro (Mac)" and a bot's status under it still fit beside three buttons; its tap still lands on
           44 × 44 px (`.tap-target`). Its buttons and the avatar are sized in px, as the name is: in rem they grew with the
@@ -1289,14 +1297,14 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           const error = await sendMessage(text, answering ? { ...options, replyTo: answering.id } : options);
           if (!error && answering) replied(answering);
           // The engine says why in English: said here in the app's language (lib/errorText.ts), as a group's composer does.
-          return error && problemLine(error, t);
+          return error && refusalLine(error, t, dhtOnly);
         }}
         reply={replyBar}
         translation={composerTranslation}
         // Editing one of mine (WISP 400 § Edits): the new text shows here at once and reaches the contact when it can.
         edit={editing && chatLink ? { key: editing.id, text: editing.text, snippet: replySnippet(editing.text), preview: editing.preview, onClose: () => setEditing(null),
           onSave: async (text, extra) => (await engine.call("editMessage", { linkId: chatLink.id, messageId: editing.id, text, ...(extra?.preview && { preview: extra.preview }) })
-            .then(result => ({ error: result.error && problemLine(result.error, t) }), (e: unknown) => ({ error: e instanceof Error ? problemLine(e, t) : t("chat.editFailed") }))).error } : undefined}
+            .then(result => ({ error: result.error && refusalLine(result.error, t, dhtOnly) }), (e: unknown) => ({ error: e instanceof Error ? problemLine(e, t) : t("chat.editFailed") }))).error } : undefined}
         onEditLast={paired && chatLink ? () => {
           const last = [...messages].reverse().find(editableText);
           if (last) { setReplyingTo(null); setEditing(last); }

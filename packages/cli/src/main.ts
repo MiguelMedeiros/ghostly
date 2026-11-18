@@ -240,12 +240,13 @@ export function oneGroupOnly(method: string): boolean {
  * payments), none from a chat's history: `wallet list` took 1.3 s and 239 MB instead of 0.48 s and 146 MB with 50,000
  * messages; `payment list --chat` starts the chat it names. `identity providers` reads nothing of the profile, and
  * `call auto` and `group auto` with no on|off what it keeps: each took 1.6 s and 211 MB instead of 0.8 s and 152 MB
- * with 50,000.
+ * with 50,000. `saved list` reads each saved row by its key, a quoted original by its id and the contact's name from
+ * the chat's record: 1.2 s instead of 0.7 s with 30,000 messages, nothing saved.
  */
 const NO_HISTORY_READS: ReadonlySet<string> = new Set([
   "status", "profile.get", "settings.get", "status.get", "chat.list", "group.list", "group.get", "group.history",
   "call.list", "service.list", "identity.list", "x401.credential.list", "app.served", "wallet.list", "wallet.history",
-  "payment.list", "identity.providers",
+  "payment.list", "identity.providers", "saved.list",
 ]);
 
 /**
@@ -346,13 +347,18 @@ export function answerWithin(method: string, params: Record<string, unknown>): n
   return undefined;
 }
 
-/** `again`: whether a read the daemon left unanswered as it stopped is asked once more (`throughDaemon`). */
-async function session(g: Globals, options: RuntimeOptions, again = true): Promise<Session> {
+/**
+ * `again`: whether a read the daemon left unanswered as it stopped is asked once more (`throughDaemon`). `first`: the
+ * call a one-shot makes, whose own words are checked before the profile opens (api.ts `refuseBeforeStart`): a malformed
+ * one opened it online and started every saved chat to be refused (with 10 chats, 20 relay requests and 0.4 s more).
+ */
+async function session(g: Globals, options: RuntimeOptions, again = true, first?: { method: string; params: Record<string, unknown> }): Promise<Session> {
   requireProfile(g);
   const anew = again ? () => session(g, options, false) : undefined;
   const client = await connectDaemon(g.paths);
   if (client) return throughDaemon(client, anew);
-  const [, { callApi, startNamedChats }] = await Promise.all([engineHost(), engineApi()]);
+  const [, { callApi, refuseBeforeStart, startNamedChats }] = await Promise.all([engineHost(), engineApi()]);
+  if (first) await refuseBeforeStart(first.method, first.params);
   const host = await openOneShot(g, options);
   if (host instanceof DaemonClient) return throughDaemon(host, anew);
   const call = async (m: string, p?: unknown) => {
@@ -494,8 +500,8 @@ async function openOneShot(g: Globals, options: RuntimeOptions = {}, mode: Host[
  * nothing of the groups, `deferChats` too when it names that chat or makes or joins a new one (`oneChatOnly`), `offline`
  * when it only reads or changes only this device (`offlineCall`).
  */
-async function withSession<T>(g: Globals, work: (s: Session) => Promise<T>, options: RuntimeOptions = {}): Promise<T> {
-  const s = await session(g, options);
+async function withSession<T>(g: Globals, work: (s: Session) => Promise<T>, options: RuntimeOptions = {}, first?: { method: string; params: Record<string, unknown> }): Promise<T> {
+  const s = await session(g, options, true, first);
   const stops = interruptible(s);
   try { return await stops.run(work); } finally { await s.close(); stops.off(); }
 }
@@ -1476,13 +1482,17 @@ async function listenCommand(argv: string[]): Promise<void> {
   // The hub's listener comes off while the feed is paused, and back after a replay from the last event taken. What a
   // replay gave and the feed did not take yet waits for the resume: one read of the journal per catch-up, not one per
   // pause; the journal is read again only for what came meanwhile.
-  let off: (() => void) | null = null, left: GhostlyEvent[] = [];
+  // A gap is numbered as the event before it, so a replay after the one that ended on it gives it again: the last one
+  // taken is not taken twice. Before, after a crash (seqs reserved past the journal's end) every replay was that gap
+  // alone, and the loop handed it on ~1,000 times, until the feed paused.
+  let off: (() => void) | null = null, left: GhostlyEvent[] = [], gap: string | undefined;
   const open = (from: number | undefined) => {
     for (;;) {
-      const events = left.length ? left : host.ctx.hub.replay(from ?? host.ctx.hub.lastSeq);
+      const events = (left.length ? left : host.ctx.hub.replay(from ?? host.ctx.hub.lastSeq)).filter((e) => e.type !== "events.gap" || e.id !== gap);
       left = [];
       if (!events.length) break;
       for (let i = 0; i < events.length; i++) {
+        if (events[i].type === "events.gap") gap = events[i].id;
         feed.take(events[i]);
         if (feed.paused) { left = events.slice(i + 1); return; }
       }
@@ -1636,7 +1646,9 @@ async function identityAddCommand(argv: string[]): Promise<void> {
   requireProfile(g);
   const client = await connectDaemon(g.paths);
   if (client) { await addThroughDaemon(client); return; }
-  const [, { callApi }] = await Promise.all([engineHost(), engineApi()]);
+  const [, { callApi, identityProvider }] = await Promise.all([engineHost(), engineApi()]);
+  // A provider there is none of, refused before the profile opens: it started every saved chat to be refused.
+  identityProvider(provider);
   const host = await openOneShot(g);
   if (host instanceof DaemonClient) { await addThroughDaemon(host); return; }
   const off = host.ctx.hub.onEvent(tell);
@@ -1703,7 +1715,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
       return joined.answer;
     }
     return result;
-  }, { deferGroups: chatOnly(command.method, params) || newChatOnly(command.method), deferChats: oneChatOnly(command.method, params) || oneGroupOnly(command.method) || readsNoHistory(command.method, params), offline: offlineCall(command.method, params) });
+  }, { deferGroups: chatOnly(command.method, params) || newChatOnly(command.method), deferChats: oneChatOnly(command.method, params) || oneGroupOnly(command.method) || readsNoHistory(command.method, params), offline: offlineCall(command.method, params) }, { method: command.method, params });
   if (translator) {
     try { printAnswer(await (await import("./translate")).translateAnswer(result, translator)); } finally { translator.close(); }
     return;
@@ -1858,6 +1870,25 @@ export async function main(input: string[]): Promise<number> {
 }
 
 /**
+ * The app's words for a message action, and the command that does it here: someone coming from the app types `reply`
+ * or `unpin` first, and "did you mean react?" for `unreact` added a reaction instead of taking one back.
+ */
+export const APP_WORDS: Readonly<Record<string, string>> = {
+  "reply": "send <chat> --reply <message>",
+  "unpin": "pin <chat> --remove",
+  "unreact": "react <chat> <message> --remove",
+  "delete": "message delete <chat> <message>",
+  "history": "chat history <chat>",
+  "message edit": "edit <chat> <message>",
+  "message react": "react <chat> <message> <emoji>",
+  "message pin": "pin <chat> <message>",
+  "message forward": "forward <chat> <message> --to <chat>",
+};
+
+/** The app's search (in a chat and in the chat list), which the CLI does not have: `chat history` and jq do it. */
+const SEARCH = ["search", "chat search"];
+
+/**
  * A command line that names no command. The words of a group (`ghostly chat`, `ghostly wallet frob`, `ghostly x401
  * credential`) are answered with the group's commands, as `ghostly help chat` lists them; before, it was only "Unknown
  * command: chat". The longest group the words name answers: `x401 credential frob` lists add, list and remove.
@@ -1865,6 +1896,10 @@ export async function main(input: string[]): Promise<number> {
  */
 export function unknownCommand(first: string | undefined, second?: string, third?: string): CliError {
   const asked = [first, second, third].filter((word): word is string => !!word);
+  // The app's word for a message action (`unpin`, `message edit`) is no typo: the command that does it, with its options.
+  const said = [asked.slice(0, 2).join(" "), asked[0]].find((words) => words !== undefined && (Object.hasOwn(APP_WORDS, words) || SEARCH.includes(words)));
+  if (said && SEARCH.includes(said)) return new CliError("usage", `Unknown command: ${said} (the CLI has no search yet: ghostly chat history <chat> --limit n | jq …; ghostly help chat history)`);
+  if (said) return new CliError("usage", `Unknown command: ${said} (ghostly ${APP_WORDS[said]}; ghostly help ${commandWords(APP_WORDS[said]).join(" ")})`);
   const all = helpRows().map((row) => commandWords(row.usage));
   const takes = (group: readonly string[]) => [...new Set(all.filter((words) => words.length > group.length && group.every((word, i) => words[i] === word)).map((words) => words[group.length]))];
   const meant = (typed: readonly string[], words: readonly string[]) => new CliError("usage", `Unknown command: ${typed.join(" ")} (did you mean ${words.join(" ")}? ghostly help ${words.join(" ")})`);

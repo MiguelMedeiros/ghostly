@@ -231,8 +231,10 @@
     "fullInvited": "グループは満員です（{{max}} / {{max}}、まだ返事のない招待 {{invited}} 件を含む）。誰かが抜けるまで、これ以上招待できません。",
     "invite": "連絡先を招待",
     "inviteAction": "招待",
+    "inviteLabel": "{{name}}を招待",
     "invited": "招待済み…",
     "makeAdmin": "管理者を譲る",
+    "makeAdminLabel": "{{name}}に管理者を譲る",
     "missing": "このメンバーのメッセージ {{count}} 件がまだ届いていません",
     "missingOne": "このメンバーのメッセージ {{count}} 件がまだ届いていません",
     "needsBothHint": "グループには双方のアプリが接続済みで最新である必要があります",
@@ -242,6 +244,7 @@
     "notReachable": "到達不可",
     "reachable": "到達可能",
     "remove": "削除",
+    "removeLabel": "{{name}}を削除",
     "removePicture": "写真を削除"
   },
   "menu": {

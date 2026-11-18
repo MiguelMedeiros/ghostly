@@ -3,7 +3,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { aloneMark, appTrainIn, inTurns, READS_AT_ONCE, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, failedJobs, gateOf, gitLayer, HOLD, HOLD_HELP, holdBatch, holdText, isBatch, LABEL, listBases, MAX_WAIT, MIN_BATCH, localBases, missedWakes, order, ordinal, pickBatch, PLANNED_JOBS, positionText, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting, vouchedAt, wakeIn } from "../merge-train.mjs";
+import { aloneMark, appTrainIn, inTurns, READS_AT_ONCE, REVIEW_HOLD, reviewHold, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, failedJobs, gateOf, gitLayer, HOLD, HOLD_HELP, holdBatch, holdText, isBatch, LABEL, listBases, MAX_WAIT, MIN_BATCH, localBases, missedWakes, order, ordinal, pickBatch, PLANNED_JOBS, positionText, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting, vouchedAt, wakeIn } from "../merge-train.mjs";
 
 type Pr = { number: number; title: string; body: string; draft: boolean; sha: string; branch: string; fork: boolean; labels: string[]; createdAt: string; closedAt?: string; open: boolean; base: string; merged?: boolean; author?: string; nodeId?: string; editor?: string };
 const green = [{ name: "CI Success", status: "completed", conclusion: "success", started_at: "2026-10-08T00:00:00Z", id: 1 }];
@@ -32,7 +32,7 @@ function fakeRepo() {
   const pulls = new Map<number | string, Pr>();
   const events = new Map<number, { event: string; label?: { name: string }; created_at: string }[]>();
   /** `editor`: who last wrote the comment, when not its author (an edit by another login). */
-  const comments = new Map<number | string, { id: number; node_id?: string; body: string; user?: { login: string }; editor?: string }[]>();
+  const comments = new Map<number | string, { id: number; node_id?: string; body: string; user?: { login: string }; editor?: string; created_at?: string; author_association?: string }[]>();
   const runs = new Map<string, object[]>();
   /** CI's runs on a commit before the newest one (newest first), and the files each pull request changes (unset: one source file). */
   const earlier = new Map<string, object[][]>();
@@ -243,7 +243,7 @@ function fakeRepo() {
       if (missing.has(p.number)) return { baseSha: tips[base], dropped: "missing" };
       if (conflicts.has(p.number) || unrebasable.has(p.number)) return { baseSha: tips[base], dropped: "conflict" };
       if (!force && sitsOn.get(p.sha) === tips[base]) return { baseSha: tips[base], sha: p.sha };
-      const sha = `r${p.number}.${++rebases}`;
+      const sha = `r${p.number}x${++rebases}`; // a head a `Review:` comment can name, as a real sha
       sitsOn.set(sha, tips[base]);
       rebased.add(sha);
       return { baseSha: tips[base], sha };
@@ -2682,7 +2682,7 @@ describe("one pull request alone", () => {
     expect(merged.log.join("\n")).toMatch(/\(dry run\) would merge #11 at h11 \(squash\) as "fix 11 \(#11\)"/);
     expect(merged.log.join("\n")).not.toMatch(/verified/i); // nothing landed, so nothing to read back
     const rebased = await repo.run({ dry: true, base: "epic/x" });
-    expect(rebased.log.join("\n")).toMatch(/\(dry run\) would push r12\.\d+ to fix-12/);
+    expect(rebased.log.join("\n")).toMatch(/\(dry run\) would push r12x\d+ to fix-12/);
     expect(repo.landed).toEqual([]);
     expect(repo.pushes).toEqual([]);
     expect([...repo.comments.values()].flat()).toEqual([]);
@@ -3059,6 +3059,61 @@ describe("a pull request on hold (queue:hold)", () => {
     expect(repo.members()).not.toContain(12);
   });
 
+  it("stops a green batch's landing on dev at one put on hold while the ones ahead of it land", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12, 13]) repo.add(n, { behind: true });
+    const b = (await repo.run()).inFlight as number;
+    repo.settle();
+    // The hold goes on #13 right after GitHub merges #11, in the run that lands the batch.
+    const squash = repo.gh.squash;
+    repo.gh.squash = async (n, ...rest) => {
+      const r = await squash(n, ...rest);
+      if (n === 11) hold(repo, 13);
+      return r;
+    };
+    const r = await repo.run();
+    expect(repo.merges).toEqual(["squash #11", "squash #12"]);
+    expect(r.merged).toEqual([11, 12]);
+    expect(said(repo, b)).toBe("Merge train: #11 #12 landed on `dev`, and the landing stopped there: #13 changed or left the line (#13 is on hold, `queue:hold`). #13 did not land; the ones still queued go back to the line.");
+    expect(repo.pulls.get(13)).toMatchObject({ open: true, labels: [LABEL.queue, HELD] });
+    expect(repo.pulls.get(13)!.merged).toBeUndefined();
+  });
+
+  it("stops a green batch's landing on dev at one taken out of the line while the ones ahead of it land", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12, 13]) repo.add(n, { behind: true });
+    const b = (await repo.run()).inFlight as number;
+    repo.settle();
+    const squash = repo.gh.squash;
+    repo.gh.squash = async (n, ...rest) => {
+      const r = await squash(n, ...rest);
+      if (n === 11) repo.pulls.get(12)!.labels = [];
+      return r;
+    };
+    await repo.run();
+    expect(repo.merges).toEqual(["squash #11"]);
+    expect(said(repo, b)).toBe("Merge train: #11 landed on `dev`, and the landing stopped there: #12 changed or left the line. #12 #13 did not land; the ones still queued go back to the line.");
+    expect(repo.pulls.get(12)!.merged).toBeUndefined();
+  });
+
+  it("lands nothing of a green batch on an epic with one put on hold while the run reads it", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12, 13]) repo.add(n, { base: "epic/x", behind: true });
+    const b = (await repo.run({ base: "epic/x" })).inFlight as number;
+    repo.settle();
+    // The hold goes on #13 after the run read the line, while it reads the batch's commits just before the push.
+    const pullCommits = repo.gh.pullCommits;
+    repo.gh.pullCommits = async (n) => {
+      if (n === b) hold(repo, 13);
+      return pullCommits(n);
+    };
+    const r = await repo.run({ base: "epic/x" });
+    expect(repo.landed).toEqual([]);
+    expect(repo.tips["epic/x"]).toBe("epic0");
+    expect(r.closed).toContain(b);
+    expect(said(repo, b)).toMatch(/#13 changed or left the line \(#13 is on hold, `queue:hold`\), so this batch closes/);
+  });
+
   it("closes a green batch with a held first one, and lands nothing of it", async () => {
     const repo = fakeRepo();
     for (const n of [11, 12, 13]) repo.add(n, { behind: true });
@@ -3111,6 +3166,122 @@ describe("a pull request on hold (queue:hold)", () => {
     await repo.run();
     expect(repo.cancelled).toEqual([]);
     expect(said(repo, 13)).not.toMatch(/cancel/i);
+  });
+});
+
+describe("a pull request with a review running (Review: in progress)", () => {
+  const said = (repo: ReturnType<typeof fakeRepo>, n: number) => repo.comments.get(n)!.filter((c) => c.user?.login === "train").at(-1)!.body;
+  const start = Date.parse("2026-11-17T19:45:00Z");
+  let id = 9000;
+  const note = (body: string, at = start, author_association = "OWNER") => ({ id: id++, body, user: { login: "MiguelMedeiros" }, created_at: new Date(at).toISOString(), author_association });
+  const review = (repo: ReturnType<typeof fakeRepo>, n: number, body = `Review: in progress (head h${n})`, at = start) =>
+    repo.comments.set(n, [...(repo.comments.get(n) ?? []), note(body, at)]);
+
+  it("reads the newest Review: comment by a reviewer, on this head, for REVIEW_HOLD at most", () => {
+    const sha = "d06086e5a1b2c3d4e5f60718293a4b5c6d7e8f90";
+    const now = start + 30 * 60_000;
+    const until = start + REVIEW_HOLD;
+    expect(REVIEW_HOLD).toBe(90 * 60_000);
+    expect(reviewHold([note("Review: in progress (head d06086e)")], sha, now)).toEqual({ since: start, until });
+    expect(reviewHold([note(`**Review: in progress (head ${sha})**\nreviewer: hermes-one`)], sha, now)).toEqual({ since: start, until });
+    // A verdict after it ends it, on any head; an older verdict does not.
+    expect(reviewHold([note("Review: in progress (head d06086e)"), note("Review: approved (head d06086e)", start + 60_000)], sha, now)).toBeNull();
+    expect(reviewHold([note("Review: in progress (head d06086e)"), note("Review: changes needed (head d06086e)", start + 60_000)], sha, now)).toBeNull();
+    expect(reviewHold([note("Review: changes needed (head 1111111)", start - 60_000), note("Review: in progress (head d06086e)")], sha, now)).toEqual({ since: start, until });
+    // Another head (a push since), a head too short to tell, no head, or the bound passed: nothing held.
+    expect(reviewHold([note("Review: in progress (head bc29edd)")], sha, now)).toBeNull();
+    expect(reviewHold([note("Review: in progress (head d06)")], sha, now)).toBeNull();
+    expect(reviewHold([note("Review: in progress")], sha, now)).toBeNull();
+    expect(reviewHold([note("Review: in progress (head d06086e)")], sha, until)).toBeNull();
+    expect(reviewHold([note("Review: in progress (head d06086e)")], sha, until - 1)).toEqual({ since: start, until });
+    // Anyone may comment on a public pull request: only an account that could hold it by label counts.
+    for (const who of ["NONE", "CONTRIBUTOR", "FIRST_TIME_CONTRIBUTOR"]) expect(reviewHold([note("Review: in progress (head d06086e)", start, who)], sha, now)).toBeNull();
+    expect(reviewHold([{ ...note("Review: in progress (head d06086e)"), author_association: undefined }], sha, now)).toBeNull();
+    for (const who of ["MEMBER", "COLLABORATOR"]) expect(reviewHold([note("Review: in progress (head d06086e)", start, who)], sha, now)).not.toBeNull();
+    // Not on its first line: a quote of one, not one.
+    expect(reviewHold([note("Merge train: see\nReview: in progress (head d06086e)")], sha, now)).toBeNull();
+  });
+
+  it("never merges a lone one green at the tip while its review runs; it lands once the verdict is posted", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    review(repo, 11);
+    const r = await repo.run({ now: start + 10 * 60_000 });
+    expect(repo.merges).toEqual([]);
+    expect(r.inFlight).toBeNull();
+    expect(said(repo, 11)).toMatch(/1st\*\*\. Waiting: a review is running on its head since 19:45 UTC \(until 21:15 UTC at the latest\): it boards once the review's verdict is posted, or at that time\. It keeps its place\.$/);
+    review(repo, 11, "Review: approved (head h11)", start + 30 * 60_000);
+    await repo.run({ now: start + 31 * 60_000 });
+    expect(repo.landed).toEqual(["#11"]);
+  });
+
+  it("lets it go once the bound passes, with no verdict", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    review(repo, 11);
+    await repo.run({ now: start + REVIEW_HOLD - 60_000 });
+    expect(repo.landed).toEqual([]);
+    await repo.run({ now: start + REVIEW_HOLD });
+    expect(repo.landed).toEqual(["#11"]);
+  });
+
+  it("counts a review only on the head it names, and not for queue:priority", async () => {
+    const other = fakeRepo();
+    other.add(11);
+    review(other, 11, "Review: in progress (head h10)");
+    await other.run({ now: start + 10 * 60_000 });
+    expect(other.landed).toEqual(["#11"]);
+    const fix = fakeRepo();
+    fix.add(11, { priority: true });
+    review(fix, 11);
+    await fix.run({ now: start + 10 * 60_000 });
+    expect(fix.landed).toEqual(["#11"]);
+  });
+
+  it("never merges a lone one the train rebased and flies alone while its review runs: it waits in line and the others go", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    expect((await repo.run({ now: start - 60 * 60_000 })).inFlight).toBe(11);
+    repo.settle(); // green on the train's rebase: without the review it would land now
+    review(repo, 11, `Review: in progress (head ${repo.pulls.get(11)!.sha})`);
+    repo.add(12);
+    const r = await repo.run({ now: start + 5 * 60_000 });
+    expect(repo.landed).toEqual(["#12"]);
+    expect(r.dropped).toEqual([]);
+    expect(repo.pulls.get(11)).toMatchObject({ open: true, labels: [LABEL.queue] });
+    expect(said(repo, 11)).toMatch(/1st\*\*\. Waiting: a review is running on its head/);
+  });
+
+  it("stops a green batch's landing on dev at one whose review started since it boarded", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12, 13]) repo.add(n, { behind: true });
+    const b = (await repo.run({ now: start - 60 * 60_000 })).inFlight as number;
+    repo.settle();
+    review(repo, 12);
+    const r = await repo.run({ now: start + 5 * 60_000 });
+    expect(repo.merges).toEqual(["squash #11"]);
+    expect(r.merged).toEqual([11]);
+    expect(said(repo, b)).toBe("Merge train: #11 landed on `dev`, and the landing stopped there: #12 changed or left the line (#12 has a review running). #12 #13 did not land; the ones still queued go back to the line.");
+    expect(repo.pulls.get(12)).toMatchObject({ open: true, labels: [LABEL.queue] });
+    expect(said(repo, 12)).toMatch(/Waiting: a review is running/);
+  });
+
+  it("stops the landing at one whose review starts while the ones ahead of it land", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12, 13]) repo.add(n, { behind: true });
+    const b = (await repo.run({ now: start - 60 * 60_000 })).inFlight as number;
+    repo.settle();
+    // The reviewer posts on #13 right after GitHub merges #11, in the run that lands the batch (the 1 s of ghostly#8096).
+    const squash = repo.gh.squash;
+    repo.gh.squash = async (n, ...rest) => {
+      const r = await squash(n, ...rest);
+      if (n === 11) review(repo, 13, "Review: in progress (head h13)", start + 60_000);
+      return r;
+    };
+    await repo.run({ now: start });
+    expect(repo.merges).toEqual(["squash #11", "squash #12"]);
+    expect(said(repo, b)).toMatch(/#13 changed or left the line \(#13 has a review running\)/);
+    expect(repo.pulls.get(13)!.merged).toBeUndefined();
   });
 });
 

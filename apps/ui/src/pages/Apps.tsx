@@ -14,6 +14,7 @@ import { draftDirection } from "../lib/documentLanguage";
 import { AppIcon, Fingerprint } from "../components/apps/AppIcon";
 import { AppInstallDialog, InstalledAppDialog } from "../components/apps/AppInstallDialog";
 import { removedLine } from "../components/apps/removedLine";
+import { stoppedSaid } from "../components/apps/stoppedSaid";
 import { AddAppDialog } from "../components/apps/AddAppDialog";
 import { AppChatPicker } from "../components/apps/AppChatPicker";
 import { NAME, withName } from "../components/apps/aroundName";
@@ -58,7 +59,8 @@ function HintLine({ lead, text, testId, className }: { lead?: string; text: stri
   );
 }
 
-function InstalledRow({ app, onDetails, onOpen }: { app: InstalledAppView; onDetails: () => void; onOpen: () => void }) {
+/** Drawn again only when its app changed, not for the page's toast, screens or a store's read (each callback is the page's one). */
+const InstalledRow = memo(function InstalledRow({ app, onDetails, onOpen }: { app: InstalledAppView; onDetails: (ref: string) => void; onOpen: (app: InstalledAppView) => void }) {
   const { t } = useI18n();
   const hint = appHint(app, t);
   const color = { muted: "text-text-muted", warning: "text-test-money-ink", danger: "text-danger-ink" }[hint.tone];
@@ -80,7 +82,7 @@ function InstalledRow({ app, onDetails, onOpen }: { app: InstalledAppView; onDet
   return (
     // Open goes under the name when both don't fit (a large text size on a phone), as in a built-in app's row.
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3" data-testid="installed-app" data-ref={app.ref}>
-      <button ref={details} type="button" onClick={onDetails} className="flex items-center gap-3 min-w-0 flex-[1_1_12rem] text-start cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      <button ref={details} type="button" onClick={() => onDetails(app.ref)} className="flex items-center gap-3 min-w-0 flex-[1_1_12rem] text-start cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
         aria-label={t("apps.page.details", { title: shown })}>
         <AppIcon installed={app} />
         <span className="min-w-0">
@@ -96,16 +98,16 @@ function InstalledRow({ app, onDetails, onOpen }: { app: InstalledAppView; onDet
           <HintLine testId="installed-app-hint" className={color} lead={hint.lead} text={hint.text} />
         </span>
       </button>
-      {app.run.status === "ok" && <Button ref={openRef} data-testid="installed-app-open" className="ms-auto" aria-label={t("apps.builtIn.openNamed", { title: app.title })} onClick={onOpen}>{t("apps.page.open")}</Button>}
+      {app.run.status === "ok" && <Button ref={openRef} data-testid="installed-app-open" className="ms-auto" aria-label={t("apps.builtIn.openNamed", { title: app.title })} onClick={() => onOpen(app)}>{t("apps.page.open")}</Button>}
     </div>
   );
-}
+});
 
 /**
  * An app that comes with Ghostly and was never opened here (WISP 1200 § Built-in apps): nothing of it is installed yet.
  * Open is the install screen with what it asks; Remove takes it off the list for good (it stays in the store).
  */
-function BuiltInRow({ app, busy, onOpen, onRemove }: { app: BuiltInAppOffer; busy: boolean; onOpen: () => void; onRemove: () => void }) {
+const BuiltInRow = memo(function BuiltInRow({ app, busy, onOpen, onRemove }: { app: BuiltInAppOffer; busy: boolean; onOpen: (app: BuiltInAppOffer) => void; onRemove: (app: BuiltInAppOffer) => void }) {
   const { t } = useI18n();
   // Remove asks first, as a store's Remove does: it is the one removal that cannot be undone here (the copy the build
   // carries is not offered again). The question takes the place of the buttons, the focus goes to its Cancel, and
@@ -130,7 +132,7 @@ function BuiltInRow({ app, busy, onOpen, onRemove }: { app: BuiltInAppOffer; bus
       {!asking && (
         <div className="flex items-center gap-2 ms-auto">
           <Button ref={remove} data-testid="built-in-app-remove" disabled={busy} aria-label={t("apps.builtIn.removeNamed", { title: app.title })} onClick={() => setAsking(true)}>{t("apps.builtIn.remove")}</Button>
-          <Button variant="primary" data-testid="built-in-app-open" disabled={busy} aria-label={t("apps.builtIn.openNamed", { title: app.title })} onClick={onOpen}>{t("apps.page.open")}</Button>
+          <Button variant="primary" data-testid="built-in-app-open" disabled={busy} aria-label={t("apps.builtIn.openNamed", { title: app.title })} onClick={() => onOpen(app)}>{t("apps.page.open")}</Button>
         </div>
       )}
       {asking && (
@@ -140,13 +142,13 @@ function BuiltInRow({ app, busy, onOpen, onRemove }: { app: BuiltInAppOffer; bus
           <p className="text-xs text-text-secondary">{t("apps.builtIn.removeText")}</p>
           <div className="flex flex-wrap justify-end gap-2">
             <Button ref={keep} disabled={busy} onClick={() => setAsking(false)}>{t("common.cancel")}</Button>
-            <Button variant="danger" data-testid="built-in-app-remove-confirm" loading={busy} onClick={onRemove}>{t("apps.builtIn.remove")}</Button>
+            <Button variant="danger" data-testid="built-in-app-remove-confirm" loading={busy} onClick={() => onRemove(app)}>{t("apps.builtIn.remove")}</Button>
           </div>
         </div>
       )}
     </div>
   );
-}
+});
 
 /** How many listings a store's block shows at a time: a page a phone draws in a frame or two. */
 const LISTING_PAGE = 50;
@@ -454,6 +456,23 @@ export function Apps() {
   const { show } = notice;
   const fail = useCallback((e: unknown) => show(appErrorText(e, t)), [show, t]);
   const said = useCallback((text: string) => show(text, { tone: "success" }), [show]);
+  // An update check or a store stopped an installed app: its row turning to Stopped, its Open going, were seen and never
+  // heard. Said politely, once, with why, in a status there since the page opened. Not for the apps already stopped
+  // when the page first read them, and not for the one whose screen is open (that screen says it).
+  const wasStopped = useRef<ReadonlyMap<string, boolean> | null>(null);
+  const [stopSaid, setStopSaid] = useState("");
+  useEffect(() => {
+    if (!installed) return;
+    const before = wasStopped.current;
+    const now = new Map(installed.map((a) => [a.ref, appStopped(a)]));
+    wasStopped.current = now;
+    if (!before) return;
+    const stopped = installed.filter((a) => appStopped(a) && before.get(a.ref) === false && a.ref !== details);
+    if (stopped.length) setStopSaid(stopped.map((a) => stoppedSaid(a.title, a.run, t)).join(" "));
+    // One that may run again, or is gone (uninstalled), empties the line, so the same app stopping again for the same
+    // reason is a change, and said.
+    else if ([...before].some(([ref, was]) => was && now.get(ref) !== true)) setStopSaid("");
+  }, [installed, details, t]);
 
   // A store that reads as before stays the object held, and the list held when all do: the update check and each
   // Refresh read every store again, and a store's block draws its listings again only when its own list changed.
@@ -472,30 +491,34 @@ export function Apps() {
     void engine.call("appCheckUpdates").then(() => reloadStores(), () => {});
   }, [available, reloadStores]);
 
-  if (state === "checking") return null;
-  if (!available) return <Navigate to="/" replace />;
+  // The rows' callbacks stay the same across the page's draws (a toast, a screen opening), so a row is drawn again only
+  // for its own app.
   // An app that runs in a chat asks which one; a full-screen app opens here, alone.
-  const open = (app: InstalledAppView, options?: OpenAppOptions) => {
+  const open = useCallback((app: InstalledAppView, options?: OpenAppOptions) => {
     if (app.view === "full") void openApp(app.ref, null, options).catch(fail);
     else setPicking({ app, ...(options && { options }) });
-  };
-  const shown = details ? installed?.find((a) => a.ref === details) : undefined;
+  }, [fail]);
   // Removed, never opened: nothing to export, and the store still has it. It is not offered again.
-  const removeBuiltIn = async (app: BuiltInAppOffer) => {
+  const removeBuiltIn = useCallback(async (app: BuiltInAppOffer) => {
     setRemoving(true);
     try { await engine.call("appUninstall", { ref: app.ref }); setGone({ app: app.ref }); await refreshInstalledApps(); } catch (e) { fail(e); } finally { setRemoving(false); }
-  };
+  }, [fail]);
+
+  if (state === "checking") return null;
+  if (!available) return <Navigate to="/" replace />;
+  const shown = details ? installed?.find((a) => a.ref === details) : undefined;
   return (
     <Page title={t("apps.title")} width="md" testId="apps-page" overlay={<Toast toast={notice.toast} onDismiss={notice.dismiss} place="page" />}
       trailing={<PageAction label={t("apps.page.add")} title={t("apps.page.addHint")} testId="apps-add" onClick={() => setAdding(true)} />}>
       <p className="text-sm text-text-secondary">{t("apps.page.intro")}</p>
+      <p role="status" aria-live="polite" aria-atomic="true" className="sr-only" data-testid="apps-stop-said">{stopSaid}</p>
       <Section title={t("apps.page.installed")} testId="apps-installed">
         {installedFailure != null && <ReadFailed error={installedFailure} testId="apps-installed-error" onRetry={() => { setRetried("installed"); return refreshInstalledApps(); }} />}
         {installed === null ? <Block><Notice>{t("apps.page.loading")}</Notice></Block>
           : installed.length === 0 && builtIns.length === 0 ? installedFailure == null && <Block testId="apps-none"><Notice>{t("apps.page.none")}</Notice></Block>
             : <>
-              {installed.map((app) => <InstalledRow key={app.ref} app={app} onDetails={() => setDetails(app.ref)} onOpen={() => open(app)} />)}
-              {builtIns.map((app) => <BuiltInRow key={app.ref} app={app} busy={removing} onOpen={() => setFirst(app)} onRemove={() => void removeBuiltIn(app)} />)}
+              {installed.map((app) => <InstalledRow key={app.ref} app={app} onDetails={setDetails} onOpen={open} />)}
+              {builtIns.map((app) => <BuiltInRow key={app.ref} app={app} busy={removing} onOpen={setFirst} onRemove={removeBuiltIn} />)}
             </>}
       </Section>
       <Section title={t("apps.page.stores")} testId="apps-stores">
