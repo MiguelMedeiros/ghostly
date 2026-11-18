@@ -1192,8 +1192,10 @@ describe("messages kept in rows.db", () => {
     const store = await openPersistentIndexedDb(dir);
     opened.push(store);
     const d = await db(store.factory);
-    // The schema's fold done first: it takes the trees' layers to SQLite too.
+    // The schema's fold done first: it takes the trees' layers to SQLite too. Its 250 ms apply timer fired, and the fold
+    // itself ended, however slow the disk is with its snapshot.
     await applied();
+    await store.flush();
     const apply = vi.spyOn(TreeFile.prototype, "apply");
     // The batch's 250 ms held while the 20 finish, by the batch and not by the clock: a slow runner (Linux ARM64, under
     // the whole suite) took longer than that over them, and split them in two.
@@ -1206,7 +1208,10 @@ describe("messages kept in rows.db", () => {
       expect(await entryCount(dir)).toBe(0);
       // Killed now: the journal has them all, and the next start puts them in rows.db.
       const crashed = copyOf(dir);
-      vi.advanceTimersByTime(250);
+      // Not before the batch's 250 ms: a shorter one is a SQLite transaction per entry again.
+      vi.advanceTimersByTime(249);
+      expect(apply).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
       // The 20 in one SQLite transaction.
       expect(apply).toHaveBeenCalledOnce();
       expect(await entryCount(dir)).toBe(20);
