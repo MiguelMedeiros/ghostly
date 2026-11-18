@@ -62,6 +62,12 @@ export const APP_CHECK_TIMINGS = {
   everyMs: 24 * 60 * 60 * 1000,
   /** A check the network was off for, or whose read of the installed apps failed, is tried again this soon, not a day later. */
   offlineRetryMs: 10 * 60 * 1000,
+  /**
+   * A check that ran while no publisher's file could be reached (the device without a network though Ghostly's is on,
+   * the host down or rate-limiting) is tried again after `offlineRetryMs`, then twice as long each time it fails again,
+   * up to this.
+   */
+  unreachedRetryMaxMs: 2 * 60 * 60 * 1000,
   /** A check at start is skipped when every app was checked this recently (a page reloaded several times). */
   freshMs: 60 * 60 * 1000,
 } as const;
@@ -398,6 +404,9 @@ function listingUrls(urls: readonly string[]): string[] {
  */
 const passing = (error: unknown): boolean => error instanceof AppFetchError
   && (error.code === "offline" || error.code === "network" || error.code === "slow" || (error.status ?? 0) >= 500 || error.status === 429 || error.status === 408);
+
+/** What one app's revocation reads in an update check met (`readRevocations`): some host answered, some read failed for a passing reason. */
+interface RevocationsReach { answered: boolean; failed: boolean }
 
 /** An error whose message starts with its code (`<code>: words`), as it crosses the engine's RPC. */
 function fail(code: string, words: string): never {
@@ -743,6 +752,8 @@ export class Apps {
   /** Drops `previewed` past `STAGED.ms`: an index is up to 4 MiB, and a closed Add screen sends no call. */
   private previewedSweep: ReturnType<typeof setTimeout> | null = null;
   private checking: Promise<AppCheckResult[]> | null = null;
+  /** Checks in a row in which an app's publisher's files could not be reached at all (`checkApp`); 0 after one that reached them all. */
+  private unreachedChecks = 0;
   /**
    * Runs the person started with Run anyway (`<ref> <digest>`): a removal does not cut them off. Only that run's: dropped
    * when the version starts without it, when a call finds it no longer removed, and at Uninstall.
@@ -887,7 +898,11 @@ export class Apps {
         const fresh = atStart && apps.length > 0 && apps.every((a) => this.checkedWithin(a.checkedAt, APP_CHECK_TIMINGS.freshMs));
         // No app installed: no request, to a store or anywhere (WISP 1200 § Updates and rollback, "When").
         if (apps.length && !fresh) await this.checkUpdates().catch(() => {});
-        if (!this.stopped) this.schedule(APP_CHECK_TIMINGS.everyMs);
+        // A check that could not reach an app's publisher (no network on the device, its host's own trouble) is tried
+        // again soon, a little later each time, not a day later: a revocation published meanwhile would wait that long.
+        const unreached = apps.length && !fresh ? this.unreachedChecks : 0;
+        const next = unreached ? Math.min(APP_CHECK_TIMINGS.offlineRetryMs * 2 ** (unreached - 1), APP_CHECK_TIMINGS.unreachedRetryMaxMs) : APP_CHECK_TIMINGS.everyMs;
+        if (!this.stopped) this.schedule(next);
       })();
     }, ms);
   }
@@ -1459,8 +1474,10 @@ export class Apps {
   /**
    * The revocations its publisher signed, read beside each URL (`ghostly-revoke.json`); none there is not an error.
    * `read` holds the files already read, which are skipped, and gets the ones read now. Null when no file answered now.
+   * `reach`, when given, learns whether a host answered (a file, or none there) and whether a read failed for a reason
+   * that may pass (offline, the host not reached or too slow, its own trouble).
    */
-  private async readRevocations(ref: string, urls: string[], read = new Set<string>()): Promise<SignedAppRevocation[] | null> {
+  private async readRevocations(ref: string, urls: string[], read = new Set<string>(), reach?: RevocationsReach): Promise<SignedAppRevocation[] | null> {
     let out: SignedAppRevocation[] | null = null;
     for (const url of new Set(urls.filter(isAppFetchUrl).map((u) => besideUrl(u, "ghostly-revoke.json")))) {
       if (read.has(url)) continue;
@@ -1468,7 +1485,11 @@ export class Apps {
       try {
         const file = await this.readRevocationsFile(ref, await this.host.fetch(url, { maxBytes: APP_FETCH_LIMITS.revocationsBytes, revalidate: true }));
         if (file) (out ??= []).push(...file);
-      } catch { /* not published there, or not reachable now */ }
+        if (reach) reach.answered = true;
+      } catch (error) {
+        // Not published there (an answer), or not reachable now.
+        if (reach) { if (passing(error)) reach.failed = true; else reach.answered = true; }
+      }
     }
     return out;
   }
@@ -2109,6 +2130,7 @@ export class Apps {
     this.listingsRead = read;
     try {
       const out = (await Promise.all(pooled(apps, APP_CHECK_PARALLEL, (app) => this.checkApp(app, stores).catch(() => null)))).filter((r) => r !== null);
+      this.unreachedChecks = out.some((r) => r.unreached) ? this.unreachedChecks + 1 : 0;
       for (const missed of this.listingMisses.keys()) if (!read.has(missed)) this.listingMisses.delete(missed);
       // Each one judged with the revocations this profile kept as they are now, read once for every app (up to 1024 of
       // every app: once per app, a check read them again for each one).
@@ -2120,8 +2142,11 @@ export class Apps {
     }
   }
 
-  /** One app's part of the update check (`checkNow`): its record as written; null when it is not installed any more. */
-  private async checkApp(listed: InstalledApp, stores: AddedAppStore[]): Promise<{ app: InstalledApp; outcome: AppCheckOutcome } | null> {
+  /**
+   * One app's part of the update check (`checkNow`): its record as written; null when it is not installed any more.
+   * `unreached` when none of its publisher's files answered, every read failing for a reason that may pass.
+   */
+  private async checkApp(listed: InstalledApp, stores: AddedAppStore[]): Promise<{ app: InstalledApp; outcome: AppCheckOutcome; unreached?: true } | null> {
     if (!(await this.hasBundle(listed.bytes, listed.digest, listed.manifest))) await this.fetchFiles({ ref: listed.ref }).catch(() => {});
     const first = await this.app(listed.ref);
     if (!first) return null;
@@ -2177,7 +2202,8 @@ export class Apps {
     }
     // The publisher's revocations are read before a candidate is taken: a version revoked before this check is not installed.
     const revokeRead = new Set<string>();
-    const before = await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])], revokeRead);
+    const reach: RevocationsReach = { answered: false, failed: false };
+    const before = await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])], revokeRead, reach);
     app = withRevocations(app, before ?? []);
     // The ones this profile kept (`APP_REVOCATIONS_KEY`) judge too: one that dropped a waiting update stops it from
     // being taken again, once the record keeps it no more and its store's next index does not carry it.
@@ -2279,7 +2305,7 @@ export class Apps {
       break;
     }
     // A version installed from elsewhere, or naming other sources: its publisher's revocations beside those too.
-    const after = await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])], revokeRead);
+    const after = await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])], revokeRead, reach);
     // What its publisher serves now, and of the ones kept those that stop the installed or the waiting version, or one
     // started here before an update (it may still run). While no file answers, every kept one stays (it may name a
     // version not found yet): a file that changes does not pile up.
@@ -2292,14 +2318,18 @@ export class Apps {
     // Removed meanwhile: not put back, and the files this check fetched go too. Its store removed meanwhile: not pinned again.
     const current = await this.app(app.ref);
     if (current?.store === undefined && app.store !== undefined) { const { store: _s, ...unpinned } = app; app = unpinned; }
-    app = { ...app, ...(merged.size && { revocations: [...merged.values()] }), checkedAt: this.now() };
-    // Nothing new but when it was checked, marked recently: not written (each Apps page visit checks, and a write drops
-    // the record held for the app's calls). The mark is kept fresh enough for a reload to skip the check at start.
-    const idle = this.checkedWithin(stored.checkedAt, APP_CHECK_TIMINGS.freshMs / 2) && sameExceptChecked(app, stored);
+    // None of its publisher's files answered (no network on the device, the host's own trouble): not marked checked, so
+    // the check at start does not take it as fresh and the scheduled one tries again soon. One not there is an answer.
+    const unreached = reach.failed && !reach.answered;
+    app = { ...app, ...(merged.size && { revocations: [...merged.values()] }), ...(!unreached && { checkedAt: this.now() }) };
+    // Nothing new but when it was checked, marked recently (or not marked again): not written (each Apps page visit
+    // checks, and a write drops the record held for the app's calls). The mark is kept fresh enough for a reload to skip
+    // the check at start.
+    const idle = sameExceptChecked(app, stored) && (unreached || this.checkedWithin(stored.checkedAt, APP_CHECK_TIMINGS.freshMs / 2));
     const put = idle ? sameRecord(current, stored) : await this.putAppIfUnchanged(app, stored);
     for (const files of [...dropped, ...(!put && wrote ? [wrote] : [])]) await this.removeUnusedBundle(app.ref, files.bytes, files.digest);
     if (!put) return null;
-    return { app, outcome };
+    return { app, outcome, ...(unreached && { unreached: true as const }) };
   }
 
   // ---------- files again (a restored profile) ----------
