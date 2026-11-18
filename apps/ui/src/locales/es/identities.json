@@ -68,6 +68,9 @@
     "expiring": "verificada {{time}}, caduca {{expires}}",
     "failed": "la comprobación falló {{time}}",
     "listLabel": "Identidades verificadas: {{list}}",
+    "mark": "{{provider}}: {{subject}} · {{state}}",
+    "markList": "{{list}}; {{next}}",
+    "markNamed": "{{provider}}: {{subject}} ({{name}}) · {{state}}",
     "revoked": "revocada por su dueño, vista {{time}}",
     "stackLabel": "Identidades con {{name}}: {{list}}",
     "verified": "verificada {{time}}"

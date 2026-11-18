@@ -5,6 +5,7 @@ import { BadgeMark } from "./BadgeMark";
 import { contactBadges } from "./contactBadges";
 import { contactFace, faceCandidates, setFaceChoice, suggestedFace, useFaceChoice, type ContactFace } from "./contactFace";
 import { loadShownProfiles } from "./markTip";
+import { providerLabel } from "../../lib/identities";
 import { chatNamesForPeer } from "../../lib/storage";
 import { useI18n } from "../../contexts/I18nContext";
 
@@ -36,7 +37,7 @@ export function ContactFacePicker({ peerKey, received }: { peerKey: string; rece
   if (!candidates.length && !lapsed) return null;
   const options = [
     { value: GHOSTLY_VALUE, label: t("identities.face.none"), description: t("identities.face.noneHint") },
-    ...candidates.map(c => ({ value: valueOf(c), label: c.name ?? c.providerName, description: t("identities.face.profileOf", { provider: c.providerName }), icon: faceMark(c, 20) })),
+    ...candidates.map(c => ({ value: valueOf(c), label: c.name ?? providerLabel(c.provider, t), description: t("identities.face.profileOf", { provider: providerLabel(c.provider, t) }), icon: faceMark(c, 20) })),
   ];
   return (
     <section className="contact-panel-section" data-testid="contact-face" aria-label={t("identities.face.title")}>
@@ -45,7 +46,7 @@ export function ContactFacePicker({ peerKey, received }: { peerKey: string; rece
         <button type="button" className="contact-face-offer" data-testid="contact-face-suggest" onClick={() => setFaceChoice(peerKey, { provider: offer.provider, subject: offer.subject })}>
           {faceMark(offer, 28)}
           <span className="min-w-0">
-            <span className="contact-face-offer-title">{t("identities.face.use", { provider: offer.providerName })}</span>
+            <span className="contact-face-offer-title">{t("identities.face.use", { provider: providerLabel(offer.provider, t) })}</span>
             {offer.name && <bdi className="contact-face-offer-name">{offer.name}</bdi>}
           </span>
         </button>

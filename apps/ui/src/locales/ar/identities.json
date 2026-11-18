@@ -78,6 +78,9 @@
     "expiring": "تم التحقق {{time}}، تنتهي {{expires}}",
     "failed": "فشل التحقق {{time}}",
     "listLabel": "هويات تم التحقق منها: {{list}}",
+    "mark": "{{provider}}: {{subject}} · {{state}}",
+    "markList": "{{list}}؛ {{next}}",
+    "markNamed": "{{provider}}: {{subject}} ({{name}}) · {{state}}",
     "revoked": "ألغاها مالكها، شوهد ذلك {{time}}",
     "stackLabel": "الهويات مع {{name}}: {{list}}",
     "verified": "تم التحقق {{time}}"

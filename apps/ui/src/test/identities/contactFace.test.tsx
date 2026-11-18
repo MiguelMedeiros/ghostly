@@ -49,7 +49,7 @@ function list(received: ReceivedIdentityView[]) {
 const row = () => screen.getByTestId("chat-row");
 
 describe("a contact's name, by precedence", () => {
-  const face = { id: "x", provider: "pubky", subject: PUBKY_KEY, providerName: "Pubky", name: "Alice Liddell" };
+  const face = { id: "x", provider: "pubky", subject: PUBKY_KEY, name: "Alice Liddell" };
   it("is the nickname given here, then the chosen identity's name, then their own, then their key", () => {
     expect(shownContactName({ nickname: "Mom", face, nick: "Ghost", fallback: "Contact · abc" })).toEqual({ name: "Mom", from: "nickname" });
     expect(shownContactName({ face, nick: "Ghost", fallback: "Contact · abc" })).toEqual({ name: "Alice Liddell", from: "identity" });
