@@ -6,20 +6,23 @@ import { useOnline } from "../hooks/useOnline";
  * Above the chat list while the device has no network: the chats are all here (they live on this device), and
  * nothing goes out until it is back. The web app opens this way from its cache, with no server to reach.
  * `inChat`: under an open chat's header, on a phone only, where the list is on another screen; wider, the list (or the
- * notices over the page, when it is a rail) shows it beside the chat. The sentence wraps rather than being cut before
- * its point: the list is 420 px wide on a desktop.
+ * notices over the page, when it is a rail) shows it beside the chat.
+ * `onPage`: over a menu page (Wallet, Settings, Services…), on a phone only, for the same reason: what is done there
+ * that needs the network fails, so it says that rather than where the chats are.
+ * The sentence wraps rather than being cut before its point: the list is 420 px wide on a desktop.
  */
-export function OfflineBanner({ inChat = false }: { inChat?: boolean }) {
+export function OfflineBanner({ inChat = false, onPage = false }: { inChat?: boolean; onPage?: boolean }) {
   const { t } = useI18n();
   const online = useOnline();
   const phone = useIsMobile();
-  if (online || (inChat && !phone)) return null;
+  if (online || ((inChat || onPage) && !phone)) return null;
+  const testId = inChat ? "chat-offline-banner" : onPage ? "page-offline-banner" : "offline-banner";
   return (
-    <div role="status" data-testid={inChat ? "chat-offline-banner" : "offline-banner"} className="shrink-0 border-b border-border bg-surface px-4 py-2 flex items-start gap-2.5">
+    <div role="status" data-testid={testId} className="shrink-0 border-b border-border bg-surface px-4 py-2 flex items-start gap-2.5">
       <span aria-hidden="true" className="mt-1 h-2 w-2 shrink-0 rounded-full bg-text-muted" />
       <p className="m-0 min-w-0 text-xs text-text-secondary">
         <span className="font-semibold text-text-primary">{t("pwa.offline")}</span>
-        <span className="text-text-muted"> · {t("pwa.offlineHint")}</span>
+        <span className="text-text-muted"> · {t(onPage ? "pwa.offlinePageHint" : "pwa.offlineHint")}</span>
       </p>
     </div>
   );

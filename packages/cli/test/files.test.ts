@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { NO_PICTURE_METADATA } from "@ghostly/core";
 import { FILE_BYTES_STEP } from "@ghostly/browser/shared/fileBytes";
 import type { EngineState, GroupView } from "@ghostly/browser/shared/types";
-import { callApi, type ApiContext } from "../src/api";
+import { callApi, mentionsFor, type ApiContext } from "../src/api";
 import { fitName, mimeOf, saveName } from "../src/files";
 import { findMember, pictureFrom } from "../src/groupAdmin";
 import { NodeFileBytes } from "../src/runtime/fileBytes";
@@ -116,6 +116,106 @@ describe("group administration", () => {
       await expect(callApi(ctx, method, { group: "Dev room", member: "Bia" })).rejects.toMatchObject({ code: "bad_request", message: '"Bia" is you: name another member of Dev room' });
     }
     expect(node.makeGroupAdmin).not.toHaveBeenCalled();
+  });
+
+  // Two members who call themselves "Bia": remove and admin answered only `"Bia" names more than one member`, with no
+  // key and no next step, where a chat or a group of one name lists its ids in `details.matches`.
+  it("group remove, admin and hub name each member a ref names, with its key, and where the keys are listed", async () => {
+    const one = "bwczjndx1xgfd7rqp8m5t3hsk4yzoeiaw6ncb9ruj1xgfd7rqp8o", two = "ps3z8pur1xgfd7rqp8m5t3hsk4yzoeiaw6ncb9ruj1xgfd7rqp8o";
+    const tea = { id: "g1", name: "Tea", members: [{ key: "595m389h77", me: true }, { key: one, nick: "Bia", me: false }, { key: two, nick: " Bia ", me: false }, { key: "zz9", me: false }] } as unknown as GroupView;
+    const node = { getState: () => ({ links: [], groups: [tea], settings: { nick: "Ana" }, transport: {} }) as unknown as EngineState, groupView: groupViewOf, getSettings: () => ({ nick: "Ana" }), makeGroupAdmin: vi.fn(), setGroupHub: vi.fn(), removeGroupMember: vi.fn() };
+    const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
+    const both = {
+      code: "bad_request",
+      message: '"Bia" names more than one member of Tea: Bia (bwczjndx…), Bia (ps3z8pur…). Use its key (ghostly group show Tea)',
+      details: { matches: [{ key: one, name: "Bia" }, { key: two, name: "Bia" }] },
+    };
+    for (const method of ["group.remove", "group.admin", "group.hub"]) {
+      await expect(callApi(ctx, method, { group: "Tea", member: "bia", ...(method === "group.hub" ? { role: "pin" } : {}) }), method).rejects.toMatchObject({ ...both, message: both.message.replace('"Bia"', '"bia"') });
+    }
+    expect(node.removeGroupMember).not.toHaveBeenCalled();
+    expect(node.makeGroupAdmin).not.toHaveBeenCalled();
+    // A key prefix the words give is the way out.
+    await callApi(ctx, "group.admin", { group: "Tea", member: "ps3z8pur" });
+    expect(node.makeGroupAdmin).toHaveBeenCalledWith({ groupId: "g1", key: two });
+    // A member with no name is named so; past five, the words count the rest (`details.matches` has them all).
+    const many = { ...tea, members: [tea.members[0], ...Array.from({ length: 7 }, (_, i) => ({ key: `k${i}abcdefgh`, me: false }))] } as unknown as GroupView;
+    let error: unknown;
+    try { findMember(many, "k", undefined, false, "Tea"); } catch (caught) { error = caught; }
+    expect(error).toMatchObject({ code: "bad_request", message: '"k" names more than one member of Tea: no name (k0abcdef…), no name (k1abcdef…), no name (k2abcdef…), no name (k3abcdef…), no name (k4abcdef…) and 2 more. Use its key (ghostly group show Tea)' });
+    expect((error as { details: { matches: unknown[] } }).details.matches).toHaveLength(7);
+  });
+
+  // `No member "Zed" in Tea` named nowhere to look, where `No group "x" (ghostly group list)` does.
+  it("says where the members are listed when no member answers to a ref", async () => {
+    const tea = { id: "g1", name: "Tea", members: [{ key: "595m389h77", me: true }, { key: "abcd12", nick: "Bia", me: false }] } as unknown as GroupView;
+    expect(() => findMember(tea, "Zed", "Ana", false, "Tea")).toThrow(expect.objectContaining({ code: "not_found", message: 'No member "Zed" in Tea (ghostly group show Tea)' }));
+    // The group as typed goes quoted when a shell would split it; one no quoting survives, and no ref at all, by its id.
+    const spaced = { ...tea, name: "Tea room" } as unknown as GroupView;
+    expect(() => findMember(spaced, "Zed", undefined, false, "Tea room")).toThrow(expect.objectContaining({ message: `No member "Zed" in Tea room (ghostly group show 'Tea room')` }));
+    expect(() => findMember(spaced, "Zed", undefined, false, "Bia's tea")).toThrow(expect.objectContaining({ message: 'No member "Zed" in Tea room (ghostly group show g1)' }));
+    expect(() => findMember(spaced, "Zed")).toThrow(expect.objectContaining({ message: 'No member "Zed" in Tea room (ghostly group show g1)' }));
+  });
+
+  // Group names are the inviter's, so two joined groups can share one. The hint said `ghostly group show Tea` for the
+  // group named by its id, and pasting it answered `"Tea" names more than one group: use its id`.
+  it("a member refusal in one of two groups of one name names the group as the command did, not by that name", async () => {
+    const one = "bwczjndx1xgfd7rqp8m5t3hsk4yzoeiaw6ncb9ruj1xgfd7rqp8o", two = "ps3z8pur1xgfd7rqp8m5t3hsk4yzoeiaw6ncb9ruj1xgfd7rqp8o";
+    const first = { id: "g1", name: "Tea", members: [{ key: "595m389h77", me: true }, { key: "abcd12", nick: "Bo", me: false }] } as unknown as GroupView;
+    const second = { id: "g2", name: "Tea", members: [{ key: "595m389h77", me: true }, { key: one, nick: "Bia", me: false }, { key: two, nick: "Bia", me: false }] } as unknown as GroupView;
+    const node = {
+      getState: () => ({ links: [], groups: [first, second], settings: { nick: "Ana" }, transport: {} }) as unknown as EngineState, groupView: groupViewOf,
+      getSettings: () => ({ nick: "Ana" }), makeGroupAdmin: vi.fn(), setGroupHub: vi.fn(), removeGroupMember: vi.fn(), sendGroupMessage: vi.fn(), editMessage: vi.fn(), getMessage: vi.fn(),
+    };
+    const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
+    // The name itself names both groups: that is the refusal the old hint led to.
+    await expect(callApi(ctx, "group.get", { group: "Tea" })).rejects.toMatchObject({ message: expect.stringMatching(/"Tea" names more than one group/) });
+    const both = '"bia" names more than one member of Tea: Bia (bwczjndx…), Bia (ps3z8pur…). Use its key (ghostly group show g2)';
+    for (const method of ["group.remove", "group.admin", "group.hub"]) {
+      const extra = method === "group.hub" ? { role: "pin" } : {};
+      await expect(callApi(ctx, method, { group: "g2", member: "bia", ...extra }), method).rejects.toMatchObject({ code: "bad_request", message: both });
+      await expect(callApi(ctx, method, { group: "g2", member: "Zed", ...extra }), method).rejects.toMatchObject({ code: "not_found", message: 'No member "Zed" in Tea (ghostly group show g2)' });
+    }
+    for (const method of ["group.send", "group.edit"]) {
+      await expect(callApi(ctx, method, { group: "g2", message: "m1", text: "hi @bia", mentions: ["bia"] }), method).rejects.toMatchObject({ code: "bad_request", message: both });
+      await expect(callApi(ctx, method, { group: "g2", message: "m1", text: "hi @Zed", mentions: ["Zed"] }), method).rejects.toMatchObject({ code: "not_found", message: 'No member "Zed" in Tea (ghostly group show g2)' });
+    }
+    // The hint it gives works: the group as typed is that one group.
+    await expect(callApi(ctx, "group.get", { group: "g2" })).resolves.toMatchObject({ id: "g2" });
+    expect(node.removeGroupMember).not.toHaveBeenCalled();
+    expect(node.makeGroupAdmin).not.toHaveBeenCalled();
+    expect(node.setGroupHub).not.toHaveBeenCalled();
+    expect(node.sendGroupMessage).not.toHaveBeenCalled();
+    expect(node.editMessage).not.toHaveBeenCalled();
+  });
+
+  // `--mention Bia` with two members of that name answered only `"Bia" names more than one member`, with no key and
+  // no next step, as group remove and admin did.
+  it("a mention of a name two members share names both with their keys", () => {
+    const one = "bwczjndx1xgfd7rqp8m5t3hsk4yzoeiaw6ncb9ruj1xgfd7rqp8o", two = "ps3z8pur1xgfd7rqp8m5t3hsk4yzoeiaw6ncb9ruj1xgfd7rqp8o";
+    const tea = { id: "g1", name: "Tea", members: [{ key: "595m389h77", me: true }, { key: one, nick: "Bia", me: false }, { key: two, nick: "Bia", me: false }] } as unknown as GroupView;
+    expect(() => mentionsFor("hi @Bia", ["Bia"], tea, () => "Ana", "Tea")).toThrow(expect.objectContaining({
+      code: "bad_request",
+      message: '"Bia" names more than one member of Tea: Bia (bwczjndx…), Bia (ps3z8pur…). Use its key (ghostly group show Tea)',
+      details: { matches: [{ key: one, name: "Bia" }, { key: two, name: "Bia" }] },
+    }));
+    // The key prefix it gives is the way out.
+    expect(mentionsFor("hi @Bia", ["ps3z8pur"], tea)).toEqual([{ k: two, o: 3, l: 4 }]);
+    expect(() => mentionsFor("@Zed", ["Zed"], tea, undefined, "Tea")).toThrow(expect.objectContaining({ code: "not_found", message: 'No member "Zed" in Tea (ghostly group show Tea)' }));
+  });
+
+  // `group send Tea hi --mention Ana`, Ana being this profile's own name: `not_found` "No member", where `group remove
+  // Tea Ana` says it is you (and a prefix of its own key said so for the mention too).
+  it("group send and edit say that a mention of this profile's own name is you, and where the members are listed", async () => {
+    const crew = { id: "g1", name: "Crew", members: [{ key: "595m389h77", me: true }, { key: "abcd12", nick: "Bo", me: false }] } as unknown as GroupView;
+    const node = { getState: () => ({ links: [], groups: [crew], settings: { nick: "Ana" }, transport: {} }) as unknown as EngineState, groupView: groupViewOf, getSettings: () => ({ nick: "Ana" }), sendGroupMessage: vi.fn(), editMessage: vi.fn(), getMessage: vi.fn() };
+    const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
+    for (const method of ["group.send", "group.edit"]) {
+      await expect(callApi(ctx, method, { group: "Crew", message: "m1", text: "hi @Ana", mentions: ["ana"] }), method).rejects.toMatchObject({ code: "bad_request", message: '"ana" is you: name another member of Crew' });
+      await expect(callApi(ctx, method, { group: "Crew", message: "m1", text: "hi @Zed", mentions: ["Zed"] }), method).rejects.toMatchObject({ code: "not_found", message: 'No member "Zed" in Crew (ghostly group show Crew)' });
+    }
+    expect(node.sendGroupMessage).not.toHaveBeenCalled();
+    expect(node.editMessage).not.toHaveBeenCalled();
   });
 
   // A member chooses its own name: a member of a community calling itself "Bob" while the real Bob is away (or named

@@ -65,10 +65,17 @@ export const LINK_TRAILING = /[.,;:!?'"*_>…»’”]/;
  */
 const LINK_TAIL = /^(?:\p{Extended_Pictographic}|\p{Emoji_Modifier}|\p{Regional_Indicator}|[\u200b\u200c\u2060\ufeff\u{e0020}-\u{e007f}]|[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]|\u200d|\ufe0e|\ufe0f)$/u;
 
+/** The direction marks and isolates alone: a payment link, which keeps an emoji at its end, still ends before these. */
+const DIRECTION_TAIL = /^[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]$/;
+
 /** How many UTF-16 units of `url` before `end` are an emoji's or an invisible character's last code point (0: none). */
 export function linkTail(url: string, end: number): number {
   const units = end > 1 && /[\udc00-\udfff]/.test(url[end - 1]) && /[\ud800-\udbff]/.test(url[end - 2]) ? 2 : 1;
   return end > 0 && LINK_TAIL.test(url.slice(end - units, end)) ? units : 0;
+}
+
+function directionTail(url: string, end: number): number {
+  return end > 0 && DIRECTION_TAIL.test(url[end - 1]) ? 1 : 0;
 }
 
 /** A link up to the first `LINK_STOP`: "https://x.example/a。" opens /a, not /a%E3%80%82. */
@@ -88,7 +95,8 @@ export function linkEnd(whole: string): string {
 
 /**
  * A payment link (`bitcoin:`, `monero:`…) ends as a web link does, but keeps an emoji at its end: its label or message
- * is text written as it is ("…&label=Pizza 🍕"), cut at 140 characters wherever that falls.
+ * is text written as it is ("…&label=Pizza 🍕"), cut at 140 characters wherever that falls. A direction mark or
+ * isolate typed after it is still left out, so "bitcoin:bc1q…\u200f." pays bc1q….
  */
 export function uriEnd(whole: string): string {
   return trimEnd(whole, false);
@@ -103,7 +111,7 @@ function trimEnd(whole: string, tails: boolean): string {
   while (end > 0) {
     const last = url[end - 1];
     const opener = LINK_CLOSERS[last];
-    const tail = tails ? linkTail(url, end) : 0;
+    const tail = tails ? linkTail(url, end) : directionTail(url, end);
     if (tail) { end -= tail; continue; }
     if (!LINK_TRAILING.test(last) && !(opener && count[last] > count[opener])) break;
     if (opener) count[last]--;
@@ -115,9 +123,15 @@ function trimEnd(whole: string, tails: boolean): string {
 /** Characters of a link worth reading: a longer one is no address anyone shares, and is left as text. */
 export const LINK_MAX_CHARS = 4 * 1024;
 
+/**
+ * An http(s) link's run in a text, as a `RegExp` source: up to a space or a `LINK_STOP_CHARS` character, as the bubble
+ * reads it. A link written right after another one's "。" or "،", with no space, is a run of its own.
+ */
+export const LINK_RUN = String.raw`https?:\/\/[^\s${LINK_STOP_CHARS}]+`;
+
 /** The http(s) links of a text, in order, each ending as the bubble ends it. */
 export function linksIn(text: string): string[] {
-  return [...text.matchAll(/https?:\/\/\S+/gi)].filter(match => match[0].length <= LINK_MAX_CHARS).map(match => linkEnd(match[0])).filter(url => url.length > 8);
+  return [...text.matchAll(new RegExp(LINK_RUN, "gi"))].filter(match => match[0].length <= LINK_MAX_CHARS).map(match => linkEnd(match[0])).filter(url => url.length > 8);
 }
 
 /**

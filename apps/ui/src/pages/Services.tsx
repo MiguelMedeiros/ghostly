@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { usePlatformValue } from "../hooks/useServicesPlatform";
 import { useStoredSessions } from "../hooks/useStoredSessions";
 import { listShownSessions } from "../lib/storage";
@@ -207,6 +207,9 @@ function ServiceCard({ service, online, contacts, onRemove }: { service: SharedS
   // refused until the person allows it here, from this click. Asked again when Share turns on or off: taking back
   // Chrome's site access turns the app off, and the card mounted before it would say "Shared" once it is on again.
   const [needsAccess, setNeedsAccess] = useState(false), [checked, setChecked] = useState(0);
+  // A no in the browser's question, said where Allow was pressed: dropped, it left the same card and nothing said.
+  const [refused, setRefused] = useState<Problem | null>(null);
+  const accessId = useId();
   // A grant the engine refused (that contact already has as many apps as it can see): said under its switch.
   const [notGranted, setNotGranted] = useState<{ contact: string; problem: Problem } | null>(null);
   useEffect(() => {
@@ -217,12 +220,18 @@ function ServiceCard({ service, online, contacts, onRemove }: { service: SharedS
   const granted = service.sharedWith ?? [];
   const reached = granted.length;
   const shared = service.enabled && online && reached > 0 && !needsAccess;
-  const status = needsAccess ? t("errors.app.localAddress")
+  const status = needsAccess ? t("services.status.needsAccess", { app: service.name })
     : shared ? (reached === 1 ? t("services.status.sharedOne") : t("services.status.sharedCount", { count: reached }))
     : !service.enabled ? t("services.status.stopped")
     : reached === 0 ? t("services.status.notShared")
     : t("services.status.offline");
   const href = /^https?:\/\//.test(service.target) ? service.target : `http://${service.target}`;
+  // What Allow asks the browser for: the whole host, as the extension's permission takes it, not only this port.
+  const host = (() => { try { return new URL(href).hostname; } catch { return service.target; } })();
+  const allow = () => {
+    setRefused(null);
+    void platform.allowLocalAccess?.(service.target).catch((e) => setRefused(problemText(e, t))).finally(() => setChecked((n) => n + 1));
+  };
   return (
     // The card itself takes the focus once it is added, or once the one before it is removed: a screen reader says its name.
     <div data-testid="service-item" data-id={service.id} role="group" aria-label={service.name} tabIndex={-1}
@@ -235,16 +244,18 @@ function ServiceCard({ service, online, contacts, onRemove }: { service: SharedS
           <a {...externalLinkProps(href)} title={service.target} dir="auto" className="inline-block max-w-full align-top text-xs font-mono text-text-muted hover:text-accent truncate">{service.target.replace(/^https?:\/\//, "")}</a>
         </>}
         hint={<span className={`flex flex-wrap items-center gap-x-1.5 mt-0.5 ${shared ? "text-accent" : "text-text-muted"}`}>
-          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${shared ? "bg-accent" : "bg-gray-500"}`} />{status}
+          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${shared ? "bg-accent" : "bg-gray-500"}`} /><span id={`${accessId}-status`}>{status}</span>
           {service.requests > 0 && <span className="text-text-muted">{t("services.requestCount", { count: service.requests })}</span>}
+          {needsAccess && <span id={`${accessId}-next`} className="basis-full">{t("services.allowNext", { host })}</span>}
         </span>}>
-          {needsAccess && <Button variant="primary" data-testid="service-allow" onClick={() => void platform.allowLocalAccess?.(service.target).catch(() => {}).finally(() => setChecked((n) => n + 1))}>{t("settings.media.allow")}</Button>}
+          {needsAccess && <Button variant="primary" data-testid="service-allow" aria-label={t("services.allowNamed", { app: service.name })} aria-describedby={`${accessId}-status ${accessId}-next`} onClick={allow}>{t("settings.media.allow")}</Button>}
           <Button onClick={() => setShowPeople(!showPeople)} data-testid="service-people" aria-expanded={showPeople}>{showPeople ? t("services.peopleDone") : t("services.people")}</Button>
           <Switch label={t("services.shareNamed", { app: service.name })} testId="service-sharing" checked={service.enabled} onChange={(on) => void platform.setServiceEnabled(service.id, on).catch(() => setChecked((n) => n + 1))} />
           {!asking && <button type="button" aria-label={t("services.removeNamed", { app: service.name })} title={t("services.remove")} autoFocus={asked} onClick={() => { setAsking(true); setAsked(true); }} className="grid place-items-center w-10 h-10 rounded-lg text-text-muted hover:text-danger hover:bg-surface-alt transition-colors cursor-pointer">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /></svg>
           </button>}
       </Row>
+      {needsAccess && refused && <Notice problem={refused} testId="service-allow-problem" className="mx-4 mb-4 text-xs" />}
       {asking && (
         <div role="group" aria-label={t("services.removeTitle", { app: service.name })} data-testid="service-remove-question" className="mx-4 mb-4 space-y-2"
           onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setAsking(false); } }}>

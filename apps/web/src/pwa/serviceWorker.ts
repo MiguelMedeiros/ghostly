@@ -306,10 +306,13 @@ export function openChat(path: string, profile: string): void {
   if (listProfiles().some((p) => p.id === profile)) switchProfile(profile, { route: path });
 }
 
-/** This page holds the peer: ask the worker for the share it is holding for it. */
-export function askForShare(): void {
+/**
+ * This page holds the peer: ask the worker for the share it is holding for it. `opened`: whether this page was opened
+ * for one, when its address may no longer say so (a link reached it while it waited behind another tab).
+ */
+export function askForShare(opened = openedForShare()): void {
   const workers = container();
-  if (!workers || !openedForShare()) return;
+  if (!workers || !opened) return;
   tellReady({ type: "share-ready" });
 }
 

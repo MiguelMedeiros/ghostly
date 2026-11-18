@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { codeFiles as repoCode, knownFiles, workspacePackages } from "../affected/files.mjs";
 import { bundleReaches, checkPaths, featureGrep, globToRegExp, namedPaths, packageImports, parseUnitGroup, plan, specsImporting, testsReaching, throughCoreBarrel, UNIT_ALONE, UNIT_HALVED, UNIT_PROJECTS, unitGroupOf, unitPartsOf, workspaceExports } from "../affected/select.mjs";
 import { shardByTime, TimedShards } from "../../vitest.shards.ts";
@@ -920,6 +920,22 @@ describe("the cli's halves (tools/vitest.shards.ts): vitest --shard cut by time"
     const [a, b] = [await half(1), await half(2)];
     expect([...a, ...b].sort()).toEqual(specs.map((s) => s.moduleId).sort());
     expect(a.map((m) => m.slice(repo.length + 1)).sort()).toEqual([...shardByTime(cliTests, seconds, 1, 2)].sort());
+  });
+
+  it("says so when its half gets none of the files, which the other half runs", async () => {
+    // A change reaching one CLI test: Vitest's own line for the empty half ("No affected test files found") read as if
+    // the test ran nowhere.
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const specs = [{ moduleId: join(repo, cliTests[0]) }];
+      const half = (index: number) => new TimedShards({ config: { shard: { index, count: 2 } } } as never).shard(specs as never);
+      expect(await half(1)).toHaveLength(1);
+      expect(log).not.toHaveBeenCalled();
+      expect(await half(2)).toEqual([]);
+      expect(log).toHaveBeenCalledWith("--shard=2/2 (cut by time, tools/vitest.shards.ts): none of the 1 test file(s) here, the other half runs them");
+    } finally {
+      log.mockRestore();
+    }
   });
 });
 

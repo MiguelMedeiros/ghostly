@@ -18,7 +18,7 @@ import {
 } from "@ghostly/core";
 import { blobDigest, fileBytes, fileBytesOf } from "../shared/fileBytes";
 import { fileStore, type StoredFile } from "../shared/idb";
-import { FileAppender, readStored } from "../shared/storedFiles";
+import { FileAppender, readStored, removeStored } from "../shared/storedFiles";
 import type { FileTransferView, MessageFile, StoredMessage } from "../shared/types";
 import { receivedPairedReply } from "../shared/replies";
 import { fileWire } from "./messageDetails";
@@ -439,6 +439,11 @@ export class FileDesk {
     return said;
   }
 
+  /** The app stops: no chat's files are swept any more (`ChatFiles.stop`). */
+  stop(): void {
+    for (const chat of this.chats.values()) chat.files.stop();
+  }
+
   /** Stops tracking whether a transfer is stuck, and the room an offer of it shows. */
   private unwatch(id: string): void {
     clearTimeout(this.stallChecks.get(id));
@@ -604,6 +609,9 @@ export class FileDesk {
           ...(place !== undefined && sentAt !== undefined ? { timestamp: place, sentAt } : { timestamp: file.timestamp }),
           ...(file.reply && { replyTo: receivedPairedReply(file.reply) }), ...(file.forwarded && { forwarded: file.forwarded }),
           details: { wire: fileWire("files/3", file.size) } });
+        // Deleted for everyone by its sender meanwhile: the removal found no row to take, and the row was refused. The
+        // file kept no message to show or delete it, and arrived whole for good: it ends on both sides, and goes.
+        if (this.deps.deleted(linkId, `peer_${record.id}`)) this.deletedMeanwhile(linkId, id);
       }).catch((error) => this.unkept(linkId, chat, record.id, id, error));
     }
     const offered = record.direction === "in" && !this.deps.transfers.has(chat.local.get(record.id)!);
@@ -653,6 +661,15 @@ export class FileDesk {
     }
     // Refused, a file said on the floor ends its bubble (`refusedHere`).
     chat.files.refuse(wireId, (error as { name?: unknown } | null)?.name === "QuotaExceededError" ? "no-room" : "invalid");
+    this.deps.changed();
+  }
+
+  /** A new offer whose message was deleted before its row was kept: forgotten as a deleted message's file is. */
+  private deletedMeanwhile(linkId: string, id: string): void {
+    this.forget(linkId, id);
+    this.deps.transfers.delete(id);
+    const chat = this.chats.get(linkId);
+    if (chat) chat.saving = chat.saving.then(() => removeStored(id)).catch(() => {});
     this.deps.changed();
   }
 

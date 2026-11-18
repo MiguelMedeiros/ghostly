@@ -298,7 +298,7 @@ export interface StoredGroup {
  */
 export interface GroupLive {
   top: string;
-  state: Pick<GroupState, "seq" | "seqEpoch" | "seen" | "sent" | "alone" | "provisional" | "nicks" | "unsaid">;
+  state: Pick<GroupState, "seq" | "seqEpoch" | "seen" | "sent" | "owed" | "alone" | "provisional" | "nicks" | "unsaid">;
   came?: StoredGroup["came"];
 }
 
@@ -620,6 +620,8 @@ export interface PendingMelt {
   /** Set when the invoice pays a contact's payment request. */
   paymentId?: string;
   createdAt: number;
+  /** When the mint answered the melt request itself (left pending): no request of it can land any more, so UNPAID is final. */
+  answeredAt?: number;
   /** Came with a restored copy of the profile: its change is as old as the copy, and is checked like the copy's ecash. */
   restored?: boolean;
 }

@@ -215,6 +215,7 @@
     "payAmount": "Pagar {{amount}} {{unit}}",
     "payLine": "Pagar {{amount}}{{fees}}",
     "pendingMint": "El pago sigue pendiente en el mint.",
+    "pendingMintNext": "Se resuelve solo; no se paga nada otra vez. Hasta que el mint responda, el importe aparece como apartado bajo el saldo.",
     "primary": "Principal",
     "received": "⚡ {{amount}} {{unit}} recibidos",
     "redeem": "Canjear token ecash",

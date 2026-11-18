@@ -109,8 +109,9 @@ describe("search inside a chat", () => {
     openChat(true, short());
     await screen.findByText(`Message ${COUNT - 1}`);
     ctrlF();
-    // 40 × 40 px before; the measure is a browser's (e2e/web/phone-touch-targets.spec.ts).
-    for (const id of ["chat-search-info", "chat-search-older", "chat-search-newer", "chat-search-close"]) expect(screen.getByTestId(id), id).toHaveClass("max-md:w-11", "max-md:h-11");
+    // 40 × 40 px before; in px, not rem, so a larger text size leaves the field its room. The measure is a browser's
+    // (e2e/web/phone-touch-targets.spec.ts, e2e/web/chat-search.spec.ts).
+    for (const id of ["chat-search-info", "chat-search-older", "chat-search-newer", "chat-search-close"]) expect(screen.getByTestId(id), id).toHaveClass("max-md:w-[44px]", "max-md:h-[44px]");
   });
 
   it("on a phone held upright puts the count on a line of its own under the field, and keeps it beside the field when wider", async () => {
