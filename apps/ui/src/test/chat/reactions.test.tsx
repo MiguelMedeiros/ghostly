@@ -318,6 +318,18 @@ describe("chips under the bubble", () => {
     fireEvent.pointerEnter(chip, { pointerType: "mouse" });
     expect(await screen.findByTestId("reaction-who")).toHaveTextContent(who);
   });
+
+  // One plain string: in Arabic a Latin name ending in punctuation read backwards ("Bob!" as "!Bob").
+  it("isolates each name in the list of who reacted", async () => {
+    const named = (by: string) => by === "k1" ? "Bob!" : names(by);
+    renderApp(<MessageBubble message={message({ reactions: { peer: r("👍"), k1: r("👍", 2) } })} peerPubKey="peer" onReact={() => {}} reactionName={named} />, { language: "ar" });
+    const chip = await screen.findByTestId("reaction-chip");
+    expect(chip).toHaveAccessibleName(/Alice وBob!$/);
+    fireEvent.pointerEnter(chip, { pointerType: "mouse" });
+    const who = await screen.findByTestId("reaction-who");
+    expect([...who.querySelectorAll("bdi")].map(b => b.textContent)).toEqual(["Alice", "Bob!"]);
+    expect(who).toHaveTextContent("Alice وBob!");
+  });
 });
 
 describe("the chat list and notices", () => {
