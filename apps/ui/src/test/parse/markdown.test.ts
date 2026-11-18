@@ -249,6 +249,21 @@ describe("[text](url) links", () => {
     expect(link("[paypal\u034f.com](https://evil.example/)")).toMatchObject({ data: { showUrl: true } });
   });
 
+  it("reads a space narrower than a word's beside a dot as no gap, as the eye does", () => {
+    for (const space of [" ", " ", " ", " ", " ", " ", " ", " "]) {
+      for (const label of [`paypal${space}.com`, `paypal.${space}com`, `paypal${space}.${space}com`, `paypal·${space}com`]) {
+        const name = `${label} U+${space.codePointAt(0)!.toString(16)}`;
+        expect(labelMisleads(label, "https://evil.example/login"), name).toBe(true);
+        expect(link(`[${label}](https://evil.example/login)`), name).toMatchObject({ data: { showUrl: true } });
+      }
+      expect(labelMisleads(`ghostly${space}.tools`, "https://ghostly.tools/docs")).toBe(false);
+    }
+    // A word's space, a no-break one and an ideographic one show their gap: a sentence, not a host.
+    for (const label of ["see the docs. next", "Mr. Smith", "公司。　詳細", "paypal .com"]) {
+      expect(labelMisleads(label, "https://ghostly.tools/p"), label).toBe(false);
+    }
+  });
+
   it("reads a combining mark as part of the host it sits in, as a browser does", () => {
     for (const label of ["paypal\u0332.com", "paypal.c\u0332om", "wiki\u0307.com", "paypal\u0320.com", "paypal.\u0332com", "paypal.co\u0332m"]) {
       expect(labelMisleads(label, "https://evil.example/login"), label).toBe(true);

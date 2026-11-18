@@ -1077,10 +1077,10 @@ describe("chat wait", () => {
   });
 
   it("a timeout names the state in words that read: text is carried, not been", async () => {
-    // It read "waiting for chat chat-one to be text".
+    // It read "waiting for chat chat-one to be text": the chat by its id too, where the person named it Alice.
     const { ctx } = moving(remembered({ textDelivery: "unavailable" }));
-    await expect(callApi(ctx, "chat.wait", { chat: "Alice", until: "text", timeout: 1 })).rejects.toMatchObject({ code: "timeout", message: "Timed out after 1 s waiting for chat chat-one to carry text" });
-    await expect(callApi(ctx, "chat.wait", { chat: "Alice", until: "live", timeout: 1 })).rejects.toMatchObject({ code: "timeout", message: "Timed out after 1 s waiting for chat chat-one to be live" });
+    await expect(callApi(ctx, "chat.wait", { chat: "Alice", until: "text", timeout: 1 })).rejects.toMatchObject({ code: "timeout", message: "Timed out after 1 s waiting for chat Alice to carry text" });
+    await expect(callApi(ctx, "chat.wait", { chat: "Alice", until: "live", timeout: 1 })).rejects.toMatchObject({ code: "timeout", message: "Timed out after 1 s waiting for chat Alice to be live" });
   });
 
   it("a chat removed while it is waited for answers not_found at once, not a timeout at the end", async () => {
@@ -1634,11 +1634,30 @@ describe("chat transport", () => {
     expect(node.setChatTransport).toHaveBeenCalledWith({ linkId: "chat-one", transport: "hyperdht/1" });
   });
 
-  it("refuses one this app lacks, with why it is not running", async () => {
-    const { ctx, node } = withChat({ availableTransports: ["hyperdht/1"], peerTransports: ["webrtc/1", "hyperdht/1", "iroh/1"], transportErrors: { "iroh/1": "Iroh relay unreachable" } });
-    await expect(callApi(ctx, "chat.transport", { chat: "Alice", transport: "webrtc" })).rejects.toMatchObject({ code: "refused", message: "This app has no WebRTC running", details: { reason: "app-lacks" } });
-    await expect(callApi(ctx, "chat.transport", { chat: "Alice", transport: "iroh" })).rejects.toMatchObject({ code: "refused", message: "This app has no Iroh running: Iroh relay unreachable", details: { reason: "app-lacks" } });
-    expect(node.setChatTransport).not.toHaveBeenCalled();
+  it("refuses one this app lacks, with why it is not running and the way out", async () => {
+    // It read "This app has no Iroh running", with no next step, where the contact's lack said "choose another, or auto".
+    vi.stubEnv("GHOSTLY_IROH_RELAYS", "");
+    try {
+      const { ctx, node } = withChat({ availableTransports: ["hyperdht/1"], peerTransports: ["webrtc/1", "hyperdht/1", "iroh/1"], transportErrors: { "iroh/1": "Iroh relay unreachable" } });
+      await expect(callApi(ctx, "chat.transport", { chat: "Alice", transport: "webrtc" })).rejects.toMatchObject({
+        code: "refused", message: "This app has no WebRTC running: choose another (hyperdht), or auto", details: { reason: "app-lacks", transport: "webrtc/1" },
+      });
+      await expect(callApi(ctx, "chat.transport", { chat: "Alice", transport: "iroh" })).rejects.toMatchObject({
+        code: "refused", message: "This app has no Iroh running (Iroh relay unreachable): check its relays (irohRelays in ghostly settings get), or choose another (hyperdht), or auto",
+        details: { reason: "app-lacks", transport: "iroh/1" },
+      });
+      expect(node.setChatTransport).not.toHaveBeenCalled();
+      // Relays this process was started on: the setting is not read, the variable is named.
+      vi.stubEnv("GHOSTLY_IROH_RELAYS", "http://127.0.0.1:9");
+      await expect(callApi(ctx, "chat.transport", { chat: "Alice", transport: "iroh" })).rejects.toMatchObject({
+        message: "This app has no Iroh running (Iroh relay unreachable): check its relays (GHOSTLY_IROH_RELAYS), or choose another (hyperdht), or auto",
+      });
+    } finally { vi.unstubAllEnvs(); }
+    // Only the transports the contact's app has too are offered; with none, auto.
+    const mine = withChat({ availableTransports: ["webrtc/1", "hyperdht/1"], peerTransports: ["webrtc/1", "iroh/1"] });
+    await expect(callApi(mine.ctx, "chat.transport", { chat: "Alice", transport: "iroh" })).rejects.toMatchObject({ code: "refused", message: "This app has no Iroh running: choose another (webrtc), or auto" });
+    const none = withChat({ availableTransports: ["hyperdht/1"], peerTransports: ["webrtc/1", "iroh/1"] });
+    await expect(callApi(none.ctx, "chat.transport", { chat: "Alice", transport: "iroh" })).rejects.toMatchObject({ code: "refused", message: "This app has no Iroh running: choose auto" });
   });
 
   it("takes any on DHT only that this app can start, auto and dht always, and any while the contact's are not known", async () => {

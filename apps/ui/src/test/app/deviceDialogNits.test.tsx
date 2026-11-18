@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { configure, screen, waitFor } from "@testing-library/react";
+import { configure, fireEvent, screen, waitFor } from "@testing-library/react";
 import { AddDeviceDialog } from "../../components/devices/AddDeviceDialog";
 import { TakeoverDialog } from "../../components/devices/TakeoverDialog";
 import { UseHereDialog } from "../../components/devices/Handoff";
@@ -53,6 +53,25 @@ describe("the device dialogs, for a screen reader and a keyboard", () => {
     expect(go).not.toHaveAttribute("aria-describedby");
   });
 
+  it("an input method's Enter in the name stays in the name while Lost or stolen is unanswered", async () => {
+    const { user } = renderApp(<TakeoverDialog device="私のiPhone" password onClose={() => {}} />);
+    await user.type(screen.getByTestId("takeover-password"), "a long lock password");
+    const name = screen.getByTestId("takeover-name");
+    await user.click(name);
+    // The Enter that confirms a candidate: composing, and WebKit's, right after the composition ended, as 229.
+    fireEvent.keyDown(name, { key: "Enter", isComposing: true });
+    expect(name).toHaveFocus();
+    fireEvent.keyDown(name, { key: "Enter", keyCode: 229 });
+    expect(name).toHaveFocus();
+    // WebKit's other order: the composition ends first, then the Enter that confirmed it, saying neither.
+    fireEvent.compositionEnd(name, { data: "私" });
+    fireEvent.keyDown(name, { key: "Enter" });
+    expect(name).toHaveFocus();
+    // A plain Enter still goes to the question.
+    fireEvent.keyDown(name, { key: "Enter" });
+    expect(screen.getByTestId("takeover-lost-yes")).toHaveFocus();
+  });
+
   it("Use here marks the password wrong only when the password was refused, pointing at the reason, the field to retype", async () => {
     const { user, engine } = renderApp(<UseHereDialog device="MacBook" onClose={() => {}} onStarted={() => {}} />);
     let reply = "handoff-unreachable: Can't reach the active device.";
@@ -81,6 +100,26 @@ describe("the device dialogs, for a screen reader and a keyboard", () => {
     expect(notice).toHaveAttribute("data-tone", "wait");
     expect(screen.queryByRole("alert")).toBeNull();
     expect(notice.closest("[role=status]")).not.toBeNull();
+  });
+
+  it("Take over's wait is said from a live line there before it, as one that comes with its text is often not read", async () => {
+    const { user, engine } = renderApp(<TakeoverDialog password={false} ownSet onClose={() => {}} />);
+    let answer!: (outcome: { kind: "wait" }) => void;
+    engine.on("deviceTakeover", () => new Promise((resolve) => { answer = resolve; }));
+    const live = () => [...screen.getByTestId("takeover-dialog").querySelectorAll<HTMLElement>("[role=status], [aria-live]")];
+    const before = live();
+    await user.click(screen.getByTestId("takeover-go"));
+    await screen.findByTestId("takeover-checking");
+    answer({ kind: "wait" });
+    const notice = await screen.findByTestId("takeover-error");
+    const saying = live().filter((region) => region.contains(notice));
+    expect(saying).toHaveLength(1);
+    expect(before).toContain(saying[0]);
+    // Asked again and still waiting: the line empties while it checks, and says the wait again after.
+    await user.click(screen.getByTestId("takeover-go"));
+    await waitFor(() => expect(saying[0]).toBeEmptyDOMElement());
+    answer({ kind: "wait" });
+    await waitFor(() => expect(saying[0]).toHaveTextContent("Waiting for the network. Try again in a moment."));
   });
 
   it("Take over's wrong password points the field at its reason", async () => {

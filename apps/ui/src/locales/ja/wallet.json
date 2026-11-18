@@ -215,6 +215,7 @@
     "payAmount": "{{amount}} {{unit}} を支払う",
     "payLine": "{{amount}} を支払う{{fees}}",
     "pendingMint": "支払いはまだミントで保留中です。",
+    "pendingMintNext": "支払いは自動的に確定し、二重に支払われることはありません。ミントが応答するまで、その金額は残高の下に取り置き中として表示されます。",
     "primary": "メイン",
     "received": "⚡ {{amount}} {{unit}} を受け取りました",
     "redeem": "ecash トークンを受け取る",

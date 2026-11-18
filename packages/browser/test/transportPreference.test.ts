@@ -168,3 +168,98 @@ it.each(["webrtc/1", "auto"] as const)("on an app with WebRTC, %s chosen out of 
     await vi.waitFor(() => expect(current().availableTransports).toEqual(["webrtc/1", "iroh/1", "hyperdht/1"]));
   } finally { up(); await node.shutdown(); await db.deleteLink(row.id); vi.unstubAllGlobals(); }
 }, 5000);
+
+/**
+ * An app with WebRTC on DHT only, Iroh's relay out of reach: after DHT only, Iroh's listener starts only at `irohUp`
+ * (never, unless the test says so), HyperDHT's at `hyperUp` when `heldHyperdht`. What `chat show` reads and what the
+ * store keeps for the next start.
+ */
+async function leftDhtOnly(id: string, heldHyperdht: boolean) {
+  const row: StoredLink = { id, profile: "paired-chat/1", createdAt: 1,
+    seedB64: createIdentity().seedB64, encKeyB64: createIdentity().seedB64,
+    participationSeed: createIdentity().seedB64, peerPubKeyZ32: createIdentity().pubKeyZ32, pairedPeerKey: createIdentity().pubKeyZ32 };
+  await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true });
+  await db.putLink(row);
+  vi.stubGlobal("RTCPeerConnection", vi.fn(function () { throw new Error("No handshake in this test"); }));
+  const endpoint = (transport: NativeTransport): NativeEndpoint => ({ transport, descriptor: {}, connect: async () => { throw new Error("offline"); },
+    close: async () => {}, onConnection: null, onDescriptor: null });
+  let irohUp!: () => void, hyperUp!: () => void, dhtOnly = false;
+  const irohReachable = new Promise<void>(resolve => { irohUp = resolve; });
+  const hyperReachable = new Promise<void>(resolve => { hyperUp = resolve; });
+  const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "local fixture", relays: [] }) };
+  const options = { transport, automaticWallets: false, nativeTransports: {
+    "iroh/1": async () => { if (dhtOnly) await irohReachable; return endpoint("iroh/1"); },
+    "hyperdht/1": async () => { if (dhtOnly && heldHyperdht) await hyperReachable; return endpoint("hyperdht/1"); },
+  } };
+  const events = { onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() };
+  const s = { row, node: new GhostlyNode(events, options), irohUp, hyperUp,
+    current: () => s.node.getState().links.find(l => l.id === row.id)!,
+    stored: async () => (await db.getLinks()).find(l => l.id === row.id)!,
+    /** Whether `step` has answered within 50 ms. */
+    settled: async (step: Promise<void>) => { let done = false; void step.then(() => { done = true; }, () => {}); await new Promise(r => setTimeout(r, 50)); return done; },
+    restart: async () => { await s.node.shutdown(); s.node = new GhostlyNode(events, options); await s.node.start(); s.node.setActiveLink({ linkId: row.id }); },
+    end: async () => { irohUp(); hyperUp(); await s.node.shutdown(); await db.deleteLink(row.id); vi.unstubAllGlobals(); } };
+  await s.node.start();
+  s.node.setActiveLink({ linkId: row.id });
+  await vi.waitFor(() => expect(s.current().availableTransports).toEqual(["webrtc/1", "iroh/1", "hyperdht/1"]));
+  await s.node.setChatTransport({ linkId: row.id, transport: "dht" });
+  await vi.waitFor(() => expect(s.current().availableTransports).toEqual(["webrtc/1"]));
+  dhtOnly = true;
+  return s;
+}
+
+it("HyperDHT chosen out of DHT only answers once its own listener is up, not after Iroh's", async () => {
+  const s = await leftDhtOnly("dht-only-left-for-hyperdht", false);
+  try {
+    // Iroh's listener never comes up here: the choice answered only once it gave up, 10 s with its relay out of reach
+    // (bug hunt, 2026-11-17), the chat live on the HyperDHT at 2 s.
+    expect(await s.settled(s.node.setChatTransport({ linkId: s.row.id, transport: "hyperdht/1" }))).toBe(true);
+    expect(s.current().deliveryMode).toBe("stream");
+    expect(s.current().preferredTransport).toBe("hyperdht/1");
+    expect(s.current().transportAutomatic).toBe(false);
+    expect(s.current().availableTransports).toEqual(["webrtc/1", "hyperdht/1"]);
+  } finally { await s.end(); }
+}, 5000);
+
+it.each(["auto", "webrtc/1"] as const)("%s chosen while HyperDHT's listener is still starting out of DHT only is the choice kept", async later => {
+  const s = await leftDhtOnly(`dht-only-hyperdht-then-${later}`, true);
+  try {
+    const first = s.node.setChatTransport({ linkId: s.row.id, transport: "hyperdht/1" });
+    expect(await s.settled(first)).toBe(false);
+    await s.node.setChatTransport({ linkId: s.row.id, transport: later });
+    const kept = () => {
+      expect(s.current().deliveryMode).toBe("stream");
+      expect(s.current().transportAutomatic).toBe(later === "auto");
+      // Automatic shows as the transport it picks: WebRTC, then Iroh once its listener is up; never the HyperDHT here.
+      if (later === "auto") expect(s.current().preferredTransport).not.toBe("hyperdht/1");
+      else expect(s.current().preferredTransport).toBe("webrtc/1");
+    };
+    kept();
+    // The listeners come up: the earlier choice answers, and leaves the chat as the later one did.
+    s.hyperUp(); s.irohUp();
+    await first;
+    kept();
+    await vi.waitFor(() => expect([...s.current().availableTransports].sort()).toEqual(["hyperdht/1", "iroh/1", "webrtc/1"]));
+    kept();
+    expect((await s.stored()).preferredTransport).toBe(later === "auto" ? undefined : "webrtc/1");
+    await s.restart();
+    await vi.waitFor(() => expect(s.current().availableTransports).toEqual(["webrtc/1", "iroh/1", "hyperdht/1"]));
+    kept();
+  } finally { await s.end(); }
+}, 5000);
+
+it("DHT only chosen while HyperDHT's listener is still starting stays, and the earlier choice says it did not apply", async () => {
+  const s = await leftDhtOnly("dht-only-hyperdht-then-dht", true);
+  try {
+    const first = s.node.setChatTransport({ linkId: s.row.id, transport: "hyperdht/1" });
+    expect(await s.settled(first)).toBe(false);
+    await s.node.setChatTransport({ linkId: s.row.id, transport: "dht" });
+    s.hyperUp(); s.irohUp();
+    // As before: the CLI then keeps a hold made meanwhile (`chat disconnect --hold`), which only a choice that applied ends.
+    await expect(first).rejects.toThrow("Transport unavailable");
+    expect(s.current().deliveryMode).toBe("dht");
+    await new Promise(r => setTimeout(r, 50));
+    expect(s.current().availableTransports).toEqual(["webrtc/1"]);
+    expect((await s.stored()).deliveryMode).toBe("dht");
+  } finally { await s.end(); }
+}, 5000);

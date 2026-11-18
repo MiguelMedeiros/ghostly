@@ -54,6 +54,7 @@
   "identity": "身份",
   "identityShared": "此聊天中已分享 {{count}} 个",
   "media": "照片和视频",
+  "nearSoft": "封装后 DHT 约可承载 {{bytes}} 字节：缩短后即可经由 DHT 发送",
   "noEmoji": "未找到表情",
   "noGifs": "未找到 GIF",
   "overSoft": "超过 DHT 可承载的 {{bytes}} 字节：直连后发送",

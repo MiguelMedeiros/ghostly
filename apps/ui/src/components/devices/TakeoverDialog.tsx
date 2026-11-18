@@ -4,6 +4,7 @@ import { useI18n } from "../../contexts/I18nContext";
 import { useLockPassedNow } from "../../contexts/LockScreenContext";
 import { reloadIntoGate, takeoverErrorKey } from "../../lib/devices";
 import { focusToRetype } from "../../lib/focus";
+import { useComposition } from "../../hooks/useComposition";
 import { InfoButton } from "../layout/Section";
 import { DeviceDialog, field, primaryButton } from "./DeviceDialog";
 import { type Problem, problemText } from "../../lib/problemText";
@@ -35,6 +36,7 @@ export function TakeoverDialog({ device, password: asks, restored, ownSet, onClo
   const other = device ?? t("devices.join.otherDevice");
   const ready = (!asks || !!password) && (!device || name.trim().length > 0) && lost !== null;
   const lostGroup = useRef<HTMLFieldSetElement>(null);
+  const { composing, inputProps } = useComposition();
   const submit = async () => {
     setBusy(true); setError(null); setRefused(null);
     try {
@@ -82,9 +84,10 @@ export function TakeoverDialog({ device, password: asks, restored, ownSet, onClo
         </fieldset>
       )}
       {/* Enter in a field with "Lost or stolen?" still unanswered (Take over is off, so Enter would do nothing): the
-          keyboard goes to the question, the one thing left to do. */}
-      <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); if (ready && !busy) void submit(); }}
-        onKeyDown={(event) => { if (event.key === "Enter" && lost === null && event.target instanceof HTMLInputElement) { event.preventDefault(); lostGroup.current?.querySelector("input")?.focus(); } }}>
+          keyboard goes to the question, the one thing left to do. An input method's Enter confirms its candidate; asked
+          first, so every keydown answers for the end of a composition (which bubbles here from both fields). */}
+      <form className="space-y-3" {...inputProps} onSubmit={(event) => { event.preventDefault(); if (ready && !busy) void submit(); }}
+        onKeyDown={(event) => { if (!composing(event) && event.key === "Enter" && lost === null && event.target instanceof HTMLInputElement) { event.preventDefault(); lostGroup.current?.querySelector("input")?.focus(); } }}>
         {asks && <input ref={passwordInput} type="password" autoFocus autoComplete="current-password" data-testid="takeover-password" aria-label={t("devices.password.current")} placeholder={t("devices.password.current")}
           aria-invalid={refused === "password" || undefined} aria-describedby={refused === "password" ? `${id}-error` : undefined} value={password} onChange={(event) => setPassword(event.target.value)} className={field} />}
         {device && (
@@ -95,8 +98,10 @@ export function TakeoverDialog({ device, password: asks, restored, ownSet, onClo
           </label>
         )}
         {busy && <p role="status" data-testid="takeover-checking" className="text-text-secondary">{t("devices.takeover.checking")}</p>}
-        {/* A wait is said as news, not as an alert. */}
-        {error && <div id={`${id}-error`} role={error.tone === "wait" ? "status" : undefined}><Notice problem={error} testId="takeover-error" className="" /></div>}
+        {/* A wait is said as news, not as an alert, from a line there from the start: one that comes with its text is
+            often not read. Empty, its margins collapse into the gap there already is. */}
+        <div role="status">{error?.tone === "wait" && <Notice problem={error} testId="takeover-error" className="" />}</div>
+        {error && error.tone !== "wait" && <div id={`${id}-error`}><Notice problem={error} testId="takeover-error" className="" /></div>}
         {/* Why Take over is still off while the rest is filled in: the question above, said under the fields and on the button. */}
         {lost === null && <p id={`${id}-lost-first`} data-testid="takeover-lost-first" className="text-xs text-text-muted">{t("devices.takeover.lostFirst")}</p>}
         {/* `aria-disabled`, not `disabled`, while it runs: a disabled button drops the keyboard focus to the page. */}

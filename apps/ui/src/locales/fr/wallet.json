@@ -215,6 +215,7 @@
     "payAmount": "Payer {{amount}} {{unit}}",
     "payLine": "Payer {{amount}}{{fees}}",
     "pendingMint": "Le paiement est toujours en attente au mint.",
+    "pendingMintNext": "Il se règle de lui-même ; rien n’est payé deux fois. Jusqu’à la réponse du mint, le montant apparaît comme mis de côté sous le solde.",
     "primary": "Principal",
     "received": "⚡ {{amount}} {{unit}} reçus",
     "redeem": "Encaisser le jeton ecash",

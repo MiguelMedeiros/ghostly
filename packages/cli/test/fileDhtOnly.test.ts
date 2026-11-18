@@ -8,7 +8,7 @@ import { callApi, type ApiContext } from "../src/api";
 import { CliError } from "../src/errors";
 import { NodeFileBytes } from "../src/runtime/fileBytes";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
-import { dhtOnlyNotice, longTextChat, waitNotice } from "../src/waitNotice";
+import { dhtOnlyChat, dhtOnlyNotice, waitNotice } from "../src/waitNotice";
 import { chatViewOf } from "./support/chatView";
 // covers: headless.files, chat.dht.delivery
 
@@ -92,13 +92,13 @@ describe("a file in a chat on the DHT only", () => {
 
   it("a file send's notice and Ctrl-C on a terminal say the note", () => {
     const params = { chat: "Bob", path: "/f", name: "notes.txt", wait: "sent", timeout: 20 };
-    expect(longTextChat("file.send", params)).toBe("Bob");
-    expect(longTextChat("file.send", { chat: "group:crew", path: "/f" })).toBeUndefined();
+    expect(dhtOnlyChat("file.send", params)).toBe("Bob");
+    expect(dhtOnlyChat("file.send", { chat: "group:crew", path: "/f" })).toBeUndefined();
     const notice = waitNotice("file.send", params, "daemon")!;
-    expect(dhtOnlyNotice(notice, params, { deliveryMode: "dht", peerDeliveryMode: null }, "daemon")).toEqual({
+    expect(dhtOnlyNotice(notice, "file.send", params, { deliveryMode: "dht", peerDeliveryMode: null }, "daemon")).toEqual({
       waiting: `copying notes.txt into the profile, then waiting for it to go out to Bob (up to 20 s; Ctrl-C stops the send while it is copied in, then only the waiting). ${mine}`,
       stopped: `notes.txt was not sent to Bob if it was still being copied in; if it was in the chat, it is kept here (ghostly file list Bob says which). ${mine}`,
     });
-    expect(dhtOnlyNotice(notice, params, { deliveryMode: "auto", peerDeliveryMode: null }, "daemon")).toBe(notice);
+    expect(dhtOnlyNotice(notice, "file.send", params, { deliveryMode: "auto", peerDeliveryMode: null }, "daemon")).toBe(notice);
   });
 });

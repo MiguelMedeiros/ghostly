@@ -198,32 +198,32 @@ export function waitNotice(method: string, given: Record<string, unknown>, mode:
 }
 
 /**
- * A `send` that waits on a text past the 256 bytes the DHT carries, or a `file send` to a chat: its notice said "it
- * still goes" and Ctrl-C that it "still goes by itself", which it does not while the chat stays on the DHT only. Only
- * the chat's state says so, which the command's process reads (`chat.get`) and hands to `dhtOnlyNotice`; the chat to
- * read, or undefined.
+ * A `send` that waits on a text past the 256 bytes the DHT carries, a pin (or unpin) in a 1:1 chat and a `file send`
+ * to one, which go on a live session only: the notice said "it still goes" and Ctrl-C that it "still goes by itself"
+ * (or with the next command), which none does while the chat stays on the DHT only. Only the chat's state says so,
+ * which the command's process reads (`chat.get`) and hands to `dhtOnlyNotice`; the chat to read, or undefined.
  */
-export function longTextChat(method: string, params: Record<string, unknown>): string | undefined {
-  const file = method === "file.send";
-  if (!file && (method !== "chat.send" || typeof params.text !== "string" || new TextEncoder().encode(params.text.trim()).length <= DHT_TEXT_BYTES)) return undefined;
+export function dhtOnlyChat(method: string, params: Record<string, unknown>): string | undefined {
+  const long = method === "chat.send" && typeof params.text === "string" && new TextEncoder().encode(params.text.trim()).length > DHT_TEXT_BYTES;
+  if (!long && method !== "chat.pin" && method !== "file.send") return undefined;
   const chat = word(params.chat);
   return chat?.startsWith("group:") ? undefined : chat;
 }
 
 /**
- * That `send`'s (or `file send`'s) notice once its chat was read (`chat.get`): said with why it waits when the chat is
- * on the DHT only, else as it was. A hold whose time is up and still ending reads as no hold there (`heldUntil`), so as a DHT only chosen.
+ * That call's notice once its chat was read (`chat.get`): said with why it waits when the chat is on the DHT only,
+ * else as it was. A hold whose time is up and still ending reads as no hold there (`heldUntil`), so as a DHT only chosen.
  */
-export function dhtOnlyNotice(notice: WaitNotice, params: Record<string, unknown>, chat: { deliveryMode?: unknown; peerDeliveryMode?: unknown; heldUntil?: unknown }, mode: "daemon" | "one-shot"): WaitNotice {
+export function dhtOnlyNotice(notice: WaitNotice, method: string, params: Record<string, unknown>, chat: { deliveryMode?: unknown; peerDeliveryMode?: unknown; heldUntil?: unknown }, mode: "daemon" | "one-shot"): WaitNotice {
   const mine = chat.deliveryMode === "dht";
   const heldUntil = mine && typeof chat.heldUntil === "number" ? chat.heldUntil : null;
   const where: DhtOnly = { mine, theirs: chat.peerDeliveryMode === "dht", heldUntil, oneShot: mode === "one-shot" };
-  if (params.text === undefined) {
+  if (method === "file.send") {
     // A file send: a daemon's that does not wait answers once the file is copied in, and its answer's `note` says it.
     if (mode === "daemon" && params.wait !== "sent") return notice;
     const note = fileWaitsNote(where, params.chat as string);
     return note ? { waiting: `${notice.waiting}. ${note}`, stopped: `${notice.stopped.replace(` and ${goesOn(mode)}`, "")}. ${note}` } : notice;
   }
-  const note = dhtOnlyNote(where, params.text as string, params.chat as string);
+  const note = method === "chat.pin" ? pinWaitsNote(where, params.chat as string, params.remove === true) : dhtOnlyNote(where, params.text as string, params.chat as string);
   return note ? { waiting: `${notice.waiting.replace(/, it still goes\)$/, ")")}. ${note}`, stopped: `it is kept here. ${note}` } : notice;
 }

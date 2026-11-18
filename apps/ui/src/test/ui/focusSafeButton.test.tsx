@@ -112,7 +112,7 @@ it("a held submit button sends no form on Enter", async () => {
  * Button) instead. The files left are other open pull requests' or held ones, each to follow.
  */
 const COMPONENTS = join(fileURLToPath(import.meta.url), "../../../components");
-const LEFT = new Set(["voice/VoiceRecorderButton.tsx", "JoinDialog.tsx", "NewGroupDialog.tsx", "GroupMembersDialog.tsx", "identities/ComposerIdentities.tsx"]);
+const LEFT = new Set(["voice/VoiceRecorderButton.tsx", "JoinDialog.tsx","GroupMembersDialog.tsx", "identities/ComposerIdentities.tsx"]);
 const files = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((entry) => entry.isDirectory() ? files(join(dir, entry.name)) : entry.name.endsWith(".tsx") ? [join(dir, entry.name)] : []);
 
 it("no raw button in the components is disabled while its work runs", () => {

@@ -18,7 +18,7 @@ import {
 } from "@ghostly/core";
 import { blobDigest, fileBytes, fileBytesOf } from "../shared/fileBytes";
 import { fileStore, type StoredFile } from "../shared/idb";
-import { FileAppender, readStored } from "../shared/storedFiles";
+import { FileAppender, readStored, removeStored } from "../shared/storedFiles";
 import type { FileTransferView, MessageFile, StoredMessage } from "../shared/types";
 import { receivedPairedReply } from "../shared/replies";
 import { fileWire } from "./messageDetails";
@@ -185,7 +185,12 @@ export class FileDesk {
       records.push(file.wire3);
       if (file.wire3.direction === "in") chat.local.set(file.wire3.id, file.id);
       if (!transferEnded(file.wire3)) this.restored.add(file.id);
-      else if (file.wire3.state !== "done" || !unsettled.has(file.id)) this.ended.add(file.id);
+      else if (file.wire3.state !== "done" || !unsettled.has(file.id)) {
+        this.ended.add(file.id);
+        // A sent one that ended cancelled or declined before this run (so the session's walk skips it): its staged copy
+        // goes now, one an older version kept or whose drop a quit cut off.
+        if (file.wire3.direction === "out" && (file.wire3.state === "cancelled" || file.wire3.state === "declined") && file.bytes) this.dropStaged(chat, file.id);
+      }
       // Finished: no transfer (a file with none reads as finished; its record says done). A view for each would go into
       // every state the engine builds, so each state would cost more with every file the chat ever had.
       if (file.wire3.state === "done") continue;
@@ -439,6 +444,11 @@ export class FileDesk {
     return said;
   }
 
+  /** The app stops: no chat's files are swept any more (`ChatFiles.stop`). */
+  stop(): void {
+    for (const chat of this.chats.values()) chat.files.stop();
+  }
+
   /** Stops tracking whether a transfer is stuck, and the room an offer of it shows. */
   private unwatch(id: string): void {
     clearTimeout(this.stallChecks.get(id));
@@ -604,6 +614,9 @@ export class FileDesk {
           ...(place !== undefined && sentAt !== undefined ? { timestamp: place, sentAt } : { timestamp: file.timestamp }),
           ...(file.reply && { replyTo: receivedPairedReply(file.reply) }), ...(file.forwarded && { forwarded: file.forwarded }),
           details: { wire: fileWire("files/3", file.size) } });
+        // Deleted for everyone by its sender meanwhile: the removal found no row to take, and the row was refused. The
+        // file kept no message to show or delete it, and arrived whole for good: it ends on both sides, and goes.
+        if (this.deps.deleted(linkId, `peer_${record.id}`)) this.deletedMeanwhile(linkId, id);
       }).catch((error) => this.unkept(linkId, chat, record.id, id, error));
     }
     const offered = record.direction === "in" && !this.deps.transfers.has(chat.local.get(record.id)!);
@@ -653,6 +666,15 @@ export class FileDesk {
     }
     // Refused, a file said on the floor ends its bubble (`refusedHere`).
     chat.files.refuse(wireId, (error as { name?: unknown } | null)?.name === "QuotaExceededError" ? "no-room" : "invalid");
+    this.deps.changed();
+  }
+
+  /** A new offer whose message was deleted before its row was kept: forgotten as a deleted message's file is. */
+  private deletedMeanwhile(linkId: string, id: string): void {
+    this.forget(linkId, id);
+    this.deps.transfers.delete(id);
+    const chat = this.chats.get(linkId);
+    if (chat) chat.saving = chat.saving.then(() => removeStored(id)).catch(() => {});
     this.deps.changed();
   }
 
@@ -724,7 +746,18 @@ export class FileDesk {
       this.deps.settled?.(linkId, id, record, this.underway.delete(id));
       // A received file ended (whole, or dropped): the offers waiting show the room it leaves.
       if (record.direction === "in") void this.rooms();
+      // A sent one cancelled or declined is never sent again (`offer`, `ChatFiles.resend`): its staged copy goes, as a
+      // received one's part does. Kept, 7 cancelled big files held 3.5 GB of the sender's disk for good. Its record stays.
+      else if (record.state === "cancelled" || record.state === "declined") this.dropStaged(chat, id);
     }
+  }
+
+  /** The bytes a sent file was staged in, after the chat's writes before; a small one kept whole in its record stays. */
+  private dropStaged(chat: Chat, id: string): void {
+    chat.saving = chat.saving.then(async () => {
+      const stored = await fileStore.get(id);
+      if (stored?.bytes) await (await fileBytesOf(stored.bytes))?.remove(id);
+    }).catch(() => {});
   }
 
   /**
