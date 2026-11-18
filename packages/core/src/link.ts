@@ -475,9 +475,9 @@ export class LinkSession {
     if (read) this.pollNow();
   }
 
-  /** This side's packet goes out now, unless one already did. */
+  /** This side's packet goes out now, unless one already did (in this run, once it left DHT only: `presenceDue`). */
   ensureAdvertised(): void {
-    if (!this.running || this.lastPublishedAt > 0 || this.publishing) return;
+    if (!this.running || (this.lastPublishedAt > 0 && !this.presenceDueOut) || this.publishing) return;
     void this.publish().catch(() => {});
   }
 

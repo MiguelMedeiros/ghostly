@@ -2,7 +2,7 @@
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { fromBase64Url, fromZ32, toBase64Url, toZ32, utf8Encode } from "./bytes";
-import { canonicalJsonBytes, readCanonicalJson, type CanonicalJsonRefusal, type JsonValue } from "./canonicalJson";
+import { canonicalJsonBytes, canonicalJsonListEntries, readCanonicalJson, type CanonicalJsonRefusal, type JsonValue } from "./canonicalJson";
 import type { Signer } from "./signer";
 import { hasVisible, stripHidden } from "./text";
 
@@ -34,6 +34,11 @@ export const APP_STATEMENT_LIMITS = {
   reason: 200,
   /** Revocations in one `ghostly-revoke.json`. */
   revocations: 4096,
+  /**
+   * One signed revocation's canonical bytes: twice the largest a valid one can be (64 digests, a 32-character name and
+   * a 200-character reason of 4-byte characters: about 4.1 KB), so a reader refuses a larger entry before parsing it.
+   */
+  revocationBytes: 8192,
 } as const;
 
 /** A z-base32 Ed25519 public key: 52 characters that decode to 32 bytes and encode back to the same text. */
@@ -285,14 +290,27 @@ export function verifyAppRevocation(revocation: SignedAppRevocation, checked?: A
  * file, as a store index's `revoked` does. With `checked`, a revocation it holds is not checked again.
  */
 export function readAppRevocations(bytes: Uint8Array, checked?: AppRevocationsChecked): { ok: true; revocations: SignedAppRevocation[] } | { ok: false; reason: CanonicalJsonRefusal | AppRevocationRefusal; detail?: string } {
-  const read = readCanonicalJson(bytes);
-  if (!read.ok) return read;
-  if (!Array.isArray(read.value) || read.value.length > APP_STATEMENT_LIMITS.revocations) return { ok: false, reason: "bad-revocation", detail: "Not a list of at most 4096 revocations" };
   const revocations: SignedAppRevocation[] = [];
-  for (const entry of read.value) {
-    const one = readAppRevocation(entry, checked);
+  const entries = appRevocationsFileEntries(bytes);
+  let next = entries.next();
+  for (; !next.done; next = entries.next()) {
+    const read = readCanonicalJson(next.value);
+    if (!read.ok) return read;
+    const one = readAppRevocation(read.value, checked);
     if (!one.ok) return one;
     revocations.push(one.revocation);
   }
-  return { ok: true, revocations };
+  return next.value ?? { ok: true, revocations };
+}
+
+/**
+ * The entries of a `ghostly-revoke.json`, each as its own bytes, one at a time and with nothing parsed: a file past
+ * 4096 entries, or with one larger than any revocation can be, is refused there, however large it is. It ends with null
+ * when the list closed. Each entry read alone (`readCanonicalJson`, then `readAppRevocation`) refuses exactly the files
+ * reading the file whole refuses.
+ */
+export function* appRevocationsFileEntries(bytes: Uint8Array): Generator<Uint8Array, { ok: false; reason: "not-json" | "bad-revocation"; detail?: string } | null, void> {
+  const end = yield* canonicalJsonListEntries(bytes, APP_STATEMENT_LIMITS.revocations, APP_STATEMENT_LIMITS.revocationBytes);
+  if (end === "not-list") return { ok: false, reason: "bad-revocation", detail: "Not a list of at most 4096 revocations" };
+  return end && { ok: false, reason: end };
 }

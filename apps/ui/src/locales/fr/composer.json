@@ -19,7 +19,7 @@
   },
   "chooseFiles": "Choisir des fichiers",
   "closeCamera": "Fermer l'appareil photo",
-  "dhtTooLong": "Trop long pour la DHT ({{bytes}} sur {{max}} octets). Raccourcissez ou passez en direct ; le brouillon est gardé.",
+  "dhtTooLong": "Trop long pour la DHT ({{bytes}} sur {{max}} octets). Raccourcissez ou passez en direct ; le brouillon est gardé.",
   "document": "Document",
   "dropFiles": "Déposez pour envoyer",
   "dropReading": "Lecture de ce que vous avez déposé…",
@@ -54,9 +54,10 @@
   "identity": "Identité",
   "identityShared": "{{count}} partagée(s) dans cette discussion",
   "media": "Photos et vidéos",
+  "nearSoft": "Environ {{bytes}} octets tiennent dans la DHT une fois scellés : raccourcissez-le pour l'y envoyer",
   "noEmoji": "Aucun emoji trouvé",
   "noGifs": "Aucun GIF trouvé",
-  "overSoft": "Au-delà des {{bytes}} octets que porte la DHT : il part dès que la liaison directe est là",
+  "overSoft": "Au-delà des {{bytes}} octets que porte la DHT : il part dès que la liaison directe est là",
   "pasteReading": "Lecture de ce que vous avez collé…",
   "payment": "Paiement",
   "placeholder": "Message…",
@@ -88,7 +89,7 @@
     "again": "Traduire à nouveau",
     "button": "Traduire",
     "cancel": "Annuler",
-    "choose": "Traduire dans quelle langue ?",
+    "choose": "Traduire dans quelle langue ?",
     "failed": "Ce message n’a pas pu être traduit. Envoyez-le tel quel ou réessayez.",
     "into": "Traduire en {{language}}",
     "noModel": "{{from}} vers {{to}} n’est pas téléchargé, ce message n’a donc pas été traduit.",
@@ -105,5 +106,5 @@
     "working": "Traduction…"
   },
   "videoConverting": "Conversion de {{name}} en MP4…",
-  "videoSentAsIs": "{{name}} a été envoyé tel quel : cet appareil ne peut pas le convertir. Certains téléphones et ordinateurs ne pourront peut-être que le télécharger."
+  "videoSentAsIs": "{{name}} a été envoyé tel quel : cet appareil ne peut pas le convertir. Certains téléphones et ordinateurs ne pourront peut-être que le télécharger."
 }

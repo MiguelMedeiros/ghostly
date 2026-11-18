@@ -4,6 +4,7 @@ import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import { getBrowserHost } from "@ghostly/browser/host";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n } from "../contexts/I18nContext";
+import { NAME, withName } from "./apps/aroundName";
 import { useLockPassedNow } from "../contexts/LockScreenContext";
 import { listNamesFor, reenrollHere, reloadIntoGate, useConnectionCheck, useDeviceSet } from "../lib/devices";
 import { HandoffOffer, HandoffProgress, UseHereDialog } from "./devices/Handoff";
@@ -34,8 +35,14 @@ const BUSY = "aria-disabled:opacity-40 aria-disabled:cursor-progress";
  * progress of a move, a takeover), the person's other devices and their links, and the other profiles of this device,
  * one click away. Nothing of the profile itself is on it.
  */
-export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
+export function DeviceStandby({ gate: asked }: { gate: DeviceGateView }) {
   const { t } = useI18n();
+  // A view that asks for the reload (a move's copy installed, or the move done) says nothing of where the device stands:
+  // the taking device read "Active on another device, on standby" until the page went. The screen stays as it was; a
+  // page whose first view is a reload says that one.
+  const [shown, setShown] = useState(asked);
+  if (!asked.reload && shown !== asked) setShown(asked);
+  const gate = asked.reload ? { ...shown, reload: asked.reload, keepUnlocked: asked.keepUnlocked } : asked;
   const lockPassedNow = useLockPassedNow();
   const [open, setOpen] = useState(false);
   const id = useId();
@@ -135,7 +142,7 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
             <div className="flex flex-wrap justify-center gap-2">
               {others.map((profile) => (
                 <button key={profile.id} type="button" data-testid="device-standby-switch" onClick={() => switchProfile(profile.id, { route: "/" })} className={SCREEN_QUIET}>
-                  {t("profileSwitcher.switchTo", { name: profile.name })}
+                  {withName(t("profileSwitcher.switchTo", { name: NAME }), profile.name)}
                 </button>
               ))}
             </div>

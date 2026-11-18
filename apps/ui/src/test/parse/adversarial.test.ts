@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { previewText } from "../../lib/chatList";
 import { findMoney } from "../../lib/money";
 import { DETECTORS, parseMessage, plainText, shownUrl, tokenizeInline, type Segment } from "../../lib/parse";
 import { MAX_SPAN_DEPTH } from "../../lib/parse/inline";
+import { link } from "../../lib/parse/links";
 import { JSON_LIMITS, prettyJson } from "../../lib/parse/json";
 import { findLocation, locationIn } from "../../lib/parse/location";
 import { mentionViews } from "../../lib/parse/mentions";
@@ -121,6 +122,48 @@ describe("many payment words next to web links", () => {
   });
 });
 
+describe("links each ended by Chinese or Arabic punctuation, with no space", () => {
+  it("are each read once, not again to the end of the run from every link", () => {
+    for (const unit of ["http://a،", "http://a。"]) {
+      const count = Math.floor(SIZE / unit.length);
+      const accept = vi.spyOn(link, "accept");
+      const [block] = parseMessage(unit.repeat(count));
+      const read = accept.mock.calls.reduce((sum, [match]) => sum + match[0].length, 0);
+      accept.mockRestore();
+      const atoms = block.type === "paragraph" ? block.segments.filter((segment) => segment.type === "atom") : [];
+      expect(atoms.map((atom) => atom.type === "atom" && atom.data)).toEqual(Array(count).fill({ url: "http://a" }));
+      // The run is about 16 K characters; read from each link to its end it was 1,820 links times half of that.
+      expect(read).toBeLessThan(SIZE);
+    }
+  });
+
+  it("leave a link after a bare scheme a link of its own", () => {
+    const [block] = parseMessage("https://。https://a.example/x");
+    const urls = block.type === "paragraph" ? block.segments.flatMap((segment) => (segment.type === "atom" ? [segment.data] : [])) : [];
+    expect(urls).toEqual([{ url: "https://a.example/x" }]);
+  });
+});
+
+describe("markdown links written end to end, with no space", () => {
+  const unit = "[a](http://a)";
+  const text = unit.repeat(Math.floor(SIZE / unit.length));
+
+  it("are read in linear time: in the bubble and in the list", () => {
+    const [block] = quickly(() => parseMessage(text));
+    const atoms = block.type === "paragraph" ? block.segments.filter((segment) => segment.type === "atom") : [];
+    expect(atoms).toHaveLength(Math.floor(SIZE / unit.length));
+    expect(atoms.every((atom) => atom.type === "atom" && atom.kind === "md-link")).toBe(true);
+    quickly(() => plainText(text));
+    quickly(() => previewText(text));
+  });
+
+  it("still leave a bare link after them a link of its own", () => {
+    const [block] = parseMessage(`${unit}http://b.example/x ${unit}`);
+    const kinds = block.type === "paragraph" ? block.segments.flatMap((segment) => (segment.type === "atom" ? [segment.kind] : [])) : [];
+    expect(kinds).toEqual(["md-link", "link", "md-link"]);
+  });
+});
+
 describe("a sending time no date holds", () => {
   it.each([Number.MAX_SAFE_INTEGER, -Number.MAX_SAFE_INTEGER, Number.NaN, Infinity])("leaves a clock time as text when sent at %s", sentAt => {
     const segments = tokenizeInline("see you at 14:00 UTC", DETECTORS, { sentAt });
@@ -167,6 +210,13 @@ describe("direction controls in links", () => {
     expect(shownUrl("https://127.1/")).toBe("https://127.0.0.1/");
     // Only the host decides: case, a port and escapes in the path still show as typed.
     expect(shownUrl("HTTPS://X.Example:8443/a%20b?q=%2E")).toBe("HTTPS://X.Example:8443/a%20b?q=%2E");
+  });
+
+  it("previews a link in the chat list as its bubble shows it", () => {
+    expect(plainText("see https://www.paypal.com@evil.example/a now")).toBe("see https://evil.example/a now");
+    expect(plainText("https://аpple.com/")).toBe("https://xn--pple-43d.com/");
+    expect(plainText("https://paypal.com%2Eevil.example/x.")).toBe("https://paypal.com.evil.example/x.");
+    expect(plainText("https://x.example/a_(b)")).toBe("https://x.example/a_(b)");
   });
 });
 

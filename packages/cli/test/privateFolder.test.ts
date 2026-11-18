@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { createHash } from "node:crypto";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { connectDaemon } from "../src/client";
+import { asCliError } from "../src/errors";
 import { serve, type Host } from "../src/host";
 import { ownSocket, privateFolder, runtimePath } from "../src/privateFolder";
 import { profilePaths } from "../src/profiles";
@@ -76,6 +77,16 @@ describe.skipIf(process.platform === "win32")("sockets outside the profile", () 
     expect(() => privateFolder(mine, "test")).not.toThrow();
   });
 
+  it("the refusal is `refused` and says what to do, as the profile's own checks do", () => {
+    const open = join(root, "open-next");
+    mkdirSync(open);
+    chmodSync(open, 0o755);
+    const refusal = (() => { try { privateFolder(open, "the daemon will not put its socket there"); } catch (error) { return asCliError(error); } })();
+    expect(refusal?.code).toBe("refused");
+    expect(refusal?.message).toMatch(/not a folder of this user's alone: the daemon will not put its socket there/);
+    expect(refusal?.message).toMatch(new RegExp(`rm -r ${open}.*chmod 700 ${open}`));
+  });
+
   it("a client connects only to a socket of this user's", async () => {
     const file = join(root, "not-a-socket");
     writeFileSync(file, "");
@@ -112,6 +123,6 @@ describe.skipIf(process.platform === "win32")("the daemon's socket in the profil
     const target = join(root, "profile-target");
     mkdirSync(target, { mode: 0o700 });
     symlinkSync(target, join(root, "profile-link"));
-    await expect(serve(hostAt(join(root, "profile-link")))).rejects.toThrow(/not a folder of this user's/);
+    await expect(serve(hostAt(join(root, "profile-link")))).rejects.toMatchObject({ code: "refused", message: expect.stringMatching(/not a folder of this user's/) });
   });
 });

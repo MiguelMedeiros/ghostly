@@ -16,8 +16,8 @@
   "deleteChatCallOn": "このチャットで通話中です。先に通話を終了してから、チャットを削除してください。",
   "deleteChatLocal": "この端末のチャットと履歴を削除します。相手側のコピーは削除されません。",
   "deleteChatTitle": "チャットを削除しますか？",
-  "error": "エラー",
   "goHome": "ホームへ",
+  "labelValue": "{{label}}：{{value}}",
   "loading": "読み込み中...",
   "moreInfo": "詳細",
   "needsYou": {
@@ -28,6 +28,7 @@
   "notCopied": "コピーできませんでした",
   "quotedName": "「{{name}}」",
   "save": "保存",
+  "sentences": "{{first}}。{{second}}",
   "size": {
     "b": "{{n}} B",
     "gb": "{{n}} GB",
@@ -35,7 +36,6 @@
     "mb": "{{n}} MB",
     "tb": "{{n}} TB"
   },
-  "success": "成功",
   "unnamedContact": "連絡先 · {{key}}",
   "unnamedContactShort": "連絡先",
   "viewPhoto": "{{name}}の写真を見る"

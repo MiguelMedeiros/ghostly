@@ -93,14 +93,18 @@ describe("GroupMembersDialog", () => {
     engine.on("removeGroupMember", () => undefined);
     await user.click(within(row(BOB)).getByTestId("group-remove-member"));
     const ask = screen.getByTestId("group-remove-dialog");
-    expect(ask).toHaveAccessibleName("Remove Bob?");
+    // Named by its heading. The name is its own <bdi>, which happy-dom's accessible name counts as a block (a space
+    // before the "?" no browser adds), so the heading's text is read instead.
+    const question = within(ask).getByRole("heading");
+    expect(ask).toHaveAttribute("aria-labelledby", question.id);
+    expect(question.textContent).toBe("Remove Bob?");
     expect(ask).toHaveAccessibleDescription("They won't get the group's new messages.");
     expect(within(ask).getByRole("button", { name: "Cancel" })).toHaveFocus();
     expect(engine.callsTo("removeGroupMember")).toEqual([]);
     await user.click(within(ask).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByTestId("group-remove-dialog")).not.toBeInTheDocument();
     await user.click(within(row(ALICE)).getByTestId("group-remove-member"));
-    expect(screen.getByTestId("group-remove-dialog")).toHaveAccessibleName("Remove Alice?");
+    expect(within(screen.getByTestId("group-remove-dialog")).getByRole("heading").textContent).toBe("Remove Alice?");
     // Escape, as the browser says it to the topmost dialog: only the question closes.
     act(() => { screen.getByTestId("group-remove-dialog").dispatchEvent(new Event("cancel", { cancelable: true })); });
     expect(screen.queryByTestId("group-remove-dialog")).not.toBeInTheDocument();
@@ -133,6 +137,28 @@ describe("GroupMembersDialog", () => {
     await user.click(within(row(ALICE)).getByTestId("group-make-admin"));
     await user.click(within(screen.getByTestId("group-make-admin-dialog")).getByRole("button", { name: "Hand over admin" }));
     expect(engine.callsTo("makeGroupAdmin")).toEqual([{ groupId: "group-1", key: ALICE }]);
+  });
+
+  // The ask stays open while the member's leave arrives: the engine then refuses with core's "Not a member", which read
+  // in English in every language.
+  it.each(["mesh", "community"] as const)("a Hand over admin or Remove confirmed after the member left says so in the language (%s)", async profile => {
+    const group = groupView({ status: "active", isAdmin: true, profile, members });
+    fakeEngine.update({ groups: [group], links: [] });
+    const { user, engine } = renderApp(<GroupMembersDialog group={group} onClose={vi.fn()} />, { language: "pt" });
+    engine.on("makeGroupAdmin", () => Promise.reject(new Error("Not a member"))).on("removeGroupMember", () => Promise.reject(new Error("Not a member")));
+    const gone = { ...group, members: members.filter(m => m.key !== BOB) };
+    await user.click(within(row(BOB)).getByTestId("group-make-admin"));
+    act(() => { fakeEngine.update({ groups: [gone] }); });
+    await user.click(screen.getByTestId("group-make-admin-confirm"));
+    expect(await screen.findByText("Essa pessoa não está mais neste grupo")).toBeInTheDocument();
+    expect(screen.queryByText("Not a member")).not.toBeInTheDocument();
+    act(() => { fakeEngine.update({ groups: [group] }); });
+    await user.click(within(row(BOB)).getByTestId("group-remove-member"));
+    act(() => { fakeEngine.update({ groups: [gone] }); });
+    await user.click(screen.getByTestId("group-remove-confirm"));
+    expect(engine.callsTo("removeGroupMember")).toEqual([{ groupId: "group-1", key: BOB }]);
+    expect(screen.getByText("Essa pessoa não está mais neste grupo")).toBeInTheDocument();
+    expect(screen.queryByText("Not a member")).not.toBeInTheDocument();
   });
 
   it("gives the focus back to the Remove or Hand over admin that asked, and to the list once a removed row is gone", async () => {
@@ -184,6 +210,20 @@ describe("GroupMembersDialog", () => {
     expect(screen.queryByTestId("group-link")).not.toBeInTheDocument();
     // It fell to the page, out of the open dialog.
     expect(screen.getByTestId("group-member-list")).toHaveFocus();
+  });
+
+  it("no longer says, under a community's link turned off, that anyone with the link can join: to the admin nor to a member", () => {
+    const link = encodeCommunityLink({ g: "AbCdEfGhIjKlMnOpQrStUv", host: createIdentity().pubKeyZ32 });
+    for (const isAdmin of [true, false]) {
+      const group = groupView({ status: "active", isAdmin, profile: "community", entryLink: link, members: [member({ key: ME, me: true, online: true, role: isAdmin ? "admin" : "member" }), member({ key: ALICE, nick: "Alice", role: isAdmin ? "member" : "admin" })] });
+      const { unmount } = members_(group);
+      const note = screen.getByTestId("group-read-note");
+      expect(note, `link on, admin ${isAdmin}`).toHaveTextContent(/^Anyone with the group's link can join, and any member can let people in\./);
+      act(() => fakeEngine.update({ groups: [{ ...group, entryLink: undefined }] }));
+      expect(note, `link off, admin ${isAdmin}`).toHaveTextContent(/^The link is off: nobody can join with it, and only the admin can let people in again, with a new link\. Everyone in the group can read/);
+      expect(note).not.toHaveTextContent("Anyone with the group's link can join");
+      unmount();
+    }
   });
 
   it("says, while the group's link works, that whoever is removed can join again with it until a new link", async () => {
@@ -761,6 +801,28 @@ describe("NewGroupDialog", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Ghostly is still starting");
     expect(onCreated).not.toHaveBeenCalled();
     expect(screen.getByTestId("new-group-create")).toBeEnabled();
+  });
+
+  // Disabled while the group was made, the Create pressed from the keyboard dropped the focus to the page, and it
+  // stayed there after a refusal. It stays a button the focus can be on, and a second press does nothing.
+  it("keeps Create, pressed from the keyboard, a button the focus stays on while the group is made and after a refusal", async () => {
+    const { user, engine, onCreated } = open();
+    let refuse!: (error: Error) => void;
+    engine.on("createGroup", () => new Promise((_, reject) => { refuse = reject; }));
+    await user.type(screen.getByTestId("new-group-name"), "Climbing");
+    const create = screen.getByTestId("new-group-create");
+    act(() => create.focus());
+    await user.keyboard("{Enter}");
+    expect(create).toBeEnabled();
+    expect(create).toHaveAttribute("aria-disabled", "true");
+    expect(create).toHaveAttribute("aria-busy", "true");
+    await user.keyboard("{Enter}");
+    expect(engine.callsTo("createGroup")).toHaveLength(1);
+    await act(async () => refuse(new Error("Ghostly is still starting")));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Ghostly is still starting");
+    expect(create).toHaveFocus();
+    expect(create).not.toHaveAttribute("aria-disabled");
+    expect(onCreated).not.toHaveBeenCalled();
   });
 
   it("on an app with no WebRTC, creates the group: its links go over Iroh or HyperDHT", async () => {

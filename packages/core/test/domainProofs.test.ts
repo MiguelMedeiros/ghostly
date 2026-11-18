@@ -97,10 +97,12 @@ describe('record formats', () => {
 });
 
 describe('DNS over HTTPS messages', () => {
-  const reply = (question: Uint8Array, answers: Uint8Array, count: number, flags = 0x8180) => {
+  // The query's header and question, then the answers; the query's 19-byte OPT record is left out, as ARCOUNT 0 says.
+  const reply = (query: Uint8Array, answers: Uint8Array, count: number, flags = 0x8180) => {
+    const question = query.subarray(0, query.length - 19);
     const out = new Uint8Array(question.length + answers.length);
     out.set(question); out.set(answers, question.length);
-    out[2] = flags >> 8; out[3] = flags & 0xff; out[6] = 0; out[7] = count;
+    out[2] = flags >> 8; out[3] = flags & 0xff; out[6] = 0; out[7] = count; out[11] = 0;
     return out;
   };
   const name = (n: string) => n.split('.').flatMap(l => [l.length, ...new TextEncoder().encode(l)]).concat(0);
@@ -112,7 +114,7 @@ describe('DNS over HTTPS messages', () => {
 
   it('encodes a recursive query asking for DNSSEC status', () => {
     const q = encodeDnsQuery('_ghostly.example.com', 'TXT');
-    expect(hex(q.subarray(0, 12))).toBe('000001200001000000000000');
+    expect(hex(q.subarray(0, 12))).toBe('000001200001000000000001');
     expect(decodeDnsResponse(reply(q, new Uint8Array(), 0, 0x81a0), '_ghostly.example.com', 'TXT')).toEqual({ rcode: 0, authenticated: true, answers: [] });
   });
 
@@ -164,6 +166,14 @@ describe('public addresses only', () => {
     expect(isPublicAddress(v6(a))).toBe(false);
   });
   it.each(['2606:4700:4700::1111', '2001:4860:4860::8888', '::ffff:808:808', '64:ff9b::808:808'])('allows %s', a => {
+    expect(isPublicAddress(v6(a))).toBe(true);
+  });
+  // 6to4 and Teredo carry an IPv4 address a gateway may reach (2002:7f00:1:: is 6to4 of 127.0.0.1), and
+  // documentation addresses are no one's: all refused whole, as Desktop's link preview and the app's host check do.
+  it.each(['2002:7f00:1::', '2002:808:808::1', '2001::1', '2001:0:4136:e378:8000:63bf:3fff:fdd2', '2001:db8::1', '2001:db8:ffff::1'])('refuses %s', a => {
+    expect(isPublicAddress(v6(a))).toBe(false);
+  });
+  it.each(['2001:1::1', '2001:db9::1', '2003::1', '2001:470::1'])('allows %s', a => {
     expect(isPublicAddress(v6(a))).toBe(true);
   });
   it('refuses anything that is not an address', () => expect(isPublicAddress(new Uint8Array(5))).toBe(false));

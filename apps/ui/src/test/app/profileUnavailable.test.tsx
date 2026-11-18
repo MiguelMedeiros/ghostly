@@ -19,7 +19,7 @@ import { renderApp } from "../render";
 
 const NEWER: ProfileOpenFailure = { reason: "newer", supportedVersion: 11, storedVersion: 12, detail: "VersionError: The requested version (11) is less than the existing version (12)." };
 
-function renderGate(language?: "pt") {
+function renderGate(language?: "pt" | "ar") {
   return renderApp(
     <UpdateProvider>
       <ProfileGate>
@@ -164,6 +164,15 @@ describe("a profile that cannot be opened", () => {
     renderGate();
     fail(NEWER);
     expect(screen.getByTestId("profile-unavailable-switch")).toHaveTextContent(`Switch to ${other.name}`);
+  });
+
+  // In a language of the other direction, a name's ending punctuation was drawn on its other side ("!Club").
+  it("names another profile in its own direction", () => {
+    createProfile("Club!");
+    renderGate("ar");
+    fail(NEWER);
+    const bdi = screen.getByTestId("profile-unavailable-switch").querySelector("bdi");
+    expect(bdi?.textContent).toBe("Club!");
   });
 
   it("goes when a peer that runs sends its state (the extension's, started again)", () => {

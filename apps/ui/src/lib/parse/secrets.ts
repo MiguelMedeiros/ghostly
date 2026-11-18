@@ -1,4 +1,5 @@
-import { sha256 } from "@noble/hashes/sha2.js";
+import { hmac } from "@noble/hashes/hmac.js";
+import { sha256, sha512 } from "@noble/hashes/sha2.js";
 import { createBase58check } from "@scure/base";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { MONERO_WORDS } from "./monero-words";
@@ -11,9 +12,10 @@ import { MONERO_WORDS } from "./monero-words";
  * ecash, the amount decoded here. Ark, Spark and Fedimint wallets are BIP39 seeds or raw keys, caught by the rules
  * below; Fedimint ecash notes are plain base64 with no prefix, so they are not recognised. A `node-login` is what the
  * wallet sources ask for to reach a node: an LND macaroon, a Core Lightning rune, a bitcoind RPC password or cookie.
+ * A `signer-link` is a NIP-46 remote signer's connection link with its secret (`bunker://…?secret=…`).
  */
 export type SecretFinding =
-  | { kind: "mnemonic" | "nsec" | "bitcoin-key" | "hex-key" | "node-login" }
+  | { kind: "mnemonic" | "nsec" | "bitcoin-key" | "hex-key" | "node-login" | "signer-link" }
   | { kind: "cashu"; amount: number | null; unit: string };
 
 export type SecretKind = SecretFinding["kind"];
@@ -28,6 +30,8 @@ interface SeedWords {
   /** A message that is nothing but this many of these words counts, checksum or not. */
   wholeMessage: number[];
   checksumHolds: (indices: number[]) => boolean;
+  /** One that costs far more, tried on runs of `length` words, on `SLOW_CHECKSUM_BUDGET` of them per message at most. */
+  slowChecksum?: { length: number; holds: (indices: number[]) => boolean };
 }
 
 const englishWords = (text: string) => text.toLowerCase().match(/[a-z]+/g);
@@ -57,7 +61,14 @@ const BIP39: SeedWords = {
    */
   wholeMessage: [...MNEMONIC_LENGTHS, 16],
   checksumHolds: bip39ChecksumHolds,
+  /** Electrum's: its seeds are 12 words of the same list with a version where BIP39's checksum is. */
+  slowChecksum: { length: 12, holds: electrumVersionHolds },
 };
+/**
+ * The English list by each word's first four letters, as a metal backup stamps it and Trezor and Coldcard take it
+ * ("aban abil …"): no two words start with the same four. A longer word is not read here, so prose still breaks a run.
+ */
+const BIP39_SHORT: SeedWords = { ...BIP39, index: lazyIndex(wordlist, (word) => word.slice(0, 4)) };
 /** Monero's classic seed (Monero GUI, monero-wallet-cli): 25 words of its own list, or MyMonero's 13. */
 const MONERO: SeedWords = {
   index: lazyIndex(MONERO_WORDS, (word) => word),
@@ -66,7 +77,7 @@ const MONERO: SeedWords = {
   wholeMessage: [25, 13],
   checksumHolds: moneroChecksum(MONERO_WORDS, 3),
 };
-let seeds = [BIP39, MONERO];
+let seeds = [BIP39, BIP39_SHORT, MONERO];
 
 /**
  * BIP39's own lists in the app's other languages, which a wallet set to one of them shows its seed in: the same
@@ -75,7 +86,7 @@ let seeds = [BIP39, MONERO];
  * first download) and the CLI with the guard.
  */
 export function addSeedLists(lists: readonly (readonly string[])[], moneroLists: readonly [list: readonly string[], prefix: number][] = []): void {
-  seeds = [BIP39, MONERO, ...lists.map((list): SeedWords => ({
+  seeds = [BIP39, BIP39_SHORT, MONERO, ...lists.map((list): SeedWords => ({
     index: lazyIndex(list, fold),
     words: foldedWords,
     lengths: MNEMONIC_LENGTHS,
@@ -89,8 +100,13 @@ export function addSeedLists(lists: readonly (readonly string[])[], moneroLists:
     checksumHolds: moneroChecksum(list, prefix),
   }))];
 }
-/** Checksums tried per message and word list at most: a 16 KiB run of seed words stays a few milliseconds. */
+/** Checksums tried per message and word list at most: a 16 KiB run of seed words that holds no seed stays ~25 ms. */
 const CHECKSUM_BUDGET = 4096;
+/**
+ * Slow checksums tried per message and word list at most: Electrum's is an HMAC-SHA512, and tried on every 12 words of
+ * the budget it took 60 to 120 ms per 16 KiB run of seed words that holds none (a contact's text forwarded, 30 at once).
+ */
+const SLOW_CHECKSUM_BUDGET = 256;
 
 const NSEC = /\bnsec1[02-9ac-hj-np-z]{58}(?![02-9ac-hj-np-z])/i;
 const EXTENDED_PRIVATE = /\b[xtyzuvYZUV]prv[1-9A-HJ-NP-Za-km-z]{100,}/;
@@ -113,7 +129,11 @@ const RUNE = /(?<![\w-])[\w-]{43,}={0,2}(?![\w=-])/g;
 /** The restrictions of a rune that `createrune` made: its unique id first (`=0`, `=3&method=…`). */
 const RUNE_RESTRICTIONS = /^=\d+(?:[&|][ -~]*)?$/;
 const RUNE_WORD = /\brunes?\b/i;
-const CASHU_TOKEN = /\bcashu([AB])([A-Za-z0-9_\-+/]{20,}={0,2})/g;
+/** A NIP-46 signer's connection link, as it is or percent-encoded inside another link. */
+const SIGNER_LINK = /\b(?:bunker|nostrconnect)(?::|%3A)(?:\/\/|%2F%2F)/i;
+/** Its `secret` parameter, with a value: the token the signer takes a new session with. */
+const SIGNER_SECRET = /(?:[?&]|%3F|%26)secret(?:=|%3D)(?![&#]|%26|$)/i;
+const CASHU_TOKEN =/\bcashu([AB])([A-Za-z0-9_\-+/]{20,}={0,2})/g;
 
 /**
  * Characters that take no room on screen: format characters (zero-width space, soft hyphen, word joiner, the joiners,
@@ -131,21 +151,37 @@ const base58check = createBase58check(sha256);
 export function findSecret(text: string): SecretFinding | null {
   const visible = text.replace(INVISIBLE, "");
   const readings = visible === text ? [text] : [text, visible];
+  let asWritten: Map<SeedWords["words"], string[] | null> | undefined;
   if (readings.some((reading) => {
     // A text's words are read once per way of reading them, not once per list: the other languages' 13 lists share one.
     const words = new Map<SeedWords["words"], string[] | null>();
+    const first = (asWritten ??= words);
+    const listed = numbered(reading);
+    const listedWords = new Map<SeedWords["words"], string[] | null>();
     return seeds.some((seed) => {
       if (!words.has(seed.words)) words.set(seed.words, seed.words(reading));
-      return hasMnemonic(words.get(seed.words)!, seed);
+      const read = words.get(seed.words)!;
+      // The same words as the text as written (its invisible characters were between them): read already. A zero-width
+      // space before a long run of seed words read it twice, twice the time.
+      if (!(words !== first && sameWords(read, first.get(seed.words)!)) && hasMnemonic(read, seed)) return true;
+      if (!listed) return false;
+      if (!listedWords.has(seed.words)) {
+        const read = seed.words(listed.words.join(" "));
+        listedWords.set(seed.words, read?.length === listed.words.length ? read : null);
+      }
+      return hasMnemonic(inOrder(listed.numbers, listedWords.get(seed.words)!, seed), seed);
     });
   })) return { kind: "mnemonic" };
   if (readings.some((reading) => NSEC.test(reading))) return { kind: "nsec" };
   if (readings.some((reading) => EXTENDED_PRIVATE.test(reading) || hasWif(reading))) return { kind: "bitcoin-key" };
+  if (readings.some(hasSignerLink)) return { kind: "signer-link" };
   if (readings.some(hasNodeLogin)) return { kind: "node-login" };
   if (readings.some(hasHexSecret)) return { kind: "hex-key" };
   const tokens = readings.map(findCashu);
   return tokens.find((found) => found?.kind === "cashu" && found.amount !== null) ?? tokens.find((found) => found) ?? null;
 }
+
+const sameWords = (a: string[] | null, b: string[] | null) => a === b || (a !== null && b !== null && a.length === b.length && a.every((word, i) => word === b[i]));
 
 /**
  * 12 to 24 words in a row from the English BIP39 list whose checksum holds, anywhere in the text; or a message that
@@ -162,8 +198,14 @@ function hasMnemonic(tokens: string[] | null, seed: SeedWords): boolean {
   const shortest = Math.min(...seed.lengths);
   if (!tokens || tokens.length < shortest) return false;
   const index = seed.index();
-  let budget = CHECKSUM_BUDGET;
+  let budget = CHECKSUM_BUDGET, slowBudget = SLOW_CHECKSUM_BUDGET;
   let run: number[] = [];
+  const slow = seed.slowChecksum;
+  /**
+   * A run's inner windows for the slow checksum, tried once every run's ends were: a seed pasted in a message is where
+   * the words on no list (or the message) start or stop its run. Tried in order, 267 seed words before one spent them.
+   */
+  const inner: number[][] = [];
   const seedLike = (start: number, length: number) => {
     const window = run.slice(start, start + length);
     const counts = new Map<number, number>();
@@ -171,7 +213,13 @@ function hasMnemonic(tokens: string[] | null, seed: SeedWords): boolean {
     if (counts.size === 1) return false;
     const [most, times] = [...counts].reduce((a, b) => (b[1] > a[1] ? b : a));
     if (times > length / 2 && (run[start - 1] === most || run[start + length] === most)) return false;
-    return seed.checksumHolds(window);
+    if (seed.checksumHolds(window)) return true;
+    if (slow === undefined || length !== slow.length) return false;
+    if (start > 0 && start + length < run.length) {
+      if (inner.length < SLOW_CHECKSUM_BUDGET) inner.push(window);
+      return false;
+    }
+    return slowBudget-- > 0 && slow.holds(window);
   };
   const check = () => {
     if (run.length >= shortest) {
@@ -190,7 +238,48 @@ function hasMnemonic(tokens: string[] | null, seed: SeedWords): boolean {
     if (at !== undefined) run.push(at);
     else if (check()) return true;
   }
-  return check();
+  return check() || inner.some((window) => slowBudget-- > 0 && slow!.holds(window));
+}
+
+/**
+ * A seed written as a numbered list: "1. abandon", "Word 2: ability", "3) able", one word to a number and nothing else
+ * before the next number or the line's end. Read in the numbers' order, so a header above it ("Recovery phrase"), the
+ * word "word" in its labels and a list in two columns ("1. … 13. …") still make one run. The spaces on each side of a
+ * mark are one run when the mark is not there: two that could split it tried every split, and a draft of a number, a
+ * word and long runs of spaces took the reader minutes.
+ */
+const NUMBERED = /(?<![\p{L}\p{N}.,])(?:word\s*)?#?(\d{1,2})\s*(?:[.:)-]\s*)?(\p{L}+)(?=[^\S\r\n]*(?:[,;][^\S\r\n]*)?(?:$|\r?\n|(?:word\s*)?#?\d))/gimu;
+
+function numbered(text: string): { numbers: number[]; words: string[] } | null {
+  const pairs = [...text.matchAll(NUMBERED)];
+  return pairs.length < 12 ? null : { numbers: pairs.map((pair) => Number(pair[1])), words: pairs.map((pair) => pair[2]) };
+}
+
+/**
+ * The words of `seed`'s list put at their numbers, when they are numbered 1 to n with none missing or twice; what is
+ * not on the list is left out ("Here are your 24 words").
+ */
+function inOrder(numbers: number[], words: string[] | null, seed: SeedWords): string[] | null {
+  if (!words) return null;
+  const index = seed.index(), placed: string[] = [];
+  let count = 0;
+  for (let i = 0; i < words.length; i++) {
+    if (!index.has(words[i])) continue;
+    if (numbers[i] < 1 || placed[numbers[i] - 1] !== undefined) return null;
+    placed[numbers[i] - 1] = words[i];
+    count++;
+  }
+  return count === placed.length ? placed : null;
+}
+
+/**
+ * Electrum (electrum/mnemonic.py): a seed's HMAC-SHA512 under "Seed version" starts with its version in hex, "01"
+ * standard, "100" segwit, "101" and "102" two-factor. Its seeds are 12 words; a random 12 pass one time in 200.
+ */
+function electrumVersionHolds(indices: number[]): boolean {
+  if (indices.length !== 12) return false;
+  const mac = hmac(sha512, utf8.encode("Seed version"), utf8.encode(indices.map((index) => wordlist[index]).join(" ")));
+  return mac[0] === 0x01 || (mac[0] === 0x10 && mac[1] >> 4 <= 2);
 }
 
 /** BIP39: the words' 11-bit indices are the entropy followed by the first bits of its SHA-256. */
@@ -259,6 +348,18 @@ function hasHexSecret(text: string): boolean {
 
 function hexBeside(text: string, context: RegExp): boolean {
   for (const match of text.matchAll(HEX_SECRET)) if (beside(text, match, context)) return true;
+  return false;
+}
+
+/**
+ * A `bunker://` or `nostrconnect://` link with its secret: whoever reads it can open a session with the person's remote
+ * signer. Read one string at a time, from its first scheme on, so a long string of schemes is read once.
+ */
+function hasSignerLink(text: string): boolean {
+  for (const [word] of text.matchAll(/\S+/g)) {
+    const at = word.search(SIGNER_LINK);
+    if (at >= 0 && SIGNER_SECRET.test(word.slice(at))) return true;
+  }
   return false;
 }
 

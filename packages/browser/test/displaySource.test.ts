@@ -8,6 +8,16 @@ describe("displaySourceOf", () => {
     expect(displaySourceOf("oidc", oidcDisplaySource("Google"))).toEqual({ kind: "oidc", provider: "Google" });
     expect(displaySourceOf("oidc", oidcDisplaySource("Microsoft", "verified"))).toEqual({ kind: "oidc", provider: "Microsoft", email: "verified" });
     expect(displaySourceOf("oidc", oidcDisplaySource("GitLab", "unverified"))).toEqual({ kind: "oidc", provider: "GitLab", email: "unverified" });
+    expect(displaySourceOf("oidc", oidcDisplaySource("Microsoft", undefined, true))).toEqual({ kind: "oidc", provider: "Microsoft", nameUnchecked: true });
+    expect(displaySourceOf("oidc", oidcDisplaySource("Google", "verified", true))).toEqual({ kind: "oidc", provider: "Google", email: "verified", nameUnchecked: true });
+    expect(displaySourceOf("oidc", oidcDisplaySource("Google", "unverified", true))).toEqual({ kind: "oidc", provider: "Google", email: "unverified", nameUnchecked: true });
+  });
+
+  it("says a name the account set for itself was not checked", () => {
+    expect(oidcDisplaySource("Microsoft", undefined, true)).toBe("Signed by Microsoft; name set on the account, not checked by Microsoft");
+    // Another provider's name in the caveat is not one of these words: shown as written.
+    expect(displaySourceOf("oidc", "Signed by Microsoft; name set on the account, not checked by Google")).toBeUndefined();
+    expect(displaySourceOf("oidc", "Signed by Google; email verified by Google; name set on the account, not checked by Microsoft")).toBeUndefined();
   });
 
   it("the words stored proofs already hold", () => {

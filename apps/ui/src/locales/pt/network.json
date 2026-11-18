@@ -14,6 +14,7 @@
   "protocolDirect": "Chega à {{dht}} diretamente (UDP) e aos relays {{pkarr}} (HTTP)",
   "protocolRelays": "Chega à {{dht}} pelos relays {{pkarr}} (HTTP)",
   "pushRelay": "Relay de push (opcional)",
+  "pushRelayBusy": "O último despertar por este relay foi recusado: ele estava no limite (HTTP {{http}}). Ele volta a acordar contatos quando tiver espaço.",
   "pushRelayHint": "Para acordar contatos a partir de um navegador. Vazio: nenhum.",
   "pushRelayInfo": "Um navegador não pode enviar a um serviço de push; este relay envia. Ele vê seu endereço IP e quando você acorda alguém, nunca a mensagem.",
   "pushRelayRefused": "O último despertar por este relay falhou: ele não respondeu como um relay de push (HTTP {{http}}). Contatos com o app fechado não são acordados por ele.",

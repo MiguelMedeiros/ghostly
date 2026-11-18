@@ -81,6 +81,9 @@ export const UNIT_PROJECTS = [
     sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/**", "apps/ui/src/**"],
     whole: ["apps/ui/vitest.ui.config.ts", "apps/ui/src/test/setup.ts", "packages/browser/vite-plugin.ts", "packages/core/src/index.ts", "tools/vitest.shared.ts"],
     tests: ["apps/ui/src/**", "packages/react/test/**"],
+    // Its config reads the locale files from disk (localesAtOnce), so they are in no import graph: a changed area file
+    // runs the tests of the code that names its keys, and the tests that load the locales themselves (usingStrings).
+    strings: { files: "apps/ui/src/locales/*/*.json", in: ["apps/ui/src/**", "packages/react/**"], readers: ["apps/ui/src/locales{,/index}", "apps/ui/src/locales/??{,/index}", "apps/ui/src/test/i18n/locales"] },
   },
   {
     name: "matrix", cwd: ".", args: ["-c", "e2e/matrix/vitest.config.ts"],
@@ -105,20 +108,27 @@ export const UNIT_PROJECTS = [
       "{docs/README.md,docs/FEATURES.md,docs/WEB.md,docs/APPS.md,docs/ANDROID.md,docs/wisps/ADAPTER-ROADMAP.md,apps/website/content/*.ts}": ["androidReleased"],
       "docs/RELEASING.md": ["chromeWebStore", "npmPublish", "webLatest"],
       "{CHANGELOG.md,apps/desktop/Cargo.toml,apps/website/lib/release.ts,apps/extension/public/manifest.json,packages/browser/src/shared/features.ts}": ["bumpVersion"],
-      "packages/cli/package.json": ["npmPublish"],
+      "packages/cli/package.json": ["npmPublish", "cliShrinkwrap"],
+      ".gitignore": ["cliShrinkwrap"],
       "apps/desktop/src/{translate,translate_models}.rs": ["translationRuntimes"],
       "e2e/playwright.config.ts": ["e2eWorkflow"],
+      ".github/security-allowlist.json": ["securityScanAllowlist"],
       "rust-toolchain.toml": ["rustToolchain"],
-      "{native/transports/Cargo.toml,native/transports/iroh-web/**,packages/iroh-web/pkg/**}": ["irohWebBuild"],
+      "Cargo.toml": ["androidNativeWorkflow"],
+      // Its postinstall: matched even when its "scripts" alone changed (a change elsewhere in it runs everything).
+      "package.json": ["releaseInstallScripts", "webAppsTestFlag"],      "{native/transports/Cargo.toml,native/transports/iroh-web/**,packages/iroh-web/pkg/**}": ["irohWebBuild"],
       "{packages/cli/vite.config.ts,packages/cli/vitest.config.ts,packages/cli/test/support/cli.ts}": ["affected"],
       "{packages/cli/vite.config.ts,e2e/fixtures/chess/**}": ["storeKeys"],
+      "{eslint.config.mjs,tools/eslint/**}": ["eslintRules"],
+      // Each workspace's src and manifest (and the shared UI's src, the root's), listed by git: no path in its text.
+      "{packages/*/src/**,packages/*/package.json,apps/extension/src/**,apps/extension/package.json,apps/mini/*/src/**,apps/mini/*/package.json,apps/web/src/**,apps/web/package.json,apps/ui/src/**}": ["workspaceDepsDeclared"],
     },
     tests: ["tools/scripts/test/**"],
   },
   {
     name: "cli", cwd: "packages/cli", args: [],
     sources: ["packages/core/src/**", "packages/browser/src/**", "packages/cli/**"],
-    whole: ["packages/cli/package.json", "packages/cli/vitest.config.ts", "packages/cli/vite.config.ts", "packages/cli/test/support/build.ts", "packages/core/src/index.ts", "tools/vitest.shared.ts"],
+    whole: ["packages/cli/package.json", "packages/cli/vitest.config.ts", "packages/cli/vite.config.ts", "packages/cli/test/support/build.ts", "packages/core/src/index.ts", "tools/vitest.shared.ts", "tools/vitest.shards.ts"],
     tests: ["packages/cli/test/**"],
     // Most CLI tests run dist/ghostly.mjs (built by the globalSetup) through `runner`, which imports none of what
     // the binary is built from. A change the build takes in (bundleReaches from `entry`; without the sources, one
@@ -160,11 +170,51 @@ export const UNIT_PROJECTS = [
   },
 ];
 
+/**
+ * CI's draft tier splits the unit projects over a few runners (`--unit-group <i>/<n>`): a change to core reaches most
+ * of ui, browser and cli, minutes each, and one after another they passed the job's 20 minutes. Each of these gets a
+ * group of its own while there are groups for it; the last group takes every other project.
+ */
+export const UNIT_ALONE = ["ui", "browser", "cli"];
+
+/**
+ * Projects of UNIT_ALONE too slow for one runner even alone: they run in two halves (`vitest --shard 1/2` and `2/2`,
+ * cut by time: tools/vitest.shards.ts), the first in their own group, the second beside the last group's small
+ * projects. A change reaching the CLI's bundle ran ~130 of its files for 6-8 minutes while the other groups took 1-2.
+ */
+export const UNIT_HALVED = ["cli"];
+
+/** `<i>/<n>` (1 ≤ i ≤ n) → { index, count }, or null. */
+export function parseUnitGroup(text) {
+  const m = /^(\d+)\/(\d+)$/.exec(text ?? "");
+  if (!m) return null;
+  const index = Number(m[1]);
+  const count = Number(m[2]);
+  return index >= 1 && index <= count ? { index, count } : null;
+}
+
+/** The group (1-based, of `count`) a unit project runs in: the one of its first half for a project of UNIT_HALVED. */
+export function unitGroupOf(name, count) {
+  const alone = UNIT_ALONE.indexOf(name);
+  return alone >= 0 && alone < count - 1 ? alone + 1 : count;
+}
+
+/**
+ * Every group (of `count`) a unit project runs in, each with the `--shard` it takes there (null: all of it). One
+ * group, unsharded, unless the project is halved and has a group of its own besides the last.
+ * @returns {{ group: number, shard: string | null }[]}
+ */
+export function unitPartsOf(name, count) {
+  const group = unitGroupOf(name, count);
+  if (!UNIT_HALVED.includes(name) || group === count) return [{ group, shard: null }];
+  return [{ group, shard: "1/2" }, { group: count, shard: "2/2" }];
+}
+
 /** `npm run lint`'s scope: what eslint is given, and what makes the whole lint run. */
 export const LINT = {
   scope: ["apps/ui/src/**", "packages/**", "apps/extension/src/**", "apps/extension/test/*.ts", "apps/web/src/**", "apps/mini/**", "e2e/**"],
   ext: /\.(?:[cm]?[jt]sx?)$/,
-  whole: ["eslint.config.mjs"],
+  whole: ["eslint.config.mjs", "tools/eslint/**"],
 };
 
 /**
@@ -278,7 +328,8 @@ export function packageImports(text, packages = KNOWN_PACKAGES) {
       const star = key.indexOf("*");
       if (key === sub) { out.push(stripExt(file)); break; }
       if (star < 0 || sub.length < key.length - 1 || !sub.startsWith(key.slice(0, star)) || !sub.endsWith(key.slice(star + 1))) continue;
-      out.push(stripExt(file.replace("*", stripExt(sub.slice(star, sub.length - (key.length - star - 1))))));
+      const part = stripExt(sub.slice(star, sub.length - (key.length - star - 1)));
+      out.push(stripExt(file.replaceAll("*", () => part)));
       break;
     }
   }
@@ -435,6 +486,34 @@ export function testsReading(changed, files) {
   return out.sort();
 }
 
+// ---------- locale strings ----------
+
+/**
+ * The files that use a changed locale file's strings: those in `strings.in` naming a key of its area (`"chat.…"`,
+ * `` `chat.${x}` `` for apps/ui/src/locales/<language>/chat.json, in any language: some tests render another), and the
+ * tests importing one of `strings.readers` (a locale whole: key parity, placeholders, plurals). vitest runs those
+ * tests, and the ones importing the others.
+ *
+ * @param {string[]} changed  changed files (deleted ones too: their keys go missing)
+ * @param {Record<string, string>} files  path → text of the files to look in
+ * @param {{files: string, in: string[], readers: string[]}} strings
+ * @returns {string[]} those files, sorted
+ */
+export function usingStrings(changed, files, strings) {
+  const locale = globToRegExp(strings.files);
+  const areas = [...new Set(changed.filter((p) => locale.test(p)).map((p) => p.split("/").pop().slice(0, -".json".length)))];
+  if (!areas.length) return [];
+  const key = new RegExp(`["'\`](?:${areas.map((a) => a.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})\\.[\\w$]`);
+  const within = strings.in.map(globToRegExp);
+  const readers = strings.readers.map(globToRegExp);
+  const out = [];
+  for (const [path, text] of Object.entries(files)) {
+    if (!within.some((re) => re.test(path))) continue;
+    if (key.test(text) || (isTest(path) && relativeImports(path, text).some((d) => readers.some((re) => re.test(d))))) out.push(path);
+  }
+  return out.sort();
+}
+
 // ---------- what a bundle is built from ----------
 
 /**
@@ -580,13 +659,14 @@ export function plan({ changed: all, inventory, e2eFiles, codeFiles, packages })
     // deleted (or renamed away: the diff has no renames) inside `sources`: vitest is given only files that exist.
     const outside = [...code.filter((c) => !c.exists || !match(p.sources, c.path)).map((c) => c.path), ...coreDependents.filter((f) => !match(p.sources, f))];
     const viaPath = outside.length && codeFiles ? testsReaching(outside, codeFiles, p.tests, packages).filter((f) => !direct.includes(f) && !viaCore.includes(f)) : [];
-    // A deleted file counts too: the test that reads it fails.
+    // A deleted file counts too: the test that reads it fails. So does a package.json whose "scripts" alone changed.
     const read = Object.entries(p.reads ?? {})
-      .filter(([glob]) => changed.some((c) => match([glob], c.path)))
+      .filter(([glob]) => all.some((c) => match([glob], c.path)))
       .flatMap(([, names]) => names.map((n) => `tools/scripts/test/${n}.test.ts`))
       .concat(p.reads ? [] : readers.filter((f) => match(p.tests, f)))
       .filter((f, i, all) => all.indexOf(f) === i && !direct.includes(f) && !viaCore.includes(f) && !viaPath.includes(f));
-    const files = [...direct, ...viaCore, ...viaPath, ...read];
+    const strings = p.strings && codeFiles ? usingStrings(changed.map((c) => c.path), codeFiles, p.strings).filter((f) => ![...direct, ...viaCore, ...viaPath, ...read].includes(f)) : [];
+    const files = [...direct, ...viaCore, ...viaPath, ...read, ...strings];
     const reach = p.bundle && codeFiles ? bundleReaches(p.bundle.entry, codeFiles, packages) : null;
     const bundled = p.bundle ? code.filter((c) => (reach ? reach.has(stripExt(c.path)) : match(p.bundle.sources, c.path))) : [];
     if (bundled.length && !files.includes(p.bundle.runner)) files.push(p.bundle.runner);
@@ -597,6 +677,7 @@ export function plan({ changed: all, inventory, e2eFiles, codeFiles, packages })
     if (viaCore.length) parts.push(`${viaCore.length} importer(s) of the changed core code`);
     if (viaPath.length) parts.push(`${viaPath.length} test file(s) importing the change by relative path`);
     if (read.length) parts.push(`${read.length} test file(s) reading a changed file from disk`);
+    if (strings.length) parts.push(`${strings.length} file(s) using a changed locale file's strings`);
     if (bundled.length) parts.push(`the tests of the built CLI (${bundled.length} changed file(s) it is built from)`);
     return { ...p, mode: "related", files, reason: `vitest related over ${parts.join(" + ")}${tests ? ` (${tests} test file(s) among them)` : ""}` };
   });

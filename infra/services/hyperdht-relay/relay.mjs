@@ -9,6 +9,11 @@ import { WebSocketServer } from 'ws'
 
 const require = createRequire(import.meta.url)
 
+// Every span of time the relay measures reads a monotonic clock, as the push relay's counts do: a host clock set back
+// (an NTP step, an operator fixing a clock that ran ahead) read as a refill an hour negative stopped reading each client
+// for that hour, so its pongs went unread and it was dropped, and kept the listens before the step in their minute.
+const monotonicNow = () => performance.now()
+
 /**
  * What one relay accepts. A Ghostly browser holds one WebSocket, listens once per saved chat or group link (at most
  * eight native listeners per app, and one per linked device) and dials a contact now and then; everything above that
@@ -70,11 +75,14 @@ export const DEFAULT_LIMITS = Object.freeze({
 /**
  * The congestion window of the relay's one HyperDHT node: requests it may have out per 750 ms tick before the rest wait
  * in its queue, for every client together. dht-rpc's default (80) is sized for one app, and each listen's announcer pings
- * its 3 nodes every 3 s, about one request a second per listen: measured on loopback, 80 keeps up with about 1,000
- * listens and 320 with 4,096, so a window of listens / 12 sends them all. At the defaults 512 × 16 / 12 = 683. Never
- * below dht-rpc's 80; at most 2048 (24,576 listens), past which a relay is better split in two.
+ * its 3 nodes every 3 s, about one request a second per listen, all at once after a restart. Measured on loopback with
+ * the relay full (its own testnet, 20 s idle): listens / 12 left 400 to 900 pings waiting at 1,024 listens, and at 4,096
+ * and 8,192 a queue of 20,000 to 42,000 that kept growing, its timeouts bringing refreshes that queue more; listens / 2
+ * kept it empty (1,024 listens) or emptied it within seconds (8,192 at 2048). Never below dht-rpc's 80; at most 2048,
+ * which the defaults reach (512 × 16 / 2 is past it) and which keeps their 8,192 listens moving: a relay set for more
+ * is better split in two.
  */
-export const relayWindow = ({ clients, listens }) => Math.min(2048, Math.max(80, Math.ceil(clients * listens / 12)))
+export const relayWindow = ({ clients, listens }) => Math.min(2048, Math.max(80, Math.ceil(clients * listens / 2)))
 
 /**
  * dht-relay 0.4.3 (its latest release) hands a browser the announce record where the browser expects the
@@ -87,9 +95,13 @@ export const relayWindow = ({ clients, listens }) => Math.min(2048, Math.max(80,
  * on). A signature comes within `SIGN_MS` or while the browser is there, or not at all. `onLeave(fail)` calls `fail`
  * when the browser leaves (at once if it has) and returns what forgets it: a wait on the client's `gone` itself stayed
  * there for every signature after it came, until the browser left.
+ * hyperdht's announcer also asks for one for a node whose answer had no token (seen with a few thousand listens through
+ * one relay): dht-relay cannot encode that request, and a client whose message cannot be sent is dropped (guardProtocol),
+ * every listen and dial with it. It is refused here, which fails that node's announcement only, as on a native node.
  */
 const SIGN_MS = 10_000
 const fixSign = (sign, onLeave) => sign && ((target, token, id, ann, keyPair) => {
+  if (token?.byteLength !== 32 || id?.byteLength !== 32) return Promise.reject(new Error('No token'))
   let timer
   let forget = () => {}
   return Promise.race([
@@ -134,7 +146,134 @@ async function holdsKey(keyPair, options, onLeave) {
   sodium.crypto_generichash_batch(signable.subarray(32), [target, id, token, encode(peerEncoding, ann.peer)])
   return sodium.crypto_sign_verify_detached(signature, signable, publicKey)
 }
-const listensOn = (dht, keyPair) => [...dht.listening].some(server => server._keyPair && keyPair?.publicKey && Buffer.compare(server._keyPair.publicKey, keyPair.publicKey) === 0)
+/**
+ * Where a dial's stream goes. A far server that says it is open has HyperDHT connect the dial's UDX stream to the first
+ * public address it names, whatever that is, and send it everything the client writes: through the relay, anyone could
+ * have its node send UDP to any public host and port, from the relay's address. The public addresses a far server names
+ * are dropped from its reply to a dial here, so HyperDHT connects to the address the DHT node that relayed the handshake
+ * saw it at (an open server names that one itself). Its private ones stay: HyperDHT tries them only on a LAN, by a ping.
+ * Every other way a dial connects follows a packet from the far peer. The relays a far server names go too: HyperDHT
+ * keeps them for the next dial to that key and sends its handshake and lookup there first, wherever they are; without
+ * them it keeps the DHT nodes it reached the far server through itself.
+ *
+ * The address "the DHT node saw it at" is only that node's word, though: a reply relayed by a DHT node carries the far
+ * server's address as that node writes it, and a node run by whoever owns the dialled key writes any it likes, loopback
+ * and LAN addresses of the relay's own host too. HyperDHT connects the stream there at once when the far server says it
+ * is open or names no relays to holepunch through. A relayed reply has neither here: an open far server is taken as one
+ * to wait for, which HyperDHT does when the relay's node names its own address (the far server connects to it, and the
+ * stream goes where that packet came from), and holepunches otherwise. One that names no relays is passed on only to a
+ * relay's node that names its address, with the DHT node that relayed it as its relay so HyperDHT waits there too: a
+ * relay's node that names none could only send the stream to the address it was told, so that reply is dropped. A
+ * reply that comes straight from the node that answered (unrelayed) has HyperDHT connect to that node, where it came from.
+ */
+const { isBogon } = hyperdht('bogon')
+const { FIREWALL } = hyperdht('./lib/constants.js')
+const Router = hyperdht('./lib/router.js')
+const NoiseWrap = hyperdht('./lib/noise-wrap.js')
+const noiseWrap = (keyPair, remotePublicKey) => new NoiseWrap(keyPair, remotePublicKey)
+// A relayed reply's Noise message → the DHT node that relayed it, as HyperDHT's router hands it on.
+const relayedReplies = new WeakMap()
+const peerHandshake = Router.prototype.peerHandshake
+Router.prototype.peerHandshake = async function (target, request, to) {
+  const reply = await peerHandshake.call(this, target, request, to)
+  if (reply.relayed) relayedReplies.set(reply.noise, to)
+  return reply
+}
+const reached = (payload, relayedBy, open) => {
+  if (!payload) return payload
+  const own = {
+    ...payload,
+    ...(payload.addresses4?.length && { addresses4: payload.addresses4.filter(address => isBogon(address.host)) }),
+    relayAddresses: null
+  }
+  if (!relayedBy) return own
+  if (own.holepunch?.relays?.length) return { ...own, firewall: own.firewall === FIREWALL.OPEN ? FIREWALL.CONSISTENT : own.firewall }
+  if (!open) return null
+  return { ...own, firewall: FIREWALL.CONSISTENT, holepunch: { id: own.holepunch?.id ?? 0, relays: [{ relayAddress: relayedBy, peerAddress: relayedBy }] } }
+}
+const reachedOnly = create => (...args) => {
+  const handshake = create(...args)
+  // Whether the relay's node named its own address in the dial's request (HyperDHT's `c.firewall`).
+  let open = false
+  const send = handshake.send.bind(handshake)
+  handshake.send = (payload, ...rest) => {
+    open = payload?.firewall === FIREWALL.OPEN
+    return send(payload, ...rest)
+  }
+  const recv = handshake.recv.bind(handshake)
+  // NoiseWrap answers at once, the client's handshake (HandshakeProxy) in a promise.
+  handshake.recv = (noise, ...rest) => {
+    const relayedBy = relayedReplies.get(noise)
+    const payload = recv(noise, ...rest)
+    const pass = answer => reached(answer, relayedBy, open)
+    return typeof payload?.then === 'function' ? payload.then(pass) : pass(payload)
+  }
+  return handshake
+}
+
+/**
+ * hyperdht 6.36.0 refuses a listen on a key its node already listens on by comparing that key with every listening
+ * server's: after a restart at the default limits, 8,192 listens at once made 33 million comparisons, a fifth of the
+ * relay's CPU, its thread pegged while most listens missed a browser's 20 s. Each node now keeps its servers by key as
+ * each takes one, and a listen looks its own up. A server holds its key, as hyperdht's walk read it, while it is in the
+ * node's list and has the key: the list is checked on each look, so a server left in the map past that holds nothing.
+ * `_listen` is hyperdht's own, the walk aside.
+ */
+const Server = hyperdht('./lib/server.js')
+const Announcer = hyperdht('./lib/announcer.js')
+const { unslabbedHash } = hyperdht('./lib/crypto.js')
+const { NODE_DESTROYED, KEYPAIR_ALREADY_USED } = hyperdht('./lib/errors.js')
+const safetyCatch = hyperdht('safety-catch')
+const b4a = hyperdht('b4a')
+// Node → hex public key → the server that took it last.
+const keyHolders = new WeakMap()
+const holdersOf = dht => {
+  let holders = keyHolders.get(dht)
+  if (!holders) keyHolders.set(dht, holders = new Map())
+  return holders
+}
+const holderOf = (dht, publicKey) => {
+  const server = keyHolders.get(dht)?.get(b4a.toString(publicKey, 'hex'))
+  return server && server._keyPair && dht.listening.has(server) ? server : null
+}
+Server.prototype._listen = async function (keyPair, opts) {
+  this.dht.listening.add(this)
+  try {
+    await this.dht.bind()
+    if (this._closing) return
+    if (holderOf(this.dht, keyPair.publicKey)) throw KEYPAIR_ALREADY_USED()
+    this.target = unslabbedHash(keyPair.publicKey)
+    this._keyPair = keyPair
+    this._heldKey = b4a.toString(keyPair.publicKey, 'hex')
+    holdersOf(this.dht).set(this._heldKey, this)
+    this._announcer = new Announcer(this.dht, keyPair, this.target, opts)
+    this.dht._router.set(this.target, {
+      relay: null,
+      record: this._announcer.record,
+      onpeerhandshake: this._onpeerhandshake.bind(this),
+      onpeerholepunch: this._onpeerholepunch.bind(this),
+    })
+    this._localAddresses().catch(safetyCatch)
+    if (this.suspended) await this._announcer.suspend()
+    await this._announcer.start()
+  } catch (err) {
+    await this._stopListening()
+    this._gc()
+    throw err
+  }
+  if (this._closing) return
+  if (this.dht.destroyed) throw NODE_DESTROYED()
+  if (this.pool) this.pool._attachServer(this)
+  this.emit('listening')
+}
+// Out of the node's list, out of the map (unless another server has taken the key since).
+const gc = Server.prototype._gc
+Server.prototype._gc = function () {
+  const holders = keyHolders.get(this.dht)
+  if (this._heldKey && holders?.get(this._heldKey) === this) holders.delete(this._heldKey)
+  return gc.call(this)
+}
+const listensOn = (dht, keyPair) => keyPair?.publicKey?.byteLength === 32 && holderOf(dht, keyPair.publicKey) !== null
 
 /**
  * The DHT one client's relay session sees: listen and dial within its budget, nothing else. Topic lookups
@@ -198,7 +337,7 @@ function clientDht(dht, limits, drop, gone, log, wrote) {
   return new Proxy(dht, {
     get(target, prop) {
       if (prop === 'createServer') return (options, onconnection) => {
-        const now = Date.now()
+        const now = monotonicNow()
         listens = listens.filter(at => now - at < 60_000)
         if (listens.push(now) > limits.listensPerMinute) { drop('listen rate'); throw new Error('Listen rate reached') }
         if (++listening > limits.listens) { drop('listen limit'); throw new Error('Listen limit reached') }
@@ -225,12 +364,12 @@ function clientDht(dht, limits, drop, gone, log, wrote) {
         return server
       }
       if (prop === 'connect') return (publicKey, options) => {
-        const now = Date.now()
+        const now = monotonicNow()
         dials = dials.filter(at => now - at < 60_000)
         if (dials.push(now) > limits.connectsPerMinute) { drop('dial limit'); throw new Error('Dial limit reached') }
         if (streams.size >= limits.streams) { drop('stream limit'); throw new Error('Stream limit reached') }
         watchIdle()
-        return hold(target.connect(publicKey, { ...options, createHandshake: untracked(options?.createHandshake) }))
+        return hold(target.connect(publicKey, { ...options, createHandshake: reachedOnly(untracked(options?.createHandshake) ?? noiseWrap) }))
       }
       if (prop === 'lookup' || prop === 'announce' || prop === 'lookupAndUnannounce' || prop === 'unannounce') return () => {
         drop('topic query'); throw new Error('Topic queries are not relayed')
@@ -263,7 +402,8 @@ const unsent = stream => {
  * here, before the relay's node makes any. An ack frees exactly what its write held (its `buffer` or `buffers`, which
  * udx-native drops then); a write the native side refuses (not connected) throws before it is counted.
  */
-const UDXStream = createRequire(hyperdht.resolve('dht-rpc'))('udx-native/lib/stream.js')
+const dhtRpc = createRequire(hyperdht.resolve('dht-rpc'))
+const UDXStream = dhtRpc('udx-native/lib/stream.js')
 const writeBytes = write => {
   if (write.buffer) return write.buffer.byteLength
   let bytes = 0
@@ -282,6 +422,132 @@ UDXStream.prototype._onack = function (id) {
   const write = this._wreqs[id]
   if (write) this._unacked = Math.max(0, (this._unacked ?? 0) - writeBytes(write))
   return acked.call(this, id)
+}
+
+/**
+ * dht-rpc 6.28.0 hands each reply to its request by walking `inflight`, every request the node has out or waiting in its
+ * queue, and finds a request it destroys (its last timeout) with indexOf over the same list. A relay full to its limits
+ * has thousands there (each listen's keep-alives, a restart's lookups and announcements): after a restart the two walks
+ * took a third of the relay's CPU, its thread pegged while most listens missed a browser's 20 s. `inflight` now keeps
+ * each request's slot and the requests of each tid (tids wrap at 65,536, so two may share one), and a reply goes to the
+ * request of its tid sent to the node that answers, a destroy to its slot, at once. Everything else dht-rpc does with the
+ * list is unchanged.
+ *
+ * A full relay has about as many requests in flight as there are tids, most waiting in the queue, so a new request nearly
+ * always shares its tid with an older one sent to another node. dht-rpc hands a reply to the first request of its tid it
+ * finds: after a restart at the default limits, one reply in six went to a request sent elsewhere, that lookup taking
+ * another target's closest nodes while the request the reply was for timed out and went again. A reply from a node none
+ * of its tid's requests went to (a server answers a handshake from its own socket) still goes to the oldest.
+ */
+class Inflight extends Array {
+  // tid → its requests in flight, oldest first.
+  tids = new Map()
+  push(request) {
+    if (!requestPatched) patchRequest(Object.getPrototypeOf(request))
+    request._slot = this.length
+    super.push(request)
+    const same = this.tids.get(request.tid)
+    if (same) same.push(request)
+    else this.tids.set(request.tid, [request])
+    return this.length
+  }
+  pop() {
+    if (!this.length) return undefined
+    const request = super.pop()
+    request._slot = -1
+    const same = this.tids.get(request.tid)
+    if (same.length === 1) this.tids.delete(request.tid)
+    else same.splice(same.indexOf(request), 1)
+    return request
+  }
+  indexOf(request) {
+    return request?._slot >= 0 && this[request._slot] === request ? request._slot : -1
+  }
+  // The request into the last slot, the last one into its: dht-rpc then pops it.
+  toLast(request) {
+    const i = this.indexOf(request)
+    const last = this.length - 1
+    if (i === -1 || i === last) return
+    this[i] = this[last]
+    this[i]._slot = i
+    this[last] = request
+    request._slot = last
+  }
+  // The request of `tid` sent to `from`, or the oldest of that tid.
+  first(tid, from) {
+    const same = this.tids.get(tid)
+    if (!same || same.length === 1) return same?.[0]
+    return same.find(request => request.to.port === from.port && request.to.host === from.host) ?? same[0]
+  }
+}
+const IO = dhtRpc('./lib/io.js')
+// dht-rpc sets an empty list in the constructor; this keeps an Inflight in its place.
+Object.defineProperty(IO.prototype, 'inflight', {
+  set(list) {
+    const inflight = new Inflight()
+    for (const request of list) inflight.push(request)
+    Object.defineProperty(this, 'inflight', { value: inflight, writable: true, enumerable: true, configurable: true })
+  },
+})
+let requestPatched = false
+// dht-rpc's Request is not exported: patched from the first one made.
+function patchRequest(proto) {
+  requestPatched = true
+  const destroy = proto.destroy
+  proto.destroy = function (error) {
+    if (!this.destroyed && this._io.inflight instanceof Inflight) this._io.inflight.toLast(this)
+    return destroy.call(this, error)
+  }
+}
+const c = dhtRpc('compact-encoding')
+const peer = dhtRpc('./lib/peer.js')
+const RESPONSE_ID = (0b0001 << 4) | 0b11
+// dht-rpc's own decodeReply and validateId.
+function decodeReply(from, state) {
+  try {
+    const flags = c.uint.decode(state)
+    const tid = c.uint16.decode(state)
+    const to = peer.ipv4.decode(state)
+    const id = flags & 1 ? c.fixed32.decode(state) : null
+    const token = flags & 2 ? c.fixed32.decode(state) : null
+    const closerNodes = flags & 4 ? peer.ipv4Array.decode(state) : null
+    const error = flags & 8 ? c.uint.decode(state) : 0
+    const value = flags & 16 ? c.buffer.decode(state) : null
+    if (id !== null) {
+      const expected = peer.id(from.host, from.port)
+      from.id = b4a.equals(expected, id) ? expected : null
+    }
+    return { tid, rtt: 0, from, to, token, closerNodes, error, value }
+  } catch {
+    return null
+  }
+}
+const onmessage = IO.prototype.onmessage
+// A request goes to dht-rpc's own; a reply as dht-rpc 6.28.0 handles it, found by its tid.
+IO.prototype.onmessage = function (socket, buffer, { host, port }) {
+  if (buffer[0] !== RESPONSE_ID || !(this.inflight instanceof Inflight)) return onmessage.call(this, socket, buffer, { host, port })
+  if (buffer.byteLength < 2 || !(port > 0 && port < 65536) || this.suspended === true) return
+  const from = { id: null, host, port }
+  const res = decodeReply(from, { start: 1, end: buffer.byteLength, buffer })
+  if (res === null) return
+  const req = this.inflight.first(res.tid, from)
+  if (!req) return
+  const external = socket !== (this.firewalled ? this.clientSocket : this.serverSocket)
+  res.rtt = Date.now() - req._timestamp
+  if (this._adt && req.sent <= 2) this._adt.put(`${req.to.host}:${req.to.port}`, res.rtt)
+  this.inflight.toLast(req)
+  this.inflight.pop()
+  if (req.session) req.session._detach(req)
+  if (req._timeout) {
+    clearTimeout(req._timeout)
+    req._timeout = null
+  }
+  this.congestion.recv()
+  if (req.internal && req.command < this.stats.commands.length) this.stats.commands[req.command].rx++
+  this.stats.requests.active--
+  this.stats.requests.responses++
+  this.onresponse(res, external)
+  req.onresponse(res, req)
 }
 
 /**
@@ -306,6 +572,9 @@ function guardProtocol(protocol, drop) {
  * protomux hands every error a client's messages raise (one it cannot decode, a throw in dht-relay's handler for it) to
  * safety-catch, which throws a TypeError or a RangeError again where nothing catches it: one client's message would end
  * the process and every client with it. The client's own mux now drops that client only.
+ *
+ * A client opens one session, dht-relay's, and protomux keeps a slot for every session a client opens (a rejected one
+ * too) until it leaves: one that opens a second is dropped, the rest of what it sent read as nothing.
  */
 function guardMux(mux, drop) {
   const fail = error => {
@@ -316,6 +585,20 @@ function guardMux(mux, drop) {
   mux._safeDestroy = fail
   mux._safeDestroyBound = fail
   mux._warn = error => mux.stream.emit('warning', error)
+  const onopensession = mux._onopensession.bind(mux)
+  let opened = false
+  mux._onopensession = state => {
+    if (!opened) {
+      opened = true
+      return onopensession(state)
+    }
+    if (!mux._destroying) {
+      drop('sessions')
+      mux._destroying = true
+      mux.stream.destroy()
+    }
+    return null
+  }
 }
 
 // Not in the package's exports: loaded by path, the same module dht-relay itself uses (0.4.3 is pinned).
@@ -479,17 +762,26 @@ Object.defineProperty(FirewallProxy.prototype, '_deny', {
  * over the client's. Behind `proxies` reverse proxies (a tunnel, nginx), the entry that many from the end of
  * `X-Forwarded-For` (the ones before it are the client's to write). Otherwise, or without the header, the socket's.
  */
-export function addressOf(request, { proxies = 0, cloudflare = false } = {}) {
-  const socket = request.socket.remoteAddress ?? 'unknown'
+export function addressOf(request, options = {}) {
+  return forwardedAddress(request, options) ?? request.socket.remoteAddress ?? 'unknown'
+}
+
+/** The client's address from the header `proxies` or `cloudflare` says to read (see addressOf), or null without it. */
+export function forwardedAddress(request, { proxies = 0, cloudflare = false } = {}) {
   if (cloudflare) {
     const header = request.headers['cf-connecting-ip']
     const connecting = String(Array.isArray(header) ? header[0] : header ?? '').trim()
     if (connecting) return connecting
   }
-  if (!proxies) return socket
+  if (!proxies) return null
+  const hops = forwardedHops(request)
+  return hops.length >= proxies ? hops[hops.length - proxies] : null
+}
+
+/** The entries of a request's `X-Forwarded-For`, in order (none without the header). */
+export function forwardedHops(request) {
   const header = request.headers['x-forwarded-for']
-  const hops = (Array.isArray(header) ? header.join(',') : header ?? '').split(',').map(item => item.trim()).filter(Boolean)
-  return hops.length >= proxies ? hops[hops.length - proxies] : socket
+  return (Array.isArray(header) ? header.join(',') : header ?? '').split(',').map(item => item.trim()).filter(Boolean)
 }
 
 /**
@@ -577,7 +869,7 @@ export async function startRelay(options = {}) {
   // ever does: the node is up, its routing table stays empty, and a browser's listen through it still resolves.
   let answeredAt = null
   const onresponse = dht.io.onresponse
-  dht.io.onresponse = (...args) => { answeredAt = Date.now(); return onresponse(...args) }
+  dht.io.onresponse = (...args) => { answeredAt = monotonicNow(); return onresponse(...args) }
   await dht.ready()
   if (dht.toArray().length === 0) log('bootstrap reached no node')
 
@@ -620,13 +912,18 @@ export async function startRelay(options = {}) {
   const refusals = refusalLines(log)
   const flushing = setInterval(refusals.flush, 60_000)
   flushing.unref?.()
-  // Once per start each: a proxy in front the relay was not told about makes every client count as that proxy.
+  // Once per start each: a proxy in front the relay was not told about, or one it was told about that does not write
+  // the header, makes every client count as that proxy.
   const hinted = new Set()
-  const hint = (header, setting) => {
+  const hint = (header, line) => {
     if (hinted.has(header)) return
     hinted.add(header)
-    log(`requests carry ${header} but ${setting} is not set: every client counts as the proxy`)
+    log(line)
   }
+  const unset = (header, setting) => hint(header, `requests carry ${header} but ${setting} is not set: every client counts as the proxy`)
+  const missing = (header, setting) => hint(header, `requests arrive without ${header} though ${setting} is set: each counts as the proxy, so have the proxy write it or leave the setting out`)
+  // The header there with fewer entries than GHOSTLY_RELAY_PROXIES: the setting names more proxies than write it.
+  const fewer = entries => hint('X-Forwarded-For', `requests carry ${entries} X-Forwarded-For ${entries === 1 ? 'entry' : 'entries'} though GHOSTLY_RELAY_PROXIES is ${options.proxies}: each counts as the proxy, so set it to the number of proxies that write the header`)
 
   /**
    * On a full relay, what makes room for a client from `address` (null: none is made). A client holding one listen and
@@ -638,16 +935,16 @@ export async function startRelay(options = {}) {
    */
   const madeRoom = new Map()
   const makeRoom = address => {
-    if (Date.now() - (madeRoom.get(address) ?? -Infinity) < ROOM_MS) return null
+    if (monotonicNow() - (madeRoom.get(address) ?? -Infinity) < ROOM_MS) return null
     const own = perAddress.get(address)?.size ?? 0
     let most = null
     for (const held of perAddress.values()) if (!most || held.size > most.size) most = held
     if (!most || most.size <= own + 1) return null
     const [[, evict]] = most
-    return () => { madeRoom.set(address, Date.now()); evict() }
+    return () => { madeRoom.set(address, monotonicNow()); evict() }
   }
   const forgetRoom = setInterval(() => {
-    for (const [address, at] of madeRoom) if (Date.now() - at >= ROOM_MS) madeRoom.delete(address)
+    for (const [address, at] of madeRoom) if (monotonicNow() - at >= ROOM_MS) madeRoom.delete(address)
   }, 60_000)
   forgetRoom.unref?.()
 
@@ -679,11 +976,17 @@ export async function startRelay(options = {}) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: limits.payloadBytes, perMessageDeflate: false, autoPong: false })
 
   server.on('upgrade', (request, socket, head) => {
-    const address = addressKey(addressOf(request, { proxies: options.proxies, cloudflare: options.cloudflare }))
+    const forwarded = forwardedAddress(request, { proxies: options.proxies, cloudflare: options.cloudflare })
+    const address = addressKey(forwarded ?? request.socket.remoteAddress ?? 'unknown')
     // Cloudflare writes both headers: its own setting is the one to name.
     if (!options.cloudflare && !options.proxies) {
-      if (request.headers['cf-connecting-ip'] !== undefined) hint('CF-Connecting-IP', 'GHOSTLY_RELAY_CLOUDFLARE')
-      else if (request.headers['x-forwarded-for'] !== undefined) hint('X-Forwarded-For', 'GHOSTLY_RELAY_PROXIES')
+      if (request.headers['cf-connecting-ip'] !== undefined) unset('CF-Connecting-IP', 'GHOSTLY_RELAY_CLOUDFLARE')
+      else if (request.headers['x-forwarded-for'] !== undefined) unset('X-Forwarded-For', 'GHOSTLY_RELAY_PROXIES')
+    } else if (forwarded === null) {
+      const entries = forwardedHops(request).length
+      if (options.cloudflare) missing('CF-Connecting-IP', 'GHOSTLY_RELAY_CLOUDFLARE')
+      else if (entries) fewer(entries)
+      else missing('X-Forwarded-For', 'GHOSTLY_RELAY_PROXIES')
     }
     const origin = request.headers.origin
     // A refusal goes straight to the raw socket, which nothing else listens on: a client that has already reset it
@@ -759,10 +1062,10 @@ export async function startRelay(options = {}) {
     }
     // A token bucket on what the client sends, its pings and pongs too: past it, the relay stops reading its socket for a while.
     let tokens = limits.burstBytes
-    let last = Date.now()
+    let last = monotonicNow()
     let paused = false
     const spend = bytes => {
-      const now = Date.now()
+      const now = monotonicNow()
       tokens = Math.min(limits.burstBytes, tokens + (now - last) * limits.bytesPerSecond / 1000)
       last = now
       tokens -= bytes
@@ -818,6 +1121,13 @@ export async function startRelay(options = {}) {
     ws.on('error', () => drop('socket error'))
     const stream = new WsStream(false, ws)
     stream.on('error', () => drop('stream error'))
+    // A client that resets right after its upgrade has a closed socket by the time the stream opens: dht-relay's open
+    // failed then with an error its handshake also rejected with, where nothing catches it (one `unhandled` line per
+    // client). The stream ends without an error instead; the socket's close has let the client go.
+    stream._open = cb => {
+      if (ws.readyState !== ws.OPEN) stream.destroy()
+      cb(null)
+    }
     // dht-relay 0.4.3 hands the WebSocket every chunk a HyperDHT stream brings, however slowly the client reads, and
     // a UDX stream has no receive window to slow its far end: a client that reads slowly or not at all would have the
     // relay hold everything its far peers send. Past `queuedBytes` waiting for it (with what waits for its far peers), it
@@ -860,7 +1170,7 @@ export async function startRelay(options = {}) {
     stats: () => ({
       clients: clients.size,
       ...stats,
-      sinceAnswerMs: answeredAt === null ? null : Date.now() - answeredAt,
+      sinceAnswerMs: answeredAt === null ? null : monotonicNow() - answeredAt,
       held: [...nodes].reduce((held, node) => ({ handshakes: held.handshakes + node._handshakes.size, signatures: held.signatures + node._signatures.size }), { handshakes: 0, signatures: 0 }),
     }),
     // Each client is told the relay is going away (1001), so it reconnects as it would after a restart, not a crash;
@@ -907,7 +1217,7 @@ export function originOf (entry) {
  * once an hour and at most `most` values an hour, so a misspelt GHOSTLY_RELAY_ORIGINS shows in the log and a client
  * sending a new value each time cannot flood it.
  */
-export function originRefusals (log, { most = 16, now = Date.now } = {}) {
+export function originRefusals (log, { most = 16, now = monotonicNow } = {}) {
   let seen = new Set()
   let since = now()
   let full = false
@@ -990,7 +1300,8 @@ export const networkOf = ({ testnet, bootstrap }) =>
  * The relay's settings from its environment (server.mjs): PORT (49443), HOST (0.0.0.0; 127.0.0.1 behind proxies
  * or Cloudflare), GHOSTLY_HYPERDHT_BOOTSTRAP,
  * GHOSTLY_HYPERDHT_TESTNET, GHOSTLY_RELAY_ORIGINS, GHOSTLY_RELAY_CLOUDFLARE (1 or 0), GHOSTLY_RELAY_PROXIES (0) and
- * GHOSTLY_RELAY_<LIMIT>. Throws on one present but not of its kind, and on a testnet with bootstrap nodes. `ignored`
+ * GHOSTLY_RELAY_<LIMIT>. Throws on one present but not of its kind, on a testnet with bootstrap nodes, and on
+ * GHOSTLY_RELAY_CLOUDFLARE with GHOSTLY_RELAY_PROXIES. `ignored`
  * names the other GHOSTLY_RELAY_* and GHOSTLY_HYPERDHT_* variables (see ignoredSettings), for server.mjs to print.
  */
 export function readSettings (env) {
@@ -1005,6 +1316,8 @@ export function readSettings (env) {
   if (testnet && bootstrap.length) throw new Error(`GHOSTLY_HYPERDHT_TESTNET=${JSON.stringify(env.GHOSTLY_HYPERDHT_TESTNET)}: expected no GHOSTLY_HYPERDHT_BOOTSTRAP with it (the testnet is a network of its own)`)
   const proxies = setting(env, 'GHOSTLY_RELAY_PROXIES', 0, 'count')
   const cloudflare = setting(env, 'GHOSTLY_RELAY_CLOUDFLARE', false, 'flag')
+  // forwardedAddress reads CF-Connecting-IP before X-Forwarded-For: behind nginx or Caddy a client writes its own.
+  if (proxies && cloudflare) throw new Error(`GHOSTLY_RELAY_PROXIES=${JSON.stringify(env.GHOSTLY_RELAY_PROXIES)}: expected no GHOSTLY_RELAY_CLOUDFLARE=1 with it (behind Cloudflare set GHOSTLY_RELAY_CLOUDFLARE alone; behind nginx or Caddy set GHOSTLY_RELAY_CLOUDFLARE=0)`)
   return {
     port: setting(env, 'PORT', 49443, 'port'),
     // Behind a proxy only the proxy should reach it: anyone else could write the header a client is counted by.

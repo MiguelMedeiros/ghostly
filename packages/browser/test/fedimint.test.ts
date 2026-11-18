@@ -192,6 +192,9 @@ describe("the Fedimint wallet", () => {
       modules: { 0: { kind: "ln", config: "00" }, 1: { kind: "mint", config: "00" }, 2: { kind: "wallet", config: "037e51776b6828fedab5bffa0afe000f4240" } } };
     expect(federationInfo("ab".repeat(32), config)).toMatchObject({ name: "Ghostly regtest", network: "regtest", consensusVersion: "2.1", modules: ["ln", "mint", "wallet"], guardians: [{ name: "ghostly-guardian", url: "ws://127.0.0.1:47095/" }] });
     expect(federationInfo("ab".repeat(32), { ...config, modules: { 0: { kind: "wallet", config: "fed9b4bef9" } } }).network).toBe("bitcoin");
+    // The federation's and its guardians' names, without the characters that hide text or reorder it.
+    const hidden = { ...config, global: { ...config.global, api_endpoints: { 0: { url: "ws://127.0.0.1:47095/", name: "\u202eguardian\u200b" } }, meta: { federation_name: "Ghostly\u200b regtest\u2066" } } };
+    expect(federationInfo("ab".repeat(32), hidden)).toMatchObject({ name: "Ghostly regtest", guardians: [{ name: "guardian" }] });
     expect(federationInfo("ab".repeat(32), { ...config, modules: { 0: { kind: "wallet", config: "fed9b4bef9fedab5bffa" } } }).network, "two networks: unknown").toBeUndefined();
     // A preview (before joining) names it `unknown_module_hex`; without a wallet module, the Lightning module says it.
     expect(federationInfo("ab".repeat(32), { ...config, modules: { 0: { kind: "ln", unknown_module_hex: "0037a8ae30fedab5bffa" }, 1: { kind: "mint", unknown_module_hex: "02fd" } } }).network).toBe("regtest");

@@ -11,7 +11,7 @@ import { forgetAppsAvailable } from "../../lib/apps/flag";
 import { forgetInstalledApps } from "../../lib/apps/installed";
 import { setAppOpener } from "../../lib/apps/open";
 import type { AppOpener } from "../../lib/apps/open";
-import { appWithContact, chatApp, requestOpenInChat, takeOpenRequest, updateChatApp } from "../../lib/apps/running";
+import { appWithContact, chatApp, chatAppOver, requestOpenInChat, takeOpenRequest, updateChatApp, useChatAppCovers } from "../../lib/apps/running";
 import { saveSession } from "../../lib/storage";
 import type { ChatSession } from "../../lib/types";
 import type { InstalledAppView } from "@ghostly/browser/engine/apps";
@@ -213,13 +213,16 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     expect(app).toHaveAttribute("data-place", "beside");
     expect(within(app).queryByTestId("mini-app-back")).not.toBeInTheDocument();
     const wide = within(app).getByTestId("mini-app-wide");
+    // Named for what it does next, never a toggle too: "Show the chat, pressed" was said with the chat hidden.
     expect(wide).toHaveAccessibleName("Full width");
+    expect(wide).not.toHaveAttribute("aria-pressed");
     await user.click(wide);
     expect(app).toHaveAttribute("data-place", "wide");
-    expect(wide).toHaveAttribute("aria-pressed", "true");
     expect(wide).toHaveAccessibleName("Show the chat");
+    expect(wide).not.toHaveAttribute("aria-pressed");
     await user.click(wide);
     expect(app).toHaveAttribute("data-place", "beside");
+    expect(wide).toHaveAccessibleName("Full width");
     // Layout changes never moved the frame.
     expect(started[0]!.frame.isConnected).toBe(true);
 
@@ -252,7 +255,7 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
 
     // Opened again from the chat (its card, or + → Apps): the same app, not a new one.
     await user.click(within(app).getByTestId("mini-app-back"));
-    let again: "shown" | void = undefined;
+    let again: "shown" | "superseded" | void = undefined;
     await act(async () => { again = await open(REF, "link-1"); });
     expect(app).toBeVisible();
     expect(started).toHaveLength(1);
@@ -291,6 +294,189 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     expect(screen.getByTestId("mini-app-resume")).toHaveFocus();
   });
 
+  it("past a phone's width with no room beside the chat (a tablet held upright), covers the chat with Back to it, as a full-screen app", async () => {
+    // The chat's page beside the chat list at 1024 px: 604 px. Beside it, the chat had 244 px, and at 768 px none.
+    windowIs(false);
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) { return this.classList.contains("chat-pane") ? 604 : 0; });
+    try {
+      const { user } = panel();
+      await act(() => open(REF, "link-1"));
+      const app = screen.getByTestId("mini-app");
+      expect(app).toHaveAttribute("data-place", "wide");
+      expect(chatAppOver("link-1")).toBe(true);
+      expect(within(app).queryByTestId("mini-app-wide")).not.toBeInTheDocument();
+      const back = within(app).getByTestId("mini-app-back");
+      expect(back).toHaveFocus();
+
+      // Back: the chat, with the app one tap away and still running.
+      await user.click(back);
+      expect(app).not.toBeVisible();
+      expect(started[0]!.stop).not.toHaveBeenCalled();
+      await user.click(screen.getByTestId("mini-app-resume"));
+      expect(app).toBeVisible();
+    } finally {
+      width.mockRestore();
+    }
+  });
+
+  it("keeps the focus with the app as its chat's page gets room beside it, or loses it (a tablet turned, a window resized)", async () => {
+    windowIs(false);
+    let paneWidth = 604;
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) { return this.classList.contains("chat-pane") ? paneWidth : 0; });
+    const observed: ResizeObserverCallback[] = [];
+    vi.stubGlobal("ResizeObserver", class { constructor(callback: ResizeObserverCallback) { observed.push(callback); } observe() {} disconnect() {} });
+    const resized = (to: number) => act(() => { paneWidth = to; for (const callback of observed) callback([], {} as ResizeObserver); });
+    try {
+      const { user } = panel();
+      await act(() => open(REF, "link-1"));
+      const app = screen.getByTestId("mini-app");
+      expect(within(app).getByTestId("mini-app-back")).toHaveFocus();
+      // Room beside the chat: Back goes with the focus on it, which stays in the panel (Escape still closes it there).
+      resized(1006);
+      expect(app).toHaveAttribute("data-place", "beside");
+      expect(app).toHaveFocus();
+      // Beside it, the person types in the chat; then no room again: the chat goes under the app, and so would the focus.
+      await user.click(screen.getByRole("textbox", { name: "Message" }));
+      resized(604);
+      expect(app).toHaveAttribute("data-place", "wide");
+      expect(within(app).getByTestId("mini-app-back")).toHaveFocus();
+      // Beside it again with the focus in the chat: it stays there.
+      resized(1006);
+      await user.click(screen.getByRole("textbox", { name: "Message" }));
+      resized(1100);
+      expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus();
+    } finally {
+      width.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("widened past a phone's width with still no room beside the chat, keeps Back over it with the focus on it", async () => {
+    // A phone-width window made wider (a window resized, a tablet turned): no longer a phone, but the chat's page is
+    // 604 px, too narrow beside the app. Back was dropped for one render before the page was measured, the focus went
+    // into the panel then, and stayed there when Back came back.
+    let phone = true;
+    const changes: (() => void)[] = [];
+    const matchMedia = window.matchMedia.bind(window);
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => query === MOBILE_QUERY
+      ? ({ ...matchMedia(query), get matches() { return phone; }, addEventListener: (_: string, listener: () => void) => { changes.push(listener); }, removeEventListener: () => {} } as unknown as MediaQueryList)
+      : matchMedia(query));
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) { return this.classList.contains("chat-pane") ? 604 : 0; });
+    try {
+      panel();
+      await act(() => open(REF, "link-1"));
+      const app = screen.getByTestId("mini-app");
+      expect(app).toHaveAttribute("data-place", "phone");
+      const back = within(app).getByTestId("mini-app-back");
+      expect(back).toHaveFocus();
+      // Back never left the header on the way: the same button is still there, with the focus.
+      const dropped: Node[] = [];
+      const watch = new MutationObserver((records) => { for (const record of records) dropped.push(...record.removedNodes); });
+      watch.observe(app, { childList: true, subtree: true });
+      act(() => { phone = false; for (const change of changes) change(); });
+      for (const record of watch.takeRecords()) dropped.push(...record.removedNodes);
+      watch.disconnect();
+      expect(app).toHaveAttribute("data-place", "wide");
+      expect(dropped).not.toContain(back);
+      expect(within(app).getByTestId("mini-app-back")).toBe(back);
+      expect(back).toHaveFocus();
+    } finally {
+      width.mockRestore();
+    }
+  });
+
+  it("widened past a phone's width with room beside the chat, sits beside it with the focus in the panel", async () => {
+    let phone = true;
+    const changes: (() => void)[] = [];
+    const matchMedia = window.matchMedia.bind(window);
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => query === MOBILE_QUERY
+      ? ({ ...matchMedia(query), get matches() { return phone; }, addEventListener: (_: string, listener: () => void) => { changes.push(listener); }, removeEventListener: () => {} } as unknown as MediaQueryList)
+      : matchMedia(query));
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) { return this.classList.contains("chat-pane") ? 1006 : 0; });
+    try {
+      panel();
+      await act(() => open(REF, "link-1"));
+      const app = screen.getByTestId("mini-app");
+      expect(within(app).getByTestId("mini-app-back")).toHaveFocus();
+      act(() => { phone = false; for (const change of changes) change(); });
+      expect(app).toHaveAttribute("data-place", "beside");
+      expect(within(app).queryByTestId("mini-app-back")).not.toBeInTheDocument();
+      expect(app).toHaveFocus();
+    } finally {
+      width.mockRestore();
+    }
+  });
+
+  it("with no room beside the chat, still covers it while the chat is kept loaded off screen: the chat is not drawn again as it goes and comes back", async () => {
+    windowIs(false);
+    // A chat kept loaded off screen (App's `loaded`) is `display: none`: its page measures 0 px until it shows again.
+    let paneWidth = 604;
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) { return this.classList.contains("chat-pane") ? paneWidth : 0; });
+    const observed: ResizeObserverCallback[] = [];
+    vi.stubGlobal("ResizeObserver", class { constructor(callback: ResizeObserverCallback) { observed.push(callback); } observe() {} disconnect() {} });
+    const resized = (to: number) => act(() => { paneWidth = to; for (const callback of observed) callback([], {} as ResizeObserver); });
+    // What the chat's page reads (Chat.tsx hides its column under the app): each change draws the whole chat again.
+    const covers: boolean[] = [];
+    function Page() { covers.push(useChatAppCovers("link-1")); return null; }
+    try {
+      renderApp(<div className="chat-pane">
+        <Page />
+        <div className="chat-column"><ChatAppResume linkId="link-1" /><textarea aria-label="Message" /></div>
+        <ChatAppPanel linkId="link-1" sessionId="s1" contact={{ name: "Ana", named: true }} peerKey="peer" />
+      </div>);
+      act(() => fakeEngine.update({ links: [ana(true)] }));
+      await act(() => open(REF, "link-1"));
+      const app = screen.getByTestId("mini-app");
+      expect(app).toHaveAttribute("data-place", "wide");
+      const drawn = covers.length;
+
+      // Another chat or page opened: this one is hidden, and comes back as it was.
+      resized(0);
+      expect(app).toHaveAttribute("data-place", "wide");
+      resized(604);
+      expect(app).toHaveAttribute("data-place", "wide");
+      expect(covers.slice(drawn)).toEqual([]);
+      // A window made wide enough meanwhile is measured as the chat shows again: the app goes beside it.
+      resized(0);
+      resized(1100);
+      expect(app).toHaveAttribute("data-place", "beside");
+    } finally {
+      width.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("opened with the contact's identities open, sits beside a chat with room for it, as when it opened first", async () => {
+    // The chat's page at 1366 px beside the chat list: 946 px. With an app beside the chat, the identities lie over it
+    // there (contact-panel.css), whichever opened first. Measured with the identities docked while the app was still
+    // hidden, the app covered the chat when they opened first, and sat beside it when it did (real Chromium, real CSS).
+    windowIs(false);
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) { return this.classList.contains("chat-pane") ? 946 : 0; });
+    const offset = vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function (this: HTMLElement) { return this.classList.contains("contact-panel") ? 360 : 0; });
+    const page = (identities: boolean) => <div className="chat-pane">
+      <div className="chat-column"><ChatAppResume linkId="link-1" /><textarea aria-label="Message" /></div>
+      <ChatAppPanel linkId="link-1" sessionId="s1" contact={{ name: "Ana", named: true }} peerKey="peer" />
+      {identities && <aside className="contact-panel" />}
+    </div>;
+    try {
+      // The identities first, then the app.
+      const view = renderApp(page(true));
+      act(() => fakeEngine.update({ links: [ana(true)] }));
+      await act(() => open(REF, "link-1"));
+      const app = screen.getByTestId("mini-app");
+      expect(app).toHaveAttribute("data-place", "beside");
+      expect(within(app).queryByTestId("mini-app-back")).not.toBeInTheDocument();
+      // Closed and opened again beside it: still beside the chat.
+      view.rerender(page(false));
+      expect(app).toHaveAttribute("data-place", "beside");
+      view.rerender(page(true));
+      expect(app).toHaveAttribute("data-place", "beside");
+    } finally {
+      width.mockRestore();
+      offset.mockRestore();
+    }
+  });
+
   it("on a phone held upright, its Back, connection and Close are as big to tap as the chat header's (44 px)", async () => {
     const matchMedia = window.matchMedia.bind(window);
     vi.spyOn(window, "matchMedia").mockImplementation((query: string) => query === MOBILE_QUERY || query === PHONE_HEADER_QUERY
@@ -298,7 +484,7 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     panel();
     await act(() => open(REF, "link-1"));
     const app = screen.getByTestId("mini-app");
-    expect(within(app).getByTestId("app-connection-options")).toHaveClass("h-11", "w-11");
+    expect(within(app).getByTestId("app-connection-options")).toHaveClass("h-[44px]", "w-[44px]");
     expect(within(app).getByTestId("mini-app-close")).toHaveClass("h-11", "w-11");
     // Back as the chat header's Back right under it: 36 px wide only under 340 px (the name keeps its room), its tap
     // still 44 × 44 px there (`.tap-target`).

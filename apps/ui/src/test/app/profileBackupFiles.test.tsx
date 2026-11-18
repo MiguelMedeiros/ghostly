@@ -220,12 +220,25 @@ describe("a profile backup's file", () => {
     expect(await screen.findByTestId("restore-unprotected")).toHaveTextContent("This backup has no passphrase. Anyone who had the file could read it.");
     expect(screen.queryByTestId("restore-passphrase")).not.toBeInTheDocument();
     await user.click(screen.getByTestId("restore-go"));
-    expect(await screen.findByTestId("backup-done")).toHaveTextContent("Restored as “Work (restored)”.");
+    expect(await screen.findByTestId("backup-done")).toHaveTextContent("Restored as “\u2068Work (restored)\u2069”.");
     expect(vi.mocked(openProfileBackup).mock.calls[0][1], "no passphrase is made up for it").toBeUndefined();
     // A sealed one picked next asks for its passphrase again.
     await user.upload(screen.getByTestId("restore-file"), new File(['{"format":"ghostly-backup","version":1}'], "sealed.ghostly-backup"));
     expect(await screen.findByTestId("restore-passphrase")).toBeInTheDocument();
     expect(screen.queryByTestId("restore-unprotected")).not.toBeInTheDocument();
+  });
+
+  // In a language of the other direction, a name's ending punctuation was drawn on its other side ("!Club").
+  it("says which profile it restored, its name in its own direction", async () => {
+    vi.mocked(openProfileBackup).mockResolvedValue({ name: "Club!", protection: "none", payload: { profile: { name: "Club!" }, storage: {} } });
+    vi.mocked(restoreOpenedBackup).mockResolvedValue({ id: "copycopyco", name: "Club!", createdAt: 1, restored: true });
+    const { user } = renderApp(<ProfileBackups canSwitch={false} />, { language: "ar" });
+    await user.click(screen.getByTestId("restore-open"));
+    const header = `${JSON.stringify({ format: "ghostly-backup", version: 2, protection: "none", check: { name: "SHA-256-chain" } })}\n`;
+    await user.upload(screen.getByTestId("restore-file"), new File([header, "frames"], "open.ghostly-backup"));
+    await screen.findByTestId("restore-unprotected");
+    await user.click(screen.getByTestId("restore-go"));
+    expect(await screen.findByTestId("backup-done")).toHaveTextContent("تمت الاستعادة باسم «\u2068Club!\u2069».");
   });
 
   it("a restore shows its progress, and Cancel says nothing was restored", async () => {

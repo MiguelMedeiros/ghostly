@@ -18,13 +18,16 @@
 .reader-crumbs a:hover {
   color: var(--cyan);
 }
+/* The list of WISPs comes after the article in the HTML and goes in the first column here; Tab follows the columns. */
 .reader-layout {
   display: grid;
   grid-template-columns: 250px minmax(0, 1fr);
   gap: 48px;
   align-items: start;
+  reading-flow: grid-order;
 }
 .reader-side {
+  order: -1;
   position: sticky;
   top: calc(var(--nav-h) + 20px);
   max-height: calc(100svh - var(--nav-h) - 40px);
@@ -172,6 +175,13 @@
 }
 .reader-all a[aria-current="page"] .mono {
   color: var(--cyan);
+}
+/* Forced colors replace the background and the cyan: the WISP that is open keeps an underline. */
+@media (forced-colors: active) {
+  .reader-all a[aria-current="page"] {
+    text-decoration: underline 2px;
+    text-underline-offset: 4px;
+  }
 }
 
 .reader-main {
@@ -347,15 +357,11 @@
   .reader-layout {
     grid-template-columns: 1fr;
   }
+  /* Under the article, as in the HTML: it cannot paint alone at the top while the article is still arriving. */
   .reader-side {
     position: static;
     max-height: none;
-    order: 2;
-  }
-  /* The list comes first in the HTML and goes under the article: until the article's end has arrived, a paint would
-     show the list alone at the top, then the article would push it off the screen. */
-  .reader-layout:not(:has(.reader-foot)) .reader-side {
-    display: none;
+    order: 0;
   }
   .reader-all {
     border-top: 1px solid var(--line);

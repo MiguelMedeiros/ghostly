@@ -1,9 +1,11 @@
+import { readFileSync } from "node:fs";
 import { connect, type Socket } from "node:net";
 import { createInterface } from "node:readline";
 import { CliError, type ErrorCode } from "./errors";
 import type { GhostlyEvent } from "./events";
 import { daemonOfThisRelease, HELLO, newNonce, provesDaemon, provesGreeting, readDaemonSecret } from "./daemonProof";
 import { ownSocket } from "./privateFolder";
+import { lockPath } from "./profiles";
 
 /** The id of the hello on every connection: a string, so it is never one of the calls' numbers. */
 const HELLO_ID = "hello";
@@ -23,9 +25,27 @@ export const MAX_LINE = 16 * 1024 * 1024;
 /** What a client needs of a profile to reach its daemon: the socket, and the folder the daemon's secret is in. */
 export interface DaemonAddress { socket: string; dir: string }
 
-/** The refusal of a listener that did not prove it is the profile's daemon (`isNotTheDaemon` tells it apart). */
-function notTheDaemon(socket: string): CliError {
-  return new CliError("refused", `What answers on ${socket} did not prove it is this profile's daemon, so nothing was sent to it. A daemon of an older release cannot: \`ghostly daemon restart\` starts this one's`, { reason: "not-the-daemon" });
+/**
+ * The refusal of a listener that did not prove it is the profile's daemon (`isNotTheDaemon` tells it apart). With nobody
+ * holding the profile it is no daemon of any release, and no restart moves it: the answer pointed at `daemon restart`,
+ * which answered the same, and a start said a daemon ran. What listens there has to stop, or its file go. `held`: whether
+ * a process holds the profile, as the caller knows it (`lockOwner`); read here as a greeting's proof reads it otherwise.
+ */
+export function notTheDaemon(address: DaemonAddress, held = profileHeld(address.dir)): CliError {
+  if (!held) {
+    return new CliError("refused", `Something that is not this profile's daemon listens on ${address.socket}, and no ghostly process holds the profile: nothing was sent to it. Stop the program that listens there, or remove that file, then start the daemon with ghostly daemon --detach`, { reason: "not-the-daemon", socket: address.socket });
+  }
+  return new CliError("refused", `What answers on ${address.socket} did not prove it is this profile's daemon, so nothing was sent to it. A daemon of an older release cannot: \`ghostly daemon restart\` starts this one's`, { reason: "not-the-daemon" });
+}
+
+/** Whether a live process of this user's is in the profile's lock (`daemonProof.ts` reads it the same way). */
+function profileHeld(dir: string): boolean {
+  try {
+    const pid = Number(readFileSync(lockPath(dir), "utf8").trim());
+    if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+    process.kill(pid, 0);
+    return true;
+  } catch { return false; }
 }
 
 /** The failures of calls whose connection ended unanswered (`endedUnanswered`), not answers the daemon gave. */
@@ -157,7 +177,7 @@ export class DaemonClient {
 
   /** `secretGone`: the daemon's secret was not there to check against, as when it stops (`endedUnanswered`). */
   private refuse(secretGone = false): void {
-    this.refusal = notTheDaemon(this.address.socket);
+    this.refusal = notTheDaemon(this.address);
     if (secretGone) unanswered.add(this.refusal);
     this.settle.reject(this.refusal);
     this.socket.destroy();

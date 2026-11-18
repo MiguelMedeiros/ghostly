@@ -34,6 +34,16 @@ export function epochKeys(secret: Uint8Array, groupId: string, epoch: number): {
   return { message: hkdf(sha256, secret, salt, info("message"), 32), confirm: hkdf(sha256, secret, salt, info("confirm"), 32) };
 }
 
+/**
+ * The key that seals a `group-community/1` group's call media end to end (WISP 602): the epoch's secret and salt, under
+ * its own label, so it is never a message key. Every member of the epoch derives the same one; a member taken out gets
+ * no later secret, so not the next key either.
+ */
+export function groupCallKey(secret: Uint8Array, groupId: string, epoch: number): Uint8Array {
+  if (secret.length !== 32) throw new Error("Invalid epoch secret");
+  return hkdf(sha256, secret, utf8Encode(`${groupId}/${epoch}`), utf8Encode(`ghostly-group-call/1 g_${groupId}`), 32);
+}
+
 export function newEpochSecret(): Uint8Array { return randomBytes(32); }
 
 export interface SealedSecret { e: string; n: string; c: string }

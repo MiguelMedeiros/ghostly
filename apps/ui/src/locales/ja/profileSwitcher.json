@@ -14,6 +14,7 @@
   "standby": "待機中",
   "switchTo": "{{name}} に切り替え",
   "switching": "{{name}} を開いています…",
+  "switchingFromOtherTab": "別の Ghostly のタブが {{name}} を開きました…",
   "title": "プロフィールを切り替え",
   "unread": "未読 {{count}} 件"
 }

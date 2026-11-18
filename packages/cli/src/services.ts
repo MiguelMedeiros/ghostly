@@ -3,8 +3,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { GhostlyHttpError, LIMITS, parseLocalTarget, type ClientRequest, type ClientResponse, type LocalFetch } from "@ghostly/core";
-import { bool, chatOf, findOwnNamedChat, node, num, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { GhostlyHttpError, LIMITS, parseLocalTarget, VIEWER_PERMISSIONS_POLICY, type ClientRequest, type ClientResponse, type LocalFetch } from "@ghostly/core";
+import { bool, chatOf, nameKey, node, num, ownChatOf, settingsOf, shownName, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError } from "./errors";
 import { isLive } from "./views";
 
@@ -130,6 +130,12 @@ export const OPENED_SERVICE_CSP_RELAY_ONLY = "default-src 'self' data: blob: 'un
  */
 export const OPENED_SERVICE_DROPPED_HEADERS = ["content-security-policy-report-only", "reporting-endpoints", "report-to", "nel", "link"];
 
+/**
+ * A contact's headers that would set the page's browser features (camera, microphone, location, a device): the
+ * viewer's own `VIEWER_PERMISSIONS_POLICY` takes their place, as in the extension's viewer (core `withViewerPolicy`).
+ */
+const OPENED_SERVICE_FEATURE_HEADERS = ["permissions-policy", "feature-policy"];
+
 /** The directives of a contact's policy that send reports to a URL it names, dropped from it. */
 export const OPENED_SERVICE_DROPPED_DIRECTIVES = ["report-uri", "report-to"];
 
@@ -143,6 +149,9 @@ export function withoutReports(value: string): string {
 
 /** `service open` while Hide my IP from contacts is on (as the browser extension refuses to open one). */
 export const SERVICE_OPEN_OFF_RELAY_ONLY = "A contact's app does not open here while Hide my IP from contacts is on: a browser tab cannot keep its page off WebRTC";
+
+/** `service open` or `service close` in a one-shot: only the daemon keeps a contact's app open on a port. */
+export const SERVICE_NEEDS_DAEMON = "An opened service lives in the daemon: start `ghostly daemon --detach` first";
 
 function plain(response: ServerResponse, status: number, text: string, headers: Record<string, string> = {}): void {
   response.writeHead(status, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", ...headers });
@@ -161,9 +170,10 @@ export async function openServiceServer(send: ServiceSend, port = 0, { relayOnly
   const name = `${randomBytes(16).toString("hex")}.localhost`;
   const token = randomBytes(32).toString("hex");
   const cookies = new Set<string>();
-  let host = "";
+  let host = "", portless = "";
   const server = createServer((request, response) => {
-    if (request.headers.host?.toLowerCase() !== host) return plain(response, 404, "Not found");
+    const asked = request.headers.host?.toLowerCase();
+    if (!asked || (asked !== host && asked !== portless)) return plain(response, 404, "Not found");
     const path = request.url ?? "/";
     if (path.startsWith(OPEN_PATH)) {
       if (!sameSecret(path.slice(OPEN_PATH.length), token)) return plain(response, 404, "Not found");
@@ -186,7 +196,10 @@ export async function openServiceServer(send: ServiceSend, port = 0, { relayOnly
     request.on("end", () => { if (!refused) void proxy(request, response, chunks, send, cookies, policy); });
   });
   await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(port, "127.0.0.1", () => { server.off("error", reject); resolve(); }); });
-  host = `${name}:${(server.address() as AddressInfo).port}`;
+  const on = (server.address() as AddressInfo).port;
+  host = `${name}:${on}`;
+  // On port 80 a browser leaves the port out of Host (`new URL("http://a.localhost:80/").host` is `a.localhost`).
+  if (on === 80) portless = name;
   return { server, host, url: `http://${host}${OPEN_PATH}${token}` };
 }
 
@@ -205,7 +218,7 @@ async function proxy(request: IncomingMessage, response: ServerResponse, chunks:
     const out: Record<string, string | string[]> = {};
     for (const [name, value] of answer.headers) {
       const lower = name.toLowerCase();
-      if (lower === "transfer-encoding" || lower === "connection" || OPENED_SERVICE_DROPPED_HEADERS.includes(lower)) continue;
+      if (lower === "transfer-encoding" || lower === "connection" || OPENED_SERVICE_DROPPED_HEADERS.includes(lower) || OPENED_SERVICE_FEATURE_HEADERS.includes(lower)) continue;
       if (lower === "set-cookie") {
         const cookie = hostOnlyCookie(value);
         if (!cookie) continue;
@@ -217,6 +230,7 @@ async function proxy(request: IncomingMessage, response: ServerResponse, chunks:
       } else out[lower] = value;
     }
     out["content-security-policy"] = [...((out["content-security-policy"] as string[] | undefined) ?? []), policy];
+    out["permissions-policy"] = VIEWER_PERMISSIONS_POLICY;
     response.writeHead(answer.status, out);
     // Streamed, not gathered: past the cap (or when the contact drops it) the body stops and the connection closes.
     await pipeline(Readable.from(answer.body, { objectMode: false }), response);
@@ -234,14 +248,86 @@ async function proxy(request: IncomingMessage, response: ServerResponse, chunks:
  */
 function serviceOf(ctx: ApiContext, params: Params): string {
   const serviceId = str(params, "service", true);
-  if (!state(ctx).services.some((s) => s.id === serviceId)) throw new CliError("not_found", `No service ${JSON.stringify(serviceId)} (ghostly service list)`);
+  const { services } = state(ctx);
+  if (!services.some((s) => s.id === serviceId)) throw noService(serviceId, servicesNamed(services, serviceId));
   return serviceId;
+}
+
+/** The ids of the services `given` names by their name, compared as a chat's label is (`nameKey`: one case, one form). */
+function servicesNamed(services: readonly { id: string; name: string }[], given: string): string[] {
+  const key = nameKey(given);
+  return key ? services.filter((s) => nameKey(s.name) === key).map((s) => s.id) : [];
+}
+
+/**
+ * No service of that id. A service's name given instead (`service add "My App"` makes `my-app`) is told which id to
+ * use: before, it read "No service" of a service `service list` shows by that very name. Same code and exit either way.
+ */
+function noService(given: string, named: readonly string[]): CliError {
+  const quoted = JSON.stringify(given);
+  if (!named.length) return new CliError("not_found", `No service ${quoted} (ghostly service list)`);
+  const which = named.length === 1 ? `${named[0]}: use its id` : `${named.length} services, ${named.slice(0, -1).join(", ")} and ${named.at(-1)}: use one of their ids`;
+  return new CliError("not_found", `No service with id ${quoted}. ${quoted} is the name of ${which} (ghostly service list)`);
+}
+
+/**
+ * On, unless `off`; or as the answer's own key (`shared`, `enabled`) says, when a socket client sends it back. Before,
+ * only `off` was read, so `{"shared": false}` shared the service with the contact and `{"enabled": false}` turned it on.
+ * Both, saying the opposite, are refused: neither is guessed.
+ */
+function onUnlessOff(params: Params, key: string): boolean {
+  const on = !bool(params, "off");
+  if (params[key] === undefined || params[key] === null) return on;
+  const said = bool(params, key);
+  if (params.off !== undefined && params.off !== null && said !== on) throw new CliError("bad_request", `${key}: ${said} and off: ${!on} say the opposite: give one of them`);
+  return said;
 }
 
 /**
  * A port the person chose that could not be taken, in words that name it. Before, one in use was Node's EADDRINUSE as
  * `engine`, and one not allowed read as a file (`localFileError`): "Not allowed to write or read the path".
  */
+/** As long as the engine keeps a service's name (node.ts addService) and the Desktop's form takes it (Services.tsx). */
+const MAX_SERVICE_NAME_LENGTH = 48;
+
+/**
+ * The `name` of `service add`, refused as a chat's or the profile's name is (`shownName`), before anything is made.
+ * Before, one of spaces was the engine's plain error as `engine` (exit 1), and a longer one was cut with exit 0.
+ */
+function serviceNameOf(params: Params): string {
+  const name = shownName(str(params, "name", true), MAX_SERVICE_NAME_LENGTH, "A service's name");
+  // The engine cuts at 48 UTF-16 units, where a character of two units (most emoji) counts as 2.
+  if (name.length > MAX_SERVICE_NAME_LENGTH) {
+    throw new CliError("bad_request", `A service's name is up to ${MAX_SERVICE_NAME_LENGTH} characters as stored, an emoji counting as 2 (this one is ${name.length})`, { length: name.length, max: MAX_SERVICE_NAME_LENGTH });
+  }
+  return name;
+}
+
+/** `service add`'s name and target, checked with no profile open (api.ts `refuseBeforeStart`). */
+export function serviceShape(params: Params): { name: string; target: string } {
+  const name = serviceNameOf(params);
+  const target = str(params, "target", true);
+  // The engine's own check of the target (core http.ts `parseLocalTarget`), the only one: a query, a fragment, a user
+  // and password or a scheme other than http(s) is the person's input to fix, `bad_request` naming it. Thrown by the
+  // engine, they were plain errors, `engine` (exit 1): "the engine failed" (agents#894). A check of its own here
+  // read `localhost:8080` as the scheme `localhost:`, refused `127.0.0.1:8080` as no URL, and let `127.0.0.2` through
+  // for the engine to refuse in other words.
+  try { parseLocalTarget(target); } catch (error) {
+    const said = error instanceof Error ? error.message : String(error);
+    // Read as the engine reads it (no scheme is http) and named without its user, password, query and fragment: the
+    // parts refused here can hold a secret (a token). One that is no URL at all (a mistyped port) is not repeated: it
+    // has no parts to tell apart, and a token or password in it would be said whole.
+    const text = target.trim();
+    let shown = "";
+    try {
+      const url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `http://${text}`);
+      shown = `: ${url.protocol}//${url.host}${url.pathname}`;
+    } catch { /* Not a URL: not repeated. */ }
+    throw new CliError(/^Only services on this machine/.test(said) ? "refused" : "bad_request", `${said}${shown}`);
+  }
+  return { name, target };
+}
+
 function portError(error: unknown, port: number): unknown {
   const { code } = (error ?? {}) as { code?: unknown };
   if (port && code === "EADDRINUSE") return new CliError("busy", `Port ${port} is in use on this machine: choose another, or leave out --port`);
@@ -254,22 +340,9 @@ export const SERVICE_METHODS: Record<string, Method> = {
     return { services: state(ctx).services.map((s) => ({ id: s.id, name: s.name, target: s.target, enabled: s.enabled, sharedWith: s.sharedWith ?? [], requests: s.requests })) };
   },
   async "service.add"(ctx, params) {
-    const target = str(params, "target", true);
-    let url: URL;
-    try { url = new URL(target); } catch { throw new CliError("bad_request", `Not a URL: ${target}`); }
-    const here = LOOPBACK.has(url.hostname) || /^127\.\d+\.\d+\.\d+$/.test(url.hostname);
-    if (!here) throw new CliError("refused", "Only a web app on this machine (127.0.0.1, localhost) can be shared");
-    // The engine's own check of the target (core http.ts `parseLocalTarget`), first: a query, a fragment, a user and
-    // password or a scheme other than http(s) is the person's input to fix, `bad_request` naming it. Thrown by the engine,
-    // they were plain errors, `engine` (exit 1): "the engine failed" (agents#894).
-    try { parseLocalTarget(target); } catch (error) {
-      const said = error instanceof Error ? error.message : String(error);
-      // Named without its user, password, query and fragment: the parts refused here can hold a secret (a token).
-      const shown = `${url.protocol}//${url.host}${url.pathname}`;
-      throw new CliError(/^Only services on this machine/.test(said) ? "refused" : "bad_request", `${said}: ${shown}`);
-    }
+    const { name, target } = serviceShape(params);
     // `service`, as the rest of the family answers it; `serviceId` (the engine's key) stays beside it for a release.
-    const { serviceId } = node(ctx).addService({ name: str(params, "name", true), target });
+    const { serviceId } = node(ctx).addService({ name, target });
     return { service: serviceId, serviceId };
   },
   async "service.remove"(ctx, params) {
@@ -278,14 +351,15 @@ export const SERVICE_METHODS: Record<string, Method> = {
     return { removed: serviceId };
   },
   async "service.enable"(ctx, params) {
+    const enabled = onUnlessOff(params, "enabled");
     const serviceId = serviceOf(ctx, params);
-    await node(ctx).setServiceEnabled({ serviceId, enabled: !bool(params, "off") });
-    return { service: serviceId, enabled: !bool(params, "off") };
+    await node(ctx).setServiceEnabled({ serviceId, enabled });
+    return { service: serviceId, enabled };
   },
   async "service.share"(ctx, params) {
     // A grant the contact keeps using: only what this side chose names its chat, as for `call auto --from`.
-    const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
-    const shared = !bool(params, "off");
+    const link = ownChatOf(ctx, params);
+    const shared = onUnlessOff(params, "shared");
     const serviceId = serviceOf(ctx, params);
     await node(ctx).setServiceShared({ serviceId, peerPubKeyZ32: link.peerPubKeyZ32, shared });
     return { service: serviceId, chat: link.id, shared };
@@ -297,10 +371,10 @@ export const SERVICE_METHODS: Record<string, Method> = {
   },
   /** A contact's shared app on a loopback port of this machine, as the Desktop opens it in a window. */
   async "service.open"(ctx, params) {
-    if (ctx.mode !== "daemon") throw new CliError("unavailable", "An opened service lives in the daemon: start `ghostly daemon --detach` first");
+    if (ctx.mode !== "daemon") throw new CliError("unavailable", SERVICE_NEEDS_DAEMON);
     // Hide my IP from contacts: the app would run in an ordinary browser tab, where nothing keeps its page off WebRTC
     // (a STUN server the contact names would see this machine's address), so none opens while it is on.
-    if (state(ctx).settings?.relayOnly === true) throw new CliError("unavailable", SERVICE_OPEN_OFF_RELAY_ONLY);
+    if (settingsOf(ctx).relayOnly === true) throw new CliError("unavailable", SERVICE_OPEN_OFF_RELAY_ONLY);
     const link = chatOf(ctx, params);
     const service = str(params, "service", true);
     const key = `${link.peerPubKeyZ32}/${service}`;
@@ -326,18 +400,41 @@ export const SERVICE_METHODS: Record<string, Method> = {
     return { chat: link.id, service, url: opened.url };
   },
   async "service.close"(ctx, params) {
+    // A one-shot has none open: it said "not open here" of one the daemon has.
+    if (ctx.mode !== "daemon") throw new CliError("unavailable", SERVICE_NEEDS_DAEMON);
     const link = chatOf(ctx, params);
     const key = `${link.peerPubKeyZ32}/${str(params, "service", true)}`;
     const pending = open.get(key);
     open.delete(key);
     const entry = await pending?.catch(() => undefined);
     if (!entry) throw new CliError("not_found", "That service is not open here");
-    // Closed means closed: an answer still streaming (a page's EventSource) kept `close` waiting for good, and kept coming.
-    // Each connection's end stops the contact's answer too (`proxy`).
-    await new Promise<void>((resolve) => {
-      entry.server.close(() => resolve());
-      entry.server.closeAllConnections();
-    });
+    await closeOpened(entry);
     return { closed: key };
   },
 };
+
+/**
+ * Closed means closed: an answer still streaming (a page's EventSource) kept `close` waiting for good, and kept coming.
+ * Each connection's end stops the contact's answer too (`proxy`).
+ */
+function closeOpened(entry: OpenedService): Promise<void> {
+  return new Promise<void>((resolve) => {
+    entry.server.close(() => resolve());
+    entry.server.closeAllConnections();
+  });
+}
+
+/**
+ * `chat remove`: the services opened from a contact no chat here has any more. Before, they stayed on their ports, each
+ * request a 503, and `service close` answered `No chat` for good.
+ */
+export async function closeServicesOf(ctx: ApiContext, peer: string): Promise<void> {
+  if (state(ctx).links.some((link) => link.peerPubKeyZ32 === peer)) return;
+  const keys = [...open.keys()].filter((key) => key.startsWith(`${peer}/`));
+  await Promise.all(keys.map(async (key) => {
+    const pending = open.get(key);
+    open.delete(key);
+    const entry = await pending?.catch(() => undefined);
+    if (entry) await closeOpened(entry);
+  }));
+}

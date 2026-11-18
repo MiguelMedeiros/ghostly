@@ -93,4 +93,76 @@ describe("a store's last read that failed", () => {
     await act(async () => {});
     expect(await screen.findByTestId("toast-text")).toHaveTextContent("You are offline.");
   });
+
+  it("says, politely, what a Refresh that worked read: the store's new count", async () => {
+    const listing = (n: number) => ({ ref: `ghostly:app/${KEY}/app${n}`, sequence: 1, digest: `d${n}`, urls: [], title: `App ${n}`, tagline: "" });
+    const off = store({ problem: "offline", apps: [1, 2, 3].map(listing) });
+    let now = off;
+    fakeEngine.on("appStoreRefresh", () => { now = store({ apps: [1, 2, 3, 4, 5].map(listing) }); return [now]; });
+    fakeEngine.on("appStoreList", () => [now]);
+    renderApp(<Apps />, { route: "/apps" });
+    await screen.findByTestId("app-store-problem");
+    const region = screen.getByTestId("toast-region");
+    expect(region).toHaveAttribute("aria-live", "polite");
+    expect(region).toHaveTextContent("");
+    await userEvent.click(within(screen.getByTestId("app-store")).getByTestId("app-store-refresh"));
+    await waitFor(() => expect(screen.queryByTestId("app-store-problem")).toBeNull());
+    expect(region).toHaveTextContent("\u2068Store off\u2069 is up to date: 5 apps");
+    expect(screen.getByTestId("toast")).toHaveAttribute("data-tone", "success");
+  });
+
+  // The card's text takes the page's direction: a name not isolated draws its ending "!" on its other side in Arabic,
+  // and an Arabic name's number before the name in English. Isolated, as everywhere else on the Apps screens.
+  it.each([
+    ["ar", "Hunt!", "\u2068Hunt!\u2069 محدّث: لا تطبيقات"],
+    ["en", "متجر 2", "\u2068متجر 2\u2069 is up to date: 0 apps"],
+  ] as const)("isolates the store's name in what a Refresh that worked says (%s)", async (language, name, said) => {
+    const named = store({ name });
+    fakeEngine.on("appStoreRefresh", () => [named]).on("appStoreList", () => [named]);
+    renderApp(<Apps />, { route: "/apps", language });
+    await userEvent.click(within(await screen.findByTestId("app-store")).getByTestId("app-store-refresh"));
+    expect(await screen.findByTestId("toast-text")).toHaveTextContent(said);
+  });
+
+  // Its link serves the list kept again: the read works, and the store stays marked for its two lists until a newer one.
+  it("says a Refresh of a store still marked for two lists says so, not up to date", async () => {
+    const marked = store({ equivocation: { sequence: 5, at: SEEN } });
+    fakeEngine.on("appStoreRefresh", () => [marked]).on("appStoreList", () => [marked]);
+    renderApp(<Apps />, { route: "/apps" });
+    const line = await screen.findByTestId("app-store-problem");
+    await userEvent.click(within(screen.getByTestId("app-store")).getByTestId("app-store-refresh"));
+    await waitFor(() => expect(fakeEngine.callsTo("appStoreRefresh")).toHaveLength(1));
+    await act(async () => {});
+    const said = await screen.findByTestId("toast-text");
+    expect(said).not.toHaveTextContent("up to date");
+    expect(said).toHaveTextContent(line.textContent!);
+    expect(screen.getByTestId("toast")).not.toHaveAttribute("data-tone", "success");
+  });
+
+  // Removed in another tab: the engine has no such store. Said so, and the list is read again, so its block goes.
+  it("says a Refresh of a store removed meanwhile that it is no longer added, and its block goes", async () => {
+    let held = [store({})];
+    fakeEngine.on("appStoreList", () => held).on("appStoreRefresh", () => { throw new Error("no-store: No such store"); });
+    renderApp(<Apps />, { route: "/apps" });
+    const refresh = within(await screen.findByTestId("app-store")).getByTestId("app-store-refresh");
+    held = [];
+    await userEvent.click(refresh);
+    expect(await screen.findByTestId("toast-text")).toHaveTextContent("This store is no longer added.");
+    await waitFor(() => expect(screen.queryByTestId("app-store")).toBeNull());
+  });
+
+  // Its host still serves a list past its date: the read works, and the store is not up to date.
+  it("says a Refresh that read a list past its date is out of date, not up to date", async () => {
+    const old = store({ expires: Math.floor(SEEN / 1000), expired: true });
+    fakeEngine.on("appStoreRefresh", () => [old]).on("appStoreList", () => [old]);
+    renderApp(<Apps />, { route: "/apps" });
+    const stale = await screen.findByTestId("app-store-stale");
+    await userEvent.click(within(screen.getByTestId("app-store")).getByTestId("app-store-refresh"));
+    await waitFor(() => expect(fakeEngine.callsTo("appStoreRefresh")).toHaveLength(1));
+    await act(async () => {});
+    const said = await screen.findByTestId("toast-text");
+    expect(said).not.toHaveTextContent("up to date");
+    expect(said).toHaveTextContent(stale.textContent!);
+    expect(screen.getByTestId("toast")).not.toHaveAttribute("data-tone", "success");
+  });
 });

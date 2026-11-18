@@ -2,6 +2,7 @@ import { engineError } from "./engineErrors";
 import { bech32 } from "@scure/base";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { decodeBolt11, type Bolt11Invoice } from "./bolt11";
+import { underLocalSuffix } from "./localNames";
 import { stripHidden } from "./text";
 
 /**
@@ -78,22 +79,26 @@ export const LIGHTNING_DESTINATION_PATTERN = /(?:lightning:|lnurlp:\/\/|lnurl1|[
 const REDIRECTS = [301, 302, 303, 307, 308];
 
 /**
- * A host that is not on the public internet, as far as its name tells: this machine, a single label, `.local` and its
- * kin, private and reserved IP addresses. (What a public name resolves to is checked where the client resolves names
- * itself, as Ghostly Desktop does.)
+ * A host that is not on the public internet, as far as its name tells: this machine, a single label, a name under a
+ * local suffix (`localNames.ts`), private and reserved IP addresses. (What a public name resolves to is checked where
+ * the client resolves names itself, as Ghostly Desktop and the CLI do, for every request.)
  */
 function isLocalHost(hostname: string): boolean {
-  const host = hostname.toLowerCase().replace(/\.$/, "").replace(/^\[|\]$/g, "");
+  const host = hostname.toLowerCase().replace(/\.+$/, "").replace(/^\[|\]$/g, "");
   if (!host.includes(".") && !host.includes(":")) return true;
-  if (/(^|\.)(localhost|local|internal|lan|home\.arpa)$/.test(host)) return true;
+  if (underLocalSuffix(host)) return true;
   const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
   if (v4) {
     const [a, b] = [Number(v4[1]), Number(v4[2])];
     return a === 0 || a === 10 || a === 127 || a >= 224 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b < 32)
       || (a === 192 && b === 168) || (a === 100 && b >= 64 && b < 128) || (a === 198 && (b === 18 || b === 19)) || (a === 192 && b === 0);
   }
-  // Any IPv6 literal but a global unicast one (2000::/3), and none that embeds an IPv4 address.
-  if (host.includes(":")) return !/^[23][0-9a-f]{0,3}:/.test(host) || host.includes(".") || /^2001:0?db8:/.test(host);
+  // Any IPv6 literal but a global unicast one (2000::/3: a first group of four digits, as `2::` is `0002::`), none
+  // that embeds an IPv4 address (dotted, 6to4 2002::/16, Teredo 2001::/32: `new URL()` writes them all in hex), and
+  // no documentation one (2001:db8::/32). Kept the same as apps/ui/src/lib/localHost.ts.
+  if (host.includes(":")) {
+    return !/^[23][0-9a-f]{3}:/.test(host) || host.includes(".") || host.startsWith("2002:") || /^2001:(0{0,4}|0{0,3}db8):/.test(host);
+  }
   return false;
 }
 
@@ -185,6 +190,8 @@ async function readBounded(response: Response, maxBytes: number): Promise<string
 /** One GET to an LNURL service (and to each checked redirect of it): bounded in time and size, no credentials, no referrer, and the answer must be JSON. */
 export async function fetchLnurlJson(url: string, options: LnurlFetchOptions = {}): Promise<unknown> {
   const target = acceptUrl(url);
+  // The rule a redirect has: this machine or the local network is never asked, but for a test server on this machine.
+  if (!isLoopback(target.hostname) && isLocalHost(target.hostname)) throw new Error(`${target.host} is a local address`);
   const doFetch = options.fetch ?? globalThis.fetch;
   if (!doFetch) throw new Error("No way to reach the network here");
   const controller = new AbortController();
@@ -261,7 +268,7 @@ export function parsePayParams(body: unknown, destination: LightningDestination)
   return {
     destination, callback: callback.href, callbackDomain: callback.host,
     minSendable: minSendable as number, maxSendable: maxSendable as number, minSat, maxSat,
-    metadata, descriptionHash: hex(sha256(new TextEncoder().encode(metadata))), description: description.slice(0, 280), identifier, commentAllowed: comment,
+    metadata, descriptionHash: hex(sha256(new TextEncoder().encode(metadata))), description: stripHidden(description.replace(/\s+/g, " ")).slice(0, 280), identifier, commentAllowed: comment,
   };
 }
 
@@ -280,10 +287,13 @@ export function invoiceCallbackUrl(params: LnurlPayParams, amountSat: number, co
   return url.href;
 }
 
-/** A success action's link: HTTPS, bounded, and no user part ("https://www.paypal.com@evil.example" opens evil.example). */
-function successUrl(text: string): boolean {
+/**
+ * A success action's link: HTTPS, bounded, no user part ("https://www.paypal.com@evil.example" opens evil.example),
+ * and on the callback's own host (LUD-09), so a service cannot hand out a link to somewhere else.
+ */
+function successUrl(text: string, host: string): boolean {
   if (!/^https:\/\//i.test(text) || text.length > LNURL_LIMITS.maxUrlLength) return false;
-  try { const url = new URL(text); return !url.username && !url.password; } catch { return false; }
+  try { const url = new URL(text); return !url.username && !url.password && url.host === host; } catch { return false; }
 }
 
 /**
@@ -304,7 +314,7 @@ export function parseInvoiceCallback(body: unknown, params: LnurlPayParams, amou
   const action = body.successAction;
   if (isRecord(action)) {
     if (action.tag === "message" && typeof action.message === "string") successAction = { tag: "message", message: reason(action.message) };
-    else if (action.tag === "url" && typeof action.url === "string" && successUrl(action.url)) successAction = { tag: "url", description: reason(action.description), url: action.url };
+    else if (action.tag === "url" && typeof action.url === "string" && successUrl(action.url, params.callbackDomain)) successAction = { tag: "url", description: reason(action.description), url: action.url };
   }
   return { invoice, successAction };
 }

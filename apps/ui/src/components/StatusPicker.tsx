@@ -8,12 +8,16 @@ import {
   AVAILABILITIES, AVAILABILITY_DOT, STATUS_EMOJI, STATUS_ENDS, STATUS_PICKER_EVENT, capStatusText, isolate, localDateTime,
   openStatusPicker, statusEnd, statusEndText, statusTextLength, type StatusEnd,
 } from "../lib/ownStatus";
+import { listText } from "../lib/listText";
+import { findSecret, type SecretFinding } from "../lib/parse/secrets";
 import { problemText, type Problem } from "../lib/problemText";
 import { touchOnly } from "../lib/touchOnly";
 import { EmojiTab } from "./composer/EmojiTab";
 import { Select } from "./ui/Select";
 import { Notice } from "./ui/Notice";
 import { input } from "./wallet/ui";
+import { FocusSafeButton } from "./ui/FocusSafeButton";
+import { SecretGuardDialog } from "./SecretGuardDialog";
 
 /*
  * This profile's status (WISP 401 § Presence and status), Slack-like: its row in the account menu, and the picker that
@@ -26,14 +30,14 @@ export function AvailabilityDot({ availability = "available", className = "w-2.5
   return <span aria-hidden="true" data-availability={availability} className={`inline-block shrink-0 rounded-full ${AVAILABILITY_DOT[availability]} ${className}`} />;
 }
 
-/** "Busy, 🍕 At lunch, until 11:00": a status in words, the person's text isolated. */
+/** "Busy, 🍕 At lunch, until 11:00": a status in words, the person's text isolated, listed the way the app's language lists. */
 function useStatusWords() {
   const { t, language } = useI18n();
-  return (status: PersonStatus) => [
+  return (status: PersonStatus) => listText([
     t(`status.availabilities.${status.availability ?? "available"}`),
     [status.emoji, status.text && isolate(status.text)].filter(Boolean).join(" "),
     status.until ? t("status.until", { time: statusEndText(status.until, language) }) : "",
-  ].filter(Boolean).join(", ");
+  ].filter(Boolean), t);
 }
 
 /** The account menu's row: the status as it stands (or "Set a status"), which opens the picker. */
@@ -91,20 +95,32 @@ function StatusPickerDialog({ onClose }: { onClose: () => void }) {
   const [past, setPast] = useState(false);
   const [linkLike, setLinkLike] = useState(false);
   const [moreEmoji, setMoreEmoji] = useState(false);
+  // An emoji picked from More emoji closes that panel, the focus in it: the chosen chip takes it, not the page.
+  const chips = useRef<HTMLDivElement>(null);
+  const picked = useRef(false);
+  useEffect(() => {
+    if (!picked.current) return;
+    picked.current = false;
+    chips.current?.querySelector<HTMLElement>('[aria-pressed="true"]')?.focus();
+  }, [moreEmoji]);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
+  // Words that look like a secret ask first, as the chat composer does: every contact reads the status.
+  const [secret, setSecret] = useState<SecretFinding | null>(null);
 
   const run = async (work: () => Promise<void>) => {
     setBusy(true); setProblem(null);
     try { await work(); onClose(); } catch (e) { setProblem(problemText(e, t)); } finally { setBusy(false); }
   };
-  const save = () => {
+  const save = (confirmed = false) => {
     const until = end === "keep" ? kept : end === "custom" ? new Date(at).getTime() : statusEnd(end, language);
     // A kept end can pass while the picker is open: the engine would clear the status rather than set it.
     if ((end === "keep" || end === "custom") && !(until && until > Date.now())) { setPast(true); return; }
     const words = text.trim();
     // Words the engine would leave out of the status ("data:", "www.", a link): said here, not dropped unseen.
     if (words && !sanitizeStatusText(words) && sanitizeDisplayText(words, STATUS_TEXT_MAX)) { setLinkLike(true); return; }
+    const found = confirmed ? null : findSecret(words);
+    if (found) { setSecret(found); return; }
     void run(() => engine.call("setOwnStatus", { status: { availability, ...(emoji ? { emoji } : {}), ...(words ? { text: words } : {}), ...(until ? { until } : {}) } }));
   };
 
@@ -141,7 +157,7 @@ function StatusPickerDialog({ onClose }: { onClose: () => void }) {
 
         <div role="group" aria-labelledby={`${id}-emoji`} className="space-y-1.5">
           <p id={`${id}-emoji`} className="text-xs font-semibold text-text-secondary">{t("status.emoji")}</p>
-          <div className="flex flex-wrap items-center gap-0.5">
+          <div ref={chips} className="flex flex-wrap items-center gap-0.5">
             {emojiChoices.map((choice) => (
               <button key={choice} type="button" aria-label={choice} aria-pressed={emoji === choice} onClick={() => setEmoji(emoji === choice ? undefined : choice)}
                 className={`${chip} ${emoji === choice ? "bg-accent/25" : ""}`}>{choice}</button>
@@ -153,7 +169,7 @@ function StatusPickerDialog({ onClose }: { onClose: () => void }) {
           </div>
           {moreEmoji && (
             <div className="expression-panel" style={{ height: 300, border: 0, boxShadow: "none" }}>
-              <EmojiTab onPick={(picked) => { setEmoji(picked); setMoreEmoji(false); }} autoFocus={!touchOnly()} />
+              <EmojiTab onPick={(choice) => { picked.current = true; setEmoji(choice); setMoreEmoji(false); }} autoFocus={!touchOnly()} />
             </div>
           )}
         </div>
@@ -178,13 +194,14 @@ function StatusPickerDialog({ onClose }: { onClose: () => void }) {
 
         {problem && <Notice problem={problem} className="text-xs" />}
         <div className="flex flex-wrap items-center gap-2">
-          {status && <button type="button" disabled={busy} onClick={() => void run(() => engine.call("clearOwnStatus"))} className={`${button} me-auto text-danger hover:bg-surface-hover`}>{t("status.clear")}</button>}
+          {status && <FocusSafeButton type="button" disabled={busy} onClick={() => void run(() => engine.call("clearOwnStatus"))} className={`${button} me-auto text-danger hover:bg-surface-hover`}>{t("status.clear")}</FocusSafeButton>}
           <div className="flex gap-2 ms-auto">
             <button type="button" onClick={onClose} className={`${button} bg-surface-alt text-text-primary border border-border`}>{t("common.cancel")}</button>
-            <button type="button" disabled={busy} onClick={save} className={`${button} bg-accent text-on-accent font-semibold`}>{t("common.save")}</button>
+            <FocusSafeButton type="button" disabled={busy} onClick={() => save()} className={`${button} bg-accent text-on-accent font-semibold`}>{t("common.save")}</FocusSafeButton>
           </div>
         </div>
       </div>
+      {secret && <SecretGuardDialog finding={secret} onCancel={() => setSecret(null)} onConfirm={() => { setSecret(null); save(true); }} />}
     </div>
   );
 }

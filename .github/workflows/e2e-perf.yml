@@ -1,0 +1,67 @@
+name: E2E (perf)
+
+# The end-to-end tests tagged @perf: their pass hangs on milliseconds or frame times (e2e/support/perfBudget.ts), which
+# a shared runner misses at random. The config leaves them out of every other run (E2E, E2E (full), One's loop) and
+# this job runs only them, nightly on dev and by hand, one worker so they never time each other. What each budget
+# measured goes in the run's summary and in its perf.json artifact: run after run, a drift shows as a trend.
+on:
+  schedule:
+    - cron: "41 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-perf
+  cancel-in-progress: false
+
+env:
+  # GitHub's ubuntu-24.04 runners refuse the unprivileged user namespaces Chromium's sandbox needs (see e2e.yml).
+  E2E_CHROMIUM_SANDBOX: "0"
+
+jobs:
+  perf:
+    name: End-to-end time budgets
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # A scheduled run tests dev, the default branch; a manual one, the branch it was started on.
+          ref: ${{ github.event_name == 'schedule' && 'dev' || github.ref }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        uses: ./.github/actions/playwright-chromium
+
+      - name: Run the @perf tests
+        env:
+          E2E_PERF: "1"
+          PLAYWRIGHT_JSON_OUTPUT_FILE: perf-results.json
+        run: npx playwright test -c e2e/playwright.config.ts --project=web --grep @perf --workers=1 --reporter=list,json
+
+      - name: Summary of the budgets
+        if: ${{ !cancelled() }}
+        run: node e2e/perf-summary.mjs perf-results.json perf.json >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the budgets
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-perf-${{ github.run_id }}
+          path: |
+            perf.json
+            perf-results.json
+          retention-days: 90

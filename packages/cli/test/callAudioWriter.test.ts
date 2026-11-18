@@ -115,4 +115,28 @@ describe("a new program on the call's audio", () => {
       await socket.close();
     }
   });
+  it("the socket: a replaced program that keeps its side open is let go, so the socket still closes", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gw-"));
+    dirs.push(dir);
+    const path = audioSocketPath(dir, "abc");
+    const socket = await AudioSocket.open(path, 16000, feedQueue(new PlaybackQueue(16000)), { requireToken: true, proveMs: 300 });
+    // Program A writes only: it never ends its side after the EOF that replacing it sends.
+    const a = connect({ path, allowHalfOpen: true });
+    a.on("data", () => {});
+    await new Promise<void>((resolve) => a.once("connect", resolve));
+    a.write(`${socket.token}\n`);
+    await until(() => socket.connected);
+    const b = await program(path);
+    b.socket.write(`${socket.token}\n`);
+    await until(() => a.readableEnded);
+    try {
+      // The call ends: the socket closes within the 2 s it gives the program that is on.
+      let closed = false;
+      const closing = socket.close().then(() => { closed = true; });
+      await until(() => closed, 3500);
+      await closing;
+    } finally {
+      a.destroy();
+    }
+  });
 });

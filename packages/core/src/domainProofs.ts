@@ -173,18 +173,24 @@ export interface DnsResponse {
   answers: DnsAnswer[];
 }
 
+/**
+ * EDNS0 OPT record (RFC 6891) with one Client Subnet option of source prefix 0 (RFC 7871 §7.1.2): a resolver must
+ * not add this device's subnet to its queries to the name's servers, as Google Public DNS otherwise does.
+ */
+const NO_CLIENT_SUBNET = Uint8Array.of(0, 0, 41, 1232 >> 8, 1232 & 0xff, 0, 0, 0, 0, 0, 8, 0, 8, 0, 4, 0, 1, 0, 0);
+
 /** A recursive query for one name and type. ID 0, as RFC 8484 recommends for caching;
  * the AD bit asks the resolver to report DNSSEC validation (RFC 6840 §5.7). */
 export function encodeDnsQuery(name: string, type: DnsType): Uint8Array {
   const labels = name.replace(/\.$/, '').split('.');
-  const parts: Uint8Array[] = [Uint8Array.of(0, 0, 0x01, 0x20, 0, 1, 0, 0, 0, 0, 0, 0)];
+  const parts: Uint8Array[] = [Uint8Array.of(0, 0, 0x01, 0x20, 0, 1, 0, 0, 0, 0, 0, 1)];
   for (const label of labels) {
     const bytes = utf8Encode(label);
     if (!bytes.length || bytes.length > 63) throw new Error('Invalid DNS name');
     parts.push(Uint8Array.of(bytes.length), bytes);
   }
   const code = DNS_TYPE[type];
-  parts.push(Uint8Array.of(0, code >> 8, code & 0xff, 0, 1));
+  parts.push(Uint8Array.of(0, code >> 8, code & 0xff, 0, 1), NO_CLIENT_SUBNET);
   return concatBytes(...parts);
 }
 
@@ -266,7 +272,8 @@ export function txtValue(rdata: Uint8Array): string {
 // Addresses: a proof may only make a contact's app fetch from the public Internet
 
 /** False for loopback, private, link-local, shared (CGNAT), multicast, reserved
- * and unspecified addresses, including IPv4 embedded in IPv6. */
+ * and unspecified addresses, including IPv4 embedded in IPv6, and for 6to4, Teredo and documentation IPv6, as
+ * Desktop's link_preview::is_public and apps/ui/src/lib/localHost.ts refuse them. */
 export function isPublicAddress(address: Uint8Array): boolean {
   if (address.length === 4) {
     const [a, b, c] = address;
@@ -286,5 +293,8 @@ export function isPublicAddress(address: Uint8Array): boolean {
   if (address[0] === 0xfe && (address[1] & 0xc0) === 0xc0) return false; // fec0::/10 site-local
   if (address[0] === 0xff) return false; // multicast
   if (address[0] === 0x01 && address.subarray(1, 8).every(x => x === 0)) return false; // 100::/64 discard
+  if (address[0] === 0x20 && address[1] === 0x02) return false; // 2002::/16 6to4: carries an IPv4 address a gateway may reach
+  if (address[0] === 0x20 && address[1] === 0x01 && address[2] === 0x00 && address[3] === 0x00) return false; // 2001::/32 Teredo, the same
+  if (address[0] === 0x20 && address[1] === 0x01 && address[2] === 0x0d && address[3] === 0xb8) return false; // 2001:db8::/32 documentation
   return (address[0] & 0xe0) === 0x20; // only 2000::/3 is global unicast
 }

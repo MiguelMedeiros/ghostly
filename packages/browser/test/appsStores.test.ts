@@ -288,7 +288,7 @@ describe("no request with nothing installed", () => {
     store.stop();
   });
 
-  it("the scheduled check waits while the network is off", async () => {
+  it("the scheduled check waits while the network is off, and runs soon after it comes back, not a day later", async () => {
     const v1 = await bundle({ sources: [BUNDLE_URL] });
     net.put(BUNDLE_URL, v1.bytes);
     const first = apps(net);
@@ -296,11 +296,44 @@ describe("no request with nothing installed", () => {
     await first.install({ digest: v1.digest, grant: ["chat"] });
     net.fetch.mockClear();
     clock();
-    const store = apps(net, { online: () => false });
+    let online = false;
+    const store = apps(net, { online: () => online });
     await store.start();
     await pass(APP_CHECK_TIMINGS.afterStartMs);
     await pass(APP_CHECK_TIMINGS.everyMs);
     expect(net.fetch).not.toHaveBeenCalled();
+    online = true;
+    await pass(APP_CHECK_TIMINGS.offlineRetryMs);
+    expect(net.fetch, "the check the network missed").toHaveBeenCalled();
+    store.stop();
+  });
+
+  it("a scheduled check whose read of the installed apps fails once is tried again soon, and the checks go on", async () => {
+    const v1 = await bundle({ sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v1.bytes);
+    const first = apps(net);
+    await first.preview({ url: BUNDLE_URL });
+    await first.install({ digest: v1.digest, grant: ["chat"] });
+    net.fetch.mockClear();
+    clock();
+    const store = apps(net, { now: () => Date.now() });
+    await store.start();
+    // The installed list's read fails once (a lost IndexedDB connection), at the check after start.
+    const getAll = IDBObjectStore.prototype.getAll;
+    let failing = true;
+    const spy = vi.spyOn(IDBObjectStore.prototype, "getAll").mockImplementation(function (this: IDBObjectStore, ...args) {
+      if (failing && this.name === "apps") { failing = false; throw new DOMException("Connection to Indexed Database server lost", "UnknownError"); }
+      return getAll.apply(this, args);
+    });
+    await pass(APP_CHECK_TIMINGS.afterStartMs);
+    spy.mockRestore();
+    expect(failing, "the read failed").toBe(false);
+    expect(net.fetch).not.toHaveBeenCalled();
+    await pass(APP_CHECK_TIMINGS.offlineRetryMs);
+    const retried = net.fetch.mock.calls.length;
+    expect(retried, "the check the failed read missed, 10 minutes later").toBeGreaterThan(0);
+    await pass(APP_CHECK_TIMINGS.everyMs);
+    expect(net.fetch.mock.calls.length, "and the next day's").toBeGreaterThan(retried);
     store.stop();
   });
 });
@@ -609,5 +642,27 @@ describe("stores", () => {
     net.fetch.mockClear();
     await expect(store.preview({ store: keyOf(STORE_KEY), ref: v1.ref })).rejects.toThrow(/^host/);
     expect(net.fetch).not.toHaveBeenCalled();
+  });
+
+  it("a listing none of whose URLs read says the host's own trouble over another URL's refusal: trying again may read it", async () => {
+    const v1 = await bundle(), v2 = await bundle({ sequence: 2 });
+    const BUSY = "https://raw.githubusercontent.com/ana/chess/main/app.ghostlyapp";
+    const OTHER = "https://raw.githubusercontent.com/ana/chess-copy/HEAD/app.ghostlyapp";
+    const answer = net.fetch.getMockImplementation()!;
+    let status = 503;
+    net.fetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) =>
+      String(input) === BUSY ? new Response("busy", { status }) : answer(input, init));
+    const store = apps(net);
+    // The busy URL first, then one that is not there (404), or holds a version the store does not list.
+    for (const [other, held] of [[OTHER, null], [OTHER, v2.bytes]] as const) {
+      if (held) net.put(other, held);
+      await net.putStore(await storeFiles({ sequence: held ? 3 : 2, apps: [listing(v1, [BUSY, other])] }));
+      if (held) await store.refreshStores(); else await store.addStore({ url: STORE_URL });
+      // 408: the host's own timeout, said as its trouble with Try again on the install screen (apps/ui lib/apps/errors.ts).
+      for (status of [503, 429, 408]) {
+        await expect(store.preview({ store: keyOf(STORE_KEY), ref: v1.ref }), `${status}, then ${held ? "another version" : "404"}`)
+          .rejects.toThrow(`status: The host answered ${status}`);
+      }
+    }
   });
 });

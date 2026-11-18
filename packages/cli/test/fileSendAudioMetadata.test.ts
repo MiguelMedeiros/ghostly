@@ -10,6 +10,7 @@ import { callApi, type ApiContext } from "../src/api";
 import { NodeFileBytes } from "../src/runtime/fileBytes";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 import { hasPlace, taggedM4a, taggedMp3 } from "../../core/test/support/audioFixtures";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.files, files.audio.metadata
 
 /** `file send` of an audio file or a voice note: it leaves without its tags, as the apps send it; one that cannot be stripped is refused. */
@@ -29,6 +30,7 @@ beforeAll(async () => {
 describe("file send of audio", () => {
   const sent: MessageFile[] = [];
   const node = {
+    chatView: chatViewOf,
     getState: () => ({ links: [link], groups: [group], settings: {}, transport: {}, transfers: {} }) as unknown as EngineState,
     getMessages: vi.fn(async () => []),
     getMessage: vi.fn(async () => undefined),

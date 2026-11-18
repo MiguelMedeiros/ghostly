@@ -1,4 +1,6 @@
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
+import { setClipboard } from "../support/clipboard";
+import { DEVICE_SET_PASSWORD } from "../support/devices";
 import { expect, test } from "../support/fixtures";
 
 /**
@@ -121,6 +123,31 @@ test("a desktop at a doubled text size: the account bar's names, the wordmark an
   await expectCardLinesApart(page);
 });
 
+test("a phone at 150% and 200% text size: New and Join stay on the screen at the top of the chat list, in English and Arabic", { tag: ["@feature:app.accessibility", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+  // At 24px Join ran 48px past the right edge (past the left one in Arabic), at 32px off the screen whole.
+  const { page } = await peer("text-size-header", { mobile: true, viewport: PHONE });
+  for (const language of ["en", "ar"]) {
+    await useLanguage(page, language);
+    for (const px of [24, 32]) {
+      await textSize(page, px);
+      const join = page.getByRole("button", { name: language === "ar" ? "انضمام" : "Join chat" });
+      // The header gives up a step a render after it measured: read once it has settled.
+      await expect.poll(() => join.evaluate((button) => {
+        const { left, right } = button.getBoundingClientRect();
+        return left >= 0 && right <= window.innerWidth;
+      }), `${language} at ${px}px`).toBe(true);
+      for (const id of ["sidebar-new-chat", "sidebar-new-more", "app-brand"]) {
+        const box = (await page.getByTestId(id).boundingBox())!;
+        expect(box.x, `${id}, ${language} at ${px}px`).toBeGreaterThanOrEqual(0);
+        expect(box.x + box.width, `${id}, ${language} at ${px}px`).toBeLessThanOrEqual(PHONE.width);
+      }
+    }
+    await textSize(page, 16);
+  }
+  // At the default size the wordmark is back beside the ghost.
+  await expect(page.locator(".sidebar-wordmark")).toBeVisible();
+});
+
 test("a phone at a doubled text size: the tab names and the identity card grow, and a Settings section's name shows in full", { tag: ["@feature:app.accessibility", "@feature:app.mobile-layout", "@feature:settings.sections"] }, async ({ peer }) => {
   const { page } = await peer("text-size-phone", { mobile: true, viewport: PHONE });
   await page.getByTestId("mobile-tab-identities").click();
@@ -150,5 +177,115 @@ test("a phone at a doubled text size: the tab names and the identity card grow, 
     // Nothing pushed out sideways.
     expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth), language).toBeLessThanOrEqual(0);
     await page.goBack();
+  }
+});
+
+test("a phone at 200% text size: Profile's row buttons wrap their words inside the screen, and the page does not scroll sideways", { tag: ["@feature:app.accessibility", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+  // In Portuguese "Adicionar este dispositivo" ran from 7 to 389 px on a 375 px screen, and the page shifted 25 px.
+  const { page } = await peer("text-size-profile", { mobile: true, viewport: PHONE });
+  await page.goto("/#/profile");
+  await textSize(page, 32);
+  for (const language of ["pt", "it", "es", "fr", "ja"]) {
+    await useLanguage(page, language);
+    await expect(page.getByTestId("device-add-open")).toBeEnabled();
+    await expect(page.getByTestId("backup-open")).toBeVisible();
+    const out = await page.getByTestId("profile-page").locator("section button").evaluateAll((buttons) => buttons
+      .map((button) => ({ button, box: button.getBoundingClientRect() }))
+      .filter(({ box }) => box.width > 1 && box.height > 1)
+      .filter(({ box }) => box.left < 0 || box.right > window.innerWidth)
+      .map(({ button, box }) => `${button.textContent}: ${Math.round(box.left)}..${Math.round(box.right)}`));
+    expect(out, `${language}: buttons past the screen`).toEqual([]);
+    const sections = await page.getByTestId("profile-page").locator("section").evaluateAll((sections) =>
+      sections.map((section) => Math.round(section.getBoundingClientRect().left)).filter((left) => left < 0));
+    expect(sections, `${language}: sections pushed off the screen`).toEqual([]);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth), language).toBeLessThanOrEqual(0);
+  }
+});
+
+/** Each of the rows' names cut sideways, as "name: scrollWidth/clientWidth". */
+function cutNames(rows: ReturnType<Page["locator"]>, name: string): Promise<string[]> {
+  return rows.evaluateAll((rows, name) => rows.map((row) => row.querySelector<HTMLElement>(name)!)
+    .filter((label) => label.scrollWidth > label.clientWidth)
+    .map((label) => `${label.textContent}: ${label.scrollWidth}/${label.clientWidth}`), name);
+}
+
+/** The rows' hints (the line under a name) cut short, theirs or any part's inside, as "words: scrollWidth/clientWidth". */
+function cutHints(rows: Locator): Promise<string[]> {
+  return rows.evaluateAll((rows) => rows.flatMap((row) => {
+    const hint = row.querySelector<HTMLElement>(":scope > span.flex-1 > span:nth-child(2)");
+    return hint ? [hint, ...hint.querySelectorAll<HTMLElement>("*")] : [];
+  }).filter((part) => part.scrollWidth > part.clientWidth)
+    .map((part) => `${part.textContent}: ${part.scrollWidth}/${part.clientWidth}`));
+}
+
+/** The dialog's buttons whose words run past their edges, or past the dialog's, as "words: scrollWidth/clientWidth". */
+function cutButtons(dialog: Locator): Promise<string[]> {
+  return dialog.evaluate((dialog) => {
+    const edge = dialog.getBoundingClientRect();
+    const cut = [...dialog.querySelectorAll<HTMLElement>("button, label")].filter((button) => {
+      const box = button.getBoundingClientRect();
+      return box.width > 1 && (button.scrollWidth > button.clientWidth || box.left < edge.left || box.right > edge.right);
+    }).map((button) => `${button.textContent!.trim()}: ${button.scrollWidth}/${button.clientWidth}`);
+    return dialog.scrollWidth > dialog.clientWidth ? [...cut, `the dialog: ${dialog.scrollWidth}/${dialog.clientWidth}`] : cut;
+  });
+}
+
+test("a phone at 150% and 200% text size: adding a device, the new device's first buttons and the check's two keep their words inside them, in Italian", { tag: ["@feature:app.accessibility", "@feature:app.mobile-layout", "@feature:devices.screens"] }, async ({ peer }) => {
+  // At 24px "Corrispondono" ran 14px past its button and "Scansiona QR" 6px past its own; at 32px the dialog scrolled sideways.
+  const [active, added] = await Promise.all([peer("text-size-active", { mobile: true, viewport: PHONE }), peer("text-size-added", { mobile: true, viewport: PHONE })]);
+  await useLanguage(active.page, "it");
+  await useLanguage(added.page, "it");
+
+  // The new device: I already use Ghostly, Add this device to my profile.
+  await added.page.getByTestId("sidebar-already").click();
+  await added.page.getByTestId("device-join-add").click();
+  const join = added.page.getByRole("dialog");
+  await expect(join.getByRole("button", { name: "Scansiona QR" })).toBeVisible();
+  for (const px of [24, 32]) {
+    await textSize(added.page, px);
+    expect.soft(await cutButtons(join), `the new device's first screen at ${px}px`).toEqual([]);
+  }
+  await textSize(added.page, 16);
+
+  await active.page.goto("/#/profile");
+  await active.page.getByTestId("device-add-open").click();
+  const add = active.page.getByTestId("device-add");
+  await add.getByTestId("device-add-password").fill(DEVICE_SET_PASSWORD);
+  await add.getByTestId("device-add-password-again").fill(DEVICE_SET_PASSWORD);
+  await add.getByTestId("device-add-next").click();
+  const code = (await add.getByTestId("device-add-code").getAttribute("data-code"))!;
+  await setClipboard(added.page, code);
+  await join.getByRole("button", { name: "Incolla dagli appunti" }).click();
+  await added.page.getByTestId("device-join-name").fill("Phone");
+  await added.page.getByTestId("device-join-next").click();
+  await expect(add.getByTestId("device-add-digits")).toBeVisible();
+  for (const px of [24, 32]) {
+    await textSize(active.page, px);
+    expect.soft(await cutButtons(add), `the check at ${px}px`).toEqual([]);
+  }
+});
+
+test("a phone at a larger text size: Settings' sections (their names and what they hold), its search results and the identity kinds wrap their words instead of cutting them", { tag: ["@feature:app.accessibility", "@feature:app.mobile-layout", "@feature:settings.sections"] }, async ({ peer }) => {
+  const { page } = await peer("text-size-names", { mobile: true, viewport: PHONE });
+  await textSize(page, 24);
+  for (const language of ["fr", "ja", "ar"]) {
+    await useLanguage(page, language);
+    await page.getByTestId("mobile-tab-settings").click();
+    const sections = page.locator('[data-testid^="settings-open-"]');
+    await expect(sections.first()).toBeVisible();
+    expect(await cutNames(sections, ":scope > span.flex-1 > span:first-child"), `${language}: Settings' sections`).toEqual([]);
+    // What each section holds, under its name: wrapped too (Media's, Privacy's and Network's are the long ones).
+    expect(await cutHints(sections), `${language}: Settings' section descriptions`).toEqual([]);
+    await page.getByTestId("settings-search").fill(language === "ja" ? "プ" : language === "ar" ? "ال" : "e");
+    const results = page.getByTestId("settings-search-result");
+    await expect(results.first()).toBeVisible();
+    expect(await cutNames(results, ":scope > span.flex-1 > span:first-child"), `${language}: Settings' search results`).toEqual([]);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth), language).toBeLessThanOrEqual(0);
+
+    await page.getByTestId("mobile-tab-identities").click();
+    await page.getByTestId("identities-new").click();
+    const kinds = page.getByTestId("add-identity").locator('[data-testid^="add-identity-card-"]');
+    await expect(kinds.first()).toBeVisible();
+    expect(await cutNames(kinds, 'span[dir="auto"]'), `${language}: the identity kinds`).toEqual([]);
   }
 });

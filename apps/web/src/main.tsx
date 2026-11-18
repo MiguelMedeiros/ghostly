@@ -15,7 +15,7 @@ import { loadSettings } from "../../ui/src/lib/settings";
 import { bootDetails, browserTraits, lockdownLikely, missingEssentials, type Essential } from "../../ui/src/lib/bootCheck";
 import { UnsupportedBrowser } from "../../ui/src/components/UnsupportedBrowser";
 import { OtherTab, type OtherTabState } from "../../ui/src/components/OtherTab";
-import { forwardLink, linkInAddress, takeLinks } from "../../ui/src/lib/otherTabLink";
+import { dropLinks, forwardLink, linkInAddress, takeLinks } from "../../ui/src/lib/otherTabLink";
 import { loadLocale, translatorFor } from "../../ui/src/locales";
 import { countInstallVisit, watchInstallPrompt } from "../../ui/src/lib/installPrompt";
 import { setPushPlatform } from "../../ui/src/lib/wakePush";
@@ -28,7 +28,7 @@ import { webOpener } from "../../ui/src/lib/apps/webOpener";
 import { profileDatabase } from "../../ui/src/lib/profileData";
 import { activeProfileId } from "../../ui/src/lib/profiles";
 import { nameInChat } from "../../ui/src/lib/apps/nameInChat";
-import { closeWakeNotices, currentPush, pushSupported, subscribePush, syncWakeTable, syncWakeText, unsubscribePush } from "./pwa/push";
+import { closeOnlineWakeNotices, closeWakeNotices, currentPush, pushSupported, subscribePush, syncWakeTable, syncWakeText, unsubscribePush } from "./pwa/push";
 import { SHARE_FORWARD_AFTER_MS, askForShare, followNewVersion, handShareOver, listenForShares, listenForTaps, openedForShare, registerServiceWorker } from "./pwa/serviceWorker";
 
 // A build for the e2e suite runs mini-apps through the real runner and broker before the app has a screen for them.
@@ -48,7 +48,7 @@ listenForTaps(() => isPeer);
 // Another tab took a new version: this one reloads into it rather than run the build whose files its worker deleted.
 const mayStart = followNewVersion();
 // Wake-up push (WISP 401 § Wake-up push): this app can be woken while closed; Settings shows the switch.
-setPushPlatform({ supported: pushSupported, subscribe: subscribePush, current: currentPush, unsubscribe: unsubscribePush, syncTable: syncWakeTable, syncText: syncWakeText, closeNotices: closeWakeNotices });
+setPushPlatform({ supported: pushSupported, subscribe: subscribePush, current: currentPush, unsubscribe: unsubscribePush, syncTable: syncWakeTable, syncText: syncWakeText, closeNotices: closeWakeNotices, closeOnlineNotices: closeOnlineWakeNotices });
 // GNOME Web and other WebKitGTK browsers before 2.52 keep the sounds' output running: waking it froze the page.
 gateSounds();
 
@@ -82,22 +82,42 @@ const missing = await missingEssentials();
 if (missing.length) await cannotRun(missing);
 
 const peerLock = profile ? `ghostly-peer-${profile}` : "ghostly-peer";
-let stopLink = () => {};
+// Read once, as the page opened: a link that reaches it later takes the address, the share is still this page's.
+const sharing = openedForShare();
+/** What stops handing links on, once this tab holds the lock; it returns the last link no tab answered yet. */
+let stopLink = (): string | null => null;
 await becomeThePeer(peerLock, () => {
   const draw = (state: OtherTabState) => root.render(<OtherTab state={state} t={profileTranslator()} />);
   // Opened for a share while the app runs in another tab: that tab gets it (after a wait, or as this tab goes), and
   // this one says it went only once the worker handed it over. Once the lock is this tab's, it asks for it itself.
-  const sharing = openedForShare();
   if (sharing) handShareOver(() => isPeer, draw);
-  // Opened for a link (an invite, a group's, a device code's): that tab opens it, with the same wait. Taken there, it
-  // leaves this address, so this tab opens nothing twice if it takes over later; until then, this tab keeps it.
+  // Opened for a link (an invite, a group's, a device code's): that tab opens it, with the same wait. It leaves this
+  // address (and so the tab's history) as it arrives, and is kept only here until that tab answers: taken there, this
+  // tab opens nothing twice if it takes over later; unanswered by then, this tab opens it itself. A tab on standby
+  // opens none: it refuses it, kept for no one.
+  const pending = new Map<() => void, string>();
+  const handOn = (link: string) => {
+    history.replaceState(history.state, "", `${window.location.pathname}${window.location.search}#/`);
+    const answered = (state: OtherTabState) => { pending.delete(stop); draw(state); };
+    const stop = forwardLink(peerLock, link, () => answered("linkTaken"), SHARE_FORWARD_AFTER_MS, () => answered("plain"));
+    pending.set(stop, link);
+  };
   const link = sharing ? null : linkInAddress(window.location.hash);
-  if (link) {
-    stopLink = forwardLink(peerLock, link, () => {
-      history.replaceState(history.state, "", `${window.location.pathname}${window.location.search}#/`);
-      draw("linkTaken");
-    }, SHARE_FORWARD_AFTER_MS);
-  }
+  if (link) handOn(link);
+  // One that reaches this tab while it waits (the installed app sends a link to the window used last, or it is typed
+  // into the address bar, or Back returns to one) goes the same way, rather than stay in the address and history.
+  const arrived = () => {
+    const next = linkInAddress(window.location.hash);
+    if (!next) return;
+    handOn(next);
+    if (!sharing) draw("link");
+  };
+  addEventListener("hashchange", arrived);
+  stopLink = () => {
+    removeEventListener("hashchange", arrived);
+    for (const stop of pending.keys()) stop();
+    return [...pending.values()].pop() ?? null;
+  };
   draw(sharing ? "sharing" : link ? "link" : "plain");
   // The lock is there but the browser refuses it: the same screen as a browser without it.
 }).catch((error: unknown) => (error instanceof PeerLockUnavailable ? cannotRun(["locks"], error) : Promise.reject(error)));
@@ -105,7 +125,11 @@ await becomeThePeer(peerLock, () => {
 await mayStart(() => untilAskedFor(peerLock));
 
 isPeer = true;
-stopLink();
+// A link no tab answered while this one waited is this tab's to open: back in the address, unless another page is there now.
+const unanswered = stopLink();
+if (unanswered && window.location.hash.replace(/^#\/?/, "") === "") {
+  history.replaceState(history.state, "", `${window.location.pathname}${window.location.search}#${unanswered}`);
+}
 // This tab is the app: a visit, once per tab (its reloads are the same one), for the install hint.
 countInstallVisit();
 // The device state, before anything of the profile starts (WISP 06 § The gate): one small local read. A profile that
@@ -119,9 +143,12 @@ if (gate.full) {
   startSessionSync();
   // Shares for this tab: the one it opened for, and any another tab forwards while this one is the app.
   listenForShares(peerLock);
-  askForShare();
+  askForShare(sharing);
   // Links another tab of this profile opened: here, as if this tab's address had changed to them.
   takeLinks(peerLock, (route) => { window.location.hash = route; });
+} else {
+  // On standby nothing takes them: a tab waiting with one drops it rather than keep it in its address.
+  dropLinks(peerLock);
 }
 addEventListener("pagehide", () => webHost.announceDeparture());
 // Shown again after that (Back, out of the back/forward cache), the page has no peer: it starts over.

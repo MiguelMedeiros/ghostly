@@ -37,6 +37,8 @@ describe("bump-version", () => {
     it("sets one new version in every workspace, the lockfile and the other places", { timeout: 120_000 }, () => {
       const files = [
         ...versionedJson(root),
+        // The npm settings the release's bump runs with (legacy-peer-deps): without them npm adds peers the lock leaves out.
+        ".npmrc",
         "package-lock.json",
         "apps/desktop/Cargo.toml",
         "Cargo.lock",
@@ -57,7 +59,10 @@ describe("bump-version", () => {
       // And one held for a release after the bump's: it stays in the folder, out of the changelog.
       writeFileSync(join(copy, "docs/changelog/unreleased/bump-held.md"), "---\nsection: Fixed\nrelease: 99.0\n---\n- A held entry.\n");
 
-      const env = { ...process.env, npm_config_offline: "true", npm_config_audit: "false", npm_config_fund: "false" };
+      // An empty npm cache of its own, offline: the bump must need nothing the lockfile does not hold, whatever this
+      // machine's cache happens to have (a package's peer that the lock leaves out passed only where it was cached).
+      const cache = join(copy, ".npm-cache");
+      const env = { ...process.env, npm_config_offline: "true", npm_config_cache: cache, npm_config_audit: "false", npm_config_fund: "false" };
       const next = "9.9.9";
       execFileSync(process.execPath, [join(copy, "tools/scripts/bump-version.mjs"), next], { cwd: copy, stdio: "pipe", env });
 

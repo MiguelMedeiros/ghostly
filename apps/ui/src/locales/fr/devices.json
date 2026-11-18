@@ -2,6 +2,7 @@
   "add": {
     "adding": "Ajout de {{device}}…",
     "button": "Ajouter un appareil",
+    "codeQr": "QR code du code de l’appareil",
     "connecting": "Un appareil se connecte…",
     "copy": "Copier le lien",
     "done": "{{device}} ajouté. Il est en veille.",
@@ -55,9 +56,9 @@
     "used": "Un autre appareil a utilisé ce code en premier. Créez-en un nouveau."
   },
   "fork": {
-    "confirm": "Supprimer définitivement cette copie ? Ce qui n'est que dans celle-ci sera perdu.",
+    "confirm": "Supprimer définitivement cette copie ? Ce qui n'est que dans celle-ci sera perdu.",
     "discard": "Supprimer",
-    "discardWhich": "Supprimer : {{which}}",
+    "discardWhich": "Supprimer : {{which}}",
     "hint": "Une copie de ce profil d'avant la reprise par un autre appareil.",
     "info": "Utiliser ici a gardé ce que cet appareil contenait alors. Les messages et paiements qui ne sont que dans cette copie ne sont pas dans votre profil. Supprimer la retire définitivement.",
     "kept": "Gardée le {{when}}",
@@ -103,7 +104,7 @@
       "room": "Pas assez d'espace sur cet appareil.",
       "settle": "Impossible de vérifier quel appareil est actif. Vérifiez votre connexion, puis réessayez.",
       "stalled": "Le transfert s'est arrêté",
-      "stalledNext": "{{device}} n'a pas répondu. Rien n'a changé ; les fichiers copiés sont gardés.",
+      "stalledNext": "{{device}} n'a pas répondu. Rien n'a changé ; les fichiers copiés sont gardés.",
       "turn": "Un autre appareil a pris le relais. Cet appareil est en veille.",
       "unreachable": "Impossible de joindre {{device}}. Il doit être allumé, avec Ghostly ouvert.",
       "version": "Ghostly a été mis à jour entre-temps. Rien n'a changé.",
@@ -119,10 +120,10 @@
     "newer": "L'autre appareil a un Ghostly plus récent. Mettez celui-ci à jour avant de revenir.",
     "notNow": "Pas maintenant",
     "offerHint": "Environ {{size}}.",
-    "offerTitle": "Déplacer ce profil ici depuis {{device}} ?",
+    "offerTitle": "Déplacer ce profil ici depuis {{device}} ?",
     "passwordHint": "Saisissez le mot de passe de verrouillage de ce profil. {{device}} le vérifie.",
     "stays": "{{wallet}} reste sur cet appareil.",
-    "staysExpires": "{{wallet}} reste sur cet appareil. Ses pièces expirent le {{date}} : utilisez Ghostly ici avant.",
+    "staysExpires": "{{wallet}} reste sur cet appareil. Ses pièces expirent le {{date}} : utilisez Ghostly ici avant.",
     "step": {
       "authorizing": "Vérification du mot de passe",
       "checking": "Vérification",
@@ -131,7 +132,7 @@
       "copyAmount": "{{done}} sur {{total}}",
       "done": "Cet appareil est maintenant actif.",
       "doneGiver": "{{device}} est maintenant actif.",
-      "finishing": "Finalisation : en attente du réseau",
+      "finishing": "Finalisation : en attente du réseau",
       "keepUsing": "Vous pouvez continuer à utiliser Ghostly.",
       "paused": "Arrêté à {{percent}} %. Cela reprend quand les deux appareils sont en ligne.",
       "ready": "Préparation",
@@ -179,7 +180,7 @@
     "homeTitle": "Ajoutez d’abord Ghostly à l’écran d’accueil",
     "name": "Nommez cet appareil",
     "newProfile": "Ghostly crée ici un nouveau profil pour cela. Votre profil d’ici reste tel quel.",
-    "newProfileInfo": "Le profil de cet appareil a des discussions, des groupes ou de l’argent : il ne peut pas devenir une copie de l’autre. Passez de l’un à l’autre dans le menu des profils.",
+    "newProfileInfo": "Le profil de cet appareil a des discussions, des groupes ou de l’argent : il ne peut pas devenir une copie de l’autre. Passez de l’un à l’autre dans le menu des profils.",
     "opening": "Ouverture…",
     "otherDevice": "votre autre appareil",
     "persist": "Ce navigateur peut effacer les données de Ghostly. Gardez une copie sur {{device}}.",
@@ -188,42 +189,42 @@
     "restore": "Restaurer une sauvegarde",
     "scanAgain": "Scanner un nouveau code",
     "title": {
-      "computer": "Ajouter cet ordinateur à « {{profile}} »",
-      "phone": "Ajouter ce téléphone à « {{profile}} »",
-      "tablet": "Ajouter cette tablette à « {{profile}} »"
+      "computer": "Ajouter cet ordinateur à « {{profile}} »",
+      "phone": "Ajouter ce téléphone à « {{profile}} »",
+      "tablet": "Ajouter cette tablette à « {{profile}} »"
     },
     "titleYours": {
       "computer": "Ajouter cet ordinateur à votre profil",
       "phone": "Ajouter ce téléphone à votre profil",
       "tablet": "Ajouter cette tablette à votre profil"
     },
-    "unfinished": "Pas terminé : votre autre appareil n’a pas encore inscrit celui-ci."
+    "unfinished": "Pas terminé : votre autre appareil n’a pas encore inscrit celui-ci."
   },
   "limited": {
     "banner": "Hors ligne tant que Ghostly ne peut pas vérifier quel appareil est actif",
     "bannerHint": "Les messages que vous écrivez attendent jusque-là.",
     "hint": "Vérifiez votre connexion.",
-    "info": "Démarrer quand même l'ouvre hors ligne : vous pouvez lire et écrire, mais rien n'est envoyé, payé ni reçu tant que la vérification n'a pas fonctionné. Ghostly réessaie toutes les 30 secondes.",
+    "info": "Démarrer quand même l'ouvre hors ligne : vous pouvez lire et écrire, mais rien n'est envoyé, payé ni reçu tant que la vérification n'a pas fonctionné. Ghostly réessaie toutes les 30 secondes.",
     "restoreBanner": "Copie restaurée, hors ligne pour l'instant",
     "restoreBannerHint": "Ghostly vérifie si votre profil fonctionne sur un autre appareil.",
-    "restoreInfo": "Tant que la vérification n'a pas fonctionné, rien n'est envoyé, payé ni reçu. Si un autre appareil utilise votre profil, cette copie passe en attente ; sinon, elle démarre d'elle-même.",
+    "restoreInfo": "Tant que la vérification n'a pas fonctionné, rien n'est envoyé, payé ni reçu. Si un autre appareil utilise votre profil, cette copie passe en attente ; sinon, elle démarre d'elle-même.",
     "startAnyway": "Démarrer quand même",
     "title": "Impossible de vérifier quel appareil est actif",
     "tryAgain": "Réessayer"
   },
   "lost": {
-    "cashu": "Cashu : échangez tout l’ecash",
-    "cashuHint": "Chaque preuve doit être échangée auprès de son mint, pour que la copie sur l’appareil perdu soit dépensée. Il n’y a pas encore de bouton pour cela : envoyez-le-vous ou dépensez-le.",
+    "cashu": "Cashu : échangez tout l’ecash",
+    "cashuHint": "Chaque preuve doit être échangée auprès de son mint, pour que la copie sur l’appareil perdu soit dépensée. Il n’y a pas encore de bouton pour cela : envoyez-le-vous ou dépensez-le.",
     "chats": "Associez chaque discussion à nouveau",
     "chatsHint": "Utilisez une nouvelle invitation pour chaque discussion. Vos contacts voient une nouvelle discussion. Dans un groupe, l’admin retire votre ancienne clé et ajoute la nouvelle.",
     "done": "Terminé",
     "hint": "Retirer l’appareil l’empêche de prendre ce profil. Ces étapes protègent votre argent et vos discussions.",
-    "lightning": "{{wallet}} : révoquez la connexion sur votre nœud",
-    "phrase": "{{wallet}} : créez un nouveau portefeuille et envoyez-y les fonds",
+    "lightning": "{{wallet}} : révoquez la connexion sur votre nœud",
+    "phrase": "{{wallet}} : créez un nouveau portefeuille et envoyez-y les fonds",
     "remove": "Retirer {{device}}",
     "storage": "Changez vos clés de stockage",
     "storageHint": "L’appareil perdu les détient. Changez-les chez votre fournisseur de stockage, puis saisissez les nouvelles dans Sauvegardes.",
-    "title": "Perdu ou volé ?"
+    "title": "Perdu ou volé ?"
   },
   "manage": {
     "confirm": "Activer",
@@ -253,14 +254,13 @@
     "doneInfo": "Il ne peut plus prendre ce profil. Vos autres appareils reçoivent le changement la prochaine fois qu’ils ouvrent Ghostly.",
     "fail": {
       "busy": "Autre chose modifie vos appareils. Réessayez dans un instant.",
-      "failed": "Un problème est survenu. Rien n’a été modifié.",
-      "offline": "Passez en ligne pour modifier vos appareils."
+      "failed": "Un problème est survenu. Rien n’a été modifié."
     },
     "go": "Retirer",
     "lost": "Perdu ou volé",
     "removing": "Retrait…",
     "text": "Il ne pourra plus prendre ce profil.",
-    "title": "Retirer {{device}} ?"
+    "title": "Retirer {{device}} ?"
   },
   "rename": {
     "button": "Renommer",
@@ -304,7 +304,7 @@
     "connecting": "Non connecté",
     "foreign": "Autre chose a fermé votre ancien ensemble d’appareils.",
     "full": "Ce profil a 4 appareils, le maximum possible.",
-    "fullInfo": "Pour en ajouter un autre, retirez-en un d’abord : ouvrez son menu ci-dessous et choisissez Retirer.",
+    "fullInfo": "Pour en ajouter un autre, retirez-en un d’abord : ouvrez son menu ci-dessous et choisissez Retirer.",
     "info": "Seul l’appareil actif envoie, reçoit et paie, ainsi vos messages et votre argent ne sont jamais à deux endroits. Déplacez le profil quand vous voulez.",
     "keepAwake": "Garder cet ordinateur éveillé",
     "keepAwakeHint": "Pour que votre téléphone puisse prendre le relais quand vous êtes sorti.",
@@ -336,12 +336,11 @@
       "unreadable": "Rien n'a été démarré."
     },
     "info": "Un seul appareil envoie, reçoit et paie à la fois, pour que vos messages et votre argent ne soient jamais à deux endroits.",
-    "link": "{{device}} : {{status}}",
     "links": "Vos appareils",
     "notice": {
       "hint": "Si cette liste vous semble fausse, n’utilisez pas cet appareil.",
       "ok": "OK",
-      "title": "Vos appareils sont maintenant : {{devices}}",
+      "title": "Vos appareils sont maintenant : {{devices}}",
       "wrong": "C’est faux"
     },
     "others": "Autres profils",
@@ -356,7 +355,7 @@
       "go": "Retirer",
       "hint": "Ses discussions, clés et portefeuilles sont effacés de cet appareil. Vos autres appareils gardent le profil.",
       "removing": "Retrait…",
-      "title": "Retirer {{name}} de cet appareil ?"
+      "title": "Retirer {{name}} de cet appareil ?"
     },
     "title": {
       "moving": "Presque terminé",
@@ -375,7 +374,7 @@
       "retry": "Réessayer",
       "title": "Pas terminé"
     },
-    "unreadableInfo": "Avant de démarrer, Ghostly lit lequel de vos appareils est actif. Cela a échoué : rien n'a été envoyé ni modifié. Redémarrez l'application ou l'appareil, puis réessayez."
+    "unreadableInfo": "Avant de démarrer, Ghostly lit lequel de vos appareils est actif. Cela a échoué : rien n'a été envoyé ni modifié. Redémarrez l'application ou l'appareil, puis réessayez."
   },
   "takeover": {
     "checking": "Vérification de l'appareil actif · environ 30 secondes",
@@ -398,9 +397,10 @@
     "hintRestored": "Votre autre appareil va s'arrêter. Cet appareil a votre profil tel qu'il était dans la sauvegarde.",
     "info": "Les messages et l'argent arrivés sur {{device}} depuis ne sont pas ici. Si {{device}} revient, il s'arrête, sans rien dire à vos contacts.",
     "lost": "Mon autre appareil est perdu ou cassé",
+    "lostFirst": "Répondez d’abord à « Perdu ou volé ? ».",
     "lostNo": "Juste cassé ou effacé",
     "lostNoHint": "Il s'arrête s'il revient un jour.",
-    "lostQuestion": "Perdu ou volé ?",
+    "lostQuestion": "Perdu ou volé ?",
     "lostRace": "Un autre appareil a pris le relais au même moment. Cet appareil est en veille.",
     "lostYes": "Perdu ou volé",
     "lostYesHint": "Après la reprise, une liste d'étapes aide à protéger votre argent et vos discussions.",
@@ -409,7 +409,7 @@
     "ownSetRemoved": "Un autre de vos appareils est reparti avant. Ajoutez de nouveau cet appareil depuis celui-ci.",
     "ownSetWait": "En attente du réseau. Réessayez dans un instant.",
     "restoredHint": "Cet appareil a une copie issue d'une sauvegarde. Rien ne démarre tant que vous ne prenez pas le relais.",
-    "title": "Prendre le relais sans {{device}} ?",
-    "titleUnnamed": "Prendre le relais sans votre autre appareil ?"
+    "title": "Prendre le relais sans {{device}} ?",
+    "titleUnnamed": "Prendre le relais sans votre autre appareil ?"
   }
 }

@@ -7,17 +7,21 @@ import type { Translate } from "../locales/translate";
 import { knownErrorParts, rawError } from "../lib/errorText";
 import type { Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
+import { isolate } from "../lib/ownStatus";
 
 /** How long the reason an answer did not go stays under Accept and Decline. */
 export const REFUSAL_SHOWN_MS = 8000;
 
 type Invitation = NonNullable<GroupView["invitation"]>;
 
-/** A contact's invitation in one line: who invited and to how many, or where the answer is. */
+/**
+ * A contact's invitation in one line: who invited and to how many, or where the answer is. The inviter's name, here as
+ * in every invitation line, is isolated: a string has no room for a <bdi>.
+ */
 export function invitationLine(invitation: Invitation, t: Translate): string {
   const members = invitation.members === 1 ? t("group.chat.memberOne") : t("group.chat.memberCount", { count: invitation.members });
   return invitation.takenBack ? t("sidebar.group.takenBack") : invitation.unanswered ? t("sidebar.group.unanswered") : invitation.accepted ? t("group.chat.joining")
-    : invitation.contact ? t("sidebar.group.invitedBy", { contact: invitation.contact, members }) : t("sidebar.group.invitedByUnknown", { members });
+    : invitation.contact ? t("sidebar.group.invitedBy", { contact: isolate(invitation.contact), members }) : t("sidebar.group.invitedByUnknown", { members });
 }
 
 /**
@@ -42,7 +46,7 @@ export const answerable = (invitation: Invitation | undefined) => !!invitation &
 
 /** Who took the invitation back, and what to do: the words of a taken-back invitation's page. */
 function takenBackWords(group: GroupView, t: Translate): { title: string; next: string } {
-  const contact = group.invitation!.contact, name = group.name;
+  const contact = group.invitation!.contact && isolate(group.invitation!.contact), name = group.name && isolate(group.name);
   return contact ? { title: name ? t("group.chat.takenBack", { contact, name }) : t("group.chat.takenBackNoName", { contact }), next: t("group.chat.takenBackNext", { contact }) }
     : { title: name ? t("group.chat.takenBackUnknown", { name }) : t("group.chat.takenBackUnknownNoName"), next: t("group.chat.takenBackNextUnknown") };
 }
@@ -121,7 +125,7 @@ export function useInvitationAnswer(group: Pick<GroupView, "id" | "invitation">,
  */
 function refusal(error: unknown, contact: string | undefined, t: Translate): Problem {
   const raw = rawError(error);
-  if (/not connected/i.test(raw)) return { tone: "error", title: contact ? t("sidebar.group.inviterAway", { contact }) : t("sidebar.group.inviterAwayUnknown") };
+  if (/not connected/i.test(raw)) return { tone: "error", title: contact ? t("sidebar.group.inviterAway", { contact: isolate(contact) }) : t("sidebar.group.inviterAwayUnknown") };
   const known = knownErrorParts(raw, t);
   return known ? { tone: "error", ...known } : { tone: "error", title: t("sidebar.group.answerFailed"), ...(raw && { detail: raw }) };
 }
@@ -135,34 +139,37 @@ export function InvitationRefusal({ refused, className }: { refused: Problem; cl
  * An answer button while an answer goes: busy, not disabled, which would drop a keyboard's focus to the page and leave
  * it there on a refusal. `answer` takes no second press.
  */
-const answering = (busy: boolean) => ({ "aria-disabled": busy || undefined, "aria-busy": busy || undefined });
+const answering = (busy: boolean, describedBy?: string) => ({ "aria-disabled": busy || undefined, "aria-busy": busy || undefined, "aria-describedby": describedBy });
+
+/** An answer button's props. `describedBy`: the id of the group's name, on a chat list row, where the button is not in the row's open button. */
+type AnswerProps = Pick<ReturnType<typeof useInvitationAnswer>, "busy" | "answer"> & { describedBy?: string };
 
 /** A chat list row's answer buttons: small on a desktop; a thumb's height on a phone, where the list is the home screen. */
 const ROW_BUTTON = "px-3 py-1 text-xs max-md:min-h-11 max-md:px-4";
 
 /** Accept and Decline, small (a chat list row) or a thumb's height (the invitation's own page). */
-export function InvitationButtons({ busy, answer, large = false }: Pick<ReturnType<typeof useInvitationAnswer>, "busy" | "answer"> & { large?: boolean }) {
+export function InvitationButtons({ busy, answer, describedBy, large = false }: AnswerProps & { large?: boolean }) {
   const { t } = useI18n();
   const size = large ? "min-h-11 px-5 text-sm" : ROW_BUTTON;
   return <>
-    <button {...answering(busy)} data-testid="group-accept" onClick={e => { e.stopPropagation(); void answer("acceptGroupInvitation"); }}
-      className={`rounded-lg bg-accent font-semibold text-panel-header hover:bg-accent-hover aria-disabled:opacity-40 ${size}`}>{t("chat.file.accept")}</button>
-    <button {...answering(busy)} data-testid="group-decline" onClick={e => { e.stopPropagation(); void answer("declineGroupInvitation"); }}
+    <button {...answering(busy, describedBy)} data-testid="group-accept" onClick={e => { e.stopPropagation(); void answer("acceptGroupInvitation"); }}
+      className={`rounded-lg bg-accent font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] aria-disabled:opacity-40 ${size}`}>{t("chat.file.accept")}</button>
+    <button {...answering(busy, describedBy)} data-testid="group-decline" onClick={e => { e.stopPropagation(); void answer("declineGroupInvitation"); }}
       className={`rounded-lg text-text-secondary hover:bg-surface-hover aria-disabled:opacity-40 ${size}`}>{t("chat.file.decline")}</button>
   </>;
 }
 
 /** A group link nobody answered for an hour: its row's action, Try again, knocks again (`acceptGroupInvitation`). */
-export function LinkTryAgain({ busy, answer }: Pick<ReturnType<typeof useInvitationAnswer>, "busy" | "answer">) {
+export function LinkTryAgain({ busy, answer, describedBy }: AnswerProps) {
   const { t } = useI18n();
-  return <button {...answering(busy)} data-testid="group-link-retry" onClick={e => { e.stopPropagation(); void answer("acceptGroupInvitation"); }}
-    className={`rounded-lg bg-accent font-semibold text-panel-header hover:bg-accent-hover aria-disabled:opacity-40 ${ROW_BUTTON}`}>{t("group.join.tryAgain")}</button>;
+  return <button {...answering(busy, describedBy)} data-testid="group-link-retry" onClick={e => { e.stopPropagation(); void answer("acceptGroupInvitation"); }}
+    className={`rounded-lg bg-accent font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] aria-disabled:opacity-40 ${ROW_BUTTON}`}>{t("group.join.tryAgain")}</button>;
 }
 
 /** A taken-back invitation's only action: Delete (it says nothing to whoever took it back). */
-export function TakenBackDelete({ busy, answer, large = false }: Pick<ReturnType<typeof useInvitationAnswer>, "busy" | "answer"> & { large?: boolean }) {
+export function TakenBackDelete({ busy, answer, describedBy, large = false }: AnswerProps & { large?: boolean }) {
   const { t } = useI18n();
-  return <button {...answering(busy)} data-testid="group-taken-back-delete" onClick={e => { e.stopPropagation(); void answer("declineGroupInvitation"); }}
+  return <button {...answering(busy, describedBy)} data-testid="group-taken-back-delete" onClick={e => { e.stopPropagation(); void answer("declineGroupInvitation"); }}
     className={`rounded-lg text-text-secondary hover:bg-surface-hover aria-disabled:opacity-40 ${large ? "min-h-11 px-5 text-sm" : ROW_BUTTON}`}>{t("common.delete")}</button>;
 }
 

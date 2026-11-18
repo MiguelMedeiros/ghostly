@@ -1,5 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useReducer, useRef, useState } from "react";
 import { useI18n } from "../contexts/I18nContext";
+import { isolate } from "../lib/ownStatus";
 import { folderUnread, type BadgeGroup } from "../lib/appBadge";
 import { OTHER_CHATS_ID, deleteFolder, folderChatsId, moveFolder, renameFolder, type ChatFolder } from "../lib/chatFolders";
 import { MUTE_EVENT } from "../lib/chatMute";
@@ -54,6 +55,8 @@ export function ChatFolderHeader({ folder, sessions, groups, place, onToggle, or
   useLayoutEffect(() => { if (moved.current) { moved.current = false; optionsRef.current?.focus(); } }, [place.index]);
   const move = (by: -1 | 1) => { moved.current = true; moveFolder(folder.id, by); closeMenu(); };
   const optionsLabel = t("sidebar.folder.options", { name: folder.name });
+  // The tooltip is drawn, in the page's direction: the name isolated in it keeps its own ("Club!", not "!Club").
+  const optionsTitle = t("sidebar.folder.options", { name: isolate(folder.name) });
   const label = unread && (unread.count === 1 ? t("sidebar.folder.unreadOne", { name: folder.name }) : t("sidebar.folder.unreadCount", { count: unread.count, name: folder.name }));
   return (
     <div data-testid="chat-folder" data-folder={folder.id} data-folded={folder.folded || undefined} className="relative flex h-11 items-center border-b border-border/40 bg-sidebar-bg">
@@ -67,7 +70,7 @@ export function ChatFolderHeader({ folder, sessions, groups, place, onToggle, or
         {unread.count > 99 ? "99+" : unread.count}
       </span>}
       <div ref={menuRef} className="relative flex shrink-0 pe-1.5">
-        <button ref={optionsRef} type="button" data-testid="chat-folder-options" aria-haspopup="true" aria-expanded={menuOpen} aria-label={optionsLabel} title={optionsLabel} onClick={() => { setPointed(undefined); setMenuOpen(o => !o); }}
+        <button ref={optionsRef} type="button" data-testid="chat-folder-options" aria-haspopup="true" aria-expanded={menuOpen} aria-label={optionsLabel} title={optionsTitle} onClick={() => { setPointed(undefined); setMenuOpen(o => !o); }}
           className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full text-text-muted transition-colors hover:bg-text-primary/10 hover:text-accent aria-expanded:bg-text-primary/10 aria-expanded:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
           <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="1" /><circle cx="12" cy="5" r="1" /><circle cx="12" cy="19" r="1" /></svg>
         </button>

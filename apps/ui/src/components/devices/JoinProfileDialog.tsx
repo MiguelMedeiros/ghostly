@@ -20,11 +20,17 @@ import { problemText, type Problem } from "../../lib/problemText";
 import { said } from "../../lib/notices";
 import { fillNames } from "../../lib/fillNodes";
 import { keepFocusIn } from "../../lib/focus";
+import { FocusSafeButton } from "../ui/FocusSafeButton";
 
 /** How long a profile whose wallets are still loading is asked again before the join gives up and says why. */
 const LOADING_WAIT_MS = 60_000;
 /** The done screen stays this long before the standby screen opens by itself. */
 const DONE_PAUSE_MS = 1_500;
+/**
+ * The joins this page asked of the engine, counted. The engine's cancel ends whichever enrollment it runs now: a join
+ * that answers after its dialog closed cancels it only while no later join was asked, which ended this one already.
+ */
+let joins = 0;
 
 /** "Add this phone to <profile>" and "Add this phone to your profile", by what this device is. */
 const TITLES: Record<ReturnType<typeof deviceNoun>, { named: TranslationKey; yours: TranslationKey }> = {
@@ -66,7 +72,8 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
   const nameField = useFittedNameField(name, setName, fitsDeviceName);
   const [place, setPlace] = useState<Place | null>(null);
   const [view, setView] = useState<EnrollView | null>(null);
-  const [kept, setKept] = useState<boolean | null>(null);
+  // Whether the browser keeps this device's data (`askPersistentStorage`); "asking" while the browser waits on the person.
+  const [kept, setKept] = useState<boolean | null | "asking">(null);
   const [preparing, setPreparing] = useState(false);
   // What went wrong before the engine had an enrollment to show: said, with a way to a new code.
   const [failure, setFailure] = useState<Problem | null>(null);
@@ -106,15 +113,21 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
     return () => clearInterval(timer);
   }, [step, view]);
   useEffect(() => () => { if (!ended.current) void engine.call("deviceEnrollCancel").catch(() => {}); }, []);
-  // Add, or Scan again, went away with its step: the focus stays in the dialog.
-  useEffect(() => { if (step === "enroll") keepFocusIn(body.current); }, [step, view?.step, failure]);
+  // Add, or Scan again, went away with its step: the focus stays in the dialog. So does Continue, once the browser said it
+  // keeps this device's data.
+  useEffect(() => { if (step === "enroll") keepFocusIn(body.current); }, [step, view?.step, failure, kept]);
+  // The end: Continue, when it shows, takes the focus, the one thing left to press. Not again later: once there, the
+  // focus is the person's.
+  const continueButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => { if (view?.step === "done" || view?.step === "unfinished") continueButton.current?.focus(); }, [view?.step]);
 
-  // Done: the standby screen opens by itself, unless the browser may clear the data, which the person reads first.
+  // Done: the standby screen opens by itself, unless the browser may clear the data, which the person reads first, or
+  // still asks them whether to keep it (a reload would drop its prompt): Continue, or the answer, opens it.
   // The profile is now one added from another device: a first start's "What should people call you?" is not asked.
   // The lock carries across the reload only if it stands passed then: this dialog runs on under a lock closed again.
   useEffect(() => {
     if (view?.step === "done") nameStepDone();
-    if (view?.step !== "done" || kept === false) return;
+    if (view?.step !== "done" || kept === false || kept === "asking") return;
     const timer = setTimeout(() => void reloadIntoGate({ keepUnlocked: lockPassedNow() }), DONE_PAUSE_MS);
     return () => clearTimeout(timer);
   }, [view?.step, kept, lockPassedNow]);
@@ -130,12 +143,16 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
   /** Joins in this profile, asking again while its wallets load; refused for this profile, the code goes to a new one. */
   const join = async (device: string) => {
     setStep("enroll"); setFailure(null); setError(null);
-    setKept(await askPersistentStorage());
+    // Firefox asks the person in a prompt of its own and answers only once they do: the join goes on meanwhile, so a
+    // prompt not seen, or put away, leaves the code unused until it runs out.
+    setKept("asking");
+    void askPersistentStorage().then((answer) => { if (!closed.current) setKept(answer); });
     const until = Date.now() + LOADING_WAIT_MS;
     for (;;) {
       try {
+        const mine = ++joins;
         const first = await engine.call("deviceEnrollJoin", { code: device, name: name.trim(), app: getBrowserHost().version });
-        if (closed.current) { void engine.call("deviceEnrollCancel").catch(() => {}); return; }
+        if (closed.current) { if (mine === joins) void engine.call("deviceEnrollCancel").catch(() => {}); return; }
         ended.current = false;
         setPreparing(false); setView(first);
         return;
@@ -185,13 +202,26 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
       onClose={() => { if (fromChoose.current) setStep("choose"); else onClose(); }} />;
   }
 
-  const close = () => { if (view?.step === "done" || view?.step === "unfinished") void reloadIntoGate({ keepUnlocked: lockPassedNow() }); else onClose(); };
+  // While it finishes × and Escape do nothing: the grant is stored and this device is a standby already, which only this
+  // dialog opens (its end reloads into the gate); closed, the page went on as the profile it was, and "Not finished" was
+  // said nowhere. The engine ends the step on its own.
+  const close = () => {
+    if (view?.step === "finishing") return;
+    if (view?.step === "done" || view?.step === "unfinished") void reloadIntoGate({ keepUnlocked: lockPassedNow() }); else onClose();
+  };
   const titles = TITLES[noun];
   const title = step === "choose" ? t("devices.join.already")
     : step === "home" ? t("devices.join.homeTitle")
       : profile ? t(titles.named, { profile }) : t(titles.yours);
+  // The digits to check, and the end, are plain lines: a screen reader hears them (the digits one by one) from a line that
+  // is there from the dialog's start and changes its text (one that comes with its step is often not read).
+  const spoken = view?.role !== "joiner" ? ""
+    : view.step === "confirm" ? <>{t("devices.join.check")} <span dir="ltr">{view.digits.split("").join(" ")}</span></>
+    : view.step === "done" ? t("devices.join.done")
+    : view.step === "unfinished" ? t("devices.join.unfinished") : "";
   return (
     <DeviceDialog title={title} onClose={close} testId="device-join">
+      <p role="status" className="sr-only" data-testid="device-join-spoken">{spoken}</p>
       {step === "choose" && <>
         {tab ? <HomeScreenSteps code={false} />
           : <button type="button" data-testid="device-join-add" onClick={() => { fromChoose.current = true; setStep("scan"); }} className={primaryButton}>{t("devices.join.addThis")}</button>}
@@ -206,7 +236,7 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
           </label>
           {place === "new" && <InfoLine testId="device-join-new-profile" info={t("devices.join.newProfileInfo")}>{t("devices.join.newProfile")}</InfoLine>}
           {error && <Notice problem={error} testId="device-join-error" />}
-          <button type="submit" autoFocus data-testid="device-join-next" disabled={!name.trim() || busy} className={primaryButton}>{t("devices.join.add")}</button>
+          <FocusSafeButton type="submit" autoFocus data-testid="device-join-next" disabled={!name.trim() || busy} className={primaryButton}>{t("devices.join.add")}</FocusSafeButton>
         </form>
       )}
       {/* What the enroll step shows; it takes the focus when Add goes away under it. */}
@@ -227,9 +257,9 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
           {(view.step === "done" || view.step === "unfinished") && <>
             <p data-testid="device-join-done" data-step={view.step} className="text-text-primary">{view.step === "done" ? t("devices.join.done") : t("devices.join.unfinished")}</p>
             {kept === false && <Notice tone="warning" testId="device-join-persist">{fillNames(t("devices.join.persist"), { device: view.device || t("devices.join.otherDevice") })}</Notice>}
-            {view.step === "done" && kept !== false
+            {view.step === "done" && kept !== false && kept !== "asking"
               ? <Status>{t("devices.join.opening")}</Status>
-              : <button type="button" data-testid="device-join-continue" onClick={() => void reloadIntoGate({ keepUnlocked: lockPassedNow() })} className={primaryButton}>{t("devices.join.continue")}</button>}
+              : <button ref={continueButton} type="button" data-testid="device-join-continue" onClick={() => void reloadIntoGate({ keepUnlocked: lockPassedNow() })} className={primaryButton}>{t("devices.join.continue")}</button>}
           </>}
           {view.step === "failed" && <>
             <div data-testid="device-join-failed" data-reason={view.reason}><Notice problem={said(failureKey(view.reason), t)} /></div>

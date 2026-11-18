@@ -24,7 +24,7 @@ const Spinner = () => (
 );
 
 export function LockScreen() {
-  const { isLocked, covered, unlock, retryAt, ringing } = useLockScreen();
+  const { isLocked, covered, unlock, retryAt, ringing, callEndSaid } = useLockScreen();
   const { t } = useI18n();
   const [password, setPassword] = useState("");
   const [error, setError] = useState(false);
@@ -73,6 +73,9 @@ export function LockScreen() {
       if (focused?.isConnected && document.activeElement !== focused) focused.focus();
     };
     const refuse = (e: Event) => e.preventDefault();
+    // A print of the page (Ctrl+P, Save as PDF) lays out the whole document, the app kept under the lock included:
+    // `data-locked` leaves it the lock screen only (index.css).
+    document.documentElement.setAttribute(LOCKED, "");
     const opened = new MutationObserver((records) => {
       if (records.some(({ target }) => target !== lockScreen && target instanceof HTMLDialogElement && target.open)) raise();
     });
@@ -91,6 +94,7 @@ export function LockScreen() {
       lockScreen.removeEventListener("close", show);
       opened.disconnect();
       document.removeEventListener("toggle", toggled, true);
+      document.documentElement.removeAttribute(LOCKED);
       lockScreen.close();
     };
   }, [isLocked]);
@@ -165,11 +169,15 @@ export function LockScreen() {
     {covered && <AwayCover />}
     <dialog
       ref={screenRef}
+      data-lock-screen=""
       // Over everything the lock hides, the call window included: the whole window, not the card a dialog draws.
       className="fixed inset-0 z-[60] m-0 h-full w-full max-h-none max-w-none border-0 p-0 bg-app-bg text-text-primary backdrop:bg-app-bg"
       aria-label={t("lockScreen.title")}
     >
       <LockViewport />
+      {/* How a call that rang here ended ("Missed audio call"): its card goes, the focus back on the password, and the
+          chat's own region is outside this modal dialog, which is all a screen reader hears. */}
+      <p role="status" className="sr-only" data-testid="lock-call-end-spoken">{callEndSaid}</p>
       {/* Centred in what the keyboard leaves (`--app-height`), not in the whole screen: on a phone the field and
           Unlock sat under the keyboard. */}
       <div className="flex items-center justify-center overflow-y-auto" data-app-height style={{ height: "var(--app-height, 100%)" }}>
@@ -271,6 +279,8 @@ export function LockScreen() {
 
 /** Marks the away cover, which goes over the lock screen: the lock screen does not go back over it. */
 const COVER = "data-lock-cover";
+/** On `<html>` while the lock screen is up: a print shows nothing else (index.css). */
+const LOCKED = "data-locked";
 
 /**
  * Puts `el` last in the browser's top layer, over every other layer the page draws: whatever its z-index, a modal

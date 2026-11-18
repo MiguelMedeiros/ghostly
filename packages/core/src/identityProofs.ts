@@ -46,6 +46,19 @@ export const IDENTITY_MAX_RECEIVED = 16;
 export const IDENTITY_FRAME_LIMIT = 40;
 export const IDENTITY_FRAME_WINDOW_MS = 60_000;
 /**
+ * `idp-*` frames this side sends a contact per `IDENTITY_SEND_WINDOW_MS`, so that the person's own shares and stops fit
+ * the contact's per-chat limits above and none is dropped unread there. Lower than the contact's count over a longer
+ * window: frames can arrive closer together than they left.
+ */
+export const IDENTITY_SEND_LIMIT = IDENTITY_FRAME_LIMIT - 4;
+export const IDENTITY_SEND_WINDOW_MS = IDENTITY_FRAME_WINDOW_MS + 10_000;
+/**
+ * A request or withdraw the contact did not answer is sent again after this (ms), twice as long each time, at most
+ * `IDENTITY_RESENDS` times a connection; past that it waits for the next one, as before.
+ */
+export const IDENTITY_RESEND_MS = 60_000;
+export const IDENTITY_RESENDS = 4;
+/**
  * A proof this side holds verified, presented again with the same evidence between the same keys, is answered from that
  * check while it is younger than this (seconds): the contact chooses how often it presents, and each check costs this
  * device a provider lookup (a forge's per-IP quota, a DNS query, a contact's server) and a Pkarr read. An hour keeps an
@@ -228,6 +241,11 @@ export interface SharedIdentity {
   id: string;
   provider: string;
   subject: string;
+  /**
+   * The identity the contact keeps it under (the provider's verified subject: an OIDC binding names the issuer, its
+   * account is the issuer and `sub`). Absent in older ledgers.
+   */
+  account?: string;
   /** queued: the person chose to share, the contact is not connected yet. */
   status: "queued" | "pending" | "accepted" | "rejected" | "withdrawal-pending" | "withdrawn";
   /** Seconds. When the status last changed. */
@@ -270,7 +288,8 @@ export interface IdentityLedger {
 }
 export const emptyIdentityLedger = (): IdentityLedger => ({ challenges: [], shared: [], received: [] });
 
-export interface LocalIdentityProof { statement: IdentityStatement; evidence: unknown; seed: Uint8Array }
+/** `account`: the subject its provider verified (`VerifiedIdentity.subject`); the binding's subject when not given. */
+export interface LocalIdentityProof { statement: IdentityStatement; evidence: unknown; seed: Uint8Array; account?: string }
 
 export interface IdentityExchangeOptions {
   /** This side's view of the authenticated channel; throws when there is none. */
@@ -287,6 +306,11 @@ export interface IdentityExchangeOptions {
   revoked?(statement: IdentityStatement): Promise<boolean>;
   now?(): number;
   onError?(error: string): void;
+  /**
+   * Off: every frame goes at once and nothing unanswered is sent again in a connection (for tests that play a contact
+   * sending past the limits). On by default: `IDENTITY_SEND_LIMIT`, `IDENTITY_RESEND_MS`.
+   */
+  paced?: boolean;
 }
 
 export type IdentityStatus = "verified" | "expired" | "withdrawn" | "revoked" | "unconfirmed" | "previous-key";
@@ -372,6 +396,17 @@ export class IdentityExchange {
   private checking = new Set<string>();
   /** When the contact's presentations were checked with their provider (seconds), for `IDENTITY_MAX_CHECKS_PER_HOUR`. */
   private checks: number[] = [];
+  /** When this side sent its recent frames (ms), for `IDENTITY_SEND_LIMIT`. Kept across connections, as the contact's count is. */
+  private sentAt: number[] = [];
+  /** Hello, answers and presentations waiting for room in that window, in order (`proof`: a presentation's). */
+  private outbox: { frame: object; proof?: string }[] = [];
+  /**
+   * This connection's request or withdraw per proof: when it (or its presentation) last went, how often, and whether its
+   * presentation went. Requests and withdraws are built from the ledger when their turn comes, so one stopped or
+   * answered meanwhile never goes.
+   */
+  private attempts = new Map<string, { kind: "request" | "withdraw"; at: number; tries: number; presented?: true }>();
+  private timer: ReturnType<typeof setTimeout> | undefined;
   constructor(private options: IdentityExchangeOptions) {}
   private now() { return (this.options.now ?? nowSeconds)(); }
   /** The ledger with one more step on the chat's timeline, in milliseconds (a test's clock, in seconds, when given). */
@@ -379,9 +414,72 @@ export class IdentityExchange {
     return { ...l, timeline: applyIdentityEvent(l.timeline ?? [], event, this.options.now ? this.now() * 1000 : Date.now()) };
   }
   private incomingScope(): IdentityScope { const s = this.options.scope(); return { ...s, subject: s.audience, audience: s.subject }; }
-  private send(frame: object) {
+  private send(frame: object, proof?: string) {
     if (JSON.stringify(frame).length > IDENTITY_MAX_FRAME) throw new Error("Identity proof too large");
-    this.options.send(frame);
+    // A contact sending past what it can read itself gets no more answers waiting here than it could read.
+    if (this.outbox.length >= IDENTITY_FRAME_LIMIT) return;
+    this.outbox.push({ frame, proof });
+    this.pump();
+  }
+  /** Sends one frame and counts it; false when the channel is gone (what waits is sent on the next connection). */
+  private transmit(frame: object, at: number): boolean {
+    try { this.options.send(frame); } catch { this.outbox = []; return false; }
+    this.sentAt.push(at);
+    return true;
+  }
+  private static resendAfter(tries: number) { return IDENTITY_RESEND_MS * 2 ** (tries - 1); }
+  /**
+   * Sends what fits the contact's limits now and sets a timer for the rest: the waiting answers first, then requests
+   * (at most `MAX_CHALLENGES` open, each keeping room in the window for its presentation) and withdraws, then the
+   * unanswered ones again once their time is up.
+   */
+  private pump(): void {
+    if (this.timer !== undefined) clearTimeout(this.timer);
+    this.timer = undefined;
+    const paced = this.options.paced !== false;
+    const [limit, maxOpen] = paced ? [IDENTITY_SEND_LIMIT, MAX_CHALLENGES] : [Infinity, Infinity];
+    const at = Date.now();
+    this.sentAt = paced ? this.sentAt.filter(t => t > at - IDENTITY_SEND_WINDOW_MS && t <= at) : [];
+    /** When the window has room for one more frame under `n`. */
+    const roomAt = (n: number) => this.sentAt[this.sentAt.length - n] + IDENTITY_SEND_WINDOW_MS;
+    let wake = Infinity;
+    while (this.outbox.length && this.sentAt.length < limit) {
+      const { frame, proof } = this.outbox.shift()!;
+      if (!this.transmit(frame, at)) return;
+      const a = proof ? this.attempts.get(proof) : undefined;
+      if (a) { a.at = at; a.presented = true; }
+    }
+    if (this.outbox.length) wake = roomAt(limit);
+    const shared = this.options.storage.read().shared;
+    const kindOf = (s: SharedIdentity) => s.status === "queued" || s.status === "pending" ? "request" as const : s.status === "withdrawal-pending" ? "withdraw" as const : undefined;
+    for (const [id, a] of this.attempts) { const s = shared.find(x => x.id === id); if (!s || kindOf(s) !== a.kind) this.attempts.delete(id); }
+    const dueAt = (a: { at: number; tries: number }) => !paced || a.tries > IDENTITY_RESENDS ? Infinity : a.at + IdentityExchange.resendAfter(a.tries);
+    // A request given up for this connection (answered without a challenge, or sent as often as it may be) holds no place.
+    const opened = [...this.attempts.values()].filter(a => a.kind === "request" && a.tries <= IDENTITY_RESENDS && dueAt(a) > at);
+    let open = opened.length;
+    /** Presentations still to come for the open requests: room kept for them. */
+    let owed = opened.filter(a => !a.presented).length;
+    for (const s of shared) {
+      const kind = kindOf(s);
+      if (!kind) continue;
+      const a = this.attempts.get(s.id);
+      if (a && dueAt(a) > at) { wake = Math.min(wake, dueAt(a)); continue; }
+      if (a && (!paced || a.tries > IDENTITY_RESENDS)) continue;
+      if (kind === "request" && open >= maxOpen) continue;
+      // A request needs room for itself and for its presentation, beside the presentations still owed.
+      const need = kind === "request" ? 2 : 1;
+      if (this.sentAt.length + owed + need > limit) { wake = Math.min(wake, roomAt(limit - owed - need + 1)); break; }
+      const frame = kind === "request" ? { t: "idp-request", id: s.id, provider: s.provider } : { t: "idp-withdraw", id: s.id };
+      if (!this.transmit(frame, at)) return;
+      if (kind === "request") { this.requested.add(s.id); open++; owed++; }
+      const tries = (a?.tries ?? 0) + 1;
+      this.attempts.set(s.id, { kind, at, tries });
+      wake = Math.min(wake, dueAt({ at, tries }));
+    }
+    if (!paced) this.sentAt = [];
+    if (wake === Infinity) return;
+    const timer = this.timer = setTimeout(() => { if (this.timer === timer) this.pump(); }, Math.max(0, wake - at) + 1);
+    (timer as { unref?: () => void }).unref?.();
   }
   private shared(id: string) { return this.options.storage.read().shared.find(s => s.id === id); }
   private async setShared(entry: SharedIdentity, event?: IdentityTimelineEvent) {
@@ -394,16 +492,19 @@ export class IdentityExchange {
   /** The providers the contact said it verifies; undefined until its hello. */
   get contactProviders(): readonly string[] | undefined { return this.peerProviders; }
 
-  /** The channel is ready: say what we verify, then send what the person queued while offline. */
+  /** The channel is ready: say what we verify, then send what the person queued while offline, paced (`pump`). */
   ready(): void {
     this.options.scope();
+    // A new connection: what went on the last one may not have arrived, so everything unanswered is due again.
+    this.attempts.clear();
     this.send({ t: "idp-hello", providers: [...this.options.providers()] });
-    for (const s of this.options.storage.read().shared) {
-      if (s.status === "queued" || s.status === "pending") this.request(s);
-      else if (s.status === "withdrawal-pending") this.send({ t: "idp-withdraw", id: s.id });
-    }
   }
-  stop(): void { this.requested.clear(); this.peerProviders = undefined; }
+  stop(): void {
+    this.requested.clear(); this.peerProviders = undefined;
+    this.outbox = []; this.attempts.clear();
+    if (this.timer !== undefined) clearTimeout(this.timer);
+    this.timer = undefined;
+  }
 
   /**
    * The challenges whose window ended unanswered go, and with them their requests' lines still verifying: a contact
@@ -428,13 +529,10 @@ export class IdentityExchange {
     const local = await this.options.localProof(id);
     if (!local) throw new Error("That identity is no longer in your profile");
     const { provider, subject } = local.statement.binding;
-    const entry: SharedIdentity = { id, provider, subject, status: "queued", at: this.now() };
+    const entry: SharedIdentity = { id, provider, subject, account: local.account ?? subject, status: "queued", at: this.now() };
     await this.setShared(entry, { type: "shared", side: "mine", proof: id, provider, subject });
-    if (connected) this.request(entry);
-  }
-  private request(s: SharedIdentity) {
-    this.requested.add(s.id);
-    this.send({ t: "idp-request", id: s.id, provider: s.provider });
+    this.attempts.delete(id);
+    if (connected) this.pump();
   }
 
   /** Stop sharing here. The contact is told (now or on reconnect); a copy it kept cannot be erased. */
@@ -456,7 +554,7 @@ export class IdentityExchange {
     await this.setShared({ ...s, status: "withdrawal-pending", at: this.now(), error: undefined },
       s.status === "rejected" ? undefined : { type: "stopped", side: "mine", proof: id, provider: s.provider, subject: s.subject, reason: "withdrawn" });
     // A link that closed during that write: the withdrawal stays pending and ready() sends it on reconnect.
-    if (connected) try { this.send({ t: "idp-withdraw", id }); } catch { /* sent on reconnect */ }
+    if (connected) this.pump();
   }
 
   /**
@@ -519,20 +617,28 @@ export class IdentityExchange {
         }
         case "idp-result": {
           const s = id ? this.shared(id) : undefined;
-          if (!s || s.status !== "pending") return;
+          // Answered without a challenge (a kind the contact does not verify): asked again only on the next connection.
+          const asked = id ? this.attempts.get(id) : undefined;
+          if (asked?.kind === "request" && s?.status === "queued") asked.tries = IDENTITY_RESENDS + 1;
+          if (!s || s.status !== "pending") { this.pump(); return; }
           const ok = frame.ok === true;
           // Only a refusal its app writes: any other text is the contact's own, never shown as this app's line.
           const error = ok ? undefined : typeof frame.error === "string" && CONTACT_REFUSALS.has(frame.error) ? frame.error : CONTACT_REFUSED;
           const entry: SharedIdentity = { ...s, status: ok ? "accepted" : "rejected", at: this.now(), error };
           // The contact keeps one proof per identity (onPresent): the one it accepted replaced any other of the same
-          // provider and subject it held from here, so that one is no longer shared in this chat.
+          // provider and verified identity it held from here, so that one is no longer shared in this chat. Matched on
+          // the account, not the binding's subject (two OIDC accounts at one issuer are two identities there); one whose
+          // account this side does not know stays shared, so Stop sharing still reaches it.
           // Its share stops on the timeline too, as the contact's does (onPresent).
-          const replaced = (x: SharedIdentity) => ok && x.status === "accepted" && x.provider === s.provider && x.subject === s.subject;
+          const replaced = (x: SharedIdentity) => ok && x.status === "accepted" && x.provider === s.provider &&
+            x.account !== undefined && x.account === s.account;
           await this.options.storage.update(l => l.shared.filter(x => x.id !== s.id && replaced(x)).reduce(
             (out, x) => this.log(out, { type: "stopped", side: "mine", proof: x.id, provider: x.provider, subject: x.subject, reason: "withdrawn" }),
             this.log({ ...l, shared: [
               ...l.shared.filter(x => x.id !== s.id).map(x => replaced(x) ? { ...x, status: "withdrawn" as const, at: entry.at } : x), entry,
             ] }, { type: "result", side: "mine", proof: s.id, ok, error })));
+          // Its place among the open requests is free for the next one.
+          this.pump();
           return;
         }
         case "idp-withdraw": {
@@ -606,7 +712,7 @@ export class IdentityExchange {
       return { ...l, shared: [...l.shared.filter(y => y.id !== id), { ...x, status: "pending", at: this.now(), error: undefined }] };
     });
     if (stopped) return;
-    this.send({ t: "idp-present", nonce, issuedAt, binding: local.statement.binding, evidence: local.evidence, sig });
+    this.send({ t: "idp-present", nonce, issuedAt, binding: local.statement.binding, evidence: local.evidence, sig }, id);
   }
 
   private async onPresent(frame: Record<string, unknown>) {

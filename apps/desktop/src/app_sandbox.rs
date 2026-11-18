@@ -50,6 +50,9 @@ const MAX_REQUEST_BYTES: usize = 66 * 1024;
 /// drops a larger one unread (`message_limit`), as parsing it would hold the main thread, every window's; the
 /// runner refuses such a request first, so an app that calls `window.ghostly` still gets "too-large".
 const MAX_MESSAGE_BYTES: usize = 2 * MAX_REQUEST_BYTES;
+/// The largest IPC message any other window but the Ghostly one may post (a contact's app, a hidden cleaning
+/// page): it may call no command, so this is only room for a call to be refused, not parsed at any length.
+const MAX_OTHER_MESSAGE_BYTES: usize = 4 * 1024;
 /// The most requests an app may send the broker in a second (WISP 1200: 50), every call counted.
 const MAX_REQUESTS_PER_SECOND: usize = 50;
 /// What a window keeps of what it was refused: the last few, each cut short, so an app that keeps asking to
@@ -518,10 +521,16 @@ pub fn is_app_label(label: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric())
 }
 
-/// The largest IPC message the webview `label` may post, for `tauri::ipc::set_post_message_limit`: an app
-/// window's is bounded, the Ghostly window's is not.
+/// The largest IPC message the webview `label` may post, for `tauri::ipc::set_post_message_limit`: the Ghostly
+/// window's is not bounded, an app window's has room for the broker, and every other window's is tiny.
 pub fn message_limit(label: &str) -> Option<usize> {
-    is_app_label(label).then_some(MAX_MESSAGE_BYTES)
+    if label == "main" {
+        None
+    } else if is_app_label(label) {
+        Some(MAX_MESSAGE_BYTES)
+    } else {
+        Some(MAX_OTHER_MESSAGE_BYTES)
+    }
 }
 
 /// Whether `url` is the runner, in either spelling: `ghostly-app://localhost/` on macOS and Linux, and
@@ -644,16 +653,13 @@ fn window_title(title: &str) -> String {
 }
 
 /// The window, with every layer that does not depend on the platform.
-/// An app window's answer to a permission request: never the microphone, the camera, the screen or the location.
-fn capture_answer(kind: tauri::webview::PermissionKind) -> tauri::webview::PermissionResponse {
-    use tauri::webview::{PermissionKind, PermissionResponse};
-    match kind {
-        PermissionKind::Microphone
-        | PermissionKind::Camera
-        | PermissionKind::DisplayCapture
-        | PermissionKind::Geolocation => PermissionResponse::Deny,
-        _ => PermissionResponse::Default,
-    }
+/// An app window's answer to a permission request (a contact's service window's too, `viewer::open`): no, whatever
+/// it asks for. Never the microphone, the camera, the screen or the location, and no notifications, file pickers or
+/// any other kind either: `Default` would let WebView2 ask the user in its own prompt, inside a Ghostly window.
+pub(crate) fn capture_answer(
+    _kind: tauri::webview::PermissionKind,
+) -> tauri::webview::PermissionResponse {
+    tauri::webview::PermissionResponse::Deny
 }
 
 fn window_builder<'a, R: Runtime>(
@@ -2133,7 +2139,7 @@ mod tests {
 
     /// No microphone, camera, screen or location for an app: no app permission covers them. Without a handler wry
     /// grants a capture on macOS with no question, so every app window carries one that refuses, and the runner is
-    /// served with a policy that turns the features off.
+    /// served with a policy that turns the features off. The handler refuses every other kind too.
     #[test]
     fn an_app_window_never_captures() {
         let source = include_str!("app_sandbox.rs");
@@ -2141,18 +2147,30 @@ mod tests {
         let body = &source[start..start + source[start..].find("\n}\n").unwrap()];
         assert!(body.contains(".on_permission_request("), "window_builder");
         use tauri::webview::{PermissionKind, PermissionResponse};
+        // Every kind, not only the capture ones: `Default` lets WebView2 ask in the window, as if Ghostly asked.
         for kind in [
             PermissionKind::Microphone,
             PermissionKind::Camera,
-            PermissionKind::DisplayCapture,
             PermissionKind::Geolocation,
+            PermissionKind::Notifications,
+            PermissionKind::ClipboardRead,
+            PermissionKind::DisplayCapture,
+            PermissionKind::Midi,
+            PermissionKind::Sensors,
+            PermissionKind::MediaKeySystemAccess,
+            PermissionKind::LocalFonts,
+            PermissionKind::WindowManagement,
+            PermissionKind::PointerLock,
+            PermissionKind::AutomaticDownloads,
+            PermissionKind::FileSystemAccess,
+            PermissionKind::Autoplay,
+            PermissionKind::Other,
         ] {
-            assert!(matches!(capture_answer(kind), PermissionResponse::Deny));
+            assert!(
+                matches!(capture_answer(kind), PermissionResponse::Deny),
+                "{kind}"
+            );
         }
-        assert!(matches!(
-            capture_answer(PermissionKind::PointerLock),
-            PermissionResponse::Default
-        ));
         let app = app();
         app.state::<AppSandboxState>()
             .windows
@@ -2303,7 +2321,8 @@ mod tests {
     }
 
     /// An app window's IPC message is bounded before Tauri parses it, with room for the broker's largest request
-    /// in Tauri's envelope; the Ghostly window's is not. `run()` sets the bound before any window opens.
+    /// in Tauri's envelope; every other window's but the Ghostly one's is bounded tighter (a contact's app's
+    /// `svc-*` window calls nothing), and the Ghostly window's is not. `run()` sets the bound before any window opens.
     #[test]
     fn an_app_windows_message_is_bounded_before_tauri_parses_it() {
         let request = json!({"id": MAX_ID, "type": "storage.set", "args": ["k", "x".repeat(MAX_REQUEST_BYTES)]});
@@ -2314,8 +2333,16 @@ mod tests {
         let limit = message_limit("app-0123456789abcdef").unwrap();
         assert!(serde_json::to_vec(&message).unwrap().len() <= limit);
         assert!(limit <= 256 * 1024, "parsed in a few milliseconds");
-        for label in ["main", "svc-1", "app-", "App-1", "xapp-1"] {
-            assert_eq!(message_limit(label), None, "{label}");
+        assert_eq!(message_limit("main"), None);
+        // A refused call fits; a body of any length does not reach the parser.
+        let refused = json!({
+            "cmd": "generate_enc_key", "callback": u32::MAX, "error": u32::MAX, "payload": {},
+            "options": {"headers": {}, "customProtocolIpcBlocked": true}, "__TAURI_INVOKE_KEY__": "k".repeat(64),
+        });
+        let refused = serde_json::to_vec(&refused).unwrap().len();
+        for label in ["svc-1", "forget-1", "app-", "xapp-1", "Main", "main-2"] {
+            let other = message_limit(label).expect(label);
+            assert!(refused <= other && other <= 4 * 1024, "{label}");
         }
         assert!(include_str!("lib.rs")
             .contains("tauri::ipc::set_post_message_limit(app_sandbox::message_limit);"));

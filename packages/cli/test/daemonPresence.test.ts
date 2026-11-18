@@ -49,6 +49,21 @@ describe("a daemon's presence", () => {
     vi.advanceTimersByTime(PRESENCE_EVERY_MS * 3);
     expect(node.setPresence).toHaveBeenCalledTimes(1);
   });
+
+  it("says by push that it came online (the engine's online notices) only while it says presence", () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const presence = new DaemonPresence({ setPresence: vi.fn() });
+    expect(presence.saysOnline()).toBe(false);
+    presence.check(state({ daemonPresence: false }));
+    expect(presence.saysOnline()).toBe(false);
+    presence.check(state({ daemonPresence: true }));
+    expect(presence.saysOnline()).toBe(true);
+    presence.check(state({}));
+    expect(presence.saysOnline()).toBe(false);
+    presence.check(state({ daemonPresence: true }));
+    presence.stop();
+    expect(presence.saysOnline()).toBe(false);
+  });
 });
 
 /**

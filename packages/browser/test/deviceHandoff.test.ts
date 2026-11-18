@@ -8,7 +8,7 @@ import {
 import { amend, firstRecord, transition, type DevicePatch, type DeviceRecord, type StoredDeviceState } from "../src/devices/state";
 import {
   HandoffGiver, HandoffTaker, MAX_HELD_FILES, STOPPED_STEP, WOKEN_CONNECT_MS, type GiverPorts, type HandoffFile, type HandoffLinks, type HandoffRecords, type HandoffSelf, type HandoffSource,
-  type BusyReport, type HandoffStaging, type HandoffStagingHost, type HandoffStay, type HandoffView, type LocalBusy, type TakerPorts,
+  type BusyReport, type HandoffStaging, type HandoffStagingHost, type HandoffStay, type HandoffView, type LocalBusy, type QuiesceCancel, type TakerPorts,
 } from "../src/devices/handoff";
 import { makeHandoffVerifier, type HandoffVerifier } from "../src/devices/handoffPake";
 import type { TurnOutcome } from "../src/devices/turn";
@@ -184,9 +184,18 @@ interface World {
   asked: (HandoffTakerFacts | undefined)[]; quiescedFor: (HandoffTakerFacts | undefined)[];
   /** What the engine adds to the record at quiesce (the Breez databases of wallets that move), and what stays here. */
   quiesceExtra: DevicePatch; stays: HandoffStay[];
+  /** Why the engine stops nothing at quiesce, found after the giver's last check (a call that came meanwhile). */
+  quiesceRefusal: BusyReport | null;
   /** The databases the giver deleted once on standby. */
   droppedDatabases: string[][];
   quiesced: DevicePatch[]; reloads: number; activeAgain: number;
+  /**
+   * Quiesce as the engine runs it, held where a test says: the wallet reads before the stop, then the stop (which takes
+   * the device links down), then the write of `releasing`. With none, it writes at once.
+   */
+  quiesceSteps?: { reads?: Promise<void>; stop?(): void; write?: Promise<void> };
+  /** The engine's reloads into the gate after quiesce, and the device record's state at each. */
+  gateReloads: StoredDeviceState[];
   takes: { release: TurnRelease; turn: number }[];
   takeOutcome: () => TurnOutcome | null;
   giverSelf: Partial<HandoffSelf>; takerSelf: Partial<HandoffSelf>;
@@ -200,7 +209,7 @@ function world(options: { verifier?: boolean } = {}): World {
   const w = {
     link: new Link(), profile: new Profile(), storage: new Storage(),
     giverRecords: new Records(recordFor("ghostly_a", 0, "active")), takerRecords: new Records(recordFor("ghostly", 1, "standby")),
-    busy: { why: null }, setChanging: false, asked: [], quiescedFor: [], quiesceExtra: {}, stays: [], droppedDatabases: [], quiesced: [], reloads: 0, activeAgain: 0, takes: [], giverSelf: {}, takerSelf: {},
+    busy: { why: null }, setChanging: false, asked: [], quiescedFor: [], quiesceExtra: {}, quiesceRefusal: null, stays: [], droppedDatabases: [], quiesced: [], reloads: 0, activeAgain: 0, gateReloads: [], takes: [], giverSelf: {}, takerSelf: {},
     takeOutcome: () => ({ kind: "start", read: { result: "mine", good: true, seen: 0n, invalid: [], unsigned: [], conditions: {}, record: { sequence: (N + 1) * 2 ** 20 + 1 } } }) as unknown as TurnOutcome,
   } as unknown as World;
   w.makeGiver = (phase) => {
@@ -211,7 +220,24 @@ function world(options: { verifier?: boolean } = {}): World {
       busy: async (taker) => { w.asked.push(taker); return w.busy.why; },
       setChanging: () => w.setChanging,
       staying: async () => w.stays,
-      ...(phase === "active" ? { quiesce: async (patch: DevicePatch, taker?: HandoffTakerFacts) => { w.quiesced.push(patch); w.quiescedFor.push(taker); await w.giverRecords.move("releasing", { ...patch, ...w.quiesceExtra }); } } : {}),
+      ...(phase === "active" ? {
+        // As the engine does (`quiesceForHandoff`): reads, a Cancel asked meanwhile stops nothing; the stop, `releasing`,
+        // the undo of a Cancel pressed while it stopped, and the reload into the gate.
+        quiesce: async (patch: DevicePatch, taker?: HandoffTakerFacts, cancel?: QuiesceCancel) => {
+          if (w.quiesceRefusal) return w.quiesceRefusal;
+          const steps = w.quiesceSteps;
+          if (steps) {
+            await steps.reads;
+            if (cancel?.asked()) return null;
+            steps.stop?.();
+            await steps.write;
+          }
+          w.quiesced.push(patch); w.quiescedFor.push(taker);
+          await w.giverRecords.move("releasing", { ...patch, ...w.quiesceExtra });
+          await cancel?.undo().catch(() => {});
+          w.gateReloads.push(w.giverRecords.record.state);
+        },
+      } : {}),
       ...(phase === "gated" ? {
         // As device-link-only mode does (`handoffStandby.ts`): a copy that stopped leaves a note for the screen after the reload.
         backToActive: async (stopped) => {
@@ -1266,6 +1292,18 @@ describe("refusals before a byte is copied", () => {
     expect(w.giverRecords.record.handoffAttempts).toBeUndefined();
   });
 
+  it("a call that came after the giver's last check, while the engine got ready to freeze: nothing is frozen, and the taker is told a call is on there", async () => {
+    const w = world();
+    w.quiesceRefusal = { why: "call" };
+    await w.taker.pull(PASSWORD);
+    await until(() => w.taker.view()?.step === "failed");
+    expect(w.link.sent.filter((s) => s.frame.t === "handoff-busy").map((s) => s.frame.why)).toEqual(["call"]);
+    expect(w.taker.view()!.failure).toBe("call-there");
+    expect(w.giver.view()).toMatchObject({ role: "giver", step: "failed", failure: "call" });
+    expect(w.quiesced).toEqual([]);
+    expect(w.giverRecords.record.state).toBe("active");
+  });
+
   it("a push from the active device that its wallets keep here is refused on the device itself, with the reason and the wallet", async () => {
     const w = world();
     w.busy.why = "wallet";
@@ -2000,5 +2038,98 @@ describe("Use here on a replaced device (WISP 06 § States and events, supersede
     expect(w.takerRecords.record.forks).toEqual([...earlier, "ghostly"]);
     expect(w.takerRecords.record.forkKeptAt).toEqual({ ghostly_fork6: 1_000, ghostly_fork7: 2_000, ghostly: expect.any(Number) });
     expect(w.takerRecords.record.handoff).toBeUndefined();
+  });
+});
+
+/*
+ * Cancel on the giver's "Ready" step (WISP 06 § States and events): quiesce runs, holding the giver's queue while the
+ * engine reads the wallets, stops (its device links go with it) and writes `releasing` with the pass-2 note. A Cancel
+ * accepted there must leave the giver the active device: no pass 2 after the reload, and the taker ends cancelled. No
+ * release was signed, so the taker holds nothing that takes the turn.
+ */
+describe("Cancel on the giver at Ready, while quiesce runs", () => {
+  /** Pass 1 done and quiesce held: at the wallet reads before the stop, or at the write after it (the stop takes the device links down unless `linkUp`). */
+  async function atReady(w: World, at: "reads" | "write", linkUp = false): Promise<() => void> {
+    let open!: () => void;
+    const held = new Promise<void>((resolve) => { open = resolve; });
+    w.quiesceSteps = at === "reads" ? { reads: held } : { stop: () => { if (!linkUp) w.link.drop(); }, write: held };
+    w.profile.add("f1", bytesOf(5_000));
+    await w.taker.pull(PASSWORD);
+    await until(() => w.giver.view()?.step === "ready" && (at === "reads" || linkUp || !w.link.live));
+    return open;
+  }
+
+  /** The page starts again from the record: as the active device when the record is active, into the gate when not. */
+  async function restartGiver(w: World): Promise<void> {
+    w.giver.stop();
+    if (w.link.live) w.link.drop();
+    w.giver = w.makeGiver(w.giverRecords.record.state === "active" ? "active" : "gated");
+    await w.giver.resume();
+    w.link.reconnect();
+  }
+
+  /** How every case ends: A active with no handoff left, nothing of pass 2 sent, B cancelled and on standby, nothing taken. */
+  async function cancelledEverywhere(w: World): Promise<void> {
+    await until(() => w.taker.view()?.step === "failed" || w.reloads > 0).catch(() => {});
+    await settle();
+    expect(w.giverRecords.record.state).toBe("active");
+    expect(w.giverRecords.record.handoff).toBeUndefined();
+    expect(w.link.sent.filter((s) => s.frame.t === "handoff-manifest" && s.frame.pass === 2)).toHaveLength(0);
+    expect(w.taker.view()).toMatchObject({ step: "failed", failure: "cancelled" });
+    expect(w.takerRecords.record.state).toBe("standby");
+    expect(w.takes).toHaveLength(0);
+    expect(w.reloads).toBe(0);
+  }
+
+  it("pressed during the wallet reads before the stop: nothing stops or is written, and the taker is told", async () => {
+    const w = world();
+    const open = await atReady(w, "reads");
+    const cancelled = w.giver.cancel();
+    await settle();
+    open();
+    await cancelled;
+    expect(w.quiesced).toHaveLength(0);
+    expect(w.gateReloads).toEqual([]);
+    expect(w.giverRecords.writes.some((write) => write.to === "releasing")).toBe(false);
+    expect(w.giver.view()).toMatchObject({ step: "failed", failure: "cancelled" });
+    expect(w.link.count("handoff-cancel", A)).toBe(1);
+    // A later start of this device finds nothing to go on with.
+    await restartGiver(w);
+    await cancelledEverywhere(w);
+  });
+
+  for (const linkUp of [false, true]) {
+    it(`pressed after the stop (device link ${linkUp ? "still up" : "down"}): \`active\` again before the reload, no pass 2 after it, the taker ends cancelled`, async () => {
+      const w = world();
+      const open = await atReady(w, "write", linkUp);
+      const cancelled = w.giver.cancel();
+      await settle();
+      open();
+      await cancelled;
+      // The record is back before the pages start again, with the note that says why.
+      expect(w.gateReloads).toEqual(["active"]);
+      expect(w.giverRecords.record.handoff).toMatchObject({ role: "releasing", step: `${STOPPED_STEP}cancelled`, peer: B });
+      expect(w.giver.view()).toMatchObject({ step: "failed", failure: "cancelled" });
+      expect(w.link.count("handoff-cancel", A)).toBe(linkUp ? 1 : 0);
+      // The reload: the device starts as the active one, says the move was cancelled, and the note goes.
+      await restartGiver(w);
+      expect(w.giver.view()).toMatchObject({ step: "failed", failure: "cancelled", key: B });
+      await cancelledEverywhere(w);
+    });
+  }
+
+  it("pressed once quiesce wrote `releasing` and asked for the reload: the record goes back before the page is gone", async () => {
+    const w = world();
+    w.profile.add("f1", bytesOf(5_000));
+    await w.taker.pull(PASSWORD);
+    await until(() => w.gateReloads.length === 1);
+    expect(w.giverRecords.record.state).toBe("releasing");
+    // The engine's stop took the device links down.
+    w.link.drop();
+    await w.giver.cancel();
+    expect(w.giverRecords.record.state).toBe("active");
+    expect(w.giverRecords.record.handoff?.step).toBe(`${STOPPED_STEP}cancelled`);
+    await restartGiver(w);
+    await cancelledEverywhere(w);
   });
 });

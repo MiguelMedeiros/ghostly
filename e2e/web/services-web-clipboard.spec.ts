@@ -23,6 +23,7 @@ const PAGE = `<!doctype html><title>Pay</title><body style="margin:0">
 <label><input type="checkbox" id="box"> Keep it</label>
 <div id="twice">Double click to copy</div>
 <div id="menu">Right click to copy</div>
+<button id="slow">Copy slowly</button>
 <form id="scripted"><input></form>
 <input type="checkbox" id="flip">
 <pre id="log">{}</pre>
@@ -62,6 +63,8 @@ const PAGE = `<!doctype html><title>Pay</title><body style="margin:0">
     channel.port2.postMessage(0);
   });
   document.getElementById("copy").addEventListener("click", () => { log.button = write("bc1q-CONTACT-button"); out(); });
+  // A tap kept being dispatched for seconds: the app spins in its own click listener, then copies.
+  on("slow", "click", () => { const end = performance.now() + 3000; while (performance.now() < end); log.slow = write("bc1q-CONTACT-slow"); out(); });
   out();
 </script>`;
 
@@ -143,6 +146,12 @@ test("a contact's app writes the clipboard only in the person's tap on its copy 
       await expect.poll(async () => (await log())[name], { message: name }).toBe(true);
       expect(await clipboard()).toBe(`bc1q-CONTACT-${name}`);
     }
+
+    // A copy seconds after the tap, though in that tap's own listener, does not count.
+    await person.page.evaluate(() => navigator.clipboard.writeText("bc1q-PERSON-OWN"));
+    await frame.locator("#slow").click();
+    await expect.poll(async () => (await log()).slow, { timeout: 15_000 }).toBe(false);
+    expect(await clipboard()).toBe("bc1q-PERSON-OWN");
 
     // A page the guard's run cannot be seen in (its own `sandbox` policy makes it opaque to the bridge) is not shown.
     await frame.locator("body").evaluate(() => { location.href = "/sandboxed"; });

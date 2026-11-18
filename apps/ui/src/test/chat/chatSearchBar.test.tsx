@@ -2,7 +2,8 @@ import "fake-indexeddb/auto";
 import { act, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Chat } from "../../pages/Chat";
-import { saveSession } from "../../lib/storage";
+import { notifySessionsChanged } from "@ghostly/browser/platform/sync";
+import { deleteMessage, loadSession, saveSession } from "../../lib/storage";
 import type { ChatMessage } from "../../lib/types";
 import { SEARCH_DEBOUNCE_MS } from "../../hooks/useChatSearch";
 import { linkView } from "../fakeEngine";
@@ -87,12 +88,30 @@ describe("search inside a chat", () => {
     expect(field()).toBeInTheDocument();
   });
 
+  it("opens with Ctrl/Cmd+F on a keyboard that types no Latin letters there (Arabic, Russian), and by the letter on Dvorak", async () => {
+    openChat(true, short());
+    await screen.findByText(`Message ${COUNT - 1}`);
+    // Dvorak: the key at F's place types "u", which is not Find.
+    fireEvent.keyDown(window, { key: "u", code: "KeyF", ctrlKey: true });
+    expect(screen.queryByTestId("chat-search")).toBeNull();
+    // Arabic: F's key types "ب"; the browser's own Find opened over the chat, not the chat's search.
+    const event = new KeyboardEvent("keydown", { key: "ب", code: "KeyF", ctrlKey: true, cancelable: true });
+    act(() => { window.dispatchEvent(event); });
+    expect(event.defaultPrevented).toBe(true);
+    expect(field()).toBeInTheDocument();
+    fireEvent.keyDown(field(), { key: "Escape" });
+    // Russian on a Mac: Cmd and F's key, "а".
+    fireEvent.keyDown(window, { key: "а", code: "KeyF", metaKey: true });
+    expect(field()).toBeInTheDocument();
+  });
+
   it("gives its buttons a thumb's 44 px on a phone", async () => {
     openChat(true, short());
     await screen.findByText(`Message ${COUNT - 1}`);
     ctrlF();
-    // 40 × 40 px before; the measure is a browser's (e2e/web/phone-touch-targets.spec.ts).
-    for (const id of ["chat-search-info", "chat-search-older", "chat-search-newer", "chat-search-close"]) expect(screen.getByTestId(id), id).toHaveClass("max-md:w-11", "max-md:h-11");
+    // 40 × 40 px before; in px, not rem, so a larger text size leaves the field its room. The measure is a browser's
+    // (e2e/web/phone-touch-targets.spec.ts, e2e/web/chat-search.spec.ts).
+    for (const id of ["chat-search-info", "chat-search-older", "chat-search-newer", "chat-search-close"]) expect(screen.getByTestId(id), id).toHaveClass("max-md:w-[44px]", "max-md:h-[44px]");
   });
 
   it("on a phone held upright puts the count on a line of its own under the field, and keeps it beside the field when wider", async () => {
@@ -242,6 +261,52 @@ describe("search inside a chat", () => {
     fireEvent.click(screen.getByTestId("chat-search-close"));
     await settle();
     expect(marked()).toEqual([]);
+  });
+
+  it("goes on from the match being read once it is gone (deleted, edited away), not from the newest", async () => {
+    openChat();
+    await screen.findByText(`Message ${COUNT - 1}`);
+    ctrlF();
+    await type("message 29");
+    await jumpedTo("m299");
+    fireEvent.keyDown(field(), { key: "Enter" });
+    fireEvent.keyDown(field(), { key: "Enter" });
+    expect(count()).toBe("3 of 11");
+    expect(last()).toBe("m297");
+
+    // Deleted here (or for everyone by the contact) while it is the one read: Older goes on to the one older than it.
+    // Before, the search began again at the newest ("Message 299"), as if its words had just been typed.
+    act(() => { deleteMessage("chat-1", "m297"); notifySessionsChanged(); });
+    await vi.waitFor(() => expect(row("m297")).toBeNull());
+    // The count keeps the place it stood at, as Older and Newer do. Before, it read "1 of 10" (and said so aloud).
+    expect(count()).toBe("3 of 10");
+    fireEvent.click(screen.getByTestId("chat-search-older"));
+    expect(last()).toBe("m296");
+    expect(count()).toBe("3 of 10");
+
+    // Edited so it no longer matches: Newer goes on to the one newer than it.
+    act(() => {
+      const session = loadSession("chat-1")!;
+      saveSession({ ...session, messages: session.messages.map(m => m.id === "m296" ? { ...m, text: "Something else" } : m) });
+      notifySessionsChanged();
+    });
+    await vi.waitFor(() => expect(count()).toContain("of 9"));
+    expect(count()).toBe("3 of 9");
+    fireEvent.click(screen.getByTestId("chat-search-newer"));
+    expect(last()).toBe("m298");
+    expect(count()).toBe("2 of 9");
+
+    // The oldest match gone: its place is past the end, the count stays on the last one rather than reading "9 of 8".
+    fireEvent.keyDown(field(), { key: "Enter", shiftKey: true });
+    fireEvent.keyDown(field(), { key: "Enter", shiftKey: true });
+    expect(last()).toBe("m29");
+    expect(count()).toBe("9 of 9");
+    act(() => { deleteMessage("chat-1", "m29"); notifySessionsChanged(); });
+    await vi.waitFor(() => expect(row("m29")).toBeNull());
+    expect(count()).toBe("8 of 8");
+    fireEvent.click(screen.getByTestId("chat-search-older"));
+    expect(last()).toBe("m299");
+    expect(count()).toBe("1 of 8");
   });
 
   it("finds whatever the case and accents, a file by its name, and says when nothing is found", async () => {

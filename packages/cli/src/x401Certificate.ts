@@ -11,6 +11,7 @@ import { fromBase64Url, type X401CertificateCheck } from "@ghostly/core";
  * Node has no path validator outside a TLS handshake, so what else RFC 5280 asks of a path is read here from each
  * certificate's DER: a CA's path length and DNS name constraints (the root's too), the leaf's key usage
  * (`digitalSignature`), an extended key usage that leaves servers out, and a critical extension this check does not know.
+ * Only tests import it yet: `x401 fetch` (WISP 3xx, not built yet) wires it when it reads a signed request.
  */
 export function x401CertificateCheck(roots: readonly string[] = defaultRoots()): X401CertificateCheck {
   let trusted: X509Certificate[] | undefined;
@@ -100,7 +101,7 @@ function pathProblem(certs: X509Certificate[], anchor: X509Certificate | undefin
     if (usages && !usages.includes(OID.serverAuth) && !usages.includes(OID.anyExtendedKeyUsage)) return "a certificate's extended key usage is not for servers";
   }
   if (read[0].keyUsage && !read[0].keyUsage(DIGITAL_SIGNATURE)) return "the leaf certificate's key usage does not allow signing";
-  const names = [...read[0].dns, host].map((name) => name.toLowerCase());
+  const names = [...read[0].dns, host].map(dnsForm);
   for (let i = 1; i < all.length; i++) {
     const { pathLen, permitted, excluded } = read[i];
     // The CAs between this one and the leaf; a self-issued one does not count (RFC 5280 §4.2.1.9).
@@ -114,10 +115,13 @@ function pathProblem(certs: X509Certificate[], anchor: X509Certificate | undefin
 
 /** A DNS name within a constraint's base: the base itself or a name below it; below it only, when the base starts with `.`. */
 function within(name: string, base: string): boolean {
-  const b = base.toLowerCase();
+  const b = dnsForm(base);
   if (!b) return true;
   return b.startsWith(".") ? name.endsWith(b) : name === b || name.endsWith(`.${b}`);
 }
+
+/** A DNS name as the constraints compare it: lower case, without the root's trailing dots (`a.example.` is `a.example`). */
+const dnsForm = (name: string) => name.toLowerCase().replace(/\.+$/, "");
 
 const commonName = (cert: X509Certificate) => cert.subject.split("\n").find((part) => part.startsWith("CN="))?.slice(3) ?? cert.subject;
 

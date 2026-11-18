@@ -9,7 +9,7 @@ declare module "bittorrent-dht" {
     address(): { address: string; family: string; port: number };
     addNode(node: { host: string; port: number }): void;
     put(options: MutablePut, done: (error: Error | null, hash: Buffer, nodes: number) => void): Buffer;
-    get(target: Buffer, options: { cache?: boolean; salt?: Buffer }, done: (error: Error | null, result: GetResult | null) => void): void;
+    get(target: Buffer, options: { cache?: boolean; salt?: Buffer; verify?: (sig: Uint8Array, message: Uint8Array, key: Uint8Array) => boolean }, done: (error: Error | null, result: GetResult | null) => void): void;
     destroy(done?: () => void): void;
   }
 }

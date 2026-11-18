@@ -187,9 +187,7 @@ export function formatBytes(bytes: number, t?: Translate): string {
   return sizeIn(bytes / Math.pow(1024, i), units[i], t, 2);
 }
 
-export const APP_WEBSITE = "https://github.com/MiguelMedeiros/ghostly";
-/** Where every client sends someone who installs a new version by hand. */
-export const RELEASES_URL = `${APP_WEBSITE}/releases/latest`;
+export { APP_WEBSITE, RELEASES_URL } from "./appWebsite";
 export const APP_LICENSE = "MIT";
 
 export function saveSettings(settings: AppSettings): void {
@@ -341,14 +339,6 @@ export async function verifyPassword(
   return constantTimeEqual(await pbkdf2(password, salt, iterations), expected);
 }
 
-export const TIMEOUT_OPTIONS = [
-  { value: 1, label: "1 minute" },
-  { value: 5, label: "5 minutes" },
-  { value: 15, label: "15 minutes" },
-  { value: 30, label: "30 minutes" },
-  { value: 60, label: "1 hour" },
-] as const;
-
 export const LANGUAGE_OPTIONS: { value: Language; label: string; native: string }[] = [
   { value: "en", label: "English", native: "English" },
   { value: "pt", label: "Portuguese", native: "Português" },
@@ -358,12 +348,6 @@ export const LANGUAGE_OPTIONS: { value: Language; label: string; native: string 
   { value: "zh", label: "Chinese", native: "中文" },
   { value: "ja", label: "Japanese", native: "日本語" },
   { value: "ar", label: "Arabic", native: "العربية" },
-];
-
-export const THEME_OPTIONS: { value: Theme; label: string }[] = [
-  { value: "dark", label: "Dark" },
-  { value: "light", label: "Light" },
-  { value: "system", label: "System" },
 ];
 
 export const COLOR_SCHEME_OPTIONS: { value: ColorScheme; labelKey: string }[] = [

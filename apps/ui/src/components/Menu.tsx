@@ -1,8 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useOutsideDismiss, useTabTrap } from "../hooks/useDismiss";
+import { safeAreaInsets } from "../hooks/useFloatingBox";
 import { useIsMobile } from "../hooks/useIsMobile";
 import type { MenuPoint } from "../lib/contextMenu";
+import { working } from "../lib/focus";
 
 /** Space kept between a menu and the edges of the window. */
 const MARGIN = 8;
@@ -59,11 +61,16 @@ type MenuProps = {
    * an opener that is itself over everything (a call over a video filling the window).
    */
   stack?: string;
+  /**
+   * Where a popover over the whole page or a phone's sheet hangs: the page's body, or a modal window its opener is in
+   * (a whole-window call), which a screen reader reads alone. On the body, the menu was outside it, out of its reach.
+   */
+  host?: HTMLElement | null;
   className?: string;
   children: ReactNode;
 };
 
-function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", prefer: wanted = "down", focusFirst, label, portal, within, at, stack = "z-50", className = "", children }: MenuProps) {
+function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", prefer: wanted = "down", focusFirst, label, portal, within, at, stack = "z-50", host, className = "", children }: MenuProps) {
   const pointed = !!at && !!portal;
   const align = pointed ? "start" : edge, prefer = pointed ? "down" : wanted;
   const phone = useIsMobile();
@@ -101,12 +108,14 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
       const menu = ref.current, anchor = anchorRef.current;
       if (!menu || !anchor) return;
       const box = bounds(anchor, within);
-      // Measured at its own height, without a cap from an earlier fit.
-      const cap = menu.style.maxHeight;
+      // Measured at its own height, without a cap from an earlier fit. Uncapped it has nothing to scroll, so a menu
+      // scrolled to its last rows went back to its top: its scroll is put back with the cap.
+      const cap = menu.style.maxHeight, scrolled = menu.scrollTop;
       menu.style.maxHeight = "";
       if (portal) {
         const rect = menu.getBoundingClientRect(), opener = opening(anchor);
         menu.style.maxHeight = cap;
+        menu.scrollTop = scrolled;
         const { up, room } = side(opener, rect.height, box);
         const height = room ?? rect.height;
         // Lined up with the opener's start or end edge (the end is the left one in a right-to-left page), kept in the bounds.
@@ -124,14 +133,17 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
       const { up, room } = side(opener, rect.height, box);
       menu.style.translate = before;
       menu.style.maxHeight = cap;
+      menu.scrollTop = scrolled;
       setPlace(was => was.shift === shift && was.up === up && was.room === room ? was : { shift, up, room });
     };
+    // A scroll of the page under it moves its opener; one of its own rows (the wheel, its scrollbar, End) moves nothing.
+    const pageScrolled = (e: Event) => { if (!(e.target instanceof Node && ref.current?.contains(e.target))) fit(); };
     fit();
     window.addEventListener("resize", fit);
-    if (portal) window.addEventListener("scroll", fit, true);
+    if (portal) window.addEventListener("scroll", pageScrolled, true);
     return () => {
       window.removeEventListener("resize", fit);
-      window.removeEventListener("scroll", fit, true);
+      window.removeEventListener("scroll", pageScrolled, true);
     };
   }, [open, phone, anchorRef, prefer, portal, align, within, at]);
 
@@ -193,14 +205,14 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
       <div aria-hidden="true" className="mx-auto mb-2 h-1 w-9 rounded-full bg-border-bright" />
       {children}
     </div>
-  </>, document.body);
+  </>, host ?? document.body);
 
   if (portal) return createPortal(
     <div ref={ref} id={id} data-testid={testId} data-menu="popover" role={label ? "group" : undefined} aria-label={label} onKeyDown={keys}
       style={{ left: fixed?.left ?? 0, top: fixed?.top ?? 0, maxHeight: fixed?.room }}
       className={`fixed ${stack} w-max min-w-44 max-w-[min(20rem,calc(100vw-1rem))] ${fixed?.room === undefined ? "" : "overflow-y-auto overscroll-contain"} rounded-lg border border-border bg-surface-alt py-1 shadow-lg animate-fade-in ${className}`}>
       {children}
-    </div>, document.body);
+    </div>, host ?? document.body);
 
   return (
     <div ref={ref} id={id} data-testid={testId} data-menu="popover" role={label ? "group" : undefined} aria-label={label} onKeyDown={keys}
@@ -213,10 +225,15 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
 
 type Rect = { left: number; right: number; top: number; bottom: number };
 
-/** The window, or the part of it the opener's `within` ancestor covers. */
+/**
+ * The window's safe area, or the part of it the opener's `within` ancestor covers. On a phone on its side the notch's
+ * side, the rounded corners and the home indicator are off limits: with larger text a menu kept to the window's edges
+ * reached into them.
+ */
 function bounds(anchor: HTMLElement, within?: string): Rect {
   const width = document.documentElement.clientWidth || window.innerWidth, height = window.innerHeight;
-  const box = { left: 0, top: 0, right: width, bottom: height };
+  const safe = safeAreaInsets();
+  const box = { left: safe.left, top: safe.top, right: width - safe.right, bottom: height - safe.bottom };
   const area = within ? anchor.closest(within)?.getBoundingClientRect() : undefined;
   // An ancestor with no size (not laid out) bounds nothing.
   if (!area?.width || !area.height) return box;
@@ -233,7 +250,7 @@ function titleIfCut(row: HTMLElement) {
   else row.removeAttribute("title");
 }
 
-export function MenuItem({ icon, children, hint, onClick, danger, disabled, title, testId, className = "", data, checked, radio }: {
+export function MenuItem({ icon, children, hint, onClick, danger, disabled, busy, title, testId, className = "", data, checked, radio }: {
   icon?: ReactNode;
   children: ReactNode;
   /** A second, quieter line under the label; one line too. */
@@ -242,6 +259,11 @@ export function MenuItem({ icon, children, hint, onClick, danger, disabled, titl
   danger?: boolean;
   /** A row that cannot be used now; its `title` (and hint) say why. */
   disabled?: boolean;
+  /**
+   * A row whose action is still under way: said busy and unavailable (`working`, lib/focus.ts), a press does nothing.
+   * Not `disabled`: it keeps its place in the menu's arrow keys and the focus it has.
+   */
+  busy?: boolean;
   /** A hover text kept whether or not the row is cut. */
   title?: string;
   testId?: string;
@@ -264,10 +286,10 @@ export function MenuItem({ icon, children, hint, onClick, danger, disabled, titl
 }) {
   const fitTitle = (row: HTMLElement) => { if (!title) titleIfCut(row); };
   return (
-    <button type="button" data-testid={testId} data-menu-item onClick={onClick} disabled={disabled} title={title} {...data}
+    <button type="button" data-testid={testId} data-menu-item onClick={() => { if (!busy) onClick(); }} disabled={disabled} title={title} {...data} {...working(!!busy)}
       {...(checked === undefined ? {} : { role: radio ? "radio" : "checkbox", "aria-checked": checked })}
       onPointerEnter={e => fitTitle(e.currentTarget)} onFocus={e => fitTitle(e.currentTarget)}
-      className={`flex w-full min-w-0 items-center whitespace-nowrap px-3 py-2 text-start text-sm transition-colors enabled:hover:bg-surface-hover focus-visible:bg-surface-hover focus-visible:outline-none disabled:cursor-not-allowed max-md:min-h-12 max-md:rounded-lg ${hint ? "gap-3" : "gap-2"} ${danger ? "text-danger-ink" : hint ? "text-text-primary" : "text-text-secondary hover:text-text-primary"} ${className}`}>
+      className={`flex w-full min-w-0 items-center whitespace-nowrap px-3 py-2 text-start text-sm transition-colors enabled:hover:bg-surface-hover focus-visible:bg-surface-hover focus-visible:outline-none disabled:cursor-not-allowed data-[loading]:cursor-progress data-[loading]:opacity-80 max-md:min-h-12 max-md:rounded-lg ${hint ? "gap-3" : "gap-2"} ${danger ? "text-danger-ink" : hint ? "text-text-primary" : "text-text-secondary hover:text-text-primary"} ${className}`}>
       {icon && <span aria-hidden="true" data-menu-icon className={`flex shrink-0 ${hint ? "text-accent" : ""}`}>{icon}</span>}
       {hint
         ? <span className="min-w-0"><span data-menu-text className="block truncate">{children}</span><span data-menu-text className="block truncate text-xs text-text-muted">{hint}</span></span>

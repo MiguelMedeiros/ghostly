@@ -372,6 +372,17 @@ describe("AddIdentityDialog", () => {
       expect(group).toHaveAttribute("data-value", "https://accounts.google.com");
     });
 
+    it("keep the chosen provider filled in forced colors, where its accent border and tint are gone", async () => {
+      restore = configureOidc();
+      const { user } = dialog();
+      await user.click(screen.getByTestId("add-identity-oidc"));
+      const radios = within(screen.getByRole("radiogroup", { name: "Provider" })).getAllByRole("radio");
+      const filled = () => radios.map((r) => r.classList.contains("forced-colors:bg-[color:Highlight]"));
+      expect(filled()).toEqual([true, false]);
+      await user.click(radios[1]);
+      expect(filled()).toEqual([false, true]);
+    });
+
     it("keep proofs short-lived and begin with the chosen issuer", async () => {
       restore = configureOidc();
       const { user, engine } = dialog();
@@ -523,7 +534,7 @@ describe("AddIdentityDialog", () => {
       expect(finish).toBeDisabled();
       await user.type(screen.getByTestId("add-identity-paste"), "not a signature");
       await user.click(finish);
-      expect(await screen.findByTestId("add-identity-error")).toHaveTextContent("Paste the whole signature, from -----BEGIN SSH SIGNATURE----- to -----END SSH SIGNATURE-----");
+      expect(await screen.findByTestId("add-identity-error")).toHaveTextContent("That is not the whole signaturePaste it from -----BEGIN SSH SIGNATURE----- to -----END SSH SIGNATURE-----.");
       // Refused in the page: nothing reached the engine.
       expect(engine.callsTo("completeIdentityProof")).toEqual([]);
     });

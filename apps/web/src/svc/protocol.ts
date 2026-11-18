@@ -20,6 +20,20 @@ export const CLEAR_COOKIES = `${BRIDGE_DIR}clear-cookies`;
 export const WORKER_SCRIPT = "/ghostly-services-sw.js";
 
 /**
+ * The address the bridge registers the worker from: its query says whether Hide my IP from contacts is on, the one
+ * thing the worker cannot read from the app's answers (its pages can reach the bridge, and so answer a request
+ * themselves) nor keep anywhere the app cannot write.
+ */
+export function workerScript(relayOnly: boolean): string {
+  return `${WORKER_SCRIPT}?relay-only=${relayOnly ? 1 : 0}`;
+}
+
+/** Whether the worker at `href` keeps to Hide my IP from contacts: unless its address says it is off, it does. */
+export function workerRelayOnly(href: string): boolean {
+  try { return new URL(href).searchParams.get("relay-only") !== "0"; } catch { return true; }
+}
+
+/**
  * What the view's frame and the bridge's frame of the contact's app allow: nothing. No `fullscreen`: in full screen the
  * app would cover the view's bar, the one thing that says it is the contact's app and not Ghostly (as a mini-app's
  * frame, WISP 1200). No `clipboard-write`: once tapped, the contact's code could replace what the person copied (an
@@ -33,6 +47,12 @@ export const SERVICE_FRAME_ALLOW = "";
 export const MAX_REQUEST_BYTES = 8 * 1024 * 1024;
 /** What one answer may weigh, as on Desktop and the CLI. */
 export const MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
+/**
+ * How much of an answer the page sends the worker ahead of what the app's frame read (`ServiceRead`). The rest waits
+ * on the link, where the engine lets go of an answer left unread past its own bound: a paused video, or a fetch the
+ * app never reads, does not pull the whole answer off the contact into the worker's memory.
+ */
+export const ANSWER_AHEAD_BYTES = 1024 * 1024;
 /** How long the worker waits for an answer's status line: the engine gives up at 60 s, so this only catches a page gone. */
 export const HEAD_TIMEOUT_MS = 75_000;
 
@@ -93,8 +113,10 @@ export interface ServiceRequestMessage {
   path: string;
   headers: [string, string][];
   body: ArrayBuffer | null;
-  /** The request's `destination` ("iframe", "script", …): whether the answer is a page (`guardViewerAnswer`). */
+  /** The request's `destination` ("iframe", "script", …), as the browser said it to the worker. */
   destination?: string;
+  /** The worker says what the frame read (`ServiceRead`): the page sends only `ANSWER_AHEAD_BYTES` past it. */
+  flow?: true;
 }
 
 /** What comes back on the request's own port: one `head`, then `chunk`s, then `end`; or `error` at any point. */
@@ -107,6 +129,8 @@ export type ServiceReply =
 
 /** The worker tells the app it no longer wants the rest (the page stopped reading). */
 export interface ServiceCancel { type: "cancel" }
+/** The worker tells the app how many bytes of the answer the frame read so far, all told. */
+export interface ServiceRead { type: "read"; bytes: number }
 
 /** The element a contact's app is shown in over the app, and the event that closes it (the lock screen sends it). */
 export const SERVICE_VIEW_ID = "ghostly-service-view";
@@ -121,16 +145,35 @@ export function closeServiceView(): void {
 export const BRIDGE_READY = "ghostly-svc-ready";
 export const BRIDGE_PORT = "ghostly-svc-port";
 /**
+ * The bridge says, after the port, that it shows no app (`reason`): `"blocked"`, the browser refused it the services
+ * worker (Firefox when it blocks third-party cookies: the services host is a site of its own); `"unguarded"`, a page of
+ * the app's ran without the clipboard guard. The app says so in the profile's words, over the bridge's English.
+ */
+export const BRIDGE_REFUSED = "ghostly-svc-refused";
+export type BridgeRefusal = "blocked" | "unguarded";
+/**
  * The app answers with this in place of the port when it only wants the origin cleared (the chat deleted, Clear all
  * data, the profile deleted): the bridge erases what the contact's app kept there, then says `BRIDGE_CLEARED`.
  */
 export const BRIDGE_CLEAR = "ghostly-svc-clear";
 export const BRIDGE_CLEARED = "ghostly-svc-cleared";
+/**
+ * The bridge hands the app's page a link the contact's app opens in a new window (`url`: `target="_blank"`,
+ * `window.open`), which the view's sandbox drops: the app's page opens one to another site in a new tab, on the
+ * person's tap (`outsideLink` in opener.ts), as Desktop sends it to the system browser.
+ */
+export const BRIDGE_OPEN_LINK = "ghostly-svc-open-link";
+/**
+ * The bridge says a page of the contact's app is in its frame (its first once parsed, then each one that loads, as long
+ * as it may show it): until the first, the app
+ * says it is opening it, over the frame, rather than showing the bridge's empty page.
+ */
+export const BRIDGE_SHOWN = "ghostly-svc-shown";
 
 /** A request the app takes from a port: anything else (a page of the contact's posting to it) is dropped. */
 export function readRequest(data: unknown): ServiceRequestMessage | null {
   if (!data || typeof data !== "object") return null;
-  const { type, method, path, headers, body, destination } = data as Record<string, unknown>;
+  const { type, method, path, headers, body, destination, flow } = data as Record<string, unknown>;
   if (type !== "request" || typeof method !== "string" || !/^[A-Z]{1,16}$/.test(method)) return null;
   if (typeof path !== "string" || !path.startsWith("/") || path.startsWith("//") || path.length > 8192) return null;
   if (!Array.isArray(headers) || headers.length > 128 || !headers.every((h) => Array.isArray(h) && h.length === 2 && typeof h[0] === "string" && typeof h[1] === "string")) return null;
@@ -138,6 +181,7 @@ export function readRequest(data: unknown): ServiceRequestMessage | null {
   return {
     type, method, path, headers: headers as [string, string][], body: body as ArrayBuffer | null,
     ...(typeof destination === "string" && /^[a-z]{0,32}$/.test(destination) ? { destination } : {}),
+    ...(flow === true ? { flow } : {}),
   };
 }
 

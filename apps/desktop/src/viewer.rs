@@ -31,6 +31,14 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 /// the refusal is missing, instead of waiting out the real timeout.
 #[cfg(test)]
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
+/// The largest request body the data link carries (`LIMITS.maxRequestBodyBytes` in core, `MAX_REQUEST_BYTES` on the
+/// web): a larger one is refused here, before it is copied into the main window.
+const MAX_REQUEST_BODY_BYTES: usize = 8 * 1024 * 1024;
+/// What one window may have waiting for an answer at once: requests, and the bytes of their bodies. Past either a
+/// request is refused at once, so the app cannot make the main window hold unbounded memory. The count is the web
+/// runner's sent and waiting ones together (`MAX_PENDING_REQUESTS` + `MAX_WAITING_REQUESTS`), the bytes its own.
+const MAX_PENDING_REQUESTS: usize = 288;
+const MAX_PENDING_BODY_BYTES: usize = 32 * 1024 * 1024;
 
 /// Added to every answer a contact's app gets served, after the contact's own
 /// policies: a WebView enforces every policy it is sent, so the contact's own
@@ -55,8 +63,9 @@ const SERVICE_CSP_RELAY_ONLY: &str = "default-src 'self' data: blob: 'unsafe-inl
 /// of the window (`initialization_script_for_all_frames`): it deletes the WebRTC constructors, opens new
 /// windows with `noopener`, and guards a frame's window before the page holds it (what a frame element
 /// hands out, the frames of a document as one loads or the page changes, each `srcdoc`), for a frame the
-/// WebView did not run it in. The same text as `VIEWER_GUARD_SCRIPT` in `packages/core/src/viewerGuard.ts`,
-/// which says what a script in the page cannot do.
+/// WebView did not run it in, and starts a worker made from a `blob:` URL of the page's from a script that makes a
+/// pass-through Trusted Types `default` policy in it first. The same text as `VIEWER_GUARD_SCRIPT` in
+/// `packages/core/src/viewerGuard.ts`, which says what a script in the page cannot do.
 const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
   "use strict";
   try {
@@ -171,16 +180,384 @@ const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
         return root;
       };
     }
+    if (w.trustedTypes && w.URL && w.Blob && !describe(w, "ghostlyWorkerGuard")) {
+      try {
+        define(w, "ghostlyWorkerGuard", { value: true });
+        const construct = Reflect.construct;
+        const json = JSON.stringify;
+        const later = w.setTimeout;
+        const Blob = w.Blob;
+        const sized = describe(Blob.prototype, "size").get;
+        const make = w.URL.createObjectURL;
+        const revoke = w.URL.revokeObjectURL;
+        const policy = "if (self.trustedTypes && !self.trustedTypes.defaultPolicy) { try { self.trustedTypes.createPolicy('default', { createHTML: (s) => s, createScript: (s) => s, createScriptURL: (s) => s }); } catch (e) {} }";
+        const script = (code) => apply(make, null, [new Blob([code], { type: "text/javascript" })]);
+        const known = { __proto__: null };
+        let first = null;
+        w.URL.createObjectURL = function createObjectURL(object) {
+          const made = apply(make, this, arguments);
+          try { apply(sized, object, []); known[made] = { blob: object, inner: null, classic: null, module: null }; } catch (e) {}
+          return made;
+        };
+        w.URL.revokeObjectURL = function revokeObjectURL(url) {
+          try {
+            const key = text(url);
+            const entry = known[key];
+            if (entry) {
+              delete known[key];
+              const ours = [entry.inner, entry.classic, entry.module];
+              apply(later, w, [() => { for (let i = 0; i < 3; i++) { if (ours[i] !== null) apply(revoke, null, [ours[i]]); } }, 60000]);
+            }
+          } catch (e) {}
+          return apply(revoke, this, arguments);
+        };
+        const start = (url, options) => {
+          const entry = known[text(url)];
+          if (!entry) return url;
+          const kind = options && typeof options === "object" && options.type === "module" ? "module" : "classic";
+          if (entry[kind] === null) {
+            if (entry.inner === null) entry.inner = apply(make, null, [entry.blob]);
+            if (kind === "module" && first === null) first = script(policy);
+            entry[kind] = script(kind === "module" ? "import " + json(first) + "; import " + json(entry.inner) + ";" : policy + " importScripts(" + json(entry.inner) + ");");
+          }
+          return entry[kind];
+        };
+        for (const name of ["Worker", "SharedWorker"]) {
+          const Real = w[name];
+          if (typeof Real !== "function") continue;
+          const started = function (url) {
+            if (new.target === undefined) return apply(Real, this, arguments);
+            const args = [];
+            for (let i = 0; i < arguments.length; i++) args[i] = arguments[i];
+            if (args.length > 0) { try { args[0] = start(url, args[1]); } catch (e) {} }
+            return construct(Real, args, new.target);
+          };
+          define(started, "name", { value: name });
+          started.prototype = Real.prototype;
+          define(Real.prototype, "constructor", { value: started, writable: true, enumerable: false, configurable: true });
+          w[name] = started;
+        }
+      } catch (e) {}
+    }
     apply(listen, home, ["load", sweep, true]);
     watch(home, w.Document.prototype.querySelectorAll);
   } catch (e) {}
 })(window)"#;
 
-/// Sent with the guard: frames only from the app's own origin (a `data:` or `blob:` frame would run before
-/// the guard where the WebView does not run it there), and Trusted Types, which hands each `javascript:` URL
-/// to the guard's policy before it runs. `VIEWER_GUARD_CSP` in `packages/core/src/viewerGuard.ts`.
+/// No policy keeps the app off `document.execCommand("copy")`, which WebView2 lets write the system clipboard for
+/// seconds after a tap in the page (from a timer too), and WebKit for a while after one: the app could swap what the
+/// person copies in Ghostly for text of its own. This runs first in every frame of the window, whatever the setting:
+/// a copy or cut only while the person's own input in it is being dispatched, never a paste. The same text as
+/// `CLIPBOARD_GUARD_SCRIPT` in `packages/core/src/clipboardGuard.ts`, which says what it allows.
+const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
+  "use strict";
+  try {
+    const apply = w.Reflect.apply;
+    const describe = w.Object.getOwnPropertyDescriptor;
+    const define = w.Object.defineProperty;
+    const proto = w.Document.prototype;
+    const home = w.document;
+    const exec = describe(proto, "execCommand");
+    const fresh = !!exec && exec.configurable === true && typeof exec.value === "function";
+    const watched = !!describe(home, "ghostlyClipboardGuard");
+    if (!fresh && watched) return;
+    if (!watched) define(home, "ghostlyClipboardGuard", { value: true });
+    const own = "<script>(" + noClipboardWrites + ")(window)<" + "/script>";
+    const close = "<" + "/script>";
+    const webRtc = "<script>(function noWebRtc(";
+    const text = w.String;
+    const lower = text.prototype.toLowerCase;
+    const slice = text.prototype.slice;
+    const index = text.prototype.indexOf;
+    const listen = w.EventTarget.prototype.addEventListener;
+    const shut = (inner) => {
+      try { if (inner && inner !== w) noClipboardWrites(inner); } catch (e) {}
+    };
+    const count = describe(w, "length").get;
+    const view = describe(proto, "defaultView").get;
+    const sweep = () => {
+      try { for (let i = apply(count, w, []); i-- > 0;) shut(w[i]); } catch (e) {}
+    };
+    const elements = w.Element.prototype;
+    const getAttribute = elements.getAttribute;
+    const setAttribute = elements.setAttribute;
+    const removeAttribute = elements.removeAttribute;
+    const attachShadow = elements.attachShadow;
+    const size = describe(w.NodeList.prototype, "length").get;
+    let passing = false;
+    const first = (frame) => {
+      const doc = apply(getAttribute, frame, ["srcdoc"]);
+      if (doc === null) return;
+      let at = 0;
+      if (apply(slice, doc, [0, webRtc.length]) === webRtc) {
+        const end = apply(index, doc, [close]);
+        if (end >= 0) at = end + close.length;
+      }
+      if (apply(slice, doc, [at, at + own.length]) === own) return;
+      passing = true;
+      try { apply(setAttribute, frame, ["srcdoc", own + doc]); } catch (e) { apply(removeAttribute, frame, ["srcdoc"]); }
+      passing = false;
+    };
+    const Observer = w.MutationObserver;
+    const observe = Observer.prototype.observe;
+    const watch = (root, all) => {
+      const scan = () => {
+        try {
+          const frames = apply(all, root, ["iframe[srcdoc]"]);
+          for (let i = apply(size, frames, []); i-- > 0;) first(frames[i]);
+        } catch (e) {}
+        sweep();
+      };
+      apply(observe, new Observer(scan), [root, { subtree: true, childList: true, attributes: true, attributeFilter: ["srcdoc"] }]);
+      apply(listen, root, ["load", sweep, true]);
+      scan();
+      return root;
+    };
+    if (fresh) {
+      const run = exec.value;
+      const phase = describe(w.Event.prototype, "eventPhase").get;
+      const trust = (event) => {
+        try {
+          const found = describe(event, "isTrusted");
+          if (found && found.get && apply(found.get, event, []) === true) return found.get;
+        } catch (e) {}
+        return null;
+      };
+      const dispatching = (event, trusted) => {
+        try { return apply(trusted, event, []) === true && apply(phase, event, []) !== 0; } catch (e) { return false; }
+      };
+      const stamp = describe(w.Event.prototype, "timeStamp");
+      const clock = w.performance;
+      const tick = clock && clock.now;
+      const time = () => { try { return apply(tick, clock, []); } catch (e) { return NaN; } };
+      const recent = (at) => time() - at <= 1000;
+      const shutters = [];
+      try {
+        const channel = new w.MessageChannel();
+        const post = w.MessagePort.prototype.postMessage;
+        const out = channel.port2;
+        channel.port1.onmessage = () => settle();
+        shutters[0] = () => apply(post, out, [0]);
+      } catch (e) {}
+      try {
+        const tasks = w.scheduler;
+        const postTask = tasks && tasks.postTask;
+        const urgent = { __proto__: null, priority: "user-blocking" };
+        if (typeof postTask === "function") shutters[shutters.length] = () => { apply(postTask, tasks, [settle, urgent]); };
+      } catch (e) {}
+      try {
+        const frame = w.requestAnimationFrame;
+        if (typeof frame === "function") shutters[shutters.length] = () => { apply(frame, w, [settle]); };
+      } catch (e) {}
+      let tap = null;
+      let trusted = null;
+      let tapped = NaN;
+      let open = 0;
+      let follows = null;
+      const settle = () => { open = 0; follows = null; };
+      const seen = (event) => {
+        const found = trust(event);
+        if (found === null) return;
+        let at = time();
+        try {
+          const given = apply(stamp.get, event, []);
+          if (given >= 0 && given < at) at = given;
+        } catch (e) {}
+        tap = event;
+        trusted = found;
+        tapped = at;
+        if (shutters.length === 0) return;
+        open = 1;
+        for (let i = 0; i < shutters.length; i++) { try { shutters[i](); } catch (e) {} }
+      };
+      const taps = ["pointerdown", "pointerup", "mousedown", "mouseup", "click", "auxclick", "dblclick", "contextmenu", "touchstart", "touchend", "keydown", "keypress", "keyup"];
+      for (let i = 0; i < taps.length; i++) apply(listen, w, [taps[i], seen, true]);
+      const followed = (event) => {
+        if (open === 0) return;
+        const found = trust(event);
+        if (found !== null) follows = { event: event, trusted: found, at: tapped, next: follows };
+      };
+      apply(listen, w, ["submit", followed, true]);
+      apply(listen, w, ["change", followed, true]);
+      const tapping = () => {
+        if (tap !== null && dispatching(tap, trusted) && recent(tapped)) return true;
+        for (let f = follows; f !== null; f = f.next) if (dispatching(f.event, f.trusted) && recent(f.at)) return true;
+        return false;
+      };
+      const guarded = function execCommand(command) {
+        const name = apply(lower, text(command), []);
+        if (name === "paste" || ((name === "copy" || name === "cut") && !tapping())) return false;
+        const args = [name];
+        for (let i = 1; i < arguments.length; i++) args[i] = arguments[i];
+        return apply(run, this, args);
+      };
+      define(proto, "execCommand", { value: guarded, writable: false, enumerable: exec.enumerable, configurable: false });
+      const types = w.trustedTypes;
+      if (types && !types.defaultPolicy) {
+        try {
+          let rules = null;
+          const rule = (kind) => (input, type, sink) => {
+            if (kind === "createScript" && sink === "Location href") return null;
+            if (passing || rules === null) return input;
+            return rules[kind] ? apply(rules[kind], undefined, [input, type, sink]) : null;
+          };
+          const members = ["createHTML", "createScript", "createScriptURL"];
+          const create = types.createPolicy;
+          const policy = apply(create, types, ["default", { createHTML: rule(members[0]), createScript: rule(members[1]), createScriptURL: rule(members[2]) }]);
+          const Mistyped = w.TypeError;
+          w.Object.getPrototypeOf(types).createPolicy = function createPolicy(name, options) {
+            if (this !== types || rules !== null || text(name) !== "default") return apply(create, this, arguments);
+            const given = { createHTML: null, createScript: null, createScriptURL: null };
+            for (let i = 0; i < members.length; i++) {
+              const found = options ? options[members[i]] : undefined;
+              if (found === undefined || found === null) continue;
+              if (typeof found !== "function") throw new Mistyped("The policy's " + members[i] + " is not a function");
+              given[members[i]] = found;
+            }
+            rules = given;
+            return policy;
+          };
+        } catch (e) {}
+      }
+      if (types && w.URL && w.Blob && !describe(w, "ghostlyWorkerGuard")) {
+        try {
+          define(w, "ghostlyWorkerGuard", { value: true });
+          const construct = w.Reflect.construct;
+          const json = w.JSON.stringify;
+          const later = w.setTimeout;
+          const Blob = w.Blob;
+          const sized = describe(Blob.prototype, "size").get;
+          const make = w.URL.createObjectURL;
+          const revoke = w.URL.revokeObjectURL;
+          const policy = "if (self.trustedTypes && !self.trustedTypes.defaultPolicy) { try { self.trustedTypes.createPolicy('default', { createHTML: (s) => s, createScript: (s) => s, createScriptURL: (s) => s }); } catch (e) {} }";
+          const script = (code) => apply(make, null, [new Blob([code], { type: "text/javascript" })]);
+          const known = { __proto__: null };
+          let first = null;
+          w.URL.createObjectURL = function createObjectURL(object) {
+            const made = apply(make, this, arguments);
+            try { apply(sized, object, []); known[made] = { blob: object, inner: null, classic: null, module: null }; } catch (e) {}
+            return made;
+          };
+          w.URL.revokeObjectURL = function revokeObjectURL(url) {
+            try {
+              const key = text(url);
+              const entry = known[key];
+              if (entry) {
+                delete known[key];
+                const ours = [entry.inner, entry.classic, entry.module];
+                apply(later, w, [() => { for (let i = 0; i < 3; i++) { if (ours[i] !== null) apply(revoke, null, [ours[i]]); } }, 60000]);
+              }
+            } catch (e) {}
+            return apply(revoke, this, arguments);
+          };
+          const start = (url, options) => {
+            const entry = known[text(url)];
+            if (!entry) return url;
+            const kind = options && typeof options === "object" && options.type === "module" ? "module" : "classic";
+            if (entry[kind] === null) {
+              if (entry.inner === null) entry.inner = apply(make, null, [entry.blob]);
+              if (kind === "module" && first === null) first = script(policy);
+              entry[kind] = script(kind === "module" ? "import " + json(first) + "; import " + json(entry.inner) + ";" : policy + " importScripts(" + json(entry.inner) + ");");
+            }
+            return entry[kind];
+          };
+          const makers = ["Worker", "SharedWorker"];
+          for (let i = 0; i < makers.length; i++) {
+            const Real = w[makers[i]];
+            if (typeof Real !== "function") continue;
+            const started = function (url) {
+              if (new.target === undefined) return apply(Real, this, arguments);
+              const args = [];
+              for (let j = 0; j < arguments.length; j++) args[j] = arguments[j];
+              if (args.length > 0) { try { args[0] = start(url, args[1]); } catch (e) {} }
+              return construct(Real, args, new.target);
+            };
+            define(started, "name", { value: makers[i] });
+            started.prototype = Real.prototype;
+            define(Real.prototype, "constructor", { value: started, writable: true, enumerable: false, configurable: true });
+            w[makers[i]] = started;
+          }
+        } catch (e) {}
+      }
+      const reopen = proto.open;
+      proto.open = function () {
+        const got = apply(reopen, this, arguments);
+        try { if (apply(view, this, []) === w) apply(listen, this, ["load", sweep, true]); } catch (e) {}
+        return got;
+      };
+      const shadowed = (html) => apply(index, apply(lower, html, []), ["shadowrootmode"]) >= 0;
+      const Refused = w.TypeError;
+      const refuse = () => { throw new Refused("A declarative shadow root is not allowed here"); };
+      const parsers = [[elements, "setHTMLUnsafe"], [w.ShadowRoot && w.ShadowRoot.prototype, "setHTMLUnsafe"], [w.Document, "parseHTMLUnsafe"]];
+      for (let i = 0; i < parsers.length; i++) {
+        const owner = parsers[i][0];
+        const name = parsers[i][1];
+        const real = owner && owner[name];
+        if (typeof real !== "function") continue;
+        owner[name] = function (html) {
+          const checked = text(html);
+          if (shadowed(checked)) refuse();
+          return apply(real, this, arguments.length > 1 ? [checked, arguments[1]] : [checked]);
+        };
+      }
+      let tail = "";
+      const writes = ["write", "writeln"];
+      for (let i = 0; i < writes.length; i++) {
+        const real = proto[writes[i]];
+        if (typeof real !== "function") continue;
+        proto[writes[i]] = function () {
+          let checked = "";
+          for (let j = 0; j < arguments.length; j++) checked += text(arguments[j]);
+          if (shadowed(tail + checked)) refuse();
+          tail = apply(slice, tail + checked, [-16]);
+          return apply(real, this, [checked]);
+        };
+      }
+      const kinds = ["HTMLIFrameElement", "HTMLFrameElement", "HTMLObjectElement", "HTMLEmbedElement"];
+      const reads = ["contentWindow", "contentDocument", "getSVGDocument"];
+      for (let k = 0; k < kinds.length; k++) {
+        const owner = w[kinds[k]] && w[kinds[k]].prototype;
+        for (let r = 0; r < reads.length; r++) {
+          const name = reads[r];
+          const found = owner && describe(owner, name);
+          const key = found && found.get ? "get" : "value";
+          if (!found || typeof found[key] !== "function") continue;
+          const read = found[key];
+          found[key] = function () {
+            const got = apply(read, this, arguments);
+            try { shut(name === "contentWindow" ? got : apply(view, got, [])); } catch (e) {}
+            return got;
+          };
+          try { define(owner, name, found); } catch (e) {}
+        }
+      }
+      const inShadow = w.DocumentFragment.prototype.querySelectorAll;
+      if (attachShadow) {
+        elements.attachShadow = function () {
+          const root = apply(attachShadow, this, arguments);
+          try { watch(root, inShadow); } catch (e) {}
+          return root;
+        };
+      }
+    }
+    if (!watched) watch(home, proto.querySelectorAll);
+  } catch (e) {}
+})(window)"#;
+
+/// Sent with the guards, with every answer: frames only from the app's own origin (a `data:` or `blob:` frame
+/// would run before the guards where the WebView does not run them there), and Trusted Types, which hands each
+/// `javascript:` URL to the guards' policy before it runs. `VIEWER_GUARD_CSP` in `packages/core/src/viewerGuard.ts`.
 const SERVICE_GUARD_CSP: &str =
     "frame-src 'self'; object-src 'self'; require-trusted-types-for 'script'";
+
+/// `SERVICE_GUARD_CSP` for a worker's own script (its request's `Sec-Fetch-Dest`): no Trusted Types. No guard runs in
+/// a worker to make the `default` policy, so Trusted Types there would refuse its every `importScripts`, `eval` and
+/// `new Function`, and a worker has no `javascript:` URL or WebRTC to keep. `VIEWER_WORKER_GUARD_CSP` in
+/// `packages/core/src/viewerGuard.ts`.
+const SERVICE_WORKER_GUARD_CSP: &str = "frame-src 'self'; object-src 'self'";
+
+/// The `Sec-Fetch-Dest` of a worker's own script: its answer's policy is the worker's.
+const WORKER_DESTINATIONS: [&str; 3] = ["worker", "sharedworker", "serviceworker"];
 
 /// The contact's headers that are not passed on: each makes the WebView send
 /// something to a place it names, outside `connect-src` (violation and
@@ -194,6 +571,13 @@ const DROPPED_HEADERS: [&str; 5] = [
     "nel",
     "link",
 ];
+
+/// The page's features, Ghostly's alone: the contact's `Permissions-Policy` (or the older `Feature-Policy`) could
+/// allow them, so it takes their place. `VIEWER_PERMISSIONS_POLICY` in `packages/core/src/http.ts`.
+const PERMISSIONS_POLICY: &str = "camera=(), microphone=(), display-capture=(), geolocation=(), midi=(), usb=(), serial=(), hid=(), clipboard-read=(), clipboard-write=(), idle-detection=(), local-fonts=(), window-management=(), storage-access=(), publickey-credentials-create=()";
+
+/// A contact's headers that would set the page's features (`PERMISSIONS_POLICY`).
+const FEATURE_HEADERS: [&str; 2] = ["permissions-policy", "feature-policy"];
 
 /// The directives of a contact's policy that send reports to a URL it names,
 /// dropped from it. The same list as `OPENED_SERVICE_DROPPED_DIRECTIVES`.
@@ -228,6 +612,8 @@ pub struct ViewerState {
     /// Window label → what it shows. The window decides where a request goes, not its URL.
     windows: Mutex<HashMap<String, Bound>>,
     pending: Mutex<HashMap<u64, oneshot::Sender<ServiceResponse>>>,
+    /// Window label → its requests waiting for an answer and the bytes of their bodies (`Room`).
+    held: Mutex<HashMap<String, (usize, usize)>>,
     next_id: AtomicU64,
 }
 
@@ -358,7 +744,8 @@ fn external_target(url: &url::Url, site: &str, service: &str) -> Option<String> 
 }
 
 /// Whether a link names this machine or the local network: an address that is not public (loopback, private,
-/// link-local, …), `localhost` and its subdomains, an mDNS `.local` name, or a name of one label (`router`, `nas`)
+/// link-local, …), a name under a local suffix (`localhost`, mDNS `.local`, a router's `.lan` or `.home`, a company's
+/// `.corp`: `local_names::LOCAL_SUFFIXES`), or a name of one label (`router`, `nas`)
 /// that only a local resolver answers. The contact's page runs on the contact's side; opening such a link in the
 /// person's browser sends it with the browser's cookies, past the browser's own guard for local addresses
 /// (WebView2 opens one from script, with no click). A public name that resolves to a local address is not caught here.
@@ -368,11 +755,7 @@ fn is_local_host(url: &url::Url) -> bool {
         Some(url::Host::Ipv6(ip)) => !crate::link_preview::is_public(ip.into()),
         Some(url::Host::Domain(name)) => {
             let name = name.trim_end_matches('.').to_ascii_lowercase();
-            !name.contains('.')
-                || name.ends_with(".localhost")
-                || name.ends_with(".local")
-                || name.ends_with(".internal")
-                || name.ends_with(".home.arpa")
+            !name.contains('.') || crate::local_names::under_local_suffix(&name)
         }
         None => true,
     }
@@ -468,9 +851,8 @@ pub fn open<R: tauri::Runtime>(
     if let Some(folder) = crate::forget_origins::app_folder(app, &format!("{service}.{site}")) {
         builder = builder.data_directory(folder);
     }
-    // Hide my IP from contacts: the app's every frame runs the WebRTC guard before its own code.
-    if relay_only {
-        builder = builder.initialization_script_for_all_frames(SERVICE_GUARD);
+    for guard in frame_guards(relay_only) {
+        builder = builder.initialization_script_for_all_frames(guard);
     }
     let window = builder
         .title(format!("{} — Ghostly", title))
@@ -491,6 +873,9 @@ pub fn open<R: tauri::Runtime>(
         })
         // The app never saves a file by itself.
         .on_download(|_, event| may_download(&event))
+        // Never the microphone, the camera, the screen or the location, as in an app window: without an answer of
+        // ours macOS grants the first two with no question.
+        .on_permission_request(|_, kind| crate::app_sandbox::capture_answer(kind))
         .inner_size(1100.0, 760.0)
         .build()
         .map_err(|e| format!("Window: {}", e))?;
@@ -513,6 +898,16 @@ pub fn open<R: tauri::Runtime>(
         }
     }
     Ok(())
+}
+
+/// The scripts the app's every frame runs before its own code, in this order: the clipboard guard always, then the
+/// WebRTC guard with Hide my IP from contacts on (the web runner's order).
+fn frame_guards(relay_only: bool) -> Vec<&'static str> {
+    if relay_only {
+        vec![CLIPBOARD_GUARD, SERVICE_GUARD]
+    } else {
+        vec![CLIPBOARD_GUARD]
+    }
 }
 
 /// No element full screen, before the page has a click to ask for it. On macOS wry turns it on as it builds the
@@ -596,6 +991,46 @@ fn plain(status: StatusCode, message: &str) -> Response<Vec<u8>> {
         .expect("static response")
 }
 
+/// One request's place in its window's room (`MAX_PENDING_REQUESTS`, `MAX_PENDING_BODY_BYTES`), given back when it
+/// is dropped: answered, timed out, or let go of by the page.
+struct Room<'a> {
+    held: &'a Mutex<HashMap<String, (usize, usize)>>,
+    label: &'a str,
+    bytes: usize,
+}
+
+impl<'a> Room<'a> {
+    fn take(state: &'a ViewerState, label: &'a str, bytes: usize) -> Option<Self> {
+        let mut held = state.held.lock().ok()?;
+        let (count, total) = held.entry(label.to_string()).or_default();
+        if *count >= MAX_PENDING_REQUESTS || *total + bytes > MAX_PENDING_BODY_BYTES {
+            return None;
+        }
+        *count += 1;
+        *total += bytes;
+        Some(Room {
+            held: &state.held,
+            label,
+            bytes,
+        })
+    }
+}
+
+impl Drop for Room<'_> {
+    fn drop(&mut self) {
+        let Ok(mut held) = self.held.lock() else {
+            return;
+        };
+        if let Some((count, total)) = held.get_mut(self.label) {
+            *count -= 1;
+            *total -= self.bytes;
+            if *count == 0 {
+                held.remove(self.label);
+            }
+        }
+    }
+}
+
 pub async fn handle<R: tauri::Runtime>(
     app: AppHandle<R>,
     label: String,
@@ -646,6 +1081,21 @@ pub async fn handle<R: tauri::Runtime>(
         );
     }
 
+    // Refused before the body is copied and base64'd into the main window, which would only refuse it there.
+    let bytes = request.body().len();
+    if bytes > MAX_REQUEST_BODY_BYTES {
+        return plain(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "The request body is too large.",
+        );
+    }
+    let Some(_room) = Room::take(&state, &label, bytes) else {
+        return plain(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Too many requests are waiting for an answer.",
+        );
+    };
+
     let id = state.next_id.fetch_add(1, Ordering::Relaxed);
     let (sender, receiver) = oneshot::channel();
     if let Ok(mut pending) = state.pending.lock() {
@@ -693,6 +1143,12 @@ pub async fn handle<R: tauri::Runtime>(
         {
             continue;
         }
+        if FEATURE_HEADERS
+            .iter()
+            .any(|feature| feature.eq_ignore_ascii_case(name))
+        {
+            continue;
+        }
         if name.eq_ignore_ascii_case("content-security-policy") {
             let policy = without_reports(value);
             if !policy.is_empty() {
@@ -702,9 +1158,25 @@ pub async fn handle<R: tauri::Runtime>(
             response = response.header(name.as_str(), value.as_str());
         }
     }
-    if relay_only {
-        policies.push(SERVICE_GUARD_CSP.to_string());
-    }
+    // The guards' own, whatever the setting: the clipboard guard runs in every frame, and a worker takes the
+    // worker's variant of its policy.
+    let worker = request
+        .headers()
+        .get("sec-fetch-dest")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|destination| {
+            WORKER_DESTINATIONS
+                .iter()
+                .any(|worker| worker.eq_ignore_ascii_case(destination))
+        });
+    policies.push(
+        if worker {
+            SERVICE_WORKER_GUARD_CSP
+        } else {
+            SERVICE_GUARD_CSP
+        }
+        .to_string(),
+    );
     policies.push(
         if relay_only {
             SERVICE_CSP_RELAY_ONLY
@@ -714,6 +1186,7 @@ pub async fn handle<R: tauri::Runtime>(
         .to_string(),
     );
     response = response.header("content-security-policy", policies.join(", "));
+    response = response.header("permissions-policy", PERMISSIONS_POLICY);
     response
         .body(STANDARD.decode(answer.body_b64).unwrap_or_default())
         .unwrap_or_else(|_| {
@@ -989,6 +1462,12 @@ mod tests {
             "http://router/",
             "http://metadata.google.internal/",
             "http://nas.home.arpa/",
+            "http://router.lan/",
+            "http://NAS.Lan./",
+            "http://router.home/",
+            "http://nas.localdomain/",
+            "http://hr.intranet/",
+            "http://files.corp/",
         ] {
             assert_eq!(outside(local), None, "{local}");
         }
@@ -1271,7 +1750,9 @@ mod routing_tests {
             .collect();
         assert_eq!(
             policies,
-            [format!("default-src *, img-src *, {SERVICE_CSP}")]
+            [format!(
+                "default-src *, img-src *, {SERVICE_GUARD_CSP}, {SERVICE_CSP}"
+            )]
         );
         assert_eq!(response.body(), b"created");
         assert!(app
@@ -1280,6 +1761,84 @@ mod routing_tests {
             .lock()
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn a_window_holds_only_so_many_requests_and_body_bytes_at_once() {
+        let app = app();
+        bind(&app, "svc-1");
+        bind(&app, "svc-2");
+        let asked = requests(&app);
+        let url = format!("{SCHEME}://atlas.{PEER}.{TAG}/up");
+        let send = |label: &str, body: &[u8]| {
+            tauri::async_runtime::spawn(handle(
+                app.handle().clone(),
+                label.into(),
+                request("POST", &url, body),
+            ))
+        };
+        let carried = || {
+            asked.recv_timeout(Duration::from_secs(5)).unwrap()["id"]
+                .as_u64()
+                .unwrap()
+        };
+        let served = |pending: tauri::async_runtime::JoinHandle<Response<Vec<u8>>>| {
+            tauri::async_runtime::block_on(pending).unwrap().status()
+        };
+        let answer = |id: u64| {
+            respond(
+                app.handle(),
+                id,
+                ServiceResponse {
+                    status: 200,
+                    headers: Vec::new(),
+                    body_b64: String::new(),
+                },
+            )
+        };
+
+        // A body past the data link's limit is refused here, never handed to the main window.
+        let too_large = vec![0u8; MAX_REQUEST_BODY_BYTES + 1];
+        assert_eq!(
+            served(send("svc-1", &too_large)),
+            StatusCode::PAYLOAD_TOO_LARGE
+        );
+        assert!(asked.try_recv().is_err());
+
+        // A request waiting for its answer holds room in its window, and gives it back once answered.
+        let state = app.state::<ViewerState>();
+        let full = vec![0u8; MAX_REQUEST_BODY_BYTES];
+        let pending = send("svc-1", &full);
+        let id = carried();
+        assert_eq!(
+            state.held.lock().unwrap().get("svc-1"),
+            Some(&(1, MAX_REQUEST_BODY_BYTES))
+        );
+        answer(id);
+        assert_eq!(served(pending), StatusCode::OK);
+        assert!(state.held.lock().unwrap().is_empty());
+
+        // Room held by others, taken here rather than by requests that would time out while the test runs: past the
+        // bytes or the count, a request is refused at once and never handed to the main window.
+        let bytes = Room::take(&state, "svc-1", MAX_PENDING_BODY_BYTES).unwrap();
+        assert_eq!(served(send("svc-1", b"x")), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(asked.try_recv().is_err());
+        // Another window has its own room.
+        let other = send("svc-2", b"x");
+        answer(carried());
+        assert_eq!(served(other), StatusCode::OK);
+        drop(bytes);
+        let count: Vec<_> = (0..MAX_PENDING_REQUESTS)
+            .map(|_| Room::take(&state, "svc-1", 0).unwrap())
+            .collect();
+        assert_eq!(served(send("svc-1", b"")), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(asked.try_recv().is_err());
+        drop(count);
+        let again = send("svc-1", b"x");
+        answer(carried());
+        assert_eq!(served(again), StatusCode::OK);
+        assert!(state.pending.lock().unwrap().is_empty());
+        assert!(state.held.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -1347,11 +1906,85 @@ mod routing_tests {
         }
         assert_eq!(
             response.headers()["content-security-policy"],
-            format!("default-src 'self'; img-src *, script-src 'self', {SERVICE_CSP}").as_str()
+            format!("default-src 'self'; img-src *, script-src 'self', {SERVICE_GUARD_CSP}, {SERVICE_CSP}")
+                .as_str()
         );
         // What can read an answer or post goes to the contact's own origin only: https: also names
         // this machine and the local network.
         assert!(SERVICE_CSP.ends_with("; connect-src 'self'; form-action 'self'"));
+    }
+
+    /// No microphone, camera, screen or location for a contact's app, as for an installed one: without a handler wry
+    /// grants a capture on macOS with no question, so the window carries the one that refuses, and its pages are
+    /// served Ghostly's permissions policy in place of the contact's.
+    #[test]
+    fn a_contacts_app_never_captures() {
+        let source = include_str!("viewer.rs");
+        let start = source.find("pub fn open<").unwrap();
+        let body = &source[start..start + source[start..].find("\n}\n").unwrap()];
+        assert!(
+            body.contains(
+                ".on_permission_request(|_, kind| crate::app_sandbox::capture_answer(kind))"
+            ),
+            "open"
+        );
+        let app = app();
+        bind(&app, "svc-1");
+        let asked = requests(&app);
+        let pending = tauri::async_runtime::spawn(handle(
+            app.handle().clone(),
+            "svc-1".into(),
+            request("GET", &format!("{SCHEME}://atlas.{PEER}.{TAG}/"), b""),
+        ));
+        let carried = asked.recv_timeout(Duration::from_secs(5)).unwrap();
+        respond(
+            app.handle(),
+            carried["id"].as_u64().unwrap(),
+            ServiceResponse {
+                status: 200,
+                headers: vec![
+                    ("Permissions-Policy".into(), "camera=*, microphone=*".into()),
+                    ("Feature-Policy".into(), "camera *; microphone *".into()),
+                    ("x-served-by".into(), "atlas".into()),
+                ],
+                body_b64: STANDARD.encode(b"hi"),
+            },
+        );
+        let response = tauri::async_runtime::block_on(pending).unwrap();
+        assert_eq!(response.headers()["x-served-by"], "atlas");
+        assert!(response.headers().get("feature-policy").is_none());
+        let policies: Vec<_> = response
+            .headers()
+            .get_all("permissions-policy")
+            .iter()
+            .collect();
+        assert_eq!(policies.len(), 1);
+        for feature in ["camera", "microphone", "display-capture", "geolocation"] {
+            assert!(
+                policies[0]
+                    .to_str()
+                    .unwrap()
+                    .contains(&format!("{feature}=()")),
+                "{feature}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_permissions_policy_is_the_one_the_other_viewers_serve() {
+        let core = include_str!("../../../packages/core/src/http.ts");
+        let start = core
+            .find("export const VIEWER_PERMISSIONS_POLICY = [")
+            .unwrap();
+        let list = &core[start..start + core[start..].find("]").unwrap()];
+        let features: Vec<_> = list
+            .split('"')
+            .skip(1)
+            .step_by(2)
+            .map(|feature| format!("{feature}=()"))
+            .collect();
+        assert!(features.len() > 4);
+        assert_eq!(PERMISSIONS_POLICY, features.join(", "));
     }
 
     /// With Hide my IP from contacts on when the window opened, its pages load nothing but their own origin: a
@@ -1392,7 +2025,7 @@ mod routing_tests {
             let ours = if relay_only {
                 format!("{SERVICE_GUARD_CSP}, {SERVICE_CSP_RELAY_ONLY}")
             } else {
-                SERVICE_CSP.to_string()
+                format!("{SERVICE_GUARD_CSP}, {SERVICE_CSP}")
             };
             assert_eq!(
                 response.headers()["content-security-policy"],
@@ -1403,6 +2036,64 @@ mod routing_tests {
         assert_eq!(
             SERVICE_CSP_RELAY_ONLY,
             "default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'"
+        );
+    }
+
+    /// With Hide my IP on, a worker's own script is sent without Trusted Types: no guard runs in a worker to make
+    /// the `default` policy, so every `importScripts` and `eval` there would be refused. A page keeps them.
+    #[test]
+    fn with_hide_my_ip_on_a_workers_script_gets_no_trusted_types() {
+        // covers: settings.network.relay-only
+        let app = app();
+        bind_relay_only(&app);
+        let asked = requests(&app);
+        for (destination, guard) in [
+            (Some("worker"), SERVICE_WORKER_GUARD_CSP),
+            (Some("SharedWorker"), SERVICE_WORKER_GUARD_CSP),
+            (Some("serviceworker"), SERVICE_WORKER_GUARD_CSP),
+            (Some("document"), SERVICE_GUARD_CSP),
+            (Some("iframe"), SERVICE_GUARD_CSP),
+            (Some("script"), SERVICE_GUARD_CSP),
+            (None, SERVICE_GUARD_CSP),
+        ] {
+            let mut sent = request("GET", &format!("{SCHEME}://atlas.{PEER}.{TAG}/w.js"), b"");
+            if let Some(destination) = destination {
+                sent.headers_mut()
+                    .insert("sec-fetch-dest", destination.parse().unwrap());
+            }
+            let pending =
+                tauri::async_runtime::spawn(handle(app.handle().clone(), "svc-1".into(), sent));
+            let carried = asked.recv_timeout(Duration::from_secs(5)).unwrap();
+            respond(
+                app.handle(),
+                carried["id"].as_u64().unwrap(),
+                ServiceResponse {
+                    status: 200,
+                    headers: vec![("content-type".into(), "text/javascript".into())],
+                    body_b64: STANDARD.encode(b"importScripts('lib.js')"),
+                },
+            );
+            let response = tauri::async_runtime::block_on(pending).unwrap();
+            assert_eq!(
+                response.headers()["content-security-policy"],
+                format!("{guard}, {SERVICE_CSP_RELAY_ONLY}").as_str(),
+                "{destination:?}"
+            );
+        }
+        assert!(!SERVICE_WORKER_GUARD_CSP.contains("trusted-types"));
+    }
+
+    fn bind_relay_only(app: &tauri::App<MockRuntime>) {
+        app.state::<ViewerState>().windows.lock().unwrap().insert(
+            "svc-1".into(),
+            Bound {
+                peer: PEER.into(),
+                service: "atlas".into(),
+                site: format!("{PEER}.{TAG}"),
+                unreachable: UNREACHABLE.into(),
+                relay_only: true,
+                rules_in: true,
+            },
         );
     }
 
@@ -1418,7 +2109,32 @@ mod routing_tests {
         assert!(core.contains(&format!(
             "export const VIEWER_GUARD_CSP = \"{SERVICE_GUARD_CSP}\";"
         )));
+        assert!(core.contains(&format!(
+            "export const VIEWER_WORKER_GUARD_CSP = \"{SERVICE_WORKER_GUARD_CSP}\";"
+        )));
+        assert!(core.contains(&format!(
+            "const WORKER_DESTINATIONS = new Set([{}]);",
+            WORKER_DESTINATIONS.map(|d| format!("\"{d}\"")).join(", ")
+        )));
         assert!(SERVICE_GUARD.starts_with("(function noWebRtc(w) {"));
+    }
+
+    /// Every frame of the window runs the clipboard guard first, whatever the setting, and the WebRTC guard
+    /// after it with Hide my IP on: the order the web runner puts them in a page.
+    #[test]
+    fn every_frame_runs_the_clipboard_guard_first() {
+        assert_eq!(frame_guards(false), vec![CLIPBOARD_GUARD]);
+        assert_eq!(frame_guards(true), vec![CLIPBOARD_GUARD, SERVICE_GUARD]);
+    }
+
+    /// The clipboard guard is the web runner's, word for word.
+    #[test]
+    fn the_clipboard_guard_is_the_one_the_web_runs() {
+        let core = include_str!("../../../packages/core/src/clipboardGuard.ts");
+        assert!(core.contains(&format!(
+            "export const CLIPBOARD_GUARD_SCRIPT = `{CLIPBOARD_GUARD}`;"
+        )));
+        assert!(CLIPBOARD_GUARD.starts_with("(function noClipboardWrites(w) {"));
     }
 
     #[test]

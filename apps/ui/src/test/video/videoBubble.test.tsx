@@ -423,7 +423,8 @@ describe("a video in the chat", () => {
     };
     await enter();
     expect(fullscreenWindow).toHaveBeenLastCalledWith(true);
-    expect(screen.getByRole("button", { name: "Exit full screen" })).toHaveAttribute("aria-pressed", "true");
+    // Named for what it does next, never a toggle too: "Exit full screen, pressed" read as left already.
+    expect(screen.getByRole("button", { name: "Exit full screen" })).not.toHaveAttribute("aria-pressed");
     // Escape leaves it, the window with it; the video goes on. The Escape is spent (false: its default prevented), so
     // a notice at the top that also answers Escape stays.
     expect(fireEvent.keyDown(document, { key: "Escape" })).toBe(false);
@@ -647,7 +648,7 @@ describe("a video not here yet", () => {
     const file = video();
     show(file, { state: "transferring", stage: "asking", direction: "in", transferred: 0, size: file.size, room: 12 * 1024 * MB });
     expect(screen.getByTestId("video-accept")).toHaveTextContent("Download 35.0 MB");
-    expect(screen.getByTestId("video-room")).toHaveTextContent("Ana wants to send it · 12.0 GB free");
+    expect(screen.getByTestId("video-room")).toHaveTextContent("Ana wants to send it · 12.0 GB left");
     expect(screen.queryByTestId("video-play")).toBeNull();
     // The poster and length are there before a byte is.
     expect(screen.getByTestId("video-poster")).toBeInTheDocument();
@@ -666,11 +667,12 @@ describe("a video not here yet", () => {
     expect(accept.className).toContain("max-w-[calc(100%-8px)]");
   });
 
-  it("an offer larger than the room here cannot be accepted", () => {
+  it("an offer larger than the room shown says so, and still takes Download: the engine reads the room again", async () => {
     const file = video();
     show(file, { state: "transferring", stage: "asking", direction: "in", transferred: 0, size: file.size, room: 10 * MB });
-    expect(screen.getByTestId("video-accept")).toBeDisabled();
-    expect(screen.getByTestId("video-room")).toHaveTextContent("Not enough space: 10.0 MB free");
+    expect(screen.getByTestId("video-room")).toHaveTextContent("Not enough space: 10.0 MB left");
+    fireEvent.click(screen.getByTestId("video-accept"));
+    await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))).toEqual({ linkId: "chat1", fileId: file.id, action: "accept" }));
   });
 
   it("while it arrives: the ring with how much is here, the status, and pause/cancel", async () => {

@@ -2,9 +2,9 @@
   "ark": {
     "approve": "Rien ne part avant votre accord.",
     "arrives": "Arrive tout seul.",
-    "boarding": "Envoyez depuis n'importe quel portefeuille Bitcoin. Une fois confirmé, il passe dans Ark tout seul ; il faut pour cela que Ghostly soit ouvert.",
+    "boarding": "Envoyez depuis n'importe quel portefeuille Bitcoin. Une fois confirmé, il passe dans Ark tout seul ; il faut pour cela que Ghostly soit ouvert.",
     "boardingRegtest": "Sur un serveur regtest local, les dépôts sont réglés dans Ark à la main.",
-    "expired": "{{amount}} {{unit}} ont expiré avant d'être renouvelés. Ils sont toujours à vous : récupérez-les pour les utiliser à nouveau.",
+    "expired": "{{amount}} {{unit}} ont expiré avant d'être renouvelés. Ils sont toujours à vous : récupérez-les pour les utiliser à nouveau.",
     "explorer": "API de l'explorateur Bitcoin",
     "incoming": "{{amount}} {{unit}} en route depuis un dépôt on-chain",
     "networkLabel": "Réseau Ark",
@@ -30,7 +30,7 @@
   "backup": {
     "download": "Télécharger",
     "file": "Sauvegarde du portefeuille",
-    "fileHint": "Ce portefeuille seulement ; la sauvegarde du profil contient tout",
+    "fileHint": "Ce portefeuille seulement ; la sauvegarde du profil contient tout",
     "filePasswordFor": "Mot de passe du fichier de sauvegarde {{name}}",
     "hide": "Masquer",
     "kept": "Le portefeuille actuel est conservé, archivé.",
@@ -55,7 +55,7 @@
     },
     "info": {
       "phrase": "La phrase de récupération restaure ce portefeuille sur n'importe quel appareil. Notez-la et gardez-la hors ligne. Qui la possède peut dépenser l'argent.",
-      "profile": "Cashu n'a pas de phrase de récupération. Une sauvegarde du profil garde votre ecash tel qu'il est au moment de la faire : refaites-en une après avoir reçu plus."
+      "profile": "Cashu n'a pas de phrase de récupération. Une sauvegarde du profil garde votre ecash tel qu'il est au moment de la faire : refaites-en une après avoir reçu plus."
     },
     "label": "sauvegarde à faire",
     "later": "Plus tard",
@@ -66,7 +66,7 @@
   "bark": {
     "addressNote": "Depuis un portefeuille Bark sur le même serveur. Un portefeuille Arkade ne peut pas la payer.",
     "approve": "Rien ne part avant votre accord. Seulement des adresses Bark de ce même serveur.",
-    "backupNow": "Sauvegardez ce portefeuille maintenant : il contient de vrais bitcoins, et sa phrase de récupération n'existe que sur cet appareil. Notez la phrase ou téléchargez la sauvegarde chiffrée avant d'y mettre de l'argent.",
+    "backupNow": "Sauvegardez ce portefeuille maintenant : il contient de vrais bitcoins, et sa phrase de récupération n'existe que sur cet appareil. Notez la phrase ou téléchargez la sauvegarde chiffrée avant d'y mettre de l'argent.",
     "board": "Transférer dans Ark",
     "connectingNote": "La première fois, Bark se charge et demande sa clé au serveur Ark.",
     "esplora": "API Esplora de Bark",
@@ -85,10 +85,10 @@
     "moving": "Transfert…",
     "networkLabel": "Réseau Bark",
     "networkReal": "De vrais bitcoins, sur le serveur de Second",
-    "onchain": "{{amount}} {{unit}} on-chain, pas encore dans Ark. Les transférer est une transaction on-chain : ses frais sont déduits.",
+    "onchain": "{{amount}} {{unit}} on-chain, pas encore dans Ark. Les transférer est une transaction on-chain : ses frais sont déduits.",
     "onchainNote": "Envoyez depuis n'importe quel portefeuille Bitcoin, puis transférez dans Ark une fois confirmé.",
-    "pending": "{{amount}} {{unit}} en attente (un round, un embarquement ou un paiement Lightning) : à vous, mais pas encore dépensables",
-    "phraseNote": "La phrase récupère ce que le serveur de Second garde pour ce portefeuille ; l'historique des paiements vient du fichier de sauvegarde.",
+    "pending": "{{amount}} {{unit}} en attente (un round, un embarquement ou un paiement Lightning) : à vous, mais pas encore dépensables",
+    "phraseNote": "La phrase récupère ce que le serveur de Second garde pour ce portefeuille ; l'historique des paiements vient du fichier de sauvegarde.",
     "read": "Lire",
     "renewalHint": "Renouvelle les pièces proches de l'expiration tant que Ghostly est ouvert",
     "scanning": "Recherche des pièces on-chain que cette phrase a reçues avant…",
@@ -109,8 +109,8 @@
     "empty": "Aucune source Bitcoin configurée",
     "emptyNote": "Le Bitcoin on-chain passe par un portefeuille ou un nœud que vous choisissez ci-dessous. Rien n'est configuré par défaut.",
     "getAddress": "Obtenir une adresse",
-    "lastBalance": "Dernier solde connu : {{balance}} {{unit}}",
-    "lastBalanceAt": "Dernier solde connu : {{balance}} {{unit}} · {{date}}",
+    "lastBalance": "Dernier solde connu : {{balance}} {{unit}}",
+    "lastBalanceAt": "Dernier solde connu : {{balance}} {{unit}} · {{date}}",
     "maxFee": "Le maximum de frais que vous acceptez",
     "maxFeeInput": "Frais maximum en {{unit}}",
     "newAddress": "Nouvelle adresse",
@@ -122,7 +122,7 @@
     "refreshNow": "Actualiser maintenant",
     "retry": "Réessayer",
     "retrying": "{{error}} · nouvel essai automatique",
-    "reviewNote": "La transaction est construite et signée pour que vous la vérifiiez ; rien n'est diffusé avant votre accord.",
+    "reviewNote": "La transaction est construite et signée pour que vous la vérifiiez ; rien n'est diffusé avant votre accord.",
     "tx": {
       "confirmed": "{{sign}}{{amount}} · {{count}} conf.",
       "unconfirmed": "{{sign}}{{amount}} · non confirmé"
@@ -177,11 +177,10 @@
   },
   "cashu": {
     "add": "Ajouter",
-    "addMintPlaceholder": "Ajouter un mint : https://…",
-    "amountSats": "{{amount}} sats",
+    "addMintPlaceholder": "Ajouter un mint : https://…",
     "askingMint": "Demande au mint…",
     "backupCopied": "Sauvegarde copiée. Qui a ces jetons a les sats.",
-    "contactHint": "Vous payez un contact ? Utilisez ⚡ dans le chat.",
+    "contactHint": "Vous payez un contact ? Utilisez ⚡ dans le chat.",
     "copyBackup": "Copier la sauvegarde",
     "copyEcash": "Copier l’ecash",
     "copyEcashHint": "Qui a les jetons a les sats",
@@ -192,8 +191,8 @@
       "perProofTest": "{{fee}} sat de test par preuve (environ 1 sat de test par paiement)"
     },
     "history": {
-      "fee": "frais {{amount}}",
-      "feesPaid": "Frais payés : {{amount}} {{unit}}",
+      "fee": "frais {{amount}} {{unit}}",
+      "feesPaid": "Frais payés : {{amount}} {{unit}}",
       "movements": "{{count}} mouvements",
       "movementsOne": "1 mouvement",
       "noFee": "sans frais",
@@ -205,7 +204,7 @@
       }
     },
     "intent": "{{amount}} {{unit}} · {{state}}",
-    "invoiceExpired": "Cette facture a expiré : plus personne ne peut la payer.",
+    "invoiceExpired": "Cette facture a expiré : plus personne ne peut la payer.",
     "invoiceFor": "Facture de {{amount}}",
     "makePrimary": "Rendre principal",
     "mints": "Mints",
@@ -216,24 +215,25 @@
     "payAmount": "Payer {{amount}} {{unit}}",
     "payLine": "Payer {{amount}}{{fees}}",
     "pendingMint": "Le paiement est toujours en attente au mint.",
+    "pendingMintNext": "Il se règle de lui-même ; rien n’est payé deux fois. Jusqu’à la réponse du mint, le montant apparaît comme mis de côté sous le solde.",
     "primary": "Principal",
     "received": "⚡ {{amount}} {{unit}} reçus",
     "redeem": "Encaisser le jeton ecash",
     "redeemed": "{{amount}} {{unit}} encaissés.",
     "remove": "Retirer",
-    "removeLastMint": "C’est le dernier mint du portefeuille : le retirer supprime le portefeuille {{label}} et sa carte Lightning.",
+    "removeLastMint": "C’est le dernier mint du portefeuille : le retirer supprime le portefeuille {{label}} et sa carte Lightning.",
     "removeMint": "Retirer {{name}}",
-    "removeMintAwaiting": "Il attend encore de l’argent :",
+    "removeMintAwaiting": "Il attend encore de l’argent :",
     "removeMintConsent": "Ce qui lui est payé ensuite n’apparaît qu’une fois ce mint ajouté à nouveau.",
     "removeMintHint": "Vous pourrez l’ajouter à nouveau plus tard.",
-    "removeMintQuestion": "Retirer {{name}} ?",
+    "removeMintQuestion": "Retirer {{name}} ?",
     "setAside": "{{amount}} {{unit}} mis de côté",
     "setAsideInfo": "Mis de côté pour un paiement que le mint n'a pas encore confirmé. Ils partent avec le paiement ou reviennent dans votre solde dès que le mint répond.",
     "settings": "Réglages",
     "testBalance": "{{amount}} sats de test (sans valeur)",
     "testBalance_one": "{{amount}} sat de test (sans valeur)",
-    "testMintInvoice": "En attente du paiement… Les mints de test marquent chaque facture payée d’eux-mêmes, donc partagez celle-ci dans un chat 1:1 : elle ne compte que lorsqu’un contact la paie là. Pour des sats de test tout de suite, utilisez Obtenir des pièces de test plus haut.",
-    "tokenHint": "Vous avez plutôt un jeton ecash ? Collez-le sous Envoyer.",
+    "testMintInvoice": "En attente du paiement… Les mints de test marquent chaque facture payée d’eux-mêmes, donc partagez celle-ci dans un chat 1:1 : elle ne compte que lorsqu’un contact la paie là. Pour des sats de test tout de suite, utilisez Obtenir des pièces de test plus haut.",
+    "tokenHint": "Vous avez plutôt un jeton ecash ? Collez-le sous Envoyer.",
     "tokenRedeemedFee": "{{amount}} sats encaissés (la mint a gardé {{fee}} comme frais).",
     "tokenRedeemedFeeTest": "{{amount}} sats de test encaissés (la mint a gardé {{fee}} comme frais).",
     "tokenRedeemedFeeTest_one": "{{amount}} sat de test encaissé (la mint a gardé {{fee}} comme frais).",
@@ -262,7 +262,7 @@
     "asNotes_one": "{{amount}} sat en note",
     "asking": "Interrogation de ses gardiens…",
     "backup": "Sauvegarde du portefeuille",
-    "backupHint": "La phrase et les fédérations ; la sauvegarde du profil contient tout",
+    "backupHint": "La phrase et les fédérations ; la sauvegarde du profil contient tout",
     "backupPassword": "Mot de passe de la sauvegarde Fedimint",
     "backupPasswordPlaceholder": "Mot de passe de sauvegarde (12 caractères ou plus)",
     "connecting": "Connexion à la fédération…",
@@ -270,11 +270,11 @@
     "createNotes": "Créer des notes",
     "download": "Télécharger",
     "empty": "Aucune fédération pour l'instant",
-    "emptyNote": "Rejoignez-en une avec son code d'invitation ci-dessous. Rien n'est rejoint à votre place : vous choisissez à qui faire confiance.",
+    "emptyNote": "Rejoignez-en une avec son code d'invitation ci-dessous. Rien n'est rejoint à votre place : vous choisissez à qui faire confiance.",
     "facts": {
       "consensus": "Consensus",
       "consensusValue": "v{{version}} · modules {{modules}}",
-      "guardianList": "{{count}} : {{names}}",
+      "guardianList": "{{count}} : {{names}}",
       "guardians": "Gardiens",
       "id": "Id",
       "name": "Nom",
@@ -315,14 +315,14 @@
     "lineTest": "{{name}} · {{network}} · pièces de test, sans valeur",
     "lnHint": "Faire payer et recevoir la carte Lightning via cette fédération",
     "lnHintUsed": "La carte Lightning passe par la passerelle d'une fédération",
-    "lnReceive": "Lightning, via la passerelle de la fédération : payé depuis n'importe quel portefeuille, il arrive ici en ecash.",
+    "lnReceive": "Lightning, via la passerelle de la fédération : payé depuis n'importe quel portefeuille, il arrive ici en ecash.",
     "look": "Voir cette fédération",
-    "noLightning": "Pas de module de passerelle Lightning : l'ecash entre et sort seulement sous forme de notes.",
-    "notAnswered": "La fédération n'a pas encore répondu : réessayez",
-    "notAnswering": "Pas de réponse : {{error}}",
-    "notesIn": "Notes que quelqu'un vous a données (ecash hors bande d'une fédération que vous avez rejointe) :",
+    "noLightning": "Pas de module de passerelle Lightning : l'ecash entre et sort seulement sous forme de notes.",
+    "notAnswered": "La fédération n'a pas encore répondu : réessayez",
+    "notAnswering": "Pas de réponse : {{error}}",
+    "notesIn": "Notes que quelqu'un vous a données (ecash hors bande d'une fédération que vous avez rejointe) :",
     "notesInInput": "Notes Fedimint à encaisser",
-    "notesOutNote": "Remettez-le en privé : c'est l'argent lui-même.",
+    "notesOutNote": "Remettez-le en privé : c'est l'argent lui-même.",
     "nothingYet": "Rien pour l'instant.",
     "phrase": "Phrase de récupération",
     "phraseHint": "Avec les codes d'invitation, elle récupère l'ecash de chaque fédération",
@@ -331,10 +331,10 @@
     "redeemed": "{{amount}} {{unit}} encaissés.",
     "restore": "Restaurer",
     "restoreBackup": "Restaurer la sauvegarde",
-    "restoreFailed": "{{count}} restaurées ; échec de la restauration : {{failed}}",
+    "restoreFailed": "{{count}} restaurées ; échec de la restauration : {{failed}}",
     "restoreNote": "Les fédérations rendent l'ecash à partir des sauvegardes qu'elles gardent pour cette phrase. Les paiements encore en cours reviennent comme inconnus.",
     "restorePhrase": "Restaurer depuis la phrase",
-    "sendAbout": "Les notes sont de l'ecash au porteur : quiconque a le texte peut l'encaisser, une fois. Si personne ne le fait, reprenez-les (elles reviennent aussi d'elles-mêmes après une semaine). Dans une discussion, payez plutôt avec la carte Fedimint. Pour payer une facture, faites de cette fédération la source Lightning (Réglages ci-dessous) et utilisez la carte Lightning.",
+    "sendAbout": "Les notes sont de l'ecash au porteur : quiconque a le texte peut l'encaisser, une fois. Si personne ne le fait, reprenez-les (elles reviennent aussi d'elles-mêmes après une semaine). Dans une discussion, payez plutôt avec la carte Fedimint. Pour payer une facture, faites de cette fédération la source Lightning (Réglages ci-dessous) et utilisez la carte Lightning.",
     "show": "Afficher",
     "state": {
       "done": "terminé",
@@ -352,19 +352,19 @@
   },
   "first": {
     "creating": "Création…",
-    "networks": "Testnet : pièces de test, sans valeur, pour essayer. Mainnet : argent réel.",
+    "networks": "Testnet : pièces de test, sans valeur, pour essayer. Mainnet : argent réel.",
     "openMade": "Ouvrir ce qui a été créé",
-    "orNew": "Ou choisissez n’importe quel type de portefeuille avec {{new}} : Ark, Lightning, Bitcoin, Fedimint et plus.",
+    "orNew": "Ou choisissez n’importe quel type de portefeuille avec {{new}} : Ark, Lightning, Bitcoin, Fedimint et plus.",
     "progress": "Création de vos portefeuilles et vérification de leurs serveurs…",
     "retry": "Réessayer {{wallet}}",
     "startMainnet": "Commencer sur Mainnet",
     "startTestnet": "Commencer sur Testnet",
-    "text": "Chaque portefeuille a son propre réseau. Commencez avec Cashu, pour payer et être payé via Lightning, et USDT : un clic, sur le réseau de votre choix.",
+    "text": "Chaque portefeuille a son propre réseau. Commencez avec Cashu, pour payer et être payé via Lightning, et USDT : un clic, sur le réseau de votre choix.",
     "title": "Créez votre premier portefeuille"
   },
   "lightning": {
     "answeredBy": "Réponse de {{domain}}.",
-    "answeredVia": "Réponse de {{domain}} ; la facture vient de {{callback}}.",
+    "answeredVia": "Réponse de {{domain}} ; la facture vient de {{callback}}.",
     "anyAmount": "Montant libre",
     "anyonePays": "N’importe qui peut payer cette facture depuis n’importe quel portefeuille Lightning.",
     "asking": "Demande à {{source}}…",
@@ -372,7 +372,7 @@
     "askingSource": "Demande à la source…",
     "asksExactly": "Il demande exactement {{amount}} {{unit}}.",
     "balance": "Solde",
-    "balanceHint": "Lightning utilise votre solde Cashu : les factures sont payées vers vos mints Cashu et depuis eux.",
+    "balanceHint": "Lightning utilise votre solde Cashu : les factures sont payées vers vos mints Cashu et depuis eux.",
     "balanceSource": "{{unit}} · {{source}}",
     "card": {
       "default": "Par défaut pour recevoir",
@@ -384,7 +384,7 @@
     "cashuMints": "les mints Cashu",
     "cashuSettings": "Réglages Cashu",
     "commentFor": "Un commentaire pour {{to}} (facultatif)",
-    "confirmWhat": "{{amount}} sats (plus des frais jusqu’à {{fee}})",
+    "confirmWhat": "{{amount}} {{unit}} (plus des frais jusqu’à {{fee}} {{feeUnit}})",
     "connecting": "Connexion à la source…",
     "domainLine": "{{answered}} {{limits}}",
     "done": "Terminé",
@@ -393,11 +393,11 @@
     "feesUpTo": "+ jusqu’à {{fee}} de frais",
     "getInvoice": "Obtenir la facture",
     "leftLink": "{{domain}} a laissé un lien",
-    "linkLine": "{{what}} : {{link}}",
+    "linkLine": "{{what}} : {{link}}",
     "lnurlServer": "le serveur du LNURL",
     "lookUp": "Rechercher",
     "lookingUp": "Recherche…",
-    "lookupAsks": "Rechercher demande à {{domain}} ce qu’il accepte : ce serveur apprend que vous allez le payer.",
+    "lookupAsks": "Rechercher demande à {{domain}} ce qu’il accepte : ce serveur apprend que vous allez le payer.",
     "mismatch": "La facture ne correspond pas au montant choisi",
     "notInvoice": "Ce n’est ni une facture Lightning ni une adresse Lightning.",
     "opState": {
@@ -414,14 +414,14 @@
     "pay": "Payer",
     "payTo": "Payer {{amount}} à {{to}}{{fees}}",
     "paying": "Paiement…",
-    "pending": "Le paiement est toujours en attente. Il est en cours de vérification ; rien n’est payé deux fois.",
+    "pending": "Le paiement est toujours en attente. Il est en cours de vérification ; rien n’est payé deux fois.",
     "recent": "Récents",
     "recentIn": "Facture · {{amount}} {{unit}}",
     "recentOut": "Paiement · {{amount}} {{unit}}",
-    "says": "{{domain}} dit : {{message}}",
+    "says": "{{domain}} dit : {{message}}",
     "takesRange": "Il accepte de {{min}} à {{max}} {{unit}}.",
     "theSource": "la source",
-    "waiting": "En attente du paiement… N’importe quel portefeuille Lightning peut la payer ; elle est marquée payée ici dès que la source le voit."
+    "waiting": "En attente du paiement… N’importe quel portefeuille Lightning peut la payer ; elle est marquée payée ici dès que la source le voit."
   },
   "money": {
     "mainnet": "Argent réel",
@@ -433,16 +433,16 @@
   },
   "new": {
     "about": {
-      "arkade": "Arkade sur Bitcoin : des paiements rapides et peu chers hors de la chaîne.",
-      "arkadeTestnet": "Arkade sur Mutinynet : des paiements rapides et peu chers hors de la chaîne.",
-      "bark": "L'Ark de Second sur Bitcoin. Les conditions de Second s'appliquent ; commencez petit.",
+      "arkade": "Arkade sur Bitcoin : des paiements rapides et peu chers hors de la chaîne.",
+      "arkadeTestnet": "Arkade sur Mutinynet : des paiements rapides et peu chers hors de la chaîne.",
+      "bark": "L'Ark de Second sur Bitcoin. Les conditions de Second s'appliquent ; commencez petit.",
       "barkTestnet": "L'Ark de Second, sur signet.",
-      "bitcoin": "Du bitcoin on-chain : un portefeuille BDK ou votre propre nœud.",
+      "bitcoin": "Du bitcoin on-chain : un portefeuille BDK ou votre propre nœud.",
       "cashu": "De l'ecash sur Lightning, gardé par des mints bien auditées.",
       "cashuTestnet": "De l'ecash sur Lightning, sur la mint de test publique.",
       "fedimint": "L'ecash d'une fédération que vous rejoignez avec son code d'invitation.",
       "intro": "Chaque portefeuille vit sur un réseau. Les pièces de test et l'argent réel ne se mélangent jamais.",
-      "lightning": "Votre propre portefeuille ou nœud Lightning : NWC, LND, Core Lightning et plus.",
+      "lightning": "Votre propre portefeuille ou nœud Lightning : NWC, LND, Core Lightning et plus.",
       "spark": "Un portefeuille Spark (Breez) sur Bitcoin, avec votre clé d'API Breez.",
       "sparkTestnet": "Un portefeuille Spark (Breez), sur regtest.",
       "usdt": "USDT sur Ethereum.",
@@ -496,8 +496,8 @@
   },
   "page": {
     "about": {
-      "mainnet": "Votre argent : dépensez-le avec soin.",
-      "testnet": "Pièces de test, sans valeur : pour essayer."
+      "mainnet": "Votre argent : dépensez-le avec soin.",
+      "testnet": "Pièces de test, sans valeur : pour essayer."
     },
     "create": "Créer un portefeuille",
     "networks": "Réseaux",
@@ -538,9 +538,9 @@
   "remove": {
     "afterwards": {
       "lost": "Ce qui leur est payé ensuite est perdu. Pour le garder, attendez qu'elles soient payées ou expirées.",
-      "lostReal": "Ce qui leur est payé ensuite est perdu : c'est de l'argent réel. Pour le garder, attendez qu'elles soient payées ou expirées.",
-      "reaches": "Ce qui leur est payé ensuite arrive toujours dans {{source}} ; Ghostly ne le voit simplement plus.",
-      "reachesWallet": "Ce qui leur est payé ensuite arrive toujours dans le portefeuille ; Ghostly ne le voit simplement plus."
+      "lostReal": "Ce qui leur est payé ensuite est perdu : c'est de l'argent réel. Pour le garder, attendez qu'elles soient payées ou expirées.",
+      "reaches": "Ce qui leur est payé ensuite arrive toujours dans {{source}} ; Ghostly ne le voit simplement plus.",
+      "reachesWallet": "Ce qui leur est payé ensuite arrive toujours dans le portefeuille ; Ghostly ne le voit simplement plus."
     },
     "and": "{{first}} et {{second}}",
     "ask": "Supprimer {{label}}…",
@@ -548,17 +548,17 @@
     "backupFirst": "Sauvegardez d'abord",
     "closesRequests": "Supprimer le portefeuille ferme ses demandes ouvertes, et vos contacts sont prévenus. {{afterwards}}",
     "comesWith": "Cette carte vient avec votre portefeuille {{wallet}} {{network}}",
-    "comesWithHint": "Elle paie par les mêmes mints : supprimer ce portefeuille supprime aussi cette carte.",
+    "comesWithHint": "Elle paie par les mêmes mints : supprimer ce portefeuille supprime aussi cette carte.",
     "confirm": "Supprimer {{label}}",
     "consent": {
-      "real": "Je comprends : ces {{amount}} sont de l'argent réel, et ils deviennent inaccessibles sans la sauvegarde de ce portefeuille.",
-      "realWaits": "Je comprends : ces {{amount}} sont de l'argent réel, et ils deviennent inaccessibles sans la sauvegarde de ce portefeuille ; et tout ce qui est payé à ses demandes et factures ouvertes après sa suppression est perdu.",
-      "test": "Je comprends : ces {{amount}} deviennent inaccessibles sans la sauvegarde de ce portefeuille.",
-      "testWaits": "Je comprends : ces {{amount}} deviennent inaccessibles sans la sauvegarde de ce portefeuille ; et tout ce qui est payé à ses demandes et factures ouvertes après sa suppression est perdu.",
-      "unknown": "Je comprends : ce que contient ce portefeuille {{label}} devient inaccessible sans sa sauvegarde.",
-      "unknownWaits": "Je comprends : ce que contient ce portefeuille {{label}} devient inaccessible sans sa sauvegarde ; et tout ce qui est payé à ses demandes et factures ouvertes après sa suppression est perdu.",
-      "waits": "Je comprends : tout ce qui est payé à ses demandes et factures ouvertes après sa suppression est perdu.",
-      "waitsReal": "Je comprends : tout ce qui est payé à ses demandes et factures ouvertes après sa suppression est perdu, et c'est de l'argent réel."
+      "real": "Je comprends : ces {{amount}} sont de l'argent réel, et ils deviennent inaccessibles sans la sauvegarde de ce portefeuille.",
+      "realWaits": "Je comprends : ces {{amount}} sont de l'argent réel, et ils deviennent inaccessibles sans la sauvegarde de ce portefeuille ; et tout ce qui est payé à ses demandes et factures ouvertes après sa suppression est perdu.",
+      "test": "Je comprends : ces {{amount}} deviennent inaccessibles sans la sauvegarde de ce portefeuille.",
+      "testWaits": "Je comprends : ces {{amount}} deviennent inaccessibles sans la sauvegarde de ce portefeuille ; et tout ce qui est payé à ses demandes et factures ouvertes après sa suppression est perdu.",
+      "unknown": "Je comprends : ce que contient ce portefeuille {{label}} devient inaccessible sans sa sauvegarde.",
+      "unknownWaits": "Je comprends : ce que contient ce portefeuille {{label}} devient inaccessible sans sa sauvegarde ; et tout ce qui est payé à ses demandes et factures ouvertes après sa suppression est perdu.",
+      "waits": "Je comprends : tout ce qui est payé à ses demandes et factures ouvertes après sa suppression est perdu.",
+      "waitsReal": "Je comprends : tout ce qui est payé à ses demandes et factures ouvertes après sa suppression est perdu, et c'est de l'argent réel."
     },
     "copyTokens": "Copier la sauvegarde de l'ecash",
     "gas": {
@@ -566,15 +566,15 @@
       "testnet": "{{amount}} ETH de test"
     },
     "held": {
-      "elsewhere": "Votre argent reste où il est : Ghostly oublie seulement comment le joindre. Vous pourrez le reconnecter plus tard.",
-      "elsewhereIn": "Votre argent reste dans {{source}} : Ghostly oublie seulement comment le joindre. Vous pourrez le reconnecter plus tard.",
+      "elsewhere": "Votre argent reste où il est : Ghostly oublie seulement comment le joindre. Vous pourrez le reconnecter plus tard.",
+      "elsewhereIn": "Votre argent reste dans {{source}} : Ghostly oublie seulement comment le joindre. Vous pourrez le reconnecter plus tard.",
       "empty": "Il ne contient rien.",
       "real": "Il contient {{amount}} sur {{network}}, de l'argent réel.",
       "test": "Il contient {{amount}} sur {{network}}, des pièces de test sans valeur.",
-      "unknown": "Ghostly ne peut pas lire son solde pour l'instant (il n'est pas connecté) : il contient peut-être de l'argent."
+      "unknown": "Ghostly ne peut pas lire son solde pour l'instant (il n'est pas connecté) : il contient peut-être de l'argent."
     },
     "hintDevice": "Ses clés et ses réglages quittent cet appareil. Les autres portefeuilles restent tels quels.",
-    "hintElsewhere": "Ghostly oublie comment le joindre ; l'argent reste où il est.",
+    "hintElsewhere": "Ghostly oublie comment le joindre ; l'argent reste où il est.",
     "item": {
       "invoice": "Une facture de {{amount}}, pas encore payée",
       "paid": "{{amount}} payés à une facture, pas encore récupérés auprès de la mint",
@@ -584,16 +584,16 @@
       "unclaimed": "{{amount}} que la mint dit avoir émis pour une facture, jamais reçus ici"
     },
     "label": "Supprimer ce portefeuille",
-    "noBackup": "Ghostly ne peut plus afficher la phrase de récupération de ce portefeuille : seule la phrase notée à sa création permet de récupérer cet argent.",
+    "noBackup": "Ghostly ne peut plus afficher la phrase de récupération de ce portefeuille : seule la phrase notée à sa création permet de récupérer cet argent.",
     "noTokens": "Il n'y a pas d'ecash à copier.",
     "open": "Ouvrir {{wallet}}",
     "pending": "Un paiement par ce portefeuille n'est pas encore terminé ({{count}}). Attendez qu'il soit réglé ou annulez-le, puis supprimez le portefeuille.",
-    "question": "Supprimer votre portefeuille {{label}} ?",
+    "question": "Supprimer votre portefeuille {{label}} ?",
     "removing": "Suppression…",
-    "returnable": "L'ecash que vous avez envoyé depuis ce portefeuille n'a pas encore été récupéré ({{amounts}}). Il n'est pas perdu : pour le reprendre plus tard, ajoutez d'abord sa mint à nouveau.",
+    "returnable": "L'ecash que vous avez envoyé depuis ce portefeuille n'a pas encore été récupéré ({{amounts}}). Il n'est pas perdu : pour le reprendre plus tard, ajoutez d'abord sa mint à nouveau.",
     "title": "Supprimer",
     "tokensCopied": "Ecash copié. Qui a ces jetons a les sats.",
-    "tokensHint": "Son ecash, sous forme de jetons : qui les a a les sats. Gardez-les en lieu sûr, ou recevez-les dans un autre portefeuille."
+    "tokensHint": "Son ecash, sous forme de jetons : qui les a a les sats. Gardez-les en lieu sûr, ou recevez-les dans un autre portefeuille."
   },
   "sats": {
     "mainnet": "sats",
@@ -602,9 +602,9 @@
     "testnet_one": "sat de test"
   },
   "send": {
-    "balance": "Solde : {{amount}} {{unit}}",
+    "balance": "Solde : {{amount}} {{unit}}",
     "cameraUnavailable": "Caméra indisponible. Collez, saisissez ou choisissez une image.",
-    "chooseAmount": "Cette facture n'a pas de montant : choisissez combien payer.",
+    "chooseAmount": "Cette facture n'a pas de montant : choisissez combien payer.",
     "clipboardEmpty": "Rien à coller. Copiez d'abord une facture ou une adresse.",
     "clipboardUnavailable": "Impossible de lire le presse-papiers. Collez ou saisissez ci-dessous.",
     "image": "Choisir une image",
@@ -617,7 +617,7 @@
     "title": "Envoyé dans une conversation supprimée"
   },
   "setup": {
-    "failed": "{{wallet}} : {{reason}}",
+    "failed": "{{wallet}} : {{reason}}",
     "progress": "Création de vos portefeuilles Mainnet…",
     "retry": "Réessayer {{wallet}}",
     "skip": "Ignorer",
@@ -628,21 +628,21 @@
     "backToMints": "Revenir aux mints Cashu",
     "bdk": {
       "label": "Portefeuille",
-      "writeFirst": "Notez d'abord les 12 mots : ils sont le seul moyen de revenir à ce portefeuille.",
+      "writeFirst": "Notez d'abord les 12 mots : ils sont le seul moyen de revenir à ce portefeuille.",
       "written": "J'ai noté ces mots. Ghostly ne les affichera plus."
     },
     "breez": {
       "apiKey": "Clé d'API Breez",
       "invalid": "Ce n'est pas une phrase de récupération valide.",
       "label": "Portefeuille Breez",
-      "mainnetNeedsKey": "Mainnet en demande une : Breez les donne gratuitement.",
+      "mainnetNeedsKey": "Mainnet en demande une : Breez les donne gratuitement.",
       "newPhrase": "Nouvelle phrase de récupération",
       "optionalTestnet": "(facultative sur Testnet)",
       "phrase": "Phrase de récupération",
       "phrasePlaceholder": "douze ou vingt-quatre mots",
       "regtestNoKey": "Regtest fonctionne sans.",
       "sealed": "La phrase de récupération et la clé d'API sont scellées sur cet appareil et ne sont plus jamais affichées.",
-      "writeDown": "Notez ces mots : ils sont le seul moyen de retrouver les sats de ce portefeuille. Ghostly les scelle sur cet appareil et ne les affiche plus.",
+      "writeDown": "Notez ces mots : ils sont le seul moyen de retrouver les sats de ce portefeuille. Ghostly les scelle sur cet appareil et ne les affiche plus.",
       "written": "J'ai noté la phrase de récupération"
     },
     "change": "Changer de source",
@@ -662,8 +662,8 @@
     },
     "inUse": "Utilisée",
     "modeNote": {
-      "mainnet": "C'est la source du portefeuille Mainnet ; un portefeuille Testnet a la sienne.",
-      "testnet": "C'est la source du portefeuille Testnet ; un portefeuille Mainnet a la sienne."
+      "mainnet": "C'est la source du portefeuille Mainnet ; un portefeuille Testnet a la sienne.",
+      "testnet": "C'est la source du portefeuille Testnet ; un portefeuille Mainnet a la sienne."
     },
     "newWallet": "Nouveau portefeuille",
     "none": "Aucune source",
@@ -676,14 +676,14 @@
     "optional": "(facultatif)",
     "providers": {
       "bdk": {
-        "description": "Un portefeuille Bitcoin dans cette app (bitcoindevkit) : vous détenez les clés, un serveur Esplora lui donne la chaîne. Réseaux de test uniquement pour l'instant.",
+        "description": "Un portefeuille Bitcoin dans cette app (bitcoindevkit) : vous détenez les clés, un serveur Esplora lui donne la chaîne. Réseaux de test uniquement pour l'instant.",
         "fields": {
           "esplora": {
-            "help": "Vide : les serveurs publics de Signet (blockstream.info, mempool.space) ou de Mutinynet (mutinynet.com), celui qui répond. Regtest demande le vôtre ; il doit autoriser l'origine de cette app (CORS).",
+            "help": "Vide : les serveurs publics de Signet (blockstream.info, mempool.space) ou de Mutinynet (mutinynet.com), celui qui répond. Regtest demande le vôtre ; il doit autoriser l'origine de cette app (CORS).",
             "label": "Serveur Esplora",
-            "placeholder": "Vide : un serveur public du réseau",
+            "placeholder": "Vide : un serveur public du réseau",
             "suggestions": {
-              "http_127_0_0_1_47002": "Cet ordinateur : la pile regtest des e2e (npm run e2e:infra:up)"
+              "http_127_0_0_1_47002": "Cet ordinateur : la pile regtest des e2e (npm run e2e:infra:up)"
             }
           },
           "mnemonic": {
@@ -710,7 +710,7 @@
             "label": "Mot de passe RPC ou cookie"
           },
           "url": {
-            "help": "Le rpcbind et le rpcport de votre nœud : 8332 mainnet, 38332 signet, 48332 testnet4, 18443 regtest.",
+            "help": "Le rpcbind et le rpcport de votre nœud : 8332 mainnet, 38332 signet, 48332 testnet4, 18443 regtest.",
             "label": "Adresse RPC"
           },
           "user": {
@@ -718,13 +718,13 @@
             "label": "Utilisateur RPC"
           },
           "wallet": {
-            "help": "Un portefeuille chargé dans le nœud (bitcoin-cli listwallets). Vide : son portefeuille par défaut.",
+            "help": "Un portefeuille chargé dans le nœud (bitcoin-cli listwallets). Vide : son portefeuille par défaut.",
             "label": "Nom du portefeuille"
           }
         }
       },
       "breez": {
-        "description": "Un portefeuille Lightning autonome sur Spark, via le SDK Breez. Sa phrase de récupération est scellée sur cet appareil ; vous détenez les sats."
+        "description": "Un portefeuille Lightning autonome sur Spark, via le SDK Breez. Sa phrase de récupération est scellée sur cet appareil ; vous détenez les sats."
       },
       "cashu-mint": {
         "description": "Les factures sont payées vers votre solde Cashu, et depuis celui-ci. Les mints détiennent les sats."
@@ -738,36 +738,36 @@
             "placeholder": "02… ou 03… (66 caractères hex)"
           },
           "rune": {
-            "help": "Jamais une rune sans restriction. Créez-en une avec : {{command}}",
+            "help": "Jamais une rune sans restriction. Créez-en une avec : {{command}}",
             "placeholder": "Une rune limitée aux méthodes de Ghostly"
           },
           "url": {
-            "help": "L'écoute bind-addr=ws:… du nœud, derrière un proxy wss:// pour l'app web ; ws:// seulement vers cette machine.",
+            "help": "L'écoute bind-addr=ws:… du nœud, derrière un proxy wss:// pour l'app web ; ws:// seulement vers cette machine.",
             "label": "Adresse WebSocket"
           }
         }
       },
       "fedimint": {
-        "description": "Une fédération que vous avez rejointe (Portefeuille → Fedimint) : les factures sont payées vers son ecash, et depuis celui-ci, par sa passerelle. Ses gardiens détiennent les sats."
+        "description": "Une fédération que vous avez rejointe (Portefeuille → Fedimint) : les factures sont payées vers son ecash, et depuis celui-ci, par sa passerelle. Ses gardiens détiennent les sats."
       },
       "lnd": {
         "description": "Votre propre nœud LND, par son API REST. Votre nœud détient les sats.",
         "fields": {
           "certificate": {
-            "help": "Bureau uniquement : le tls.cert du nœud, épinglé (le nœud doit présenter exactement celui-ci). Laissez vide pour un certificat d'une autorité publique ; partout ailleurs, il doit rester vide.",
+            "help": "Bureau uniquement : le tls.cert du nœud, épinglé (le nœud doit présenter exactement celui-ci). Laissez vide pour un certificat d'une autorité publique ; partout ailleurs, il doit rester vide.",
             "label": "Certificat TLS"
           },
           "macaroon": {
-            "help": "Jamais le macaroon admin : créez-en un avec {{command}} (seulement invoices:… pour recevoir uniquement)."
+            "help": "Jamais le macaroon admin : créez-en un avec {{command}} (seulement invoices:… pour recevoir uniquement)."
           },
           "url": {
-            "help": "Le port REST de LND (restlisten, 8080 par défaut). Dans un navigateur, le nœud doit autoriser cette app avec restcors et avoir un certificat auquel le navigateur fait confiance ; l'app de bureau n'a besoin d'aucun des deux.",
+            "help": "Le port REST de LND (restlisten, 8080 par défaut). Dans un navigateur, le nœud doit autoriser cette app avec restcors et avoir un certificat auquel le navigateur fait confiance ; l'app de bureau n'a besoin d'aucun des deux.",
             "label": "Adresse REST"
           }
         }
       },
       "nwc": {
-        "description": "Un portefeuille que vous connectez avec son URI NWC (Alby Hub, le service NWC d'un nœud, un portefeuille hébergé). Ce portefeuille détient les sats et fixe sa propre limite de frais : custodial ou non, cela dépend du portefeuille.",
+        "description": "Un portefeuille que vous connectez avec son URI NWC (Alby Hub, le service NWC d'un nœud, un portefeuille hébergé). Ce portefeuille détient les sats et fixe sa propre limite de frais : custodial ou non, cela dépend du portefeuille.",
         "fields": {
           "uri": {
             "help": "Dans les connexions d'apps de votre portefeuille. Autorisez la création, le paiement et la consultation de factures, et la lecture du solde.",
@@ -789,7 +789,7 @@
     "secretsSealed": "Les secrets sont scellés sur cet appareil et ne sont plus jamais affichés.",
     "selectLightning": "Source Lightning",
     "selectOnchain": "Source Bitcoin",
-    "serverNote": "Le portefeuille reste le même ; seul l'endroit où il lit la chaîne change. C'est vérifié avant d'être enregistré.",
+    "serverNote": "Le portefeuille reste le même ; seul l'endroit où il lit la chaîne change. C'est vérifié avant d'être enregistré.",
     "status": {
       "connecting": "Connexion…",
       "custodial": "dépositaire",
@@ -807,31 +807,31 @@
       "connect": "Connecter le portefeuille du navigateur",
       "found": "Un portefeuille WebLN est présent dans ce navigateur. Il vous demandera d'approuver la connexion, puis avant chaque paiement si vous l'avez réglé ainsi.",
       "missing": "Aucun portefeuille WebLN trouvé dans ce navigateur. Installez-en un ou déverrouillez-le (Alby, par exemple), puis connectez-vous.",
-      "note": "Ghostly vous montre toujours chaque paiement à approuver avant de demander au portefeuille de payer. Le portefeuille garde les sats ; rien n'est stocké ici.",
+      "note": "Ghostly vous montre toujours chaque paiement à approuver avant de demander au portefeuille de payer. Le portefeuille garde les sats ; rien n'est stocké ici.",
       "waiting": "En attente du portefeuille…"
     }
   },
   "spark": {
-    "addressNote": "Depuis n'importe quel portefeuille Spark sur le même réseau : instantané, sans passer par Lightning. C'est l'adresse de ce portefeuille, toujours la même.",
+    "addressNote": "Depuis n'importe quel portefeuille Spark sur le même réseau : instantané, sans passer par Lightning. C'est l'adresse de ce portefeuille, toujours la même.",
     "apiKey": "Clé d'API Breez",
-    "approve": "Rien ne part avant votre accord. Seulement des adresses et factures Spark ; une facture Lightning passe par la carte Lightning.",
+    "approve": "Rien ne part avant votre accord. Seulement des adresses et factures Spark ; une facture Lightning passe par la carte Lightning.",
     "connectingNote": "La première fois, le SDK Breez se charge et ouvre un portefeuille sur Spark.",
     "fee": "frais {{fee}}",
     "history": "Historique",
     "invoiceFor": "Facture de {{amount}} {{unit}}",
     "invoiceForMemo": "Facture de {{amount}} {{unit}} · {{memo}}",
     "lnHint": "Payer et recevoir des factures Lightning avec ce même portefeuille (une phrase, un solde)",
-    "lnHintOn": "Breez (Spark) est votre source Lightning : avec la phrase de ce portefeuille, un seul portefeuille derrière les deux cartes",
+    "lnHintOn": "Breez (Spark) est votre source Lightning : avec la phrase de ce portefeuille, un seul portefeuille derrière les deux cartes",
     "mainnetLabel": "Mainnet · vrais bitcoins sur Spark",
     "mainnetTitle": "Spark sur Mainnet",
     "mainnetWarning": "Mainnet déplace de vrais bitcoins. Spark sur Mainnet a besoin d'une clé d'API Breez (gratuite, chez Breez), gardée scellée sur cet appareil.",
     "networkHintMainnet": "Bitcoin, via Breez (votre clé d'API)",
-    "networkHintRegtest": "Regtest, géré par Breez et Lightspark : sats de test uniquement",
+    "networkHintRegtest": "Regtest, géré par Breez et Lightspark : sats de test uniquement",
     "notMainnet": "Ce n'est pas une adresse ni une facture Spark Mainnet.",
     "notRegtest": "Ce n'est pas une adresse ni une facture Spark regtest.",
     "openMainnet": "Ouvrir un portefeuille Spark sur Mainnet",
-    "orTestnet": "Ou créez un portefeuille Spark sur Testnet avec Nouveau : il fonctionne en regtest, avec des sats sans valeur et sans clé.",
-    "phraseNote": "Les opérateurs de Spark ne détiennent rien de vous : la phrase récupère les sats dans n'importe quel portefeuille Spark. L'historique des paiements vient du fichier de sauvegarde.",
+    "orTestnet": "Ou créez un portefeuille Spark sur Testnet avec Nouveau : il fonctionne en regtest, avec des sats sans valeur et sans clé.",
+    "phraseNote": "Les opérateurs de Spark ne détiennent rien de vous : la phrase récupère les sats dans n'importe quel portefeuille Spark. L'historique des paiements vient du fichier de sauvegarde.",
     "regtestLabel": "Regtest · Spark de test de Breez · sats sans valeur",
     "status": {
       "failed": "échoué",
@@ -859,17 +859,17 @@
       "signet": "Faucet Signet",
       "testnet4": "Faucet testnet4"
     },
-    "gas": "Le faucet se paie avec un peu de Sepolia ETH pour le gas : envoyez-en d’abord à l’adresse de ce portefeuille. {{link}}",
+    "gas": "Le faucet se paie avec un peu de Sepolia ETH pour le gas : envoyez-en d’abord à l’adresse de ce portefeuille. {{link}}",
     "gasLink": "Ouvrir un faucet Sepolia ETH",
     "get": "Obtenir des pièces de test",
     "got": "{{amount}} {{unit}}",
-    "gotPending": "{{amount}} {{unit}} en route : ils arrivent ici dans quelques secondes",
+    "gotPending": "{{amount}} {{unit}} en route : ils arrivent ici dans quelques secondes",
     "open": "Ouvrir le faucet",
     "openHint": "{{name}}. {{why}}",
     "openHintThen": "{{name}}. {{why}} {{then}}",
     "retry": "Réessayer",
     "then": {
-      "boarding": "Envoyez à votre adresse d’embarquement : cela passe dans Ark une fois confirmé.",
+      "boarding": "Envoyez à votre adresse d’embarquement : cela passe dans Ark une fois confirmé.",
       "spark": "Collez-y votre adresse Spark."
     },
     "title": "Pièces de test",
@@ -897,7 +897,7 @@
   },
   "ui": {
     "amountIn": "Montant en {{unit}}",
-    "amountUnclear": "Montant ambigu : écrivez-le comme {{example}}",
+    "amountUnclear": "Montant ambigu : écrivez-le comme {{example}}",
     "amountWhole": "Nombres entiers uniquement, comme {{example}}",
     "gettingAddress": "Obtention d’une adresse… Elle s’affiche ici dès que le fournisseur répond.",
     "history": "Historique",

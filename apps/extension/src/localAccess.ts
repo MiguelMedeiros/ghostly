@@ -2,7 +2,7 @@ import { parseLocalTarget } from "@ghostly/core";
 import { localAccessPattern } from "@ghostly/browser/host";
 import { databaseExists } from "@ghostly/browser/backup/database";
 import { listProfiles, namespaceOf } from "../../ui/src/lib/profiles";
-import { activeNamespace, databaseFor } from "./profile";
+import { databaseFor, pageNamespace } from "./profile";
 import { ALLOWED_PREFIX, allowedKey, allowedOrigins, disallowLocalOrigin } from "./localAllowList";
 
 /**
@@ -80,9 +80,9 @@ export function withLocalAccess(pattern: string, task: () => Promise<void>): Pro
   });
 }
 
-/** The last app of this profile at `origin` went (`removeService`): off its list (localAllowList.ts), and its host's pattern, if nothing else is there. */
+/** The last app of this page's profile at `origin` went (`removeService`): off its list (localAllowList.ts), and its host's pattern, if nothing else is there. */
 export async function forgetLocalAccess(origin: string): Promise<void> {
-  await disallowLocalOrigin(activeNamespace(), origin);
+  await disallowLocalOrigin(pageNamespace(), origin);
   await release([localAccessPattern(origin)]);
 }
 

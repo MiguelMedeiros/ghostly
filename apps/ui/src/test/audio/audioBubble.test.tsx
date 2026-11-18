@@ -115,12 +115,11 @@ describe("an audio file in the chat", () => {
     expect(getFile).not.toHaveBeenCalled();
   });
 
-  it("a name in the other direction than the app's starts at its start, cut at its end", () => {
+  it("a name in the other direction than the app's starts at its start", () => {
     // A <bdi> inside the truncating line took the line's (the page's) direction for the cut: "…g about the release plan.wav".
     show(song({ name: "تسجيل اجتماع الفريق الأسبوعي.wav" }));
     const name = screen.getByTestId("audio-name");
     expect(name).toHaveAttribute("dir", "auto");
-    expect(name).toHaveClass("truncate");
   });
 
   it("plays from its bytes; the seek bar moves it; the time reads position of length", async () => {
@@ -352,7 +351,7 @@ describe("an audio file not here yet", () => {
     const file = song({ size: 40 * MB });
     show(file, { state: "transferring", stage: "asking", direction: "in", transferred: 0, size: file.size, room: 12 * 1024 * MB });
     expect(screen.getByTestId("audio-accept")).toHaveTextContent("Download 40.0 MB");
-    expect(screen.getByTestId("audio-room")).toHaveTextContent("Ana wants to send it · 12.0 GB free");
+    expect(screen.getByTestId("audio-room")).toHaveTextContent("Ana wants to send it · 12.0 GB left");
     expect(screen.getByTestId("audio-play")).toBeDisabled();
     fireEvent.click(screen.getByTestId("audio-accept"));
     await waitFor(() => expect(fakeEngine.callsTo("fileAction")).toEqual([{ linkId: "chat1", fileId: file.id, action: "accept" }]));
@@ -370,10 +369,11 @@ describe("an audio file not here yet", () => {
     expect(document.activeElement).toBe(screen.getByTestId("audio-bubble"));
   });
 
-  it("an offer larger than the room here cannot be accepted", () => {
+  it("an offer larger than the room shown still takes Download: the engine reads the room again", async () => {
     const file = song({ size: 40 * MB });
     show(file, { state: "transferring", stage: "asking", direction: "in", transferred: 0, size: file.size, room: 10 * MB });
-    expect(screen.getByTestId("audio-accept")).toBeDisabled();
+    fireEvent.click(screen.getByTestId("audio-accept"));
+    await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))).toEqual({ linkId: "chat1", fileId: file.id, action: "accept" }));
   });
 
   it("while it arrives: a ring round the play button, the status, and pause/cancel", async () => {
@@ -448,5 +448,16 @@ describe("an audio file not here yet", () => {
     expect(screen.getByTestId("audio-why-text")).toHaveTextContent("The connection dropped");
     fireEvent.click(screen.getByTestId("audio-retry"));
     expect(retryFile).toHaveBeenCalledWith("chat1-out-song");
+  });
+});
+
+// A long name cut with … at its end hid what the file is on a phone: it wraps, its end kept.
+describe("a long audio file name", () => {
+  it("wraps onto more lines and keeps its extension in sight", () => {
+    show(song({ name: "Voice memo from the bank about your account (listen).mp3.exe" }));
+    const name = screen.getByTestId("audio-name");
+    expect(name).toHaveTextContent("Voice memo from the bank about your account (listen).mp3.exe");
+    expect(name).not.toHaveClass("truncate");
+    expect(name.className).toContain("[overflow-wrap:anywhere]");
   });
 });

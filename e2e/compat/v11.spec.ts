@@ -37,10 +37,10 @@ test("an app card reaches v1.1.4 as its text with a link, apps/1 is never offere
 
   // + → Apps names Olga's app as the reason, not "Apps need you both online": they are, and her app can't.
   const row = await composerRow(nina.page, "composer-apps");
-  await expect(row).toHaveAttribute("title", "Olga's app can't run apps yet");
+  await expect(row).toHaveAttribute("title", "⁨Olga⁩'s app can't run apps yet");
   await row.click();
   const dialog = nina.page.getByTestId("chat-apps");
-  await expect(dialog.getByTestId("chat-apps-waiting")).toHaveText("Olga's app can't run apps yet");
+  await expect(dialog.getByTestId("chat-apps-waiting")).toHaveText("⁨Olga⁩'s app can't run apps yet");
 
   // Opening it still works, and sends the opened card; nothing hangs: the app waits, and closes.
   await dialog.getByTestId("chat-app-open").click();
@@ -70,5 +70,5 @@ test("an app card reaches v1.1.4 as its text with a link, apps/1 is never offere
   await expect(chat(nina).getByText("still here on 1.1.4", { exact: true })).toBeVisible();
   for (const p of [nina, olga]) await expect(p.page.getByTestId("connection-options")).toHaveAccessibleName(/Connected · /);
   // apps/1 never came up: + → Apps still names Olga's app.
-  await expect(await composerRow(nina.page, "composer-apps")).toHaveAttribute("title", "Olga's app can't run apps yet");
+  await expect(await composerRow(nina.page, "composer-apps")).toHaveAttribute("title", "⁨Olga⁩'s app can't run apps yet");
 });

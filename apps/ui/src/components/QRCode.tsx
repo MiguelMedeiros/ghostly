@@ -13,9 +13,11 @@ interface QRCodeDisplayProps {
   label?: string;
   /** What the Copy button says, when it does not copy an invite. */
   copyLabel?: string;
+  /** What a screen reader names the QR image, when it is not an invite's (Add a device's code). */
+  title?: string;
 }
 
-export function QRCodeDisplay({ value, qr, label, copyLabel }: QRCodeDisplayProps) {
+export function QRCodeDisplay({ value, qr, label, copyLabel, title }: QRCodeDisplayProps) {
   const { t } = useI18n();
   const currentValue = useRef(value); currentValue.current = value;
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -52,19 +54,20 @@ export function QRCodeDisplay({ value, qr, label, copyLabel }: QRCodeDisplayProp
           {label}
         </span>
       )}
-      <div data-testid="invite-qr" className="bg-white p-4 rounded-xl max-w-full [&_svg]:max-w-full [&_svg]:h-auto">
+      {/* An image: forced colors keep its white box, the quiet zone a scanner needs around the code's black modules. */}
+      <div data-testid="invite-qr" className="bg-white p-4 rounded-xl max-w-full forced-color-adjust-none [&_svg]:max-w-full [&_svg]:h-auto">
         <QRCodeSVG
           value={encoded}
           size={232}
           marginSize={2}
-          title={t("invite.qrTitle")}
+          title={title ?? t("invite.qrTitle")}
           bgColor="#ffffff"
           fgColor="#0b0f1a"
           level="M"
         />
       </div>
       <button onClick={() => void handleCopy()}
-        className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-panel-header cursor-pointer hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-alt">
+        className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-panel-header cursor-pointer hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-alt">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
           <rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h3"/>
         </svg>
@@ -74,7 +77,8 @@ export function QRCodeDisplay({ value, qr, label, copyLabel }: QRCodeDisplayProp
       {canShare && <button onClick={() => {
         setError("");
         void navigator.share({text: value}).catch((cause: unknown) => {
-          if (!(cause instanceof DOMException && cause.name === "AbortError")) setError(t("invite.shareFailed"));
+          // Points to the Copy button that is there: Add a device's copies a link, not an invite.
+          if (!(cause instanceof DOMException && cause.name === "AbortError")) setError(t(copyLabel ? "invite.shareFailedLink" : "invite.shareFailed"));
         });
       }} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-4 text-xs text-text-muted cursor-pointer hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 16V3m0 0L7 8m5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>

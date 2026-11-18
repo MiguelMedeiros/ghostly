@@ -7,21 +7,39 @@
  *
  * - MP4 audio (M4A, a voice note recorded in MP4): videoMetadata.ts's box walk, its `udta` and `meta` emptied.
  * - MP3 and AAC: an ID3v2 tag at the start becomes an empty one (its frames zeros: padding), one at the end (with its
- *   footer), an APEv2 tag's items, a Lyrics3v2 tag and an ID3v1 tag's fields become zeros.
+ *   footer), an APEv2 tag's items, a Lyrics3v2 tag and an ID3v1 tag's fields become zeros. One typed as MP3 or AAC
+ *   whose first bytes are neither (junk before its first frame) still has the tags at its end emptied.
  * - FLAC: every metadata block but its stream info and seek table (a Vorbis comment, a picture, a cue sheet, an
  *   application's) becomes padding, zeroed.
- * - Ogg Opus, Vorbis and Speex: the comment header keeps its vendor (the encoder's name) and has no comment, the bytes
- *   after it zeros; each page it changed has its checksum made again.
- * - WAV: every chunk but its format, data and the ones of the sound itself (`fact`, `cue `, `smpl`, `inst`) becomes
- *   `JUNK`, zeroed (an INFO list, an `id3 ` chunk, a broadcast `bext` with its date and originator, XMP).
+ * - Ogg Opus, Vorbis, Speex and Theora: the comment header keeps its vendor (the encoder's name) and has no comment,
+ *   the bytes after it zeros. FLAC in Ogg: its metadata blocks as a FLAC's. Each page changed has its checksum made again.
+ * - WAV (RIFF, RF64 or BW64): every chunk but its format, data and the ones of the sound itself (`fact`, `cue `,
+ *   `smpl`, `inst`, an RF64's `ds64`) becomes `JUNK`, zeroed (an INFO list, an `id3 ` chunk, a broadcast `bext` with
+ *   its date and originator, iXML, XMP).
+ * - AIFF and AIFF-C: every chunk but its sound's (`COMM`, `SSND`, `FVER`, `MARK`, `INST`, `AESD`, `chan`) becomes
+ *   `JUNK`, zeroed (NAME, AUTH, ANNO, `(c) `, COMT, an `ID3 ` chunk, an app's `APPL`).
+ * - CAF: every chunk but its sound's (`desc`, `data`, `pakt`, `kuki`, `chan`, `peak`, `ovvw`) becomes `free`, zeroed
+ *   (its `info` strings, a marker's names in `strg`, `edct` comments, `uuid` chunks).
+ * - WavPack: its APEv2 and ID3v1 tags at the end as an MP3's, and the source file's header and trailer each block may
+ *   keep for a lossless restore (a WAV's INFO list, an AIFF's NAME) made a sub-block that says nothing, zeroed.
+ * - TTA, Monkey's Audio, Musepack (SV7 and SV8) and OptimFROG: their tags at the end (and an ID3v2 before them) as an MP3's.
+ * - DSF: the ID3v2 tag its header points at emptied as an MP3's; any other byte after its sound, zeros.
+ * - DSDIFF: every chunk but its sound's (`FVER`, `PROP`, `DSD `, `DST `, `DSTI`) becomes `JUNK`, zeroed (COMT, DIIN
+ *   with its artist and title, MANF, an `ID3 ` chunk), and any byte after its form.
+ * - MIDI: the text of its meta events (a copyright, a track's name, lyrics, markers) and a sequencer's own data become
+ *   zeros, their lengths kept; its notes and SysEx as they are.
+ * - Sun AU: its annotation, zeros.
  * - WebM and Matroska, audio or video: `Tags`, `Attachments`, `Chapters`, the title, the date, the file names and each
  *   track's name become `Void` elements (and the SeekHead's entries for them); the muxer's and the writing app's names
- *   are zeroed. Clusters, cues and track settings are kept as they are.
+ *   are zeroed. A Vorbis, Theora or FLAC track's CodecPrivate (its Ogg headers or its FLAC metadata blocks) has its
+ *   comments emptied as an Ogg's or a FLAC's. Clusters, cues and other track settings are kept as they are.
  *
  * Fail-closed: a file that is one of these by its bytes and whose tags cannot be removed (truncated, malformed) is
- * refused with `NO_AUDIO_METADATA`, never sent as it was. Any other file goes as it is (other audio formats too).
+ * refused with `NO_AUDIO_METADATA`, never sent as it was. So is a WMA (ASF): its title, place and date are not removed
+ * here. Any other file goes as it is (other audio formats too).
  */
-import { NO_VIDEO_METADATA, readingAhead, videoMetadataPatches, type VideoPatch, type VideoSource } from "./videoMetadata";
+import { baseMime } from "./voice";
+import { NO_VIDEO_METADATA, isAsf, readingAhead, videoMetadataPatches, type VideoPatch, type VideoSource } from "./videoMetadata";
 
 export const AUDIO_METADATA_LIMITS = {
   /** The largest header, element or tag read whole (an Ogg comment header with a picture in it): past this the file is refused. */
@@ -40,6 +58,7 @@ const ZEROS = new Blob([new Uint8Array(1024 * 1024)]);
 
 const text = (b: Uint8Array, at: number, length: number) => String.fromCharCode(...b.subarray(at, at + length));
 const u32le = (b: Uint8Array, at: number) => (b[at]! | (b[at + 1]! << 8) | (b[at + 2]! << 16) | (b[at + 3]! << 24)) >>> 0;
+const u32be = (b: Uint8Array, at: number) => ((b[at]! << 24) >>> 0) + (b[at + 1]! << 16) + (b[at + 2]! << 8) + b[at + 3]!;
 const syncsafe = (b: Uint8Array, at: number) => (b[at]! << 21) | (b[at + 1]! << 14) | (b[at + 2]! << 7) | b[at + 3]!;
 const latin = (s: string) => Uint8Array.from(s, (c) => c.charCodeAt(0));
 
@@ -150,6 +169,9 @@ async function trailingTags(read: Read, size: number, start: number, patches: Vi
   }
 }
 
+/** The types an MP3 or AAC file is sent as: one whose first bytes are no frame still has its tags at the end read. */
+const MPEG_AUDIO = new Set(["audio/mpeg", "audio/mp3", "audio/mpeg3", "audio/x-mpeg", "audio/x-mp3", "audio/aac", "audio/x-aac", "audio/aacp"]);
+
 /** An MPEG audio frame's or an ADTS header's first bytes: 11 bits set, a version and a layer that are some. */
 const isFrame = (b: Uint8Array, at: number) => b.length >= at + 2 && b[at] === 0xff && (b[at + 1]! & 0xe0) === 0xe0 && (b[at + 1]! & 0x18) !== 0x08;
 
@@ -194,37 +216,66 @@ function oggCrc(page: Uint8Array): number {
 }
 
 /**
- * How a codec's comment header (its second packet) is laid out: its magic's length, and whether a framing bit
- * follows its comments (Vorbis). Known by the first bytes of its first packet.
- */
-const OGG_CODECS: { head: string; comments: string; framing: boolean }[] = [
-  { head: "OpusHead", comments: "OpusTags", framing: false },
-  { head: "\x01vorbis", comments: "\x03vorbis", framing: true },
-  { head: "Speex   ", comments: "", framing: false },
-];
-
-/**
  * A comment header with no comment: its magic and vendor kept, its count 0 (and Vorbis's framing bit set), the rest
- * zeros: padding after the comments, which Opus says may be there and Vorbis's and Speex's readers do not read.
+ * zeros: padding after the comments, which Opus says may be there and Vorbis's, Speex's and Theora's readers do not read.
  */
-function noComments(packet: Uint8Array, codec: (typeof OGG_CODECS)[number]): Uint8Array {
-  const magic = codec.comments.length;
-  check(text(packet, 0, magic) === codec.comments && packet.length >= magic + 4);
+function noComments(packet: Uint8Array, comments: string, framing: boolean): Uint8Array {
+  const magic = comments.length;
+  check(text(packet, 0, magic) === comments && packet.length >= magic + 4);
   const count = magic + 4 + u32le(packet, magic);
-  check(count + 4 + (codec.framing ? 1 : 0) <= packet.length);
+  check(count + 4 + (framing ? 1 : 0) <= packet.length);
   const out = new Uint8Array(packet.length);
   out.set(packet.subarray(0, count));
-  if (codec.framing) out[count + 4] = 1;
+  if (framing) out[count + 4] = 1;
   return out;
 }
+
+/** A FLAC metadata block that is a whole packet (FLAC in Ogg): kept, or made padding as `flac` makes it. */
+function noFlacBlock(packet: Uint8Array): Uint8Array {
+  check(packet.length >= 4 && packet.length === 4 + ((packet[1]! << 16) | (packet[2]! << 8) | packet[3]!) && (packet[0]! & 0x7f) !== 127);
+  const type = packet[0]! & 0x7f;
+  if (FLAC_KEEPS.has(type)) return packet;
+  const out = new Uint8Array(packet.length);
+  out[0] = type === 1 ? packet[0]! : (packet[0]! & 0x80) | 1;
+  return out;
+}
+
+/**
+ * A codec's headers after its first packet, known by that packet's first bytes: `tagged` says whether one that may
+ * hold tags follows (its first packet given, then each header after it), `empty` makes one without them, its length
+ * kept.
+ */
+interface OggCodec { head: string; tagged: (packet: Uint8Array, index: number) => boolean; empty: (packet: Uint8Array) => Uint8Array }
+/** A codec whose second packet is its comment header: its magic, and whether a framing bit follows its comments (Vorbis). */
+const commentHeader = (head: string, comments: string, framing: boolean): OggCodec => ({ head, tagged: (_, index) => index === 0, empty: (packet) => noComments(packet, comments, framing) });
+
+const OGG_CODECS: OggCodec[] = [
+  commentHeader("OpusHead", "OpusTags", false),
+  commentHeader("\x01vorbis", "\x03vorbis", true),
+  commentHeader("Speex   ", "", false),
+  commentHeader("\x80theora", "\x81theora", false),
+  // FLAC: its first packet holds the stream info's block, each header after it one metadata block, the last flagged.
+  {
+    head: "\x7fFLAC",
+    tagged: (packet, index) => {
+      if (index) return !(packet[0]! & 0x80);
+      check(packet.length >= 17 && text(packet, 9, 4) === "fLaC");
+      return !(packet[13]! & 0x80);
+    },
+    empty: noFlacBlock,
+  },
+];
 
 /**
  * An Ogg file's pages walked: each logical stream's comment header (a chained file has one per link) made one with no
  * comment where it is, across the pages it spans, and those pages' checksums made again.
  */
 async function ogg(read: Read, size: number, patches: VideoPatch[]): Promise<void> {
-  /** A logical stream: its packets so far, the parts of the one being read (with the page each is on), its codec (null: one not known). */
-  interface Stream { packet: number; ranges: [number, number, number][]; codec?: (typeof OGG_CODECS)[number] | null }
+  /**
+   * A logical stream: its packets so far, the parts of the one being read (with the page each is on), its codec (null:
+   * one not known), and whether a header that may hold tags is still to come.
+   */
+  interface Stream { packet: number; ranges: [number, number, number][]; codec?: OggCodec | null; tagged: boolean }
   const streams = new Map<number, Stream>();
   /** The bytes put in the pages changed, by where each page starts: by where they go in the file. */
   const pages = new Map<number, [number, Uint8Array][]>();
@@ -245,20 +296,22 @@ async function ogg(read: Read, size: number, patches: VideoPatch[]): Promise<voi
     const end = at + 27 + lacing.length + lacing.reduce((sum, l) => sum + l, 0);
     check(end <= size);
     const serial = u32le(head, 14);
-    if (head[5]! & 2) streams.set(serial, { packet: 0, ranges: [] });
+    if (head[5]! & 2) streams.set(serial, { packet: 0, ranges: [], tagged: true });
     const stream = streams.get(serial);
     check(!!stream);
     let offset = at + 27 + lacing.length;
     for (const length of lacing) {
-      if (stream.packet <= 1 && stream.codec !== null) stream.ranges.push([offset, offset + length, at]);
+      if (stream.tagged) stream.ranges.push([offset, offset + length, at]);
       offset += length;
       if (length === 255) continue;
       // A packet ends.
       if (stream.packet === 0) {
         const first = await packetOf(stream.ranges);
         stream.codec = OGG_CODECS.find((codec) => text(first, 0, codec.head.length) === codec.head) ?? null;
-      } else if (stream.packet === 1 && stream.codec) {
-        const emptied = noComments(await packetOf(stream.ranges), stream.codec);
+        stream.tagged = !!stream.codec?.tagged(first, 0);
+      } else if (stream.tagged && stream.codec) {
+        const packet = await packetOf(stream.ranges), emptied = stream.codec.empty(packet);
+        stream.tagged = stream.codec.tagged(packet, stream.packet);
         let from = 0;
         for (const [start, until, page] of stream.ranges) {
           if (!pages.has(page)) pages.set(page, []);
@@ -271,8 +324,8 @@ async function ogg(read: Read, size: number, patches: VideoPatch[]): Promise<voi
     }
     at = end;
   }
-  // A stream cut before its comment header ended would go with it.
-  for (const stream of streams.values()) check(stream.codec === null || stream.packet > 1);
+  // A stream cut before its headers with tags ended would go with them.
+  for (const stream of streams.values()) check(!stream.tagged);
   for (const [start, changes] of pages) {
     const head = await read(start, 27), lacing = await read(start + 27, head[26]!);
     const end = start + 27 + lacing.length + lacing.reduce((sum, l) => sum + l, 0);
@@ -290,22 +343,225 @@ async function ogg(read: Read, size: number, patches: VideoPatch[]): Promise<voi
 const WAV_KEEPS = new Set(["fmt ", "data", "fact", "cue ", "smpl", "inst"]);
 const WAV_SPACE = new Set(["JUNK", "junk", "PAD ", "FLLR"]);
 
-async function wav(read: Read, size: number, patches: VideoPatch[]): Promise<void> {
+/** A WAV's chunks from its `WAVE`; an RF64 or BW64 one (`rf64`) has its `ds64` first, which says `data`'s size when its own is all ones. */
+async function wav(read: Read, size: number, rf64: boolean, patches: VideoPatch[]): Promise<void> {
+  let dataSize: number | undefined;
+  if (rf64) {
+    const ds64 = await read(12, 8 + 16);
+    check(text(ds64, 0, 4) === "ds64" && u32le(ds64, 4) >= 28);
+    dataSize = u32le(ds64, 16) + u32le(ds64, 20) * 2 ** 32;
+  }
   const count = counter();
   for (let at = 12; at + 8 <= size;) {
     count();
     const head = await read(at, 8);
-    const id = text(head, 0, 4), length = u32le(head, 4);
-    let end = at + 8 + length + (length & 1);
+    const id = text(head, 0, 4), length = id === "data" && dataSize !== undefined && u32le(head, 4) === 0xffffffff ? dataSize : u32le(head, 4);
+    let end = at + 8 + length + (length % 2);
     // Sound that runs to the end: a recorder's that never wrote its size (0, or all ones), or one cut short.
     if (id === "data") end = length ? Math.min(end, size) : size;
     else check(at + 8 + length <= size);
-    if (!WAV_KEEPS.has(id)) {
+    if (!WAV_KEEPS.has(id) && !(rf64 && at === 12)) {
       if (!WAV_SPACE.has(id)) patches.push({ start: at, end: at + 4, bytes: latin("JUNK") });
       if (length) patches.push({ start: at + 8, end: at + 8 + length });
     }
     at = Math.min(end, size);
   }
+}
+
+// AIFF, CAF, WavPack, Sun AU.
+
+/** The chunks an AIFF's or AIFF-C's sound is made of, kept; any other becomes `JUNK`. */
+const AIFF_KEEPS = new Set(["COMM", "SSND", "FVER", "MARK", "INST", "AESD", "chan"]);
+
+/** An AIFF's chunks from its form type: big-endian sizes, each padded to an even length. */
+async function aiff(read: Read, size: number, patches: VideoPatch[]): Promise<void> {
+  const count = counter();
+  for (let at = 12; at + 8 <= size;) {
+    count();
+    const head = await read(at, 8);
+    const id = text(head, 0, 4), length = u32be(head, 4);
+    let end = at + 8 + length + (length % 2);
+    // Sound that runs to the end: a recorder's that never wrote its size, or one cut short.
+    if (id === "SSND") end = length ? Math.min(end, size) : size;
+    else check(at + 8 + length <= size);
+    if (!AIFF_KEEPS.has(id)) {
+      if (id !== "JUNK") patches.push({ start: at, end: at + 4, bytes: latin("JUNK") });
+      if (length) patches.push({ start: at + 8, end: at + 8 + length });
+    }
+    at = Math.min(end, size);
+  }
+}
+
+/** The chunks a CAF's sound is made of, kept; any other becomes `free`. */
+const CAF_KEEPS = new Set(["desc", "data", "pakt", "kuki", "chan", "peak", "ovvw"]);
+
+/** A CAF's chunks after its 8-byte header: big-endian 64-bit sizes, `data`'s -1 when it runs to the end. */
+async function caf(read: Read, size: number, patches: VideoPatch[]): Promise<void> {
+  const count = counter();
+  for (let at = 8; at + 12 <= size;) {
+    count();
+    const head = await read(at, 12);
+    const id = text(head, 0, 4), high = u32be(head, 4), length = high * 2 ** 32 + u32be(head, 8);
+    const toEnd = id === "data" && high === 0xffffffff && u32be(head, 8) === 0xffffffff;
+    check(toEnd || (Number.isSafeInteger(length) && at + 12 + length <= size));
+    const end = toEnd ? size : at + 12 + length;
+    if (!CAF_KEEPS.has(id)) {
+      if (id !== "free") patches.push({ start: at, end: at + 4, bytes: latin("free") });
+      if (end > at + 12) patches.push({ start: at + 12, end });
+    }
+    at = end;
+  }
+}
+
+/** A WavPack sub-block's own id (its flags apart): the source file's header and trailer, a WAV's or another's. */
+const WAVPACK_SOURCE = new Set([0x21 /* RIFF header */, 0x22 /* RIFF trailer */, 0x23 /* other header */, 0x24 /* other trailer */]);
+
+/** A WavPack's blocks from `at`, their source file's header and trailer emptied; returns where they end (its tags). */
+async function wavpack(read: Read, size: number, at: number, patches: VideoPatch[]): Promise<number> {
+  const count = counter();
+  while (at + 32 <= size && text(await read(at, 4), 0, 4) === "wvpk") {
+    count();
+    const end = at + 8 + u32le(await read(at + 4, 4), 0);
+    check(end >= at + 32 && end <= size);
+    for (let sub = at + 32; sub < end;) {
+      count();
+      const head = await read(sub, Math.min(4, end - sub));
+      // Its size in 16-bit words: one byte, or three for a large one.
+      const large = (head[0]! & 0x80) !== 0, body = sub + (large ? 4 : 2);
+      check(body <= end);
+      const length = (large ? head[1]! | (head[2]! << 8) | (head[3]! << 16) : head[1]!) * 2;
+      check(body + length <= end);
+      // An optional sub-block of no id (its flags kept), its body zeros: a decoder skips it, and makes a header of its own.
+      if (WAVPACK_SOURCE.has(head[0]! & 0x3f)) {
+        patches.push({ start: sub, end: sub + 1, bytes: Uint8Array.of((head[0]! & 0xc0) | 0x20) });
+        if (length) patches.push({ start: body, end: body + length });
+      }
+      sub = body + length;
+    }
+    at = end;
+  }
+  return at;
+}
+
+/** A 64-bit size at `at` of `b`, little- or big-endian: one past what a file can hold is refused. */
+function u64(b: Uint8Array, at: number, little: boolean): number {
+  const n = little ? u32le(b, at) + u32le(b, at + 4) * 2 ** 32 : u32be(b, at) * 2 ** 32 + u32be(b, at + 4);
+  check(Number.isSafeInteger(n));
+  return n;
+}
+
+/**
+ * A DSF: its `DSD `, `fmt ` and `data` chunks kept, the ID3v2 tag its header's metadata pointer names emptied where it
+ * is, and any byte after its data that is not that tag zeroed.
+ */
+async function dsf(read: Read, size: number, patches: VideoPatch[]): Promise<void> {
+  const head = await read(0, 28);
+  check(u64(head, 4, true) === 28);
+  const fmt = await read(28, 12);
+  check(text(fmt, 0, 4) === "fmt ");
+  const dataAt = 28 + u64(fmt, 4, true);
+  const data = await read(dataAt, 12);
+  check(text(data, 0, 4) === "data");
+  let end = dataAt + u64(data, 4, true);
+  check(end <= size);
+  const pointer = u64(head, 20, true);
+  if (pointer) {
+    check(pointer >= end);
+    const tag = await read(pointer, 10);
+    check(isId3(tag));
+    if (pointer > end) patches.push({ start: end, end: pointer });
+    end = await emptyId3(read, size, pointer, tag, patches);
+  }
+  if (end < size) patches.push({ start: end, end: size });
+}
+
+/** The chunks a DSDIFF's sound is made of, kept; any other (COMT, DIIN with its artist and title, MANF, an `ID3 `) becomes `JUNK`, zeroed. */
+const DSDIFF_KEEPS = new Set(["FVER", "PROP", "DSD ", "DST ", "DSTI"]);
+
+/** A DSDIFF's chunks within its `FRM8`: big-endian 64-bit sizes, each padded to an even length; any byte after the form zeroed. */
+async function dsdiff(read: Read, size: number, patches: VideoPatch[]): Promise<void> {
+  const formEnd = 12 + u64(await read(4, 8), 0, false);
+  check(formEnd >= 16 && formEnd <= size);
+  const count = counter();
+  for (let at = 16; at < formEnd;) {
+    count();
+    const head = await read(at, 12);
+    const id = text(head, 0, 4), length = u64(head, 4, false), end = at + 12 + length;
+    check(end <= formEnd);
+    if (!DSDIFF_KEEPS.has(id)) {
+      patches.push({ start: at, end: at + 4, bytes: latin("JUNK") });
+      if (length) patches.push({ start: at + 12, end });
+    }
+    at = Math.min(end + (length % 2), formEnd);
+  }
+  if (formEnd < size) patches.push({ start: formEnd, end: size });
+}
+
+/** The meta events whose data is text (a text, a copyright, a track's or an instrument's name, a lyric, a marker, a cue point, a program's or a device's name) or a sequencer's own. */
+const MIDI_TEXT = new Set([0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x7f]);
+
+/**
+ * A Standard MIDI File's chunks: each track's events walked, the data of its text meta events zeroed (their lengths
+ * kept, so every delta time and event stays where it was), any byte after its end of track zeroed; a chunk that is
+ * neither a header nor a track zeroed.
+ */
+async function midi(read: Read, size: number, patches: VideoPatch[]): Promise<void> {
+  const count = counter();
+  let at = 0;
+  for (; at + 8 <= size;) {
+    count();
+    const head = await read(at, 8);
+    const id = text(head, 0, 4), start = at + 8, end = start + u32be(head, 4);
+    check(end <= size);
+    if (id === "MTrk") {
+      const b = await read(start, end - start);
+      let i = 0, running = 0;
+      const varlen = () => {
+        let value = 0;
+        for (let n = 0; ; n++) {
+          check(i < b.length && n < 4);
+          const byte = b[i++]!;
+          value = value * 128 + (byte & 0x7f);
+          if (!(byte & 0x80)) return value;
+        }
+      };
+      while (i < b.length) {
+        count();
+        varlen();
+        check(i < b.length);
+        const status = b[i]!;
+        if (status === 0xff || status === 0xf0 || status === 0xf7) {
+          // A meta event or a SysEx: its length says where it ends; either ends running status.
+          const type = status === 0xff ? b[++i] : undefined;
+          i++;
+          const length = varlen();
+          check(i + length <= b.length);
+          if (type !== undefined && MIDI_TEXT.has(type) && length) patches.push({ start: start + i, end: start + i + length });
+          i += length;
+          running = 0;
+          if (type === 0x2f) {
+            if (i < b.length) patches.push({ start: start + i, end });
+            break;
+          }
+        } else {
+          // A channel event, its status byte left out when it is the one before (running status).
+          if (status & 0x80) { running = status; i++; }
+          check(running >= 0x80 && running < 0xf0);
+          i += (running & 0xe0) === 0xc0 ? 1 : 2;
+          check(i <= b.length);
+        }
+      }
+    } else if (id !== "MThd" && end > start) patches.push({ start, end });
+    at = end;
+  }
+  if (at < size) patches.push({ start: at, end: size });
+}
+
+/** A Sun AU's annotation: from its 24-byte header to its sound. */
+async function au(read: Read, size: number, patches: VideoPatch[]): Promise<void> {
+  const offset = u32be(await read(4, 4), 0);
+  check(offset >= 24 && offset <= size);
+  if (offset > 24) patches.push({ start: 24, end: offset });
 }
 
 // WebM and Matroska.
@@ -319,7 +575,9 @@ const CLUSTER_CHILDREN = new Set([0xe7, 0x5854, 0xa7, 0xab, 0xa3, 0xa0, 0xaf, VO
 /** What Info keeps: the timing, the segment's IDs; the muxer's and writing app's names, zeroed. Any other (a title, a date, file names) becomes Void. */
 const INFO_KEEPS = new Set([0x2ad7b1, 0x4489, 0x73a4, 0x4444, 0x3cb923, 0x3eb923, 0x6924]);
 const INFO_ZEROED = new Set([0x4d80, 0x5741]);
-const TRACK_ENTRY = 0xae, TRACK_NAME = 0x536e, SEEK = 0x4dbb, SEEK_ID = 0x53ab;
+const TRACK_ENTRY = 0xae, TRACK_NAME = 0x536e, CODEC_ID = 0x86, CODEC_PRIVATE = 0x63a2, SEEK = 0x4dbb, SEEK_ID = 0x53ab;
+/** The codecs whose CodecPrivate is their Ogg headers Xiph-laced: the second a comment header, its magic, and whether a framing bit follows its comments. */
+const XIPH_PRIVATE = new Map<string, [string, boolean]>([["A_VORBIS", ["\x03vorbis", true]], ["V_THEORA", ["\x81theora", false]]]);
 
 interface Element { id: number; start: number; body: number; end: number; unknown: boolean }
 
@@ -380,11 +638,48 @@ function childrenOf(b: Uint8Array, parent: Element): Element[] {
 }
 
 /**
- * A top-level element of a segment read whole and changed in it: Info without its title, date and file names (its
- * muxer's and writing app's names zeroed), Tracks without their names, a SeekHead without the entries for what
- * became Void. A CRC-32 in them, wrong once they changed, becomes Void too.
+ * A track's CodecPrivate (`b`, changed in it) by its codec: a Vorbis or Theora track's headers (their count less one,
+ * each size but the last's in Xiph lacing, them) with a comment header that has no comment, its sizes kept; a FLAC
+ * track's `fLaC` and metadata blocks as a FLAC's, any byte after the last zeroed. Another codec's is kept as it is.
  */
-function stripTopLevel(b: Uint8Array): void {
+async function noPrivateTags(b: Uint8Array, codec: string): Promise<void> {
+  const xiph = XIPH_PRIVATE.get(codec);
+  if (xiph) {
+    check(b.length >= 1 && b[0] === 2);
+    let at = 1;
+    const sizes: number[] = [];
+    while (sizes.length < 2) {
+      let size = 0;
+      for (let byte = 255; byte === 255; size += byte) {
+        check(at < b.length);
+        byte = b[at++]!;
+      }
+      sizes.push(size);
+    }
+    const start = at + sizes[0]!, end = start + sizes[1]!;
+    check(end <= b.length);
+    b.set(noComments(b.subarray(start, end), ...xiph), start);
+  } else if (codec === "A_FLAC") {
+    check(b.length >= 4 && text(b, 0, 4) === "fLaC");
+    const patches: VideoPatch[] = [];
+    const end = await flac(async (offset, length) => {
+      check(offset >= 0 && length >= 0 && offset + length <= b.length);
+      return b.subarray(offset, offset + length);
+    }, b.length, 0, patches);
+    for (const patch of patches) {
+      if (patch.bytes) b.set(patch.bytes, patch.start);
+      else b.fill(0, patch.start, patch.end);
+    }
+    b.fill(0, end);
+  }
+}
+
+/**
+ * A top-level element of a segment read whole and changed in it: Info without its title, date and file names (its
+ * muxer's and writing app's names zeroed), Tracks without their names and the comments in their CodecPrivate, a
+ * SeekHead without the entries for what became Void. A CRC-32 in them, wrong once they changed, becomes Void too.
+ */
+async function stripTopLevel(b: Uint8Array): Promise<void> {
   const top = element(b, 0, b.length);
   check(!top.unknown && top.end === b.length);
   for (const child of childrenOf(b, top)) {
@@ -393,7 +688,14 @@ function stripTopLevel(b: Uint8Array): void {
       if (INFO_ZEROED.has(child.id)) b.fill(0, child.body, child.end);
       else if (!INFO_KEEPS.has(child.id) && child.id !== VOID) voidIn(b, child);
     } else if (top.id === TRACKS && child.id === TRACK_ENTRY) {
-      for (const part of childrenOf(b, child)) if (part.id === TRACK_NAME || part.id === CRC32) voidIn(b, part);
+      const parts = childrenOf(b, child), ids = parts.filter((part) => part.id === CODEC_ID);
+      // A CodecID null-padded is the same; two would leave which one a player reads unknown.
+      check(ids.length <= 1);
+      const codec = ids[0] ? text(b, ids[0].body, ids[0].end - ids[0].body).replace(/\0+$/, "") : "";
+      for (const part of parts) {
+        if (part.id === TRACK_NAME || part.id === CRC32) voidIn(b, part);
+        else if (part.id === CODEC_PRIVATE) await noPrivateTags(b.subarray(part.body, part.end), codec);
+      }
     } else if (top.id === SEEK_HEAD && child.id === SEEK) {
       const target = childrenOf(b, child).find((part) => part.id === SEEK_ID);
       let id = 0;
@@ -442,7 +744,7 @@ async function matroska(source: VideoSource, read: Read, patches: VideoPatch[]):
       check(!el.unknown && el.end <= top.end);
       if (el.id === INFO || el.id === TRACKS || el.id === SEEK_HEAD) {
         const bytes = (await read(el.start, el.end - el.start)).slice();
-        stripTopLevel(bytes);
+        await stripTopLevel(bytes);
         patches.push({ start: el.start, end: el.end, bytes });
       } else if (el.id === VOID) {
         if (el.end > el.body) patches.push({ start: el.body, end: el.end });
@@ -470,11 +772,20 @@ export async function audioMetadataPatches(file: VideoSource, mime: string): Pro
       throw error;
     }
   } else if (text(head, 0, 4) === "OggS") await ogg(read, size, patches);
-  else if (head.length >= 12 && text(head, 0, 4) === "RIFF" && text(head, 8, 4) === "WAVE") await wav(read, size, patches);
+  else if (head.length >= 12 && ["RIFF", "RF64", "BW64"].includes(text(head, 0, 4)) && text(head, 8, 4) === "WAVE") await wav(read, size, text(head, 0, 4) !== "RIFF", patches);
   else if (text(head, 0, 4) === "\x1a\x45\xdf\xa3") await matroska(source, read, patches);
+  else if (head.length >= 12 && text(head, 0, 4) === "FORM" && ["AIFF", "AIFC"].includes(text(head, 8, 4))) await aiff(read, size, patches);
+  else if (head.length >= 8 && text(head, 0, 4) === "caff") await caf(read, size, patches);
+  else if (head.length >= 24 && text(head, 0, 4) === ".snd") await au(read, size, patches);
+  else if (text(head, 0, 4) === "wvpk") await trailingTags(read, size, await wavpack(read, size, 0, patches), patches);
+  else if (text(head, 0, 4) === "TTA1" || ["MAC ", "MPCK", "OFR "].includes(text(head, 0, 4)) || text(head, 0, 3) === "MP+") await trailingTags(read, size, 0, patches);
+  else if (text(head, 0, 4) === "DSD ") await dsf(read, size, patches);
+  else if (head.length >= 16 && text(head, 0, 4) === "FRM8" && text(head, 12, 4) === "DSD ") await dsdiff(read, size, patches);
+  else if (head.length >= 14 && text(head, 0, 4) === "MThd") await midi(read, size, patches);
+  else if (isAsf(head)) check(false);
   else if (text(head, 0, 4) === "fLaC") await trailingTags(read, size, await flac(read, size, 0, patches), patches);
   else if (isId3(head) || isFrame(head, 0)) {
-    // ID3v2 tags before the sound (one after another, as some taggers leave them), then a FLAC's blocks or MPEG frames.
+    // ID3v2 tags before the sound (one after another, as some taggers leave them), then a FLAC's or a WavPack's blocks, or MPEG frames.
     let at = 0;
     const count = counter();
     for (let next = head; isId3(next); next = at + 10 <= size ? await read(at, 10) : new Uint8Array(0)) {
@@ -482,7 +793,12 @@ export async function audioMetadataPatches(file: VideoSource, mime: string): Pro
       at = await emptyId3(read, size, at, next, patches);
     }
     if (at + 4 <= size && text(await read(at, 4), 0, 4) === "fLaC") at = await flac(read, size, at, patches);
+    else if (at + 4 <= size && text(await read(at, 4), 0, 4) === "wvpk") at = await wavpack(read, size, at, patches);
     await trailingTags(read, size, at, patches);
+  } else if (MPEG_AUDIO.has(baseMime(mime))) {
+    // An MP3 or AAC that starts with neither (junk before its first frame, a stream cut): a player finds its frames past
+    // the junk and reads the tags at its end.
+    await trailingTags(read, size, 0, patches);
   } else return undefined;
   if (!patches.length) return undefined;
   patches.sort((a, b) => a.start - b.start);

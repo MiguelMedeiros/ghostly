@@ -161,14 +161,12 @@ describe("app events", () => {
       ]);
     });
 
-    it("learns again when an open names another version than the one it learned", async () => {
-      const { frame, derived } = await counted("version.jsonl");
-      for (let i = 0; i < 3; i++) frame("c1", { app: "id:c1:a", o: "open", v: "1.0.0" });
+    it("learns nothing again when opens alternate versions: the ids do not depend on one", async () => {
+      const { events, frame, derived } = await counted("version.jsonl");
+      for (let i = 0; i < 400; i++) frame("c1", { app: `id:c1:${NAMES[i % NAMES.length]}`, o: "open", v: i % 2 ? "1.1.0" : "1.0.0" });
       expect(derived()).toBe(NAMES.length);
-      frame("c1", { app: "id:c1:a", o: "open", v: "1.1.0" });
-      frame("c1", { app: "id:c1:a", o: "open", v: "1.1.0" });
-      expect(derived()).toBe(2 * NAMES.length);
-      expect(reads.count).toBe(2);
+      expect(reads.count).toBe(1);
+      expect(events.filter((e) => e.type === "app.opened").map((e) => e.version).slice(0, 2)).toEqual(["1.0.0", "1.1.0"]);
     });
   });
 });

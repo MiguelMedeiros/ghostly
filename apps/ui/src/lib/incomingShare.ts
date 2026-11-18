@@ -1,4 +1,6 @@
 import { useSyncExternalStore } from "react";
+import { LINK_STOP_CHARS } from "@ghostly/core";
+import { linkEnd } from "./parse/links";
 
 /*
  * Something another app shared into Ghostly (the installed web app is a share target): text, a link, images,
@@ -42,9 +44,15 @@ export interface IncomingShare {
   read?: () => Promise<File[]>;
   /**
    * Keeps the share for the page that loads next (a profile switch restarts the app), which shows it in its picker
-   * again. False where it could not be kept. Without it, the share goes with this page.
+   * again. False where it could not be kept. Without it, the share goes with this page. Called with the share's
+   * `dropped` as it is now (those not kept counted since it came), which the next page says with it.
    */
-  carry?: () => boolean;
+  carry?: (dropped?: number) => boolean;
+  /**
+   * Told when the share is sent to a chat: it no longer waits in the picker, so a later share does not take its place
+   * (the Android app's copies stay until that chat's composer reads them, or the page goes).
+   */
+  sent?: () => void;
 }
 
 /** A share's files as Files, read now where they were not yet. */
@@ -136,7 +144,7 @@ export function dropIncomingShare(): void {
  * is redrawn: the page is going.
  */
 export function carryIncomingShare(): boolean {
-  const carry = (share: IncomingShare | null) => { try { return share?.carry?.() ?? false; } catch { return false; } };
+  const carry = (share: IncomingShare | null) => { try { return share?.carry?.(share.dropped) ?? false; } catch { return false; } };
   let sent = false;
   for (const [chat, shares] of forChat) {
     const left = shares.filter((share) => !carry(share));
@@ -159,7 +167,10 @@ export function sendShareTo(chat: string): void {
   if (!pending) return;
   const waiting = forChat.get(chat) ?? [];
   const share = pending;
-  if (!waiting.some((kept) => sameShare(kept, share))) forChat.set(chat, [...waiting, share]);
+  if (!waiting.some((kept) => sameShare(kept, share))) {
+    forChat.set(chat, [...waiting, share]);
+    share.sent?.();
+  }
   pending = behind.shift() ?? null;
   emit();
 }
@@ -204,6 +215,36 @@ export function keepShareFor(chat: string, share: IncomingShare): void {
   forChat.set(chat, [share, ...forChat.get(chat) ?? []]);
 }
 
+/** How many places `carriesLink` reads, and how far past the link: a sentence's punctuation and closing brackets. */
+const MAX_LINK_LOOKS = 64;
+const MAX_LINK_TAIL = 64;
+/** What may stand right before and right after a link of its own in a shared text. */
+const LINK_BEFORE = new RegExp(`[\\s\\p{Ps}\\p{Pi}"'${LINK_STOP_CHARS}]`, "u");
+const LINK_AFTER = new RegExp(`[\\s${LINK_STOP_CHARS}]`);
+
+/**
+ * Whether `text` carries `url` as a link of its own: after the text's start, a space, an opening bracket or quote or
+ * the CJK or Arabic punctuation a link stops at ("链接：https://a.example/p"), and ending where a bubble's link would
+ * (`linkEnd`: "https://a.example/p.", "(https://a.example/p)" or "https://a.example/p。見て" carry it).
+ * A longer address that starts with it ("https://a.example/p2") or holds it ("…?u=https://a.example/p") does not.
+ * Any website can post a share, of megabytes: only the first `MAX_LINK_LOOKS` places it turns up are read, each up to
+ * `MAX_LINK_TAIL` characters past it (a word longer than that is not taken for it), so the text is never read once per
+ * place. Past those, the link goes in once more, which says nothing wrong.
+ */
+function carriesLink(text: string, url: string): boolean {
+  const word = new RegExp(`[^\\s${LINK_STOP_CHARS}]{0,${url.length + MAX_LINK_TAIL}}`, "y");
+  const own = linkEnd(url);
+  let looks = 0;
+  for (let at = text.indexOf(url); at >= 0 && looks < MAX_LINK_LOOKS; at = text.indexOf(url, at + 1), looks += 1) {
+    if (at > 0 && !LINK_BEFORE.test(text[at - 1]!)) continue;
+    word.lastIndex = at;
+    const found = word.exec(text)![0];
+    if (!LINK_AFTER.test(text[at + found.length] ?? " ")) continue;
+    if (linkEnd(found) === own) return true;
+  }
+  return false;
+}
+
 /**
  * The text a share puts in the draft: its text, and its link where the text does not already carry it (apps
  * differ: some put the link in `text`, some in `url`, some in both). A title only when there is nothing else.
@@ -211,7 +252,7 @@ export function keepShareFor(chat: string, share: IncomingShare): void {
 export function shareText(share: Pick<IncomingShare, "title" | "text" | "url">): string {
   const text = share.text.trim();
   const url = share.url.trim();
-  const parts = [text, url && !text.includes(url) ? url : ""].filter(Boolean);
+  const parts = [text, url && !carriesLink(text, url) ? url : ""].filter(Boolean);
   if (!parts.length && share.title.trim()) parts.push(share.title.trim());
   return parts.join("\n");
 }

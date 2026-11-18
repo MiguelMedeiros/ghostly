@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { knownDeviceGate } from "@ghostly/browser/devices/gate";
 import { useI18n } from "../contexts/I18nContext";
 import { useSettings } from "../contexts/SettingsContext";
 import { JOIN_OPEN_EVENT, DEVICE_LINK_EVENT, deviceLinkOffered } from "../lib/devices";
 import { useFittedNameField } from "../hooks/useGroupNameField";
 import { nameStepAllowed, nameStepDone, nameStepPending } from "../lib/nameStep";
-import { cleanOwnName, fitsOwnName } from "../lib/ownName";
+import { OWN_NAME_LENGTH, cleanOwnName, fitsOwnName } from "../lib/ownName";
 import { closedByArrival } from "../lib/layerHistory";
 import { currentProfile } from "../lib/profiles";
 import { touchOnly } from "../lib/touchOnly";
@@ -37,14 +37,23 @@ function focusAfter() {
  * One field, empty, and Skip, which keeps the default: contacts see the anonymous label. Never in a profile with a name
  * already, a restored one, or one this page opened to add to a profile on another device (a device code, or "I already
  * use Ghostly" opened over it, which closes it and asks again on the next start).
+ *
+ * It says what a name may be: the limit under the field (its description), a keystroke past it once in a polite status
+ * (`full`, said again only after a delete), and, while the name is blank or only invisible characters, why Continue
+ * is off, under the field and as the button's description (a disabled button with a reason, as Take over does).
  */
 export function NameStep() {
   const { t } = useI18n();
   const { settings, updateDefaultNickname } = useSettings();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
-  // Counted in characters as seen, never cut inside an emoji (`fitsOwnName`).
-  const nameField = useFittedNameField(name, setName, fitsOwnName);
+  const id = useId();
+  // Whether the last keystroke or paste had no room: said once, until a delete makes room again. Room is counted by the
+  // name's own rule (one more letter fits), never in UTF-16 units; a change the hook cut says so after this (`onDropped`).
+  const [full, setFull] = useState(false);
+  const keep = (next: string) => { if (fitsOwnName(next + "a")) setFull(false); setName(next); };
+  // Counted in characters as seen, never cut inside an emoji (`fitsOwnName`): no `maxLength`, which counts UTF-16 units.
+  const nameField = useFittedNameField(name, keep, fitsOwnName, () => setFull(true));
   const input = nameField.ref;
 
   useEffect(() => {
@@ -80,10 +89,16 @@ export function NameStep() {
   return (
     <DeviceDialog title={t("profile.nameStep.title")} onClose={close} testId="name-step">
       <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); save(); }}>
-        <input ref={input} data-testid="name-step-input" aria-label={t("profile.nameStep.title")} className={field} autoFocus
-          placeholder={t("profile.nameStep.placeholder")} value={name} onChange={nameField.onChange}
-          onCompositionStart={nameField.onCompositionStart} onCompositionEnd={nameField.onCompositionEnd} dir={nameField.dir} />
-        <button type="submit" data-testid="name-step-save" className={primaryButton} disabled={!chosen}>{t("profile.nameStep.save")}</button>
+        <div className="space-y-1">
+          <input ref={input} data-testid="name-step-input" aria-label={t("profile.nameStep.title")} aria-describedby={`${id}-limit`} className={field} autoFocus
+            placeholder={t("profile.nameStep.placeholder")} value={name} onChange={nameField.onChange}
+            onCompositionStart={nameField.onCompositionStart} onCompositionEnd={nameField.onCompositionEnd} dir={nameField.dir} />
+          <p id={`${id}-limit`} data-testid="name-step-limit" className="text-xs text-text-muted">{t("profile.nameStep.limit", { count: OWN_NAME_LENGTH })}</p>
+          {!chosen && <p id={`${id}-why`} data-testid="name-step-why" className="text-xs text-text-muted">{t("profile.nameStep.needName")}</p>}
+        </div>
+        {/* Mounted empty with the step, so the cut is news a screen reader hears when it is written in. */}
+        <p role="status" data-testid="name-step-full" className="sr-only">{full ? t("profile.nameStep.full", { count: OWN_NAME_LENGTH }) : ""}</p>
+        <button type="submit" data-testid="name-step-save" className={primaryButton} disabled={!chosen} aria-describedby={chosen ? undefined : `${id}-why`}>{t("profile.nameStep.save")}</button>
         <button type="button" data-testid="name-step-skip" onClick={done}
           className="mx-auto block min-h-10 px-2 text-sm text-text-secondary underline underline-offset-4 hover:text-accent cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded">
           {t("profile.nameStep.skip")}

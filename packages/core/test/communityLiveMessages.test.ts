@@ -16,7 +16,8 @@ import { COMMUNITY_LIMITS, CommunitySession, type CommunityFrame, type Community
 const MINUTE = 60_000;
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
-interface Member { name: string; session: CommunitySession; key: string; hub: boolean; old: boolean; skew: number; got: CommunityIncomingMessage[] }
+/** `adds`: fields an `old` hub puts beside a frame's own as it hands it on. */
+interface Member { name: string; session: CommunitySession; key: string; hub: boolean; old: boolean; adds?: Record<string, unknown>; skew: number; got: CommunityIncomingMessage[] }
 
 /**
  * Members on explicit edges. A hub hands on what its session took to every other edge, at once, as the engine does
@@ -54,7 +55,7 @@ class Net {
     this.pending.push((async () => {
       const fresh = await to.session.handle(from.key, copy);
       if (!fresh || !to.hub) return;
-      const out = to.old ? copy : to.session.passOn(copy);
+      const out = to.old ? { ...copy, ...to.adds } : to.session.passOn(copy);
       for (const other of this.members.values()) if (other !== from && other !== to && this.linked(to, other)) this.deliver(to, other, out);
     })());
   }
@@ -124,6 +125,22 @@ describe("a community message that came as it was written is live", () => {
     const kept = dave.got.find(g => g.text === "@Dave are you there?")!.frame!;
     expect("lv" in kept).toBe(false);
     expect(dave.session.state.store.some(f => "lv" in f)).toBe(false);
+  });
+
+  it("fields a hub put beside the signed ones are neither kept, stored nor handed on", async () => {
+    const { net, alice, bob, hub, dave } = await community();
+    // Bob > Alice (hands it on with fields of its own) > Hub > Dave.
+    alice.hub = true; alice.old = true; alice.adds = { pad: "x".repeat(4096), note: { any: 1 } };
+    net.link([bob, alice], [alice, hub], [hub, dave]);
+    await net.say(bob, "padded");
+    expect(net.tap.find(t => t.from === "Alice" && t.to === "Hub" && t.frame.t === "group-msg")!.frame.pad).toBeDefined();
+    const fields = ["c", "e", "g", "h", "n", "nn", "s", "sig", "t", "ts", "v"];
+    expect(Object.keys(net.tap.find(t => t.from === "Hub" && t.to === "Dave" && t.frame.t === "group-msg")!.frame).sort()).toEqual(fields);
+    expect(dave.got.map(g => g.text)).toContain("padded");
+    for (const m of [hub, dave]) {
+      expect(Object.keys(m.got.find(g => g.text === "padded")!.frame!).sort()).toEqual(fields);
+      expect(m.session.state.store.filter(f => f.s === bob.key).map(f => Object.keys(f).sort())).toEqual([fields]);
+    }
   });
 
   it("a marked frame still verifies as its author signed it, by the tuple apps from before check", async () => {

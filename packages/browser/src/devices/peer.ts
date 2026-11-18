@@ -1,7 +1,7 @@
 import { EngineServer } from "../engine/server";
 import type { NodeOptions, StartCheck } from "../engine/node";
 import { DEFAULT_IROH_RELAYS, createIrohWebEndpoint } from "../platform/irohWeb";
-import type { PkarrTransport, TurnNetwork } from "@ghostly/core";
+import { RELAY_POLL_INTERVALS, type PkarrTransport, type TurnNetwork } from "@ghostly/core";
 import { openDeviceGate, viewOf, type DeviceGate, type DeviceGateView } from "./gate";
 import { openTurnKeeper } from "./setup";
 import { recoverEnrollment } from "./enroll";
@@ -50,7 +50,9 @@ export async function standbyEngine(gate: DeviceGate, options: NodeOptions | und
     ...(options?.pushSend ? { pushSend: options.pushSend } : {}),
     transport: network.transport,
     createPeerConnection: network.createPeerConnection,
-    pollIntervals: options?.pollIntervals,
+    // The pace the engine would read at (`GhostlyNode`): the relays' where the host gives none (a page, the extension).
+    // A link's own default is the DHT's, which only an app that reaches the DHT itself (the Desktop) may keep.
+    pollIntervals: options?.pollIntervals ?? RELAY_POLL_INTERVALS,
     nativeTransports: {
       // HyperDHT through the person's relay where this app runs none of its own, as the engine's chats (`nativeFactories`).
       ...(network.hyperdhtRelay && !options?.nativeTransports?.["hyperdht/1"]

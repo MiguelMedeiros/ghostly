@@ -3,20 +3,25 @@ import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
 import { COMMANDS } from "../src/commands";
 import { parseArgs } from "../src/args";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.chat
 
 /** `chat connect` to a contact that is not there: `--timeout`, and a timeout that says what happens next. */
 const link = { id: "chat-one", label: "bia", peerPubKeyZ32: "pchat-one", createdAt: 1, lastMessageAt: 0, profile: "paired-chat/1", peerParticipationKey: "k",
   textDelivery: "stream", deliveryMode: "stream", pairing: { status: "connecting" } } as unknown as LinkView;
 
-function fake(mode: "one-shot" | "daemon", connect: () => Promise<void>) {
-  const node = { getState: () => ({ links: [link], groups: [], settings: {}, transport: {} }) as unknown as EngineState, connect: vi.fn(connect) };
+/** An attempt to go live that ended without it: the contact was dialled and did not answer. */
+const ended = { liveAttempt: { at: 1, side: "dialled", failed: [{ transport: "hyperdht/1", error: "PEER_NOT_FOUND: Peer not found" }] } } as unknown as Partial<LinkView>;
+
+function fake(mode: "one-shot" | "daemon", connect: () => Promise<void>, fields: Partial<LinkView> = {}) {
+  const chat = { ...link, ...fields } as LinkView;
+  const node = { chatView: chatViewOf, getState: () => ({ links: [chat], groups: [], settings: {}, transport: {} }) as unknown as EngineState, connect: vi.fn(connect) };
   const ctx = { runtime: { server: { node }, paths: { name: "default", dir: "/nonexistent" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, emit: () => {}, lastSeq: 0, replay: () => [] }, mode, version: "test" } as unknown as ApiContext;
   return { ctx, node };
 }
 const never = () => new Promise<void>(() => {});
 
-afterEach(() => { vi.useRealTimers(); });
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe("chat connect", () => {
   it("takes --timeout, 1 to 90 s (the link's own wait)", () => {
@@ -40,12 +45,65 @@ describe("chat connect", () => {
   it("the link's own timeout says the daemon goes on, with the wait that follows it", async () => {
     vi.useFakeTimers();
     const timedOut = Object.assign(new Error("Timed out connecting to the peer"), { code: "timeout" });
-    const { ctx } = fake("daemon", () => new Promise<void>((_, reject) => { setTimeout(() => reject(timedOut), 89_000); }));
+    const { ctx } = fake("daemon", () => new Promise<void>((_, reject) => { setTimeout(() => reject(timedOut), 89_000); }), ended);
     const connect = callApi(ctx, "chat.connect", { chat: "bia" }).catch((error: unknown) => error);
     await vi.advanceTimersByTimeAsync(89_000);
     expect(await connect).toMatchObject({
       code: "timeout",
       message: "Timed out after 90 s: the contact did not answer. It reconnects by itself while this profile is online; ghostly chat wait bia --until live waits for it",
+    });
+  });
+
+  it("right after the daemon's start, a chat no attempt of this run reached yet is still resuming, not unanswered", async () => {
+    // `daemon restart`, then `chat connect bob --timeout 2` with the contact online: "the contact did not answer".
+    vi.spyOn(process, "uptime").mockReturnValue(3);
+    vi.useFakeTimers();
+    const { ctx } = fake("daemon", never, { peerOnline: true });
+    const connect = callApi(ctx, "chat.connect", { chat: "bia", timeout: 2 }).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(await connect).toMatchObject({
+      code: "timeout", details: { chat: "chat-one" },
+      message: "Timed out after 2 s: the chat is still resuming after the daemon's start, and no attempt to reach the contact has ended yet. It reconnects by itself while this profile is online; ghostly chat wait bia --until live waits for it",
+    });
+    // An attempt that ended without the contact: it did not answer, however new the daemon is.
+    const tried = fake("daemon", never, { peerOnline: true, ...ended });
+    const again = callApi(tried.ctx, "chat.connect", { chat: "bia", timeout: 2 }).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(await again).toMatchObject({ code: "timeout", message: expect.stringMatching(/^Timed out after 2 s: the contact did not answer\. It reconnects by itself/) });
+  });
+
+  it("later, a contact that reads online with no attempt ended yet is said so; one that does not, did not answer", async () => {
+    vi.spyOn(process, "uptime").mockReturnValue(3_600);
+    vi.useFakeTimers();
+    const online = callApi(fake("daemon", never, { peerOnline: true }).ctx, "chat.connect", { chat: "bia", timeout: 2 }).catch((error: unknown) => error);
+    const away = callApi(fake("daemon", never, { peerOnline: false }).ctx, "chat.connect", { chat: "bia", timeout: 2 }).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(await online).toMatchObject({ code: "timeout", message: expect.stringMatching(/^Timed out after 2 s: your contact's app reads online, and no attempt to reach it has ended yet\. It reconnects by itself/) });
+    expect(await away).toMatchObject({ code: "timeout", message: expect.stringMatching(/^Timed out after 2 s: the contact did not answer\. It reconnects by itself/) });
+  });
+
+  it("a contact whose app is not there is unavailable, with HyperDHT's words in details", async () => {
+    const notFound = new Error("PEER_NOT_FOUND: Peer not found");
+    expect(await callApi(fake("daemon", async () => { throw notFound; }).ctx, "chat.connect", { chat: "bia" }).catch((error: unknown) => error)).toMatchObject({
+      code: "unavailable", details: { chat: "chat-one", reason: "PEER_NOT_FOUND: Peer not found" },
+      message: "Your contact's app isn't reachable on HyperDHT: it may be closed. It reconnects by itself while this profile is online; ghostly chat wait bia --until live waits for it",
+    });
+    const frozen = new Error("PEER_CONNECTION_FAILED: Could not connect to peer");
+    expect(await callApi(fake("one-shot", async () => { throw frozen; }).ctx, "chat.connect", { chat: "bia" }).catch((error: unknown) => error)).toMatchObject({
+      code: "unavailable", details: { reason: "PEER_CONNECTION_FAILED: Could not connect to peer" },
+      message: "Your contact's app isn't answering on HyperDHT: it may be asleep or frozen. Try again later, or keep this profile online with `ghostly daemon --detach`: it reconnects by itself",
+    });
+  });
+
+  it("the link giving up on the contact says what happens next too", async () => {
+    const gaveUp = Object.assign(new Error("Could not connect to the peer"), { code: "unreachable" });
+    expect(await callApi(fake("daemon", async () => { throw gaveUp; }).ctx, "chat.connect", { chat: "bia" }).catch((error: unknown) => error)).toMatchObject({
+      code: "unavailable", details: { chat: "chat-one", reason: "Could not connect to the peer" },
+      message: "The contact did not answer. It reconnects by itself while this profile is online; ghostly chat wait bia --until live waits for it",
+    });
+    const notFound = Object.assign(new Error("Could not connect to the peer: PEER_NOT_FOUND: Peer not found"), { code: "unreachable" });
+    expect(await callApi(fake("daemon", async () => { throw notFound; }).ctx, "chat.connect", { chat: "bia" }).catch((error: unknown) => error)).toMatchObject({
+      code: "unavailable", message: expect.stringMatching(/^Your contact's app isn't reachable on HyperDHT: it may be closed\. It reconnects by itself/),
     });
   });
 

@@ -1,6 +1,7 @@
-import { useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "../../contexts/I18nContext";
+import { composingKey } from "../../hooks/useComposition";
 import { useBackCloses } from "../../hooks/useDismiss";
 import { InfoButton } from "../layout/Section";
 
@@ -25,8 +26,15 @@ export function DeviceDialog({ title, onClose, testId, children }: { title: Reac
     setShown(true);
     return () => { element.close(); if (previous?.isConnected) previous.focus(); };
   }, []);
+  // Escape is taken at its keydown, so the browser makes no close request of it: a `cancel` can be refused only once,
+  // and the next Escape closed the dialog while it stays open here (a check, a removal that is running). An input
+  // method's Escape stays the input method's.
+  const escape = (event: KeyboardEvent<HTMLDialogElement>) => {
+    if (event.key !== "Escape" || event.defaultPrevented || composingKey(event.nativeEvent, null)) return;
+    event.preventDefault(); onClose();
+  };
   return createPortal(
-    <dialog ref={dialog} data-testid={testId} onCancel={(event) => { event.preventDefault(); onClose(); }} aria-labelledby={`${id}-title`}
+    <dialog ref={dialog} data-testid={testId} onKeyDown={escape} onCancel={(event) => { event.preventDefault(); onClose(); }} aria-labelledby={`${id}-title`}
       className="m-auto w-[calc(100%_-_2rem)] max-w-sm max-h-[85dvh] overflow-y-auto rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
       <div className="mb-4 flex items-center justify-between gap-3">
         <h2 id={`${id}-title`} className="text-base font-semibold min-w-0 break-words">{title}</h2>
@@ -38,10 +46,11 @@ export function DeviceDialog({ title, onClose, testId, children }: { title: Reac
   );
 }
 
-export const primaryButton = "inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-on-accent hover:bg-accent-hover cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:cursor-not-allowed";
+// A border in forced colors only (as wallet/ui.tsx's Button): there the fill is gone, and a filled button would read as bare text.
+export const primaryButton = "inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-on-accent hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:cursor-not-allowed";
 export const quietButton = "inline-flex min-h-11 w-full items-center justify-center rounded-lg border border-border px-3 py-2.5 text-sm font-semibold text-text-secondary hover:bg-surface-hover cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40";
 /** An action that cannot be undone from here (Remove): the danger color, never the accent. */
-export const dangerButton = "inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-danger-fill px-3 py-2.5 text-sm font-semibold text-white hover:bg-danger-fill/80 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar-bg disabled:opacity-40 disabled:cursor-not-allowed";
+export const dangerButton = "inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-danger-fill px-3 py-2.5 text-sm font-semibold text-white hover:bg-danger-fill/80 forced-colors:border forced-colors:border-[color:ButtonText] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar-bg disabled:opacity-40 disabled:cursor-not-allowed";
 export const field = "w-full min-w-0 px-3 py-2 min-h-11 bg-input-bg border border-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent";
 
 /** The six digits as people read them: "482 913", large and spaced. */
@@ -50,7 +59,7 @@ export function Digits({ digits, testId }: { digits: string; testId: string }) {
 }
 
 /** The full-screen notices' buttons (standby, limited start): full width on a phone, side by side from a small tablet up, 44 px tall to touch. */
-export const SCREEN_BUTTON = "inline-flex min-h-11 items-center justify-center rounded-lg px-4 py-2 text-sm font-semibold bg-accent text-on-accent hover:bg-accent-hover cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-chat-bg disabled:opacity-40 disabled:cursor-not-allowed max-sm:w-full";
+export const SCREEN_BUTTON = "inline-flex min-h-11 items-center justify-center rounded-lg px-4 py-2 text-sm font-semibold bg-accent text-on-accent hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-chat-bg disabled:opacity-40 disabled:cursor-not-allowed max-sm:w-full";
 export const SCREEN_QUIET = "inline-flex min-h-11 items-center justify-center rounded-lg px-4 py-2 text-sm text-text-secondary border border-border hover:bg-surface-hover hover:text-text-primary cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 disabled:cursor-not-allowed max-sm:w-full";
 
 /** A small spinner beside a status line: something is going on, and nothing is asked of the person yet. */

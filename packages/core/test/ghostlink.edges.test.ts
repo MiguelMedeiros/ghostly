@@ -12,6 +12,7 @@ import { signPairedSignal } from "../src/pairedSignal";
 import { createChannelPair } from "./helpers";
 import { SESSION_RECEIVE_PENDING } from "../src/pairedSession";
 import { IDENTITY_FRAME_LIMIT, IDENTITY_FRAME_WINDOW_MS } from "../src/identityProofs";
+import { CALL_RATE_WINDOW_MS, CALL_RECEIVE_LIMIT } from "../src/pairedCalls";
 
 // covers: chat.paired.session, chat.paired.send, chat.paired.receipts, chat.paired.reconnect, chat.paired.nickname-sync, chat.legacy.send, core.liveness, core.capabilities, transport.switch, payments.chat.frames
 
@@ -605,14 +606,14 @@ describe("what a paired peer says about itself", () => {
     expect(t.b.groupsSupport).toBe(false);
   });
 
-  it("answers a reconnect request and ignores an unexpected acknowledgement", async () => {
+  it("ignores an old reconnect request and its acknowledgement", async () => {
     const t = linkedPair();
     await t.ready();
     const send = vi.spyOn(t.cb, "send");
     t.toB({ t: "paired-reconnect" });
     t.toB({ t: "paired-reconnect-ack" });
     await t.settle("b");
-    expect(sentFrames(send)).toContainEqual({ t: "paired-reconnect-ack" });
+    expect(sentFrames(send)).not.toContainEqual({ t: "paired-reconnect-ack" });
     expect(t.b.isDataLinkOpen).toBe(true);
   });
 
@@ -1044,10 +1045,11 @@ describe("legacy data link frames", () => {
     const pkarr = vi.spyOn(t.a.session, "sendMessage").mockResolvedValue(null);
     const call = vi.spyOn(t.a.session, "setCallSignal").mockResolvedValue();
     expect(await t.a.sendMessage("hi", 3)).toBeNull();
-    await t.a.setCallSignal("ring");
-    await vi.waitFor(() => expect(onCallSignal).toHaveBeenCalledWith("ring"));
+    const ring = JSON.stringify({ t: "h", ts: Date.now() });
+    await t.a.setCallSignal(ring);
+    await vi.waitFor(() => expect(onCallSignal).toHaveBeenCalledWith(expect.stringContaining(ring.slice(0, -1))));
     expect(onMessage).toHaveBeenCalledWith({ text: "hi", timestamp: 3, via: "datalink" });
-    expect(call).toHaveBeenCalledWith("ring");
+    expect(call).toHaveBeenCalledWith(ring);
     expect(pkarr).not.toHaveBeenCalled();
     const long = "x".repeat(16 * 1024 / 4 + 1);
     await t.a.sendMessage(long, 4);
@@ -1081,6 +1083,29 @@ describe("legacy data link frames", () => {
     expect(onMessage).not.toHaveBeenCalled();
     expect(onCallSignal).not.toHaveBeenCalled();
     expect(onPaymentRequest).not.toHaveBeenCalled();
+    expect(t.b.isDataLinkOpen).toBe(true);
+  });
+
+  it("takes at most the call receive limit of signals per window, counted before they are read, and none twice", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const onCallSignal = vi.fn();
+    const t = legacyPair([{}, { events: { onCallSignal } }]);
+    t.attach();
+    const base = Date.now();
+    const signal = (i: number) => JSON.stringify({ t: "h", ts: base + i });
+    for (let i = 0; i <= CALL_RECEIVE_LIMIT; i++) t.toB({ t: "call", s: signal(i) });
+    await vi.waitFor(() => expect(onCallSignal).toHaveBeenCalledTimes(CALL_RECEIVE_LIMIT));
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(onCallSignal).toHaveBeenCalledTimes(CALL_RECEIVE_LIMIT);
+    // The next window takes them again; one already heard is not news, and a malformed one is not handed on.
+    vi.setSystemTime(Date.now() + CALL_RATE_WINDOW_MS);
+    t.toB({ t: "call", s: signal(CALL_RECEIVE_LIMIT - 1) });
+    t.toB({ t: "call", s: "not a signal" });
+    t.toB({ t: "call", s: signal(CALL_RECEIVE_LIMIT) });
+    await vi.waitFor(() => expect(onCallSignal).toHaveBeenCalledTimes(CALL_RECEIVE_LIMIT + 1));
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(onCallSignal).toHaveBeenCalledTimes(CALL_RECEIVE_LIMIT + 1);
+    expect(onCallSignal).toHaveBeenLastCalledWith(expect.stringContaining(`"ts":${base + CALL_RECEIVE_LIMIT}`));
     expect(t.b.isDataLinkOpen).toBe(true);
   });
 
@@ -1170,21 +1195,25 @@ describe("native transports", () => {
     expect(t.onDataLinkState).toHaveBeenLastCalledWith("idle");
   });
 
-  it("after the peer asks to reconnect, its next native connection replaces the open session", async () => {
+  it("an old reconnect request leaves the open session to a dial that does not authenticate", async () => {
     const t = nativePair();
     const [ca, cb] = createChannelPair();
     t.ea.onConnection({ channel: ca, binding });
     t.eb.onConnection({ channel: cb, binding });
     await open(t.a, t.b);
-    const acks = vi.spyOn(ca, "send");
+    const sent = vi.spyOn(ca, "send");
     cb.send(JSON.stringify({ t: "paired-reconnect" }));
-    await vi.waitFor(() => expect(sentFrames(acks)).toContainEqual({ t: "paired-reconnect-ack" }));
-    const [xa, xb] = createChannelPair();
-    t.ea.onConnection({ channel: xa, binding });
-    expect((ca as FrameChannel & { closed: boolean }).closed).toBe(true);
-    t.eb.onConnection({ channel: xb, binding });
-    await open(t.a, t.b);
-    expect((t.a as unknown as Internal).channel).toBe(xa);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(sentFrames(sent)).not.toContainEqual({ t: "paired-reconnect-ack" });
+    // Anyone may dial the endpoint: until the dial proves to be the contact, the live session stays.
+    const [extra, far] = createChannelPair();
+    const close = vi.spyOn(extra, "close");
+    t.ea.onConnection({ channel: extra, binding });
+    far.send(JSON.stringify({ t: "pair-offer", v: 1 }));
+    await vi.waitFor(() => expect(close).toHaveBeenCalled());
+    expect((ca as FrameChannel & { closed: boolean }).closed).toBe(false);
+    expect((t.a as unknown as Internal).channel).toBe(ca);
+    expect(t.a.isDataLinkOpen).toBe(true);
   });
 
   it("an incoming connection on a transport this side does not offer is closed", async () => {
@@ -1462,6 +1491,40 @@ describe("DHT-only delivery", () => {
     await link.setDeliveryMode("stream");
     expect(start).toHaveBeenCalled();
     expect(link.textDelivery).toBe("unavailable");
+  });
+
+  it("switching to DHT-only stops the link session and closes the native endpoints before it waits on the mailbox", async () => {
+    const { link } = dhtLink();
+    const close = vi.fn(async () => {});
+    link.registerEndpoint({ transport: "hyperdht/1", descriptor: {}, onConnection: null, onDescriptor: null, connect: vi.fn(), close } as unknown as NativeEndpoint);
+    const stop = vi.spyOn(link.session, "stop");
+    // A relay that takes its time: the mailbox's pending work, and with it `setMode`, has not finished.
+    let settle!: () => void;
+    const inner = link as unknown as { dht: { setMode(mode: string): Promise<void> } };
+    vi.spyOn(inner.dht, "setMode").mockImplementation(() => new Promise<void>(resolve => { settle = resolve; }));
+    const switched = link.setDeliveryMode("dht");
+    await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
+    expect(stop).toHaveBeenCalledWith(false);
+    settle();
+    await switched;
+  });
+
+  it("an edit the DHT packet cannot carry with its element says so at once, though its text alone fits as a text", async () => {
+    const { link } = dhtLink();
+    const edit = (m: string) => ({ id: newId(), e: 1, ts: Date.now(), m });
+    // Off the floor nothing is asked: an edit goes on the live session.
+    expect(link.dhtEditTooBig(edit("x".repeat(256)))).toBeNull();
+    await link.setDeliveryMode("dht");
+    // The longest ASCII text the packet carries now, measured as the floor does: the same bytes as an edit go with its
+    // element (the message's id and the edit's number), and no longer fit. It waited for good, said nowhere.
+    let bound = 256;
+    while (link.validateText("x".repeat(bound), Date.now(), newId())) bound--;
+    expect(bound).toBeGreaterThan(200);
+    for (const text of ["x".repeat(bound), "é".repeat(Math.floor(bound / 2)), "x".repeat(257)]) {
+      expect(link.dhtEditTooBig(edit(text)), `${utf8Encode(text).length} bytes`).toBe("Text and authentication exceed the DHT packet budget. Shorten the message.");
+    }
+    // A short one fits.
+    expect(link.dhtEditTooBig(edit("a short edit"))).toBeNull();
   });
 
   it("confirming a DHT contact needs the current comparison code", async () => {

@@ -11,6 +11,14 @@
 @custom-variant short (@media (max-height: 500px));
 
 @theme {
+  /* Tailwind's breakpoints in px, as the app's own media queries and its JS layout queries are (`MOBILE_QUERY` is
+     767px, hooks/useIsMobile.ts). In rem they followed the browser's font size: at Very large (24px) a 1024px window was
+     under `md` but not a phone to JS, and showed the list and the chat side by side with the phone's CSS on both. */
+  --breakpoint-sm: 640px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1280px;
+  --breakpoint-2xl: 1536px;
   /* Tailwind's spinner and pulse, which never end by themselves: here they do. A dot that pulses while a contact is
      being reached rests after half a minute, a spinner after two (whatever it waits for is not coming), so a chat
      left open on a contact who is away does not keep the window drawing. They start again when their state does. */
@@ -376,6 +384,19 @@ body {
   padding-right: env(safe-area-inset-right);
 }
 
+/* Locked (components/LockScreen.tsx): a print of the page (Ctrl+P, Save as PDF) is the lock screen only. On screen the
+   app kept under it is out of sight; on paper the whole document is laid out, its text with it. Hidden, not removed:
+   `!important` over an element that makes itself `visible`. */
+@media print {
+  html[data-locked] body,
+  html[data-locked] body :not([data-lock-screen], [data-lock-screen] *) {
+    visibility: hidden !important;
+  }
+  html[data-locked] [data-lock-screen] {
+    visibility: visible !important;
+  }
+}
+
 /* An app opened from the iPhone home screen (iOS 26): with nothing in the page's flow (the body is fixed on
    phones), WebKit sizes the viewport as the screen less the status bar, and draws nothing in a band as tall as
    the status bar at the bottom, under the tab bar and the composer. A document as tall as the screen gets it all.
@@ -527,6 +548,15 @@ html[data-standalone="true"] {
   left: calc(1rem + env(safe-area-inset-left));
 }
 
+/* The group call's tiles (its grid, or the shared screen and the faces beside it): 1rem from the sides past the notch
+   or Dynamic Island of a phone on its side, where the window is the wide layout and 16 px put a tile's muted mark under
+   it. They end 1rem above the controls, which a phone lifts over its home bar (see below). */
+.call-tiles {
+  padding-left: calc(1rem + env(safe-area-inset-left));
+  padding-right: calc(1rem + env(safe-area-inset-right));
+  padding-bottom: 8rem;
+}
+
 .call-mini .call-resize {
   top: 8px;
   left: 8px;
@@ -565,6 +595,14 @@ html[data-standalone="true"] {
   overflow: hidden;
   font-size: 12px;
   line-height: 20px;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.8);
+}
+
+/* Over the contact's picture, the state line (the clock, "Reconnecting...") is white with a shadow, as the buttons
+   there are. In the theme's muted grey it was dark in a light theme (#5a6a74): 1.1:1 on a green picture, under 2:1 on
+   a dim room. */
+.call-top p[data-over-picture] {
+  color: #fff;
   text-shadow: 0 1px 3px rgb(0 0 0 / 0.8);
 }
 
@@ -671,6 +709,27 @@ html[data-standalone="true"] {
   bottom: 78px;
   padding: 4px 8px;
   font-size: 11px;
+}
+
+/* A group call's mic or camera that did not come on (GroupCallView), in the small window: its title on three lines at
+   most, just above the controls as the share notice, after the corner button (30 px at 8 px), and the next step only
+   said. Centred over the whole width with that step, a phone's 190 × 136 window began it above its top, the title cut
+   off ("…desligado"), the corner button over it. */
+.call-mini .call-group-error {
+  bottom: 54px;
+  left: 46px;
+  right: 8px;
+  width: auto;
+  max-width: none;
+  translate: none;
+}
+
+.call-mini .call-group-error > :first-child {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
 }
 
 /* The whole window lets a notice's words run onto a second line; the small one has room for one, cut short. */
@@ -794,6 +853,12 @@ html[data-standalone="true"] {
 
   .call-mini .call-share-error {
     bottom: 100px;
+  }
+
+  /* After the 44 px corner button at 4 px. */
+  .call-mini .call-group-error {
+    bottom: 76px;
+    left: 56px;
   }
 }
 
@@ -973,6 +1038,12 @@ html[data-standalone="true"] {
     bottom: calc(2.5rem + env(safe-area-inset-bottom));
   }
 
+  /* The group call's tiles end 1rem above those controls (72 px, hang up's height). A fixed 8rem left a home bar's
+     34 px under them: the muted mark and "You" sat on the microphone button. */
+  .call-tiles {
+    padding-bottom: calc(2.5rem + 72px + 1rem + env(safe-area-inset-bottom));
+  }
+
   /* An incoming call takes the whole screen, answer buttons within thumb reach. */
   .incoming-call {
     display: flex;
@@ -1060,11 +1131,6 @@ html[data-standalone="true"] {
 @keyframes fade-in {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes pulse-dot {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
 }
 
 .animate-fade-in {
@@ -1187,10 +1253,6 @@ html .toast-place.toast-place-page[data-at="top"] {
   max-width: calc(100% - 2rem);
 }
 
-.animate-pulse-dot {
-  animation: pulse-dot 1.5s ease-in-out infinite;
-}
-
 /*
  * A call ringing in: its avatar pulses a few times, then rests fully shown. A pulse for the whole ring redrew the
  * window every frame (a core of the GPU process); the ring sound says it goes on.
@@ -1230,6 +1292,17 @@ html .toast-place.toast-place-page[data-at="top"] {
   background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23c5c6c8' fill-opacity='0.4'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
 }
 
+/* Forced colors (Windows Contrast themes) replace a bubble's background with the page's, and it was all that drew the
+   bubble: the wallpaper's pattern ran under the words, and the tail (an SVG fill, kept in the theme's colour) hung on
+   its own. There the wallpaper is plain, the tail is not drawn and the bubble has an edge in the theme's text colour,
+   an outline inside its box so nothing moves. Message details' accent outline (`outline-2`) stays as it is. Settings'
+   Text size preview draws its messages the same way (`data-preview-bubble`). */
+@media (forced-colors: active) {
+  .chat-wallpaper, [data-theme] .chat-wallpaper { background-image: none; }
+  .bubble-tail { display: none; }
+  [data-message-bubble]:not([class~="outline-2"]), [data-preview-bubble] { outline: 1px solid CanvasText; outline-offset: -1px; }
+}
+
 /*
  * A chat's message list on a layer of its own. In WebKit (Desktop on the Mac), a long chat left open froze for 300 to
  * 450 ms every half second or so with no script running (nothing drawn by React, nothing changed in the page), and the
@@ -1247,7 +1320,7 @@ html .toast-place.toast-place-page[data-at="top"] {
  * squeezed its bubbles to a third of it, and a video into a tall black box.
  */
 .message-row-x { padding-inline: 63px; }
-@media (width < 48rem) { .message-row-x { padding-inline: 10px; } }
+@media (width < 768px) { .message-row-x { padding-inline: 10px; } }
 @container message-list (width < 36rem) { .message-row-x { padding-inline: 10px; } }
 
 /*
@@ -1256,7 +1329,7 @@ html .toast-place.toast-place-page[data-at="top"] {
  * line long enough to wrap pushed it against the screen's edge, which cut the 44px a thumb needs to 33. The row keeps
  * those 22px on both sides (the line stays centred, and in Arabic the ⋮ is on the left with the same room).
  */
-@media (width < 48rem) { .message-row-x.system-row-x { padding-inline: 22px; } }
+@media (width < 768px) { .message-row-x.system-row-x { padding-inline: 22px; } }
 @container message-list (width < 36rem) { .message-row-x.system-row-x { padding-inline: 22px; } }
 
 /*
@@ -1265,7 +1338,7 @@ html .toast-place.toast-place-page[data-at="top"] {
  * the room and the name's colour alone tells who wrote.
  */
 .sender-avatar { width: 28px; height: 28px; flex-shrink: 0; align-self: flex-end; margin-inline-end: 2px; }
-@media (width < 48rem) { .sender-avatar { width: 24px; height: 24px; } }
+@media (width < 768px) { .sender-avatar { width: 24px; height: 24px; } }
 @container message-list (width < 36rem) { .sender-avatar { width: 24px; height: 24px; } }
 @media (width < 22rem) { .sender-avatar { display: none; } }
 @container message-list (width < 22rem) { .sender-avatar { display: none; } }
@@ -1443,7 +1516,7 @@ html .toast-place.toast-place-page[data-at="top"] {
  * on when it is back. Only loops are listed: a finite animation (a bubble coming in) must finish, or it would leave
  * its element half shown. A new loop goes here too (test/idleMotion.test.ts checks the stylesheets).
  */
-:root[data-away] :is(.animate-spin, .animate-pulse, .animate-pulse-dot, .typing-dots > span, .profile-switch-badge,
+:root[data-away] :is(.animate-spin, .animate-pulse, .typing-dots > span, .profile-switch-badge,
   .voice-bar-dot, .voice-slide-arrow, .new-wallet-spinner, .pi-packet),
 :root[data-away] .new-wallet-shimmer::after { animation-play-state: paused !important; }
 
@@ -1485,13 +1558,6 @@ html .toast-place.toast-place-page[data-at="top"] {
   background-repeat: no-repeat;
   animation: sats-shine 0.9s ease-out 0.1s both;
 }
-
-@keyframes bolt-pop {
-  0% { transform: scale(0.4) rotate(-20deg); opacity: 0; }
-  60% { transform: scale(1.35) rotate(6deg); opacity: 1; }
-  100% { transform: none; }
-}
-.animate-bolt-pop { display: inline-block; animation: bolt-pop 0.5s cubic-bezier(0.3, 1.5, 0.5, 1) both; }
 
 @keyframes nudge {
   0%, 100% { transform: none; }
@@ -1663,6 +1729,8 @@ input[type="checkbox"]:not(:disabled), input[type="radio"]:not(:disabled), selec
 [role="button"]:not(:disabled):not([aria-disabled="true"]), [role="switch"]:not(:disabled):not([aria-disabled="true"]) { cursor: pointer; }
 button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, input[type="radio"]:disabled, select:disabled,
 [role="button"][aria-disabled="true"], [role="switch"][aria-disabled="true"] { cursor: not-allowed; }
+/* Disabled while it has the focus (FocusSafeButton): looks as a disabled button does, and keeps the focus. */
+button[data-held] { opacity: 0.4; }
 
 /* Shared desktop baseline; the composer can still grow with multiline text. */
 @media (min-width: 768px) {
@@ -1694,9 +1762,12 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
 }
 /* A chat's search with the keyboard up on a short screen (a phone on its side): the chat's header, the search bar and
    the composer took all the keyboard leaves, and "1 of 8" showed no message. While the search has the focus, the
-   composer goes behind the keyboard and the bar keeps only its buttons' height. */
+   composer goes behind the keyboard and the bar keeps only its buttons' height. The other way round, a reply or an edit
+   written while the search is open: the search bar goes behind the keyboard, as the pinned bar does, or the list was
+   0px tall and the field 30px under the keyboard. */
 @media (pointer: coarse) and (max-height: 500px) {
   html[data-keyboard="true"]:has(.chat-search-bar:focus-within) [data-composer] { display: none; }
+  html[data-keyboard="true"]:has([data-composer]:focus-within) .chat-search-bar { display: none; }
   html[data-keyboard="true"] .chat-search-bar:focus-within { padding-block: 0; }
 }
 
@@ -1734,7 +1805,7 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
 /* A thumb's 44px on a phone, for a control drawn smaller there: where a tap lands grows past its box, centred on it, and
    it looks the same. Its own box must not clip (no overflow-hidden, no ::after of its own), nor what holds it. One
    placed with `absolute` (a × in a tile's corner) stays where it is: it already holds its ::after. */
-@media (width < 48rem) {
+@media (width < 768px) {
   .tap-target:not(.absolute) { position: relative; }
   .tap-target::after { content: ""; position: absolute; top: 50%; left: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
 }
@@ -1757,6 +1828,11 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
 .sidebar-header[data-labels="off"] .sidebar-header-action { width: 40px; gap: 0; }
 .sidebar-header[data-labels="off"] .sidebar-new-split > .sidebar-header-action { width: auto; }
 .sidebar-header[data-labels="off"] [data-testid="sidebar-chat-actions"] > .sidebar-header-action { width: 100%; }
+/* Still too wide without them (a phone at a large text size): the wordmark goes, the ghost stays; then Join takes only
+   its own width, not New's. */
+.sidebar-header[data-wordmark="off"] .sidebar-wordmark { display: none; }
+.sidebar-header[data-join="own"] [data-testid="sidebar-chat-actions"] { grid-template-columns: auto auto; }
+.sidebar-header[data-join="own"] [data-testid="sidebar-chat-actions"] > .sidebar-header-action { width: auto; }
 
 /* Which money: "Test money" or "Real money", wherever money moves. Words first; the colour only echoes them. */
 .network-tag{display:inline-block;padding:0 6px;border:1px solid currentColor;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.04em;line-height:1.7;text-transform:uppercase;vertical-align:middle;white-space:nowrap}
@@ -1775,7 +1851,7 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
   padding-left: max(1rem, env(safe-area-inset-left));
   padding-right: max(1rem, env(safe-area-inset-right));
 }
-@media (width < 48rem) {
+@media (width < 768px) {
   .picture-viewer-area { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
 }
 .picture-viewer-close {
@@ -1783,6 +1859,20 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
   right: max(0.75rem, env(safe-area-inset-right));
 }
 [dir="rtl"] .picture-viewer-close { right: auto; left: max(0.75rem, env(safe-area-inset-left)); }
+
+/* A panel from the end edge on a wide screen (a message's details, a wallet total's breakdown) is a portal on the body
+   too: an iPhone on its side or an installed iPad keeps its close button and its last row clear of the notch, the
+   status bar and the home indicator. The end inset is added to its width, so the content keeps its 400px. */
+.end-panel {
+  width: min(calc(400px + env(safe-area-inset-right)), 100vw);
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-inline-end: env(safe-area-inset-right);
+}
+[dir="rtl"] .end-panel {
+  width: min(calc(400px + env(safe-area-inset-left)), 100vw);
+  padding-inline-end: env(safe-area-inset-left);
+}
 
 /* An app opened alone covers the whole screen: its bar keeps clear of a phone's status bar and notch (webOpener.ts). */
 .alone-bar {
@@ -1850,4 +1940,13 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
     border-start-end-radius: 9999px;
     border-end-end-radius: 0;
   }
+}
+
+/* Forced colors: a progress bar (a file on its way, a backup or a restore, a task card). Its track and its fill were
+   backgrounds alone, which forced colors replace with the page's: an empty strip. A CanvasText frame on the page's
+   colour and a Highlight fill instead, both kept as drawn; at least 6px tall, so the frame leaves the fill room. Only
+   the bars here. */
+@media (forced-colors: active) {
+  .progress-track { forced-color-adjust: none; border: 1px solid CanvasText; background: Canvas; min-block-size: 6px; }
+  .progress-fill { forced-color-adjust: none; background: Highlight; }
 }

@@ -195,6 +195,29 @@ describe("payments in a community on headless engines", { timeout: 180_000 }, ()
     expect([bobKey, keyOf(world, carol, id)]).toContain(winner);
   });
 
+  /**
+   * A request to the whole community closed for good (the wallet it was paid to removed) was said only to... nobody: the
+   * group's link said "paid" alone, so every member kept a Pay that would pay a wallet that is gone. Closed is said to
+   * everyone too, and only the requester's word closes it.
+   */
+  it("a request to the whole community closed for good closes for every member, at its requester's word only", async () => {
+    const { world, id, members } = await community(["admin", "p1", "p2", "p3"]);
+    const [alice, bob, carol, dave] = members;
+    const aliceKey = keyOf(world, alice, id);
+    const { paymentId } = await alice.desk.requestFromGroup({ groupId: id, amount: 300, timestamp: world.now, rail: "cashu" });
+    await world.until(() => [bob, carol, dave].every(m => m.desk.views()[paymentId]?.state === "pending"), 60_000);
+
+    // Another member saying it is closed changes nothing.
+    bob.pay.link(groupLinkId(id))!.sendPaymentResult({ id: paymentId, ok: false, error: "your contact removed the wallet it was paid to", closed: true });
+    await world.run(15_000);
+    expect(carol.desk.views()[paymentId]?.state).toBe("pending");
+
+    expect(await alice.desk.close(paymentId, "you removed the Testnet Cashu wallet it was paid to")).toBe(true);
+    await world.until(() => [bob, carol, dave].every(m => m.desk.views()[paymentId]?.state === "failed"), 60_000);
+    for (const m of [bob, carol, dave]) expect(m.desk.views()[paymentId]).toMatchObject({ linkId: pairLinkId(id, aliceKey), closed: true });
+    await expect(carol.desk.payRequest({ linkId: pairLinkId(id, aliceKey), paymentId })).rejects.toThrow("no longer open");
+  });
+
   it("a member learns what another takes when asked: until then, Cashu and Lightning", async () => {
     const { world, id, members } = await community(["admin", "p1", "p2"]);
     const [alice, bob] = members;

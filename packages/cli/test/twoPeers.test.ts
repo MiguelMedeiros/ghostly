@@ -372,9 +372,9 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     for (const i of stops) expect((typing[i + 1].at as number) - (typing[i].at as number), shown).toBeLessThan(TYPING_REFRESH_MS);
     const ended = listen.lines.length;
     await listen.waitFor((l) => l.type === "typing.stopped" && listen.lines.indexOf(l) >= ended);
-    // What the contact's app would not show is refused here.
-    const refused = error(await as(alice, "typing", "bob", "--status", "see https://x.example"), "bad_request", 1);
-    expect(refused.message).toContain("no link or markup");
+    // What the contact's app would not show is refused here, as a usage error that names the option.
+    const refused = error(await as(alice, "typing", "bob", "--status", "see https://x.example"), "usage", 2);
+    expect(refused.message).toBe("--status is plain text: no link or markup");
     await listen.stop();
   });
 
@@ -514,7 +514,8 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     ok(await as(alice, "react", "bob", theirs.id, "--remove"));
     await listen.waitFor((l) => l.type === "message.reaction" && l.removed === true);
     expect((await shown()).reactions).toBeUndefined();
-    error(await as(alice, "react", "bob", theirs.id, "not an emoji"), "bad_request", 1);
+    // A usage error before the daemon is asked (the API answers bad_request only to socket callers).
+    error(await as(alice, "react", "bob", theirs.id, "not an emoji"), "usage", 2);
     error(await as(alice, "react", "bob", "no-such-message", "👍"), "not_found", 3);
     await listen.stop();
   });

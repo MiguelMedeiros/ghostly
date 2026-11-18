@@ -14,6 +14,7 @@
     "messagesFrom": "{{count}} mensagens novas de {{name}}",
     "notSent": "Sua mensagem “{{text}}” não foi enviada",
     "notSentCount": "{{count}} mensagens não enviadas",
+    "paymentState": "{{payment}} · {{state}}",
     "pinMoved": "Movida para a posição {{place}} de {{count}} conversas fixadas",
     "rowMoved": "Agora na posição {{place}} de {{count}}",
     "waiting": "Sua mensagem “{{text}}” está aguardando seu contato ficar online",
@@ -113,6 +114,7 @@
     "lookupLocal": "Verificado neste aparelho: a chave é o identificador.",
     "lookupPubky": "Consultar pergunta aos relays Pkarr do Pubky ({{relays}}), que ficam sabendo seu endereço IP e esta chave.",
     "lookupWeb": "Consultar pergunta ao seu resolvedor DNS-over-HTTPS sobre {{host}} e baixa o did.json de lá: esse servidor fica sabendo seu endereço IP.",
+    "lookupWebHiddenIp": "Ocultar meu IP está ligado, então {{host}}, um servidor que seu contato escolheu, não é contatado.",
     "muted": "Oculto pela sua lista de silenciados do Nostr.",
     "nip05": "(NIP-05, como a pessoa escreveu, não verificado)",
     "noDids": "Este app não resolve DIDs",
@@ -161,7 +163,7 @@
     "leftHoursMinutes": "{{hours}} h {{minutes}} min restantes",
     "leftMinutes": "{{minutes}} min restantes",
     "leftUnderMinute": "menos de um minuto restante",
-    "noRoomDevice": "Espaço insuficiente: {{size}} livres neste aparelho",
+    "noRoomDevice": "Espaço insuficiente: sobram {{size}} neste aparelho",
     "nobodyHas": "Ninguém com quem você está conectado tem este arquivo ainda",
     "nobodyHasHint": "Ele chega sozinho quando um membro que o tem estiver online.",
     "notDownloaded": "{{size}} · não baixado",
@@ -177,7 +179,7 @@
     "resendHint": "Oferece de novo. Continua do que seu contato já tem.",
     "restoring": "Carregando… · {{size}}",
     "resume": "Continuar",
-    "roomDevice": "{{size}} livres neste aparelho",
+    "roomDevice": "Sobram {{size}} neste aparelho",
     "senderOnly": "Ainda não está com suas conexões",
     "senderOnlyHint": "Em um grupo deste tamanho, seu app se conecta por meio de poucos membros, não com quem enviou. Ele chega sozinho quando um deles baixar, ou peça a quem enviou que o mande para você em uma conversa.",
     "stalled": "Parado · {{progress}}",
@@ -206,6 +208,8 @@
     "noMatch": "Nenhuma conversa com esse nome",
     "partial": "{{sent}} de {{count}} enviadas",
     "pick": "Escolha até {{count}}",
+    "refused": "{{name}}: {{error}}",
+    "refusedPartial": "{{name}} ({{partial}}): {{error}}",
     "search": "Buscar conversas",
     "select": "Selecionar",
     "selected": "{{count}} selecionadas",
@@ -241,7 +245,6 @@
     "newOne": "1 mensagem nova, rolar até o fim"
   },
   "keyChanged": "Esta conversa parou: a chave do seu contato mudou.",
-  "lastSeen": "Visto por último {{time}}",
   "listTime": {
     "days": "{{count}} d",
     "hours": "{{count}} h",
@@ -257,11 +260,11 @@
   },
   "media": {
     "downloadSize": "Baixar {{size}}",
-    "noRoom": "Espaço insuficiente: {{size}} livres",
+    "noRoom": "Espaço insuficiente: sobram {{size}}",
     "noRoomToPlay": "Sem espaço livre em disco para tocar aqui. Baixe o arquivo.",
     "notYet": "Toca depois de enviado.",
     "positionOf": "{{position}} de {{duration}}",
-    "wantsToSend": "{{name}} quer enviar · {{size}} livres"
+    "wantsToSend": "{{name}} quer enviar · sobram {{size}}"
   },
   "menu": {
     "continueNew": "Continuar numa nova conversa",
@@ -314,7 +317,7 @@
   "online": "online",
   "options": "Opções",
   "payments": {
-    "needLive": "Pagamentos precisam de uma conexão direta",
+    "needLive": "Enviar precisa do seu contato online: ecash nunca fica esperando numa fila. Um pedido pode esperar até o contato voltar.",
     "noWallet": "Seu contato ainda não tem carteira",
     "off": "Desligado nesta conversa: ative uma forma em Aceitar",
     "offOrOld": "Seu contato desligou pagamentos nesta conversa ou precisa atualizar o Ghostly"
@@ -394,6 +397,8 @@
     "copyCode": "Copiar código",
     "hiddenChars": "Este código tem caracteres ocultos ou que mudam a direção do texto, mostrados como {{marker}}. Copiar código copia eles também.",
     "localTime": "{{time}} no seu horário",
+    "notCopied": "Não copiado",
+    "notCopiedHint": "Não copiado. Selecione o texto e copie-o.",
     "showAll": "Mostrar tudo",
     "showLess": "Mostrar menos",
     "spoiler": "Texto oculto. Toque para mostrar",
@@ -483,7 +488,6 @@
     "showTranslation": "Ver tradução",
     "translate": "Traduzir"
   },
-  "typeMessage": "Digite uma mensagem...",
   "typing": "digitando…",
   "typingRecording": "gravando áudio…",
   "typingThinking": "pensando…",
@@ -502,6 +506,7 @@
     "tooLarge": "Grande demais para tocar aqui. Baixe para assistir."
   },
   "voice": {
+    "callPaused": "Mensagem de voz pausada pela chamada",
     "cancelled": "Mensagem de voz cancelada",
     "cantPlay": "Este dispositivo não toca gravações {{format}}. Salve para tocar em outro lugar.",
     "couldNotPlay": "Não foi possível tocar esta gravação.",
@@ -527,6 +532,7 @@
     "recordHint": "Segure para gravar ou clique para gravar sem as mãos",
     "recorded": "Gravado {{time}}",
     "recording": "Gravando",
+    "resumeAfterCall": "Continuar depois da chamada",
     "sent": "Mensagem de voz enviada",
     "slideCancel": "Deslize para cancelar",
     "speed": "Velocidade {{speed}}",

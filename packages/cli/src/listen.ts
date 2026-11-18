@@ -1,10 +1,11 @@
 import { spawn } from "node:child_process";
 import { accessSync, constants, existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { CONTACT_KEY, nameKey, namedByThem } from "./apiKit";
+import { contactKeyOf, nameKey, namedByThem, sharedGroupIds } from "./apiKit";
 import { childEnv } from "./childEnv";
 import { connectDaemon, type DaemonAddress, type DaemonClient } from "./client";
 import { CliError, localFileError } from "./errors";
+import { shellWord } from "./shellWord";
 import type { GhostlyEvent } from "./events";
 import { jsonOut } from "./jsonOut";
 import { turnRef } from "./turnRefs";
@@ -41,6 +42,12 @@ export interface ListenOptions {
   /** `EXEC_SLOW_MS` and `EXEC_STOP_MS`, shorter in tests. */
   execSlowMs?: number;
   stopMs?: number;
+  /**
+   * The folder and profile the listen runs on, set as `GHOSTLY_HOME` and `GHOSTLY_PROFILE` in an --exec hook's
+   * environment: its own `ghostly send` answers from them. Before, a listen given `--profile` or `--home` ran its hook
+   * on the environment's, and the answer went to the current profile ("No chat …", or another identity's chat).
+   */
+  profile?: { home: string; name: string };
 }
 
 /** The cursor's own write failed, not the event's handling. */
@@ -62,11 +69,16 @@ export class Allowlist {
 
   async allows(event: GhostlyEvent): Promise<boolean> {
     if ("group" in event) return typeof event.group === "string" && this.groups.has(event.group);
+    // A group's payment names a link (`group:<id>`, a community's `cpay:…`, a member's), never the group: its group says.
+    const group = (event.payment as { group?: unknown } | undefined)?.group;
+    if (group !== undefined) return typeof group === "string" && this.groups.has(group);
     if (!("chat" in event)) return true;
     const chat = event.chat;
     if (typeof chat !== "string") return false;
     if (this.chats.has(chat)) return true;
     if (!this.keys.size) return false;
+    // A removal carries the key: the chat is gone, so its lookup fails, and a replay holds no earlier event of it.
+    if (event.type === "chat.removed" && typeof event.peer === "string") return this.keys.has(event.peer);
     // Kept once known: a chat's contact key does not change. One not paired yet is asked again next time.
     let key = this.peers.get(chat);
     if (!key) { key = (await this.peerOf(chat).catch(() => null)) || undefined; if (key) this.peers.set(chat, key); }
@@ -83,25 +95,41 @@ export class Allowlist {
 export async function allowlist(from: readonly string[], groups: readonly string[], call: (method: string, params: Record<string, unknown>) => Promise<unknown>, peerOf: (chat: string) => Promise<string | null>): Promise<Allowlist> {
   const chats = new Set<string>(), keys = new Set<string>(), groupIds = new Set<string>();
   for (const ref of from) {
-    if (CONTACT_KEY.test(ref)) { keys.add(ref); continue; }
-    const chat = (await otherFlag(call("chat.get", { chat: ref }), ref, "--from")) as { id: string; label?: string | null; peerName?: string | null; peer?: string };
-    // A label compared as the lookup compares it (`nameKey`): the string given to `chat rename` names its chat.
-    if (chat.id !== ref && (!nameKey(ref) || nameKey(chat.label) !== nameKey(ref))) throw namedByThem(ref, { chat: chat.id, name: chat.peerName ?? null, contact: chat.peer });
-    chats.add(chat.id);
+    const key = contactKeyOf(ref);
+    if (key !== undefined) { keys.add(key); continue; }
+    chats.add(await fromChat(ref, call));
   }
-  for (const ref of groups) groupIds.add(((await otherFlag(call("group.get", { group: ref }), ref, "--group")) as { id: string }).id);
+  for (const ref of groups) groupIds.add(((await otherFlag(call("group.get", { group: ref }), ref, "--group", call)) as { id: string }).id);
   return new Allowlist(chats, keys, groupIds, peerOf);
+}
+
+/** The chat `--from <ref>` names (not a contact key): its id, or `namedByThem` when only its contact chose `ref`. */
+async function fromChat(ref: string, call: (method: string, params: Record<string, unknown>) => Promise<unknown>): Promise<string> {
+  const chat = (await otherFlag(call("chat.get", { chat: ref }), ref, "--from", call)) as { id: string; label?: string | null; peerName?: string | null; peer?: string };
+  // A label compared as the lookup compares it (`nameKey`): the string given to `chat rename` names its chat.
+  if (chat.id !== ref && (!nameKey(ref) || nameKey(chat.label) !== nameKey(ref))) throw namedByThem(ref, { chat: chat.id, name: chat.peerName ?? null, contact: chat.peer });
+  return chat.id;
 }
 
 /**
  * A `--from` that names a group, or a `--group` a chat: said with the flag that takes it. The lookup's own hint named
- * `ghostly group show` (or `chat show`), which lists nothing.
+ * `ghostly group show` (or `chat show`), which lists nothing. A chat is named by its id: `--from` refuses a prefix of it
+ * or the name its contact chose, which `--group`'s lookup took, so a `--group` that found its chat only so is refused
+ * as `--from` refuses it, with no `--from` to paste.
  */
-async function otherFlag(lookup: Promise<unknown>, ref: string, flag: "--from" | "--group"): Promise<unknown> {
+async function otherFlag(lookup: Promise<unknown>, ref: string, flag: "--from" | "--group", call: (method: string, params: Record<string, unknown>) => Promise<unknown>): Promise<unknown> {
   try { return await lookup; } catch (error) {
     const other = flag === "--from" ? "group" : "chat";
+    // A name more than one group has: `--group` with the id of the one meant (`matches`), not `group show`. Asked of the
+    // group lookup: a `not_found` with `matches` may hold chats (`group:<name>` a chat's label has).
+    if (flag === "--from" && error instanceof CliError && error.code === "not_found" && Array.isArray(error.details?.matches)) {
+      const shared = await call("group.get", { group: ref }).then(() => undefined, sharedGroupIds);
+      if (shared) throw new CliError("not_found", `${JSON.stringify(ref)} names more than one group, not a chat: ghostly listen --group <group>, with the id of the group meant (ghostly group list)`, { matches: shared });
+    }
     if (!(error instanceof CliError) || error.code !== "not_found" || typeof error.details?.[other] !== "string") throw error;
-    const shown = /^[\w.:-]+$/.test(ref) ? ref : JSON.stringify(ref);
+    if (other === "chat" && contactKeyOf(ref) === undefined) await fromChat(ref, call);
+    const named = other === "chat" ? error.details.chat as string : ref;
+    const shown = shellWord(named, error.details[other] as string);
     throw new CliError("not_found", `${JSON.stringify(ref)} is a ${other}, not a ${flag === "--from" ? "chat" : "group"}: ghostly listen ${flag === "--from" ? "--group" : "--from"} ${shown}`, error.details);
   }
 }
@@ -174,20 +202,26 @@ function turn(event: GhostlyEvent, source: AgentTurn["source"], where: Pick<Agen
   };
 }
 
-/** Only loopback: events carry message text, and a webhook is a local bridge (WISP 1100 § Security). */
-export function checkWebhook(url: string): URL {
+/**
+ * Only loopback: events carry message text, and a webhook is a local bridge (WISP 1100 § Security). `from` names where
+ * the URL came from; what is not a URL is not repeated: a bridge's token is in it.
+ */
+export function checkWebhook(url: string, from = "--webhook"): URL {
   let parsed: URL;
-  try { parsed = new URL(url); } catch { throw new CliError("usage", `Not a URL: ${url}`); }
+  try { parsed = new URL(url); } catch { throw new CliError("usage", `${from} is not a URL`); }
   if (!["http:", "https:"].includes(parsed.protocol)) throw new CliError("usage", "The webhook must be http:// or https://");
   if (!["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname)) throw new CliError("usage", "The webhook must be on this machine (127.0.0.1, localhost or [::1])");
   // fetch refuses a URL with credentials: every event was held as "not answering" for good, the password on stderr.
-  if (parsed.username || parsed.password) throw new CliError("usage", "The webhook URL takes no user or password: put the bridge's token in its path or query");
+  if (parsed.username || parsed.password) throw new CliError("usage", "The webhook URL takes no user or password: put the bridge's token in its path or query, the URL in GHOSTLY_WEBHOOK");
   return parsed;
 }
 
+/** A cursor file that is there and read, but holds no event number: the one refusal --since takes as its start. */
+class NoEventNumber extends CliError {}
+
 /**
  * The event number a cursor file holds, or undefined when there is no file (a first start: live events). A file that is
- * there and holds no whole number (empty, half-written, edited by hand) is refused, naming the file and what it holds:
+ * there and holds no whole number (empty, half-written, edited by hand) is refused, naming the file and how much it holds:
  * taken as no cursor, the listener started at the journal's end and skipped every event since the last one handled,
  * without a word, and its next write replaced the file.
  */
@@ -198,8 +232,34 @@ export function readCursor(path: string | undefined): number | undefined {
   const trimmed = text.trim();
   const value = trimmed === "" ? NaN : Number(trimmed);
   if (Number.isSafeInteger(value) && value >= 0 && /^\d+$/.test(trimmed)) return value;
-  const shown = trimmed === "" ? "nothing" : JSON.stringify(trimmed.length > 32 ? `${trimmed.slice(0, 32)}…` : trimmed);
-  throw new CliError("bad_request", `${path} holds no event number (${shown}): fix or remove it, or give --since`);
+  // Measured, never quoted: a --cursor pointed at a seed or key file by mistake put its start on stderr, which a service
+  // manager keeps in its journal.
+  const words = trimmed.split(/\s+/).length, bytes = Buffer.byteLength(trimmed);
+  const shown = trimmed === "" ? "nothing" : `${words} ${words === 1 ? "word" : "words"}, ${bytes} ${bytes === 1 ? "byte" : "bytes"}`;
+  throw new NoEventNumber("bad_request", `${path} holds no event number (${shown}): fix or remove it, or give --since`);
+}
+
+/**
+ * Where listen starts: after the event number the cursor file holds, else after `since` (--since: the first start's
+ * place). Before, --since won without a word, and a unit with `--since 0 --cursor f` ran every handled event's hook
+ * again at each restart. A cursor file that holds no number is refused unless --since is given, which starts it; one
+ * that cannot be read, or a folder, is refused either way (before, --since started it too and its hook ran again).
+ * `known`, once the journal's last event is: says on stderr where it starts. A cursor past it (a profile restored from a
+ * backup, a journal reset, a cursor copied from another profile) starts with new events; before, stderr said "starting
+ * after it" (or nothing, without --since) and the next event wrote a lower number over the file.
+ */
+export function startAt(since: number | undefined, cursor: string | undefined, say: (line: string) => void): { from: number | undefined; known(lastSeq: number): void } {
+  let kept: number | undefined;
+  if (since === undefined) kept = readCursor(cursor);
+  else try { kept = readCursor(cursor); } catch (error) { if (!(error instanceof NoEventNumber)) throw error; /* --since starts it */ }
+  return {
+    from: kept ?? since,
+    known: (lastSeq) => {
+      if (kept === undefined) return;
+      if (kept > lastSeq) say(`ghostly: ${cursor} holds event ${kept}, past this profile's last event (${lastSeq}): starting with new events`);
+      else if (since !== undefined && kept !== since) say(`ghostly: ${cursor} holds event ${kept}: starting after it, not after --since ${since}`);
+    },
+  };
 }
 
 /**
@@ -270,6 +330,10 @@ export function checkTypes(types: readonly string[], warn: (line: string) => voi
     if (type === "*") continue;
     const family = type.split(/[.*]/)[0];
     if (!EVENT_FAMILIES.includes(family)) throw new CliError("usage", `No event is of type ${type}: --type takes a type, or a family (${EVENT_FAMILIES.join(", ")})`);
+    // Turns are made from the events --type keeps, and --turns is refused beside it: a --type that keeps only
+    // agent.turn kept nothing, and the listener stayed silent for good without a word.
+    const known = EVENT_TYPES.filter((each) => matches({ seq: 0, id: "", type: each, at: 0 }, [type]));
+    if (known.length === 1 && known[0] === "agent.turn") throw new CliError("usage", `No event is of type ${type} without --turns: ghostly listen --turns gives agent.turn events, in the place of --type`);
     if (!EVENT_TYPES.some((known) => matches({ seq: 0, id: "", type: known, at: 0 }, [type]))) warn(`ghostly: no event is of type ${type}; the ${family} family has ${EVENT_TYPES.filter((known) => known.startsWith(family + ".")).join(", ")}`);
   }
 }
@@ -297,14 +361,14 @@ interface Hook { event: GhostlyEvent; ended: Promise<HookEnd>; signal(name: Node
  * `toStderr` (with `--print`, whose stdout is the JSON stream): the hook's stdout is streamed to listen's stderr, so a
  * hook that echoes never puts a line that is not an event into the stream. Piped as it comes, never held in memory.
  */
-function runExec(command: string, event: GhostlyEvent, toStderr: boolean): Hook {
+function runExec(command: string, event: GhostlyEvent, toStderr: boolean, profile?: ListenOptions["profile"]): Hook {
   // Its own process group (not on Windows, where that opens a console), so a stop ends the hook and what it started.
   const group = process.platform !== "win32";
   const child = spawn(command, {
     shell: true,
     detached: group,
     stdio: ["pipe", toStderr ? "pipe" : "inherit", "inherit"],
-    env: { ...hookEnv(process.env), GHOSTLY_EVENT_TYPE: event.type, GHOSTLY_EVENT_ID: event.id, GHOSTLY_EVENT_SEQ: String(event.seq) },
+    env: { ...hookEnv(process.env), ...(profile ? { GHOSTLY_HOME: profile.home, GHOSTLY_PROFILE: profile.name } : {}), GHOSTLY_EVENT_TYPE: event.type, GHOSTLY_EVENT_ID: event.id, GHOSTLY_EVENT_SEQ: String(event.seq) },
   });
   const signal = (name: NodeJS.Signals) => {
     try { if (group && child.pid) process.kill(-child.pid, name); else child.kill(name); } catch { /* gone already */ }
@@ -338,7 +402,8 @@ function runExec(command: string, event: GhostlyEvent, toStderr: boolean): Hook 
 const RETRY_MAX_MS = 60_000;
 
 /**
- * Posts one event; resolves true once the bridge took it, or the status it refused it with (a 4xx or a redirect, three times).
+ * Posts one event; resolves true once the bridge took it, or the status it refused it with (a 4xx or a redirect, posted
+ * once: before, three times with backoff, three refusals in the bridge's log for an event stderr said was not tried again).
  * A bridge that is not there (refused connection, timeout, 5xx, 408, 429) has not handled the event: it is tried again,
  * waiting up to a minute between tries, for as long as it takes, so the cursor never moves past it. Before, three tries
  * in 3.5 s and the cursor moved on: a bridge restarting for longer lost every event of the time it was down, for good.
@@ -359,7 +424,7 @@ async function post(url: URL, event: GhostlyEvent, retryMs: number): Promise<tru
       status = response.status;
       down = status >= 500 || status === 408 || status === 429;
     } catch { /* not there: tried again */ }
-    if (!down && attempt >= 2) return status;
+    if (!down) return status;
     if (down && attempt >= 2 && !holding) {
       holding = true;
       process.stderr.write(`ghostly: the webhook at ${url.origin} is not answering: holding event ${event.seq} (${event.type}) until it does\n`);
@@ -430,15 +495,14 @@ export function eventHandler(options: ListenOptions): EventHandler {
       if (stopped) return;
       const skip = () => keep(event.seq);
       if (options.allow && !(await options.allow.allows(event))) return skip();
+      // What --turns drops is dropped before the translation: a contact's edits and a group's messages that name nobody
+      // went through the model one by one, 16 KiB each, every turn behind them waiting, to be thrown away.
+      if (options.turns && !gap && !toTurn(event)) return skip();
       if (options.translate) event = await options.translate(event);
-      if (options.turns && !gap) {
-        const next = toTurn(event);
-        if (!next) return skip();
-        event = next;
-      }
+      if (options.turns && !gap) event = toTurn(event)!;
       const full = options.print && options.write(jsonOut(event)) === false;
       if (options.exec) {
-        const hook = running = runExec(options.exec, event, options.print);
+        const hook = running = runExec(options.exec, event, options.print, options.profile);
         // Once, as the webhook's "not answering": a hook that never ends held every later event without a word.
         const slow = setTimeout(() => process.stderr.write(`ghostly: --exec still runs on event ${hook.event.seq} (${hook.event.type}) after ${Math.round(slowMs / 1000)} s: the events after it wait for it\n`), slowMs);
         const { code, signal } = await hook.ended.finally(() => { clearTimeout(slow); running = null; });
@@ -569,14 +633,19 @@ export function followDaemon(address: DaemonAddress, client: DaemonClient, handl
     if (current) current.resume(); else reconnect(0);
   });
   // A feed that took no event yet goes on after the last seq the daemon had when it subscribed: one that restarts
-  // otherwise subscribes it from its own now, past what it journaled before the reconnect (its daemon.started).
-  const follow = (c: DaemonClient) => c.subscribe(feed.since, feed.take, () => {
-    if (current !== c) return;
-    current = null;
-    reconnect(1000);
-  }).then((answer) => {
-    if (feed.since === undefined && typeof answer?.lastSeq === "number") feed.since = answer.lastSeq;
-    return answer;
-  });
+  // otherwise subscribes it from its own now, past what it journaled before the reconnect (its daemon.started). So does
+  // one started past the daemon's last event (a cursor from a backup, `startAt`): it waited at the cursor's number, and
+  // the daemon replays nothing up to it. Not once it took an event since: that is where it is.
+  const follow = (c: DaemonClient) => {
+    const asked = feed.since;
+    return c.subscribe(asked, feed.take, () => {
+      if (current !== c) return;
+      current = null;
+      reconnect(1000);
+    }).then((answer) => {
+      if (typeof answer?.lastSeq === "number" && feed.since === asked && (asked === undefined || asked > answer.lastSeq)) feed.since = answer.lastSeq;
+      return answer;
+    });
+  };
   return { subscribed: follow(client), close: () => { clearTimeout(holding); current?.close(); } };
 }

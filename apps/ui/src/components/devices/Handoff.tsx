@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { FAILURES, dayText, handoffProblem, sizeText, useHandoffView, walletNameOf } from "../../lib/handoff";
+import { FAILURES, dayText, handoffErrorKey, handoffProblem, sizeText, useHandoffView, walletNameOf } from "../../lib/handoff";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { HandoffView } from "@ghostly/browser/devices/handoff";
 import { meteredConnection } from "@ghostly/browser/devices/handoffHost";
@@ -12,6 +12,7 @@ import { DeviceDialog, field, primaryButton, quietButton } from "./DeviceDialog"
 import { type Problem, problemText } from "../../lib/problemText";
 import { Notice } from "../ui/Notice";
 import { nextOf } from "../../lib/notices";
+import { focusToRetype } from "../../lib/focus";
 import { fillNames } from "../../lib/fillNodes";
 
 /*
@@ -26,6 +27,12 @@ const STEP_OF: Partial<Record<HandoffView["step"], Step>> = {
   connecting: "connecting", authorizing: "connecting", copying: "copying", paused: "copying", ready: "ready", rest: "rest",
   checking: "checking", switching: "switching", settling: "settling", finishing: "settling",
 };
+
+/**
+ * The copy's bar in forced colors (Windows Contrast themes), which replace the track's and the fill's backgrounds with
+ * the page's: both vanished. There only, an outlined track with a Highlight fill, as Settings' switches (wallet/ui.tsx).
+ */
+const FORCED_TRACK = "forced-colors:forced-color-adjust-none forced-colors:border forced-colors:border-[color:CanvasText] forced-colors:bg-[color:Canvas]";
 
 /**
  * Where a move stands (WISP 06 § Handoff progress): the steps, the one running now in words (with the bytes and a bar
@@ -106,8 +113,8 @@ export function HandoffProgress({ view, onCancel }: { view: HandoffView; onCance
                       {step === "settling" && <InfoButton open={why} onToggle={() => setWhy(!why)} controls={whyId} testId="handoff-settle-info" className="mt-px" />}
                     </span>
                     {(view.step === "copying" || view.step === "rest" || view.step === "paused") && view.total > 0 && (
-                      <span role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-valuetext={amount} aria-label={t("devices.handoff.step.copy")} className="block h-1.5 w-full overflow-hidden rounded-full bg-border">
-                        <span className="block h-full bg-accent transition-[width]" style={{ width: `${percent}%` }} />
+                      <span role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-valuetext={amount} aria-label={t("devices.handoff.step.copy")} className={`block h-1.5 w-full overflow-hidden rounded-full bg-border ${FORCED_TRACK}`}>
+                        <span className="block h-full bg-accent transition-[width] forced-colors:bg-[color:Highlight]" style={{ width: `${percent}%` }} />
                       </span>
                     )}
                     {why && step === "settling" && <span id={whyId} data-testid="handoff-settle-text" className="block text-xs text-text-secondary">{t("devices.handoff.step.settlingInfo")}</span>}
@@ -152,25 +159,32 @@ export function UseHereDialog({ device, onClose, onStarted }: { device: string; 
   const [later, setLater] = useState(metered);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
+  // Only a refusal of the password itself marks the field wrong; that field gets the focus back, its text selected.
+  const [wrongPassword, setWrongPassword] = useState(false);
+  const passwordInput = useRef<HTMLInputElement>(null);
+  const errorId = useId();
   const submit = async () => {
     if (busy || !password) return;
-    setBusy(true); setError(null);
+    setBusy(true); setError(null); setWrongPassword(false);
     try { onStarted(await engine.call("deviceHandoffPull", { password, later: later ? HANDOFF_LATER_BYTES : 0 })); onClose(); }
-    catch (cause) { setError(handoffProblem(cause, t, { device }) ?? problemText(cause, t)); }
+    catch (cause) {
+      setError(handoffProblem(cause, t, { device }) ?? problemText(cause, t));
+      if (handoffErrorKey(cause) === FAILURES.password) { setWrongPassword(true); focusToRetype(passwordInput.current); }
+    }
     finally { setBusy(false); }
   };
   return (
     <DeviceDialog title={t("devices.handoff.useHereTitle")} onClose={onClose} testId="handoff-use-here-dialog">
       <p className="text-text-secondary">{fillNames(t("devices.handoff.passwordHint"), { device })}</p>
       <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
-        <input type="password" autoFocus autoComplete="current-password" data-testid="handoff-password" aria-label={t("devices.password.current")} placeholder={t("devices.password.current")}
-          aria-invalid={!!error || undefined} value={password} onChange={(event) => setPassword(event.target.value)} className={field} />
+        <input ref={passwordInput} type="password" autoFocus autoComplete="current-password" data-testid="handoff-password" aria-label={t("devices.password.current")} placeholder={t("devices.password.current")}
+          aria-invalid={wrongPassword || undefined} aria-describedby={wrongPassword ? errorId : undefined} value={password} onChange={(event) => setPassword(event.target.value)} className={field} />
         {metered && <p className="text-xs text-text-muted">{t("devices.handoff.metered")}</p>}
         <label className="flex items-center justify-between gap-3 text-text-secondary">
           <span className="min-w-0">{t("devices.handoff.later")}</span>
           <Switch checked={later} onChange={setLater} label={t("devices.handoff.later")} testId="handoff-later" />
         </label>
-        {error && <Notice problem={error} className="" />}
+        {error && <div id={errorId}><Notice problem={error} className="" /></div>}
         {/* `aria-disabled`, not `disabled`, while it runs: a disabled button drops the keyboard focus to the page. */}
         <button type="submit" data-testid="handoff-start" disabled={!password} aria-disabled={busy || undefined} aria-busy={busy || undefined} className={primaryButton}>{t("devices.handoff.useHere")}</button>
       </form>

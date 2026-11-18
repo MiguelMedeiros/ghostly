@@ -31,13 +31,14 @@ function usersAlone(path: string): boolean {
 
 /**
  * A folder for a socket outside the profile (when the profile's path is too long for one): made owner-only, and
- * refused when it is a link, someone else made it, or anyone else may enter it.
+ * refused when it is a link, someone else made it, or anyone else may enter it: `refused`, as the profile's own checks
+ * (`ownProfile`), with the way out. It holds only sockets, so removing it loses nothing; it is made again.
  */
 export function privateFolder(path: string, what: string): void {
   mkdirSync(path, { recursive: true, mode: 0o700 });
   const info = lstatSync(path);
   if (!info.isDirectory() || (process.getuid && info.uid !== process.getuid()) || (info.mode & 0o077) !== 0) {
-    throw new Error(`${path} is not a folder of this user's alone: ${what}`);
+    throw new CliError("refused", `${path} is not a folder of this user's alone: ${what}. Run \`rm -r ${path}\` (ghostly makes it again), or if it is this user's folder, \`chmod 700 ${path}\`, then try again`);
   }
 }
 
@@ -47,7 +48,7 @@ export function privateFolder(path: string, what: string): void {
  */
 export function ownFolder(path: string, what: string): void {
   const info = lstatSync(path);
-  if (!info.isDirectory() || (process.getuid && info.uid !== process.getuid())) throw new Error(`${path} is not a folder of this user's: ${what}`);
+  if (!info.isDirectory() || (process.getuid && info.uid !== process.getuid())) throw new CliError("refused", `${path} is not a folder of this user's: ${what}`);
   if ((info.mode & 0o077) !== 0) chmodSync(path, 0o700);
 }
 

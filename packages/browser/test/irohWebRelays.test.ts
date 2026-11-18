@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { expect, it, vi } from "vitest";
+import { checkedDescriptors } from "@ghostly/core";
 import { DEFAULT_IROH_RELAYS, MAX_IROH_RELAYS, createIrohWebEndpoint, irohRelayProblem, onPublicIrohRelay, type IrohWasm } from "../src/platform/irohWeb";
 
 // covers: transport.iroh-web, settings.network.iroh-relays
@@ -44,6 +45,26 @@ it("lists the default relays in the spelling every browser opens: n0's four, the
   expect(DEFAULT_IROH_RELAYS[4]).toBe("https://iroh.miguelmedeiros.dev/");
   for (const relay of DEFAULT_IROH_RELAYS) expect(irohRelayProblem(relay)).toBeNull();
   noDottedHost([...DEFAULT_IROH_RELAYS]);
+});
+
+it("refuses a relay address a contact would drop with the whole descriptor, and keeps one it reads", async () => {
+  // A contact keeps an Iroh descriptor only with a relay `relayUrl` reads (120 characters past https://, a loopback
+  // path of 100), and drops the whole descriptor otherwise: this profile is then never reached over Iroh.
+  const long = [`https://${"a".repeat(60)}.example.com/${"p".repeat(60)}`, `http://127.0.0.1:3340/${"p".repeat(101)}`];
+  const wasm = fakeWasm();
+  for (const bad of long) {
+    // Said as what to do: it is a relay address, one too long (not a typo to look for in it).
+    expect(irohRelayProblem(bad)).toBe(`Use a shorter relay address: ${bad}`);
+    const endpoint = await createIrohWebEndpoint(seed, { load: wasm.load, relays: [bad] });
+    expect(checkedDescriptors({ "iroh/1": endpoint.descriptor })["iroh/1"]).toBeUndefined();
+    await endpoint.close();
+  }
+  for (const good of ["https://relay.example.com", "https://relay.example.com./", `http://127.0.0.1:3340/${"p".repeat(100)}`]) {
+    expect(irohRelayProblem(good)).toBeNull();
+    const endpoint = await createIrohWebEndpoint(seed, { load: wasm.load, relays: [good] });
+    expect(checkedDescriptors({ "iroh/1": endpoint.descriptor })["iroh/1"]).toEqual(endpoint.descriptor);
+    await endpoint.close();
+  }
 });
 
 it("tells n0's public relays, in either spelling, from Ghostly's and a relay of one's own", () => {

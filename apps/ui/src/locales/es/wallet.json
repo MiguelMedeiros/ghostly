@@ -178,7 +178,6 @@
   "cashu": {
     "add": "Añadir",
     "addMintPlaceholder": "Añadir un mint: https://…",
-    "amountSats": "{{amount}} sats",
     "askingMint": "Pidiendo al mint…",
     "backupCopied": "Copia copiada. Quien tenga estos tokens tiene los sats.",
     "contactHint": "¿Pagas a un contacto? Usa ⚡ en el chat.",
@@ -192,7 +191,7 @@
       "perProofTest": "{{fee}} sat de prueba por prueba (cerca de 1 sat de prueba por pago)"
     },
     "history": {
-      "fee": "comisión {{amount}}",
+      "fee": "comisión {{amount}} {{unit}}",
       "feesPaid": "Comisiones pagadas: {{amount}} {{unit}}",
       "movements": "{{count}} movimientos",
       "movementsOne": "1 movimiento",
@@ -216,6 +215,7 @@
     "payAmount": "Pagar {{amount}} {{unit}}",
     "payLine": "Pagar {{amount}}{{fees}}",
     "pendingMint": "El pago sigue pendiente en el mint.",
+    "pendingMintNext": "Se resuelve solo; no se paga nada otra vez. Hasta que el mint responda, el importe aparece como apartado bajo el saldo.",
     "primary": "Principal",
     "received": "⚡ {{amount}} {{unit}} recibidos",
     "redeem": "Canjear token ecash",
@@ -384,7 +384,7 @@
     "cashuMints": "los mints Cashu",
     "cashuSettings": "Ajustes de Cashu",
     "commentFor": "Un comentario para {{to}} (opcional)",
-    "confirmWhat": "{{amount}} sats (más una comisión de hasta {{fee}})",
+    "confirmWhat": "{{amount}} {{unit}} (más una comisión de hasta {{fee}} {{feeUnit}})",
     "connecting": "Conectando con la fuente…",
     "domainLine": "{{answered}} {{limits}}",
     "done": "Listo",

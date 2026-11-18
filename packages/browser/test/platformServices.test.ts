@@ -92,6 +92,20 @@ describe("sharing a local web app", () => {
     expect(engine.calls).toEqual([]);
   });
 
+  // The extension turns an app's Share off when the person takes Chrome's site access to its host back: turned on
+  // again without asking, its contacts were refused until a second click on Allow.
+  it("turning an app's Share on again asks for its address first, as sharing it did; turning it off asks nothing", async () => {
+    const stopped = (id: string, target: string) => ({ id, name: id, target, enabled: false, createdAt: 0 });
+    engine.state = { services: [stopped("db", "http://127.0.0.1:5432"), stopped("notes", "http://localhost:3400")] } as unknown as EngineState;
+    await services.setServiceEnabled("db", true);
+    expect(access).toEqual(["http://127.0.0.1/*"]);
+    expect(asked).toEqual(["http://127.0.0.1:5432"]);
+    await expect(services.setServiceEnabled("notes", true)).rejects.toThrow("needs your permission");
+    await services.setServiceEnabled("notes", false);
+    expect(asked).toEqual(["http://127.0.0.1:5432", "http://localhost:3400"]);
+    expect(engine.calls).toEqual([["setServiceEnabled", { serviceId: "db", enabled: true }], ["setServiceEnabled", { serviceId: "notes", enabled: false }]]);
+  });
+
   it("refuses a target off this machine before asking for any access", async () => {
     await expect(services.shareService("Bank", "https://bank.example")).rejects.toThrow("Only services on this machine");
     await expect(services.shareService("Creds", "http://user:pw@localhost:1")).rejects.toThrow("Credentials");
@@ -540,6 +554,19 @@ describe("wallet and settings", () => {
     } as never;
     expect(services.wallet.answerTo("ask-1")).toMatchObject({ id: "theirs" });
     expect(services.wallet.answerTo("ask-2")).toBeNull();
+  });
+
+  it("finds the contact's payment of a request of ours only while it is on its way", () => {
+    withLinks();
+    (engine.state as EngineState).payments = {
+      req: { id: "req", kind: "request", direction: "out", state: "pending" },
+      sent: { id: "sent", requestId: "req", kind: "payment", direction: "out", state: "pending" },
+      failed: { id: "failed", requestId: "req", kind: "payment", direction: "in", state: "failed" },
+      theirs: { id: "theirs", requestId: "req", kind: "payment", direction: "in", state: "pending" },
+    } as never;
+    expect(services.wallet.paymentOnItsWay("req")).toMatchObject({ id: "theirs" });
+    (engine.state as EngineState).payments = { theirs: { id: "theirs", requestId: "req", kind: "payment", direction: "in", state: "settled" } } as never;
+    expect(services.wallet.paymentOnItsWay("req")).toBeNull();
   });
 
   it("reads nothing before the first state, and the peer's view after", () => {

@@ -108,6 +108,7 @@ const ARABIC_COUNT_ALONE = new Set([
   "composer.identityShared", "composer.sendCount", "composer.servicesShared", "connection.history.showAll",
   "connection.history.title", "errors.group.growMore", "group.create.communityHint", "group.link.full", "group.link.note",
   "group.link.noteCommunity", "group.members.missing", "group.members.missingOne", "group.readNote", "group.readNoteCommunity",
+  "group.readNoteCommunityOff", "groupCallModeration.removed",
   "messageDetails.value.edits", "profileSwitcher.unread", "pwa.sharePastLimit", "saved.rowLabel", "secretGuard.sat",
   "secretGuard.sats", "settings.storageParts.files", "sidebar.folder.unreadCount",
   "sidebar.rail.unreadCount", "wallet.fedimint.facts.guardianList", "wallet.fedimint.restoreFailed", "wallet.remove.pending",
@@ -192,5 +193,32 @@ describe("the keys components ask for exist in every language", () => {
       literalKeys(source).filter((key) => key.includes(".") && lookup(language, key) === undefined).map((key) => `${name(path)}: ${key}`),
     );
     expect(missing).toEqual([]);
+  });
+});
+
+describe("every English key is asked for somewhere in the app", () => {
+  // A key is named whole as a string (`t("chat.x")`, `labelKey: "chat.x"`), or built from a head the app writes
+  // (`messageDetails.label.${label}`, "providers." + id). One nothing names is a string translated in every language
+  // that no screen shows. The web app's and the extension's hosts ask for keys of their own (`services.window.retry`).
+  const hostSources = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) return entry.name === "test" ? [] : hostSources(path);
+    return /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [readFileSync(path, "utf8")] : [];
+  });
+  const APPS = join(LOCALE_DIR, "../../..");
+  const source = [...Object.values(allSources), ...hostSources(join(APPS, "web/src")), ...hostSources(join(APPS, "extension/src"))].join("\n");
+  const strings = new Set([...source.matchAll(/(["'`])([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*\.?)(?=\1|\$\{)/g)].map((m) => m[2]));
+  const named = (key: string) => {
+    const parts = (pluralBase(key) ?? key).split(".");
+    return strings.has(parts.join(".")) || parts.some((_, i) => i > 0 && strings.has(`${parts.slice(0, i).join(".")}.`));
+  };
+
+  it("sees the keys the app builds from a head", () => {
+    expect(strings.has("messageDetails.label.")).toBe(true);
+    expect(named("messageDetails.label.sent")).toBe(true);
+  });
+
+  it("names every one", () => {
+    expect([...en.keys()].filter((key) => !named(key))).toEqual([]);
   });
 });

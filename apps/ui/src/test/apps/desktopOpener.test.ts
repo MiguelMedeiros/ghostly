@@ -3,7 +3,9 @@ import { MINI_APP_LIMITS } from "@ghostly/core/miniApp";
 import { APP_CLOSED_EVENT, APP_REQUEST_EVENT, desktopOpener, type DesktopOpenerOptions } from "../../lib/apps/desktopOpener";
 import { memoryAppId, memoryHost } from "../../lib/apps/memoryHost";
 import { nameToldIn } from "../../lib/apps/nameInChat";
-import { stopTakenDown } from "../../lib/apps/open";
+import { CHAT_CLOSED, stopAppsIn, stopTakenDown } from "../../lib/apps/open";
+import { appWithContact, registerAppSlot } from "../../lib/apps/running";
+import { translatorFor } from "../../locales";
 import type { AppEntry } from "../../lib/platform";
 import { engineState, linkView } from "../fakeEngine";
 
@@ -75,6 +77,39 @@ describe("opening an app on Desktop", () => {
     expect(stops).toEqual(["stopped", "stopped"]);
   });
 
+  it("closes an app's window when its chat is deleted, and not the same app's in another chat or alone", async () => {
+    const { calls, open, stops } = setup();
+    await open(REF, LINK);
+    await open(REF, "link-2");
+    await open(REF, null);
+    stopAppsIn(LINK);
+    expect(calls.filter((c) => c.command === "app_close").map((c) => c.args.label)).toEqual(["app-1"]);
+    expect(stops).toEqual(["stopped"]);
+    // Opened again in that chat: a new window, not the closed one brought to the front.
+    await open(REF, LINK);
+    expect(calls.filter((c) => c.command === "app_open")).toHaveLength(4);
+  });
+
+  it("does not start an app whose chat is deleted while it opens, and closes the window it made for it", async () => {
+    const { calls, hooks, host, open, stops } = setup();
+    // Deleted while its window is being made: the window comes, and closes before the app starts in it.
+    hooks.opened = () => stopAppsIn(LINK);
+    await expect(open(REF, LINK)).rejects.toThrow(CHAT_CLOSED);
+    expect(calls.filter((c) => c.command === "app_close").map((c) => c.args.label)).toEqual(["app-1"]);
+    // Deleted while its entry is read: no window at all.
+    hooks.opened = undefined;
+    const read = host.entry;
+    host.entry = async (ref, runAnyway) => { stopAppsIn(LINK); return read(ref, runAnyway); };
+    await expect(open(REF, LINK)).rejects.toThrow(CHAT_CLOSED);
+    expect(calls.filter((c) => c.command === "app_open")).toHaveLength(1);
+    // Another chat's deletion stops nothing of it.
+    host.entry = async (ref, runAnyway) => { stopAppsIn("link-2"); return read(ref, runAnyway); };
+    await open(REF, LINK);
+    expect(calls.filter((c) => c.command === "app_open")).toHaveLength(2);
+    expect(calls.filter((c) => c.command === "app_close")).toHaveLength(1);
+    expect(stops).toEqual([]);
+  });
+
   it("names its window after the app and the contact in a chat, and the app alone outside one", async () => {
     const { calls, open } = setup({}, (title, linkId) => (linkId ? `${title} with Ana` : title));
     await open(REF, LINK);
@@ -120,6 +155,25 @@ describe("opening an app on Desktop", () => {
     request("app-1", { id: 5, type: "files.unserve", args: [again] });
     await answer("app-1", 5);
     expect(titles()).toEqual([["app-1", "Chess · sharing a file with Ana"], ["app-1", "Chess with Ana"]]);
+  });
+
+  it("still names the contact in its window's title while serving once the person went to another chat", async () => {
+    // main.tsx's title: the chat's panel tells who the contact is, and goes when the chat page closes; the app's window stays.
+    const t = translatorFor("en");
+    const { calls, host, open, request, answer } = setup({ permissions: ["chat", "files"] }, (title, linkId, serving) => appWithContact(title, linkId, t, serving));
+    registerAppSlot(LINK, { box: document.createElement("div"), sessionId: "s1", contact: { name: "Ana", named: true } });
+    await open(REF, LINK);
+    registerAppSlot(LINK, null);
+    request("app-1", { id: 0, type: "writing", args: [] });
+    await answer("app-1", 0);
+    host.nextPick = [{ path: "Films/Up.mp4", bytes: new Uint8Array(10) }];
+    request("app-1", { id: 1, type: "files.pick", args: [] });
+    const [film] = (await answer("app-1", 1)).value as { id: string }[];
+    request("app-1", { id: 2, type: "files.serve", args: [film!.id] });
+    const serve = (await answer("app-1", 2)).value as string;
+    request("app-1", { id: 3, type: "files.unserve", args: [serve] });
+    await answer("app-1", 3);
+    expect(calls.filter((c) => c.command === "app_title").map((c) => c.args.title)).toEqual(["Chess · sharing a file with Ana", "Chess with Ana"]);
   });
 
   it("opens a window with the checked entry and what the person granted, and runs the web broker for it", async () => {

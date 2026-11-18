@@ -379,6 +379,12 @@ describe("what the peer tells the page", () => {
     await new Promise((resolve) => setTimeout(resolve, MESSAGE_CHANGES_TICK_MS));
     expect(engine.messages.has("l2")).toBe(false);
     expect(listener).not.toHaveBeenCalled();
+    // A group it holds no list of (the peer sends a tab only what changes in one until it shows it): no list is made of
+    // it, and its listeners hear what changed (a saved message edited, a card come), with nothing as its list.
+    const row = { ...at("y", 2), linkId: "group:g" };
+    deliver({ kind: "message-changes", linkId: "group:g", messages: [row], deleted: ["z"] });
+    expect(engine.messages.has("group:g")).toBe(false);
+    expect(listener).toHaveBeenCalledExactlyOnceWith("group:g", [], { from: [], messages: [row], deleted: ["z"] });
   });
 
   it("tells listeners once of a catch-up the peer sends one row at a time, each chat with its whole list", async () => {

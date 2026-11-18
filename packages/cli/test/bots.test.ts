@@ -8,6 +8,7 @@ import type { GhostlyEvent } from "../src/events";
 import type { CliError } from "../src/errors";
 import { holdOf, resumeHolds } from "../src/holds";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.files, headless.typing, headless.chat, headless.api
 
 /**
@@ -30,7 +31,7 @@ function fake(mode: "daemon" | "one-shot" = "daemon") {
     groups: [], settings: {}, transport: {}, transfers: {} as Record<string, FileTransferView>,
   } as unknown as EngineState;
   const node = {
-    getState: () => s,
+    chatView: chatViewOf, getState: () => s,
     setTyping: vi.fn(),
     sendMessage: vi.fn(async () => ({ error: null, messageId: "me_1" })),
     getMessages: vi.fn(async () => []),
@@ -42,6 +43,7 @@ function fake(mode: "daemon" | "one-shot" = "daemon") {
     setChatTransport: vi.fn(async ({ linkId, transport }: { linkId: string; transport: string }) => { setLink(linkId, transport === "dht" ? { deliveryMode: "dht", textDelivery: "dht" } : { deliveryMode: "stream" }); }),
     setDeliveryMode: vi.fn(async ({ linkId, mode: m }: { linkId: string; mode: string }) => { setLink(linkId, { deliveryMode: m as never }); }),
     removeLink: vi.fn(({ linkId }: { linkId: string }) => { s.links = s.links.filter((l) => l.id !== linkId); }),
+    removalsPending: () => [],
   };
   const setLink = (linkId: string, fields: Partial<LinkView>) => { s.links = s.links.map((l) => (l.id === linkId ? { ...l, ...fields } : l)); };
   const dir = mkdtempSync(join(tmpdir(), "ghostly-bots-profile-"));
@@ -214,20 +216,35 @@ describe("typing --for", () => {
 
   // Without a daemon, `--for 600` on a chat whose contact is away held the terminal, and the profile, for 10 minutes
   // with nobody to see it: `typing --stop` and `send` from another shell answered busy.
-  it("a one-shot whose chat is not live within 15 s stops there, and says it was not live", async () => {
+  // It then answered `typing: true` with an `until` to come and no note: a script believed the contact saw it.
+  it("a one-shot whose chat is not live within 15 s stops there, and says it is off and reached nobody", async () => {
     vi.useFakeTimers();
     const { ctx, node, setLink } = fake("one-shot");
     setLink("chat-one", { dataLink: "connecting", textDelivery: "dht" });
-    let answer: { live?: boolean } | undefined;
-    const typing = callApi(ctx, "chat.typing", { chat: "Alice", for: 600 }).then((a) => { answer = a as { live: boolean }; });
+    let answer: Record<string, unknown> | undefined;
+    const typing = callApi(ctx, "chat.typing", { chat: "Alice", for: 600, kind: "thinking", status: "Working" }).then((a) => { answer = a as Record<string, unknown>; });
     await vi.advanceTimersByTimeAsync(14_900);
     expect(answer).toBeUndefined();
     await vi.advanceTimersByTimeAsync(200);
     await typing;
-    expect(answer).toMatchObject({ typing: true, live: false });
+    expect(answer).toMatchObject({ chat: "chat-one", typing: false, live: false, note: expect.stringMatching(/reached nobody.*ghostly daemon --detach/) });
+    expect(answer).not.toHaveProperty("until");
+    expect(answer).not.toHaveProperty("kind");
     const calls = node.setTyping.mock.calls.length;
     await vi.advanceTimersByTimeAsync(10_000);
     expect(node.setTyping, "nothing kept on after it").toHaveBeenCalledTimes(calls);
+  });
+
+  it("a one-shot --for shorter than the wait that ends before the chat is live says it reached nobody too", async () => {
+    vi.useFakeTimers();
+    const { ctx, setLink } = fake("one-shot");
+    setLink("chat-one", { dataLink: "connecting", textDelivery: "dht" });
+    let answer: Record<string, unknown> | undefined;
+    const typing = callApi(ctx, "chat.typing", { chat: "Alice", for: 3 }).then((a) => { answer = a as Record<string, unknown>; });
+    await vi.advanceTimersByTimeAsync(3_100);
+    await typing;
+    expect(answer).toMatchObject({ typing: false, live: false, note: expect.stringContaining("reached nobody") });
+    expect(answer).not.toHaveProperty("until");
   });
 
   it("a one-shot whose chat comes live within 15 s stays the whole time", async () => {
@@ -243,6 +260,7 @@ describe("typing --for", () => {
     await vi.advanceTimersByTimeAsync(200);
     await typing;
     expect(answer).toMatchObject({ typing: true, live: true });
+    expect(answer).not.toHaveProperty("note");
   });
 });
 
@@ -410,6 +428,32 @@ describe("chat disconnect --hold", () => {
     await expect(callApi(ctx, "chat.connect", { chat: "Bob" })).rejects.toMatchObject({ message: "Link is closed" });
   });
 
+  // It waited its whole --timeout (a bot's up to a day) and said only "Timed out after N s waiting for chat <id> to be
+  // live", read as a slow network, while the chat could never go live and `chat connect` said why at once.
+  it("chat wait --until live that times out on a chat on DHT only says why and what ends it, naming the chat as given", async () => {
+    const { ctx, setLink } = fake();
+    const failure = (chat: string, until?: string) => callApi(ctx, "chat.wait", { chat, timeout: 1, ...(until && { until }) }).then(() => undefined, (error: unknown) => error as CliError);
+    setLink("chat-two", { deliveryMode: "dht", textDelivery: "dht" });
+    const mine = await failure("Bob");
+    expect(mine).toMatchObject({ code: "timeout", message: "Timed out after 1 s waiting for chat Bob to be live. This chat is on DHT only on this side: choose a live method first (chat transport auto)" });
+    expect(mine?.details).toBeUndefined();
+    setLink("chat-two", { deliveryMode: "stream", textDelivery: "dht", dhtDelivery: { mode: "stream", peerMode: "dht", authenticated: true, maxTextBytes: 256 } });
+    const theirs = await failure("Bob");
+    expect(theirs).toMatchObject({ code: "timeout", message: "Timed out after 1 s waiting for chat Bob to be live. Your contact keeps this chat on DHT only: it goes live once they choose a live method. Short texts still go on the DHT" });
+    expect(theirs?.details).toBeUndefined();
+    // A hold of this side's ends by itself: said with when, and what ends it now.
+    await callApi(ctx, "chat.disconnect", { chat: "Alice", hold: 30 });
+    const held = await failure("Alice");
+    expect(held).toMatchObject({ code: "timeout" });
+    // The hold's end carries its day when it is not today: a run from 23:30 crosses midnight.
+    expect(held?.message).toMatch(/^Timed out after 1 s waiting for chat Alice to be live\. This chat is held on the DHT only until (\d{4}-\d\d-\d\d )?\d\d:\d\d: it goes live then, or now with ghostly chat connect Alice$/);
+    // Off DHT only: the usual words, the chat still as given; other states are not about DHT only.
+    setLink("chat-two", { dhtDelivery: { mode: "stream", peerMode: "stream", authenticated: true, maxTextBytes: 256 } });
+    expect(await failure("Bob")).toMatchObject({ code: "timeout", message: "Timed out after 1 s waiting for chat Bob to be live" });
+    setLink("chat-two", { deliveryMode: "dht", textDelivery: "unavailable" });
+    expect(await failure("Bob", "text")).toMatchObject({ code: "timeout", message: "Timed out after 1 s waiting for chat Bob to carry text" });
+  });
+
   // A `chat transport dht` chosen during a hold was taken back when the hold's time was up, and one that left DHT
   // only kept `heldUntil` in `chat show` while the chat was live, then said it was released when nothing was held.
   it("ends when the chat's transport is chosen meanwhile, and leaves that choice as it is", async () => {
@@ -513,6 +557,34 @@ describe("chat disconnect --hold", () => {
     expect(emitted.map((e) => [e.type, e.chat])).toEqual([["chat.held", "chat-one"], ["chat.held", "chat-two"], ["chat.released", "chat-two"]]);
     expect(node.setDeliveryMode).toHaveBeenCalledTimes(1);
     expect(node.setDeliveryMode).toHaveBeenCalledWith({ linkId: "chat-two", mode: "stream" });
+  });
+
+  // The engine's own calls on the socket (`ghostly engine removeLink|setChatTransport|setDeliveryMode`) left the hold as
+  // it was: a removed chat's end said chat.released for a chat that was gone, and a DHT only chosen meanwhile was taken
+  // back to the live link when the hold's time was up.
+  it("goes with its chat removed by the engine's own call, with no release said", async () => {
+    vi.useFakeTimers();
+    const { ctx, dir, emitted } = fake();
+    await callApi(ctx, "chat.disconnect", { chat: "Alice", hold: 5 });
+    await callApi(ctx, "engine.call", { method: "removeLink", params: { linkId: "chat-one" }, yes: true });
+    expect(JSON.parse(readFileSync(join(dir, "holds.json"), "utf8"))).toEqual({});
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+    expect(emitted.map((e) => [e.type, e.chat])).toEqual([["chat.held", "chat-one"]]);
+  });
+
+  it("ends when the engine's own call chooses the chat's transport, which stays as chosen", async () => {
+    vi.useFakeTimers();
+    const { ctx, node, dir, emitted } = fake();
+    await callApi(ctx, "chat.disconnect", { chat: "Alice", hold: 5 });
+    await callApi(ctx, "chat.disconnect", { chat: "Bob", hold: 5 });
+    await callApi(ctx, "engine.call", { method: "setChatTransport", params: { linkId: "chat-one", transport: "dht" } });
+    await callApi(ctx, "engine.call", { method: "setDeliveryMode", params: { linkId: "chat-two", mode: "dht" } });
+    expect(JSON.parse(readFileSync(join(dir, "holds.json"), "utf8"))).toEqual({});
+    expect(emitted.filter((e) => e.type === "chat.released").map((e) => [e.chat, e.reason])).toEqual([["chat-one", "lifted"], ["chat-two", "lifted"]]);
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+    expect(node.setDeliveryMode).toHaveBeenCalledTimes(1);
+    expect(await callApi(ctx, "chat.get", { chat: "Alice" })).toMatchObject({ heldUntil: null, deliveryMode: "dht" });
+    expect(await callApi(ctx, "chat.get", { chat: "Bob" })).toMatchObject({ heldUntil: null, deliveryMode: "dht" });
   });
 
   // A one-shot that only read (`chat show`, `chat list`, `status`) opens no chat, and the engine refuses to switch one

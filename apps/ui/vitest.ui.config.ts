@@ -5,7 +5,7 @@ import type { Plugin } from "vite";
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { ghostlyPlatformModules, tauriAliases } from "../../packages/browser/vite-plugin.ts";
-import { maxWorkers } from "../../tools/vitest.shared.ts";
+import { maxWorkers, quarantined } from "../../tools/vitest.shared.ts";
 
 /**
  * Component and hook tests for the shared UI (`apps/ui/src/`) and `@ghostly/react`. They render the UI as the web app
@@ -45,7 +45,11 @@ export default defineConfig({
   test: {
     name: "ui",
     environment: "happy-dom",
+    // A link the app opens in a new tab (every link in a message) loads no page when a test clicks it: happy-dom asked
+    // its server, so messageLinks.test.tsx reached github.com on every run.
+    environmentOptions: { happyDOM: { settings: { navigation: { disableChildPageNavigation: true } } } },
     include: ["apps/ui/src/**/*.test.{ts,tsx}", "packages/react/test/**/*.test.{ts,tsx}"],
+    exclude: quarantined(undefined, fileURLToPath(new URL("../..", import.meta.url))),
     setupFiles: ["apps/ui/src/test/setup.ts"],
     css: false,
     restoreMocks: true,

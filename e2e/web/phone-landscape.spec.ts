@@ -1,7 +1,7 @@
 import { createLink } from "@ghostly/core";
 import type { Page } from "@playwright/test";
 import { fileURLToPath } from "node:url";
-import { chat, expect, say, test } from "../support/fixtures";
+import { chat, createWallet, expect, say, test, useFakeProviders } from "../support/fixtures";
 import { iosKeyboard, keyboard } from "../support/keyboard";
 import { pair } from "../support/paired";
 import { optionsOf } from "../support/select";
@@ -201,6 +201,82 @@ test("a phone on its side: an open select's list stays clear of the notch", { ta
   await expect(options.first()).toBeVisible();
 });
 
+/**
+ * What a panel from the end edge shows clear of the safe area: nothing past the end inset, under the top one (an
+ * installed iPad's status bar) or in the home indicator's band. The insets differ on each side, so the end the page's
+ * direction puts it at is the one checked.
+ */
+async function clearOfInsets(page: Page, panel: string, targets: string[], insets: { left: number; right: number; top: number; bottom: number }) {
+  const rtl = await page.locator("html").getAttribute("dir") === "rtl";
+  const end = rtl ? insets.left : insets.right;
+  const box = (await page.getByTestId(panel).boundingBox())!;
+  // At its end edge, as wide as before plus the inset: the content keeps its 400px.
+  expect(rtl ? box.x : box.x + box.width).toBe(rtl ? 0 : LANDSCAPE.width);
+  expect(box.width).toBe(400 + end);
+  for (const id of targets) {
+    const target = (await page.getByTestId(panel).getByTestId(id).boundingBox())!;
+    if (rtl) expect(target.x).toBeGreaterThanOrEqual(end);
+    else expect(target.x + target.width).toBeLessThanOrEqual(LANDSCAPE.width - end);
+    expect(target.y).toBeGreaterThanOrEqual(insets.top);
+    expect(target.y + target.height).toBeLessThanOrEqual(LANDSCAPE.height - insets.bottom);
+  }
+}
+
+/** Uneven on purpose: a panel that pads the wrong side's inset is caught. And a status bar's 24px on top. */
+const PANEL_INSETS = { left: 47, right: SIDE, top: 24, bottom: HOME };
+
+for (const language of ["en", "ar"] as const) {
+  test(`a phone on its side (${language}): a message's details keep the close button and Copy JSON clear of the notch and the home indicator`, { tag: ["@feature:app.mobile-layout", "@feature:chat.paired.message-details"] }, async ({ peer }) => {
+    // The panel is a portal on the body, outside #root's side insets: its ✕ sat 16px from the screen's edge, under
+    // the Dynamic Island's band, and Copy JSON in the home indicator's.
+    const { page } = await peer(`side-details-${language}`, { mobile: true, viewport: LANDSCAPE });
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: PANEL_INSETS });
+    const mine = createLink().mine;
+    await page.evaluate(({ mine, language }) => {
+      const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+      localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language }));
+      const id = crypto.randomUUID().replaceAll("-", "");
+      const messages = [{ id: "m0", sender: "peer", timestamp: Date.now() - 60_000, text: "Where did this come from?" }];
+      localStorage.setItem(`ghostly_${id}`, JSON.stringify({ id, mySeedB64: mine.seedB64, peerPubKeyB64: mine.peerPubKeyZ32, encKeyB64: mine.encKeyB64, messages, createdAt: Date.now() - 120_000 }));
+      localStorage.setItem(`ghostly_join_${id}`, "true");
+      location.hash = `/chat/${id}`;
+    }, { mine, language });
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("dir", language === "ar" ? "rtl" : "ltr");
+    const row = page.locator(".chat-wallpaper [data-message-row]").filter({ hasText: "Where did this come from?" });
+    await expect(row).toBeVisible();
+    await row.hover();
+    await row.getByTestId("message-options").click({ force: true });
+    await page.getByTestId("message-details").click();
+    const panel = page.getByTestId("message-details");
+    await expect(panel).toHaveAttribute("data-side", "end");
+    await expect(panel).toHaveAttribute("data-loaded", "yes");
+    // Its slide in over (it stays in getAnimations(), filled).
+    await panel.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
+    await clearOfInsets(page, "message-details", ["message-details-close", "message-details-copy-all"], PANEL_INSETS);
+  });
+}
+
+test("a phone on its side: a wallet total's breakdown keeps its close button clear of the notch", { tag: ["@feature:app.mobile-layout", "@feature:wallet.balance.total"] }, async ({ peer }) => {
+  // The same panel from the end edge as a message's details, with the same escape from #root's insets.
+  const alice = await peer("side-wallet-total");
+  const page = alice.page;
+  await useFakeProviders(alice);
+  await createWallet(alice, "lightning", "testnet", { provider: "fake-lightning", fill: async (form) => {
+    await form.getByLabel("Name").fill("Node A");
+    await form.getByLabel("Access token").fill("token-a");
+    await form.getByTestId("provider-save").click();
+  } });
+  await expect(page.getByTestId("wallet-total-bitcoin-amount")).toHaveText(/^100,000\s*test sats$/, { timeout: 30_000 });
+  await page.setViewportSize(LANDSCAPE);
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: PANEL_INSETS });
+  await page.getByTestId("wallet-total-bitcoin").click();
+  await expect(page.getByTestId("wallet-total-breakdown")).toHaveAttribute("data-side", "end");
+  await clearOfInsets(page, "wallet-total-breakdown", ["wallet-total-close", "wallet-total-rows"], PANEL_INSETS);
+});
+
 for (const screen of [{ name: "a small phone", width: 667, height: 375, keyboard: 200 }, { name: "two panes", ...LANDSCAPE, keyboard: 240 }]) {
   test(`a phone on its side with the keyboard up (${screen.name}): a pinned message and a reply leave the message field above the keyboard`, { tag: ["@feature:app.mobile-layout", "@feature:chat.pins", "@feature:chat.replies", "@feature:chat.edit"] }, async ({ peer }) => {
     // The pinned bar and the reply or edit bar stood between the header and the field on top of each other: the list
@@ -256,5 +332,49 @@ for (const screen of [{ name: "a small phone", width: 667, height: 375, keyboard
     await keyboard(page, 0);
     await input.blur();
     await expect(pinned).toBeVisible();
+  });
+}
+
+for (const screen of [{ name: "a small phone", width: 667, height: 375, keyboard: 200 }, { name: "two panes", ...LANDSCAPE, keyboard: 240 }]) {
+  test(`a phone on its side with the keyboard up (${screen.name}): a reply or an edit written while the chat's search is open leaves the message field above the keyboard`, { tag: ["@feature:app.mobile-layout", "@feature:chat.search", "@feature:chat.replies", "@feature:chat.edit"] }, async ({ peer }) => {
+    // The search bar and the reply or edit bar between the header and the field: the list was 0px tall and the
+    // field's bottom 30px under the keyboard (113-205 of 175 visible at 667×375).
+    const visible = screen.height - screen.keyboard;
+    const [alice, bob] = await Promise.all([peer(`side-search-a-${screen.width}`), peer(`side-search-b-${screen.width}`, { mobile: true, viewport: { width: screen.width, height: screen.height } })]);
+    await pair(alice, bob);
+    for (let i = 0; i < 3; i++) { await say(alice, `From alice ${i}`); await say(bob, `From bob ${i}`); }
+    const page = bob.page;
+    const row = (text: string) => page.locator(".chat-wallpaper [data-message-row]").filter({ hasText: text }).last();
+    await expect(row("From alice 2")).toBeVisible();
+    await iosKeyboard(page);
+    await expect(row("From alice 2")).toBeVisible();
+    const input = page.getByPlaceholder("Message…");
+    const bar = page.getByTestId("chat-search");
+    const fits = async () => { const box = (await page.locator("[data-composer]").boundingBox())!; return box.y + box.height <= visible + 1; };
+
+    await page.getByTestId("chat-options").click();
+    await page.locator("[data-menu-item]").filter({ hasText: "Search" }).click();
+    await page.getByTestId("chat-search-input").fill("From");
+    await expect(page.getByTestId("chat-search-count")).toBeVisible();
+
+    for (const [text, item] of [["From alice 2", "message-reply"], ["From bob 2", "message-edit"]] as const) {
+      await row(text).hover();
+      await row(text).getByTestId("message-options").click({ force: true });
+      await page.getByTestId(item).click();
+      await input.focus();
+      await keyboard(page, screen.keyboard);
+      await expect(page.locator("html")).toHaveAttribute("data-keyboard", "true");
+      await expect.poll(fits).toBe(true);
+      // The search bar waits behind the keyboard, and the list is no longer 0px tall.
+      await expect(bar).toBeHidden();
+      expect((await page.locator(".chat-wallpaper").boundingBox())!.height).toBeGreaterThan(0);
+      // Keyboard down: the search is back, as it was.
+      await keyboard(page, 0);
+      await input.blur();
+      await expect(bar).toBeVisible();
+      await expect(page.getByTestId("chat-search-input")).toHaveValue("From");
+      await page.keyboard.press("Escape").catch(() => {});
+      await expect(bar).toBeVisible();
+    }
   });
 }

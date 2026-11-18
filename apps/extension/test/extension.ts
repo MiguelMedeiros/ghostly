@@ -101,10 +101,11 @@ export async function pauseRequest(
   world: FakeWorld,
   tabId: number,
   request: { url: string; method?: string; headers?: Record<string, string>; postData?: string; postDataEntries?: { bytes?: string }[] },
+  resourceType?: string,
 ): Promise<{ method: string; params: Record<string, unknown> }> {
   const before = world.callsTo("debugger.sendCommand").length;
   const requestId = `r${Math.random()}`;
-  fire(world.chrome.debugger.onEvent, { tabId }, "Fetch.requestPaused", { requestId, request: { method: "GET", headers: {}, ...request } });
+  fire(world.chrome.debugger.onEvent, { tabId }, "Fetch.requestPaused", { requestId, request: { method: "GET", headers: {}, ...request }, ...(resourceType ? { resourceType } : {}) });
   for (let i = 0; i < 50; i++) {
     const answer = world
       .callsTo("debugger.sendCommand")
@@ -114,6 +115,26 @@ export async function pauseRequest(
     await settle(1);
   }
   throw new Error("the paused request was never answered");
+}
+
+/**
+ * Asks the peer for a contact's app's request over the viewer port, as the worker does (`askPeer`), as `sender`: the
+ * worker by default. Undefined when the port closes with no answer.
+ */
+export async function askPeer(
+  world: FakeWorld,
+  request: Partial<{ peerPubKeyZ32: string; serviceId: string; method: string; path: string; headers: [string, string][]; bodyB64: string | null }> = {},
+  sender: chrome.runtime.MessageSender = { id: world.chrome.runtime.id, url: world.chrome.runtime.getURL("background.js") },
+): Promise<unknown> {
+  const port = world.connectFrom(sender, "viewer");
+  return new Promise((resolve) => {
+    // The document says it took the ask (`ViewerTaken`) before its reply.
+    port.onMessage.addListener((message: unknown) => {
+      if (message && typeof message === "object" && "reply" in message) resolve(message.reply);
+    });
+    port.onDisconnect.addListener(() => resolve(undefined));
+    port.postMessage({ id: 1, request: { peerPubKeyZ32: PEER, serviceId: SERVICE, method: "GET", path: "/", headers: [], bodyB64: null, ...request } });
+  });
 }
 
 export function bodyText(params: Record<string, unknown>): string {

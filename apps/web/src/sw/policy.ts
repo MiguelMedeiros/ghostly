@@ -90,12 +90,13 @@ export function desktopOnlyFiles(bundle: Iterable<{ type: string; fileName: stri
 /**
  * What only an online flow loads, by module id: a Pubky approval (it waits on a relay for a remote signer) and the
  * homeserver reads, a Keet proof (signed for, or checked from, a contact on a live channel), a device handoff's PAKE
- * (both devices online), and the USDT and Ark wallets' adapters and SDK (nothing without their RPC or Ark server; their
- * wasm is not precached either). 2.4 MiB of the build: cached the first time one is used, not at install.
+ * (both devices online), the USDT and Ark wallets' adapters and SDK (nothing without their RPC or Ark server; their
+ * wasm is not precached either), and a group call's LiveKit client with its E2EE worker (a call joins with a pass the
+ * node hands out, WISP 602). 3 MiB of the build: cached the first time one is used, not at install.
  */
 const ONLINE_ONLY_MODULES = [
   "/node_modules/@synonymdev/pubky/", "/node_modules/keet-identity-key/", "/node_modules/@serenity-kit/opaque/", "/node_modules/@arkade-os/sdk/",
-  "/paymentAdapters/usdt.ts", "/paymentAdapters/arkade.ts",
+  "/paymentAdapters/usdt.ts", "/paymentAdapters/arkade.ts", "/hooks/groupCallLivekit.ts",
 ];
 
 /** A language's dictionary, a chunk of its own (`loadLocale`). English is in the entry. */
@@ -111,15 +112,33 @@ export interface BundleFile {
   facadeModuleId?: string | null;
   imports?: readonly string[];
   dynamicImports?: readonly string[];
+  /** The files a chunk names by URL (a worker it starts, `new URL(…, import.meta.url)`), as Vite records them. */
+  viteMetadata?: { importedAssets?: ReadonlySet<string> } | null;
+  /** An asset's content: the app's page (`index.html`) names the scripts it loads. */
+  source?: string | Uint8Array;
+}
+
+/**
+ * The scripts the app's page loads, by file name: its module scripts and modulepreloads. Vite drops an entry chunk that is
+ * nothing but imports (the `main` group took its code) and names those in the page instead, so the page, not an entry
+ * chunk, is where the app starts.
+ */
+function pageScripts(bundle: readonly BundleFile[]): string[] {
+  const page = bundle.find((file) => file.type === "asset" && file.fileName === "index.html")?.source;
+  const html = typeof page === "string" ? page : page ? new TextDecoder().decode(page) : "";
+  return [...html.matchAll(/<(?:script[^>]*\ssrc|link[^>]*rel="modulepreload"[^>]*\shref)="\/?(assets\/[^"]+\.js)"/g)].map(([, name]) => name!);
 }
 
 /**
  * The build's chunks the install leaves to their first use: those only reached through a dynamic import of an
  * online-only module (`onlineOnly`) or of a language (`languages`, by language: the install takes the person's own,
- * `installList`). Walked from the entries along every import but those: a chunk any other path reaches is kept.
+ * `installList`). Walked from the entries and the scripts the app's page loads, along every import but those: a chunk
+ * any other path reaches is kept. A file an online-only chunk names by URL (its worker) is online-only too, unless a
+ * kept chunk names it as well.
  */
 export function optionalFiles(bundle: Iterable<BundleFile>): { onlineOnly: string[]; languages: Record<string, string[]> } {
-  const chunks = new Map([...bundle].filter((file) => file.type === "chunk").map((file) => [file.fileName, file]));
+  const files = [...bundle];
+  const chunks = new Map(files.filter((file) => file.type === "chunk").map((file) => [file.fileName, file]));
   const facade = (file: BundleFile) => file.facadeModuleId?.replace(/\\/g, "/") ?? "";
   const languageOf = (file: BundleFile) => LANGUAGE_MODULE.exec(facade(file))?.[1];
   const door = (file: BundleFile) => languageOf(file) !== undefined || ONLINE_ONLY_MODULES.some((id) => facade(file).includes(id));
@@ -134,7 +153,7 @@ export function optionalFiles(bundle: Iterable<BundleFile>): { onlineOnly: strin
     }
     return seen;
   };
-  const kept = walk([...chunks.values()].filter((file) => file.isEntry).map((file) => file.fileName), new Set(), true);
+  const kept = walk([...[...chunks.values()].filter((file) => file.isEntry).map((file) => file.fileName), ...pageScripts(files)], new Set(), true);
   const languages: Record<string, string[]> = {};
   for (const file of chunks.values()) {
     const language = languageOf(file);
@@ -142,7 +161,11 @@ export function optionalFiles(bundle: Iterable<BundleFile>): { onlineOnly: strin
     languages[language] = [...walk([file.fileName], new Set(), false)].filter((name) => !kept.has(name)).sort();
   }
   const ofLanguages = new Set(Object.values(languages).flat());
-  const onlineOnly = [...chunks.keys()].filter((name) => !kept.has(name) && !ofLanguages.has(name)).sort();
+  const onlineChunks = [...chunks.keys()].filter((name) => !kept.has(name) && !ofLanguages.has(name));
+  const assetsOf = (names: Iterable<string>) => [...names].flatMap((name) => [...(chunks.get(name)?.viteMetadata?.importedAssets ?? [])]);
+  const keptAssets = new Set(assetsOf([...kept, ...ofLanguages]));
+  const onlineAssets = assetsOf(onlineChunks).filter((name) => !keptAssets.has(name));
+  const onlineOnly = [...new Set([...onlineChunks, ...onlineAssets])].sort();
   return { onlineOnly, languages };
 }
 
@@ -188,16 +211,37 @@ export function precacheList(files: readonly string[], leaveOut: readonly string
 }
 
 /**
- * What the worker is built with, from the public folder's files and the bundle: the precache, and each language's files
- * (but English's, in the entry), which the install takes for the person's language only (`installList`).
+ * What the worker is built with, from the public folder's files and the bundle: the precache, each language's files
+ * (but English's, in the entry), which the install takes for the person's language only (`installList`), and the
+ * build's other hashed files (`lazy`: the WebAssembly, the online-only chunks), kept on their first use (`asset`).
+ * `bundle` is read before Vite's own `generateBundle`, its entry chunks still there for the walk (`optionalFiles`);
+ * `written`, when given, is what the build writes after it: a name it dropped (an entry chunk that was only imports,
+ * named in index.html instead) is in no list, as one 404 fails the install.
  */
-export function serviceWorkerFiles(publicFiles: readonly string[], bundle: readonly (BundleFile & { moduleIds?: readonly string[] })[]): { precache: string[]; languages: Record<string, string[]> } {
+export function serviceWorkerFiles(publicFiles: readonly string[], bundle: readonly (BundleFile & { moduleIds?: readonly string[] })[], written?: readonly string[]): { precache: string[]; languages: Record<string, string[]>; lazy: string[] } {
   const { onlineOnly, languages } = optionalFiles(bundle);
+  const kept = written && new Set(written.map((file) => "/" + file.replace(/^\/+/, "")));
+  const writes = (path: string) => !kept || !path.startsWith("/assets/") || kept.has(path);
   const leaveOut = [...desktopOnlyFiles(bundle), ...onlineOnly, ...Object.values(languages).flat()];
-  return {
-    precache: precacheList([...publicFiles, ...bundle.map((file) => file.fileName)], leaveOut),
-    languages: Object.fromEntries(Object.entries(languages).map(([language, files]) => [language, files.map((file) => "/" + file.replace(/^\/+/, ""))])),
-  };
+  const precache = precacheList([...publicFiles, ...bundle.map((file) => file.fileName)], leaveOut).filter(writes);
+  const byLanguage = Object.fromEntries(Object.entries(languages).map(([language, files]) => [language, files.map((file) => "/" + file.replace(/^\/+/, "")).filter(writes)]));
+  const installed = new Set([...precache, ...Object.values(byLanguage).flat()]);
+  const lazy = [...new Set(bundle.map((file) => "/" + file.fileName.replace(/^\/+/, "")))]
+    .filter((path) => path.startsWith("/assets/") && !path.endsWith(".map") && !installed.has(path) && writes(path))
+    .sort();
+  return { precache, languages: byLanguage, lazy };
+}
+
+/**
+ * The files the install takes from the caches of earlier builds (`held`, path → cache) instead of the network: a hashed
+ * file has a digest of its content in its name, so the copy an older cache holds is the file. The browser's HTTP cache
+ * may have let it go: the worker answered from its own cache since, so nothing read it, and clearing the browser's
+ * cached files empties it but not the worker's. Those it needs (`wanted`), and those it keeps on first use (`lazy`) that
+ * an earlier build kept: the next use of a wallet does not download its WebAssembly again. Never the files whose
+ * names stay from one deploy to the next (`precacheMode`).
+ */
+export function carriedOver(wanted: readonly string[], lazy: readonly string[], held: ReadonlyMap<string, string>): string[] {
+  return [...new Set([...wanted, ...lazy])].filter((path) => precacheMode(path) === "default" && held.has(path));
 }
 
 /**
@@ -405,9 +449,9 @@ export function pushNotice(
   const home = { path: "/", profile: options.profile };
   const runs = !device || device.state === "active";
   if (wake.kind === "device") {
-    const asker = device?.tokens[wake.token];
-    if (asker === undefined || options.appVisible) return null;
-    const name = asker || "Ghostly";
+    // Only a token of its own: one that names what every object has (`__defineGetter__`) is no device's.
+    if (!device || !Object.prototype.hasOwnProperty.call(device.tokens, wake.token) || options.appVisible) return null;
+    const name = device.tokens[wake.token] || "Ghostly";
     return { title, body: fill(runs ? text.takeover : text.moveHere, name), tag: `device:${options.profile}`, call: false, data: home };
   }
   if (runs) return wakeNotice(found, { now: options.now, appVisible: options.appVisible, profile: options.profile, kind: wake.kind });

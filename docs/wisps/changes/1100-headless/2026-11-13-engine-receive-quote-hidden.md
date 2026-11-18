@@ -1,0 +1,1 @@
+`engine walletReceiveLightning` prints a Cashu mint quote id as `quote: "<hidden>"` unless `--show-secret` is given, as `wallet receive` leaves it out: the mint quote is not locked to a key, so whoever holds its id can mint the ecash its invoice pays for. The socket answer is unchanged.

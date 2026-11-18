@@ -12,6 +12,14 @@ const name = transportName;
 const native = (t?: PairedTransport) => t === "iroh/1" || t === "hyperdht/1";
 
 /**
+ * The contact's place in a line, handed to these helpers as `contact` by a component that draws the line: it stays in
+ * the text, and `fillNames(text, { contact })` (lib/fillNodes.tsx) puts the name there as its own <bdi>. Put in
+ * plainly, a Latin name with a bracket at its edge beside a Latin transport name made one run in an Arabic line, and
+ * "Ana (work)" read with its bracket and the transport on the wrong side.
+ */
+export const CONTACT = "{{contact}}";
+
+/**
  * An error from the engine, short enough for a timeline line: transport ids named, the advice left for the details,
  * and said in a few words of `tr`'s language (lib/problemText.ts), never a long English engine text.
  */

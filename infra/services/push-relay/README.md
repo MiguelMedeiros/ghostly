@@ -6,7 +6,8 @@ push services answer without CORS. For those senders, a person may set a relay i
 Push relay**; the app then hands it the finished request, already encrypted and signed.
 
 This is that relay: one Node file, no dependencies, nothing stored. It only posts to the big push
-services (Google, Apple, Mozilla, Microsoft) on their default port, only forwards a request signed for Web Push
+services (Google, Apple, Mozilla, Microsoft) on their default port, at an endpoint with no `%` in its path and no
+query (but Microsoft's single `token`), only forwards a request signed for Web Push
 (a VAPID `Authorization`) with the Web Push headers, and limits each address (an IPv6 one by its /64) to 30
 requests a minute, and each subscription (an endpoint with its VAPID key) to 30 forwards a minute from all
 addresses together; a forward the push service refuses (a 4xx other than 429) counts against the sender's address only. When its table of addresses, or of subscriptions, is full it forgets the one seen longest ago. A client has 15 seconds
@@ -26,7 +27,7 @@ curl -s http://127.0.0.1:49480/healthz           # {"ok":true}
 ```
 
 `GET /healthz` answers 200 `{"ok":true}` while the relay runs. Point a monitor at it: `HEAD` and a query string
-(`/healthz?x=1`) answer the same, and are not logged as refusals; any other `GET` is refused (405). Anyone who reaches the relay may read it, so it carries no count: pushes forwarded, failed and refused are in
+(`/healthz?x=1`) answer the same, and are not logged as refusals; any other `GET` is refused (405, `Allow: POST, OPTIONS`) with what the relay is (`{"error":"Ghostly push relay: POST a push to it"}`), so its address opened in a browser says it runs. Anyone who reaches the relay may read it, so it carries no count: pushes forwarded, failed and refused are in
 the log (below).
 
 A port another program holds or one below 1024 this user may not take (`PORT`), and a `HOST` that is no address of
@@ -35,7 +36,12 @@ this machine or no name at all, stop the start with one line that names the sett
 Put it behind HTTPS (a tunnel or a reverse proxy) and enter its address in Settings. Behind a proxy, set
 `GHOSTLY_RELAY_PROXIES` to the number of proxies in front of it (`1` for one tunnel), so the limit counts each
 client's address from `X-Forwarded-For` rather than the proxy's; without it the header is ignored, and the first request
-that carries one logs `requests carry X-Forwarded-For but GHOSTLY_RELAY_PROXIES is not set`. With proxies set,
+that carries one logs `requests carry X-Forwarded-For but GHOSTLY_RELAY_PROXIES is not set`. With it set, the first
+request without that entry (a proxy that does not write the header, such as nginx without `proxy_set_header
+X-Forwarded-For $proxy_add_x_forwarded_for`) logs `requests arrive without X-Forwarded-For though
+GHOSTLY_RELAY_PROXIES is set`: it counts as the proxy, as every other one would. One with fewer entries than the
+setting (`2` behind a single proxy) logs `requests carry 1 X-Forwarded-For entry though GHOSTLY_RELAY_PROXIES is 2`:
+set it to the number of proxies that write the header. With proxies set,
 the relay listens on 127.0.0.1 unless `HOST` says otherwise: only the proxy should reach it, since anyone else could
 write that header. Ghostly runs none for you: no relay is set by default.
 

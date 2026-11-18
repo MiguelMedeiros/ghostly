@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { renderHook } from "@testing-library/react";
 import { FakeMediaStream, FakeTrack } from "../../../../../packages/react/test/fakes";
 
 // covers: calls.linux-native, calls.devices-linux, calls.reconnect, calls.speaking, settings.network.relay-only
@@ -43,6 +44,11 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 const { NativePeerConnection, SCREEN_UNAVAILABLE, askedDevice, bytesOf, connectionStateOf, deviceList, deviceName, isJpeg, nativeCallMedia, nativeCallOptions, nativeDevices, ownIceServers } = await import("../../desktop/nativeCalls");
 const { callRtcConfig, keepsToRelays } = await import("@ghostly/core");
+const { GROUP_CALLS_NOT_ON_LINUX, groupCallSupport } = await import("../../desktop/groupCallSupport");
+const { useGroupCallSupport } = await import("../../hooks/useGroupCallSupport");
+const { errorText } = await import("../../lib/errorText");
+const { translateWith } = await import("../../locales/translate");
+const { LOCALES } = await import("../i18n/locales");
 const { CallRelayError } = await import("@ghostly/react");
 const { chooseDevice } = await import("../../lib/mediaDevices");
 const { callLevels } = await import("../../lib/voiceLevels");
@@ -95,6 +101,67 @@ describe("what the host makes of what Rust says about calls", () => {
   it("on Linux without the GStreamer plugins, offers no calls and says what to install", () => {
     const missing = "Calls need GStreamer plugins: install gstreamer1.0-plugins-good";
     expect(nativeCallOptions({ native: true, missing })).toEqual({ node: { callsSupport: false, callsUnavailable: missing } });
+  });
+});
+
+/** The agents each app's page has: WKWebView, WebView2, WebKitGTK, Android's WebView, and two browsers. */
+const AGENTS = {
+  mac: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)",
+  windows: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0",
+  linux: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15",
+  android: "Mozilla/5.0 (Linux; Android 14; Pixel 8 Build/AP2A.240805.005; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/131.0.0.0 Mobile Safari/537.36",
+  firefoxLinux: "Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0",
+  safariMac: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15",
+};
+
+describe("where group calls work", () => {
+  const off = { supported: false, reason: GROUP_CALLS_NOT_ON_LINUX };
+  const on = { supported: true, reason: null };
+
+  it("not on the Linux Desktop, whose WebView has no WebRTC: the button says to join from the web app", () => {
+    expect(groupCallSupport(true, AGENTS.linux)).toEqual(off);
+    expect(GROUP_CALLS_NOT_ON_LINUX).toBe("Group calls aren't on Linux yet: join from app.ghostly.tools in a browser");
+  });
+
+  it("on the macOS and Windows Desktop, with the WebView's own WebRTC, and in the Android app", () => {
+    expect(groupCallSupport(true, AGENTS.mac)).toEqual(on);
+    expect(groupCallSupport(true, AGENTS.windows)).toEqual(on);
+    expect(groupCallSupport(true, AGENTS.android)).toEqual(on);
+  });
+
+  it("in a browser on any system, Linux included: that is where the Linux Desktop sends people", () => {
+    for (const agent of [AGENTS.firefoxLinux, AGENTS.linux, AGENTS.safariMac, AGENTS.windows]) expect(groupCallSupport(false, agent)).toEqual(on);
+  });
+
+  describe("on this page, as the group's call button reads it", () => {
+    const tauri = window as unknown as { __TAURI_INTERNALS__?: object };
+    afterEach(() => {
+      delete tauri.__TAURI_INTERNALS__;
+      Reflect.deleteProperty(navigator, "userAgent");
+    });
+    const agent = (value: string) => Object.defineProperty(navigator, "userAgent", { value, configurable: true });
+
+    it("off with the reason in the Linux Desktop, on in its browser", () => {
+      agent(AGENTS.linux);
+      tauri.__TAURI_INTERNALS__ = {};
+      expect(groupCallSupport()).toEqual(off);
+      expect(renderHook(() => useGroupCallSupport()).result.current).toEqual(off);
+      delete tauri.__TAURI_INTERNALS__;
+      expect(renderHook(() => useGroupCallSupport()).result.current).toEqual(on);
+    });
+
+    it("on in the Mac and Windows Desktop", () => {
+      tauri.__TAURI_INTERNALS__ = {};
+      for (const value of [AGENTS.mac, AGENTS.windows]) {
+        agent(value);
+        expect(renderHook(() => useGroupCallSupport()).result.current).toEqual(on);
+      }
+    });
+
+    it("says the reason in the app's language", () => {
+      const pt = translateWith(LOCALES.pt, "pt");
+      expect(errorText(GROUP_CALLS_NOT_ON_LINUX, pt)).toBe("Chamadas em grupo ainda não chegaram ao Linux: entre pelo app.ghostly.tools num navegador");
+    });
   });
 });
 
@@ -717,12 +784,14 @@ describe("the devices, which are GStreamer's and known by name", () => {
 
     await video.sender.replaceTrack((await media.getUserMedia({ video: true })).getVideoTracks()[0]);
     const headset = (await media.getUserMedia({ audio: { deviceId: { exact: "Headset" } } })).getAudioTracks()[0];
-    await audio.sender.replaceTrack(headset);
+    // Settled once Rust has it, as a switch on a call that is up.
+    const switching = audio.sender.replaceTrack(headset);
     nativeDevices.playCallOn("Headphones");
     await new Promise((done) => setTimeout(done, 0));
     for (const [command, args] of tauri.invoke.mock.calls) if (args?.id === pc.id) spoken.push(command);
     described();
     await describing;
+    await switching;
 
     expect(spoken, "nothing for a call Rust does not have yet").toEqual([]);
     expect(tauri.invoke).toHaveBeenCalledWith("native_call_camera", { id: pc.id, camera: 7 });
@@ -738,7 +807,8 @@ describe("the devices, which are GStreamer's and known by name", () => {
     tauri.invoke.mockImplementation(async (command, args) => {
       if (command === "native_call_offer") { await new Promise<void>((done) => { described = done; }); return { sdp: "sdp", microphone: null }; }
       // Rust relaunches the call's sound on the new speaker: the person picks another microphone meanwhile.
-      if (command === "native_call_speaker") { await new Promise<void>((done) => { spoken = done; }); return undefined; }
+      // (This call's: a call an earlier test left open plays on it at once.)
+      if (command === "native_call_speaker" && args?.id === pc.id) { await new Promise<void>((done) => { spoken = done; }); return undefined; }
       if (command === "native_call_microphone") return args?.device ?? null;
       return undefined;
     });
@@ -749,20 +819,100 @@ describe("the devices, which are GStreamer's and known by name", () => {
     const describing = pc.createOffer();
     await vi.waitFor(() => expect(described).toBeTypeOf("function"));
     // While Rust gathers: a headset, both ways.
-    await audio.sender.replaceTrack((await media.getUserMedia({ audio: { deviceId: { exact: "Headset" } } })).getAudioTracks()[0]);
+    const headset = audio.sender.replaceTrack((await media.getUserMedia({ audio: { deviceId: { exact: "Headset" } } })).getAudioTracks()[0]);
     nativeDevices.playCallOn("Headphones");
     described();
     await vi.waitFor(() => expect(spoken).toBeTypeOf("function"));
-    // The call has started in Rust: this one goes at once.
+    // The call has started in Rust, which has not had the microphone yet: this one goes with the earlier pick.
     const usb = (await media.getUserMedia({ audio: { deviceId: { exact: "USB Mic" } } })).getAudioTracks()[0];
-    await audio.sender.replaceTrack(usb);
+    const switching = audio.sender.replaceTrack(usb);
     spoken();
     await describing;
+    await Promise.all([headset, switching]);
 
     const microphones = tauri.invoke.mock.calls.filter(([command]) => command === "native_call_microphone").map(([, args]) => args?.device);
     expect(microphones[microphones.length - 1], "the last microphone Rust was told").toBe("USB Mic");
     expect(usb.getSettings().deviceId).toBe("USB Mic");
     pc.close();
+  });
+
+  describe("a microphone picked while Rust starts the call, which the call hook swaps in once its replaceTrack resolves", () => {
+    const calls: InstanceType<typeof NativePeerConnection>[] = [];
+    afterEach(() => calls.forEach((pc) => pc.close()));
+
+    /** A call Rust starts on Mic A once let go; the microphone switches as `switched` answers. */
+    async function starting(switched: (device: string | null) => Promise<string | null>) {
+      let described!: () => void;
+      tauri.invoke.mockImplementation(async (command, args) => {
+        // Rust gathers its candidates first (up to a few seconds): the person picks another microphone meanwhile.
+        if (command === "native_call_offer") { await new Promise<void>((done) => { described = done; }); return { sdp: "sdp", microphone: "Mic A" }; }
+        if (command === "native_call_microphone") return switched((args?.device as string | null | undefined) ?? null);
+        return undefined;
+      });
+      const media = nativeCallMedia();
+      const pc = new NativePeerConnection({});
+      calls.push(pc);
+      const [audio] = pc.getTransceivers();
+      const mic = async (device: string) => (await media.getUserMedia({ audio: { deviceId: { exact: device } } })).getAudioTracks()[0];
+      const micA = await mic("Mic A");
+      pc.addTrack(micA);
+      const describing = pc.createOffer();
+      await vi.waitFor(() => expect(described).toBeTypeOf("function"));
+      /** Picks `device` as `useWebRTC.switchMicrophone` does: the old track stops once it is swapped in, the new one if it is refused. */
+      const pick = async (device: string) => {
+        const track = await mic(device);
+        const switching = audio.sender.replaceTrack(track).then(() => { micA.stop(); }, (error: unknown) => { track.stop(); throw error; });
+        // Awaited by the test later: no unhandled rejection meanwhile.
+        switching.catch(() => {});
+        return { track, switching };
+      };
+      const start = async () => { described(); await describing; };
+      const ended = (device: "microphone") => tauri.channels[0].onmessage(json({ ended: device }));
+      return { pc, audio, micA, pick, start, ended };
+    }
+
+    it("refused by Rust, fails the switch: the call keeps the one Rust sends, which its device check falls back from when it fails", async () => {
+      const { audio, micA, pick, start, ended } = await starting(async () => { throw new Error("Headset could not be opened"); });
+      const { track: headset, switching } = await pick("Headset");
+      await start();
+      await expect(switching, "the call hook hears the switch failed, and says so").rejects.toThrow("Headset could not be opened");
+      expect(headset.readyState).toBe("ended");
+      expect(micA.readyState, "Mic A, the one Rust sends, stays on").toBe("live");
+      expect(micA.getSettings().deviceId).toBe("Mic A");
+      expect(audio.sender.track, "a later offer asks Rust for the one it sends").toBe(micA);
+      ended("microphone");
+      expect(micA.readyState, "Mic A failing ends its track").toBe("ended");
+    });
+
+    it("opened by Rust, is the one sent: its track, which ends when it fails", async () => {
+      const { audio, micA, pick, start, ended } = await starting(async (device) => device);
+      const { track: headset, switching } = await pick("Headset");
+      await start();
+      await switching;
+      expect(tauri.invoke).toHaveBeenCalledWith("native_call_microphone", expect.objectContaining({ device: "Headset" }));
+      expect(micA.readyState).toBe("ended");
+      expect(headset.getSettings().deviceId).toBe("Headset");
+      expect(audio.sender.track).toBe(headset);
+      ended("microphone");
+      expect(headset.readyState, "the Headset failing ends its track").toBe("ended");
+    });
+
+    it("picked again as the one Rust starts with, is the one sent: its track ends when it fails", async () => {
+      const { pick, start, ended } = await starting(async (device) => device);
+      const { track: again, switching } = await pick("Mic A");
+      await start();
+      await switching;
+      expect(commands()).not.toContain("native_call_microphone");
+      ended("microphone");
+      expect(again.readyState).toBe("ended");
+    });
+
+    it("on a call hung up meanwhile, lets the switch go", async () => {
+      const { pc, pick } = await starting(async (device) => device);
+      const { switching } = await pick("Headset");
+      pc.close();
+      await switching;
+    });
   });
 
   it("meters a microphone in Rust for Settings, by name, until stopped", async () => {

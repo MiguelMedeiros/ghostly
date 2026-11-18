@@ -18,6 +18,7 @@ class FakeRegistration extends EventTarget {
   waiting: FakeWorker | null = null;
   active: FakeWorker | null = new FakeWorker("activated");
   update = vi.fn(async () => {});
+  unregister = vi.fn(async () => true);
 }
 
 class FakeContainer extends EventTarget {
@@ -94,6 +95,46 @@ describe("Reload on a new version", () => {
     expect(registration.active!.posted).toEqual([]);
   });
 
+  it("an older version waits and update() finds a newer one: the newer one is waited for and takes over, the older one is told nothing", async () => {
+    // B's banner was never pressed and C was deployed since: told to skip waiting, B would take over while C still
+    // fills its cache.
+    const older = new FakeWorker("installed");
+    registration.waiting = older;
+    const newer = new FakeWorker("installing");
+    registration.update.mockImplementation(async () => { registration.installing = newer; });
+    const reload = vi.fn();
+    const applying = applyUpdate({ reload });
+    await vi.waitFor(() => expect(registration.update).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(older.posted).toEqual([]);
+    expect(newer.posted).toEqual([]);
+    // C installed: it waits in B's place, which goes redundant.
+    registration.installing = null;
+    registration.waiting = newer;
+    older.become("redundant");
+    newer.become("installed");
+    await vi.waitFor(() => expect(newer.posted).toEqual([{ type: "skip-waiting" }]));
+    container.controller = newer;
+    container.dispatchEvent(new Event("controllerchange"));
+    await applying;
+    expect(older.posted).toEqual([]);
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("an older version waits and the newer one does not finish installing in time: the older one takes over, as before", async () => {
+    const older = new FakeWorker("installed");
+    registration.waiting = older;
+    const newer = new FakeWorker("installing");
+    registration.update.mockImplementation(async () => { registration.installing = newer; });
+    const reload = vi.fn();
+    const applying = applyUpdate({ timeoutMs: 20, reload });
+    await vi.waitFor(() => expect(older.posted).toEqual([{ type: "skip-waiting" }]));
+    container.dispatchEvent(new Event("controllerchange"));
+    await applying;
+    expect(newer.posted).toEqual([]);
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
   it("the newest worker already controls the page (another tab took the update): it reloads at once", async () => {
     // The other tab's Reload activated it and it claimed this page too: nothing is waiting, nothing installs.
     const newest = new FakeWorker("activated");
@@ -110,6 +151,141 @@ describe("Reload on a new version", () => {
     const reload = vi.fn();
     await applyUpdate({ reload });
     expect(reload).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Reload when the new worker cannot install", () => {
+  // The page runs 1.13.0 build aaa; the server's `/version.json` answers what each test says.
+  const versionFile = vi.fn<(url: string) => Promise<Response>>();
+  const answers = (feed: object) => versionFile.mockImplementation(async () => new Response(JSON.stringify(feed), { status: 200 }));
+  const asked = () => versionFile.mock.calls.filter(([url]) => String(url).endsWith("/version.json")).length;
+  /** What happened, in order: the worker unregistered, the page reloaded. */
+  let steps: string[];
+  const reload = () => { steps.push("reload"); };
+
+  beforeEach(() => {
+    vi.stubGlobal("__APP_VERSION__", "1.13.0");
+    vi.stubGlobal("__APP_BUILD__", "aaa");
+    vi.stubGlobal("fetch", versionFile);
+    versionFile.mockReset();
+    steps = [];
+    registration.unregister.mockImplementation(async () => { steps.push("unregister"); return true; });
+  });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  /** A deploy's worker starts installing at `update()`, then its install fails (a precache file missing, storage full). */
+  const installFails = () => {
+    const next = new FakeWorker("installing");
+    registration.update.mockImplementation(async () => {
+      registration.installing = next;
+      setTimeout(() => { registration.installing = null; next.become("redundant"); }, 0);
+    });
+    return next;
+  };
+
+  it("a new build is out: the old worker is unregistered before the reload, so the page loads the new build", async () => {
+    answers({ version: "1.13.1", build: "bbb" });
+    const next = installFails();
+    await applyUpdate({ reload });
+    expect(steps).toEqual(["unregister", "reload"]);
+    expect(asked()).toBe(1);
+    expect(next.posted).toEqual([]);
+  });
+
+  it("a redeploy of the same version (another build) counts as a new build too", async () => {
+    answers({ version: "1.13.0", build: "ccc" });
+    installFails();
+    await applyUpdate({ reload });
+    expect(steps).toEqual(["unregister", "reload"]);
+  });
+
+  it("not installed in time: the same, once the server says a new build is out", async () => {
+    answers({ version: "1.13.1", build: "bbb" });
+    registration.update.mockImplementation(async () => { registration.installing = new FakeWorker("installing"); });
+    await applyUpdate({ timeoutMs: 20, reload });
+    expect(steps).toEqual(["unregister", "reload"]);
+  });
+
+  it("the new worker's script refused (update() rejects) while a new build is out: the same", async () => {
+    answers({ version: "1.13.1", build: "bbb" });
+    registration.update.mockImplementation(async () => { throw new TypeError("Failed to update a ServiceWorker: 404"); });
+    await applyUpdate({ reload });
+    expect(steps).toEqual(["unregister", "reload"]);
+  });
+
+  it("the server still has this build: the worker stays, a plain reload", async () => {
+    answers({ version: "1.13.0", build: "aaa" });
+    installFails();
+    await applyUpdate({ reload });
+    expect(asked()).toBe(1);
+    expect(steps).toEqual(["reload"]);
+    expect(registration.unregister).not.toHaveBeenCalled();
+  });
+
+  it("offline (the version file does not answer): the worker stays, so the reload still opens the app", async () => {
+    versionFile.mockImplementation(async () => { throw new TypeError("Failed to fetch"); });
+    installFails();
+    await applyUpdate({ reload });
+    expect(asked()).toBe(1);
+    expect(steps).toEqual(["reload"]);
+    expect(registration.unregister).not.toHaveBeenCalled();
+  });
+
+  it("the server answers with an error or something else: the worker stays", async () => {
+    versionFile.mockImplementation(async () => new Response("<html>bad gateway</html>", { status: 502 }));
+    installFails();
+    await applyUpdate({ reload });
+    versionFile.mockImplementation(async () => new Response("<html>a captive portal</html>", { status: 200 }));
+    installFails();
+    await applyUpdate({ reload });
+    expect(asked()).toBe(2);
+    expect(steps).toEqual(["reload", "reload"]);
+    expect(registration.unregister).not.toHaveBeenCalled();
+  });
+
+  it("nothing newer to install (another tab's Reload already put the new worker in place): never unregistered", async () => {
+    answers({ version: "1.13.1", build: "bbb" });
+    await applyUpdate({ reload });
+    expect(steps).toEqual(["reload"]);
+    expect(registration.unregister).not.toHaveBeenCalled();
+  });
+
+  it("the new worker installs: it takes over as before, nothing unregistered", async () => {
+    answers({ version: "1.13.1", build: "bbb" });
+    const next = new FakeWorker("installed");
+    registration.waiting = next;
+    const applying = applyUpdate({ reload });
+    await vi.waitFor(() => expect(next.posted).toEqual([{ type: "skip-waiting" }]));
+    container.dispatchEvent(new Event("controllerchange"));
+    await applying;
+    expect(steps).toEqual(["reload"]);
+    expect(registration.unregister).not.toHaveBeenCalled();
+  });
+
+  it("an older version waits and the newer one update() found fails to install while a new build is out: unregistered, the older one told nothing", async () => {
+    answers({ version: "1.13.2", build: "ccc" });
+    const older = new FakeWorker("installed");
+    registration.waiting = older;
+    const newer = installFails();
+    const applying = applyUpdate({ reload });
+    await vi.waitFor(() => expect(steps.length + older.posted.length).toBeGreaterThan(0));
+    expect(older.posted).toEqual([]);
+    await applying;
+    expect(steps).toEqual(["unregister", "reload"]);
+    expect(newer.posted).toEqual([]);
+  });
+
+  it("the same offline (the version file does not answer): the older one, installed whole, takes over as before", async () => {
+    versionFile.mockImplementation(async () => { throw new TypeError("Failed to fetch"); });
+    const older = new FakeWorker("installed");
+    registration.waiting = older;
+    installFails();
+    const applying = applyUpdate({ reload });
+    await vi.waitFor(() => expect(older.posted).toEqual([{ type: "skip-waiting" }]));
+    container.dispatchEvent(new Event("controllerchange"));
+    await applying;
+    expect(steps).toEqual(["reload"]);
+    expect(registration.unregister).not.toHaveBeenCalled();
   });
 });
 
@@ -181,6 +357,15 @@ describe("a share, on the page's side", () => {
     await vi.waitFor(() => expect(registration.active!.posted).toEqual([{ type: "share-ready" }]));
   });
 
+  it("the page opened for it asks for it once it is the app, even after a link took its address while it waited", async () => {
+    window.location.hash = "#/shared";
+    const opened = openedForShare();
+    // The tab that was the app closed before the wait was over, with an invite in this tab's address by then.
+    window.location.hash = "#/invite/abc";
+    askForShare(opened);
+    await vi.waitFor(() => expect(registration.active!.posted).toEqual([{ type: "share-ready" }]));
+  });
+
   it("a page that waits for another tab has it forwarded there", async () => {
     window.location.hash = "#/shared";
     forwardShare();
@@ -221,6 +406,20 @@ describe("a share, on the page's side", () => {
       vi.advanceTimersByTime(SHARE_FORWARD_AFTER_MS);
       say("share-none");
       expect(answered).toHaveBeenCalledWith("shareNone");
+    });
+
+    it("a link reaches the tab before the wait is over: the share is still forwarded, after the wait and as it goes", () => {
+      handShareOver(() => false, () => {});
+      // The link takes the address, then leaves it for the app's home once the tab that is the app took it.
+      window.location.hash = "#/invite/abc";
+      vi.advanceTimersByTime(SHARE_FORWARD_AFTER_MS);
+      expect(forwards()).toEqual([{ type: "share-forward", profile: activeProfileId() }]);
+      registration.active!.posted.length = 0;
+      window.location.hash = "#/shared";
+      handShareOver(() => false, () => {});
+      window.location.hash = "#/";
+      window.dispatchEvent(new Event("pagehide"));
+      expect(forwards()).toEqual([{ type: "share-forward", profile: activeProfileId() }]);
     });
 
     it("the tab took over meanwhile: it asks for the share itself, nothing is forwarded", () => {
@@ -349,6 +548,21 @@ describe("a share, on the page's side", () => {
     // No worker controls the page: nothing can keep it.
     container.controller = null;
     expect(carryIncomingShare()).toBe(false);
+  });
+
+  it("a share given back to the worker takes the count of those that could not be kept with it, the worker's and the picker's", () => {
+    listenForShares();
+    const say = (text: string, dropped?: number) => container.dispatchEvent(Object.assign(new Event("message"), { data: { type: "share", item: { title: "", text, url: "", files: [] }, ...(dropped && { dropped }) } }));
+    say("shown", 2);
+    for (const text of ["second", "third", "fourth"]) say(text);
+    expect(incomingShare()).toMatchObject({ text: "shown", dropped: 3 });
+    expect(carryIncomingShare()).toBe(true);
+    const kept = registration.active!.posted.filter((message) => (message as { type: string }).type === "share-keep");
+    expect(kept).toEqual([
+      { type: "share-keep", item: { title: "", text: "shown", url: "", files: [] }, dropped: 3 },
+      { type: "share-keep", item: { title: "", text: "second", url: "", files: [] } },
+      { type: "share-keep", item: { title: "", text: "third", url: "", files: [] } },
+    ]);
   });
 
   it("a share into the same window replaces the page: the shares in its picker go back to the worker, once, ahead of the new one", async () => {

@@ -13,6 +13,7 @@ import { ago } from "./contactBadges";
 import { contactFace, faceChoice, shownContactName } from "./contactFace";
 import { hostList, profileCounts } from "./profileWords";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
+import { ownDirection } from "../../lib/ownDirection";
 import { problemLine } from "../../lib/problemText";
 import type { Language } from "../../lib/settings";
 import { formatAt } from "../../lib/time";
@@ -56,12 +57,12 @@ export function IdentityActivity({ provider, subject, profile, links }: { provid
       {found && <div className="identity-activity-profile" data-testid="contact-activity-profile">
         {found.avatar?.startsWith("data:image/") && <img src={found.avatar} alt="" className="identity-activity-avatar" data-testid="contact-activity-avatar" />}
         <div className="identity-activity-who">
-          {found.name && <span className="identity-activity-name" data-testid="contact-activity-name">{found.name}</span>}
+          {found.name && <span className="identity-activity-name" data-testid="contact-activity-name"><bdi>{found.name}</bdi></span>}
           {found.handle && <span className="identity-activity-handle" data-testid="contact-activity-handle"><bdi>{found.handle}</bdi></span>}
           {counts && <span className="identity-activity-counts" data-testid="contact-activity-counts">{counts}</span>}
         </div>
       </div>}
-      {found?.about && <p className="identity-activity-about" data-testid="contact-activity-about">{found.about}</p>}
+      {found?.about && <p className="identity-activity-about" data-testid="contact-activity-about"><bdi>{found.about}</bdi></p>}
       {(found?.website || posts?.profileUrl) && <div className="identity-activity-links">
         {found?.website && <a {...externalLinkProps(found.website)} rel="noopener noreferrer nofollow" dir="ltr" className="identity-activity-link" data-testid="contact-activity-website"><bdi>{shownUrl(found.website)}</bdi></a>}
         {posts?.profileUrl && <a {...externalLinkProps(posts.profileUrl)} className="identity-activity-link" data-testid="contact-activity-open-profile">{t("identities.activity.openIn", { network })}</a>}
@@ -101,8 +102,10 @@ function Chips({ graph, links }: { graph?: PublicGraphViewLike | null; links: re
       {graph.contacts.map(c => {
         const name = contactName(c.linkId, links, t);
         const how = c.follows && c.followedBy ? t("identities.activity.mutual", { name }) : c.follows ? t("identities.activity.follows", { name }) : t("identities.activity.followedBy", { name });
+        // The arrow points from the follower to the one followed: mirrored where the app reads right to left, since it
+        // then sits to the right of the name ("⇄" is the same either way).
         return <li key={c.linkId} className="identity-activity-chip" data-testid="contact-activity-contact" data-link={c.linkId} title={how} aria-label={how}>
-          <span aria-hidden="true">{c.follows && c.followedBy ? "⇄" : c.follows ? "→" : "←"}</span> <bdi>{name}</bdi>
+          <span aria-hidden="true" className="inline-block rtl:-scale-x-100">{c.follows && c.followedBy ? "⇄" : c.follows ? "→" : "←"}</span> <bdi>{name}</bdi>
         </li>;
       })}
     </ul>
@@ -149,7 +152,7 @@ function PostImage({ image, index, postId, provider, subject }: { image: { host?
         {busy ? t("identities.activity.loading") : t("identities.activity.showPicture")}<span className="identity-activity-image-host">{from}</span>
       </button>
       {image.alt && <span className="identity-activity-image-alt">{image.alt}</span>}
-      {error && <span className="identity-activity-note" role="alert" data-testid="contact-activity-post-image-error">{error}</span>}
+      {error && <span className="identity-activity-note" role="alert" dir={ownDirection(error)} data-testid="contact-activity-post-image-error">{error}</span>}
     </span>
   );
 }

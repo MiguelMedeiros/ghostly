@@ -220,9 +220,11 @@ export interface GiverPorts extends Common {
   staying?(taker: HandoffTakerFacts): Promise<HandoffStay[]>;
   /**
    * Pass 1 is done: freeze. Stops the engine without a word to any contact, writes `releasing` with `patch`, and
-   * reloads into the gate. Only while the engine runs (pass 1). The wallets follow their plan for `taker`.
+   * reloads into the gate. Only while the engine runs (pass 1). The wallets follow their plan for `taker`. Why it stopped
+   * nothing, when a reason came after the last `busy` (a call that started ringing): the device stays active.
+   * `cancel`: a Cancel pressed while it runs (`QuiesceCancel`).
    */
-  quiesce?(patch: DevicePatch, taker?: HandoffTakerFacts): Promise<void>;
+  quiesce?(patch: DevicePatch, taker?: HandoffTakerFacts, cancel?: QuiesceCancel): Promise<BusyReport | null | void>;
   /**
    * Deletes the Breez databases of the wallets that moved (WISP 06 § Wallets), once the release is written. Each is
    * named from its phrase, so a device that took the profile back later would reopen a stale one.
@@ -232,6 +234,17 @@ export interface GiverPorts extends Common {
   backToActive?(stopped?: { failure: HandoffFailure; peer: string }): Promise<void>;
   /** A notice on this device: a pull with a wrong password. */
   notice?(kind: "wrong-password", device: string): void;
+}
+
+/**
+ * Cancel pressed on the giver while quiesce runs (its "Ready" step). The engine asks `asked()` just before it stops,
+ * and stops nothing once it says yes; it awaits `undo()` after `releasing` is written and before the pages start
+ * again, which puts the record back to `active` when Cancel came meanwhile. So no reload goes on with pass 2 after a
+ * Cancel the screen accepted.
+ */
+export interface QuiesceCancel {
+  asked(): boolean;
+  undo(): Promise<void>;
 }
 
 export interface TakerPorts extends Common {
@@ -578,14 +591,37 @@ export class HandoffGiver {
     if (this.phase === "offered" && this.id) this.out(handoffOfferFrame(this.turn, this.id, this.offerBytes));
   }
 
-  /** Cancel: before quiesce nothing changed; in pass 2 the device is active again. Never once the release is signed. */
+  /**
+   * Cancel: before quiesce nothing changed; at Ready (quiesce running) the record goes back to `active`, the same as
+   * in pass 2, where the device is active again. Never once the release is signed.
+   */
   cancel(): Promise<void> {
+    // Said at once, not behind the queue: a quiesce that runs or waits to run stops nothing, or undoes its write
+    // before the pages start again (`QuiesceCancel`).
+    if (this.phase === "pass1" || this.phase === "quiescing") this.cancelAsked = true;
     return this.exclusive(async () => {
       if (this.phase === "idle" || this.phase === "released" || this.phase === "failed") return;
       if (this.peer && this.ports.links.live(this.peer)) this.out(handoffCancelFrame("cancelled"));
       if (this.phase === "pass2") { await this.backToActive(); return; }
+      // Quiesce came back before this ran (it holds the queue): `releasing` may be written, and goes back.
+      if (this.phase === "quiescing") await this.undoQuiesce();
       this.reset("cancelled");
     });
+  }
+
+  /** Cancel pressed while quiesce runs or waits to: what it hands the engine. */
+  private cancelAsked = false;
+
+  /**
+   * Cancel at Ready: the `releasing` this handoff's quiesce wrote goes back to `active`, with a note that says
+   * it was cancelled after the reload (`resume`). No release was signed (only pass 2 signs one), so the taker holds nothing
+   * that takes the turn: the move stops there, as a Cancel in pass 2 stops it.
+   */
+  private async undoQuiesce(): Promise<void> {
+    const record = await this.ports.records.read();
+    const handoff = record?.handoff;
+    if (record?.state !== "releasing" || handoff?.role !== "releasing" || handoff.id !== this.id || !this.peer) return;
+    await this.ports.records.move("active", { handoff: { role: "releasing", step: `${STOPPED_STEP}cancelled`, peer: this.peer, at: this.now() } });
   }
 
   /**
@@ -943,11 +979,23 @@ export class HandoffGiver {
       const still = reportOf(await this.ports.busy(taker));
       if (still) { this.out(handoffBusyFrame(wireWhy(still), 30)); this.reset(still.why === "payment" ? "payment" : this.failWith(still)); return; }
     } else if (why) { this.out(handoffBusyFrame(wireWhy(why), 30)); this.reset(this.failWith(why)); return; }
+    // Cancel pressed while the checks above ran: nothing stops (its own turn in the queue resets this).
+    if (this.cancelAsked) return;
     this.phase = "quiescing";
     this.changed();
-    await this.ports.quiesce({
+    const late = await this.ports.quiesce({
       handoff: { role: "releasing", step: "pass2", id: this.id!, peer: this.peer!, from: this.turn, secret: toBase64Url(this.secret!), at: this.now(), ...(this.newer ? { newer: true as const } : {}) },
-    }, taker);
+    }, taker, { asked: () => this.cancelAsked, undo: async () => { if (this.cancelAsked) await this.undoQuiesce(); } });
+    // Cancel pressed while it ran: the engine stopped nothing, or put the record back before the reload. The taker is
+    // told when the link is still up; otherwise its next word finds this device active and is answered with a cancel.
+    if (this.cancelAsked) {
+      if (this.peer && this.ports.links.live(this.peer)) this.out(handoffCancelFrame("cancelled"));
+      await this.undoQuiesce().catch(() => {});
+      this.reset("cancelled");
+      return;
+    }
+    // A call came after the check above, while the engine got ready to stop: it stopped nothing, and the move waits.
+    if (late) { this.out(handoffBusyFrame(wireWhy(late), 30)); this.reset(this.failWith(late)); }
   }
 
   private async onVerified(from: string, frame: DeviceFrame): Promise<void> {
@@ -1002,6 +1050,7 @@ export class HandoffGiver {
   private begin(key: string, id: string, record: DeviceRecord): void {
     this.peer = key; this.id = id; this.turn = record.turn; this.deviceName = name(record, key);
     this.failure = undefined; this.failed = {}; this.stays = []; this.retry = undefined; this.have = null; this.planned = null; this.pake = null; this.secret = null; this.bundleMade = null;
+    this.cancelAsked = false;
     // A list cut off as an earlier handoff stopped is not part of this one's.
     this.haveBuffer = { d: [], p: {} };
     this.offerHellos.clear();
@@ -1017,6 +1066,7 @@ export class HandoffGiver {
     this.phase = "idle";
     this.failure = failure;
     this.refused = refused;
+    this.cancelAsked = false;
     this.pake = null; this.have = null; this.haveBuffer = { d: [], p: {} }; this.planned = null; this.secret = null; this.bundleMade = null;
     this.changed();
   }

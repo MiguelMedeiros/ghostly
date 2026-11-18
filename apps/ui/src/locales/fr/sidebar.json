@@ -9,7 +9,7 @@
     "create": "Créer",
     "delete": "Supprimer le dossier",
     "deleteBody": "Ses discussions ne sont pas supprimées. Elles reviennent dans la liste, sans dossier.",
-    "deleteTitle": "Supprimer le dossier « {{name}} » ?",
+    "deleteTitle": "Supprimer le dossier « {{name}} » ?",
     "empty": "Aucune discussion dans ce dossier pour l'instant",
     "move": "Déplacer vers un dossier…",
     "nameLabel": "Nom du dossier",
@@ -33,7 +33,7 @@
     "inviterAwayUnknown": "Le contact qui vous a invité n'est pas encore connecté. Réessayez dans un instant.",
     "letting": "Un membre vous fait entrer…",
     "linkUnanswered": "Le lien n'a pas répondu",
-    "others": "Un autre groupe a cet identifiant : choisissez",
+    "others": "Un autre groupe a cet identifiant : choisissez",
     "takenBack": "Invitation retirée",
     "unanswered": "L'app de la personne qui vous a invité n'a pas répondu. Acceptez à nouveau, ou refusez.",
     "waitingAdmin": "En attente de l'app de l'admin…",
@@ -53,11 +53,9 @@
     "groupHint": "Un lien que tout le monde peut ouvrir",
     "label": "Créer un groupe ou une discussion"
   },
-  "noChats": "Aucune discussion",
   "noResults": "Aucun résultat",
-  "pinned": "Épinglée",
   "quiet": "C'est calme ici...",
-  "quietHint": "L'heure de hanter quelqu'un ! 👻",
+  "quietHint": "L'heure de hanter quelqu'un ! 👻",
   "rail": {
     "collapse": "Replier la liste des discussions",
     "expand": "Déplier la liste des discussions",
@@ -83,6 +81,5 @@
   "settings": "Réglages",
   "sharedIdentity": "A partagé une identité",
   "skipToContent": "Aller au contenu",
-  "startChat": "Nouvelle conversation",
-  "unread": "Messages non lus"
+  "startChat": "Nouvelle conversation"
 }

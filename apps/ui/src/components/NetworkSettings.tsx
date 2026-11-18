@@ -13,6 +13,7 @@ import { errorText, rawError } from "../lib/errorText";
 import { clockOffTexts } from "../lib/clockOff";
 import { exactText } from "../lib/exactText";
 import { fillNames } from "../lib/fillNodes";
+import { ownDirection } from "../lib/ownDirection";
 import { FieldError } from "./ui/FieldError";
 
 /** Protocol names the transport line keeps as they are, each its own `<bdi>` (Latin inside an Arabic sentence). */
@@ -208,9 +209,10 @@ export function NetworkSettings() {
         <input id={FIELDS.push} value={pushRelay} onChange={(e) => { setPushRelay(e.target.value); edited("push"); }} placeholder="https://push-relay.example.org"
           {...exactText} dir="ltr" data-testid="network-push-relay" {...invalid("push")} className={`${field} font-mono text-sm`} />
         {problemUnder("push")}
-        {/* The saved relay answered the last wake-up, but not as a push relay (a web page, its own refusal): said until it forwards one. */}
+        {/* The saved relay answered the last wake-up, but not as a push relay (a web page, its own refusal): said until it forwards one.
+            A 429 is a relay at its limit for now (its per-address or per-subscription count, or a proxy's), not one that forwards nothing. */}
         {network.pushRelayRefused && pushRelay.trim() === network.pushRelay && <div data-testid="network-push-relay-refused" className="mt-1 text-xs text-warn-ink">
-          <p>{t("network.pushRelayRefused", { http: String(network.pushRelayRefused.http) })}</p>
+          <p>{t(network.pushRelayRefused.http === 429 ? "network.pushRelayBusy" : "network.pushRelayRefused", { http: String(network.pushRelayRefused.http) })}</p>
           {network.pushRelayRefused.text && <p data-testid="network-push-relay-said">{fillNames(t("network.pushRelayRefusedSaid"), { text: network.pushRelayRefused.text })}</p>}
         </div>}
       </Field>
@@ -245,7 +247,7 @@ export function NetworkSettings() {
             {t("common.save")}
           </button>
           {saved && <span role="status" data-testid="network-saved" className="text-accent text-sm">{t("network.saved")}</span>}
-          {error && <span role="alert" data-testid="network-error" className="text-danger text-sm min-w-0 break-words">{error}</span>}
+          {error && <span role="alert" dir={ownDirection(error)} data-testid="network-error" className="text-danger text-sm min-w-0 break-words">{error}</span>}
           <span data-testid="network-protocol" data-kind={reaches} className="text-text-muted text-xs ms-auto min-w-0">{fillNames(t(reaches === "direct" ? "network.protocolDirect" : "network.protocolRelays"), PROTOCOL_NAMES)}</span>
         </div>
       </Block>

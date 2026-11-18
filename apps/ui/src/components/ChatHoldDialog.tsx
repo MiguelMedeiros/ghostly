@@ -7,7 +7,9 @@ import { useI18n } from "../contexts/I18nContext";
 import { problemLine, problemText } from "../lib/problemText";
 import { sizeIn } from "../lib/sizeText";
 import { fillNames } from "../lib/fillNodes";
+import { ownDirection } from "../lib/ownDirection";
 import type { Translate } from "../locales/translate";
+import { FocusSafeButton } from "./ui/FocusSafeButton";
 
 const mb = (bytes: number, t: Translate) => sizeIn(bytes / 1024 / 1024, "mb", t, bytes < 1024 * 1024 ? 2 : 1, true);
 
@@ -48,9 +50,11 @@ export function ChatHoldDialog({ peer, name, onSave, onClose }: { peer: PeerLink
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 animate-fade-in" {...backdrop}>
       <div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="chat-hold-title" data-testid="chat-hold" className="focus:outline-none w-full max-w-md max-h-full overflow-y-auto bg-panel-header border border-border rounded-2xl shadow-2xl p-5 space-y-4">
-        <div>
-          <h2 id="chat-hold-title" className="text-lg font-medium text-text-primary">{t("chat.hold.title", { name })}</h2>
-          <p className="text-xs text-text-muted mt-1">{t("chat.hold.intro", { name, days })}</p>
+        {/* The contact's name (one long word, a nickname of 20 W's) breaks anywhere: unbroken, the dialog scrolled
+            sideways on a phone, and in Arabic the title's start was drawn off the dialog. */}
+        <div className="[overflow-wrap:anywhere]">
+          <h2 id="chat-hold-title" className="text-lg font-medium text-text-primary">{fillNames(t("chat.hold.title"), { name })}</h2>
+          <p className="text-xs text-text-muted mt-1">{fillNames(t("chat.hold.intro", { days }), { name })}</p>
         </div>
         <div className="bg-surface rounded-xl divide-y divide-border">
           <div className="flex items-center gap-3 px-4 py-3">
@@ -63,22 +67,22 @@ export function ChatHoldDialog({ peer, name, onSave, onClose }: { peer: PeerLink
           <div className="px-4 py-3 space-y-1">
             <p className="text-[11px] text-text-secondary" data-testid="chat-hold-storage">{hold?.storage ? t("chat.hold.storage") : t("chat.hold.noStorage")}</p>
             <p className="text-[11px] text-text-secondary" data-testid="chat-hold-quota">
-              {hold ? t("chat.hold.quota", { name, count: hold.outstanding, max: hold.maxItems, bytes: mb(hold.bytes, t), maxBytes: mb(hold.maxBytes, t) }) : t("chat.hold.nothing")}
+              {hold ? fillNames(t("chat.hold.quota", { count: hold.outstanding, max: hold.maxItems, bytes: mb(hold.bytes, t), maxBytes: mb(hold.maxBytes, t) }), { name }) : t("chat.hold.nothing")}
             </p>
-            {hold?.refused ? <p className="text-[11px] text-danger" data-testid="chat-hold-refused">{hold.refused === 1 ? t("chat.hold.refusedOne", { name }) : t("chat.hold.refusedMany", { count: hold.refused, name })}</p> : null}
+            {hold?.refused ? <p className="text-[11px] text-danger" data-testid="chat-hold-refused">{hold.refused === 1 ? fillNames(t("chat.hold.refusedOne"), { name }) : fillNames(t("chat.hold.refusedMany", { count: hold.refused }), { name })}</p> : null}
             {hold?.error && <Notice testId="chat-hold-error" problem={problemText(hold.error, t)} className="text-[11px]" />}
           </div>
         </div>
         <p className="text-[11px] text-text-muted">{t("chat.hold.privacy")}</p>
-        {error && <p role="alert" className="text-xs text-danger">{error}</p>}
+        {error && <p role="alert" dir={ownDirection(error)} className="text-xs text-danger">{error}</p>}
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm bg-surface-alt text-text-primary border border-border hover:bg-surface-hover cursor-pointer">{t("common.cancel")}</button>
           {/* Busy while it saves, not disabled: that would drop a keyboard's focus to the page, and keep it there on a refusal. */}
-          <button type="button" data-testid="chat-hold-save" disabled={enabled === initial && !busy} aria-disabled={busy || undefined} aria-busy={busy || undefined}
+          <FocusSafeButton type="button" data-testid="chat-hold-save" disabled={enabled === initial && !busy} aria-disabled={busy || undefined} aria-busy={busy || undefined}
             onClick={() => { if (busy) return; setBusy(true); setError(""); void onSave(enabled).then(onClose, (e) => { setError(problemLine(e, t)); setBusy(false); }); }}
             className="px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-on-accent hover:bg-accent-hover cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:cursor-not-allowed">
             {busy ? t("chat.hold.saving") : t("common.save")}
-          </button>
+          </FocusSafeButton>
         </div>
       </div>
     </div>

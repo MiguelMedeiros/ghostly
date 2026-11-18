@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fromBase64Url, toBase64Url, toZ32 } from "../src/bytes";
 import { decodeTxtPacket, encodeTxtPacket, type NsRecord, type TxtRecord } from "../src/dns";
 import {
@@ -8,6 +8,7 @@ import {
 } from "../src/didDht";
 import { createIdentity } from "../src/identity";
 import { MAX_DNS_PACKET_BYTES, openRelayPayload, PacketTooLargeError } from "../src/pkarr";
+import { DEFAULT_RELAYS } from "../src/relay";
 
 // covers: did.dht.document
 
@@ -244,10 +245,31 @@ describe("resolveDidDht", () => {
     expect(asked).toEqual([`https://a.test/${identity.pubKeyZ32}`, `https://b.test/${identity.pubKeyZ32}`]);
   });
 
-  it("asks one relay when it answers", async () => {
-    const { fetch, asked } = relays({ "https://a.test": payload, "https://b.test": payload });
-    await resolveDidDht(did, { fetch, relays: ["https://a.test", "https://b.test"] });
-    expect(asked).toHaveLength(1);
+  it("asks every relay and keeps the newest packet, wherever it is", async () => {
+    // The older document still lists a second key, which its owner has since removed.
+    const base = didDhtDocument(identity.publicKey);
+    const removed = `${did}#1`;
+    const withSecond: DidDhtDocument = {
+      ...base,
+      verificationMethod: [...base.verificationMethod!, { ...base.verificationMethod![0], id: removed, publicKeyJwk: { ...base.verificationMethod![0].publicKeyJwk, x: toBase64Url(createIdentity().publicKey), kid: "1" } }],
+      authentication: [...base.authentication!, removed],
+    };
+    const older = signDidDhtPacket(identity, encodeDidDhtPacket(withSecond), seq);
+    expect(openDidDhtPayload(did, older).document.verificationMethod).toHaveLength(2);
+    const newer = signDidDhtPacket(identity, encodeDidDhtPacket(didDhtDocument(identity.publicKey)), seq + 1);
+    for (const order of [["https://a.test", "https://b.test"], ["https://b.test", "https://a.test"]]) {
+      const { fetch, asked } = relays({ "https://a.test": older, "https://b.test": newer });
+      const resolved = await resolveDidDht(did, { fetch, relays: order });
+      expect(resolved).toMatchObject({ relay: "https://b.test", metadata: { versionId: String(seq + 1) } });
+      expect(resolved.document.verificationMethod).toHaveLength(1);
+      expect(asked).toHaveLength(2);
+    }
+  });
+
+  it("does not let an older packet undo a deactivation", async () => {
+    const ended = signDidDhtPacket(identity, encodeDidDhtDeactivated(identity.publicKey), seq + 1);
+    const resolved = await resolveDidDht(did, { ...relays({ "https://a.test": payload, "https://b.test": ended }), relays: ["https://a.test", "https://b.test"] });
+    expect(resolved.metadata.deactivated).toBe(true);
   });
 
   it("moves past a relay serving a forged packet, and says so when none is good", async () => {
@@ -297,6 +319,28 @@ describe("resolveDidDht", () => {
     expect(resolved.metadata.updated).toBe(new Date(seq * 1000).toISOString());
   });
 
+  it("waits for every relay that answers within the fetch's timeout, so a slower one's newer packet wins", async () => {
+    vi.useFakeTimers();
+    try {
+      const ended = signDidDhtPacket(identity, encodeDidDhtDeactivated(identity.publicKey), seq + 1);
+      // The relay with the older packet answers at once, the one with the deactivation 3.5 s later (the fetch allows 10 s).
+      const fetch: DidDhtFetch = async (url) => {
+        const late = new URL(url).origin === "https://b.test";
+        await new Promise((resolve) => setTimeout(resolve, late ? 3_500 : 0));
+        return { status: 200, bytes: late ? ended : payload };
+      };
+      let settled = false;
+      const resolving = resolveDidDht(did, { fetch, relays: ["https://a.test", "https://b.test"] });
+      void resolving.finally(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(3_499);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(resolving).resolves.toMatchObject({ relay: "https://b.test", metadata: { versionId: String(seq + 1), deactivated: true } });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("stops when aborted", async () => {
     const controller = new AbortController();
     controller.abort();
@@ -305,7 +349,7 @@ describe("resolveDidDht", () => {
 
   it("uses the public relays by default", async () => {
     const { fetch, asked } = relays({ "https://pkarr.pubky.org": payload });
-    await resolveDidDht(did, { fetch });
-    expect(asked).toEqual([`https://pkarr.pubky.org/${toZ32(identity.publicKey)}`]);
+    await expect(resolveDidDht(did, { fetch })).resolves.toMatchObject({ relay: "https://pkarr.pubky.org" });
+    expect(asked).toEqual(DEFAULT_RELAYS.map((relay) => `${relay}/${toZ32(identity.publicKey)}`));
   });
 });

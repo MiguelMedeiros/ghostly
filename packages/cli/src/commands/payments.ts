@@ -1,6 +1,28 @@
 import { type Command, net, card, memo, confirmReal, force, sats, pageLimit, pairs } from "./shared";
 import { ADDRESS_TYPES, CHAT_METHODS, PAY_METHODS, WALLET_TYPES } from "../words";
-import { CliError } from "../errors";
+import { CliError, shownValue } from "../errors";
+
+/**
+ * `chat accept`'s --networks: mainnet and/or testnet, comma-separated; any other word, or none (an unset variable), is a
+ * usage error before the profile opens, as a word --network does not take is. Before, the API refused it after a
+ * one-shot had opened the profile: bad_request, exit 1.
+ */
+function networkList(value: string): string[] {
+  const networks = value.split(",").map((n) => n.trim()).filter(Boolean);
+  if (!networks.length) throw new CliError("usage", `--networks takes mainnet, testnet or mainnet,testnet (to stop taking it: --off), not ${shownValue(value)}`);
+  if (!networks.every((n) => n === "mainnet" || n === "testnet")) throw new CliError("usage", `--networks takes mainnet, testnet or mainnet,testnet, not ${shownValue(value)}`);
+  return networks;
+}
+
+/**
+ * `chat request`'s amount: whole sats, or with --method usdt USDT as the app's composer reads it (5 is 5 USDT, 0.25 a
+ * quarter), passed on as its text for the API to turn into base units with the wallet's decimals.
+ */
+function requestAmount(value: string | undefined, method: unknown): number | string {
+  if (method !== "usdt") return sats(value);
+  if (!/^\d+(\.\d+)?$/.test(value ?? "") || !/[1-9]/.test(value!)) throw new CliError("usage", `<amount> with --method usdt takes USDT above 0 (5 or 0.25), not ${shownValue(value)}`);
+  return value!;
+}
 
 /** Wallets and payments: one entry per command, in alphabetical order (test/commands.test.ts checks). */
 export const commands: Record<string, Command> = {
@@ -11,7 +33,7 @@ export const commands: Record<string, Command> = {
       // Without a method it only answers what the chat takes: --off or --networks would be dropped without a word.
       if (a.method === undefined && (options.off !== undefined || options.networks !== undefined)) throw new CliError("usage", "--off and --networks change one method: ghostly chat accept <chat> <method> [--off] [--networks mainnet,testnet]");
       if (a.method === undefined) return { chat: a.chat };
-      return { chat: a.chat, method: a.method, on: options.off !== true, networks: typeof options.networks === "string" ? options.networks.split(",").map((n) => n.trim()).filter(Boolean) : undefined };
+      return { chat: a.chat, method: a.method, on: options.off !== true, networks: typeof options.networks === "string" ? networkList(options.networks) : undefined };
     },
   },
   "chat pay": {
@@ -25,19 +47,27 @@ export const commands: Record<string, Command> = {
     params: ({ options }, a) => ({ chat: a.chat, payment: a.payment, via: options.via, maxFee: options["max-fee"], card: options.card, confirmReal: options["confirm-real"] === true }),
   },
   "chat request": {
-    method: "chat.request", usage: "chat request <chat> <sats> [--memo t] [--method m] [--rail cashu|lightning] [--network testnet] [--card <id>] [--force]", summary: "Ask a contact to pay",
-    args: ["chat", "amount"], options: { memo, method: { type: "string", choices: PAY_METHODS, description: "cashu, arkade, usdt, bitcoin, spark, …" }, rail: { type: "string", choices: ["cashu", "lightning"], description: "cashu or lightning" }, network: net, card, force },
-    params: ({ options }, a) => ({ chat: a.chat, amount: sats(a.amount), memo: options.memo, method: options.method, rail: options.rail, network: options.network, card: options.card, force: options.force === true }),
+    method: "chat.request", usage: "chat request <chat> <sats> [--memo t] [--method m] [--rail cashu|lightning] [--network testnet] [--card <id>] [--force]", summary: "Ask a contact to pay (with --method usdt the amount is in USDT: 5 is 5 USDT)",
+    args: ["chat", "amount"], options: { memo, method: { type: "string", choices: PAY_METHODS, description: "cashu, arkade, usdt (amount in USDT), bitcoin, spark, …" }, rail: { type: "string", choices: ["cashu", "lightning"], description: "cashu or lightning" }, network: net, card, force },
+    params: ({ options }, a) => ({ chat: a.chat, amount: requestAmount(a.amount, options.method), memo: options.memo, method: options.method, rail: options.rail, network: options.network, card: options.card, force: options.force === true }),
   },
   "lightning default": { method: "lightning.default", usage: "lightning default <card> [--network testnet]", summary: "The Lightning card that receives by default", args: ["card"], options: { network: net }, params: ({ options }, { card: c }) => ({ card: c, network: options.network }) },
   "lightning rename": { method: "lightning.rename", usage: "lightning rename <card> <name...> [--network testnet]", summary: "Name a Lightning card", args: ["card", "name..."], options: { network: net }, params: ({ options }, a) => ({ card: a.card, name: a.name, network: options.network }) },
   "pay": {
-    method: "pay", usage: "pay <invoice|lightning-address|lnurl> [--amount sats] [--network n] [--max-fee sats] [--card <id>] [--comment t] [--chat <chat>] [--confirm-real] [--force]", summary: "Pay over Lightning from Testnet, or --network mainnet with --confirm-real",
-    args: ["target"], options: { amount: { type: "number", description: "Sats, for an address or LNURL" }, network: net, "max-fee": { type: "number", description: "Refuse a fee above this" }, card, comment: { type: "string", description: "For the address's owner" }, chat: { type: "string", description: "The chat the invoice came from: on Testnet its contact is told it was paid" }, "confirm-real": confirmReal, force },
+    method: "pay", usage: "pay <invoice|lightning-address|lnurl> [--amount sats] [--network n] [--max-fee sats] [--card <id>] [--comment t] [--chat <chat>] [--confirm-real] [--force]", summary: "Pay over Lightning from Testnet, or --network mainnet with --confirm-real. paid false: not settled yet (pending at the mint or the card's source, or its answer lost); it settles by itself, is never paid twice, and its note says what is set aside and where to look",
+    args: ["target"], options: { amount: { type: "number", description: "Sats, for an address or LNURL; with an invoice, refuse it unless it asks exactly this" }, network: net, "max-fee": { type: "number", description: "Refuse a fee above this" }, card, comment: { type: "string", description: "For the address's owner" }, chat: { type: "string", description: "The chat the invoice came from: on Testnet its contact is told it was paid" }, "confirm-real": confirmReal, force },
     params: ({ options }, { target }) => ({ target, amount: options.amount, network: options.network, maxFee: options["max-fee"], card: options.card, comment: options.comment, chat: options.chat, confirmReal: options["confirm-real"] === true, force: options.force === true }),
   },
   "payment check": { method: "payment.check", usage: "payment check <chat> <payment>", summary: "Paid from another wallet: the contact's app looks now", args: ["chat", "payment"], params: (_, a) => ({ chat: a.chat, payment: a.payment }) },
-  "payment list": { method: "payment.list", usage: "payment list [--chat <chat>]", summary: "Payments and requests, newest first", options: { chat: { type: "string", description: "Only this chat's" } }, params: ({ options }) => ({ chat: options.chat }) },
+  "payment list": {
+    method: "payment.list", usage: "payment list [--chat <chat>]", summary: "Payments and requests, newest first",
+    options: { chat: { type: "string", description: "Only this chat's" } },
+    // `--chat "$CHAT"` with CHAT unset: before, `bad_request` (exit 1), a one-shot online first.
+    params: ({ options }) => {
+      if (options.chat === "") throw new CliError("usage", "--chat needs a chat");
+      return { chat: options.chat };
+    },
+  },
   "payment reclaim": { method: "payment.reclaim", usage: "payment reclaim <payment>", summary: "Take back ecash the contact has not taken", args: ["payment"], params: (_, a) => ({ payment: a.payment }) },
   "wallet add-mint": {
     method: "wallet.mint.add", usage: "wallet add-mint <url> [--primary]", summary: "Add a Cashu mint (a local or test mint is Testnet's)",
@@ -68,7 +98,7 @@ export const commands: Record<string, Command> = {
     method: "wallet.receive", usage: "wallet receive <sats> [--network testnet] [--card <id>]", summary: "A Lightning invoice to be paid",
     args: ["amount"], options: { network: net, card }, params: ({ options }, { amount }) => ({ amount: sats(amount), network: options.network, card: options.card }),
   },
-  "wallet redeem": { method: "wallet.redeem", usage: "wallet redeem [<cashu-token> | -]", summary: "Take the ecash of a Cashu token (its mint must be one of yours); the token on stdin keeps it out of ps", args: ["token?"], params: (_, { token }) => ({ token }) },
+  "wallet redeem": { method: "wallet.redeem", usage: "wallet redeem [<cashu-token> | -]", summary: "Take the ecash of a Cashu token (its mint must be one of yours: wallet add-mint <url>); the token on stdin keeps it out of ps", args: ["token?"], params: (_, { token }) => ({ token }) },
   "wallet remove": {
     method: "wallet.remove", usage: "wallet remove <type> [--network testnet] [--card <id>] [--accept-loss]", summary: "Remove a wallet; refused while it holds money or waits for some, unless --accept-loss",
     args: ["type"], words: { type: WALLET_TYPES }, options: { network: net, card: card, "accept-loss": { type: "boolean", description: "What it holds on this device is lost without its backup" } },

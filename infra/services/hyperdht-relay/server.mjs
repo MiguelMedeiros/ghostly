@@ -1,4 +1,4 @@
-import { DEFAULT_LIMITS, limitVariable, listenProblem, networkOf, readSettings, startRelay } from './relay.mjs'
+import { DEFAULT_LIMITS, limitVariable, listenProblem, networkOf, readSettings, refusalLines, startRelay } from './relay.mjs'
 
 // Configuration, all optional:
 //   PORT (49443), HOST (0.0.0.0; 127.0.0.1 behind proxies or Cloudflare)
@@ -6,7 +6,7 @@ import { DEFAULT_LIMITS, limitVariable, listenProblem, networkOf, readSettings, 
 //   GHOSTLY_HYPERDHT_TESTNET    size of an in-process HyperDHT network instead of any other (e2e); not with BOOTSTRAP
 //   GHOSTLY_RELAY_ORIGINS       allowed origins, comma-separated (empty: any): https://app.example, read as a browser
 //                               sends it (no path; case, a default port and a trailing / do not matter)
-//   GHOSTLY_RELAY_CLOUDFLARE    "1" behind Cloudflare (a tunnel): each client counts by CF-Connecting-IP
+//   GHOSTLY_RELAY_CLOUDFLARE    "1" behind Cloudflare (a tunnel): each client counts by CF-Connecting-IP; not with PROXIES
 //   GHOSTLY_RELAY_PROXIES       reverse proxies in front of it (0): each client counts by the X-Forwarded-For entry
 //                               that many from the end. A client that reaches the port past them could write either
 //                               header itself, so HOST is loopback by default with either set.
@@ -49,8 +49,11 @@ const serves = settings.origins.length ? `origins ${settings.origins.join(' ')}`
 const changed = Object.entries(settings.limits).filter(([name, value]) => value !== DEFAULT_LIMITS[name]).map(([name, value]) => `${limitVariable(name)}=${value}`)
 log(`Ghostly HyperDHT relay on port ${relay.port}`, networkOf(settings), [`on ${settings.host}`, counting, ...(changed.length ? [`limits ${changed.join(' ')}`] : []), serves].join(', '))
 
-// One client's request that fails where nothing catches it must not end the relay for every other client.
-process.on('unhandledRejection', error => log('unhandled', error?.code ?? error?.name ?? 'error'))
+// One client's request that fails where nothing catches it must not end the relay for every other client. Counted like
+// the refusals: a client that could repeat one would otherwise write a line per attempt and rotate the log away.
+const unhandled = refusalLines(log)
+setInterval(unhandled.flush, 60_000).unref()
+process.on('unhandledRejection', error => unhandled.line('unhandled', error?.code ?? error?.name ?? 'error'))
 
 let closing = false
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {

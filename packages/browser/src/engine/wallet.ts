@@ -3,9 +3,12 @@ import type {
   MeltPreview,
   MeltProofsResponse,
   MeltQuoteBolt11Response,
+  NetworkError as CashuNetworkError,
   OutputData,
   Proof,
   ProofLike,
+  RequestFn,
+  RequestOptions,
   SerializedOutputData,
   SerializedSwapPreview,
   SwapPreview,
@@ -14,8 +17,8 @@ import type {
 import { STORES, newestWalletTx, openDb, store, transact, wrap, committed } from "../shared/idb";
 import { openRow, openRows, proofKey, RowSeals, sealRow, sealedStore } from "./sealedRows";
 import { hasDataKey } from "./dataKey";
-import { LIMITS, PaymentPreflightError, decodeBolt11, engineError, engineText, type PaymentReview, type WalletNetwork } from "@ghostly/core";
-import { CASHU_REQUEST_TIMEOUT_MS, SWAP_SETTLED_MS, keysetRefused, mintFailed, mintRefused } from "./paymentAdapters/cashu";
+import { LIMITS, PaymentPreflightError, decodeBolt11, ecashUnitError, engineError, engineText, stripHidden, type PaymentReview, type WalletNetwork } from "@ghostly/core";
+import { CASHU_REQUEST_TIMEOUT_MS, MELT_REQUEST_TIMEOUT_MS, SWAP_SETTLED_MS, keysetRefused, mintFailed, mintRefused } from "./paymentAdapters/cashu";
 import { AskBackoff } from "./askBackoff";
 import { INVOICE_PACE, nextInvoiceAsk } from "./invoicePace";
 import { BITCOIN_INVOICE_ON_TESTNET, fakesLightning, isTestMint, mintNetwork, mintUrlSpelling, paysItsOwnInvoices } from "../shared/mints";
@@ -294,7 +297,7 @@ const backInWallet = (lost: number) => lost > 0
 
 /** A mint's own words for a refusal, as one short line: the reason at the end of `lightningRefused`. */
 const mintReason = (error: unknown) =>
-  (error instanceof Error ? error.message : String(error)).replace(/\s+/g, " ").trim().slice(0, 160) || "no reason given";
+  stripHidden((error instanceof Error ? error.message : String(error)).replace(/\s+/g, " ")).replace(/\s+/g, " ").trim().slice(0, 160) || "no reason given";
 
 /** Every proof and swap stored, as `CashuWallet.readStored` read them. */
 export interface StoredCashu { proofs: StoredProof[]; swaps: PendingSwap[] }
@@ -329,6 +332,63 @@ function within<T>(ms: number, work: Promise<T>, mint: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`${new URL(mint).host} did not answer`)), ms); });
   return Promise.race([work, late]).finally(() => clearTimeout(timer));
+}
+
+/** A swap's request, and those that ask a mint where a swap stands (NUT-09 restore, NUT-07 states). */
+const SWAP_REQUESTS = ["/v1/swap", "/v1/restore", "/v1/checkstate"];
+/** A Lightning payment's request (`completeMelt`): `meltOverdue` holds its coins until it can no longer land. */
+const MELT_REQUEST = "/v1/melt/bolt11";
+/**
+ * What `settleQuote` asks under the mint's lock once an invoice is paid: where the quote stands, and its ecash. Its
+ * outputs are written down first, so a request cut short is asked again next round (NUT-09 once issued).
+ */
+const MINT_REQUEST = "/v1/mint/bolt11";
+const MINT_QUOTE_STATE = /\/v1\/mint\/quote\/bolt11\/[^/]+$/;
+/**
+ * What `melt` and `settleMelt` ask under the mint's lock: where a Lightning payment's quote stands, and the keysets its
+ * change may be on. Nothing is paid on a read: one cut short is asked again (`melt` before it pays, `pollMelts` after).
+ */
+const MELT_QUOTE_STATE = /\/v1\/melt\/quote\/bolt11\/[^/]+$/;
+const KEYSET_REQUESTS = /\/v1\/(keysets|keys(\/[^/]+)?)$/;
+
+/** How long a request to this path may last, its retries included; undefined: cashu-ts' defaults. */
+function requestLimit(pathname: string): number | undefined {
+  if (SWAP_REQUESTS.some((path) => pathname.endsWith(path))) return CASHU_REQUEST_TIMEOUT_MS;
+  if (pathname.endsWith(MINT_REQUEST) || MINT_QUOTE_STATE.test(pathname)) return CASHU_REQUEST_TIMEOUT_MS;
+  if (MELT_QUOTE_STATE.test(pathname) || KEYSET_REQUESTS.test(pathname)) return CASHU_REQUEST_TIMEOUT_MS;
+  if (pathname.endsWith(MELT_REQUEST)) return MELT_REQUEST_TIMEOUT_MS;
+  return undefined;
+}
+
+/**
+ * Each of `SWAP_REQUESTS`, a paid invoice's (`MINT_REQUEST`, `MINT_QUOTE_STATE`) and a melt's reads (`MELT_QUOTE_STATE`,
+ * `KEYSET_REQUESTS`) ends within
+ * `CASHU_REQUEST_TIMEOUT_MS`, and a melt's within `MELT_REQUEST_TIMEOUT_MS`, retries
+ * included. cashu-ts' `requestTimeout` is per try, and NUT-19 tries a cached endpoint again after a timeout, each try
+ * with a timeout of its own, for as long as the mint's `ttl` (endless when it gives none): one deadline for the whole
+ * request ends them all, and a caller's abort is never retried. Past it the request failed with no answer
+ * (`NetworkError`), as a try that timed out does. Every other request keeps cashu-ts' defaults. cashu-ts takes no
+ * options per call of a swap or a melt: its mint client's request function is wrapped.
+ */
+function boundMintRequests(wallet: Wallet, NetworkError: typeof CashuNetworkError): void {
+  const client = wallet.mint as unknown as { _request: RequestFn };
+  const request = client._request;
+  client._request = async <T,>(options: RequestOptions): Promise<T> => {
+    const url = new URL(options.endpoint);
+    const limit = requestLimit(url.pathname);
+    if (limit === undefined) return request<T>(options);
+    const deadline = new AbortController();
+    const timer = setTimeout(() => deadline.abort(), limit);
+    options.signal?.addEventListener("abort", () => deadline.abort(), { once: true });
+    try {
+      return await request<T>({ ...options, requestTimeout: limit, signal: deadline.signal });
+    } catch (error) {
+      if (deadline.signal.aborted && !options.signal?.aborted) throw new NetworkError(`${url.host} did not answer within ${limit / 1_000} s`, { cause: error });
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
 }
 
 /**
@@ -451,7 +511,7 @@ export class CashuWallet {
 
   /** Whether no request of this melt can reach the mint any more: its one request is sent right after it is written down. */
   private meltOverdue(melt: PendingMelt): boolean {
-    return this.passed(melt.createdAt) >= CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS;
+    return this.passed(melt.createdAt) >= MELT_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS;
   }
 
   /** Whether no request of this swap can reach the mint any more: a request's longest life, and a margin after its last try. */
@@ -478,7 +538,7 @@ export class CashuWallet {
       balance: total(proofs.filter((p) => p.mint === url && !p.reserved)),
       info: this.infos.get(url) ?? null,
     }));
-    const history = await newestWalletTx<WalletTx>((mint) => !network || mintNetwork(mint) === network, HISTORY_SHOWN);
+    const history = await this.history(network, HISTORY_SHOWN);
     const here = new Set(mints.map((m) => m.url));
     const swaps = allSwaps.filter((s) => here.has(s.mint) && !s.released && !s.finished);
     // What a swap is about: the proofs it spends, or what a redeem would bring.
@@ -496,6 +556,11 @@ export class CashuWallet {
       history,
       feesPaid: history.reduce((sum, tx) => sum + tx.fee, 0),
     };
+  }
+
+  /** A network's `count` newest movements, newest first (every network's when none is named): only those are read. */
+  history(network: WalletNetwork | undefined, count: number): Promise<WalletTx[]> {
+    return newestWalletTx<WalletTx>((mint) => !network || mintNetwork(mint) === network, count);
   }
 
   /** Every proof and swap stored, read once for the views of every network: each read is the whole store. */
@@ -560,7 +625,8 @@ export class CashuWallet {
       throw Object.assign(engineError("mintUnreachable", { host: new URL(normalized).host }), { cause: error });
     }
     const info = wallet.getMintInfo();
-    const name = info.name || new URL(normalized).hostname;
+    // The mint's own words, without the characters that hide text or reorder it, so its name reads as what it is.
+    const name = (typeof info.name === "string" ? stripHidden(info.name).replace(/\s+/g, " ").trim().slice(0, 80) : "") || new URL(normalized).hostname;
     this.names.set(normalized, name);
 
     const bounds = (nut: 4 | 5) => {
@@ -571,7 +637,7 @@ export class CashuWallet {
     const active = wallet.keyChain.getKeysets().filter((k) => k.isActive);
     this.infos.set(normalized, {
       version: info.version || undefined,
-      motd: info.motd?.trim().slice(0, 200) || undefined,
+      motd: typeof info.motd === "string" ? stripHidden(info.motd).trim().slice(0, 200) || undefined : undefined,
       inputFeePpk: active.length > 0 ? Math.min(...active.map((k) => k.fee)) : 0,
       receive: bounds(4),
       send: bounds(5),
@@ -601,10 +667,14 @@ export class CashuWallet {
         created = { mint: candidate, response: await within(MINT_TIMEOUT_MS, mintInvoice(await this.wallet(candidate), amount, "Ghostly"), candidate) };
         break;
       } catch (error) {
-        lastError = error;
+        // A mint that failed ("internal error", a closed connection) is named, with what to do; its words kept last.
+        lastError = mintFailed(error) ? Object.assign(engineError("mintFailedInvoice", { host: new URL(candidate).host, reason: mintReason(error) }), { cause: error }) : error;
       }
     }
-    if (!created) throw new Error(`No mint could create an invoice: ${lastError instanceof Error ? lastError.message : lastError}`);
+    if (!created) {
+      if ((lastError as { engineCode?: unknown } | null)?.engineCode === "mintFailedInvoice") throw lastError;
+      throw new Error(`No mint could create an invoice: ${lastError instanceof Error ? lastError.message : lastError}`);
+    }
     const { mint, response } = created;
     const quote: StoredQuote = {
       quote: response.quote,
@@ -944,7 +1014,22 @@ export class CashuWallet {
       if (sent) return sent;
     }
     if (room > 0) throw engineError("notEnoughForFee", { amount: room });
+    // The sats are there, only set aside by a split the mint has not answered: said as the first attempt said it.
+    const held = await this.heldBySilentSplit(candidates, amount);
+    if (held) throw new SwapUnsettledError(held);
     throw engineError(candidates.length === 0 && preferred ? "noSharedMint" : "notEnoughSats");
+  }
+
+  /** An open send swap at one of `mints` whose reserved inputs, with the coins free there, would cover `amount`. */
+  private async heldBySilentSplit(mints: string[], amount: number): Promise<PendingSwap | undefined> {
+    for (const mint of mints) {
+      const open = (await this.swapsAt(mint)).filter((s) => s.kind === "send" && !s.released && !s.finished);
+      if (open.length === 0) continue;
+      const held = await Promise.all(open.map((s) => this.storedInputs(s)));
+      const swap = open.find((_, i) => held[i].length > 0);
+      if (swap && total(await this.proofsAt(mint)) + total(held.flat()) >= amount) return swap;
+    }
+    return undefined;
   }
 
   async prepareReviewedCashu(mint:string,amount:number):Promise<{fee:number;prepared:CashuPrepared}> {
@@ -952,7 +1037,22 @@ export class CashuWallet {
     if(!this.getKnownMints().includes(mint))throw new Error("Select a configured mint");
     return this.locked(mint,async()=>{
       const wallet=await this.wallet(mint);
-      const preview=await wallet.ops.send(amount,asProofLike(await this.proofsAt(mint))).includeFees(true).prepare();
+      const proofs=await this.proofsAt(mint);
+      const prepare=(sats:number)=>wallet.ops.send(sats,asProofLike(proofs)).includeFees(true).prepare();
+      const preview=await prepare(amount).catch(async(error:unknown)=>{
+        // Coins that cannot cover the amount and its fees are refused in cashu-ts' own English words: said as a send
+        // says it instead, with how much fits. Its coins are not split's, so `roomAt` would claim more than fits here.
+        if(!/^Not enough funds available/.test(error instanceof Error?error.message:""))throw error;
+        const fits=(sats:number)=>prepare(sats).then(()=>true,()=>false);
+        // Below the amount asked, and at most what every coin brings in past its fee (all of it, at a mint that charges none).
+        let low=0,high=Math.min(amount-1,total(proofs)-wallet.getFeesForProofs(asProofLike(proofs)).toNumber());
+        while(low<high){
+          const middle=Math.ceil((low+high)/2);
+          if(await fits(middle))low=middle;
+          else high=middle-1;
+        }
+        throw low>0?engineError("notEnoughForFee",{amount:low}):engineError("notEnoughSats");
+      });
       return {fee:await reviewedCashuFee(preview),prepared:{mint,swap:(await loadCashu()).serializeSwapPreview(preview)}};
     });
   }
@@ -1171,7 +1271,7 @@ export class CashuWallet {
         const mint = mintUrlSpelling(metadata.mint);
         return {
           kind: "token",
-          amount: Number(metadata.amount),
+          amount: metadata.amount.toNumber(),
           unit: metadata.unit,
           mint,
           memo: metadata.memo || undefined,
@@ -1183,7 +1283,7 @@ export class CashuWallet {
         const request = decodePaymentRequest(value);
         return {
           kind: "request",
-          amount: request.amount === undefined ? null : Number(request.amount),
+          amount: request.amount === undefined ? null : request.amount.toNumber(),
           unit: request.unit ?? UNIT,
           mints: (request.mints ?? []).map(mintUrlSpelling),
           description: request.description || undefined,
@@ -1214,15 +1314,17 @@ export class CashuWallet {
       unit = metadata.unit;
       // In this wallet's spelling of its mints. The library redeems the token at the same mint in any spelling.
       mint = mintUrlSpelling(metadata.mint);
-      faceValue = Number(metadata.amount);
+      faceValue = metadata.amount.toNumber();
     } catch {
       throw new Error("That is not a valid ecash token");
     }
-    // A token of another unit is still a token: said as such.
-    if (unit !== UNIT) throw engineError("ecashOtherUnit", { unit });
+    // A token of another unit is still a token: said as such (its unit named only when it looks like one).
+    if (unit !== UNIT) throw ecashUnitError(unit);
     // A mint is a custodian and only the user picks those. The test mint holds nothing of value.
     if (addTestMint && !this.getKnownMints().includes(mint) && isTestMint(mint)) await this.events.onTestMintNeeded(mint);
-    if (!this.getKnownMints().includes(mint)) throw new Error(`Ecash from ${new URL(mint).hostname} is not accepted`);
+    // The words name the host only (a contact reads them in a payment's result); `mint` is the whole URL, which a host
+    // can offer to add (the CLI's `wallet add-mint`).
+    if (!this.getKnownMints().includes(mint)) throw Object.assign(new Error(`Ecash from ${new URL(mint).hostname} is not accepted`), { mint });
 
     return this.locked(mint, async () => {
       // A sender that prepaid the redeem fee put it on top of the amount; what the mint kept is the fee either way.
@@ -1690,6 +1792,8 @@ export class CashuWallet {
       if (!mints.length) throw new Error(BITCOIN_INVOICE_ON_TESTNET);
     }
     if (chosen !== undefined && mints.length) lastError = engineError("mintsNoAnyAmount");
+    /** The failure of a mint that holds enough for the invoice: said over a later mint's "Not enough sats". */
+    let failedHolding: unknown;
     for (const mint of mints) {
       try {
         const wallet = await this.wallet(mint);
@@ -1715,9 +1819,11 @@ export class CashuWallet {
       } catch (error) {
         // A mint that failed ("internal error", a closed connection) is named, with what to do; its words kept last.
         lastError = mintFailed(error) ? Object.assign(engineError("mintFailedQuote", { host: new URL(mint).host, reason: mintReason(error) }), { cause: error }) : error;
+        if (failedHolding === undefined && total(await this.proofsAt(mint)) >= expected) failedHolding = lastError;
       }
     }
-    throw lastError instanceof Error ? lastError : new Error(String(lastError));
+    const said = failedHolding ?? lastError;
+    throw said instanceof Error ? said : new Error(String(said));
   }
 
   /**
@@ -1801,7 +1907,7 @@ export class CashuWallet {
       // A dropped connection or a gateway timeout says nothing: the payment may still be going through.
       if (!mintRefused(error) && !(error instanceof MeltChangeError)) return "pending";
       // The mint answered (a refusal), or took the proofs and only the change failed: its word decides.
-      const outcome = await this.settleMelt(melt, true).catch((): MeltOutcome => "pending");
+      const outcome = await this.settleMelt(await this.meltAnswered(melt), true).catch((): MeltOutcome => "pending");
       if (outcome === "unpaid") {
         unpaid();
         const lost = this.takeFailedFee(melt.quote);
@@ -1819,9 +1925,20 @@ export class CashuWallet {
       await this.finishMelt(melt, result.change);
       return "paid";
     }
-    const outcome = await this.settleMelt(melt, true).catch((): MeltOutcome => "pending");
+    const outcome = await this.settleMelt(await this.meltAnswered(melt), true).catch((): MeltOutcome => "pending");
     if (outcome === "unpaid") unpaid();
     return outcome;
+  }
+
+  /**
+   * Writes down that the mint answered this melt's one request: the poll's later UNPAID is then final (`settleMelt`),
+   * with no hold for a request still on its way. Not written, it is held as one whose answer was lost.
+   */
+  private async meltAnswered(melt: PendingMelt): Promise<PendingMelt> {
+    const answered: PendingMelt = { ...melt, answeredAt: Date.now() };
+    try { await committed((await store(STORES.melts, "readwrite")).put(await sealRow(STORES.melts, answered))); }
+    catch { return melt; }
+    return answered;
   }
 
   /**
@@ -1842,26 +1959,19 @@ export class CashuWallet {
     this.meltTimer = null;
     if (this.stopped) return;
     const melts = await this.readMelts();
-
+    // Mints that could not be loaded, or did not answer a melt's read, in this round: their other melts wait for the next.
+    const down = new Set<string>();
+    // Each mint's melts in turn (its lock serializes them anyway), the mints side by side: one that does not answer
+    // holds only its own melts, not those of the mints after it.
+    const byMint = new Map<string, PendingMelt[]>();
     for (const melt of melts) {
-      if (!this.meltAsk.due(melt.quote, Date.now())) continue;
-      try {
-        const outcome = await this.locked(melt.mint, async () => {
-          // It may have been settled while this waited for the lock.
-          const current = await openRow(STORES.melts, await wrap<PendingMelt | undefined>((await store(STORES.melts, "readonly")).get(melt.quote)));
-          return current ? this.settleMelt(current) : null;
-        });
-        if (outcome === "paid" || outcome === "unpaid") {
-          this.takeFailedFee(melt.quote);
-          this.spentAway.delete(melt.quote);
-          this.events.onMeltResolved(melt, outcome === "paid");
-          this.events.onChange();
-        }
-      } catch {
-        // mint unreachable: try again on the next round
-      }
-      this.meltAsk.missed(melt.quote, Date.now(), !this.meltOverdue(melt));
+      const atMint = byMint.get(melt.mint);
+      if (atMint) atMint.push(melt);
+      else byMint.set(melt.mint, [melt]);
     }
+    await Promise.allSettled([...byMint.values()].map(async (atMint) => {
+      for (const melt of atMint) await this.pollMelt(melt, down);
+    }));
 
     const remaining = new Set((await this.readMelts()).map((m) => m.quote));
     this.meltAsk.keepOnly(remaining);
@@ -1870,6 +1980,33 @@ export class CashuWallet {
     const next = Math.min(...[...remaining].map((quote) => this.meltAsk.at(quote, 0)));
     if (this.meltTimer) clearTimeout(this.meltTimer);
     this.meltTimer = setTimeout(() => void this.pollMelts(), Math.max(0, next - Date.now()));
+  }
+
+  /** One pending melt of a `pollMelts` round, if it is due: asked under its mint's lock, unless its mint is `down`. */
+  private async pollMelt(melt: PendingMelt, down: Set<string>): Promise<void> {
+    if (!this.meltAsk.due(melt.quote, Date.now())) return;
+    try {
+      // Its mint could not be loaded, or did not answer, for another melt just now: this one waits as that one does.
+      if (down.has(melt.mint)) throw new Error("mint down");
+      try { await this.wallet(melt.mint); }
+      catch (error) { down.add(melt.mint); throw error; }
+      const outcome = await this.locked(melt.mint, async () => {
+        // It may have been settled while this waited for the lock.
+        const current = await openRow(STORES.melts, await wrap<PendingMelt | undefined>((await store(STORES.melts, "readonly")).get(melt.quote)));
+        return current ? this.settleMelt(current) : null;
+      });
+      if (outcome === "paid" || outcome === "unpaid") {
+        this.takeFailedFee(melt.quote);
+        this.spentAway.delete(melt.quote);
+        this.events.onMeltResolved(melt, outcome === "paid");
+        this.events.onChange();
+      }
+    } catch (error) {
+      // No answer at all (its read timed out, or the connection failed): each of the mint's other melts would wait as
+      // long again, so they are asked next round. An answer, even a refusal or a server error, says the mint is there.
+      if (error instanceof Error && error.name === "NetworkError") down.add(melt.mint);
+    }
+    this.meltAsk.missed(melt.quote, Date.now(), !this.meltOverdue(melt));
   }
 
   /**
@@ -1903,8 +2040,8 @@ export class CashuWallet {
     }
     if (quote.state === "PENDING") return "pending";
     // UNPAID with no answer to the request: it may still reach the mint and be paid with these very proofs. Held
-    // until no request of this melt can land any more.
-    if (!answered && !this.meltOverdue(melt)) return "pending";
+    // until no request of this melt can land any more. One the mint answered (`answeredAt`) has none left on its way.
+    if (!answered && melt.answeredAt === undefined && !this.meltOverdue(melt)) return "pending";
 
     // UNPAID: the payment failed, or never started. The mint says which proofs are still unspent.
     const inputs = await this.reservedProofs(melt);
@@ -2023,7 +2160,9 @@ export class CashuWallet {
     if (this.failedLoads.has(mint) && !(recentFailure && !this.mintAsk.due(mint, Date.now()))) wallet = undefined;
     if (!wallet) {
       const loading = (async () => {
-        const instance = new (await loadCashu()).Wallet(mint, { unit: UNIT });
+        const cashu = await loadCashu();
+        const instance = new cashu.Wallet(mint, { unit: UNIT });
+        boundMintRequests(instance, cashu.NetworkError);
         await within(MINT_TIMEOUT_MS, instance.loadMint(), mint);
         const info = instance.getMintInfo();
         if (info.isSupported(5).params.some(saysAmountlessBeside)) instance.loadMintFromCache(amountlessUnderOptions(info.cache), instance.keyChain.cache);

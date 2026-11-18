@@ -87,7 +87,7 @@ export function InstallHint({ hasChats }: { hasChats: boolean }) {
           {t("pwa.notNow")}
         </button>
         <button type="button" data-testid="install-hint-install" onClick={then(startInstall)}
-          className="min-h-9 px-3 bg-accent hover:bg-accent-hover text-on-accent rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar-bg">
+          className="min-h-9 px-3 bg-accent hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] text-on-accent rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar-bg">
           {t("pwa.install")}
         </button>
       </div>
@@ -152,7 +152,7 @@ function StepsDialog({ kind }: { kind: "ios" | "dock" }) {
       <p className="mt-3 text-xs text-text-muted">{t("pwa.stepsThen")}</p>
       <div className="mt-5 flex justify-end">
         <button ref={done} type="button" data-testid="install-steps-done" onClick={closeInstallSteps}
-          className="min-h-11 rounded-lg bg-accent px-4 text-sm font-semibold text-on-accent hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar-bg">
+          className="min-h-11 rounded-lg bg-accent px-4 text-sm font-semibold text-on-accent hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar-bg">
           {t("pwa.gotIt")}
         </button>
       </div>

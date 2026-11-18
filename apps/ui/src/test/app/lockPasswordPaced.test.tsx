@@ -1,126 +1,124 @@
-import { act, screen } from "@testing-library/react";
-import { useEffect } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DeleteProfileDialog } from "../../components/DeleteProfileDialog";
-import { LockScreenProvider, useLockScreen } from "../../contexts/LockScreenContext";
-import { assertUnlocked, deleteProfile } from "../../lib/profileData";
-import { createProfileBackup } from "../../lib/profileBackup";
-import { namespaceOf, setRunningProfile, settingsKeyFor } from "../../lib/profiles";
-import { setStorageProfile } from "../../lib/storage";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, configure, screen, waitFor } from "@testing-library/react";
+import { Route, Routes } from "react-router-dom";
+import { LockScreenProvider } from "../../contexts/LockScreenContext";
+import { UpdateProvider } from "../../contexts/UpdateContext";
+import { Settings } from "../../pages/Settings";
+import { AddDeviceDialog } from "../../components/devices/AddDeviceDialog";
+import { hashPassword } from "../../lib/settings";
 import { renderApp } from "../render";
+// covers: profiles.lock, settings.lock.password, devices.enroll
 
-// covers: profiles.lock, profiles.delete
+/*
+ * The lock password typed anywhere but the lock screen (Add a device, Settings' current password) is paced with the
+ * lock screen's own count: a wrong one counts, and a wait already running refuses even the right one.
+ */
+configure({ asyncUtilTimeout: 10_000 });
+vi.setConfig({ testTimeout: 30_000 });
 
-/** Another profile of this space, with a lock. */
-const OTHER = "abcdefghij";
-const RIGHT = "the right one";
+HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) { this.open = true; };
 
-/** The oldest stored form of a lock password (unsalted SHA-256): quick to check here, and still accepted. */
-async function quickHash(password: string): Promise<string> {
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(password)));
-  return Array.from(digest, (b) => b.toString(16).padStart(2, "0")).join("");
-}
-async function lockWith(id: string, password: string) {
-  localStorage.setItem(settingsKeyFor(id), JSON.stringify({ lockScreen: { enabled: true, passwordHash: await quickHash(password), timeoutMinutes: 5 } }));
-}
+const ATTEMPTS_KEY = "ghostly_lock_attempts";
+const attempts = () => JSON.parse(localStorage.getItem(ATTEMPTS_KEY) ?? "null") as { failures: number; retryAt: number } | null;
+const storedHash = () => JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}").lockScreen?.passwordHash ?? null;
 
-/** This page as profile `id` (the default profile: ""). */
-function runAs(id: string) {
-  setRunningProfile(id || undefined);
-  setStorageProfile(namespaceOf(id));
-}
-
-const seen: { lock?: ReturnType<typeof useLockScreen> } = {};
-function Probe() {
-  const lock = useLockScreen();
-  useEffect(() => { seen.lock = lock; });
-  return null;
-}
-const lockScreen = { unlock: (password: string) => seen.lock!.unlock(password), get retryAt() { return seen.lock!.retryAt; } };
-function openLockScreen() {
-  return renderApp(<LockScreenProvider><Probe /></LockScreenProvider>);
+async function lockWith(password: string) {
+  const hash = await hashPassword(password);
+  localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: hash, timeoutMinutes: 5 } }));
+  return hash;
 }
 
-const tries = { delete: (password: string) => deleteProfile(OTHER, password), backup: (password: string) => createProfileBackup("a long backup passphrase", OTHER, password) };
+/** The lock screen's wait, five minutes of it, after twelve wrong tries. */
+function waitRunning() {
+  const retryAt = Date.now() + 5 * 60_000;
+  localStorage.setItem(ATTEMPTS_KEY, JSON.stringify({ failures: 12, retryAt }));
+  return retryAt;
+}
 
-describe("every check of a profile's lock password is paced, per profile", () => {
-  beforeEach(async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    runAs("");
-    await lockWith(OTHER, RIGHT);
-  });
-  afterEach(() => { vi.useRealTimers(); runAs(""); localStorage.clear(); });
+async function renderSettings() {
+  const result = renderApp(<LockScreenProvider><UpdateProvider><Routes><Route path="/settings" element={<Settings />} /></Routes></UpdateProvider></LockScreenProvider>, { route: "/settings" });
+  result.engine.on("deviceSet", () => ({ state: "single", devices: [] }));
+  await waitFor(() => expect(result.engine.callsTo("deviceSet")).toHaveLength(1));
+  await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+  return result;
+}
 
-  it.each(Object.keys(tries) as (keyof typeof tries)[])("another profile's %s: after three wrong passwords even the right one waits", async (way) => {
-    for (let i = 0; i < 3; i++) await expect(tries[way](`wrong ${i}`)).rejects.toThrow("Wrong lock password for that profile");
-    await expect(tries[way](RIGHT)).rejects.toThrow("Too many attempts. Try again in 1 s");
-    await expect(assertUnlocked(OTHER, RIGHT)).rejects.toThrow(/Too many attempts/);
-    vi.setSystemTime(Date.now() + 1_000);
-    await expect(assertUnlocked(OTHER, RIGHT)).resolves.toBeUndefined();
-  });
+afterEach(() => { localStorage.clear(); sessionStorage.clear(); });
 
-  it("the wait doubles with each wrong password, up to five minutes", async () => {
-    for (let i = 0; i < 3; i++) await expect(assertUnlocked(OTHER, "wrong")).rejects.toThrow();
-    for (const seconds of [2, 4, 8, 16, 32, 64, 128, 256, 300, 300]) {
-      vi.setSystemTime(Date.now() + 300_000);
-      await expect(assertUnlocked(OTHER, "wrong")).rejects.toThrow("Wrong lock password for that profile");
-      await expect(assertUnlocked(OTHER, RIGHT)).rejects.toThrow(`Too many attempts. Try again in ${seconds} s`);
-    }
-  });
-
-  it("the Delete dialog shows the wait and holds Delete and Save until it is over", async () => {
-    const { user } = renderApp(<DeleteProfileDialog entry={{ id: OTHER, name: "Work", createdAt: 0 }} onClose={() => {}} />);
-    await user.type(screen.getByTestId("delete-profile-confirm"), "Work");
-    const password = screen.getByTestId("delete-profile-password");
-    for (let i = 0; i < 3; i++) {
-      await user.clear(password);
-      await user.type(password, `wrong ${i}`);
-      await user.click(screen.getByTestId("delete-profile-go"));
-    }
-    expect(await screen.findByRole("alert")).toHaveTextContent("Too many attempts. Try again in 1 s");
-    expect(screen.getByTestId("delete-profile-go")).toBeDisabled();
-    await user.click(screen.getByRole("button", { name: "Download a backup first" }));
-    await user.type(screen.getByLabelText("Backup passphrase"), "a long backup passphrase");
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+describe("the lock password in Add a device", () => {
+  it("a wrong one counts as on the lock screen", async () => {
+    await lockWith("a long password");
+    const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
+    await user.type(screen.getByTestId("device-add-password"), "not the one");
+    await user.click(screen.getByTestId("device-add-next"));
+    expect(await screen.findByTestId("device-add-password-error")).toHaveTextContent("Wrong password.");
+    expect(attempts()?.failures).toBe(1);
+    expect(engine.callsTo("deviceEnrollInvite")).toHaveLength(0);
   });
 
-  it("one profile's right password leaves another's wait as it was", async () => {
-    await lockWith("", "mine");
-    for (let i = 0; i < 3; i++) await expect(assertUnlocked(OTHER, "wrong")).rejects.toThrow();
-    const view = openLockScreen();
-    await act(async () => { expect(await lockScreen.unlock("mine")).toBe(true); });
-    view.unmount();
-    await expect(assertUnlocked(OTHER, RIGHT)).rejects.toThrow(/Too many attempts/);
+  it("the right one waits for the lock screen's wait: no code is made, and the count stays", async () => {
+    await lockWith("a long password");
+    const retryAt = waitRunning();
+    const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
+    engine.on("deviceEnrollInvite", () => ({ role: "inviter", step: "waiting", code: "ghostly1zexample", expires: Math.floor(Date.now() / 1000) + 600 }));
+    await user.type(screen.getByTestId("device-add-password"), "a long password");
+    await user.click(screen.getByTestId("device-add-next"));
+    expect(await screen.findByTestId("device-add-password-error")).toHaveTextContent(/^Too many attempts\. Try again in \d+ s$/);
+    expect(engine.callsTo("deviceHandoffVerifier")).toHaveLength(0);
+    expect(engine.callsTo("deviceEnrollInvite")).toHaveLength(0);
+    expect(attempts()).toEqual({ failures: 12, retryAt });
   });
 
-  it("the lock screen's wait is the profile's own: another profile's right password does not clear it", async () => {
-    await lockWith("", "mine");
-    runAs(OTHER);
-    let view = openLockScreen();
-    for (let i = 0; i < 3; i++) await act(async () => { expect(await lockScreen.unlock("wrong")).toBe(false); });
-    expect(lockScreen.retryAt).toBeGreaterThan(Date.now());
-    view.unmount();
+  it("the right one with no wait clears the count and makes the code", async () => {
+    await lockWith("a long password");
+    localStorage.setItem(ATTEMPTS_KEY, JSON.stringify({ failures: 2, retryAt: 0 }));
+    const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
+    engine.on("deviceHandoffVerifier", () => {});
+    engine.on("deviceEnrollInvite", () => ({ role: "inviter", step: "waiting", code: "ghostly1zexample", expires: Math.floor(Date.now() / 1000) + 600 }));
+    await user.type(screen.getByTestId("device-add-password"), "a long password");
+    await user.click(screen.getByTestId("device-add-next"));
+    expect(await screen.findByTestId("device-add-code")).toBeInTheDocument();
+    expect(attempts()).toBeNull();
+  });
+});
 
-    runAs("");
-    view = openLockScreen();
-    expect(lockScreen.retryAt).toBeNull();
-    await act(async () => { expect(await lockScreen.unlock("mine")).toBe(true); });
-    view.unmount();
-
-    runAs(OTHER);
-    openLockScreen();
-    expect(lockScreen.retryAt).toBeGreaterThan(Date.now());
-    await act(async () => { expect(await lockScreen.unlock(RIGHT)).toBe(false); });
+describe("the current lock password in Settings", () => {
+  it("a wrong one counts as on the lock screen", async () => {
+    const hash = await lockWith("first secret");
+    const { user } = await renderSettings();
+    await user.click(screen.getByTestId("settings-password-edit"));
+    await user.type(screen.getByTestId("settings-password-current"), "not it");
+    await user.type(screen.getByTestId("settings-password-new"), "second secret");
+    await user.type(screen.getByTestId("settings-password-confirm"), "second secret");
+    await user.click(screen.getByRole("button", { name: "Change password" }));
+    expect(await screen.findByTestId("settings-password-current-error")).toHaveTextContent("Incorrect password");
+    expect(attempts()?.failures).toBe(1);
+    expect(storedHash()).toBe(hash);
   });
 
-  it("a wait kept before profiles had their own is the first profile's", async () => {
-    localStorage.setItem("ghostly_lock_attempts", JSON.stringify({ failures: 3, retryAt: Date.now() + 1_000 }));
-    await lockWith("", "mine");
-    const view = openLockScreen();
-    expect(lockScreen.retryAt).toBeGreaterThan(Date.now());
-    view.unmount();
-    runAs(OTHER);
-    openLockScreen();
-    expect(lockScreen.retryAt).toBeNull();
+  it("changing it waits for the lock screen's wait, even with the right one", async () => {
+    const hash = await lockWith("first secret");
+    const retryAt = waitRunning();
+    const { user } = await renderSettings();
+    await user.click(screen.getByTestId("settings-password-edit"));
+    await user.type(screen.getByTestId("settings-password-current"), "first secret");
+    await user.type(screen.getByTestId("settings-password-new"), "second secret");
+    await user.type(screen.getByTestId("settings-password-confirm"), "second secret");
+    await user.click(screen.getByRole("button", { name: "Change password" }));
+    expect(await screen.findByTestId("settings-password-current-error")).toHaveTextContent(/^Too many attempts\. Try again in \d+ s$/);
+    expect(storedHash()).toBe(hash);
+    expect(attempts()).toEqual({ failures: 12, retryAt });
+  });
+
+  it("removing it waits for the lock screen's wait, even with the right one", async () => {
+    const hash = await lockWith("first secret");
+    const retryAt = waitRunning();
+    const { user } = await renderSettings();
+    await user.click(screen.getByTestId("settings-password-edit"));
+    await user.type(screen.getByTestId("settings-password-current"), "first secret");
+    await user.click(screen.getByRole("button", { name: "Remove password" }));
+    expect(await screen.findByTestId("settings-password-current-error")).toHaveTextContent(/^Too many attempts\. Try again in \d+ s$/);
+    expect(storedHash()).toBe(hash);
+    expect(attempts()).toEqual({ failures: 12, retryAt });
   });
 });

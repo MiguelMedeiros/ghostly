@@ -26,6 +26,9 @@ dist-e2e
 # Generated native HyperDHT runtime
 /apps/desktop/native-runtime/
 
+# The CLI's npm-shrinkwrap.json is cut from package-lock.json when it is published (tools/scripts/cli-shrinkwrap.mjs)
+/packages/cli/npm-shrinkwrap.json
+
 # The SDK example installs @ghostlytools/sdk from a tarball packed on the spot (tools/scripts/sdk-example.mjs)
 /packages/sdk/examples/*/vendor/
 /packages/sdk/examples/*/package-lock.json
@@ -47,3 +50,6 @@ blob-report-matrix
 # The bundles of the built-in apps: read from each app's own repository by apps/ui/scripts/built-in-apps.mjs (npm run sync:apps)
 apps/ui/src/assets/apps/*.ghostlyapp
 apps/ui/src/assets/apps/*.part
+
+# Throwaway bug-hunt probes stay out of the repo
+.hunt/

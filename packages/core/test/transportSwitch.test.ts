@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { TransportSwitch, type TransportPolicy, type SwitchPlan } from "../src/transportSwitch";
+import { POLICY_RECEIVE_LIMIT, TransportSwitch, type TransportPolicy, type SwitchPlan } from "../src/transportSwitch";
 import { TransportSwitch as TransportSwitchV114 } from "./support/transportSwitchV114";
 // covers: transport.switch, transport.preference, transport.wait
 
@@ -352,14 +352,15 @@ it("reads a handful of the contact's policies a minute: a flood of policy, ready
     coordinator.handle({ t: "paired-switch-ready", context: "session-1", id: plan.id });
     coordinator.handle({ t: "paired-switch-failed", context: "session-1", id: plan.id });
   };
-  for (let revision = 1; revision <= 50; revision++) loop(revision);
+  const flood = POLICY_RECEIVE_LIMIT + 20;
+  for (let revision = 1; revision <= flood; revision++) loop(revision);
   const dials = () => prepare.mock.calls.filter(([, dial]) => dial).length;
-  expect(dials()).toBe(10); expect(peer).toHaveBeenCalledTimes(10);
+  expect(dials()).toBe(POLICY_RECEIVE_LIMIT); expect(peer).toHaveBeenCalledTimes(POLICY_RECEIVE_LIMIT);
   // Only the newest held policy is read once the window has room, and it is planned as any other.
   vi.advanceTimersByTime(60_000);
-  expect(peer).toHaveBeenCalledTimes(11);
-  expect(coordinator.peerPolicy?.revision).toBe(50);
-  expect(coordinator.pending?.remote.descriptors["iroh/1"]).toEqual(node(50));
+  expect(peer).toHaveBeenCalledTimes(POLICY_RECEIVE_LIMIT + 1);
+  expect(coordinator.peerPolicy?.revision).toBe(flood);
+  expect(coordinator.pending?.remote.descriptors["iroh/1"]).toEqual(node(flood));
   coordinator.stop();
 });
 it("reads the contact's policy said again as a moved session begins for free, once per session: a repeat flood still spends the window", () => {
@@ -371,14 +372,14 @@ it("reads the contact's policy said again as a moved session begins for free, on
   const say = (context: string) => side.handle({ t: "paired-policy", context, replaces: true, policy });
   side.begin("session-1", "webrtc/1");
   say("session-1");
-  // On one session: the first repeat is free, the others spend the window (9 left), the rest wait.
-  for (let i = 0; i < 20; i++) say("session-1");
-  expect(peer).toHaveBeenCalledTimes(11);
+  // On one session: the first repeat is free, the others spend the window (all but the first read), the rest wait.
+  for (let i = 0; i < POLICY_RECEIVE_LIMIT + 10; i++) say("session-1");
+  expect(peer).toHaveBeenCalledTimes(POLICY_RECEIVE_LIMIT + 1);
   // The move's new session: the contact says it again as it begins, read though the window is spent.
   side.begin("session-2", "iroh/1", true);
   say("session-2");
-  expect(peer).toHaveBeenCalledTimes(12);
+  expect(peer).toHaveBeenCalledTimes(POLICY_RECEIVE_LIMIT + 2);
   say("session-2");
-  expect(peer).toHaveBeenCalledTimes(12);
+  expect(peer).toHaveBeenCalledTimes(POLICY_RECEIVE_LIMIT + 2);
   side.stop();
 });

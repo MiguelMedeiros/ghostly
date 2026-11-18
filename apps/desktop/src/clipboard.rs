@@ -372,6 +372,14 @@ pub fn encode_png(width: usize, height: usize, rgba: &[u8]) -> Result<Vec<u8>, S
 /// CRLF line end of the file manager's `text/uri-list` (RFC 2483, as GTK and Qt write it) before
 /// decoding, so a '\r' left at the end of a path is the file's own name (`%0D`) and stays.
 pub fn pasted_files(paths: Vec<PathBuf>) -> Vec<(PathBuf, String, u64)> {
+    let mut files = regular_files(paths);
+    files.truncate(MAX_PASTED_FILES);
+    files
+}
+
+/// [`pasted_files`] with no limit on how many: for files the page never reads in itself (a drop picked on its file
+/// input, as + → Document picks any number).
+pub fn regular_files(paths: Vec<PathBuf>) -> Vec<(PathBuf, String, u64)> {
     let mut seen = std::collections::HashSet::new();
     paths
         .into_iter()
@@ -381,7 +389,6 @@ pub fn pasted_files(paths: Vec<PathBuf>) -> Vec<(PathBuf, String, u64)> {
             let name = path.file_name()?.to_str()?.to_string();
             meta.is_file().then_some((path, name, meta.len()))
         })
-        .take(MAX_PASTED_FILES)
         .collect()
 }
 
