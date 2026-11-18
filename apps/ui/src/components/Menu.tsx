@@ -4,6 +4,7 @@ import { useOutsideDismiss, useTabTrap } from "../hooks/useDismiss";
 import { safeAreaInsets } from "../hooks/useFloatingBox";
 import { useIsMobile } from "../hooks/useIsMobile";
 import type { MenuPoint } from "../lib/contextMenu";
+import { working } from "../lib/focus";
 
 /** Space kept between a menu and the edges of the window. */
 const MARGIN = 8;
@@ -249,7 +250,7 @@ function titleIfCut(row: HTMLElement) {
   else row.removeAttribute("title");
 }
 
-export function MenuItem({ icon, children, hint, onClick, danger, disabled, title, testId, className = "", data, checked, radio }: {
+export function MenuItem({ icon, children, hint, onClick, danger, disabled, busy, title, testId, className = "", data, checked, radio }: {
   icon?: ReactNode;
   children: ReactNode;
   /** A second, quieter line under the label; one line too. */
@@ -258,6 +259,11 @@ export function MenuItem({ icon, children, hint, onClick, danger, disabled, titl
   danger?: boolean;
   /** A row that cannot be used now; its `title` (and hint) say why. */
   disabled?: boolean;
+  /**
+   * A row whose action is still under way: said busy and unavailable (`working`, lib/focus.ts), a press does nothing.
+   * Not `disabled`: it keeps its place in the menu's arrow keys and the focus it has.
+   */
+  busy?: boolean;
   /** A hover text kept whether or not the row is cut. */
   title?: string;
   testId?: string;
@@ -280,10 +286,10 @@ export function MenuItem({ icon, children, hint, onClick, danger, disabled, titl
 }) {
   const fitTitle = (row: HTMLElement) => { if (!title) titleIfCut(row); };
   return (
-    <button type="button" data-testid={testId} data-menu-item onClick={onClick} disabled={disabled} title={title} {...data}
+    <button type="button" data-testid={testId} data-menu-item onClick={() => { if (!busy) onClick(); }} disabled={disabled} title={title} {...data} {...working(!!busy)}
       {...(checked === undefined ? {} : { role: radio ? "radio" : "checkbox", "aria-checked": checked })}
       onPointerEnter={e => fitTitle(e.currentTarget)} onFocus={e => fitTitle(e.currentTarget)}
-      className={`flex w-full min-w-0 items-center whitespace-nowrap px-3 py-2 text-start text-sm transition-colors enabled:hover:bg-surface-hover focus-visible:bg-surface-hover focus-visible:outline-none disabled:cursor-not-allowed max-md:min-h-12 max-md:rounded-lg ${hint ? "gap-3" : "gap-2"} ${danger ? "text-danger-ink" : hint ? "text-text-primary" : "text-text-secondary hover:text-text-primary"} ${className}`}>
+      className={`flex w-full min-w-0 items-center whitespace-nowrap px-3 py-2 text-start text-sm transition-colors enabled:hover:bg-surface-hover focus-visible:bg-surface-hover focus-visible:outline-none disabled:cursor-not-allowed data-[loading]:cursor-progress data-[loading]:opacity-80 max-md:min-h-12 max-md:rounded-lg ${hint ? "gap-3" : "gap-2"} ${danger ? "text-danger-ink" : hint ? "text-text-primary" : "text-text-secondary hover:text-text-primary"} ${className}`}>
       {icon && <span aria-hidden="true" data-menu-icon className={`flex shrink-0 ${hint ? "text-accent" : ""}`}>{icon}</span>}
       {hint
         ? <span className="min-w-0"><span data-menu-text className="block truncate">{children}</span><span data-menu-text className="block truncate text-xs text-text-muted">{hint}</span></span>
