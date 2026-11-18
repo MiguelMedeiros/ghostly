@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { parseEngineError, paymentUri, type Bolt11Invoice, type PaymentReview as Review } from "@ghostly/core";
 import type { WalletPlatform, WalletState } from "../../lib/platform";
 import { useCountUp } from "../../hooks/useCountUp";
+import { usePageShown } from "../../hooks/usePageShown";
 import { PaymentReview } from "../PaymentReview";
 import { ConfirmRealMoney } from "../ConfirmRealMoney";
 import { Actions, Address, Amount, Block, Button, Notice, Row, Section, Signed, input, type Action } from "./ui";
@@ -218,16 +219,19 @@ export function CashuWallet({ wallet, state, rail, sharedWith, onOpenCashu, focu
     return () => clearTimeout(timer);
   }, [invoice, invoiceExpiresAt]);
   // While the invoice shows, its mint or source is asked about it every few seconds: the engine asks less and less about
-  // an invoice nobody looks at (agents#2447). Said again before the engine's watch (90 s) runs out.
+  // an invoice nobody looks at (agents#2447). Said again before the engine's watch (90 s) runs out. Not while the page
+  // is hidden: nobody sees it there, and the engine's watch lapses by itself into its own pace. Shown again, it is said
+  // at once, so a payment made meanwhile shows within seconds.
   const walletNow = useRef(wallet);
   useEffect(() => { walletNow.current = wallet; });
+  const pageShown = usePageShown();
   useEffect(() => {
-    if (showing !== "invoice" || invoicePaid || !invoice) return;
+    if (showing !== "invoice" || invoicePaid || !invoice || !pageShown) return;
     const watch = () => void walletNow.current.watchInvoice?.(invoice)?.catch(() => {});
     watch();
     const timer = setInterval(watch, INVOICE_WATCH_AGAIN_MS);
     return () => clearInterval(timer);
-  }, [showing, invoicePaid, invoice]);
+  }, [showing, invoicePaid, invoice, pageShown]);
 
   // The button pressed keeps the keys while it works (Button's `loading`, by the key `run` was given); the others wait,
   // disabled. A mint's question closed hands them back to its Remove, or (the mint gone) to the field that adds one.

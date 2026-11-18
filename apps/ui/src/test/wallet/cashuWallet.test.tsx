@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fakeInvoice } from "@ghostly/browser/engine/paymentAdapters/providers/testing";
 import { DEFAULT_MINTS, TEST_MINTS } from "@ghostly/browser/shared/mints";
@@ -338,6 +338,52 @@ describe("Receive's invoice on screen", () => {
     await waitFor(() => expect(screen.getByTestId("wallet-paid")).toBeInTheDocument());
     vi.advanceTimersByTime(5 * 60_000);
     expect(watchInvoice).toHaveBeenCalledTimes(2);
+  });
+
+  /**
+   * Nobody sees an invoice in a hidden page (another tab, the window minimised): the screen stops saying it, so the
+   * engine falls back to its own pace instead of asking the mint every 4 s for the invoice's whole life. Shown again,
+   * it says it at once, so a payment made meanwhile shows within seconds.
+   */
+  describe("while the page is hidden", () => {
+    let visibility: DocumentVisibilityState = "visible";
+    const turn = (to: DocumentVisibilityState) => act(() => {
+      visibility = to;
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    const showWatched = async () => {
+      vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+      vi.spyOn(document, "visibilityState", "get").mockImplementation(() => visibility);
+      const watchInvoice = vi.fn(async () => {});
+      const wallet: WalletPlatform = Object.assign(Object.create(servicesPlatform!.wallet), {
+        receiveLightning: async () => ({ quote: "our-quote", invoice: REGTEST_INVOICE, expiresAt: null, source: "cashu-mint" }),
+        watchInvoice,
+      });
+      const view = renderApp(<CashuWallet wallet={wallet} state={at([])} rail="cashu" onOpenCashu={() => {}} />);
+      await view.user.click(screen.getByTestId("wallet-receive-amount"));
+      await view.user.keyboard("1000{Enter}");
+      await waitFor(() => expect(watchInvoice).toHaveBeenCalledWith(REGTEST_INVOICE));
+      return watchInvoice;
+    };
+    afterEach(() => { visibility = "visible"; vi.restoreAllMocks(); });
+
+    it("is not watched at all, however long it stays hidden", async () => {
+      const watchInvoice = await showWatched();
+      expect(watchInvoice).toHaveBeenCalledOnce();
+      turn("hidden");
+      vi.advanceTimersByTime(30 * 60_000);
+      expect(watchInvoice).toHaveBeenCalledOnce();
+    });
+
+    it("is watched at once when the page shows again, then every minute", async () => {
+      const watchInvoice = await showWatched();
+      turn("hidden");
+      vi.advanceTimersByTime(10 * 60_000);
+      turn("visible");
+      expect(watchInvoice).toHaveBeenCalledTimes(2);
+      vi.advanceTimersByTime(60_000);
+      expect(watchInvoice).toHaveBeenCalledTimes(3);
+    });
   });
 });
 
