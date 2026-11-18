@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lobbyKeys } from "@ghostly/core";
+import { beaconKeys, lobbyKeys } from "@ghostly/core";
 import { CommunityWorld, RELAY_NETWORK, seededRandom, type Peer } from "./communityWorld";
 // covers: groups.community.catch-up
 
@@ -114,6 +114,32 @@ describe("a community member back within minutes", { timeout: 60_000 }, () => {
     const within = (from: number, to: number) => reads.filter(at => at >= back + from && at < back + to).length;
     expect(within(0, 110_000)).toBeGreaterThanOrEqual(12);
     expect(within(3 * 60_000, 5 * 60_000)).toBeLessThanOrEqual(5);
+  });
+
+  // The beacon unread a while after the restart (a phone woken with no network, the relays refusing the read): the window
+  // starts at its first reading all the same, the edges of the last run gone by then (`RESTORED_EDGE_MS`).
+  it("an app back first after both were closed reads its lobby fast once its beacon read, though that came 70 s late", async () => {
+    const world = new CommunityWorld(undefined, RELAY_NETWORK, seededRandom(1));
+    const alice = world.add("alice"), bob = world.add("bob");
+    const id = await alice.groups.create("Check");
+    const link = await alice.groups.enableLink(id);
+    await bob.groups.joinByLink(`https://app.ghostly.tools/#/join/${link}`);
+    await world.until(() => world.member(bob, id), 10 * 60_000);
+    await world.run(3 * 60_000);
+    const s = alice.groups.communities.session(id)!, lobby = lobbyKeys(s.state.rv, id, s.myKey).identity.pubKeyZ32;
+    const beacon = beaconKeys(s.state.rv, id).identity.pubKeyZ32;
+    alice.online = false; bob.online = false;
+    await world.run(110_000);
+    world.failRead = (p, key) => p === alice && key === beacon;
+    await world.restart(alice);
+    await world.run(70_000);
+    world.failRead = null;
+    await world.until(() => alice.groups.communities.isHub(id), 60_000);
+    const reads: number[] = [];
+    world.onPkarr = (p, op, key) => { if (p === alice && op === "resolve" && key === lobby) reads.push(world.now); };
+    await world.run(60_000);
+    // Every 6 s, not every half minute.
+    expect(reads.length).toBeGreaterThanOrEqual(7);
   });
 
   it("a hub reads its lobby fast only a while after it dropped a member", async () => {

@@ -412,6 +412,11 @@ interface Live {
   restored: Map<string, number>;
   /** The restored edges to members were cut down to `RESTORED_MEMBER_EDGES`, at the first reading of the beacon. */
   restoredTrimmed?: boolean;
+  /**
+   * The keys of `restored` as the app started, for the restart window's check at the first reading of the beacon
+   * (`restartedUntil`): one held back a minute finds `restored` emptied by then (`RESTORED_EDGE_MS`).
+   */
+  restartKeys?: Set<string>;
   /** As a hub: keys the chain took out that I keep an edge to until they are told (since when, told when); keys not waited for until; and when each was last told. */
   farewells: Map<string, { since: number; told?: number }>;
   farewellQuiet: Map<string, number>;
@@ -531,7 +536,7 @@ export class Communities {
       for (const [, linkId] of this.host.entries(group.id)) if (group.joining?.linkId !== linkId) await this.host.closeEdge(linkId);
       // The edges of the last run stay a while, whatever the topology wants at first (see `reconcile`).
       const live = this.live.get(group.id);
-      if (live) for (const key of this.host.edges(group.id).keys()) live.restored.set(key, 0);
+      if (live) { for (const key of this.host.edges(group.id).keys()) live.restored.set(key, 0); live.restartKeys = new Set(live.restored.keys()); }
     }
   }
 
@@ -1876,7 +1881,8 @@ export class Communities {
       // times a minute, against a budget of 20, and an app reloaded every half minute never left the window (bug hunt
       // 1118, 2026-11-17).
       const running = new Set(live.beacon.filter(h => now - h.ts < COMMUNITY_TOPOLOGY.beaconEveryMs * 1.5).map(h => h.key));
-      for (const key of live.restored.keys()) if (!running.has(key) && !(existing.has(key) && this.host.linkReady(existing.get(key)!, 2))) live.restartedUntil = now + MEMBER_BACK_MS;
+      for (const key of live.restartKeys ?? []) if (!running.has(key) && !(existing.has(key) && this.host.linkReady(existing.get(key)!, 2))) live.restartedUntil = now + MEMBER_BACK_MS;
+      live.restartKeys = undefined;
       live.restoredTrimmed = true;
       const hubs = new Set(freshHubs(this.hubs(live), now).map(h => h.key));
       let kept = 0;
