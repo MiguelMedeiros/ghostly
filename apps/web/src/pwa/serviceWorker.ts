@@ -313,7 +313,7 @@ export function openChat(path: string, profile: string): void {
 export function askForShare(opened = openedForShare()): void {
   const workers = container();
   if (!workers || !opened) return;
-  tellReady({ type: "share-ready" });
+  tellReady({ type: "share-ready", profile: activeProfileId() });
 }
 
 /** How long a tab opened for a share waits for the peer's lock before it hands the share to the tab that holds it. */
