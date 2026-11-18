@@ -751,10 +751,18 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
       // to rows.db with it, half of it (a file's state deleted, its record kept). rows.db names this snapshot with
       // them: a process killed before the rename below comes back to it (at open).
       trees.apply(upTo, name);
-      if (scrub) trees.scrub();
-      trees.sync();
     }
-    renameSync(temporaryPath, snapshotPath);
+    try {
+      if (scrub) trees?.scrub();
+      trees?.sync();
+      renameSync(temporaryPath, snapshotPath);
+    } catch (error) {
+      // The fold did not take the journal's place: the store goes on writing to it. Left on disk, that snapshot is the
+      // one rows.db names, and a process killed later came back to it, the journal dropped: every transaction completed
+      // since the failure lost its writes outside rows.db (a purge's VACUUM with no room for its copy, a rename refused).
+      rmSync(temporaryPath, { force: true });
+      throw error;
+    }
     foldedUpTo = upTo;
     // Trees of stores and indexes gone from the schema: once no snapshot on disk names them, nor the schema now.
     try { if (live) trees!.sweep(new Set([...live, ...liveTrees()])); } catch (error) { process.stderr.write(`ghostly: storage: old trees not removed: ${error instanceof Error ? error.message : String(error)}\n`); }
