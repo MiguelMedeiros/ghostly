@@ -189,6 +189,27 @@ describe("a private group catches up a member from whoever is there", { timeout:
     expect(asks.sort()).toEqual(["bob", "carol"]);
   });
 
+  it("every member online gets all of a burst of 200 from one author, though each takes 64 of them live", async () => {
+    const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave"]);
+    const [alice, ...others] = peers;
+    // Sent at once, as a bot's `group send` over the daemon's socket: past the pace the others apply (`AuthorPace`).
+    for (let i = 0; i < 200; i++) await alice.groups.send(id, `alice ${i}`);
+    const has = (p: Peer) => world.texts(p, id).filter(t => t.startsWith("alice ")).length;
+    expect(others.map(has)).toEqual([64, 64, 64]);
+    // The others ask Alice for the ones they did not take, and she hands them from what she kept (`GroupState.owed`).
+    await world.until(() => others.every(p => has(p) === 200), 5 * 60_000, 1000, () => others.map(p => `${p.name} has ${has(p)} of 200`).join(", "));
+    for (const p of others) expect(new Set(world.texts(p, id)).size).toBe(world.texts(p, id).length);
+  });
+
+  it("every member online gets all of 500 messages three authors send in turn at once", async () => {
+    const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave"]);
+    const authors = peers.slice(0, 3);
+    for (let i = 0; i < 500; i++) await authors[i % 3]!.groups.send(id, `m ${i}`);
+    const has = (p: Peer) => world.texts(p, id).filter(t => t.startsWith("m ")).length;
+    await world.until(() => peers.every(p => has(p) === 500), 5 * 60_000, 1000, () => peers.map(p => `${p.name} has ${has(p)} of 500`).join(", "));
+    for (const p of peers) expect(new Set(world.texts(p, id)).size).toBe(world.texts(p, id).length);
+  });
+
   it("a member back after a while is announced once, and the others look fast for it", async () => {
     const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave", "erin"], true);
     const erin = peers[4];
