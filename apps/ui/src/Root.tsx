@@ -247,13 +247,20 @@ function ChatNotStoredNotice() {
  * after it): the router reads it as home with the link as its hash, so no intake took it and it stayed in the address.
  * It opens as the link it doubles, and the intakes take it from there. One that starts with `//` or `/\` after it is no
  * page's, as with one `#` (`anchorTarget`): the router reads it as another site's address and refuses it, so home.
+ * A link after another page (`#/chat/<id>#ghostly1…`, `#/settings#ghostly1…`: pasted after the app's address) opens
+ * as that link too: no intake reads a page's hash. Not after a page that is a link itself, nor a device code's link
+ * that names the profile (`namedDeviceLink`): their intakes take those.
  */
 function DoubledHashLink() {
   const { pathname, hash } = useLocation();
   const navigate = useNavigate();
   useEffect(() => {
-    if (pathname !== "/" || !hash) return;
+    if (!hash) return;
     const route = undoubledRoute(hash);
+    if (pathname !== "/") {
+      if (linkInAddress(route) !== null && linkInAddress(pathname) === null && !namedDeviceLink(pathname, hash)) navigate(route, { replace: true });
+      return;
+    }
     if (/^[\\/]{2}/.test(route)) navigate("/", { replace: true });
     else if (linkInAddress(route) !== null || /^\/chat\/./.test(route)) navigate(route, { replace: true });
   }, [pathname, hash, navigate]);
