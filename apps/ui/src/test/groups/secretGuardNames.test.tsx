@@ -65,6 +65,42 @@ describe("the secret guard on names and the status", () => {
     expect(guard()).not.toBeInTheDocument();
   });
 
+  /** The browser's cancel on Escape: on the dialog, not bubbling. */
+  const escape = (testId: string) => act(() => { screen.getByTestId(testId).dispatchEvent(new Event("cancel", { cancelable: true })); });
+
+  it("Escape on the question over New group closes only the question: the name stays typed in", async () => {
+    let closed = 0;
+    const { user } = renderApp(<NewGroupDialog onClose={() => { closed++; }} onCreated={() => {}} />);
+    await user.click(screen.getByTestId("new-group-name"));
+    await user.paste(NSEC);
+    await user.click(screen.getByTestId("new-group-create"));
+    await screen.findByTestId("secret-guard");
+    escape("secret-guard");
+    expect(guard()).not.toBeInTheDocument();
+    expect(closed).toBe(0);
+    expect(screen.getByTestId("new-group-name")).toHaveValue(NSEC);
+    // The next Escape is the dialog's.
+    escape("new-group-dialog");
+    expect(closed).toBe(1);
+  });
+
+  it("Escape on the question over a rename closes only the question: the members dialog stays with the name", async () => {
+    let closed = 0;
+    fakeEngine.update({ groups: [admin({ name: "Friends" })] });
+    const { user } = renderApp(<GroupMembersDialog group={admin({ name: "Friends" })} onClose={() => { closed++; }} />);
+    await user.click(screen.getByTestId("group-rename"));
+    const input = screen.getByTestId("group-rename-input");
+    await user.clear(input);
+    await user.click(input);
+    await user.paste(NSEC);
+    await user.click(screen.getByTestId("group-rename-save"));
+    await screen.findByTestId("secret-guard");
+    escape("secret-guard");
+    expect(guard()).not.toBeInTheDocument();
+    expect(closed).toBe(0);
+    expect(screen.getByTestId("group-rename-input")).toHaveValue(NSEC);
+  });
+
   it("a status of a Bitcoin private key asks first, and is set only on Send anyway", async () => {
     fakeEngine.on("getOwnStatus", () => ({ sharePresence: true }));
     const { user, engine } = renderApp(<StatusPickerHost />);

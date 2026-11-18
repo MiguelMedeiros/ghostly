@@ -9,6 +9,7 @@ import { formatAmount } from "../lib/amount";
  * Asked before the composer sends text that looks like a secret (`findSecret`): a seed, a private key or a login to a
  * node, or a Cashu
  * token, which is money handed to whoever reads the chat. Cancel has the focus, so Enter and Escape keep the draft.
+ * Its cancel stops here: React passes it up to the dialog that asked, which would close too.
  * It says what kind of secret it is and, for ecash, how much: never the text itself.
  */
 export function SecretGuardDialog({ finding, recipient, onCancel, onConfirm }: {
@@ -40,7 +41,7 @@ export function SecretGuardDialog({ finding, recipient, onCancel, onConfirm }: {
   }
 
   return createPortal(<dialog ref={dialog} role="alertdialog" data-testid="secret-guard" data-kind={finding.kind}
-    onCancel={(e) => { e.preventDefault(); onCancel(); }}
+    onCancel={(e) => { e.preventDefault(); e.stopPropagation(); onCancel(); }}
     onKeyDown={(e) => { if (e.key === "Tab") { e.preventDefault(); (document.activeElement === cancel.current ? confirm.current : cancel.current)?.focus(); } }}
     aria-labelledby={`${id}-title`} aria-describedby={`${id}-body`}
     className="m-auto w-[calc(100%_-_2rem)] max-w-sm rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
