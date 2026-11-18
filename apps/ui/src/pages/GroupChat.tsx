@@ -478,6 +478,11 @@ export function GroupChat() {
   const avatarButton = useRef<HTMLButtonElement>(null);
   if (viewingPicture && !group?.picture) setViewingPicture(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  // The groups whose Rotate keys is still going. Each press signs a rotation of its own (a fresh epoch every member
+  // fetches), so a second press while the first goes does nothing. By group: this page stays mounted when another group
+  // is opened.
+  const rotatingRef = useRef(new Set<string>());
+  const [rotating, setRotating] = useState<ReadonlySet<string>>(() => new Set());
   const [showMute, setShowMute] = useState(false);
   const [showTranslate, setShowTranslate] = useState(false);
   const [showFolders, setShowFolders] = useState(false);
@@ -857,6 +862,13 @@ export function GroupChat() {
     setMenuOpen(false); setError(null);
     try { await action(); } catch (e) { setError(e instanceof Error ? problemText(e, t) : { tone: "error", title: t("group.error.generic") }); }
   };
+  const rotate = () => {
+    const id = groupId;
+    if (rotatingRef.current.has(id)) return;
+    const mark = (on: boolean) => { if (on) rotatingRef.current.add(id); else rotatingRef.current.delete(id); setRotating(new Set(rotatingRef.current)); };
+    mark(true);
+    void act(() => engine.call("rotateGroup", { groupId: id })).finally(() => mark(false));
+  };
   // Knocking again, Try again goes: the focus it had goes to Cancel joining beside it, not to the page.
   const tryAgain = (pressed: HTMLElement) => void act(async () => {
     await engine.call("acceptGroupInvitation", { groupId });
@@ -927,7 +939,7 @@ export function GroupChat() {
               {!invited && <TranslateMenuItem chat={groupChat(group.id)} onChoose={() => { closeMenu(); setShowTranslate(true); }} />}
               {!invited && <FolderMenuItem chat={groupChat(group.id)} onChoose={() => { closeMenu(); setShowFolders(true); }} />}
               {!noTimeline && !invited && <MenuItem testId="chat-search-open" onClick={() => { closeMenu(); search.show(); }} icon={<SearchIcon />}>{t("chat.search.open")}</MenuItem>}
-              {group.isAdmin && <MenuItem testId="group-rotate" onClick={() => void act(() => engine.call("rotateGroup", { groupId }))}>{t("group.menu.rotate")}</MenuItem>}
+              {group.isAdmin && <MenuItem testId="group-rotate" busy={rotating.has(groupId)} onClick={rotate}>{t("group.menu.rotate")}</MenuItem>}
               {!invited && <MenuSeparator />}
               {group.status === "active" && <MenuItem danger testId="group-leave" onClick={() => { closeMenu(); setConfirmLeave(true); }}>{t("group.menu.leave")}</MenuItem>}
               <MenuItem danger testId="group-forget" onClick={() => { closeMenu(); setConfirmForget(true); }}>{t("group.menu.forget")}</MenuItem>
