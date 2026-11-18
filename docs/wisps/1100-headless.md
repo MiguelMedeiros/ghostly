@@ -207,7 +207,7 @@ A bot or an agent joins a voice call with the apps: the CLI takes part in [601](
 | | |
 |---|---|
 | Format | Raw PCM, no framing: signed 16-bit little-endian, mono, at the call's rate: 48000 by default, or 24000, 16000, 12000, 8000 (`--rate`). Opus runs at that rate itself: nothing is resampled |
-| From the call | The contact's audio, in 20 ms frames, as soon as each is decoded. A late packet waits up to 40 ms; a lost one is 20 ms of silence |
+| From the call | The contact's audio, in 20 ms frames, as soon as each is decoded. A late packet waits up to 40 ms; a lost one is a 20 ms frame the decoder conceals (Opus loss concealment), and a longer gap is 3 such frames at most, the rest of it not written |
 | To the call | Any amount at any time. The CLI queues it (at most five minutes), sends a 20 ms frame per tick at real time, and silence when the queue is empty. A partial frame waits 60 ms for the rest, then plays padded |
 | Barge-in | `call.flush` drops everything queued at once and says how much (`flushedMs`) |
 | Token | The call's `audio.token` and a line feed, before anything else; required on Windows and in `GHOSTLY_CALL_SOCKET_DIR` |

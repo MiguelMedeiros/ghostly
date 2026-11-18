@@ -1679,6 +1679,31 @@ describe("messages kept in rows.db", () => {
     expect(found).toEqual({ "before the rename": { file: undefined, state: undefined }, "between the entries": { file: undefined, state: undefined } });
   });
 
+  it("a fold whose VACUUM or rename failed is not, in a process killed later, what the transactions completed since come back to", async () => {
+    const errors = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const found: Record<string, unknown> = {};
+    try {
+      for (const fault of ["vacuum", "rename"] as const) {
+        const dir = folder();
+        const store = await openPersistentIndexedDb(dir);
+        opened.push(store);
+        const d = await db(store.factory);
+        await tx(d, ["messages", "settings"], (s) => { s.messages.put({ linkId: "a", id: "1", text: "before" }); s.settings.put("before", "name"); });
+        // A purge's fold with no room for VACUUM's copy, or a backup's whose rename is refused: rows.db names its snapshot.
+        const scrub = fault === "vacuum" ? vi.spyOn(TreeFile.prototype, "scrub").mockImplementationOnce(() => { throw new Error("database or disk is full"); }) : null;
+        if (fault === "rename") faults.next.push("rename");
+        await expect(store.compact({ scrub: fault === "vacuum" })).rejects.toThrow();
+        scrub?.mockRestore();
+        // Completed after it: the message's half in rows.db, the setting's in the journal.
+        await tx(d, ["messages", "settings"], (s) => { s.messages.put({ linkId: "a", id: "2", text: "after" }); s.settings.put("after", "name"); });
+        await store.flush();
+        const t = (await db(await open(copyOf(dir)))).transaction(["messages", "settings"]);
+        found[fault] = { name: await read(t.objectStore("settings").get("name")), message: (await read(t.objectStore("messages").get(["a", "2"])) as { text?: string } | undefined)?.text };
+      }
+    } finally { errors.mockRestore(); faults.next.length = 0; }
+    expect(found).toEqual({ vacuum: { name: "after", message: "after" }, rename: { name: "after", message: "after" } });
+  });
+
   it("a put a unique index refuses in a store kept on disk leaves the store writable by the next transaction", async () => {
     const dir = folder();
     const factory = await open(dir);

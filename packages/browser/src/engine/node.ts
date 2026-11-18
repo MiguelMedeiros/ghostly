@@ -3027,6 +3027,9 @@ export class GhostlyNode implements EngineImplementation {
     this.groupEdits.stop();
     this.reactions.stop();
     this.cardEdits.stop();
+    // Files are swept while their session is open (`ChatFiles`): a session the stop leaves open sweeps no more.
+    this.fileDesk.stop();
+    this.groups.files?.stopSweeps();
     // What is still being written is waited for, side by side: the stop takes as long as the slowest, not their sum.
     await Promise.allSettled([
       linksStopped,
@@ -4123,6 +4126,7 @@ export class GhostlyNode implements EngineImplementation {
     this.reactionNotes.delete(linkId);
     this.reactionNotesBefore.delete(linkId);
     this.reactionNotesWhole.delete(linkId);
+    this.chatSearch.forget(linkId);
     if (filesEnded) setTimeout(() => void live.link?.stop(true), FILES_END_MS);
     else void live.link?.stop(true);
     void live.caps?.stop();
@@ -4137,8 +4141,9 @@ export class GhostlyNode implements EngineImplementation {
     this.wakeLimiter.reset(linkId);
     this.callWakeLimiter.reset(linkId);
     if (live.stored.wakeToken) void this.rotateWake().then(() => this.emitState());
-    // Its apps' storage counts go once its rows have: the same invite joined again is a chat of the same id.
-    void db.deleteLink(linkId).finally(() => this.appShelf?.forgetScope(linkId));
+    // Its apps' storage counts go once its rows have: the same invite joined again is a chat of the same id. So do the
+    // search's texts once more: that chat joined in the same tick, a search before the rows went read and kept them.
+    void db.deleteLink(linkId).finally(() => { this.chatSearch.forget(linkId); this.appShelf?.forgetScope(linkId); });
     void this.desk.forgetLink(linkId);
     // Ecash the contact has not taken is kept: the Wallet page offers it back, now that its bubble is gone.
     this.awaitingSoon();

@@ -1,7 +1,10 @@
 import { useSyncExternalStore } from "react";
+import { DHT_PACKET_BUDGET } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
-import { useI18n } from "../contexts/I18nContext";
+import { useI18n, type Translate } from "../contexts/I18nContext";
 import { useOnline } from "../hooks/useOnline";
+import { rawError } from "./errorText";
+import { problemLine, sentences } from "./problemText";
 import type { ChatMessage } from "./types";
 
 export type Delivery = NonNullable<ChatMessage["delivery"]>;
@@ -45,6 +48,16 @@ export function useDhtOnly(peerPubKey?: string): DhtOnlyBy | undefined {
  */
 export function waitsForLive(message: Pick<ChatMessage, "delivery" | "file"> | undefined, dhtOnly: DhtOnlyBy | undefined): DhtOnlyBy | undefined {
   return message?.delivery === "waiting" && message.file ? dhtOnly : undefined;
+}
+
+/**
+ * A send or an edit the engine refused, as one line (`problemLine`). A text the DHT packet cannot carry (core
+ * `DHT_PACKET_BUDGET`) in a chat on DHT only says what ends DHT only: "once you're connected peer to peer" never comes
+ * there until the side that chose it leaves it.
+ */
+export function refusalLine(cause: unknown, t: Translate, dhtOnly: DhtOnlyBy | undefined): string {
+  if (!dhtOnly || rawError(cause) !== DHT_PACKET_BUDGET) return problemLine(cause, t);
+  return sentences(t("errors.chat.dhtTooLong"), t(dhtOnly === "you" ? "errors.chat.dhtTooLongYouNext" : "errors.chat.dhtTooLongContactNext"), t);
 }
 
 /**

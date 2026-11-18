@@ -34,7 +34,8 @@ export function shardByTime(files: string[], seconds: Record<string, number>, in
  * fell mostly in one half, which took twice the other's time (CI's draft tier runs the CLI in two halves,
  * tools/scripts/affected/select.mjs UNIT_HALVED). The times are the packages shards' record
  * (tools/scripts/test-durations.json): a stale record only unbalances the halves, it never drops a file. Only
- * `--shard` reads this; the order a run takes its files in is Vitest's own.
+ * `--shard` reads this; the order a run takes its files in is Vitest's own. A shard left none of the run's files says
+ * so: Vitest's own "No affected test files found" read as if a change's only CLI test ran nowhere.
  */
 export class TimedShards extends BaseSequencer {
   override async shard(specs: TestSpecification[]): Promise<TestSpecification[]> {
@@ -42,6 +43,8 @@ export class TimedShards extends BaseSequencer {
     const seconds: Record<string, number> = JSON.parse(readFileSync(new URL("./scripts/test-durations.json", import.meta.url), "utf8"));
     const path = (spec: TestSpecification) => relative(REPO, spec.moduleId).replaceAll("\\", "/");
     const mine = new Set(shardByTime(specs.map(path), seconds, index, count));
+    const files = new Set(specs.map(path)).size;
+    if (!mine.size && files) console.log(`--shard=${index}/${count} (cut by time, tools/vitest.shards.ts): none of the ${files} test file(s) here, the other ${count === 2 ? "half runs" : "shards run"} them`);
     return specs.filter((spec) => mine.has(path(spec)));
   }
 }

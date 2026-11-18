@@ -17,7 +17,7 @@ import { identityWaitLines } from "./identityWait";
 import { jsonOut } from "./jsonOut";
 import { ownProfile } from "./privateFolder";
 import { shellWord } from "./shellWord";
-import { dhtOnlyNotice, longTextChat, waitNotice, waitsFor, type WaitNotice } from "./waitNotice";
+import { dhtOnlyChat, dhtOnlyNotice, waitNotice, waitsFor, type WaitNotice } from "./waitNotice";
 import type { RuntimeOptions } from "./runtime/engine";
 import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, followDaemon, PAUSE_HOLD_MS, startAt } from "./listen";
 import { format } from "node:util";
@@ -547,9 +547,9 @@ function interruptible(s: Session): { run<T>(work: (s: Session) => Promise<T>): 
     const given = (params ?? {}) as Record<string, unknown>;
     const entry = { method, notice: waitNotice(method, given, s.mode) };
     pending.add(entry);
-    // A long text's chat, read beside the send: on the DHT only, the notice and Ctrl-C say why it waits, not that it goes.
-    const chat = entry.notice && longTextChat(method, given);
-    if (chat) void s.call("chat.get", { chat }).then((view) => { if (entry.notice) entry.notice = dhtOnlyNotice(entry.notice, given, view as Record<string, unknown>, s.mode); }, () => {});
+    // A long text's chat or a pin's, read beside the call: on the DHT only, the notice and Ctrl-C say why it waits, not that it goes.
+    const chat = entry.notice && dhtOnlyChat(method, given);
+    if (chat) void s.call("chat.get", { chat }).then((view) => { if (entry.notice) entry.notice = dhtOnlyNotice(entry.notice, method, given, view as Record<string, unknown>, s.mode); }, () => {});
     const timer = entry.notice && process.stderr.isTTY ? setTimeout(() => process.stderr.write(`ghostly: ${entry.notice!.waiting}\n`), WAIT_NOTICE_MS) : undefined;
     return held(s.call(method, params).finally(() => { clearTimeout(timer); pending.delete(entry); }));
   };
@@ -1870,6 +1870,25 @@ export async function main(input: string[]): Promise<number> {
 }
 
 /**
+ * The app's words for a message action, and the command that does it here: someone coming from the app types `reply`
+ * or `unpin` first, and "did you mean react?" for `unreact` added a reaction instead of taking one back.
+ */
+export const APP_WORDS: Readonly<Record<string, string>> = {
+  "reply": "send <chat> --reply <message>",
+  "unpin": "pin <chat> --remove",
+  "unreact": "react <chat> <message> --remove",
+  "delete": "message delete <chat> <message>",
+  "history": "chat history <chat>",
+  "message edit": "edit <chat> <message>",
+  "message react": "react <chat> <message> <emoji>",
+  "message pin": "pin <chat> <message>",
+  "message forward": "forward <chat> <message> --to <chat>",
+};
+
+/** The app's search (in a chat and in the chat list), which the CLI does not have: `chat history` and jq do it. */
+const SEARCH = ["search", "chat search"];
+
+/**
  * A command line that names no command. The words of a group (`ghostly chat`, `ghostly wallet frob`, `ghostly x401
  * credential`) are answered with the group's commands, as `ghostly help chat` lists them; before, it was only "Unknown
  * command: chat". The longest group the words name answers: `x401 credential frob` lists add, list and remove.
@@ -1877,6 +1896,10 @@ export async function main(input: string[]): Promise<number> {
  */
 export function unknownCommand(first: string | undefined, second?: string, third?: string): CliError {
   const asked = [first, second, third].filter((word): word is string => !!word);
+  // The app's word for a message action (`unpin`, `message edit`) is no typo: the command that does it, with its options.
+  const said = [asked.slice(0, 2).join(" "), asked[0]].find((words) => words !== undefined && (Object.hasOwn(APP_WORDS, words) || SEARCH.includes(words)));
+  if (said && SEARCH.includes(said)) return new CliError("usage", `Unknown command: ${said} (the CLI has no search yet: ghostly chat history <chat> --limit n | jq …; ghostly help chat history)`);
+  if (said) return new CliError("usage", `Unknown command: ${said} (ghostly ${APP_WORDS[said]}; ghostly help ${commandWords(APP_WORDS[said]).join(" ")})`);
   const all = helpRows().map((row) => commandWords(row.usage));
   const takes = (group: readonly string[]) => [...new Set(all.filter((words) => words.length > group.length && group.every((word, i) => words[i] === word)).map((words) => words[group.length]))];
   const meant = (typed: readonly string[], words: readonly string[]) => new CliError("usage", `Unknown command: ${typed.join(" ")} (did you mean ${words.join(" ")}? ghostly help ${words.join(" ")})`);

@@ -53,7 +53,9 @@
   },
   "chat": {
     "dhtTooLong": "Too long for the DHT",
+    "dhtTooLongContactNext": "Shorten it, or try again once your contact leaves DHT only.",
     "dhtTooLongNext": "Shorten it, or send it once you're connected peer to peer.",
+    "dhtTooLongYouNext": "Shorten it, or leave DHT only from the connection icon and try again.",
     "editTooMany": "This message can't be edited again",
     "editTooManyNext": "A message takes {{max}} edits at most.",
     "forwardNone": "Nothing left to forward",

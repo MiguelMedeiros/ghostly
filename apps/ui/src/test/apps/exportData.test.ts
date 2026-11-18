@@ -29,7 +29,7 @@ describe("the export offered before an uninstall", () => {
       { ghostlyAppData: 1, app: REF, scope: "alone", entries: { b: { c: true } } },
       { ghostlyAppData: 1, app: REF, scope: "chat-1", entries: Object.defineProperty({ a: [1, 2], "x\"y": "z" }, "__proto__", { value: 7, enumerable: true }) },
     ];
-    await saveAppData(REF, asKept(exports));
+    expect(await saveAppData(REF, asKept(exports))).toBe(true);
     expect(saved.map((s) => s.name)).toEqual(["chess-data.json"]);
     const text = await saved[0]!.blob.text();
     expect(JSON.parse(text)).toEqual(JSON.parse(JSON.stringify(exports)));
@@ -56,7 +56,7 @@ describe("the export offered before an uninstall", () => {
 
   it("saves nothing for an app that kept nothing", async () => {
     saved.length = 0;
-    await saveAppData(REF, []);
+    expect(await saveAppData(REF, [])).toBe(false);
     expect(saved).toEqual([]);
   });
 });
