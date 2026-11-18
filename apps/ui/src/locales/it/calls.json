@@ -76,6 +76,8 @@
   "noPathNext": "Una VPN o un firewall, tuo o del tuo contatto, può bloccare le chiamate. Un server TURN le fa passare.",
   "noPathSettings": "Opzioni di rete",
   "noPathTurnSet": "Non è passata nemmeno dal tuo server TURN. Controlla l'indirizzo (TURN su TLS sulla 443) e la credenziale, oppure anche il tuo contatto potrebbe averne bisogno.",
+  "nowAudio": "Ora è una chiamata vocale",
+  "nowVideo": "Ora è una videochiamata",
   "onAnother": "Sei in un'altra chiamata",
   "outgoing": "Chiamata in corso...",
   "reconnecting": "Riconnessione...",
