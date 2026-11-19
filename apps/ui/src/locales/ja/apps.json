@@ -16,6 +16,7 @@
   },
   "app": {
     "export": "データを書き出す",
+    "exportNone": "{{title}} が保存したデータはありません。書き出すものはありません。",
     "fetchFiles": "ファイルを取得",
     "keepStopped": "停止したままにする",
     "needsFiles": "ファイルが必要です",

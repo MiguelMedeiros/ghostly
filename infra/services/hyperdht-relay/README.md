@@ -80,7 +80,9 @@ Other settings:
   (`requests carry CF-Connecting-IP but GHOSTLY_RELAY_CLOUDFLARE is not set`). With one set, the first request
   without its header (a proxy that does not write it, such as nginx without `proxy_set_header X-Forwarded-For
   $proxy_add_x_forwarded_for`) logs `requests arrive without X-Forwarded-For though GHOSTLY_RELAY_PROXIES is set`
-  (or `CF-Connecting-IP` and `GHOSTLY_RELAY_CLOUDFLARE`): it counts as the proxy, as every other one would. With either set, the
+  (or `CF-Connecting-IP` and `GHOSTLY_RELAY_CLOUDFLARE`): it counts as the proxy, as every other one would. One with
+  fewer `X-Forwarded-For` entries than `GHOSTLY_RELAY_PROXIES` (`2` behind a single nginx) logs `requests carry 1
+  X-Forwarded-For entry though GHOSTLY_RELAY_PROXIES is 2`: set it to the number of proxies that write the header. With either set, the
   relay listens on 127.0.0.1 unless `HOST` says otherwise: only the proxy should reach it, since anyone else could
   write that header. The container sets `HOST=0.0.0.0` inside it and publishes the port where the proxy is
   (`HYPERDHT_RELAY_BIND`, loopback by default).
@@ -123,7 +125,8 @@ shell or an `.env` file next to it):
 (`{"ok":true,"firewalled":false,"nodes":20}`); `HEAD` and a query string (`/healthz?x=1`) answer the same. Anyone who reaches the relay may read it, so it carries no count of
 clients; refusals and drops are in the log. It is `ok: false` with HTTP 503 while `nodes` is 0: the node reaches no other one (no outgoing UDP, as behind a tunnel, a
 firewall or a container network without it), so nobody reaches the browsers listening through it. The start log
-says `bootstrap reached no node` then. While the relay stops (up to a second, until each client has answered its
+says so with what to check (`bootstrap reached no node: check that this host can send UDP out ...`, and that
+`GHOSTLY_HYPERDHT_BOOTSTRAP` names running nodes when it is set). While the relay stops (up to a second, until each client has answered its
 going-away close, 1001), it reads `{"ok":false,"stopping":true}` with HTTP 503 and refuses new WebSockets with 503
 and `Retry-After: 1`. The log has counts and reasons only: never a key, an address or anyone's
 traffic.

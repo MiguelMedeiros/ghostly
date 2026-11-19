@@ -60,6 +60,8 @@ export const APP_CHECK_TIMINGS = {
   /** After the engine starts, so the chats come up first. */
   afterStartMs: 60_000,
   everyMs: 24 * 60 * 60 * 1000,
+  /** A check the network was off for, or whose read of the installed apps failed, is tried again this soon, not a day later. */
+  offlineRetryMs: 10 * 60 * 1000,
   /** A check at start is skipped when every app was checked this recently (a page reloaded several times). */
   freshMs: 60 * 60 * 1000,
 } as const;
@@ -377,6 +379,9 @@ function pooled<T, R>(items: readonly T[], limit: number, run: (item: T) => Prom
   return out;
 }
 
+/** A jsDelivr URL, which this client reads only at a full commit (`isAppFetchUrl`): its bytes never move on. */
+const isPinnedAppUrl = (u: string): boolean => new URL(u).hostname.toLowerCase() === "cdn.jsdelivr.net";
+
 /**
  * A listing's URLs this client reads, in order, a jsDelivr copy first: one this client reads names a full commit, so it
  * holds exactly the version the store reviewed, where a raw `HEAD` may have moved on to one it has not (WISP 1200 §
@@ -384,8 +389,7 @@ function pooled<T, R>(items: readonly T[], limit: number, run: (item: T) => Prom
  */
 function listingUrls(urls: readonly string[]): string[] {
   const readable = urls.filter(isAppFetchUrl);
-  const pinned = (u: string) => new URL(u).hostname.toLowerCase() === "cdn.jsdelivr.net";
-  return [...readable.filter(pinned), ...readable.filter((u) => !pinned(u))];
+  return [...readable.filter(isPinnedAppUrl), ...readable.filter((u) => !isPinnedAppUrl(u))];
 }
 
 /** A read that failed for a reason that may pass: offline, the host not reached or too slow, its own trouble (5xx, 429). */
@@ -872,12 +876,14 @@ export class Apps {
       this.timer = null;
       void (async () => {
         if (this.stopped) return;
-        if (this.host.online()) {
-          const apps = await this.installed();
-          const fresh = atStart && apps.length > 0 && apps.every((a) => this.checkedWithin(a.checkedAt, APP_CHECK_TIMINGS.freshMs));
-          // No app installed: no request, to a store or anywhere (WISP 1200 § Updates and rollback, "When").
-          if (apps.length && !fresh) await this.checkUpdates().catch(() => {});
-        }
+        // The network off: the check is tried again soon (as the one after start, if it was that one), not a day later.
+        if (!this.host.online()) return this.schedule(APP_CHECK_TIMINGS.offlineRetryMs, atStart);
+        // Storage that failed this once (a lost IndexedDB connection): tried again soon, so the checks don't stop for good.
+        const apps = await this.installed().catch(() => null);
+        if (!apps) { if (!this.stopped) this.schedule(APP_CHECK_TIMINGS.offlineRetryMs, atStart); return; }
+        const fresh = atStart && apps.length > 0 && apps.every((a) => this.checkedWithin(a.checkedAt, APP_CHECK_TIMINGS.freshMs));
+        // No app installed: no request, to a store or anywhere (WISP 1200 § Updates and rollback, "When").
+        if (apps.length && !fresh) await this.checkUpdates().catch(() => {});
         if (!this.stopped) this.schedule(APP_CHECK_TIMINGS.everyMs);
       })();
     }, ms);
@@ -956,12 +962,17 @@ export class Apps {
 
   /**
    * The bundle the build carries for a built-in app, checked as a fetched one is, and against its entry: the digest the
-   * list pins and the entry's reference. Anything else in that file is not this app, and nothing of it is kept.
+   * list pins and the entry's reference. Anything else in that file is not this app, and nothing of it is kept. A read
+   * that says why it failed (`AppFetchError`: offline, the host not reached, its status) says so as is, so the screen
+   * offers Try again: only an unexplained failure is a build that does not carry the app.
    */
   private async bundled(app: BuiltInApp): Promise<{ bundle: AppBundle; bytes: Uint8Array }> {
     if (!this.host.readBuiltIn) fail("not-carried", "This build does not carry this app");
     let bytes: Uint8Array;
-    try { bytes = await this.host.readBuiltIn(app); } catch { fail("not-carried", "This build does not carry this app"); }
+    try { bytes = await this.host.readBuiltIn(app); } catch (error) {
+      if (error instanceof AppFetchError) throw error;
+      fail("not-carried", "This build does not carry this app");
+    }
     if (!(bytes instanceof Uint8Array) || bytes.length > APP_BUNDLE_LIMITS.bundleBytes) fail("not-carried", "This build does not carry this app");
     const read = await readAppBundleAsync(bytes);
     if (!read.ok) refuseBundle(read);
@@ -1793,18 +1804,27 @@ export class Apps {
     // checked from that URL within `STAGED.ms` is taken as it is, and only its revocations are read again.
     // None read: a URL's passing trouble (its host down, a rate limit, too slow) is what is said, not a later URL's 404 or
     // refusal, so the screen offers Try again, which may read that URL.
+    const judge = (version: AppVersion) => {
+      if (!expect) return;
+      if (version.ref !== expect.ref) fail("other-app", "The URL holds another app");
+      if (expect.sequence !== undefined && version.sequence < expect.sequence) fail("rollback", "The URL holds an older version than the one named");
+      if (expect.sequence === version.sequence && expect.digest !== undefined && expect.digest !== version.digest) fail("equivocation", "The URL holds another version under the same number");
+      if (expect.exact && version.digest !== expect.digest) fail("unlisted", "The URL holds a version the store does not list");
+    };
     let last: unknown = null;
     for (const url of urls) {
       try {
         const kept = expect?.digest !== undefined ? this.staged.get(stagedKey(expect.digest, url, fromStore)) : undefined;
-        const { bundle, bytes } = kept && this.checkedWithin(kept.at, STAGED.ms) ? kept : await this.fetchBundle(url);
-        const version = versionOf(bundle.manifest, bundle.digest);
-        if (expect) {
-          if (version.ref !== expect.ref) fail("other-app", "The URL holds another app");
-          if (expect.sequence !== undefined && version.sequence < expect.sequence) fail("rollback", "The URL holds an older version than the one named");
-          if (expect.sequence === version.sequence && expect.digest !== undefined && expect.digest !== version.digest) fail("equivocation", "The URL holds another version under the same number");
-          if (expect.exact && version.digest !== expect.digest) fail("unlisted", "The URL holds a version the store does not list");
+        const fresh = kept && this.checkedWithin(kept.at, STAGED.ms);
+        // A listing's URL that may have moved on (not at a commit: tried once the pinned ones failed) is peeked first, as
+        // the update check does: a raw HEAD holding a newer version is not downloaded whole (up to 16 MiB) only to be
+        // refused, at each Try again while the pinned copy's host has trouble.
+        if (!fresh && expect?.exact && !isPinnedAppUrl(url)) {
+          const peek = await this.peekAt(url);
+          if (peek) judge(peek);
         }
+        const { bundle, bytes } = fresh ? kept : await this.fetchBundle(url);
+        judge(versionOf(bundle.manifest, bundle.digest));
         return this.stage(bundle, bytes, url, fromStore);
       } catch (error) { if (!passing(last) || passing(error)) last = error; }
     }

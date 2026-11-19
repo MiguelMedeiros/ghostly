@@ -392,6 +392,15 @@ function runExec(command: string, event: GhostlyEvent, toStderr: boolean, profil
 const RETRY_MAX_MS = 60_000;
 
 /**
+ * The TLS error a failed post met, as Node names it (`DEPTH_ZERO_SELF_SIGNED_CERT`, `ERR_SSL_WRONG_VERSION_NUMBER` for
+ * https:// to a plain http server), or null for any other failure.
+ */
+function tlsFailure(error: unknown): string | null {
+  const code = (error as { cause?: { code?: unknown } } | null)?.cause?.code;
+  return typeof code === "string" && /^ERR_(SSL|TLS)_|CERT|SELF_SIGNED|UNABLE_TO_/.test(code) ? code : null;
+}
+
+/**
  * Posts one event; resolves true once the bridge took it, or the status it refused it with (a 4xx or a redirect, posted
  * once: before, three times with backoff, three refusals in the bridge's log for an event stderr said was not tried again).
  * A bridge that is not there (refused connection, timeout, 5xx, 408, 429) has not handled the event: it is tried again,
@@ -401,7 +410,7 @@ const RETRY_MAX_MS = 60_000;
 async function post(url: URL, event: GhostlyEvent, retryMs: number): Promise<true | number> {
   let wait = retryMs, holding = false;
   for (let attempt = 0; ; attempt++) {
-    let down = true, status = 0;
+    let down = true, status = 0, tls: string | null = null;
     try {
       // A redirect is not followed: it would post the event to wherever it points, off this machine too. stderr names the
       // bridge by its origin only: its token is in the path or query (no user:password@, `checkWebhook`).
@@ -413,11 +422,18 @@ async function post(url: URL, event: GhostlyEvent, retryMs: number): Promise<tru
       }
       status = response.status;
       down = status >= 500 || status === 408 || status === 429;
-    } catch { /* not there: tried again */ }
+    } catch (error) {
+      // Not there: tried again. A TLS failure answers each try and fails the same way; it is held too (the cursor stays
+      // before the event, so a listen restarted with the way out below delivers it), but said for what it is. Before, it
+      // was "not answering", and waiting changed nothing.
+      tls = tlsFailure(error);
+    }
     if (!down) return status;
     if (down && attempt >= 2 && !holding) {
       holding = true;
-      process.stderr.write(`ghostly: the webhook at ${url.origin} is not answering: holding event ${event.seq} (${event.type}) until it does\n`);
+      process.stderr.write(tls
+        ? `ghostly: the webhook at ${url.origin} failed TLS (${tls}): holding event ${event.seq} (${event.type}) until it passes; on this machine give it as http://, or restart listen with NODE_EXTRA_CA_CERTS set to the file of the certificate that signed the bridge's\n`
+        : `ghostly: the webhook at ${url.origin} is not answering: holding event ${event.seq} (${event.type}) until it does\n`);
     }
     await new Promise((resolve) => setTimeout(resolve, wait));
     wait = Math.min(wait * 2, RETRY_MAX_MS);
@@ -434,8 +450,8 @@ export interface EventHandler {
   /**
    * Takes no more events and resolves once no hook runs: one at work gets `EXEC_STOP_MS` to end on its own (the cursor
    * then moves past its event), else it and what it started are sent SIGTERM, then SIGKILL, and the cursor stays before
-   * its event, handed again at the next start. Before, a stop left the hook running on its own, and the restarted listen
-   * ran that event's hook a second time alongside it.
+   * its event, handed again at the next start (without a cursor, stderr says how to get it: `--since`). Before, a stop
+   * left the hook running on its own, and the restarted listen ran that event's hook a second time alongside it.
    */
   stop(): Promise<void>;
 }
@@ -535,7 +551,12 @@ export function eventHandler(options: ListenOptions): EventHandler {
       return;
     }
     hook.stopped = true;
-    process.stderr.write(`ghostly: stopped while --exec ran on event ${hook.event.seq} (${hook.event.type}): ended it, and the event is handed again at the next start\n`);
+    // Only a cursor keeps where it stopped: without one the next start begins at the journal's end, and the event is
+    // reached again only from the place before it.
+    const { seq, type } = hook.event;
+    process.stderr.write(options.cursor
+      ? `ghostly: stopped while --exec ran on event ${seq} (${type}): ended it, and the event is handed again at the next start\n`
+      : `ghostly: stopped while --exec ran on event ${seq} (${type}): ended it; with no --cursor it is not handed again (start with --since ${seq - 1} to run it again)\n`);
     hook.signal("SIGTERM");
     if (!(await within(hook.ended, stopMs))) { hook.signal("SIGKILL"); await hook.ended; }
   };
