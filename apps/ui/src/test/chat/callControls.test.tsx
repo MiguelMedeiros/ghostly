@@ -526,13 +526,11 @@ describe("a call ringing while you are on another (End and answer)", () => {
     screen.getByRole("button", { name: "End and answer" }).focus();
     rerender(<IncomingCallNotification {...props} hasVideo />);
     expect(ring).toHaveFocus();
-    // The contact calls again, as audio, while the focus is on Accept video call: that button goes.
-    screen.getByRole("button", { name: "Accept video call" }).focus();
-    rerender(<IncomingCallNotification {...props} hasVideo={false} />);
-    expect(ring).toHaveFocus();
     await user.keyboard("{Enter}");
     expect(props.onAcceptAudio).not.toHaveBeenCalled();
+    expect(props.onAcceptVideo).not.toHaveBeenCalled();
     expect(props.onReject).not.toHaveBeenCalled();
+    // Accept video going with the call's kind is the kind's own: the focus goes to Accept audio (incomingCallKindChange).
   });
 
   it("is said in every language", async () => {

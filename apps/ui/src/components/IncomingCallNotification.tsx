@@ -64,9 +64,6 @@ export function IncomingCallNotification({
   // Back (Android's back gesture) answers nothing either: it would move the page hidden under the ringing, or leave the
   // app. The call takes an entry again.
   useBackCloses(() => {});
-  // Its choices change while it rings (the call that was on ends: End and answer becomes Accept; the contact calls
-  // again as audio: Accept video goes): the focus on the one that went stays in the box, not on the page under it.
-  useFocusKept(box);
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null;
     box.current?.focus({ preventScroll: true });
@@ -92,6 +89,10 @@ export function IncomingCallNotification({
     if (!box.current?.contains(document.activeElement)) (acceptAudio.current ?? box.current)?.focus({ preventScroll: true });
     else if (hasVideo && endAndAnswer.current && document.activeElement === endAndAnswer.current) box.current.focus({ preventScroll: true });
   }, [hasVideo]);
+  // Its choices change while it rings (the call that was on ends: End and answer becomes Accept): the focus on the one
+  // that went stays in the box, not on the page under it. After the kind's effect above (effects run in order), which
+  // sends the focus of an Accept video gone with the kind to Accept audio first.
+  useFocusKept(box);
   return (
     // A plain dimmed overlay: a backdrop blur is drawn again with every frame anything under it moves.
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 max-md:bg-chat-bg animate-fade-in">
