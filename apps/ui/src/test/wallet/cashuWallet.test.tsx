@@ -93,6 +93,19 @@ describe("the Cashu card keeps the keyboard's place while it works", () => {
     expect(calls).toBe(1);
   });
 
+  it("Send's Pay <amount> wraps its label, like Create invoice, instead of leaving the card (a long amount, 200% text size), busy too", async () => {
+    const paid = later<never>();
+    const { user } = show({ quoteInvoice: () => paid.promise }, "mainnet");
+    await user.click(screen.getByRole("tab", { name: "Send" }));
+    await user.click(screen.getByTestId("wallet-pay-input"));
+    await user.paste(liveMainnetInvoice(21_000_000_000));
+    const pay = screen.getByRole("button", { name: /^Pay 21,000,000,000 sats$/ });
+    expect(pay.className).toContain("!whitespace-normal");
+    await user.click(pay);
+    expect(pay).toHaveAttribute("aria-busy", "true");
+    expect(pay.className).toContain("!whitespace-normal");
+  });
+
   it("Add: busy where it was pressed, then the emptied address field takes the keys", async () => {
     const added = later<void>();
     const { user } = show({ addMint: () => added.promise });
@@ -525,6 +538,20 @@ describe("in Arabic, someone else's memo in the wallet keeps its own direction",
     await user.click(screen.getByTestId("lnurl-invoice"));
     await screen.findByTestId("lnurl-review");
     expect(screen.getByText(MEMO)).toHaveAttribute("dir", "auto");
+  });
+
+  it("a received ecash's memo and its mint's name in History, and the mint's name in Mints", async () => {
+    // Joined bare, an Arabic mint name, " · " and an Arabic memo made one right-to-left run: the memo was drawn first.
+    const TEST_MINT = TEST_MINTS[0];
+    const NAME = "مينت الاختبار (2)";
+    const ecash = { id: "tx-ecash", kind: "ecash-in" as const, amount: 100, fee: 0, timestamp: 1_791_000_000_000, mint: TEST_MINT, note: MEMO };
+    const state = networkState(walletView({ mints: [{ ...mint(TEST_MINT, 100), name: NAME }], balance: 100, history: [ecash] }) as WalletState, "testnet");
+    const { user } = renderApp(<CashuWallet wallet={servicesPlatform!.wallet} state={state} rail="cashu" onOpenCashu={() => {}} />, { language: "ar" });
+    expect(screen.getByText(NAME).tagName).toBe("BDI");
+    expect(screen.getByTestId("mint-row")).toContainElement(screen.getByText(NAME));
+    await user.click(screen.getByRole("tab", { name: "السجل" }));
+    const row = screen.getByTestId("wallet-tx");
+    for (const text of [NAME, MEMO]) expect(within(row).getByText(text).tagName).toBe("BDI");
   });
 });
 

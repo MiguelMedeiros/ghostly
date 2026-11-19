@@ -68,6 +68,7 @@ import { COMMUNITY_LIMITS, GROUP_FILE_LIMITS, GROUP_LIMITS, isPlayableVideoType,
 import { servicesPlatform } from "../lib/platform";
 import { useEngineReconnecting, useEngineValue } from "../lib/engineState";
 import { formatFileSize } from "../lib/format";
+import { publicKeyLabel } from "../lib/publicKeyLabel";
 import { videoMetaOf } from "../lib/videoPoster";
 import { heldOriginal, messageSnippet, quoteFor, replyIndexer, replyTarget, type NameOf, type QuoteView } from "../lib/replies";
 import { useKeptEdit } from "../lib/keptEdits";
@@ -147,7 +148,7 @@ const replyNames = (group: GroupView, you: string, t: Translate): NameOf => (fro
 
 /** Whom "@" offers in the composer: every other member, by name and the end of their key. */
 function mentionCandidates(group: GroupView, t: Translate): MentionCandidate[] {
-  return group.members.filter(m => !m.me).map(m => ({ key: m.key, name: memberName(m, t), tag: `…${m.key.slice(-6)}` }));
+  return group.members.filter(m => !m.me).map(m => ({ key: m.key, name: memberName(m, t), tag: `…${m.key.slice(-6)}`, ...(m.nick ? {} : { label: publicKeyLabel(m.key) }) }));
 }
 
 /** The note that captions a payment bubble (`groupPayCaption`, shared with the CLI's group history). */
@@ -703,8 +704,14 @@ export function GroupChat() {
   // Mine, taken off every member's device: a refusal (limited mode) rejects, and the bubble says it under the message.
   const removeRow = useHandler((m: StoredMessage) => engine.call("removeMessage", { linkId: `group:${groupId}`, messageId: m.id })
     .then(result => { if (result.error) throw new Error(result.error); forgetSentOriginal(groupChat(groupId), m.id); }));
+  // A reaction or a pin the group refuses ("You are not in this group", a community's admin-only pin) shows nothing
+  // on the row: why is said in the group's notice.
+  const sayRefusal = (call: Promise<{ error?: string | null }>) => {
+    setError(null);
+    void call.then(result => { if (result.error) throw new Error(result.error); }).catch(e => setError(problemText(e, t)));
+  };
   // Reactions (WISP 902 § Reactions): one per member per message, named by the roster.
-  const react = useHandler((messageId: string, emoji: string) => { void engine.call("react", { linkId: `group:${groupId}`, messageId, emoji }).catch(() => {}); });
+  const react = useHandler((messageId: string, emoji: string) => sayRefusal(engine.call("react", { linkId: `group:${groupId}`, messageId, emoji })));
   // One function while the roster's names stay (a row draws the names it answers): not one per draw of the page.
   const reactionName = useMemo(() => {
     const nameOf = group && replyNames(group, t("chat.reply.you"), t);
@@ -713,7 +720,7 @@ export function GroupChat() {
   }, [namesKey, t]);
   // The pinned message (WISP 400 § Pinned message): any member of a private group pins, only the admin of a community.
   const pinMessage = useHandler((messageId: string | undefined, remove: boolean = false) => {
-    void engine.call("pinMessage", { linkId: `group:${groupId}`, messageId, remove }).catch(() => {});
+    sayRefusal(engine.call("pinMessage", { linkId: `group:${groupId}`, messageId, remove }));
   });
   const pinRow = useHandler((m: StoredMessage) => pinMessage(m.id, replyTarget(rowNow(m), true) === group?.pin?.id));
   const saveRow = useHandler((messageId: string) => void setSaved(`group:${groupId}`, messageId, savedHere.has(messageId)).catch(() => {}));
@@ -1090,8 +1097,14 @@ export function GroupChat() {
             ? (group.invitation.contact ? t("group.forget.invitationKept", { contact: isolate(group.invitation.contact) }) : t("group.forget.invitationKeptUnknown"))
             : (group.invitation.contact ? t("group.forget.invitation", { contact: isolate(group.invitation.contact) }) : t("group.forget.invitationUnknown")))
           : t("group.forget.kept")}
-        // A group I am no longer in (removed, left, an invitation): nothing to leave, only its history here goes.
-        onConfirm={() => { setConfirmForget(false); void act(async () => { await engine.call("forgetGroup", { groupId }); goneHere(); nav.home(); }); }} />}
+        // A group I am no longer in (removed, left, an invitation): nothing to leave, only its history here goes. The
+        // dialog gives the focus back to ⋮, which goes with the page: it goes to the list's next row, or New, as
+        // Cancel joining's does; it was left on the page's body.
+        onConfirm={() => {
+          const next = rowAfter(groupId);
+          setConfirmForget(false);
+          void act(async () => { await engine.call("forgetGroup", { groupId }); goneHere(); nav.home(); focusPastRow(next, optionsRef.current); });
+        }} />}
     </div>
     </MemberColorsProvider>
     </NowPlayingChat.Provider>

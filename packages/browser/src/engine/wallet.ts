@@ -17,7 +17,7 @@ import type {
 import { STORES, newestWalletTx, openDb, store, transact, wrap, committed } from "../shared/idb";
 import { openRow, openRows, proofKey, RowSeals, sealRow, sealedStore } from "./sealedRows";
 import { hasDataKey } from "./dataKey";
-import { LIMITS, PaymentPreflightError, decodeBolt11, engineError, engineText, stripHidden, type PaymentReview, type WalletNetwork } from "@ghostly/core";
+import { LIMITS, PaymentPreflightError, decodeBolt11, ecashUnitError, engineError, engineText, stripHidden, type PaymentReview, type WalletNetwork } from "@ghostly/core";
 import { CASHU_REQUEST_TIMEOUT_MS, MELT_REQUEST_TIMEOUT_MS, SWAP_SETTLED_MS, keysetRefused, mintFailed, mintRefused } from "./paymentAdapters/cashu";
 import { AskBackoff } from "./askBackoff";
 import { INVOICE_PACE, nextInvoiceAsk } from "./invoicePace";
@@ -1318,8 +1318,8 @@ export class CashuWallet {
     } catch {
       throw new Error("That is not a valid ecash token");
     }
-    // A token of another unit is still a token: said as such.
-    if (unit !== UNIT) throw engineError("ecashOtherUnit", { unit });
+    // A token of another unit is still a token: said as such (its unit named only when it looks like one).
+    if (unit !== UNIT) throw ecashUnitError(unit);
     // A mint is a custodian and only the user picks those. The test mint holds nothing of value.
     if (addTestMint && !this.getKnownMints().includes(mint) && isTestMint(mint)) await this.events.onTestMintNeeded(mint);
     // The words name the host only (a contact reads them in a payment's result); `mint` is the whole URL, which a host
@@ -2059,7 +2059,7 @@ export class CashuWallet {
         else stores[STORES.proofs].put({ ...p, reserved: false } satisfies StoredProof);
       }
       stores[STORES.melts].delete(melt.quote);
-      if (lost > 0) stores[STORES.walletTx].put(walletTx(melt.mint, "fee", 0, lost, melt.note ? `Payment failed: ${melt.note}` : "A Lightning payment failed"));
+      if (lost > 0) stores[STORES.walletTx].put({ ...walletTx(melt.mint, "fee", 0, lost, melt.note ? `Payment failed: ${melt.note}` : "A Lightning payment failed"), quote: melt.quote });
     });
     if (lost > 0) this.failedFees.set(melt.quote, lost);
     if (spent.size > 0) { this.spentAway.add(melt.quote); void this.recheck(melt.mint).catch(() => {}); }
@@ -2076,7 +2076,8 @@ export class CashuWallet {
   /** The invoice is paid: the reserved proofs are spent, the change is ours, and the payment goes in the history. */
   private async finishMelt(melt: PendingMelt, change: Proof[]): Promise<void> {
     // The reserve is an upper bound; the mint returns what the route did not cost as change.
-    const tx = walletTx(melt.mint, "lightning-out", melt.amount, melt.outlay - sats(change) - melt.amount, melt.note);
+    // Its melt quote: a Pay left pending at the mint ends on the screen that waits for it once this row is there.
+    const tx: WalletTx = { ...walletTx(melt.mint, "lightning-out", melt.amount, melt.outlay - sats(change) - melt.amount, melt.note), quote: melt.quote };
     await this.sealedTransact([STORES.proofs, STORES.melts, STORES.walletTx], { [STORES.proofs]: change }, (stores) => {
       for (const secret of melt.secrets) stores[STORES.proofs].delete(secret);
       // From a restored copy, the profile it came from may have settled this payment and spent its change since.

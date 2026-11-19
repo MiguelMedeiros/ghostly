@@ -12,7 +12,9 @@ import { profilePaths } from "../src/profiles";
 // covers: headless.daemon
 
 /** Sockets outside the profile's folder (a path too long for one): in a folder of this user's alone, or not at all. */
-const root = mkdtempSync(join(tmpdir(), "gh-priv-"));
+// Under a short base off Windows: a long temp folder (macOS's `/var/folders/…/T/`) would push the runtime socket over
+// the 100-byte limit, and `runtimePath` would fall back to `/tmp` instead of the folder each test means.
+const root = mkdtempSync(process.platform === "win32" ? join(tmpdir(), "gh-priv-") : "/tmp/gh-priv-");
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 describe.skipIf(process.platform === "win32")("sockets outside the profile", () => {
@@ -85,6 +87,19 @@ describe.skipIf(process.platform === "win32")("sockets outside the profile", () 
     expect(refusal?.code).toBe("refused");
     expect(refusal?.message).toMatch(/not a folder of this user's alone: the daemon will not put its socket there/);
     expect(refusal?.message).toMatch(new RegExp(`rm -r ${open}.*chmod 700 ${open}`));
+  });
+
+  it("a folder another account made is not met with `rm -r` or `chmod`, which /tmp's sticky bit refuses: XDG_RUNTIME_DIR or a shorter --home", () => {
+    const theirs = join(root, "theirs");
+    mkdirSync(theirs, { mode: 0o755 });
+    vi.spyOn(process, "getuid").mockReturnValue(process.getuid!() + 1);
+    try {
+      const refusal = (() => { try { privateFolder(theirs, "the daemon will not put its socket there"); } catch (error) { return asCliError(error); } })();
+      expect(refusal?.code).toBe("refused");
+      expect(refusal?.message).toMatch(/another account made it/);
+      expect(refusal?.message).toMatch(/XDG_RUNTIME_DIR.*--home/);
+      expect(refusal?.message).not.toMatch(/rm -r|chmod/);
+    } finally { vi.restoreAllMocks(); }
   });
 
   it("a client connects only to a socket of this user's", async () => {
