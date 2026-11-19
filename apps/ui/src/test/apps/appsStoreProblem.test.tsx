@@ -139,7 +139,8 @@ describe("a store's last read that failed", () => {
     expect(screen.getByTestId("toast")).not.toHaveAttribute("data-tone", "success");
   });
 
-  // Removed in another tab: the engine has no such store. Said so, and the list is read again, so its block goes.
+  // Removed in another tab: the engine has no such store. Said so, and the list is read again, so its block goes, and
+  // the Refresh that had the focus with it: the focus goes to Add, as after a Remove here, not to the page.
   it("says a Refresh of a store removed meanwhile that it is no longer added, and its block goes", async () => {
     let held = [store({})];
     fakeEngine.on("appStoreList", () => held).on("appStoreRefresh", () => { throw new Error("no-store: No such store"); });
@@ -149,6 +150,20 @@ describe("a store's last read that failed", () => {
     await userEvent.click(refresh);
     expect(await screen.findByTestId("toast-text")).toHaveTextContent("This store is no longer added.");
     await waitFor(() => expect(screen.queryByTestId("app-store")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId("apps-add")));
+  });
+
+  it("sends the focus to Add when a Refresh finds its store removed meanwhile and another store is left", async () => {
+    const other = store({ key: "other", url: "https://other.example/store.json", name: "Other" });
+    let held = [store({}), other];
+    fakeEngine.on("appStoreList", () => held).on("appStoreRefresh", () => { throw new Error("no-store: No such store"); });
+    renderApp(<Apps />, { route: "/apps" });
+    await waitFor(() => expect(screen.getAllByTestId("app-store")).toHaveLength(2));
+    const refresh = within(screen.getAllByTestId("app-store")[0]).getByTestId("app-store-refresh");
+    held = [other];
+    await userEvent.click(refresh);
+    await waitFor(() => expect(screen.getAllByTestId("app-store")).toHaveLength(1));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId("apps-add")));
   });
 
   // Its host still serves a list past its date: the read works, and the store is not up to date.

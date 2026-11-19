@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useOutsideDismiss, useTabTrap } from "../hooks/useDismiss";
 import { safeAreaInsets } from "../hooks/useFloatingBox";
@@ -12,12 +12,17 @@ const MARGIN = 8;
 const GAP = 4;
 /** A field the on-screen keyboard types into. */
 const TYPED = "input:not([type=checkbox], [type=radio], [type=range], [type=button], [type=submit], [type=file]), textarea, select, [contenteditable]:not([contenteditable=false])";
+/**
+ * Whether the rows are in a phone's sheet. There a row's hint wraps: cut, the rest of it showed only in the row's
+ * `title`, which a touch screen never shows (the French New menu at a larger text size).
+ */
+const InSheet = createContext(false);
 
 /**
  * A dropdown of actions. Every row is one line in every language: the menu is as wide as its longest row
  * (between a floor and the window), and only a row wider than that is cut, with the full text on hover.
  * On a wide screen it drops from its opener and moves over, or up, to stay in the window; on a phone it is a
- * sheet from the bottom with full-width rows. Outside clicks and Escape close it; the arrow keys, Home and End
+ * sheet from the bottom with full-width rows, where a row's hint wraps. Outside clicks and Escape close it; the arrow keys, Home and End
  * move between the rows that can be used.
  */
 export function Menu(props: MenuProps) {
@@ -40,6 +45,8 @@ type MenuProps = {
   focusFirst?: boolean;
   /** What a screen reader calls the menu. */
   label?: string;
+  /** With `label`: the id of a note inside the menu that says what its rows do, said with the group as the focus enters it. */
+  describedBy?: string;
   /**
    * On a wide screen too, drawn over the whole page (placed by its opener, and following it on scroll) rather than
    * inside the opener's wrapper: for an opener in a scrolling list or a row, which would cut the popover off or
@@ -70,7 +77,7 @@ type MenuProps = {
   children: ReactNode;
 };
 
-function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", prefer: wanted = "down", focusFirst, label, portal, within, at, stack = "z-50", host, className = "", children }: MenuProps) {
+function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", prefer: wanted = "down", focusFirst, label, describedBy, portal, within, at, stack = "z-50", host, className = "", children }: MenuProps) {
   const pointed = !!at && !!portal;
   const align = pointed ? "start" : edge, prefer = pointed ? "down" : wanted;
   const phone = useIsMobile();
@@ -200,22 +207,22 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
 
   if (phone) return createPortal(<>
     <div aria-hidden="true" data-testid="menu-backdrop" className={`fixed inset-0 ${stack} bg-black/40 animate-fade-in`} />
-    <div ref={ref} id={id} data-testid={testId} data-menu="sheet" role={label ? "group" : undefined} aria-label={label} onKeyDown={keys}
+    <div ref={ref} id={id} data-testid={testId} data-menu="sheet" role={label ? "group" : undefined} aria-label={label} aria-describedby={describedBy} onKeyDown={keys}
       className={`menu-sheet fixed inset-x-0 bottom-0 ${stack} max-h-[80vh] overflow-y-auto rounded-t-2xl border-t border-border bg-surface-alt px-1 pt-2 pb-safe shadow-2xl animate-fade-in ${className}`}>
       <div aria-hidden="true" className="mx-auto mb-2 h-1 w-9 rounded-full bg-border-bright" />
-      {children}
+      <InSheet.Provider value>{children}</InSheet.Provider>
     </div>
   </>, host ?? document.body);
 
   if (portal) return createPortal(
-    <div ref={ref} id={id} data-testid={testId} data-menu="popover" role={label ? "group" : undefined} aria-label={label} onKeyDown={keys}
+    <div ref={ref} id={id} data-testid={testId} data-menu="popover" role={label ? "group" : undefined} aria-label={label} aria-describedby={describedBy} onKeyDown={keys}
       style={{ left: fixed?.left ?? 0, top: fixed?.top ?? 0, maxHeight: fixed?.room }}
       className={`fixed ${stack} w-max min-w-44 max-w-[min(20rem,calc(100vw-1rem))] ${fixed?.room === undefined ? "" : "overflow-y-auto overscroll-contain"} rounded-lg border border-border bg-surface-alt py-1 shadow-lg animate-fade-in ${className}`}>
       {children}
     </div>, host ?? document.body);
 
   return (
-    <div ref={ref} id={id} data-testid={testId} data-menu="popover" role={label ? "group" : undefined} aria-label={label} onKeyDown={keys}
+    <div ref={ref} id={id} data-testid={testId} data-menu="popover" role={label ? "group" : undefined} aria-label={label} aria-describedby={describedBy} onKeyDown={keys}
       style={{ translate: place.shift ? `${place.shift}px 0` : undefined, maxHeight: place.room } as CSSProperties}
       className={`absolute ${align === "start" ? "start-0" : "end-0"} z-50 w-max min-w-44 max-w-[min(20rem,calc(100vw-1rem))] ${place.room === undefined ? "" : "overflow-y-auto overscroll-contain"} rounded-lg border border-border bg-surface-alt py-1 shadow-lg animate-fade-in ${place.up ? "bottom-full mb-1" : "top-full mt-1"} ${className}`}>
       {children}
@@ -253,7 +260,7 @@ function titleIfCut(row: HTMLElement) {
 export function MenuItem({ icon, children, hint, onClick, danger, disabled, busy, title, testId, className = "", data, checked, radio }: {
   icon?: ReactNode;
   children: ReactNode;
-  /** A second, quieter line under the label; one line too. */
+  /** A second, quieter line under the label; one line too in a popover, wrapped in a phone's sheet. */
   hint?: ReactNode;
   onClick: () => void;
   danger?: boolean;
@@ -284,6 +291,7 @@ export function MenuItem({ icon, children, hint, onClick, danger, disabled, busy
    */
   radio?: boolean;
 }) {
+  const sheet = useContext(InSheet);
   const fitTitle = (row: HTMLElement) => { if (!title) titleIfCut(row); };
   return (
     <button type="button" data-testid={testId} data-menu-item onClick={() => { if (!busy) onClick(); }} disabled={disabled} title={title} {...data} {...working(!!busy)}
@@ -292,7 +300,7 @@ export function MenuItem({ icon, children, hint, onClick, danger, disabled, busy
       className={`flex w-full min-w-0 items-center whitespace-nowrap px-3 py-2 text-start text-sm transition-colors enabled:hover:bg-surface-hover focus-visible:bg-surface-hover focus-visible:outline-none disabled:cursor-not-allowed data-[loading]:cursor-progress data-[loading]:opacity-80 max-md:min-h-12 max-md:rounded-lg ${hint ? "gap-3" : "gap-2"} ${danger ? "text-danger-ink" : hint ? "text-text-primary" : "text-text-secondary hover:text-text-primary"} ${className}`}>
       {icon && <span aria-hidden="true" data-menu-icon className={`flex shrink-0 ${hint ? "text-accent" : ""}`}>{icon}</span>}
       {hint
-        ? <span className="min-w-0"><span data-menu-text className="block truncate">{children}</span><span data-menu-text className="block truncate text-xs text-text-muted">{hint}</span></span>
+        ? <span className="min-w-0"><span data-menu-text className="block truncate">{children}</span><span data-menu-text className={`block ${sheet ? "whitespace-normal break-words" : "truncate"} text-xs text-text-muted`}>{hint}</span></span>
         : <span data-menu-text className="min-w-0 truncate">{children}</span>}
     </button>
   );

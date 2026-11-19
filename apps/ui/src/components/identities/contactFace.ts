@@ -4,7 +4,7 @@ import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/typ
 import { engine, linkOfPeer } from "@ghostly/browser/platform/engine";
 import { hasPublicProfile } from "@ghostly/browser/profiles/readers";
 import { badgeState, isGood } from "./contactBadges";
-import { providerLabel, useEngineValue } from "../../lib/identities";
+import { useEngineValue } from "../../lib/identities";
 import { keyedStorage } from "../../lib/keyedStorage";
 import { getPrefix } from "../../lib/storage";
 
@@ -90,8 +90,6 @@ export interface ContactFace {
   id: string;
   provider: string;
   subject: string;
-  /** "Pubky", "Nostr": whose profile it is. */
-  providerName: string;
   name?: string;
   /** A sanitized data URL, never a remote address. */
   photo?: string;
@@ -104,7 +102,7 @@ const faceOf = (r: ReceivedIdentityView, now: number): ContactFace | undefined =
   const name = cleanFaceName(profile?.name);
   const photo = profile?.avatar?.startsWith("data:image/") ? profile.avatar : undefined;
   if (!name && !photo) return undefined;
-  return { id: r.id, provider: r.provider, subject: r.subject, providerName: providerLabel(r.provider), ...(name ? { name } : {}), ...(photo ? { photo } : {}) };
+  return { id: r.id, provider: r.provider, subject: r.subject, ...(name ? { name } : {}), ...(photo ? { photo } : {}) };
 };
 
 /** Every identity a contact can be shown as, right now. */

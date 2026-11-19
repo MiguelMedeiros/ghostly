@@ -384,6 +384,19 @@ body {
   padding-right: env(safe-area-inset-right);
 }
 
+/* Locked (components/LockScreen.tsx): a print of the page (Ctrl+P, Save as PDF) is the lock screen only. On screen the
+   app kept under it is out of sight; on paper the whole document is laid out, its text with it. Hidden, not removed:
+   `!important` over an element that makes itself `visible`. */
+@media print {
+  html[data-locked] body,
+  html[data-locked] body :not([data-lock-screen], [data-lock-screen] *) {
+    visibility: hidden !important;
+  }
+  html[data-locked] [data-lock-screen] {
+    visibility: visible !important;
+  }
+}
+
 /* An app opened from the iPhone home screen (iOS 26): with nothing in the page's flow (the body is fixed on
    phones), WebKit sizes the viewport as the screen less the status bar, and draws nothing in a band as tall as
    the status bar at the bottom, under the tab bar and the composer. A document as tall as the screen gets it all.
@@ -1501,7 +1514,7 @@ html .toast-place.toast-place-page[data-at="top"] {
  * Motion that rests (lib/windowAway.ts). The loops below say something is under way; while the window is away
  * (hidden, or not the focused one: behind others, on another workspace) nobody is looking, so they hold still and go
  * on when it is back. Only loops are listed: a finite animation (a bubble coming in) must finish, or it would leave
- * its element half shown. A new loop goes here too (test/idleMotion.test.ts checks the stylesheets).
+ * its element half shown. A new loop goes here too (test/app/idleMotion.test.tsx checks the stylesheets).
  */
 :root[data-away] :is(.animate-spin, .animate-pulse, .typing-dots > span, .profile-switch-badge,
   .voice-bar-dot, .voice-slide-arrow, .new-wallet-spinner, .pi-packet),
