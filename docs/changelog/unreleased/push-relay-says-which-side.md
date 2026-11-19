@@ -1,4 +1,0 @@
----
-section: Fixed / Network
----
-- Settings, Network now says which side a push relay's failed wake-up is on. A relay that answers but cannot reach the push service (HTTP 502, 503 or 504 with its own words, such as "The push service did not answer") is said to work but fail on its own side, with "ask whoever runs it", instead of "it did not answer as a push relay". A 403 (`Origin not allowed`) names the next step: ask whoever runs the relay to add this app's address to its allowed origins (`GHOSTLY_RELAY_ORIGINS`). A push-relay address that answers without CORS (the HyperDHT relay's address pasted in that field, a proxy's error page while the relay is down, any other site) is now reported too, where before nothing was shown and every wake-up through it failed silently. That one is said only when something answers at the address, so being offline still shows nothing.

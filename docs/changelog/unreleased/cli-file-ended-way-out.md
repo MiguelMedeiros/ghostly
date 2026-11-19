@@ -1,4 +1,0 @@
----
-section: Fixed / CLI
----
-- A file transfer that ended (cancelled or declined, by either side) is now refused by `file resend`, `file accept`, `file pause` and the others, and by `file save`, with the way out: send it again with `ghostly file send <chat> <path>`, or ask the contact to send it again. These refusals and `file wait` now carry `details.reason` (`cancelled`, `declined`, `failed`) and `details.by` (`me`, `contact`). Before, they said only "It ended: …", and a script could not tell "the contact said no" from "I already did it" without reading the English. A second `file cancel` (or `file decline`) of a file this side already ended now answers as the first did instead of failing. A file too large for a group is refused with its name, its size and the cap in MiB (send it in a 1:1 chat) instead of "at most 104857600 bytes".
