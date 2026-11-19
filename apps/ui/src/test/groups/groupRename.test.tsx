@@ -216,7 +216,7 @@ describe("renaming a group in the app", () => {
     const dialog = screen.getByTestId("group-members-dialog");
     expect(screen.getByTestId("group-members-name")).toHaveTextContent("A group");
     expect(dialog).toHaveAccessibleName("A group");
-    expect(screen.getByTestId("group-members-avatar-open")).toHaveAccessibleName("View photo of A group");
+    expect(screen.getByTestId("group-members-avatar-open")).toHaveAccessibleName("View photo of \u2068A group\u2069");
     await user.click(screen.getByTestId("group-rename"));
     expect(screen.getByTestId("group-rename-input")).toHaveValue("");
     expect(dialog).toHaveAccessibleName("A group");
