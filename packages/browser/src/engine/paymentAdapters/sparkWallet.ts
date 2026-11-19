@@ -3,8 +3,8 @@ import { awayFrom, refuseAway, requireTurn } from "./away";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { SPARK_NETWORKS, SPARK_PROVIDER, type PaymentTarget, type SparkNetwork, type WalletNetwork } from "@ghostly/core";
 import { store, STORES, transact, wrap } from "../../shared/idb";
-import type { WalletMode } from "../../shared/mints";
 import { redact } from "./providers/types";
+import { SPARK_MAINNET_NEEDS_KEY, sparkMode, sparkNetworkFor } from "./walletModes";
 import { ModeChanged, ModeGate, WrongNetworkError, networkLabel } from "./modeGate";
 import { walletKey } from "./walletNetworks";
 import { viewNews } from "./viewNews";
@@ -32,9 +32,7 @@ export interface SparkWalletView {
 interface StoredSpark { network: SparkNetwork; seed: EncryptedSeed; deviceKey: string; apiKey?: EncryptedSeed; createdAt: number }
 export interface SparkCreate { network: SparkNetwork; mnemonic?: string; apiKey?: string }
 
-export const SPARK_MAINNET_NEEDS_KEY = "Spark on Mainnet needs a Breez API key (free, from Breez). Mainnet moves real bitcoin.";
-export const sparkMode = (network: SparkNetwork): WalletMode => network === "bitcoin" ? "mainnet" : "testnet";
-export const sparkNetworkFor = (network: WalletNetwork): SparkNetwork => network === "mainnet" ? "bitcoin" : "regtest";
+export { SPARK_MAINNET_NEEDS_KEY, sparkMode, sparkNetworkFor };
 /** How often the page's balance and history are read while the wallet is open. */
 export const sparkTiming = { pollMs: 10_000, retryMs: 30_000 };
 

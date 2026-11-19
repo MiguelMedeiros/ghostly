@@ -701,13 +701,15 @@ export class HandoffGiver {
   }
 
   /**
-   * A turn read on this standby found the record of `key` at `turn`: the device it released to took the turn, which is
+   * A turn read on this standby found a record at `turn`: the device it released to took the turn, which is
    * what the `handoff-done` would have said. That frame goes once, as the taker reloads, and can be lost; without this
-   * the screen said "Moving to …" for good, with no Use here, until that device offered the profile back.
+   * the screen said "Moving to …" for good, with no Use here, until that device offered the profile back. Another
+   * device's record at the release's turn or above (a forced takeover that won) ends the release too: the taker steps
+   * back from it, and the screen and a Take over follow the record's active device, not the one released to.
    */
-  turnTaken(key: string, turn: number): Promise<void> {
+  turnTaken(turn: number): Promise<void> {
     return this.exclusive(async () => {
-      if (this.stopped || this.phase !== "released" || key !== this.peer || turn <= this.turn) return;
+      if (this.stopped || this.phase !== "released" || turn <= this.turn) return;
       await this.taken();
     }).catch(() => {});
   }

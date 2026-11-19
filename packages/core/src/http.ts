@@ -189,6 +189,22 @@ export function sanitizeRequestHeaders(headers: HeaderList): HeaderList {
   });
 }
 
+/**
+ * A cookie's `Path` as the client sees the app: without the target's base path, which the client never sees (as
+ * `relativizeLocation` takes it off), so a cookie the app keeps on `/notes` is sent back to its `/home` at `/`. One
+ * outside the base path would never be sent at all and goes on `/`; one that does not start with `/` the browser
+ * ignores, so it stays.
+ */
+function cookieOnClient(cookie: string, target: LocalTarget): string {
+  if (!target.basePath) return cookie;
+  return cookie.replace(/;\s*path\s*=\s*([^;]*)/gi, (attribute, value: string) => {
+    const path = value.trim();
+    if (!path.startsWith("/")) return attribute;
+    const under = path === target.basePath || path.startsWith(`${target.basePath}/`);
+    return `; Path=${under ? path.slice(target.basePath.length) || "/" : "/"}`;
+  });
+}
+
 /** `from`: the local URL of the request answered, the one a relative `Location` is read against. */
 export function sanitizeResponseHeaders(headers: HeaderList, target: LocalTarget, from?: string): HeaderList {
   const out: HeaderList = [];
@@ -202,7 +218,7 @@ export function sanitizeResponseHeaders(headers: HeaderList, target: LocalTarget
       if (location !== null) out.push([name, location]);
     } else if (lower === "set-cookie") {
       // The cookie belongs to the virtual origin on the client, not to localhost.
-      out.push([name, value.replace(/;\s*domain\s*=[^;]*/gi, "")]);
+      out.push([name, cookieOnClient(value.replace(/;\s*domain\s*=[^;]*/gi, ""), target)]);
     } else {
       out.push([name, value]);
     }

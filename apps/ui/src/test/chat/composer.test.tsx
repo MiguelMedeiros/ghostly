@@ -16,7 +16,7 @@ import type { Language } from "../../lib/settings";
 
 // covers: app.composer.attach, app.composer.expressions, app.emoji-picker, chat.paired.emoji, chat.paired.gifs, chat.paired.gifs.categories, chat.paired.gifs.busy
 
-// The emoji panel's data set, here before any panel opens (its loading: emojiPanelLoad.test.tsx).
+// The emoji panel's data set, here before any panel opens (its loading: emojiPanel.test.tsx).
 beforeAll(() => loadEmoji());
 
 const viewport = (width: number, height = 800) => (window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height });

@@ -40,7 +40,8 @@ export function SecretGuardDialog({ finding, recipient, onCancel, onConfirm }: {
   }
 
   return createPortal(<dialog ref={dialog} role="alertdialog" data-testid="secret-guard" data-kind={finding.kind}
-    onCancel={(e) => { e.preventDefault(); onCancel(); }}
+    // Escape is this question's alone: React would hand its cancel on to a <dialog> it was asked from (a new group's).
+    onCancel={(e) => { e.preventDefault(); e.stopPropagation(); onCancel(); }}
     onKeyDown={(e) => { if (e.key === "Tab") { e.preventDefault(); (document.activeElement === cancel.current ? confirm.current : cancel.current)?.focus(); } }}
     aria-labelledby={`${id}-title`} aria-describedby={`${id}-body`}
     className="m-auto w-[calc(100%_-_2rem)] max-w-sm rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
