@@ -21,7 +21,7 @@ const READS = [
  */
 const LOCAL_WRITES = [
   "app serve", "app unserve", "chat remove", "chat rename", "identity cancel", "saved add", "saved remove", "service add", "status clear", "status set",
-  "x401 credential add", "x401 credential remove", "x401 key new",
+  "x401 credential add", "x401 credential remove", "x401 key new", "lightning default", "lightning rename",
 ];
 /**
  * Said on a live session only: a one-shot starts the chat or group as it says it, so it reaches nobody (it waited for
@@ -41,7 +41,7 @@ const ONLINE = [
   "group accept", "group admin", "group call", "group create", "group decline", "group forget", "group hub", "group invite", "group join", "group leave",
   "group link", "group picture", "group react", "group remove", "group rename", "group rotate",
   "file accept", "file cancel", "file decline", "file pause", "file request", "file resend", "file resume", "file save", "file send", "file wait",
-  "chat pay", "chat pay-request", "chat request", "lightning default", "lightning rename", "pay", "payment check", "payment reclaim",
+  "chat pay", "chat pay-request", "chat request", "pay", "payment check", "payment reclaim",
   "wallet add-mint", "wallet address", "wallet create", "wallet faucet", "wallet receive", "wallet redeem", "wallet remove",
   "identity complete", "identity recheck", "identity remove", "identity share", "identity withdraw",
   "service enable", "service remove", "service share",

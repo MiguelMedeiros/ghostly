@@ -72,7 +72,8 @@ Other settings:
   Left out, any origin may connect. A
   refused one gets 403, and the log says `refused origin "<origin>"` once an hour per origin, for at most 16 origins
   an hour. It keeps other websites from using the relay; it is no defence against other programs.
-- `GHOSTLY_RELAY_CLOUDFLARE=1` counts each client by `CF-Connecting-IP`, behind Cloudflare (a tunnel).
+- `GHOSTLY_RELAY_CLOUDFLARE=1` counts each client by `CF-Connecting-IP`, behind Cloudflare (a tunnel). It does not go
+  with `GHOSTLY_RELAY_PROXIES`: both set stops the start, since behind nginx or Caddy a client writes that header.
 - `GHOSTLY_RELAY_PROXIES` is the number of reverse proxies in front of it (`1` for one nginx): each client then
   counts by the `X-Forwarded-For` entry that many from the end, the ones before it being the client's to write.
   Without either, the headers are ignored, and the first request that carries one logs which setting is missing
@@ -116,7 +117,7 @@ machine or no name at all: one line names the setting instead of a stack trace, 
 shell or an `.env` file next to it):
 
 - `GHOSTLY_RELAY_CLOUDFLARE=0`, or every client could name its own address in that header; behind nginx or Caddy add
-  `GHOSTLY_RELAY_PROXIES=1`;
+  `GHOSTLY_RELAY_PROXIES=1` (with the default `GHOSTLY_RELAY_CLOUDFLARE=1` left on, the relay does not start);
 - `GHOSTLY_RELAY_ORIGINS` with the origins of the web app you serve, and `tauri://localhost,http://tauri.localhost`
   for the Desktop, or every browser on it is refused (403), and so is every Desktop with Hide my IP on.
 
@@ -124,7 +125,8 @@ shell or an `.env` file next to it):
 (`{"ok":true,"firewalled":false,"nodes":20}`); `HEAD` and a query string (`/healthz?x=1`) answer the same. Anyone who reaches the relay may read it, so it carries no count of
 clients; refusals and drops are in the log. It is `ok: false` with HTTP 503 while `nodes` is 0: the node reaches no other one (no outgoing UDP, as behind a tunnel, a
 firewall or a container network without it), so nobody reaches the browsers listening through it. The start log
-says `bootstrap reached no node` then. While the relay stops (up to a second, until each client has answered its
+says so with what to check (`bootstrap reached no node: check that this host can send UDP out ...`, and that
+`GHOSTLY_HYPERDHT_BOOTSTRAP` names running nodes when it is set). While the relay stops (up to a second, until each client has answered its
 going-away close, 1001), it reads `{"ok":false,"stopping":true}` with HTTP 503 and refuses new WebSockets with 503
 and `Retry-After: 1`. The log has counts and reasons only: never a key, an address or anyone's
 traffic.

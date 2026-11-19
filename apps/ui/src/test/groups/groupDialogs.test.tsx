@@ -73,7 +73,7 @@ describe("GroupMembersDialog", () => {
       expect(within(row(BOB)).getByTestId(id)).toHaveClass("max-md:min-h-11", "max-md:px-3");
     }
     expect(within(row(BOB)).getByTestId("group-member-actions")).toHaveClass("max-md:gap-2");
-    expect(within(screen.getByTestId("group-members-dialog")).getByRole("button", { name: "Close" })).toHaveClass("max-md:h-11", "max-md:w-11", "place-items-center");
+    expect(within(screen.getByTestId("group-members-dialog")).getByRole("button", { name: "Close" })).toHaveClass("max-md:h-[44px]", "max-md:w-[44px]", "place-items-center");
   });
 
   it("lets the admin promote or remove anyone but themselves", async () => {

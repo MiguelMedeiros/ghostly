@@ -194,11 +194,30 @@ const RELAY_TEXT_CHARS = 120;
  * The push relay answered, but not with a push service's status: its own refusal (403 `Origin not allowed`, 400 naming
  * a header, 429), a web page or JSON without `status` (a wrong address or path, a proxy with no route). `text` is the
  * relay's own `{ error }` text when it gave one, on one line and cut to `RELAY_TEXT_CHARS`; a web page gives none.
+ * `http` 0 is fetch's status for an answer the page may not read: the address answered, but without CORS (another
+ * kind of server, a proxy's error page in front of a relay that is down), so it is no push relay this page can use.
  */
 export class PushRelayRefusal extends Error {
   constructor(readonly http: number, readonly text?: string, readonly cause?: unknown) {
-    super(`The push relay did not forward it (HTTP ${http})`);
+    super(http === 0 ? "The push relay's address answered without CORS" : `The push relay did not forward it (HTTP ${http})`);
     this.name = "PushRelayRefusal";
+  }
+}
+
+/**
+ * Whether something answers at `url` at all, read with a `no-cors` GET: its answer is opaque, but it arrives, where
+ * offline, a name that does not resolve or a host that refuses the connection fail as the post did. Only asked after
+ * the post failed with a `TypeError`, which is all a page gets both for an answer without CORS and for no answer.
+ */
+async function answersWithoutCors(url: string): Promise<boolean> {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return false;
+  try {
+    // Any answer resolves it (opaque: its status and body are hidden). `no-cors` follows redirects (another redirect
+    // mode fails it), so an address that redirects answers too.
+    await fetch(url, { method: "GET", mode: "no-cors", credentials: "omit", referrerPolicy: "no-referrer", cache: "no-store", signal: AbortSignal.timeout(10_000) });
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -216,8 +235,8 @@ function relayErrorText(body: unknown): string | undefined {
 /**
  * Posts a push: the host's way (Desktop and the CLI post it themselves), or `fetch`, then the person's push relay when
  * a page may not post it (the push services answer without CORS). Answers the push service's HTTP status; throws a
- * `PushRelayRefusal` when the relay answers without it (`relayed` is told when it answers with it), and the fetch's
- * own error when the relay cannot be reached at all.
+ * `PushRelayRefusal` when the relay answers without it (`relayed` is told when it answers with it), or when its address
+ * answers but without CORS (`http` 0), and the fetch's own error when the relay cannot be reached at all.
  */
 export async function postPush(request: PushRequest, options: { pushSend?: (request: PushRequest) => Promise<number>; relay?: string; relayed?: () => void }): Promise<number> {
   if (options.pushSend) return options.pushSend(request);
@@ -227,9 +246,17 @@ export async function postPush(request: PushRequest, options: { pushSend?: (requ
     return response.status;
   } catch (error) {
     if (!options.relay) throw error;
-    const response = await fetch(options.relay, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(relayRequest(request)), signal: AbortSignal.timeout(15_000), ...quiet,
-    });
+    let response: Response;
+    try {
+      response = await fetch(options.relay, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(relayRequest(request)), signal: AbortSignal.timeout(15_000), ...quiet,
+      });
+    } catch (relayError) {
+      // A page gets the same TypeError for an answer without CORS (the HyperDHT relay's address, a proxy's error page,
+      // any other site) as for no answer (offline): only an address that answers a no-cors GET is said to refuse.
+      if (relayError instanceof TypeError && await answersWithoutCors(options.relay)) throw new PushRelayRefusal(0, undefined, relayError);
+      throw relayError;
+    }
     // Only the push service's status, as the relay reports it, counts: any other answer (a wrong address, a proxy with no
     // route, a captive portal, the relay's own refusal) is the relay failing, never "gone" or "sent".
     const answer = await response.json().catch(() => null) as { status?: unknown } | null;
