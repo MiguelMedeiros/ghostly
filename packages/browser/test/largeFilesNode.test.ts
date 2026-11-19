@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { createHash } from "node:crypto";
 import { afterEach, expect, it, vi } from "vitest";
-import { ChatFiles, FILE_LIMITS, GhostLink, createIdentity, createLink, identityFromSeedB64, randomBytes, toBase64Url, type FileTransferRecord, type IncomingTarget, type OfferDecision } from "@ghostly/core";
+import { ChatFiles, FILE_LIMITS, GhostLink, REMOVED_TEXT, createIdentity, createLink, identityFromSeedB64, randomBytes, toBase64Url, type FileTransferRecord, type IncomingTarget, type OfferDecision } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { STORES, fileStore } from "../src/shared/idb";
@@ -37,8 +37,11 @@ Object.defineProperty(globalThis.navigator, "storage", { value: { estimate: asyn
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { left = 40 * 1024 ** 3; checking = undefined; for (const step of cleanup.splice(0).reverse()) await step(); });
 
-/** `files2`: the contact also takes files/2; `largeFiles: false`, an app from before files/3; `reactions`: it reacts and pins. */
-async function setup({ files2 = false, largeFiles = true, reactions = false } = {}) {
+/**
+ * `files2`: the contact also takes files/2; `largeFiles: false`, an app from before files/3; `reactions`: it reacts and
+ * pins; `edits`: it edits and deletes for everyone.
+ */
+async function setup({ files2 = false, largeFiles = true, reactions = false, edits = false } = {}) {
   const net = new FakeNativeNet();
   // As the real Iroh and HyperDHT channels: past 120 KiB queued, a frame is refused.
   net.sendBudget = 120 * 1024;
@@ -83,7 +86,7 @@ async function setup({ files2 = false, largeFiles = true, reactions = false } = 
   });
   const contact = new GhostLink({
     params: { ...invitation.invite, profile: "paired-chat/1" }, rtcAvailable: false, largeFilesSupport: largeFiles,
-    ...(reactions && { reactionsSupport: true, pinSupport: true }),
+    ...(reactions && { reactionsSupport: true, pinSupport: true }), ...(edits && { editSupport: true }),
     pairing: { credentials: { seedB64: theirs, peerKey: identityFromSeedB64(mine).pubKeyZ32 }, pinPeer: async () => {} },
     native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1", "hyperdht/1"], peerFallback: true,
       peerDescriptors: { "iroh/1": fakeDescriptor("iroh/1", "app"), "hyperdht/1": fakeDescriptor("hyperdht/1", "app") } },
@@ -447,6 +450,35 @@ it("a deleted chat takes no row the engine stores for it later by another way (a
   t.node().removeLink({ linkId: t.id });
   await t.node()["storeMessage"]({ linkId: t.id, id: "peer_afterdeletehold00001", text: "Held for the chat", sender: "peer", timestamp: Date.now(), via: "hold" });
   expect(await heard()).toEqual({ rows: [], told: 0, attention: 0, reactionNote: false });
+}, 60_000);
+
+/**
+ * The contact deletes its file for everyone while its offer is being taken here, before its row is kept: the removal
+ * found no row to take, and the row was then refused as deleted. The record, the transfer and the bytes stayed, the file
+ * arrived whole and said done to its sender, with no message here to show or delete it. Nothing of it is kept, and its
+ * sender is told it ended.
+ */
+it("a file the contact deletes for everyone while its offer is taken is not kept: no record, no bytes, ended there", async () => {
+  const t = await setup({ edits: true });
+  await vi.waitFor(() => expect(t.contact.supportsEdits).toBe(true));
+  const wireId = "gonewhiletaken00001";
+  const put = fileStore.put.bind(fileStore);
+  // The removal comes and is taken while the new offer's record is being written.
+  const puts = vi.spyOn(fileStore, "put").mockImplementation(async (file) => {
+    if (file.wireId === wireId) {
+      expect(await t.contact.sendEdit({ id: wireId, e: 1, ts: Date.now(), m: REMOVED_TEXT, rm: true })).toBeNull();
+      await vi.waitFor(() => expect(t.node()["links"].get(t.id)?.stored.deletedIds ?? []).toContain(`peer_${wireId}`));
+    }
+    return put(file);
+  });
+  cleanup.push(async () => { puts.mockRestore(); });
+  t.offer(wireId, 200_000);
+  await vi.waitFor(() => expect(t.records.get(`out:${wireId}`)).toMatchObject({ state: "cancelled", error: "Cancelled by your contact" }), { timeout: 30_000 });
+  await vi.waitFor(async () => expect((await fileStore.listForLink(t.id)).filter((f) => f.wireId === wireId)).toEqual([]));
+  const fileId = puts.mock.calls.find(([file]) => file.wireId === wireId)![0].id;
+  expect(await (await fileBytes()).size(fileId)).toBe(null);
+  expect((await db.getMessages(t.id)).filter((m) => m.id === `peer_${wireId}`)).toEqual([]);
+  expect(t.node().getState().transfers[fileId]).toBeUndefined();
 }, 60_000);
 
 it("a sent file whose every byte arrived is too late to cancel: it ends done on both sides, kept there", async () => {

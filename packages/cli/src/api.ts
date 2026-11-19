@@ -366,7 +366,7 @@ function dhtOnlyWait(link: LinkView, text: string, ref: string, ctx?: ApiContext
 }
 
 /** Where `link` stands on the DHT only (waitNotice.ts `DhtOnly`): this side's choice or hold, read from `ctx`'s profile. */
-function dhtOnlyOf(link: LinkView, ctx?: ApiContext): DhtOnly {
+export function dhtOnlyOf(link: LinkView, ctx?: ApiContext): DhtOnly {
   const mine = link.deliveryMode === "dht";
   return { mine, theirs: link.dhtDelivery?.peerMode === "dht", heldUntil: mine && ctx ? holdEnds(ctx, link.id) : null, oneShot: ctx?.mode === "one-shot" };
 }
@@ -397,12 +397,14 @@ function dhtOnlyTimeout(ctx: ApiContext, chat: string, text: string, ref: string
 /**
  * What keeps `link` off a live session, or undefined: a chat on DHT only opens none (WISP 100: no app dials it). A hold
  * of this side's (`chat disconnect --hold`) ends by itself (`held`: when), unless the contact's choice keeps it there
- * too; this side's choice or the contact's is `chat connect`'s refusal (apiKit `dhtOnly`), in its words.
+ * too; this side's choice or the contact's is `chat connect`'s refusal (apiKit `dhtOnly`), in its words. A held chat
+ * the contact keeps there is the contact's refusal, as `chat connect` says it once the hold is gone: it read "on DHT
+ * only on this side" with `chat transport auto`, which only lifted the hold.
  */
 function offLive(ctx: ApiContext, link: LinkView): { held: number } | { refusal: CliError } | undefined {
-  const held = link.deliveryMode === "dht" && link.dhtDelivery?.peerMode !== "dht" ? holdEnds(ctx, link.id) : null;
-  if (held !== null) return { held };
-  try { dhtOnly(link); } catch (error) { if (error instanceof CliError) return { refusal: error }; throw error; }
+  const held = link.deliveryMode === "dht" ? holdEnds(ctx, link.id) : null;
+  if (held !== null && link.dhtDelivery?.peerMode !== "dht") return { held };
+  try { dhtOnly(held === null ? link : { ...link, deliveryMode: "stream" }); } catch (error) { if (error instanceof CliError) return { refusal: error }; throw error; }
   return undefined;
 }
 
@@ -516,8 +518,13 @@ const METHODS: Record<string, Method> = {
         patch[key] = servers;
         // libdatachannel (libjuice) skips TURN over TCP and TLS without a word; the apps' browsers use them, so they stay.
         const unused = servers.flatMap((server) => server.urls.split(/[\s,]+/)).filter((url) => /^turns:|\?transport=tcp$/i.test(url));
-        if (unused.length) warning = `The CLI reaches TURN over UDP only: it does not use ${unused.join(", ")} (the apps do). Add a turn: server over UDP for the CLI`;
+        if (unused.length) warning = (warning ? `${warning}. ` : "") + `The CLI reaches TURN over UDP only: it does not use ${unused.join(", ")} (the apps do). Add a turn: server over UDP for the CLI`;
         continue;
+      }
+      // The CLI hands the engine a HyperDHT of its own (runtime/engine.ts), which dials from this machine: the engine takes
+      // the relay only under "Hide my IP from contacts", not the CLI's yet (`engine.call`). Kept for the apps, said here.
+      if (key === "hyperdhtRelay" && value) {
+        warning = (warning ? `${warning}. ` : "") + "This CLI runs HyperDHT itself and does not dial through hyperdhtRelay: it uses it only with Hide my IP from contacts, which comes in a later release. It is kept for the apps this profile moves to";
       }
       patch[key] = value;
     }
@@ -1002,7 +1009,7 @@ const METHODS: Record<string, Method> = {
     return { ...chatJson(findChat(state(ctx).links, link.id)), heldUntil: holdOf(ctx, link.id) };
   },
   async "chat.verify"(ctx, params) {
-    const link = chatOf(ctx, params);
+    const link = chatOf(ctx, params, undefined, "only a chat has a code to compare");
     const code = str(params, "code", true).replace(/\s+/g, "").toLowerCase();
     const mine = link.pairing?.code?.replace(/\s+/g, "").toLowerCase();
     if (!mine) throw new CliError("unavailable", "This chat shows no comparison code yet (it needs a live session)");
@@ -1566,7 +1573,7 @@ function deleteNotMine(ctx: ApiContext, target: { linkId: string; group: boolean
 /**
  * About the longest ASCII text, and edit, the DHT packet carries once sealed and signed: within the 256 bytes, the
  * envelope's authentication (and an edit's element) takes the rest. The edge moves by a byte or two with the chat (the
- * envelope's sequence, the edit's number), so the words say "about"; `dhtBudgetWords.test.ts` sends both sizes on two
+ * envelope's sequence, the edit's number), so the words say "about"; `dhtPacketBudget.test.ts` sends both sizes on two
  * paired daemons.
  */
 const DHT_TEXT_FITS = 248, DHT_EDIT_FITS = 214;

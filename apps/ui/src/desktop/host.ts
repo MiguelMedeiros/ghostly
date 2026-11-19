@@ -36,6 +36,7 @@ import { desktopUpdates } from "./updates";
 import { desktopHoldFetch } from "./holdFetch";
 import { desktopIdentityFetch } from "./identityFetch";
 import { desktopLnurlFetch } from "./lnurlFetch";
+import { desktopGroupCallFetch } from "./groupCallFetch";
 import { desktopOidc } from "./oidc";
 import { desktopAtprotoHost } from "./atproto";
 import { appCommandForKey, isAppCommand, sendAppCommand } from "../lib/appCommands";
@@ -445,8 +446,10 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
   const node: NodeOptions = { nativeTransports: { "iroh/1": createIrohEndpoint, "hyperdht/1": createHyperEndpoint }, nativeIrohRelays: true, transport: createTauriTransport(), pollIntervals: DHT_POLL_INTERVALS, localFetch: tauriLocalFetch, platform: "desktop", invoke,
     // Wake-ups go from Rust: push services answer without CORS, which a WebView would enforce (WISP 401 § Wake-up push).
     pushSend: (request) => invoke<number>("push_send", { url: request.url, headers: Object.entries(request.headers), body: toBase64Url(request.body) }),
-    // A Lightning address whose service redirects is asked from Rust, which checks every hop before following it.
+    // A Lightning address service, its redirects and its callback are asked from Rust, on public addresses only.
     lnurlFetch: desktopLnurlFetch(invoke),
+    // A group's call node, the same way: a node the group's admin points at this network is not reached.
+    groupCallFetch: desktopGroupCallFetch(invoke),
     // Held items are read from the contact's storage on public addresses only, which Rust checks and a WebView cannot.
     holdFetch: desktopHoldFetch(invoke),
     // A contact's identity proof and public data, the same way: a name the contact points at this network is not reached.

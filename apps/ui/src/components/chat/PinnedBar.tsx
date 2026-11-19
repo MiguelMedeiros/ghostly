@@ -6,7 +6,8 @@ import { jumpToMessage, messageSnippet, type ReplyIndex } from "../../lib/replie
 import { PinIcon } from "../PinIcon";
 
 const icon = { width: 15, height: 15, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true } as const;
-const button = "shrink-0 grid place-items-center w-8 h-8 max-md:w-11 max-md:h-11 rounded-full text-text-secondary hover:text-accent hover:bg-surface-hover transition-colors cursor-pointer";
+// On a phone a thumb's 44 px: px, not rem, so a larger text size leaves them that size, as the chat header's.
+const button = "shrink-0 grid place-items-center w-8 h-8 max-md:w-[44px] max-md:h-[44px] rounded-full text-text-secondary hover:text-accent hover:bg-surface-hover transition-colors cursor-pointer";
 
 /**
  * The bar under a chat's header while a message is pinned (WISP 400 § Pinned message): a line of it, found in this

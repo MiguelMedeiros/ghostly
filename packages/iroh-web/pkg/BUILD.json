@@ -5,5 +5,10 @@
   "source": "492e189878b1ef7dc5a7147a5883ab1a8842cda9aa00c0258370dd68879c5a76",
   "sha256": "f53e1b0eac587580ca01a1bd92cfb693a3c9e749fda0116026fad95fb153b09b",
   "bytes": 2771398,
-  "gzipBytes": 1047396
+  "gzipBytes": 1047396,
+  "files": {
+    "ghostly_iroh_web.d.ts": "829ab500dd73424ec365233ec9646093d5e8177c64fd3556bfea26cf41666ef6",
+    "ghostly_iroh_web.js": "ffa1fa0a3ad5c23096c5af4dc3b605658a0601bd3d6d736233b20ca254afca25",
+    "ghostly_iroh_web_bg.wasm.d.ts": "43a7e5dd6babab1c137d86120a69cbdbfa871f8ae531bbcc8c34b0c5c9691ba2"
+  }
 }

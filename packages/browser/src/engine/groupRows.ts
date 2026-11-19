@@ -20,7 +20,7 @@ import type { GroupStore } from "./groups";
 export const SEQ_BLOCK = 1024;
 
 /** The fields of the state the small row holds. */
-const LIVE = ["seq", "seqEpoch", "seen", "sent", "alone", "provisional", "nicks", "unsaid"] as const;
+const LIVE = ["seq", "seqEpoch", "seen", "sent", "owed", "alone", "provisional", "nicks", "unsaid"] as const;
 
 /**
  * The fields of the record a row of their own holds (`GroupLight`) while nothing else of it changed: what a pin (mine
@@ -89,7 +89,7 @@ function marks(light: GroupLight, now: GroupLight, of: string): boolean {
 
 function liveOf(group: StoredGroup): GroupLive {
   const s = group.state!;
-  return { top: topOf(s), state: { seq: s.seq, seqEpoch: s.seqEpoch, seen: s.seen, sent: s.sent, nicks: s.nicks, ...(s.alone && { alone: s.alone }), ...(s.provisional && { provisional: s.provisional }),
+  return { top: topOf(s), state: { seq: s.seq, seqEpoch: s.seqEpoch, seen: s.seen, sent: s.sent, nicks: s.nicks, ...(s.owed?.length ? { owed: s.owed } : {}), ...(s.alone && { alone: s.alone }), ...(s.provisional && { provisional: s.provisional }),
     // A text saved before its row is stored (`unsaid`) is saved with its counter and frame, in the same row.
     ...(s.unsaid?.length ? { unsaid: s.unsaid } : {}) },
     ...(group.came && { came: group.came }) };
@@ -231,11 +231,15 @@ export class GroupRows {
  * after the small row's no longer did (`message delete --purge` promises it leaves the profile's folder).
  */
 function holds(written: GroupState, key: string, state: GroupState, removedIds: readonly string[] = []): boolean {
-  return written.seqEpoch === state.seqEpoch && state.seq <= written.seq && key === recordKey(state) && !keepsRemoved(written, removedIds);
+  return written.seqEpoch === state.seqEpoch && state.seq <= written.seq && key === recordKey(state) && !keepsRemoved(written, removedIds, state);
 }
 
-/** Whether `state` keeps the text of a frame of mine whose message (its first place, for one said again) is in `removedIds`. */
-function keepsRemoved(state: GroupState, removedIds: readonly string[]): boolean {
+/**
+ * Whether `state` keeps the text of a frame of mine whose message (its first place, for one said again) is in `removedIds`,
+ * or a frame of mine `now` holds sealed again (a reply's line of a message deleted for everyone, `GroupSession.forget`).
+ */
+function keepsRemoved(state: GroupState, removedIds: readonly string[], now: GroupState): boolean {
+  if (state.sent.some(f => f.c && now.sent.some(g => g.e === f.e && g.n === f.n && g.xs !== f.xs))) return true;
   if (!removedIds.length) return false;
   return state.sent.some(f => f.c && removedIds.includes(f.o ? groupMessageId(f.s, f.o.e, f.o.n) : groupMessageId(f.s, f.e, f.n)));
 }

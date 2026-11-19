@@ -655,12 +655,30 @@ describe("MessageBubble: delivery", () => {
     expect(mark()).toHaveAccessibleName(label);
     // In the time row, not a line of its own.
     expect(mark().closest(".msg-meta")).not.toBeNull();
-    expect(container).not.toHaveTextContent(label);
+    // Shown, that is: its line is there for a screen reader, hidden.
+    const shown = container.cloneNode(true) as HTMLElement;
+    shown.querySelectorAll("[hidden]").forEach((e) => e.remove());
+    expect(shown).not.toHaveTextContent(label);
     await user.hover(mark());
     expect(screen.getByRole("tooltip")).toHaveTextContent(hint);
     expect(mark()).toHaveAccessibleDescription(hint);
     await user.unhover(mark());
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  });
+
+  it("a keyboard reaches the mark and a screen reader hears its line, without a hover", async () => {
+    // Bug hunt hunt-1118 (issue 7382): Tab skipped the mark, and its line was its description only while hovered.
+    const { user } = bubble({ sender: "me", delivery: "queued" });
+    expect(mark()).toHaveAccessibleName("Sending");
+    expect(mark()).toHaveAccessibleDescription("No receipt yet. Sends again by itself.");
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    act(() => { mark().focus(); });
+    expect(mark()).toHaveFocus();
+    expect(screen.getByRole("tooltip")).toHaveTextContent("No receipt yet. Sends again by itself.");
+    await user.tab();
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    await user.tab({ shift: true });
+    expect(mark()).toHaveFocus();
   });
 
   it.each(["waiting", "sending", "queued"] as const)("with this device offline, a %s message says it waits for this device, not the contact", async (delivery) => {
@@ -715,6 +733,7 @@ describe("MessageBubble: delivery", () => {
       act(() => engine.update({ links: [linkView({ ...link })] }));
       expect(mark()).toHaveAttribute("data-delivery", "waiting");
       expect(mark()).toHaveAccessibleName(LIVE);
+      expect(mark()).toHaveAccessibleDescription(hint);
       await user.hover(mark());
       expect(screen.getByRole("tooltip")).toHaveTextContent(hint);
       expect(screen.getByRole("tooltip").textContent).not.toMatch(/online|—/);
@@ -1003,6 +1022,19 @@ describe("MessageBubble: deleting", () => {
     await user.click(screen.getByTestId("message-options"));
     await user.click(screen.getByRole("button", { name: "Delete message" }));
     expect(screen.getByTestId("message-delete-menu")).toHaveTextContent("Deleted only here.");
+  });
+
+  it.each([
+    ["message-delete", /^Deleted only here\./],
+    ["message-delete-everyone", /^Deleted from your contact's devices too\./],
+  ])("%s's confirmation says what it does to a screen reader: the hint describes the group and its Delete", async (item, hint) => {
+    const { user } = bubble({ sender: "me", text: "x" }, { onDelete: vi.fn(), onDeleteForEveryone: vi.fn() });
+    await user.click(screen.getByTestId("message-options"));
+    await user.click(screen.getByTestId(item));
+    // The focus is on Cancel, inside the group: the group's description is what is said with it.
+    expect(within(screen.getByTestId("message-delete-menu")).getByRole("button", { name: "Cancel" })).toHaveFocus();
+    expect(screen.getByTestId("message-delete-menu")).toHaveAccessibleDescription(hint);
+    expect(screen.getByTestId("message-delete-confirm")).toHaveAccessibleDescription(hint);
   });
 
   it("Delete for everyone in a group says it goes from the members' devices, not a contact's", async () => {

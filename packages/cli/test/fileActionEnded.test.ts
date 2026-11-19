@@ -38,18 +38,24 @@ const ended = (direction: "in" | "out", error: string, retry = false) =>
   ({ state: "failed", transferred: 8_388_608, size: 12_582_912, direction, error, ...(retry ? { retry } : {}) }) as FileTransferView;
 
 describe("file actions on an ended 1:1 transfer", () => {
-  it("pause, resume, cancel, accept and decline of a received file the sender cancelled are refused with its words", async () => {
+  it("pause, resume, cancel, accept and decline of a received file the sender cancelled are refused with its words and the way out", async () => {
     const { ctx, node } = world({ [IN]: ended("in", "Cancelled by the sender") });
-    for (const action of ["pause", "resume", "cancel", "accept", "decline"]) {
-      await expect(callApi(ctx, "file.action", { file: IN, action })).rejects.toMatchObject({ code: "refused", message: "It ended: Cancelled by the sender" });
+    for (const action of ["pause", "resume", "cancel", "accept", "decline", "request"]) {
+      await expect(callApi(ctx, "file.action", { file: IN, action })).rejects.toMatchObject({
+        code: "refused", message: "It ended: Cancelled by the sender (ask the contact to send it again)",
+        details: { file: IN, chat: "chat-one", reason: "cancelled", by: "contact" },
+      });
     }
     expect(node.fileAction).not.toHaveBeenCalled();
   });
 
-  it("pause, resume and cancel of a sent file this side cancelled are refused; accept and decline are not for a sent file", async () => {
+  it("pause and resume of a sent file this side cancelled are refused naming file send; accept and decline are not for a sent file", async () => {
     const { ctx, node } = world({ [OUT]: ended("out", "You cancelled it") });
-    for (const action of ["pause", "resume", "cancel"]) {
-      await expect(callApi(ctx, "file.action", { file: OUT, action })).rejects.toMatchObject({ code: "refused", message: "It ended: You cancelled it" });
+    for (const action of ["pause", "resume", "resend"]) {
+      await expect(callApi(ctx, "file.action", { file: OUT, action })).rejects.toMatchObject({
+        code: "refused", message: "It ended: You cancelled it (send it again: ghostly file send chat-one <path>)",
+        details: { file: OUT, chat: "chat-one", reason: "cancelled", by: "me" },
+      });
     }
     for (const action of ["accept", "decline"]) {
       await expect(callApi(ctx, "file.action", { file: OUT, action })).rejects.toMatchObject({ code: "bad_request" });
@@ -57,16 +63,49 @@ describe("file actions on an ended 1:1 transfer", () => {
     expect(node.fileAction).not.toHaveBeenCalled();
   });
 
+  /** A script could not tell "the contact said no" from "I already did it" without reading the English. */
+  it("resend of a sent file the contact cancelled or declined names file send, with who ended it", async () => {
+    for (const [words, reason] of [["Cancelled by your contact", "cancelled"], ["Declined by your contact", "declined"]] as const) {
+      const { ctx, node } = world({ [OUT]: ended("out", words) });
+      await expect(callApi(ctx, "file.action", { file: OUT, action: "resend" })).rejects.toMatchObject({
+        code: "refused", message: `It ended: ${words} (send it again: ghostly file send chat-one <path>)`,
+        details: { file: OUT, chat: "chat-one", reason, by: "contact" },
+      });
+      expect(node.fileAction).not.toHaveBeenCalled();
+    }
+  });
+
+  it("a second cancel of what this side cancelled, or decline of what it declined, answers as the first did", async () => {
+    for (const [id, direction, words, action] of [[OUT, "out", "You cancelled it", "cancel"], [IN, "in", "You cancelled it", "cancel"], [IN, "in", "You declined it", "decline"]] as const) {
+      const { ctx, node } = world({ [id]: ended(direction, words) });
+      await expect(callApi(ctx, "file.action", { file: id, action })).resolves.toMatchObject({ chat: "chat-one", file: id, action, transfer: { state: "failed", error: words } });
+      expect(node.fileAction).not.toHaveBeenCalled();
+    }
+  });
+
   it("a sent file that failed and can go again names file resend", async () => {
     const { ctx } = world({ [OUT]: ended("out", "The contact stopped answering", true) });
-    await expect(callApi(ctx, "file.action", { file: OUT, action: "resume" })).rejects.toMatchObject({ code: "refused", message: "It ended: The contact stopped answering (file resend sends it again)" });
+    await expect(callApi(ctx, "file.action", { file: OUT, action: "resume" })).rejects.toMatchObject({
+      code: "refused", message: "It ended: The contact stopped answering (file resend sends it again)",
+      details: { file: OUT, chat: "chat-one", reason: "failed", by: null },
+    });
   });
 
   it("an ended transfer known only from its record (after a restart) is refused too", async () => {
     await fileStore.put({ id: "chat-one-in-r", linkId: "chat-one", createdAt: 1, direction: "in", metadata: { name: "r.bin", size: 10, mime: "application/octet-stream", timestamp: 1 }, transfer: { state: "failed", transferred: 4, size: 10, error: "You declined it" } } as never);
     const { ctx, node } = world({});
-    await expect(callApi(ctx, "file.action", { file: "chat-one-in-r", action: "accept" })).rejects.toMatchObject({ code: "refused", message: "It ended: You declined it" });
+    await expect(callApi(ctx, "file.action", { file: "chat-one-in-r", action: "accept" })).rejects.toMatchObject({
+      code: "refused", message: "It ended: You declined it (ask the contact to send it again)",
+      details: { file: "chat-one-in-r", chat: "chat-one", reason: "declined", by: "me" },
+    });
     expect(node.fileAction).not.toHaveBeenCalled();
+  });
+
+  it("file wait on a transfer the contact cancelled says who ended it, as the actions do", async () => {
+    const { ctx } = world({ [OUT]: ended("out", "Cancelled by your contact") });
+    await expect(callApi(ctx, "file.wait", { file: OUT, timeout: 1 })).rejects.toMatchObject({
+      message: "Cancelled by your contact", details: { file: OUT, chat: "chat-one", retry: false, reason: "cancelled", by: "contact" },
+    });
   });
 
   it("a transfer still moving takes the action", async () => {
@@ -94,7 +133,10 @@ describe("file actions on an ended 1:1 transfer", () => {
   it("file save of a received file that ended says it ended, not that it is on its way", async () => {
     await fileStore.put({ id: IN, linkId: "chat-one", createdAt: 1, direction: "in", metadata: { name: "big.bin", size: 12_582_912, mime: "application/octet-stream", timestamp: 1 }, transfer: { state: "transferring", transferred: 8_388_608, size: 12_582_912 } } as never);
     const { ctx } = world({ [IN]: ended("in", "Cancelled by the sender") });
-    await expect(callApi(ctx, "file.save", { file: IN, path: join(dir, "big.bin") })).rejects.toMatchObject({ code: "refused", message: "It ended: Cancelled by the sender" });
+    await expect(callApi(ctx, "file.save", { file: IN, path: join(dir, "big.bin") })).rejects.toMatchObject({
+      code: "refused", message: "It ended: Cancelled by the sender (ask the contact to send it again)",
+      details: { file: IN, reason: "cancelled", by: "contact" },
+    });
   });
 
   it("pause of a file being checked is refused: the engine would do nothing and it ends done", async () => {

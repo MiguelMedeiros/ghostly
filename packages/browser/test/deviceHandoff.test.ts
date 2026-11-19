@@ -1257,13 +1257,27 @@ describe("Try again on the active device after a move that stopped", () => {
     await fullPull(w);
     await settle();
     expect(w.giver.view()?.step).toBe("switching");
-    // Not the taker, or not past the turn the handoff started at: nothing changes.
-    await w.giver.turnTaken(C, N + 1);
-    await w.giver.turnTaken(B, N);
+    // Not past the turn the handoff started at: nothing changes.
+    await w.giver.turnTaken(N);
     expect(w.giver.view()?.step).toBe("switching");
-    await w.giver.turnTaken(B, N + 1);
+    await w.giver.turnTaken(N + 1);
     expect(w.giver.view()).toBeNull();
     expect(w.giverRecords.record.handoff).toBeUndefined();
+  });
+
+  it("a standby that released ends the release when a turn read names another device's record at the release's turn (a forced takeover won)", async () => {
+    const w = world();
+    w.profile.add("f1", bytesOf(100));
+    w.link.meddle = (_from, frame) => (frame.t === "handoff-done" ? null : frame);
+    await fullPull(w);
+    await settle();
+    expect(w.giver.view()?.step).toBe("switching");
+    await w.giver.turnTaken(N + 1);
+    expect(w.giver.view()).toBeNull();
+    expect(w.giverRecords.record.handoff).toBeUndefined();
+    // After a restart it is a plain standby too.
+    await w.giver.resume();
+    expect(w.giver.view()).toBeNull();
   });
 });
 

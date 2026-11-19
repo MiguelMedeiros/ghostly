@@ -442,8 +442,8 @@ Nothing needs to be precached:
 
 - the wasm is already left out (`precacheList` drops every `.wasm`); fetched once on the first translation, the
   worker's `asset` route then keeps it, as it does the wallets' wasm;
-- the engine's Worker and its glue (100 KB) must be left out by name, as the detector's worker is today
-  (`/assets/translateDetector.worker-`), or the build would precache them for everyone;
+- the engine's Worker and its glue (100 KB) must be started from a module only a build with translation keeps, as the
+  detector's worker is (`lib/translateDetectorStart.ts`), or every build would write them and the web would precache them;
 - the models are never in the worker's cache: they come from the mirror into OPFS.
 
 ### Recommendation

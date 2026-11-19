@@ -8,7 +8,7 @@ import { checkSettingKey, checkSettingValue, GLOBAL_OPTIONS, globalOption, liftG
 import { connectDaemon, DaemonClient, endedUnanswered, endedUnsent, isNotTheDaemon, notTheDaemon } from "./client";
 import { childEnv, dropSecretEnv } from "./childEnv";
 import { COMMANDS, idSlot, noMoreThan, numberSlot, positionals, takesText, TEXT_COMMANDS } from "./commands";
-import { here, inRange, INPUT_BYTES, localStat, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
+import { here, inRange, INPUT_BYTES, listAtMost, localStat, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS, hideSecretFields } from "./engineMethods";
 import { asCliError, CliError, type ErrorCode, EXIT, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
@@ -17,7 +17,7 @@ import { identityWaitLines } from "./identityWait";
 import { jsonOut } from "./jsonOut";
 import { ownProfile } from "./privateFolder";
 import { shellWord } from "./shellWord";
-import { dhtOnlyNotice, longTextChat, waitNotice, waitsFor, type WaitNotice } from "./waitNotice";
+import { dhtOnlyChat, dhtOnlyNotice, waitNotice, waitsFor, type WaitNotice } from "./waitNotice";
 import type { RuntimeOptions } from "./runtime/engine";
 import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, followDaemon, PAUSE_HOLD_MS, startAt } from "./listen";
 import { format } from "node:util";
@@ -253,11 +253,14 @@ const NO_HISTORY_READS: ReadonlySet<string> = new Set([
  * Changes kept outside any chat (this profile's status, which each chat says on its next session; x401 keys and
  * credentials; a service; a draft; a served app), and `call answer` and `call flush`, which a one-shot refuses whatever
  * the chats say: a one-shot for one leaves every saved chat unstarted too. Each read every 1:1 chat whole first: with
- * 30,000 messages in the profile, about 0.95 s and 200 MB instead of 0.45 s and 140 MB.
+ * 30,000 messages in the profile, about 0.95 s and 200 MB instead of 0.45 s and 140 MB. The wallet's own stores too (an
+ * address, a Lightning card's name or default, a wallet removed): each started every chat, 20 relay requests and 0.35 s
+ * more with 10 chats and 30,000 messages, a refusal too. A removal tells a contact of a request it closes only on a chat
+ * that is open; one away hears when their chat opens.
  */
 const NO_HISTORY_WRITES: ReadonlySet<string> = new Set([
   "status.set", "status.clear", "x401.key.new", "x401.credential.add", "x401.credential.remove", "service.add", "identity.cancel",
-  "app.serve", "app.unserve", "call.answer", "call.flush",
+  "app.serve", "app.unserve", "call.answer", "call.flush", "wallet.address", "lightning.rename", "lightning.default", "wallet.remove",
 ]);
 
 /** Whether a one-shot for this call leaves every saved chat unstarted, its history unread (`NO_HISTORY_READS`, `NO_HISTORY_WRITES`). */
@@ -300,6 +303,8 @@ export function readOnly(method: string, params: Record<string, unknown>): boole
 const LOCAL_WRITES: ReadonlySet<string> = new Set([
   "chat.rename", "chat.remove", "call.auto", "group.auto", "identity.cancel", "service.add", "x401.key.new", "x401.credential.add", "x401.credential.remove",
   "saved.add", "saved.remove", "app.serve", "app.unserve",
+  // A Lightning card's name and its network's default for receiving: this device's settings store only.
+  "lightning.rename", "lightning.default",
   // This profile's status: kept here, and said only on a live session (WISP 401 § Presence and status), never on a
   // relay. A one-shot waits for no session, so online it would only show this device to the contacts for a moment; the
   // daemon says it at once, and any process that runs the profile online says it on each chat's next session.
@@ -547,9 +552,9 @@ function interruptible(s: Session): { run<T>(work: (s: Session) => Promise<T>): 
     const given = (params ?? {}) as Record<string, unknown>;
     const entry = { method, notice: waitNotice(method, given, s.mode) };
     pending.add(entry);
-    // A long text's chat, read beside the send: on the DHT only, the notice and Ctrl-C say why it waits, not that it goes.
-    const chat = entry.notice && longTextChat(method, given);
-    if (chat) void s.call("chat.get", { chat }).then((view) => { if (entry.notice) entry.notice = dhtOnlyNotice(entry.notice, given, view as Record<string, unknown>, s.mode); }, () => {});
+    // A long text's chat, a pin's or a file's, read beside the call: on the DHT only, the notice and Ctrl-C say why it waits, not that it goes.
+    const chat = entry.notice && dhtOnlyChat(method, given);
+    if (chat) void s.call("chat.get", { chat }).then((view) => { if (entry.notice) entry.notice = dhtOnlyNotice(entry.notice, method, given, view as Record<string, unknown>, s.mode); }, () => {});
     const timer = entry.notice && process.stderr.isTTY ? setTimeout(() => process.stderr.write(`ghostly: ${entry.notice!.waiting}\n`), WAIT_NOTICE_MS) : undefined;
     return held(s.call(method, params).finally(() => { clearTimeout(timer); pending.delete(entry); }));
   };
@@ -624,7 +629,7 @@ export const SPECIAL: [usage: string, summary: string, options?: Record<string, 
     translate,
   }],
   ["settings get [--show-secret]", "The profile's settings: each key settings set takes with its value in effect (unset: the default)", { "show-secret": o("boolean", "Show credentials too") }],
-  ["settings set <key> <json-value> [--force]", "Change one: relays, irohRelays, hyperdhtRelay, iceServers, publicProfiles, online, shareProfile, sendTyping, autoDownloads, serveFiles, daemonPresence, nick. daemonPresence true: contacts see this profile online while a daemon runs it (off by default). <json-value> - (or none, piped) reads it from stdin: a TURN password stays out of ps", { force: o("boolean", "Set a nick even if it looks like a seed, a key or ecash") }],
+  ["settings set <key> <json-value> [--force]", "Change one: relays, irohRelays, hyperdhtRelay, iceServers, publicProfiles, online, shareProfile, sendTyping, autoDownloads, serveFiles, daemonPresence, nick. daemonPresence true: contacts see this profile online while a daemon runs it (off by default). hyperdhtRelay is kept for the apps: this CLI's own HyperDHT does not dial through it. <json-value> - (or none, piped) reads it from stdin: a TURN password stays out of ps", { force: o("boolean", "Set a nick even if it looks like a seed, a key or ecash") }],
   ["engine <method> [json-params | -] [--confirm-real] [--show-secret] [--yes] [--force]", "Any call of the app's engine, with its own parameters (engine --list --verbose names them)", { "confirm-real": o("boolean", "Confirm a Mainnet (real money) spend"), "show-secret": o("boolean", "Print a call's secrets"), yes: o("boolean", "Confirm a call that deletes chats or groups"), force: o("boolean", "Send a text that looks like a secret, or remove a chat (or clear the profile) while a delete for everyone has not reached the contact") }],
   ["engine --list [--verbose]", "The engine's calls", { verbose: o("boolean", "With what each call takes: { linkId, label }, ? for an optional one") }],
   ["call pipe [<chat|call>]", "A call's audio on stdin/stdout: raw s16le mono PCM at the call's rate (e.g. with sox or ffmpeg)"],
@@ -1577,6 +1582,7 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
   if (!target || (spec.message && !message)) throw new CliError("usage", `Missing <${target ? "message" : spec.target}>: ghostly ${spec.usage}`);
   // Before stdin is read and the profile opens: the API's own check answered once a one-shot was online (exit 1).
   timeout(parsed.options);
+  if (spec.target === "group") listAtMost(parsed.options, "mention");
   // Empty (an unset variable in a script), it sent a plain message: an id the chat lacks is exit 3.
   if (parsed.options.reply === "") throw new CliError("usage", "--reply needs a message id");
   // Stdin only when no text word was given at all: `send bob "$line"` with an empty line is no text, not the rest of stdin.
