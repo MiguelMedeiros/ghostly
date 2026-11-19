@@ -209,6 +209,19 @@ describe("renaming a group in the app", () => {
     expect(screen.queryByTestId("group-rename")).not.toBeInTheDocument();
   });
 
+  it("a group with no name yet is \"A group\" in the panel's title, its name, and its picture's button; Rename starts empty", async () => {
+    const unnamed = admin({ name: "", picture: "data:image/jpeg;base64,AA" });
+    fakeEngine.update({ groups: [unnamed] });
+    const { user } = renderApp(<GroupMembersDialog group={unnamed} onClose={() => {}} />);
+    const dialog = screen.getByTestId("group-members-dialog");
+    expect(screen.getByTestId("group-members-name")).toHaveTextContent("A group");
+    expect(dialog).toHaveAccessibleName("A group");
+    expect(screen.getByTestId("group-members-avatar-open")).toHaveAccessibleName("View photo of A group");
+    await user.click(screen.getByTestId("group-rename"));
+    expect(screen.getByTestId("group-rename-input")).toHaveValue("");
+    expect(dialog).toHaveAccessibleName("A group");
+  });
+
   it("the new name in the chat list, and a line naming who renamed it as the roster knows them", async () => {
     fakeEngine.update({ groups: [notAdmin({ name: "Book club" })] });
     const { unmount } = renderApp(<UpdateProvider><Sidebar /></UpdateProvider>);

@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { GhostlyHttpError, LIMITS, parseLocalTarget, VIEWER_PERMISSIONS_POLICY, type ClientRequest, type ClientResponse, type LocalFetch } from "@ghostly/core";
-import { bool, chatOf, node, num, ownChatOf, settingsOf, shownName, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, chatOf, nameKey, node, num, ownChatOf, settingsOf, shownName, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError } from "./errors";
 import { isLive } from "./views";
 
@@ -248,8 +248,26 @@ async function proxy(request: IncomingMessage, response: ServerResponse, chunks:
  */
 function serviceOf(ctx: ApiContext, params: Params): string {
   const serviceId = str(params, "service", true);
-  if (!state(ctx).services.some((s) => s.id === serviceId)) throw new CliError("not_found", `No service ${JSON.stringify(serviceId)} (ghostly service list)`);
+  const { services } = state(ctx);
+  if (!services.some((s) => s.id === serviceId)) throw noService(serviceId, servicesNamed(services, serviceId));
   return serviceId;
+}
+
+/** The ids of the services `given` names by their name, compared as a chat's label is (`nameKey`: one case, one form). */
+function servicesNamed(services: readonly { id: string; name: string }[], given: string): string[] {
+  const key = nameKey(given);
+  return key ? services.filter((s) => nameKey(s.name) === key).map((s) => s.id) : [];
+}
+
+/**
+ * No service of that id. A service's name given instead (`service add "My App"` makes `my-app`) is told which id to
+ * use: before, it read "No service" of a service `service list` shows by that very name. Same code and exit either way.
+ */
+function noService(given: string, named: readonly string[]): CliError {
+  const quoted = JSON.stringify(given);
+  if (!named.length) return new CliError("not_found", `No service ${quoted} (ghostly service list)`);
+  const which = named.length === 1 ? `${named[0]}: use its id` : `${named.length} services, ${named.slice(0, -1).join(", ")} and ${named.at(-1)}: use one of their ids`;
+  return new CliError("not_found", `No service with id ${quoted}. ${quoted} is the name of ${which} (ghostly service list)`);
 }
 
 /**
@@ -285,6 +303,31 @@ function serviceNameOf(params: Params): string {
   return name;
 }
 
+/** `service add`'s name and target, checked with no profile open (api.ts `refuseBeforeStart`). */
+export function serviceShape(params: Params): { name: string; target: string } {
+  const name = serviceNameOf(params);
+  const target = str(params, "target", true);
+  // The engine's own check of the target (core http.ts `parseLocalTarget`), the only one: a query, a fragment, a user
+  // and password or a scheme other than http(s) is the person's input to fix, `bad_request` naming it. Thrown by the
+  // engine, they were plain errors, `engine` (exit 1): "the engine failed" (agents#894). A check of its own here
+  // read `localhost:8080` as the scheme `localhost:`, refused `127.0.0.1:8080` as no URL, and let `127.0.0.2` through
+  // for the engine to refuse in other words.
+  try { parseLocalTarget(target); } catch (error) {
+    const said = error instanceof Error ? error.message : String(error);
+    // Read as the engine reads it (no scheme is http) and named without its user, password, query and fragment: the
+    // parts refused here can hold a secret (a token). One that is no URL at all (a mistyped port) is not repeated: it
+    // has no parts to tell apart, and a token or password in it would be said whole.
+    const text = target.trim();
+    let shown = "";
+    try {
+      const url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `http://${text}`);
+      shown = `: ${url.protocol}//${url.host}${url.pathname}`;
+    } catch { /* Not a URL: not repeated. */ }
+    throw new CliError(/^Only services on this machine/.test(said) ? "refused" : "bad_request", `${said}${shown}`);
+  }
+  return { name, target };
+}
+
 function portError(error: unknown, port: number): unknown {
   const { code } = (error ?? {}) as { code?: unknown };
   if (port && code === "EADDRINUSE") return new CliError("busy", `Port ${port} is in use on this machine: choose another, or leave out --port`);
@@ -297,25 +340,7 @@ export const SERVICE_METHODS: Record<string, Method> = {
     return { services: state(ctx).services.map((s) => ({ id: s.id, name: s.name, target: s.target, enabled: s.enabled, sharedWith: s.sharedWith ?? [], requests: s.requests })) };
   },
   async "service.add"(ctx, params) {
-    const name = serviceNameOf(params);
-    const target = str(params, "target", true);
-    // The engine's own check of the target (core http.ts `parseLocalTarget`), the only one: a query, a fragment, a user
-    // and password or a scheme other than http(s) is the person's input to fix, `bad_request` naming it. Thrown by the
-    // engine, they were plain errors, `engine` (exit 1): "the engine failed" (agents#894). A check of its own here
-    // read `localhost:8080` as the scheme `localhost:`, refused `127.0.0.1:8080` as no URL, and let `127.0.0.2` through
-    // for the engine to refuse in other words.
-    try { parseLocalTarget(target); } catch (error) {
-      const said = error instanceof Error ? error.message : String(error);
-      // Read as the engine reads it (no scheme is http) and named without its user, password, query and fragment: the
-      // parts refused here can hold a secret (a token). One that is no URL at all is named as given.
-      const text = target.trim();
-      let shown = text;
-      try {
-        const url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `http://${text}`);
-        shown = `${url.protocol}//${url.host}${url.pathname}`;
-      } catch { /* Not a URL: named as given. */ }
-      throw new CliError(/^Only services on this machine/.test(said) ? "refused" : "bad_request", `${said}: ${shown}`);
-    }
+    const { name, target } = serviceShape(params);
     // `service`, as the rest of the family answers it; `serviceId` (the engine's key) stays beside it for a release.
     const { serviceId } = node(ctx).addService({ name, target });
     return { service: serviceId, serviceId };

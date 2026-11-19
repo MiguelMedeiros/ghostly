@@ -45,6 +45,22 @@ describe("linksIn", () => {
     expect(linksIn("見て https://a.example/x。看 https://b.example/y，好")).toEqual(["https://a.example/x", "https://b.example/y"]);
     expect(linksIn("هل رأيت https://a.example/x؟ «https://b.example/y»")).toEqual(["https://a.example/x", "https://b.example/y"]);
   });
+
+  // The bubble drew both links; the second was never read, so it could get no preview.
+  it("finds a link written right after that punctuation with no space, as the bubble does", () => {
+    expect(linksIn("見て https://a.example/x。https://b.example/y")).toEqual(["https://a.example/x", "https://b.example/y"]);
+    for (const stop of ["、", "،", "؟"])
+      expect(linksIn(`https://a.example/x${stop}https://b.example/y`), stop).toEqual(["https://a.example/x", "https://b.example/y"]);
+    // A bare scheme before the stop is no link, and leaves the next one whole.
+    expect(linksIn("https://。https://b.example/y")).toEqual(["https://b.example/y"]);
+  });
+
+  it("keeps one link where the bubble does: a path in Chinese or Japanese, a full-width full stop, a space", () => {
+    expect(linksIn("見て https://ja.wikipedia.org/wiki/東京タワー")).toEqual(["https://ja.wikipedia.org/wiki/東京タワー"]);
+    // \uff0e is no stop: a host can be written with it ("a．example" opens a.example), and the bubble reads on.
+    expect(linksIn("https://a.example/x\uff0ehttps://b.example/y")).toEqual(["https://a.example/x\uff0ehttps://b.example/y"]);
+    expect(linksIn("https://a.example/x https://b.example/y")).toEqual(["https://a.example/x", "https://b.example/y"]);
+  });
 });
 
 describe("sanitizePreviewImage", () => {
@@ -79,6 +95,13 @@ describe("parseLinkPreview", () => {
   it("keeps a preview of one of the text's links, compared without tracking parameters", () => {
     expect(parseLinkPreview(preview, text)).toEqual(preview);
     expect(parseLinkPreview({ ...preview, u: "https://news.example/story?id=9&utm_campaign=z" }, text)).toEqual(preview);
+  });
+
+  it("keeps a preview of a link written right after another one's 。, with no space", () => {
+    const second = { ...preview, u: "https://b.example/y" };
+    expect(parseLinkPreview(second, "見て https://a.example/x。https://b.example/y")).toEqual(second);
+    // Still only a link the text has: the run's two links glued together are none of them.
+    expect(parseLinkPreview({ ...preview, u: "https://a.example/x。https://b.example/y" }, "見て https://a.example/x。https://b.example/y")).toBeUndefined();
   });
 
   it("drops a preview whose link is not in the text, so a card never points elsewhere", () => {

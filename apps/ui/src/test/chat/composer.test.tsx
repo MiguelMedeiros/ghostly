@@ -16,7 +16,7 @@ import type { Language } from "../../lib/settings";
 
 // covers: app.composer.attach, app.composer.expressions, app.emoji-picker, chat.paired.emoji, chat.paired.gifs, chat.paired.gifs.categories, chat.paired.gifs.busy
 
-// The emoji panel's data set, here before any panel opens (its loading: emojiPanelLoad.test.tsx).
+// The emoji panel's data set, here before any panel opens (its loading: emojiPanel.test.tsx).
 beforeAll(() => loadEmoji());
 
 const viewport = (width: number, height = 800) => (window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height });
@@ -871,6 +871,19 @@ describe("the composer counts a message's bytes", () => {
     expect(screen.getByTestId("composer-left")).toHaveTextContent("0 B");
     await act(async () => { fireEvent.keyDown(field(), { key: "Enter" }); });
     expect(onSend).toHaveBeenCalledWith("👻".repeat(4_096));
+  });
+
+  it("off the live link, the DHT's count turns amber where the packet stops carrying a text, not only past 256 B", () => {
+    // Its envelope takes about 8 of the 256 bytes once sealed: a 252 B text read "252 / 256 B" in muted ink, then the
+    // DHT refused it (or kept it for live) as one past 256 B.
+    composer({ softBytes: 256 });
+    fireEvent.change(field(), { target: { value: "x".repeat(248) } });
+    expect(screen.getByTestId("dht-byte-count")).toHaveClass("text-text-muted");
+    expect(screen.getByTestId("dht-byte-count")).not.toHaveAttribute("title");
+    fireEvent.change(field(), { target: { value: "x".repeat(252) } });
+    expect(screen.getByTestId("dht-byte-count")).toHaveTextContent("252 / 256 B");
+    expect(screen.getByTestId("dht-byte-count")).toHaveClass("text-warn-ink");
+    expect(screen.getByTestId("dht-byte-count")).toHaveAttribute("title", "About 248 bytes fit the DHT once sealed: shorten it to send it there");
   });
 
   it("off the live link, past 16 KiB the hard count shows instead of the DHT's", () => {

@@ -32,6 +32,8 @@ export const ENGINE_ERRORS = {
   ecashBeingReceived: "This ecash is already being received",
   ecashFeeTakesAll: "The mint keeps all {amount} sats of this ecash as its fee to take it in: nothing was redeemed, and its sender can still take it back",
   ecashOtherUnit: "This ecash is in {unit}: only sat ecash can be redeemed here",
+  // A token's unit is its sender's free text: one that does not look like a unit is not named (`ecashUnitError`).
+  ecashUnnamedUnit: "This ecash is in another unit: only sat ecash can be redeemed here",
   reviewedEcashSpent: "The ecash for this payment was already spent somewhere else. Nothing was sent, and your balance now shows what the mint still holds.",
   reviewedSatsGone: "The sats this payment was reviewed with went to another payment. Nothing was sent: review it again.",
   // A mint that failed (a server error, a closed connection), not refused: nothing happened, and it may work later.
@@ -120,9 +122,19 @@ export function engineText(code: EngineErrorCode, values: EngineErrorValues = {}
 
 export const engineError = (code: EngineErrorCode, values?: EngineErrorValues): EngineError => new EngineError(code, values);
 
+/** A unit as the app names it: a unit's shape (`frames.ts` `isUnit`, in any case), never a token sender's other text. */
+const NAMED_UNIT = "[A-Za-z0-9]{1,12}";
+
+/**
+ * Why ecash of `unit` is not redeemed here. The unit is named only when it looks like one: a token's unit is whatever
+ * its sender wrote, and the line is the app's own (a contact's payment's refusal row, the CLI's answer).
+ */
+export const ecashUnitError = (unit: string): EngineError =>
+  new RegExp(`^${NAMED_UNIT}$`).test(unit) ? engineError("ecashOtherUnit", { unit }) : engineError("ecashUnnamedUnit");
+
 /** What each kind of value looks like in a text: never a space in a host, a network by its name, an amount as digits. */
 const VALUE: Record<string, string> = {
-  host: "(\\S+)", domain: "(\\S+)", chain: "(\\S+)", unit: "(\\S+)", network: "(Mainnet|Testnet)",
+  host: "(\\S+)", domain: "(\\S+)", chain: "(\\S+)", unit: `(${NAMED_UNIT})`, network: "(Mainnet|Testnet)",
   amount: "(\\d[\\d.,\\u00a0\\u202f' ]*?)", fee: "(\\d[\\d.,\\u00a0\\u202f' ]*?)", min: "(\\d[\\d.,\\u00a0\\u202f' ]*?)", max: "(\\d[\\d.,\\u00a0\\u202f' ]*?)",
 };
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

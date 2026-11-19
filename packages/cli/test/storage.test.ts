@@ -431,6 +431,50 @@ describe("persistent IndexedDB", () => {
     expect(await read(second.transaction("messages").objectStore("messages").get(["a", "1"]))).toEqual({ linkId: "a", id: "1" });
   });
 
+  it("lets the writes that wait behind a fold share a sync off the thread, each `complete` once it is on the disk", async () => {
+    // Each was synced in place, one by one: 800 writes that committed during the hourly fold held the daemon 2.9 s.
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    opened.push(store);
+    const d = await db(store.factory);
+    await tx(d, ["messages"], (s) => { s.messages.put({ linkId: "a", id: "0" }); });
+    await store.flush();
+    let reached!: () => void, release!: () => void;
+    const begun = new Promise<void>((resolve) => { reached = resolve; });
+    disk.snapshotSync = () => { disk.snapshotSync = null; reached(); return new Promise<void>((resolve) => { release = resolve; }); };
+    const onThread = syncs.onThread, before = syncs.count, done = disk.synced;
+    // The syncs finished when each transaction's `complete` came: never before the one that covers it.
+    const heard: number[] = [];
+    let synced = () => {};
+    try {
+      const folding = store.compact();
+      await begun;
+      const writes = Array.from({ length: 50 }, (_, at) => tx(d, ["messages"], (s) => { s.messages.put({ linkId: "a", id: `m${at}`, text: `text ${at}` }); })
+        .then(() => { heard.push(disk.synced - done); }));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(heard).toEqual([]);
+      // Their entries are written once the fold is done; with the syncs off the thread held, none may complete yet.
+      disk.held = new Promise<void>((resolve) => { synced = resolve; });
+      release();
+      await folding;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(heard).toEqual([]);
+      disk.held = null;
+      synced();
+      await Promise.all(writes);
+    } finally { release?.(); disk.held = null; synced(); disk.snapshotSync = null; }
+    expect(syncs.onThread - onThread).toBe(0);
+    expect(syncs.count - before).toBeLessThanOrEqual(3);
+    expect(heard).toHaveLength(50);
+    expect(Math.min(...heard)).toBeGreaterThanOrEqual(1);
+
+    // A process killed now keeps all of them.
+    const killed = folder();
+    cpSync(dir, killed, { recursive: true });
+    const again = await db(await open(killed));
+    expect(await read(again.transaction("messages").objectStore("messages").count())).toBe(51);
+  });
+
   it("keeps on close a write nobody waited for: the transaction made in the turn the process leaves", async () => {
     // The engine writes a removed chat, a new name or a service with `void db.…`. fake-indexeddb runs a transaction on
     // a later turn of the event loop: a one-shot command closed in the same turn, and its answer was never on disk.
@@ -1192,22 +1236,37 @@ describe("messages kept in rows.db", () => {
     const store = await openPersistentIndexedDb(dir);
     opened.push(store);
     const d = await db(store.factory);
+    // The schema's fold done first: it takes the trees' layers to SQLite too. Its 250 ms apply timer fired, and the fold
+    // itself ended, however slow the disk is with its snapshot.
+    await applied();
+    await store.flush();
     const apply = vi.spyOn(TreeFile.prototype, "apply");
+    // The batch's 250 ms held while the 20 finish, by the batch and not by the clock: a slow runner (Linux ARM64, under
+    // the whole suite) took longer than that over them, and split them in two.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
       for (let i = 0; i < 20; i++) await tx(d, ["messages"], (s) => { s.messages.put(message(i)); });
       // Read before SQLite has them: from the layers.
       expect(await all(store.factory)).toHaveLength(20);
+      expect(apply).not.toHaveBeenCalled();
+      expect(await entryCount(dir)).toBe(0);
       // Killed now: the journal has them all, and the next start puts them in rows.db.
       const crashed = copyOf(dir);
+      // Not before the batch's 250 ms: a shorter one is a SQLite transaction per entry again.
+      vi.advanceTimersByTime(249);
+      expect(apply).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      // The 20 in one SQLite transaction.
+      expect(apply).toHaveBeenCalledOnce();
+      expect(await entryCount(dir)).toBe(20);
+      expect(await entryCount(dir, "byLink")).toBe(20);
+      vi.useRealTimers();
+      // Opened after: its probe's schema change folds the first store's journal too (the classes are shared).
       const second = await openPersistentIndexedDb(crashed);
       opened.push(second);
       expect(await all(second.factory)).toHaveLength(20);
       expect(await entryCount(crashed)).toBe(20);
-      await vi.waitFor(async () => expect(await entryCount(dir)).toBe(20), { timeout: 2_000, interval: 20 });
-      expect(await entryCount(dir, "byLink")).toBe(20);
-      // The second open's own start is one more.
-      expect(apply.mock.calls.length).toBeLessThanOrEqual(3);
-    } finally { apply.mockRestore(); }
+    } finally { vi.useRealTimers(); apply.mockRestore(); }
   });
 
   it("after a crash, replays what SQLite did not take, and skips what it did", async () => {
@@ -1310,6 +1369,81 @@ describe("messages kept in rows.db", () => {
     const bytes = readFileSync(join(dir, "rows.db"));
     expect(gone.length).toBeGreaterThan(900);
     expect(gone.filter((text) => bytes.includes(`${text} `))).toEqual([]);
+  });
+
+  it("scrubs asked at once (`message delete --purge` x 6) write rows.db again once or twice, and each one's delete is gone", async () => {
+    // Each wrote rows.db whole on the thread: ten at once held a daemon of 100,000 messages 15 s.
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    opened.push(store);
+    const d = await db(store.factory);
+    await tx(d, ["messages"], (s) => { for (let i = 0; i < 6; i++) s.messages.put({ linkId: "chat", id: `m${i}`, text: `purged-${i}-secret` }); });
+    await store.compact();
+    const scrubs = vi.spyOn(TreeFile.prototype, "scrub");
+    try {
+      await Promise.all(Array.from({ length: 6 }, (_, i) => tx(d, ["messages"], (s) => s.messages.delete(["chat", `m${i}`])).then(() => store.compact({ scrub: true }))));
+      expect(scrubs.mock.calls.length).toBeLessThanOrEqual(2);
+    } finally { scrubs.mockRestore(); }
+    d.close();
+    const bytes = readFileSync(join(dir, "rows.db"));
+    for (let i = 0; i < 6; i++) expect(bytes.includes(`purged-${i}-secret`), `m${i}`).toBe(false);
+  });
+
+  /** A store whose messages m0…m{n-1} say `purged-<i>-secret`, folded, and whether rows.db still holds message i's text. */
+  const purgeable = async (n: number) => {
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    opened.push(store);
+    const d = await db(store.factory);
+    await tx(d, ["messages"], (s) => { for (let i = 0; i < n; i++) s.messages.put({ linkId: "chat", id: `m${i}`, text: `purged-${i}-secret` }); });
+    await store.compact();
+    return { store, d, gone: (i: number) => !readFileSync(join(dir, "rows.db")).includes(`purged-${i}-secret`) };
+  };
+
+  it("a scrub asked after the one before answered scrubs again: its delete is gone from rows.db too", async () => {
+    const { store, d, gone } = await purgeable(2);
+    await tx(d, ["messages"], (s) => s.messages.delete(["chat", "m0"]));
+    await store.compact({ scrub: true });
+    await tx(d, ["messages"], (s) => s.messages.delete(["chat", "m1"]));
+    await store.compact({ scrub: true });
+    d.close();
+    expect([gone(0), gone(1)]).toEqual([true, true]);
+  });
+
+  it("a scrub asked while another's snapshot is written does not join it: that one captured the store before its delete", async () => {
+    const { store, d, gone } = await purgeable(1);
+    let reached!: () => void, release!: () => void;
+    const begun = new Promise<void>((resolve) => { reached = resolve; });
+    disk.snapshotSync = () => { disk.snapshotSync = null; reached(); return new Promise<void>((resolve) => { release = resolve; }); };
+    try {
+      const first = store.compact({ scrub: true });
+      await begun;
+      // Its `complete` waits behind the fold (a write committed meanwhile is on the disk only after it): not awaited here.
+      const deleted = tx(d, ["messages"], (s) => s.messages.delete(["chat", "m0"]));
+      const second = store.compact({ scrub: true });
+      // Its settle gives up (CLOSE_WAIT_MS) while the first is still held: it asks while that one runs.
+      const now = Date.now.bind(Date);
+      const clock = vi.spyOn(Date, "now").mockImplementation(() => now() + 6_000);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      clock.mockRestore();
+      release();
+      await Promise.all([first, deleted, second]);
+    } finally { disk.snapshotSync = null; }
+    d.close();
+    expect(gone(0)).toBe(true);
+  });
+
+  it("a scrub that failed is not joined by the purges after it: the next one scrubs", async () => {
+    const { store, d, gone } = await purgeable(3);
+    const scrubs = vi.spyOn(TreeFile.prototype, "scrub").mockImplementationOnce(() => { throw new Error("disk full"); });
+    try {
+      const results = await Promise.allSettled([0, 1].map((i) => tx(d, ["messages"], (s) => s.messages.delete(["chat", `m${i}`])).then(() => store.compact({ scrub: true }))));
+      expect(results[0]!.status).toBe("rejected");
+    } finally { scrubs.mockRestore(); }
+    await tx(d, ["messages"], (s) => s.messages.delete(["chat", "m2"]));
+    await store.compact({ scrub: true });
+    d.close();
+    expect([gone(0), gone(1), gone(2)]).toEqual([true, true, true]);
   });
 
   it("a deleted chat and its messages leave the journal once the snapshot is an hour old, at a start, a write or a close", async () => {
@@ -1550,6 +1684,37 @@ describe("messages kept in rows.db", () => {
     expect({ file: await read(t.objectStore("files").get("f1")), state: await read(t.objectStore("fileState").get("f1")) }).toEqual({ file: undefined, state: undefined });
   });
 
+  it("a fold waits for a transaction running on a store held in memory: what it wrote is not kept when it then aborts", async () => {
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    opened.push(store);
+    const d = await db(store.factory);
+    await tx(d, ["messages"], (s) => { s.messages.put({ linkId: "a", id: "1" }); });
+    await store.flush();
+    // The snapshot an hour old: the delete below folds the store.
+    const then = Date.now() - 2 * 60 * 60_000;
+    utimesSync(join(dir, "snapshot.bin"), then / 1000, then / 1000);
+    const folded = () => statSync(join(dir, "snapshot.bin")).mtimeMs > then + 60_000;
+    // A settings write that goes on with requests, turn after turn, until the fold is done (or a second), then aborts.
+    const running = d.transaction("settings", "readwrite");
+    const settings = running.objectStore("settings");
+    settings.put("aborted secret", "secret");
+    const until = Date.now() + 1_000;
+    const aborted = new Promise<void>((resolve) => {
+      running.onabort = () => resolve();
+      const next = () => { settings.get("secret").onsuccess = () => (folded() || Date.now() > until ? running.abort() : next()); };
+      next();
+    });
+    await tx(d, ["messages"], (s) => { s.messages.delete(["a", "1"]); });
+    await aborted;
+    await store.flush();
+    expect(folded()).toBe(true);
+    expect(readFileSync(join(dir, "snapshot.bin")).includes("aborted secret")).toBe(false);
+    await store.close();
+    const again = await db(await open(dir));
+    expect(await read(again.transaction("settings").objectStore("settings").get("secret"))).toBeUndefined();
+  });
+
   it("transactions that wait behind the fold are all or nothing in a process killed just before its snapshot takes the old one's place, or between their entries after", async () => {
     const profile = (factory: IDBFactory) => new Promise<IDBDatabase>((resolve, reject) => {
       const request = factory.open("ghostly", 1);
@@ -1602,6 +1767,31 @@ describe("messages kept in rows.db", () => {
     }
     // The fold holds the delete, and rows.db with it: not the file's record back without its state.
     expect(found).toEqual({ "before the rename": { file: undefined, state: undefined }, "between the entries": { file: undefined, state: undefined } });
+  });
+
+  it("a fold whose VACUUM or rename failed is not, in a process killed later, what the transactions completed since come back to", async () => {
+    const errors = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const found: Record<string, unknown> = {};
+    try {
+      for (const fault of ["vacuum", "rename"] as const) {
+        const dir = folder();
+        const store = await openPersistentIndexedDb(dir);
+        opened.push(store);
+        const d = await db(store.factory);
+        await tx(d, ["messages", "settings"], (s) => { s.messages.put({ linkId: "a", id: "1", text: "before" }); s.settings.put("before", "name"); });
+        // A purge's fold with no room for VACUUM's copy, or a backup's whose rename is refused: rows.db names its snapshot.
+        const scrub = fault === "vacuum" ? vi.spyOn(TreeFile.prototype, "scrub").mockImplementationOnce(() => { throw new Error("database or disk is full"); }) : null;
+        if (fault === "rename") faults.next.push("rename");
+        await expect(store.compact({ scrub: fault === "vacuum" })).rejects.toThrow();
+        scrub?.mockRestore();
+        // Completed after it: the message's half in rows.db, the setting's in the journal.
+        await tx(d, ["messages", "settings"], (s) => { s.messages.put({ linkId: "a", id: "2", text: "after" }); s.settings.put("after", "name"); });
+        await store.flush();
+        const t = (await db(await open(copyOf(dir)))).transaction(["messages", "settings"]);
+        found[fault] = { name: await read(t.objectStore("settings").get("name")), message: (await read(t.objectStore("messages").get(["a", "2"])) as { text?: string } | undefined)?.text };
+      }
+    } finally { errors.mockRestore(); faults.next.length = 0; }
+    expect(found).toEqual({ vacuum: { name: "after", message: "after" }, rename: { name: "after", message: "after" } });
   });
 
   it("a put a unique index refuses in a store kept on disk leaves the store writable by the next transaction", async () => {
@@ -1668,6 +1858,48 @@ describe("messages kept in rows.db", () => {
     const elsewhere = await openPersistentIndexedDb(copy, { rowsOnDisk: () => false });
     opened.push(elsewhere);
     expect(await all(elsewhere.factory)).toEqual(values);
+  });
+
+  it("gives back as it was an object a contact's data gave the Blob marker's key: after a kill, a restart, and a backup restored", async () => {
+    const marked = { t: "group-msg", c: "AAAA", __ghostlyBlob: "x" };
+    const lookalike = { __ghostlyBlob: { type: "text/plain", bytes: new Uint8Array([104, 105]) } };
+    const kept = { __ghostlyBlob: { kept: { a: 1 } } };
+    const group = { store: [marked, lookalike, kept], file: new Blob(["hi"], { type: "text/plain" }) };
+    const messages = [{ ...message(0), ...marked }, { ...message(1), extra: lookalike }, { ...message(2), extra: kept }];
+    const same = async (factory: IDBFactory) => {
+      const d = await db(factory);
+      try {
+        const value = await read(d.transaction("settings").objectStore("settings").get("group")) as typeof group;
+        expect(value.store).toEqual(group.store);
+        expect(value.file).toBeInstanceOf(Blob);
+        expect(await value.file.text()).toBe("hi");
+      } finally { d.close(); }
+      expect(await all(factory)).toEqual(messages);
+    };
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    opened.push(store);
+    await tx(await db(store.factory), ["messages", "settings"], (s) => { for (const m of messages) s.messages.put(m); s.settings.put(group, "group"); });
+    await store.flush();
+    // Killed before rows.db took the messages: the next start replays them into it.
+    const crashed = copyOf(dir);
+    const replayed = await openPersistentIndexedDb(crashed);
+    opened.push(replayed);
+    await same(replayed.factory);
+    await applied();
+    await store.compact();
+    await store.close();
+    const again = await openPersistentIndexedDb(dir);
+    opened.push(again);
+    await same(again.factory);
+
+    const exported = join(folder(), "store.bin");
+    await again.exportSnapshot(exported);
+    const copy = folder();
+    cpSync(exported, join(copy, "snapshot.bin"));
+    const restored = await openPersistentIndexedDb(copy);
+    opened.push(restored);
+    await same(restored.factory);
   });
 
   it("a backup's store carries no chat's ratchet (WISP 4xx), and keeps the rest of the chat", async () => {
