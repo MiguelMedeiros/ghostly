@@ -22,7 +22,7 @@ vi.mock("../../hooks/useWebRTC", async () => {
     useWebRTC: (options: Parameters<typeof real.useWebRTC>[0]) => {
       const webrtc = real.useWebRTC(options);
       seen.startCall = webrtc.startCall;
-      return seen.offerOut === undefined ? webrtc : { ...webrtc, ringingOut: seen.offerOut && webrtc.callState === "offering" };
+      return seen.offerOut === undefined ? webrtc : { ...webrtc, offerSent: seen.offerOut && webrtc.callState === "offering" };
     },
   };
 });

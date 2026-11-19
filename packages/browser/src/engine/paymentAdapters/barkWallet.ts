@@ -3,10 +3,9 @@ import { awayFrom, refuseAway, requireTurn } from "./away";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import type { PaymentTarget, WalletNetwork } from "@ghostly/core";
 import { store, STORES, transact, wrap } from "../../shared/idb";
-import type { WalletMode } from "../../shared/mints";
 import { BARK_NETWORKS, BarkAdapter, barkDatabase, serverInfo, type BarkConfig, type BarkExpiry } from "./bark";
 import { loadBarkSdk, type BarkNetwork, type BarkSdk } from "./barkSdk";
-import { RETIRE_READ_MS } from "./arkWallet";
+import { RETIRE_READ_MS, barkMode } from "./walletModes";
 import { ModeChanged, ModeGate, WrongNetworkError, networkLabel } from "./modeGate";
 import { walletKey } from "./walletNetworks";
 import { viewNews } from "./viewNews";
@@ -52,7 +51,7 @@ export const SECOND_TERMS = "https://second.tech/terms";
 const TERMS: Record<string, string> = { [MAINNET_BARK.provider]: SECOND_TERMS };
 /** The defaults a new wallet of this network is made with, in one click. */
 export const barkDefaults = (network: WalletNetwork): BarkCreate => network === "testnet" ? TESTNET_BARK : MAINNET_BARK;
-export const barkMode = (network: BarkNetwork): WalletMode => network === "bitcoin" ? "mainnet" : "testnet";
+export { barkMode };
 /**
  * An SDK error as a person reads it: the WebAssembly's own words up to where it starts quoting JavaScript values and
  * stack frames ("…: JsValue(TypeError: Failed to fetch at __wbg_fetch… wasm-function[3134]…"), bounded.

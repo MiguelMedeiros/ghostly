@@ -1,4 +1,0 @@
----
-section: Fixed / CLI
----
-- `chat connect` that times out right after a daemon starts, before any attempt to reach the contact has ended, now says the chat is still resuming after the start. It said "the contact did not answer", with the contact online. Later, a contact that reads online with no attempt ended yet is said to be online. `chat transport <chat> iroh` (or webrtc, hyperdht) that this app is not running now names the way out: the transports both apps run, or auto, and for Iroh relays that did not answer, where the relays are set. A group given to `chat connect`, `chat disconnect`, `chat transport` or `chat wait` now says a group connects through its members' chats, with no transport of its own, and names `ghostly group show`, instead of pointing to `ghostly chat list`, which never lists it. The error codes and exit statuses are unchanged.

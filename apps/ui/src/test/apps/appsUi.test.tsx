@@ -1321,6 +1321,31 @@ describe("with the apps flag on", () => {
     await waitFor(() => expect(screen.queryByTestId("app-store")).not.toBeInTheDocument());
   });
 
+  it("a store's Remove names the installed apps it took down, listed or not, and says their takedown ends with it", async () => {
+    const store = (apps: { ref: string; sequence: number; digest: string; urls: string[]; title: string; tagline: string }[]) => ({ key: "s", fingerprint: "abcd efgh ijkl mnop",
+      url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json", preloaded: false, name: "Hunt", kind: "curated" as const, sequence: 2,
+      expires: 2_000_000_000, expired: false, fetchedAt: 1, apps, removed: [{ ref: REF, digest: DIGEST, reason: "It steals your messages", at: 1 }] });
+    let stores = [store([])];
+    fakeEngine.on("appList", () => [installed({ run: { status: "removed", by: [{ store: "s", name: "Hunt", reason: "It steals your messages", at: 1 }] } })])
+      .on("appStoreList", () => stores).on("appCheckUpdates", () => []);
+    const { user, unmount } = renderApp(<Apps />, { route: "/apps" });
+    await user.click(await screen.findByTestId("app-store-remove"));
+    // No longer listed: the question named no app, and Remove gave Chess its Open back with no word.
+    let question = screen.getByTestId("app-store-remove-question");
+    expect(question).toHaveTextContent("Chess");
+    expect(question).toHaveTextContent("took down");
+    expect(question).toHaveTextContent("ends that takedown");
+    unmount();
+
+    // Still listed (a newer version), it is named once, as taken down, not only as an app that gets no more takedowns.
+    stores = [store([{ ref: REF, sequence: 8, digest: "b".repeat(43), urls: [URL_], title: "Chess", tagline: "Play chess with a contact" }])];
+    renderApp(<Apps />, { route: "/apps" });
+    await user.click(await screen.findByTestId("app-store-remove"));
+    question = screen.getByTestId("app-store-remove-question");
+    expect(question).toHaveTextContent("ends that takedown");
+    expect(question).not.toHaveTextContent("updates or takedowns");
+  });
+
   it("a store that lists none of the installed apps says only how to get it back", async () => {
     fakeEngine.on("appList", () => []).on("appStoreList", () => [{ key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json",
       preloaded: false, name: "Hunt", kind: "curated", sequence: 1, expires: 2_000_000_000, expired: false, fetchedAt: 1, apps: [], removed: [] }])

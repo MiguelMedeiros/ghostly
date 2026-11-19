@@ -454,6 +454,17 @@ describe("chat disconnect --hold", () => {
     expect(await failure("Bob", "text")).toMatchObject({ code: "timeout", message: "Timed out after 1 s waiting for chat Bob to carry text" });
   });
 
+  // A hold is no choice of this side's: it said "on DHT only on this side: choose a live method first (chat transport
+  // auto)", and that only lifted the hold while the contact's choice kept the chat off its live link.
+  it("chat wait --until live on a held chat the contact keeps on DHT only names the contact's choice", async () => {
+    const { ctx, setLink } = fake();
+    await callApi(ctx, "chat.disconnect", { chat: "Bob", hold: 30 });
+    setLink("chat-two", { dhtDelivery: { mode: "dht", peerMode: "dht", authenticated: true, maxTextBytes: 256 } });
+    const failed = await callApi(ctx, "chat.wait", { chat: "Bob", timeout: 1 }).then(() => undefined, (error: unknown) => error as CliError);
+    expect(failed?.code).toBe("timeout");
+    expect(failed?.message).toBe("Timed out after 1 s waiting for chat Bob to be live. Your contact keeps this chat on DHT only: it goes live once they choose a live method. Short texts still go on the DHT");
+  });
+
   // A `chat transport dht` chosen during a hold was taken back when the hold's time was up, and one that left DHT
   // only kept `heldUntil` in `chat show` while the chat was live, then said it was released when nothing was held.
   it("ends when the chat's transport is chosen meanwhile, and leaves that choice as it is", async () => {
