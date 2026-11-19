@@ -261,11 +261,11 @@
   },
   "media": {
     "downloadSize": "Scarica {{size}}",
-    "noRoom": "Spazio insufficiente: {{size}} liberi",
+    "noRoom": "Spazio insufficiente: restano {{size}}",
     "noRoomToPlay": "Spazio libero su disco insufficiente per riprodurlo qui. Scaricalo.",
     "notYet": "Si riproduce dopo l'invio.",
     "positionOf": "{{position}} di {{duration}}",
-    "wantsToSend": "{{name}} vuole inviarlo · {{size}} liberi"
+    "wantsToSend": "{{name}} vuole inviarlo · restano {{size}}"
   },
   "menu": {
     "continueNew": "Continua in una nuova chat",

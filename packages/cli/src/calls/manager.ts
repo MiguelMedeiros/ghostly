@@ -3,7 +3,7 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { answersOffer, callSignalHeardAt, parseCallSignal, signalHasVideo, BURST_RING_MS, CALL_SIGNAL_MAX_AGE_MS, QUICK_REDIAL_MS, type CallSignal } from "@ghostly/core";
 import type { EngineState, LinkView, Settings } from "@ghostly/browser/shared/types";
-import { findChat, findOwnNamedChat } from "../apiKit";
+import { dhtOnly, findChat, findOwnNamedChat } from "../apiKit";
 import { CliError } from "../errors";
 import { AudioSocket, audioSocketPath, clearAudioSockets, feedQueue, sharedFolder } from "./audioSocket";
 import { callIceServers, CallMedia, callUsesTurn, EarlyAnswer, loadCallStack, type CallStack, type MediaOptions } from "./media";
@@ -876,24 +876,31 @@ export class CallManager {
   /**
    * A chat by id, contact key, prefix or name (the API's rules, `findChat`); a group's says it is one. By its id (as
    * events name it, and a call's own chat), only that chat's view is built: a call placed and hung up built every chat's
-   * five times, one rung and answered six, ~0.2 s of the daemon's thread at 2,000 chats.
+   * five times, one rung and answered six, ~0.2 s of the daemon's thread at 2,000 chats. `onlyChat`: as `findChat`.
    */
-  private chatOf(ref: string): LinkView {
+  private chatOf(ref: string, onlyChat?: string): LinkView {
     const byId = this.link(ref);
     if (byId) return byId;
     const { links, groups } = this.host.engine.getState();
-    return findChat(links, ref, groups);
+    return findChat(links, ref, groups, onlyChat);
   }
 
   /** The chat, if a call can go in it now; else why not (the engine's reason). */
   private callable(ref: string): LinkView {
-    const link = this.chatOf(ref);
+    // A name more than one group has says a call is a chat's: no command calls a group (`group call` names its node).
+    const link = this.chatOf(ref, "a call goes to a contact, in their chat");
     // A one-shot's chat is not live yet, and never would be in time: it said "Calls need a live connection" before
     // the daemon it needs (`stack`).
     if (this.host.answers === false) throw new CliError("unavailable", CALLS_NEED_DAEMON);
     if (!link.profile) throw new CliError("unavailable", "Calls are in chats made since 0.4 (the chat session): this is a compatibility chat");
     // Not live (the contact's app closed or asleep): the engine's words alone left the person with nothing to do next.
     if (link.callsUnavailable === CALLS_NEED_LIVE) {
+      // On DHT only (either side's choice) no session ever opens: say whose choice it is, as `chat connect` does, not a
+      // wait that never ends. Still `unavailable`, this command's code.
+      try { dhtOnly(link); } catch (error) {
+        if (!(error instanceof CliError)) throw error;
+        throw new CliError("unavailable", `${CALLS_NEED_LIVE}. ${error.message}`, { chat: link.id, ...error.details });
+      }
       const shown = /^[\w.:-]+$/.test(link.label ?? "") ? link.label! : link.id;
       throw new CliError("unavailable", `${CALLS_NEED_LIVE}, and your contact's app is not connected now: ghostly chat wait ${shown} --until live waits for it, then call again`, { chat: link.id });
     }

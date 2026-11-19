@@ -9,9 +9,10 @@ const dirs: string[] = [];
 
 /**
  * The chunks today's build keeps for later, each a file of its own: the online-only ones, a group call, OpenPGP, the
- * Lightning and on-chain sources' clients.
+ * Lightning and on-chain sources' clients, the wallets of each kind.
  */
-const LATER = ["pubky-a1.js", "keet-identity-key-b2.js", "esm-a7.js", "usdt-c3.js", "arkade-d4.js", "groupCallLivekit-e5.js", "openpgp.min-f6.js", "lnd-g1.js", "coreLightning-g2.js", "webln-g3.js", "bdk-g4.js", "breez-g5.js"];
+const LATER = ["pubky-a1.js", "keet-identity-key-b2.js", "esm-a7.js", "usdt-c3.js", "arkade-d4.js", "groupCallLivekit-e5.js", "openpgp.min-f6.js", "lnd-g1.js", "coreLightning-g2.js", "webln-g3.js", "bdk-g4.js", "breez-g5.js",
+  "arkWallet-h1.js", "barkWallet-h2.js", "fedimintWallet-h3.js", "fedimintSdk-h4.js", "fedimint-h5.js", "sparkWallet-h6.js", "usdtWallet-h7.js"];
 
 interface Page { src: string[]; preload?: string[] }
 
@@ -140,6 +141,20 @@ describe("check-web-first-load", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("No lnd-*.js in assets/: it was folded into another chunk, likely main");
     expect(result.stderr).toContain("No bdk-*.js in assets/");
+  });
+
+  it("fails a wallet class imported statically, which folds it into main", () => {
+    const result = check(dist(TODAY, SIGN_IN, { assets: LATER.filter((file) => !file.startsWith("fedimintWallet-")) }));
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("No fedimintWallet-*.js in assets/: it was folded into another chunk, likely main");
+  });
+
+  it("passes a later chunk with a facade of its name beside it, passing on its exports to a dynamic import", () => {
+    // What the build leaves for the Fedimint wallet, imported both on its own and with its SDK loader.
+    const facade = `export{t as FedimintWallet,n as MAX_FEDERATIONS}from"./fedimintWallet-h3.js";`;
+    const result = check(dist(TODAY, SIGN_IN, { assets: [...LATER, "fedimintWallet-h8.js"], text: { "fedimintWallet-h8.js": facade } }));
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
   });
 
   it("fails the regtest fakes in the first load, which a release build leaves out", () => {

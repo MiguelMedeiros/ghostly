@@ -8,7 +8,7 @@ import {
 } from "../src/didDht";
 import { createIdentity } from "../src/identity";
 import { MAX_DNS_PACKET_BYTES, openRelayPayload, PacketTooLargeError } from "../src/pkarr";
-import { DEFAULT_RELAYS, SLOW_MS } from "../src/relay";
+import { DEFAULT_RELAYS } from "../src/relay";
 
 // covers: did.dht.document
 
@@ -319,34 +319,23 @@ describe("resolveDidDht", () => {
     expect(resolved.metadata.updated).toBe(new Date(seq * 1000).toISOString());
   });
 
-  it("does not wait for a relay that hangs once a packet checks out, but takes a newer one that comes within SLOW_MS", async () => {
+  it("waits for every relay that answers within the fetch's timeout, so a slower one's newer packet wins", async () => {
     vi.useFakeTimers();
     try {
-      const newer = signDidDhtPacket(identity, encodeDidDhtPacket(didDhtDocument(identity.publicKey)), seq + 1);
-      const newest = signDidDhtPacket(identity, encodeDidDhtPacket(didDhtDocument(identity.publicKey)), seq + 2);
-      /** Relays by URL: a payload and when it comes, or never. */
-      const timed = (answers: Record<string, [Uint8Array, number] | "hangs">): DidDhtFetch => async (url) => {
-        const answer = answers[new URL(url).origin];
-        if (answer === "hangs") return new Promise(() => {});
-        await new Promise((resolve) => setTimeout(resolve, answer[1]));
-        return { status: 200, bytes: answer[0] };
+      const ended = signDidDhtPacket(identity, encodeDidDhtDeactivated(identity.publicKey), seq + 1);
+      // The relay with the older packet answers at once, the one with the deactivation 3.5 s later (the fetch allows 10 s).
+      const fetch: DidDhtFetch = async (url) => {
+        const late = new URL(url).origin === "https://b.test";
+        await new Promise((resolve) => setTimeout(resolve, late ? 3_500 : 0));
+        return { status: 200, bytes: late ? ended : payload };
       };
-      const order = ["https://a.test", "https://b.test", "https://c.test"];
-      const started = Date.now();
-      let tookMs = -1;
-      const hung = resolveDidDht(did, { fetch: timed({ "https://a.test": [payload, 0], "https://b.test": "hangs", "https://c.test": [newer, SLOW_MS - 500] }), relays: order });
-      void hung.then(() => { tookMs = Date.now() - started; });
-      await vi.advanceTimersByTimeAsync(SLOW_MS - 1);
-      expect(tookMs).toBe(-1);
+      let settled = false;
+      const resolving = resolveDidDht(did, { fetch, relays: ["https://a.test", "https://b.test"] });
+      void resolving.finally(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(3_499);
+      expect(settled).toBe(false);
       await vi.advanceTimersByTimeAsync(1);
-      expect(tookMs).toBe(SLOW_MS);
-      await expect(hung).resolves.toMatchObject({ relay: "https://c.test", metadata: { versionId: String(seq + 1) } });
-
-      // A newer packet later than that is not waited for: the next check reads it.
-      const late = resolveDidDht(did, { fetch: timed({ "https://a.test": [payload, 0], "https://b.test": [newest, 10_000] }), relays: order.slice(0, 2) });
-      await vi.advanceTimersByTimeAsync(SLOW_MS);
-      await expect(late).resolves.toMatchObject({ relay: "https://a.test", metadata: { versionId: String(seq) } });
-      await vi.advanceTimersByTimeAsync(10_000);
+      await expect(resolving).resolves.toMatchObject({ relay: "https://b.test", metadata: { versionId: String(seq + 1), deactivated: true } });
     } finally {
       vi.useRealTimers();
     }
