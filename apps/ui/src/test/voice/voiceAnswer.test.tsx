@@ -84,4 +84,16 @@ describe("a 1:1 voice message that needs an answer or is on its way", () => {
     fireEvent.click(screen.getByTestId("voice-cancel"));
     await vi.waitFor(() => expect(lastAction()).toEqual({ linkId: "link-1", fileId: id, action: "cancel" }));
   });
+
+  // They took taps on 20 px of height on a phone, under a file's 44 px Accept, Decline, Pause, Resume and Cancel.
+  it("Download, Decline, Pause, Resume and Cancel are a thumb's height on a phone, as a file's are", () => {
+    const offer = voice();
+    const moving = voice();
+    const paused = voice();
+    const transfer = (stage?: "asking" | "paused") => ({ state: "transferring" as const, stage, direction: "in" as const, transferred: stage === "asking" ? 0 : 34 * MB, size: 86 * MB });
+    fakeEngine.update({ links: [linkView({ id: "link-1" })], transfers: { [offer.file!.id]: transfer("asking"), [moving.file!.id]: transfer(), [paused.file!.id]: transfer("paused") } });
+    for (const message of [offer, moving, paused]) show(message);
+    for (const id of ["voice-download", "voice-decline", "voice-pause-transfer", "voice-resume-transfer"]) expect(screen.getByTestId(id), id).toHaveClass("max-md:min-h-11", "max-md:px-4");
+    for (const cancel of screen.getAllByTestId("voice-cancel")) expect(cancel).toHaveClass("max-md:min-h-11", "max-md:px-4");
+  });
 });

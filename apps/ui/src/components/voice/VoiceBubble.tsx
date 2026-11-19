@@ -34,8 +34,8 @@ import { downloadFile, downloadName } from "../../lib/fileDownload";
 type PlayState = "idle" | "loading" | "playing" | "paused";
 
 const FORMATS: Record<string, string> = { "audio/webm": "WebM", "audio/ogg": "Ogg", "audio/mp4": "M4A", "audio/x-m4a": "M4A", "audio/mpeg": "MP3", "audio/aac": "AAC", "audio/wav": "WAV" };
-/** A file answer under the waveform (Decline, Pause, Resume, Cancel), as AudioBubble draws it. */
-const pill = `text-xs px-2.5 py-0.5 rounded-full bg-black/20 hover:bg-black/30 border-none ${FORCED_EDGE} text-inherit cursor-pointer transition-colors`;
+/** A file answer under the waveform (Decline, Pause, Resume, Cancel): on a phone 44 px tall, as FileBubble's. */
+const pill = `text-xs px-2.5 py-0.5 max-md:min-h-11 max-md:px-4 rounded-full bg-black/20 hover:bg-black/30 border-none ${FORCED_EDGE} text-inherit cursor-pointer transition-colors`;
 const formatOf = (mime: string) => FORMATS[mime.split(";")[0]!.trim().toLowerCase()] ?? (mime || "unknown");
 
 /** What went wrong, for whoever debugs the next failure: the console in dev builds, `data-error` always. */
@@ -566,7 +566,7 @@ export function VoiceBubble({ file, sender, peerName: named, timestamp }: { file
         <div className="mt-1.5 px-1" data-testid="voice-offer">
           <div className="flex items-center gap-2">
             <button type="button" data-testid="voice-download" onClick={() => run(() => platform!.fileAction!(file.id, "accept"))}
-              className={`text-xs px-3 py-1 rounded-full bg-accent text-on-accent border-none ${FORCED_EDGE} cursor-pointer`}>
+              className={`text-xs px-3 py-1 max-md:min-h-11 max-md:px-4 rounded-full bg-accent text-on-accent border-none ${FORCED_EDGE} cursor-pointer`}>
               {t("chat.media.downloadSize", { size: formatFileSize(file.size, t) })}
             </button>
             {!group && <button type="button" data-testid="voice-decline" onClick={() => run(() => platform!.fileAction!(file.id, "decline"))} className={pill}>{t("chat.file.decline")}</button>}
