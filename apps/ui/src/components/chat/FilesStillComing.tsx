@@ -26,22 +26,26 @@ export function FilesStillComing({ except, open: opened = false }: { except: str
   const [open, setOpen] = useState(false);
   const [problem, setProblem] = useState("");
   const coming = useEngineValue((state) => filesStillComing(state?.transfers, state?.links, except));
+  // Which files are listed, without what is left of each: that changes on every progress tick of a file still coming.
+  const held = useEngineValue((state) => filesStillComing(state?.transfers, state?.links, except).map(({ fileId, linkId }) => ({ fileId, linkId })).sort((a, b) => a.fileId.localeCompare(b.fileId)));
   const links = useEngineValue((state) => state?.links?.map(({ id, label, peerNick, peerPubKeyZ32 }) => ({ id, label, peerNick, peerPubKeyZ32 })));
-  // Each chat's stored copy read once per list: the chat's name as the list shows it, and the file's from its message.
-  const shown = useMemo(() => {
+  // Each chat's stored copy read once per set of files listed, not per tick: the chat's name as the list shows it, and
+  // the file's from its message.
+  const names = useMemo(() => {
     const sessions = new Map<string, ReturnType<typeof loadSession>>();
     const session = (linkId: string) => {
       if (!sessions.has(linkId)) sessions.set(linkId, loadSession(linkId));
       return sessions.get(linkId);
     };
-    return coming.map((file) => {
+    return new Map(held.map((file) => {
       const stored = session(file.linkId);
       const link = links?.find((l) => l.id === file.linkId);
       const chat = contactName(stored ?? undefined) || link?.label || link?.peerNick || t("common.unnamedContact", { key: contactTag(link?.peerPubKeyZ32 ?? file.linkId) });
       const name = stored?.messages.find((m) => m.file?.id === file.fileId)?.file?.name || t("chat.file.comingUnnamed");
-      return { ...file, chat, name };
-    });
-  }, [coming, links, t]);
+      return [file.fileId, { chat, name }];
+    }));
+  }, [held, links, t]);
+  const shown = coming.map((file) => ({ ...file, chat: "", name: "", ...names.get(file.fileId) }));
   if (!shown.length) return null;
   const expanded = opened || open;
   const cancel = (fileId: string) => {

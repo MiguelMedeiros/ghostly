@@ -1,16 +1,24 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FileBubble } from "../../components/FileBubble";
+import { AudioBubble } from "../../components/audio/AudioBubble";
 import { VideoBubble } from "../../components/video/VideoBubble";
 import { servicesPlatform, type FileTransferState } from "../../lib/platform";
 import type { Language } from "../../lib/settings";
 import { saveSession } from "../../lib/storage";
 import type { ChatFile } from "../../lib/types";
-import { fakeEngine, linkView } from "../fakeEngine";
+import { fakeEngine, groupView, linkView } from "../fakeEngine";
 import { everythingOnScreen } from "../onScreen";
 import { renderApp } from "../render";
 
 // covers: files.large.offer
+
+// Which chats' stored copies the list reads, to see it does not read them again on each progress tick.
+const reads = vi.hoisted(() => [] as string[]);
+vi.mock("../../lib/storage", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../../lib/storage")>();
+  return { ...real, loadSession: (id: string) => { reads.push(id); return real.loadSession(id); } };
+});
 
 /**
  * An offer that does not fit beside the files already taken that are still coming: Accept's refusal said "wait for them
@@ -138,5 +146,36 @@ describe("an offer refused for the files still coming names them", () => {
     fireEvent.click(screen.getByTestId("video-accept"));
     await waitFor(() => expect(rows()).toHaveLength(2));
     expect(rows()[0]).toHaveTextContent("backup.iso from Bob: 24.0 MB still to come");
+  });
+
+  it("an audio offer refused the same way lists them too; a group's audio offer lists none", async () => {
+    world();
+    const view = renderApp(<AudioBubble file={offer({ name: "talk.mp3", mime: "audio/mpeg" })} sender="peer" peerName="Ana" />);
+    fireEvent.click(screen.getByTestId("audio-accept"));
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    expect(rows()[0]).toHaveTextContent("backup.iso from Bob: 24.0 MB still to come");
+    view.unmount();
+    // A group's file does not hold the room counted here (`ChatFiles.stillToCome`): no list, before or after Accept.
+    world();
+    act(() => fakeEngine.update({ groups: [groupView({ id: "g1" })], transfers: { ...fakeEngine.state.transfers, "group-g1-in-talk": taken(30 * MB, 0, { stage: "asking", room: 4 * MB }) } }));
+    renderApp(<AudioBubble file={offer({ id: "group-g1-in-talk", name: "talk.mp3", mime: "audio/mpeg" })} sender="peer" peerName="Ana" />);
+    expect(screen.queryByTestId("files-coming")).toBeNull();
+    fireEvent.click(screen.getByTestId("audio-accept"));
+    await waitFor(() => expect(fakeEngine.callsTo("fileAction")).toContainEqual({ linkId: "group:g1", fileId: "group-g1-in-talk", action: "accept" }));
+    await act(async () => {});
+    expect(screen.queryByTestId("files-coming")).toBeNull();
+  });
+
+  it("progress on a file still coming updates what is left without reading the chats' stored copies again", async () => {
+    world();
+    renderApp(<FileBubble file={offer()} peerName="Ana" />);
+    fireEvent.click(screen.getByTestId("file-accept"));
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    const before = reads.filter((id) => id === "chat2").length;
+    for (let mb = 2; mb <= 6; mb++) {
+      act(() => fakeEngine.update({ transfers: { ...fakeEngine.state.transfers, "chat2-in-big": taken(25 * MB, mb * MB) } }));
+    }
+    expect(rows()[0]).toHaveTextContent("backup.iso from Bob: 19.0 MB still to come");
+    expect(reads.filter((id) => id === "chat2").length).toBe(before);
   });
 });
