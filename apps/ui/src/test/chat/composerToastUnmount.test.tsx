@@ -22,7 +22,8 @@ describe("the composer's notice card", () => {
     const field = screen.getByPlaceholderText<HTMLTextAreaElement>("Message…");
     act(() => { fireEvent.change(field, { target: { value: "longer than four bytes" } }); });
     act(() => { fireEvent.keyDown(field, { key: "Enter" }); });
-    expect(screen.getByText(/too long/i)).toBeTruthy();
+    // The card itself, not the field's description or the count's live region, which say the same in sr-only words.
+    expect(screen.getByText(/too long/i, { ignore: "script, style, .sr-only" })).toBeTruthy();
     // The typing's own pause to save the draft is a wait too: let it run so only the card's is left.
     act(() => { vi.advanceTimersByTime(1_000); });
     expect(vi.getTimerCount()).toBeGreaterThan(0);
