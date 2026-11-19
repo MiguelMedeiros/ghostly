@@ -57,6 +57,29 @@ describe("a shared app whose address this browser has not allowed", () => {
     expect(within(card).queryByText("Shared with 1 contact")).toBeNull();
   });
 
+  it("Allow on one app's card also clears it on another app's card at the same address", async () => {
+    fakeEngine.features = { ...fakeEngine.features, shareLocalServices: true };
+    const allowed = new Set<string>();
+    fakeEngine.localAccessAllowed = async (origin) => allowed.has(origin);
+    vi.spyOn(fakeEngine, "requestLocalAccess").mockImplementation(async (_pattern, origin) => { allowed.add(origin); return true; });
+    const { user } = renderApp(<Services />, { route: "/services" });
+    const shared = { enabled: true, requests: 0, createdAt: 1, sharedWith: ["p".repeat(52)] };
+    fakeEngine.update({ services: [
+      { id: "notes", name: "Notes", target: "localhost:9000", ...shared },
+      { id: "admin", name: "Admin", target: "localhost:9000/admin", ...shared },
+    ] });
+
+    const [notes, admin] = await screen.findAllByTestId("service-item");
+    await waitFor(() => expect(within(admin).queryByTestId("service-allow")).toBeTruthy());
+    expect(within(admin).getByText("Not allowed in this browser yet: contacts can't open Admin")).toBeTruthy();
+    await user.click(within(notes).getByTestId("service-allow"));
+
+    await waitFor(() => expect(within(notes).queryByTestId("service-allow")).toBeNull());
+    await waitFor(() => expect(within(admin).queryByTestId("service-allow")).toBeNull());
+    expect(within(admin).queryByText("Not allowed in this browser yet: contacts can't open Admin")).toBeNull();
+    expect(within(admin).getByText("Shared with 1 contact")).toBeTruthy();
+  });
+
   // Two such apps had two buttons named just "Allow", and the card said neither why the app was asked again, nor what
   // Chrome would be asked for (the whole host, every port), nor how to take it back.
   it("names the app on its Allow, and says what Allow asks for and how to give it back", async () => {
