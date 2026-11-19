@@ -10518,10 +10518,14 @@ export class GhostlyNode implements EngineImplementation {
     if (before) clearTimeout(before);
     this.resumeTimers.set(linkId, setTimeout(() => {
       this.resumeTimers.delete(linkId);
+      const live = this.links.get(linkId);
+      // Only this link's window: one stopped since (the network went and came back) left the chat waiting its turn
+      // again, and taking it out of the line then left it never started, offline until opened or written to.
+      if (!live || live.link !== link) return;
       // Its window is over, live or not: the next chat in line takes its turn.
       this.resumeTurns.finished(linkId);
-      const live = this.links.get(linkId), log = live && this.transportLogOf(live);
-      if (this.shuttingDown || !live || !log || live.link !== link) return;
+      const log = this.transportLogOf(live);
+      if (this.shuttingDown || !log) return;
       if (!log.notBackAfterRestart(Date.now())) return;
       traceLink(live.myPubKeyZ32, "resume-spent", {});
       this.saveTransportLog(live, log);

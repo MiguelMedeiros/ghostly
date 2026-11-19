@@ -23,6 +23,8 @@ import { closeWorld, fakePeerConnection, invitationWhere, run, useFakeWorld, typ
  */
 
 const CHATS = 50;
+/** How many of the chats first in line have their contact away, in the test that has some away. */
+const AWAY = 20;
 const RELAY = "https://relay-one.test";
 const MIN = 60_000;
 const peerKeyOf = (side: Side) => identityFromSeedB64(side.seedB64).pubKeyZ32;
@@ -85,34 +87,44 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 }, 120_000);
 
+/**
+ * 50 chats paired and live once, then the engine's own last run (no limit): every chat live, then a stop with its
+ * states and records saved. The contacts stay online.
+ */
+async function lastRun() {
+  // Paired and live once; the app then stops with a goodbye.
+  const pairs = Array.from({ length: CHATS }, (_, i) => { const made = invitationWhere(i % 2 ? "inviter" : "joiner"); return { app: made.inviter, contact: made.joiner }; });
+  const contacts = pairs.map((p, i) => side(p.contact, p.app, unlimited(), `contact-${i}`));
+  const first = pairs.map((p) => side(p.app, p.contact, unlimited(), "app-before"));
+  for (let t = 0; t < 2 * MIN && !first.every((l) => l.isDataLinkOpen); t += 500) await run(500);
+  expect(first.filter((l) => l.isDataLinkOpen)).toHaveLength(CHATS);
+  for (const link of first) link.depart();
+  await run(300);
+  await Promise.all(first.map((link) => link.stop(false)));
+  const rows = pairs.map((p, i) => ({
+    ...p.app.params, id: `chat-${i}`, label: `c${i}`, createdAt: p.app.createdAt, participationSeed: p.app.seedB64,
+    pairedPeerKey: peerKeyOf(p.contact), peerTrust: { version: 1, verifiedKey: peerKeyOf(p.contact) }, peerTransports: ["webrtc/1"],
+    transportHistory: [{ id: `h${i}`, at: Date.now() - MIN + i * 100, kind: "live", transport: "webrtc/1" }],
+  }) as unknown as StoredLink);
+  for (const row of rows) await db.putLink(row);
+  const liveIn = (node: GhostlyNode, i: number) => !!node["links"].get(rows[i].id)?.link?.isDataLinkOpen && contacts[i].isDataLinkOpen;
+
+  // The engine's last run, with no limit: every chat live, then a stop. Its states and records are saved.
+  const before = engine(unlimited(), { resumesAtOnce: Infinity });
+  await settled(before.start());
+  for (let t = 0; t < 3 * MIN && rows.some((_, i) => !liveIn(before, i)); t += 500) await run(500);
+  expect(rows.filter((_, i) => liveIn(before, i))).toHaveLength(CHATS);
+  await run(30_000);
+  await settled(before.shutdown());
+  nodes.splice(nodes.indexOf(before), 1);
+  await run(10_000);
+
+  return { contacts, rows, liveIn };
+}
+
 describe("a daemon restarted while its 50 contacts are online, one relay at the default budget", () => {
   it("brings its chats back steadily, never past the relay's budget, and a chat opened or written to goes first", async () => {
-    // Paired and live once; the app then stops with a goodbye.
-    const pairs = Array.from({ length: CHATS }, (_, i) => { const made = invitationWhere(i % 2 ? "inviter" : "joiner"); return { app: made.inviter, contact: made.joiner }; });
-    const contacts = pairs.map((p, i) => side(p.contact, p.app, unlimited(), `contact-${i}`));
-    const first = pairs.map((p) => side(p.app, p.contact, unlimited(), "app-before"));
-    for (let t = 0; t < 2 * MIN && !first.every((l) => l.isDataLinkOpen); t += 500) await run(500);
-    expect(first.filter((l) => l.isDataLinkOpen)).toHaveLength(CHATS);
-    for (const link of first) link.depart();
-    await run(300);
-    await Promise.all(first.map((link) => link.stop(false)));
-    const rows = pairs.map((p, i) => ({
-      ...p.app.params, id: `chat-${i}`, label: `c${i}`, createdAt: p.app.createdAt, participationSeed: p.app.seedB64,
-      pairedPeerKey: peerKeyOf(p.contact), peerTrust: { version: 1, verifiedKey: peerKeyOf(p.contact) }, peerTransports: ["webrtc/1"],
-      transportHistory: [{ id: `h${i}`, at: Date.now() - MIN + i * 100, kind: "live", transport: "webrtc/1" }],
-    }) as unknown as StoredLink);
-    for (const row of rows) await db.putLink(row);
-    const liveIn = (node: GhostlyNode, i: number) => !!node["links"].get(rows[i].id)?.link?.isDataLinkOpen && contacts[i].isDataLinkOpen;
-
-    // The engine's last run, with no limit: every chat live, then a stop. Its states and records are saved.
-    const before = engine(unlimited(), { resumesAtOnce: Infinity });
-    await settled(before.start());
-    for (let t = 0; t < 3 * MIN && rows.some((_, i) => !liveIn(before, i)); t += 500) await run(500);
-    expect(rows.filter((_, i) => liveIn(before, i))).toHaveLength(CHATS);
-    await run(30_000);
-    await settled(before.shutdown());
-    nodes.splice(nodes.indexOf(before), 1);
-    await run(10_000);
+    const { rows, liveIn } = await lastRun();
 
     // Started again, on the default budget.
     const asked: number[] = [];
@@ -148,6 +160,82 @@ describe("a daemon restarted while its 50 contacts are online, one relay at the 
     let most = 0;
     for (let a = 0, b = 0; b < asked.length; b++) { while (asked[b] - asked[a] >= MIN) a++; most = Math.max(most, b - a + 1); }
     expect(most).toBeLessThanOrEqual(REQUESTS_PER_MINUTE * (1 + SIGNALING_ALLOWANCE_SHARE));
+  }, 300_000);
+});
+
+/**
+ * The 20 chats first in line (`nativeStartOrder`: the most recently live in the last run first) have their contact
+ * away: it quit while the app was off, and said so on the relay. The engine started again on the default budget, each
+ * chat's turn (`ResumeTurns`) noted as it is taken and given back.
+ */
+async function restartedWithAway() {
+  const { contacts, rows, liveIn } = await lastRun();
+  const stored = new Map((await db.getLinks()).map((link) => [link.id, link]));
+  const lastLive = (i: number) => Math.max(0, ...(stored.get(rows[i].id)!.transportHistory ?? [])
+    .filter((e) => e.kind === "live" || e.kind === "switched" || (e.kind === "down" && !e.restart)).map((e) => e.at));
+  const inLine = rows.map((_, i) => i).sort((a, b) => lastLive(b) - lastLive(a));
+  const away = inLine.slice(0, AWAY), online = inLine.slice(AWAY);
+  await settled(Promise.all(away.map((i) => contacts[i].stop(true))));
+  await run(10_000);
+
+  const node = engine(new RelayTransport({ fetch: relay(), relays: [RELAY], log: () => {} }));
+  const turns = new Map<string, { from: number; to?: number }>();
+  const running = (node["resumeTurns"] as ResumeTurns)["running"] as Set<string>;
+  const take = running.add.bind(running), give = running.delete.bind(running);
+  const start = Date.now();
+  running.add = (id: string) => { turns.set(id, { from: Date.now() - start }); return take(id); };
+  running.delete = (id: string) => { const turn = turns.get(id); if (turn && running.has(id)) turn.to = Date.now() - start; return give(id); };
+  await settled(node.start());
+  const backAt: (number | null)[] = rows.map(() => null);
+  /** Runs the restarted engine on to `until` ms after its start, noting when each chat is back. */
+  const runTo = async (until: number) => {
+    while (Date.now() - start < until) { await run(500); rows.forEach((_, i) => { if (backAt[i] === null && liveIn(node, i)) backAt[i] = Date.now() - start; }); }
+  };
+  return { node, rows, away, online, turns, backAt, runTo, turnOf: (i: number) => turns.get(rows[i].id) };
+}
+
+describe("a daemon restarted while the 20 contacts first in line are away", () => {
+  it("ends an away chat's turn on the read that finds its contact gone, and the online chats behind start", async () => {
+    const { away, online, backAt, runTo, turnOf } = await restartedWithAway();
+    await runTo(3 * MIN);
+    const story = JSON.stringify({ away: away.map(turnOf), online: online.map((i) => [turnOf(i), backAt[i]]) });
+    // The first ten away chats read their contact gone at once and give their turn back: it does not last the window.
+    // The ten after them take it at once, and their own read waits on the relay's budget, which the first ten's reads
+    // and records spent in the first moment: they give it back on the first read the next minute lets through.
+    const first = away.slice(0, 10).map(turnOf), next = away.slice(10).map(turnOf);
+    for (const turn of first) expect(turn!.to! - turn!.from, story).toBeLessThan(2_000);
+    for (const turn of next) expect(turn!.from, story).toBeLessThan(5_000);
+    for (const turn of [...first, ...next]) expect(turn!.to, story).toBeLessThan(MIN + 5_000);
+    // The online chats behind them start on the next minute, and come back: not a minute later each wave.
+    const behind = online.slice(0, 10).map(turnOf);
+    for (const turn of behind) expect(turn!.from, story).toBeLessThan(MIN + 5_000);
+    expect(online.filter((i) => backAt[i] !== null && backAt[i]! <= 2.5 * MIN).length, story).toBeGreaterThanOrEqual(4);
+  }, 300_000);
+
+  it("keeps a chat that waits its turn again after a network blip in the line, when its first turn's window ends", async () => {
+    const { node, rows, online, turns, runTo } = await restartedWithAway();
+    // Opened a few seconds in: a chat of the second wave of online contacts starts at once, ahead of the line.
+    const wanted = online[15], id = rows[wanted].id;
+    await runTo(3_000);
+    node.setActiveLink({ linkId: id });
+    await runTo(4_000);
+    expect(turns.get(id)?.from, "the chat opened starts now").toBeGreaterThanOrEqual(3_000);
+    node.setActiveLink({ linkId: null });
+    // The network goes and comes back: every chat starts anew, in the line's order, and this one waits behind the
+    // twenty away chats and the first ten online ones. Its first turn's window ends (`RESUME_SPENT_MS`) while it waits.
+    await settled(node.updateSettings({ settings: { online: false } }));
+    await runTo(6_000);
+    await settled(node.updateSettings({ settings: { online: true } }));
+    await runTo(10_000);
+    const line = (node["resumeTurns"] as ResumeTurns)["line"] as string[];
+    expect(line, "the chat opened waits its turn again").toContain(id);
+    expect(line.indexOf(id), "behind ten chats waiting, at least").toBeGreaterThanOrEqual(10);
+    await runTo(70_000);
+    expect(line.includes(id) || turns.get(id)!.from >= 10_000, "still in line once its first window is over").toBe(true);
+    // Its turn comes, as the line moves on.
+    await runTo(3.5 * MIN);
+    expect(turns.get(id)!.from, JSON.stringify([...turns])).toBeGreaterThan(10_000);
+    expect(node["links"].get(id)?.link, "started").toBeTruthy();
   }, 300_000);
 });
 
