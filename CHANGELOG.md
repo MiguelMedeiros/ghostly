@@ -4,6 +4,76 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.13.4
+
+### Security
+
+**Apps**
+
+- Web: an app that sends requests far past its rate is now stopped within a second in every browser, so it can no longer grow the Ghostly tab's memory until the watchdog stops it.
+- An update check that could not reach any app's publisher (no network on the device, or the host's own errors) is now tried again within minutes instead of counting as done for a day, so a revocation published meanwhile is no longer missed until the next day's check.
+- Granting an app access to files again no longer brings back files picked under an earlier grant: you pick them again.
+- With Hide my IP from contacts on, a contact's app can no longer make the app prefetch or prerender pages of another server through speculation rules (Desktop on Windows, `ghostly service open` and the web).
+
+**Web**
+
+- An invite link added after an app address other than the home screen is now opened (or refused) and taken out of the address bar and history at once.
+- A share opened in a second tab is now passed to the tab running Ghostly even when a link reaches that tab as it opens, and the link is moved out of its address bar.
+
+**Identities**
+
+- Stopping sharing an identity proof right after sharing it again now always reaches a contact that had verified it before.
+- A contact's proof withdrawn shortly before the app stopped is now checked for its revocation soon after the next start, instead of up to 12 hours later.
+
+**Files**
+
+- A file announced over the DHT that its sender deletes for everyone while its offer arrives no longer leaves the file's record (name, size and type) on your device.
+
+**Devices**
+
+- A forced takeover started while this device was pulling the profile no longer leaves the pull's partly copied data on the device.
+
+**Transports**
+
+- Removing a Pkarr relay in Settings now applies right away to reads and publishes already in progress: a removed relay is no longer contacted.
+
+**Browser extension**
+
+- Switching profiles while the background peer was restarting now closes the previous profile's contact app tabs and notifications.
+
+**Self-hosted relays**
+
+- Push and HyperDHT relays with `GHOSTLY_RELAY_PROXIES` set above the number of proxies that write `X-Forwarded-For` no longer let a client choose the address its limits count it by.
+
+### Fixed
+
+**Calls**
+
+- A ringing call whose buttons change under the keyboard focus (the call you were on ends, so End and answer becomes Accept, or the caller rings again as a voice call) keeps the focus in the ringing card. Before, it fell to the page behind it, and a screen reader was left outside the call.
+
+**CLI**
+
+- `file accept` refused because the files still coming hold the room now names up to three of those files, with each one's chat, how much is still to come and the `ghostly file cancel` command for it, and counts the rest. The error code, exit code and `details` are unchanged.
+- `chat connect` that times out in a daemon's first 5 minutes no longer says the chat is still resuming after the start when the chat was already live in this run (held by the contact since, say), or when the contact's record reads offline. It now says the contact did not answer, or that the contact's app reads online.
+
+**Chat**
+
+- When the message field's byte count turns amber on the DHT (too long to go there once sealed, or past its 256 bytes) or red near the 16 KiB limit, a screen reader now hears why, once as it changes, and the field carries the sentence as its description. Before, it was only a tooltip for the mouse.
+- On a phone on its side with the keyboard up and no network, a reply or edit no longer pushes the message field under the keyboard: the Offline line under the chat's header steps aside while you type, as a pinned message does, and is back when the keyboard goes down.
+- The "View photo of …" button on a contact's or a group's picture (a chat's header, the group members and the contact's identities panel) keeps the name in its own direction for screen readers and voice control, so in Arabic a name like "Notes!" no longer reads "!Notes".
+
+**Files**
+
+- A file you can't accept because the files still coming hold the room now lists those files: each one's name, its chat, how much of it is still to come, and a Cancel button. A waiting file that doesn't fit shows the same list behind a "Files still coming" button. Before, the app only said to wait for them or cancel one, without saying which files or which chats.
+
+**Wallets**
+
+- An invoice left on the Receive screen of a Cashu or Lightning card in a hidden page (another tab, a minimised window) no longer makes the wallet ask its mint or source about it every few seconds. It is checked at the usual slower pace until the page shows again, and then right away, so a payment made meanwhile still shows within seconds. Over an hour hidden, an unpaid invoice now costs about 100 checks instead of about 900.
+
+**Transports**
+
+- After a restart with many contacts online (a bot's daemon, a Desktop with dozens of chats), chats come back a few at a time, the most recently used first, instead of all at once. Started all at once they shared the relays' per-minute budget so thinly that only a handful a minute got back; a chat you open or write in starts at once, ahead of the rest.
+
 ## 1.13.3
 
 ### Fixed
