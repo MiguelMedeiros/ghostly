@@ -77,7 +77,7 @@ function pair({ bVerifies = [fakeKey] as (typeof fakeKey)[] } = {}) {
 /** `count` proofs of A, each of its own test key (a contact keeps one proof per identity); `kinds` names some of another kind. */
 async function proofs(engine: IdentityProofs, count: number, kinds: Record<number, string> = {}): Promise<string[]> {
   await transact([STORES.settings], stores => {
-    for (const key of ["identityProofs", "identityRevocations", "identityRevocationsCheckedAt", "identityRevocationsRound"]) stores[STORES.settings].delete(key);
+    for (const key of ["identityProofs", "identityRevocations", "identityRevocationsCheckedAt", "identityRevocationsRound", "identityWithdrawnLookups"]) stores[STORES.settings].delete(key);
   });
   await engine.load();
   const ids: string[] = [];

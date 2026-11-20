@@ -104,6 +104,39 @@ describe("a link with a doubled `#` before it", () => {
     render(<Root />);
     await waitFor(() => expect(window.location.hash).toBe("#/group/g1"));
   }, 60_000);
+
+  /*
+   * A link after a page other than home (`#/chat/<id>#ghostly1…`, `#/settings#ghostly1…`: pasted after the address the
+   * app was on) is the same link too: no intake reads a page's hash, so it stayed in the address and the history.
+   */
+  it.each(["#/settings#{code}", "#/chat/{id}#{code}", "#/settings##{code}"])("an invite given to the open app as %s joins, and leaves the address", async (form) => {
+    const first = readInvite(createChatInvite().inviteCode);
+    if (!first.ok) throw new Error("a fresh invite reads");
+    const id = ensureSession(first.keys);
+    render(<Root />);
+    const code = createChatInvite().inviteCode;
+    window.location.hash = form.replace("{id}", id).replace("{code}", code);
+    act(() => { window.dispatchEvent(new PopStateEvent("popstate")); });
+    await waitFor(() => expect(listSessions()).toHaveLength(2));
+    const made = listSessions().find((session) => session.id !== id)!;
+    await waitFor(() => expect(window.location.hash).toBe(`#/chat/${made.id}`));
+  }, 60_000);
+
+  it("a bad invite after a page is refused, and leaves the address", async () => {
+    render(<Root />);
+    window.location.hash = "#/settings#ghostly1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq";
+    act(() => { window.dispatchEvent(new PopStateEvent("popstate")); });
+    expect(await screen.findByTestId("invite-link-invalid")).toBeInTheDocument();
+    await waitFor(() => expect(window.location.hash).toBe("#/"));
+  }, 60_000);
+
+  it("a group's link after a page joins, and leaves the address", async () => {
+    fakeEngine.on("joinGroupByLink", () => ({ groupId: "g1" }));
+    render(<Root />);
+    window.location.hash = "#/settings#/join/group2/abc";
+    act(() => { window.dispatchEvent(new PopStateEvent("popstate")); });
+    await waitFor(() => expect(window.location.hash).toBe("#/group/g1"));
+  }, 60_000);
 });
 
 // covers: invite.link
