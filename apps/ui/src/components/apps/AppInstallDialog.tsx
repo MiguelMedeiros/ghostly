@@ -17,7 +17,7 @@ import { appStopped, refreshInstalledApps } from "../../lib/apps/installed";
 import { useTryAgain } from "../../lib/apps/tryAgain";
 import { saveAppData } from "../../lib/apps/exportData";
 import { webKitAppLeak } from "../../lib/apps/flag";
-import { forgetLinkedFiles, type OpenAppOptions } from "../../lib/apps/open";
+import { forgetLinkedFiles, forgetLinkedFilesOnGrant, type OpenAppOptions } from "../../lib/apps/open";
 import { ownDirection } from "../../lib/ownDirection";
 
 /*
@@ -322,8 +322,11 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
       return null;
     }
   };
-  const grant = (shown: AppPreview) =>
-    engine.call("appInstall", { stage: shown.stage, digest: shown.digest, grant: [...shown.manifest.permissions], asks: [...shown.asks] });
+  const grant = async (shown: AppPreview) => {
+    const app = await engine.call("appInstall", { stage: shown.stage, digest: shown.digest, grant: [...shown.manifest.permissions], asks: [...shown.asks] });
+    await forgetLinkedFilesOnGrant(app.ref, shown.asks);
+    return app;
+  };
   const install = async () => {
     if (!preview || stale) return;
     focusBack();
@@ -550,7 +553,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
           {app.pending.added.length > 0 && <Permissions asks={app.pending.added} update />}
           {/* Update grants only the update listed here: another one found since is refused, and the list read again shows it. */}
           <div className="flex justify-end">
-            <Button variant="primary" data-testid="app-update-accept" disabled={busy} loading={pending === "update"} onClick={() => void act(() => engine.call("appUpdateAccept", { ref: app.ref, sequence: app.pending!.sequence, added: [...app.pending!.added] }), false, "update", appUpdateErrorView)}>{t("apps.install.update")}</Button>
+            <Button variant="primary" data-testid="app-update-accept" disabled={busy} loading={pending === "update"} onClick={() => void act(async () => { const added = [...app.pending!.added]; await engine.call("appUpdateAccept", { ref: app.ref, sequence: app.pending!.sequence, added }); await forgetLinkedFilesOnGrant(app.ref, added); }, false, "update", appUpdateErrorView)}>{t("apps.install.update")}</Button>
           </div>
         </div>
       )}

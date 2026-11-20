@@ -24,12 +24,15 @@ import type { HeaderList } from "./frames";
  *   the same script, so it is the same worker; the page's revoke of the blob's URL drops the guard's own a minute later.
  *   A `data:` worker, and a blob made in another window, in a worker or already revoked, run as they were. Once per
  *   window, whichever guard runs first (`ghostlyWorkerGuard`, `CLIPBOARD_GUARD_SCRIPT` does the same).
+ * - takes out each `<script type="speculationrules">` as it is put in the page, a shadow tree the page makes included:
+ *   Chromium would prefetch or prerender the pages it lists on a server the contact names, which no policy covers
+ *   (`'unsafe-inline'` lets inline rules in); the `Speculation-Rules` header is not passed on (`VIEWER_DROPPED_HEADERS`).
  * It uses nothing the page can change after it ran (the page's own code runs later, in the same realm).
  *
  * What a script put in the page cannot do, so where the viewer does not run it per document this is not a guarantee:
  * a frame's window read by its index (`window[0]`, never through the frame element) while the frame's page is still
- * on its way, and a `srcdoc` frame inside a shadow tree written in the HTML the page itself sends, run before the
- * guard is there.
+ * on its way, and a `srcdoc` frame or speculation rules inside a shadow tree written in the HTML the page itself sends,
+ * run before the guard is there.
  * No backslash, `${` or backtick in it: Desktop's copy (`SERVICE_GUARD`, apps/desktop/src/viewer.rs) is the same text.
  */
 export const VIEWER_GUARD_SCRIPT = `(function noWebRtc(w) {
@@ -124,6 +127,12 @@ export const VIEWER_GUARD_SCRIPT = `(function noWebRtc(w) {
       if (doc === null || apply(slice, doc, [0, own.length]) === own) return;
       try { apply(setAttribute, frame, ["srcdoc", own + doc]); } catch (e) { apply(removeAttribute, frame, ["srcdoc"]); }
     };
+    const trim = String.prototype.trim;
+    const drop = w.Element.prototype.remove;
+    const unruled = (script) => {
+      const type = apply(getAttribute, script, ["type"]);
+      if (type !== null && apply(lower, apply(trim, type, []), []) === "speculationrules") apply(drop, script, []);
+    };
     const Observer = w.MutationObserver;
     const observe = Observer.prototype.observe;
     const watch = (root, all) => {
@@ -131,6 +140,10 @@ export const VIEWER_GUARD_SCRIPT = `(function noWebRtc(w) {
         try {
           const frames = apply(all, root, ["iframe[srcdoc]"]);
           for (let i = apply(size, frames, []); i-- > 0;) first(frames[i]);
+        } catch (e) {}
+        try {
+          const scripts = apply(all, root, ["script"]);
+          for (let i = apply(size, scripts, []); i-- > 0;) unruled(scripts[i]);
         } catch (e) {}
         sweep();
       };
@@ -211,7 +224,7 @@ export const VIEWER_GUARD_SCRIPT = `(function noWebRtc(w) {
 })(window)`;
 
 /** `VIEWER_GUARD_SCRIPT`'s hash, as a CSP source: a contact's own policy that would refuse it is given it (`allowingViewerGuard`). */
-export const VIEWER_GUARD_HASH = "'sha256-DweV0mr/eyHFWESxtsRrzk0i6VjF4GSCokjozAiXkbQ='";
+export const VIEWER_GUARD_HASH = "'sha256-G1zc09L4CUQu4pukd7RlHvzFZthzzsUsbF0WwoT+KBo='";
 
 /**
  * With the guard, where it is put in the page and not run by the viewer in every frame: frames only from the app's own

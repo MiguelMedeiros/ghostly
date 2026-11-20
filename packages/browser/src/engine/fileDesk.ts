@@ -610,6 +610,8 @@ export class FileDesk {
           metadata: { name: file.name, size: file.size, mime: file.mime, timestamp: file.timestamp, voice: file.voice, video: file.video, image: file.image }, wire3: record });
         await this.deps.patchMessage?.(linkId, `peer_${record.id}`, (current) => current.sender !== "peer" || current.file?.id !== id ? null
           : { file: message, text: fileMessageText(message), via: "datalink", details: { ...current.details, wire: fileWire("files/3", file.size) } });
+        // Deleted for everyone by its sender meanwhile: the removal took the bubble before this record was written.
+        if (this.deps.deleted(linkId, `peer_${record.id}`)) this.deletedMeanwhile(linkId, id);
       }).catch((error) => this.unkept(linkId, chat, record.id, id, error, said));
     }
     if (record.direction === "in" && !chat.local.has(record.id)) {
@@ -684,7 +686,7 @@ export class FileDesk {
     this.deps.changed();
   }
 
-  /** A new offer whose message was deleted before its row was kept: forgotten as a deleted message's file is. */
+  /** An offer whose message was deleted before its row was kept: forgotten as a deleted message's file is. */
   private deletedMeanwhile(linkId: string, id: string): void {
     this.forget(linkId, id);
     this.deps.transfers.delete(id);
