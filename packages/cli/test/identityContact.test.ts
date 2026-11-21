@@ -22,7 +22,8 @@ function contact(status: Status, checkedAt: number) {
     linkIds: () => ["chat"], online: () => true, emit: () => {}, publish: async () => {}, resolve: async () => null }, () => IDENTITY_PROVIDERS);
   const link = () => ({ id: "chat", label: "Alice", peerPubKeyZ32: "them", createdAt: 1, lastMessageAt: 0, profile: "paired-chat/1", pairing: { status: "ready" },
     identities: engine.linkView("chat", true) }) as unknown as LinkView;
-  const node = { getState: () => ({ links: [link()], groups: [], settings: {}, transport: {}, identityProofs: [] }) as unknown as EngineState };
+  const node = { getState: () => ({ links: [link()], groups: [], settings: {}, transport: {}, identityProofs: [] }) as unknown as EngineState,
+    chatView: (id: string) => (id === "chat" ? link() : undefined) };
   const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { emit: () => {}, onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
   return async () => ((await callApi(ctx, "identity.contact", { chat: "chat" })) as { received: { status: string; recheckDue: boolean }[] }).received[0];
 }

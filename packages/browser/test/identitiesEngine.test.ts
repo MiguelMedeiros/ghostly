@@ -1387,6 +1387,8 @@ describe("per chat", () => {
       }
       const hb = p.host("b");
       p.engines.b = new IdentityProofs({ ...hb, ledger: id => many.get(id) ?? hb.ledger(id), linkIds: () => [...hb.linkIds(), ...many.keys()],
+        // The many chats' keys are the ones their proofs were presented under ("p" to "a"), as a paired chat's are.
+        keys: id => (many.has(id) ? { mine: "a", theirs: "p" } : hb.keys(id)),
         updateLedger: async (id, change) => many.has(id) ? (many.set(id, change(structuredClone(many.get(id)!))), many.get(id)!) : hb.updateLedger(id, change) }, () => p.state.providers.b);
       await p.engines.b.load(); p.engines.b.start();
       await vi.advanceTimersByTimeAsync(30 * 60_000);

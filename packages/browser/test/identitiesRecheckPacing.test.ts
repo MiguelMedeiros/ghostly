@@ -37,7 +37,8 @@ it.each([300, 1_000])("%i contacts with 3 proofs each: every proof is checked ag
     // Each check writes its outcome once: no revocation is found, so nothing else writes.
     updateLedger: async (id, change) => { calls.push(Date.now()); const next = change(structuredClone(ledgers.get(id)!)); ledgers.set(id, next); return next; },
     channel: () => undefined,
-    keys: () => ({}),
+    // The chat's keys, as the proofs were presented under them: a proof under a previous key is never re-checked.
+    keys: () => ({ mine: "a", theirs: "p" }),
     linkIds: () => [...ledgers.keys()],
     online: () => true,
     emit: () => {},
