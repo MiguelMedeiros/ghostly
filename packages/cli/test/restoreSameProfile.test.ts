@@ -1,6 +1,9 @@
-import { readdirSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { deserialize, serialize } from "node:v8";
+import { seal } from "@ghostly/browser/backup/envelope";
 import { expect, it } from "vitest";
+import { openPersistentIndexedDb } from "../src/runtime/storage";
 import { error, ghostly, home, ok, Running } from "./support/cli";
 // covers: headless.backup
 
@@ -36,4 +39,23 @@ it("a backup of a profile still in the home is refused as the same person, names
   const daves = join(other, "dave.ghostly-backup");
   ok(await ghostly(["--home", other, "profile", "backup", "--out", daves, "--no-passphrase"], { env: NO_PASS }));
   expect(ok(await ghostly(["--home", dir, "profile", "restore", daves, "dave"], { env: NO_PASS }))).toMatchObject({ restored: "dave" });
+});
+
+// A version-1 backup (the whole profile in one sealed JSON) takes the other path in restoreWith: the check runs there too.
+it("a version-1 backup of a profile still in the home is refused too, nothing left behind", { timeout: 120_000 }, async () => {
+  const PASS = { GHOSTLY_BACKUP_PASSPHRASE: "correct horse battery staple" };
+  const dir = home("restore-same-v1");
+  ok(await ghostly(["--home", dir, "profile", "set", "--name", "Old bot"]));
+  const folding = await openPersistentIndexedDb(join(dir, "profiles", "default", "db"));
+  await folding.compact();
+  await folding.close();
+  const saved = deserialize(readFileSync(join(dir, "profiles", "default", "db", "snapshot.bin"))) as { format: number; databases: { stores: { onDisk?: boolean }[] }[] };
+  for (const db of saved.databases) for (const kept of db.stores) delete kept.onDisk;
+  saved.format = 1;
+  const payload = { format: "ghostly-cli-profile/1", createdAt: 1, store: serialize(saved).toString("base64"), files: [] };
+  const file = join(dir, "old.ghostly-backup");
+  writeFileSync(file, await seal(JSON.stringify(payload), PASS.GHOSTLY_BACKUP_PASSPHRASE));
+  const refused = error(await ghostly(["--home", dir, "profile", "restore", file, "copy"], { env: PASS }), "refused", 1) as { details?: unknown };
+  expect(refused.details).toEqual({ reason: "same-profile", profiles: ["default"] });
+  expect(profiles(dir), "nothing is written, not even a folder being restored").toEqual(["default"]);
 });
