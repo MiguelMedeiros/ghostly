@@ -80,9 +80,12 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
   // A check was wanted while the device said it had no network (skipped, or failed out there): the next `online` runs
   // it, however recent the last answer is. Otherwise a deploy or a "build gone" waits for the next scheduled check.
   const missedOffline = useRef(false);
+  // An install is on its way out (the page reloads, the app restarts): no check starts, and one that settles meanwhile
+  // leaves the stage "installing", or Reload would read ready and could be pressed again.
+  const installing = useRef(false);
 
   const check = useCallback(async () => {
-    if (!updatePlatform || checking.current) return;
+    if (!updatePlatform || checking.current || installing.current) return;
     checking.current = true;
     setStage("checking");
     try {
@@ -105,12 +108,13 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
       } while (goneWhileChecking.current);
     } finally {
       checking.current = false;
-      setStage("idle");
+      if (!installing.current) setStage("idle");
     }
   }, []);
 
   const install = useCallback(async () => {
-    if (!updatePlatform || !update || update.apply === "manual") return;
+    if (!updatePlatform || !update || update.apply === "manual" || installing.current) return;
+    installing.current = true;
     setStage("installing");
     setProgress(0);
     setError(null);
@@ -119,6 +123,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
       // On the way out: this either reloads the page or restarts the app.
       await updatePlatform.install(update, setProgress);
     } catch (e) {
+      installing.current = false;
       setError(errorText(e, tRef.current));
       setFailed("install");
       setStage("idle");

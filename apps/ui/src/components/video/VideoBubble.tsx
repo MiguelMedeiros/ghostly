@@ -18,6 +18,8 @@ import { FORCED_EDGE, RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry"
 import { useT } from "../../contexts/I18nContext";
 import { NAME, withName } from "../apps/aroundName";
 import { problemLine, saveProblemLine } from "../../lib/problemText";
+import { roomHeld } from "../../lib/filesComing";
+import { FilesStillComing } from "../chat/FilesStillComing";
 import { ownDirection } from "../../lib/ownDirection";
 
 type Phase = "poster" | "loading" | "playing";
@@ -62,6 +64,8 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
   const [theater, setTheater] = useState(false);
   const canTheater = typeof document !== "undefined" && !document.fullscreenEnabled && !!platform?.fullscreenWindow;
   const [actionError, setActionError] = useState("");
+  // Accept refused for the files still coming: which ones, from which chat, show under the offer (FileBubble).
+  const [heldRoom, setHeldRoom] = useState(false);
   /** A resend or a request asked for, until the transfer answers by moving on. */
   const [busy, setBusy] = useState(false);
   const [why, setWhy] = useState(false);
@@ -247,7 +251,8 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
 
   const act =(action: FileAction) => {
     setActionError("");
-    void platform?.fileAction?.(file.id, action).catch((error: Error) => setActionError(problemLine(error, t)));
+    setHeldRoom(false);
+    void platform?.fileAction?.(file.id, action).catch((error: Error) => { setActionError(problemLine(error, t)); setHeldRoom(roomHeld(error)); });
   };
   const save = () => {
     if (!platform) return;
@@ -423,6 +428,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
           {noRoom ? t("chat.media.noRoom", { size: formatFileSize(transfer.room, t) }) : withName(t("chat.media.wantsToSend", { name: NAME, size: formatFileSize(transfer.room, t) }), peerName)}
         </p>
       )}
+      {offered && !group && (heldRoom || noRoom) && <div className="px-1"><FilesStillComing except={file.id} open={heldRoom} /></div>}
       {(status || canRetry || stuck) && (!offered || reason) && (
         <div className="flex items-center gap-2 mt-1 px-1">
           {canRetry ? (

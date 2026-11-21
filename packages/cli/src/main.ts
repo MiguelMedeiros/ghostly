@@ -4,11 +4,11 @@ import { connect } from "node:net";
 import { closeSync, fstatSync, openSync, readFileSync, readSync, rmSync } from "node:fs";
 import { dirname, sep } from "node:path";
 import packageJson from "../package.json" with { type: "json" };
-import { checkSettingKey, checkSettingValue, GLOBAL_OPTIONS, globalOption, liftGlobals, nearest, parseArgs, unknownGlobalOption, type OptionSpec, type Parsed } from "./args";
+import { checkSettingKey, checkSettingValue, GLOBAL_OPTIONS, globalOption, liftGlobals, nearest, parseArgs, shownWord, unknownGlobalOption, type OptionSpec, type Parsed } from "./args";
 import { connectDaemon, DaemonClient, endedUnanswered, endedUnsent, isNotTheDaemon, notTheDaemon } from "./client";
 import { childEnv, dropSecretEnv } from "./childEnv";
 import { COMMANDS, idSlot, noMoreThan, numberSlot, positionals, takesText, TEXT_COMMANDS } from "./commands";
-import { here, inRange, INPUT_BYTES, localStat, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
+import { here, inRange, INPUT_BYTES, listAtMost, localStat, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS, hideSecretFields } from "./engineMethods";
 import { asCliError, CliError, type ErrorCode, EXIT, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
@@ -253,11 +253,14 @@ const NO_HISTORY_READS: ReadonlySet<string> = new Set([
  * Changes kept outside any chat (this profile's status, which each chat says on its next session; x401 keys and
  * credentials; a service; a draft; a served app), and `call answer` and `call flush`, which a one-shot refuses whatever
  * the chats say: a one-shot for one leaves every saved chat unstarted too. Each read every 1:1 chat whole first: with
- * 30,000 messages in the profile, about 0.95 s and 200 MB instead of 0.45 s and 140 MB.
+ * 30,000 messages in the profile, about 0.95 s and 200 MB instead of 0.45 s and 140 MB. The wallet's own stores too (an
+ * address, a Lightning card's name or default, a wallet removed): each started every chat, 20 relay requests and 0.35 s
+ * more with 10 chats and 30,000 messages, a refusal too. A removal tells a contact of a request it closes only on a chat
+ * that is open; one away hears when their chat opens.
  */
 const NO_HISTORY_WRITES: ReadonlySet<string> = new Set([
   "status.set", "status.clear", "x401.key.new", "x401.credential.add", "x401.credential.remove", "service.add", "identity.cancel",
-  "app.serve", "app.unserve", "call.answer", "call.flush",
+  "app.serve", "app.unserve", "call.answer", "call.flush", "wallet.address", "lightning.rename", "lightning.default", "wallet.remove",
 ]);
 
 /** Whether a one-shot for this call leaves every saved chat unstarted, its history unread (`NO_HISTORY_READS`, `NO_HISTORY_WRITES`). */
@@ -300,6 +303,8 @@ export function readOnly(method: string, params: Record<string, unknown>): boole
 const LOCAL_WRITES: ReadonlySet<string> = new Set([
   "chat.rename", "chat.remove", "call.auto", "group.auto", "identity.cancel", "service.add", "x401.key.new", "x401.credential.add", "x401.credential.remove",
   "saved.add", "saved.remove", "app.serve", "app.unserve",
+  // A Lightning card's name and its network's default for receiving: this device's settings store only.
+  "lightning.rename", "lightning.default",
   // This profile's status: kept here, and said only on a live session (WISP 401 § Presence and status), never on a
   // relay. A one-shot waits for no session, so online it would only show this device to the contacts for a moment; the
   // daemon says it at once, and any process that runs the profile online says it on each chat's next session.
@@ -547,7 +552,7 @@ function interruptible(s: Session): { run<T>(work: (s: Session) => Promise<T>): 
     const given = (params ?? {}) as Record<string, unknown>;
     const entry = { method, notice: waitNotice(method, given, s.mode) };
     pending.add(entry);
-    // A long text's chat or a pin's, read beside the call: on the DHT only, the notice and Ctrl-C say why it waits, not that it goes.
+    // A long text's chat, a pin's or a file's, read beside the call: on the DHT only, the notice and Ctrl-C say why it waits, not that it goes.
     const chat = entry.notice && dhtOnlyChat(method, given);
     if (chat) void s.call("chat.get", { chat }).then((view) => { if (entry.notice) entry.notice = dhtOnlyNotice(entry.notice, method, given, view as Record<string, unknown>, s.mode); }, () => {});
     const timer = entry.notice && process.stderr.isTTY ? setTimeout(() => process.stderr.write(`ghostly: ${entry.notice!.waiting}\n`), WAIT_NOTICE_MS) : undefined;
@@ -624,7 +629,7 @@ export const SPECIAL: [usage: string, summary: string, options?: Record<string, 
     translate,
   }],
   ["settings get [--show-secret]", "The profile's settings: each key settings set takes with its value in effect (unset: the default)", { "show-secret": o("boolean", "Show credentials too") }],
-  ["settings set <key> <json-value> [--force]", "Change one: relays, irohRelays, hyperdhtRelay, iceServers, publicProfiles, online, shareProfile, sendTyping, autoDownloads, serveFiles, daemonPresence, nick. daemonPresence true: contacts see this profile online while a daemon runs it (off by default). <json-value> - (or none, piped) reads it from stdin: a TURN password stays out of ps", { force: o("boolean", "Set a nick even if it looks like a seed, a key or ecash") }],
+  ["settings set <key> <json-value> [--force]", "Change one: relays, irohRelays, hyperdhtRelay, iceServers, publicProfiles, online, shareProfile, sendTyping, autoDownloads, serveFiles, daemonPresence, nick. daemonPresence true: contacts see this profile online while a daemon runs it (off by default). hyperdhtRelay is kept for the apps: this CLI's own HyperDHT does not dial through it. <json-value> - (or none, piped) reads it from stdin: a TURN password stays out of ps", { force: o("boolean", "Set a nick even if it looks like a seed, a key or ecash") }],
   ["engine <method> [json-params | -] [--confirm-real] [--show-secret] [--yes] [--force]", "Any call of the app's engine, with its own parameters (engine --list --verbose names them)", { "confirm-real": o("boolean", "Confirm a Mainnet (real money) spend"), "show-secret": o("boolean", "Print a call's secrets"), yes: o("boolean", "Confirm a call that deletes chats or groups"), force: o("boolean", "Send a text that looks like a secret, or remove a chat (or clear the profile) while a delete for everyone has not reached the contact") }],
   ["engine --list [--verbose]", "The engine's calls", { verbose: o("boolean", "With what each call takes: { linkId, label }, ? for an optional one") }],
   ["call pipe [<chat|call>]", "A call's audio on stdin/stdout: raw s16le mono PCM at the call's rate (e.g. with sox or ffmpeg)"],
@@ -942,7 +947,25 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       const file = here(given) as string;
       const { backupFileProtection, restoreProfile } = await import("./backup");
       const protection = await backupFileProtection(file);
-      const paths = await restoreProfile(g.home, checkProfileName(name), file, protection === "none" ? undefined : await backupPassphrase(parsed.options["passphrase-file"], RESTORE_PASSPHRASE));
+      const passphrase = protection === "none" ? undefined : await backupPassphrase(parsed.options["passphrase-file"], RESTORE_PASSPHRASE);
+      // Ctrl-C, a service manager's stop or the terminal closing ends the restore at its next record, its folder (the
+      // profile in the clear) removed: killed by the signal, the process left it behind. A second signal leaves at once,
+      // the folder still removed on the way out.
+      const stop = new AbortController();
+      let words = "";
+      const onSignal = (signal: NodeJS.Signals) => {
+        if (stop.signal.aborted) process.exit(EXIT.interrupted);
+        words = `stopped (${signal === "SIGINT" ? "Ctrl-C" : signal}) before the restore finished: no profile was made`;
+        stop.abort(new CliError("interrupted", words[0].toUpperCase() + words.slice(1)));
+      };
+      const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+      for (const signal of signals) process.on(signal, onSignal);
+      let paths: Awaited<ReturnType<typeof restoreProfile>>;
+      try { paths = await restoreProfile(g.home, checkProfileName(name), file, passphrase, stop.signal); } catch (error) {
+        // Said only when the stop is what ended it: one that came after the profile took its name restored it all the same.
+        if (error === stop.signal.reason) process.stderr.write(`ghostly: ${words}\n`);
+        throw error;
+      } finally { for (const signal of signals) process.off(signal, onSignal); }
       if (parsed.options.use) selectProfile(g.home, name);
       // Whether --use made it the current profile, as profile create says it.
       print({ restored: name, folder: paths.dir, protection, current: currentProfileOrNone(g.home) === name });
@@ -1577,6 +1600,7 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
   if (!target || (spec.message && !message)) throw new CliError("usage", `Missing <${target ? "message" : spec.target}>: ghostly ${spec.usage}`);
   // Before stdin is read and the profile opens: the API's own check answered once a one-shot was online (exit 1).
   timeout(parsed.options);
+  if (spec.target === "group") listAtMost(parsed.options, "mention");
   // Empty (an unset variable in a script), it sent a plain message: an id the chat lacks is exit 3.
   if (parsed.options.reply === "") throw new CliError("usage", "--reply needs a message id");
   // Stdin only when no text word was given at all: `send bob "$line"` with an empty line is no text, not the rest of stdin.
@@ -1883,6 +1907,10 @@ export const APP_WORDS: Readonly<Record<string, string>> = {
   "message react": "react <chat> <message> <emoji>",
   "message pin": "pin <chat> <message>",
   "message forward": "forward <chat> <message> --to <chat>",
+  // A group's pins are `pin <group>`, as a chat's are, and its members are in `group show`.
+  "group pin": "pin <group> <message>",
+  "group unpin": "pin <group> --remove",
+  "group members": "group show <group>",
 };
 
 /** The app's search (in a chat and in the chat list), which the CLI does not have: `chat history` and jq do it. */
@@ -1893,6 +1921,7 @@ const SEARCH = ["search", "chat search"];
  * credential`) are answered with the group's commands, as `ghostly help chat` lists them; before, it was only "Unknown
  * command: chat". The longest group the words name answers: `x401 credential frob` lists add, list and remove.
  * A word near one of them is a typo: `chat lst` and `sned hi` say the command meant (`chat list`, `send`) and its help.
+ * A word another command does the work of (`group pin`, `DONE_ELSEWHERE`) names that command.
  */
 export function unknownCommand(first: string | undefined, second?: string, third?: string): CliError {
   const asked = [first, second, third].filter((word): word is string => !!word);
@@ -1902,7 +1931,7 @@ export function unknownCommand(first: string | undefined, second?: string, third
   if (said) return new CliError("usage", `Unknown command: ${said} (ghostly ${APP_WORDS[said]}; ghostly help ${commandWords(APP_WORDS[said]).join(" ")})`);
   const all = helpRows().map((row) => commandWords(row.usage));
   const takes = (group: readonly string[]) => [...new Set(all.filter((words) => words.length > group.length && group.every((word, i) => words[i] === word)).map((words) => words[group.length]))];
-  const meant = (typed: readonly string[], words: readonly string[]) => new CliError("usage", `Unknown command: ${typed.join(" ")} (did you mean ${words.join(" ")}? ghostly help ${words.join(" ")})`);
+  const meant = (typed: readonly string[], words: readonly string[]) => new CliError("usage", `Unknown command: ${typed.map(shownWord).join(" ")} (did you mean ${words.join(" ")}? ghostly help ${words.join(" ")})`);
   for (let depth = Math.min(asked.length, 2); depth >= 1; depth--) {
     const group = asked.slice(0, depth), name = group.join(" "), extra = asked[depth];
     const subs = takes(group);
@@ -1910,12 +1939,12 @@ export function unknownCommand(first: string | undefined, second?: string, third
     const near = extra === undefined ? undefined : nearest(extra, subs);
     if (near) return meant([...group, extra!], [...group, near]);
     const list = `${subs.slice(0, -1).join(", ")}${subs.length > 1 ? " or " : ""}${subs.at(-1)}`;
-    return new CliError("usage", extra ? `Unknown command: ${name} ${extra}: ghostly ${name} takes ${list} (ghostly help ${name})` : `ghostly ${name} takes a command: ${list} (ghostly help ${name})`);
+    return new CliError("usage", extra ? `Unknown command: ${name} ${shownWord(extra)}: ghostly ${name} takes ${list} (ghostly help ${name})` : `ghostly ${name} takes a command: ${list} (ghostly help ${name})`);
   }
   // A first word that names no command: the words after it are its arguments (`sned hi`), unless they are a command
   // word of the one it meant (`chta list`).
   const near = asked[0] === undefined ? undefined : nearest(asked[0], takes([]));
-  if (!near) return new CliError("usage", `Unknown command: ${asked[0] ?? '""'} (ghostly help)`);
+  if (!near) return new CliError("usage", `Unknown command: ${asked[0] === undefined ? '""' : shownWord(asked[0])} (ghostly help)`);
   return asked[1] !== undefined && takes([near]).includes(asked[1]) ? meant(asked.slice(0, 2), [near, asked[1]]) : meant([asked[0]], [near]);
 }
 

@@ -1,5 +1,7 @@
+import { createPrivateKey } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
+import { createServer as createHttpsServer } from "node:https";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +14,8 @@ import { Allowlist, allowlist, checkCursor, checkTypes, checkWebhook, EVENT_FAMI
 import { turnRef } from "../src/turnRefs";
 import { ghostly, Running } from "./support/cli";
 import { chatViewOf, groupViewOf } from "./support/chatView";
+import { toBase64Url } from "../../core/src/bytes";
+import { pem, testCertificate } from "../../core/test/support/x509";
 // covers: headless.hooks, headless.events
 
 /**
@@ -283,6 +287,33 @@ describe("hooks", () => {
     }
   }, 10_000);
 
+  it("a webhook whose TLS fails is held, said as a TLS failure with the way out, never as not answering", async () => {
+    // https:// to a plain http server, and a bridge with a self-signed certificate: both answer every try.
+    const plain = createServer((request, response) => { request.resume(); response.writeHead(204).end(); });
+    const leaf = testCertificate({ subject: "localhost", dns: ["localhost"] });
+    const key = createPrivateKey({ key: { kty: "EC", crv: "P-256", d: toBase64Url(leaf.secret), x: toBase64Url(leaf.publicKey.slice(1, 33)), y: toBase64Url(leaf.publicKey.slice(33)) }, format: "jwk" });
+    const selfSigned = createHttpsServer({ cert: pem(leaf), key: key.export({ type: "pkcs8", format: "pem" }) }, (request, response) => { request.resume(); response.writeHead(204).end(); });
+    for (const server of [plain, selfSigned]) await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const said = () => stderr.mock.calls.map(([text]) => String(text)).join("");
+    try {
+      for (const [server, code] of [[plain, "ERR_SSL_WRONG_VERSION_NUMBER"], [selfSigned, "DEPTH_ZERO_SELF_SIGNED_CERT"]] as const) {
+        stderr.mockClear();
+        const origin = `https://localhost:${(server.address() as AddressInfo).port}`;
+        const handle = eventHandler({ types: [], print: false, write: () => {}, retryMs: 10, webhook: `${origin}/hook` });
+        const event = other("daemon.started", {});
+        handle(event);
+        await vi.waitFor(() => expect(said()).toMatch(`holding event ${event.seq}`));
+        expect(said()).toBe(`ghostly: the webhook at ${origin} failed TLS (${code}): holding event ${event.seq} (daemon.started) until it passes; on this machine give it as http://, or restart listen with NODE_EXTRA_CA_CERTS set to the file of the certificate that signed the bridge's\n`);
+        expect(handle.behind()).toBe(1);
+        await handle.stop();
+      }
+    } finally {
+      stderr.mockRestore();
+      plain.close(); selfSigned.close();
+    }
+  }, 10_000);
+
   it("with --print, a hook's stdout goes to stderr as it comes: listen's stdout carries the events only, in order", async () => {
     const said: string[] = [], out: string[] = [];
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => { said.push(String(chunk)); return true; });
@@ -485,6 +516,24 @@ describe("hooks", () => {
       stderr.mockRestore();
     }
   });
+
+  it("a stop that ends a hook without --cursor does not promise the event again: it says how to get it", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const handle = eventHandler({ types: [], print: false, write: () => {}, stopMs: 100, exec: "sleep 20" });
+      const event = received("c1", "p", "slow");
+      handle(event);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await handle.stop();
+      await handle.idle();
+      const said = stderr.mock.calls.map(([text]) => String(text)).join("");
+      // Nothing keeps where it stopped: the next start begins at the journal's end.
+      expect(said).not.toContain("handed again at the next start");
+      expect(said).toContain(`ghostly: stopped while --exec ran on event ${event.seq} (message.received): ended it; with no --cursor it is not handed again (start with --since ${event.seq - 1} to run it again)\n`);
+    } finally {
+      stderr.mockRestore();
+    }
+  });
 });
 
 describe("the allowlist", () => {
@@ -538,10 +587,10 @@ describe("the allowlist", () => {
   it("resolves names to ids once at start; a contact key with no chat yet is kept as a key; anything else is an error", async () => {
     const call = vi.fn(async (method: string, params: Record<string, unknown>) => {
       if (method === "chat.get" && params.chat === "bob") return { id: "c1", label: "bob", peer: KEY };
-      if (method === "group.get" && params.group === "team") return { id: "g1" };
+      if (method === "group.get" && params.group === "g1") return { id: "g1" };
       throw new CliError("not_found", `No ${method} ${String(params.chat ?? params.group)}`);
     });
-    const list = await allowlist(["bob", OTHER_KEY], ["team"], call, async (chat) => (chat === "c9" ? OTHER_KEY : null));
+    const list = await allowlist(["bob", OTHER_KEY], ["g1"], call, async (chat) => (chat === "c9" ? OTHER_KEY : null));
     expect(await list.allows(received("c1", "a", "hi"))).toBe(true);
     expect(await list.allows(received("c9", "b", "hi"))).toBe(true);
     expect(await list.allows(received("c2", "c", "hi"))).toBe(false);
@@ -690,6 +739,58 @@ describe("listen with an allowlist and --turns", () => {
     expect(node.getMessages).toHaveBeenCalledTimes(2);
   });
 
+  it("an agent catching up on old turns, one reply each, reads the whole history once, not once per turn", async () => {
+    const history = Array.from({ length: 5000 }, (_, i) => ({ id: `peer_m${i}`, sender: "peer", text: `m${i}`, timestamp: i }));
+    const node = {
+      chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [{ id: "c1", peerPubKeyZ32: KEY, label: "Alice", pairing: { status: "ready" } }], groups: [], settings: {}, transport: {} }),
+      messagePage: vi.fn(async () => ({ messages: history.slice(-200), more: true })),
+      getMessages: vi.fn(async () => history),
+      getMessage: vi.fn(async (_linkId: string, id: string) => history.find((m) => m.id === id)),
+      sendMessage: vi.fn(async () => ({ error: null, messageId: "me_2" })),
+    };
+    const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
+
+    // 300 turns behind the newest page, answered oldest first as a --cursor catch-up hands them.
+    for (let i = 4500; i < 4800; i++) {
+      await callApi(ctx, "chat.send", { chat: "c1", text: "yes", reply: turnRef("c1", `peer_m${i}`) });
+      expect(node.sendMessage).toHaveBeenLastCalledWith({ linkId: "c1", text: "yes", replyTo: `peer_m${i}` });
+    }
+    expect(node.getMessages).toHaveBeenCalledTimes(1);
+    // One older than what that read kept reads it again, and a message deleted since names none.
+    await callApi(ctx, "chat.send", { chat: "c1", text: "yes", reply: turnRef("c1", "peer_m3000") });
+    expect(node.getMessages).toHaveBeenCalledTimes(2);
+    history.splice(4600, 1);
+    await callApi(ctx, "chat.send", { chat: "c1", text: "yes", reply: turnRef("c1", "peer_m4600") });
+    expect(node.sendMessage).toHaveBeenLastCalledWith({ linkId: "c1", text: "yes", replyTo: turnRef("c1", "peer_m4600") });
+    expect(node.getMessages).toHaveBeenCalledTimes(2);
+  });
+
+  it("what a whole read keeps of its newest messages is bounded, and never pushes out a turn that was asked for", async () => {
+    const histories: Record<string, { id: string; sender: string; text: string; timestamp: number }[]> = Object.fromEntries(["c1", "c2"].map((chat) =>
+      [chat, Array.from({ length: 5000 }, (_, i) => ({ id: `peer_${chat}_${i}`, sender: "peer", text: `m${i}`, timestamp: i }))]));
+    const node = {
+      chatView: chatViewOf, groupView: groupViewOf,
+      getState: () => ({ links: [{ id: "c1", peerPubKeyZ32: KEY, label: "Alice", pairing: { status: "ready" } }, { id: "c2", peerPubKeyZ32: OTHER_KEY, label: "Bob", pairing: { status: "ready" } }], groups: [], settings: {}, transport: {} }),
+      messagePage: vi.fn(async ({ linkId }: { linkId: string }) => ({ messages: histories[linkId].slice(-200), more: true })),
+      getMessages: vi.fn(async (linkId: string) => histories[linkId]),
+      getMessage: vi.fn(async (linkId: string, id: string) => histories[linkId].find((m) => m.id === id)),
+      sendMessage: vi.fn(async () => ({ error: null, messageId: "me_2" })),
+    };
+    const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
+    const reply = (chat: string, at: number) => callApi(ctx, "chat.send", { chat, text: "yes", reply: turnRef(chat, `peer_${chat}_${at}`) });
+
+    // An old turn in each chat: the second chat's read keeps its own newest messages in place of the first's.
+    await reply("c1", 100);
+    await reply("c2", 100);
+    expect(node.getMessages).toHaveBeenCalledTimes(2);
+    // The turn asked for in the first chat is still known; one among its newest 1,000 (outside the newest page) is not.
+    await reply("c1", 100);
+    expect(node.getMessages).toHaveBeenCalledTimes(2);
+    await reply("c1", 4500);
+    expect(node.sendMessage).toHaveBeenLastCalledWith({ linkId: "c1", text: "yes", replyTo: "peer_c1_4500" });
+    expect(node.getMessages).toHaveBeenCalledTimes(3);
+  });
+
   it("a cursor in a folder that is not there, or that takes no file, is refused before anything starts", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ghostly-listen-"));
     // Nothing to check without one; a folder that is there takes it, and the check leaves nothing behind.
@@ -732,20 +833,26 @@ describe("listen with an allowlist and --turns", () => {
     writeFileSync(join(dir, "kept"), "42\n");
     expect(readCursor(join(dir, "kept"))).toBe(42);
     const refusal = (path: string) => { try { readCursor(path); } catch (error) { return asCliError(error).toJSON(); } return null; };
-    for (const [name, text, shown] of [["empty", "", "nothing"], ["blank", " \n", "nothing"], ["garbage", "abc\n", '"abc"'], ["negative", "-1", '"-1"'], ["fraction", "1.5", '"1.5"']] as const) {
+    for (const [name, text, shown] of [["empty", "", "nothing"], ["blank", " \n", "nothing"], ["garbage", "abc\n", "1 word, 3 bytes"], ["negative", "-1", "1 word, 2 bytes"], ["fraction", "1.5", "1 word, 3 bytes"]] as const) {
       writeFileSync(join(dir, name), text);
       expect(refusal(join(dir, name)), name).toEqual({ code: "bad_request", message: `${join(dir, name)} holds no event number (${shown}): fix or remove it, or give --since` });
     }
-    // Something long is cut where it is shown.
-    writeFileSync(join(dir, "long"), "x".repeat(500));
-    expect(refusal(join(dir, "long"))!.message).toContain(`("${"x".repeat(32)}…")`);
+    // What it holds is measured, never quoted: a --cursor pointed by mistake at a seed or a key file put their start on
+    // stderr, which a service manager keeps in its journal.
+    writeFileSync(join(dir, "seed"), "abandon ".repeat(11) + "about\n");
+    writeFileSync(join(dir, "key"), "994c870a52affc250f3649f639430b5e".repeat(2) + "\n");
+    for (const [name, shown] of [["seed", "12 words, 93 bytes"], ["key", "1 word, 64 bytes"]] as const) {
+      const message = refusal(join(dir, name))!.message;
+      expect(message, name).toBe(`${join(dir, name)} holds no event number (${shown}): fix or remove it, or give --since`);
+      expect(message.slice(join(dir, name).length), name).not.toMatch(/abandon|about|994c|"/);
+    }
 
     // The command says it at once, with the code a bot branches on, and no profile was opened or made for it; the file
     // is left as it was, and --since still starts it.
     const home = mkdtempSync(join(tmpdir(), "ghostly-listen-"));
     const result = await ghostly(["--home", home, "listen", "--cursor", join(dir, "garbage")]);
     expect(result.code, result.stdout + result.stderr).toBe(1);
-    expect(result.json).toEqual({ error: { code: "bad_request", message: `${join(dir, "garbage")} holds no event number ("abc"): fix or remove it, or give --since` } });
+    expect(result.json).toEqual({ error: { code: "bad_request", message: `${join(dir, "garbage")} holds no event number (1 word, 3 bytes): fix or remove it, or give --since` } });
     expect(readdirSync(home)).toEqual([]);
     expect(readFileSync(join(dir, "garbage"), "utf8")).toBe("abc\n");
   });
