@@ -33,7 +33,7 @@ import { mintUrlShape, payShape, tokenShape, WALLET_METHODS } from "./wallets";
 import { checkOwnStatus, statusJson } from "./ownStatus";
 import { TRANSPORT_NAMES } from "./words";
 import { chatState, dhtOnlyNote, heldWords, pinWaitsNote, type DhtOnly } from "./waitNotice";
-import { chatDetailsJson, chatJson, chatMessageJson, groupJson, groupMessageJson, groupPayTwins, isLive, messageJson, type MessageJson } from "./views";
+import { chatDetailsJson, chatJson, chatMessageJson, groupJson, groupMessageJson, groupPayTwins, isLive, LINK_MAYBE_REPLACED, longKnockNote, messageJson, type MessageJson } from "./views";
 
 /**
  * A text past what a chat or a group carries (16 KiB of UTF-8, as the engine counts it: trimmed) is refused before the
@@ -354,7 +354,8 @@ async function letIn(ctx: ApiContext, groupId: string, link: string, held: Group
   const noRoom = stage ? NO_ROOM[stage] : undefined;
   if (noRoom) return { group: groupId, joined, stage, warning: `${noRoom}${full ? ` (${full.n} of ${full.max} members)` : ""}. Your app goes on knocking only while this profile is running, and gets in when there is room: ${show}` };
   if (stage === "admitted") return { group: groupId, joined, stage, warning: `Not in yet: a member's app let you in, and the group's welcome has not finished arriving. It arrives only while this profile is running: ${show}` };
-  return { group: groupId, joined, stage, warning: `Not in yet: no member's app has let you in. A member's app lets you in only while this profile is running: ${show}` };
+  // A replaced (or turned-off) link reaches nobody and nothing says so (WISP 902/903): the app's 2-minute line names it.
+  return { group: groupId, joined, stage, warning: `Not in yet: no member's app has let you in. A member's app lets you in only while this profile is running: ${show}. ${LINK_MAYBE_REPLACED}` };
 }
 
 /**
@@ -1078,7 +1079,10 @@ const METHODS: Record<string, Method> = {
     return { autoJoin: ctx.groupAuto.set({ on, from: list(params, "from") }) };
   },
   async "group.get"(ctx, params) {
-    return groupJson(groupOf(ctx, params, "chat show <chat>"), bool(params, "showSecret"));
+    const group = groupOf(ctx, params, "chat show <chat>");
+    // A link join's long knock said on stderr too, as a person reads `group show`; it stays in `invitation.note`.
+    const long = longKnockNote(group);
+    return { ...groupJson(group, bool(params, "showSecret")), ...(long ? { warning: long } : {}) };
   },
   async "group.history"(ctx, params) {
     const group = groupOf(ctx, params, "chat history <chat>");
