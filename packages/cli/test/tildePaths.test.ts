@@ -24,7 +24,7 @@ describe("a path that starts with ~", { timeout: 60_000 }, () => {
     writeFileSync(join(user, "pass"), "a passphrase of twelve\n");
     ok(await ghostly(["--home=~/bots", "-p", "bot", "profile", "backup", "--out=~/bk.backup", "--passphrase-file=~/pass"], { env, cwd }));
     expect(existsSync(join(user, "bk.backup"))).toBe(true);
-    ok(await ghostly(["--home=~/bots", "profile", "restore", "~/bk.backup", "copy", "--passphrase-file=~/pass"], { env, cwd }));
+    ok(await ghostly(["--home=~/bots", "profile", "restore", "~/bk.backup", "copy", "--copy", "--passphrase-file=~/pass"], { env, cwd }));
     expect(existsSync(join(user, "bots", "profiles", "copy"))).toBe(true);
     expect(readdirSync(cwd)).toEqual([]);
   });
