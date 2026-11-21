@@ -3,7 +3,7 @@ import { chmodSync, existsSync, lstatSync, readdirSync, rmSync } from "node:fs";
 import { connect, createServer, type Server, type Socket } from "node:net";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { CliError } from "../errors";
-import { privateFolder, runtimePath } from "../privateFolder";
+import { dropRuntimeFolder, privateFolder, runtimePath } from "../privateFolder";
 import { bytesToMs, frameBytes, type CallRate, type PlaybackQueue } from "./pcm";
 
 /**
@@ -337,6 +337,8 @@ export class AudioSocket {
     return new Promise((resolve) => {
       this.server.close(() => resolve());
       if (process.platform !== "win32") rmSync(this.path, { force: true });
+      // Its folder outside the profile with it, once no other call's socket is in it.
+      dropRuntimeFolder(this.path);
     });
   }
 }

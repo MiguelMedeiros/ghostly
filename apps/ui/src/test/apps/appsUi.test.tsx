@@ -19,6 +19,7 @@ import { Settings } from "../../pages/Settings";
 import { registerRunningApp, setAppOpener, setLinkedFiles } from "../../lib/apps/open";
 import { appsAvailable, forgetAppsAvailable, webKitAppLeak } from "../../lib/apps/flag";
 import { forgetInstalledApps, useInstalledApps } from "../../lib/apps/installed";
+import { webLinkedFiles } from "../../lib/apps/webFiles";
 import type { ChatMessage } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { shownInName } from "../labelInName";
@@ -1195,6 +1196,47 @@ describe("with the apps flag on", () => {
     await waitFor(() => expect(forgot).toEqual([`${REF} all`]));
     setLinkedFiles(null);
     expect(fetches).toEqual([]);
+  });
+
+  describe("a grant of files starts with no links: what was picked under an earlier grant does not come back", () => {
+    const linked = async () => {
+      const files = webLinkedFiles({ text: () => ({}) as never, ask: async () => ({ files: [{ path: "Private/tax.pdf", file: new Blob(["1040"]) }] }) });
+      await files.pick(REF, "Chess", { folder: true, accept: [] });
+      expect(await files.list(REF, "Chess")).toHaveLength(1);
+      setLinkedFiles(files);
+      return files;
+    };
+    afterEach(() => setLinkedFiles(null));
+
+    it("an update that asks for files again: its Update drops the links picked before", async () => {
+      const files = await linked();
+      fakeEngine.on("appList", () => []).on("appUpdateAccept", () => installed({ permissions: ["chat", "files"] }));
+      const { user } = renderApp(<InstalledAppDialog onClose={() => {}} onOpen={() => {}}
+        app={installed({ pending: { sequence: 9, version: "1.4.0", added: ["files"] } })} />);
+      await user.click(await screen.findByTestId("app-update-accept"));
+      await waitFor(() => expect(fakeEngine.callsTo("appUpdateAccept")).toHaveLength(1));
+      await waitFor(async () => expect(await files.list(REF, "Chess")).toEqual([]));
+    });
+
+    it("an update installed from its link that asks for files: Update drops them too", async () => {
+      const files = await linked();
+      fakeEngine.on("appPreview", () => preview({ install: "update", asks: ["files"] })).on("appInstall", () => installed({ permissions: ["chat", "files"] }));
+      const onInstalled = vi.fn();
+      const { user } = renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} onInstalled={onInstalled} />);
+      await user.click(await screen.findByTestId("app-install-confirm"));
+      await waitFor(() => expect(onInstalled).toHaveBeenCalled());
+      expect(await files.list(REF, "Chess")).toEqual([]);
+    });
+
+    it("an update that adds another permission keeps them", async () => {
+      const files = await linked();
+      fakeEngine.on("appList", () => []).on("appUpdateAccept", () => installed({ permissions: ["chat", "files", "name"] }));
+      const { user } = renderApp(<InstalledAppDialog onClose={() => {}} onOpen={() => {}}
+        app={installed({ permissions: ["chat", "files"], pending: { sequence: 9, version: "1.4.0", added: ["name"] } })} />);
+      await user.click(await screen.findByTestId("app-update-accept"));
+      await waitFor(() => expect(fakeEngine.callsTo("appUpdateAccept")).toHaveLength(1));
+      expect(await files.list(REF, "Chess")).toHaveLength(1);
+    });
   });
 
   it("an installed app's row is named with all it shows, then details, so a stopped app says so to a screen reader", async () => {

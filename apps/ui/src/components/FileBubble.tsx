@@ -15,6 +15,8 @@ import { useT } from "../contexts/I18nContext";
 import { NAME, SECOND_NAME, withNames } from "./apps/aroundName";
 import type { ChatFile } from "../lib/types";
 import { problemLine, saveProblemLine } from "../lib/problemText";
+import { roomHeld } from "../lib/filesComing";
+import { FilesStillComing } from "./chat/FilesStillComing";
 
 /** A press this long is the message's long press (`LONG_PRESS_MS` in MessageBubble.tsx), not a tap. */
 const HELD_MS = 500;
@@ -37,6 +39,8 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   /** The preview as it loaded, or that it could not be shown, for this URL. */
   const [loaded, setLoaded] = useState<{ url: string; ok: boolean } | null>(null);
   const [actionError, setActionError] = useState("");
+  // Accept refused for the files still coming: which ones, from which chat, show under the offer.
+  const [heldRoom, setHeldRoom] = useState(false);
   /** A resend or a request asked for, until the transfer answers by moving on. */
   const [busy, setBusy] = useState(false);
   const [why, setWhy] = useState(false);
@@ -134,7 +138,8 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
 
   const act = (action: FileAction) => {
     setActionError("");
-    void platform?.fileAction?.(file.id, action).catch((error: Error) => setActionError(problemLine(error, t)));
+    setHeldRoom(false);
+    void platform?.fileAction?.(file.id, action).catch((error: Error) => { setActionError(problemLine(error, t)); setHeldRoom(roomHeld(error)); });
   };
   /** The same path as Download in the message's menu: the system's save dialog where there is one, else a download. */
   const save = () => {
@@ -290,6 +295,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
               data-testid="file-accept" onClick={() => act("accept")}>{t("chat.file.accept")}</button>
             <button type="button" className={`${answerButton} bg-black/20 text-inherit`} data-testid="file-decline" onClick={() => act("decline")}>{t("chat.file.decline")}</button>
           </div>
+          {(heldRoom || (typeof transfer.room === "number" && transfer.room < file.size)) && <FilesStillComing except={file.id} open={heldRoom} />}
         </div>
       )}
       {(controls && !offered && !group && (canPause || pausedHere || canCancel)) && (

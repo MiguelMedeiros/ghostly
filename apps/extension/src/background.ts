@@ -32,7 +32,7 @@ function ensureEngine(): Promise<void> {
 async function startEngine(): Promise<void> {
   if (!(await chrome.offscreen.hasDocument())) await createEngineDocument();
   const status = await waitForEngine();
-  if (status.profile === status.active && !status.stopped) return;
+  if (status.profile === status.active && !status.stopped) return await sweepAfterPeer(status);
   // A page made another profile the one in use. The running peer stops and its document closes before
   // the next one opens: never two peers, and never one peer over two profiles' data.
   // Or the peer stopped for good and nobody asked for the next one: the page that ran "Clear all data" went away
@@ -61,10 +61,28 @@ async function replaceEngine(next?: string): Promise<void> {
     const status = (await answerOf()) ?? notStarted();
     // Again: a tab still on the peer before posted one while that peer stopped. The next profile's pages wait on this start.
     await clearNotices(next);
-    if (status.profile === status.active) return;
+    if (status.profile === status.active) return await chrome.storage.session.set({ [PEER_PROFILE]: status.profile });
     next = status.activeId;
   }
   throw new Error("Switching profiles…");
+}
+
+/**
+ * The profile the last peer ran, in session storage, which outlives the worker. A document that went away (its renderer
+ * crashed, it was ended from Chrome's task manager) replaces nothing when the next one opens, and that one may open as
+ * another profile: a switch made meanwhile, or one it read as it loaded. Its start closes the viewers and the notices,
+ * as a switch does (`replaceEngine`).
+ */
+const PEER_PROFILE = "peer-profile";
+
+async function sweepAfterPeer(status: EngineStatus): Promise<void> {
+  const before: unknown = (await chrome.storage.session.get(PEER_PROFILE))[PEER_PROFILE];
+  if (typeof before === "string" && before !== status.profile) {
+    viewersClosed++;
+    await closeViewers();
+    await clearNotices(status.activeId);
+  }
+  await chrome.storage.session.set({ [PEER_PROFILE]: status.profile });
 }
 
 /** A new peer in place of the running one, which stopped for good ("Clear all data"); after any start in progress. */
@@ -759,6 +777,12 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
     bodyB64,
     ...(binding.page.app ? { app: binding.page.app } : {}),
   };
+
+  // A start in progress may find the next peer another profile's (`sweepAfterPeer`): this tab's request waits on it.
+  if (starting) {
+    await starting.catch(() => {});
+    if (!(await bindingOf(tabId))) return;
+  }
 
   let reply: HttpRequestReply;
   try {

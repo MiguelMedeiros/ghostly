@@ -785,6 +785,17 @@ export function forwardedHops(request) {
 }
 
 /**
+ * The line for a request with `entries` X-Forwarded-For entries, fewer than GHOSTLY_RELAY_PROXIES (`proxies`) or than
+ * any request before: the setting names more proxies than write the header. Until then a client writing the header
+ * itself could choose the address it counted as; from then on the relay reads only as deep as `entries`. The push relay's.
+ */
+export function fewerHops(entries, proxies) {
+  const before = 'until now a client writing the header itself could choose the address it counts as'
+  if (!entries) return `requests arrive without X-Forwarded-For though GHOSTLY_RELAY_PROXIES is set: ${before}; from now on the header is ignored and each counts as the proxy, so have the proxy write it or leave the setting out`
+  return `requests carry ${entries} X-Forwarded-For ${entries === 1 ? 'entry' : 'entries'} though GHOSTLY_RELAY_PROXIES is ${proxies}: ${before}; from now on each counts by entry ${entries} from the end, so set it to the number of proxies that write the header`
+}
+
+/**
  * What `clientsPerAddress` counts: an IPv4 address as it is (an IPv4-mapped IPv6 one too), an IPv6 address by its
  * /64, the block one subscriber usually holds whole. A port some proxies write with it (`203.0.113.7:51234`,
  * `[2001:db8::1]:51234`) and IPv6 brackets are dropped first: each connection has a new port, so keyed with it the
@@ -906,7 +917,8 @@ export async function startRelay(options = {}) {
   const onresponse = dht.io.onresponse
   dht.io.onresponse = (...args) => { answeredAt = monotonicNow(); return onresponse(...args) }
   await dht.ready()
-  if (dht.toArray().length === 0) log('bootstrap reached no node')
+  // With its next step: the operator reading it has no other line that says what to check.
+  if (dht.toArray().length === 0) log(`bootstrap reached no node: check that this host can send UDP out (a tunnel, a firewall or a container network may not)${bootstrap.length ? ' and that GHOSTLY_HYPERDHT_BOOTSTRAP names running nodes' : ''}; /healthz answers 503 until a node answers`)
 
   const clients = new Set()
   // Each client's dht-relay session, for what it holds (`stats().held`).
@@ -957,8 +969,11 @@ export async function startRelay(options = {}) {
   }
   const unset = (header, setting) => hint(header, `requests carry ${header} but ${setting} is not set: every client counts as the proxy`)
   const missing = (header, setting) => hint(header, `requests arrive without ${header} though ${setting} is set: each counts as the proxy, so have the proxy write it or leave the setting out`)
-  // The header there with fewer entries than GHOSTLY_RELAY_PROXIES: the setting names more proxies than write it.
-  const fewer = entries => hint('X-Forwarded-For', `requests carry ${entries} X-Forwarded-For ${entries === 1 ? 'entry' : 'entries'} though GHOSTLY_RELAY_PROXIES is ${options.proxies}: each counts as the proxy, so set it to the number of proxies that write the header`)
+  // The fewest `X-Forwarded-For` entries a request has come with, from GHOSTLY_RELAY_PROXIES down: each proxy in front
+  // adds one and a client can only add more, so no more proxies than that write the header. Read deeper, the counted
+  // entry would be one the client wrote (a new address per upgrade if it likes, past clientsPerAddress and makeRoom's
+  // once per ROOM_MS), so the relay reads no deeper than that from then on.
+  let trusted = options.proxies ?? 0
 
   /**
    * On a full relay, what makes room for a client from `address` (null: none is made). A client holding one listen and
@@ -1011,18 +1026,17 @@ export async function startRelay(options = {}) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: limits.payloadBytes, perMessageDeflate: false, autoPong: false })
 
   server.on('upgrade', (request, socket, head) => {
-    const forwarded = forwardedAddress(request, { proxies: options.proxies, cloudflare: options.cloudflare })
-    const address = addressKey(forwarded ?? request.socket.remoteAddress ?? 'unknown')
     // Cloudflare writes both headers: its own setting is the one to name.
     if (!options.cloudflare && !options.proxies) {
       if (request.headers['cf-connecting-ip'] !== undefined) unset('CF-Connecting-IP', 'GHOSTLY_RELAY_CLOUDFLARE')
       else if (request.headers['x-forwarded-for'] !== undefined) unset('X-Forwarded-For', 'GHOSTLY_RELAY_PROXIES')
-    } else if (forwarded === null) {
+    } else if (options.proxies) {
       const entries = forwardedHops(request).length
-      if (options.cloudflare) missing('CF-Connecting-IP', 'GHOSTLY_RELAY_CLOUDFLARE')
-      else if (entries) fewer(entries)
-      else missing('X-Forwarded-For', 'GHOSTLY_RELAY_PROXIES')
+      if (entries < trusted) { trusted = entries; log(fewerHops(entries, options.proxies)) }
     }
+    const forwarded = forwardedAddress(request, { proxies: trusted, cloudflare: options.cloudflare })
+    const address = addressKey(forwarded ?? request.socket.remoteAddress ?? 'unknown')
+    if (options.cloudflare && forwarded === null) missing('CF-Connecting-IP', 'GHOSTLY_RELAY_CLOUDFLARE')
     const origin = request.headers.origin
     // A refusal goes straight to the raw socket, which nothing else listens on: a client that has already reset it
     // would make the write fail with an error nobody catches, and that ends the relay for every other client.

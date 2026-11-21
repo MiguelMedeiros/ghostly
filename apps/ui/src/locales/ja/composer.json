@@ -1,5 +1,6 @@
 {
   "attach": "添付",
+  "bytesLeft": "残りバイト数: {{count}}",
   "camera": "カメラ",
   "cameraBlocked": "カメラがブロックされています。Android の設定で Ghostly にカメラを許可してください。",
   "cameraFailed": "カメラを起動できませんでした。",
@@ -17,6 +18,7 @@
     "recent": "最近使用",
     "symbols": "記号"
   },
+  "charactersLeft": "残り文字数: {{count}}",
   "chooseFiles": "ファイルを選ぶ",
   "closeCamera": "カメラを閉じる",
   "dhtTooLong": "DHT には長すぎます（{{bytes}} / {{max}} バイト）。短くするかライブ接続にしてください。下書きは残ります。",

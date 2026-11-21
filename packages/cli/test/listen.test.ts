@@ -1,5 +1,7 @@
+import { createPrivateKey } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
+import { createServer as createHttpsServer } from "node:https";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +14,8 @@ import { Allowlist, allowlist, checkCursor, checkTypes, checkWebhook, EVENT_FAMI
 import { turnRef } from "../src/turnRefs";
 import { ghostly, Running } from "./support/cli";
 import { chatViewOf, groupViewOf } from "./support/chatView";
+import { toBase64Url } from "../../core/src/bytes";
+import { pem, testCertificate } from "../../core/test/support/x509";
 // covers: headless.hooks, headless.events
 
 /**
@@ -283,6 +287,33 @@ describe("hooks", () => {
     }
   }, 10_000);
 
+  it("a webhook whose TLS fails is held, said as a TLS failure with the way out, never as not answering", async () => {
+    // https:// to a plain http server, and a bridge with a self-signed certificate: both answer every try.
+    const plain = createServer((request, response) => { request.resume(); response.writeHead(204).end(); });
+    const leaf = testCertificate({ subject: "localhost", dns: ["localhost"] });
+    const key = createPrivateKey({ key: { kty: "EC", crv: "P-256", d: toBase64Url(leaf.secret), x: toBase64Url(leaf.publicKey.slice(1, 33)), y: toBase64Url(leaf.publicKey.slice(33)) }, format: "jwk" });
+    const selfSigned = createHttpsServer({ cert: pem(leaf), key: key.export({ type: "pkcs8", format: "pem" }) }, (request, response) => { request.resume(); response.writeHead(204).end(); });
+    for (const server of [plain, selfSigned]) await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const said = () => stderr.mock.calls.map(([text]) => String(text)).join("");
+    try {
+      for (const [server, code] of [[plain, "ERR_SSL_WRONG_VERSION_NUMBER"], [selfSigned, "DEPTH_ZERO_SELF_SIGNED_CERT"]] as const) {
+        stderr.mockClear();
+        const origin = `https://localhost:${(server.address() as AddressInfo).port}`;
+        const handle = eventHandler({ types: [], print: false, write: () => {}, retryMs: 10, webhook: `${origin}/hook` });
+        const event = other("daemon.started", {});
+        handle(event);
+        await vi.waitFor(() => expect(said()).toMatch(`holding event ${event.seq}`));
+        expect(said()).toBe(`ghostly: the webhook at ${origin} failed TLS (${code}): holding event ${event.seq} (daemon.started) until it passes; on this machine give it as http://, or restart listen with NODE_EXTRA_CA_CERTS set to the file of the certificate that signed the bridge's\n`);
+        expect(handle.behind()).toBe(1);
+        await handle.stop();
+      }
+    } finally {
+      stderr.mockRestore();
+      plain.close(); selfSigned.close();
+    }
+  }, 10_000);
+
   it("with --print, a hook's stdout goes to stderr as it comes: listen's stdout carries the events only, in order", async () => {
     const said: string[] = [], out: string[] = [];
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => { said.push(String(chunk)); return true; });
@@ -485,6 +516,24 @@ describe("hooks", () => {
       stderr.mockRestore();
     }
   });
+
+  it("a stop that ends a hook without --cursor does not promise the event again: it says how to get it", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const handle = eventHandler({ types: [], print: false, write: () => {}, stopMs: 100, exec: "sleep 20" });
+      const event = received("c1", "p", "slow");
+      handle(event);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await handle.stop();
+      await handle.idle();
+      const said = stderr.mock.calls.map(([text]) => String(text)).join("");
+      // Nothing keeps where it stopped: the next start begins at the journal's end.
+      expect(said).not.toContain("handed again at the next start");
+      expect(said).toContain(`ghostly: stopped while --exec ran on event ${event.seq} (message.received): ended it; with no --cursor it is not handed again (start with --since ${event.seq - 1} to run it again)\n`);
+    } finally {
+      stderr.mockRestore();
+    }
+  });
 });
 
 describe("the allowlist", () => {
@@ -538,10 +587,10 @@ describe("the allowlist", () => {
   it("resolves names to ids once at start; a contact key with no chat yet is kept as a key; anything else is an error", async () => {
     const call = vi.fn(async (method: string, params: Record<string, unknown>) => {
       if (method === "chat.get" && params.chat === "bob") return { id: "c1", label: "bob", peer: KEY };
-      if (method === "group.get" && params.group === "team") return { id: "g1" };
+      if (method === "group.get" && params.group === "g1") return { id: "g1" };
       throw new CliError("not_found", `No ${method} ${String(params.chat ?? params.group)}`);
     });
-    const list = await allowlist(["bob", OTHER_KEY], ["team"], call, async (chat) => (chat === "c9" ? OTHER_KEY : null));
+    const list = await allowlist(["bob", OTHER_KEY], ["g1"], call, async (chat) => (chat === "c9" ? OTHER_KEY : null));
     expect(await list.allows(received("c1", "a", "hi"))).toBe(true);
     expect(await list.allows(received("c9", "b", "hi"))).toBe(true);
     expect(await list.allows(received("c2", "c", "hi"))).toBe(false);

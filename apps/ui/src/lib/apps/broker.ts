@@ -23,6 +23,7 @@ import type { AppFileAt } from "@ghostly/browser/engine/apps";
 import { MINI_APP_LIMITS, type MiniAppContext, type MiniAppErrorCode, type MiniAppJson, type MiniAppLinkedFile, type MiniAppPeerEvent, type MiniAppRequestType } from "@ghostly/core/miniApp";
 import type { AppsPlatform } from "../platform";
 import { appInput } from "./open";
+import { relayedChannel } from "./relayedChannel";
 
 /** An app to run: its checked entry (the engine's `appEntry`), what the person granted it, and where it opens. */
 export interface AppLaunch {
@@ -915,6 +916,7 @@ export function startApp({ container, host, launch, view, onStop, onServing, sta
   frame.setAttribute("allow", "");
   frame.title = launch.title;
   let port: MessagePort | null = null;
+  let relay: ReturnType<typeof relayedChannel> | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let watch: AppWatch | null = null;
   let watching: ReturnType<typeof setInterval> | null = null;
@@ -941,6 +943,7 @@ export function startApp({ container, host, launch, view, onStop, onServing, sta
       frame.removeEventListener("load", loaded);
       port?.close();
       port = null;
+      relay?.end();
       frame.remove();
       onStop?.(reason);
     },
@@ -960,7 +963,7 @@ export function startApp({ container, host, launch, view, onStop, onServing, sta
       watch.tick();
     }
     if (broker.phase !== "starting" || port) return;
-    const channel = new MessageChannel();
+    const channel = (relay = relayedChannel(STOP_REQUESTS_PER_SECOND, () => broker.stop("protocol")));
     port = channel.port1;
     const reading = readWithin();
     port.onmessage = (event) => {
