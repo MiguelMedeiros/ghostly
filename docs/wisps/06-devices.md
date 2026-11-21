@@ -845,7 +845,7 @@ Copy follows the app's rules: short labels, one-line hints, details behind ⓘ. 
 
 ⓘ on the standby screen: "Only one device sends, receives and pays at a time, so your messages and money are never in two places."
 
-**Remove this profile here** is the way to take the frozen copy, which is not encrypted, off a device that is out of the set for good. It asks "Remove <profile> from this device?", "Its chats, keys and wallets go from this device. Your other devices keep the profile.", and for the profile's name typed, as deleting a profile does ([04](04-profiles.md)). It deletes what deleting a profile deletes on this device (the namespace the profile runs on, its wallets' own storage, its files and keys, the forks its device record lists, and the device record), and nothing on the network. Any other profile then goes off the list and the app opens the first one. The first profile, which cannot be deleted, keeps its place on the list ("An empty profile takes its place here."): its pointer goes back to its own namespace, and it opens empty, from where the device can be added to a profile again.
+**Remove this profile here** is the way to take the frozen copy, which is not encrypted, off a device that is out of the set for good. It asks "Remove <profile> from this device?", "Its chats, keys and wallets go from this device. Your other devices keep the profile.", and for the profile's name typed, as deleting a profile does ([04](04-profiles.md)). On the home device of a wallet that stays home it also names each such wallet, "<wallet> lives on this device. What it keeps here is not on your other devices.", with that wallet's loss from the [Wallets](#wallets) table: its own database goes with the copy, and the other devices have only its record. It deletes what deleting a profile deletes on this device (the namespace the profile runs on, its wallets' own storage, its files and keys, the forks its device record lists, and the device record), and nothing on the network. Any other profile then goes off the list and the app opens the first one. The first profile, which cannot be deleted, keeps its place on the list ("An empty profile takes its place here."): its pointer goes back to its own namespace, and it opens empty, from where the device can be added to a profile again.
 
 The account switcher ([04](04-profiles.md)) shows such a profile with the word "Standby" in place of its unread count.
 
@@ -885,7 +885,7 @@ The account switcher ([04](04-profiles.md)) shows such a profile with the word "
 
 **Remove**
 
-- "Remove <device>?" Text: "It can no longer take this profile." If it held a copy: "It still holds your chats and wallets as of <date>, unencrypted." Buttons: "Remove", and "Lost or stolen" (the checklist first).
+- "Remove <device>?" Text: "It can no longer take this profile." If it held a copy: "It still holds your chats and wallets as of <date>, unencrypted." For each wallet at home on that device ([Wallets that stay home](#wallets-that-stay-home)), before the buttons: "<wallet> lives on <device>. After removal it opens here instead.", with that wallet's loss from its row in the [Wallets](#wallets) table under it (Bark: an exit or a send still open there can't be finished here; Fedimint: it is recovered from its federation, untested; USDT: sending stays off until the last transaction is confirmed on chain). Buttons: "Remove", and "Lost or stolen" (the checklist first).
 
 **Restore where a device set exists**
 
