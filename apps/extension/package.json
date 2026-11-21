@@ -16,24 +16,24 @@
     "@ghostly/browser": "*",
     "@ghostly/core": "*",
     "@ghostly/react": "*",
-    "@tauri-apps/api": "^2.12.4",
+    "@tauri-apps/api": "^2.12.5",
     "qrcode.react": "^4.2.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-router-dom": "^7.18.5"
   },
   "devDependencies": {
-    "@cashu/cashu-ts": "^4.13.0",
+    "@cashu/cashu-ts": "^4.13.1",
     "@tailwindcss/vite": "^4.3.5",
     "@types/chrome": "^0.3.7",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "@vitejs/plugin-react": "^6.2.1",
+    "@vitejs/plugin-react": "^6.3.0",
     "fake-indexeddb": "^6.2.8",
     "playwright": "^1.63.0",
     "tailwindcss": "^4.2.0",
     "typescript": "^5.9.3",
-    "vite": "^8.3.6",
-    "vitest": "^5.1.0"
+    "vite": "^8.3.8",
+    "vitest": "^5.1.1"
   }
 }
