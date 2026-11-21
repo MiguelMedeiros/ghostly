@@ -62,6 +62,8 @@ interface Files {
   store: MemoryFiles; transfers: Map<string, FileTransferView>; brief: Map<string, FileTransferView>; settings: { autoDownloads: boolean; serveFiles: boolean };
   /** Bytes still to come of the files its 1:1 chats took (`FileDesk.chatsComing`). */
   chatsComing: number;
+  /** What still came of the group files each time the desk said it changed (`GroupFilesHost.comingChanged`). */
+  coming: number[];
 }
 
 /** Frames on the edges, as they went: who to whom, and the frame. */
@@ -100,10 +102,11 @@ class FilesWorld {
 
   /** `binary`: its edges agreed files/4, so what it serves goes as binary messages. */
   add(name: string, binary = false, staysOnline = false): Peer {
-    const files: Files = { store: new MemoryFiles(), transfers: new Map(), brief: new Map(), settings: { autoDownloads: true, serveFiles: true }, chatsComing: 0 };
+    const files: Files = { store: new MemoryFiles(), transfers: new Map(), brief: new Map(), settings: { autoDownloads: true, serveFiles: true }, chatsComing: 0, coming: [] };
     const brief = (id: string) => { const view = files.transfers.get(id); if (view) files.brief.set(id, view); };
     const peer = this.world.add(name, p => ({ groupFiles: { store: files.store, transfers: files.transfers, brief, settings: () => files.settings, sendFiles: (linkId, frame) => this.world.sendFiles(p, linkId, frame),
       chatsComing: () => files.chatsComing,
+      comingChanged: () => files.coming.push(p.groups.files!.stillComing()),
       ...(binary && { sendData: (linkId: string, id: string, offset: number, data: Uint8Array) => this.world.sendData(p, linkId, id, offset, data) }) } }), { staysOnline });
     this.files.set(peer, files);
     return peer;
@@ -659,6 +662,20 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(t.got(bob, id, big.messageId).transfer).toMatchObject({ state: "transferring", stage: "asking" });
     const small = await t.send(alice, id, pattern(400_000, 4), { name: "small.bin" });
     await t.world.until(() => t.done(bob, id, small.messageId), 60_000);
+  });
+
+  /**
+   * A 1:1 offer waiting shows the room left beside the group files still coming: the desk says when that changes, as a
+   * file is asked for and as it ends, so the offer's room is read again then (`FileDesk.comingChanged`).
+   */
+  it("says what still comes changed when a file fetched by itself is asked for and when it ends", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
+    const files = t.files.get(bob)!;
+    files.coming.length = 0;
+    const sent = await t.send(alice, id, pattern(400_000, 7), { name: "told.bin" });
+    await t.world.until(() => t.done(bob, id, sent.messageId), 60_000);
+    expect(files.coming).toEqual([400_000, 0]);
   });
 
   /**

@@ -128,6 +128,11 @@ export interface GroupFilesHost {
    * is fetched only where it fits beside them too. Absent: none.
    */
   chatsComing?(room: number): number;
+  /**
+   * The group files still coming changed: one is asked for, or ends (`GroupFileDesk.stillComing`). A 1:1 offer waiting
+   * for the person shows the room left beside them (`FileDesk.comingChanged`). Absent: nothing told.
+   */
+  comingChanged?(): void;
 }
 
 /** Me in a group I am active in, and who could read one of its messages. */
@@ -336,11 +341,30 @@ const DAMAGED = "Every copy of this file arrived damaged and was deleted. Ask fo
 /** Why a want stopped, or a Download was refused: this device has no room for the file. */
 const NO_ROOM = "Not enough space on this device for this file";
 
+/** The files this device fetches, by local id: `changed` runs when one is asked for or ends, as what still comes does. */
+class Wants extends Map<string, Want> {
+  constructor(private readonly changed: () => void) { super(); }
+
+  override set(id: string, want: Want): this {
+    const added = !this.has(id);
+    super.set(id, want);
+    if (added) this.changed();
+    return this;
+  }
+
+  override delete(id: string): boolean {
+    const gone = super.delete(id);
+    if (gone) this.changed();
+    return gone;
+  }
+}
+
 export class GroupFileDesk {
   private readonly kept = new Map<string, Kept>();
   /** `<group>\n<message id>` → local id. */
   private readonly byMessage = new Map<string, string>();
-  private readonly wants = new Map<string, Want>();
+  /** A file starting or ending changes the room a 1:1 offer waiting shows (`GroupFilesHost.comingChanged`). */
+  private readonly wants = new Wants(() => this.deps.comingChanged?.());
   /** Files just chosen to be fetched by themselves, before their want counts them: the room they will take (`reserve`). */
   private readonly reserved = new Set<{ size: number }>();
   /**

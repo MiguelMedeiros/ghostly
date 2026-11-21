@@ -5,6 +5,7 @@ import { ChatFiles, FILE_LIMITS, GhostLink, REMOVED_TEXT, createIdentity, create
 import { GhostlyNode } from "../src/engine/node";
 import type { GroupFileDesk } from "../src/engine/groupFiles";
 import { db } from "../src/engine/db";
+import type { FileTransferView } from "../src/shared/types";
 import { STORES, fileStore } from "../src/shared/idb";
 import { knownErrorParts } from "../../../apps/ui/src/lib/errorText";
 import { fileBytes, registerFileBytes } from "../src/shared/fileBytes";
@@ -973,7 +974,14 @@ it("an offer that fits only without the group files still coming is asked about,
   const MiB = 1024 ** 2;
   left = 30 * MiB;
   const engine = t.node() as unknown as { groups: { files: GroupFileDesk } };
-  vi.spyOn(engine.groups.files, "stillComing").mockReturnValue(16 * MiB);
+  const coming = vi.spyOn(engine.groups.files, "stillComing").mockReturnValue(16 * MiB);
   t.offer("beside-0001", 20 * MiB);
   await vi.waitFor(() => expect(t.records.get("out:beside-0001")).toMatchObject({ state: "asking", waitingFor: "consent" }));
+  // The offer waiting shows the room left beside them, and again once they end (the group desk says so).
+  const views = (engine as unknown as { transfers: Map<string, FileTransferView> }).transfers;
+  const shown = () => [...views.values()].find(view => view.stage === "asking" && view.size === 20 * MiB)?.room;
+  await vi.waitFor(() => expect(shown()).toBe(14 * MiB));
+  coming.mockReturnValue(0);
+  (engine.groups.files as unknown as { deps: { comingChanged(): void } }).deps.comingChanged();
+  await vi.waitFor(() => expect(shown()).toBe(30 * MiB));
 }, 30_000);

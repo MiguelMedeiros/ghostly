@@ -1988,6 +1988,7 @@ export class GhostlyNode implements EngineImplementation {
       sendData: (linkId, id, offset, data) => this.links.get(linkId)?.link?.sendFileData(id, offset, data) ?? false,
       writable: linkId => this.links.get(linkId)?.link?.filesWritable(),
       chatsComing: (room: number): number => this.fileDesk.chatsComing(room),
+      comingChanged: () => this.fileDesk.comingChanged(),
     },
   });
 

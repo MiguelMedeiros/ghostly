@@ -553,6 +553,15 @@ export class FileDesk {
     return this.stillComing({}, room, 0);
   }
 
+  /**
+   * The group files still coming changed (`FileDeskDeps.groupsComing`): one started or ended. The offers waiting show the
+   * room left beside them again (`rooms`). Before, they were read again only for a 1:1 file, and an offer kept showing
+   * the room a group file had taken since (or had given back).
+   */
+  comingChanged(): void {
+    void this.rooms();
+  }
+
   /** A taken offer's record is kept, under way: it counts itself from now (`stillComing`), even if forgotten later. */
   private counted(linkId: string, record: FileTransferRecord): void {
     if (record.direction !== "in" || transferEnded(record)) return;
@@ -854,7 +863,8 @@ export class FileDesk {
   /**
    * The room the offers waiting for the person are decided against, shown with them: the free space (`known` when an
    * Accept read it) less what the files taken here still need (`stillComing`), as Accept counts it. Read again when one
-   * is shown, when one is taken, when another received file ends, and when an Accept found less; once for all of them.
+   * is shown, when one is taken, when another received file ends, when a group file starts or ends (`comingChanged`),
+   * and when an Accept found less; once for all of them.
    * Before, the free space alone: an offer that fit it read as fitting, and Accept refused it for the file still coming.
    */
   private async rooms(known?: number | null): Promise<void> {
