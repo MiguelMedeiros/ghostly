@@ -5,7 +5,7 @@ import { Chat } from "../../pages/Chat";
 import { saveSession } from "../../lib/storage";
 import { clockTime, formatAt } from "../../lib/time";
 import { linkView } from "../fakeEngine";
-import { heldTime } from "../heldTime";
+import { plainBeforeDayPeriod } from "../timeSpaces";
 import { renderApp } from "../render";
 
 // covers: app.i18n
@@ -31,12 +31,15 @@ describe("an Arabic time keeps its day period on its line", () => {
     }
   });
 
-  // ICU 72-77 writes English's "PM" after a narrow no-break space, ICU 78 after a plain one the app holds: either way it stays on the line.
-  it("other languages read as before, with no plain space a line could break at before a day period", () => {
+  // ICU 78 writes English's "PM" after a plain space, which the app holds; Node 22's V8 (ICU 74-77) says U+202F in its parts and is left as it writes.
+  it("other languages read as before, a plain space before a day period held where the runtime writes one", () => {
     const options: Intl.DateTimeFormatOptions = { dateStyle: "medium", timeStyle: "short" };
+    const format = new Intl.DateTimeFormat("en", options);
     const english = formatAt(EVENING, options, "en");
-    expect(english).toBe(heldTime(new Intl.DateTimeFormat("en", options), EVENING));
-    expect(english).toMatch(/[\u00a0\u202f]PM$/);
+    if (plainBeforeDayPeriod(format, EVENING)) {
+      expect(english).toBe(format.format(EVENING).replace(/ PM$/, "\u00a0PM"));
+      expect(english).toMatch(/\u00a0PM$/);
+    } else expect(english).toBe(format.format(EVENING));
     expect(formatAt(EVENING, options, "pt")).toBe(new Intl.DateTimeFormat("pt-BR", options).format(EVENING));
     expect(clockTime(EVENING, "ja")).toBe(new Intl.DateTimeFormat("ja", { hour: "2-digit", minute: "2-digit" }).format(EVENING));
   });
