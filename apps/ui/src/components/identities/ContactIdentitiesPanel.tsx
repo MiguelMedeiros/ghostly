@@ -241,10 +241,16 @@ function TheirCardBack({ t, entry, linkId, name, nostr, turning, onCards }: { t:
   const provider = providerOf(r.provider);
   const [busy, setBusy] = useState(""), [error, setError] = useState("");
   /** Check again answered (not thrown), with the record as it was at the press: the reply comes before the new state
-   *  (50 ms or more), so the check counts as done only once the record differs. */
-  const [rechecked, setRechecked] = useState<{ checkedAt: number; status: string; error?: string } | null>(null);
+   *  (50 ms or more), so the check counts as done once the record differs, or a second after the reply (a check in the
+   *  same second as the last, with the same result, leaves the record as it was). */
+  const [rechecked, setRechecked] = useState<{ checkedAt: number; status: string; error?: string; settled?: boolean } | null>(null);
   const act = (key: string, work: () => Promise<unknown>) => { setBusy(key); setError(""); setRechecked(null); void work().catch(e => setError(problemLine(e, t))).finally(() => setBusy("")); };
-  const recheckIn = !!rechecked && (r.checkedAt !== rechecked.checkedAt || r.status !== rechecked.status || r.error !== rechecked.error);
+  const recheckIn = !!rechecked && (!!rechecked.settled || r.checkedAt !== rechecked.checkedAt || r.status !== rechecked.status || r.error !== rechecked.error);
+  useEffect(() => {
+    if (!rechecked || rechecked.settled) return;
+    const timer = setTimeout(() => setRechecked(x => x && { ...x, settled: true }), 1000);
+    return () => clearTimeout(timer);
+  }, [rechecked]);
   const ok = card.status === "verified" || card.status === "expiring";
   const canCheck = r.status !== "withdrawn" && r.status !== "revoked" && r.status !== "previous-key";
   const status = r.status === "unconfirmed" ? (r.error ? fillNames(t("identities.contact.unconfirmedWhy", { status: card.statusLabel }), { error: receivedRefusal(r.error, t) }) : t("identities.contact.unconfirmed", { status: card.statusLabel }))

@@ -337,6 +337,23 @@ describe("ContactIdentitiesPanel", () => {
         expect(screen.queryByTestId("chat-identity-recheck")).toBeNull();
         expect(live).toHaveTextContent(/^Revoked/);
       });
+
+      it("the same record (a check in the same second, same result): what it is, a second after the reply", async () => {
+        const same = receivedView({ id: "r1" });
+        const { user, engine } = open(withReceived([same]));
+        let finish!: () => void;
+        engine.on("recheckIdentityProof", () => new Promise<void>(resolve => { finish = resolve; }));
+        await turnOver(user, 0);
+        const live = screen.getByTestId("chat-identity-recheck-live");
+        await user.click(screen.getByTestId("chat-identity-recheck"));
+        vi.useFakeTimers();
+        onTestFinished(() => { vi.useRealTimers(); });
+        await act(async () => { finish(); });
+        act(() => engine.update(withReceived([{ ...same }])));
+        expect(live).toHaveTextContent(/^Checking…$/);
+        act(() => { vi.advanceTimersByTime(1000); });
+        expect(live).toHaveTextContent(/^Checked again: Verified$/);
+      });
     });
 
     it("holds the Nostr key's profile, follows and notes on the Nostr card's back, with a short relay note", async () => {
