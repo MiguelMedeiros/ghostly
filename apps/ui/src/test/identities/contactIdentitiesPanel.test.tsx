@@ -316,6 +316,8 @@ describe("ContactIdentitiesPanel", () => {
         await user.keyboard("{Enter}");
         expect(live).toHaveTextContent(/^Checking…$/);
         await act(async () => { finish(); });
+        // The reply comes before the new state: the card as it was is not said as the result.
+        expect(live).toHaveTextContent(/^Checking…$/);
         act(() => engine.update(withReceived([after])));
         expect(screen.getByTestId("chat-identity-recheck-live")).toBe(live);
         return live;
@@ -328,6 +330,12 @@ describe("ContactIdentitiesPanel", () => {
       it("failed, with why", async () => {
         expect(await recheck(receivedView({ id: "r1", status: "unconfirmed", error: "DNS lookup failed", checkedAt: now() })))
           .toHaveTextContent(/^Check failed: This proof couldn't be verified$/);
+      });
+
+      it("revoked, though Check again is gone then", async () => {
+        const live = await recheck(receivedView({ id: "r1", status: "revoked", checkedAt: now() }));
+        expect(screen.queryByTestId("chat-identity-recheck")).toBeNull();
+        expect(live).toHaveTextContent(/^Revoked/);
       });
     });
 
