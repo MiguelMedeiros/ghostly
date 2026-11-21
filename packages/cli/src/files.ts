@@ -271,12 +271,19 @@ async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, pa
     throw result.refused ? new CliError("refused", result.error) : groupSendRefused(result.error);
   }
   const messageId = result.messageId ?? null;
-  const edges = !messageId ? 0 : waitMs !== undefined ? await waitForGroupFrame(ctx, group.id, messageId, undefined, waitMs) : node(ctx).groupTaken({ groupId: group.id, messageId });
+  // A timeout names the file as the 1:1 chat's does: a bot that retries finds it there instead of sending a second copy.
+  const edges = !messageId ? 0 : waitMs !== undefined ? await waitForGroupFrame(ctx, group.id, messageId, undefined, waitMs).catch((error: unknown) => {
+    if (error instanceof CliError && error.code === "timeout") throw new CliError("timeout", error.message, { ...error.details, group: group.id, messageId, file: fileId });
+    throw error;
+  }) : node(ctx).groupTaken({ groupId: group.id, messageId });
+  // A one-shot leaves now. What no edge took leaves with it: the members hear of the file once this profile is online
+  // again. What an edge took, they fetch from here, its only holder: a file larger than the moment before the one-shot
+  // closed waits for this profile to be online too (a 4 MB file stayed at 0 bytes on the member's side).
+  const fetched = "Members fetch the file from this device: they get it while this profile is online (`ghostly daemon --detach`)";
+  const note = !messageId || ctx.mode !== "one-shot" || nobodyElseIn(ctx, group.id) ? undefined : edges ? fetched : `No member's edge took it yet: it ${goesOn(ctx)}`;
   return {
     group: group.id, messageId, sent: edges > 0, edges, file: { id: fileId, name: file.name, size, mime, ...(voice ? { voice: true } : {}), ...(image ? { image } : {}) }, ...(warning ? { warning } : {}),
-    // A one-shot leaves now, and what no edge took leaves with it: the members hear of the file, and fetch it from here,
-    // once this profile is online again.
-    ...(messageId && !edges && ctx.mode === "one-shot" && !nobodyElseIn(ctx, group.id) ? { note: `No member's edge took it yet: it ${goesOn(ctx)}` } : {}),
+    ...(note ? { note } : {}),
   };
 }
 
@@ -453,7 +460,8 @@ export const FILE_METHODS: Record<string, Method> = {
     // edge took its message, as `group send --wait sent` does (it left with no word that nothing went). A chat nobody
     // joined yet: none.
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "group" in target ? (ctx.mode === "one-shot" ? "sent" : "none") : oneShotWaits(ctx, target.link.id) ? "sent" : "none");
-    const seconds = num(params, "timeout", 300, { min: 1, max: 86_400 });
+    // A group's waits for an edge, as `group send --wait sent` does, and as long (30 s); a chat's for the whole file.
+    const seconds = num(params, "timeout", "group" in target ? 30 : 300, { min: 1, max: 86_400 });
     if ("group" in target) return sendToGroup(ctx, params, target.group, path, name, info.size, call?.gone, wait === "sent" ? seconds * 1000 : undefined);
     const { link } = target;
     if (link.profile && link.dataLink === "open" && !link.capabilities?.files) throw new CliError("unavailable", "The contact's app takes no files");

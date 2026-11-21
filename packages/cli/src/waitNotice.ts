@@ -122,6 +122,9 @@ function waitOf(method: string, params: Record<string, unknown>, mode: "daemon" 
  */
 export function waitsFor(method: string, params: Record<string, unknown>): number | undefined {
   if (method === "chat.wait") return 60;
+  // A file send to a group (`group:<id>`) waits for an edge, 30 s as `group send` does; one named otherwise only the
+  // engine tells from a chat, and this bound is the longer.
+  if (method === "file.send" && params.wait === "sent" && typeof params.chat === "string" && params.chat.startsWith("group:")) return 30;
   if (method === "file.wait" || (method === "file.save" && params.wait === true) || (method === "file.send" && params.wait === "sent")) return 300;
   // send, edit, forward, a button, a task or routine card: `--wait sent|confirmed|delivered`, 30 s each.
   if (typeof params.wait === "string" && params.wait !== "none") return 30;
