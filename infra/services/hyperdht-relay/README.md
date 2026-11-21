@@ -110,7 +110,11 @@ Other settings:
   fewer `X-Forwarded-For` entries than `GHOSTLY_RELAY_PROXIES` (`2` behind a single nginx) logs `requests carry 1
   X-Forwarded-For entry though GHOSTLY_RELAY_PROXIES is 2`: set it to the number of proxies that write the header.
   Until such a request comes, a client that writes the header itself chooses the address it counts as; from it on, the
-  relay reads no deeper than the fewest entries a request has come with (no header at all: the proxy's address). With either set, the
+  relay reads no deeper than the fewest entries a request has come with (no header at all: the proxy's address). With
+  neither set and no header at all (a proxy that writes none, unnamed), every browser is the proxy's one address and
+  the 17th is refused (429): the first refusal at `GHOSTLY_RELAY_CLIENTS_PER_ADDRESS` from a loopback or private
+  address logs `clients refused at GHOSTLY_RELAY_CLIENTS_PER_ADDRESS (16) come from a loopback or private address`,
+  with the header and settings to set, once per start. With either set, the
   relay listens on 127.0.0.1 unless `HOST` says otherwise: only the proxy should reach it, since anyone else could
   write that header. The container sets `HOST=0.0.0.0` inside it and publishes the port where the proxy is
   (`HYPERDHT_RELAY_BIND`, loopback by default).
