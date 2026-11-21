@@ -45,15 +45,14 @@ let online = true;
 let answer: () => Promise<Response> = async () => new Response("", { status: 200 });
 
 /**
- * The engine's preview of a built-in app (engine/apps.ts `bundled`): the client's read, a failure that may pass as it
- * came (offline, the host not reached or in trouble), any other as `not-carried`.
+ * The engine's preview of a built-in app (engine/apps.ts `bundled`): the client's read, a failure that says why
+ * (`AppFetchError`: offline, the host not reached, its answer) as it came, any other as `not-carried`.
  */
 async function previewBuiltIn(): Promise<AppPreview> {
   try {
     await readBuiltInApp(CHESS);
   } catch (error) {
-    const passing = error instanceof AppFetchError && (error.code === "offline" || error.code === "network" || (error.status ?? 0) >= 500);
-    throw passing ? new Error(error.message) : new Error("not-carried: This build does not carry this app");
+    throw error instanceof AppFetchError ? new Error(error.message) : new Error("not-carried: This build does not carry this app");
   }
   return preview();
 }
@@ -107,8 +106,8 @@ describe("a built-in app's first Open whose copy did not load", () => {
       saysNothingRaw(second.dialog, second.t);
     });
 
-    it(`a copy the host no longer has says it did not load, and how to get it (${language})`, async () => {
-      answer = async () => new Response("not found", { status: 404 });
+    it(`a copy that did not load as this app says so, and how to get it (${language})`, async () => {
+      fakeEngine.on("appPreview", () => { throw new Error("not-carried: This build does not carry this app"); });
       const { t, dialog, error } = await failedScreen(language);
       expect(error).toHaveTextContent(t("apps.errors.notCarried"));
       // A read again would find the same nothing: a reload brings this build's file.
