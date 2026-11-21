@@ -298,6 +298,37 @@ describe("ContactIdentitiesPanel", () => {
       await turnOver(user, 0);
       await user.click(screen.getByTestId("chat-identity-recheck"));
       expect(await screen.findByTestId("chat-identities-error")).toHaveTextContent("Offline: this identity cannot be checked now");
+      // Said by the alert alone, not twice.
+      expect(screen.getByTestId("chat-identity-recheck-live")).toHaveTextContent(/^$/);
+    });
+
+    describe("says Check again out loud: Checking…, then what it found", () => {
+      async function recheck(after: ReceivedIdentityView) {
+        const { user, engine } = open(withReceived([receivedView({ id: "r1" })]));
+        let finish!: () => void;
+        engine.on("recheckIdentityProof", () => new Promise<void>(resolve => { finish = resolve; }));
+        await turnOver(user, 0);
+        // There before the press, so its first words are heard.
+        const live = screen.getByTestId("chat-identity-recheck-live");
+        expect(live).toHaveAttribute("role", "status");
+        expect(live).toHaveTextContent(/^$/);
+        screen.getByTestId("chat-identity-recheck").focus();
+        await user.keyboard("{Enter}");
+        expect(live).toHaveTextContent(/^Checking…$/);
+        await act(async () => { finish(); });
+        act(() => engine.update(withReceived([after])));
+        expect(screen.getByTestId("chat-identity-recheck-live")).toBe(live);
+        return live;
+      }
+
+      it("confirmed again", async () => {
+        expect(await recheck(receivedView({ id: "r1", checkedAt: now() }))).toHaveTextContent(/^Checked again: Verified$/);
+      });
+
+      it("failed, with why", async () => {
+        expect(await recheck(receivedView({ id: "r1", status: "unconfirmed", error: "DNS lookup failed", checkedAt: now() })))
+          .toHaveTextContent(/^Check failed: This proof couldn't be verified$/);
+      });
     });
 
     it("holds the Nostr key's profile, follows and notes on the Nostr card's back, with a short relay note", async () => {
