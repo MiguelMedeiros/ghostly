@@ -107,7 +107,9 @@ terminal, a command that waits says on stderr what it waits for once it has wait
 a pipe. A `<chat>` is
 its id, a unique prefix of it, or its name; a `<group>` too, each also as `group:<ref>` (every group command and
 every command that takes a chat or a group; `listen --group` takes only the group's id, as is or after `group:`). A `<group>` that is one group's name and a prefix of
-another's id is refused (exit 1, `bad_request`, both ids in `details.matches`): use its id.
+another's id is refused (exit 1, `bad_request`, both ids in `details.matches`): use its id. A command that takes only a
+1:1 chat, given a group's name, answers that it is a group (exit 3, `not_found`, its id in `details.group`), and given a
+name more than one group has, that it names more than one group (exit 3, `not_found`, their ids in `details.matches`).
 
 The rows are in alphabetical order of their first command, and every command of `ghostly help` has one
 (`test/readme.test.ts` checks both).
