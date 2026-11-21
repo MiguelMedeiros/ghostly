@@ -2446,7 +2446,8 @@ export class Apps {
         await this.removeUnusedBundle(app.ref, kind, app.digest);
         return this.fetchFilesOf(now);
       }
-      if (now.bytes === kind || await this.putAppIfUnchanged({ ...now, bytes: kind }, now)) break;
+      // A store pinned meanwhile (Install of this version from a store's listing) is the one written.
+      if (now.bytes === kind || await this.putAppIfUnchanged({ ...now, bytes: kind }, now, "kept")) break;
     }
     // Every page reads the list again, as when Open drops them: an Open from a chat's card (or another tab) fetched
     // them, and every card and row still said they were missing, its icon unread, until the next update check.

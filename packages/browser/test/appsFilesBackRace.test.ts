@@ -108,4 +108,27 @@ describe("Open of a restored app's files while Install writes a newer version", 
     expect(await bundleIds()).toEqual([`app-${v2.digest}`]);
     expect(((await appRows()) as Row[]).map((r) => ({ digest: r.digest, bytes: r.bytes }))).toEqual([{ digest: v2.digest, bytes: (await fileBytes()).kind }]);
   });
+
+  it("a store pin made while the files were written back is kept", async () => {
+    const v1 = await bundle({ sequence: 1 });
+    net.put(BUNDLE_URL, v1.bytes);
+    const first = apps(net);
+    await first.preview({ url: BUNDLE_URL });
+    await first.install({ digest: v1.digest, grant: ["chat"] });
+    const [row] = await appRows() as Row[];
+    await wrap((await openDb()).transaction(STORES.apps, "readwrite").objectStore(STORES.apps).put({ ...row, bytes: "native" }));
+    await (await fileBytes()).remove(`app-${v1.digest}`);
+
+    const store = apps(net);
+    const engine = store as unknown as Private;
+    const put = engine.putAppIfUnchanged.bind(store);
+    // Between Open's read of the record and its write, the same version is pinned to a store (Install from its listing).
+    vi.spyOn(engine, "putAppIfUnchanged").mockImplementation(async (...a) => {
+      await wrap((await openDb()).transaction(STORES.apps, "readwrite").objectStore(STORES.apps).put({ ...row, bytes: "native", store: "store-a" }));
+      return put(...a);
+    });
+    expect(await store.fetchFiles({ ref: v1.ref })).toEqual({ status: "ok" });
+    const [now] = await appRows() as (Row & { store?: string })[];
+    expect({ bytes: now?.bytes, store: now?.store }).toEqual({ bytes: (await fileBytes()).kind, store: "store-a" });
+  });
 });
