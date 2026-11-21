@@ -64,7 +64,7 @@ export function ChatSearchBar({ search, nameOf, appCards = false, noteLine }: {
   const searched = !!search.term.trim() && search.term === search.query;
   const count = searched ? (total ? t("chat.search.count", { current: String(Math.max(search.place, 0) + 1), total: String(total) }) : t("chat.search.none")) : "";
   // Before, only "2 of 5" was said, nothing of the message found. Once it is gone (deleted, edited away): the count alone.
-  const said = count && search.match ? t("chat.search.found", { count, name: nameOf(search.match), text: spokenShort(search.match, t, appCards, noteLine) }) : count;
+  const said = count && search.match ? t("chat.search.found", { position: count, name: nameOf(search.match), text: spokenShort(search.match, t, appCards, noteLine) }) : count;
   const more = t("common.moreInfo");
   return (
     <div data-testid="chat-search" className="chat-search-bar @container shrink-0 border-b border-border bg-panel-header px-3 py-1.5 max-md:px-2">
