@@ -315,7 +315,9 @@ jobs:
   # they push), on four runners instead of the five above. `vitest related` per project; a project's config, setup or
   # the lock file runs that project whole. ui, browser and cli each get a runner (a core change reaches most of each,
   # minutes apiece, and one after another they passed the 20 minutes), the fourth takes every other project
-  # (affected/select.mjs UNIT_ALONE). Lint and types are frontend-checks' (whole), Rust is tauri's, the e2e is no pull
+  # (affected/select.mjs UNIT_ALONE). The cli alone still took 6-8 minutes where the others took 1-2, so it runs in two
+  # halves cut by time (`vitest --shard`, UNIT_HALVED): the first on the third runner, the second beside the small
+  # projects on the fourth. Lint and types are frontend-checks' (whole), Rust is tauri's, the e2e is no pull
   # request's. Leaving draft runs the full suites above instead.
   affected-tests:
     name: Affected unit tests (draft ${{ matrix.group }}/4)

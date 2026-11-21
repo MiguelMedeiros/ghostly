@@ -4,8 +4,8 @@ import type { SharedItem } from "./policy";
 export type ToWorker =
   /** The user pressed Reload on a new version: the waiting worker takes over now. Never sent on its own. */
   | { type: "skip-waiting" }
-  /** This page is the app (it holds the peer) and opened for a share: hand it over. */
-  | { type: "share-ready" }
+  /** This page is the app (it holds `profile`'s peer) and opened for a share: hand it over, unless a tab of another profile asked to forward it. */
+  | { type: "share-ready"; profile: string }
   /** This page opened for a share but another tab of `profile` holds the peer: give the share to that one. */
   | { type: "share-forward"; profile: string }
   /**

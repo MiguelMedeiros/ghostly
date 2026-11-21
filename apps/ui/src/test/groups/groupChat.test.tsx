@@ -358,8 +358,14 @@ describe("GroupChat: joining through a link", () => {
   it("says when the admin's app answered", () => {
     openGroup(viaLink(ALICE));
     expect(screen.getByTestId("group-members")).toHaveTextContent("Joining…");
-    expect(screen.getByTestId("group-joining")).toHaveTextContent("Joining Friends…");
+    expect(screen.getByTestId("group-joining")).toHaveTextContent("Joining ⁨Friends⁩…");
     expect(screen.getByTestId("group-joining")).toHaveTextContent("The admin's app answered: getting the group's keys.");
+  });
+
+  it("the joining card's title keeps the group's name in its own direction", () => {
+    // It was put in as it is: in Arabic, "Book club!" read "!Book club" (the "!" taken by the line's direction).
+    openGroup({ ...viaLink(ALICE), name: "Book club!" });
+    expect(screen.getByRole("heading", { name: "Joining ⁨Book club!⁩…" })).toBeInTheDocument();
   });
 
   it("let into a community five minutes ago and still no keys: says no member could finish, and to ask for the current link", () => {
@@ -745,6 +751,53 @@ describe("GroupChat: the options menu", () => {
     expect(await screen.findByTestId("group-notice")).toHaveTextContent("Bob is not reachable");
   });
 
+  // Each rotation is a commit of its own (a fresh epoch every member fetches): a second press while the first is still
+  // going must not sign a second one.
+  describe("while a rotation is still going", () => {
+    const pending = (engine: typeof fakeEngine) => {
+      const calls: { resolve: () => void; reject: (e: Error) => void }[] = [];
+      engine.on("rotateGroup", () => new Promise<void>((resolve, reject) => { calls.push({ resolve, reject }); }));
+      return calls;
+    };
+    const rotateRow = async (user: ReturnType<typeof openGroup>["user"]) => {
+      await user.click(screen.getByTestId("group-options"));
+      return within(screen.getByTestId("group-options-menu")).getByTestId("group-rotate");
+    };
+
+    it("Rotate keys is busy and a second press sends nothing; once done it can be pressed again", async () => {
+      const { user, engine } = openGroup(active({ isAdmin: true }));
+      const calls = pending(engine);
+      await user.click(await rotateRow(user));
+      const again = await rotateRow(user);
+      await user.click(again);
+      expect(engine.callsTo("rotateGroup")).toHaveLength(1);
+      expect(again).toHaveAttribute("aria-disabled", "true");
+      expect(again).toHaveAttribute("aria-busy", "true");
+      // Busy, not disabled: the row keeps the focus it has and its place in the menu's arrow keys.
+      expect(again).not.toBeDisabled();
+      again.focus();
+      await user.keyboard("{Enter}");
+      expect(engine.callsTo("rotateGroup")).toHaveLength(1);
+      expect(again).toHaveFocus();
+      await act(async () => calls[0]!.resolve());
+      expect(again).not.toHaveAttribute("aria-disabled");
+      await user.click(again);
+      expect(engine.callsTo("rotateGroup")).toHaveLength(2);
+    });
+
+    it("a refused rotation says why and lets it be pressed again", async () => {
+      const { user, engine } = openGroup(active({ isAdmin: true }));
+      const calls = pending(engine);
+      await user.click(await rotateRow(user));
+      await act(async () => calls[0]!.reject(new Error("Bob is not reachable")));
+      expect(await screen.findByTestId("group-notice")).toHaveTextContent("Bob is not reachable");
+      const again = await rotateRow(user);
+      expect(again).not.toHaveAttribute("aria-disabled");
+      await user.click(again);
+      expect(engine.callsTo("rotateGroup")).toHaveLength(2);
+    });
+  });
+
   // One page for every group (Root.tsx): a refusal in one group's notice is about that group, not the next one opened.
   describe("a refusal, then another group opened", () => {
     const other = (patch: Partial<GroupView> = {}) => active({ id: "group-2", name: "Others", isAdmin: true, ...patch });
@@ -800,6 +853,18 @@ describe("GroupChat: the options menu", () => {
       await act(async () => refuse(new Error("Bob is not reachable")));
       expect(screen.getByTestId("group-name")).toHaveTextContent("Others");
       expect(screen.queryByTestId("group-notice")).not.toBeInTheDocument();
+    });
+
+    it("a rotation still going in one group leaves Rotate keys free in the next", async () => {
+      const { user, engine } = open(other());
+      engine.on("rotateGroup", () => new Promise<void>(() => {}));
+      await rotate(user);
+      await act(async () => screen.getByRole("button", { name: "two" }).click());
+      await user.click(screen.getByTestId("group-options"));
+      const row = within(screen.getByTestId("group-options-menu")).getByTestId("group-rotate");
+      expect(row).not.toHaveAttribute("aria-disabled");
+      await user.click(row);
+      expect(engine.callsTo("rotateGroup")).toEqual([{ groupId: "group-1" }, { groupId: "group-2" }]);
     });
   });
 
@@ -888,6 +953,32 @@ describe("GroupChat: the options menu", () => {
     expect(dialog).not.toHaveTextContent("contact");
     await user.click(within(dialog).getByRole("button", { name: "Delete from this device" }));
     expect(engine.callsTo("forgetGroup")).toEqual([{ groupId: "group-1" }]);
+  });
+
+  it.each(["removed", "left"] as const)(
+    "Delete from the keyboard on a %s group's page hands the focus to the next row of the list, or to New after the last", async status => {
+    // The ⋮ the dialog gives it back to goes with the page: it was left on the page's body once home.
+    const gone = active({ status, canSend: false });
+    const other = active({ id: "group-2", name: "Others" });
+    fakeEngine.on("groupMessages", () => []).on("updateSettings", () => undefined);
+    for (const [groups, next] of [[[gone, other], "group-2"], [[gone], undefined]] as const) {
+      fakeEngine.update({ groups: [...groups] });
+      const { user, engine, unmount } = renderApp(<UpdateProvider><Sidebar /><Routes>
+        <Route path="/" element={<p>Chat list</p>} />
+        <Route path="/group/:groupId" element={<GroupChat />} />
+      </Routes></UpdateProvider>, { route: "/group/group-1" });
+      engine.on("forgetGroup", () => { fakeEngine.update({ groups: groups.slice(1) }); });
+      screen.getByTestId("group-options").focus();
+      await user.keyboard("{Enter}");
+      screen.getByTestId("group-forget").focus();
+      await user.keyboard("{Enter}");
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Delete from this device" }).focus();
+      await user.keyboard("{Enter}");
+      expect(await screen.findByText("Chat list")).toBeInTheDocument();
+      const row = next && screen.getAllByTestId("group-row").find(r => r.dataset.group === next)!;
+      await vi.waitFor(() => expect(row ? within(row).getByTestId("group-row-open") : screen.getByTestId("sidebar-new-chat")).toHaveFocus());
+      unmount();
+    }
   });
 
   it("deleting an invitation says its sender is told it was declined", async () => {

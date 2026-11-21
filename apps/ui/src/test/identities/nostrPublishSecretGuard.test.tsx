@@ -24,7 +24,9 @@ HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) { t
 afterEach(() => { vi.mocked(signNostrDraft).mockClear(); });
 
 const SEED = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-const NSEC = "nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5";
+/** Twelve seed words whose checksum fails: alone, still most of a seed. */
+const SEED_TYPO = "abandon ability able about above absent absorb abstract absurd abuse access accident";
+const NSEC ="nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5";
 
 function draftOf(kind: number, content: string): NostrDraft {
   return { draftId: "d1", subject: "npub1me", template: { kind, created_at: 1, tags: [], content }, notice: "Sent to wss://relay.example.", summary: "Post a note", relays: ["wss://relay.example"] };
@@ -44,6 +46,7 @@ describe("publishing on Nostr asks before a secret goes public", () => {
     ["a seed in a note", 1, `my backup: ${SEED}`, "mnemonic"],
     ["an nsec in a note", 1, `follow me ${NSEC}`, "nsec"],
     ["a seed in a profile's About, on lines of its own", 0, JSON.stringify({ name: "me", about: SEED.split(" ").join("\n") }), "mnemonic"],
+    ["a profile's About that is nothing but seed words with a bad checksum", 0, JSON.stringify({ name: "Ana", about: SEED_TYPO }), "mnemonic"],
   ])("%s", async (_, kind, content, finding) => {
     const user = await publish(kind, content);
     const guard = await screen.findByTestId("secret-guard");

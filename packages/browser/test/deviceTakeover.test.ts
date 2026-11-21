@@ -345,6 +345,29 @@ describe("what keeps a forced takeover from locking the owner out", () => {
     await expect(forceTakeover(ports(desktop.store, desktop.keeper), { password: PASSWORD, name: "" })).rejects.toThrow("takeover-state");
   });
 
+  it("a standby mid-pull: the pull's staging goes before anything is written, and one that could not go refuses the takeover", async () => {
+    const PULL = { role: "taking" as const, step: "copying", id: "aGFuZG9mZg", peer: deviceSet()[0].key, staging: "ghostly_stage1", old: "ghostly", at: clock.t };
+    const phone = await device(network, 1, "standby", { handoff: PULL });
+    network.seed(phone.stored);
+    const order: string[] = [];
+    const dropping = { ...ports(phone.store, phone.keeper), dropStaging: async () => {
+      order.push(`drop after ${network.calls.length} calls`);
+      await phone.store.amend("ghostly", { handoff: { ...phone.store.record.handoff!, step: "stopped", staging: undefined } });
+    } };
+    expect((await forceTakeover(dropping, { password: PASSWORD, name: "Desktop" })).kind).toBe("start");
+    expect(order).toEqual(["drop after 0 calls"]);
+    expect(phone.store.record).toMatchObject({ state: "active", takeovers: 1 });
+
+    // The drop failed, or nothing here can drop it: the record still names the staging, and nothing goes to the turn.
+    const net = new FakeTurnNetwork();
+    const laptop = await device(net, 2, "standby", { handoff: PULL });
+    net.seed(laptop.stored);
+    await expect(forceTakeover({ ...ports(laptop.store, laptop.keeper), dropStaging: async () => { throw new Error("The file is locked"); } }, { password: PASSWORD, name: "Desktop" })).rejects.toThrow("takeover-state");
+    await expect(forceTakeover(ports(laptop.store, laptop.keeper), { password: PASSWORD, name: "Desktop" })).rejects.toThrow("takeover-state");
+    expect(net.calls).toEqual([]);
+    expect(laptop.store.record).toMatchObject({ state: "standby", handoff: { staging: "ghostly_stage1" } });
+  });
+
   it("a takeover that loses goes back to what it was, and the device it lost to goes on", async () => {
     const phone = await device(network, 1, "standby");
     // Another device already holds a higher turn than the phone will read: the laptop forces N + 1 after the phone's read.
@@ -385,6 +408,20 @@ describe("what keeps a forced takeover from locking the owner out", () => {
     const sentTo = patch.earlierSets!.at(-1)!.pending;
     expect(sentTo).toEqual([toBase64Url(devices[2].publicKey)]);
     expect(readSetUpdate(frame)!.set.map((slot) => slot && toBase64Url(slot.key))).toEqual([toBase64Url(devices[0].publicKey), null, toBase64Url(devices[2].publicKey)]);
+  });
+
+  it("a device still finishing its enrollment (no record stored yet) takes from such a record only its author's slot", async () => {
+    // The tablet was granted the set with the desktop active, and has read no record yet. The phone forces N + 1 with
+    // the tablet in its slot and another key in place of the laptop's, under the laptop's name.
+    const tablet = identityFromSeed(new Uint8Array(32).fill(80)), swapped = identityFromSeed(new Uint8Array(32).fill(78));
+    const granted = [...deviceSet(), { key: toBase64Url(tablet.publicKey), name: "Tablet" }];
+    const forged = [{ key: devices[0].publicKey, name: "Desktop" }, { key: devices[1].publicKey, name: "Phone" }, { key: swapped.publicKey, name: "Laptop" }, { key: tablet.publicKey, name: "Tablet" }];
+    const intruder = await signTurnPacket(keys, { turn: N + 1, rev: 0, author: 1, active: 1, slots: forged, instance: new Uint8Array(8).fill(2) }, (bytes) => sign(bytes, devices[1].seed));
+    const store = memoryStore({ ...firstRecord("ghostly", "standby", { turn: N, d: toBase64Url(D), deviceSet: granted, ownSlot: 3, activeSlot: 0 }), saved: 1 });
+    const keeper = new TurnKeeper({ profile: "ghostly", network, store, signer: (bytes) => sign(bytes, tablet.seed), now: () => clock.t, sleep: async (ms) => { clock.t += ms; } });
+    network.seed(intruder);
+    await keeper.check(false);
+    expect(store.record).toMatchObject({ activeSlot: 1, deviceSet: granted });
   });
 
   it("a takeover by a key the set never listed (a restored copy) names that device, in its own slot only", async () => {

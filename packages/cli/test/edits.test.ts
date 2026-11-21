@@ -42,6 +42,8 @@ describe("ghostly edit", () => {
 
   it("goes to the engine, and says how many edits the message has and whether the contact confirmed the last", async () => {
     const { ctx, node } = fake();
+    // The first look at the message is before the edit (no edit yet), the next ones after (edit 1).
+    node.getMessage.mockResolvedValueOnce(row());
     expect(await callApi(ctx, "chat.edit", { chat: "Alice", message: "me_w", text: "Done" })).toEqual({ chat: "chat-one", messageId: "me_w", edits: 1, confirmed: true });
     expect(node.editMessage).toHaveBeenCalledWith({ linkId: "chat-one", messageId: "me_w", text: "Done" });
     const refused = fake({ error: "Only your own text messages can be edited", refused: true }, [row(), row({ id: "peer_x", sender: "peer" })]);
@@ -81,9 +83,10 @@ describe("ghostly edit", () => {
       await callApi(theirs.ctx, "chat.edit", { chat: "Alice", message: "peer_x", text: "x" }).catch((e: unknown) => e)];
     for (const { node } of [gone, theirs]) {
       expect(node.getMessages).not.toHaveBeenCalled();
-      expect(node.getMessage).not.toHaveBeenCalled();
+      // The look at the edit number before the edit only, as group edit's.
+      expect(node.getMessage.mock.calls).toHaveLength(1);
     }
-    expect(errors).toMatchObject([{ code: "not_found", message: `No message "${"W".repeat(22)}" in this chat (ghostly chat history Alice)` }, { code: "refused", message: "Only your own text messages can be edited" }]);
+    expect(errors).toMatchObject([{ code: "not_found", message: `No message "${"W".repeat(22)}" in this chat (ghostly chat history Alice)` }, { code: "refused", message: "Only your own text messages can be edited: to answer this one, reply to it (ghostly send Alice --reply peer_x <text>)" }]);
   });
 
   it("--wait confirmed times out while the contact has not confirmed", async () => {
@@ -193,7 +196,7 @@ describe("ghostly group edit", () => {
       // The look at the edit number before the edit only.
       expect(node.getMessage.mock.calls).toHaveLength(1);
     }
-    expect(errors).toMatchObject([{ code: "not_found", message: 'No message "mekey:9:9" in this group (ghostly group history Crew)' }, { code: "refused", message: "Only your own text messages can be edited" }]);
+    expect(errors).toMatchObject([{ code: "not_found", message: 'No message "mekey:9:9" in this group (ghostly group history Crew)' }, { code: "refused", message: "Only your own text messages can be edited: to answer this one, reply to it (ghostly group send Crew --reply bobkey:1:0 <text>)" }]);
   });
 
   it("the text the message already has is no edit: nothing is said to have gone", async () => {

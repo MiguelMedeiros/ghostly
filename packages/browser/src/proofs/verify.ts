@@ -1,5 +1,6 @@
 import { boundVerifiedIdentity, IdentityCheckUnavailable, IDENTITY_MAX_EVIDENCE, IDENTITY_MAX_VALIDITY, type IdentityStatement, type VerifiedIdentity } from "@ghostly/core";
 import type { IdentityFetch, IdentityProofProvider, IdentitySigner, VerifyContext } from "./contract";
+import { isOwnPkarrRelayUrl } from "./pkarrRelays";
 
 const DAY = 86_400;
 
@@ -57,14 +58,18 @@ export function availableSigners<E>(p: IdentityProofProvider<E>, platform: Ident
  * The engine's `ctx.fetch`: HTTPS GET only, no credentials or referrer, a time-out, a size cap,
  * redirects refused unless asked for.
  * `online` false refuses everything (the person turned the network off).
+ * A did:dht read of the profile's own Pkarr relays (`ownPkarrRelay`) may be http://, through `relayFetcher`: those are
+ * the relays the person chose, as the chats read them, not an address a contact named.
  */
-export function boundedIdentityFetch(options: { online: () => boolean; timeoutMs?: number; fetcher?: typeof fetch } = { online: () => true }): IdentityFetch {
-  return async (url, { headers, maxBytes = 64 * 1024, signal, redirect = "error" } = {}) => {
+export function boundedIdentityFetch(options: { online: () => boolean; timeoutMs?: number; fetcher?: typeof fetch; relayFetcher?: typeof fetch } = { online: () => true }): IdentityFetch {
+  return async (url, { headers, maxBytes = 64 * 1024, signal, redirect = "error", ownPkarrRelay } = {}) => {
     if (!options.online()) throw new IdentityCheckUnavailable("Offline: this identity cannot be checked now");
     const target = new URL(url);
-    if (target.protocol !== "https:" || target.username || target.password) throw new Error("Identity checks use HTTPS only");
+    const ownRelay = ownPkarrRelay === true && isOwnPkarrRelayUrl(target);
+    if (!ownRelay && (target.protocol !== "https:" || target.username || target.password)) throw new Error("Identity checks use HTTPS only");
     const timeout = AbortSignal.timeout(options.timeoutMs ?? 10_000);
-    const response = await (options.fetcher ?? fetch)(target.href, {
+    const fetcher = (ownRelay ? options.relayFetcher : undefined) ?? options.fetcher ?? fetch;
+    const response = await fetcher(target.href, {
       headers, signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
       credentials: "omit", referrerPolicy: "no-referrer", cache: "no-store", redirect,
     });

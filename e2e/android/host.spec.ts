@@ -93,7 +93,7 @@ test("text shared from another app opens the Share to… picker", { tag: ["@feat
 });
 
 test("text shared while the app's process is gone but its task is in Recents opens the Share to… picker", { tag: ["@feature:android.host.share-target", "@gated"] }, async ({ app }) => {
-  const { adb, device } = app;
+  const { adb } = app;
   const takes = adb.shell("cmd package query-activities -a android.intent.action.SEND -t text/plain").includes(PKG);
   skipUntilA1("Sharing into the app", !takes && "the app has no ACTION_SEND filter for text");
   app.background();
@@ -110,7 +110,7 @@ test("text shared while the app's process is gone but its task is in Recents ope
   adb.run("shell", "am", "start", "-W", "-a", "android.intent.action.SEND", "-t", "text/plain", "--es", "android.intent.extra.TEXT", text, "-p", PKG);
   let pid = "";
   await expect.poll(() => (pid = adb.pid()), { timeout: 30_000, message: "the app's new process" }).not.toBe("");
-  const page = await webViewPage(device, Number(pid));
+  const page = await webViewPage(app, Number(pid));
   await expect(page.getByTestId("share-picker")).toBeVisible({ timeout: 120_000 });
   await expect(page.getByTestId("share-text")).toHaveText(text);
 });
@@ -119,7 +119,7 @@ test("text shared while the app's process is gone but its task is in Recents ope
 const shareRooted = /baseIntent=Intent \{ act=android\.intent\.action\.SEND [^\n]*pkg=tools\.ghostly\.app/;
 
 test("a share that started the app is not offered again when Android brings the app back after ending its process", { tag: ["@feature:android.host.share-target", "@gated"] }, async ({ app, relayUrl }) => {
-  const { adb, device } = app;
+  const { adb } = app;
   const takes = adb.shell("cmd package query-activities -a android.intent.action.SEND -t text/plain").includes(PKG);
   skipUntilA1("Sharing into the app", !takes && "the app has no ACTION_SEND filter for text");
   // The app not running and no task of it: the share starts it, and is its task's root intent (the profile and its
@@ -130,7 +130,7 @@ test("a share that started the app is not offered again when Android brings the 
   expect(adb.shell("dumpsys activity recents"), "the share is the root intent of the app's task").toMatch(shareRooted);
   let pid = "";
   await expect.poll(() => (pid = adb.pid()), { timeout: 30_000, message: "the app's process" }).not.toBe("");
-  let page = await webViewPage(device, Number(pid));
+  let page = await webViewPage(app, Number(pid));
   await expect(page.getByTestId("share-text")).toHaveText(text, { timeout: 120_000 });
   await expect(page.getByTestId("share-next")).toContainText(text);
   await page.getByTestId("share-cancel").click();
@@ -150,7 +150,7 @@ test("a share that started the app is not offered again when Android brings the 
   const [width, height] = (/(\d+)x(\d+)/.exec(adb.shell("wm size")) ?? []).slice(1).map(Number);
   adb.shell(`input tap ${Math.round(width / 2)} ${Math.round(height / 2)}`);
   await expect.poll(() => (pid = adb.pid()), { timeout: 30_000, message: "the app's new process" }).not.toBe("");
-  page = await webViewPage(device, Number(pid));
+  page = await webViewPage(app, Number(pid));
   // The chat list, or the picker over it: the share Rust would hand over comes at the page's start, a few seconds more
   // for it to show, then none.
   await expect(newChat(page).or(page.getByTestId("share-picker")), "the UI rendered").toBeAttached({ timeout: 120_000 });
@@ -233,7 +233,7 @@ test("a sign-in's deep link comes back to the running app and answers the sign-i
 });
 
 test("a sign-in's answer that comes back after Android ended the app's process says the sign-in was interrupted", { tag: ["@feature:android.host.oidc-deep-link", "@gated"] }, async ({ app }) => {
-  const { page, adb, device } = app;
+  const { page, adb } = app;
   let port: unknown;
   try { port = await app.invoke("oidc_loopback_start"); } catch (error) { skipUntilA1("The sign-in deep link", pending(error) ?? false); throw error; }
   const state = `a.${Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url")}`;
@@ -254,7 +254,7 @@ test("a sign-in's answer that comes back after Android ended the app's process s
   // The person finishes signing in: the answer starts a new process, whose page never asked for it.
   adb.run("shell", "am", "start", "-W", "-a", "android.intent.action.VIEW", "-d", `'${OIDC_LINK}?code=a9&state=${state}'`);
   await expect.poll(() => adb.pid(), { timeout: 30_000, message: "a new process for the answer" }).not.toBe("");
-  const again = await webViewPage(device, Number(adb.pid()));
+  const again = await webViewPage(app, Number(adb.pid()));
   const notice = again.getByTestId("sign-in-interrupted");
   await expect(notice, "the page says so, not only the diagnostics log").toContainText("The sign-in was interrupted", { timeout: 120_000 });
   await notice.getByRole("button", { name: "Try again", exact: true }).click();

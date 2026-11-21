@@ -5,8 +5,10 @@ import { useI18n, type TranslationKey } from "../contexts/I18nContext";
 import type { CallModeration } from "../hooks/useCallModeration";
 import { useBackCloses, useBackdropDismiss, useQuestionDialog } from "../hooks/useDismiss";
 import { errorText } from "../lib/errorText";
+import { fillNames } from "../lib/fillNodes";
 import type { GroupCallSource } from "../lib/groupCallModeration";
 import { ownDirection } from "../lib/ownDirection";
+import { isolate } from "../lib/ownStatus";
 import { InfoButton } from "./layout/Section";
 import { Menu, MenuItem, MenuSeparator } from "./Menu";
 
@@ -25,7 +27,7 @@ export function TileModerationMenu({ identity, name, moderation, host }: { ident
   const [open, setOpen] = useState(false);
   const [asking, setAsking] = useState<"call" | "group" | null>(null);
   const anchor = useRef<HTMLDivElement>(null);
-  const label = t("groupCallModeration.menu", { name });
+  const label = t("groupCallModeration.menu", { name: isolate(name) });
   const muted = moderation.state.muted[identity] ?? [];
   const pick = (run: () => void) => () => { setOpen(false); run(); };
   const removeFromGroup = async () => {
@@ -38,7 +40,7 @@ export function TileModerationMenu({ identity, name, moderation, host }: { ident
   return (
     <div ref={anchor} className="absolute top-1.5 end-1.5 z-10">
       <button type="button" onClick={() => setOpen(!open)} data-testid="group-call-moderate" aria-label={label} title={label} aria-expanded={open} aria-haspopup="true"
-        className="grid h-8 w-8 max-md:h-11 max-md:w-11 cursor-pointer place-items-center rounded-full bg-black/60 text-white transition-colors hover:bg-black/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+        className="grid h-8 w-8 max-md:h-[44px] max-md:w-[44px] cursor-pointer place-items-center rounded-full bg-black/60 text-white transition-colors hover:bg-black/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" /></svg>
       </button>
       <Menu open={open} onClose={() => setOpen(false)} anchorRef={anchor} testId="group-call-moderate-menu" label={label} portal focusFirst host={host.current}>
@@ -81,7 +83,7 @@ function ConfirmRemove({ name, from, returnFocus, onClose, onConfirm }: { name: 
     : { title: "groupCallModeration.removeFromGroupTitle", body: "groupCallModeration.removeFromGroupBody", info: "groupCallModeration.removeFromGroupInfo", confirm: "groupCallModeration.remove" } as const;
   return createPortal(<dialog ref={dialog} {...backdrop} onCancel={e => { e.preventDefault(); e.stopPropagation(); onClose(); }} aria-labelledby={`${id}-title`} aria-describedby={`${id}-body`}
     data-testid={`group-call-remove-${from}-dialog`} className="m-auto w-[calc(100%_-_2rem)] max-w-sm rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
-    <h2 id={`${id}-title`} className="break-words text-base font-semibold">{t(keys.title, { name })}</h2>
+    <h2 id={`${id}-title`} className="break-words text-base font-semibold">{fillNames(t(keys.title), { name })}</h2>
     <div className="mt-2 flex items-start gap-1.5">
       <p id={`${id}-body`} className="m-0 min-w-0 flex-1 text-sm text-text-muted">{t(keys.body)}</p>
       <InfoButton open={info} onToggle={() => setInfo(!info)} controls={`${id}-info`} testId={`group-call-remove-${from}-info`} className="mt-0.5" />
@@ -115,7 +117,7 @@ export function RemovedFromCall({ moderation, nameOf, host }: { moderation: Call
       <Menu open={open} onClose={() => setOpen(false)} anchorRef={anchor} testId="group-call-removed-menu" label={label} portal focusFirst align="start" host={host.current}>
         {banned.map((key) => (
           <MenuItem key={key} testId="group-call-unban" data={{ "data-identity": key }} onClick={() => { setOpen(false); void moderation.act("unban", key); }}>
-            {t("groupCallModeration.letBackIn", { name: nameOf(key) })}
+            {fillNames(t("groupCallModeration.letBackIn"), { name: nameOf(key) })}
           </MenuItem>
         ))}
       </Menu>

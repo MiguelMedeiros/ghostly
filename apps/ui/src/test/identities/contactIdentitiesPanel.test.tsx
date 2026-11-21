@@ -72,7 +72,7 @@ describe("ContactIdentitiesPanel", () => {
         receivedView({ id: "r6", status: "previous-key" }),
         receivedView({ id: "r7", provider: "domain", subject: "example.org" }),
       ]));
-      expect(screen.getByRole("radiogroup", { name: "Identities shared by Alice" })).toBeInTheDocument();
+      expect(screen.getByRole("radiogroup", { name: "Identities shared by \u2068Alice\u2069" })).toBeInTheDocument();
       const faces = theirs().map(card => card.querySelector<HTMLElement>("[data-deck=face]")!);
       expect(faces.map(f => [f.dataset.status, f.querySelector(".id-card-status")!.textContent])).toEqual([
         ["verified", "Verified"],

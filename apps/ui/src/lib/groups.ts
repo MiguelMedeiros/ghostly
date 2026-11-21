@@ -5,6 +5,7 @@ import { appLinkOrigin, decodePart } from "./url";
 import { setChatFolder } from "./chatFolders";
 import { forgetChatLanguage } from "./chatLanguage";
 import { forgetChatMute, groupChat } from "./chatMute";
+import { clearExtensionNotices } from "./notifications";
 import { forgetChatTranslate } from "./chatTranslate";
 import { forgetSentOriginals } from "./sentOriginals";
 import { forgetTranslateSend } from "./chatTranslateSend";
@@ -14,6 +15,7 @@ import { transportName } from "./connection";
 import { ago } from "./time";
 import { english } from "./english";
 import { relayCause } from "./problemText";
+import { listText } from "./listText";
 import type { Translate } from "../contexts/I18nContext";
 
 /** Whether a group's name is one `groupName` takes whole: characters (`MAX_GROUP_NAME_LENGTH`) and bytes (`MAX_GROUP_NAME_BYTES`). */
@@ -203,7 +205,7 @@ export function groupTransports(members: GroupMemberView[], t: Translate = engli
   const head = hubbed ? t("group.transports.liveHubs", { live: live.length + hubbed, total: others.length, hubs: hubbed })
     : t("group.transports.live", { live: live.length, total: others.length });
   if (counts.size === 1) { const [transport] = counts.keys(); return { line: t("group.transports.over", { head, transport: transportName(transport) }), transport }; }
-  return { line: t("group.transports.mixed", { head, list: [...counts].sort((a, b) => b[1] - a[1]).map(([kind, n]) => `${n} ${transportName(kind)}`).join(", ") }) };
+  return { line: t("group.transports.mixed", { head, list: listText([...counts].sort((a, b) => b[1] - a[1]).map(([kind, n]) => `${n} ${transportName(kind)}`), t) }) };
 }
 
 /**
@@ -271,10 +273,12 @@ export function markGroupRead(groupId: string, at = Date.now()): void {
 /**
  * What this device keeps of a group beside the engine goes with it (left, deleted here, a join called off): what was
  * typed and not sent, the read mark, the mute, the translation choice, the language and the folder, as a chat's go with the chat (storage.ts deleteSession).
- * A community keeps its id, so a draft left behind was in the field again after joining it again.
+ * A community keeps its id, so a draft left behind was in the field again after joining it again. Its notifications in
+ * the extension go too: Chrome keeps them past the page, and a click on one opened a group that is not there.
  */
 export function forgetGroupLocal(groupId: string): void {
   setSessionDraft(`group:${groupId}`, "");
+  void clearExtensionNotices(groupChat(groupId));
   try { localStorage.removeItem(`${getPrefix()}group_read_${groupId}`); } catch { /* storage unavailable */ }
   forgetTranslateSend(groupChat(groupId));
   forgetChatMute(groupChat(groupId));

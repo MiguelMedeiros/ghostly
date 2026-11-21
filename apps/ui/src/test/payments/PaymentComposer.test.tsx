@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -787,6 +790,19 @@ describe("a memo that looks like a seed or a key", () => {
   });
 });
 
+// Send or Request at work (or held from the keys) is `aria-disabled`, not disabled: its hover answered as a live one's
+// did, Send brighter and Request lighter under the pointer while they read "Preparing…" or "Requesting…". Hover itself
+// is measured in a browser; here, the rules that give it.
+describe("PaymentComposer: the CSS of Send and Request", () => {
+  const CSS = readFileSync(join(fileURLToPath(import.meta.url), "../../../components/payment-composer.css"), "utf8");
+
+  it("a busy or held Send or Request does not answer the pointer's hover", () => {
+    const hovers = CSS.split(/\r?\n/).filter((line) => /^\.payment-back-(primary|secondary)[^{]*:hover/.test(line.trim()));
+    expect(hovers).toHaveLength(2);
+    for (const line of hovers) expect(line).toMatch(/:not\(\[aria-disabled="?true"?\]\)/);
+  });
+});
+
 describe("sending on Ark, Bark, on-chain and USDT", () => {
   // The composer looks for the contact's answer every 400 ms and gives up after 45 s: only those clocks are faked.
   beforeEach(() => { vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] }); });
@@ -1201,9 +1217,9 @@ describe("the payment sheet's network tabs", () => {
       for (const m of ["pay", "accept"]) expect(screen.getByTestId(`payment-mode-${m}`)).toHaveClass("max-md:min-h-11");
       const arrows = [...screen.getAllByRole("button", { name: "Previous card" }), ...screen.getAllByRole("button", { name: "Next card" })];
       expect(arrows).toHaveLength(2);
-      for (const arrow of arrows) expect(arrow).toHaveClass("max-md:min-h-11", "max-md:min-w-11");
+      for (const arrow of arrows) expect(arrow).toHaveClass("max-md:min-h-[44px]", "max-md:min-w-[44px]");
       await user.click(screen.getByTestId("payment-card-lightning-mainnet"));
-      expect(screen.getByRole("button", { name: "Cards" })).toHaveClass("max-md:min-h-11");
+      expect(screen.getByRole("button", { name: "Cards" })).toHaveClass("max-md:min-h-[44px]");
     });
 
     it("pays a card of the tab on its own network, and goes back to that tab from the card", async () => {
