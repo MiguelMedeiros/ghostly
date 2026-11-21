@@ -2279,6 +2279,37 @@ describe("one pull request alone", () => {
     expect(repo.comments.get(23)!.at(-1)!.body).toMatch(/changes a workflow \(\.github\/workflows\/ci\.yml\)/);
   });
 
+  it("says so when GitHub refuses the push of a lone pull request's rebase, and takes it out of the line the second time", async () => {
+    // A branch rule, or a push the queue app's token may not do: else every run rebased it again, and its comment waited
+    // for CI Success on a commit its branch never got.
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    // git names the commit it pushed, a new rebase at every run: still the same refusal.
+    let run = 0;
+    repo.git.pushHead = async () => ({ ok: false, message: `! [remote rejected] ${String(++run).repeat(40)} -> fix-11 (push declined due to repository rule violations)` });
+    const r = await repo.run();
+    expect(r.dropped).toEqual([]);
+    expect(repo.pulls.get(11)!.sha).toBe("h11");
+    const position = repo.comments.get(11)!.at(-1)!.body;
+    expect(position).toMatch(/GitHub refused the push of that rebase to its branch: ! \[remote rejected\] 1{40} -> fix-11 \(push declined due to repository rule violations\)\./);
+    expect(position).not.toMatch(/waiting for CI Success/);
+    const again = await repo.run();
+    expect(again.dropped).toEqual([11]);
+    expect(again.inFlight).toBeNull();
+    expect(repo.pulls.get(11)!.labels).toEqual([LABEL.failed]);
+    expect(repo.comments.get(11)!.map((c) => c.body)).toEqual([expect.stringMatching(/refused the push of its rebase onto `dev` twice \(! \[remote rejected\] .*rule violations\)\)/)]);
+  });
+
+  it("leaves out of its comment any credentials in the URL of a refused push", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    repo.git.pushHead = async () => ({ ok: false, message: "fatal: unable to access 'https://x-access-token:secret@github.com/o/r/': The requested URL returned error: 403" });
+    await repo.run();
+    const position = repo.comments.get(11)!.at(-1)!.body;
+    expect(position).toContain("unable to access 'https://github.com/o/r/': The requested URL returned error: 403");
+    expect(position).not.toContain("secret");
+  });
+
   it("gives a red pull request one more run on a fresh rebase, then queue:failed", async () => {
     const repo = fakeRepo();
     repo.add(11, { behind: true });
