@@ -284,16 +284,16 @@ describe("IdentityShareLine", () => {
     expect(bdis()).toEqual([":Ana (work)"]);
     shared.unmount();
     const stopped = arabic(entry({ kind: "stopped", state: undefined, reason: "withdrawn", provider: "ssh-github", subject: "octocat-old" }));
-    expect(text()).toBe("أوقف Ana (work) مشاركة GitHub (SSH key) · octocat-old");
-    expect(bdis()).toEqual([":Ana (work)", ":GitHub (SSH key) · octocat-old", "ltr:octocat-old"]);
+    expect(text()).toBe("أوقف Ana (work) مشاركة GitHub (مفتاح SSH) · octocat-old");
+    expect(bdis()).toEqual([":Ana (work)", ":GitHub (مفتاح SSH) · octocat-old", "ltr:octocat-old"]);
     stopped.unmount();
     // Stopped before it was presented: the kind alone, its ")" kept on its own side of the Arabic after it.
     const revoked = arabic(entry({ kind: "stopped", state: undefined, reason: "revoked", provider: "ssh-github", subject: undefined }));
-    expect(text()).toBe("أُلغي GitHub (SSH key) الخاص بـ Ana (work)");
-    expect(bdis()).toEqual([":GitHub (SSH key)", ":Ana (work)"]);
+    expect(text()).toBe("أُلغي GitHub (مفتاح SSH) الخاص بـ Ana (work)");
+    expect(bdis()).toEqual([":GitHub (مفتاح SSH)", ":Ana (work)"]);
     revoked.unmount();
     arabic(entry({ kind: "stopped", state: undefined, reason: "withdrawn", side: "mine", proof: "gone", subject: "example.com" }));
-    expect(bdis()).toEqual([":Domain · example.com", "ltr:example.com"]);
+    expect(bdis()).toEqual([":نطاق · example.com", "ltr:example.com"]);
   });
 });
 

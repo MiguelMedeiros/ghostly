@@ -1,3 +1,4 @@
+import { BURST_RING_MS, QUICK_REDIAL_MS } from "@ghostly/core";
 import { describe, expect, it, vi } from "vitest";
 import type { EngineEvent, RpcResponse } from "../src/shared/rpc";
 // covers: extension.engine, app.attention.notifications
@@ -82,6 +83,39 @@ describe("a call that rings with no page attached", () => {
     server.attach(page);
     await server.handle(page, { kind: "request", id: 1, method: "setCallSignal", params: { linkId: "link-1", signal: answer() } } as never);
     expect(told).toEqual([["link-1", ringing], ["link-1", null]]);
+  });
+
+  it("a call that comes right after one hung up as it began to ring is held back, as a page holds it (QUICK_REDIAL_MS)", async () => {
+    // A bot looping call and hang-up: a page rings the first and keeps the rest as missed, with no ring or notification.
+    let now = 1_000_000;
+    const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
+    try {
+      const { node, told } = await started();
+      const first = offer();
+      node.events.onCallSignal("link-1", first);
+      now += 100;
+      node.events.onCallSignal("link-1", hangUp());
+      for (let i = 0; i < 5; i++) {
+        now += 300;
+        node.events.onCallSignal("link-1", offer());
+        now += 100;
+        node.events.onCallSignal("link-1", hangUp());
+      }
+      expect(told).toEqual([["link-1", first], ["link-1", null]]);
+
+      // After a pause it rings again; and a call that rang a while holds the next one back no more.
+      now += QUICK_REDIAL_MS;
+      const later = offer();
+      node.events.onCallSignal("link-1", later);
+      now += BURST_RING_MS;
+      node.events.onCallSignal("link-1", hangUp());
+      now += 100;
+      const again = offer();
+      node.events.onCallSignal("link-1", again);
+      expect(told.slice(2)).toEqual([["link-1", later], ["link-1", null], ["link-1", again]]);
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it("nothing for an offer too old to answer, nor for a contact's picture change", async () => {

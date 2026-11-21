@@ -20,7 +20,7 @@ import type { GroupStore } from "./groups";
 export const SEQ_BLOCK = 1024;
 
 /** The fields of the state the small row holds. */
-const LIVE = ["seq", "seqEpoch", "seen", "sent", "alone", "provisional", "nicks", "unsaid"] as const;
+const LIVE = ["seq", "seqEpoch", "seen", "sent", "owed", "alone", "provisional", "nicks", "unsaid"] as const;
 
 /**
  * The fields of the record a row of their own holds (`GroupLight`) while nothing else of it changed: what a pin (mine
@@ -89,7 +89,7 @@ function marks(light: GroupLight, now: GroupLight, of: string): boolean {
 
 function liveOf(group: StoredGroup): GroupLive {
   const s = group.state!;
-  return { top: topOf(s), state: { seq: s.seq, seqEpoch: s.seqEpoch, seen: s.seen, sent: s.sent, nicks: s.nicks, ...(s.alone && { alone: s.alone }), ...(s.provisional && { provisional: s.provisional }),
+  return { top: topOf(s), state: { seq: s.seq, seqEpoch: s.seqEpoch, seen: s.seen, sent: s.sent, nicks: s.nicks, ...(s.owed?.length ? { owed: s.owed } : {}), ...(s.alone && { alone: s.alone }), ...(s.provisional && { provisional: s.provisional }),
     // A text saved before its row is stored (`unsaid`) is saved with its counter and frame, in the same row.
     ...(s.unsaid?.length ? { unsaid: s.unsaid } : {}) },
     ...(group.came && { came: group.came }) };

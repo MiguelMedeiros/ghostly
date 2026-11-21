@@ -126,9 +126,9 @@ export const OPENED_SERVICE_CSP_RELAY_ONLY = "default-src 'self' data: blob: 'un
 /**
  * The contact's headers that are not passed on: each makes the browser send something to a place it names, outside
  * `connect-src` (violation and network-error reports, and the endpoints they go to; `Link` preloads, prefetches and
- * early connections). Only the contact's server is reached.
+ * early connections; `Speculation-Rules` prefetches and prerenders). Only the contact's server is reached.
  */
-export const OPENED_SERVICE_DROPPED_HEADERS = ["content-security-policy-report-only", "reporting-endpoints", "report-to", "nel", "link"];
+export const OPENED_SERVICE_DROPPED_HEADERS = ["content-security-policy-report-only", "reporting-endpoints", "report-to", "nel", "link", "speculation-rules"];
 
 /**
  * A contact's headers that would set the page's browser features (camera, microphone, location, a device): the
