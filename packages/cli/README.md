@@ -295,7 +295,9 @@ complete` command, with its draft (the app's "press Check" and "paste it into Gh
 `identity add`, with their fields in `--field` (a NIP-46 `bunker://` link on stdin: `printf 'bunker=%s\n' "$LINK" | ghostly
 identity add nostr --signer nip46 --stdin`), and print what they wait on (a link, a code) to stderr: on a terminal as
 `ghostly: …` lines, the link or code on its own line; on a pipe as the JSON of its `identity.approval` and
-`identity.progress` events. Each command prints only its own: the events carry the `request` id it gave. OpenID Connect,
+`identity.progress` events. Each command prints only its own: the events carry the `request` id it gave. The signer
+brings the subject; one given is NIP-05's domain, or the key the signer must hold (another key fails before anything is
+signed). OpenID Connect,
 AT Protocol and a NIP-07 browser extension need a browser window: make those proofs in the app. `identity providers`
 marks each signer that runs here as `headless`.
 
