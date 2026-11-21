@@ -129,6 +129,8 @@ describe("identity signers on Node", () => {
   describe("a subject given to a signer that runs here", () => {
     const signerOf = (provider: string, id: string) => IDENTITY_PROVIDERS.find((p) => p.id === provider)!.signers.find((s) => s.id === id) as InAppSigner<unknown>;
     const ALICE = "a".repeat(64), BOB = "b".repeat(64);
+    // A link the bunker check takes: the signer itself is stubbed, so it never connects.
+    const BUNKER = `bunker://${"c".repeat(64)}?relay=wss://relay.example.com`;
 
     it("is NIP-05's domain, as --field domain is", async () => {
       const { ctx, node } = fake();
@@ -138,13 +140,13 @@ describe("identity signers on Node", () => {
       const seen: Record<string, string>[] = [];
       const run = vi.spyOn(signerOf("domain", "nip05-nip46"), "run").mockImplementation(async (sctx) => { seen.push({ ...sctx.values }); throw new Error("stopped here"); });
       try {
-        await expect(callApi(ctx, "identity.add", { provider: "domain", signer: "nip05-nip46", subject: "example.com", fields: { bunker: "bunker://x" } })).rejects.toThrow("stopped here");
-        await expect(callApi(ctx, "identity.add", { provider: "domain", signer: "nip05-nip46", subject: "example.com", fields: { domain: "example.com", bunker: "bunker://x" } })).rejects.toThrow("stopped here");
-        await expect(callApi(ctx, "identity.add", { provider: "domain", signer: "nip05-nip46", subject: "example.com", fields: { domain: "other.org", bunker: "bunker://x" } })).rejects.toMatchObject({
+        await expect(callApi(ctx, "identity.add", { provider: "domain", signer: "nip05-nip46", subject: "example.com", fields: { bunker: BUNKER } })).rejects.toThrow("stopped here");
+        await expect(callApi(ctx, "identity.add", { provider: "domain", signer: "nip05-nip46", subject: "example.com", fields: { domain: "example.com", bunker: BUNKER } })).rejects.toThrow("stopped here");
+        await expect(callApi(ctx, "identity.add", { provider: "domain", signer: "nip05-nip46", subject: "example.com", fields: { domain: "other.org", bunker: BUNKER } })).rejects.toMatchObject({
           code: "usage", message: "Two domains: example.com as <subject>, other.org as --field domain; give one",
         });
       } finally { run.mockRestore(); }
-      expect(seen).toEqual([{ domain: "example.com", bunker: "bunker://x" }, { domain: "example.com", bunker: "bunker://x" }]);
+      expect(seen).toEqual([{ domain: "example.com", bunker: BUNKER }, { domain: "example.com", bunker: BUNKER }]);
       expect(node.beginIdentityProof).not.toHaveBeenCalled();
     });
 
@@ -157,19 +159,19 @@ describe("identity signers on Node", () => {
       const sign = vi.fn(async () => ({}));
       const run = vi.spyOn(signerOf("nostr", "nip46"), "run").mockImplementation((_, work) => work({ subject: async () => BOB, sign }));
       try {
-        await expect(callApi(ctx, "identity.add", { provider: "nostr", subject: npubEncode(ALICE), fields: { bunker: "bunker://x" } })).rejects.toMatchObject({
+        await expect(callApi(ctx, "identity.add", { provider: "nostr", subject: npubEncode(ALICE), fields: { bunker: BUNKER } })).rejects.toMatchObject({
           code: "bad_request", message: `Remote signer (NIP-46) holds nostr:${npubEncode(BOB)}, not nostr:${npubEncode(ALICE)}: nothing was signed`,
         });
         expect(node.beginIdentityProof).not.toHaveBeenCalled();
         expect(sign).not.toHaveBeenCalled();
         // One the provider cannot read, before the signer is asked.
-        await expect(callApi(ctx, "identity.add", { provider: "nostr", subject: "npub1nope", fields: { bunker: "bunker://x" } })).rejects.toMatchObject({
+        await expect(callApi(ctx, "identity.add", { provider: "nostr", subject: "npub1nope", fields: { bunker: BUNKER } })).rejects.toMatchObject({
           code: "bad_request", message: "Enter a Nostr public key: npub1… or 64 hex characters",
         });
         expect(run).toHaveBeenCalledTimes(1);
         // Its own key, as an npub or in hex: the proof is made.
-        await expect(callApi(ctx, "identity.add", { provider: "nostr", subject: npubEncode(BOB), fields: { bunker: "bunker://x" } })).resolves.toMatchObject({ done: true });
-        await expect(callApi(ctx, "identity.add", { provider: "nostr", subject: BOB.toUpperCase(), fields: { bunker: "bunker://x" } })).resolves.toMatchObject({ done: true });
+        await expect(callApi(ctx, "identity.add", { provider: "nostr", subject: npubEncode(BOB), fields: { bunker: BUNKER } })).resolves.toMatchObject({ done: true });
+        await expect(callApi(ctx, "identity.add", { provider: "nostr", subject: BOB.toUpperCase(), fields: { bunker: BUNKER } })).resolves.toMatchObject({ done: true });
       } finally { run.mockRestore(); }
       expect(node.beginIdentityProof).toHaveBeenCalledTimes(2);
       expect(node.beginIdentityProof).toHaveBeenCalledWith({ provider: "nostr", subject: BOB });
