@@ -1,0 +1,1 @@
+A `files/3` sender's cancel that no session carried (none open, or a transport switch's swap, before the contact's capabilities on the new session are heard) is said with `pf-abort` once the next session agrees `files/3`, while the app still runs. Before, the receiver showed the file under way until its idle `accept` got the sender's `pf-abort`, 30 s later. No new frame.

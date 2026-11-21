@@ -24,10 +24,31 @@ describe("the push relay's health check (infra/services/push-relay)", () => {
     expect(await fresh.json()).toEqual({ ok: true });
     expect((await post("https://127.0.0.1/x")).status).toBe(502);
     expect((await post("https://example.com/x")).status).toBe(400);
-    expect((await fetch(`${url}/`)).status).toBe(405);
+    // Someone opening the relay's address in a browser reads what it is and what it takes, as on the HyperDHT relay.
+    const opened = await fetch(`${url}/`);
+    expect(opened.status).toBe(405);
+    expect(opened.headers.get("allow")).toBe("POST, OPTIONS");
+    expect(await opened.json()).toEqual({ error: "Ghostly push relay: POST a push to it" });
     expect((await fetch(`${url}/status`)).status).toBe(405);
     expect(await (await fetch(`${url}/healthz?probe=1`)).json()).toEqual({ ok: true });
     expect(relay.stats()).toEqual({ forwarded: 0, failed: 1, refused: 3, tracked: 1 });
+  });
+
+  it("answers a monitor's HEAD /healthz as its GET, with no body and no refusal in the log", async () => {
+    const logged: string[] = [];
+    const relay = await startRelay({ log: (...words: string[]) => { logged.push(words.join(" ")); } });
+    close = relay.close;
+    const url = `http://127.0.0.1:${relay.port}`;
+    for (const path of ["/healthz", "/healthz?x=1"]) {
+      const head = await fetch(`${url}${path}`, { method: "HEAD" });
+      expect(head.status).toBe(200);
+      expect(head.headers.get("cache-control")).toBe("no-store");
+      expect(await head.text()).toBe("");
+    }
+    expect(relay.stats()).toMatchObject({ refused: 0 });
+    await close();
+    close = undefined;
+    expect(logged.filter((line) => line.includes("refused"))).toEqual([]);
   });
 
   it("reads the same to a stranger before and after an allowed client's push", async () => {

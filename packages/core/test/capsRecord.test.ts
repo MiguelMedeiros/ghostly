@@ -375,7 +375,11 @@ describe("capability record: publishing and reading", () => {
     // A copied invite publishes a record under A's address, signed by another key: refused, the last good one stays.
     const mallory = new CapsKeys(link.mine, createIdentity().seedB64);
     await transport.publish(mallory.identity, mallory.seal(content({ name: "Mallory" }), 50).records);
+    // Named a moment after the last read: read once the spacing is up, not at once.
+    const read = transport.resolve.mock.calls.length;
     bSide.peerRev(50); await vi.advanceTimersByTimeAsync(0);
+    expect(transport.resolve.mock.calls.length).toBe(read);
+    await vi.advanceTimersByTimeAsync(15_000);
     expect(bSide.peer).toMatchObject({ rev: 2, name: "Ada L." });
     expect(refused).toHaveBeenCalledWith(expect.objectContaining({ reason: "author" }));
     await aSide.stop(); await bSide.stop();
@@ -546,6 +550,75 @@ describe("capability record: publishing and reading", () => {
     expect(transport.publish, "the reseal for the pin still goes out").toHaveBeenCalledTimes(2);
     expect(saved, "both saves kept: the contact's record and this side's publication").toMatchObject({ rev: 1, sealedFor: a.pubKeyZ32, publishedAt: expect.any(Number), peer: { rev: 1, name: "Ada" } });
     await caps.stop();
+  });
+
+  it("a revision an envelope names is a hint: a few background reads a minute however high it goes, a real one still read in seconds", async () => {
+    // A contact's envelope every 4 s (a DHT-only chat's pace) naming a revision never published: one read per envelope,
+    // and the read-again chain started over for each higher number, made 15 reads a minute (the same number named) or
+    // 45 (a higher one each time), on the budget of the chats on screen.
+    vi.useFakeTimers();
+    for (const naming of ["fixed", "rising"] as const) {
+      const { link, a, b } = pair(), { transport } = exchange();
+      const aCreds: PairingCredentials = { seedB64: a.seedB64, peerKey: b.pubKeyZ32 }, bCreds: PairingCredentials = { seedB64: b.seedB64, peerKey: a.pubKeyZ32 };
+      let aName = "Ada";
+      const aSide = new CapsExchange({ params: link.mine, credentials: aCreds, transport, local: () => content({ name: aName }), save: async () => {} });
+      const bSide = new CapsExchange({ params: link.invite, credentials: bCreds, transport, local: () => content({ name: "Bob" }), save: async () => {} });
+      aSide.start(); await vi.advanceTimersByTimeAsync(0);
+      bSide.start(); await vi.advanceTimersByTimeAsync(60_000);
+      expect(bSide.peer).toMatchObject({ rev: 1 });
+      const calls = () => transport.resolve.mock.calls.filter(([key]) => key === aSide.address);
+      const before = calls().length;
+      let named = 2;
+      for (let t = 0; t < 10 * 60_000; t += 4_000) {
+        bSide.peerRev(naming === "rising" ? named++ : named);
+        await vi.advanceTimersByTimeAsync(4_000);
+      }
+      const hinted = calls().slice(before);
+      // One read per spacing (15 s), and the read-again chain once: 40 + 6 in ten minutes at most. Only that first chase
+      // is on the chats' budget; every other read is upkeep.
+      expect(hinted.length, `${naming}: reads in 10 min`).toBeLessThanOrEqual(46);
+      expect(hinted.filter(call => !((call as unknown[])[1] as { background?: boolean } | undefined)?.background).length, `${naming}: on the chats' budget`).toBeLessThanOrEqual(6);
+
+      // The contact really publishes: read within the spacing, and the read-again chain is there for it again.
+      aName = "Ada L."; await aSide.update();
+      const out = aSide.rev;
+      bSide.peerRev(out);
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(bSide.peer, `${naming}: a real revision is read`).toMatchObject({ rev: out, name: "Ada L." });
+      await aSide.stop(); await bSide.stop();
+    }
+  });
+
+  it("a revision named after the read-again chain ran out is still read, while a link signals and the relays hold background reads", async () => {
+    // Two browsers with WebRTC blocked, B's Iroh not running: B's record lists Iroh with no descriptor, so A spends its
+    // read-again chain on it at pairing. B's Iroh starts later and its envelope names the record with the descriptor,
+    // which is not out yet. Read as background upkeep, with no chain left, A got the old copy (the relays answer a held
+    // background read with what they know) and never read again: the chat never went live on Iroh.
+    vi.useFakeTimers();
+    const { link, a, b } = pair(), { packets, transport } = exchange();
+    const aCreds: PairingCredentials = { seedB64: a.seedB64, peerKey: b.pubKeyZ32 }, bCreds: PairingCredentials = { seedB64: b.seedB64, peerKey: a.pubKeyZ32 };
+    let bContent = content({ descriptors: {} }), signaling = false, stale: SignedPacket | undefined, staleReads = 0;
+    transport.publish.mockImplementation(async (identity: { pubKeyZ32: string }, records: GhostRecord[]) => {
+      stale = packets.get(identity.pubKeyZ32);
+      packets.set(identity.pubKeyZ32, { pubKeyZ32: identity.pubKeyZ32, timestampMicros: 0n, records });
+    });
+    transport.resolve.mockImplementation(async (key: string, options?: { background?: boolean }) => {
+      if (stale?.pubKeyZ32 === key && (staleReads > 0 || (signaling && options?.background))) { staleReads = Math.max(0, staleReads - 1); return stale; }
+      return packets.get(key) ?? null;
+    });
+    const bSide = new CapsExchange({ params: link.invite, credentials: bCreds, transport, local: () => bContent, save: async () => {} });
+    const aSide = new CapsExchange({ params: link.mine, credentials: aCreds, transport, local: () => content(), save: async () => {} });
+    bSide.start(); await vi.advanceTimersByTimeAsync(0);
+    aSide.start(); await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(aSide.peer).toMatchObject({ rev: 1, descriptors: {} });
+
+    signaling = true;
+    bContent = content(); await bSide.update();
+    staleReads = 1;
+    aSide.peerRev(bSide.rev);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(aSide.peer, "B's descriptors, within the spacing and a read again").toMatchObject({ rev: 2, descriptors: { "iroh/1": expect.anything(), "hyperdht/1": expect.anything() } });
+    await aSide.stop(); await bSide.stop();
   });
 
   it("merges reads asked for close together", async () => {

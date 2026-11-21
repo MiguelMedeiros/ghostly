@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
@@ -60,5 +60,17 @@ describe("file send to a group that would refuse it", () => {
     expect(node.sendGroupFile).not.toHaveBeenCalled();
     expect(stage).not.toHaveBeenCalled();
     stage.mockRestore();
+  });
+
+  it("a file over a group's cap is refused with its name, its size and the way out (a 1:1 chat takes it)", async () => {
+    const big = join(dir, "sparse101.bin");
+    writeFileSync(big, "");
+    truncateSync(big, 105_000_000);
+    const { node, ctx } = ctxWith({ error: null });
+    await expect(callApi(ctx, "file.send", { chat: "group:g1", path: big })).rejects.toMatchObject({
+      code: "refused", message: "Too large for a group: sparse101.bin is 105 MB, a group takes up to 100 MiB (send it in a 1:1 chat)",
+      details: { reason: "too_large", size: 105_000_000, max: 104_857_600 },
+    });
+    expect(node.groupFileCheck).not.toHaveBeenCalled();
   });
 });

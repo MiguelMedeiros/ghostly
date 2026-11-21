@@ -1,10 +1,15 @@
+import { spawnSync } from "node:child_process";
+import { generateKeyPairSync } from "node:crypto";
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { p256 } from "@noble/curves/nist.js";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { base58 } from "@scure/base";
 import {
-  createIdentity, didDhtDocument, didGhostlyServiceEntry, IdentityCheckUnavailable, didWebFile, encodeDidDhtPacket, identityStatement, newIdentityBinding, sign, signDidDhtPacket,
+  createIdentity, didDhtDocument, didGhostlyServiceEntry, IdentityCheckUnavailable, didWebFile, encodeDidDhtDeactivated, encodeDidDhtPacket, identityStatement, newIdentityBinding, sign, signDidDhtPacket,
   toBase64Url, utf8Encode, type DidDhtDocument, type IdentityStatement,
 } from "@ghostly/core";
 import type { IdentityFetch, IdentityFetchOptions, IdentityProofProvider, VerifyContext } from "../src/proofs/contract";
@@ -277,6 +282,31 @@ describe("the DID provider", () => {
     expect(secpSteps.map(x => x.copy ?? "").join("\n")).not.toMatch(/jose/);
     expect(secpSteps.map(x => x.copy ?? "").join("\n")).toMatch(/secp256k1\.js[\s\S]*openssl dgst -sha256 -sign/);
   });
+
+  // The real OpenSSL 3, with nothing else on PATH: the command must not need xxd (vim's, missing on many Linux systems).
+  const [bash, openssl] = spawnSync("bash", ["-c", "command -v bash; command -v openssl"], { encoding: "utf8" }).stdout.trim().split("\n");
+  const openssl3 = !!openssl && /^OpenSSL 3\./.test(spawnSync(openssl, ["version"], { encoding: "utf8" }).stdout ?? "");
+  it.skipIf(!openssl3)("prints an OpenSSL command that needs OpenSSL alone, and whose output is accepted", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ghostly-did-openssl-"));
+    try {
+      symlinkSync(openssl, join(dir, "openssl"));
+      for (const curve of ["Ed25519", "P-256", "secp256k1"] as const) {
+        const pair = curve === "Ed25519" ? generateKeyPairSync("ed25519") : generateKeyPairSync("ec", { namedCurve: curve === "P-256" ? "prime256v1" : "secp256k1" });
+        const jwk = pair.publicKey.export({ format: "jwk" });
+        const x = Buffer.from(jwk.x!, "base64url"), y = jwk.y ? Buffer.from(jwk.y, "base64url") : undefined;
+        const pub = y ? Uint8Array.from([y[y.length - 1] & 1 ? 3 : 2, ...x]) : Uint8Array.from(x);
+        const prefix = { Ed25519: [0xed, 0x01], secp256k1: [0xe7, 0x01], "P-256": [0x80, 0x24] }[curve];
+        const s = statementFor(`did:key:z${base58.encode(Uint8Array.from([...prefix, ...pub]))}`);
+        writeFileSync(join(dir, "key.pem"), pair.privateKey.export({ format: "pem", type: "pkcs8" }));
+        const steps = (signer as { instructions(s: IdentityStatement): { steps: { text: string; copy?: string }[] } }).instructions(s).steps;
+        const command = steps.map(x => x.copy ?? "").find(c => c.includes("openssl"))!;
+        const run = spawnSync(bash, ["-c", command], { cwd: dir, encoding: "utf8", env: { PATH: dir } });
+        expect(run.stderr, curve).toBe("");
+        const evidence = await signer.parse(run.stdout, s);
+        await expect(verifyIdentity([did], s, evidence, ctxOf(refuse)), curve).resolves.toMatchObject({ source: expect.stringContaining(`${curve === "Ed25519" ? "Ed25519" : `ECDSA ${curve}`} signature`) });
+      }
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
 });
 
 describe("resolving a did:web", () => {
@@ -358,6 +388,26 @@ describe("resolving a did:dht", () => {
     clearDidCache();
     const deactivated = async () => ({ document: net.document, metadata: { versionId: "1", updated: "", deactivated: true as const }, relay: "x" });
     await expect(resolveDid(net.didDht, { fetch: net.fetch, dht: deactivated })).rejects.toThrow(/deactivated/);
+  });
+
+  it("refuses a DID deactivated on a relay that answers later than one still holding the live record", async () => {
+    vi.useFakeTimers();
+    try {
+      const net = dhtNetwork();
+      const ended = signDidDhtPacket(net.identity, encodeDidDhtDeactivated(net.identity.publicKey), 1_800_000_000);
+      const live = signDidDhtPacket(net.identity, encodeDidDhtPacket(net.document), 1_700_000_000);
+      const fetch: IdentityFetch = async url => {
+        const late = url.startsWith("https://pkarr.pubky.app/");
+        await new Promise(resolve => setTimeout(resolve, late ? 3_500 : 0));
+        return { status: 200, contentType: "application/pkarr.org/relays#payload", text: "", bytes: late ? ended : live };
+      };
+      const resolving = resolveDid(net.didDht, { fetch });
+      const refused = expect(resolving).rejects.toThrow(/deactivated/);
+      await vi.advanceTimersByTimeAsync(3_500);
+      await refused;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("marks relays it could not read as this side's network, not the DID's record: none reached, or none answering", async () => {

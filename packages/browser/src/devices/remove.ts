@@ -109,7 +109,7 @@ export async function planSetMove(record: DeviceRecord | null, signer: Signer, o
     const pending = staying(set.pending);
     let by: Uint8Array | undefined;
     try { by = readSetUpdate(JSON.parse(set.setUpdate) as DeviceFrame)?.by; } catch { /* none */ }
-    if (!by || !bytesEqual(by, signer.publicKey)) { earlier.push({ ...set, pending }); continue; }
+    if (!by || !bytesEqual(by, signer.publicKey)) { earlier.push(withDelivered({ ...set, pending }, [])); continue; }
     // Only the devices its tombstone keeps, in their slots: a device added since is in none, and a frame that names it is
     // refused (`setUpdate.ts`). The device learns of it from the turn record it reads at the new address.
     const setKeys = turnKeys(fromBase64Url(set.d)), tombBytes = fromBase64Url(set.tombstone);
@@ -118,7 +118,8 @@ export async function planSetMove(record: DeviceRecord | null, signer: Signer, o
     const setUpdate = pending.length
       ? JSON.stringify(await setUpdateFrame(setKeys.address, { ...update, set: kept, tomb: tombBytes }, signer))
       : set.setUpdate;
-    earlier.push({ ...set, pending, setUpdate });
+    // A device it went to already may hold the secret it named then, whatever it names now: `delivered` stays.
+    earlier.push(withDelivered({ ...set, pending, setUpdate }, []));
   }
   earlier.push({ d: record.d, tombstone: toBase64Url(tomb), setUpdate: JSON.stringify(frame), pending: staying(slots.flatMap((slot) => (slot ? [slot.key] : []))), ...(removed ? { removed: removed.key } : {}) });
   return {
@@ -233,5 +234,25 @@ export function pendingFrames(record: DeviceRecord | null): { d: string; key: st
  */
 export function acknowledged(record: DeviceRecord | null, key: string, d?: string): DevicePatch | null {
   if (!record?.earlierSets.some((set) => (d === undefined || set.d === d) && set.pending.includes(key))) return null;
-  return { earlierSets: record.earlierSets.map((set) => ((d === undefined || set.d === d) ? { ...set, pending: set.pending.filter((k) => k !== key) } : set)) };
+  return { earlierSets: record.earlierSets.map((set) => ((d === undefined || set.d === d) ? withDelivered({ ...set, pending: set.pending.filter((k) => k !== key) }, []) : set)) };
+}
+
+/**
+ * The record once the frame of the set under `d` went to `key` over a live link (`EarlierDeviceSet.delivered`): the
+ * device may hold the secret that frame names, and keep it if its `set-ack` is lost. Null when that is noted already.
+ */
+export function delivered(record: DeviceRecord | null, key: string, d: string): DevicePatch | null {
+  const set = record?.earlierSets.find((s) => s.d === d && s.pending.includes(key));
+  let named: string | undefined;
+  try { const update = set && readSetUpdate(JSON.parse(set.setUpdate) as DeviceFrame); if (update) named = toBase64Url(update.d); } catch { /* none */ }
+  if (!record || !set || named === undefined || set.delivered?.some((e) => e.key === key && e.d === named)) return null;
+  const kept = new Set([record.d, ...record.earlierSets.map((s) => s.d)]);
+  return { earlierSets: record.earlierSets.map((s) => (s === set ? withDelivered(s, [{ key, d: named }], kept) : s)) };
+}
+
+/** `set` with `more` delivered, and only entries of devices still pending under a secret the record keeps (`kept`). */
+function withDelivered(set: EarlierDeviceSet, more: { key: string; d: string }[], kept?: Set<string | undefined>): EarlierDeviceSet {
+  const { delivered: was, ...rest } = set;
+  const entries = [...(was ?? []), ...more].filter((e) => set.pending.includes(e.key) && (!kept || kept.has(e.d)));
+  return entries.length ? { ...rest, delivered: entries } : rest;
 }

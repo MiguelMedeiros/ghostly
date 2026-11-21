@@ -20,11 +20,36 @@ describe("identity timeline", () => {
     let t = applyIdentityEvent([], { type: "shared", side: "theirs", proof: P, provider: "nostr" }, 1);
     t = applyIdentityEvent(t, { type: "result", side: "theirs", proof: Q, requested: P, provider: "nostr", subject: "npub1x", ok: false, error: "Bad" }, 2);
     expect(t).toEqual([expect.objectContaining({ proof: Q, state: "failed", error: "Bad" })]);
-    // A retry after a failure is a new entry; its success clears nothing of the old one.
+    // The contact's retry after a failure takes its failed entry over, at its time; a success leaves no error.
     t = applyIdentityEvent(t, { type: "shared", side: "theirs", proof: Q, provider: "nostr" }, 3);
     t = applyIdentityEvent(t, { type: "result", side: "theirs", proof: Q, ok: true }, 4);
-    expect(t.map(e => e.state)).toEqual(["failed", "verified"]);
-    expect(t[1]).not.toHaveProperty("error");
+    expect(t).toEqual([expect.objectContaining({ proof: Q, state: "verified", at: 1 })]);
+    expect(t[0]).not.toHaveProperty("error");
+    // This side's retry after a failure is a new entry; its success clears nothing of the old one.
+    let m = applyIdentityEvent([], { type: "shared", side: "mine", proof: P, provider: "nostr" }, 1);
+    m = applyIdentityEvent(m, { type: "result", side: "mine", proof: P, ok: false, error: "Bad" }, 2);
+    m = applyIdentityEvent(m, { type: "shared", side: "mine", proof: P, provider: "nostr" }, 3);
+    m = applyIdentityEvent(m, { type: "result", side: "mine", proof: P, ok: true }, 4);
+    expect(m.map(e => e.state)).toEqual(["failed", "verified"]);
+  });
+
+  it("keeps one unverified line of the contact's per kind, so its attempts never push out the others", () => {
+    let t = applyIdentityEvent([], { type: "shared", side: "theirs", proof: P, provider: "nostr" }, 1);
+    t = applyIdentityEvent(t, { type: "result", side: "theirs", proof: P, provider: "nostr", subject: "npub1x", ok: true }, 2);
+    t = applyIdentityEvent(t, { type: "stopped", side: "mine", proof: Q, provider: "ssh", subject: "k", reason: "revoked" }, 3);
+    const kept = [...t];
+    for (let i = 0; i < IDENTITY_TIMELINE_MAX * 2; i++) {
+      const proof = (i + 1).toString(16).padStart(64, "0"), presented = "c".repeat(63) + (i % 10);
+      t = applyIdentityEvent(t, { type: "shared", side: "theirs", proof, provider: "nostr" }, 10 + i);
+      // Every other one presented and failed, under another proof than the one requested, or one whose start is gone.
+      if (i % 2) t = applyIdentityEvent(t, { type: "result", side: "theirs", proof: presented, requested: i % 4 === 1 ? proof : undefined, provider: "nostr", subject: "fake", ok: false, error: "Bad" }, 10 + i);
+    }
+    expect(t.slice(0, 2)).toEqual(kept);
+    expect(t.slice(2)).toEqual([{ id: `theirs:${"0".repeat(63)}1:0`, proof: "c".repeat(63) + "9", side: "theirs", kind: "shared", provider: "nostr", state: "failed", subject: "fake", error: "Bad", at: 10 }]);
+    // Another kind has a line of its own; a verified outcome whose start is gone is a line of its own, as before.
+    t = applyIdentityEvent(t, { type: "shared", side: "theirs", proof: Q, provider: "ssh" }, 500);
+    t = applyIdentityEvent(t, { type: "result", side: "theirs", proof: "d".repeat(64), provider: "nostr", subject: "npub1y", ok: true }, 501);
+    expect(t.slice(2).map(e => `${e.provider}:${e.state}`)).toEqual(["nostr:failed", "ssh:verifying", "nostr:verified"]);
   });
 
   it("writes a stop once, and an outcome whose start is gone on its own", () => {
@@ -48,7 +73,12 @@ describe("identity timeline", () => {
 
   it("keeps the newest entries only, and tells the chat list when the contact last shared", () => {
     let t: IdentityTimelineEntry[] = [];
-    for (let i = 0; i < IDENTITY_TIMELINE_MAX + 5; i++) t = applyIdentityEvent(t, { type: "shared", side: i % 2 ? "mine" : "theirs", proof: i.toString(16).padStart(64, "0"), provider: "nostr" }, i);
+    for (let i = 0; i < IDENTITY_TIMELINE_MAX + 5; i++) {
+      const side = i % 2 ? "mine" : "theirs", proof = i.toString(16).padStart(64, "0");
+      t = applyIdentityEvent(t, { type: "shared", side, proof, provider: "nostr" }, i);
+      // The contact's shares verified (one not verified would take over its earlier one).
+      if (side === "theirs") t = applyIdentityEvent(t, { type: "result", side, proof, ok: true }, i);
+    }
     expect(t).toHaveLength(IDENTITY_TIMELINE_MAX);
     expect(t[0].at).toBe(5);
     expect(lastSharedWithMe(t)).toBe(IDENTITY_TIMELINE_MAX + 4);
@@ -60,7 +90,11 @@ describe("identity timeline", () => {
     t = applyIdentityEvent(t, { type: "result", side: "mine", proof: P, ok: true }, 1);
     t = applyIdentityEvent(t, { type: "stopped", side: "mine", proof: P, provider: "nostr", reason: "withdrawn" }, 2);
     t = applyIdentityEvent(t, { type: "shared", side: "mine", proof: P, provider: "nostr" }, 3);
-    for (let i = 0; i < IDENTITY_TIMELINE_MAX - 2; i++) t = applyIdentityEvent(t, { type: "shared", side: "theirs", proof: i.toString(16).padStart(64, "0"), provider: "nostr" }, 4 + i);
+    for (let i = 0; i < IDENTITY_TIMELINE_MAX - 2; i++) {
+      const proof = i.toString(16).padStart(64, "0");
+      t = applyIdentityEvent(t, { type: "shared", side: "theirs", proof, provider: "nostr" }, 4 + i);
+      t = applyIdentityEvent(t, { type: "result", side: "theirs", proof, ok: true }, 4 + i);
+    }
     t = applyIdentityEvent(t, { type: "stopped", side: "mine", proof: P, provider: "nostr", reason: "withdrawn" }, 200);
     expect(t).toHaveLength(IDENTITY_TIMELINE_MAX);
     expect(new Set(t.map(e => e.id)).size).toBe(t.length);

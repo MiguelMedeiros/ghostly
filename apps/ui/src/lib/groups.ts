@@ -1,10 +1,11 @@
 import { MAX_GROUP_NAME_BYTES, MAX_GROUP_NAME_LENGTH, decodeCommunityLink, decodeGroupEntryLink, groupEntryUrl, type PairedTransport } from "@ghostly/core";
-import { fitText, fitTextEdit, utf8Bytes } from "./fitText";
+import { utf8Bytes } from "./fitText";
 import { getPrefix, setSessionDraft } from "./storage";
 import { appLinkOrigin, decodePart } from "./url";
 import { setChatFolder } from "./chatFolders";
 import { forgetChatLanguage } from "./chatLanguage";
 import { forgetChatMute, groupChat } from "./chatMute";
+import { clearExtensionNotices } from "./notifications";
 import { forgetChatTranslate } from "./chatTranslate";
 import { forgetSentOriginals } from "./sentOriginals";
 import { forgetTranslateSend } from "./chatTranslateSend";
@@ -14,21 +15,11 @@ import { transportName } from "./connection";
 import { ago } from "./time";
 import { english } from "./english";
 import { relayCause } from "./problemText";
+import { listText } from "./listText";
 import type { Translate } from "../contexts/I18nContext";
 
 /** Whether a group's name is one `groupName` takes whole: characters (`MAX_GROUP_NAME_LENGTH`) and bytes (`MAX_GROUP_NAME_BYTES`). */
 export const fitsGroupName = (s: string) => [...s].length <= MAX_GROUP_NAME_LENGTH && utf8Bytes(s) <= MAX_GROUP_NAME_BYTES;
-
-/**
- * What a group's name field keeps of what was typed or pasted: as much as `groupName` takes, counted as it counts
- * (`fitsGroupName`), cut between whole emoji. An input's `maxLength` counts UTF-16 units: a name of emoji stopped at
- * 32 of them, a family at 5 (agents#1048).
- */
-export const fitGroupName = (value: string): string => fitText(value, fitsGroupName);
-
-/** A change to a group's name field, kept to what `groupName` takes the way a text field with a limit does (`fitTextEdit`). */
-export const fitGroupNameEdit = (before: string, after: string, caret: number | null): { value: string; caret: number } =>
-  fitTextEdit(before, after, caret, fitsGroupName);
 
 /**
  * What a name may hold that draws nothing by itself, and that `sanitizeNick` keeps since a name may need it beside
@@ -38,12 +29,45 @@ export const fitGroupNameEdit = (before: string, after: string, caret: number | 
 const DRAWS_NOTHING = /[\p{Default_Ignorable_Code_Point}⠀]/gu;
 
 /**
- * A name as two are compared: told apart by neither case, width, spacing, what draws nothing (`DRAWS_NOTHING`) nor the
- * key's end a name already shows ("Alice (…3r69cg)", isolated as `withKeyEnd` shows it or not), so "alice ", "Ali‍ce"
- * and "Alice (…k1p0aa)" are all "Alice".
+ * The Cyrillic and Greek letters drawn as a Latin one (Unicode TR39's confusables among the three), each to that
+ * letter: capitals before a name's case is folded (Greek Η is H, its small η is n), small ones after.
  */
-const sameNameForm = (nick: string) =>
-  nick.normalize("NFKC").replace(DRAWS_NOTHING, "").replace(/\s*\(\s*\.\.\.[^()]*\)\s*$/u, "").replace(/\s+/gu, " ").trim().toLocaleLowerCase();
+const lookalikes = (pairs: string) => new Map([...pairs.matchAll(/(\S)(\S)/gu)].map(([, from, to]) => [from!, to!]));
+const LOOKALIKE_CAPITALS = lookalikes("АA ВB ЕE ЅS ІI ЈJ КK МM НH ОO РP СC ТT УY ХX ҮY ӀI ԚQ ԜW ΑA ΒB ΕE ΖZ ΗH ΙI ΚK ΜM ΝN ΟO ΡP ΤT ΥY ΧX ϹC");
+const LOOKALIKE_SMALL = lookalikes("аa еe оo рp сc уy хx ѕs іi јj һh ӏl үy ԁd ԛq ԝw αa γy ιi νv οo ρp υu ϲc ϳj");
+const foldLookalikes = (s: string, letters: Map<string, string>) => s.replace(/\p{L}/gu, c => letters.get(c) ?? c);
+/** `s` in small letters, each look-alike as its Latin letter, accents apart (NFD) so "Ё" is "Ë". */
+const lookalikeForm = (s: string) => foldLookalikes(foldLookalikes(s.normalize("NFD"), LOOKALIKE_CAPITALS).toLocaleLowerCase(), LOOKALIKE_SMALL);
+
+/**
+ * A name as two are compared: told apart by neither case, width, spacing, what draws nothing (`DRAWS_NOTHING`), a
+ * letter of another alphabet drawn the same (`lookalikeForm`) nor the key's end a name already shows ("Alice
+ * (…3r69cg)", isolated as `withKeyEnd` shows it or not), so "alice ", "Ali‍ce", "Аlice" (a Cyrillic А) and "Alice
+ * (…k1p0aa)" are all "Alice". Look-alikes are folded both before NFKC (which turns Greek Ϲ into Σ) and after it (which
+ * turns 𝚨 into Α). Only the comparison: the name is shown as chosen.
+ */
+const sameNameForm = (nick: string) => lookalikeForm(
+  lookalikeForm(nick).normalize("NFKC").replace(DRAWS_NOTHING, "").replace(/\s*\(\s*\.\.\.[^()]*\)\s*$/u, "").replace(/\s+/gu, " ").trim(),
+).normalize("NFC");
+
+/**
+ * The app's own word for me in each language it speaks, which its lines about me start with ("You removed Bob",
+ * "Você reagiu…"). Every language's is here (test/i18n checks it): a name in one language's word reads as mine in it.
+ */
+const MY_WORDS = ["You", "Você", "Tú", "Vous", "Tu", "あなた", "你", "أنت"];
+/** `sameNameForm` without accents or marks: "Voce", "Tu" and "انت" are the word too. */
+const wordForm = (name: string) => sameNameForm(name).normalize("NFD").replace(/\p{M}/gu, "");
+const MY_WORD_FORMS = new Set(MY_WORDS.map(wordForm));
+
+/**
+ * A name someone chose (a contact's, a member's) as a line about them says it: in quotes where it is the app's word for
+ * me (`MY_WORDS`, whatever its case, spacing or accents), so a member named "You" reads "“You” removed Bob", never my
+ * own "You removed Bob". Not for my own name: those lines are mine.
+ */
+export function othersName(name: string, t: Translate = english): string {
+  const form = wordForm(name);
+  return MY_WORD_FORMS.has(form) || form === wordForm(t("group.member.you")) || form === wordForm(t("chat.reply.you")) ? t("common.quotedName", { name }) : name;
+}
 
 /** `sameNamed` of a roster already read: a page names many of its rows, each by the same roster. */
 const sameNamedOf = new WeakMap<readonly object[], ReadonlySet<string>>();
@@ -66,11 +90,33 @@ export function sameNamed(members: readonly Pick<GroupMemberView, "key" | "me" |
   return keys;
 }
 
+/** What `DRAWS_NOTHING` holds that a name may need in its middle: the joiners and the selectors of an emoji or a script. */
+const NEEDED_UNSEEN = /^(?:\u200c|\u200d|\p{Variation_Selector}|[\u{e0020}-\u{e007f}])$/u;
+/** A name without what it may be padded with that `sameNameForm` drops (blank Braille, a filler), its spacing collapsed. */
+const withoutBlanks = (s: string) => s.replace(DRAWS_NOTHING, c => NEEDED_UNSEEN.test(c) ? c : "").replace(/\s+/gu, " ").trim();
+/** A key's end a name ends with, as `sameNameForm` reads one. */
+const KEY_END_FORM = /^\s*\(\s*\.\.\.[^()]*\)\s*$/u;
+
+/**
+ * A name as `withKeyEnd` shows it: without the key's end it ends with (in any form `sameNameForm` reads as one, "（…"
+ * too) and without the blanks it may be padded with (`withoutBlanks`). "Alice (…3r69cg)" padded with blank Braille to its
+ * last character pushed its own key's end out of the cut line, which then read as the real Alice's.
+ */
+function shownName(nick: string): string {
+  const name = withoutBlanks(nick), points = [...name];
+  for (let i = points.length - 1, tail = ""; i > 0; i--) {
+    tail = points[i] + tail;
+    if (KEY_END_FORM.test(tail.normalize("NFKC").replace(DRAWS_NOTHING, ""))) return withoutBlanks(points.slice(0, i).join("")) || name;
+  }
+  return name || nick;
+}
+
 /**
  * A name told apart by the end of its key, as "@" offers a member. The end is isolated left to right (LRI … PDI): in
- * an Arabic name's direction "محمد (…k1p0aa)" is laid out as "(k1p0aa…) محمد", the key's end read as its start.
+ * an Arabic name's direction "محمد (…k1p0aa)" is laid out as "(k1p0aa…) محمد", the key's end read as its start. The
+ * name is shown as `shownName` reads it, so the only key's end it shows is its own, right after the name.
  */
-const withKeyEnd = (nick: string, key: string) => `${nick} \u2066(…${key.slice(-6)})\u2069`;
+const withKeyEnd = (nick: string, key: string) => `${shownName(nick)} \u2066(…${key.slice(-6)})\u2069`;
 
 /** `sameNamed`: a member whose name another member shows too is told apart by the end of their key (`withKeyEnd`). */
 export const memberName = (m: { key: string; me: boolean; nick?: string }, t: Translate = english, sameNamed?: ReadonlySet<string>) =>
@@ -88,9 +134,9 @@ type FormerNamesOf = { profile?: GroupView["profile"]; members: readonly Pick<Gr
  */
 export const authorName = (group: FormerNamesOf & { formerNames?: GroupView["formerNames"] }, key: string, t: Translate = english) => {
   const member = group.members.find(m => m.key === key);
-  if (member) return memberName(member, t, sameNamed(group.members));
+  if (member) return member.me ? memberName(member, t) : othersName(memberName(member, t, sameNamed(group.members)), t);
   const former = group.formerNames?.[key];
-  return former ? formerName(group, key, former) : t("group.member.unnamed", { key: key.slice(0, 8) });
+  return former ? othersName(formerName(group, key, former), t) : t("group.member.unnamed", { key: key.slice(0, 8) });
 };
 
 /**
@@ -159,7 +205,7 @@ export function groupTransports(members: GroupMemberView[], t: Translate = engli
   const head = hubbed ? t("group.transports.liveHubs", { live: live.length + hubbed, total: others.length, hubs: hubbed })
     : t("group.transports.live", { live: live.length, total: others.length });
   if (counts.size === 1) { const [transport] = counts.keys(); return { line: t("group.transports.over", { head, transport: transportName(transport) }), transport }; }
-  return { line: t("group.transports.mixed", { head, list: [...counts].sort((a, b) => b[1] - a[1]).map(([kind, n]) => `${n} ${transportName(kind)}`).join(", ") }) };
+  return { line: t("group.transports.mixed", { head, list: listText([...counts].sort((a, b) => b[1] - a[1]).map(([kind, n]) => `${n} ${transportName(kind)}`), t) }) };
 }
 
 /**
@@ -227,10 +273,12 @@ export function markGroupRead(groupId: string, at = Date.now()): void {
 /**
  * What this device keeps of a group beside the engine goes with it (left, deleted here, a join called off): what was
  * typed and not sent, the read mark, the mute, the translation choice, the language and the folder, as a chat's go with the chat (storage.ts deleteSession).
- * A community keeps its id, so a draft left behind was in the field again after joining it again.
+ * A community keeps its id, so a draft left behind was in the field again after joining it again. Its notifications in
+ * the extension go too: Chrome keeps them past the page, and a click on one opened a group that is not there.
  */
 export function forgetGroupLocal(groupId: string): void {
   setSessionDraft(`group:${groupId}`, "");
+  void clearExtensionNotices(groupChat(groupId));
   try { localStorage.removeItem(`${getPrefix()}group_read_${groupId}`); } catch { /* storage unavailable */ }
   forgetTranslateSend(groupChat(groupId));
   forgetChatMute(groupChat(groupId));

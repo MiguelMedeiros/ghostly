@@ -17,12 +17,12 @@ const NOW = Date.now();
 const key = (c: string) => c.repeat(52);
 const chat = (id: string, name: string, over: Partial<ChatSession> = {}): ChatSession =>
   ({ id, profile: "paired-chat/1", mySeedB64: `seed-${id}`, peerPubKeyB64: key(id), encKeyB64: "enc", messages: [], createdAt: NOW, nick: name, nickSource: "profile", ...over });
-const list = (language?: "pt") => renderApp(<UpdateProvider><Sidebar /></UpdateProvider>, { language });
+const list = (language?: "pt" | "ar") => renderApp(<UpdateProvider><Sidebar /></UpdateProvider>, { language });
 const folderNames = () => screen.queryAllByTestId("chat-folder-name").map(n => n.textContent);
 const folder = (name: string) => screen.getAllByTestId("chat-folder-section").find(s => within(s).getByTestId("chat-folder-name").textContent === name)!;
 const names = (root: HTMLElement) => within(root).queryAllByTestId("chat-row-name").map(n => n.textContent);
 const options = (name: string) => within(folder(name)).getByTestId("chat-folder-options");
-/** The menu's rows, ticked ones (menu checkboxes) included. */
+/** The menu's rows, ticked ones (menu radios) included. */
 const rowTexts = (menu: HTMLElement) => [...menu.querySelectorAll("[data-menu-item]")].map(b => b.querySelector("[data-menu-text]")?.textContent);
 
 /** Opens /group/group-1 as the app routes it, with the chat list beside it. */
@@ -81,6 +81,14 @@ describe("a folder's ⋮", () => {
     setChatFolder("a", agents.id);
     return agents;
   };
+
+  // The tooltip is drawn in the page's direction: in Arabic a name's ending punctuation went to its other side ("!Club").
+  it("its tooltip names the folder in its own direction", () => {
+    saveSession(chat("a", "Alice"));
+    setChatFolder("a", createFolder("Club!")!.id);
+    list("ar");
+    expect(options("Club!")).toHaveAttribute("title", "خيارات المجلد \u2068Club!\u2069");
+  });
 
   it("renames it, with its name ready to be typed over", async () => {
     seed();
@@ -155,6 +163,8 @@ describe("a chat's ⋮ → Move to folder…", () => {
     expect(menu).toHaveAccessibleName("Move to folder…");
     expect(rowTexts(menu)).toEqual(["Agents", "Personal", "No folder", "New folder…"]);
     expect(within(menu).getByTestId("chat-folder-none")).toHaveAttribute("aria-checked", "true");
+    // One folder at a time: the folders and "No folder" are radios.
+    expect(within(menu).getAllByRole("radio").map(r => r.textContent)).toEqual(["Agents", "Personal", "No folder"]);
     await user.click(within(menu).getAllByTestId("chat-folder-choice")[0]);
     expect(screen.queryByTestId("chat-folder-menu")).not.toBeInTheDocument();
     expect(folderOf(groupChat("group-1"))).toBe(agents.id);

@@ -30,6 +30,8 @@ export interface IdCardContent {
   /** The identity in full, and as short as the provider writes it (npub1ab…yz, a domain, a login). */
   subject: string;
   short: string;
+  /** The subject is words in the app's language (the Ghostly card's "One key per chat"), not a key or a handle. */
+  subjectWords?: boolean;
   /** What the statement names, which picks the provider's mark: for an account, the provider it was made at. */
   bound: string;
   /** A name the evidence carried (a Nostr profile's), and its picture: a sanitized data URL, never a remote one. */
@@ -95,7 +97,7 @@ export function idCard(p: IdentityProofView, { now = Date.now() / 1000, refusedB
   return {
     id: p.id,
     provider: p.provider,
-    label: providerLabel(p.provider),
+    label: providerLabel(p.provider, t),
     subject: p.verified.subject,
     short: shortSubject(p.provider, p.verified.subject),
     bound: p.subject,
@@ -135,7 +137,7 @@ export function receivedIdCard(r: ReceivedIdentityView, now = Date.now() / 1000,
   return {
     id: r.id,
     provider: r.provider,
-    label: providerLabel(r.provider),
+    label: providerLabel(r.provider, t),
     subject: r.verified.subject,
     short: shortSubject(r.provider, r.verified.subject),
     bound: r.subject,
@@ -177,7 +179,7 @@ export function shareIdCard(entry: IdentityTimelineEntry, state: ShareState, { p
   const own = received ? receivedIdCard(received, now, t, language) : proof ? idCard(proof, { now, t }) : undefined;
   const subject = own?.subject ?? entry.subject ?? "";
   const base: IdCardContent = own ?? {
-    id: entry.proof, provider: entry.provider, label: providerLabel(entry.provider), subject, short: subject ? shortSubject(entry.provider, subject) : "…", bound: subject,
+    id: entry.proof, provider: entry.provider, label: providerLabel(entry.provider, t), subject, short: subject ? shortSubject(entry.provider, subject) : "…", bound: subject,
     category: "", attested: providerOf(entry.provider)?.category === "provider-attested", status: "checking", statusLabel: "", validity: "", issued: "", shared: "", refusedBy: [],
   };
   // One of mine says, as in the picker, whether this contact sees it.
@@ -236,6 +238,7 @@ export function ghostlyCard(t: Translate, profile: GhostlyProfile, place: { chat
     label: t("identities.ghostly.provider"),
     subject,
     short: place.chat ? shortKey(place.chat.key) : subject,
+    subjectWords: !place.chat,
     bound: GHOSTLY,
     name,
     photo,

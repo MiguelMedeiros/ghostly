@@ -1,8 +1,9 @@
 import "fake-indexeddb/auto";
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChatFiles, GhostLink, NO_PICTURE_METADATA, NO_VIDEO_METADATA, REMOVED_TEXT, createIdentity, createLink, forwardedAgain, forwardedMany, identityFromSeedB64, readForwarded, withoutVideoMetadata, type FileTransferRecord, type IncomingMessage, type IncomingTarget } from "@ghostly/core";
+import { ChatFiles, GhostLink, NO_PICTURE_METADATA, NO_VIDEO_METADATA, REMOVED_TEXT, createIdentity, createLink, forwardedAgain, forwardedMany, identityFromSeedB64, readForwarded, withoutAudioMetadata, withoutVideoMetadata, type FileTransferRecord, type IncomingMessage, type IncomingTarget } from "@ghostly/core";
 import { H264_MP4, PLACE, hasPlace, withMovie, xyzUdta } from "../../core/test/support/videoFixtures";
+import { taggedM4a, taggedMp3 } from "../../core/test/support/audioFixtures";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { copyForForward, forwardError, forwardKind } from "../src/engine/forwards";
@@ -181,6 +182,23 @@ describe("a group file", () => {
   });
 });
 
+describe("a sent file", () => {
+  // Its transfer cancelled or declined, its staged copy goes (`FileDesk`), its record and bubble stay: its bytes never
+  // come back, so it never "has not arrived yet".
+  it("whose staged copy went, its transfer cancelled: not on this device any more", async () => {
+    const id = `link-a-out-${crypto.randomUUID()}`, size = 64 * 1024;
+    const storage = await fileBytes();
+    await storage.append(id, 0, pattern(0, size));
+    await fileStore.put({ id, linkId: "link-a", direction: "out", wireId: "w1", createdAt: 1, metadata: { name: "a.bin", size, mime: "application/octet-stream", timestamp: 1 },
+      bytes: storage.kind, digest: digestOf(size) });
+    await fileStore.patch(id, { wire3: { id: "w1", direction: "out", state: "cancelled", confirmed: 16_384, since: 1, error: "You cancelled it", file: { name: "a.bin", size, mime: "application/octet-stream", timestamp: 1 } } as FileTransferRecord });
+    await storage.remove(id);
+    const target = { linkId: "link-b", wireId: "w2", timestamp: 2, file: { id: `link-b-out-${crypto.randomUUID()}`, name: "a.bin", size, mime: "application/octet-stream" } };
+    await expect(copyForForward(id, target, async () => false)).rejects.toThrow("The file is not on this device any more");
+    expect(await fileStore.get(target.file.id)).toBeUndefined();
+  });
+});
+
 describe("a copy whose source goes while it is copied", () => {
   /** A received file kept in file storage, and a copy of it for chat `link-b` whose first step runs `meanwhile`. */
   async function copying(meanwhile: (id: string) => Promise<void>) {
@@ -230,7 +248,7 @@ describe("a copy whose source goes while it is copied", () => {
 });
 
 // covers: files.video.metadata
-describe("a received video", () => {
+describe("a received video or audio file", () => {
   // From an app that sent it as it was recorded: it says where.
   const recorded = withMovie(H264_MP4, [xyzUdta()]);
   const bytesOf = async (blob: Blob) => new Uint8Array(await blob.arrayBuffer());
@@ -288,6 +306,25 @@ describe("a received video", () => {
     expect(hasPlace(sent)).toBe(false);
     expect(Buffer.compare(sent, stripped)).toBe(0);
   });
+
+  // covers: files.audio.metadata
+  for (const kept of ["blob", "storage"] as const)
+    for (const [as, name, mime, bytes, voice] of [
+      ["a voice note", "voice.m4a", "audio/mp4", taggedM4a(), { duration: 1200, peaks: [1, 2, 3] }],
+      ["an audio file", "memo.mp3", "audio/mpeg", taggedMp3(), undefined],
+    ] as const)
+      it(`goes on as ${as} (kept in ${kept}) without its first sender's tags: the digest is the stripped copy's`, async () => {
+        const { id, target } = await received(bytes, name, mime, kept);
+        if (voice) target.file = { ...target.file, voice } as typeof target.file;
+        const stripped = await bytesOf((await withoutAudioMetadata(new Blob([bytes]), mime))!);
+        const file = await copyForForward(id, target);
+        const sent = await copied(target.file.id);
+        expect(hasPlace(sent)).toBe(false);
+        expect(Buffer.compare(sent, stripped)).toBe(0);
+        expect(file).toMatchObject({ size: bytes.length, ...(voice && { voice }) });
+        expect(await fileStore.get(target.file.id)).toMatchObject({ digest: createHash("sha256").update(stripped).digest("base64url") });
+        expect(hasPlace(await copied(id))).toBe(true);
+      });
 
   it("whose metadata cannot be removed is refused as one sent from here is, and no copy is kept", async () => {
     for (const kept of ["blob", "storage"] as const) {

@@ -1,7 +1,7 @@
 import { getBrowserHost, type EngineConnection } from "../host";
-import type { AppFrameEvent } from "@ghostly/core";
-import type { AppRangeAsk, AttentionEvent, EngineApi, EngineMethod, KeptPictures, KeptViews, PostedEvent, PostedState } from "../shared/rpc";
-import type { EngineState, LinkView, StoredMessage } from "../shared/types";
+import { STATUS_IDLE_AFTER_MS, type AppFrameEvent } from "@ghostly/core";
+import type { AppRangeAsk, AttachMark, AttentionEvent, EngineApi, EngineMethod, KeptPictures, KeptViews, PostedEvent, PostedState } from "../shared/rpc";
+import type { EngineState, GroupView, LinkView, StoredMessage } from "../shared/types";
 import { applyMessageChanges, type MessageChanges } from "../shared/messageChanges";
 import { identityPicture, nostrPicture, picturesBack } from "../shared/keptPictures";
 import type { ProfileOpenFailure } from "../shared/idb";
@@ -30,8 +30,74 @@ export interface ListChanges extends MessageChanges {
   from: StoredMessage[];
 }
 
-/** A listener of a chat's messages: the whole list as it is now, and what changed since the last one it heard, if known. */
+/**
+ * A listener of a chat's messages: the whole list as it is now, and what changed since the last one it heard, if known.
+ * A group this page holds no list of (`engine.messages` has none) is told only what changed, with an empty list.
+ */
 export type MessagesListener = (linkId: string, messages: StoredMessage[], changes?: ListChanges) => void;
+
+/**
+ * The page's lists, by chat: what changes in one (`change`) is held and made on its list once, when the list is next
+ * read, so a burst of K one-row changes (a delivery mark per text) costs one pass over a history of N, not K. Every
+ * read (`get`, iterating) sees each list as it is now.
+ */
+class Histories extends Map<string, StoredMessage[]> {
+  private readonly owed = new Map<string, { rows: Map<string, StoredMessage>; deleted: Set<string> }>();
+
+  /** Holds these changes for this chat's list, which is here: as `applyMessageChanges` has it, a row both given and deleted goes. */
+  change(linkId: string, changes: MessageChanges): void {
+    let owed = this.owed.get(linkId);
+    if (!owed) this.owed.set(linkId, owed = { rows: new Map(), deleted: new Set() });
+    for (const id of changes.deleted) { owed.rows.delete(id); owed.deleted.add(id); }
+    for (const row of changes.messages) {
+      if (changes.deleted.includes(row.id)) continue;
+      owed.rows.set(row.id, row);
+      owed.deleted.delete(row.id);
+    }
+  }
+
+  override get(linkId: string): StoredMessage[] | undefined {
+    const owed = this.owed.get(linkId);
+    if (!owed) return super.get(linkId);
+    this.owed.delete(linkId);
+    const made = applyMessageChanges(super.get(linkId)!, { messages: [...owed.rows.values()], deleted: [...owed.deleted] });
+    super.set(linkId, made);
+    return made;
+  }
+
+  override set(linkId: string, messages: StoredMessage[]): this {
+    this.owed.delete(linkId);
+    return super.set(linkId, messages);
+  }
+
+  override delete(linkId: string): boolean {
+    this.owed.delete(linkId);
+    return super.delete(linkId);
+  }
+
+  override clear(): void {
+    this.owed.clear();
+    super.clear();
+  }
+
+  override forEach(each: (messages: StoredMessage[], linkId: string, map: Map<string, StoredMessage[]>) => void, self?: unknown): void {
+    for (const [linkId, messages] of this.entries()) each.call(self, messages, linkId, this);
+  }
+
+  override entries(): MapIterator<[string, StoredMessage[]]> {
+    for (const linkId of [...this.owed.keys()]) this.get(linkId);
+    return super.entries();
+  }
+
+  override values(): MapIterator<StoredMessage[]> {
+    for (const linkId of [...this.owed.keys()]) this.get(linkId);
+    return super.values();
+  }
+
+  override [Symbol.iterator](): MapIterator<[string, StoredMessage[]]> {
+    return this.entries();
+  }
+}
 
 /**
  * This page's connection to the Ghostly peer, wherever the host keeps it. The
@@ -39,7 +105,8 @@ export type MessagesListener = (linkId: string, messages: StoredMessage[], chang
  */
 class EngineClient {
   state: EngineState | null = null;
-  readonly messages = new Map<string, StoredMessage[]>();
+  private readonly histories = new Histories();
+  readonly messages: Map<string, StoredMessage[]> = this.histories;
   /** Per chat, the ids the engine deleted in it, as its last whole history said (the `messages` event's `deleted`). */
   readonly deletedIds = new Map<string, readonly string[]>();
   /** The chats whose list here is only their newest page (a `messages` event with `more`): the peer has older rows. */
@@ -50,6 +117,18 @@ class EngineClient {
   private readonly held = new Set<string>();
   /** Per chat, how many readers hold its whole history here (`keepWhole`). */
   private readonly kept = new Map<string, number>();
+  /** The group asked for last (`history`): the one the page shows, or showed last. */
+  private lastGroup: string | null = null;
+  /** That group, held or asked for when the peer went away: the next connection asks its whole history again. */
+  private readonly reread = new Set<string>();
+  /**
+   * What this page last told the peer about itself that the peer keeps only in memory (`sessionWord`): the chat on
+   * screen, whether the person is here, a call on. A peer that starts again (the extension's offscreen document,
+   * replaced) knows none of it, and the page says it only when it changes: each connection is told it again.
+   */
+  private readonly said = new Map<string, { method: EngineMethod; params: unknown; at: number }>();
+  /** Per `said` key, the calls waiting for a connection to send it: the newest word goes with them, not before. */
+  private readonly due = new Map<string, number>();
   /**
    * Why the peer did not start, when it did not (the profile's database did not open): the app shows this and nothing
    * of the profile. Null while it runs or is still starting. State listeners hear of it.
@@ -69,7 +148,7 @@ class EngineClient {
   private connection: EngineConnection | null = null;
   private connecting: Promise<void> | null = null;
   private nextId = 1;
-  private readonly pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+  private readonly pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void; text?: SentText }>();
   private readonly stateListeners = new Set<() => void>();
   private readonly messageListeners = new Set<MessagesListener>();
   private readonly attentionListeners = new Set<(event: AttentionEvent) => void>();
@@ -87,6 +166,15 @@ class EngineClient {
    * Offers expire by themselves (`parseCallSignal` refuses old ones).
    */
   private readonly offers = new Map<string, string>();
+  /**
+   * Where the page keeps the peer's marks (`mark` events): each connection attaches with the one read, so the peer sends
+   * no chat the stored chats have as it is now, and each one heard is kept once what came before it was told.
+   */
+  private marks: { read(): AttachMark | undefined; keep(mark: AttachMark): void } | null = null;
+
+  keepMarks(marks: { read(): AttachMark | undefined; keep(mark: AttachMark): void }): void {
+    this.marks = marks;
+  }
 
   subscribe(listener: () => void): () => void {
     this.stateListeners.add(listener);
@@ -119,6 +207,7 @@ class EngineClient {
    * group that opens reads it here, not from the store on each open.
    */
   history(linkId: string): StoredMessage[] | undefined {
+    if (linkId.startsWith("group:")) this.lastGroup = linkId;
     if (this.held.has(linkId)) return this.messages.get(linkId);
     if (!this.connection) {
       void this.connect().then(() => void this.history(linkId)).catch(() => {});
@@ -130,12 +219,18 @@ class EngineClient {
     return undefined;
   }
 
-  /** Forgets every history held here, as a page that just loaded holds none: each test of the UI is a page of its own. */
+  /**
+   * Forgets every history held here, and what the page told the peer about itself, as a page that just loaded holds
+   * none: each test of the UI is a page of its own.
+   */
   forgetHistories(): void {
+    this.said.clear();
     this.messages.clear();
     this.partial.clear();
     this.asked.clear();
     this.held.clear();
+    this.reread.clear();
+    this.lastGroup = null;
     this.changed.clear();
   }
 
@@ -160,6 +255,16 @@ class EngineClient {
   /** Whether this chat's list changed since its listeners last heard: they hear of it when the tick ends. */
   changing(linkId: string): boolean {
     return this.changed.has(linkId);
+  }
+
+  /**
+   * Ends the tick now: its listeners hear what changed at once. A call whose change the engine told before answering (a
+   * message of mine deleted for everyone) is then mirrored before its caller goes on, from what changed only.
+   */
+  tellChangesNow(): void {
+    if (!this.changesTimer) return;
+    clearTimeout(this.changesTimer);
+    this.tellChanges();
   }
 
   onAttention(listener: (event: AttentionEvent) => void): () => void {
@@ -213,16 +318,32 @@ class EngineClient {
 
   /** A chat by its peer's key, or the edge of a group toward a member (payments with that member use it). */
   linkByPeer(peerPubKeyZ32: string): LinkView | undefined {
-    return this.state?.links.find((l) => l.peerPubKeyZ32 === peerPubKeyZ32) ?? this.state?.edges?.find((l) => l.peerPubKeyZ32 === peerPubKeyZ32);
+    return linkOfPeer(this.state?.links, peerPubKeyZ32) ?? linkOfPeer(this.state?.edges, peerPubKeyZ32);
   }
 
   async call<M extends EngineMethod>(method: M, ...params: Parameters<EngineApi[M]>): Promise<Result<M>> {
-    await this.connect();
+    const word = sessionWord(method, params[0]);
+    if (word) {
+      // The newest word is the one a later connection is told, even when this call never reaches a peer.
+      if (word.kept) this.said.set(word.key, { method, params: params[0], at: Date.now() });
+      else this.said.delete(word.key);
+      this.due.set(word.key, (this.due.get(word.key) ?? 0) + 1);
+    }
+    try {
+      await this.connect();
+    } finally {
+      if (word) {
+        const left = (this.due.get(word.key) ?? 1) - 1;
+        if (left) this.due.set(word.key, left);
+        else this.due.delete(word.key);
+      }
+    }
     const connection = this.connection;
     if (!connection) throw new Error("Ghostly is starting…");
     const id = this.nextId++;
+    const text = method === "sendMessage" ? sentText(params[0] as Parameters<EngineApi["sendMessage"]>[0]) : undefined;
     return new Promise<Result<M>>((resolve, reject) => {
-      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
+      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, ...(text && { text }) });
       connection.send({ kind: "request", id, method, params: params[0] } as Parameters<EngineConnection["send"]>[0]);
     });
   }
@@ -236,17 +357,31 @@ class EngineClient {
         () => {
           this.connection = null;
           // The next connection is sent each chat again: what it asked for, it asks again. A group's list here is no
-          // longer kept current: read again when it is asked for.
+          // longer kept current: read again once connected for the group open now (it asks nothing again), and for any
+          // other when it is opened. Not every group opened since the page loaded: each was read whole, in every tab.
+          const open = this.lastGroup;
+          if (open && (this.held.has(open) || this.asked.has(open))) this.reread.add(open);
           this.asked.clear();
           this.held.clear();
-          for (const pending of this.pending.values()) pending.reject(new Error("Lost the Ghostly peer"));
+          for (const { resolve, reject, text } of this.pending.values()) {
+            const lost = new Error("Lost the Ghostly peer");
+            if (!text) { reject(lost); continue; }
+            // The peer stores a text before its send answers, and the next peer sends what it stored: one kept is sent,
+            // not handed back to be sent twice. Only a text not in the chat failed.
+            void this.keptRow(text).then((messageId) => messageId ? resolve({ error: null, messageId }) : reject(lost), () => reject(lost));
+          }
           this.pending.clear();
           this.reconnect(500);
         },
+        this.marks?.read(),
       )
       .then((connection) => {
         this.connection = connection;
         this.setReconnecting(false);
+        this.sayAgain(connection);
+        const reread = [...this.reread];
+        this.reread.clear();
+        for (const id of reread) this.history(id);
       })
       .finally(() => (this.connecting = null));
     return this.connecting;
@@ -261,6 +396,27 @@ class EngineClient {
       this.setReconnecting(true);
       this.reconnect(500);
     });
+  }
+
+  /** The id of the row a text cut off by the peer going away was kept under, read from the next peer; none when not kept. */
+  private async keptRow({ linkId, text, timestamp }: SentText): Promise<string | undefined> {
+    const { messages } = await this.call("messagePage", { linkId, after: timestamp - 1, before: timestamp + 1 });
+    return messages.find((m) => m.sender === "me" && m.timestamp === timestamp && m.text === text)?.id;
+  }
+
+  /**
+   * Tells a new connection what the page said of itself to the one before (`said`): a peer that started again heard
+   * none of it. A word a call is about to send itself is left to that call, so nothing goes twice on a first connection
+   * and an older word never follows a newer one. Nobody waits for the answers.
+   */
+  private sayAgain(connection: EngineConnection): void {
+    for (const [key, { method, params, at }] of this.said) {
+      if (this.due.has(key)) continue;
+      // The peer before went idle by itself 10 minutes after the last "active" (`STATUS_IDLE_AFTER_MS`): so does this one.
+      const said = method === "setPresence" && (params as { presence?: unknown }).presence === "active" && Date.now() - at >= STATUS_IDLE_AFTER_MS
+        ? { presence: "idle" } : params;
+      connection.send({ kind: "request", id: this.nextId++, method, params: said } as Parameters<EngineConnection["send"]>[0]);
+    }
   }
 
   /** Connects again after `delay`, and again after twice as long while the tries fail. */
@@ -316,12 +472,20 @@ class EngineClient {
         break;
       case "message-changes": {
         // Only what changed, in a history the peer sent whole first: listeners still get the whole list, as it is now.
-        // The list here is current at once; its listeners hear once per tick, of every change in it together.
-        const history = this.messages.get(message.linkId);
-        if (!history) break;
-        this.messages.set(message.linkId, applyMessageChanges(history, message));
+        // The list here reads current at once; its listeners hear once per tick, of every change in it together.
+        if (!this.messages.has(message.linkId)) {
+          // A group this page has no list of (the peer sends a tab only its changes until it shows it): no list is made
+          // of them; its listeners hear what changed, with nothing as its list (`engine.messages` has none).
+          if (message.linkId.startsWith("group:")) {
+            const changes: ListChanges = { from: [], messages: message.messages, deleted: message.deleted };
+            for (const listener of this.messageListeners) listener(message.linkId, [], changes);
+          }
+          break;
+        }
+        // The first change in the tick reads the list its listeners last heard; the list is made once the changes are read.
         let since = this.changed.get(message.linkId);
-        if (!since) this.changed.set(message.linkId, since = { from: history, rows: new Map(), deleted: new Set() });
+        if (!since) this.changed.set(message.linkId, since = { from: this.messages.get(message.linkId)!, rows: new Map(), deleted: new Set() });
+        this.histories.change(message.linkId, message);
         // As `applyMessageChanges` has it: a row both given and deleted goes.
         for (const id of message.deleted) { since.rows.delete(id); since.deleted.add(id); }
         for (const row of message.messages) {
@@ -354,6 +518,22 @@ class EngineClient {
       case "apps-checked":
         for (const listener of this.appsCheckedListeners) listener();
         break;
+      case "mark": {
+        // A chat the peer did not send (the stored chats have it): its list here is not its whole history, which is asked
+        // for as a newest page's is. Its newest page comes with its first change.
+        for (const id of message.skipped ?? []) {
+          if (this.messages.has(id)) continue;
+          this.partial.add(id);
+          if (this.kept.has(id)) this.askWhole(id);
+        }
+        // What changed before the mark is told first: the mark is kept once the stored chats have it.
+        if (this.changesTimer) {
+          clearTimeout(this.changesTimer);
+          this.tellChanges();
+        }
+        this.marks?.keep({ epoch: message.epoch, mark: message.mark });
+        break;
+      }
       case "response": {
         const pending = this.pending.get(message.id);
         this.pending.delete(message.id);
@@ -377,6 +557,43 @@ class EngineClient {
   }
 }
 
+/**
+ * What a page says of itself that the peer keeps only in memory, and only hears when it changes: the chat or group on
+ * screen (`setActiveLink`), whether the person is here (`setPresence`), whether a call is on in the page (`setCallOn`;
+ * the engine server counts it per page), and a chat polled fast while a call connects over the DHT (`setFastPoll`).
+ * `key` names the word (the newest per key counts); `kept` is false for what a new peer already starts with (nothing
+ * on screen, no presence said, no call, no fast poll), which needs no saying again. Anything else (a send, a setting
+ * the peer stores) is no such word: undefined.
+ */
+function sessionWord(method: string, params: unknown): { key: string; kept: boolean } | undefined {
+  const p = (params ?? {}) as Record<string, unknown>;
+  switch (method) {
+    case "setActiveLink":
+      return { key: method, kept: typeof p.linkId === "string" };
+    case "setPresence":
+      return { key: method, kept: p.presence === "active" || p.presence === "idle" };
+    case "setCallOn":
+      return { key: method, kept: p.on === true };
+    case "setFastPoll":
+      return typeof p.linkId === "string" ? { key: `${method} ${p.linkId}`, kept: p.fast === true } : undefined;
+    default:
+      return undefined;
+  }
+}
+
+/** A text sent at the page's own time (`sendMessage`'s `timestamp`): what finds its row in the chat. */
+interface SentText {
+  linkId: string;
+  text: string;
+  timestamp: number;
+}
+
+function sentText(params: Parameters<EngineApi["sendMessage"]>[0]): SentText | undefined {
+  const { linkId, text, timestamp } = params ?? {};
+  return typeof linkId === "string" && typeof text === "string" && text.trim() && Number.isSafeInteger(timestamp)
+    ? { linkId, text: text.trim(), timestamp: timestamp! } : undefined;
+}
+
 /** A state the peer sent, whole: what it left out (`PostedState`) is what this page has from the state before. */
 function keptState(posted: PostedState, before: EngineState | null): EngineState {
   const kept = posted.keptPictures, views = posted.keptViews;
@@ -390,14 +607,23 @@ function keptState(posted: PostedState, before: EngineState | null): EngineState
   } as EngineState;
 }
 
-/** The chats and groups a state left out (`KeptViews`), from the state before: each list whole again, in the order the ids give. */
-function keptViews<S extends Pick<EngineState, "links" | "groups">>(state: S, before: EngineState | null, views: KeptViews): S {
+/** The chats, group edges and groups a state left out (`KeptViews`), from the state before: each list whole again, in the order the ids give. */
+function keptViews<S extends Pick<EngineState, "links" | "edges" | "groups">>(state: S, before: EngineState | null, views: KeptViews): S {
   const back = <T extends { id: string }>(list: T[], ids: string[] | undefined, had: T[] | undefined): T[] => {
     if (!ids) return list;
     const sent = new Map(list.map((view) => [view.id, view])), kept = new Map(had?.map((view) => [view.id, view]));
     return ids.flatMap((id) => sent.get(id) ?? kept.get(id) ?? []);
   };
-  return { ...state, links: back(state.links, views.links, before?.links), groups: back(state.groups, views.groups, before?.groups) };
+  // The groups sent without their member list (`members`): each keeps the one it had.
+  const withMembers = (list: GroupView[]): GroupView[] => {
+    if (!views.members?.length) return list;
+    const ids = new Set(views.members), had = new Map(before?.groups.map((group) => [group.id, group.members]));
+    return list.map((group) => (ids.has(group.id) && !group.members ? { ...group, members: had.get(group.id) ?? [] } : group));
+  };
+  return {
+    ...state, links: back(state.links, views.links, before?.links), groups: withMembers(back(state.groups, views.groups, before?.groups)),
+    ...(state.edges && { edges: back(state.edges, views.edges, before?.edges) }),
+  };
 }
 
 /** The pictures a state left out (`KeptPictures`), from the state before: each the one it was sent last. */
@@ -426,6 +652,24 @@ function keptPictures(state: Omit<PostedState, "keptPictures">, before: EngineSt
     ...(kept.identityProofs && { identityProofs: picturesBack(state.identityProofs, kept.identityProofs, before?.identityProofs, identityPicture) }),
     ...(kept.nostrOwn && { nostr: { ...state.nostr, own: picturesBack(state.nostr.own, kept.nostrOwn, before?.nostr.own, nostrPicture) } }),
   };
+}
+
+/** Per list of a state (its chats, its group edges), each view by its contact's key: made once per state, not per lookup. */
+const byPeer = new WeakMap<readonly LinkView[], Map<string, LinkView>>();
+
+/**
+ * The view in `list` with this contact's key (the first, as `find` would): each row of the chat list looks its contact
+ * up on every engine state, and a pass over the whole list for each made N rows cost N x N.
+ */
+export function linkOfPeer(list: readonly LinkView[] | undefined, peerPubKeyZ32: string | undefined): LinkView | undefined {
+  if (!list || peerPubKeyZ32 === undefined) return undefined;
+  let index = byPeer.get(list);
+  if (!index) {
+    index = new Map();
+    for (const view of list) if (!index.has(view.peerPubKeyZ32)) index.set(view.peerPubKeyZ32, view);
+    byPeer.set(list, index);
+  }
+  return index.get(peerPubKeyZ32);
 }
 
 export const engine = new EngineClient();

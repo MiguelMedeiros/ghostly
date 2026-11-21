@@ -161,6 +161,8 @@ export class ProviderSources<P extends Connectable> {
   private answeredMeanwhile = false;
   /** An answer to another call already brought a read since the last read that answered: the next ones wait their turn. */
   private answerRead = false;
+  /** The balance changed while a read was under way (`balanceChanged`): it may say the old one, so one more follows it. */
+  private changedMeanwhile = false;
   view: SourceView = { mode: "mainnet", status: "none", offered: [] };
 
   constructor(private readonly options: SourcesOptions<P>) {
@@ -196,11 +198,14 @@ export class ProviderSources<P extends Connectable> {
 
   async start() { await this.load(this.mode); this.view = this.idle(); }
 
-  /** One saved secret of the source (a handoff asks whether an LND card pins its certificate, and a Breez phrase), or undefined. */
+  /**
+   * One saved secret of the source (a handoff asks whether an LND card pins its certificate, and a Breez phrase), or
+   * undefined. A connected source reads the secrets it connected with, as `holds` does; one that is not unseals them.
+   */
   async secret(name: string): Promise<string | undefined> {
     const stored = this.stored;
     if (!stored?.secrets) return undefined;
-    const secrets = JSON.parse(await unsealSeed(stored.secrets, stored.deviceKey ?? "")) as Record<string, unknown>;
+    const secrets = (this.provider ? this.secrets : JSON.parse(await unsealSeed(stored.secrets, stored.deviceKey ?? ""))) as Record<string, unknown>;
     const value = secrets[name];
     return typeof value === "string" && value ? value : undefined;
   }
@@ -250,6 +255,19 @@ export class ProviderSources<P extends Connectable> {
     if (this.stopped || provider !== this.provider || !this.options.refresh || !this.view.error || this.answerRead) return;
     this.answerRead = true;
     if (this.reading) { this.answeredMeanwhile = true; return; }
+    void this.refresh();
+  }
+
+  /**
+   * What the connected source holds changed (a payment through it went through, an invoice of ours was seen paid): its
+   * balance is read now, failed reads or not, instead of on its timer: the card, the wallet's total and the Send
+   * picker would show the balance from before it for up to `refreshMs`. A read already under way may have started
+   * before: one more comes right after it, never two at once. It is also the one read an answer brings (`answered`).
+   */
+  balanceChanged(provider: P) {
+    if (this.stopped || provider !== this.provider || !this.options.refresh) return;
+    this.answerRead = true;
+    if (this.reading) { this.changedMeanwhile = true; return; }
     void this.refresh();
   }
 
@@ -328,19 +346,26 @@ export class ProviderSources<P extends Connectable> {
   }
 
   /**
-   * Whether the saved source is this provider with these very settings (the same wallet added twice). Its secrets are
-   * unsealed here to compare, and never leave.
+   * Whether the saved source is this provider reaching the same wallet (the same wallet added twice): the provider's
+   * `wallet` says which one (an NWC URI spelled another way, or another app connection to it, is the same), else these
+   * very settings. A connected source compares the secrets it connected with; one that is not unseals them here (a
+   * 600,000-iteration key: once per card of the kind, each new card took 320 ms more). They never leave.
    */
   async holds(providerId: string, settings: ProviderSettings): Promise<boolean> {
     const stored = this.stored;
     if (!stored || stored.providerId !== providerId) return false;
+    const connected = this.provider ? this.secrets : undefined;
+    const unseal = async () => connected ?? (stored.secrets ? JSON.parse(await unsealSeed(stored.secrets, stored.deviceKey ?? "")) as Record<string, string> : {});
+    const wallet = this.find(providerId)?.wallet;
+    if (wallet) {
+      const secrets = await unseal();
+      try { return wallet({ config: stored.config, secrets }) === wallet(settings); } catch { return false; }
+    }
     const same = (a: Record<string, string>, b: Record<string, string>) => {
       const keys = Object.keys(a).sort();
       return JSON.stringify(keys) === JSON.stringify(Object.keys(b).sort()) && keys.every((k) => a[k] === b[k]);
     };
-    if (!same(stored.config, settings.config)) return false;
-    const secrets = stored.secrets ? JSON.parse(await unsealSeed(stored.secrets, stored.deviceKey ?? "")) as Record<string, string> : {};
-    return same(secrets, settings.secrets);
+    return same(stored.config, settings.config) && same(await unseal(), settings.secrets);
   }
 
   /**
@@ -500,7 +525,11 @@ export class ProviderSources<P extends Connectable> {
     // whole wallet view and engine state, with no wallet at all.
     const after = this.view as unknown as Record<string, unknown>, was = before as unknown as Record<string, unknown>;
     if (Object.keys({ ...was, ...after }).some(key => was[key] !== after[key])) this.options.changed();
-    if (this.provider) { clearTimeout(this.timer); this.timer = setTimeout(() => void this.refresh(), wait); }
+    if (!this.provider) return;
+    clearTimeout(this.timer);
+    // The balance changed while this read was under way: it may have said the old one.
+    if (this.changedMeanwhile && !this.reading) { this.changedMeanwhile = false; void this.refresh(); return; }
+    this.timer = setTimeout(() => void this.refresh(), wait);
   }
 
   /** Keeps the balance read, for the next start: written only when it changed. */
@@ -517,7 +546,7 @@ export class ProviderSources<P extends Connectable> {
 
   /** `forget`: the source is removed, so what it keeps on this device goes too (a provider's own `forget`). */
   private async disconnect(forget = false) {
-    clearTimeout(this.timer); clearTimeout(this.retry); this.reads.forget("balance"); this.answerRead = false;
+    clearTimeout(this.timer); clearTimeout(this.retry); this.reads.forget("balance"); this.answerRead = false; this.changedMeanwhile = false;
     this.controller.abort(); this.controller = new AbortController();
     const provider = this.provider as (P & { forget?: () => Promise<void> }) | undefined;
     this.provider = undefined; this.descriptor = undefined; this.secrets = {};

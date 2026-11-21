@@ -4,8 +4,8 @@ import type { SharedItem } from "./policy";
 export type ToWorker =
   /** The user pressed Reload on a new version: the waiting worker takes over now. Never sent on its own. */
   | { type: "skip-waiting" }
-  /** This page is the app (it holds the peer) and opened for a share: hand it over. */
-  | { type: "share-ready" }
+  /** This page is the app (it holds `profile`'s peer) and opened for a share: hand it over, unless a tab of another profile asked to forward it. */
+  | { type: "share-ready"; profile: string }
   /** This page opened for a share but another tab of `profile` holds the peer: give the share to that one. */
   | { type: "share-forward"; profile: string }
   /**
@@ -15,8 +15,11 @@ export type ToWorker =
   | { type: "share-here"; profile: string; lock?: string }
   /** This page that took shares goes (a share into the same window replaces it): none is forwarded to it on its way out. */
   | { type: "share-away" }
-  /** This page restarts (a profile switch) with a share still in its picker: hold it again for the page that loads next. */
-  | { type: "share-keep"; item: SharedItem }
+  /**
+   * This page restarts (a profile switch) with a share still in its picker: hold it again for the page that loads next.
+   * `dropped`: the shares it counted as not kept, which the next page is told of with it.
+   */
+  | { type: "share-keep"; item: SharedItem; dropped?: number }
   /** Opens a wake-up notification's chat as a tap would (the push worker; a page of this origin only). */
   | { type: "open-notification"; tag: string };
 

@@ -53,9 +53,8 @@ export function TransportOptions({ link, disabled = false, dhtBlocked, relayOnly
     const active = document.activeElement;
     if (!active || active === document.body) toTabStop();
   }, [single]);
-  // An app with no WebRTC (Linux Desktop) puts its first native transport first.
-  const automaticHint = own.includes("webrtc/1") ? t("connection.option.automaticHint")
-    : t("connection.option.automaticHintNative", { transport: transportName(automaticTransport(own)) });
+  // Iroh where this app runs it, else WebRTC, else HyperDHT; WebRTC first with Fallback off (`automaticTransport`).
+  const automaticHint = t("connection.option.automaticFirst", { transport: transportName(automaticTransport(own, link.transportFallback ?? true)) });
   function choose(choice: ConnectionChoice) {
     // A single transport here: choosing it means leaving DHT only, back to the app's rule.
     if (single && choice !== "dht") choice = "auto";
@@ -118,7 +117,7 @@ function Option({ ref, label, hint, off, offShown = false, mark, icon, checked, 
         {inUse && <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-accent" />}{mark}
       </span>}
       <span aria-hidden="true" className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${checked ? "border-accent" : "border-border"}`}>
-        {checked && <span className="h-2 w-2 rounded-full bg-accent" />}
+        {checked && <span className="h-2 w-2 rounded-full bg-accent forced-colors:forced-color-adjust-none forced-colors:bg-[color:Highlight]" />}
       </span>
     </button>
   );

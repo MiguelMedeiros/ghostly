@@ -143,6 +143,23 @@ describe("IdentityShareLine", () => {
     }
   });
 
+  it("waits quietly for a check window further off than a timer can hold (the clock set back a month since)", async () => {
+    // Past 2^31 - 1 ms a timer fires at once: each wake drew the line and set the next, a draw every few milliseconds.
+    const setTimer = vi.spyOn(globalThis, "setTimeout");
+    // React draws as a page does, not held until an act() ends.
+    const scope = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    try {
+      line(entry({ state: "verifying", subject: undefined, at: Date.now() + 30 * 86_400_000 }));
+      scope.IS_REACT_ACT_ENVIRONMENT = false;
+      await new Promise(resolve => setTimeout(resolve, 300));
+      expect(status()).toBe("Checking");
+      expect(setTimer.mock.calls.filter(([, ms]) => (ms ?? 0) > 86_400_000).length).toBe(1);
+    } finally {
+      scope.IS_REACT_ACT_ENVIRONMENT = true;
+      setTimer.mockRestore();
+    }
+  });
+
   it("shows on the same card that the share stopped later: no longer shared, or revoked, on both sides, and never a card that still looks valid", () => {
     const publicProfile: PublicProfileView = { found: true, name: "Pat", avatar: AVATAR, hosts: ["relay.damus.io"], fetchedAt: now() - 60 };
     const stop = (of: IdentityTimelineEntry, reason: "withdrawn" | "revoked"): IdentityTimelineEntry => ({ id: `${of.side}:${of.proof}:1`, proof: of.proof, side: of.side, kind: "stopped", provider: of.provider, subject: of.subject, reason, at: of.at + 500 });
@@ -267,16 +284,16 @@ describe("IdentityShareLine", () => {
     expect(bdis()).toEqual([":Ana (work)"]);
     shared.unmount();
     const stopped = arabic(entry({ kind: "stopped", state: undefined, reason: "withdrawn", provider: "ssh-github", subject: "octocat-old" }));
-    expect(text()).toBe("أوقف Ana (work) مشاركة GitHub (SSH key) · octocat-old");
-    expect(bdis()).toEqual([":Ana (work)", ":GitHub (SSH key) · octocat-old", "ltr:octocat-old"]);
+    expect(text()).toBe("أوقف Ana (work) مشاركة GitHub (مفتاح SSH) · octocat-old");
+    expect(bdis()).toEqual([":Ana (work)", ":GitHub (مفتاح SSH) · octocat-old", "ltr:octocat-old"]);
     stopped.unmount();
     // Stopped before it was presented: the kind alone, its ")" kept on its own side of the Arabic after it.
     const revoked = arabic(entry({ kind: "stopped", state: undefined, reason: "revoked", provider: "ssh-github", subject: undefined }));
-    expect(text()).toBe("أُلغي GitHub (SSH key) الخاص بـ Ana (work)");
-    expect(bdis()).toEqual([":GitHub (SSH key)", ":Ana (work)"]);
+    expect(text()).toBe("أُلغي GitHub (مفتاح SSH) الخاص بـ Ana (work)");
+    expect(bdis()).toEqual([":GitHub (مفتاح SSH)", ":Ana (work)"]);
     revoked.unmount();
     arabic(entry({ kind: "stopped", state: undefined, reason: "withdrawn", side: "mine", proof: "gone", subject: "example.com" }));
-    expect(bdis()).toEqual([":Domain · example.com", "ltr:example.com"]);
+    expect(bdis()).toEqual([":نطاق · example.com", "ltr:example.com"]);
   });
 });
 

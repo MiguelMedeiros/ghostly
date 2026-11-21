@@ -80,6 +80,13 @@
   gap: 12px;
   margin-top: 6px;
 }
+/* The APK's version, beside "Download for Android" on an Android phone. */
+.hero-version {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 0.72em;
+  font-weight: 500;
+  opacity: 0.75;
+}
 .hero-micro {
   color: var(--dim);
   display: flex;

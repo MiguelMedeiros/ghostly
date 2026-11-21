@@ -29,7 +29,7 @@ export function DaySections<R>({ rows, days, from, draw }: { rows: readonly R[];
     return (
       <section key={`day:${day}`} data-day={day}>
         <div data-testid="chat-day" className="pointer-events-none sticky top-2 z-[2] mb-3 flex justify-center px-6">
-          <time dateTime={`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`} className="rounded-lg bg-surface-alt/90 px-3 py-1 text-center text-[11px] font-medium text-text-muted shadow-sm">
+          <time dateTime={`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`} className="rounded-lg bg-surface-alt/90 px-3 py-1 text-center chat-text-day font-medium text-text-muted shadow-sm">
             {dayLabel(day, today, language, t)}
           </time>
         </div>

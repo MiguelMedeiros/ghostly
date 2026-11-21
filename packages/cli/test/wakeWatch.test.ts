@@ -133,6 +133,26 @@ describe("wake watch", () => {
     w.stop();
   });
 
+  it("back from sleep on another network, wakes for the new network at its first tick", async () => {
+    for (const atSleep of ["", "en0/192.168.0.10"]) {
+      const w = setup();
+      await w.tick();
+      // Wi-Fi has not rejoined yet at the sleep tick: no address, or still the old one.
+      w.move(atSleep);
+      w.sleep(30 * 60_000);
+      await w.tick();
+      expect(w.wakes).toEqual(["sleep"]);
+      w.move("en1/10.0.0.7");
+      await w.tick();
+      expect(w.wakes).toEqual(["sleep", "network"]);
+      // A change right after that one is a flap again: held.
+      w.move("en1/10.0.0.8");
+      await w.tick();
+      expect(w.wakes).toEqual(["sleep", "network"]);
+      w.stop();
+    }
+  });
+
   it("stops ticking once stopped", async () => {
     const w = setup();
     w.stop();

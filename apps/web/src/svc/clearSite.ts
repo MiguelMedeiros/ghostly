@@ -65,9 +65,9 @@ export async function dropSharedCookies(suffix: string): Promise<void> {
 
 /**
  * What a contact's app kept on its origin, erased by the bridge on that origin (`bridge.ts`) when the app asks: its
- * local and session storage, its IndexedDB databases, its caches, its files in the origin-private file system, the
- * cookies its script set (its own and those for the whole services host, `suffix`), and the services worker. Each kind
- * on its own: one the browser refuses keeps none of the others.
+ * local and session storage, its IndexedDB databases, its caches, its files in the origin-private file system, its
+ * storage buckets, the cookies its script set (its own and those for the whole services host, `suffix`), and the
+ * services worker. Each kind on its own: one the browser refuses keeps none of the others.
  */
 export async function clearSite(suffix: string): Promise<void> {
   const steps: (() => unknown)[] = [
@@ -87,6 +87,11 @@ export async function clearSite(suffix: string): Promise<void> {
     async () => {
       const root = await navigator.storage.getDirectory();
       for await (const name of (root as unknown as { keys(): AsyncIterable<string> }).keys()) await root.removeEntry(name, { recursive: true });
+    },
+    // A named storage bucket holds its own IndexedDB, caches and files, which the steps above never reach.
+    async () => {
+      const buckets = (navigator as unknown as { storageBuckets?: { keys(): Promise<string[]>; delete(name: string): Promise<void> } }).storageBuckets;
+      for (const name of await buckets?.keys() ?? []) await buckets!.delete(name);
     },
     () => expireSeen(),
     () => expireSeen(suffix),

@@ -12,6 +12,14 @@ const name = transportName;
 const native = (t?: PairedTransport) => t === "iroh/1" || t === "hyperdht/1";
 
 /**
+ * The contact's place in a line, handed to these helpers as `contact` by a component that draws the line: it stays in
+ * the text, and `fillNames(text, { contact })` (lib/fillNodes.tsx) puts the name there as its own <bdi>. Put in
+ * plainly, a Latin name with a bracket at its edge beside a Latin transport name made one run in an Arabic line, and
+ * "Ana (work)" read with its bracket and the transport on the wrong side.
+ */
+export const CONTACT = "{{contact}}";
+
+/**
  * An error from the engine, short enough for a timeline line: transport ids named, the advice left for the details,
  * and said in a few words of `tr`'s language (lib/problemText.ts), never a long English engine text.
  */
@@ -429,7 +437,10 @@ export function connectionSummary(link: LinkView | undefined, now: number, conta
     : chosen ? [tr("connection.summary.fallbackShort"), tr("connection.summary.fallback", { preferred: name(link.preferredTransport), transport: t })]
     : cause === "dropped" ? [tr("connection.summary.afterDropShort"), tr("connection.summary.afterDrop", { transport: t })]
     : relayed ? [tr("connection.summary.noDirectShort"), tr("connection.summary.noDirect", { transport: t })]
-    : [tr("connection.event.automatic"), transport === "webrtc/1" ? tr("connection.summary.automaticWebrtc")
+    // Both apps run Iroh: Automatic comes back over it first, then moves the session to WebRTC (WISP 100, revision
+    // 2026-11-08). Not with Fallback off: then it puts WebRTC first, as before.
+    : [tr("connection.event.automatic"), transport === "webrtc/1"
+      ? tr(link.transportFallback !== false && ownTransports(link).includes("iroh/1") && !!link.peerTransports?.includes("iroh/1") ? "connection.summary.automaticWebrtcIroh" : "connection.summary.automaticWebrtc")
       : tr(noWebrtc ? "connection.summary.automaticNoWebrtc" : "connection.summary.automatic", { transport: t })];
   const since = link.transportLive?.since;
   const rtt = link.transportRttMs !== undefined ? [tr("connection.ms", { ms: link.transportRttMs })] : [];

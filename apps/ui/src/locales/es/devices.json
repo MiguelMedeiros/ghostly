@@ -2,6 +2,7 @@
   "add": {
     "adding": "Añadiendo {{device}}…",
     "button": "Añadir un dispositivo",
+    "codeQr": "Código QR del código del dispositivo",
     "connecting": "Un dispositivo se está conectando…",
     "copy": "Copiar enlace",
     "done": "{{device}} añadido. Está en espera.",
@@ -253,8 +254,7 @@
     "doneInfo": "Ya no puede tomar este perfil. Tus otros dispositivos reciben el cambio la próxima vez que abran Ghostly.",
     "fail": {
       "busy": "Otra cosa está cambiando tus dispositivos. Inténtalo de nuevo en un momento.",
-      "failed": "Algo salió mal. No se cambió nada.",
-      "offline": "Conéctate para cambiar tus dispositivos."
+      "failed": "Algo salió mal. No se cambió nada."
     },
     "go": "Quitar",
     "lost": "Perdido o robado",
@@ -336,7 +336,6 @@
       "unreadable": "No se inició nada."
     },
     "info": "Solo un dispositivo envía, recibe y paga a la vez, para que tus mensajes y tu dinero nunca estén en dos lugares.",
-    "link": "{{device}}: {{status}}",
     "links": "Tus dispositivos",
     "notice": {
       "hint": "Si esta lista parece incorrecta, no uses este dispositivo.",
@@ -398,6 +397,7 @@
     "hintRestored": "Esto hará que tu otro dispositivo se detenga. Este dispositivo tiene tu perfil como estaba en la copia de seguridad.",
     "info": "Los mensajes y el dinero que llegaron a {{device}} después no están aquí. Si {{device}} vuelve, se detiene, sin decir nada a tus contactos.",
     "lost": "Mi otro dispositivo se perdió o se rompió",
+    "lostFirst": "Responde primero a «¿Perdido o robado?».",
     "lostNo": "Solo roto o borrado",
     "lostNoHint": "Se detiene si alguna vez vuelve.",
     "lostQuestion": "¿Perdido o robado?",

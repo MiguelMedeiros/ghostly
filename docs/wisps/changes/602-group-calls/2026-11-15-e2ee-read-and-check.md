@@ -1,0 +1,1 @@
+End-to-end encryption: a reader takes `"e2ee": true` in `call` as on, the same as `1`, and writers keep writing `1`. An app in a sealed call checks, once in the room, that its worker runs, that its SFU client's encryption is on and that each track it sends goes through the worker; if not, it leaves the room, stops its tracks and says why.

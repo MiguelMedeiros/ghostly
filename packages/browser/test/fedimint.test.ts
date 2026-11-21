@@ -192,6 +192,9 @@ describe("the Fedimint wallet", () => {
       modules: { 0: { kind: "ln", config: "00" }, 1: { kind: "mint", config: "00" }, 2: { kind: "wallet", config: "037e51776b6828fedab5bffa0afe000f4240" } } };
     expect(federationInfo("ab".repeat(32), config)).toMatchObject({ name: "Ghostly regtest", network: "regtest", consensusVersion: "2.1", modules: ["ln", "mint", "wallet"], guardians: [{ name: "ghostly-guardian", url: "ws://127.0.0.1:47095/" }] });
     expect(federationInfo("ab".repeat(32), { ...config, modules: { 0: { kind: "wallet", config: "fed9b4bef9" } } }).network).toBe("bitcoin");
+    // The federation's and its guardians' names, without the characters that hide text or reorder it.
+    const hidden = { ...config, global: { ...config.global, api_endpoints: { 0: { url: "ws://127.0.0.1:47095/", name: "\u202eguardian\u200b" } }, meta: { federation_name: "Ghostly\u200b regtest\u2066" } } };
+    expect(federationInfo("ab".repeat(32), hidden)).toMatchObject({ name: "Ghostly regtest", guardians: [{ name: "guardian" }] });
     expect(federationInfo("ab".repeat(32), { ...config, modules: { 0: { kind: "wallet", config: "fed9b4bef9fedab5bffa" } } }).network, "two networks: unknown").toBeUndefined();
     // A preview (before joining) names it `unknown_module_hex`; without a wallet module, the Lightning module says it.
     expect(federationInfo("ab".repeat(32), { ...config, modules: { 0: { kind: "ln", unknown_module_hex: "0037a8ae30fedab5bffa" }, 1: { kind: "mint", unknown_module_hex: "02fd" } } }).network).toBe("regtest");
@@ -402,6 +405,18 @@ describe("Fedimint in a chat", () => {
     expect(lines()).toEqual(["⚡ 1,200 test sats on Fedimint"]);
     expect(copies.map((_, i) => desk.payment(`c${i}`)), "no record per copy").toEqual(copies.map(() => undefined));
     expect(sent.filter((s) => s.kind === "res" && String(s.frame.id).startsWith("c")).map((s) => s.frame.error)).toEqual(copies.map(() => "These notes were already received"));
+  });
+
+  it("a flood of notes the federation refuses, from one chat, asks it a bounded number of times and stores a bounded number of lines", async () => {
+    const redeems = vi.fn();
+    const payee = { inspectNotes: async () => ({ federation: federation.id, amountMsats: 250_000_000 }),
+      redeemNotes: async () => { redeems(); return { operationId: `op${redeems.mock.calls.length}`, state: "failed" }; }, redeemState: async () => "failed",
+      federation: () => ({ network: "regtest" }), requestFederations: () => [federation.id] } as unknown as FedimintWallet;
+    const { desk, sent, host } = chat(payee);
+    for (let i = 0; i < 200; i++) await desk.onPayment("l", { id: `f${i}`, timestamp: 1_000 + i, amount: { value: "250000", asset: "sat" }, endpoint: [ENDPOINT.fedimint, `madeup-${i}`] });
+    expect(redeems.mock.calls.length).toBeLessThanOrEqual(10);
+    expect(host.storeMessage.mock.calls.length).toBeLessThanOrEqual(5);
+    expect(sent.filter((s) => s.kind === "res")).toHaveLength(200);
   });
 
   it("received notes carry their federation's network: test sats are never a Mainnet payment, and older records learn it", async () => {

@@ -278,6 +278,12 @@ body {
   color: #031018;
   box-shadow: 0 16px 40px -12px rgba(34, 211, 238, 0.7);
 }
+/* Forced colors drop the gradient: without an edge the main button is plain text beside the bordered secondary one. */
+@media (forced-colors: active) {
+  .btn--primary {
+    border: 1px solid ButtonText;
+  }
+}
 .btn--lg {
   min-height: 60px;
   padding: 16px 30px;
@@ -433,6 +439,14 @@ body {
 .nav-links a[aria-current="page"] {
   color: var(--cyan);
 }
+/* Forced colors replace the background and the cyan: the page that is open keeps an underline (also the phone menu's). */
+@media (forced-colors: active) {
+  .nav-links a[aria-current="page"],
+  .nav-sheet a[aria-current="page"] {
+    text-decoration: underline 2px;
+    text-underline-offset: 6px;
+  }
+}
 .nav-end {
   display: flex;
   align-items: center;
@@ -459,6 +473,12 @@ body {
   border-end-start-radius: 0;
   border-inline-start: 1px solid rgba(3, 16, 24, 0.25);
   cursor: pointer;
+}
+/* With the main button's edge drawn in forced colors, one line between the two halves, not two. */
+@media (forced-colors: active) {
+  .nav-open .nav-open-main {
+    border-inline-end: 0;
+  }
 }
 .nav-open .nav-open-more[aria-expanded="true"] svg {
   transform: rotate(180deg);

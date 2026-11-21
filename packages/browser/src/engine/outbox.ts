@@ -68,8 +68,11 @@ export interface Resender {
 export class NotSent {
   /** What a message that waits again says, in its details. */
   static readonly REASON = "No relay took it, so it has not left this device. It is sent by itself once one does.";
-  /** `error`: what the send said, kept as it was for a message queued already. */
-  constructor(readonly error: string) {}
+  /**
+   * `error`: what the send said, kept as it was for a message queued already. `reason`: what the message that waits
+   * again says (the contact's windows had no room for it, `MESSAGE_PACED`, rather than no relay taking it).
+   */
+  constructor(readonly error: string, readonly reason = NotSent.REASON) {}
 }
 
 /** How long one turn of an outbox may hold the next one back: a send that never returns must not stop the chat. */
@@ -436,11 +439,11 @@ export class Outbox {
    * receipt and nothing waiting read the chat's whole history for nothing, twice (the link says it is open in two
    * ways): 600 ms of a daemon's time per reconnect at 10,000 messages (agents#2468).
    */
-  private async held(): Promise<StoredMessage[]> {
+  private async held(id?: string): Promise<StoredMessage[]> {
     this.looks++;
     const at = this.writes ? undefined : this.stamp;
     try {
-      const messages = await this.look();
+      const messages = await this.look(id);
       if (at !== undefined && !messages.some(m => this.unknown(m))) this.seen = at;
       return messages;
     } finally { this.looked++; }
@@ -590,7 +593,7 @@ export class Outbox {
       if (!(error instanceof NotSent)) this.unsent.delete(id);
       if (error instanceof NotSent && unsentBefore) {
         this.clear(id);
-        await this.notSent(id);
+        await this.notSent(id, error.reason);
       } else if (error) {
         this.clear(id);
         await this.requeue(id, error instanceof NotSent ? error.error : error);
@@ -681,7 +684,10 @@ export class Outbox {
     // (delivered, failed or handed over meanwhile) has nothing to check: a timer that fired during the look a contact
     // back to n queued texts began read the chat's whole history for each text that look had delivered.
     if (!this.waiting.has(id) || this.waiting.get(id)?.timer || this.receipts.has(id)) return;
-    const messages = await this.store.read(), message = messages.find(m => m.id === id);
+    // The rows this outbox holds, by id, where it knows them all (`held`): a text waiting for an away contact read the
+    // chat's whole history at each check and could not send it, 36 reads an hour for three texts (720,000 rows at
+    // 20,000 messages) for as long as the contact stayed away.
+    const messages = await this.held(id), message = messages.find(m => m.id === id);
     if (!message || !(toGo(message) || this.file(message))) { await this.attempt(id); return; }
     const soon = this.monotonic() + this.policy.backoffMs[0], taken: string[] = [];
     let until = message.timestamp;
@@ -804,13 +810,13 @@ export class Outbox {
    * A send that did not leave this device, of a message that had not gone before: it waits again, as it did, and counts
    * no attempt. It keeps the path a new message's turn gives it (`waitsItsTurn`): it goes the way the chat can carry it.
    */
-  private async notSent(id: string): Promise<void> {
+  private async notSent(id: string, reason: string): Promise<void> {
     const left = (this.attempts.get(id) ?? 1) - 1;
     if (left > 0) this.attempts.set(id, left); else this.attempts.delete(id);
     const message = await this.one(id);
     if (!message || message.delivery === "delivered") return;
     this.unsent.set(id, message.timestamp);
-    await this.store.update(id, "waiting", NotSent.REASON, { via: "datalink", resendUntil: message.resendUntil ?? this.now() + this.policy.windowMs });
+    await this.store.update(id, "waiting", reason, { via: "datalink", resendUntil: message.resendUntil ?? this.now() + this.policy.windowMs });
     if (!this.stopped) this.schedule(id);
   }
 

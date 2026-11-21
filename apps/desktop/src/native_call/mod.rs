@@ -22,6 +22,8 @@ pub mod engine;
 #[cfg(any(target_os = "linux", test))]
 pub mod gather;
 pub mod ice;
+#[cfg(all(test, target_os = "linux"))]
+mod turn_lab;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -71,6 +73,8 @@ struct Live {
     camera: Option<u32>,
     /// The profile's own ICE servers (a TURN server, typically), the usable ones.
     ice: Vec<ice::IceServer>,
+    /// Hide my IP from contacts: the call keeps to their TURN servers.
+    relay_only: bool,
 }
 
 #[cfg(target_os = "linux")]
@@ -338,12 +342,14 @@ pub async fn native_speaker_test(device: Option<String>) -> Result<Option<String
 /// A call with this id, its events (JSON: `{"ice": state}`, `{"ended":"microphone"}`) and the peer's picture
 /// (JPEG) on `events`.
 /// `ice_servers`: the profile's own ICE servers (Settings, Network), used after the built-in STUN server; one
-/// that is not usable is left out ([`ice::usable`]).
+/// that is not usable is left out ([`ice::usable`]). `relay_only`: Hide my IP from contacts, the call uses their
+/// TURN servers alone and gathers relay candidates only (WISP 601, Relay only).
 #[tauri::command]
 pub fn native_call_open(
     id: String,
     events: Channel<InvokeResponseBody>,
     ice_servers: Option<Vec<ice::IceServer>>,
+    relay_only: Option<bool>,
 ) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
@@ -355,13 +361,14 @@ pub fn native_call_open(
                 call: None,
                 camera: None,
                 ice,
+                relay_only: relay_only.unwrap_or(false),
             },
         );
         Ok(())
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = (id, sink(events), ice_servers);
+        let _ = (id, sink(events), ice_servers, relay_only);
         Err(ELSEWHERE.into())
     }
 }
@@ -389,13 +396,13 @@ async fn media(
     camera: Option<u32>,
     devices: engine::Devices,
 ) -> Result<Arc<engine::Call>, String> {
-    let (events, ice) = {
+    let (events, ice, relay_only) = {
         let calls = calls().lock().unwrap();
         let live = calls.calls.get(id).ok_or("No such call")?;
         if live.call.is_some() {
             return Err("The call has started already".into());
         }
-        (live.events.clone(), live.ice.clone())
+        (live.events.clone(), live.ice.clone(), live.relay_only)
     };
     let events = Arc::new(sink(events));
     let call = Arc::new(
@@ -405,6 +412,7 @@ async fn media(
             engine::fake_media(),
             devices,
             &ice,
+            relay_only,
             events,
         )
         .await?,
@@ -849,6 +857,7 @@ mod tests {
                     call: None,
                     camera: Some(1),
                     ice: Vec::new(),
+                    relay_only: false,
                 },
             );
         }

@@ -9,6 +9,7 @@
   "downloading": "ダウンロード中... {{percent}}%",
   "errorDetails": "アップデーターからの応答",
   "failed": "更新を確認できませんでした",
+  "installFailed": "更新をインストールできませんでした。もう一度お試しください。",
   "installing": "更新中...",
   "lastChecked": "最終確認 {{when}}",
   "later": "後で",

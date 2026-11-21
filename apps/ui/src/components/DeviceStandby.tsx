@@ -4,6 +4,7 @@ import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import { getBrowserHost } from "@ghostly/browser/host";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n } from "../contexts/I18nContext";
+import { NAME, withName } from "./apps/aroundName";
 import { useLockPassedNow } from "../contexts/LockScreenContext";
 import { listNamesFor, reenrollHere, reloadIntoGate, useConnectionCheck, useDeviceSet } from "../lib/devices";
 import { HandoffOffer, HandoffProgress, UseHereDialog } from "./devices/Handoff";
@@ -34,8 +35,14 @@ const BUSY = "aria-disabled:opacity-40 aria-disabled:cursor-progress";
  * progress of a move, a takeover), the person's other devices and their links, and the other profiles of this device,
  * one click away. Nothing of the profile itself is on it.
  */
-export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
+export function DeviceStandby({ gate: asked }: { gate: DeviceGateView }) {
   const { t } = useI18n();
+  // A view that asks for the reload (a move's copy installed, or the move done) says nothing of where the device stands:
+  // the taking device read "Active on another device, on standby" until the page went. The screen stays as it was; a
+  // page whose first view is a reload says that one.
+  const [shown, setShown] = useState(asked);
+  if (!asked.reload && shown !== asked) setShown(asked);
+  const gate = asked.reload ? { ...shown, reload: asked.reload, keepUnlocked: asked.keepUnlocked } : asked;
   const lockPassedNow = useLockPassedNow();
   const [open, setOpen] = useState(false);
   const id = useId();
@@ -127,14 +134,15 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
         {removingHere && <RemoveHereDialog onClose={() => setRemovingHere(false)} />}
         {!unfinished && !restored && (gate.state === "standby" || gate.state === "superseded" || gate.state === "releasing" || gate.state === "taking") && <StandbyHandoff gate={gate} />}
         {!unfinished && takeover?.offered && <Takeover gate={gate} info={takeover} />}
-        {gate.state !== "unreadable" && gate.state !== "removed" && !unfinished && <Links />}
+        {/* Out of its set, the set this device kept is an old one: its Active device may not be the one in use now. */}
+        {gate.state !== "unreadable" && !offersReenroll && !unfinished && <Links />}
         {others.length > 0 && (
           <nav aria-label={t("devices.standby.others")} className="space-y-2 border-t border-border pt-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">{t("devices.standby.others")}</p>
             <div className="flex flex-wrap justify-center gap-2">
               {others.map((profile) => (
                 <button key={profile.id} type="button" data-testid="device-standby-switch" onClick={() => switchProfile(profile.id, { route: "/" })} className={SCREEN_QUIET}>
-                  {t("profileSwitcher.switchTo", { name: profile.name })}
+                  {withName(t("profileSwitcher.switchTo", { name: NAME }), profile.name)}
                 </button>
               ))}
             </div>

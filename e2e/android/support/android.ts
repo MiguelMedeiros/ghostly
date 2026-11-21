@@ -5,9 +5,11 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { openPeer, type Peer } from "../../support/fixtures";
 import { LocalRelay } from "../../support/relay";
+import { ensureHostRoute, hostAddresses, routeTo } from "./network";
 import { minWebView, webViewTooOld } from "./webview";
+import { PKG, type Phone, webViewPage } from "./webViewPage";
 
-export { expect };
+export { expect, PKG, webViewPage };
 
 /**
  * The native Android app (apps/desktop built with Tauri for Android, docs/ANDROID.md) on an emulator, driven by
@@ -28,9 +30,7 @@ export { expect };
  *   E2E_ANDROID_A1=1     run the Android host specs even when the app says it has no such host yet (see `pending`)
  */
 
-export const PKG = "tools.ghostly.app";
 const ACTIVITY = `${PKG}/.MainActivity`;
-const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 
 /** One device over adb: every command names its serial, since another session's emulator may share the adb server. */
 export class Adb {
@@ -127,14 +127,17 @@ export function skipUntilA1(what: string, why: string | null | false): void {
   base.skip(true, `${what} waits for the Android host (A1): ${why}`);
 }
 
-export interface AndroidApp {
+export interface AndroidApp extends Phone {
   adb: Adb;
+  /** The run's device: another one once `webViewPage` took it again (read it when needed, don't keep it). */
   device: AndroidDevice;
   page: Page;
   /** The app as a peer for the shared helpers (support/fixtures.ts `say`, `chat`, …). Its context is the WebView's. */
   peer: Peer;
   /** The app's process id, as `pidof` said once the page was up. */
   pid: string;
+  /** Why the device has no IPv4 route to this machine (support/network.ts), so a call cannot connect; null when it has one. */
+  noHostRoute: string | null;
   /** Rust's own call into the page's bridge: what the app's code would call. */
   invoke<T = unknown>(command: string, args?: Record<string, unknown>): Promise<T>;
   /** The Home key, then back to the app (its activity brought forward, the same WebView). */
@@ -144,7 +147,7 @@ export interface AndroidApp {
 
 type WorkerFixtures = {
   /** The device, connected once for the run, with the APK installed (E2E_ANDROID_APK); null when adb lists none. */
-  android: { adb: Adb; device: AndroidDevice } | null;
+  android: (Phone & { adb: Adb }) | null;
 };
 
 /**
@@ -179,7 +182,7 @@ function lostDuring(adb: Adb, testInfo: TestInfo): Error | null {
 }
 
 /** The device, or the test skipped: a machine with no emulator runs none of these, nor a run that lost its device. */
-function needDevice(android: WorkerFixtures["android"], testInfo: TestInfo): { adb: Adb; device: AndroidDevice } {
+function needDevice(android: WorkerFixtures["android"], testInfo: TestInfo): NonNullable<WorkerFixtures["android"]> {
   const lost = readLost(testInfo.project.outputDir);
   // The retry of the test it died in fails again (a skip there would count it as flaky, and the run as passed).
   if (lost?.testId === testInfo.testId) throw new Error(`The emulator died during this test's first run (${lost.where}): not run again`);
@@ -199,6 +202,24 @@ type Fixtures = {
   /** A web peer (Chromium on the host, the built web app) on the same relays: support/fixtures.ts `openPeer`. */
   webPeer: (name: string) => Promise<Peer>;
 };
+
+/**
+ * The device's IPv4 route to this machine, set right again when it is missing (support/network.ts `ensureHostRoute`).
+ * The route is printed once per run, so a run's log shows what the check read. Once a repair failed, later tests only
+ * check: Wi-Fi off and on again takes up to a minute and a half each time.
+ */
+let hostRouteShown = false;
+let hostRouteGaveUp = false;
+async function hostRoute(adb: Adb): Promise<string | null> {
+  const target = hostAddresses()[0] ?? "8.8.8.8";
+  const missing = hostRouteGaveUp
+    ? (routeTo(adb, target) ? null : `The emulator has no IPv4 route to this machine (${target}): a call's media cannot reach the web peer.`)
+    : await ensureHostRoute(adb, target);
+  hostRouteGaveUp = !!missing;
+  if (!missing && !hostRouteShown) console.log(`  [android] IPv4 route to this machine: ${routeTo(adb, target)}`);
+  hostRouteShown ||= !missing;
+  return missing;
+}
 
 /** Installs `apk`, over the one installed when it can; a debug key from another machine needs the old one gone. */
 function install(adb: Adb, apk: string): void {
@@ -222,17 +243,6 @@ function installedBuild(adb: Adb): { version: string; debug: boolean } {
   const dump = adb.run("shell", "dumpsys", "package", PKG);
   const flags = dump.match(/^\s+flags=\[([^\]]*)\]/m)?.[1] ?? "";
   return { version: dump.match(/versionName=(\S+)/)?.[1] ?? "?", debug: /\bDEBUGGABLE\b/.test(flags) };
-}
-
-/** The WebView of the app's process `pid`, not one of a process that is gone (`pm clear` kills it; the list lags). */
-export async function webViewPage(device: AndroidDevice, pid: number): Promise<Page> {
-  const end = Date.now() + 120_000;
-  while (Date.now() < end) {
-    const view = device.webViews().find((v) => v.pkg() === PKG && v.pid() === pid);
-    if (view) return await view.page();
-    await sleep(250);
-  }
-  throw new Error(`No WebView of ${PKG} (pid ${pid}) over adb within 120 s`);
 }
 
 /** Starts the app as a debug e2e start: `ghostly_e2e` (MainActivity.kt), and the network for when it reads extras. */
@@ -318,8 +328,9 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
     if (tooOld) throw new Error(`${serial}: ${tooOld}`);
     const device = (await _android.devices()).find((d) => d.serial() === serial);
     if (!device) throw new Error(`Playwright sees no device ${serial}`);
-    await use({ adb, device });
-    await device.close().catch(() => {});
+    const phone = { adb, device };
+    await use(phone);
+    await phone.device.close().catch(() => {});
   }, { scope: "worker" }],
 
   relay: async ({}, use) => {
@@ -337,7 +348,8 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
   },
 
   app: async ({ android, relayUrl }, use, testInfo) => {
-    const { adb, device } = needDevice(android, testInfo);
+    const phone = needDevice(android, testInfo);
+    const { adb } = phone;
     const iroh = irohRelay();
     if (iroh) adb.reverse(portOf(iroh));
     adb.run("shell", "am", "force-stop", PKG);
@@ -346,12 +358,15 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
     // Awake and unlocked: a screen left off by a test before would keep the activity from resuming.
     adb.tryRun("shell", "input", "keyevent", "KEYCODE_WAKEUP");
     adb.tryRun("shell", "wm", "dismiss-keyguard");
+    // A call's media goes from the device to this machine directly, not through `adb reverse`: its IPv4 route first.
+    const noHostRoute = await hostRoute(adb);
+    if (noHostRoute) testInfo.annotations.push({ type: "network", description: noHostRoute.split("\n")[0] });
     let page: Page, pid: string;
     try {
       launch(adb, { GHOSTLY_PKARR_RELAYS: relayUrl, ...(iroh ? { GHOSTLY_IROH_RELAYS: iroh } : {}) });
       pid = adb.pid();
       if (!pid) throw new Error(`${PKG} is not running after am start`);
-      page = await webViewPage(device, Number(pid));
+      page = await webViewPage(phone, Number(pid));
       page.setDefaultTimeout(60_000);
       page.on("pageerror", (error) => console.log(`  [android] ${error.message}`));
       await expect(newChat(page), "the UI rendered").toBeAttached({ timeout: 120_000 });
@@ -361,15 +376,17 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
       // The start itself failed: what the device said is all there is to go on.
       const lost = lostDuring(adb, testInfo);
       if (lost) throw lost;
-      await collect(null, adb, device, testInfo);
+      await collect(null, adb, phone.device, testInfo);
       throw error;
     }
     const app: AndroidApp = {
       adb,
-      device,
+      get device() { return phone.device; },
+      set device(device) { phone.device = device; },
       page,
       peer: { name: "android", context: page.context(), page },
       pid,
+      noHostRoute,
       invoke: (command, args) => page.evaluate(([command, args]) => (window as unknown as { __TAURI_INTERNALS__: { invoke(c: string, a?: unknown): Promise<never> } }).__TAURI_INTERNALS__.invoke(command, args), [command, args] as const),
       background: () => void adb.run("shell", "input", "keyevent", "KEYCODE_HOME"),
       // Brought forward as the launcher's icon would (its intent and flags): the running task, not a new activity.
@@ -379,7 +396,7 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
     // No device left: nothing to collect, and the test fails with where it died (the specs after it skip).
     const lost = lostDuring(adb, testInfo);
     if (lost) throw lost;
-    await collect(app, adb, device, testInfo);
+    await collect(app, adb, phone.device, testInfo);
     adb.tryRun("shell", "am", "force-stop", PKG);
     if (iroh) adb.unreverse(portOf(iroh));
   },
