@@ -46,12 +46,14 @@ engine.subscribe(() => {
   const listed: OpenedViewer[] = [];
   for (const link of links) {
     if (!link.peerServices?.length) continue;
-    const tag = viewerTag(link.myPubKeyZ32);
+    // Keyed by the chat's own key, not its tag: the tag is a hash, and every state lists every chat's apps again.
+    let tag: string | undefined;
     for (const { id: service, type } of link.peerServices) {
       if (type !== "http") continue;
-      const key = `${profile} ${tag} ${service} ${link.peerPubKeyZ32}`;
+      const key = `${profile} ${link.myPubKeyZ32} ${service} ${link.peerPubKeyZ32}`;
       if (listedNoted.has(key)) continue;
       listedNoted.add(key);
+      tag ??= viewerTag(link.myPubKeyZ32);
       listed.push({ profile, tag, service, peer: link.peerPubKeyZ32 });
     }
   }

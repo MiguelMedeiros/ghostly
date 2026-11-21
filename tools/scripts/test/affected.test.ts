@@ -1,9 +1,10 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { codeFiles as repoCode, knownFiles, workspacePackages } from "../affected/files.mjs";
-import { bundleReaches, checkPaths, featureGrep, globToRegExp, namedPaths, packageImports, parseUnitGroup, plan, specsImporting, testsReaching, throughCoreBarrel, UNIT_ALONE, UNIT_PROJECTS, unitGroupOf, workspaceExports } from "../affected/select.mjs";
+import { bundleReaches, checkPaths, featureGrep, globToRegExp, namedPaths, packageImports, parseUnitGroup, plan, specsImporting, testsReaching, throughCoreBarrel, UNIT_ALONE, UNIT_HALVED, UNIT_PROJECTS, unitGroupOf, unitPartsOf, workspaceExports } from "../affected/select.mjs";
+import { shardByTime, TimedShards } from "../../vitest.shards.ts";
 
 // A small repository: a few features, a paths map, specs tagged with them, and core modules behind a barrel.
 const inventory = {
@@ -782,16 +783,37 @@ for (const doc of [...DOCS, "docs/CLI.md"]) readFileSync(resolve(ROOT, doc), "ut
 describe("--unit-group: the draft tier's unit projects over a few runners", () => {
   const names = UNIT_PROJECTS.map((u) => u.name);
   const groups = (count: number) => Array.from({ length: count }, (_, i) => names.filter((n) => unitGroupOf(n, count) === i + 1));
+  /** Group i (1-based) of `count`: each project it runs, with its `--shard` there (none: all of it). */
+  const runs = (count: number) => Array.from({ length: count }, (_, i) => names.flatMap((n) => unitPartsOf(n, count).filter((p) => p.group === i + 1).map((p) => (p.shard ? `${n} ${p.shard}` : n))));
 
   it("puts ui, browser and cli on runners of their own and everything else on the last", () => {
     expect(UNIT_ALONE.filter((n) => !names.includes(n))).toEqual([]);
     expect(groups(4)).toEqual([["ui"], ["browser"], ["cli"], names.filter((n) => !UNIT_ALONE.includes(n))]);
   });
 
-  it("runs every project in exactly one group, whatever the count", () => {
+  it("runs the cli in two halves: the first on its own runner, the second beside the small projects on the last", () => {
+    expect(UNIT_HALVED).toEqual(["cli"]);
+    expect(UNIT_HALVED.filter((n) => !UNIT_ALONE.includes(n))).toEqual([]);
+    const [ui, browser, cli, last] = runs(4);
+    expect([ui, browser, cli]).toEqual([["ui"], ["browser"], ["cli 1/2"]]);
+    expect(last.sort()).toEqual([...names.filter((n) => !UNIT_ALONE.includes(n)), "cli 2/2"].sort());
+    // Every other project is in one group, all of it, as before the halves.
+    for (const count of [1, 2, 3, 4, 5, 8]) for (const n of names.filter((x) => !UNIT_HALVED.includes(x))) expect(unitPartsOf(n, count)).toEqual([{ group: unitGroupOf(n, count), shard: null }]);
+    // With no runner of its own (3 groups or fewer) the cli is not cut: the last group runs all of it.
+    for (const count of [1, 2, 3]) expect(unitPartsOf("cli", count)).toEqual([{ group: count, shard: null }]);
+  });
+
+  it("runs every project in exactly one group, or each half of it in exactly one, whatever the count", () => {
     for (const count of [1, 2, 3, 4, 5, 8]) expect(groups(count).flat().sort()).toEqual([...names].sort());
     expect(groups(1)).toEqual([names]);
     expect(groups(2)).toEqual([["ui"], names.filter((n) => n !== "ui")]);
+    for (const count of [1, 2, 3, 4, 5, 8]) {
+      const all = runs(count).flat();
+      for (const n of names) {
+        const parts = all.filter((r) => r === n || r === `${n} 1/2` || r === `${n} 2/2`).sort();
+        expect(parts).toEqual(UNIT_HALVED.includes(n) && count > 3 ? [`${n} 1/2`, `${n} 2/2`] : [n]);
+      }
+    }
   });
 
   it("reads <i>/<n> with 1 ≤ i ≤ n", () => {
@@ -827,6 +849,22 @@ describe("--unit-group: the draft tier's unit projects over a few runners", () =
     expect(r.stdout).not.toContain("runs it");
   }, 60_000);
 
+  it("plans the cli's halves for a change that reaches it: half 1/2 in group 3, half 2/2 in group 4, neither elsewhere", () => {
+    const list = (group: string, file: string) => affected("--list", "--no-e2e", "--no-rust", "--no-lint", "--no-typecheck", "--unit-group", group, "--files", file);
+    const [g1, g3, g4] = ["1/4", "3/4", "4/4"].map((g) => list(g, "packages/cli/src/args.ts"));
+    for (const r of [g1, g3, g4]) expect(r.status).toBe(0);
+    expect(g3.stdout).toMatch(/\n {2}related cli {7}half 1\/2 \(vitest --shard; group 4 runs 2\/2\): /);
+    expect(g4.stdout).toMatch(/\n {2}related cli {7}half 2\/2 \(vitest --shard; group 3 runs 1\/2\): /);
+    expect(g1.stdout).toMatch(/\n {2}other {3}cli {7}groups 3 and 4 run it in halves \(related: /);
+    // A change the cli never sees plans as before: no half anywhere, and a skipped cli says so in every group.
+    const [u3, u4] = ["3/4", "4/4"].map((g) => list(g, "apps/ui/src/lib/initial.ts"));
+    for (const r of [u3, u4]) {
+      expect(r.status).toBe(0);
+      expect(r.stdout).toMatch(/\n {2}skip {4}cli {7}nothing it imports changed\n/);
+      expect(r.stdout).not.toContain("half");
+    }
+  }, 120_000);
+
   it("is what ci.yml's draft tier runs: one runner per group, each project of UNIT_ALONE on its own", () => {
     const ci = readFileSync(join(import.meta.dirname, "..", "..", "..", ".github", "workflows", "ci.yml"), "utf8");
     const job = /^ {2}affected-tests:\n((?: {4}.*\n|\n)+)/m.exec(ci)?.[1] ?? "";
@@ -836,6 +874,68 @@ describe("--unit-group: the draft tier's unit projects over a few runners", () =
     expect(count).toBeGreaterThan(UNIT_ALONE.length);
     expect(job).toContain(`name: Affected unit tests (draft \${{ matrix.group }}/${count})`);
     expect(job).toMatch(new RegExp(`run: node tools/scripts/test-affected\\.mjs .*--unit-group \\$\\{\\{ matrix\\.group \\}\\}/${count}( |$)`, "m"));
+  });
+});
+
+describe("the cli's halves (tools/vitest.shards.ts): vitest --shard cut by time", () => {
+  const repo = join(import.meta.dirname, "..", "..", "..");
+  const cliTests = (readdirSync(join(repo, "packages/cli/test"), { recursive: true }) as string[]).filter((f) => f.endsWith(".test.ts")).map((f) => `packages/cli/test/${f}`).sort();
+  const seconds: Record<string, number> = JSON.parse(readFileSync(join(repo, "tools/scripts/test-durations.json"), "utf8"));
+  const load = (files: string[]) => files.reduce((sum, f) => sum + (seconds[f] ?? 0.3), 0);
+
+  it("gives every file to exactly one half, the same split whatever order the files come in", () => {
+    const [a, b] = [1, 2].map((i) => shardByTime(cliTests, seconds, i, 2));
+    expect(a.length).toBeGreaterThan(0);
+    expect(b.length).toBeGreaterThan(0);
+    expect([...a, ...b].sort()).toEqual(cliTests);
+    expect(a.filter((f) => b.includes(f))).toEqual([]);
+    expect(shardByTime([...cliTests].reverse(), seconds, 1, 2).sort()).toEqual([...a].sort());
+    for (const count of [1, 3, 5]) expect(Array.from({ length: count }, (_, i) => shardByTime(cliTests, seconds, i + 1, count)).flat().sort()).toEqual(cliTests);
+  });
+
+  it("evens the halves' recorded time out to within the heaviest file, the first the heavier", () => {
+    const [a, b] = [1, 2].map((i) => shardByTime(cliTests, seconds, i, 2));
+    const heaviest = Math.max(...cliTests.map((f) => seconds[f] ?? 0));
+    expect(load(a)).toBeGreaterThanOrEqual(load(b));
+    expect(load(a) - load(b)).toBeLessThanOrEqual(heaviest);
+    // Two slow files and many quick ones: Vitest's split by count put both slow ones in one half.
+    const toy = { "s1.test.ts": 100, "s2.test.ts": 100, ...Object.fromEntries(Array.from({ length: 10 }, (_, i) => [`q${i}.test.ts`, 1])) };
+    const halves = [1, 2].map((i) => shardByTime(Object.keys(toy), toy, i, 2));
+    expect(halves.map((h) => h.filter((f) => f.startsWith("s")).length)).toEqual([1, 1]);
+    expect(halves.map((h) => h.length)).toEqual([6, 6]);
+    // Files of no measurable time (0 s recorded) still spread over both halves (on a tie of load, to the one with fewer).
+    const quick = { "a.test.ts": 0, "b.test.ts": 0, "c.test.ts": 0, "d.test.ts": 0, "e.test.ts": 0 };
+    expect([1, 2].map((i) => shardByTime(Object.keys(quick), quick, i, 2).length)).toEqual([3, 2]);
+  });
+
+  it("is what the cli's Vitest shards with, and keeps only the specs of its half", async () => {
+    const config = readFileSync(join(repo, "packages/cli/vitest.config.ts"), "utf8");
+    expect(config).toContain('import { TimedShards } from "../../tools/vitest.shards.ts"');
+    expect(config).toMatch(/sequence: \{ sequencer: TimedShards \}/);
+    const specs = cliTests.map((f) => ({ moduleId: join(repo, f) }));
+    const half = async (index: number) => {
+      const sequencer = new TimedShards({ config: { shard: { index, count: 2 } } } as never);
+      return (await sequencer.shard(specs as never)).map((s) => (s as unknown as { moduleId: string }).moduleId);
+    };
+    const [a, b] = [await half(1), await half(2)];
+    expect([...a, ...b].sort()).toEqual(specs.map((s) => s.moduleId).sort());
+    expect(a.map((m) => m.slice(repo.length + 1)).sort()).toEqual([...shardByTime(cliTests, seconds, 1, 2)].sort());
+  });
+
+  it("says so when its half gets none of the files, which the other half runs", async () => {
+    // A change reaching one CLI test: Vitest's own line for the empty half ("No affected test files found") read as if
+    // the test ran nowhere.
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const specs = [{ moduleId: join(repo, cliTests[0]) }];
+      const half = (index: number) => new TimedShards({ config: { shard: { index, count: 2 } } } as never).shard(specs as never);
+      expect(await half(1)).toHaveLength(1);
+      expect(log).not.toHaveBeenCalled();
+      expect(await half(2)).toEqual([]);
+      expect(log).toHaveBeenCalledWith("--shard=2/2 (cut by time, tools/vitest.shards.ts): none of the 1 test file(s) here, the other half runs them");
+    } finally {
+      log.mockRestore();
+    }
   });
 });
 

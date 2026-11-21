@@ -237,6 +237,63 @@ describe("editing my message", () => {
     history.mockRestore();
   });
 
+  it("an id no message goes by is refused as missing, the chat read whole once in a run, not each; a wire id still names mine, of this chat, while it is here", async () => {
+    // Each such edit read the chat's whole history for a wire id, and the CLI read it again to word the refusal: 0.6-2 s
+    // a call at 100,000 messages, with the daemon's other clients waiting. Now once in a run, for the rows that go by
+    // another id than their own.
+    const t = await setup();
+    // As the CLI and the web app host it: the pages hear the rows that changed, not the whole history.
+    Object.assign((t.node as unknown as { events: object }).events, { onMessageChanges: vi.fn() });
+    const sent = await t.node.sendMessage({ linkId: t.id, text: "Working…" });
+    await vi.waitFor(async () => expect((await t.row(sent.messageId!)).delivery).toBe("delivered"));
+    const mine = await t.row(sent.messageId!);
+    expect(await t.contact.sendMessage("theirs", Date.now(), WIRE("T"))).toBeNull();
+    const theirs = await t.peerRow("theirs");
+    // Another chat's message of the same wire id is never this chat's.
+    await db.addMessage({ linkId: "another-chat", id: `me_${WIRE("O")}`, wireId: WIRE("O"), text: "elsewhere", sender: "me", timestamp: 1, via: "datalink" });
+    cleanup.push(() => db.deleteMessage("another-chat", `me_${WIRE("O")}`));
+    // Only the edits' own reads count: the node reads on its own too (a session's look at what waits).
+    const [measuring, read] = [new AsyncLocalStorage<true>(), db.getMessages.bind(db)];
+    let whole = 0;
+    const history = vi.spyOn(db, "getMessages").mockImplementation(linkId => { if (measuring.getStore()) whole++; return read(linkId); });
+    cleanup.push(async () => { history.mockRestore(); });
+    const edit = (messageId: string, text = "Done") => measuring.run(true, () => t.node.editMessage({ linkId: t.id, messageId, text }));
+    const answers = [];
+    for (const unknown of ["me_typo", WIRE("Z"), WIRE("O"), WIRE("Y")]) answers.push(await edit(unknown));
+    expect(whole).toBe(1);
+    expect(answers).toEqual(Array(4).fill({ error: "Only your own text messages can be edited", refused: true, missing: true }));
+    // There, but not mine: refused as before, and said to be there.
+    expect(await edit(theirs.id)).toMatchObject({ refused: true, missing: false });
+    // Mine, by its wire id (what the contact's side and a bot know it by).
+    expect(await edit(mine.wireId!)).toEqual({ error: null, messageId: sent.messageId });
+    expect((await t.row(sent.messageId!)).text).toBe("Done");
+    // A row of mine that goes by another id than `me_` and its wire id, stored after the chat was read: found by it too.
+    const late = { linkId: t.id, id: "me_late", wireId: WIRE("L"), text: "late", sender: "me", timestamp: Date.now(), via: "datalink", delivery: "delivered" } satisfies StoredMessage;
+    await (t.node as unknown as { storeMessage(m: StoredMessage): Promise<void> }).storeMessage(late);
+    expect(await edit(WIRE("L"), "later")).toEqual({ error: null, messageId: "me_late" });
+    expect(whole).toBe(1);
+    // Deleted here: no longer found by either id.
+    t.node.deleteMessage({ linkId: t.id, messageId: sent.messageId! });
+    await vi.waitFor(async () => expect(await db.getMessage(t.id, sent.messageId!)).toBeUndefined());
+    expect(await edit(mine.wireId!)).toMatchObject({ refused: true, missing: true });
+    expect(await edit(sent.messageId!)).toMatchObject({ refused: true, missing: true });
+    expect(whole).toBe(1);
+  });
+
+  it("a row of mine already in the history under another id than its wire id is found by it", async () => {
+    const t = await setup();
+    Object.assign((t.node as unknown as { events: object }).events, { onMessageChanges: vi.fn() });
+    await db.addMessage({ linkId: t.id, id: "me_123", wireId: WIRE("K"), text: "kept", sender: "me", timestamp: 123, via: "datalink", delivery: "delivered" });
+    const [measuring, read] = [new AsyncLocalStorage<true>(), db.getMessages.bind(db)];
+    let whole = 0;
+    const history = vi.spyOn(db, "getMessages").mockImplementation(linkId => { if (measuring.getStore()) whole++; return read(linkId); });
+    cleanup.push(async () => { history.mockRestore(); });
+    const kept = await measuring.run(true, () => t.node.editMessage({ linkId: t.id, messageId: WIRE("K"), text: "kept, edited" }));
+    const never = await measuring.run(true, () => t.node.editMessage({ linkId: t.id, messageId: WIRE("N"), text: "x" }));
+    expect(whole).toBe(1);
+    expect([kept, never]).toEqual([{ error: null, messageId: "me_123" }, { error: "Only your own text messages can be edited", refused: true, missing: true }]);
+  });
+
   it("a backlog of edits on their way costs one read per look, and a confirmation reads its own row alone", async () => {
     // The contact confirms none: every edit stays on its way, ten go per window and the others wait.
     const t = await setup({ confirm: () => false });
@@ -296,7 +353,7 @@ describe("editing my message", () => {
     // 12,002 UTF-8 bytes of mostly control characters: six characters each in the frame's JSON, ~72 K against 60 K.
     const controls = `x${"\u0001".repeat(12_000)}x`;
     expect(await t.node.editMessage({ linkId: t.id, messageId: sent.messageId!, text: controls }))
-      .toEqual({ error: "Message too long once encoded. Shorten it or send it as a file.", refused: true });
+      .toEqual({ error: "Message too long once encoded. Shorten it or send it as a file.", refused: true, missing: false });
     expect(await t.row(sent.messageId!)).toMatchObject({ text: "short" });
     expect((await t.row(sent.messageId!)).edit).toBeUndefined();
     // As many quotes (two characters each) fit, and go; the session that carries them stays.

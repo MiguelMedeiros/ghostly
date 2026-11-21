@@ -124,12 +124,18 @@ describe("asking the node", () => {
     await expect(ask(vi.fn(async () => new Response(pass.padEnd(64 * 1024))) as unknown as typeof fetch)).resolves.toMatchObject({ token: "t" });
   });
 
-  it("a ws:// address is taken only on this machine: LiveKit puts the pass in the address, so elsewhere it would go out in clear", async () => {
+  it("a ws:// address is taken only on this machine, and only under test: LiveKit puts the pass in the address, and the node names it", async () => {
     const reply = (url: string) => vi.fn(async () => Response.json({ url, token: "t", room: `g_${g}`, identity: me.pubKeyZ32, expiresIn: 600 })) as unknown as typeof fetch;
+    const askWith = (url: string, loopback: boolean) => fetchGroupCallToken({ sfu: SFU, g, k: me.pubKeyZ32, seed: me.seed, fetch: reply(url), loopback, sleep: async () => {} });
+    const failed = "call.ghostly.test could not start the group's call. Try again later.";
     for (const url of ["ws://sfu.ghostly.test", "ws://192.168.1.20:7880", "ws://127.0.0.1.example.org", "ws://[::2]:7880"])
-      await expect(ask(reply(url)), url).rejects.toThrow("call.ghostly.test could not start the group's call. Try again later.");
+      for (const loopback of [false, true]) await expect(askWith(url, loopback), url).rejects.toThrow(failed);
+    // A node's pass may not send the member's LiveKit client to a local port with a path of its own.
+    for (const url of ["ws://127.0.0.1:6379/anything?x=1", "ws://localhost:631/admin/", "ws://[::1]:9222/devtools/browser/x"])
+      await expect(ask(reply(url)), url).rejects.toThrow(failed);
+    await expect(ask(reply("wss://sfu.ghostly.test")), "wss").resolves.toMatchObject({ url: "wss://sfu.ghostly.test" });
     for (const url of ["wss://sfu.ghostly.test", "ws://127.0.0.1:47120", "ws://localhost:7880", "ws://[::1]:7880"])
-      await expect(ask(reply(url)), url).resolves.toMatchObject({ url });
+      await expect(askWith(url, true), url).resolves.toMatchObject({ url });
   });
 });
 
@@ -142,10 +148,10 @@ beforeEach(async () => {
 });
 afterEach(async () => { vi.unstubAllGlobals(); for (const node of nodes.splice(0)) await node.shutdown(); });
 
-async function started() {
+async function started(options: { groupCallFetch?: typeof fetch; groupCallLoopback?: boolean } = {}) {
   await db.putSettings({ online: true, nick: "Ana", relays: [], iceServers: [], mints: [], mintsInitialized: true });
   const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
-  const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() } as never, { transport, automaticWallets: false });
+  const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() } as never, { transport, automaticWallets: false, ...options });
   nodes.push(node);
   await node.start();
   return { node, inner: node as unknown as Inner };
@@ -172,6 +178,38 @@ describe("the engine's groupCallToken", () => {
       expect(sfu.seen[0]).toMatchObject({ method: "POST", type: "application/json", body: { v: 1, g: groupId, k: myKey, room: `g_${groupId}`, name: "Ana" } });
     });
   }
+
+  it("asks the node through the host's groupCallFetch (the CLI's checks the address when it connects), the pass and the moderation alike", async () => {
+    const page = vi.fn();
+    vi.stubGlobal("fetch", page);
+    const host = vi.fn(async (input: string | URL | Request) => String(input).endsWith("/sfu/group-token") ? new Response("", { status: 429 }) : Response.json({ muted: {}, banned: [] }));
+    const { node, inner } = await started({ groupCallFetch: host as unknown as typeof fetch });
+    const { groupId } = await node.createGroup({ name: "Plaza", profile: "community" });
+    const session = inner.groups.communities.session(groupId)!;
+    session.state.meta ??= { body: "{}" } as GroupMeta;
+    withCall(session.state);
+    await expect(node.groupCallToken({ groupId })).rejects.toThrow("call.ghostly.test is busy");
+    await node.groupCallModerate({ groupId, act: "state" });
+    expect(host.mock.calls.map(([url]) => String(url))).toEqual([`${SFU}/sfu/group-token`, `${SFU}/sfu/group-moderate`]);
+    expect(page).not.toHaveBeenCalled();
+  });
+
+  it("takes a pass's ws:// address on this machine only when the host says so (groupCallLoopback, the e2e build's)", async () => {
+    for (const groupCallLoopback of [false, true]) {
+      const reply = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+        const { room, k } = JSON.parse(String(init?.body)) as { room: string; k: string };
+        return Response.json({ url: "ws://127.0.0.1:47120", token: "t", room, identity: k, expiresIn: 600 });
+      });
+      const { node, inner } = await started({ groupCallFetch: reply as unknown as typeof fetch, groupCallLoopback });
+      const { groupId } = await node.createGroup({ name: "Plaza", profile: "community" });
+      const session = inner.groups.communities.session(groupId)!;
+      session.state.meta ??= { body: "{}" } as GroupMeta;
+      withCall(session.state);
+      const asked = node.groupCallToken({ groupId });
+      if (groupCallLoopback) await expect(asked).resolves.toMatchObject({ url: "ws://127.0.0.1:47120" });
+      else await expect(asked).rejects.toThrow("call.ghostly.test could not start the group's call");
+    }
+  });
 
   it("a group without call, or one I am not in: a plain error and nothing asked", async () => {
     const { node } = await started();

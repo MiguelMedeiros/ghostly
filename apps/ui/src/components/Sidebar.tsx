@@ -46,6 +46,7 @@ import {
 import { createPairedChat } from "../lib/pairedChat";
 import { chatPath, decodePart } from "../lib/url";
 import { stopPlayingFrom } from "../lib/nowPlaying";
+import { clearExtensionNotices } from "../lib/notifications";
 import type { ChatSession } from "../lib/types";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { useRowReorder } from "../hooks/useRowReorder";
@@ -54,6 +55,8 @@ import { PinMoveNote } from "./chat/PinOrder";
 import { usePageShown } from "../hooks/usePageShown";
 import { shownContactName, useContactFaces } from "./identities/contactFace";
 import { reactionNoteText } from "../lib/reactions";
+import { appCardsShown } from "../lib/statusCards";
+import { useAppsAvailable } from "../lib/apps/flag";
 import { SidebarTasks } from "./tasks/SidebarTasks";
 import { SidebarSaved } from "./saved/SidebarSaved";
 import { openJoinProfile } from "../lib/devices";
@@ -128,6 +131,7 @@ export function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const { t, language } = useI18n();
+  const appsOn = useAppsAvailable();
   // New and Join keep their words while they fit beside the logo, in this language (French needs more room).
   const headerRef = useRef<HTMLDivElement>(null), brandRef = useRef<HTMLDivElement>(null), actionsRef = useRef<HTMLDivElement>(null);
   // What the header gives up when it does not fit (a phone at a large text size): the buttons' words, then the wordmark
@@ -381,6 +385,14 @@ export function Sidebar() {
     const face = faceOf(session.peerPubKeyB64);
     return { face, shown: shownContactName({ nickname: session.label, face, nick: session.nick, fallback: t("common.unnamedContact", { key: contactTag(session.peerPubKeyB64) }) }) };
   };
+  /**
+   * What the chat list's reaction line quotes its message from: its row, when the chat holds it (the latest are), read
+   * as its bubble shows it, an app card as a card where the chat draws one (`appCardsShown`).
+   */
+  const reactionQuoted = (session: ChatSession, id: string | undefined) => ({
+    row: id === undefined ? undefined : session.messages.find((m) => m.id === id),
+    appCards: appCardsShown(session.profile === "paired-chat/1" ? session.id : undefined, appsOn),
+  });
   const chatRow = (session: ChatSession) => {
     const lastMsg = session.messages[session.messages.length - 1];
     const isActive = activeSessionId === session.id;
@@ -391,6 +403,7 @@ export function Sidebar() {
     const peerLabel = shown.name;
     const unread = isActive ? 0 : getUnreadCount(session);
     const isCreator = !!getInviteCode(session.id);
+    const reaction = session.lastReaction;
 
     return (
       <ChatRow
@@ -405,7 +418,7 @@ export function Sidebar() {
         keyLabel={peerKey}
         peerPubKey={session.peerPubKeyB64}
         lastMessage={lastMsg}
-        note={(session.lastReaction?.at ?? 0) > Math.max(lastMsg?.timestamp ?? 0, session.identitySharedAt ?? 0) ? reactionNoteText(session.lastReaction!, peerLabel, t)
+        note={reaction && reaction.at > Math.max(lastMsg?.timestamp ?? 0, session.identitySharedAt ?? 0) ? reactionNoteText(reaction, peerLabel, t, reactionQuoted(session, reaction.message))
           : (session.identitySharedAt ?? 0) > (lastMsg?.timestamp ?? 0) ? t("sidebar.sharedIdentity") : undefined}
         time={formatListTime(session.lastSyncAt ?? session.createdAt, undefined, language, t)}
         unread={unread}
@@ -629,7 +642,7 @@ export function Sidebar() {
         name={(() => { const target=sessions.find(s=>s.id===confirmDeleteId); return `${target?.label || target?.nick || t("common.unnamedContact", { key: contactTag(target?.peerPubKeyB64 ?? confirmDeleteId) })} · ${publicKeyLabel(target?.peerPubKeyB64 ?? confirmDeleteId)}`; })()}
         onClose={() => setConfirmDeleteId(null)}
         callOn={deleteOnCall}
-        onConfirm={() => { const id=confirmDeleteId; if (chatOnCall(id)) return; deleteSession(id); setChatFolder(id, undefined); stopPlayingFrom(chatPath(id), activeSessionId===id); setConfirmDeleteId(null); refreshSessions(); window.dispatchEvent(new Event("session-updated")); if(activeSessionId===id) nav.home(); }} />}
+        onConfirm={() => { const id=confirmDeleteId; if (chatOnCall(id)) return; deleteSession(id); setChatFolder(id, undefined); void clearExtensionNotices(id); stopPlayingFrom(chatPath(id), activeSessionId===id); setConfirmDeleteId(null); refreshSessions(); window.dispatchEvent(new Event("session-updated")); if(activeSessionId===id) nav.home(); }} />}
       {!isMobile && <AccountBar rail={collapsed} />}
 
       {/* Resize Handle */}

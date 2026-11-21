@@ -127,6 +127,11 @@ export function useChatSearch({ messages, chat, active, t, returnFocus }: { mess
   /** The matches as they were while the one being read was among them: where it stood, once it is gone. */
   const held = useRef(results);
   if (index >= 0) held.current = results;
+  /**
+   * The place the count shows: the one being read, or where it stood once it is gone (deleted, edited away), so the count
+   * stays where Older and Newer go on from. Before, it read "1 of N" there. Past the end (the oldest went): the last.
+   */
+  const place = index >= 0 || !current ? index : Math.min(placeOf(current, held.current, results), results.length - 1);
   const step = useCallback((by: 1 | -1) => {
     // Enter before the pause is over: these words now, on their newest match.
     if (query.trim() && query !== term) { setTerm(query); return; }
@@ -147,7 +152,7 @@ export function useChatSearch({ messages, chat, active, t, returnFocus }: { mess
   /** The words to mark in a message: the search's, when that message is one of its matches. */
   const highlight = useCallback((id: string) => (found.has(id) ? term : undefined), [found, term]);
 
-  return { open, show, close, dismiss, query, setQuery, term, results, index, current, older, newer, highlight, inputRef };
+  return { open, show, close, dismiss, query, setQuery, term, results, index, place, current, older, newer, highlight, inputRef };
 }
 
 export type ChatSearch = ReturnType<typeof useChatSearch>;

@@ -350,6 +350,28 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
     expect(plain.stderr).not.toContain("listen");
   });
 
+  it("a listen that runs the profile after a crash hands the gap past the journal's end once, not once per replay", async () => {
+    // Found in a bug hunt: the seqs the killed run reserved are a gap numbered as the journal's last event, so each replay
+    // of the catch-up gave it again: ~1,000 copies printed (and as many hook runs) before the feed paused.
+    const own = home("listen-crash");
+    ok(await ghostly(["--home", own, "settings", "set", "relays", JSON.stringify([relay.url])], { env }));
+    const first = new Running(["--home", own, "listen", "--since", "0"], env);
+    let last: number;
+    try {
+      last = (await first.waitFor((l) => l.type === "daemon.started" && l.pid === first.child.pid)).seq as number;
+      first.child.kill("SIGKILL");
+      await first.exited(20_000);
+    } finally { await first.stop(); }
+    const again = new Running(["--home", own, "listen", "--since", String(last)], env);
+    try {
+      await again.waitFor((l) => l.type === "daemon.started" && l.pid === again.child.pid);
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const gaps = again.lines.filter((l) => l.type === "events.gap");
+      expect(gaps).toHaveLength(1);
+      expect(gaps[0]).toMatchObject({ seq: last, from: last + 1 });
+    } finally { await again.stop(); }
+  });
+
   it("daemon status says when the daemon is a listen running the profile, as its stop does", async () => {
     const own = home("listen-status");
     ok(await ghostly(["--home", own, "settings", "set", "relays", JSON.stringify([relay.url])], { env }));

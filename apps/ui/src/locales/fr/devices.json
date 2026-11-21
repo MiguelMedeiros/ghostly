@@ -2,6 +2,7 @@
   "add": {
     "adding": "Ajout de {{device}}…",
     "button": "Ajouter un appareil",
+    "codeQr": "QR code du code de l’appareil",
     "connecting": "Un appareil se connecte…",
     "copy": "Copier le lien",
     "done": "{{device}} ajouté. Il est en veille.",
@@ -396,6 +397,7 @@
     "hintRestored": "Votre autre appareil va s'arrêter. Cet appareil a votre profil tel qu'il était dans la sauvegarde.",
     "info": "Les messages et l'argent arrivés sur {{device}} depuis ne sont pas ici. Si {{device}} revient, il s'arrête, sans rien dire à vos contacts.",
     "lost": "Mon autre appareil est perdu ou cassé",
+    "lostFirst": "Répondez d’abord à « Perdu ou volé ? ».",
     "lostNo": "Juste cassé ou effacé",
     "lostNoHint": "Il s'arrête s'il revient un jour.",
     "lostQuestion": "Perdu ou volé ?",

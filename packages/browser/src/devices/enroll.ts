@@ -10,7 +10,7 @@ import { DeviceSetError, deviceIdentity, firstTurn, openTurnKeeper } from "./set
 import { createDeviceSigningKey, type DeviceSigningKey } from "./signingKey";
 import { MAX_DEVICES, MAX_UNFINISHED_GRANTS, type DeviceRecord, type DeviceSlot, type UnfinishedGrant } from "./state";
 import { amendDevice, enrollDevice, readDeviceRecord } from "./store";
-import { deviceSetOf, type TurnKeeper } from "./turn";
+import { adoptedSet, deviceSetOf, type TurnKeeper } from "./turn";
 
 /*
  * Adding a device (WISP 06 § Adding a device): `enroll/1` over a one-time session that a device code opens.
@@ -511,6 +511,8 @@ export class EnrollJoiner extends Enrollment {
   private inviterName = "";
   /** The inviter's packet was seen on the link: a timeout with no session then means the two could not connect. */
   private seen = false;
+  /** When the code was read, on the monotonic clock: the wait for the grant counts from here. */
+  private readAt = 0;
 
   constructor(private readonly options: JoinerOptions) {
     super(options, { role: "joiner", step: "connecting" });
@@ -522,6 +524,7 @@ export class EnrollJoiner extends Enrollment {
     const reading = readDeviceInvite(code, Math.floor(this.now() / 1000));
     if (!reading.ok) throw new EnrollCodeError(reading.reason);
     this.invite = reading;
+    this.readAt = performance.now();
     if (await readDeviceRecord(this.options.profile)) throw new EnrollCodeError("set");
     this.key = await createDeviceSigningKey(this.options.profile, { forceSeed: this.options.forceSeed });
     this.crash("joiner:key-made");
@@ -558,10 +561,10 @@ export class EnrollJoiner extends Enrollment {
       if (!verifyEnrollProof(frame, this.hash, inviterKey, this.key.publicKey)) { await this.fail("proof", "failed"); return; }
       this.proven = true;
       // The person confirms on the other device within the code's ten minutes; no grant by then (and a little after),
-      // and the other device is gone: nothing was written here. The code's expiry is read on this device's clock, which
-      // may be days behind the other's (a phone with a wrong date takes the code as good for that long): the wait is
-      // never longer than a code's whole lifetime, and a timer past 2^31 - 1 ms (some 25 days) would run at once.
-      const left = Math.min(Math.max(0, this.invite.invite.expires * 1000 - this.now()), DEVICE_INVITE_LIFETIME_S * 1000);
+      // and the other device is gone: nothing was written here. The code's expiry is in the other device's clock, and
+      // this one may be days behind it or hours ahead (WISP 06: the inviter enforces the ten minutes): the wait is a
+      // code's whole lifetime from the moment this device read it, on the monotonic clock, whatever either clock says.
+      const left = Math.max(0, DEVICE_INVITE_LIFETIME_S * 1000 - (performance.now() - this.readAt));
       const grantMs = this.options.timing?.grantMs ?? left + ENROLL_DONE_TIMEOUT_MS;
       this.timer(grantMs, () => { if (!this.committed && this.view.step === "confirm") void this.fail("unanswered", "failed"); });
       this.show({ role: "joiner", step: "confirm", digits: enrollDigits(this.hash, inviterKey, this.key.publicKey) });
@@ -652,7 +655,7 @@ export async function finishEnrollment(profile: string, network: TurnNetwork, op
     if (read && read.result === "other" && read.record && read.payload && !read.record.tombstone && listsAt(read, ownKey, record.ownSlot)) {
       const seen = Number(read.record.sequence);
       await amendDevice(profile, {
-        turn: read.record.turn, rev: read.record.rev, turnPacket: toBase64Url(read.payload), activeSlot: read.record.active, deviceSet: deviceSetOf(read.record),
+        turn: read.record.turn, rev: read.record.rev, turnPacket: toBase64Url(read.payload), activeSlot: read.record.active, deviceSet: adoptedSet(record.deviceSet, null, read.record, record.activeSlot),
         ...(seen > (record.seenSequence ?? 0) ? { seenSequence: seen } : {}),
       });
       return true;
