@@ -52,6 +52,7 @@
     "leaveBody": "Il valore mostrato funziona solo con questi passaggi. Una volta chiusi, un nuovo tentativo dà un nuovo valore, e quello che hai pubblicato andrà sostituito.",
     "leaveTitle": "Chiudere senza salvare?",
     "linkable": "Condividere la stessa identità con più contatti permette loro di sapere che si tratta della stessa persona.",
+    "lookedUp": "Trovato: {{what}}",
     "lookingUp": "Ricerca in corso…",
     "none": "In questa app non si può ancora aggiungere nessun tipo di identità.",
     "openSigner": "Apri il tuo firmatario per approvare",
