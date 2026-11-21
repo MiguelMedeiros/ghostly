@@ -74,6 +74,42 @@ describe("the playback queue (program to call)", () => {
     expect(Buffer.concat(out)).toEqual(Buffer.concat([audio.subarray(0, frame), audio.subarray(3 * frame)]));
   });
 
+  it("holds none of the audio it already sent", () => {
+    // 15 min at 48 kHz in 64 KiB writes, about a second ahead: what went out must not stay referenced.
+    let t = 0;
+    const q = new PlaybackQueue(48000, () => t);
+    const inner = q as unknown as { chunks: Buffer[] };
+    const piece = Buffer.alloc(65536, 1);
+    let worst = 0;
+    for (let tick = 0; tick < (15 * 60_000) / 20; tick++) {
+      while (q.queuedMs < 1000) q.push(piece);
+      q.next();
+      t += 20;
+      if (tick % 50 === 0) worst = Math.max(worst, inner.chunks.reduce((n, c) => n + c.length, 0));
+    }
+    expect(worst).toBeLessThanOrEqual(48 * 2 * 1000 + 2 * piece.length);
+  });
+
+  it("drops the used-up chunks of tiny writes as it goes, and reads on after a flush or a new writer", () => {
+    const q = new PlaybackQueue(16000, () => 0);
+    const inner = q as unknown as { chunks: Buffer[] };
+    const perFrame = frameBytes(16000) / 4;
+    let worst = 0;
+    for (let tick = 0; tick < 3000; tick++) {
+      for (let k = 0; k < perFrame; k++) q.push(Buffer.alloc(4, 1));
+      q.next();
+      worst = Math.max(worst, inner.chunks.length);
+    }
+    expect(worst).toBeLessThan(2048 + perFrame);
+    for (const reset of [() => q.flush(), () => q.newWriter()]) {
+      for (let k = 0; k < perFrame * 3; k++) q.push(Buffer.alloc(4, 1));
+      q.next();
+      reset();
+      q.push(Buffer.alloc(frameBytes(16000), 2));
+      expect(q.next().frame[0]).toBe(2);
+    }
+  });
+
   it("flush drops everything queued and says how much", () => {
     const q = new PlaybackQueue(48000);
     q.push(tone(440, 48000, 2000));

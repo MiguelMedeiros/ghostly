@@ -32,6 +32,9 @@ export const PARTIAL_WAIT_MS = 60;
  */
 export const monotonic = (): number => performance.now();
 
+/** What a used-up chunk's slot holds until the slots are dropped (`PlaybackQueue.take`): the audio itself goes at once. */
+const USED = Buffer.alloc(0);
+
 /**
  * What the program wrote, waiting to be sent: taken one 20 ms frame per tick, silence when there is nothing, and
  * dropped whole by a flush (barge-in). The program may write any amount at any time, faster than real time too.
@@ -137,7 +140,7 @@ export class PlaybackQueue {
       chunk.copy(out, filled, this.head, this.head + n);
       filled += n;
       this.head += n;
-      if (this.head === chunk.length) { this.first++; this.head = 0; }
+      if (this.head === chunk.length) { this.chunks[this.first++] = USED; this.head = 0; }
     }
     // Used-up chunks are dropped now and then, not one shift() each: a program writing a sample per write queues
     // hundreds of thousands of chunks, and a shift per chunk made one frame cost more than its 20 ms.
