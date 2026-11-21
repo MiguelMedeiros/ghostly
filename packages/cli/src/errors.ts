@@ -24,6 +24,19 @@ export class CliError extends Error {
 }
 
 /**
+ * What a CLI profile's device calls and `ghostly device` say (WISP 06): the engine runs it on one device only
+ * (`singleDevice`), and the app's devices cannot take it. Before, the same fact came in three wordings with the engine's
+ * own prefixes (`enroll-single:`, `remove-state:`, `takeover-state:`), and `ghostly device` suggested `service`.
+ */
+export const SINGLE_DEVICE = "A CLI profile is on this one device only: it cannot be added to another device, moved to one or taken over from one, and the app's Add a device cannot add it. To run it on another machine, back it up here (ghostly profile backup --out <file>), restore it there (ghostly profile restore <file> <name>) and stop using it here";
+
+/** A device call a CLI profile cannot make: `refused` (exit 1), in one wording, `details.reason` `single_device`. */
+export const singleDeviceRefusal = (): CliError => new CliError("refused", SINGLE_DEVICE, { reason: "single_device" });
+
+/** The engine's own words for it, behind any of its prefixes (`enroll-single:`, `remove-state:`, `rename-state:`). */
+const ENGINE_SINGLE_DEVICE = /^(?:[a-z]+-[a-z]+: )?A profile of the command line is on one device only$/;
+
+/**
  * A value as a refusal quotes it (`--limit takes a number, not "x"`): a word with a line break or longer than 40
  * characters is described, not printed, as an unknown option is (docs/CLI.md "Secrets stay hidden"). A Cashu token, a
  * wallet connection link, an nsec, a seed or a hex key typed in the wrong place is that long, and bots keep the output.
@@ -57,6 +70,7 @@ export function asCliError(error: unknown): CliError {
   const unopened = profileOpenError(error);
   if (unopened) return unopened;
   const message = error instanceof Error ? error.message : String(error);
+  if (ENGINE_SINGLE_DEVICE.test(message)) return singleDeviceRefusal();
   if (/real money|confirmedReal|Mainnet/i.test(message) && /confirm/i.test(message)) return new CliError("confirm", message);
   if (/other network|cross-network|network does not match/i.test(message)) return new CliError("refused", message);
   // A member asking for a group's admin-only change, one removed from the group (or gone) asking for any, an invitation

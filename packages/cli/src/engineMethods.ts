@@ -2,7 +2,8 @@
  * What each call of the app's `EngineApi` (packages/browser/src/shared/rpc.ts) takes, as `engine --list --verbose`
  * shows it: `{ linkId, label }` an object with these keys (`?` an optional one), a type's name for an object of that
  * type, "" nothing; a trailing `?` when the object may be left out. `engineMethods.test.ts` reads it out of rpc.ts and
- * keeps the two equal. The device calls (WISP 06): a CLI profile is always on one device, so they answer `single` or refuse.
+ * keeps the two equal. The device calls (WISP 06): a CLI profile is always on one device, so they answer or refuse
+ * (`SINGLE_DEVICE_REFUSED`, `SINGLE_DEVICE_ANSWERS`).
  */
 export const ENGINE_PARAMS: Readonly<Record<string, string>> = {
   usdtCreate: "UsdtCreate",
@@ -298,7 +299,30 @@ export const DESTRUCTIVE_CALLS: ReadonlyMap<string, string> = new Map([
   ["leaveGroup", "deletes a group's history and files on this device"],
   ["forgetGroup", "deletes a group's history on this device"],
   ["switchGroup", "leaves the group held under this id and deletes its history on this device"],
-  ["deviceRemove", "takes a device off this profile"],
+]);
+
+/**
+ * The device calls a CLI profile cannot make, being on this one device only (WISP 06, `singleDevice`): adding a device
+ * or joining one, removing, renaming or re-keying the set, moving the profile, taking it over, and reading or pinging
+ * a set it has none of. Each is refused with one answer (`singleDeviceRefusal`, `refused`), before any `--yes` or
+ * parameter check: `deviceRemove` asked for `--yes`, then refused. Before, each came in the engine's own words.
+ */
+export const SINGLE_DEVICE_REFUSED: ReadonlySet<string> = new Set([
+  "deviceEnrollInvite", "deviceEnrollConfirm", "deviceEnrollJoin", "deviceEnrollRemove",
+  "deviceRemove", "deviceRename", "deviceNewSecret",
+  "deviceHandoffPush", "deviceHandoffPull", "deviceHandoffAccept", "deviceHandoffSettle",
+  "deviceTakeover", "deviceTurnPeek", "devicePing", "deviceForkDiscard", "deviceRestoreStartOwn",
+]);
+
+/**
+ * The device calls a CLI profile answers as the engine does (nothing in progress, nothing to show), and
+ * `deviceEnrollReady`, which the CLI answers `single` (no device code can be used in this profile) where the engine
+ * said `ready`. `engineMethods.test.ts` keeps every `device*` call in one of the two lists.
+ */
+export const SINGLE_DEVICE_ANSWERS: ReadonlySet<string> = new Set([
+  "deviceEnrollCancel", "deviceEnrollView", "deviceEnrollReady", "deviceEnrollFinish", "deviceSet",
+  "devicePushState", "devicePushSet", "deviceHandoffVerifier", "deviceHandoffCancel", "deviceHandoffView",
+  "deviceHandoffAllow", "deviceTakeoverInfo", "deviceSecretOfferDismiss", "deviceTurnCheck", "deviceSetNoticeSeen",
 ]);
 
 /**
