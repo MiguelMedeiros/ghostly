@@ -6,8 +6,8 @@ import { groupPayLineId, groupPayNoteId } from "@ghostly/browser/shared/groupPay
 import { DEFAULT_IROH_RELAYS } from "@ghostly/browser/platform/irohWeb";
 import { FORWARD_MESSAGES, FORWARD_TARGETS } from "@ghostly/browser/engine/forwards";
 import { findSecret, guardText, secretWords } from "./secretGuard";
-import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
-import { asCliError, CliError } from "./errors";
+import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SINGLE_DEVICE_REFUSED, engineParamsProblem } from "./engineMethods";
+import { asCliError, CliError, singleDeviceRefusal } from "./errors";
 import { shellWord } from "./shellWord";
 import {
   bool, chatOf, chatOrGroup, dhtOnly, findChat, findChatOrGroup, findGroup, groupById, groupCalled, groupNameOf, groupOf, groupPrefixed, inviteTaken, keptForJoin, list, messageOf, noMessage, nobodyJoined, node, notInYet, notInYetError, num, oneOf, oneShotWaits, onlyKeys, settingsOf, sharedGroupIds, shownName, sinceSeq, somebodyJoined, state, str, transportOffered, waitForState,
@@ -1236,6 +1236,11 @@ const METHODS: Record<string, Method> = {
     const raw = params.params;
     if (raw !== undefined && (raw === null || typeof raw !== "object" || Array.isArray(raw))) throw new CliError("bad_request", "params must be an object");
     const args = raw as Params | undefined;
+    // A CLI profile is on this one device only (`singleDevice`): a call that would add, remove, move or take over a
+    // device is refused in one wording, before its `--yes` or its parameters are asked for, and no device code can be
+    // used here. The engine said `ready` to that, and refused each of the others in its own words.
+    if (SINGLE_DEVICE_REFUSED.has(method)) throw singleDeviceRefusal();
+    if (method === "deviceEnrollReady") return "single";
     // "Hide my IP from contacts" (`relayOnly`, WISP 100 § Relay only) is the apps' switch in Settings, Network, not the
     // CLI's yet: its WebRTC chat links (node-datachannel) still check from this machine's own sockets under the relay
     // policy, as its calls did (they are refused while it is on). Nobody turns it on through here until they keep to
