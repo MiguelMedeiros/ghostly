@@ -70,7 +70,7 @@ const key = (mode: WalletMode) => `fedimintWallet-${mode}`;
 const sats = (msats: number) => Math.floor(msats / 1000);
 export function assertFedimintAmount(amount: number) {
   if (!Number.isSafeInteger(amount) || amount <= 0) throw new Error("Enter an amount in sats");
-  if (amount > MAX_SATS) throw new Error(`Amounts above ${MAX_SATS.toLocaleString()} sats are not supported`);
+  if (amount > MAX_SATS) throw new Error(`Amounts above ${MAX_SATS.toLocaleString("en-US")} sats are not supported`);
 }
 /** An invite code as the client takes it: bech32m with the prefix `fed1` (so `fed11…`), one line, bounded. */
 export function normalizeInvite(text: string): string {

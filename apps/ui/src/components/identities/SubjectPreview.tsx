@@ -2,6 +2,7 @@ import { Fragment } from "react";
 import { Notice } from "../wallet/ui";
 import type { SubjectPreviewState } from "./useSubjectPreview";
 import { useI18n } from "../../contexts/I18nContext";
+import { ownDirection } from "../../lib/ownDirection";
 
 /** The preview under the subject field: its facts, "Looking it up…", or why it cannot be used. */
 export function SubjectPreviewFacts({ state }: { state: SubjectPreviewState }) {
@@ -14,7 +15,10 @@ export function SubjectPreviewFacts({ state }: { state: SubjectPreviewState }) {
       {state.preview.facts.map(f => (
         <Fragment key={f.label}>
           <dt className="text-text-muted">{f.label}</dt>
-          <dd data-testid={`add-identity-preview-${f.label.toLowerCase().replace(/\s+/g, "-")}`} className={`min-w-0 [overflow-wrap:anywhere] text-text-primary ${/\s/.test(f.value) ? "" : "font-mono"}`}>{f.value}</dd>
+          {/* A host, URL or "#0 (Ed25519)" left to right even in Arabic, or its "#" and brackets move; a sentence its own way. */}
+          <dd data-testid={`add-identity-preview-${f.label.toLowerCase().replace(/\s+/g, "-")}`} dir={f.code ? undefined : ownDirection(f.value)} className={`min-w-0 [overflow-wrap:anywhere] text-text-primary ${f.code ? "font-mono" : ""}`}>
+            {f.code ? <bdi dir="ltr">{f.value}</bdi> : f.value}
+          </dd>
         </Fragment>
       ))}
     </dl>

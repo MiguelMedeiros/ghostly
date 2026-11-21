@@ -150,6 +150,25 @@ describe("a chat's publish the relays' budget holds back", () => {
     await link.stop();
   });
 
+  // An edge to a member who left, beside members who stayed: each try of a packet the relays' budget held was sealed and
+  // signed anew and handed to two members who could not pass it on, every few seconds (35 KB a minute on an idle web app).
+  it("a group edge that is down hands members its packet once while the relays' budget holds it back, not at every try", async () => {
+    const { inner, carry, link } = downEdge(() => true);
+    carry.mockImplementation(() => ({ taken: 2, sure: false }));
+    link.start();
+    await vi.advanceTimersByTimeAsync(25_000);
+    const tries = inner.publish.mock.calls.length;
+    expect(tries).toBeGreaterThan(2);
+    expect(carry).toHaveBeenCalledTimes(1);
+    // Every try put the same records to the relays: they were sealed once.
+    expect(new Set(inner.publish.mock.calls.map(([, records]) => JSON.stringify(records))).size).toBe(1);
+    // Once it went, the next packet is sealed anew.
+    inner.held = false;
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(inner.publish.mock.calls.length).toBe(tries + 1);
+    await link.stop();
+  });
+
   it("a member that can carry it comes up meanwhile: it is handed the newest packet, signed then", async () => {
     let reachable = false;
     const { inner, edge, link } = downEdge(() => reachable);

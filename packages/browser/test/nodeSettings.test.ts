@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GhostlyHttpError, createIdentity, createChatInvite } from "@ghostly/core";
+import { GhostlyHttpError, MAX_SHARED_APPS, createIdentity, createChatInvite, decodeServices, encodeServices } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { STORES, transact } from "../src/shared/idb";
@@ -174,6 +174,22 @@ describe("settings", () => {
     expect(edge.setTyping).not.toHaveBeenCalled();
   });
 
+  it("typing: a file (a voice note) or a payment sent ends it too", async () => {
+    const { node } = engine();
+    const link = stubLink({ supportsFiles: true });
+    const chat = await addChat(node, link);
+    node["storeMessage"] = vi.fn(async () => {}) as never;
+    node["transferFile"] = vi.fn(async () => {}) as never;
+    node.setTyping({ linkId: chat.id, typing: true, kind: "recording" });
+    await node.sendFile({ linkId: chat.id, file: { id: `${chat.id}-out-AAAAAAAAAAAAAAAA`, name: "v.ogg", size: 10, mime: "audio/ogg" }, timestamp: 1 });
+    expect(link.setTyping.mock.calls).toEqual([[true, { kind: "recording" }], [false]]);
+    link.setTyping.mockClear();
+    node["desk"].send = vi.fn(async () => ({ paymentId: "p" })) as never;
+    node.setTyping({ linkId: chat.id, typing: true });
+    await node.sendPayment({ linkId: chat.id, amount: 5, timestamp: 2 });
+    expect(link.setTyping.mock.calls).toEqual([[true, { kind: "typing" }], [false]]);
+  });
+
   it("typing: the chat shows the contact typing only while its link says so", async () => {
     const { node } = engine();
     const link = stubLink({ peerTyping: false });
@@ -238,12 +254,14 @@ describe("one chat's choices", () => {
     const chat = await addChat(node, link);
     await expect(node.setTransportPreference({ linkId: chat.id, preferred: "hyperdht/1", fallback: true })).rejects.toThrow("Transport unavailable");
     await expect(node.setTransportPreference({ linkId: chat.id, preferred: "iroh/1", fallback: "no" as never })).rejects.toThrow("Transport unavailable");
-    // A new transport is a choice; the same one with another fallback (the Fallback switch) is not.
-    await node.setTransportPreference({ linkId: chat.id, preferred: "iroh/1", fallback: false });
-    expect(link.setTransportPreference).toHaveBeenLastCalledWith("iroh/1", false, false, true);
-    expect(await saved(chat.id)).toMatchObject({ preferredTransport: "iroh/1", transportFallback: false });
-    await node.setTransportPreference({ linkId: chat.id, preferred: "iroh/1", fallback: true });
-    expect(link.setTransportPreference).toHaveBeenLastCalledWith("iroh/1", true, false, false);
+    // A new transport is a choice (HyperDHT: Automatic names Iroh here, or WebRTC with Fallback off); the same one with
+    // another fallback (the Fallback switch) is not.
+    const desktop = stubLink({ availableTransports: ["webrtc/1", "iroh/1", "hyperdht/1"] }), other = await addChat(node, desktop);
+    await node.setTransportPreference({ linkId: other.id, preferred: "hyperdht/1", fallback: false });
+    expect(desktop.setTransportPreference).toHaveBeenLastCalledWith("hyperdht/1", false, false, true);
+    expect(await saved(other.id)).toMatchObject({ preferredTransport: "hyperdht/1", transportFallback: false });
+    await node.setTransportPreference({ linkId: other.id, preferred: "hyperdht/1", fallback: true });
+    expect(desktop.setTransportPreference).toHaveBeenLastCalledWith("hyperdht/1", true, false, false);
   });
 
   it("the Fallback switch on an Automatic chat changes only the fallback: still Automatic, no row, no switch intent", async () => {
@@ -251,15 +269,22 @@ describe("one chat's choices", () => {
     const link = stubLink();
     const chat = await addChat(node, link);
     const view = () => node.getState().links.find((l) => l.id === chat.id)!;
-    expect(view()).toMatchObject({ transportAutomatic: true, preferredTransport: "webrtc/1", transportFallback: true });
+    // Automatic names Iroh where the app runs it (WISP 100, revision 2026-11-08).
+    expect(view()).toMatchObject({ transportAutomatic: true, preferredTransport: "iroh/1", transportFallback: true });
     // The switch sends back the transport Automatic shows.
+    // With Fallback off, Automatic names WebRTC where there is one: Iroh's relay would be the chat's only transport.
     await node.setTransportPreference({ linkId: chat.id, preferred: view().preferredTransport!, fallback: false });
     expect(link.setTransportPreference).toHaveBeenLastCalledWith("webrtc/1", false, true, false);
     const stored = await saved(chat.id);
     expect(stored?.transportFallback).toBe(false);
     expect(stored?.preferredTransport).toBeUndefined();
     expect(stored?.transportLog).toBeUndefined();
-    expect(view()).toMatchObject({ transportAutomatic: true, transportFallback: false });
+    expect(view()).toMatchObject({ transportAutomatic: true, preferredTransport: "webrtc/1", transportFallback: false });
+    // On again, from a view from before the Iroh endpoint came up (WebRTC): still Automatic, no choice of WebRTC.
+    await node.setTransportPreference({ linkId: chat.id, preferred: "webrtc/1", fallback: true });
+    expect(link.setTransportPreference).toHaveBeenLastCalledWith("iroh/1", true, true, false);
+    expect((await saved(chat.id))?.preferredTransport).toBeUndefined();
+    expect(view()).toMatchObject({ transportAutomatic: true, preferredTransport: "iroh/1", transportFallback: true });
   });
 
   it("ways of paying: only known methods and yes/no, merged, saved and told to the contact", async () => {
@@ -472,6 +497,68 @@ describe("shared services", () => {
     node.setServiceShared({ serviceId, peerPubKeyZ32: alice, shared: false });
     expect(node["hostedService"](serviceId, alice)).toBeUndefined();
     expect(node.getState().services[0]).toMatchObject({ requests: 1, sharedWith: [] });
+  });
+
+  it("stopping, removing or unsharing a service takes it back from the requests already open", () => {
+    const { node } = engine();
+    const { serviceId } = node.addService({ name: "App", target: "localhost:3000" });
+    const alice = createIdentity().pubKeyZ32, bob = createIdentity().pubKeyZ32;
+    node.setServiceShared({ serviceId, peerPubKeyZ32: alice, shared: true });
+    node.setServiceShared({ serviceId, peerPubKeyZ32: bob, shared: true });
+    const open = () => [node["hostedService"](serviceId, alice)!.revoked!, node["hostedService"](serviceId, bob)!.revoked!];
+
+    let [a, b] = open();
+    node.setServiceShared({ serviceId, peerPubKeyZ32: alice, shared: false });
+    expect([a.aborted, b.aborted], "only the contact taken off the list").toEqual([true, false]);
+    node.setServiceShared({ serviceId, peerPubKeyZ32: alice, shared: true });
+    [a, b] = open();
+    expect(a.aborted, "granted again: a new request is served").toBe(false);
+
+    node.setServiceEnabled({ serviceId, enabled: false });
+    expect([a.aborted, b.aborted]).toEqual([true, true]);
+    node.setServiceEnabled({ serviceId, enabled: true });
+    [a, b] = open();
+    node.removeService({ serviceId });
+    expect([a.aborted, b.aborted]).toEqual([true, true]);
+  });
+
+  it("a contact is granted no more apps than it can see; a grant past them is refused, not shared on paper", () => {
+    const { node } = engine();
+    const alice = createIdentity().pubKeyZ32, bob = createIdentity().pubKeyZ32;
+    const ids = Array.from({ length: MAX_SHARED_APPS + 1 }, (_, i) => node.addService({ name: `web ${i + 1}`, target: `localhost:${3000 + i}` }).serviceId);
+    // Stopped ones count too: turned on again, one would push another off the contact's list.
+    node.setServiceEnabled({ serviceId: ids[0], enabled: false });
+    for (const serviceId of ids.slice(0, -1)) node.setServiceShared({ serviceId, peerPubKeyZ32: alice, shared: true });
+    node.setServiceEnabled({ serviceId: ids[0], enabled: true });
+    const last = ids.at(-1)!;
+    expect(() => node.setServiceShared({ serviceId: last, peerPubKeyZ32: alice, shared: true })).toThrow(expect.objectContaining({ engineCode: "serviceShareFull" }));
+    expect(node.getState().services.find((s) => s.id === last)?.sharedWith ?? []).toEqual([]);
+    // Everything granted reaches the contact, the built-ins first as a chat not paired yet tells them.
+    expect(decodeServices(encodeServices(node["advertisedServices"](alice)))?.filter((s) => s.type === "http").map((s) => s.id)).toEqual(ids.slice(0, -1));
+
+    node.setServiceShared({ serviceId: ids[1], peerPubKeyZ32: alice, shared: true });
+    node.setServiceShared({ serviceId: last, peerPubKeyZ32: bob, shared: true });
+    node.setServiceShared({ serviceId: ids[1], peerPubKeyZ32: alice, shared: false });
+    node.setServiceShared({ serviceId: last, peerPubKeyZ32: alice, shared: true });
+    expect(node["hostedService"](last, alice)).toMatchObject({ id: last });
+  });
+
+  it("a contact's requests send one state a second with their count, not one each", async () => {
+    const { node, events } = engine();
+    const { serviceId } = node.addService({ name: "App", target: "localhost:3000" });
+    const alice = createIdentity().pubKeyZ32;
+    node.setServiceShared({ serviceId, peerPubKeyZ32: alice, shared: true });
+    await vi.waitFor(() => expect(events.onState).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    events.onState.mockClear();
+    vi.useFakeTimers();
+    for (let i = 0; i < 200; i++) {
+      node["hostedService"](serviceId, alice);
+      vi.advanceTimersByTime(5);
+    }
+    vi.advanceTimersByTime(1_100);
+    expect(events.onState.mock.calls.length).toBeLessThanOrEqual(2);
+    expect(events.onState.mock.lastCall?.[0].services[0]).toMatchObject({ requests: 200 });
   });
 
   it("sharing twice or switching to the same state writes nothing", async () => {

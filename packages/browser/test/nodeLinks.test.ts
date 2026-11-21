@@ -1,10 +1,11 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
-import { LIMITS, createIdentity, dhtFileId, type FileSink, type GhostLinkOptions } from "@ghostly/core";
+import { LIMITS, createIdentity, createLink, dhtFileId, type FileSink, type GhostLinkOptions } from "@ghostly/core";
 import { GROUP_ANCHOR_ANSWER_MS, GROUP_IROH_WEB_SLOTS, GROUP_NATIVE_SLOTS, GhostlyNode, NATIVE_HOLD_MS, RESUME_SPENT_MS, type NodeOptions } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { setJoinTraceSink } from "../src/engine/joinTrace";
 import { EditQueue } from "../src/engine/edits";
+import { mayReach } from "../src/engine/serviceAccess";
 import { STORES, fileStore, transact } from "../src/shared/idb";
 import { storedBlob } from "../src/shared/storedFiles";
 import type { GroupEdgeView, StoredLink } from "../src/shared/types";
@@ -27,6 +28,7 @@ vi.mock("@ghostly/core", async (importOriginal) => {
     isDataLinkOpen = true;
     supportsFiles = true;
     canSendText = true;
+    textRoom = true;
     textDelivery = "stream";
     groupsSupport = false;
     supportsGroupVersion = vi.fn(() => false);
@@ -65,11 +67,15 @@ vi.mock("@ghostly/core", async (importOriginal) => {
     validateText = vi.fn(() => null);
     setCallSignal = vi.fn(async () => {});
     setTyping = vi.fn();
+    refreshServices = vi.fn(async () => {});
     confirmPair = vi.fn(async () => {});
     peerAllowsPayment = vi.fn((m: string) => m === "cashu");
     // Its choice, wallets aside: Lightning too, which it has no wallet of (peerAllowsPayment leaves it out).
     peerChoosesPayment = vi.fn((m: string) => m === "cashu" || m === "lightning");
     allowsPayment = vi.fn(() => true);
+    /** Nothing of mine waits on the DHT floor here. */
+    dhtHolds = vi.fn(() => false);
+    withdrawDht = vi.fn(async () => {});
     constructor(readonly options: GhostLinkOptions) { links.push(this as never); }
   }
   return { ...actual, GhostLink: RecordedLink };
@@ -173,7 +179,7 @@ describe("a chat as the contact drives it", () => {
     const chat = row();
     const { node, linkOf } = await started(chat);
     const { events } = linkOf(chat.id).options;
-    const emits = vi.spyOn(node as never as { emitState(): void }, "emitState");
+    const emits = vi.spyOn(node as never as { scheduleState(): void }, "scheduleState");
     const read = (lastPacketAt: number) => events.onPresence({ online: true, lastPacketAt, seenAt: 5, nick: "Bob", services: [{ id: "web", type: "http" }] });
     read(10);
     expect(emits).toHaveBeenCalledTimes(1);
@@ -194,6 +200,20 @@ describe("a chat as the contact drives it", () => {
     expect(emits).toHaveBeenCalledTimes(1);
     events.onRtt(55);
     expect(emits).toHaveBeenCalledTimes(2);
+  });
+
+  it("an attempt to go live that ended names its chat, and builds no other chat's view", async () => {
+    const a = row(), b = row();
+    const { node, linkOf } = await started(a, b);
+    const unnamed = vi.spyOn(node as never as { emitState(): void }, "emitState");
+    const named = vi.spyOn(node as never as { chatChanged(linkId: string): void }, "chatChanged");
+    // A contact that looks online but is not reached: each dial that ends says so, every 20 s to 3 min.
+    const attempt = { at: Date.now(), side: "dialled" as const, failed: [{ transport: "iroh/1" as const, error: "unreachable" }], retryAt: Date.now() + 20_000 };
+    (linkOf(b.id) as never as { liveAttempt: unknown }).liveAttempt = attempt;
+    linkOf(b.id).options.events.onLiveAttempt!(attempt);
+    expect(unnamed).not.toHaveBeenCalled();
+    expect(named.mock.calls).toEqual([[b.id]]);
+    expect(node.getState().links.find((link) => link.id === b.id)!.liveAttempt).toEqual(attempt);
   });
 
   it("an acknowledgement moves a legacy chat's read mark, never a paired one's", async () => {
@@ -251,6 +271,38 @@ describe("a chat as the contact drives it", () => {
     expect(node["fileDesk"]["chats"].has(chat.id)).toBe(false);
   });
 
+  it("a removed chat's contact no longer reaches the services shared with it, nor again once the same invite is joined anew", async () => {
+    const chat = row(), other = row(), twin = row({ peerPubKeyZ32: other.peerPubKeyZ32 });
+    const { node } = await started(chat, other, twin);
+    onTestFinished(async () => { for (const s of await db.getServices()) await db.deleteService(s.id); });
+    const { serviceId } = node.addService({ name: "web", target: "http://127.0.0.1:3400" });
+    for (const { peerPubKeyZ32 } of [chat, other]) node.setServiceShared({ serviceId, peerPubKeyZ32, shared: true });
+    const service = () => node.getState().services.find((s) => s.id === serviceId)!;
+    node.removeLink({ linkId: chat.id });
+    // Another chat with the same contact still has it: only the chat's own contact is cut off.
+    node.removeLink({ linkId: twin.id });
+    expect(mayReach(service(), chat.peerPubKeyZ32)).toBe(false);
+    expect(service().sharedWith).toEqual([other.peerPubKeyZ32]);
+    await vi.waitFor(async () => expect((await db.getServices()).find((s) => s.id === serviceId)?.sharedWith).toEqual([other.peerPubKeyZ32]));
+    // The same invite joined again is a chat of the same id and contact key: nothing is shared with it.
+    await node.shutdown();
+    const again = await started(chat);
+    expect(again.node.getState().services.find((s) => s.id === serviceId)?.sharedWith).toEqual([other.peerPubKeyZ32]);
+  });
+
+  it("a service still shared with a contact whose chat is gone (deleted by an older release) is no longer shared with it at start", async () => {
+    const gone = row(), other = row();
+    onTestFinished(async () => { for (const s of await db.getServices()) await db.deleteService(s.id); });
+    await db.putService({ id: "web", name: "web", target: "http://127.0.0.1:3400", enabled: true, createdAt: 1,
+      sharedWith: [gone.peerPubKeyZ32, other.peerPubKeyZ32] });
+    const { node } = await started(other);
+    const service = () => node.getState().services.find((s) => s.id === "web")!;
+    expect(service().sharedWith).toEqual([other.peerPubKeyZ32]);
+    // The same invite joined again (the same contact key) is not served.
+    expect(mayReach(service(), gone.peerPubKeyZ32)).toBe(false);
+    await vi.waitFor(async () => expect((await db.getServices()).find((s) => s.id === "web")?.sharedWith).toEqual([other.peerPubKeyZ32]));
+  });
+
   it("a ready session remembers which ways of paying the contact chose, wallets aside, for requests held while it is away", async () => {
     const chat = row();
     const { node, linkOf } = await started(chat);
@@ -278,7 +330,7 @@ describe("a chat as the contact drives it", () => {
     const chat = row();
     const { node, linkOf } = await started(chat);
     const { events } = linkOf(chat.id).options;
-    const emit = vi.spyOn(node as unknown as { emitState(): void }, "emitState");
+    const emit = vi.spyOn(node as unknown as { scheduleState(): void }, "scheduleState");
     events.onPoll({ polling: true, nextInMs: 0 });
     expect(node.getState().links[0].poll.polling, "the first sync under way").toBe(true);
     events.onStatus("error");
@@ -438,6 +490,32 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
       node.wake({ network: true });
       node["retryNative"]();
       await vi.waitFor(() => expect(linkOf().registerEndpoint).toHaveBeenCalledTimes(2));
+    });
+
+    it("a listener started again with its seed already stored writes no link row", async () => {
+      // A CLI daemon with its Iroh relay out of reach (bug hunt, 2026-11-08): with 30 chats or more the failed starts'
+      // retries kept the queue busy, one every 10 s, and each wrote its chat's whole row back unchanged, a disk sync
+      // each: nearly every write of a daemon whose contacts were away.
+      const chat = row({ ...paired() });
+      await db.putLink(chat);
+      const iroh = vi.fn(async () => endpoint());
+      iroh.mockRejectedValueOnce(new Error("Iroh relay unreachable"));
+      const events = { onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() };
+      const node = new GhostlyNode(events, { automaticWallets: false, transport: fixture, nativeTransports: { "iroh/1": iroh } });
+      nodes.push(node);
+      await node.start();
+      await vi.waitFor(() => expect(node["nativeFailed"].has(chat.id)).toBe(true));
+      const seed = (await db.getLinks()).find((l) => l.id === chat.id)?.transportSeeds?.["iroh/1"];
+      expect(seed).toBeTruthy();
+      const patches = vi.spyOn(db, "patchLink");
+      onTestFinished(() => { patches.mockRestore(); });
+      iroh.mockRejectedValueOnce(new Error("Iroh relay unreachable"));
+      await node["ensureNativeEndpoints"](chat.id);
+      expect(iroh).toHaveBeenCalledTimes(2);
+      await node["ensureNativeEndpoints"](chat.id);
+      expect(iroh).toHaveBeenCalledTimes(3);
+      expect(iroh.mock.calls.map((call) => (call as unknown[])[0])).toEqual([seed, seed, seed]);
+      expect(patches.mock.calls.filter(([, patch]) => "transportSeeds" in patch)).toEqual([]);
     });
 
     it("the chat live most recently takes one first, among chats live when the app quit", async () => {
@@ -1452,6 +1530,130 @@ describe("text in a chat", () => {
     expect(history).not.toHaveBeenCalled();
   });
 
+  // covers: chat.dht.files
+  /**
+   * A waiting file's offer goes on the DHT floor while the chat is not live (WISP 403 § Files), and Cancel sending comes
+   * while it is being said there (a relay publication: hundreds of ms or more). The delete read a row that did not say
+   * `fileOnFloor` yet and withdrew nothing: no `pf-abort` ever went, and the contact's bubble waited a week for the file
+   * instead of saying it was cancelled. `back`: when the publication ends, after the cancel.
+   */
+  async function cancelOnFloor(back: "once the row is gone" | "at once" | "a moment later" | "said before the cancel") {
+    const chat = row();
+    const { node, linkOf } = await started(chat);
+    vi.spyOn(node["desk"], "replay").mockResolvedValue();
+    const link = linkOf(chat.id), wireId = `floor${crypto.randomUUID().slice(0, 8)}`, messageId = "me_7";
+    const gone = async () => !(await db.getMessage(chat.id, messageId));
+    const cancel = () => node.deleteMessage({ linkId: chat.id, messageId });
+    const announceFile = vi.fn(async (offer: { wireId: string }) => {
+      if (back !== "said before the cancel") {
+        cancel();
+        if (back === "once the row is gone") await vi.waitFor(async () => expect(await gone()).toBe(true));
+        if (back === "a moment later") await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      Object.assign(link, { dhtPendingId: dhtFileId(offer.wireId) });
+      return null;
+    });
+    const settleDht = vi.fn(async () => {}), sendFilesFrame = vi.fn(() => true);
+    // Away: the file waits for the live link, and its offer goes on the floor meanwhile.
+    Object.assign(link, { isDataLinkOpen: false, supportsFiles: false, fileAnnounceError: () => null, announceFile, settleDht, sendFilesFrame });
+    node.sendFile({ linkId: chat.id, file: { id: `${chat.id}-out-${wireId}`, name: "a.txt", size: 1, mime: "text/plain" }, timestamp: 7 });
+    await vi.waitFor(async () => expect((await db.getMessage(chat.id, messageId))?.delivery).toBe("waiting"));
+    // A text written after it: the outbox looks at what waits, and the file's offer goes on the floor first (`sendWaitingFile`).
+    void node.sendMessage({ linkId: chat.id, text: "after it", timestamp: 8 });
+    await vi.waitFor(async () => expect((await db.getMessages(chat.id)).filter((m) => m.delivery === "waiting")).toHaveLength(2));
+    // A read of the mailbox (the contact is away): the outbox looks at what waits.
+    link.options.events.onDhtDelivery({ peerMode: "dht" } as never);
+    await vi.waitFor(() => expect(announceFile).toHaveBeenCalledOnce());
+    if (back === "said before the cancel") {
+      await vi.waitFor(async () => expect((await db.getMessage(chat.id, messageId))?.fileOnFloor).toBe("sent"));
+      cancel();
+    }
+    await vi.waitFor(async () => expect(await gone()).toBe(true));
+    // Whatever was going to happen to it has happened by now.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Withdrawn: a new envelope without it takes its place on the floor (not only settled there), and the chat keeps
+    // its id for the next session.
+    expect(link.withdrawDht).toHaveBeenCalledWith(dhtFileId(wireId));
+    expect(settleDht).not.toHaveBeenCalled();
+    expect((await saved(chat.id))?.withdrawnFiles).toEqual([wireId]);
+    expect(await gone()).toBe(true);
+    expect((await saved(chat.id))?.deletedIds).toContain(messageId);
+    // The next session that carries files tells the contact's bubble it was cancelled ("Cancelled by the sender").
+    link.isDataLinkOpen = true;
+    link.options.events.onFilesSession(true);
+    expect(sendFilesFrame).toHaveBeenCalledWith({ t: "pf-abort", id: wireId });
+    await vi.waitFor(async () => expect((await saved(chat.id))?.withdrawnFiles).toBeUndefined());
+    expect(link.sendFile).not.toHaveBeenCalled();
+  }
+
+  for (const [run, back] of (["once the row is gone", "at once", "a moment later"] as const).entries()) {
+    it(`Cancel sending while a waiting file's offer is being said on the DHT floor withdraws it, as one cancelled after (run ${run + 1}: it ends ${back})`, async () => {
+      await cancelOnFloor(back);
+    });
+  }
+
+  it("Cancel sending once a waiting file's offer was said on the DHT floor withdraws it", async () => {
+    await cancelOnFloor("said before the cancel");
+  });
+
+  /**
+   * Delete for everyone while a waiting file's offer is being said on the DHT floor (its publication takes seconds, the
+   * moment right after sending a wrong file): the delete read a row with no `fileOnFloor` yet and took the file for one
+   * that never left, so no removal went, and the contact's chat kept its bubble and name as "Cancelled by the sender".
+   */
+  it("Delete for everyone while a waiting file's offer is being said on the DHT floor sends its removal", async () => {
+    const chat = row();
+    const { node, linkOf } = await started(chat);
+    vi.spyOn(node["desk"], "replay").mockResolvedValue();
+    const link = linkOf(chat.id), wireId = `floor${crypto.randomUUID().slice(0, 8)}`, messageId = "me_7";
+    let removed: Promise<unknown> | undefined;
+    const announceFile = vi.fn(async (offer: { wireId: string }) => {
+      removed = node.removeMessage({ linkId: chat.id, messageId });
+      await removed;
+      Object.assign(link, { dhtPendingId: dhtFileId(offer.wireId) });
+      return null;
+    });
+    Object.assign(link, { isDataLinkOpen: false, supportsFiles: false, fileAnnounceError: () => null, announceFile, settleDht: vi.fn(async () => {}), sendFilesFrame: vi.fn(() => true) });
+    node.sendFile({ linkId: chat.id, file: { id: `${chat.id}-out-${wireId}`, name: "a.txt", size: 1, mime: "text/plain" }, timestamp: 7 });
+    await vi.waitFor(async () => expect((await db.getMessage(chat.id, messageId))?.delivery).toBe("waiting"));
+    void node.sendMessage({ linkId: chat.id, text: "after it", timestamp: 8 });
+    await vi.waitFor(async () => expect((await db.getMessages(chat.id)).filter((m) => m.delivery === "waiting")).toHaveLength(2));
+    link.options.events.onDhtDelivery({ peerMode: "dht" } as never);
+    await vi.waitFor(() => expect(announceFile).toHaveBeenCalledOnce());
+    expect(await removed).toEqual({ error: null });
+    await vi.waitFor(async () => expect(await db.getMessage(chat.id, messageId)).toBeUndefined());
+    // Its removal goes to the contact once live, as for one deleted for everyone after its offer was said.
+    expect(node.removalPending({ linkId: chat.id, messageId })).toBe(true);
+    expect((await saved(chat.id))?.removals?.map((r) => r.wireId)).toEqual([wireId]);
+  });
+
+  // covers: groups.files
+  it("a group edge's waiting file deleted while the session waits for the member's capabilities stays gone and never goes", async () => {
+    const { node } = await started();
+    const { groupId } = await node.createGroup({ name: "Friends", profile: "mesh" });
+    const state = (await db.getGroups()).find((g) => g.id === groupId)!.state;
+    const edgeId = await openEdge(node, state, createIdentity().pubKeyZ32);
+    const edge = links.filter((l) => l.options.params.id === edgeId).at(-1)!;
+    const file = { id: `${edgeId}-out-e1`, name: "a.txt", size: 1, mime: "text/plain" };
+    await db.addMessage({ linkId: edgeId, id: "me_9", text: "📎 a.txt", sender: "me", timestamp: 9, via: "datalink", file, delivery: "waiting", deliveryError: "Sent when you are live." });
+    Object.assign(edge, { isDataLinkOpen: true });
+    const engine = GhostlyNode as unknown as { takesFiles: (link: unknown) => boolean; largeFilesAgreed: (link: unknown) => Promise<boolean> };
+    // Deleted here while the session asks the member's capabilities; it takes files once they come.
+    let asked = false;
+    vi.spyOn(engine, "takesFiles").mockImplementation(() => asked);
+    const agreed = vi.spyOn(engine, "largeFilesAgreed").mockImplementation(async () => {
+      if (!asked) await db.deleteMessage(edgeId, "me_9");
+      asked = true;
+      return true;
+    });
+    await node["sendWaiting"](edgeId);
+    expect(agreed).toHaveBeenCalled();
+    // Never written back as sent, and its transfer never began.
+    expect(await db.getMessage(edgeId, "me_9")).toBeUndefined();
+    expect(node.getState().transfers[file.id]).toBeUndefined();
+    expect(edge.sendFile).not.toHaveBeenCalled();
+  });
+
   // covers: chat.link-preview.wire
   it("a link preview is kept with the message and goes with it; one of a link the text lacks is dropped", async () => {
     const chat = row();
@@ -1478,6 +1680,20 @@ describe("text in a chat", () => {
     expect(await node.sendMessage({ linkId: chat.id, text: "x".repeat(600), timestamp: 9 })).toEqual({ error: null, messageId: expect.stringMatching(/^me_/) });
     expect(node.getState().links[0].peerAck).toBe(9);
     expect((await db.getMessages(chat.id))[0]).toMatchObject({ id: "me_9", via: "datalink" });
+  });
+
+  it("a legacy chat's read mark never goes back: the contact's record still carrying an older acknowledgement leaves a delivered text delivered", async () => {
+    const chat = row({ profile: undefined, participationSeed: undefined });
+    const { node, linkOf } = await started(chat);
+    const link = linkOf(chat.id);
+    link.options.events.onPeerAck(1000);
+    link.isDataLinkOpen = true;
+    await node.sendMessage({ linkId: chat.id, text: "hi", timestamp: 5000 });
+    expect(node.getState().links[0].peerAck).toBe(5000);
+    link.options.events.onPeerAck(1000);
+    expect(node.getState().links[0].peerAck).toBe(5000);
+    link.options.events.onPeerAck(6000);
+    expect(node.getState().links[0].peerAck).toBe(6000);
   });
 
   it("for an away contact that allows it, a text is held in storage, and never above the held-text limit", async () => {
@@ -1727,14 +1943,93 @@ describe("a 1:1 session that opens (agents#2468)", () => {
     const again = await hosted();
     const back = again.linkOf(chat.id);
     const sendEdit = wire(back, false);
-    // The new run reads the chat's history once for the edit queue (it starts with nothing known); the outbox has what
-    // the start read.
-    expect.soft(await historyReads(chat.id, () => opens(back)), "whole-history reads at the first open after a restart").toBeLessThanOrEqual(1);
+    // The edit queue and the outbox both have what the start read: the first open reads no history.
+    expect.soft(await historyReads(chat.id, () => opens(back)), "whole-history reads at the first open after a restart").toBe(0);
     await vi.waitFor(() => expect(wires(back)).toEqual([unconfirmedWire, awayWire]));
     await vi.waitFor(() => expect(sendEdit).toHaveBeenCalledWith(expect.objectContaining({ id: WIRE_OLD, m: "old, edited" }), expect.anything()));
     closes(back);
     await settle();
     expect.soft(await historyReads(chat.id, () => opens(back)), "whole-history reads at the next open").toBe(0);
+  });
+
+  it("from the start to its first session open, the chat's history is read whole once: by the start", async () => {
+    const chat = await chatWithHistory();
+    const whole = vi.spyOn(db, "getMessages");
+    try {
+      const { linkOf } = await hosted(chat);
+      opens(linkOf(chat.id));
+      await settle();
+      // The start's read seeds what a session open needs: what waits to go, cards due, and my edits on their way.
+      expect(whole.mock.calls.filter(([id]) => id === chat.id)).toHaveLength(1);
+    } finally { whole.mockRestore(); }
+  });
+
+  it("after a restart, my edit and my removal on their way go when the session opens, found from the start's read", async () => {
+    const chat = await chatWithHistory();
+    const WIRE_GONE = "g".repeat(22);
+    await db.putMessage({ linkId: chat.id, id: `me_${WIRE_GONE}`, wireId: WIRE_GONE, text: "to delete", sender: "me", timestamp: 950, via: "datalink", delivery: "delivered" });
+    const first = await hosted(chat);
+    closes(first.linkOf(chat.id));
+    expect(await first.node.editMessage({ linkId: chat.id, messageId: `me_${WIRE_OLD}`, text: "old, edited" })).toMatchObject({ error: null });
+    expect(await first.node.removeMessage({ linkId: chat.id, messageId: `me_${WIRE_GONE}` })).toMatchObject({ error: null });
+    await settle();
+    await first.node.shutdown();
+    nodes.splice(nodes.indexOf(first.node), 1);
+    links.length = 0;
+
+    const whole = vi.spyOn(db, "getMessages");
+    try {
+      const again = await hosted();
+      const back = again.linkOf(chat.id);
+      const sendEdit = wire(back, false);
+      opens(back);
+      await vi.waitFor(() => expect(sendEdit).toHaveBeenCalledWith(expect.objectContaining({ id: WIRE_OLD, m: "old, edited" }), expect.anything()));
+      await vi.waitFor(() => expect(sendEdit).toHaveBeenCalledWith(expect.objectContaining({ id: WIRE_GONE, rm: true }), expect.anything()));
+      await settle();
+      expect(whole.mock.calls.filter(([id]) => id === chat.id), "whole-history reads from the start to the session open").toHaveLength(1);
+    } finally { whole.mockRestore(); }
+  });
+
+  it("an edit made after the start, before the session opens, goes when it opens", async () => {
+    const chat = await chatWithHistory();
+    const whole = vi.spyOn(db, "getMessages");
+    try {
+      const { node, linkOf } = await hosted(chat);
+      const link = linkOf(chat.id);
+      const sendEdit = wire(link, false);
+      expect(await node.editMessage({ linkId: chat.id, messageId: `me_${WIRE_OLD}`, text: "edited before the session" })).toMatchObject({ error: null });
+      await settle();
+      expect(sendEdit).not.toHaveBeenCalled();
+      opens(link);
+      await vi.waitFor(() => expect(sendEdit).toHaveBeenCalledWith(expect.objectContaining({ id: WIRE_OLD, m: "edited before the session" }), expect.anything()));
+      await settle();
+      expect(whole.mock.calls.filter(([id]) => id === chat.id)).toHaveLength(1);
+    } finally { whole.mockRestore(); }
+  });
+
+  it("a chat added during the run, which the start never read, learns its edits on their way from one read of its history", async () => {
+    const { node, linkOf } = await hosted();
+    const { linkId } = await node.ensureLink({ ...createLink().mine, profile: "paired-chat/1" });
+    const link = linkOf(linkId);
+    const sendEdit = wire(link, false);
+    // An edit on its way the queue was never told of (written by another run of the profile): the history has it.
+    await db.putMessage({ linkId, id: `me_${WIRE_OLD}`, wireId: WIRE_OLD, text: "edited elsewhere", sender: "me", timestamp: 900, via: "datalink", delivery: "delivered",
+      edit: { seq: 1, at: Date.now(), history: [], pending: true } });
+    // Its other lookups read it lazily too (what waits to go, cards due); the edit queue's is one read.
+    const read = db.getMessages.bind(db), byQueue: string[] = [];
+    const whole = vi.spyOn(db, "getMessages").mockImplementation((...args) => {
+      if (args[0] === linkId && /EditQueue/.test(new Error().stack ?? "")) byQueue.push(args[0]);
+      return read(...args);
+    });
+    try {
+      opens(link);
+      await vi.waitFor(() => expect(sendEdit).toHaveBeenCalledWith(expect.objectContaining({ id: WIRE_OLD, m: "edited elsewhere" }), expect.anything()));
+      closes(link);
+      await settle();
+      opens(link);
+      await settle();
+      expect(byQueue, "the edit queue's whole-history reads in the run").toHaveLength(1);
+    } finally { whole.mockRestore(); }
   });
 });
 
@@ -1758,6 +2053,20 @@ describe("what arrives from held storage", () => {
     expect(stored!.blob).toBeUndefined();
     expect(stored!.bytes).toBe("idb");
     expect(await (await storedBlob(stored!, "text/plain"))!.text()).toBe("held");
+  });
+
+  it("a held file counts against the same per-contact budget as files taken live, files/3 ones included", async () => {
+    const chat = row();
+    const { node } = await started(chat);
+    const host = node["hold"]["host"] as { receiveFile(linkId: string, wire: object, bytes: Uint8Array, digest: string): Promise<string | null> };
+    const MiB = 1024 * 1024;
+    const wire = (wireId: string) => ({ wireId, name: "h.bin", size: 8 * MiB, mime: "application/octet-stream", timestamp: 5 });
+    // 495 MiB of files/3 files taken without asking: the file desk counts them, not the chat's received bytes.
+    const taken = vi.spyOn(node["fileDesk"], "autoTaken").mockReturnValue(495 * MiB);
+    expect(await host.receiveFile(chat.id, wire("over"), bytes("held"), "d")).toBe("no room for more files");
+    expect(await db.getMessages(chat.id)).toEqual([]);
+    taken.mockReturnValue(0);
+    expect(await host.receiveFile(chat.id, wire("room"), bytes("held"), "d")).toBeNull();
   });
 
   it("a held file, received or sent, says done in one state and then leaves the states: a device up for days carries none", async () => {

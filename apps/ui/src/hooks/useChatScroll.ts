@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { reducedMotion } from "../lib/motion";
 import { JUMP_EVENT, jumpGlides } from "../lib/replies";
 import type { RowWindow } from "./useRowWindow";
+import { modalOpen } from "./useAppCommands";
 
 /** A message row of the timeline, in order: its id (the row's `data-message-id`) and whether I sent it. */
 export interface ScrollRow {
@@ -73,7 +74,7 @@ const rowById = (list: HTMLElement, id: string) => {
   return row && shown(list, row);
 };
 const editable = (target: EventTarget | null) =>
-  target instanceof Element && !!target.closest("input, textarea, select, [contenteditable]:not([contenteditable='false']), [role='dialog'], [role='menu']");
+  target instanceof Element && !!target.closest("input, textarea, select, [contenteditable]:not([contenteditable='false']), dialog, [role='dialog'], [role='menu']");
 
 /**
  * The chat timeline's scrolling, as WhatsApp does it. At the bottom, a new message keeps the view there. Scrolled up,
@@ -92,8 +93,8 @@ const editable = (target: EventTarget | null) =>
  * Give `listRef` to the scrolling element and `columnRef` to the one that grows with the rows. `chat` starts it over: a
  * chat opens where it was left (on the same message, or at its bottom) with nothing counted, and one never opened opens
  * at its bottom. When the message it was left on is not among its first rows, it opens at its bottom and goes back on
- * that message once the rows bring it, unless a hand scrolled first. `keys`: End or Ctrl/Cmd+↓ (outside a text field)
- * jumps to the bottom. A jump to a message (`jumpToMessage`: a quote's, a search's) lands on it, from the bottom too.
+ * that message once the rows bring it, unless a hand scrolled first. `keys`: End or Ctrl/Cmd+↓ (outside a text field, and
+ * with no modal dialog open) jumps to the bottom. A jump to a message (`jumpToMessage`: a quote's, a search's) lands on it, from the bottom too.
  */
 export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { rows: readonly ScrollRow[]; chat: string; keys?: boolean; window?: RowWindow }) {
   // Elements, not refs: a list shown later (a group still joining) still gets its listeners.
@@ -197,6 +198,10 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
     away.current = false;
     if (atBottom.current) {
       el.scrollTop = el.scrollHeight;
+      // Put there by this, the way down after ↓ is over: a row laying out under the glide takes it the rest of the way at
+      // once, and the scroll event that follows finds it unmoved. Still on its way, the next move up with no wheel or
+      // touch on the list (a screen reader, a key) counted as at the bottom: the next page coming in above took it down.
+      if (distance(el) <= NEAR_BOTTOM_PX) following.current = false;
     } else if (anchor.current) {
       // A height of 0: taken while the list was off screen, so not known yet.
       const { offset, height } = anchor.current;
@@ -239,6 +244,8 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
     else el.scrollTo({ top, behavior: "smooth" });
     lastTop.current = el.scrollTop;
     lastHeight.current = el.scrollHeight;
+    // There at once (no glide, or it was there already): no scroll event will say it arrived.
+    if (distance(el) <= NEAR_BOTTOM_PX) following.current = false;
   }, [clear]);
 
   /** The pill: to the first message not seen yet, or to the bottom when that one is already in reach of it. */
@@ -411,7 +418,8 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
       }
     };
     const release = () => { pressed.current = false; };
-    const onKey = (e: KeyboardEvent) => { if (SCROLL_KEYS.has(e.key) && !editable(e.target)) { handAt.current = performance.now(); jumping.current = 0; } };
+    // A key takes over as a wheel does (End's own trip to the bottom starts after this, from the window's keydown).
+    const onKey = (e: KeyboardEvent) => { if (SCROLL_KEYS.has(e.key) && !editable(e.target)) { handAt.current = performance.now(); jumping.current = 0; following.current = false; } };
     // A jump to a message: the list goes where the row will be, in the middle of the view (or as near as it scrolls).
     const onJump = (e: Event) => {
       const row = e.target as HTMLElement;
@@ -451,7 +459,8 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
   useEffect(() => {
     if (!keys) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || editable(e.target)) return;
+      // Not behind a modal dialog (the focus in it, or dropped to the page): the key is the dialog's, the chat stays put.
+      if (e.defaultPrevented || editable(e.target) || modalOpen()) return;
       const end = e.key === "End" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
       const down = e.key === "ArrowDown" && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey;
       if (!end && !down) return;

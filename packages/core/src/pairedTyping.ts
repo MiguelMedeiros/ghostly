@@ -57,9 +57,14 @@ const LINK_OR_MARKUP = /[a-z][a-z0-9+.-]*:\/\/|\bwww\.|\b(?:mailto|javascript|da
  * holds a link or markup (it is plain text, never a way to put a link on the contact's screen).
  */
 export function sanitizeTypingStatus(value: unknown): string | undefined {
+  return plainStatusLine(value, TYPING_STATUS_MAX);
+}
+
+/** A contact's line of plain text by the typing status's rules, at most `max` characters (a set status uses it too). */
+export function plainStatusLine(value: unknown, max: number): string | undefined {
   if (typeof value !== "string") return undefined;
-  const oneLine = value.slice(0, 4 * TYPING_STATUS_MAX).replace(/\s+/g, " ");
-  const clean = sanitizeDisplayText(oneLine, TYPING_STATUS_MAX);
+  const oneLine = value.slice(0, 4 * max).replace(/\s+/g, " ");
+  const clean = sanitizeDisplayText(oneLine, max);
   if (!clean || LINK_OR_MARKUP.test(clean)) return undefined;
   return clean;
 }

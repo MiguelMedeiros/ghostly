@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent } from "react";
+import { isAltLetterKey } from "../lib/appCommands";
 import { changesGlance, profileGlance, recounted, type ProfileGlance } from "../lib/profileData";
-import { currentProfile, listProfiles, type ProfileEntry } from "../lib/profiles";
+import { currentProfile, listProfiles, onOwnThemeSaved, type ProfileEntry } from "../lib/profiles";
 import { PEEK_EVENT } from "../lib/profilePeek";
 import { modalOpen } from "./useAppCommands";
 
@@ -19,7 +20,8 @@ export function openProfileSwitcher(): void {
 export const SWITCHER_SHORTCUT = "Alt+Shift+P";
 const isMac = () => typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 export const shortcutLabel = () => (isMac() ? "⌥⇧P" : SWITCHER_SHORTCUT);
-const isShortcut = (e: globalThis.KeyboardEvent) => e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && e.code === "KeyP";
+// The key that types P, as Ctrl+N's (appCommands.ts): on Dvorak the key at a US keyboard's P types L (the rail's).
+const isShortcut = (e: globalThis.KeyboardEvent) => e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && isAltLetterKey(e, "p");
 
 export interface OtherProfile { entry: ProfileEntry; glance?: ProfileGlance }
 
@@ -54,13 +56,16 @@ export function useProfileGlances(): { current: ProfileEntry; others: OtherProfi
       if (ids.size) setState((old) => ({ ...old, others: old.others.map((o) => (ids.has(o.entry.id) && o.glance ? { ...o, glance: recounted(o.entry.id, o.glance) } : o)) }));
     };
     load();
-    const events = ["profiles-updated", "settings-updated", PEEK_EVENT];
+    const events = ["profiles-updated", PEEK_EVENT];
     for (const name of events) window.addEventListener(name, load);
     window.addEventListener("storage", onStorage);
+    // This profile's own settings change no other profile's glance: only a new colour of its own is drawn.
+    const stopTheme = onOwnThemeSaved(() => setState((old) => ({ ...old, current: currentProfile() })));
     return () => {
       alive = false;
       for (const name of events) window.removeEventListener(name, load);
       window.removeEventListener("storage", onStorage);
+      stopTheme();
     };
   }, []);
   const othersUnread = state.others.reduce((sum, o) => sum + (o.glance?.unread ?? 0), 0);

@@ -66,8 +66,8 @@ export function InviteCard({ code, shown = true }: { code: string; shown?: boole
   return <div ref={cardRef} data-testid="invite-card" data-leaving={leaving || undefined} data-returning={(returning && !leaving) || undefined}
     aria-hidden={leaving || undefined} inert={leaving || undefined}
     className="invite-card mx-auto my-3 w-[calc(100%_-_2rem)] max-w-sm rounded-2xl border border-border bg-surface-alt/95 p-4 text-center">
-    <h2 className="mb-3 text-sm font-medium text-text-primary">{t("invite.title")}</h2>
+    <h2 className="mb-3 chat-text-card-title font-medium text-text-primary">{t("invite.title")}</h2>
     <QRCodeDisplay value={shared} qr={inviteQrSegments(code)} />
-    {shared !== code && <p data-testid="invite-link" title={shared} dir="ltr" className="mt-2 truncate font-mono text-[11px] text-text-muted">{shared.replace(/^https:\/\//, "")}</p>}
+    {shared !== code && <p data-testid="invite-link" title={shared} dir="ltr" className="mt-2 truncate font-mono chat-text-card-label text-text-muted">{shared.replace(/^https:\/\//, "")}</p>}
   </div>;
 }

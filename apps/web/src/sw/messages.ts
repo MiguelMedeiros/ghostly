@@ -4,8 +4,8 @@ import type { SharedItem } from "./policy";
 export type ToWorker =
   /** The user pressed Reload on a new version: the waiting worker takes over now. Never sent on its own. */
   | { type: "skip-waiting" }
-  /** This page is the app (it holds the peer) and opened for a share: hand it over. */
-  | { type: "share-ready" }
+  /** This page is the app (it holds `profile`'s peer) and opened for a share: hand it over, unless a tab of another profile asked to forward it. */
+  | { type: "share-ready"; profile: string }
   /** This page opened for a share but another tab of `profile` holds the peer: give the share to that one. */
   | { type: "share-forward"; profile: string }
   /**
@@ -15,8 +15,11 @@ export type ToWorker =
   | { type: "share-here"; profile: string; lock?: string }
   /** This page that took shares goes (a share into the same window replaces it): none is forwarded to it on its way out. */
   | { type: "share-away" }
-  /** This page restarts (a profile switch) with a share still in its picker: hold it again for the page that loads next. */
-  | { type: "share-keep"; item: SharedItem }
+  /**
+   * This page restarts (a profile switch) with a share still in its picker: hold it again for the page that loads next.
+   * `dropped`: the shares it counted as not kept, which the next page is told of with it.
+   */
+  | { type: "share-keep"; item: SharedItem; dropped?: number }
   /** Opens a wake-up notification's chat as a tap would (the push worker; a page of this origin only). */
   | { type: "open-notification"; tag: string };
 
@@ -33,8 +36,12 @@ export type FromWorker =
    * a page that takes shares says it again now, without coming to the front.
    */
   | { type: "share-where" }
-  /** A wake-up notification was tapped: open this chat, in this profile (switching to it when another is open). */
-  | { type: "open-chat"; path: string; profile: string }
+  /**
+   * A wake-up notification was tapped: open this chat, in this profile (switching to it when another is open). `silent`:
+   * this window did not answer `open-ask`, so the worker only guessed it runs the profile; it answers on the port sent
+   * with it (`ChatTaken`), and one that holds another profile's peer hands the chat back instead of switching.
+   */
+  | { type: "open-chat"; path: string; profile: string; silent?: true }
   /** A wake-up notification was tapped: which profile does this window run, and does it hold its peer? Answered on the port sent with it (`WindowSays`). */
   | { type: "open-ask" }
   /** A hashed file of this build is gone from the server: a deploy replaced it, so the page looks for the new version now. */
@@ -43,8 +50,19 @@ export type FromWorker =
 /** A window's answer to `open-ask`: the profile it runs, and whether it holds that profile's peer (false: it waits behind another tab, or has not started yet). */
 export type WindowSays = { profile: string; peer: boolean };
 
+/** A window's answer to a `silent` `open-chat`: false, it runs another profile's peer and left the chat to a new window. */
+export type ChatTaken = { taken: boolean };
+
 /** How long the push worker waits for the windows to answer `open-ask`. A page that says nothing by then is of an older build, or frozen. */
 export const OPEN_ASK_MS = 500;
+
+/**
+ * How long the push worker waits for a window on screen it only guessed at (`silent` `open-chat`) to take the chat or
+ * hand it back, before it focuses it: a busy one answers once its work is done. A hidden one, maybe frozen, waits only
+ * `OPEN_ASK_MS` (it answers once focusing has unfrozen it). Well inside the time the browser lets a tap open a window
+ * (10 s in Chromium); a page of an older build never answers, and then nothing more is opened.
+ */
+export const OPEN_BACK_MS = 5000;
 
 /** How long a shared item waits for the app to ask for it. Past that it is dropped, never stored. */
 export const SHARE_HOLD_MS = 2 * 60_000;

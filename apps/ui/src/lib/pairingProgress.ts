@@ -75,7 +75,7 @@ export function pairingDetail(progress: Pick<PairingProgress, "detail" | "reason
 }
 
 /** The engine's own report of a chat's first pairing (`LinkView.pairingProgress`), when it gives one. */
-export function reportedProgress(link: LinkView | undefined): PairingProgress | undefined {
+export function reportedProgress(link: Pick<LinkView, "pairingProgress"> | undefined): PairingProgress | undefined {
   return link?.pairingProgress;
 }
 
@@ -83,7 +83,7 @@ export function reportedProgress(link: LinkView | undefined): PairingProgress | 
  * The stage as it can be read off what the engine already shows about a link, for engines that do not report
  * progress yet. `link` is absent while a chat just joined is still being set up.
  */
-export function deriveStage(link: LinkView | undefined, role: PairingRole, online: boolean): Pick<PairingProgress, "stage" | "detail" | "reason" | "retryable"> {
+export function deriveStage(link: Pick<LinkView, "pairing" | "dataLink" | "discoveryError" | "peerOnline" | "status"> | undefined, role: PairingRole, online: boolean): Pick<PairingProgress, "stage" | "detail" | "reason" | "retryable"> {
   // Offline is this device's own switch: nothing to retry, pairing goes on once it is back.
   if (!online) return { stage: "failed", reason: "offline", retryable: false };
   if (!link) return { stage: role === "inviter" ? "publishing" : "resolving" };

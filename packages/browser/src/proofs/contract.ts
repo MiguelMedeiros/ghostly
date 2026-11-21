@@ -26,7 +26,14 @@ export const IDENTITY_PLATFORMS: readonly IdentityPlatform[] = ["web", "extensio
  * unless the provider says so. `text` is the body as UTF-8; `bytes` is the same body raw (binary
  * answers such as DNS-over-HTTPS `application/dns-message`).
  */
-export interface IdentityFetchOptions { headers?: Record<string, string>; maxBytes?: number; signal?: AbortSignal; redirect?: "follow" | "error" }
+export interface IdentityFetchOptions {
+  headers?: Record<string, string>; maxBytes?: number; signal?: AbortSignal; redirect?: "follow" | "error";
+  /**
+   * A read of one of the profile's own Pkarr relays (a did:dht): read as the chats read them, http:// and a private
+   * address included, since the person chose them. Ignored for any other URL.
+   */
+  ownPkarrRelay?: boolean;
+}
 export interface IdentityFetchResponse { status: number; contentType: string; text: string; bytes: Uint8Array }
 export type IdentityFetch = (url: string, options?: IdentityFetchOptions) => Promise<IdentityFetchResponse>;
 
@@ -73,7 +80,7 @@ export interface SubjectSpec {
 
 export interface SubjectPreview {
   /** Short facts, in order: "Method" → "did:web", "Keys" → "#key-1 (Ed25519)". */
-  facts: readonly { label: string; value: string }[];
+  facts: readonly { label: string; value: string; /** A machine token (a host, URL, key id), not a sentence: shown left to right in any language. */ code?: true }[];
   /** The ids of the signers that apply to this subject; every signer when omitted. */
   signers?: readonly string[];
 }
@@ -102,9 +109,17 @@ export interface ApprovalRequest {
   notes?: readonly string[];
 }
 
+/** A signer's own wait for the person's approval ended (Pubky's relay forgot the request): a time-out, not a failure. */
+export class SignerTimeout extends Error {}
+
 export interface SignerContext {
   values: Record<string, string>;
   signal: AbortSignal;
+  /**
+   * How long the caller waits for the approval (the CLI's --timeout): a signer with a wait of its own takes this one,
+   * up to its `maxWaitMs`. Its own wait when absent (the app).
+   */
+  waitMs?: number;
   /** The signer asks the person to approve on a page (NIP-46 auth_url): the UI shows it as a link, never opens it itself. */
   onAuthUrl(url: string): void;
   onProgress(message: string): void;
@@ -148,6 +163,8 @@ interface SignerBase {
 export interface InAppSigner<E> extends SignerBase {
   kind: "in-app";
   fields?: readonly SignerField[];
+  /** The longest it can wait for an approval, whatever `waitMs` says (Pubky: its relay keeps a request five minutes). */
+  maxWaitMs?: number;
   /** Opens the signer, runs `work`, and always cleans up (closes connections, drops keys) before resolving. */
   run<T>(ctx: SignerContext, work: (session: SignerSession<E>) => Promise<T>): Promise<T>;
 }
@@ -206,9 +223,11 @@ export interface IdentityProofProvider<E = unknown> {
   /**
    * When a verifier's check can go stale (the DNS record may be removed later): the contact's app offers
    * "Check again" after this many seconds and shows the last check time. Omit when the evidence is a
-   * signature that stays valid until expiry.
+   * signature that stays valid until expiry. `perHour`: the most checks the app runs on its own in an hour, for a
+   * server that limits lookups per IP (the rest wait for later); well under that limit, so a check a person starts
+   * (a new contact's proof, "Check again") still gets an answer.
    */
-  recheck?: { afterSeconds: number };
+  recheck?: { afterSeconds: number; perHour?: number };
   /** One sentence for people: what `verify` contacts and who learns what. "Nothing: checked on this device." */
   privacy: string;
   /** Mark providers whose flows are not proven against real-world tools yet. */

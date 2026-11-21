@@ -28,7 +28,7 @@
   },
   "delivery": {
     "delivered": "Entregue (recibo recebido)",
-    "failed": "Falhou",
+    "failed": "Não enviada",
     "held": "Guardada para o contato",
     "queued": "Ainda sem confirmação, reenvia sozinha",
     "sending": "Enviando",
@@ -161,6 +161,12 @@
     "timing": "Tempos",
     "voice": "Voz",
     "wire": "Rede"
+  },
+  "send": {
+    "failed": "falhou",
+    "failedBecause": "falhou: {{error}}",
+    "sending": "enviando",
+    "sent": "enviado"
   },
   "storage": {
     "blob": "o arquivo inteiro no IndexedDB",

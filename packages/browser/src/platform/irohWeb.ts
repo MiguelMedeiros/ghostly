@@ -1,4 +1,4 @@
-import { dialableIrohRelay, fromBase64Url, irohDescriptor, irohRelayUrl, type BoundChannel, type FrameChannel, type NativeBinding, type NativeEndpoint } from "@ghostly/core";
+import { dialableIrohRelay, fromBase64Url, irohDescriptor, irohRelayUrl, relayUrl, relayUrlTooLong, type BoundChannel, type FrameChannel, type NativeBinding, type NativeEndpoint } from "@ghostly/core";
 
 /**
  * Iroh (WISP 102) in a browser: the same QUIC/TLS session and binding as the
@@ -53,7 +53,12 @@ export function irohRelayProblem(value: string): string | null {
   try { url = new URL(value); } catch { return `Not a relay address: ${value}`; }
   const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
   if (url.protocol !== "https:" && !(url.protocol === "http:" && local)) return `Use an https:// relay address: ${value}`;
-  if (url.username || url.password || url.search || url.hash || value.length > 256) return `Not a relay address: ${value}`;
+  if (url.username || url.password || url.search || url.hash) return `Not a relay address: ${value}`;
+  // Nor one a contact would drop with the whole descriptor (`relayUrl`: past 120 characters, a loopback path past 100),
+  // leaving this profile unreached over Iroh without a word. Checked as Iroh names it: parsed, in its longer spelling.
+  // One refused for its length alone is a relay address all the same: what to do is said instead.
+  const named = new URL(irohRelayUrl(value)).href;
+  if (value.length > 256 || !relayUrl(named)) return relayUrlTooLong(named) ? `Use a shorter relay address: ${value}` : `Not a relay address: ${value}`;
   return null;
 }
 
@@ -101,6 +106,12 @@ export interface IrohWebOptions {
    * the relay its descriptor names, and a contact who runs that relay would see this profile's address there.
    */
   ownRelaysOnly?: boolean;
+  /**
+   * Whether a contact's relay is at a public address, or at a name whose every address is public now: asked before each
+   * dial through a relay that is not one of `relays`, where the host has a resolver (the CLI's `nodePublicRelay`). A page
+   * has none; a contact's relay is held there to what its URL says (`dialableIrohRelay`).
+   */
+  publicRelay?: (relay: string) => Promise<boolean>;
 }
 
 const SEND_BUDGET = 120 * 1024;
@@ -251,6 +262,10 @@ export async function createIrohWebEndpoint(seedB64: string, options: IrohWebOpt
       if (!dialableIrohRelay((descriptor as { relay?: unknown } | null)?.relay, relays)) throw new Error("The contact's Iroh relay is not one this device dials");
       const dialled = irohDescriptor(descriptor, BROWSER_SPELLING);
       if (options.ownRelaysOnly && !onOwnRelay(dialled, relays)) throw new Error("The contact is not on one of this profile's Iroh relays");
+      const relay = (dialled as { relay?: unknown } | null)?.relay;
+      if (options.publicRelay && typeof relay === "string" && !onOwnRelay(dialled, relays) && !await options.publicRelay(relay))
+        throw new Error("The contact's Iroh relay is not one this device dials");
+      if (stopped) throw new Error("Iroh endpoint is stopped");
       const conn = await node.connect(dialled, options.connectMs ?? 20_000);
       if (stopped) { conn.close(); throw new Error("Iroh endpoint is stopped"); }
       return bind(conn);

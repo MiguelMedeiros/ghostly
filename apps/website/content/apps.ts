@@ -36,6 +36,7 @@ export const apps = {
     can: "What it can do",
     runs: "Where it runs",
     madeFor: "Made for",
+    fromPublisher: "From the publisher",
     install: {
       title: "Install it in Ghostly",
       steps: (title: string, fingerprint: string, release: string) => [

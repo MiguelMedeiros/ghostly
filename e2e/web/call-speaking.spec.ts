@@ -159,7 +159,7 @@ const crowded = (p: Peer) => p.page.evaluate(() => {
 });
 
 test("on a phone the small window keeps the state line, the avatars with their ring, the names and the buttons apart", { tag: ["@feature:calls.speaking", "@feature:calls.mini-window", "@feature:app.i18n"] }, async ({ peer }, testInfo) => {
-  // A phone opens the small window at its smallest width, 190 x 136 px. In Arabic: right to left.
+  // A phone opens the small window at its smallest, 264 x 168 px on a touch screen (44 px buttons). In Arabic: right to left.
   const [alice, bob] = await Promise.all([peer("speaking-phone-alice", { mobile: true, viewport: { width: 320, height: 568 } }), peer("speaking-phone-bob")]);
   await pair(alice, bob);
   await alice.page.evaluate(() => {
@@ -184,7 +184,7 @@ test("on a phone the small window keeps the state line, the avatars with their r
   };
 
   await small();
-  expect(await callWindow.evaluate((el) => [el.getBoundingClientRect().width, el.getBoundingClientRect().height])).toEqual([190, 136]);
+  expect(await callWindow.evaluate((el) => [el.getBoundingClientRect().width, el.getBoundingClientRect().height])).toEqual([264, 168]);
   expect(await crowded(alice)).toEqual([]);
   await alice.page.screenshot({ path: testInfo.outputPath("phone-small.png") });
   // The contact's name shows; yours is there for a screen reader, beside the avatar that is yours.
@@ -192,10 +192,10 @@ test("on a phone the small window keeps the state line, the avatars with their r
   await expect(callWindow.locator(".call-self .call-name")).toHaveText("أنت");
   await hangUp();
 
-  // As low as a pulled corner takes it, 128 px.
+  // Left smaller before (190 x 128, as low as a pulled corner took it then): it comes back at the touch screen's smallest.
   await alice.page.evaluate(() => localStorage.setItem("ghostly_call_window_box", JSON.stringify({ x: 114, y: 336, w: 190, h: 128 })));
   await small();
-  expect(await callWindow.evaluate((el) => [el.getBoundingClientRect().width, el.getBoundingClientRect().height])).toEqual([190, 128]);
+  expect(await callWindow.evaluate((el) => [el.getBoundingClientRect().width, el.getBoundingClientRect().height])).toEqual([264, 168]);
   expect(await crowded(alice)).toEqual([]);
   await alice.page.screenshot({ path: testInfo.outputPath("phone-small-lowest.png") });
   await hangUp();

@@ -186,25 +186,53 @@ export async function desktopPerson(name: string, options: {
     copyInvite: async () => {
       await run(`Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (v) => { window.qaInvite = v; } } });`);
       await person.press("Copy invite", '[data-testid="invite-card"]');
+      // An invite is a secret: the app copies it natively (`copy_secret`, marked so clipboard histories keep no copy),
+      // past the page's clipboard, and the test build's clipboard is a stand-in. The card shows the same link in full.
       let invite: string | null = null;
-      await expect.poll(async () => (invite = await run<string | null>(`return window.qaInvite ?? null;`))).not.toBeNull();
+      await expect.poll(async () => (invite = await run<string | null>(
+        `return window.qaInvite ?? document.querySelector('[data-testid="invite-card"] [data-testid="invite-link"]')?.getAttribute("title") ?? null;`))).not.toBeNull();
       return invite!;
     },
     join: async (invite) => {
       // Desktop reads the clipboard natively (the host's readClipboardText), out of a page script's reach, and
-      // the test does not touch the machine's clipboard: an empty one opens the invite field, typed in instead.
+      // the test does not touch the machine's clipboard: an empty one opens the invite field, where the invite goes in
+      // whole, as a paste puts it (one input). Not typed as keys: WebKitWebDriver holds the page for up to 1.4 s before
+      // the first of 243 keys on a loaded host, which dht-direct.spec.ts's watch over the page's timers reads as a freeze.
       await person.press("Join chat");
       await person.press("Paste from clipboard");
       const field = 'dialog textarea[placeholder="Paste invite…"]';
       await expect.poll(() => app().text(field), { message: `${name}'s invite field` }).not.toBeNull();
-      await app().type(field, invite);
+      const entered = await run<string | null>(`
+        const field = document.querySelector(arguments[0]);
+        if (!field) return null;
+        field.focus();
+        document.execCommand("insertText", false, arguments[1]);
+        return field.value;`, field, invite);
+      expect(entered, `${name}'s invite field holds the invite`).toBe(invite);
       await person.press("Join chat", "dialog form");
     },
     canWrite: () => run<boolean>(`const box = document.querySelector('[placeholder="Message…"]'); return !!box && !box.disabled;`),
     hash: () => run<string>(`return location.hash;`),
     say: async (text) => {
+      const box = '[placeholder="Message…"]';
       await expect.poll(() => person.canWrite(), { timeout: 60_000 }).toBe(true);
-      await app().type('[placeholder="Message…"]', `${text}`);
+      // The text goes in whole, as `join` puts the invite in, and only Enter is a key. Typed key by key, a loaded host's
+      // WebKitWebDriver now and then ends the run of keys with a bare "unknown error", with no telling how many landed.
+      const entered = await run<string | null>(`
+        const box = document.querySelector(arguments[0]);
+        if (!box) return null;
+        box.focus();
+        document.execCommand("insertText", false, arguments[1]);
+        return box.value;`, box, text);
+      expect(entered, `${name}'s message box holds the text`).toBe(text);
+      // Enter sends it and empties the box. A failed call may still have pressed it: Enter again only when the box still
+      // holds the text a while later, so the text never goes twice.
+      const left = () => run<string | null>(`return document.querySelector(arguments[0])?.value ?? null;`, box);
+      await expect(async () => {
+        if (await left() !== text) return;
+        await app().type(box, "\uE007").catch(() => {});
+        await expect.poll(left, { timeout: 10_000 }).not.toBe(text);
+      }, `${name} sends “${text}”`).toPass({ timeout: 60_000 });
     },
     shows: (text) => run<boolean>(`
       const pane = document.querySelector(".chat-wallpaper");

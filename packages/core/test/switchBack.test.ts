@@ -135,3 +135,26 @@ for (const chooser of ["the dialling side", "the other side"] as const) it(`a ch
   await who.link.setTransportPreference("webrtc/1", true);
   expect(await until(on("webrtc/1"), 8_000)).toBeLessThan(8_000);
 }, 90_000);
+
+/**
+ * Moves one after another, a few seconds apart. Each side reads 10 of the contact's policies a minute
+ * (`POLICY_RECEIVE_LIMIT`), and each move's new session says the policy again (`begin`): a move spent two of the
+ * contact's, so the sixth in a minute waited for the window, "Transport change timed out" after 30 s, on the target
+ * 37-51 s on (two CLIs on a HyperDHT testnet: the third move back to WebRTC, 50 s).
+ */
+for (const chooser of ["the dialling side", "the other side"] as const) it(`eight moves in a minute each go at once, chosen by ${chooser}`, async () => {
+  const { inviter, joiner } = invitationWhere("inviter");
+  const a = startApp("a", inviter, { side: joiner, name: "b" }), b = startApp("b", joiner, { side: inviter, name: "a" });
+  expect(await until(on("webrtc/1"), 60_000)).toBeLessThan(60_000);
+  await run(5_000);
+  const who = chooser === "the dialling side" ? a : b;
+  const took: number[] = [];
+  for (let i = 0; i < 8; i++) {
+    const target: PairedTransport = i % 2 === 0 ? "iroh/1" : "webrtc/1";
+    await who.link.setTransportPreference(target, true);
+    took.push(await until(on(target), 60_000));
+    await run(3_000);
+  }
+  console.log(`MOVES ${chooser}: ${took.map((ms) => ms / 1000).join(" ")} s`);
+  for (const ms of took) expect(ms).toBeLessThan(8_000);
+}, 120_000);

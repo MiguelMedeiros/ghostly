@@ -77,6 +77,13 @@ export const RELAY_URL = /^((https|wss):\/\/[^\s]{1,120}|(http|ws):\/\/(127\.0\.
 export const RELAY_WITH_SECRETS = /^[a-z]+:\/\/[^/?#]*@|[?#]/i;
 /** A relay URL a descriptor may name: `RELAY_URL`, with nothing but the server's address in it. */
 export const relayUrl = (value: unknown): value is string => typeof value === "string" && RELAY_URL.test(value) && !RELAY_WITH_SECRETS.test(value);
+/** `RELAY_URL` at any length. */
+const RELAY_URL_ANY_LENGTH = /^((https|wss):\/\/[^\s]+|(http|ws):\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d{1,5})?(\/[^\s]*)?)$/;
+/**
+ * A relay URL `relayUrl` refuses for its length alone (past 120 characters, a loopback path past 100): a relay setting
+ * asks for a shorter one, where "not a relay address" sent the person looking for a typo in it.
+ */
+export const relayUrlTooLong = (value: string): boolean => !relayUrl(value) && !RELAY_WITH_SECRETS.test(value) && RELAY_URL_ANY_LENGTH.test(value);
 /**
  * Whether an Iroh endpoint may dial a contact through the relay its descriptor names (none: a direct address alone).
  * The contact chose that relay and this device opens it on its own, again on each redial, so it is held to what a held
@@ -140,9 +147,11 @@ export function relayedTransports(local: TransportDescriptors, remote: Transport
 /** Symmetric rank sum; the fixed order breaks ties deterministically. Neither
  * a remote list nor a preference can add an unavailable local adapter. A
  * relayed transport ranks after every direct one: it is where a failed direct
- * path goes, never ahead of one that works. */
+ * path goes, never ahead of one that works. Iroh through its relay is the
+ * exception (WISP 100, revision 2026-11-08): it comes back almost at once after
+ * the app was away, and a browser's Iroh is never anything else. */
 export function rankTransports(local: readonly string[], remote: readonly string[], relayed: readonly string[] = []): PairedTransport[] {
-  const penalty = (t: PairedTransport) => relayed.includes(t) ? 1 : 0;
+  const penalty = (t: PairedTransport) => t !== "iroh/1" && relayed.includes(t) ? 1 : 0;
   return TRANSPORTS.filter(t => local.includes(t) && remote.includes(t))
     .sort((a, b) => penalty(a) - penalty(b)
       || (local.indexOf(a) + remote.indexOf(a)) - (local.indexOf(b) + remote.indexOf(b))
@@ -150,11 +159,16 @@ export function rankTransports(local: readonly string[], remote: readonly string
 }
 
 /**
- * What a chat prefers when nobody chose (Automatic): WebRTC where the app has it, else the first transport it has
- * (a Linux Desktop: WebKitGTK has no WebRTC). With nothing at all, WebRTC, which the offer then leaves out.
+ * What a chat prefers when nobody chose (Automatic): Iroh where the app has it, then WebRTC, then HyperDHT (WISP 100,
+ * revision 2026-11-08). Every app puts Iroh first, so the rank sum of two apps that both run it puts it first on both
+ * sides. With nothing at all, WebRTC, which the offer then leaves out.
+ * With Fallback off the chat may use only that one transport, and nothing moves it off a relayed Iroh then: WebRTC
+ * where the app has it, else the first transport it has (a Linux Desktop: WebKitGTK has no WebRTC), as before.
  */
-export function automaticTransport(available: readonly PairedTransport[]): PairedTransport {
-  return available.includes("webrtc/1") ? "webrtc/1" : TRANSPORTS.find(t => available.includes(t)) ?? "webrtc/1";
+export const AUTOMATIC_ORDER: readonly PairedTransport[] = ["iroh/1", "webrtc/1", "hyperdht/1"];
+export function automaticTransport(available: readonly PairedTransport[], fallback = true): PairedTransport {
+  if (!fallback) return available.includes("webrtc/1") ? "webrtc/1" : TRANSPORTS.find(t => available.includes(t)) ?? "webrtc/1";
+  return AUTOMATIC_ORDER.find(t => available.includes(t)) ?? "webrtc/1";
 }
 
 export function transportOrder(available: readonly PairedTransport[], preferred: PairedTransport,

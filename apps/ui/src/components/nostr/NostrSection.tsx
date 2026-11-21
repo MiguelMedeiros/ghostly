@@ -11,6 +11,7 @@ import { FieldGrid, InputGroup } from "../layout";
 import { NostrPublishDialog } from "./NostrPublishDialog";
 import { problemLine } from "../../lib/problemText";
 import { exactText } from "../../lib/exactText";
+import { listText } from "../../lib/listText";
 
 
 /**
@@ -100,11 +101,11 @@ function OwnKey({ view, publish, onPublish, onError }: { view: NostrOwnView; pub
             return count === 1 ? t("identities.nostr.youFollowOne") : t("identities.nostr.youFollow", { count });
           })()}</p>}
           {view.mute && <p className="text-xs text-text-muted" data-testid="nostr-own-mute">{(() => {
-            const m = view.mute, list = [
+            const m = view.mute, list = listText([
               m.pubkeys === 1 ? t("identities.nostr.keyOne") : t("identities.nostr.keys", { count: m.pubkeys }),
               m.words === 1 ? t("identities.nostr.wordOne") : t("identities.nostr.words", { count: m.words }),
               m.notes === 1 ? t("identities.nostr.noteOne") : t("identities.nostr.notes", { count: m.notes }),
-            ].join(", ");
+            ], t);
             return m.hasPrivate ? t("identities.nostr.mutePrivate", { list }) : t("identities.nostr.mute", { list });
           })()}</p>}
         </div>
@@ -116,7 +117,7 @@ function OwnKey({ view, publish, onPublish, onError }: { view: NostrOwnView; pub
       </div>
       {mode === "note" && (
         <form className="space-y-2" onSubmit={e => { e.preventDefault(); onPublish({ subject: view.subject, action: "note", content: note }); setMode(""); setNote(""); }}>
-          <textarea data-testid="nostr-post-text" value={note} onChange={e => setNote(e.target.value)} rows={3} maxLength={4000} placeholder={t("identities.nostr.postPlaceholder")} className={input} />
+          <textarea data-testid="nostr-post-text" value={note} dir={draftDirection(note)} onChange={e => setNote(e.target.value)} rows={3} maxLength={4000} placeholder={t("identities.nostr.postPlaceholder")} className={input} />
           <div className="flex justify-end"><Button type="submit" variant="primary" data-testid="nostr-post-submit" disabled={!note.trim()}>{t("identities.nostr.review")}</Button></div>
         </form>
       )}
@@ -130,7 +131,7 @@ function OwnKey({ view, publish, onPublish, onError }: { view: NostrOwnView; pub
             <input data-testid="nostr-profile-website" aria-label={t("identities.nostr.website")} placeholder="https://…" maxLength={512} value={fields.website} onChange={e => setFields({ ...fields, website: e.target.value })} {...exactText} className={input} />
             <input data-testid="nostr-profile-picture" aria-label={t("identities.nostr.picture")} placeholder={t("identities.nostr.picturePlaceholder")} maxLength={2048} value={fields.picture} onChange={e => setFields({ ...fields, picture: e.target.value })} {...exactText} className={input} />
           </FieldGrid>
-          <textarea data-testid="nostr-profile-about" aria-label={t("identities.nostr.about")} placeholder={t("identities.nostr.about")} rows={2} maxLength={500} value={fields.about} onChange={e => setFields({ ...fields, about: e.target.value })} className={input} />
+          <textarea data-testid="nostr-profile-about" aria-label={t("identities.nostr.about")} placeholder={t("identities.nostr.about")} rows={2} maxLength={500} value={fields.about} dir={draftDirection(fields.about)} onChange={e => setFields({ ...fields, about: e.target.value })} className={input} />
           <p className="text-[11px] text-text-muted">{t("identities.nostr.fieldsNote")}</p>
           <div className="flex justify-end"><Button type="submit" variant="primary" data-testid="nostr-profile-submit">{t("identities.nostr.review")}</Button></div>
         </form>

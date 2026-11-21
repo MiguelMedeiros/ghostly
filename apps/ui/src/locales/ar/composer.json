@@ -1,7 +1,10 @@
 {
   "attach": "إرفاق",
+  "bytesLeft": "البايتات المتبقية: {{count}}",
   "camera": "كاميرا",
+  "cameraBlocked": "الكاميرا محظورة. اسمح بالكاميرا لـ Ghostly في إعدادات Android.",
   "cameraFailed": "تعذّر تشغيل الكاميرا.",
+  "cameraRefused": "لا يمكن الوصول إلى الكاميرا. اضغط على الكاميرا مرة أخرى واسمح بها.",
   "caption": "أضف تعليقًا",
   "captionTooLong": "هذا التعليق {{bytes}} بايت UTF-8. تسمح DHT بما يصل إلى {{max}}.",
   "category": {
@@ -15,6 +18,8 @@
     "recent": "الأخيرة",
     "symbols": "الرموز"
   },
+  "charactersLeft": "الأحرف المتبقية: {{count}}",
+  "chooseFiles": "اختر ملفات",
   "closeCamera": "إغلاق الكاميرا",
   "dhtTooLong": "أطول من أن يُرسل عبر DHT ({{bytes}} من {{max}} بايت). اختصره أو اتصل مباشرة؛ المسودة محفوظة.",
   "document": "مستند",
@@ -54,6 +59,7 @@
   "identity": "هوية",
   "identityShared": "{{count}} مشتركة في هذه الدردشة",
   "media": "صور وفيديوهات",
+  "nearSoft": "يتسع DHT لنحو {{bytes}} بايت بعد الختم: اختصره لإرساله عبرها",
   "noEmoji": "لم يُعثر على إيموجي",
   "noGifs": "لم يُعثر على صور GIF",
   "overSoft": "يتجاوز {{bytes}} بايت التي تحملها DHT: يُرسل عند الاتصال المباشر",
@@ -77,6 +83,7 @@
   "services": "الخدمات المشتركة",
   "servicesNeedApp": "يتطلب إضافة Ghostly للمتصفح أو تطبيق سطح المكتب",
   "servicesShared": "{{count}} مشتركة في هذه الدردشة",
+  "shareWaitsForEdit": "ما شاركته يُضاف عند انتهاء هذا التعديل.",
   "sharedTextFile": "نص مشارك",
   "skinTone": "لون البشرة",
   "takePhoto": "التقاط صورة",

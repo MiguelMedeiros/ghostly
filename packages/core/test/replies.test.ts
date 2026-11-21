@@ -39,6 +39,23 @@ describe("the line of a reply", () => {
   it("names an inline picture instead of quoting its bytes", () => {
     expect(replySnippet("data:image/png;base64," + "A".repeat(5000))).toBe("🖼️ Picture");
   });
+
+  it("covers a spoiler, markers and all, as the chat list does; other formatting stays", () => {
+    expect(replySnippet("Spoiler: ||the butler did it||")).toBe("Spoiler: ▒▒▒");
+    expect(replySnippet("(||he lives||) **ok**")).toBe("(▒▒▒) **ok**");
+    // Two on a line read as one: never less than the bubble hides.
+    expect(replySnippet("||Ned|| then ||Robb||!")).toBe("▒▒▒!");
+    // Nested spoilers, or one the bubble's parser pairs past another's closer.
+    expect(replySnippet("||a ||b|| c|| d")).toBe("▒▒▒ d");
+    // Within a line: one on the next line is that line's.
+    expect(replySnippet("||a\nb|| c ||d||")).toBe("||a b|| c ▒▒▒");
+    // Not at a word's edge, or never closed: text, as in the bubble.
+    expect(replySnippet("a||b||c, a || b and ||open")).toBe("a||b||c, a || b and ||open");
+    // A line cut before its spoiler closes hides the rest.
+    expect(replySnippet(`||${"x".repeat(REPLY_LIMITS.raw * 2)} end||`)).toBe("▒▒▒");
+    // A wire line from an app that did not cover it is covered where it is read.
+    expect(readReply({ i: ID, s: "see ||it||", f: "sender" }, pairedReplyAuthor)!.s).toBe("see ▒▒▒");
+  });
 });
 
 describe("a reply as a receiver takes it", () => {

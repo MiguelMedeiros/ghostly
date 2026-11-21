@@ -65,6 +65,16 @@ describe("idCard with a public profile", () => {
     expect(receivedIdCard(pubkyReceived({ publicProfile: profile(), expiresAt: now() - 1 })).lookup).toBeUndefined();
     expect(receivedIdCard(pubkyReceived({ publicProfile: profile() }))).toMatchObject({ name: "Alice Liddell", photo: AVATAR });
   });
+
+  it("a contact's profile name is one line on the card: no separator, invisible or direction-changing character", () => {
+    const name = "Alice Verified by GitHub ​⁠﻿؜‎‏\u{e0041}";
+    // As the chat list's face: a line or paragraph separator is a space.
+    expect(receivedIdCard(pubkyReceived({ publicProfile: profile({ name }) }))).toMatchObject({ status: "verified", name: "Alice Verified by GitHub" });
+    // Nothing visible left: the proof's own name, as when the profile has none.
+    const display = { name: "@from-proof", source: "x", fetchedAt: 1 };
+    expect(receivedIdCard(pubkyReceived({ display, publicProfile: profile({ name: "​\u{e0041}" }) })).name).toBe("@from-proof");
+    expect(receivedIdCard(pubkyReceived({ publicProfile: profile({ name: "مريم 👩🏽‍💻" }) })).name).toBe("مريم 👩🏽‍💻");
+  });
 });
 
 describe("the Identities page's cards", () => {

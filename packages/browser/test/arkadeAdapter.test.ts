@@ -91,7 +91,7 @@ const ark = vi.hoisted(() => {
   }
   class RestIndexerProvider { constructor(readonly url: string) {} async getVtxos() { return { vtxos: server.vtxos.map((v) => ({ ...v })) }; } }
   class Wallet {
-    constructor(readonly options: { arkProvider: RestArkProvider; settlementConfig: unknown; storage: Record<string, unknown> }) {}
+    constructor(readonly options: { operatorProvider: RestArkProvider; settlementConfig: unknown; storage: Record<string, unknown> }) {}
     static async create(options: Wallet["options"]) { server.created.push(options as unknown as Record<string, unknown>); return new Wallet(options); }
     async getBalance() { return { available: server.balance, recoverable: undefined, boarding: { total: 7 } }; }
     async getAddress() { return `tark1${server.key}${server.own}`; }
@@ -104,10 +104,10 @@ const ark = vi.hoisted(() => {
       server.tamper?.(tx);
       const checkpoint: TxData = { id: "cp" + id.slice(2), inputs: [{ amount: String(input), script: server.own, leaf: "beef" + "c0" }], outputs: [] };
       await new Promise((resolve) => setTimeout(resolve, 0)); // lets a concurrent operation run if nothing serializes them
-      await this.options.arkProvider.submitTx(enc(tx), [enc(checkpoint)]);
+      await this.options.operatorProvider.submitTx(enc(tx), [enc(checkpoint)]);
     }
     async finalizePendingTxs() {
-      for (const [txid, pending] of server.pending) if (!server.recoveryTxid || server.recoveryTxid === txid) await this.options.arkProvider.finalizeTx(txid, pending.checkpoints);
+      for (const [txid, pending] of server.pending) if (!server.recoveryTxid || server.recoveryTxid === txid) await this.options.operatorProvider.finalizeTx(txid, pending.checkpoints);
     }
     async getContractManager() { return { getContracts: async () => server.contracts }; }
     readonly dustAmount = 330n;
@@ -155,8 +155,8 @@ const ark = vi.hoisted(() => {
       });
     },
     assertAllowedSighashTypes: () => {},
-    // As the SDK has them: swept is recoverable; past its expiry (by the clock) counts too, swept or not.
-    isRecoverable: (v: { isSwept: boolean }) => v.isSwept,
+    // As the SDK has them: these coins are never spent; past its expiry (by the clock) counts too, swept or not.
+    isVtxoSpent: () => false,
     canRecoverOnchain: (v: { isSwept: boolean; expiresAt?: Date }, now: { timestamp: Date }) => v.isSwept || (!!v.expiresAt && v.expiresAt <= now.timestamp),
     verifyTapscriptSignatures: (tx: Transaction, _index: number, keys: string[]) => { if (tx.data.cosigned !== keys[0]) throw new Error("not signed by the pinned server key"); },
   };

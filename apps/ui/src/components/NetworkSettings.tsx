@@ -13,7 +13,9 @@ import { errorText, rawError } from "../lib/errorText";
 import { clockOffTexts } from "../lib/clockOff";
 import { exactText } from "../lib/exactText";
 import { fillNames } from "../lib/fillNodes";
+import { ownDirection } from "../lib/ownDirection";
 import { FieldError } from "./ui/FieldError";
+import type { TranslationKey } from "../locales/translate";
 
 /** Protocol names the transport line keeps as they are, each its own `<bdi>` (Latin inside an Arabic sentence). */
 const PROTOCOL_NAMES = { dht: "Mainline DHT (BEP44)", pkarr: "Pkarr" };
@@ -24,6 +26,8 @@ const FIELDS = {
   turnUrl: "network-turn-url", turnUsername: "network-turn-username", turnCredential: "network-turn-credential",
 } as const;
 type FieldName = keyof typeof FIELDS;
+/** The TURN server's block, which a link to Settings can name to open Network at it (the call note's). */
+export const TURN_FIELD = "network-turn";
 /** What is wrong with each field, said in the page's language. */
 type Problems = Partial<Record<FieldName, string>>;
 
@@ -37,6 +41,22 @@ function turnField(problem: string, server: { username?: string; credential?: st
  * The field a refusal of the engine on Save is about (packages/browser/src/engine/node.ts `updateSettings`), or none:
  * an empty Pkarr list, an Iroh relay (named in the message as typed), or the TURN server Hide my IP still needs.
  */
+/**
+ * What the push relay's last refusal says (`network-push-relay-refused`), by the side the problem is on:
+ * - an answer without CORS (`http` 0, fetch's status for an answer the page may not read): the address is not a push relay (another kind of server, a proxy's error page);
+ * - 429: a relay at its limit for now (its per-address or per-subscription count, or a proxy's), not one that forwards nothing;
+ * - 502-504 with the relay's own words (`The push service did not answer`): the relay works, its host cannot reach the push service;
+ * - 403 (`Origin not allowed`): the relay does not let this app's origin in, which only whoever runs it can change;
+ * - anything else: it did not answer as a push relay.
+ */
+function pushRelayRefusedKey(refused: { http: number; text?: string }): TranslationKey {
+  if (refused.http === 0) return "network.pushRelayNoCors";
+  if (refused.http === 429) return "network.pushRelayBusy";
+  if (refused.http >= 502 && refused.http <= 504 && refused.text) return "network.pushRelayUpstream";
+  if (refused.http === 403) return "network.pushRelayOrigin";
+  return "network.pushRelayRefused";
+}
+
 function refusedField(message: string, irohRelays: readonly string[]): FieldName | undefined {
   if (/^Enter at least one relay address/.test(message)) return "relays";
   if (/Iroh relays$/.test(message)) return "iroh";
@@ -100,6 +120,8 @@ export function NetworkSettings() {
   const direct = network.readRelays !== undefined;
   // Hide my IP from contacts: this app reads and writes through the relays alone, whatever the switch below says.
   const relayOnly = direct && network.relayOnly === true;
+  // How this app reaches the DHT now: with Hide my IP on, the Desktop's DHT node is closed and it goes through the relays.
+  const reaches = relayOnly ? "relays" : network.kind;
 
   const refuse = (refused: Problems) => { focusFirst.current = true; setProblems(refused); };
   // An edit of a refused field takes its error away; the others stay until the next Save.
@@ -169,14 +191,14 @@ export function NetworkSettings() {
   // A refused field: its border says so, and it names its error to assistive technology.
   const invalid = (name: FieldName) => problems[name] ? { "aria-invalid": true, "aria-describedby": `${FIELDS[name]}-error` } : {};
   const problemUnder = (name: FieldName) => <FieldError id={`${FIELDS[name]}-error`} testId="network-error">{problems[name]}</FieldError>;
-  const reset = "min-h-8 text-xs text-text-muted hover:text-accent transition-colors cursor-pointer";
+  const reset = "tap-target min-h-8 text-xs text-text-muted hover:text-accent transition-colors cursor-pointer";
 
   return (
     <Section title={t("network.title")}>
       {network.clockOffMs !== undefined && <Row label={t("connection.clockOff.title")} {...clockOffTexts(t, network.clockOffMs, language)} testId="network-clock-off" />}
       {network.directBlocked && <Row label={t("connection.directBlocked.title")} hint={t("connection.directBlocked.hint")} info={t("connection.directBlocked.info")} testId="network-direct-blocked" />}
       {direct && <Row label={t("network.readRelays")} hint={t(relayOnly ? "network.readRelaysRelayOnly" : "network.readRelaysHint")} info={t("network.readRelaysInfo")} testId="network-read-relays-row">
-        <Switch label={t("network.readRelays")} checked={network.readRelays === true || relayOnly} disabled={switching || relayOnly} onChange={(on) => void readRelays(on)} testId="network-read-relays" />
+        <Switch label={t("network.readRelays")} checked={network.readRelays === true || relayOnly} disabled={relayOnly} busy={switching} onChange={(on) => void readRelays(on)} testId="network-read-relays" />
       </Row>}
       <Field testId="network-relays-field" label={t("network.relays")} htmlFor="network-relays" hint={t("network.relaysHint")} info={t(direct ? "network.relaysInfoDirect" : "network.relaysInfoWeb")}
         trailing={<button onClick={() => setRelays(network.defaultRelays.join("\n"))} aria-label={t("network.resetRelays")} className={reset}>{t("network.reset")}</button>}>
@@ -204,9 +226,17 @@ export function NetworkSettings() {
         <input id={FIELDS.push} value={pushRelay} onChange={(e) => { setPushRelay(e.target.value); edited("push"); }} placeholder="https://push-relay.example.org"
           {...exactText} dir="ltr" data-testid="network-push-relay" {...invalid("push")} className={`${field} font-mono text-sm`} />
         {problemUnder("push")}
+        {/* The saved relay answered the last wake-up, but not as a push relay (a web page, its own refusal, an answer without
+            CORS): said until it forwards one, with the side the problem is on (`pushRelayRefusedKey`). */}
+        {network.pushRelayRefused && pushRelay.trim() === network.pushRelay && <div data-testid="network-push-relay-refused" className="mt-1 text-xs text-warn-ink">
+          <p>{fillNames(t(pushRelayRefusedKey(network.pushRelayRefused), { http: String(network.pushRelayRefused.http) }), { origin: window.location.origin })}</p>
+          {network.pushRelayRefused.text && <p data-testid="network-push-relay-said">{fillNames(t("network.pushRelayRefusedSaid"), { text: network.pushRelayRefused.text })}</p>}
+        </div>}
       </Field>
 
-      <Field testId="network-turn-field" label={t("network.turn")} htmlFor="network-turn-url" hint={t(credentialGone ? "network.turnCredentialAgain" : "network.turnHint")} info={t("network.turnInfo")}>
+      {/* With Hide my IP from contacts on (every client), every connection to a contact goes through it: not optional. */}
+      <Field id={TURN_FIELD} testId="network-turn-field" label={t("network.turn")} htmlFor="network-turn-url"
+        hint={t(credentialGone ? "network.turnCredentialAgain" : network.relayOnly === true ? "network.turnHintRelayOnly" : "network.turnHint")} info={t("network.turnInfo")}>
         <input id={FIELDS.turnUrl} aria-label={t("network.turnUrl")} value={turn.urls} onChange={(e) => { setTurn({ ...turn, urls: e.target.value }); edited("turnUrl"); }}
           placeholder="turn:turn.example.org:3478" {...exactText} dir="ltr" {...invalid("turnUrl")} className={`${field} font-mono text-sm`} />
         {problemUnder("turnUrl")}
@@ -221,7 +251,7 @@ export function NetworkSettings() {
       </Field>
 
       <Row label={t("network.relayOnly")} hint={t("network.relayOnlyHint")} info={t("network.relayOnlyInfo")} testId="network-relay-only-row">
-        <Switch label={t("network.relayOnly")} checked={network.relayOnly === true} disabled={switching} onChange={(on) => void hideMyIp(on)} testId="network-relay-only" />
+        <Switch label={t("network.relayOnly")} checked={network.relayOnly === true} busy={switching} onChange={(on) => void hideMyIp(on)} testId="network-relay-only" />
       </Row>
 
       <Block>
@@ -229,13 +259,13 @@ export function NetworkSettings() {
           <button
             onClick={() => void save()}
             data-testid="network-save"
-            className="px-4 py-2 min-h-10 bg-accent text-on-accent rounded-lg text-sm font-bold hover:bg-accent-hover transition-colors cursor-pointer"
+            className="tap-target px-4 py-2 min-h-10 bg-accent text-on-accent rounded-lg text-sm font-bold hover:bg-accent-hover transition-colors cursor-pointer"
           >
             {t("common.save")}
           </button>
           {saved && <span role="status" data-testid="network-saved" className="text-accent text-sm">{t("network.saved")}</span>}
-          {error && <span role="alert" data-testid="network-error" className="text-danger text-sm min-w-0 break-words">{error}</span>}
-          <span data-testid="network-protocol" data-kind={network.kind} className="text-text-muted text-xs ms-auto min-w-0">{fillNames(t(network.kind === "direct" ? "network.protocolDirect" : "network.protocolRelays"), PROTOCOL_NAMES)}</span>
+          {error && <span role="alert" dir={ownDirection(error)} data-testid="network-error" className="text-danger text-sm min-w-0 break-words">{error}</span>}
+          <span data-testid="network-protocol" data-kind={reaches} className="text-text-muted text-xs ms-auto min-w-0">{fillNames(t(reaches === "direct" ? "network.protocolDirect" : "network.protocolRelays"), PROTOCOL_NAMES)}</span>
         </div>
       </Block>
     </Section>

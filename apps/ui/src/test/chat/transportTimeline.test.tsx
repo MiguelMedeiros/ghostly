@@ -449,6 +449,18 @@ describe("the chat's connection control and its panel", () => {
     expect(engine.callsTo("setChatTransport")).toEqual([{ linkId: "link-1", transport: "auto" }]);
   });
 
+  it("on the Desktop with Hide my IP on, says that is why its own Iroh and HyperDHT are off, not that they need the Desktop", async () => {
+    // As the engine reports it (node.ts `nativeFactoriesFor`): the host's Iroh and HyperDHT left out for contacts, no HyperDHT relay set.
+    const { user, engine } = control({ availableTransports: ["webrtc/1"], runnableTransports: ["webrtc/1"], peerTransports: all, transportAutomatic: true });
+    act(() => engine.update({ settings: { ...engine.state.settings, relayOnly: true } }));
+    await user.click(screen.getByTestId("connection-options"));
+    expect(within(panel()).getByTestId("connection-option-iroh")).toHaveAttribute("title", "Iroh: Off while Hide my IP is on · Settings, Network");
+    expect(within(panel()).getByTestId("connection-option-hyperdht")).toHaveAttribute("title", "With Hide my IP on, HyperDHT needs a HyperDHT relay · Settings, Network");
+    // Off, it is the app that lacks them.
+    act(() => engine.update({ settings: { ...engine.state.settings, relayOnly: undefined } }));
+    expect(within(panel()).getByTestId("connection-option-iroh")).toHaveAttribute("title", "Iroh needs Ghostly Desktop");
+  });
+
   it("says when the contact chose DHT only", () => {
     control({ availableTransports: all, dataLink: "idle", pairing: undefined, textDelivery: "dht", transportAutomatic: true, dhtDelivery: { mode: "stream", peerMode: "dht", authenticated: true, maxTextBytes: 256 } });
     expect(screen.getByTestId("connection-option-dht")).toHaveAttribute("aria-checked", "false");

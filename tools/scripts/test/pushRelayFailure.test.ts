@@ -41,7 +41,7 @@ describe("the push relay's log of a failed forward (infra/services/push-relay)",
     // A value fetch takes still goes on to the push service.
     expect((await post({ Urgency: "high\t" })).status).toBe(502);
     expect(lines).toEqual(["refused Bad TTL value", "refused Bad Topic value", "failed ECONNREFUSED"]);
-    expect(await (await fetch(`${url}healthz`)).json()).toMatchObject({ forwarded: 0, failed: 1, refused: 2 });
+    expect(relay.stats()).toMatchObject({ forwarded: 0, failed: 1, refused: 2 });
   });
 
   it("does not count fetch refusing a request before any connection as a push service that did not answer", async () => {
@@ -61,7 +61,7 @@ describe("the push relay's log of a failed forward (infra/services/push-relay)",
       });
       expect(answer.status).toBe(400);
       expect(lines).toEqual(["refused Not a request fetch can send"]);
-      expect(await (await fetch(`${url}healthz`)).json()).toMatchObject({ failed: 0, refused: 1 });
+      expect(relay.stats()).toMatchObject({ failed: 0, refused: 1 });
     } finally {
       vi.unstubAllGlobals();
     }

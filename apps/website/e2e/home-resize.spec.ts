@@ -44,9 +44,20 @@ async function size(page: Page, width: number, height: number) {
   await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
 }
 
+/** Whether the reader ends up in chapter `id`. For a frame or two after a turn the page has its new width but not yet
+ * its place back (the chapters reshape after the resize event, then KeepPlace scrolls): on a loaded runner that can
+ * outlast any fixed wait, and the middle of the screen is briefly in the next chapter or the footer. */
+async function stays(page: Page, id: string, what: string) {
+  await expect.poll(async () => (await place(page)).id, { message: `${id} ${what}`, timeout: 5_000 }).toBe(id);
+}
+
+/** The home at a window size, once it runs: a scroll before then is laid out anew under the reader by hydration, and
+ * a resize before KeepPlace is there is held by nothing. The nav's chevron is enabled once the page has hydrated
+ * (a starved runner can take well over expect's 5 s for it). */
 async function open(page: Page, width: number, height: number) {
   await size(page, width, height);
   await page.goto("/", { waitUntil: "networkidle" });
+  await expect(page.locator(".nav-open-more")).toBeEnabled({ timeout: 20_000 });
   await page.waitForTimeout(500);
 }
 
@@ -76,8 +87,7 @@ test.describe("a window that changes size", () => {
       await into(page, id, 0.5);
       expect((await place(page)).id).toBe(id);
       await size(page, 768, 1024);
-      await page.waitForTimeout(300);
-      expect((await place(page)).id, `${id} after the resize`).toBe(id);
+      await stays(page, id, "after the resize");
     }
   });
 });
@@ -91,8 +101,7 @@ test.describe("a touch tablet turned", () => {
       await into(page, id, 0.5);
       expect((await place(page)).id).toBe(id);
       await size(page, 768, 1024);
-      await page.waitForTimeout(300);
-      expect((await place(page)).id, `${id} after the turn`).toBe(id);
+      await stays(page, id, "after the turn");
     }
   });
 });

@@ -1,5 +1,5 @@
 import { IDENTITY_CLOCK_SKEW, type IdentityStatement } from "@ghostly/core";
-import type { IdentityProofProvider, IdentityPlatform, RedirectSigner } from "../contract";
+import { englishSay, type IdentityProofProvider, type IdentityPlatform, type RedirectSigner } from "../contract";
 import { getBrowserHost, type OidcHost } from "../../host";
 import { audiences, isConfigured, oidcProviders, providerForIssuer, type OidcProvider, type OidcReveal } from "../oidc/providers";
 import { signInForProof } from "../oidc/flow";
@@ -57,7 +57,7 @@ export function createOidcIdentityProvider(options: OidcIdentityOptions = {}): I
         if (!h || !opening) throw new Error("Signing in with a provider is not available here.");
         const provider = providerForIssuer(statement.binding.subject, providers());
         if (!provider || !isConfigured(provider, h.platform)) { void opening.then(w => w.close(), () => {}); throw new Error("This provider is not set up in this Ghostly build."); }
-        ctx.onProgress(`Sign in with ${provider.name} in the window that opened.`);
+        ctx.onProgress((ctx.say ?? englishSay)("signIn", "Sign in with {{provider}} in the window that opened.", { provider: provider.name }));
         const token = await signInForProof({
           provider, platform: h.platform, nonce: statement.id, window: await opening, signal: ctx.signal, fetch: options.fetch,
           // What the provider cannot put in its token is not asked for.
@@ -113,6 +113,9 @@ export function createOidcIdentityProvider(options: OidcIdentityOptions = {}): I
       if (!SUB.test(id.subject)) throw new Error("The provider’s account identifier cannot be shown");
       const attester = hostOf(provider.issuer);
       const person = id.name ?? id.username;
+      // A display name is the account's own words (its holder's, or any directory admin's): only a GitLab or Twitch
+      // username, unique at the provider, is the provider's. Any other carries that caveat, never shown as checked.
+      const handle = !id.name && (provider.id === "gitlab" || provider.id === "twitch");
       // Only an email the provider marks verified names the account; one it does not (Microsoft never says) is left out.
       const email = id.emailVerified ? id.email : undefined;
       const name = email ? (person && `${person} · ${email}`.length <= 64 ? `${person} · ${email}` : email) : person;
@@ -127,7 +130,7 @@ export function createOidcIdentityProvider(options: OidcIdentityOptions = {}): I
         // With an email, always: a recheck then replaces a display stored before (which kept the email as the name).
         ...(name || url || id.email ? { display: {
           ...(name ? { name } : {}), ...(url ? { url } : {}), fetchedAt: id.issuedAt,
-          source: oidcDisplaySource(provider.name, id.email ? id.emailVerified ? "verified" : "unverified" : undefined),
+          source: oidcDisplaySource(provider.name, id.email ? id.emailVerified ? "verified" : "unverified" : undefined, !!person && !handle),
         } } : {}),
       };
     },

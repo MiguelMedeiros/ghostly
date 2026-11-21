@@ -77,7 +77,7 @@ export function SettingsMenu({ top, summary, shown, has, onOpen, onFound }: {
         <nav aria-label={t("settings.title")} className="bg-surface rounded-xl divide-y divide-border">
           {SETTINGS_SECTIONS.filter(shown).map((section) => (
             <LinkRow key={section} testId={`settings-open-${section}`} leading={<SectionIcon section={section} />} label={t(SECTION_TITLE[section])}
-              hint={summary[section] ? <span className="block truncate">{summary[section]}</span> : undefined} onClick={() => onOpen(section)} />
+              hint={summary[section]} onClick={() => onOpen(section)} />
           ))}
         </nav>
       </>}

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { createIdentity, identityFromSeedB64, sign } from "../src/identity";
 import { fromBase64Url, isZ32Key, toBase64Url } from "../src/bytes";
 import { confirmationTag, epochKeys, newEpochSecret } from "../src/groupCrypto";
@@ -26,6 +26,8 @@ class Net {
   delivered = 0;
   /** Every frame that reached someone: who sent it, to whom, its type. */
   readonly log: { from: string; to: string; t: string }[] = [];
+  /** How many times each member saved its state. */
+  readonly saves = new Map<string, number>();
   /** The members' clock. */
   now = () => Date.now();
 
@@ -39,7 +41,7 @@ class Net {
       return true;
     };
     return {
-      save: async (state: CommunityState) => { this.members.get(name)!.saved = state; },
+      save: async (state: CommunityState) => { this.members.get(name)!.saved = state; this.saves.set(name, (this.saves.get(name) ?? 0) + 1); },
       broadcast: (frame: CommunityFrame) => [...this.members.values()].filter(m => deliver(m, frame)).length,
       direct: (to: string, frame: CommunityFrame) => { deliver(this.byKey(to), frame); },
       addressed: (to: string, frame: CommunityFrame) => { deliver(this.byKey(to), frame); },
@@ -717,6 +719,27 @@ describe("community sessions", { timeout: 60_000 }, () => {
     expect(dave.session.roster).toHaveLength(4);
   });
 
+  it("a replaced link is saved once, the new entry key in the same write as the link commit, and a restart keeps both", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob");
+    await net.meet(alice, bob);
+    const before = net.saves.get("alice") ?? 0;
+    const fresh = await alice.session.replaceLink();
+    const seed = alice.session.state.entry.seedB64;
+    // The admin's state is the whole chain and the secrets: one write for the reset, not one for the commit and one for the key.
+    expect((net.saves.get("alice") ?? 0) - before).toBe(1);
+    expect(alice.saved.entry).toEqual({ key: fresh, seedB64: seed });
+    expect(alice.saved.chain.at(-1)).toMatchObject({ k: "link", x: fresh });
+    await net.settle();
+    await net.restart(alice);
+    expect(alice.session.entryKey).toBe(fresh);
+    expect(alice.session.state.entry.seedB64).toBe(seed);
+    // The restarted admin still answers the new link.
+    const carol = await net.admit(alice, "carol");
+    expect(carol.session.roster).toHaveLength(3);
+  });
+
   it("messages go to everyone, and a restart keeps the branch, the secrets and the store", async () => {
     const net = new Net();
     const alice = net.create("alice");
@@ -919,6 +942,35 @@ describe("community admin changes are final", { timeout: 60_000 }, () => {
     for (const commit of hers) expect(await bob.session.handle(carol.session.myKey, commitFrame(commit))).toBe(true);
     expect(bob.session.topHash).toBe(adminTip);
     expect(bob.session.state.side).toHaveLength(3);
+  });
+
+  it("losing branches kept, however many, never push out the secrets of the branch followed", async () => {
+    // One member's branches are capped (`sideTips`, `sideCommits`); many members together can still keep more than
+    // `secrets`. Lifted here, so one member stands for them all.
+    const limits = COMMUNITY_LIMITS as unknown as { sideTips: number; sideCommits: number };
+    const kept = { sideTips: limits.sideTips, sideCommits: limits.sideCommits };
+    limits.sideTips = limits.sideCommits = COMMUNITY_LIMITS.side;
+    onTestFinished(() => { Object.assign(limits, kept); });
+    const { net, alice, bob, carol, mallory } = await group();
+    const tip = alice.session.top, tipRoster = alice.session.roster;
+    // Mallory signs more admissions after the tip than secrets are kept, each a branch of its own.
+    const flood = Array.from({ length: COMMUNITY_LIMITS.secrets + 4 }, () => forge(mallory, tip, tipRoster, { k: "add", s: createIdentity().pubKeyZ32 }).commit);
+    for (const commit of flood) for (const m of [alice, bob, carol]) await m.session.handle(mallory.session.myKey, commitFrame(commit));
+    await net.settle();
+    for (const m of [alice, bob, carol]) {
+      // One of them may be followed (it is as long as the others): every member the same one.
+      expect(m.session.topHash).toBe(alice.session.topHash);
+      expect(m.session.state.side.length).toBeGreaterThan(COMMUNITY_LIMITS.secrets - COMMUNITY_LIMITS.window);
+      expect(m.session.canSend).toBe(true);
+    }
+    await say(net, bob, "after the flood");
+    expect(net.texts(carol)).toContain("after the flood");
+    // And past the admin's next commit.
+    await alice.session.rotate();
+    await net.settle();
+    await say(net, carol, "after the rotation");
+    expect(net.texts(bob)).toContain("after the rotation");
+    for (const m of [alice, bob, carol]) expect(m.session.state.secrets[alice.session.topHash]).toBeDefined();
   });
 
   it("a member away through the change who hears the longer branch first ends on the admin's", async () => {
@@ -1142,11 +1194,45 @@ describe("a key let in only on a branch that lost", () => {
     alice.online = true;
     await net.meet(alice, bob);
     expect(bob.session.topHash).toBe(alice.session.topHash);
-    // Carol is told her admission lost (the link commit is what makes it lose) and asks again by the link she knew.
+    // The link commit is what makes her admission lose, and it carries the new link: no member sends it to her, so
+    // nothing she holds names the new link, and she is not told she lost.
     await net.meet(bob, carol);
-    expect(carol.session.status).toBe("lost");
+    await net.meet(alice, carol);
+    expect(JSON.stringify(carol.session.state)).not.toContain(entry);
+    expect(carol.session.state.chain.some(c => c.k === "link")).toBe(false);
+    expect(carol.session.status).toBe("active");
+    expect(carol.session.entryKey).toBe(old);
     expect(carol.session.lostEntryKey).toBe(old);
-    expect(carol.session.lostEntryKey).not.toBe(entry);
+  });
+
+  it("is heard no more once a member knows its admission lost, as one removed: neither shown nor handed on", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob");
+    await net.meet(alice, bob);
+    // Alice replaces the link while Bob, cut off, lets Carol in by the old one; Carol speaks on that branch.
+    bob.online = false;
+    await alice.session.replaceLink();
+    await net.settle();
+    bob.online = true; alice.online = false;
+    const carol = await net.admit(bob, "carol");
+    await say(net, carol, "before");
+    expect(net.texts(bob)).toEqual(["before"]);
+    alice.online = true;
+    await net.meet(alice, bob);
+    expect(bob.session.topHash).toBe(alice.session.topHash);
+    expect(bob.session.isRecentMember(carol.session.myKey)).toBe(false);
+    // Carol, not told yet (or an app that does not stop), writes again under her branch's epoch: Bob, who knows her
+    // admission lost, neither shows it nor hands it on.
+    const before = net.log.length;
+    await say(net, carol, "after");
+    expect(net.texts(bob)).toEqual(["before"]);
+    expect(net.texts(alice)).toEqual([]);
+    expect(net.log.slice(before).filter(f => f.from !== "carol" && f.t === "group-msg")).toEqual([]);
+    // What she said while her branch could still win is not handed on either, as for one removed.
+    alice.messages.length = 0;
+    await net.meet(alice, bob);
+    expect(net.texts(alice)).toEqual([]);
   });
 });
 
@@ -1172,8 +1258,8 @@ describe("a leave ends one admission", { timeout: 60_000 }, () => {
     const { net, alice, bob, carol, first } = await rejoined();
     const key = carol.session.myKey;
     expect(first.ls3).toBeDefined();
-    // Alice still holds the request Bob committed: it is not one for this admission, and she commits nothing.
-    expect(alice.session.state.pendingLeaves.map(r => r.s)).toEqual([key]);
+    // Alice dropped the request Bob committed once his commit took Carol out, and commits nothing.
+    expect(alice.session.state.pendingLeaves).toEqual([]);
     expect(await alice.session.commitPendingLeaves()).toBe(0);
     expect(alice.session.state.pendingLeaves).toEqual([]);
     // As a request, with and without the statement of the admission it ended: no member keeps it.
@@ -1332,6 +1418,105 @@ describe("admissions by members while the admin is away", { timeout: 120_000 }, 
     const erin = await net.admit(bob, "erin");
     expect(keys(alice)).toContain(erin.session.myKey);
     expect(COMMUNITY_LIMITS.memberAdmissions).toBe(bound);
+  });
+
+  it("a key a member let in that leaves soon after counts too, and the admin's admission does not clear it", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob"), mallory = await net.admit(alice, "mallory");
+    await net.meet(bob, mallory);
+    alice.online = false;
+    const g = mallory.session.id;
+    // Mallory lets in a key it made up, then commits that key's own leave: the roster stays as it was.
+    const churn = async () => {
+      const { seed, pubKeyZ32: s } = createIdentity();
+      await mallory.session.admit(s);
+      const h = communityCommitHash(mallory.session.top);
+      mallory.session.state.pendingLeaves = [{ s, ls: toBase64Url(sign(leaveStatement(g, s), seed)), ls3: toBase64Url(sign(leaveStatement3(g, s, h), seed)) }];
+      expect(await mallory.session.commitPendingLeaves()).toBe(1);
+    };
+    const pairs = async () => {
+      let n = 0;
+      for (; n < bound; n++) { try { await churn(); } catch (e) { expect(String(e)).toMatch(/admin/); break; } }
+      await net.settle();
+      return n;
+    };
+    expect(await pairs()).toBe(bound / 2);
+    expect(bob.session.roster).toHaveLength(3);
+    const past = forge(mallory, mallory.session.top, mallory.session.roster, { k: "add", s: madeUp() }).commit;
+    expect(await bob.session.handle(mallory.session.myKey, commitFrame(past))).toBe(false);
+    // The admin back lets the next ones in at the door: the leaves still count, so each admission opens the members'
+    // door only for what they leave of the bound, and once as many keys left as the bound, not at all.
+    alice.online = true;
+    await net.meet(alice, bob); await net.meet(alice, mallory);
+    let left = bound / 2, rounds = 0;
+    for (let n = 1; n; rounds++) { await net.admit(alice, `door${rounds}`); left += n = await pairs(); }
+    expect(left).toBe(bound);
+    expect(rounds).toBeLessThan(8);
+    await expect(mallory.session.admit(madeUp())).rejects.toThrow(/admin/);
+    const again = forge(mallory, mallory.session.top, mallory.session.roster, { k: "add", s: madeUp() }).commit;
+    expect(await bob.session.handle(mallory.session.myKey, commitFrame(again))).toBe(false);
+    expect(bob.session.roster).toHaveLength(3 + rounds);
+  });
+
+  it("the people a former admin let in leaving after the hand-over do not hold the members' door", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob"), carol = await net.admit(alice, "carol");
+    await net.meet(bob, carol);
+    const g = alice.session.id;
+    // Alice, the admin, lets people in at the door: as many as the bound.
+    const joined: { s: string; seed: Uint8Array; h: string }[] = [];
+    for (let i = 0; i < bound; i++) {
+      const { seed, pubKeyZ32: s } = createIdentity();
+      await alice.session.admit(s);
+      joined.push({ s, seed, h: communityCommitHash(alice.session.top) });
+    }
+    await net.settle();
+    await alice.session.transferAdmin(bob.session.myKey);
+    await net.settle();
+    expect(carol.session.admin).toBe(bob.session.myKey);
+    // They leave (Bob, the admin now, commits their leaves).
+    for (const { s, seed, h } of joined) {
+      bob.session.state.pendingLeaves = [{ s, ls: toBase64Url(sign(leaveStatement(g, s), seed)), ls3: toBase64Url(sign(leaveStatement3(g, s, h), seed)) }];
+      expect(await bob.session.commitPendingLeaves()).toBe(1);
+    }
+    await net.settle();
+    expect(carol.session.roster).toHaveLength(3);
+    // No member let any of them in: Carol's door is open, at her app and at every member's.
+    await carol.session.admit(madeUp());
+    await net.settle();
+    expect(bob.session.roster).toHaveLength(4);
+  });
+
+  it("the people a member let in leaving after a hand-over still count, the new admin's own as a member included", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob"), carol = await net.admit(alice, "carol");
+    await net.meet(bob, carol);
+    const g = alice.session.id;
+    // Bob, a member, lets in keys he made up: as many as the bound.
+    const joined: { s: string; seed: Uint8Array; h: string }[] = [];
+    for (let i = 0; i < bound; i++) {
+      const { seed, pubKeyZ32: s } = createIdentity();
+      await bob.session.admit(s);
+      joined.push({ s, seed, h: communityCommitHash(bob.session.top) });
+    }
+    await net.settle();
+    // Alice hands the role to Bob: the run ends there, the leaves after it still count his admissions.
+    await alice.session.transferAdmin(bob.session.myKey);
+    await net.settle();
+    expect(carol.session.admin).toBe(bob.session.myKey);
+    for (const { s, seed, h } of joined) {
+      bob.session.state.pendingLeaves = [{ s, ls: toBase64Url(sign(leaveStatement(g, s), seed)), ls3: toBase64Url(sign(leaveStatement3(g, s, h), seed)) }];
+      expect(await bob.session.commitPendingLeaves()).toBe(1);
+    }
+    await net.settle();
+    expect(carol.session.roster).toHaveLength(3);
+    await expect(carol.session.admit(madeUp())).rejects.toThrow(/admin/);
+    const past = forge(carol, carol.session.top, carol.session.roster, { k: "add", s: madeUp() }).commit;
+    expect(await alice.session.handle(carol.session.myKey, commitFrame(past))).toBe(false);
+    expect(alice.session.roster).toHaveLength(3);
   });
 
   it("the admin removing a member takes out everyone that member let in, and whom those let in, and no one else", async () => {

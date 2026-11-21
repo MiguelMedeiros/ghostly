@@ -1,8 +1,8 @@
 import {
   isPubkyKey, isPubkyProofFolder, newPubkyProofFolder, normalizePubkyKey, pubkyProofCapability, pubkyProofFile, pubkyProofPath,
 } from "@ghostly/core";
-import type { IdentityPlatform, IdentityProofProvider, InAppSigner } from "../contract";
-import { readPubkyFile, withPubkyApproval, type PubkyApprovalOptions } from "../pubky";
+import { englishSay, type IdentityPlatform, type IdentityProofProvider, type InAppSigner } from "../contract";
+import { PUBKY_APPROVAL_TIMEOUT, readPubkyFile, withPubkyApproval, type PubkyApprovalOptions } from "../pubky";
 
 /**
  * A Pubky identity (WISP 302, docs/wisps/302-pubky.md), proven by publication: Pubky Ring and Pubky Passport sign
@@ -33,13 +33,15 @@ export interface PubkyIdentityOptions {
 export function createPubkyIdentityProvider(options: PubkyIdentityOptions = {}): IdentityProofProvider<PubkyEvidence> {
   const approve = <T>(capability: `/pub/${string}/:w`, ctx: Parameters<InAppSigner<PubkyEvidence>["run"]>[0], work: Parameters<typeof withPubkyApproval<T>>[1]) => {
     if (!ctx.onApproval) throw new Error("This screen cannot show a Pubky request");
-    return withPubkyApproval({ ...options.approval, capability, signal: ctx.signal, onApproval: ctx.onApproval, onProgress: ctx.onProgress }, work);
+    const wait = ctx.waitMs ? { timeoutMs: Math.min(ctx.waitMs, PUBKY_APPROVAL_TIMEOUT) } : {};
+    return withPubkyApproval({ ...options.approval, ...wait, capability, signal: ctx.signal, onApproval: ctx.onApproval, onProgress: ctx.onProgress, say: ctx.say }, work);
   };
 
   const signer: InAppSigner<PubkyEvidence> = {
     id: "pubky-auth", kind: "in-app",
     label: "Pubky Ring or Pubky Passport",
     action: "Continue",
+    maxWaitMs: PUBKY_APPROVAL_TIMEOUT,
     description: "One request: approve it in Pubky Passport in your browser, or scan it with Pubky Ring. Ghostly only asks to write one small file to a new folder of your homeserver.",
     run(ctx, work) {
       const folder = newPubkyProofFolder();
@@ -50,7 +52,7 @@ export function createPubkyIdentityProvider(options: PubkyIdentityOptions = {}):
             subject: async () => session.key,
             async sign(statement) {
               if (statement.binding.subject !== session.key) throw new Error("That is another Pubky identity");
-              ctx.onProgress("Writing the proof to your homeserver…");
+              ctx.onProgress((ctx.say ?? englishSay)("progress.writing", "Writing the proof to your homeserver…"));
               const path = pubkyProofPath(folder, statement.id);
               await session.put(path, pubkyProofFile(statement));
               written = path;
@@ -105,7 +107,7 @@ export function createPubkyIdentityProvider(options: PubkyIdentityOptions = {}):
         const path = pubkyProofPath(folder, id);
         return approve(pubkyProofCapability(folder), ctx, async session => {
           if (session.key !== subject) throw new Error("That is another Pubky identity: approve with the one this proof is for");
-          ctx.onProgress("Deleting the proof file from your homeserver…");
+          ctx.onProgress((ctx.say ?? englishSay)("progress.deleting", "Deleting the proof file from your homeserver…"));
           await session.delete(path);
         });
       },

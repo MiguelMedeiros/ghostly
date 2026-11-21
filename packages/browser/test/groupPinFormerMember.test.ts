@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { pinIsNewer, type GroupPinFrame, type WirePin } from "@ghostly/core";
+import { myPin } from "../src/engine/pins";
 import { CommunityWorld, type Peer } from "./communityWorld";
 // covers: groups.protocol.pins
 
@@ -68,4 +69,37 @@ describe("a private group's pin after its pinner leaves", { timeout: 300_000 }, 
       for (const p of [alice, carol]) expect(p.groups.pinOf(id)?.id ?? "").toBe("");
     });
   }
+
+  it("a member who pins the message already pinned takes nothing over: the pin stays when they leave", async () => {
+    const world = new CommunityWorld();
+    vi.spyOn(Date, "now").mockImplementation(() => world.now);
+    const [alice, bob, carol] = ["alice", "bob", "carol"].map(n => addPeer(world, n));
+    const id = await alice.groups.create("Crew", "mesh");
+    const link = await alice.groups.enableLink(id);
+    for (const p of [bob, carol]) { await p.groups.joinByLink(link); await world.until(() => world.member(p, id), 5 * 60_000); }
+    await world.run(60_000);
+    await alice.groups.send(id, "meet at 9");
+    await world.run(10_000);
+    // As pinMessage does: myPin on what the peer shows, then signed and sent unless nothing changes.
+    const pinFrom = async (p: Peer) => {
+      const current = p.groups.pinOf(id), messageId = p.messages.find(m => m.text === "meet at 9")!.id;
+      const made = await myPin({ messages: async chat => p.messages.filter(m => m.linkId === chat) }, `group:${id}`, messageId, false, current, world.now);
+      if ("error" in made) throw new Error(made.error);
+      if ("already" in made) return;
+      const frame = p.groups.pinFrame(id, made)!;
+      await p.groups.setPin(id, { ...made, k: frame.k, sig: frame.sig });
+      for (const key of p.host.edges(id).keys()) sendPin(p, id, key);
+    };
+    await pinFrom(alice);
+    await world.run(10_000);
+    const pinned = alice.groups.pinOf(id)!;
+    expect(carol.groups.pinOf(id)).toMatchObject({ id: pinned.id, n: pinned.n });
+    await world.run(1_000);
+    await pinFrom(carol);
+    await world.run(10_000);
+    for (const p of [alice, bob]) expect(p.groups.pinOf(id)).toMatchObject({ id: pinned.id, n: pinned.n });
+    await carol.groups.leave(id);
+    await world.run(30_000);
+    for (const p of [alice, bob]) expect(p.groups.pinOf(id)?.id).toBe(pinned.id);
+  });
 });

@@ -29,9 +29,28 @@ describe("accepting a contact request in the engine (WISP 8xx)", () => {
     const linkId = await node["contactLinks"]["host"].accept({ key: asker, invite, name: "Kevin", text: "Hi, from your site", issued: 1_000, expires: 2_000, receivedAt: 1_500 });
     expect(linkId).toBe(row.id);
     expect(join).toHaveBeenCalledWith({ inviteCode: invite });
-    expect(node.getState().links.find((l) => l.id === row.id)?.label).toBe("Kevin");
+    // The requester chose that name: it is the contact's own, never a name given on this side.
+    const view = node.getState().links.find((l) => l.id === row.id);
+    expect({ label: view?.label, peerNick: view?.peerNick }).toEqual({ label: undefined, peerNick: "Kevin" });
+    const stored = (await db.getLinks()).find((l) => l.id === row.id);
+    expect({ label: stored?.label, peerNick: stored?.peerNick }).toEqual({ label: undefined, peerNick: "Kevin" });
     const messages = await db.getMessages(row.id);
     expect(messages.map((m) => ({ text: m.text, sender: m.sender }))).toEqual([{ text: "Hi, from your site", sender: "peer" }]);
+  });
+
+  it("keeps a request's name as the contact's own even when it looks like a group ref, cleaned as a label is", async () => {
+    const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { automaticWallets: false });
+    nodes.push(node);
+    const row: StoredLink = { id: "chat-named-group", profile: "paired-chat/1", createdAt: 1, seedB64: createIdentity().seedB64, encKeyB64: createIdentity().seedB64,
+      peerPubKeyZ32: createIdentity().pubKeyZ32, participationSeed: createIdentity().seedB64 };
+    await db.putLink(row);
+    node["links"].set(row.id, { stored: row, myPubKeyZ32: "me", link: null as never, status: "online", dataLink: "open",
+      presence: { online: true, lastPacketAt: 0, services: null }, lastMessageAt: 0, peerAck: 0, lastSyncAt: 0,
+      poll: { polling: false, nextAt: 0, interval: 0 }, files: { receivedBytes: 0, wireIds: new Set(), incoming: new Map() } } as never);
+    vi.spyOn(node, "joinLink").mockResolvedValue({ linkId: row.id });
+    await node["contactLinks"]["host"].accept({ key: createIdentity().pubKeyZ32, invite: createChatInvite().inviteCode, name: "  group:Crew​  ", text: "hi", issued: 1_000, expires: 2_000, receivedAt: 1_500 });
+    const view = node.getState().links.find((l) => l.id === row.id);
+    expect({ label: view?.label, peerNick: view?.peerNick }).toEqual({ label: undefined, peerNick: "group:Crew" });
   });
 
   it("shows a request's text as not confirmed until the asker's app proves it in the chat, and only the asker key's proof for this chat does", async () => {

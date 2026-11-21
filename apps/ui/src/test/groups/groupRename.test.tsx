@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import type { GroupMemberView, GroupView, StoredMessage } from "@ghostly/browser/shared/types";
@@ -164,6 +164,20 @@ describe("renaming a group in the app", () => {
     expect(input).toHaveValue(`${name}ね`);
   });
 
+  it("Escape that drops an input method's candidate keeps the rename open", async () => {
+    fakeEngine.update({ groups: [admin({ name: "Friends" })] });
+    const { user } = renderApp(<GroupMembersDialog group={admin({ name: "Friends" })} onClose={() => {}} />);
+    await user.click(screen.getByTestId("group-rename"));
+    const input = screen.getByTestId("group-rename-input");
+    fireEvent.keyDown(input, { key: "Escape", isComposing: true });
+    expect(screen.getByTestId("group-rename-input")).toBeInTheDocument();
+    // WebKit: the key that ends the composition comes right after its end, no longer composing, as 229.
+    fireEvent.keyDown(input, { key: "Escape", keyCode: 229 });
+    expect(screen.getByTestId("group-rename-input")).toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.queryByTestId("group-rename-input")).not.toBeInTheDocument();
+  });
+
   it("Rename, Change picture and Remove picture are a thumb's height on a phone, as the rest of the dialog is", () => {
     // They were a line of 12 px text, 16 px high: the only way to rename the group or change its picture.
     const group = admin({ picture: "data:image/webp;base64,AAAA" });
@@ -195,6 +209,19 @@ describe("renaming a group in the app", () => {
     expect(screen.queryByTestId("group-rename")).not.toBeInTheDocument();
   });
 
+  it("a group with no name yet is \"A group\" in the panel's title, its name, and its picture's button; Rename starts empty", async () => {
+    const unnamed = admin({ name: "", picture: "data:image/jpeg;base64,AA" });
+    fakeEngine.update({ groups: [unnamed] });
+    const { user } = renderApp(<GroupMembersDialog group={unnamed} onClose={() => {}} />);
+    const dialog = screen.getByTestId("group-members-dialog");
+    expect(screen.getByTestId("group-members-name")).toHaveTextContent("A group");
+    expect(dialog).toHaveAccessibleName("A group");
+    expect(screen.getByTestId("group-members-avatar-open")).toHaveAccessibleName("View photo of \u2068A group\u2069");
+    await user.click(screen.getByTestId("group-rename"));
+    expect(screen.getByTestId("group-rename-input")).toHaveValue("");
+    expect(dialog).toHaveAccessibleName("A group");
+  });
+
   it("the new name in the chat list, and a line naming who renamed it as the roster knows them", async () => {
     fakeEngine.update({ groups: [notAdmin({ name: "Book club" })] });
     const { unmount } = renderApp(<UpdateProvider><Sidebar /></UpdateProvider>);
@@ -208,7 +235,8 @@ describe("renaming a group in the app", () => {
     renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1" });
     expect(screen.getByTestId("group-name")).toHaveTextContent("Book club");
     const lines = await screen.findAllByTestId("group-event");
-    expect(lines.map(l => l.textContent)).toEqual(["Alice renamed the group to “Book club”"]);
+    // Alice is the admin: her name carries the admin's mark.
+    expect(lines.map(l => l.textContent)).toEqual(["Alice admin renamed the group to “Book club”"]);
   });
 
   it("a change the engine credits nobody with (a new admin signed again what the last one set) names nobody, in the app's language", async () => {

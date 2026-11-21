@@ -335,10 +335,20 @@ pub async fn link_preview_fetch(url: String, kind: String) -> Result<PreviewResp
     link_preview::fetch(url, kind).await
 }
 
-/// A held item or manifest from the storage a contact chose (WISP 404): public addresses only, see `hold_fetch`.
+/// A held item or manifest from the storage a contact chose (WISP 404), or an identity's proof or public data:
+/// public addresses only, see `hold_fetch`.
 #[tauri::command]
-pub async fn hold_fetch(url: String) -> Result<HoldResponse, String> {
-    hold_fetch::fetch(url).await
+pub async fn hold_fetch(
+    url: String,
+    headers: Option<Vec<(String, String)>>,
+) -> Result<HoldResponse, String> {
+    hold_fetch::fetch(url, headers.unwrap_or_default()).await
+}
+
+/// A token or moderation request to the call node a group names (WISP 602): public addresses only, see `hold_fetch`.
+#[tauri::command]
+pub async fn group_call_fetch(url: String, body: String) -> Result<HoldResponse, String> {
+    hold_fetch::post(url, body).await
 }
 
 /// Opens a web link from a message (a link preview, a location card) in the
@@ -349,6 +359,19 @@ pub fn open_web_link(url: String) -> Result<(), String> {
         return Err("Not a web link".into());
     }
     launch(&url)
+}
+
+/// The app's own page in Android's settings, where a camera Android no longer asks for is allowed again. Android only.
+#[tauri::command]
+pub fn open_app_settings() -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        crate::android::open_app_settings()
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        Err("No app settings to open".into())
+    }
 }
 
 pub(crate) fn is_web_link(url: &str) -> bool {
@@ -420,8 +443,9 @@ pub fn open_service_window<R: tauri::Runtime>(
     tag: String,
     title: String,
     unreachable: Option<String>,
+    relay_only: Option<bool>,
 ) -> Result<(), String> {
-    viewer::open(&app, peer, service, tag, title, unreachable)
+    viewer::open(&app, peer, service, tag, title, unreachable, relay_only)
 }
 
 /// The profile locked: every contact's app window closes (`viewer::close_all`).
@@ -536,6 +560,32 @@ pub fn hide_from_switcher(on: bool) -> Result<(), String> {
     {
         let _ = on;
         Ok(())
+    }
+}
+
+/// The Android connection service's answer: whether it runs now, and whether the system ended the app under it in
+/// the last run (the page then offers the battery setting).
+#[derive(Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ConnectionHeld {
+    held: bool,
+    killed: bool,
+}
+
+/// Android: while "Stay connected in the background" is on, the app unlocked and online with chats or groups (`on`),
+/// a foreground service with a quiet "Ghostly is connected" notification keeps the app and its links up out of sight
+/// (Android freezes it otherwise, and every link goes down); `links`, whether any link is up, holds its wake lock.
+/// Elsewhere nothing held.
+// Off the main thread: the Kotlin plugin is waited for.
+#[tauri::command(async)]
+pub fn connection_service(on: bool, links: Option<bool>) -> Result<ConnectionHeld, String> {
+    #[cfg(target_os = "android")]
+    {
+        crate::android::connection_service(on, on && links.unwrap_or(false))
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (on, links);
+        Ok(ConnectionHeld::default())
     }
 }
 
@@ -754,6 +804,21 @@ mod project_link_tests {
             serde_json::from_value(serde_json::json!({ "name": "Alice", "video": true })).unwrap();
         assert_eq!(super::call_service(Some(call)), Ok(false));
         assert_eq!(super::call_service(None), Ok(false));
+    }
+
+    #[test]
+    fn nothing_stays_connected_on_a_desktop() {
+        let none = super::ConnectionHeld::default();
+        assert_eq!(super::connection_service(true, Some(true)), Ok(none));
+        assert_eq!(
+            super::connection_service(false, None),
+            Ok(super::ConnectionHeld::default())
+        );
+        // The page reads both fields by these names.
+        assert_eq!(
+            serde_json::to_value(super::ConnectionHeld::default()).unwrap(),
+            serde_json::json!({ "held": false, "killed": false })
+        );
     }
 
     #[test]

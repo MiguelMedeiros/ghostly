@@ -53,6 +53,8 @@ describe("a store's last read that failed", () => {
     [{ problem: "status", problemStatus: 404 }, "Nothing found at that link."],
     [{ problem: "store-key" }, "That store is signed by a different key."],
     [{ problem: "not-json" }, "That link holds no valid store."],
+    [{ problem: "rollback" }, "This store's link now holds an older list than yours. Ghostly kept yours."],
+    [{ problem: "too-large" }, "This store's list is too large for Ghostly to read."],
   ])("says its cause: %o", async (problem, line) => {
     expect(await problemLine(store(problem))).toBe(line);
   });
@@ -68,8 +70,17 @@ describe("a store's last read that failed", () => {
     expect(await problemLine(store({ equivocation: { sequence: 5, at: SEEN } }))).toContain("signed two different lists");
   });
 
+  it("says it in the red meant for words, readable on a dark theme", async () => {
+    await problemLine(store({ problem: "offline" }));
+    expect(screen.getByTestId("app-store-problem")).toHaveClass("text-danger-ink");
+  });
+
   it("says its cause in the app's language", async () => {
     expect(await problemLine(store({ problem: "offline" }), "pt")).toBe("Você está offline.");
+  });
+
+  it("says an older list in the store's words, in the app's language", async () => {
+    expect(await problemLine(store({ problem: "rollback" }), "pt")).toBe("O link desta loja agora tem uma lista mais antiga que a sua. O Ghostly manteve a sua.");
   });
 
   it("says so when a Refresh fails again", async () => {
@@ -81,5 +92,92 @@ describe("a store's last read that failed", () => {
     await waitFor(() => expect(fakeEngine.callsTo("appStoreRefresh")).toHaveLength(1));
     await act(async () => {});
     expect(await screen.findByTestId("toast-text")).toHaveTextContent("You are offline.");
+  });
+
+  it("says, politely, what a Refresh that worked read: the store's new count", async () => {
+    const listing = (n: number) => ({ ref: `ghostly:app/${KEY}/app${n}`, sequence: 1, digest: `d${n}`, urls: [], title: `App ${n}`, tagline: "" });
+    const off = store({ problem: "offline", apps: [1, 2, 3].map(listing) });
+    let now = off;
+    fakeEngine.on("appStoreRefresh", () => { now = store({ apps: [1, 2, 3, 4, 5].map(listing) }); return [now]; });
+    fakeEngine.on("appStoreList", () => [now]);
+    renderApp(<Apps />, { route: "/apps" });
+    await screen.findByTestId("app-store-problem");
+    const region = screen.getByTestId("toast-region");
+    expect(region).toHaveAttribute("aria-live", "polite");
+    expect(region).toHaveTextContent("");
+    await userEvent.click(within(screen.getByTestId("app-store")).getByTestId("app-store-refresh"));
+    await waitFor(() => expect(screen.queryByTestId("app-store-problem")).toBeNull());
+    expect(region).toHaveTextContent("\u2068Store off\u2069 is up to date: 5 apps");
+    expect(screen.getByTestId("toast")).toHaveAttribute("data-tone", "success");
+  });
+
+  // The card's text takes the page's direction: a name not isolated draws its ending "!" on its other side in Arabic,
+  // and an Arabic name's number before the name in English. Isolated, as everywhere else on the Apps screens.
+  it.each([
+    ["ar", "Hunt!", "\u2068Hunt!\u2069 محدّث: لا تطبيقات"],
+    ["en", "متجر 2", "\u2068متجر 2\u2069 is up to date: 0 apps"],
+  ] as const)("isolates the store's name in what a Refresh that worked says (%s)", async (language, name, said) => {
+    const named = store({ name });
+    fakeEngine.on("appStoreRefresh", () => [named]).on("appStoreList", () => [named]);
+    renderApp(<Apps />, { route: "/apps", language });
+    await userEvent.click(within(await screen.findByTestId("app-store")).getByTestId("app-store-refresh"));
+    expect(await screen.findByTestId("toast-text")).toHaveTextContent(said);
+  });
+
+  // Its link serves the list kept again: the read works, and the store stays marked for its two lists until a newer one.
+  it("says a Refresh of a store still marked for two lists says so, not up to date", async () => {
+    const marked = store({ equivocation: { sequence: 5, at: SEEN } });
+    fakeEngine.on("appStoreRefresh", () => [marked]).on("appStoreList", () => [marked]);
+    renderApp(<Apps />, { route: "/apps" });
+    const line = await screen.findByTestId("app-store-problem");
+    await userEvent.click(within(screen.getByTestId("app-store")).getByTestId("app-store-refresh"));
+    await waitFor(() => expect(fakeEngine.callsTo("appStoreRefresh")).toHaveLength(1));
+    await act(async () => {});
+    const said = await screen.findByTestId("toast-text");
+    expect(said).not.toHaveTextContent("up to date");
+    expect(said).toHaveTextContent(line.textContent!);
+    expect(screen.getByTestId("toast")).not.toHaveAttribute("data-tone", "success");
+  });
+
+  // Removed in another tab: the engine has no such store. Said so, and the list is read again, so its block goes, and
+  // the Refresh that had the focus with it: the focus goes to Add, as after a Remove here, not to the page.
+  it("says a Refresh of a store removed meanwhile that it is no longer added, and its block goes", async () => {
+    let held = [store({})];
+    fakeEngine.on("appStoreList", () => held).on("appStoreRefresh", () => { throw new Error("no-store: No such store"); });
+    renderApp(<Apps />, { route: "/apps" });
+    const refresh = within(await screen.findByTestId("app-store")).getByTestId("app-store-refresh");
+    held = [];
+    await userEvent.click(refresh);
+    expect(await screen.findByTestId("toast-text")).toHaveTextContent("This store is no longer added.");
+    await waitFor(() => expect(screen.queryByTestId("app-store")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId("apps-add")));
+  });
+
+  it("sends the focus to Add when a Refresh finds its store removed meanwhile and another store is left", async () => {
+    const other = store({ key: "other", url: "https://other.example/store.json", name: "Other" });
+    let held = [store({}), other];
+    fakeEngine.on("appStoreList", () => held).on("appStoreRefresh", () => { throw new Error("no-store: No such store"); });
+    renderApp(<Apps />, { route: "/apps" });
+    await waitFor(() => expect(screen.getAllByTestId("app-store")).toHaveLength(2));
+    const refresh = within(screen.getAllByTestId("app-store")[0]).getByTestId("app-store-refresh");
+    held = [other];
+    await userEvent.click(refresh);
+    await waitFor(() => expect(screen.getAllByTestId("app-store")).toHaveLength(1));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId("apps-add")));
+  });
+
+  // Its host still serves a list past its date: the read works, and the store is not up to date.
+  it("says a Refresh that read a list past its date is out of date, not up to date", async () => {
+    const old = store({ expires: Math.floor(SEEN / 1000), expired: true });
+    fakeEngine.on("appStoreRefresh", () => [old]).on("appStoreList", () => [old]);
+    renderApp(<Apps />, { route: "/apps" });
+    const stale = await screen.findByTestId("app-store-stale");
+    await userEvent.click(within(screen.getByTestId("app-store")).getByTestId("app-store-refresh"));
+    await waitFor(() => expect(fakeEngine.callsTo("appStoreRefresh")).toHaveLength(1));
+    await act(async () => {});
+    const said = await screen.findByTestId("toast-text");
+    expect(said).not.toHaveTextContent("up to date");
+    expect(said).toHaveTextContent(stale.textContent!);
+    expect(screen.getByTestId("toast")).not.toHaveAttribute("data-tone", "success");
   });
 });

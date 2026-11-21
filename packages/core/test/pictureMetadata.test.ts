@@ -54,17 +54,19 @@ const vp8l = riffChunk("VP8L", [0x2f, 43, 0x20, 0x06, 0, 1, 2, 3]);
 // HEIF: ftyp, meta (hdlr, iinf with a picture item and an Exif item, iloc), mdat with both.
 const box = (type: string, body: number[]) => [...be32(body.length + 8), ...ascii(type), ...body];
 const fullBox = (type: string, version: number, body: number[]) => box(type, [version, 0, 0, 0, ...body]);
-function heif({ extra = [] as number[][], exifMethod = 0, topExtra = [] as number[][] } = {}): number[] {
+function heif({ extra = [] as number[][], exifMethod = 0, topExtra = [] as number[][], brand = "heic", properties = [] as number[][] } = {}): number[] {
   const picture = [0xaa, 0xbb, 0xcc, 0xdd], exifData = [0, 0, 0, 6, ...ascii("Exif\0\0MM"), ...ascii(SECRET)];
-  const ftyp = box("ftyp", [...ascii("heic"), 0, 0, 0, 0, ...ascii("mif1heic")]);
+  const ftyp = box("ftyp", [...ascii(brand), 0, 0, 0, 0, ...ascii(`mif1${brand}`)]);
   const infe = (id: number, type: string) => fullBox("infe", 2, [...be16(id), 0, 0, ...ascii(type), 0]);
-  const iinf = fullBox("iinf", 0, [0, 2, ...infe(1, "hvc1"), ...infe(2, "Exif")]);
+  const iinf = fullBox("iinf", 0, [0, 2, ...infe(1, brand === "avif" ? "av01" : "hvc1"), ...infe(2, "Exif")]);
+  // The picture's properties, each associated with item 1 by its index (from 1).
+  const iprp = properties.length ? [box("iprp", [...box("ipco", properties.flat()), ...fullBox("ipma", 0, [0, 0, 0, 1, 0, 1, properties.length, ...properties.map((_, i) => i + 1)])])] : [];
   const idat = exifMethod === 1 ? [box("idat", exifData)] : [];
   // iloc v1: offset 4, length 4, base 0, index 0; two items, one extent each. Offsets fixed once the layout is known.
   const iloc = (pictureAt: number, exifAt: number) => fullBox("iloc", 1, [0x44, 0x00, 0, 2,
     0, 1, 0, 0, 0, 0, 0, 1, ...be32(pictureAt), ...be32(picture.length),
     0, 2, 0, exifMethod, 0, 0, 0, 1, ...be32(exifAt), ...be32(exifData.length)]);
-  const meta = (at: number[]) => fullBox("meta", 0, [...fullBox("hdlr", 0, [0, 0, 0, 0, ...ascii("pict"), ...new Array(12).fill(0), 0]), ...iinf, ...iloc(at[0]!, at[1]!), ...idat.flat(), ...extra.flat()]);
+  const meta = (at: number[]) => fullBox("meta", 0, [...fullBox("hdlr", 0, [0, 0, 0, 0, ...ascii("pict"), ...new Array(12).fill(0), 0]), ...iinf, ...iloc(at[0]!, at[1]!), ...iprp.flat(), ...idat.flat(), ...extra.flat()]);
   const head = [...ftyp, ...meta([0, 0]), ...topExtra.flat()];
   const mdatBody = exifMethod === 1 ? picture : [...picture, ...exifData];
   const start = head.length + 8;
@@ -371,6 +373,61 @@ describe("a picture's metadata, removed before it is sent", () => {
     expect(has(out, SECRET)).toBe(false);
     expect([...out]).toEqual(jpeg(segment(0xe0, [...ascii("JFIF\0"), 1, 2, 1, 0, 72, 0, 72, 0, 0]), dqt, sof(300, 200), dht));
     expect(imageSize(out)).toEqual({ width: 300, height: 200 });
+  });
+
+  // Item properties: what draws the picture, and what is about it (a user description, its times).
+  const ispe = fullBox("ispe", 0, [...be32(300), ...be32(200)]);
+  const colr = box("colr", [...ascii("nclx"), 0, 1, 0, 13, 0, 6, 0x80]);
+  const pixi = fullBox("pixi", 0, [3, 8, 8, 8]);
+  const irot = box("irot", [1]);
+  const hvcC = box("hvcC", [1, 1, 0x60, 0, 0, 0, 0x90, 0, 0, 0, 0, 0, 0x5d, 0xf0, 0, 0xfc, 0xfd, 0xf8, 0xf8, 0, 0, 0x0f, 0]);
+  const av1C = box("av1C", [0x81, 0x00, 0x0c, 0x00]);
+  const TIME = [0x00, 0x00, 0x01, 0x8f, 0x2a, 0x3b, 0x4c, 0x5d];
+  const udes = fullBox("udes", 0, ascii(`en\0${SECRET}\0Amsterdam, by the canal\0holiday\0`));
+  const crtt = fullBox("crtt", 0, TIME);
+  const mdft = fullBox("mdft", 0, TIME);
+  const altt = fullBox("altt", 0, ascii(`${SECRET}\0en\0`));
+
+  /** What `strip` changed in `sent`, past its Exif item: all zeros, and none of the drawing properties. */
+  function onlyDescriptionZeroed(sent: number[], out: Uint8Array, kept: number[][]) {
+    expect(out.length).toBe(sent.length);
+    expect([...sent.keys()].filter((i) => sent[i] !== out[i]).every((i) => out[i] === 0)).toBe(true);
+    for (const property of kept) expect(has(out, String.fromCharCode(...property))).toBe(true);
+  }
+
+  it("HEIC: a user description and creation time among its item properties go zeroed, headers and sizes kept; what draws it stays", () => {
+    const sent = heif({ properties: [hvcC, ispe, udes, colr, crtt, pixi, irot] });
+    const out = strip(sent, "image/heic");
+    expect(has(Uint8Array.from(sent), SECRET)).toBe(true);
+    expect(has(out, SECRET)).toBe(false);
+    expect(has(out, "Amsterdam")).toBe(false);
+    expect(has(out, String.fromCharCode(...TIME))).toBe(false);
+    expect(has(out, `\0\0\0${String.fromCharCode(udes.length)}udes${"\0".repeat(udes.length - 8)}`)).toBe(true);
+    expect(has(out, `\0\0\0${String.fromCharCode(crtt.length)}crtt${"\0".repeat(crtt.length - 8)}`)).toBe(true);
+    onlyDescriptionZeroed(sent, out, [hvcC, ispe, colr, pixi, irot]);
+  });
+
+  it("AVIF: accessibility text and modification time among its item properties go zeroed; what draws it stays", () => {
+    const sent = heif({ brand: "avif", properties: [av1C, ispe, altt, colr, mdft, pixi] });
+    const out = strip(sent, "image/avif");
+    expect(has(out, SECRET)).toBe(false);
+    expect(has(out, String.fromCharCode(...TIME))).toBe(false);
+    onlyDescriptionZeroed(sent, out, [av1C, ispe, colr, pixi]);
+  });
+
+  it("HEIF with an item property this does not know, or anything but ipco and ipma in iprp, is refused", () => {
+    expect(() => strip(heif({ properties: [hvcC, ispe, box("zzzz", ascii(SECRET))] }), "image/heic")).toThrow(NO_PICTURE_METADATA);
+    expect(() => strip(heif({ brand: "avif", properties: [av1C, ispe, fullBox("cmex", 0, ascii(SECRET))] }), "image/avif")).toThrow(NO_PICTURE_METADATA);
+    const twoIpco = heif({ properties: [hvcC] });
+    const ipco = Buffer.from(Uint8Array.from(twoIpco)).indexOf("ipco", 0, "latin1") - 4;
+    const extraIpco = box("ipco", ascii(SECRET));
+    twoIpco.splice(ipco, 0, ...extraIpco);
+    // The boxes that hold the new one grow with it: iprp and meta (iloc's offsets then point 1 box early, which this never reads).
+    for (const name of ["iprp", "meta"]) {
+      const at = Buffer.from(Uint8Array.from(twoIpco)).indexOf(name, 0, "latin1") - 4;
+      twoIpco.splice(at, 4, ...be32(((twoIpco[at]! << 24) | (twoIpco[at + 1]! << 16) | (twoIpco[at + 2]! << 8) | twoIpco[at + 3]!) + extraIpco.length));
+    }
+    expect(() => strip(twoIpco, "image/heic")).toThrow(NO_PICTURE_METADATA);
   });
 
   it("HEIC with a part this does not know is refused: an XML box, a video track, a uuid box", () => {

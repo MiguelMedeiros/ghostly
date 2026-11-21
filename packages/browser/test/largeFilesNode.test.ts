@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { createHash } from "node:crypto";
 import { afterEach, expect, it, vi } from "vitest";
-import { ChatFiles, FILE_LIMITS, GhostLink, createIdentity, createLink, identityFromSeedB64, randomBytes, toBase64Url, type FileTransferRecord, type IncomingTarget, type OfferDecision } from "@ghostly/core";
+import { ChatFiles, FILE_LIMITS, GhostLink, REMOVED_TEXT, createIdentity, createLink, identityFromSeedB64, randomBytes, toBase64Url, type FileTransferRecord, type IncomingTarget, type OfferDecision } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { STORES, fileStore } from "../src/shared/idb";
@@ -9,7 +9,7 @@ import { knownErrorParts } from "../../../apps/ui/src/lib/errorText";
 import { fileBytes, registerFileBytes } from "../src/shared/fileBytes";
 import { IdbFileBytes } from "../src/shared/fileBytesIdb";
 import { FakeNativeNet, fakeDescriptor } from "./helpers/fakeNative";
-// covers: files.large.offer, files.large.resume, files.large.integrity, files.storage, files.large.resend, files.large.request, chat.order
+// covers: files.large.offer, files.large.resume, files.large.integrity, files.storage, files.large.resend, files.large.request, chat.order, chat.waiting
 
 /**
  * files/3 in the engine: a real node (the app) and its contact's link over stand-ins for Iroh and HyperDHT, the
@@ -37,8 +37,11 @@ Object.defineProperty(globalThis.navigator, "storage", { value: { estimate: asyn
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { left = 40 * 1024 ** 3; checking = undefined; for (const step of cleanup.splice(0).reverse()) await step(); });
 
-/** `files2`: the contact also takes files/2; `largeFiles: false`, an app from before files/3. */
-async function setup({ files2 = false, largeFiles = true } = {}) {
+/**
+ * `files2`: the contact also takes files/2; `largeFiles: false`, an app from before files/3; `reactions`: it reacts and
+ * pins; `edits`: it edits and deletes for everyone.
+ */
+async function setup({ files2 = false, largeFiles = true, reactions = false, edits = false } = {}) {
   const net = new FakeNativeNet();
   // As the real Iroh and HyperDHT channels: past 120 KiB queued, a frame is refused.
   net.sendBudget = 120 * 1024;
@@ -61,6 +64,8 @@ async function setup({ files2 = false, largeFiles = true } = {}) {
   let decide: (size: number) => OfferDecision = () => "accept";
   /** What reached the contact, in the order it came: each text, and each file's first offer. */
   const arrivals: string[] = [];
+  /** Told of each change to one of the contact's transfers, as it is made (`watch`). */
+  const watchers: ((record: FileTransferRecord) => void)[] = [];
   const peer: { link?: GhostLink } = {};
   const files = new ChatFiles({
     send: (frame) => peer.link?.sendFilesFrame(frame) ?? false,
@@ -75,12 +80,13 @@ async function setup({ files2 = false, largeFiles = true } = {}) {
       const { size, digest } = sources.get(record.id)!;
       return { read: async (offset, length) => pattern(offset, Math.min(length, size - offset)), digest: async () => digest ?? digestOf(size) };
     },
-    changed: (record) => { records.set(`${record.direction}:${record.id}`, record); },
+    changed: (record) => { records.set(`${record.direction}:${record.id}`, record); for (const watch of watchers) watch(record); },
     room: async () => 50 * 1024 ** 3,
     writable: () => peer.link?.filesWritable(),
   });
   const contact = new GhostLink({
     params: { ...invitation.invite, profile: "paired-chat/1" }, rtcAvailable: false, largeFilesSupport: largeFiles,
+    ...(reactions && { reactionsSupport: true, pinSupport: true }), ...(edits && { editSupport: true }),
     pairing: { credentials: { seedB64: theirs, peerKey: identityFromSeedB64(mine).pubKeyZ32 }, pinPeer: async () => {} },
     native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1", "hyperdht/1"], peerFallback: true,
       peerDescriptors: { "iroh/1": fakeDescriptor("iroh/1", "app"), "hyperdht/1": fakeDescriptor("hyperdht/1", "app") } },
@@ -118,6 +124,7 @@ async function setup({ files2 = false, largeFiles = true } = {}) {
   };
   return {
     net, id, files, records, received, contact, offer, incoming, arrivals,
+    watch: (fn: (record: FileTransferRecord) => void) => { watchers.push(fn); },
     node: () => node,
     set decide(fn: (size: number) => OfferDecision) { decide = fn; },
     /** The app quits and starts again, the contact dialling it once it is back. */
@@ -156,6 +163,30 @@ it("a large file waits for the person, shows the room here, and is stored whole 
   expect(stored.blob).toBeUndefined();
   expect(await (await fileBytes()).digest(fileId)).toBe(digestOf(size));
 }, 90_000);
+
+/**
+ * Accept on a file whose offer waited started it whatever room was left: files taken meanwhile had filled the disk,
+ * and it failed part way. Not started now: it keeps waiting, the contact asked for nothing, the room read shown.
+ */
+it("Accept on a waiting file larger than the room left now does not start it: it keeps waiting, the room read shown", async () => {
+  const t = await setup();
+  const size = FILE_LIMITS.askAboveBytes + 1234;
+  t.offer("tight-0001", size);
+  await vi.waitFor(() => expect(t.records.get("out:tight-0001")).toMatchObject({ state: "asking", waitingFor: "consent" }));
+  await vi.waitFor(async () => expect((await t.incoming("tight-0001"))?.transfer).toMatchObject({ stage: "asking", room: left }));
+  const { fileId } = (await t.incoming("tight-0001"))!;
+  // Files taken meanwhile filled the disk: a byte less left than the file needs.
+  left = size - 1;
+  const answer = await Promise.resolve().then(() => t.node().fileAction({ linkId: t.id, fileId, action: "accept" })).then(() => null, (error: Error) => error);
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  expect(t.records.get("out:tight-0001")?.state, "the contact was asked for nothing").toBe("asking");
+  expect(t.node().getState().transfers[fileId]).toMatchObject({ state: "transferring", stage: "asking", room: size - 1 });
+  expect(answer?.message).toMatch(/^No room on this device for this file \(.+ free\)$/);
+  // Room made: Accept takes it.
+  left = 40 * 1024 ** 3;
+  await t.node().fileAction({ linkId: t.id, fileId, action: "accept" });
+  await vi.waitFor(() => expect(t.records.get("out:tight-0001")?.state).not.toBe("asking"));
+}, 30_000);
 
 it.each([
   { storage: "files on disk (Desktop, web, extension, CLI)", onDisk: true },
@@ -307,7 +338,8 @@ it("a received file is said done only once that is kept: the app gone before, it
   lost = false;
   await t.restartApp();
   await vi.waitFor(async () => expect((await fileStore.get(fileId))?.wire3?.state).toBe("done"), { timeout: 15_000 });
-  expect(t.records.get("out:cut-000001")?.state).toBe("done");
+  // The done is sent once the record is kept, and reaches the contact a moment after.
+  await vi.waitFor(() => expect(t.records.get("out:cut-000001")?.state).toBe("done"));
   expect(await (await fileBytes()).digest(fileId)).toBe(digestOf(632));
   expect((await db.getMessages(t.id)).filter((m) => m.id === "peer_cut-000001")).toHaveLength(1);
 }, 60_000);
@@ -355,6 +387,130 @@ it("deleting the chat while files move ends them on the contact's side too, befo
   await vi.waitFor(() => expect(t.files.live).toBe(false));
   expect(t.node()["fileDesk"]["chats"].has(t.id)).toBe(false);
   await vi.waitFor(async () => expect(await fileStore.get(sent.id)).toBeUndefined());
+}, 60_000);
+
+/** What reaches the app for a chat once it is deleted: the rows stored under it, and what the pages and the attention heard. */
+function afterDelete(t: Awaited<ReturnType<typeof setup>>) {
+  const events = t.node()["events"] as { onMessages: ReturnType<typeof vi.fn>; onAttention?: (fact: { linkId?: string }) => void };
+  const attention: { linkId?: string }[] = [];
+  events.onAttention = (fact) => { attention.push(fact); };
+  const told = events.onMessages.mock.calls.length;
+  return async () => ({
+    rows: (await db.getMessages(t.id)).map((m) => m.id),
+    told: events.onMessages.mock.calls.slice(told).filter((call) => JSON.stringify(call).includes(t.id)).length,
+    attention: attention.filter((fact) => fact.linkId === t.id).length,
+    reactionNote: t.node()["reactionNotes"].has(t.id),
+  });
+}
+
+it("a deleted chat's link, up a moment to say its files' ends, acts on nothing it hears: no text, reaction or pin is taken", async () => {
+  const t = await setup({ reactions: true });
+  let hold = false;
+  const send = t.contact.sendFilesFrame.bind(t.contact);
+  t.contact.sendFilesFrame = (frame) => (hold && (frame.t === "pf-data" || frame.t === "pf-got") ? true : send(frame));
+  t.offer("gone-in-02", 10 * 1024 * 1024);
+  await vi.waitFor(async () => expect((await t.incoming("gone-in-02"))?.transfer?.transferred ?? 0).toBeGreaterThan(1024 * 1024), { timeout: 20_000 });
+  hold = true;
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  expect(t.records.get("out:gone-in-02")?.state).toBe("active");
+
+  // The moment the contact hears its transfer ended, it writes, reacts to what it wrote and pins it.
+  const said: (string | null)[] = [];
+  t.watch((record) => {
+    if (record.id !== "gone-in-02" || record.state !== "cancelled" || said.length) return;
+    const wire = "afterdeletetext0000001";
+    said.push("text");
+    void t.contact.sendMessage("Written as the chat went", Date.now(), wire).then((error) => { said.push(`text:${error}`); });
+    said.push(t.contact.sendReaction({ id: wire, e: "👍", n: Date.now() }), t.contact.sendPin({ id: wire, n: Date.now() }));
+  });
+  const heard = afterDelete(t);
+  t.node().removeLink({ linkId: t.id });
+  // The file's end still reaches the contact, which is why the link stayed up.
+  await vi.waitFor(() => expect(t.records.get("out:gone-in-02")).toMatchObject({ state: "cancelled", error: "Cancelled by your contact" }), { timeout: 5_000 });
+  await vi.waitFor(() => expect(said).toHaveLength(4));
+  expect(said, JSON.stringify(said)).toEqual(["text", null, null, "text:null"]);
+  await vi.waitFor(() => expect(t.files.live).toBe(false));
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  expect(await heard()).toEqual({ rows: [], told: 0, attention: 0, reactionNote: false });
+}, 60_000);
+
+it("a chat deleted with no file moving stops its link at once: what the contact writes then is not taken either", async () => {
+  const t = await setup({ reactions: true });
+  const heard = afterDelete(t);
+  t.node().removeLink({ linkId: t.id });
+  await vi.waitFor(() => expect(t.files.live).toBe(false));
+  await t.contact.sendMessage("Written after the chat went", Date.now(), "afterdeletetext0000002");
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  expect(await heard()).toEqual({ rows: [], told: 0, attention: 0, reactionNote: false });
+}, 60_000);
+
+it("a deleted chat takes no row the engine stores for it later by another way (a held text, a payment's line)", async () => {
+  const t = await setup();
+  const heard = afterDelete(t);
+  t.node().removeLink({ linkId: t.id });
+  await t.node()["storeMessage"]({ linkId: t.id, id: "peer_afterdeletehold00001", text: "Held for the chat", sender: "peer", timestamp: Date.now(), via: "hold" });
+  expect(await heard()).toEqual({ rows: [], told: 0, attention: 0, reactionNote: false });
+}, 60_000);
+
+/**
+ * The contact deletes its file for everyone while its offer is being taken here, before its row is kept: the removal
+ * found no row to take, and the row was then refused as deleted. The record, the transfer and the bytes stayed, the file
+ * arrived whole and said done to its sender, with no message here to show or delete it. Nothing of it is kept, and its
+ * sender is told it ended.
+ */
+it("a file the contact deletes for everyone while its offer is taken is not kept: no record, no bytes, ended there", async () => {
+  const t = await setup({ edits: true });
+  await vi.waitFor(() => expect(t.contact.supportsEdits).toBe(true));
+  const wireId = "gonewhiletaken00001";
+  const put = fileStore.put.bind(fileStore);
+  // The removal comes and is taken while the new offer's record is being written.
+  const puts = vi.spyOn(fileStore, "put").mockImplementation(async (file) => {
+    if (file.wireId === wireId) {
+      expect(await t.contact.sendEdit({ id: wireId, e: 1, ts: Date.now(), m: REMOVED_TEXT, rm: true })).toBeNull();
+      await vi.waitFor(() => expect(t.node()["links"].get(t.id)?.stored.deletedIds ?? []).toContain(`peer_${wireId}`));
+    }
+    return put(file);
+  });
+  cleanup.push(async () => { puts.mockRestore(); });
+  t.offer(wireId, 200_000);
+  await vi.waitFor(() => expect(t.records.get(`out:${wireId}`)).toMatchObject({ state: "cancelled", error: "Cancelled by your contact" }), { timeout: 30_000 });
+  await vi.waitFor(async () => expect((await fileStore.listForLink(t.id)).filter((f) => f.wireId === wireId)).toEqual([]));
+  const fileId = puts.mock.calls.find(([file]) => file.wireId === wireId)![0].id;
+  expect(await (await fileBytes()).size(fileId)).toBe(null);
+  expect((await db.getMessages(t.id)).filter((m) => m.id === `peer_${wireId}`)).toEqual([]);
+  expect(t.node().getState().transfers[fileId]).toBeUndefined();
+}, 60_000);
+
+/**
+ * The same for a file said on the DHT floor first: its live offer takes over the bubble that waited for it, and the
+ * contact deletes it for everyone before that record is written. The removal took the bubble, and the record written
+ * after it stayed with no message, loaded again at every start. Nothing of it is kept.
+ */
+it("a file said on the floor that the contact deletes for everyone while its offer takes the bubble is not kept", async () => {
+  const t = await setup({ edits: true });
+  await vi.waitFor(() => expect(t.contact.supportsEdits).toBe(true));
+  const wireId = "floorgonetaken0001";
+  await announce(t, wireId, 200_000);
+  const fileId = (await db.getMessages(t.id)).find((m) => m.id === `peer_${wireId}`)!.file!.id;
+  const put = fileStore.put.bind(fileStore);
+  let landed: Promise<unknown> | undefined;
+  // The removal comes and is taken while the offer's record is being written over the floor's.
+  const puts = vi.spyOn(fileStore, "put").mockImplementation(async (file) => {
+    if (file.id === fileId && file.wire3) {
+      expect(await t.contact.sendEdit({ id: wireId, e: 1, ts: Date.now(), m: REMOVED_TEXT, rm: true })).toBeNull();
+      await vi.waitFor(async () => expect((await db.getMessages(t.id)).filter((m) => m.id === `peer_${wireId}`)).toEqual([]));
+      return landed = put(file);
+    }
+    return put(file);
+  });
+  cleanup.push(async () => { puts.mockRestore(); });
+  t.offer(wireId, 200_000);
+  await vi.waitFor(() => expect(t.records.get(`out:${wireId}`)).toMatchObject({ state: "cancelled" }), { timeout: 30_000 });
+  await vi.waitFor(() => expect(landed).toBeDefined(), { timeout: 10_000 });
+  await landed;
+  await vi.waitFor(async () => expect((await fileStore.listForLink(t.id)).filter((f) => f.id === fileId)).toEqual([]));
+  expect(await (await fileBytes()).size(fileId)).toBe(null);
+  expect(t.node().getState().transfers[fileId]).toBeUndefined();
 }, 60_000);
 
 it("a sent file whose every byte arrived is too late to cancel: it ends done on both sides, kept there", async () => {
@@ -471,6 +627,70 @@ it("texts and files written while the contact is away reach it in the order they
   expect(t.arrivals).toEqual(["one", "file between-01", "two", "file between-02", "three"]);
   await vi.waitFor(() => expect(t.records.get("in:between-02")?.state).toBe("done"), { timeout: 30_000 });
 }, 120_000);
+
+/**
+ * A file written while the contact is away waits, with Cancel sending on its ⋮. When the chat goes live the outbox
+ * sends it (`sendWaitingFile`), which first waits a little for the contact's capabilities. A Cancel sending in that
+ * wait deleted it here, and the send then wrote back the row it had read before the wait: the file was back in the
+ * chat as sent, after a restart too, and the contact never got it.
+ */
+async function cancelWaitingFile(when: "in the wait" | "as the wait ends" | "at its offer", run: number) {
+  const t = await setup();
+  t.contact.disconnect();
+  await vi.waitFor(() => expect(t.files.live).toBe(false));
+  const wireId = `cancel-${run}-${when === "at its offer" ? "o" : when === "in the wait" ? "w" : "e"}`, after = `after-${wireId}`;
+  const file = await put(t, wireId, 50_000, Date.now());
+  const row = async () => (await db.getMessages(t.id)).find((m) => m.file?.id === file.id);
+  await vi.waitFor(async () => expect((await row())?.delivery).toBe("waiting"));
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  // A file written after it: once it is done there, whatever was going to happen to the first has happened.
+  await put(t, after, 20_000, Date.now());
+  const messageId = (await row())!.id;
+  let fired = false;
+  const cancel = () => { if (fired) return; fired = true; t.node().deleteMessage({ linkId: t.id, messageId }); };
+  const engine = GhostlyNode as unknown as { largeFilesAgreed: (link: GhostLink) => Promise<boolean> };
+  const agreed = engine.largeFilesAgreed.bind(GhostlyNode);
+  const spy = vi.spyOn(engine, "largeFilesAgreed").mockImplementation(async (link) => {
+    if (when === "in the wait") { const waited = agreed(link); cancel(); return waited; }
+    const answer = await agreed(link);
+    // Deleted here just before the send goes on: its row and its file are gone by the time it does.
+    if (when === "as the wait ends") { cancel(); await vi.waitFor(async () => expect(await row()).toBeUndefined()); }
+    return answer;
+  });
+  cleanup.push(async () => spy.mockRestore());
+  if (when === "at its offer") t.watch((record) => { if (record.direction === "in" && record.id === wireId) cancel(); });
+  void t.contact.connect(5_000).catch(() => {});
+  const arrived = await vi.waitFor(() => expect(t.records.get(`in:${after}`)?.state).toBe("done"), { timeout: 15_000 }).then(() => true, () => false);
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  expect(fired).toBe(true);
+  return { t, wireId, row, messageId, arrived };
+}
+
+for (const when of ["in the wait", "as the wait ends"] as const) {
+  for (const run of [1, 2, 3]) {
+    it(`Cancel sending on a waiting file ${when} for the contact's capabilities as the chat goes live: it stays gone, and never reaches the contact (run ${run})`, async () => {
+      const { t, wireId, row, messageId, arrived } = await cancelWaitingFile(when, run);
+      expect(await row()).toBeUndefined();
+      expect((await db.getLinks()).find((l) => l.id === t.id)?.deletedIds).toContain(messageId);
+      expect(t.records.get(`in:${wireId}`)).toBeUndefined();
+      expect(t.arrivals).not.toContain(`file ${wireId}`);
+      // The file written after it went as usual.
+      expect(arrived).toBe(true);
+      // And after a restart: nothing of it comes back here, and nothing goes.
+      await t.restartApp();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      expect(await row()).toBeUndefined();
+      expect(t.records.get(`in:${wireId}`)).toBeUndefined();
+    }, 60_000);
+  }
+}
+
+it("Cancel sending on a waiting file once its offer reached the contact: gone here, and the contact is told it was cancelled", async () => {
+  const { t, wireId, row, arrived } = await cancelWaitingFile("at its offer", 1);
+  expect(arrived).toBe(true);
+  await vi.waitFor(() => expect(t.records.get(`in:${wireId}`)).toMatchObject({ state: "cancelled", error: "Cancelled by the sender" }));
+  expect(await row()).toBeUndefined();
+}, 60_000);
 
 it("a received file is placed where its offer came: a text that comes right after it goes below it", async () => {
   const t = await setup();

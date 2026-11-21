@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { LOCALES as locales } from "../i18n/locales";
 import { translateWith } from "../../locales/translate";
-import { appErrorCode, appErrorView, appStoreErrorView } from "../../lib/apps/errors";
+import { appErrorCode, appErrorRetryable, appErrorView, appStoreErrorView, appStoreProblemText } from "../../lib/apps/errors";
 // covers: apps.page
 
 /*
@@ -25,13 +25,17 @@ describe("app errors", () => {
       .toEqual({ text: "That took too long on this connection. Try again on a faster one." });
   });
 
-  it("a host's own trouble (5xx, 429) says try again later, not that nothing is at the link", () => {
+  it("a host's own trouble (5xx, 429, 408) says try again later, not that nothing is at the link", () => {
     const en = translateWith(locales.en);
     expect(appErrorView(new Error("status: The host answered 404"), en).text).toBe("Nothing found at that link.");
     expect(appErrorView(new Error("status: The host answered 410"), en).text).toBe("Nothing found at that link.");
     expect(appErrorView(new Error("status: The host answered 500"), en).text).toBe("The host had a problem (error 500). Try again later.");
     expect(appErrorView(new Error("status: The host answered 503"), en).text).toBe("The host had a problem (error 503). Try again later.");
     expect(appErrorView(new Error("status: The host answered 429"), en).text).toBe("The host had a problem (error 429). Try again later.");
+    // Its own timeout too: the runner check asks again after a 408, as after a 5xx or a 429 (runnerCheck.ts).
+    expect(appErrorView(new Error("status: The host answered 408"), en).text).toBe("The host had a problem (error 408). Try again later.");
+    expect(appErrorRetryable(new Error("status: The host answered 408"))).toBe(true);
+    expect(appErrorRetryable(new Error("status: The host answered 404"))).toBe(false);
     expect(appErrorView(new Error("status: The host answered 500"), translateWith(locales.pt)).text).toBe("O servidor teve um problema (erro 500). Tente de novo mais tarde.");
   });
 
@@ -44,7 +48,59 @@ describe("app errors", () => {
     expect(appStoreErrorView(new Error("network: Failed to fetch"), en)).toEqual({ text: "Could not reach the host." });
   });
 
+  it("a store's older or too large list is said of the store's list, not of an app's version", () => {
+    const en = translateWith(locales.en);
+    expect(appStoreErrorView(new Error("rollback: This store's index is older than the one you have (sequence 4)"), en))
+      .toEqual({ text: "This store's link now holds an older list than yours. Ghostly kept yours." });
+    expect(appStoreErrorView(new Error("too-large: Too large"), en)).toEqual({ text: "This store's list is too large for Ghostly to read." });
+  });
+
+  it("a store's list dated too far ahead names this device's clock, in every language, never that the link holds no valid store", () => {
+    const refused = new Error("expires-too-far: This is not a store Ghostly can read");
+    const problem = { problem: "expires-too-far" } as const;
+    const en = translateWith(locales.en);
+    expect(appStoreErrorView(refused, en)).toEqual({ text: "This store's list is dated ahead of this device's clock. Check the date and time on this device." });
+    expect(appStoreProblemText(problem, en)).toBe("This store's list is dated ahead of this device's clock. Check the date and time on this device.");
+    expect(appStoreProblemText(problem, translateWith(locales.pt))).toBe("A lista desta loja tem uma data à frente do relógio deste dispositivo. Confira a data e a hora deste dispositivo.");
+    for (const [name, locale] of Object.entries(locales)) {
+      const t = translateWith(locale);
+      expect(appStoreErrorView(refused, t).text, name).not.toBe(t("apps.errors.notStore"));
+      expect(appStoreErrorView(refused, t).text, name).not.toMatch(/apps\.store/);
+    }
+  });
+
   it("other errors have no ⓘ", () => {
     expect(appErrorView(new Error("offline: no network"), translateWith(locales.en))).toEqual({ text: "You are offline." });
+  });
+
+  it("files found damaged on this device say to get them again, in every language, never that Ghostly won't install it", () => {
+    const damaged = new Error("damaged: This app's stored files do not match what was installed");
+    expect(appErrorView(damaged, translateWith(locales.en))).toEqual({ text: "Its files on this device are damaged. Get its files again." });
+    expect(appErrorView(damaged, translateWith(locales.pt)).text).toBe("Os arquivos dele neste dispositivo estão danificados. Baixe os arquivos de novo.");
+    for (const [name, locale] of Object.entries(locales)) {
+      const t = translateWith(locale);
+      expect(appErrorView(damaged, t).text, name).not.toBe(t("apps.errors.refused"));
+      expect(appErrorView(damaged, t).text, name).not.toMatch(/apps\.errors|stored files/);
+    }
+  });
+
+  it("an app uninstalled meanwhile (an Open while another tab removed it) says it is no longer installed, never that Ghostly won't install it", () => {
+    const gone = new Error("not-installed: This app is not installed");
+    expect(appErrorView(gone, translateWith(locales.en))).toEqual({ text: "This app is no longer installed." });
+    expect(appErrorView(gone, translateWith(locales.pt)).text).toBe("Este app não está mais instalado.");
+    for (const [name, locale] of Object.entries(locales)) {
+      const t = translateWith(locale);
+      expect(appErrorView(gone, t).text, name).not.toBe(t("apps.errors.refused"));
+      expect(appErrorView(gone, t).text, name).not.toMatch(/apps\.errors|is not installed/);
+    }
+  });
+
+  it("a refusal's own words behind the ⓘ are one line and bounded", () => {
+    const view = appErrorView(new Error(`bad-field: This is not an app Ghostly can install (${"x\n".repeat(30_000)})`), translateWith(locales.en));
+    expect(view.info?.length).toBe(200);
+    expect(view.info).not.toMatch(/[\n\r]/);
+    expect(view.info?.endsWith("…")).toBe(true);
+    expect(appErrorView(new Error("bad-field: This is not an app Ghostly can install (name is not valid)"), translateWith(locales.en)).info)
+      .toBe("This is not an app Ghostly can install (name is not valid)");
   });
 });

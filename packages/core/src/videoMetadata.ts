@@ -1,19 +1,28 @@
 /**
  * What a video leaves with. An MP4 or QuickTime file says more than its frames: its `udta` and `meta` boxes hold where
  * it was recorded (`©xyz`, `com.apple.quicktime.location.ISO6709`), the device, often its software; a timed metadata
- * track (an iPhone's location and motion, a GoPro's GPS) holds them sample by sample; the movie's, each track's and
+ * track (an iPhone's location and motion, a GoPro's GPS) holds them sample by sample, a caption track (a drone's, a
+ * dashcam's) a line of them each second; the movie's, each track's and
  * each track's media header (`mvhd`, `tkhd`, `mdhd`) say when it was recorded, to the second, and a camera's timecode
  * track the time of day. The sender removes them before the file is stored and its digest computed, without decoding
  * or re-encoding a frame: each such box becomes a `free` box of the same size, zeroed, the headers' creation and
  * modification times are zeroed (0 is "unknown"), the space already left in it (`free`, `skip`, `wide`: what an edit in
  * place left behind, a recorder's GPS log) is zeroed after its header, so are the names of its handlers and of the
- * compressor that made its frames, and each metadata and timecode track's samples are zeroed where they are, so no
+ * compressor that made its frames, and each metadata, timecode and caption track's samples are zeroed where they are, so no
  * offset in the file moves and it plays as it did. Only the boxes' headers, `moov` and `moof` are read; the
  * media goes untouched.
  *
  * Fail-closed: a file that is an MP4 or QuickTime video, by its bytes or by its type, and whose metadata cannot be
  * removed (truncated, malformed, a part of its movie this does not know) is refused with `NO_VIDEO_METADATA`, never sent as it was.
- * A picture (HEIF is pictureMetadata.ts's), a file without a video track (an M4A) and any other file go as they are.
+ * A picture (HEIF is pictureMetadata.ts's) and any other file go as they are; so does a file without a video track (an
+ * M4A) here: audioMetadata.ts strips it.
+ *
+ * An AVI (a dashcam's, an older camera's) goes without what its header and its `INFO` list say: each chunk but the
+ * ones its frames and sound are made of (`avih`, `strh`, `strf`, `indx`, `vprp`, `dmlh`) becomes `JUNK`, zeroed (a
+ * stream's name `strn` and data `strd`, `IDIT`'s date, a camera's `LIST ncdt`), and the chunks of a stream that is
+ * neither pictures nor sound (a GPS or subtitle text stream) are zeroed in `movi`, so no offset moves. An ASF (WMV,
+ * WMA), an FLV and an MPEG transport stream are refused with `NO_VIDEO_METADATA` (a WMA, typed as audio, with
+ * `NO_AUDIO_METADATA`): their titles, places and dates are not removed here.
  */
 import { isStrippedPicture } from "./pictureMetadata";
 
@@ -22,10 +31,18 @@ export const VIDEO_METADATA_LIMITS = {
   maxBoxBytes: 64 * 1024 * 1024,
   /** The most top-level boxes walked (a fragmented MP4 has two per fragment). */
   maxBoxes: 100_000,
+  /** The most chunks of an AVI walked (one per frame and per piece of sound). */
+  maxChunks: 4_000_000,
   /** Bytes read first to tell a video from another file. */
   headBytes: 64,
   /** Bytes read at once for a box's header or a small box, so the next headers and `moof`s are read with it. */
   readAhead: 64 * 1024,
+  /** The most a walk going on from its window reads at once (an Ogg's pages, a live WebM's blocks: the whole file). */
+  readAheadMax: 4 * 1024 * 1024,
+  /** The most bytes between two parts replaced that are read and sent with them as one part of the stripped video. */
+  joinGap: 64 * 1024,
+  /** The most bytes of such a part. */
+  joinedBytes: 4 * 1024 * 1024,
 } as const;
 
 /** Why a video is refused: its metadata could not be removed, so it does not go at all. */
@@ -59,13 +76,18 @@ const MOOV_KEEPS = new Set(["mvhd", "trak", "mvex", "iods", "ctab", ...SPACE]);
 const TRAK_KEEPS = new Set(["tkhd", "edts", "mdia", "tref", "tapt", "load", "txas", "matt", ...SPACE]);
 /** Boxes looked into below a track (and in a fragment) for the metadata boxes in them. */
 const CONTAINERS = new Set(["mdia", "minf", "dinf", "stbl", "edts", "mvex", "traf"]);
-/** Track handlers kept as they are: picture, sound, text and subtitles, timecode, hints. `meta` tracks have their samples zeroed, `tmcd` ones too. */
-const HANDLERS = new Set(["vide", "soun", "text", "sbtl", "subt", "clcp", "tmcd", "hint", "auxv", "pict", "sdsm", "odsm", "subp"]);
+/** Track handlers kept as they are: picture, sound, timecode, hints. `meta` tracks have their samples zeroed, `tmcd` ones and `CAPTIONS` too. */
+const HANDLERS = new Set(["vide", "soun", "tmcd", "hint", "auxv", "pict", "sdsm", "odsm", "subp"]);
+/**
+ * Text, subtitle and caption tracks: what a recorder writes there is a log (a drone's or a dashcam's GPS, home point,
+ * date and time each second), so their samples are zeroed, in `moov`'s tables and in fragments alike; they show nothing.
+ */
+const CAPTIONS = new Set(["text", "sbtl", "subt", "clcp"]);
 /** The handlers whose sample descriptions are a visual one's, a compressor's name in each. */
 const VISUAL = new Set(["vide", "auxv", "pict"]);
 
-/** Zeros put in a Blob a part at a time. */
-const ZEROS = new Uint8Array(1024 * 1024);
+/** Zeros put in a Blob a slice at a time: a Blob's Blob parts are not copied, so a zeroed range of any size holds no more. */
+const ZEROS = new Blob([new Uint8Array(1024 * 1024)]);
 
 const u32be = (b: Uint8Array, at: number) => ((b[at]! << 24) >>> 0) + (b[at + 1]! << 16) + (b[at + 2]! << 8) + b[at + 3]!;
 const text = (b: Uint8Array, at: number, length: number) => String.fromCharCode(...b.subarray(at, at + length));
@@ -232,10 +254,11 @@ function defaultSampleSizes(moov: Uint8Array): Map<number, number> {
  * The byte ranges of a fragment's samples in the file, one per track run (`trun`), from its `moof` read whole (`at` its
  * offset in the file): each run starts at its data offset from its track fragment's base (`tfhd`'s base data offset,
  * else the `moof`'s start for the first track fragment or one that says so, else where the previous one's data ended),
- * or where the previous run ended; its length is its samples' sizes, its own or `tfhd`'s or `trex`'s default.
+ * or where the previous run ended; its length is its samples' sizes, its own or `tfhd`'s or `trex`'s default. Each
+ * with its track's ID.
  */
-function fragmentRanges(b: Uint8Array, at: number, sizes: Map<number, number>): [number, number][] {
-  const ranges: [number, number][] = [];
+function fragmentRanges(b: Uint8Array, at: number, sizes: Map<number, number>): [number, number, number][] {
+  const ranges: [number, number, number][] = [];
   let previous = at;
   for (const traf of boxes(b, header(b, 0, b.length).body, b.length)) {
     if (traf.type !== "traf") continue;
@@ -250,7 +273,8 @@ function fragmentRanges(b: Uint8Array, at: number, sizes: Map<number, number>): 
     }
     if (flags & 0x2) field += 4;
     if (flags & 0x8) field += 4;
-    let size = sizes.get(u32be(b, tfhd.body + 4));
+    const track = u32be(b, tfhd.body + 4);
+    let size = sizes.get(track);
     if (flags & 0x10) {
       check(field + 4 <= tfhd.end);
       size = u32be(b, field);
@@ -278,7 +302,7 @@ function fragmentRanges(b: Uint8Array, at: number, sizes: Map<number, number>): 
         length = count * size;
       }
       check(Number.isSafeInteger(next) && Number.isSafeInteger(next + length));
-      if (length) ranges.push([next, next + length]);
+      if (length) ranges.push([next, next + length, track]);
       next += length;
     }
     previous = next;
@@ -295,12 +319,13 @@ function selfContained(b: Uint8Array, minf: Box): boolean {
 
 /**
  * `moov` with its metadata boxes emptied and its headers' times zeroed, read whole: whether it has a video track, the
- * byte ranges of its metadata and timecode tracks' samples (zeroed by the caller where they are), whether a metadata
- * track has any, and every track's sample table.
+ * byte ranges of its metadata, timecode and caption tracks' samples (zeroed by the caller where they are), whether it
+ * has a metadata or timecode track, every track's sample table, and the IDs of its caption tracks (their samples in
+ * fragments zeroed too).
  */
-function stripMoov(b: Uint8Array): { video: boolean; fragmented: boolean; metadata: boolean; zeroed: [number, number][]; tables: Box[] } {
+function stripMoov(b: Uint8Array): { video: boolean; fragmented: boolean; metadata: boolean; zeroed: [number, number][]; tables: Box[]; captions: Set<number> } {
   let video = false, fragmented = false, metadata = false;
-  const zeroed: [number, number][] = [], tables: Box[] = [];
+  const zeroed: [number, number][] = [], tables: Box[] = [], captions = new Set<number>();
   for (const box of boxes(b, header(b, 0, b.length).body, b.length)) {
     if (METADATA.has(box.type)) { empty(b, box); continue; }
     check(MOOV_KEEPS.has(box.type));
@@ -308,11 +333,11 @@ function stripMoov(b: Uint8Array): { video: boolean; fragmented: boolean; metada
     if (box.type === "mvhd") zeroTimes(b, box);
     if (box.type === "mvex") { fragmented = true; emptyWithin(b, box.body, box.end); }
     if (box.type !== "trak") continue;
-    let mdia: Box | undefined;
+    let mdia: Box | undefined, tkhd: Box | undefined;
     for (const part of boxes(b, box.body, box.end)) {
       if (METADATA.has(part.type)) { empty(b, part); continue; }
       check(TRAK_KEEPS.has(part.type));
-      if (part.type === "tkhd") zeroTimes(b, part);
+      if (part.type === "tkhd") { check(!tkhd); tkhd = part; zeroTimes(b, part); }
       if (part.type === "mdia") { check(!mdia); mdia = part; }
     }
     check(!!mdia);
@@ -325,18 +350,26 @@ function stripMoov(b: Uint8Array): { video: boolean; fragmented: boolean; metada
     tables.push(stbl);
     if (handler === "meta") {
       check(selfContained(b, minf));
-      const ranges = sampleRanges(b, stbl);
-      metadata ||= ranges.length > 0;
-      for (const range of ranges) zeroed.push(range);
+      // The track itself, not its table in `moov`: a fragmented movie's tables are empty, its samples in fragments.
+      metadata = true;
+      for (const range of sampleRanges(b, stbl)) zeroed.push(range);
     } else if (handler === "tmcd" && selfContained(b, minf)) {
       // A camera's timecode starts at the time of day it recorded: it starts at 0 instead.
+      metadata = true;
+      for (const range of sampleRanges(b, stbl)) zeroed.push(range);
+    } else if (CAPTIONS.has(handler)) {
+      check(selfContained(b, minf) && !!tkhd);
+      // Its ID (after the times, 32 or 64 bits each), for its samples in fragments.
+      const id = tkhd.body + 4 + (b[tkhd.body] === 1 ? 16 : 8);
+      check(id + 4 <= tkhd.end);
+      captions.add(u32be(b, id));
       for (const range of sampleRanges(b, stbl)) zeroed.push(range);
     } else check(HANDLERS.has(handler));
     if (handler === "vide") video = true;
     if (VISUAL.has(handler)) zeroCompressorNames(b, stbl);
     emptyWithin(b, box.body, box.end);
   }
-  return { video, fragmented, metadata, zeroed, tables };
+  return { video, fragmented, metadata, zeroed, tables, captions };
 }
 
 /** A video as it is read: its size, and `length` of its bytes from `offset` (fewer only at its end). */
@@ -360,20 +393,43 @@ function meets(ranges: [number, number][], start: number, end: number): boolean 
 }
 
 /**
+ * Whether `start` to `end` of the file is within one of `boxes` (in file order, apart): the first one that ends at or
+ * past `end` is the only one that can hold it, found by halves, so a caption run per fragment is not checked against
+ * every fragment's `mdat`.
+ */
+function within(boxes: Box[], start: number, end: number): boolean {
+  let low = 0, high = boxes.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (boxes[middle]!.end >= end) high = middle;
+    else low = middle + 1;
+  }
+  return low < boxes.length && start >= boxes[low]!.body;
+}
+
+/**
  * `source` read a window at a time: a read that fits in `readAhead` bytes reads that many from where it starts, and
  * the reads after it within them (the next boxes' headers, a fragment's `moof`) are served from it, as copies (they
- * are changed in place). A Blob's read costs about the same whatever its size, so a fragment costs one, not three.
+ * are changed in place). A Blob's read costs most for being one (in Chromium ~0.3 ms, and ~0.9 ms per MiB), so a
+ * fragment costs one, not three.
+ *
+ * A walk that goes on from its window (an Ogg's pages, a live WebM's blocks: headers less than a window apart, through
+ * the whole file) reads twice as much each time, up to `readAheadMax`, so it makes a few large reads, not one per
+ * 64 KiB. One that jumps farther (over a fragment's samples) or back reads `readAhead` again.
  */
-function readingAhead(source: VideoSource): VideoSource {
-  let start = 0, window: Uint8Array = new Uint8Array(0);
+export function readingAhead(source: VideoSource): VideoSource {
+  let start = 0, window: Uint8Array = new Uint8Array(0), ahead = VIDEO_METADATA_LIMITS.readAhead;
   return {
     size: source.size,
     async read(offset, length) {
       const end = start + window.length;
       if (offset < start || (offset + length > end && end < source.size)) {
-        if (length > VIDEO_METADATA_LIMITS.readAhead) return source.read(offset, length);
+        // Going on: forward, past less than a window (a page's or a block's body skipped).
+        const goesOn = window.length > 0 && offset >= start && offset - end < ahead;
+        ahead = goesOn ? Math.min(ahead * 2, VIDEO_METADATA_LIMITS.readAheadMax) : VIDEO_METADATA_LIMITS.readAhead;
+        if (length > ahead) return source.read(offset, length);
         start = offset;
-        window = await source.read(offset, VIDEO_METADATA_LIMITS.readAhead);
+        window = await source.read(offset, ahead);
       }
       return window.slice(offset - start, offset - start + length);
     },
@@ -401,6 +457,112 @@ async function whole(source: VideoSource, box: Box): Promise<Uint8Array> {
   return bytes;
 }
 
+// AVI: RIFF chunks.
+
+const u32le = (b: Uint8Array, at: number) => (b[at]! | (b[at + 1]! << 8) | (b[at + 2]! << 16) | (b[at + 3]! << 24)) >>> 0;
+const JUNK = Uint8Array.from("JUNK", (c) => c.charCodeAt(0));
+/** The chunks of an AVI's header its frames and sound are read with, kept; any other becomes `JUNK`. */
+const AVI_HEADER_KEEPS = new Set(["avih", "strh", "strf", "indx", "vprp", "dmlh"]);
+/** The lists of an AVI's header looked into. */
+const AVI_HEADER_LISTS = new Set(["hdrl", "strl", "odml"]);
+/** The streams whose chunks in `movi` are kept: pictures and sound. */
+const AVI_STREAMS = new Set(["vids", "auds"]);
+/** A frame's or a piece of sound's chunk in `movi`: its stream's number, then what it is. */
+const AVI_DATA = /^\d\d(dc|db|wb|pc)$/;
+
+interface Chunk { id: string; type: string; start: number; body: number; end: number; next: number }
+
+/** An AVI: `RIFF` `AVI `, then any `RIFF` `AVIX` (an OpenDML one past 1 GiB). */
+const isAvi = (head: Uint8Array) => head.length >= 12 && text(head, 0, 4) === "RIFF" && text(head, 8, 4) === "AVI ";
+
+/** An AVI without what its header and `INFO` say, nor its text and data streams' chunks; the patches in file order. */
+async function avi(source: VideoSource): Promise<VideoPatch[]> {
+  const patches: VideoPatch[] = [], size = source.size;
+  /** Whether each stream, in order, is kept (pictures or sound). */
+  const streams: boolean[] = [];
+  let chunks = 0;
+  const chunkAt = async (at: number, end: number): Promise<Chunk> => {
+    check(++chunks <= VIDEO_METADATA_LIMITS.maxChunks && at + 8 <= end);
+    const head = await source.read(at, 12);
+    check(head.length >= 8);
+    const id = text(head, 0, 4), length = u32le(head, 4), list = id === "LIST" || id === "RIFF";
+    check(!list || (length >= 4 && head.length >= 12));
+    return { id, type: list ? text(head, 8, 4) : "", start: at, body: at + (list ? 12 : 8), end: at + 8 + length, next: at + 8 + length + (length & 1) };
+  };
+  /** Zeros from `start` to `end`; a chunk made `JUNK` (`junk`) has its id replaced too. */
+  const zero = (start: number, end: number) => { if (end > start) patches.push({ start, end }); };
+  const junk = (chunk: Chunk, end = chunk.end) => {
+    if (chunk.id !== "JUNK") patches.push({ start: chunk.start, end: chunk.start + 4, bytes: JUNK });
+    zero(chunk.start + 8, end);
+  };
+  const header = async (start: number, end: number): Promise<void> => {
+    for (let at = start; at < end; ) {
+      const chunk = await chunkAt(at, end);
+      check(chunk.end <= end);
+      if (chunk.id === "LIST" && AVI_HEADER_LISTS.has(chunk.type)) await header(chunk.body, chunk.end);
+      else if (chunk.id === "strh") {
+        check(chunk.end - chunk.body >= 4);
+        streams.push(AVI_STREAMS.has(text(await source.read(chunk.body, 4), 0, 4)));
+      } else if (chunk.id === "JUNK") zero(chunk.body, chunk.end);
+      else if (!AVI_HEADER_KEEPS.has(chunk.id)) junk(chunk);
+      at = Math.min(chunk.next, end);
+    }
+  };
+  // A recording cut short (power lost in a dashcam): its lists and last chunk run past the end of the file.
+  const movi = async (start: number, end: number): Promise<void> => {
+    let at = start;
+    for (; at + 8 <= end; ) {
+      const chunk = await chunkAt(at, end), until = Math.min(chunk.end, end);
+      if (chunk.id === "LIST" && chunk.type === "rec ") await movi(chunk.body, until);
+      else if (chunk.id.startsWith("ix") || (AVI_DATA.test(chunk.id) && streams[Number(chunk.id.slice(0, 2))])) { /* kept */ }
+      else if (/^\d\d/.test(chunk.id)) zero(chunk.body, until);
+      else junk(chunk, until);
+      at = Math.min(chunk.next, end);
+    }
+    zero(at, end);
+  };
+  let at = 0;
+  for (let first = true; at + 12 <= size; first = false) {
+    const head = await source.read(at, 12);
+    if (text(head, 0, 4) !== "RIFF" || text(head, 8, 4) !== (first ? "AVI " : "AVIX")) break;
+    const form = await chunkAt(at, size), end = Math.min(form.end, size);
+    for (let inner = form.body; inner + 8 <= end; ) {
+      const chunk = await chunkAt(inner, end);
+      if (first && chunk.id === "LIST" && chunk.type === "hdrl") {
+        check(!streams.length && chunk.end <= end);
+        await header(chunk.body, chunk.end);
+      } else if (chunk.id === "LIST" && chunk.type === "movi") {
+        check(streams.length > 0);
+        await movi(chunk.body, Math.min(chunk.end, end));
+      } else if (chunk.id === "JUNK") zero(chunk.body, Math.min(chunk.end, end));
+      else if (chunk.id !== "idx1") junk(chunk, Math.min(chunk.end, end));
+      inner = Math.min(chunk.next, end);
+    }
+    at = Math.min(form.next, size);
+  }
+  // Bytes after the last RIFF (a recorder's trailer) are no part of the movie: zeros.
+  zero(at, size);
+  return patches;
+}
+
+/** An ASF (WMV, WMA): its header object's GUID. */
+const ASF = [0x30, 0x26, 0xb2, 0x75, 0x8e, 0x66, 0xcf, 0x11, 0xa6, 0xd9, 0x00, 0xaa, 0x00, 0x62, 0xce, 0x6c];
+export const isAsf = (head: Uint8Array) => head.length >= 16 && ASF.every((byte, i) => head[i] === byte);
+
+/** A video whose metadata is not removed here, so it is refused: an ASF, an FLV, an MPEG transport stream (`.ts`, `.m2ts`). */
+async function refused(source: VideoSource, head: Uint8Array): Promise<boolean> {
+  if (isAsf(head) || (head.length >= 4 && text(head, 0, 3) === "FLV" && head[3] === 1)) return true;
+  // Three packets in a row, 188 bytes apart (192 in a camcorder's M2TS, after each one's time): a sync byte, and an
+  // adaptation field control that is not the reserved 0.
+  const packetAt = (b: Uint8Array, at: number) => b[at] === 0x47 && (b[at + 3]! & 0x30) !== 0;
+  for (const [packet, offset] of [[188, 0], [192, 4]] as const) {
+    if (!packetAt(head, offset) || source.size < offset + 2 * packet + 4) continue;
+    const next = await source.read(offset + packet, packet + 4);
+    if (packetAt(next, 0) && packetAt(next, packet)) return true;
+  }
+  return false;
+}
+
 /**
  * What a file is by its first box: a movie (`FIRST_BOXES`), a file of boxes that is one when it holds a `moov` (any
  * other box found at the top of a movie: a stream's segment holds none), or another file. An HEIF picture is
@@ -423,11 +585,26 @@ export async function withoutVideoMetadata(source: Blob, mime: string): Promise<
   if (!patches) return undefined;
   const parts: BlobPart[] = [];
   let at = 0;
-  for (const patch of patches) {
+  for (let i = 0; i < patches.length;) {
+    const patch = patches[i]!;
+    // Parts replaced close together (a fragmented video's `moof`s, the frames between them) are read with the bytes
+    // between them and go as one part: Chromium slices a File and builds a Blob a part at a time, so a part per
+    // fragment held the page for seconds before the file was even in the chat.
+    let last = i;
+    while (last + 1 < patches.length && patches[last + 1]!.start - patches[last]!.end <= VIDEO_METADATA_LIMITS.joinGap
+      && patches[last + 1]!.end - patch.start <= VIDEO_METADATA_LIMITS.joinedBytes) last++;
     if (patch.start > at) parts.push(source.slice(at, patch.start));
-    if (patch.bytes) parts.push(patch.bytes as BlobPart);
-    else for (let left = patch.end - patch.start; left > 0; left -= ZEROS.length) parts.push(ZEROS.subarray(0, Math.min(left, ZEROS.length)) as BlobPart);
-    at = patch.end;
+    if (last > i) {
+      const joined = new Uint8Array(await source.slice(patch.start, patches[last]!.end).arrayBuffer());
+      for (const { start, end, bytes } of patches.slice(i, last + 1)) {
+        if (bytes) joined.set(bytes, start - patch.start);
+        else joined.fill(0, start - patch.start, end - patch.start);
+      }
+      parts.push(joined as BlobPart);
+    } else if (patch.bytes) parts.push(patch.bytes as BlobPart);
+    else for (let left = patch.end - patch.start; left > 0; left -= ZEROS.size) parts.push(ZEROS.slice(0, Math.min(left, ZEROS.size)));
+    at = patches[last]!.end;
+    i = last + 1;
   }
   if (at < source.size) parts.push(source.slice(at));
   return new Blob(parts, { type: mime });
@@ -436,11 +613,17 @@ export async function withoutVideoMetadata(source: Blob, mime: string): Promise<
 /**
  * What `withoutVideoMetadata` changes in a video read from `source` (one not held in a Blob: a file kept in storage):
  * the parts replaced, in order and apart, the rest of its bytes going as they are; undefined when it goes as it is.
- * Throws `NO_VIDEO_METADATA` as it does.
+ * Throws `NO_VIDEO_METADATA` as it does. With `audio`, a movie without a video track (an M4A) is stripped too.
  */
-export async function videoMetadataPatches(file: VideoSource, mime: string): Promise<VideoPatch[] | undefined> {
+export async function videoMetadataPatches(file: VideoSource, mime: string, audio = false): Promise<VideoPatch[] | undefined> {
   const source = readingAhead(file);
   const head = await source.read(0, VIDEO_METADATA_LIMITS.headBytes);
+  if (isAvi(head)) {
+    const patches = await avi(source);
+    return patches.length ? patches : undefined;
+  }
+  // A WMA typed as audio is audioMetadata.ts's to refuse.
+  if (!(isAsf(head) && mime.toLowerCase().startsWith("audio/"))) check(!await refused(source, head));
   const typed = STRIPPED_TYPES.has(mime.split(";")[0]!.trim().toLowerCase());
   const container = containerOf(head, mime);
   if (!container) {
@@ -481,8 +664,8 @@ export async function videoMetadataPatches(file: VideoSource, mime: string): Pro
   check(moovs.length === 1);
 
   const moov = await whole(source, moovs[0]!);
-  const { video, fragmented, metadata, zeroed, tables } = stripMoov(moov);
-  if (!video && !typed) return undefined;
+  const { video, fragmented, metadata, zeroed, tables, captions } = stripMoov(moov);
+  if (!video && !typed && !audio) return undefined;
   patches.push({ start: moovs[0]!.start, end: moovs[0]!.end, bytes: moov });
 
   // No sample is where zeros go.
@@ -494,14 +677,19 @@ export async function videoMetadataPatches(file: VideoSource, mime: string): Pro
     }
   }
 
-  // A metadata track's samples in fragments are not looked for: such a video is refused.
+  // A metadata or timecode track's samples in fragments are not looked for: such a video is refused.
   check(!fragmented || !metadata);
-  const sizes = dropped.length && fragmented ? defaultSampleSizes(moov) : undefined;
+  const sizes = (dropped.length || captions.size) && fragmented ? defaultSampleSizes(moov) : undefined;
   for (const box of top) {
     if (box.type === "moof") {
       const moof = await whole(source, box);
-      // No fragment's sample is where zeros go either.
-      if (dropped.length) for (const [start, end] of fragmentRanges(moof, box.start, sizes ?? new Map())) check(!meets(dropped, start, end));
+      // No fragment's sample is where zeros go either; a caption track's samples are zeroed.
+      if (dropped.length || captions.size) {
+        for (const [start, end, track] of fragmentRanges(moof, box.start, sizes ?? new Map())) {
+          check(!meets(dropped, start, end));
+          if (captions.has(track)) zeroed.push([start, end]);
+        }
+      }
       emptyWithin(moof, box.body - box.start, moof.length);
       patches.push({ start: box.start, end: box.end, bytes: moof });
     } else if (SPACE.has(box.type)) {
@@ -515,11 +703,11 @@ export async function videoMetadataPatches(file: VideoSource, mime: string): Pro
     }
   }
 
-  // The metadata and timecode samples, each within a `mdat`: zeros where they were, ranges that touch made one.
+  // The metadata, timecode and caption samples, each within a `mdat`: zeros where they were, ranges that touch made one.
   const mdats = top.filter((box) => box.type === "mdat");
   const merged: [number, number][] = [];
   for (const [start, end] of zeroed.sort((a, b) => a[0] - b[0])) {
-    check(mdats.some((mdat) => start >= mdat.body && end <= mdat.end));
+    check(within(mdats, start, end));
     const last = merged[merged.length - 1];
     if (last && start <= last[1]) last[1] = Math.max(last[1], end);
     else merged.push([start, end]);

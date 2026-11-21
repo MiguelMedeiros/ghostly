@@ -1,4 +1,5 @@
 import { npubEncode, decode as nip19Decode } from "nostr-tools/nip19";
+import { hasVisible, stripHidden } from "@ghostly/core";
 import { byNewest, type NostrEvent } from "./relay";
 
 /**
@@ -31,14 +32,17 @@ const UNSAFE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f‪-‮⁦-⁩]/g;
 /** Longest string looked at before it is cut: a relay's frame is capped at 64 KiB anyway. */
 const MAX_TEXT_INPUT = 64 * 1024;
 
-/** Plain text: no controls (newlines kept when `multiline`), no bidi overrides, trimmed, capped. */
+/**
+ * Plain text: no controls (newlines kept when `multiline`), no bidi overrides, trimmed, capped. One line (a name, a
+ * word) is held to core's rule for display text (`stripHidden`): no line or paragraph separator and no invisible or
+ * direction-changing character either, and something visible or nothing.
+ */
 export function plainText(value: unknown, max: number, multiline = false): string | undefined {
   if (typeof value !== "string" || value.length > MAX_TEXT_INPUT) return;
-  let text = value.replace(UNSAFE, "");
-  if (!multiline) text = text.replace(/[\r\n\t]+/g, " ");
+  let text = multiline ? value.replace(UNSAFE, "") : stripHidden(value.replace(/[\r\n\t]+/g, " "));
   text = text.trim();
   if (text.length > max) text = text.slice(0, max);
-  return text || undefined;
+  return text && (multiline || hasVisible(text)) ? text : undefined;
 }
 
 /** An https URL for a website or a picture, or nothing: never javascript:, data:, or a host with credentials. */

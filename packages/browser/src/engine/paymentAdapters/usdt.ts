@@ -1,4 +1,4 @@
-import { mnemonicToSeedSync } from '@scure/bip39';
+import { mnemonicToSeedWebcrypto } from '@scure/bip39';
 import WalletManagerEvm, { type WalletAccountEvm } from '@tetherto/wdk-wallet-evm';
 import { Interface, Transaction, getAddress, keccak256 } from 'ethers';
 import { ETHEREUM_USDT, EVM_TEST_CHAINS, USDT_PUBLIC_RPC, SEPOLIA_TEST_USDT, SEPOLIA_TEST_USDT_FAUCET, TEST_USDT_FAUCET_AMOUNT, PaymentPreflightError, engineError, validatePaymentTarget, type PaymentAdapter, type PaymentExecution, type PaymentReview, type PaymentTarget } from '@ghostly/core';
@@ -68,8 +68,10 @@ export class UsdtAdapter implements PaymentAdapter<UsdtPrepared> {
     if (inspected.decimals !== config.decimals || inspected.codeHash !== config.codeHash) throw new Error('Token metadata changed; do not use this wallet configuration');
     const adapter = new UsdtAdapter(config);
     adapter.mnemonic = mnemonic;
-    // Pass standard BIP-39 seed bytes: WDK's string helper assumes a Node Buffer global.
-    const seed = mnemonicToSeedSync(mnemonic);
+    // Pass standard BIP-39 seed bytes: WDK's string helper assumes a Node Buffer global. Its 2,048 rounds of PBKDF2 go to
+    // the browser's own (WebCrypto), off the page's thread: in script they held it at every start, about 80 ms on a
+    // slow phone, for a wallet that opens by itself.
+    const seed = await mnemonicToSeedWebcrypto(mnemonic);
     try { adapter.manager = new WalletManagerEvm(seed, {provider: {request: ({method, params}) => adapter.rpc(method, params as unknown[] ?? [])}, chainId: config.chainId}); } finally { seed.fill(0); }
     adapter.account = await adapter.manager.getAccount(0);
     return adapter;
@@ -133,8 +135,11 @@ export class UsdtAdapter implements PaymentAdapter<UsdtPrepared> {
   }); }
   private current(): WalletAccountEvm { if (!this.account) throw new Error('Unlock the USDT wallet first'); return this.account; }
   address() { return this.current().getAddress(); }
+  /**
+   * The token and gas balances. The chain and the contract are not asked again here: `connect` checked them, and every
+   * payment does before it signs. The wallet reads this every 8 s, and the contract's whole code was most of each read.
+   */
   async balances() {
-    await this.assertToken();
     const address = await this.address();
     const [token, gas] = await Promise.all([this.rpc<string>('eth_call',[{to:this.config.token,data:erc20.encodeFunctionData('balanceOf',[address])},'latest']),this.rpc<string>('eth_getBalance',[address,'pending'])]);
     return {balance:erc20.decodeFunctionResult('balanceOf',token)[0].toString(),gasBalance:BigInt(gas).toString()};

@@ -1,5 +1,6 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { createLink, DHT_POLL_INTERVALS, RELAY_POLL_INTERVALS } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { STORES, transact } from "../src/shared/idb";
@@ -19,8 +20,9 @@ const nodes: GhostlyNode[] = [];
 function desktop() {
   const configure = vi.fn();
   const transport = { publish: async () => {}, resolve: async () => null, describe: () => ({ protocol: "fixture", relays: [] }), configure };
+  // The pace host.ts gives the Desktop.
   const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() },
-    { transport: transport as never, automaticWallets: false, nativeTransports: {} });
+    { transport: transport as never, automaticWallets: false, nativeTransports: {}, pollIntervals: DHT_POLL_INTERVALS });
   nodes.push(node);
   return { node, configure };
 }
@@ -28,7 +30,7 @@ function desktop() {
 beforeEach(async () => {
   await transact([STORES.settings, STORES.links], (s) => { s[STORES.settings].clear(); s[STORES.links].clear(); });
 });
-afterEach(async () => { for (const node of nodes.splice(0)) await node.shutdown(); });
+afterEach(async () => { for (const node of nodes.splice(0)) await node.shutdown(); vi.unstubAllGlobals(); });
 
 it("tells the Desktop at the start to keep off the DHT while it is on, and to use it while it is off", async () => {
   await db.putSettings({ online: false, nick: "", relays: RELAYS, iceServers: [TURN], mints: [], mintsInitialized: true, relayOnly: true });
@@ -58,4 +60,19 @@ it("turns the Desktop's DHT off and on with the switch, and keeps it off through
   await node.updateSettings({ settings: { relayOnly: false } });
   expect(configure).toHaveBeenCalledTimes(1);
   expect(configure).toHaveBeenLastCalledWith({ relays: RELAYS, readRelays: true, dhtDirect: true });
+});
+
+it("polls a chat at the relays' pace while it keeps to the relays, and at the DHT's again once it is off", async () => {
+  vi.stubGlobal("RTCPeerConnection", undefined);
+  await db.putSettings({ online: true, nick: "", relays: RELAYS, iceServers: [TURN], mints: [], mintsInitialized: true, relayOnly: true });
+  const { node } = desktop();
+  await node.start();
+  const { linkId } = await node.ensureLink({ ...createLink().mine, profile: "paired-chat/1" });
+  // Every read is a relay request then, background ones too (`pkarr_network.rs`): the DHT's pace was 1.5 times the reads.
+  const pace = () => (node as unknown as { links: Map<string, { link: { session: { intervals: unknown } } | null }> })
+    .links.get(linkId)!.link?.session.intervals;
+  await vi.waitFor(() => expect(pace()).toBe(RELAY_POLL_INTERVALS));
+
+  await node.updateSettings({ settings: { relayOnly: false } });
+  await vi.waitFor(() => expect(pace()).toBe(DHT_POLL_INTERVALS));
 });

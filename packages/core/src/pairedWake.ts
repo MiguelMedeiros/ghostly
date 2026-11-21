@@ -28,6 +28,12 @@ export const WAKE_FRAME = "paired-wake";
 
 /** At most one wake-up per contact in this long. A burst of messages is one push. */
 export const WAKE_INTERVAL_MS = 5 * 60_000;
+/**
+ * A wake-up that did not reach the push service (no network, the push relay did not forward it, the push service
+ * answered 429 or 5xx) is not the contact's wake-up: the next one may go this long after it, not 5 minutes. Never a
+ * retry of that one; only a pause, so a relay that is refusing is not asked again on every message.
+ */
+export const WAKE_RETRY_MS = 30_000;
 /** A wake-up that has not reached the phone within this is no use: the push service may drop it. */
 export const WAKE_TTL_SECONDS = 60 * 60;
 /** The VAPID subject push services ask for: who to contact about abuse. The project, never a person. */
@@ -93,6 +99,13 @@ export const WAKE_ONLINE_INTERVAL_MS = 30 * 60_000;
 export const WAKE_ONLINE_TTL_SECONDS = 5 * 60;
 /** How long after this side comes online it waits for the chat to go live before it says so: a live contact needs no push. */
 export const WAKE_ONLINE_DELAY_MS = 30_000;
+/**
+ * Most online notices that go out in `WAKE_ONLINE_BATCH_MS`; the rest wait for the next one. A page posts its wake-ups
+ * through a push relay, which takes 30 a minute from one address: all at once, a profile with 30 contacts that asked
+ * spent the whole minute, and a call or message wake-up right after was refused.
+ */
+export const WAKE_ONLINE_BATCH = 10;
+export const WAKE_ONLINE_BATCH_MS = 60_000;
 
 /** At most one call wake-up per contact in this long: a caller who tries again at once is not a new push. */
 export const WAKE_CALL_INTERVAL_MS = 30_000;
@@ -158,6 +171,14 @@ export class WakeLimiter {
     if (before !== undefined && now - before < this.interval) return false;
     this.last.set(contact, now);
     return true;
+  }
+  /**
+   * The wake-up taken at `takenAt` did not reach the push service: it does not count, and the next may go
+   * `retryMs` from now. Nothing changes when another was taken since, or the count started over.
+   */
+  missed(contact: string, takenAt: number, retryMs = WAKE_RETRY_MS, now = Date.now()): void {
+    if (this.last.get(contact) !== takenAt) return;
+    this.last.set(contact, now - this.interval + Math.min(retryMs, this.interval));
   }
   /** The contact answered (it is live again): the next time it is away, it may be woken at once. */
   reset(contact: string): void {

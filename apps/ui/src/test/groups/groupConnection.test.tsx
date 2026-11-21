@@ -215,6 +215,32 @@ describe("GroupConnection: the popover lists every member's edge", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Go online before reconnecting");
   });
 
+  it("keeps the keyboard in the panel while Retry now works, and on the member's row once they are back", async () => {
+    const group = active([me, alice(), bob({ state: "waiting" })]);
+    const { user, engine, rerender } = await open(group);
+    let answer!: () => void;
+    engine.on("connect", () => new Promise<void>(resolve => { answer = resolve; }));
+    const retry = screen.getByTestId("group-connection-reconnect");
+    retry.focus();
+    await user.keyboard("{Enter}");
+    expect(engine.callsTo("connect")).toEqual([{ linkId: "edge-b" }]);
+    // Busy, not disabled: a disabled button drops the focus to the page, where Escape no longer closes the panel.
+    expect(retry).toHaveTextContent("Trying…");
+    expect(retry).toBeEnabled();
+    expect(retry).toHaveAttribute("aria-busy", "true");
+    expect(retry).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(engine.callsTo("connect")).toHaveLength(1);
+    await act(async () => answer());
+    // Bob is back: his Retry now goes, and his row has the focus, not the page.
+    rerender(<GroupConnection group={active([me, alice(), bob()])} />);
+    expect(screen.queryByTestId("group-connection-reconnect")).not.toBeInTheDocument();
+    expect(screen.getAllByTestId("group-connection-member")[1]).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByTestId("group-connection-options")).toHaveFocus();
+  });
+
   it("says a dropped member is being reconnected by itself, with its attempt; the icon breathes, and the button only skips the wait", async () => {
     await open(active([me, alice(), bob({ state: "waiting", transport: undefined, reconnecting: true, attempt: 3, retryAt: NOW + 60_000 }),
       member({ key: CAROL, nick: "Carol", edge: edge({ linkId: "edge-c", state: "connecting", transport: undefined, reconnecting: true, attempt: 1 }) })]));
@@ -268,6 +294,14 @@ describe("GroupConnection: the popover lists every member's edge", () => {
     await open(active([me, alice({ state: "connecting" }), bob({ state: "waiting" })]), { transport: { protocol: "webrtc/1", relays: [], webrtc: false, groupLinks: false } });
     expect(screen.getByTestId("group-connection-no-webrtc")).toHaveTextContent("Open the group in the web app or on another device.");
     expect(screen.queryByTestId("group-connection-reconnect")).not.toBeInTheDocument();
+  });
+
+  it("with Hide my IP on, says that is why, and where to change it, not to open the group elsewhere", async () => {
+    // The Linux Desktop with no HyperDHT relay: its own Iroh and HyperDHT are left out for contacts, so no group link.
+    await open(active([me, alice({ state: "connecting" }), bob({ state: "waiting" })]), { transport: { protocol: "webrtc/1", relays: [], webrtc: false, groupLinks: false }, settings: { relayOnly: true } });
+    const hint = screen.getByTestId("group-connection-no-webrtc");
+    expect(hint).toHaveTextContent("With Hide my IP on, HyperDHT needs a HyperDHT relay · Settings, Network");
+    expect(hint).not.toHaveTextContent("web app");
   });
 
   it("offers no Reconnect while this device is offline", async () => {

@@ -4,6 +4,7 @@ import { callApi, type ApiContext } from "../src/api";
 import { parseArgs } from "../src/args";
 import { COMMANDS, idSlot, positionals } from "../src/commands";
 import { readOnly } from "../src/main";
+import { chatViewOf } from "./support/chatView";
 // covers: chat.saved
 
 /** `saved add|remove|list`: saved messages, kept for the profile on this device. */
@@ -14,7 +15,7 @@ const row = (linkId: string, id: string, patch: Partial<StoredMessage> = {}): St
 
 function fake(result: { error: string | null } = { error: null }, saved: SavedMessage[] = [], rows: StoredMessage[] = saved.map((s) => s.message)) {
   const node = {
-    getState: () => ({ links: [link("chat-one", { label: "Alice", peerNick: "Alice" })], groups: [group()], settings: {}, transport: {} }) as unknown as EngineState,
+    chatView: chatViewOf, getState: () => ({ links: [link("chat-one", { label: "Alice", peerNick: "Alice" })], groups: [group()], settings: {}, transport: {} }) as unknown as EngineState,
     saveMessage: vi.fn(async () => result),
     savedMessages: vi.fn(async () => saved),
     getMessage: vi.fn(async (linkId: string, id: string) => rows.find((m) => m.linkId === linkId && m.id === id)),

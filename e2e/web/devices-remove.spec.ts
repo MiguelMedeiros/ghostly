@@ -48,8 +48,11 @@ test("the active device removes the third device while the second is closed; the
   await untilShown(phone.page, notice, { timeout: 240_000 });
   await expect(phone.page.getByTestId("device-set-notice-title")).toContainText("Phone");
   await expect(phone.page.getByTestId("device-set-notice-title")).not.toContainText("Tablet");
-  await phone.page.getByTestId("device-set-notice-ok").click();
+  // Answered from the keyboard: the focus stays on the button while it runs, then goes to Use here, not to the page.
+  await phone.page.getByTestId("device-set-notice-ok").focus();
+  await phone.page.keyboard.press("Enter");
   await expect(notice).toHaveCount(0);
+  await expect(phone.page.getByTestId("handoff-use-here")).toBeFocused();
   // It goes on as a standby of the new set, with a live link to the desktop that answers.
   const standby = phone.page.getByTestId("device-standby");
   await expect(standby).toHaveAttribute("data-state", "standby");
