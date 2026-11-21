@@ -432,6 +432,10 @@ The audio contract, one Unix socket per call:
 - **From the call.** The contact's voice in 20 ms frames, as they are decoded.
 - **To the call.** Write any amount, at any pace: the CLI plays it at real time, and silence when there is nothing.
 - **Barge-in.** `ghostly call flush` drops what is queued, at once.
+- **Falling behind.** A program that stops reading finds at most 1 s of the contact's voice waiting when it reads
+  again, the system's socket buffer included; what comes meanwhile is dropped. `call pipe` keeps more on top for a
+  player that stops reading: its stdout pipe and its own buffers, about 260-350 KiB (some 3 s at 48 kHz, 16-20 s at
+  8 kHz).
 - **End.** The program reads EOF when the call ends; `call.ended` says why (`hangup`, `remote-hangup`, `missed`,
   `rejected`, `unanswered`, `crossed`, `failed`, `stopped`).
 - **Silence.** `call.stalled` says the contact's packets stopped for 5 s (its side may have died), `call.resumed` that
