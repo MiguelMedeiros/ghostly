@@ -819,6 +819,12 @@ export class Apps {
    * most `REVOCATION_FILES_KEPT.bytes` of files, the oldest dropped first; none outside a check.
    */
   private revocationSplits: Map<string, { bytes: number; split: Promise<Map<string, SignedAppRevocation[]> | null> }> | null = null;
+  /**
+   * While an update check runs (`checkNow`), the `ghostly-revoke.json` files it downloaded, by URL: the apps of one
+   * publisher kept in one folder share a file, which is downloaded once in a check, not once per app. At most
+   * `REVOCATION_FILES_KEPT.bytes` of files, the oldest dropped first (one dropped is downloaded again); none outside a check.
+   */
+  private revocationReads: Map<string, { bytes: number; read: Promise<Uint8Array> }> | null = null;
   /** Revocations read in a store's index and verified, by `appRevocationId`: at most `STORE_REVOCATIONS_KEPT`. */
   private readonly storeRevocations = new Set<string>();
   private readonly checkedRevocations: AppRevocationsChecked = {
@@ -1504,7 +1510,7 @@ export class Apps {
       if (read.has(url)) continue;
       read.add(url);
       try {
-        const file = await this.readRevocationsFile(ref, await this.host.fetch(url, { maxBytes: APP_FETCH_LIMITS.revocationsBytes, revalidate: true }));
+        const file = await this.readRevocationsFile(ref, await this.fetchRevocationsOnce(url));
         if (file) (out ??= []).push(...file);
         if (reach) reach.answered = true;
       } catch (error) {
@@ -1513,6 +1519,30 @@ export class Apps {
       }
     }
     return out;
+  }
+
+  /** A `ghostly-revoke.json` downloaded, once per update check for the same URL (`revocationReads`). */
+  private fetchRevocationsOnce(url: string): Promise<Uint8Array> {
+    const reads = this.revocationReads;
+    const held = reads?.get(url);
+    if (held) return held.read;
+    const read = this.host.fetch(url, { maxBytes: APP_FETCH_LIMITS.revocationsBytes, revalidate: true });
+    if (reads) {
+      const entry = { bytes: 0, read };
+      reads.set(url, entry);
+      read.then((bytes) => {
+        if (reads.get(url) !== entry) return;
+        entry.bytes = bytes.length;
+        let all = 0;
+        for (const file of reads.values()) all += file.bytes;
+        for (const [old, file] of reads) {
+          if (reads.size <= 1 || all <= REVOCATION_FILES_KEPT.bytes) break;
+          reads.delete(old);
+          all -= file.bytes;
+        }
+      }, () => {});
+    }
+    return read;
   }
 
   /**
@@ -2147,6 +2177,7 @@ export class Apps {
     // (a bundle write refused on a full disk) is left out, as one uninstalled meanwhile is: a throw would end the check
     // while the other workers still run, and the next check would start beside them.
     this.revocationSplits = new Map();
+    this.revocationReads = new Map();
     const read = new Set<string>();
     this.listingsRead = read;
     try {
@@ -2159,6 +2190,7 @@ export class Apps {
       return await Promise.all(out.map(async ({ app, outcome }) => ({ ref: app.ref, outcome, run: await this.runCheckOf(app, stores, kept) })));
     } finally {
       this.revocationSplits = null;
+      this.revocationReads = null;
       this.listingsRead = null;
     }
   }
