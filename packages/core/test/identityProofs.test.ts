@@ -232,6 +232,37 @@ describe("identity exchange", () => {
     expect(w.ledger(alice, bob).shared.filter(s => s.status === "accepted")).toEqual([]);
   });
 
+  it("two accounts at one provider-attested issuer stay shared on both sides, and each one's Stop sharing reaches the contact", async () => {
+    // As OIDC: the binding names the issuer, the account is the issuer and the token's `sub`.
+    const accountVerify = async (s: IdentityStatement, evidence: unknown) =>
+      ({ ...await fakeVerify(s, evidence), subject: `${s.binding.subject}#${(evidence as { account: string }).account}` });
+    const w = world(), { alice, bob } = w.ids;
+    const ab = w.peer(alice, bob, "a".repeat(64), { verify: accountVerify }); w.peer(bob, alice, "a".repeat(64), { verify: accountVerify });
+    const account = (id: string, name: string) => {
+      const p = w.proofs.get(id)!;
+      w.proofs.set(id, { ...p, evidence: { ...(p.evidence as object), account: name }, account: `${p.statement.binding.subject}#${name}` });
+      return id;
+    };
+    const work = account(w.addProof(), "work");
+    w.advance(60);
+    const home = account(w.addProof(), "home");
+    const status = (id: string) => w.ledger(alice, bob).shared.find(s => s.id === id)?.status;
+    const held = () => w.ledger(bob, alice).received.map(r => `${r.id}:${r.status}`).sort();
+    await ab.share(work, true);
+    await vi.waitFor(() => expect(status(work)).toBe("accepted"));
+    await ab.share(home, true);
+    await vi.waitFor(() => expect(status(home)).toBe("accepted"));
+    // The contact keeps both (two identities), so both are still shared here.
+    expect(held()).toEqual([`${work}:verified`, `${home}:verified`].sort());
+    expect(status(work)).toBe("accepted");
+    await ab.withdraw(work, true);
+    await vi.waitFor(() => expect(status(work)).toBe("withdrawn"));
+    expect(held()).toEqual([`${work}:withdrawn`, `${home}:verified`].sort());
+    await ab.withdraw(home, true);
+    await vi.waitFor(() => expect(status(home)).toBe("withdrawn"));
+    expect(held()).toEqual([`${work}:withdrawn`, `${home}:withdrawn`].sort());
+  });
+
   it("withdrawing a share still queued just forgets it", async () => {
     const w = world(), { alice, bob } = w.ids;
     const ab = w.peer(alice, bob, "a".repeat(64));

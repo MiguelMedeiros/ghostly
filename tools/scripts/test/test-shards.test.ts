@@ -1,5 +1,8 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ALONE, WORKERS, packages, split, staleWarning } from "../test-shards.mjs";
+import { ALONE, WORKERS, packages, slowWarnings, split, staleWarning, unlistedAlone } from "../test-shards.mjs";
 
 const unit = (id: string, files: string[], alone = false) => ({ id, dir: id, files, alone });
 
@@ -63,8 +66,51 @@ describe("the packages shards", () => {
     expect(staleWarning([unit("a", files), unit("b", ["new1", "new2", "new3"])], seconds)).toMatch(/^::warning::3 of the 23 test files have no time/);
   });
 
+  it("name the files with no recorded time in that warning, the first ten", () => {
+    const files = Array.from({ length: 20 }, (_, i) => `f${i}`);
+    const seconds = Object.fromEntries(files.map((f) => [f, 1]));
+    expect(staleWarning([unit("a", files), unit("b", ["new3", "new1", "new2"])], seconds)).toContain("(new1, new2, new3)");
+    const many = Array.from({ length: 12 }, (_, i) => `new${String(i).padStart(2, "0")}`);
+    expect(staleWarning([unit("a", files), unit("b", many)], seconds)).toContain("(new00, new01, new02, new03, new04, new05, new06, new07, new08, new09 and 2 more)");
+  });
+
+  it("name, after a shard's run, a file the split weighed far too light", () => {
+    // 2026-11-13: communityAdminHubFull.test.ts took 193 s with no record, counted as a typical file (under a second),
+    // and alone made one shard 11.5 minutes and another 4.2; only 22 of 1,031 files had no time, so nothing warned.
+    const dir = mkdtempSync(join(tmpdir(), "test-shards-"));
+    const root = resolve(import.meta.dirname, "../../..");
+    const result = (file: string, took: number, status = "passed") => ({ name: join(root, file), status, startTime: 1000, endTime: 1000 + took * 1000 });
+    const hub = "packages/browser/test/communityAdminHubFull.test.ts";
+    const leaver = "packages/browser/test/communityAdminToLeaver.test.ts";
+    const leave = "packages/browser/test/communityAdminLeave.test.ts";
+    const notHub = "packages/browser/test/communityAdminNotHub.test.ts";
+    const report = join(dir, "browser.json");
+    // The record: leaver 8 s, leave 20 s; hub and notHub have none.
+    const seconds = { [leaver]: 8, [leave]: 20 };
+    writeFileSync(report, JSON.stringify({ testResults: [result(hub, 193), result(leaver, 40), result(leave, 45), result(notHub, 29)] }));
+    const warnings = slowWarnings([report], seconds);
+    // hub: no record and over 30 s. leaver: over twice 8 s and 30 s more. leave: twice its 20 s but only 25 s more.
+    // notHub: no record, under 30 s.
+    expect(warnings).toEqual([
+      expect.stringMatching(/^::warning file=packages\/browser\/test\/communityAdminHubFull\.test\.ts::.* took 193 s, but .* has no time for it/),
+      expect.stringMatching(/^::warning file=packages\/browser\/test\/communityAdminToLeaver\.test\.ts::.* took 40 s, but .* has 8 s for it/),
+    ]);
+    // A failed file's time is no record either (--record skips it), and a report of fast files warns of nothing.
+    writeFileSync(report, JSON.stringify({ testResults: [result(hub, 193, "failed"), result(leaver, 9)] }));
+    expect(slowWarnings([report], seconds)).toEqual([]);
+  });
+
   it("need a shard for each file that runs alone", () => {
     expect(() => split([unit("long", ["long"], true), unit("other", ["other"], true)], {}, 1)).toThrow(/at least 2 shards/);
     expect(split([unit("long", ["long"], true), unit("a", ["a1"])], {}, 1)[0].units.map((u) => u.id)).toEqual(["long", "a"]);
+  });
+
+  it("leave out a file that runs alone while tools/scripts/quarantine.json holds it, and still refuse one that is gone", () => {
+    const [long] = ALONE;
+    // Quarantined, Vitest lists it nowhere: the nightly runs it, and the shards plan without it.
+    expect(unlistedAlone([unit("cli", ["packages/cli/test/a.test.ts"])], [long])).toEqual([]);
+    // Renamed or removed, with no quarantine: a name to fix in ALONE.
+    expect(unlistedAlone([unit("cli", ["packages/cli/test/a.test.ts"])], [])).toEqual([long]);
+    expect(unlistedAlone([unit(long, [long], true)], [])).toEqual([]);
   });
 });

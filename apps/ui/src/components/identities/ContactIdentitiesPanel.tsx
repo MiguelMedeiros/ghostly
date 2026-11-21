@@ -1,9 +1,9 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from "react";
-import { engine } from "@ghostly/browser/platform/engine";
+import { engine, linkOfPeer } from "@ghostly/browser/platform/engine";
 import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/types";
 import type { NostrContactView } from "@ghostly/browser/nostr/types";
 import { useDialogFocus } from "../../hooks/useDismiss";
-import { dateTime, providerOf, useEngineValue } from "../../lib/identities";
+import { dateTime, providerOf, receivedRefusal, useEngineValue } from "../../lib/identities";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { Deck } from "../deck/Deck";
 import { CardFlip, FlipTurnButton } from "../deck/Flip";
@@ -25,12 +25,25 @@ import { ProviderMark } from "./ProviderMark";
 import { PublicProfileDetails } from "./PublicProfileDetails";
 import "./contact-panel.css";
 import { deckArrows } from "../deck/arrows";
+import { ownDirection } from "../../lib/ownDirection";
 import { problemLine } from "../../lib/problemText";
 import { fillNames } from "../../lib/fillNodes";
+import { isolate } from "../../lib/ownStatus";
 import { sourceWords } from "../../lib/providerWords";
+import { focusLost } from "../../lib/focus";
+import { FocusSafeButton } from "../ui/FocusSafeButton";
 
 type Entry = { id: typeof GHOSTLY; ghostly: true; card: IdCardContent } | { id: string; ghostly?: false; r: ReceivedIdentityView; card: IdCardContent };
 type Received = Extract<Entry, { r: ReceivedIdentityView }>;
+
+/** What the panel shows of the contact's chat: their Ghostly card, their identities and their Nostr keys. */
+type PanelLink = Pick<LinkView, "id" | "peerNick" | "peerAvatar" | "peerPubKeyZ32" | "peerVerified" | "createdAt" | "nostr"> & {
+  identities?: Pick<NonNullable<LinkView["identities"]>, "received" | "error">;
+};
+const panelLink = (l: LinkView | undefined): PanelLink | undefined => l && {
+  id: l.id, peerNick: l.peerNick, peerAvatar: l.peerAvatar, peerPubKeyZ32: l.peerPubKeyZ32, peerVerified: l.peerVerified, createdAt: l.createdAt, nostr: l.nostr,
+  identities: l.identities && { received: l.identities.received, error: l.identities.error },
+};
 
 /**
  * A contact's identities, beside the chat (the chat's column is `chat-pane`, contact-panel.css): a side panel in a wide
@@ -48,9 +61,10 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
   card?: { side: "mine" | "theirs"; id: string };
   onClose: () => void;
 }) {
-  // This contact's link, and whose each chat is with the identities they shared (the names the activity's chips
-  // show): not the whole state, which drew the panel again on every engine state while it stayed open.
-  const link = useEngineValue(state => state?.links.find(l => l.peerPubKeyZ32 === peerKey));
+  // What it shows of this contact's chat, and whose each chat is with the identities they shared (the names the
+  // activity's chips show): not the whole state, nor the chat's whole view (their typing, presence, round trip time),
+  // each of which drew the panel and every card again while it stayed open.
+  const link = useEngineValue(state => panelLink(linkOfPeer(state?.links, peerKey)));
   const links = useEngineValue(state => (state?.links ?? []).map((l): ChipLink => ({ id: l.id, peerPubKeyZ32: l.peerPubKeyZ32, identities: l.identities && { received: l.identities.received } })));
   const { t, language } = useI18n();
   const ref = useRef<HTMLDivElement>(null), backdrop = useRef<HTMLDivElement>(null);
@@ -58,6 +72,10 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
   const beside = useBeside(backdrop);
   const besideNow = useRef(beside); besideNow.current = beside;
   useDialogFocus(ref, onClose, undefined, undefined, () => besideNow.current);
+  // Over the chat now (an app opened beside it): a dialog, so it has the focus, as when it opens over the chat.
+  useEffect(() => {
+    if (!beside && ref.current && !ref.current.contains(document.activeElement)) ref.current.focus({ preventScroll: true });
+  }, [beside]);
   const face = useContactFace(peerKey), sent = usePeerAvatar(peerKey);
   const photo = face?.photo ?? sent;
   const now = Math.floor(Date.now() / 1000);
@@ -83,7 +101,7 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
             <PeerAvatar peerPubKey={peerKey} label={name} photo={face?.photo} testId="chat-identities-picture" presence />
           </AvatarOpener>
           <div className="min-w-0">
-            <h2 id={titleId} className="contact-panel-title">{t("identities.contact.title", { name })}</h2>
+            <h2 id={titleId} className="contact-panel-title">{fillNames(t("identities.contact.title"), { name })}</h2>
             {/* Whether they are online, in words (the dot is on their picture), and the status they set. */}
             <PeerPresenceLine peerKey={peerKey} testId="chat-identities-presence" className="mt-0.5 text-[13px]" />
             <p className="contact-panel-lead">{t("identities.contact.lead")}</p>
@@ -95,13 +113,13 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
       </div>
       <div className="contact-panel-body">
         <ContactFacePicker peerKey={peerKey} received={received} />
-        <section className="contact-panel-section" data-testid="chat-identities-received" aria-label={t("identities.contact.sharedBy", { name })}>
-          <h3 className="contact-panel-heading">{t("identities.contact.sharedBy", { name })}</h3>
+        <section className="contact-panel-section" data-testid="chat-identities-received" aria-label={t("identities.contact.sharedBy", { name: isolate(name) })}>
+          <h3 className="contact-panel-heading">{fillNames(t("identities.contact.sharedBy"), { name })}</h3>
           {link
             ? <TheirCards t={t} entries={entries} link={link} links={links} name={name} nostr={link.nostr ?? []} initial={card?.side === "theirs" ? card.id : undefined} />
-            : <p className="contact-panel-note" data-testid="chat-identities-none">{t("identities.ghostly.nothingElse", { name })}</p>}
+            : <p className="contact-panel-note" data-testid="chat-identities-none">{fillNames(t("identities.ghostly.nothingElse"), { name })}</p>}
         </section>
-        {link?.identities?.error && <p className="contact-panel-note" role="alert" data-testid="chat-identities-link-error">{problemLine(link.identities.error, t)}</p>}
+        {link?.identities?.error && <p className="contact-panel-note" role="alert" dir={ownDirection(problemLine(link.identities.error, t))} data-testid="chat-identities-link-error">{problemLine(link.identities.error, t)}</p>}
         <p className="contact-panel-note" data-testid="chat-identities-share-yours">{t("identities.contact.shareYours")}</p>
       </div>
     </div>
@@ -110,7 +128,8 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
 
 /**
  * Whether the panel sits beside the chat rather than over it: its backdrop is shown only over it (contact-panel.css,
- * by the chat's column width and the screen's), so this follows the column as it is resized.
+ * by the chat's column width and the screen's, and whether an app sits beside the chat), so this follows the column as
+ * it is resized, and the chat's column as an app beside it opens or closes (the page keeps its size then).
  */
 function useBeside(backdrop: RefObject<HTMLElement | null>) {
   const [beside, setBeside] = useState(false);
@@ -122,13 +141,15 @@ function useBeside(backdrop: RefObject<HTMLElement | null>) {
     if (typeof ResizeObserver !== "function") return;
     const observer = new ResizeObserver(check);
     observer.observe(pane);
+    const column = pane.querySelector(":scope > .chat-column");
+    if (column) observer.observe(column);
     return () => observer.disconnect();
   }, [backdrop]);
   return beside;
 }
 
 /** The contact's ID cards: a deck, then the chosen card turned over. */
-function TheirCards({ t, entries, link, links, name, nostr, initial }: { t: Translate; entries: Entry[]; link: LinkView; links: readonly ChipLink[]; name: string; nostr: NostrContactView[]; initial?: string }) {
+function TheirCards({ t, entries, link, links, name, nostr, initial }: { t: Translate; entries: Entry[]; link: PanelLink; links: readonly ChipLink[]; name: string; nostr: NostrContactView[]; initial?: string }) {
   // The card shown first: the one tapped in the timeline, else their first shared identity, else their Ghostly card.
   const [chosen, setChosen] = useState<string | undefined>(initial ?? entries.find(e => !e.ghostly)?.id);
   const { side, flipped, turn, turnBack } = useCardFlip();
@@ -139,28 +160,30 @@ function TheirCards({ t, entries, link, links, name, nostr, initial }: { t: Tran
   const root = useRef<HTMLDivElement>(null);
   const entry = entries.find(e => e.id === chosen) ?? entries[0];
   const tone = (e: Entry) => idCardTone({ provider: e.card.provider, subject: e.card.bound, attested: e.card.attested });
-  // Turned over, the keys go to the back's way back; face up again, to the chosen card.
+  // Turned over, the keys go to the back's way back; face up again, to the chosen card once the deck is back (after the
+  // turn: until then the back is there, with the focus on its Cards), unless the person went elsewhere meanwhile.
+  const turned = useRef(false);
   useEffect(() => {
-    if (side === "back" && flipped) root.current?.querySelector<HTMLElement>("[data-testid=chat-identity-cards]")?.focus({ preventScroll: true });
+    if (side === "back") { turned.current = true; if (flipped) root.current?.querySelector<HTMLElement>("[data-testid=chat-identity-cards]")?.focus({ preventScroll: true }); }
+    else if (turned.current) { turned.current = false; if (focusLost()) root.current?.querySelector<HTMLElement>('[role=radio][tabindex="0"]')?.focus({ preventScroll: true }); }
   }, [side, flipped]);
-  const cards = () => { turnBack(); requestAnimationFrame(() => root.current?.querySelector<HTMLElement>('[role=radio][tabindex="0"]')?.focus({ preventScroll: true })); };
   const showing = side === "back" ? entry : undefined;
   return (
     <div ref={root} className={`contact-cards ${tone(entry)}`} data-side={showing ? "back" : "cards"}>
       {showing ? <CardFlip className="contact-identity" flipped={flipped} onSettle={setAtRest} tone={tone(showing)}
         front={<IdCardFace card={showing.card} />}
         back={showing.ghostly
-          ? <TheirGhostlyBack t={t} card={showing.card} link={link} name={name} turning={turning} onCards={cards} />
-          : <TheirCardBack t={t} entry={showing} linkId={link.id} name={name} nostr={nostr.find(v => v.subject === showing.r.subject)} turning={turning} onCards={cards} />} />
+          ? <TheirGhostlyBack t={t} card={showing.card} link={link} name={name} turning={turning} onCards={turnBack} />
+          : <TheirCardBack t={t} entry={showing} linkId={link.id} name={name} nostr={nostr.find(v => v.subject === showing.r.subject)} turning={turning} onCards={turnBack} />} />
       : <>
         <Deck<Entry> compact cards={entries} selected={entry.id} onSelect={setChosen} onChoose={id => { setChosen(id); turn(); }}
-          kind="radios" label={t("identities.contact.deckLabel", { name })} name="contact-identity-deck" arrows={deckArrows(t)} className="id-deck" size={{ max: 300, share: .78 }}
+          kind="radios" label={t("identities.contact.deckLabel", { name: isolate(name) })} name="contact-identity-deck" arrows={deckArrows(t)} className="id-deck" size={{ max: 300, share: .78 }}
           testId={e => (e.ghostly ? "chat-identity-ghostly" : "chat-identity-received")}
           face={(e, { after }) => <IdCardFace card={e.card} after={after} />}
           mark={e => <IdCardMark provider={e.card.provider} subject={e.card.bound} />}
           tone={tone} />
         {entries.length === 1
-          ? <p className="contact-panel-note" data-testid="chat-identities-none">{t("identities.ghostly.nothingElse", { name })}</p>
+          ? <p className="contact-panel-note" data-testid="chat-identities-none">{fillNames(t("identities.ghostly.nothingElse"), { name })}</p>
           : <p className="contact-panel-hint">{t("identities.contact.tapHint")}</p>}
         {!entry.ghostly && (entry.card.status === "verified" || entry.card.status === "expiring") && hasIdentityActivity(entry.r.provider) &&
           <IdentityActivity key={entry.id} provider={entry.r.provider} subject={entry.r.verified.subject} profile={entry.r.publicProfile} links={links} />}
@@ -173,7 +196,7 @@ function TheirCards({ t, entries, link, links, name, nostr, initial }: { t: Tran
  * The contact's Ghostly card turned over: the name and picture as they sent them (not a proof), their key in this
  * chat in full, to copy, whether it is verified (codes compared), and since when the chat exists.
  */
-function TheirGhostlyBack({ t, card, link, name, turning, onCards }: { t: Translate; card: IdCardContent; link: LinkView; name: string; turning: boolean; onCards: () => void }) {
+function TheirGhostlyBack({ t, card, link, name, turning, onCards }: { t: Translate; card: IdCardContent; link: PanelLink; name: string; turning: boolean; onCards: () => void }) {
   const { copied, failed, copy } = useCopyKey(card.subject);
   return (
     <div className="id-card-back contact-card-back" data-testid="chat-identity-back" data-provider={GHOSTLY} data-status={card.status}>
@@ -185,8 +208,8 @@ function TheirGhostlyBack({ t, card, link, name, turning, onCards }: { t: Transl
         <div className="id-card-back-sees">
           {card.photo ? <img src={card.photo} alt="" className="h-10 w-10 shrink-0 rounded-xl object-cover" /> : <ProviderMark provider={GHOSTLY} />}
           <span className="id-card-back-who">
-            <span className="id-card-back-name">{card.label}{card.name ? ` · ${card.name}` : ""}</span>
-            <span className="id-card-back-subject" title={card.subject} data-testid="chat-identity-received-subject">{card.short}</span>
+            <span className="id-card-back-name">{card.label}{card.name && <> · <bdi>{card.name}</bdi></>}</span>
+            <span className="id-card-back-subject" title={card.subject} data-testid="chat-identity-received-subject"><bdi dir="ltr">{card.short}</bdi></span>
             <span className="id-card-back-meta">{card.category}</span>
           </span>
         </div>
@@ -199,7 +222,7 @@ function TheirGhostlyBack({ t, card, link, name, turning, onCards }: { t: Transl
           {card.issued && <><dt>{t("identities.contact.since")}</dt><dd>{card.validity}</dd></>}
         </dl>
         <div className="flex flex-wrap gap-2">
-          <button type="button" className="contact-card-action" data-testid="chat-identity-copy-key" disabled={turning} onClick={copy}>{copied ? t("identities.ghostly.copied") : t("identities.ghostly.copyKey")}</button>
+          <FocusSafeButton type="button" className="contact-card-action" data-testid="chat-identity-copy-key" disabled={turning} onClick={copy}>{copied ? t("identities.ghostly.copied") : t("identities.ghostly.copyKey")}</FocusSafeButton>
         </div>
         {failed && <p role="alert" className="id-card-back-note" data-testid="chat-identity-copy-error">{t("identities.add.copyError")}</p>}
       </div>
@@ -230,11 +253,11 @@ function TheirCardBack({ t, entry, linkId, name, nostr, turning, onCards }: { t:
         <div className="id-card-back-sees">
           <ProviderMark provider={r.provider} subject={card.bound} />
           <span className="id-card-back-who">
-            <span className="id-card-back-name">{card.label}{card.name ? ` · ${card.name}` : ""}</span>
+            <span className="id-card-back-name">{card.label}{card.name && <> · <bdi>{card.name}</bdi></>}</span>
             {/* A domain whole, wrapped: its end names who owns it, and the face shows only that end. */}
             {r.provider === "domain"
               ? <span className="id-card-back-subject id-card-back-subject-whole" data-testid="chat-identity-received-subject"><bdi dir="ltr">{card.subject}</bdi></span>
-              : <span className="id-card-back-subject" title={card.subject} data-testid="chat-identity-received-subject">{card.short}</span>}
+              : <span className="id-card-back-subject" title={card.subject} data-testid="chat-identity-received-subject"><bdi dir="ltr">{card.short}</bdi></span>}
             <span className="id-card-back-meta">{card.category}</span>
             {/* A name the evidence or a lookup carried, and who wrote it: a holder's own words are not a proof. */}
             {card.name && <span className="id-card-back-meta id-card-back-meta-whole" data-testid="chat-identity-received-name-source">{fillNames(t("identities.contact.nameFrom"), { source: card.profile?.found && card.profile.name ? t("identities.contact.theirProfile") : sourceWords(r.provider, r.display?.source ?? r.verified.display?.source ?? "", t) })}</span>}
@@ -251,18 +274,18 @@ function TheirCardBack({ t, entry, linkId, name, nostr, turning, onCards }: { t:
           <dt>{t("identities.contact.validity")}</dt>
           <dd>{card.validity}</dd>
           <dt>{t("identities.contact.status")}</dt>
-          <dd data-testid="chat-identity-received-status" data-status={card.status}>{r.status === "unconfirmed" ? (r.error ? fillNames(t("identities.contact.unconfirmedWhy", { status: card.statusLabel }), { error: problemLine(r.error, t, "proof") }) : t("identities.contact.unconfirmed", { status: card.statusLabel }))
+          <dd data-testid="chat-identity-received-status" data-status={card.status}>{r.status === "unconfirmed" ? (r.error ? fillNames(t("identities.contact.unconfirmedWhy", { status: card.statusLabel }), { error: receivedRefusal(r.error, t) }) : t("identities.contact.unconfirmed", { status: card.statusLabel }))
             : r.status === "revoked" ? t("identities.contact.revoked", { status: card.statusLabel }) : card.statusLabel}</dd>
         </dl>
         <div className="flex flex-wrap gap-2">
-          {canCheck && <button type="button" className="contact-card-action" data-testid="chat-identity-recheck" disabled={turning} aria-disabled={!!busy || undefined}
-            onClick={() => { if (!busy) act("recheck", () => engine.call("recheckIdentityProof", { linkId, id: r.id })); }}>{busy === "recheck" ? t("identities.contact.checking") : t("identities.contact.recheck")}</button>}
-          {provider?.lookupDisplay && ok && <button type="button" className="contact-card-action" data-testid="chat-identity-lookup" disabled={turning} aria-disabled={!!busy || undefined}
-            onClick={() => { if (!busy) act("lookup", () => engine.call("lookupIdentityDisplay", { linkId, id: r.id })); }}>{busy === "lookup" ? t("identities.contact.lookingUp") : r.provider === "openpgp" ? t("identities.contact.lookupOpenpgp") : provider.lookupLabel ?? t("identities.contact.showProfile")}</button>}
+          {canCheck && <FocusSafeButton type="button" className="contact-card-action" data-testid="chat-identity-recheck" disabled={turning} aria-disabled={!!busy || undefined}
+            onClick={() => { if (!busy) act("recheck", () => engine.call("recheckIdentityProof", { linkId, id: r.id })); }}>{busy === "recheck" ? t("identities.contact.checking") : t("identities.contact.recheck")}</FocusSafeButton>}
+          {provider?.lookupDisplay && ok && <FocusSafeButton type="button" className="contact-card-action" data-testid="chat-identity-lookup" disabled={turning} aria-disabled={!!busy || undefined}
+            onClick={() => { if (!busy) act("lookup", () => engine.call("lookupIdentityDisplay", { linkId, id: r.id })); }}>{busy === "lookup" ? t("identities.contact.lookingUp") : r.provider === "openpgp" ? t("identities.contact.lookupOpenpgp") : provider.lookupLabel ?? t("identities.contact.showProfile")}</FocusSafeButton>}
         </div>
         {/* What Check again does, only where there is one: a withdrawn or revoked card is not checked again. */}
         {canCheck && <p className="id-card-back-note">{provider?.recheck ? t("identities.contact.recheckNoteRepeat") : t("identities.contact.recheckNote")}{provider?.lookupDisplay && ok ? ` ${t("identities.contact.lookupNote")}` : ""}</p>}
-        {error && <p role="alert" className="m-0 text-xs text-danger" data-testid="chat-identities-error">{error}</p>}
+        {error && <p role="alert" dir={ownDirection(error)} className="m-0 text-xs text-danger" data-testid="chat-identities-error">{error}</p>}
         {r.provider === "nostr" && ok && nostr && <div className="contact-card-nostr"><NostrContactCard linkId={linkId} view={nostr} name={name} compact turning={turning} /></div>}
       </div>
       <span className="id-card-mrz id-card-back-mrz" aria-hidden="true">{machineLine(card.label, card.subject)}</span>

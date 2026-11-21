@@ -534,7 +534,7 @@ describe("AddIdentityDialog", () => {
       expect(finish).toBeDisabled();
       await user.type(screen.getByTestId("add-identity-paste"), "not a signature");
       await user.click(finish);
-      expect(await screen.findByTestId("add-identity-error")).toHaveTextContent("Paste the whole signature, from -----BEGIN SSH SIGNATURE----- to -----END SSH SIGNATURE-----");
+      expect(await screen.findByTestId("add-identity-error")).toHaveTextContent("That is not the whole signaturePaste it from -----BEGIN SSH SIGNATURE----- to -----END SSH SIGNATURE-----.");
       // Refused in the page: nothing reached the engine.
       expect(engine.callsTo("completeIdentityProof")).toEqual([]);
     });

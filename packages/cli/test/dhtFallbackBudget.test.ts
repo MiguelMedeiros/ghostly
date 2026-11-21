@@ -39,12 +39,13 @@ function fakeDht() {
   return { dht: dht as unknown as Mainline, gets };
 }
 
-/** Relays that have no packet for anyone (404), or answer 502 while `down`. */
-function relayStub(state: { down: boolean; gets: number[] }): typeof fetch {
+/** Relays that have no packet for anyone (404), or answer 502 while `down`, or 429 (a minute's wait) while `limiting`. */
+function relayStub(state: { down: boolean; limiting?: boolean; gets: number[] }): typeof fetch {
   return (async (_input: RequestInfo | URL, init?: RequestInit) => {
     if ((init?.method ?? "GET") === "GET") state.gets.push(Date.now());
     await new Promise((r) => setTimeout(r, 50));
     if (state.down) return new Response("bad gateway", { status: 502 });
+    if (state.limiting) return new Response("slow down", { status: 429, headers: { "retry-after": "60" } });
     return init?.method === "PUT" ? new Response(null, { status: 204 }) : new Response(null, { status: 404 });
   }) as typeof fetch;
 }
@@ -71,7 +72,7 @@ async function daemon(contacts: number) {
   await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true });
   const rows = Array.from({ length: contacts }, (_, i) => chat(i));
   for (const row of rows) await db.putLink(row);
-  const relays = { down: false, gets: [] as number[] };
+  const relays = { down: false, limiting: false, gets: [] as number[] };
   const { dht, gets } = fakeDht();
   const transport = new RelaysAndDht(dht, { relays: RELAYS, fetch: relayStub(relays), log: () => {} }, true);
   node = new GhostlyNode({ onState: () => {}, onMessages: () => {}, onCallSignal: () => {} }, {
@@ -114,6 +115,25 @@ describe("background DHT reads while every relay fails", { timeout: 120_000 }, (
     const after = perMinute(gets.map((g) => g.at), t0, 66, 70);
     expect(Math.max(...after)).toBe(0);
     expect(perMinute(relays.gets, t0, 66, 70).every((n) => n > 0)).toBe(true);
+  });
+
+  it("50 contacts, relays answering 429 for 10 minutes: read on the DHT at the relays' share; back to the relays after", async () => {
+    const { rows, relays, gets, t0 } = await daemon(50);
+    await vi.advanceTimersByTimeAsync(2 * MIN);
+    relays.limiting = true;
+    for (let m = 2; m < 12; m++) await vi.advanceTimersByTimeAsync(MIN);
+    // Before: no lookup at all, and no contact read anywhere for the 10 minutes (3 relay GETs, each one a 429).
+    const lookups = perMinute(gets.map((g) => g.at), t0, 3, 12);
+    expect(Math.max(...lookups)).toBeLessThanOrEqual(BOUND);
+    const read = new Set(gets.filter((g) => g.at - t0 >= 3 * MIN).map((g) => g.key));
+    for (const row of rows) expect(read.has(row.peerPubKeyZ32)).toBe(true);
+    // The relays still asked only as often as their 429s let them be.
+    expect(perMinute(relays.gets, t0, 3, 12).reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(9);
+
+    relays.limiting = false;
+    for (let m = 12; m < 18; m++) await vi.advanceTimersByTimeAsync(MIN);
+    expect(Math.max(...perMinute(gets.map((g) => g.at), t0, 15, 18))).toBe(0);
+    expect(perMinute(relays.gets, t0, 15, 18).every((n) => n > 0)).toBe(true);
   });
 
   it("300 contacts, relays failing for 30 minutes: bounded the same", async () => {

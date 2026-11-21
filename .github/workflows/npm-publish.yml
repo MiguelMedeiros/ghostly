@@ -94,9 +94,11 @@ jobs:
             echo "published=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # No dependency's install script runs here (better-sqlite3's downloads a native binary nothing here loads); the
+      # root's own postinstall (the dependency patches, the built-in apps) still runs.
       - name: Install dependencies
         if: steps.version.outputs.published == 'false'
-        run: npm ci
+        run: npm ci --ignore-scripts && npm run postinstall
 
       - name: Build
         if: steps.version.outputs.published == 'false'
@@ -268,9 +270,11 @@ jobs:
             echo "published=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # No dependency's install script runs here (better-sqlite3's downloads a native binary nothing here loads); the
+      # root's own postinstall (the dependency patches, the built-in apps) still runs.
       - name: Install dependencies
         if: steps.enabled.outputs.on == 'true' && steps.version.outputs.published == 'false'
-        run: npm ci
+        run: npm ci --ignore-scripts && npm run postinstall
 
       # `npm pack` builds the package into packages/sdk/examples/adapter/vendor/ghostly-sdk.tgz, which both examples install.
       - name: The tarball works outside the repository

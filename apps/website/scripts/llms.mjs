@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 
 export const SITE = "https://ghostly.tools";
 const REPO = "https://github.com/MiguelMedeiros/ghostly";
-const RAW = "https://raw.githubusercontent.com/MiguelMedeiros/ghostly/dev";
+const RAW = "https://raw.githubusercontent.com/MiguelMedeiros/ghostly/main";
 
 /**
  * Documents of the repository that llms-full.txt carries before the WISPs, in this order: the agent guides, the CLI's
@@ -70,7 +70,7 @@ export function llmsIndex(entries, numbering) {
 
 > An open-source, end-to-end encrypted, peer-to-peer messenger with a wallet and verifiable identities built in. No Ghostly server, no account. Two apps meet through small signed records on the Mainline DHT, then talk over a direct link. It runs in the browser, on the desktop (macOS, Windows, Linux) and as a browser extension, and a headless CLI, \`@ghostlytools/cli\`, puts bots and AI agents in the same chats as people.
 
-On Android and iPhone the web app installs as an app. Each release since 1.6.0 also attaches the native Android app, an arm64 APK signed with Ghostly's upload key and listed in SHA256SUMS.txt (\`ghostly-<version>-android-arm64.apk\`, ${REPO}/releases/latest); it is not yet the whole Desktop app (${REPO}/blob/dev/docs/ANDROID.md). Every wire contract is an open draft called a WISP (Wire Interoperability Specification Proposal); each says what is implemented. A page under ${SITE}/wisps/ has its Markdown source at ${SITE}/reference/<file>.md. This file, the agent guides, the full CLI reference and every WISP are in one file: ${SITE}/llms-full.txt.
+On Android and iPhone the web app installs as an app. Each release since 1.6.0 also attaches the native Android app, an arm64 APK signed with Ghostly's upload key and listed in SHA256SUMS.txt (\`ghostly-<version>-android-arm64.apk\`, ${REPO}/releases/latest); it is not yet the whole Desktop app (${REPO}/blob/main/docs/ANDROID.md). Every wire contract is an open draft called a WISP (Wire Interoperability Specification Proposal); each says what is implemented. A page under ${SITE}/wisps/ has its Markdown source at ${SITE}/reference/<file>.md. This file, the agent guides, the full CLI reference and every WISP are in one file: ${SITE}/llms-full.txt.
 
 ${AGENTS_INTRO}
 
@@ -92,8 +92,8 @@ ${[
   line("Agents FAQ", `${SITE}/agents/faq`, "short answers for someone deciding whether to connect an agent"),
   line("Agents guide", `${RAW}/docs/AI-AGENTS.md`, "the agent connector: allowlist, agent.turn events, safe setup and adapters"),
   line("Agent skill", `${RAW}/packages/cli/SKILL.md`, "a SKILL.md that takes an agent from install to answering in chats and groups"),
-  line("CLI reference", `${REPO}/blob/dev/packages/cli/README.md`, "every command, event and socket method of @ghostlytools/cli"),
-  line("Claude Code example", `${REPO}/blob/dev/packages/cli/examples/claude-code-agent.sh`, "wakes claude -p with no tools once per turn and sends its answer as a reply"),
+  line("CLI reference", `${REPO}/blob/main/packages/cli/README.md`, "every command, event and socket method of @ghostlytools/cli"),
+  line("Claude Code example", `${REPO}/blob/main/packages/cli/examples/claude-code-agent.sh`, "wakes claude -p with no tools once per turn and sends its answer as a reply"),
   line("Voice agent", "https://github.com/MiguelMedeiros/ghostly-voice-agent", "ghostly-voice-agent: answers Ghostly calls on the CLI with speech to text, Claude and text to speech; its AGENTS.md is the setup guide"),
 ].join("\n")}
 
@@ -101,10 +101,10 @@ ${[
 
 ${[
   line("Source code", REPO, "MIT licensed"),
-  line("License", `${REPO}/blob/dev/LICENSE`, "MIT"),
+  line("License", `${REPO}/blob/main/LICENSE`, "MIT"),
   line("Security policy", `${REPO}/blob/main/.github/SECURITY.md`, "how to report a vulnerability privately"),
   line("Security advisories", `${REPO}/security/advisories`, "published advisories for fixed flaws"),
-  line("Security review log", `${REPO}/blob/dev/docs/SECURITY-REVIEW.md`, "the threat model, what was fixed and how it was proven, what is still open"),
+  line("Security review log", `${REPO}/blob/main/docs/SECURITY-REVIEW.md`, "the threat model, what was fixed and how it was proven, what is still open"),
   line("Releases", `${REPO}/releases`, "each has SHA256SUMS.txt, signed with GPG key 46A3AC8395F95A6E6D8F1E34819EDEE4673F3EBB"),
 ].join("\n")}
 
@@ -153,7 +153,7 @@ ${[
 export function llmsFull(entries, numbering, read) {
   const part = (url, body) => `<!-- Source: ${url} -->\n\n${body.trim()}\n`;
   const parts = [
-    ...KEY_DOCS.map((path) => part(`${REPO}/blob/dev/${path}`, read(path))),
+    ...KEY_DOCS.map((path) => part(`${REPO}/blob/main/${path}`, read(path))),
     ...wispsOf(entries, numbering).map((e) => part(`${SITE}/reference/${e.file}`, read(`apps/website/public/reference/${e.file}`))),
     ...HOW.map(([file]) => part(`${SITE}/reference/${file}`, read(`apps/website/public/reference/${file}`))),
   ];

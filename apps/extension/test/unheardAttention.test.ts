@@ -121,6 +121,26 @@ describe("a message with no Ghostly tab open", () => {
     expect(asked()).toHaveLength(1);
   });
 
+  it("builds no chat's view but the one a 1:1 chat's event that may be shown is about", async () => {
+    // `getState` builds every chat's and group's view: it was built for each event the peer heard with no tab open, then
+    // for each 1:1 chat's message shown (3.7 ms at 300 chats, 15 ms at 2,000, where its own chat's view takes 0.005 ms).
+    const built = vi.spyOn(engine().node, "getState");
+    const one = vi.spyOn(engine().node, "chatView");
+    notificationsOn(false);
+    await hear();
+    notificationsOn();
+    await hear({ type: "coin", linkId: undefined });
+    await hear({ type: "sent" });
+    await hear({ at: Date.now() - 60_000 });
+    await hear({ linkId: "group:g1" }, true);
+    expect(one).not.toHaveBeenCalled();
+    await hear({}, true);
+    await hear({}, true);
+    expect(built).not.toHaveBeenCalled();
+    expect(one.mock.calls).toEqual([["link-a"], ["link-a"]]);
+    expect(world.session.get(`notice:${created().at(-1)![0]}`)).toBe(CHAT);
+  });
+
   it("nothing without the notifications permission", async () => {
     resetEngine();
     world = await bootExtension();

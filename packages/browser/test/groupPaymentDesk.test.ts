@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ENDPOINT, type GhostLink, type Payment, type PaymentRequest, type PaymentResult } from "@ghostly/core";
+import { authoredNote } from "../src/engine/groupPayments";
 import { PaymentDesk, type DeskLightning } from "../src/engine/payments";
 import type { CashuWallet } from "../src/engine/wallet";
+import type { FedimintWallet } from "../src/engine/paymentAdapters/fedimintWallet";
 import type { StoredMessage } from "../src/shared/types";
 import { resetDb } from "./fakes";
 import { invoiceFor } from "./helpers/invoice";
@@ -40,9 +42,11 @@ interface Member {
 class World {
   readonly members = new Map<string, Member>();
   readonly down = new Set<string>();
+  /** Edges that are not the group's: a 1:1 chat, another group's edge. */
+  readonly outside = new Set<string>();
   private queue: (() => Promise<unknown>)[] = [];
 
-  add(name: string): Member {
+  add(name: string, fedimint?: FedimintWallet): Member {
     const edges = new Map<string, string>();
     const sent: Member["sent"] = [];
     const deliver = (linkId: string, kind: string, frame: Frame, run: (peer: Member, back: string) => Promise<unknown>) => {
@@ -53,7 +57,7 @@ class World {
     };
     const link = (linkId: string) => ({
       isDataLinkOpen: true, supportsPayments: true, supportsArkPayments: false, supportsBarkPayments: false, supportsBitcoinPayments: false, supportsUsdtPayments: false,
-      requirePaymentSupport: async () => {}, allowsPayment: (m: string) => m === "cashu" || m === "lightning", paymentEnabled: (m: string) => m === "cashu" || m === "lightning",
+      requirePaymentSupport: async () => {}, allowsPayment: (m: string) => m === "cashu" || m === "lightning" || m === "fedimint", paymentEnabled: (m: string) => m === "cashu" || m === "lightning",
       sendPaymentRequest: async (frame: PaymentRequest) => deliver(linkId, "req", frame as unknown as Frame, (peer, back) => peer.desk.onPaymentRequest(back, structuredClone(frame))),
       sendPayment: async (frame: Payment) => deliver(linkId, "pay", frame as unknown as Frame, (peer, back) => peer.desk.onPayment(back, structuredClone(frame))),
       sendPaymentResult: (frame: PaymentResult) => deliver(linkId, "res", frame as unknown as Frame, (peer, back) => peer.desk.onPaymentResult(back, structuredClone(frame))),
@@ -73,13 +77,13 @@ class World {
     const messages: StoredMessage[] = [];
     const desk = new PaymentDesk(wallet as unknown as CashuWallet, {
       getLink: linkId => edges.has(linkId) ? link(linkId) as unknown as GhostLink : null,
-      groupOf: linkId => edges.has(linkId) ? "g" : undefined,
+      groupOf: linkId => edges.has(linkId) && !this.outside.has(linkId) ? "g" : undefined,
       groupLinks: group => group === "g" ? [...edges.keys()] : [],
       storeMessage: async message => { messages.push(message); },
       onChange: () => {},
       // The members try things out on the public test mint: their requests are Testnet's.
       defaultNetwork: () => "testnet",
-    }, undefined, undefined, undefined, lightning as unknown as DeskLightning);
+    }, undefined, undefined, undefined, lightning as unknown as DeskLightning, undefined, fedimint);
     const member: Member = { name, desk, wallet, lightning, edges, messages, sent };
     this.members.set(name, member);
     return member;
@@ -97,8 +101,11 @@ class World {
 }
 
 async function group(...names: string[]) {
+  return groupWith({}, ...names);
+}
+async function groupWith(fedimint: Record<string, FedimintWallet>, ...names: string[]) {
   const world = new World();
-  const members = names.map(n => world.add(n));
+  const members = names.map(n => world.add(n, fedimint[n]));
   world.mesh();
   for (const m of members) await m.desk.start();
   return { world, members };
@@ -182,6 +189,46 @@ describe("a request to the whole group", () => {
       ["p-mint", false, "This ecash does not pay the request: the amount or the mint differs"],
     ]);
     expect(view(a, paymentId).state).toBe("pending");
+  });
+
+  it("ecash naming it from outside the group is not its payment: the note names the member who paid it", async () => {
+    const { world, members: [a, b] } = await group("A", "B", "C");
+    // M shares another chat with A: its edge is not the group's.
+    const m = world.add("M");
+    await m.desk.start();
+    a.edges.set("AM", "M"); m.edges.set("MA", "A");
+    world.outside.add("AM"); world.outside.add("MA");
+    const { paymentId } = await a.desk.requestFromGroup({ groupId: "g", amount: 100, timestamp: 1, rail: "cashu" });
+    await world.settle();
+    await a.desk.onPayment("AM", { id: "p-outside", timestamp: 2, requestId: paymentId, amount: { value: "1", asset: "sat" }, endpoint: [ENDPOINT.cashu, `cashu|${MINT}|1|m`] });
+    expect(view(a, "p-outside")).toMatchObject({ kind: "payment", direction: "in", state: "settled", linkId: "AM" });
+    expect(view(a, "p-outside").requestId).toBeUndefined();
+    expect(view(a, paymentId).state).toBe("pending");
+    await b.desk.payRequest({ linkId: "BA", paymentId });
+    await world.settle();
+    expect(view(a, paymentId).state).toBe("settled");
+    const note = authoredNote(view(a, paymentId), { groupId: "g", me: "A" }, Object.values(a.desk.views()), undefined, linkId => a.edges.get(linkId));
+    expect(note).toMatchObject({ st: "paid", by: "B" });
+  });
+
+  it("notes from a member naming it pay nothing towards it: the note names the member whose ecash settled it", async () => {
+    // A joined a federation and allows Fedimint; any notes of it are worth what they say.
+    const fedimint = { inspectNotes: async (n: string) => ({ federation: "fed1", amountMsats: Number(n.split("|")[1]) * 1000 }),
+      redeemNotes: async () => ({ operationId: "op", state: "done" }), redeemState: async () => "done",
+      federation: () => ({ network: "regtest" }), requestFederations: () => ["fed1"], view: { federations: [] } } as unknown as FedimintWallet;
+    const { world, members: [a, b] } = await groupWith({ A: fedimint }, "A", "B", "C");
+    const { paymentId } = await a.desk.requestFromGroup({ groupId: "g", amount: 100, timestamp: 1, rail: "cashu" });
+    await world.settle();
+    await a.desk.onPayment("AC", { id: "p-notes", timestamp: 2, requestId: paymentId, amount: { value: "1", asset: "sat" }, endpoint: [ENDPOINT.fedimint, "fakenotes|1"] });
+    // Taken in as a plain payment from C: it neither settles the request nor stands for its payer.
+    expect(view(a, "p-notes")).toMatchObject({ kind: "payment", direction: "in", state: "settled", linkId: "AC" });
+    expect(view(a, "p-notes").requestId).toBeUndefined();
+    expect(view(a, paymentId).state).toBe("pending");
+    await b.desk.payRequest({ linkId: "BA", paymentId });
+    await world.settle();
+    expect(view(a, paymentId).state).toBe("settled");
+    const note = authoredNote(view(a, paymentId), { groupId: "g", me: "A" }, Object.values(a.desk.views()), undefined, linkId => a.edges.get(linkId));
+    expect(note).toMatchObject({ st: "paid", by: "B" });
   });
 
   it("on Lightning: one invoice for everyone; paid once, it closes on every member and nobody can pay it again", async () => {

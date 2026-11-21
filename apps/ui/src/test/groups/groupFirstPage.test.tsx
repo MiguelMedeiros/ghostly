@@ -62,6 +62,24 @@ describe("a long group", () => {
     expect(screen.queryByTestId("jump-latest")?.getAttribute("data-count") ?? "0").toBe("0");
   });
 
+  it("keeps its newest page when a message comes before its whole history, which brings that message", async () => {
+    // The extension's peer sends a tab only what changes in a group the tab holds no list of: no list to show.
+    let whole!: (list: StoredMessage[]) => void;
+    fakeEngine.on("messagePage", () => ({ messages: history.slice(-PAGE), more: true }))
+      .on("groupMessages", () => new Promise<StoredMessage[]>(done => { whole = done; }))
+      .on("updateSettings", () => undefined)
+      .update({ groups: [groupView({ status: "active", epoch: 1, members: [member({ key: ME, me: true }), member({ key: ALICE, nick: "Alice" })] })] });
+    renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1" });
+    await screen.findByText(`Message ${COUNT - 1}`);
+
+    const next: StoredMessage = { ...history[COUNT - 1], id: "g-next", text: "Next message", timestamp: history[COUNT - 1].timestamp + 60_000 };
+    await act(async () => { fakeEngine.emit({ kind: "message-changes", linkId: "group:group-1", messages: [next], deleted: [] }); await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.getByText(`Message ${COUNT - 1}`)).toBeInTheDocument();
+    await act(async () => { whole([...history, next]); await vi.advanceTimersByTimeAsync(0); });
+    await screen.findByText("Next message");
+    expect(screen.getByText(`Message ${COUNT - 1}`)).toBeInTheDocument();
+  });
+
   it("shows it is loading until its first rows come, not an empty group", async () => {
     let page!: (answer: { messages: StoredMessage[]; more: boolean }) => void;
     fakeEngine.on("messagePage", () => new Promise(done => { page = done; }))

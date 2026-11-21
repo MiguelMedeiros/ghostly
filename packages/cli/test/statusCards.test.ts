@@ -11,6 +11,7 @@ import { openPersistentIndexedDb } from "../src/runtime/storage";
 import { COMMANDS, idSlot, positionals } from "../src/commands";
 import { chatOnly } from "../src/main";
 import { CARD_UPDATE_GAP_MS, flushCardUpdates, mergeCard } from "../src/statusCards";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.status-cards
 
 /** `task send` and `task update` (WISP 405 · Status Cards) against an engine that keeps what it is sent. */
@@ -35,7 +36,7 @@ function fake(mode: "daemon" | "one-shot" = "daemon", out: { delivery?: StoredMe
   const emit = (event: GhostlyEvent) => { for (const listener of listeners) listener(event); };
   const card = (raw: unknown) => { const checked = checkStatusCard(raw); if ("error" in checked) throw new Error(checked.error); return checked.card; };
   const node = {
-    getState: () => ({ links: [link("chat-one", { label: "Coordinator" })], groups: [group()], settings: {}, transport: {} }) as unknown as EngineState,
+    chatView: chatViewOf, getState: () => ({ links: [link("chat-one", { label: "Coordinator" })], groups: [group()], settings: {}, transport: {} }) as unknown as EngineState,
     getMessages: vi.fn(async (linkId: string) => of(linkId).map((m) => ({ ...m }))),
     getMessage: vi.fn(async (linkId: string, id: string) => { const m = of(linkId).find((x) => x.id === id); return m && { ...m }; }),
     groupMessages: vi.fn(async ({ groupId }: { groupId: string }) => of(`group:${groupId}`).map((m) => ({ ...m }))),
@@ -124,7 +125,7 @@ describe("the task commands", () => {
     usage("task send", pr("--pr-number", "0"), /^--pr-number takes a whole number from 1 to 1000000000, not 0$/);
     for (const flag of ["additions", "deletions", "files"]) usage("task send", pr(`--${flag}`, "-3"), new RegExp(`^--${flag} takes a whole number from 0 to 1000000000, not -3$`));
     usage("task update", ["g1", "t", "--additions", "2.5"], /^--additions takes a whole number from 0 to 1000000000, not 2.5$/);
-    usage("task send", send("--steps", "99999999999999999999/99999999999999999999"), /^--steps takes done\/total of at most 1000000000 steps, like 2\/5, not "99999999999999999999\/99999999999999999999"$/);
+    usage("task send", send("--steps", "99999999999999999999/99999999999999999999"), /^--steps takes done\/total of at most 1000000000 steps, like 2\/5, not \(a 41-character word\)$/);
     expect(params("task send", pr("--pr-number", "7", "--additions", "0", "--files", "1000000000", "--steps", "1000000000/1000000000")).card).toMatchObject({ pr: { number: 7, additions: 0, files: 1e9 }, done: 1e9, total: 1e9 });
     usage("task update", ["g1", "t", "--pr-state", "weird"], /^--pr-state takes draft, open, merged or closed, not "weird"$/);
     usage("task update", ["g1", "t", "--pr-checks", "green"], /^--pr-checks takes passing, failing or pending, not "green"$/);
@@ -330,6 +331,30 @@ describe("the secret guard on cards", () => {
     expect(node.sendMessage).not.toHaveBeenCalled();
     expect(node.sendGroupMessage).not.toHaveBeenCalled();
     await expect(callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "Deploy", step: broken("​") }, force: true })).resolves.toMatchObject({ task: "t1", card: { step: nsec } });
+  });
+
+  it("refuses a --text past 16 KiB as send does, with its size, before the guard reads it: every card command, chat and group", async () => {
+    vi.useFakeTimers();
+    const { ctx, node } = fake("one-shot");
+    await callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "Deploy" }, wait: "none" });
+    await callApi(ctx, "routine.send", { chat: "Sala de Máquinas", card: { id: "r1", name: "Nightly", schedule: "every day 01:00" } });
+    node.sendMessage.mockClear(); node.sendGroupMessage.mockClear();
+    // A seed past the limit: the size is said, not "looks like a secret" (a --force would not send it either).
+    const text = `${seed} ${"é".repeat(8193)}`;
+    const bytes = new TextEncoder().encode(text).length;
+    const tooLong = { code: "bad_request", message: expect.stringMatching(/exceeds 16384 UTF-8 bytes/), details: { bytes, max: 16384 } };
+    for (const chat of ["Coordinator", "Sala de Máquinas"]) {
+      await expect(callApi(ctx, "task.send", { chat, card: { title: "Deploy" }, text })).rejects.toMatchObject(tooLong);
+      await expect(callApi(ctx, "routine.send", { chat, card: { name: "Nightly", schedule: "every day 01:00" }, text })).rejects.toMatchObject(tooLong);
+      await expect(callApi(ctx, "usage.send", { chat, card: { left: 40 }, text })).rejects.toMatchObject(tooLong);
+    }
+    await expect(callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { status: "done" }, text })).rejects.toMatchObject(tooLong);
+    await expect(callApi(ctx, "routine.update", { chat: "Sala de Máquinas", routine: "r1", card: {}, text })).rejects.toMatchObject(tooLong);
+    // `--all` says it once, with its size, not once per chat.
+    await expect(callApi(ctx, "usage.send", { all: true, card: { left: 40 }, text })).rejects.toMatchObject(tooLong);
+    expect(node.sendMessage).not.toHaveBeenCalled();
+    expect(node.sendGroupMessage).not.toHaveBeenCalled();
+    expect(node.editMessage).not.toHaveBeenCalled();
   });
 
   it("takes --force on every card command", () => {

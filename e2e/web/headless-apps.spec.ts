@@ -2,9 +2,9 @@ import { createHash, randomBytes } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pasteInvite } from "../support/clipboard";
-import { chat, expect, test } from "../support/fixtures";
+import { chat, expect } from "../support/fixtures";
 import { HeadlessBot } from "../support/headless";
-import { ChessPublisher, chessFrame, chessStatus, miniApp } from "../support/chessApp";
+import { chessFrame, chessStatus, miniApp, test } from "../support/chessApp";
 import { CHESS } from "../support/chessFixture";
 
 /*
@@ -22,9 +22,8 @@ const frameOf = (kind: string) => (e: Record<string, unknown>) => e.type === "ap
 
 test("a bot on the CLI opens Chess with a person: the card, the app installed from it, and the app's messages both ways", {
   tag: ["@feature:headless.apps", "@feature:headless.web-interop", "@feature:apps.chat.card", "@feature:apps.chat.wire"],
-}, async ({ peer, relay }, info) => {
+}, async ({ peer, relay, publisher }, info) => {
   const url = await relay.listen();
-  const publisher = new ChessPublisher();
   const chess = publisher.publish({ sequence: 5 });
   const bot = new HeadlessBot();
   try {
