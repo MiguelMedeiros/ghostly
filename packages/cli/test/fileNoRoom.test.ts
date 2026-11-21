@@ -30,6 +30,7 @@ function world(transfers: Record<string, FileTransferView>, messages: StoredMess
   const node = {
     getState: () => ({ links: [link], groups: [], settings: {}, transport: {}, transfers }) as unknown as EngineState,
     getMessages: vi.fn(async () => messages),
+    fileMessages: vi.fn(async () => messages),
     fileAction: vi.fn(),
   };
   const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
