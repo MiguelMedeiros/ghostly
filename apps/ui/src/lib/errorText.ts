@@ -89,6 +89,12 @@ export const SAVE_REFUSED = /^(?:The file could not be saved there|Unreadable fi
  */
 export const DESKTOP_SAVE_REFUSED = /^(?:.+ \(os error \d+\)|The chosen place has no file name)$/;
 
+/**
+ * A part that loads on demand (a wallet's library, the identity providers) whose file did not come: offline before the
+ * worker kept it, or a deploy replaced it under an open tab. Each browser says it its own way (Chromium, WebKit, Firefox).
+ */
+export const PART_NOT_LOADED = /^(?:Failed to fetch dynamically imported module|error loading dynamically imported module)(?::[\s\S]*)?$|^Importing a module script failed\.?$/;
+
 /** No room left in the storage that holds items for an away contact (WISP 404, engine/hold.ts): it sends once some are picked up. */
 const HOLD_FULL_ITEMS = /^At most (?<max>\d+) items can wait for this contact\. Wait until some are picked up\.$/;
 const HOLD_FULL_BYTES = /^Items waiting for this contact would exceed (?<max>\d+) MB\. Wait until some are picked up\.$/;
@@ -124,9 +130,7 @@ const RULES: readonly Rule[] = [
   // A call the peer was answering when it went away (an extension's offscreen restart, Clear all data or a profile
   // switch in another tab): the old peer may have done it before it went, so it says to look before trying again.
   exact("Lost the Ghostly peer", "errors.app.lostPeer", "errors.app.lostPeerNext"),
-  // A part that loads on demand (a wallet's library, the identity providers) whose file did not come: offline before the
-  // worker kept it, or a deploy replaced it under an open tab. Each browser says it its own way (Chromium, WebKit, Firefox).
-  { match: /^(?:Failed to fetch dynamically imported module|error loading dynamically imported module)(?::[\s\S]*)?$|^Importing a module script failed\.?$/, key: "errors.app.partNotLoaded", next: "app.pageNotLoaded.hint", detail: true },
+  { match: PART_NOT_LOADED, key: "errors.app.partNotLoaded", next: "app.pageNotLoaded.hint", detail: true },
   // A call whose storage write the browser refused for want of space (engine/server.ts): a group made, a text sent. A
   // forward's copy that found no room (engine/forwards.ts forwardError) says Desktop's io error the same way.
   { match: /^Not enough space on this device \((?:QuotaExceededError(?:: [\s\S]*)?|No space left on device[\s\S]*)\)$/, key: "errors.app.noRoom", next: "errors.app.noRoomNext", detail: true },

@@ -37,11 +37,14 @@ const MAX_SCRIPTS = 4;
  * online-only ones the service worker leaves out of its install (`ONLINE_ONLY_MODULES` in apps/web/src/sw/policy.ts:
  * Pubky, Keet proofs, OPAQUE's handoff password proof, named `esm` after @serenity-kit/opaque's esm/index.js, the USDT
  * and Ark wallets) and heavy ones a person may never open (a group call, OpenPGP, the clients of the Lightning and
- * on-chain sources: LND, Core Lightning, WebLN, the BDK wallet, Breez).
+ * on-chain sources: LND, Core Lightning, WebLN, the BDK wallet, Breez; the wallets of each kind, which come with the
+ * first one saved: Ark, Bark, Fedimint with its SDK loader and its chat payments, Spark, USDT).
  * A chunk folded into another loads with whatever took it in, often the first load, and leaves at most a stub of its
- * name behind (`ownCode`).
+ * name behind (`ownCode`). A chunk may also have a facade of its name beside it, passing on its exports to a dynamic
+ * import: it counts as folded only when every file of its name is a stub.
  */
-const LATER = ["pubky", "keet-identity-key", "esm", "usdt", "arkade", "groupCallLivekit", "openpgp.min", "lnd", "coreLightning", "webln", "bdk", "breez"];
+const LATER = ["pubky", "keet-identity-key", "esm", "usdt", "arkade", "groupCallLivekit", "openpgp.min", "lnd", "coreLightning", "webln", "bdk", "breez",
+  "arkWallet", "barkWallet", "fedimintWallet", "fedimintSdk", "fedimint", "sparkWallet", "usdtWallet"];
 
 /**
  * Words only the regtest fakes hold (their labels, packages/browser/src/engine/paymentAdapters/providers/testing.ts; not
@@ -107,7 +110,7 @@ if (app.length > 0) {
     const stubs = own.filter((file) => ownCode(file).length < MIN_OWN_CODE);
     if (own.length === 0) {
       problems.push(`No ${name}-*.js in assets/: it was folded into another chunk, likely main, and loads with it. ${fold}. Renamed or removed on purpose? Update LATER in this script.`);
-    } else if (stubs.length > 0) {
+    } else if (stubs.length === own.length) {
       problems.push(`${stubs.join(", ")} only passes on main's exports: ${name} was folded into main and loads with it. ${fold}.`);
     } else if (first.length > 0) {
       problems.push(`index.html loads ${first.join(", ")}, which the app should load only when it is used: something on the first load imports it statically.`);

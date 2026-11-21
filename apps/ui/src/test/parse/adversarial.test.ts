@@ -8,6 +8,7 @@ import { JSON_LIMITS, prettyJson } from "../../lib/parse/json";
 import { findLocation, locationIn } from "../../lib/parse/location";
 import { mentionViews } from "../../lib/parse/mentions";
 import { findBip21 } from "../../lib/parse/money-bitcoin";
+import { findBolt12Offer } from "../../lib/parse/money-bolt12";
 import { trimUriEnd } from "../../lib/parse/money-text";
 
 // covers: chat.rich.code, chat.rich.time, chat.paired.links, chats.list.rows, chat.location.card, groups.mentions, payments.money.onchain-card
@@ -111,6 +112,14 @@ describe("many payment words next to web links", () => {
       const text = fill(unit);
       expect(quickly(() => findMoney(text))).toBeNull();
       quickly(() => previewText(text));
+    }
+  });
+
+  it("in one word, each a bitcoin: link that stops at a quote, are read in linear time", () => {
+    for (const unit of ["bitcoin:?'", "bitcoin:?&'"]) {
+      expect(quickly(() => findMoney(fill(unit)))).toBeNull();
+      // Sixteen times the message limit: a scan that reads the word again at each link takes seconds here.
+      expect(quickly(() => findBolt12Offer(unit.repeat(Math.floor((16 * SIZE) / unit.length))))).toBeNull();
     }
   });
 

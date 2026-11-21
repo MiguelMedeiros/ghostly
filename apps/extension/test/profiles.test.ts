@@ -462,6 +462,27 @@ describe("a contact's app open as the profile before", () => {
     expect(world.tabs.has(other.id!)).toBe(true);
   });
 
+  it("closes when another profile is the one in use as the peer comes back, its notices going with it", async () => {
+    const tabId = await openViewer(world);
+    world.session.set("notice:n1", "chatOfPersonal");
+    world.session.set("notice:n2", `profile:${HOME}`);
+    // Its document went away (a crash, the task manager), and a switch came before anything made it again.
+    world.endOffscreen();
+    useProfile(world, WORK, [HOME]);
+    expect(await ensure()).toEqual({ ok: true });
+    expect(servers().at(-1)!.database).toBe(`ghostly_${WORK}`);
+    await expectClosed(tabId);
+    expect([...world.session.keys()].filter((key) => key.startsWith("notice:"))).toEqual(["notice:n2"]);
+  });
+
+  it("stays open when the peer comes back as the same profile", async () => {
+    const tabId = await openViewer(world);
+    world.endOffscreen();
+    expect(await ensure()).toEqual({ ok: true });
+    expect(world.tabs.has(tabId)).toBe(true);
+    expect(world.session.has(`viewer:${tabId}`)).toBe(true);
+  });
+
   it("closes when the peer starts again (Clear all data)", async () => {
     const tabId = await openViewer(world);
     expect(await world.chrome.runtime.sendMessage({ target: "background", type: "restart-engine" })).toEqual({ ok: true });

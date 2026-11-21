@@ -90,7 +90,7 @@ await becomeThePeer(peerLock, () => {
   const draw = (state: OtherTabState) => root.render(<OtherTab state={state} t={profileTranslator()} />);
   // Opened for a share while the app runs in another tab: that tab gets it (after a wait, or as this tab goes), and
   // this one says it went only once the worker handed it over. Once the lock is this tab's, it asks for it itself.
-  if (sharing) handShareOver(() => isPeer, draw);
+  if (sharing) handShareOver(() => isPeer, draw, sharing);
   // Opened for a link (an invite, a group's, a device code's): that tab opens it, with the same wait. It leaves this
   // address (and so the tab's history) as it arrives, and is kept only here until that tab answers: taken there, this
   // tab opens nothing twice if it takes over later; unanswered by then, this tab opens it itself. A tab on standby
@@ -102,7 +102,8 @@ await becomeThePeer(peerLock, () => {
     const stop = forwardLink(peerLock, link, () => answered("linkTaken"), SHARE_FORWARD_AFTER_MS, () => answered("plain"));
     pending.set(stop, link);
   };
-  const link = sharing ? null : linkInAddress(window.location.hash);
+  // A tab opened for a share has one there only if it came while this tab asked for the lock: handed on all the same.
+  const link = linkInAddress(window.location.hash);
   if (link) handOn(link);
   // One that reaches this tab while it waits (the installed app sends a link to the window used last, or it is typed
   // into the address bar, or Back returns to one) goes the same way, rather than stay in the address and history.

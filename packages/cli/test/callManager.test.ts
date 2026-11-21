@@ -342,6 +342,9 @@ describe("the audio socket", () => {
     const socket = await AudioSocket.open(path, 48000, { onAudio: () => {} });
     expect(statSync(join(path, "..")).mode & 0o777).toBe(0o700);
     await socket.close();
+    // Its folder goes with its last socket; a shared one made in its place is refused.
+    expect(existsSync(join(path, ".."))).toBe(false);
+    mkdirSync(join(path, ".."), { mode: 0o755 });
     chmodSync(join(path, ".."), 0o755);
     await expect(AudioSocket.open(path, 48000, { onAudio: () => {} })).rejects.toThrow(/not a folder of this user's alone/);
     rmSync(join(path, ".."), { recursive: true, force: true });
@@ -519,6 +522,21 @@ describe("a call to a contact who is away", () => {
         details: { chat: "chat-ab" },
       });
     }
+  });
+
+  // Found in a bug hunt: a chat on DHT only (either side's choice) said the contact's app was not connected, with a
+  // `chat wait --until live` that waited 60 s and failed, where `chat connect` names whose choice it is.
+  it("on a chat on DHT only, says whose choice it is instead of a wait that never ends", async () => {
+    const dht = (fields: Partial<LinkView>) => ({ id: "chat-ab", label: "bia", profile: "paired-chat/1", callsUnavailable: "Calls need a live connection", ...fields }) as unknown as LinkView;
+    const start = (link: LinkView) => new CallManager({ engine: engineOf(() => ({ links: [link] }) as unknown as EngineState), emit: () => {}, profileDir: tmp(), answers: true }).start("bia", {});
+    await expect(start(dht({ deliveryMode: "dht" }))).rejects.toMatchObject({
+      code: "unavailable", details: { chat: "chat-ab", reason: "dht-only" },
+      message: "Calls need a live connection. This chat is on DHT only on this side: choose a live method first (chat transport auto)",
+    });
+    await expect(start(dht({ dhtDelivery: { peerMode: "dht" } } as Partial<LinkView>))).rejects.toMatchObject({
+      code: "unavailable", details: { chat: "chat-ab", reason: "peer-dht-only" },
+      message: "Calls need a live connection. Your contact keeps this chat on DHT only: it goes live once they choose a live method. Short texts still go on the DHT",
+    });
   });
 
   it("keeps the engine's own words for a chat that cannot call for another reason", async () => {

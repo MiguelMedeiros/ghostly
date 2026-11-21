@@ -141,8 +141,10 @@ async function copyFile(sourceId: string, target: ForwardTarget): Promise<Messag
   // One arriving with files/3, or a group's, is whole only once its digest checked out (a group's desk says so once it
   // did: a holder can leave bytes of the whole size that are not the author's); any other is whole when all its bytes are here.
   const checked = source.wire3 ? source.wire3.state === "done" : !source.group || source.transfer?.state === "done";
-  if (source.direction === "in" && !checked || await bytesHere(source) !== stored)
-    throw new Error("The file has not arrived yet");
+  if (source.direction === "in" && !checked) throw new Error("The file has not arrived yet");
+  // A sent one's bytes are all here, unless they went (its transfer cancelled or declined): they never come back.
+  if (await bytesHere(source) !== stored)
+    throw new Error(source.direction === "out" ? "The file is not on this device any more" : "The file has not arrived yet");
   const from = source.bytes ? await fileBytesOf(source.bytes) : null;
   const read: Read = async (offset, length) => source.blob ? new Uint8Array(await source.blob.slice(offset, offset + length).arrayBuffer()) : from!.read(source.id, offset, length);
   // The bytes it is copied from, and their digest: the stripped copy's, computed on what is sent, never the original's.

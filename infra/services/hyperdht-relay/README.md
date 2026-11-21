@@ -60,6 +60,32 @@ Past a limit the client is dropped, or its socket is paused (the byte rate), or 
 `streams` is closed, or a handshake past `handshakes` is refused (`refused handshake <why>` in the log). Topic lookups and announcements
 are refused: Ghostly never makes them, and they would make the relay an open crawler.
 
+### In the log
+
+Each limit reached is a line of its own kind. The first one of a kind names the limit and the setting that moves it
+(`refused address: 16 clients from one address (GHOSTLY_RELAY_CLIENTS_PER_ADDRESS)`); the next ones are the kind alone,
+at most 5 a minute, then one count a minute while it goes on (`refused address (812 more this minute, not logged)`).
+
+| log | what happened | to change |
+|---|---|---|
+| `refused full` | a new client got 503: the relay holds `clients`, and no address holds more than the newcomer's would | `GHOSTLY_RELAY_CLIENTS` |
+| `refused address` | a new client got 429: its address already holds `clientsPerAddress` | `GHOSTLY_RELAY_CLIENTS_PER_ADDRESS`; behind a proxy, `GHOSTLY_RELAY_PROXIES` or `GHOSTLY_RELAY_CLOUDFLARE`, or every client counts as the proxy |
+| `dropped room` | on a full relay, the oldest client of the address holding the most, for a newcomer | `GHOSTLY_RELAY_CLIENTS` |
+| `dropped idle` | a client with no listen and no dial for `idleMs` | `GHOSTLY_RELAY_IDLE_MS` |
+| `dropped no pong` | a client that had not answered the last ping by the next | `GHOSTLY_RELAY_PING_MS` |
+| `dropped listen rate`, `dropped listen limit` | a client past `listensPerMinute`, or past `listens` at once | `GHOSTLY_RELAY_LISTENS_PER_MINUTE`, `GHOSTLY_RELAY_LISTENS` |
+| `dropped dial limit` | a client past `connectsPerMinute` | `GHOSTLY_RELAY_CONNECTS_PER_MINUTE` |
+| `dropped stream limit` | a client dialling past `streams` open | `GHOSTLY_RELAY_STREAMS` |
+| `dropped queue`, `closed far queue` | a client holding more than `queuedBytes` unread or untaken, or one of its streams half of it (closed, the client stays) | `GHOSTLY_RELAY_QUEUED_BYTES` |
+| `dropped queue total` | the client holding the most, while all of them hold more than `queuedTotalBytes` | `GHOSTLY_RELAY_QUEUED_TOTAL_BYTES` |
+| `refused handshake limit`, `refused handshake listen share`, `refused handshake incoming` | a handshake past `handshakes` waiting on one client, past a quarter of it on one of its keys, or incoming ones past the three quarters left after its dials' | `GHOSTLY_RELAY_HANDSHAKES` |
+
+The rest name no limit: `refused stopping` (a new client while the relay stops), `refused origin "<origin>"` (see
+`GHOSTLY_RELAY_ORIGINS` below), `refused listen <code>` (HyperDHT refused the listen, `KEYPAIR_ALREADY_USED` for a key
+another client holds), `dropped topic query` (a lookup or an announcement, never relayed), and `dropped protocol error`,
+`dropped unsendable <message>`, `dropped sessions` (a second relay session on one WebSocket), `dropped socket error`,
+`dropped stream error` (a client that broke the protocol or its connection).
+
 A time limit (`*_MS`) is at most 2147483647 (about 24 days), the longest a Node timer waits; a longer one stops the
 start, as any other value not of its kind does.
 
@@ -82,7 +108,13 @@ Other settings:
   $proxy_add_x_forwarded_for`) logs `requests arrive without X-Forwarded-For though GHOSTLY_RELAY_PROXIES is set`
   (or `CF-Connecting-IP` and `GHOSTLY_RELAY_CLOUDFLARE`): it counts as the proxy, as every other one would. One with
   fewer `X-Forwarded-For` entries than `GHOSTLY_RELAY_PROXIES` (`2` behind a single nginx) logs `requests carry 1
-  X-Forwarded-For entry though GHOSTLY_RELAY_PROXIES is 2`: set it to the number of proxies that write the header. With either set, the
+  X-Forwarded-For entry though GHOSTLY_RELAY_PROXIES is 2`: set it to the number of proxies that write the header.
+  Until such a request comes, a client that writes the header itself chooses the address it counts as; from it on, the
+  relay reads no deeper than the fewest entries a request has come with (no header at all: the proxy's address). With
+  neither set and no header at all (a proxy that writes none, unnamed), every browser is the proxy's one address and
+  the 17th is refused (429): the first refusal at `GHOSTLY_RELAY_CLIENTS_PER_ADDRESS` from a loopback or private
+  address logs `clients refused at GHOSTLY_RELAY_CLIENTS_PER_ADDRESS (16) come from a loopback or private address`,
+  with the header and settings to set, once per start. With either set, the
   relay listens on 127.0.0.1 unless `HOST` says otherwise: only the proxy should reach it, since anyone else could
   write that header. The container sets `HOST=0.0.0.0` inside it and publishes the port where the proxy is
   (`HYPERDHT_RELAY_BIND`, loopback by default).
@@ -125,7 +157,8 @@ shell or an `.env` file next to it):
 (`{"ok":true,"firewalled":false,"nodes":20}`); `HEAD` and a query string (`/healthz?x=1`) answer the same. Anyone who reaches the relay may read it, so it carries no count of
 clients; refusals and drops are in the log. It is `ok: false` with HTTP 503 while `nodes` is 0: the node reaches no other one (no outgoing UDP, as behind a tunnel, a
 firewall or a container network without it), so nobody reaches the browsers listening through it. The start log
-says `bootstrap reached no node` then. While the relay stops (up to a second, until each client has answered its
+says so with what to check (`bootstrap reached no node: check that this host can send UDP out ...`, and that
+`GHOSTLY_HYPERDHT_BOOTSTRAP` names running nodes when it is set). While the relay stops (up to a second, until each client has answered its
 going-away close, 1001), it reads `{"ok":false,"stopping":true}` with HTTP 503 and refuses new WebSockets with 503
 and `Retry-After: 1`. The log has counts and reasons only: never a key, an address or anyone's
 traffic.

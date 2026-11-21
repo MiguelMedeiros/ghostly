@@ -17,7 +17,7 @@ import { handOut, openTreeFile, openTreeReader, rollback, SqlTree, type TreeFile
  *   before the transaction's `complete` event reaches the engine (a Cashu proof saved is a proof on disk); one opened
  *   with `durability: "relaxed"` is appended at once and synced with the next one, or within a second. The sync runs
  *   off the thread, and the transactions that commit while one runs share the next (`shareSync`). One that commits
- *   while a fold or a Blob's entry waits in the store's queue is written behind it, and completes then;
+ *   while a fold or a Blob's entry waits in the store's queue is written behind it, and completes with the sync after;
  * - a schema change (an upgrade, a deleted database) writes a whole new `snapshot.bin` instead;
  * - at start the snapshot is loaded and the journal replayed. A short journal that is whole stays as it is, and so
  *   does the snapshot; a long one, or one whose last entry was cut short, is folded into a fresh snapshot first;
@@ -410,7 +410,7 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
    * A committed transaction's entry, numbered `entry` (its first op says so, where there are trees), from the
    * transaction whose rollback log is `owner`. Written at once, it may fail (a full disk): the reason is given back,
    * and the transaction is to be refused, not completed. "unsynced": written, and its `complete` waits for a sync.
-   * "queued": written behind what the queue holds (a fold, a Blob's entry), and `complete` called once it is: what
+   * "queued": written behind what the queue holds (a fold, a Blob's entry), and `complete` called once a sync covers it: what
    * completed before was on no disk while the fold waited for the sync in flight, and a process killed then lost a
    * text the engine had told the contact it held.
    */
@@ -429,14 +429,19 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     }
     trees?.complete(owner, entry);
     held++;
+    const done = () => { held--; complete(); };
+    let sharing = false;
     void enqueue(async () => {
       try {
         // In the snapshot of the fold it waited behind, and in rows.db: replayed over that snapshot, which holds the
         // transactions after it too, it brought back what they changed (a file's record, renamed, without its state).
         if (entry <= foldedUpTo) return;
-        if (writeEntry(serialize(await Promise.all(ops.map(async (op) => (op.kind === "put" ? { ...op, value: await blobsToDisk(op.value) } : op)))), lazy ? "lazy" : "now")) {
+        if (writeEntry(serialize(await Promise.all(ops.map(async (op) => (op.kind === "put" ? { ...op, value: await blobsToDisk(op.value) } : op)))), lazy ? "lazy" : "shared")) {
           // A fold it waited behind cleared the mark, with a snapshot taken before it: the new journal holds its delete.
           holdsDelete ||= deleting;
+          // Synced off the thread with the entries written behind it: synced in place, one by one, 800 writes that
+          // committed during a fold held the daemon 2.9 s (3.4 s in all, 0.2 s with no fold).
+          if (!lazy) { sharing = true; shareSync(() => { written(entry); done(); }); return; }
           written(entry);
         }
       } catch (error) {
@@ -445,7 +450,7 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
         failed(error);
         await writeSnapshot().catch(failed);
       }
-    }).then(() => { held--; complete(); });
+    }).then(() => { if (!sharing) done(); });
     return "queued";
   }
 
@@ -634,6 +639,7 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
    * holds, the transactions whose layers go to the trees with it.
    */
   async function capture(journalName: string): Promise<{ snapshot: Snapshot; upTo: number }> {
+    await unwritten();
     const snapshot: Snapshot = { format: 1, journal: journalName, databases: [] };
     const held: SnapshotStore[] = [];
     for (const db of raw._databases.values()) {
@@ -671,6 +677,7 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     // An export of 100,000 messages read them all in one turn: the daemon answered nothing for 1.1-1.7 s.
     const databases: { name: string; version: number; stores: { meta: Omit<SnapshotStore, "records">; records: RawRecord[] | SqlTree }[] }[] = [];
     let reader: TreeFile | null = null;
+    await unwritten();
     try {
       for (const db of raw._databases.values()) {
         if (db.name === PROBE) continue;
@@ -800,6 +807,25 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
       await new Promise((resolve) => setImmediate(resolve));
       quiet = busy() ? 0 : quiet + 1;
     }
+  }
+
+  /**
+   * Resolves in a turn where no running transaction has written to a store held in memory (or after `CLOSE_WAIT_MS`):
+   * fake-indexeddb puts its writes in the records at once and takes them back if it aborts. A fold read them meanwhile,
+   * and its snapshot kept what the transaction never committed (a refused write, after a restart), or a part of what it
+   * did (its other part in the journal entry a process killed then never wrote). One that commits meanwhile waits behind
+   * the fold in the queue (`append`): the snapshot holds it, whole.
+   */
+  async function unwritten() {
+    const until = Date.now() + CLOSE_WAIT_MS;
+    while (Date.now() < until && writesHeld()) await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  function writesHeld() {
+    return [...raw._databases.values()].some((db) => db.transactions.some((transaction) => {
+      const { _state, _rollbackLog } = transaction as RawTransaction;
+      return _state !== "finished" && !!pending.get(_rollbackLog)?.some((op) => { const store = db.rawObjectStores.get(op.store); return !store || !disk(store); });
+    }));
   }
 
   /** Whether a transaction is running or waiting to, or for the sync or the queued write that tells the engine it completed. */
