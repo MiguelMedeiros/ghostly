@@ -120,7 +120,7 @@ describe("Rename, on the active device", () => {
     await user.click(screen.getByTestId("device-rename-save"));
     await waitFor(() => expect(engine.callsTo("deviceRename")).toHaveLength(1));
     expect(screen.getByTestId("device-rename-busy")).toHaveTextContent("Saving…");
-    expect(screen.getByTestId("device-rename-busy")).toHaveAttribute("role", "status");
+    expect(screen.getByTestId("device-rename-busy").parentElement).toHaveAttribute("role", "status");
     // Escape and the × do nothing while it saves, as Cancel does.
     const dialog = screen.getByTestId("device-rename");
     dialog.dispatchEvent(new Event("cancel", { cancelable: true }));

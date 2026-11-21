@@ -1,13 +1,21 @@
 /**
- * A host that names this machine or the local network, as far as its spelling tells: `localhost`, `.local`,
- * `.internal`, a single label, private and reserved IP addresses. Previews are never made for these, and a page
- * on the internet may not point its picture at one. (Desktop also checks the addresses a name resolves to.)
+ * Names only a local network answers (RFC 6762, RFC 8375, ICANN's .internal, and the usual router and company ones).
+ * A copy of packages/core/src/localNames.ts, as this module imports nothing; the same as Desktop's
+ * apps/desktop/src/local_names.rs (src/test/chat/linkPreviewParse.test.ts pins all three).
+ */
+export const LOCAL_SUFFIXES = ["localhost", "local", "internal", "lan", "home", "home.arpa", "localdomain", "intranet", "corp"] as const;
+
+/**
+ * A host that names this machine or the local network, as far as its spelling tells: a name under a local suffix
+ * (`localhost`, `.local`, `.lan`, `.home`, `.corp`, …), a single label, private and reserved IP addresses. Previews
+ * are never made for these, a page on the internet may not point its picture at one, and a contact's app may not open
+ * one. (Desktop also checks the addresses a name resolves to.)
  * In a module of its own, importing nothing: the extension's background worker reads it too.
  */
 export function isLocalHost(hostname: string): boolean {
   const host = hostname.toLowerCase().replace(/\.+$/, "").replace(/^\[|\]$/g, "");
   if (!host.includes(".") && !host.includes(":")) return true;
-  if (/(^|\.)(localhost|local|internal|lan|home\.arpa)$/.test(host)) return true;
+  if (LOCAL_SUFFIXES.some(s => host === s || host.endsWith(`.${s}`))) return true;
   const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
   if (v4) {
     const [a, b] = [Number(v4[1]), Number(v4[2])];

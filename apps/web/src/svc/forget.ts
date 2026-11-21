@@ -31,21 +31,26 @@ const listed = new Set<string>();
  * (it noted only those it opened from then on) goes with the chat, its data or its profile too. Only a contact who
  * comes back online lists theirs again, so only theirs are found. No more for a chat than one list holds
  * (`MAX_SERVICES`): a contact may list new apps at any time, and the list is local storage the whole origin shares,
- * each entry a bridge Delete chat loads at once.
+ * each entry a bridge Delete chat loads at once. Every label is worked out first, then all are noted with one read and
+ * one write of the list (`noteUpTo`), as the extension does: a page load lists every chat's apps again.
  */
 export async function noteListed(profile: string, links: readonly Pick<LinkView, "myPubKeyZ32" | "peerPubKeyZ32" | "peerServices">[]): Promise<void> {
-  for (const link of links) {
-    for (const service of link.peerServices ?? []) {
-      if (service.type !== "http") continue;
-      const key = `${profile} ${link.myPubKeyZ32} ${link.peerPubKeyZ32} ${service.id}`;
-      if (listed.has(key)) continue;
-      listed.add(key);
-      const tag = viewerTag(link.myPubKeyZ32);
-      const label = await serviceLabel(tag, link.peerPubKeyZ32, service.id);
-      // Counted right before it is noted, with no wait between: two states noted at once never both pass the count.
-      if (opened.list().filter((o) => o.profile === profile && o.tag === tag).length >= MAX_SERVICES) continue;
-      opened.note({ profile, tag, label });
+  const found: OpenedService[] = [];
+  try {
+    for (const link of links) {
+      for (const service of link.peerServices ?? []) {
+        if (service.type !== "http") continue;
+        const key = `${profile} ${link.myPubKeyZ32} ${link.peerPubKeyZ32} ${service.id}`;
+        if (listed.has(key)) continue;
+        listed.add(key);
+        const tag = viewerTag(link.myPubKeyZ32);
+        found.push({ profile, tag, label: await serviceLabel(tag, link.peerPubKeyZ32, service.id) });
+      }
     }
+  } finally {
+    // Counted and noted in one go, with no wait between: two states noted at once never both pass the count. Those
+    // found before a label failed are still noted.
+    if (found.length) opened.noteUpTo(MAX_SERVICES, ...found);
   }
 }
 

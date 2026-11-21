@@ -294,4 +294,23 @@ describe("a Lightning payment at a mint that answers its quote and never answers
     expect(outbox).toHaveBeenCalledOnce();
     expect(mint.asked.slice(before)).toContain(`/v1/melt/quote/bolt11/${quote}`);
   }, 30_000);
+
+  it("melts it left pending at a mint that answers nothing when the app starts load that mint once a round, not once each", async () => {
+    const paying = new CashuWallet(() => [MINT], events());
+    for (const fill of [2, 3, 4]) {
+      const { quote } = await paying.quoteInvoice(fakeInvoice(10, new Uint8Array(32).fill(fill)));
+      expect(await paying.payQuote(quote, MINT)).toBe(false);
+    }
+    await paying.stop();
+
+    const wallet = new CashuWallet(() => [MINT], events());
+    wallets.push(wallet);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
+    mint.silent(["/v1/"]);
+    const before = mint.asked.length;
+    wallet.start();
+    // One round: the first melt's load gives up after 12 s, and the next round is 30 s after it.
+    await elapse(40_000);
+    expect(mint.asked.slice(before).filter((p) => p === "/v1/info")).toHaveLength(1);
+  }, 30_000);
 });

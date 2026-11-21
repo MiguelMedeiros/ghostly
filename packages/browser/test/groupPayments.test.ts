@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { GroupPayments, WAITING, authoredNote, mayAuthor, mergeGroupPay, parseGroupPay, type GroupPaymentsHost, type Placement } from "../src/engine/groupPayments";
+import { paymentWireId } from "../src/shared/paymentIds";
 import type { GroupPayFrame, GroupPayNote, PaymentView, StoredMessage } from "../src/shared/types";
 // covers: groups.payments.member, groups.payments.group-request, groups.payments.notes
 
@@ -385,6 +386,35 @@ describe("GroupPayments: every member hears it, the parties say it", () => {
     await peers.get("C")!.engine.receive("g1", B, note({ st: "paid", by: B }));
     await peers.get("C")!.engine.receive("g1", B, { t: "group-pay", junk: true });
     expect(noteOf("C", "req-00001")).toBeUndefined();
+  });
+});
+
+describe("GroupPayments: an id another member used first", () => {
+  // A asks B for 1,000 sats; B, who learned the id from that request, says something else under it, sometimes first.
+  const request = note({ id: "req-00042", v: "1000", m: "rent" });
+  const shown = (history: Map<string, StoredMessage[]>, name: string) => (history.get(name) ?? [])
+    .flatMap(m => (m.groupPay ? [{ ...m.groupPay, id: paymentWireId(m.groupPay.id) }] : [])).sort((a, b) => a.kind.localeCompare(b.kind));
+
+  it.each<[string, GroupPayFrame]>([
+    ["B's claim on a request made to C", note({ id: "req-00042", f: B, to: C, by: B, st: "sent" })],
+    ["B's own payment to A", note({ id: "req-00042", k: "pay", f: B, to: A, v: "1", st: "sent" })],
+  ])("%s keeps neither A's request nor its paid out, in either order", async (_, other) => {
+    const seen: ReturnType<typeof shown>[][] = [];
+    for (const order of [[[B, other], [A, request]], [[A, request], [B, other]]] as [string, GroupPayFrame][][]) {
+      const { peers, history } = world({ A, B, C, D });
+      for (const [author, frame] of order) await peers.get("D")!.engine.receive("g1", author, frame);
+      const open = shown(history, "D");
+      // D restarts before A's paid arrives.
+      const d = peers.get("D")!;
+      d.engine = new GroupPayments((d.engine as unknown as { host: GroupPaymentsHost }).host);
+      await d.engine.receive("g1", A, { ...request, st: "paid", by: B });
+      seen.push([open, shown(history, "D")]);
+    }
+    const [[open, paid]] = seen;
+    expect(open).toContainEqual(expect.objectContaining({ kind: "request", from: B, to: A, amount: "1000", memo: "rent", state: "open" }));
+    expect(paid).toContainEqual(expect.objectContaining({ kind: "request", from: B, to: A, amount: "1000", memo: "rent", state: "paid", by: B }));
+    expect(paid.filter(n => n.kind === "request")).toHaveLength(1);
+    expect(seen[1], "the same history in both orders").toEqual(seen[0]);
   });
 });
 

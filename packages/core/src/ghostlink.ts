@@ -362,6 +362,35 @@ export const MAX_PAIRED_MESSAGE_FRAME = 56 * 1024;
  * resends with backoff), so a catch-up only slows.
  */
 export const MESSAGE_RECEIVE_LIMITS = { burst: 200, burstWindowMs: 10_000, hourly: 1_800, hourWindowMs: 3_600_000 } as const;
+/** What `sendMessage` says of a text the contact's windows have no room for yet: it did not go (`MessagePace`). */
+export const MESSAGE_PACED = "Your contact takes a limited number of texts at a time. It goes by itself once they can take more.";
+/** How long a text sent with no receipt yet counts as taken past its send: one in flight is taken when it lands. */
+const PACE_UNANSWERED_MS = 60_000;
+
+/**
+ * The texts this side sent on a paired session, counted against the contact's windows (`MESSAGE_RECEIVE_LIMITS`), so
+ * none goes that the contact would refuse. A refused text went unconfirmed and came again with the outbox's backoff,
+ * after texts written later that found room meanwhile: the contact read them out of order. Past the hour's total it
+ * was sent until its attempts ran out, well inside the hour, and ended failed. Each counts from its receipt, the latest
+ * the contact can have taken it: counted from its send, a frame that sat in a queue was taken later than counted.
+ */
+export class MessagePace {
+  private sent: { id: string; at: number; answered?: number }[] = [];
+  constructor(private readonly now: () => number = Date.now) {}
+  /** The contact's windows have room for one more text now. */
+  room(): boolean {
+    const now = this.now(), { burst, burstWindowMs, hourly, hourWindowMs } = MESSAGE_RECEIVE_LIMITS;
+    const counts = (entry: { at: number; answered?: number }, windowMs: number) =>
+      entry.answered !== undefined ? now - entry.answered < windowMs : now - entry.at < windowMs + PACE_UNANSWERED_MS;
+    this.sent = this.sent.filter(entry => counts(entry, hourWindowMs));
+    return this.sent.length < hourly && this.sent.filter(entry => counts(entry, burstWindowMs)).length < burst;
+  }
+  took(id: string): void { this.sent.push({ id, at: this.now() }); }
+  /** Its receipt came: the contact counted it by now. */
+  answered(id: string): void {
+    for (let i = this.sent.length - 1; i >= 0; i--) if (this.sent[i].id === id && this.sent[i].answered === undefined) { this.sent[i].answered = this.now(); return; }
+  }
+}
 
 /**
  * A `paired-message` frame. The preview (`pv`) is left out when the frame would pass `MAX_PAIRED_MESSAGE_FRAME`
@@ -986,6 +1015,8 @@ export class GhostLink {
     new RateWindow(MESSAGE_RECEIVE_LIMITS.burst, MESSAGE_RECEIVE_LIMITS.burstWindowMs),
     new RateWindow(MESSAGE_RECEIVE_LIMITS.hourly, MESSAGE_RECEIVE_LIMITS.hourWindowMs),
   ];
+  /** The texts sent to the contact, against their `messagesReceived` (`MessagePace`). */
+  private readonly messagesSent = new MessagePace();
   /** Call signals the contact may send per window; the rest are dropped. */
   private readonly callsReceived = new RateWindow(CALL_RECEIVE_LIMIT, CALL_RATE_WINDOW_MS);
   /** WebRTC signals the contact may send on the session (`paired-rtc`) per window; the rest are dropped. */
@@ -1815,6 +1846,8 @@ export class GhostLink {
     return this.canSendText ? null : "No authenticated text delivery method is available.";
   }
   get canSendText(): boolean { return this.textDelivery !== "unavailable"; }
+  /** A text on the live session would find room in the contact's windows now (`MessagePace`); the DHT floor has its own pace. */
+  get textRoom(): boolean { return this.textDelivery !== "stream" || this.messagesSent.room(); }
   get dhtDelivery(): DhtDeliveryView | undefined { return this.dht?.view; }
   /** The chat is on screen: on the DHT its mailbox is read at the signaling pace (WISP 403, poll pace). */
   setChatActive(active: boolean): void {
@@ -1855,11 +1888,13 @@ export class GhostLink {
       if (this.myPubKeyZ32 > this.options.params.peerPubKeyZ32) this.session.presenceDue();
       this.session.start();
     }
-    await this.dht.setMode(mode);
+    // DHT only: no new dial is taken from the moment it is chosen. `setMode` waits for the mailbox's pending read or
+    // publish (a slow relay holds it for seconds), so the native listeners go first.
     if (mode === "dht") {
       await this.session.stop(false);
       await Promise.allSettled([...this.endpoints.keys()].map(t => this.releaseEndpoint(t)));
     }
+    await this.dht.setMode(mode);
     this.streamBlockChanged();
     this.emitDeliveryState();
   }
@@ -3176,8 +3211,9 @@ export class GhostLink {
       // Past the contact's frame limit its session would end on it, and again on each retry.
       const frame = pairedMessageFrame(id, timestamp, trimmed, preview, reply, forwarded, card);
       if (frame.length > SESSION_FRAME_MAX) return PAIRED_FRAME_TOO_LARGE;
+      if (!this.messagesSent.room()) return MESSAGE_PACED;
       this.pairedPending.set(id, timestamp);
-      try { this.channel.send(frame); return null; }
+      try { this.channel.send(frame); this.messagesSent.took(id); return null; }
       catch { this.pairedPending.delete(id); return "The connection closed before sending. Reconnect and retry."; }
     }
     if (this.channel && trimmed.length <= LIMITS.maxChatMessageBytes / 4) {
@@ -4933,6 +4969,7 @@ export class GhostLink {
             const live = this.answerOn(channel);
             if (live) live.send(JSON.stringify({ t: "paired-received", id: frame.id }));
           } else if (frame.t === "paired-received") {
+            this.messagesSent.answered(frame.id);
             const timestamp = this.pairedPending.get(frame.id);
             if (timestamp !== undefined) {
               await this.options.events?.onMessageReceipt?.(frame.id);

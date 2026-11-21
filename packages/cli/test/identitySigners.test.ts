@@ -9,6 +9,7 @@ import { IDENTITY_PROVIDERS } from "@ghostly/browser/proofs/registry";
 import { callApi, type ApiContext } from "../src/api";
 import { asCliError, EXIT } from "../src/errors";
 import { EventHub, type GhostlyEvent } from "../src/events";
+import { identityWaitLines } from "../src/identityWait";
 // @ts-expect-error Native fixture is deliberately directly executable JavaScript.
 import { startTestBunker } from "../../browser/test/helpers/nostrBunker.mjs";
 // covers: headless.identities
@@ -140,6 +141,55 @@ describe("identity signers on Node", () => {
     expect(live.filter((e) => e.type === "identity.approval").map((e) => e.url ?? e.qr)).toEqual(["https://bunker.test/auth?secret=s3cret", "pubkyauth://signin?secret=s3cret"]);
     expect(JSON.stringify(hub.replay(0))).not.toContain("s3cret");
     expect(hub.replay(0).map((e) => e.type)).toEqual(["daemon.started"]);
+  });
+
+  /**
+   * `identity add` wrote every `identity.progress`/`identity.approval` of the daemon to stderr as JSON: a terminal read
+   * event lines, and two proofs waiting on one daemon each printed the other's "approve now" and approval link.
+   */
+  it("each identity add tells only its own signer's wait, in words on a terminal and as JSON on a pipe", async () => {
+    const { ctx } = fake();
+    const hub = new EventHub(join(mkdtempSync(join(tmpdir(), "ghostly-wait-")), "events.jsonl"), () => 1000, "wait");
+    (ctx as unknown as { hub: EventHub }).hub = hub;
+    const heard: GhostlyEvent[] = [];
+    hub.onEvent((e) => heard.push(e));
+    const pubky = IDENTITY_PROVIDERS.find((p) => p.id === "pubky")!.signers.find((s) => s.kind === "in-app") as InAppSigner<unknown>;
+    const run = vi.spyOn(pubky, "run").mockImplementation(async (sctx) => {
+      const who = (sctx.values as Record<string, string> | undefined)?.who ?? "?";
+      sctx.onProgress(`${who}: approve in Pubky Ring.`);
+      sctx.onApproval?.({ qr: { value: `pubkyauth://signin?secret=${who}`, label: "Or scan with Pubky Ring" }, notes: ["The code is your request: scan it yourself, and do not share it."] });
+      throw new Error("stopped here");
+    });
+    try {
+      await expect(callApi(ctx, "identity.add", { provider: "pubky", fields: { who: "A" }, request: "call-a" })).rejects.toThrow("stopped here");
+      await expect(callApi(ctx, "identity.add", { provider: "pubky", fields: { who: "B" }, request: "call-b" })).rejects.toThrow("stopped here");
+    } finally { run.mockRestore(); }
+    const said = (request: string, terminal: boolean) => heard.map((e) => identityWaitLines(e, request, terminal)).join("");
+    expect(said("call-a", true)).toBe([
+      "ghostly: A: approve in Pubky Ring.",
+      "ghostly: Approve the request with this code (Scan with Pubky Ring):",
+      "pubkyauth://signin?secret=A",
+      "ghostly: The code is your request: scan it yourself, and do not share it.",
+      "",
+    ].join("\n"));
+    expect(said("call-b", true)).not.toMatch(/A: approve|secret=A/);
+    expect(said("call-b", true)).toContain("pubkyauth://signin?secret=B\n");
+    const piped = said("call-a", false).trim().split("\n").map((line) => JSON.parse(line) as GhostlyEvent);
+    expect(piped.map((e) => [e.type, e.request, e.message ?? e.qr])).toEqual([
+      ["identity.progress", "call-a", "A: approve in Pubky Ring."], ["identity.approval", "call-a", "pubkyauth://signin?secret=A"],
+    ]);
+    // A NIP-46 signer's page to approve on: the link alone on its line.
+    expect(identityWaitLines({ seq: 1, id: "x", type: "identity.approval", at: 1, provider: "nostr", request: "r", url: "https://bunker.test/auth" }, "r", true))
+      .toBe("ghostly: Approve the request at this link:\nhttps://bunker.test/auth\n");
+  });
+
+  // A daemon started before the `request` id (upgraded CLI, `daemon restart` not run yet) tags no event: `identity add`
+  // printed none of its waits, so the bunker's approval link never showed and the proof waited out its --timeout.
+  it("a wait from a daemon that tags no request is still told", () => {
+    const untagged: GhostlyEvent = { seq: 1, id: "x", type: "identity.approval", at: 1, provider: "nostr", url: "https://bunker.test/auth" };
+    expect(identityWaitLines(untagged, "r", true)).toBe("ghostly: Approve the request at this link:\nhttps://bunker.test/auth\n");
+    expect(identityWaitLines({ ...untagged, type: "identity.progress", url: undefined, message: "Approve it." }, "r", false)).toContain("\"message\":\"Approve it.\"");
+    expect(identityWaitLines({ ...untagged, request: "other" }, "r", true)).toBe("");
   });
 
   // Nobody approved a Pubky sign-in: it ended as `engine`, "The operation was aborted due to timeout", after 300 s,

@@ -714,6 +714,11 @@ function isMessageFrame(v: unknown): v is CommunityMessageFrame {
     Number.isSafeInteger(f.ts) && (f.ts as number) > 0 && typeof f.nn === "string" && f.nn.length === 32 && B64.test(f.nn) &&
     typeof f.c === "string" && f.c.length <= MAX_TEXT_BOX && B64.test(f.c) && typeof f.sig === "string" && f.sig.length === 86 && B64.test(f.sig);
 }
+/** A message frame's own fields alone: whatever else came beside them is outside its author's signature, so no member's word, and is neither kept nor handed on. */
+function messageFields(f: CommunityMessageFrame): CommunityMessageFrame {
+  const { t, v, g, e, h, s, n, ts, nn, c, sig } = f;
+  return { t, v, g, e, h, s, n, ts, nn, c, sig };
+}
 
 /**
  * One member's view of a community group: the branch it follows and the ones it knows, the
@@ -769,9 +774,10 @@ export class CommunitySession {
   private adminSeen: string | undefined;
   /**
    * After the admin role moved to me (`metaFollowsChain`): whom from, until when I take their statement, and the last
-   * one of theirs I signed again (what I held then, until one of theirs comes). In memory only.
+   * one of theirs I signed again (what I held then, until one of theirs comes). `vouched`: the latest of theirs another
+   * member's sync said it holds; `held`: the latest of theirs no other member has shown it holds yet. In memory only.
    */
-  private takeover: { from: string; until: number; base: GroupMeta | undefined } | undefined;
+  private takeover: { from: string; until: number; base: GroupMeta | undefined; vouched?: { e: number; r: number }; held?: { from: string; raw: unknown; s: GroupMetaStatement } } | undefined;
   /** The store's frames the app holds with their messages (`storeKey` → message id): in memory here, not in what is saved. */
   private readonly onRows = new Map<string, string>();
   /** The oldest epoch whose seen marks are kept, as of the last `pruneSeen`. In memory only. */
@@ -800,6 +806,8 @@ export class CommunitySession {
     });
     this.rebuild();
     this.pruneSeen();
+    // A reply to a message deleted for everyone while this device ran an app from before `unquote`.
+    if (hooks.removed && this.unquote(id => hooks.removed!(id))) this.persistSoon();
     this.adminSeen = this.admin;
     // A branch kept under the older rule (longest first) may be the better one now: it keeps an admin change mine dropped.
     if ((state.status === "active" || state.status === "lost") && this.bestBranch().tip !== this.topHash) void this.serialize(() => this.chooseBranch());
@@ -2173,11 +2181,48 @@ export class CommunitySession {
   forget(id: string): void {
     const author = id.slice(0, id.indexOf(":"));
     const kept = this.state.store.filter(f => f.s !== author || this.storedId(f) !== id);
-    if (kept.length === this.state.store.length) return;
-    const left = new Set(kept.map(storeKey));
-    for (const f of this.state.store) if (!left.has(storeKey(f))) this.onRows.delete(storeKey(f));
-    this.state.store = kept;
-    this.persistSoon();
+    const dropped = kept.length !== this.state.store.length;
+    if (dropped) {
+      const left = new Set(kept.map(storeKey));
+      for (const f of this.state.store) if (!left.has(storeKey(f))) this.onRows.delete(storeKey(f));
+      this.state.store = kept;
+    }
+    if (this.unquote(quoted => quoted === id) || dropped) this.persistSoon();
+  }
+
+  /**
+   * The frames whose reply quotes a message deleted for everyone (`gone`): the line of it (`r.s`) is sealed with them,
+   * and opens with the epoch secret this profile keeps. Mine is sealed again with an empty line, in its place, time and
+   * reply, and signed again: a member who holds the first drops it as seen, one who missed it gets the reply without
+   * the line. A member's I cannot sign again: it goes, and its author hands it on. Either way the row that held the
+   * first gives it up; mine is saved with the state from then on.
+   */
+  private unquote(gone: (id: string) => boolean): boolean {
+    let changed = false;
+    const store: CommunityMessageFrame[] = [];
+    for (const f of this.state.store) {
+      const key = this.messageKey(f);
+      const plain = key ? decryptText(key, messageAad(f), f.nn, f.c) : null;
+      let parsed: unknown = null;
+      try { parsed = plain === null ? null : JSON.parse(plain); } catch { /* not a payload */ }
+      const r = isObject(parsed) ? parsed.r : undefined;
+      if (!isObject(r) || typeof r.i !== "string" || r.s === "" || !gone(r.i)) { store.push(f); continue; }
+      changed = true;
+      const row = this.onRows.get(storeKey(f));
+      if (row !== undefined) { this.onRows.delete(storeKey(f)); this.hooks.forgetFrame?.(row); }
+      if (f.s !== this.myKey) continue;
+      const { n: nn, c } = encryptText(key!, messageAad(f), JSON.stringify({ ...(parsed as Record<string, unknown>), r: { ...r, s: "" } }));
+      const unsigned = { g: f.g, e: f.e, h: f.h, s: f.s, n: f.n, ts: f.ts, nn, c };
+      store.push({ t: "group-msg", v: 2, ...unsigned, sig: toBase64Url(sign(messageSigned(unsigned), this.identity.seed)) });
+    }
+    if (changed) this.state.store = store;
+    return changed;
+  }
+
+  /** The key a stored frame is sealed with, when I hold its epoch's secret. */
+  private messageKey(f: CommunityMessageFrame): Uint8Array | undefined {
+    const found = this.commitByShort(f.e, f.h), secret = found && this.state.secrets[found.hash];
+    return secret ? epochKeys(fromBase64Url(secret), this.id, f.e).message : undefined;
   }
 
   /** The id of the message a stored frame is, by its first place when it was said again (and I can open it). */
@@ -2210,12 +2255,15 @@ export class CommunitySession {
   /** The frames the app's rows hold, into the store: oldest first by when they were written, with what the record kept from before. */
   private takeRows(rows: readonly { id: string; frame: CommunityMessageFrame }[]): void {
     if (!rows.length) return;
-    const inRecord = new Set(this.state.store.map(storeKey));
+    const inRecord = new Map(this.state.store.map(f => [storeKey(f), f]));
     for (const { id, frame } of rows) {
-      this.onRows.set(storeKey(frame), id);
-      if (!inRecord.has(storeKey(frame))) this.state.store.push(frame);
       // My counter goes above a row of mine an older app stored before it was killed mid-send, its counter unsaved.
       if (frame.s === this.myKey && frame.h === shortHash(this.state.seqH) && frame.n >= this.state.seq && frame.n < OWN_FRAME_LIMIT) this.state.seq = frame.n + 1;
+      // Mine sealed again since (`unquote`), the app stopped before the row gave the first up: the record's stands.
+      const recorded = inRecord.get(storeKey(frame));
+      if (recorded && frame.s === this.myKey && recorded.sig !== frame.sig) { this.hooks.forgetFrame?.(id); continue; }
+      this.onRows.set(storeKey(frame), id);
+      if (!recorded) this.state.store.push(messageFields(frame));
     }
     this.state.store.sort((a, b) => a.ts - b.ts);
     this.trimStore();
@@ -2457,17 +2505,17 @@ export class CommunitySession {
    * once: the mark says it is passed on as it came.
    */
   passOn(frame: object): object {
-    if ((frame as { t?: unknown }).t !== "group-msg") return frame;
-    const { lv: _mark, ...rest } = frame as Record<string, unknown>;
-    return this.cameLive.has(frame) ? { ...rest, lv: this.myKey } : rest;
+    if (!isMessageFrame(frame)) return frame;
+    const fields = messageFields(frame);
+    return this.cameLive.has(frame) ? { ...fields, lv: this.myKey } : fields;
   }
 
   /** `waited`: it waited for a commit or a secret (`replayWaiting`), so it is not live. */
   private async receiveMessage(from: string, input: unknown, waited = false): Promise<boolean> {
     if (!isMessageFrame(input)) return false;
     // The live mark is the hop's, never the frame's: it is not kept, stored or handed on as it came.
-    const { lv: mark, ...unmarked } = input as CommunityMessageFrame & { lv?: unknown };
-    const raw = unmarked as CommunityMessageFrame;
+    const mark = (input as { lv?: unknown }).lv;
+    const raw = messageFields(input);
     if (raw.s === this.myKey) { this.ownFrame(raw); return false; }
     const now = this.hooks.clock?.() ?? Date.now();
     // Straight from its author, outside its answer to my sync; or handed on at once by the member at the other end,
@@ -2678,6 +2726,7 @@ export class CommunitySession {
     let answered = this.syncsAnswered.get(from);
     if (!answered) this.syncsAnswered.set(from, answered = new RateWindow(COMMUNITY_LIMITS.syncAnswers, COMMUNITY_LIMITS.syncWindowMs, () => this.hooks.clock?.() ?? Date.now()));
     if (!answered.take()) return;
+    if (recent) await this.vouch(from, frame.mt);
     // Let in only on a branch that lost: the commits from where it parts up to the one that makes it lose, and nothing
     // else (no secret, no frame, no later link), as `farewell` tells one taken out. Its app then knows to ask again.
     // A new link's commit is never among them: its `x` is the link. When it is what makes the branch lose, the answer
@@ -2923,7 +2972,11 @@ export class CommunitySession {
     if (!secret || !sealedUnder) { this.waitMeta(from, raw, s); return false; }
     const opened = openGroupMeta(frame, epochKeys(fromBase64Url(secret), this.id, sealedUnder.e).message);
     if (!opened) return false;
-    if (taking) { await this.signAgainTaken(opened.meta, opened.body); return false; }
+    if (taking) {
+      if (this.vouches(from, s)) await this.signAgainTaken(opened.meta, opened.body);
+      else this.holdTaken(from, raw, s);
+      return false;
+    }
     const before = this.state.meta;
     this.state.meta = opened.meta;
     this.state.metaPast = keepPastGroupMeta(this.state.metaPast, before, opened.meta);
@@ -2945,6 +2998,35 @@ export class CommunitySession {
   private takesOver(s: GroupMetaStatement): boolean {
     const t = this.takeover;
     return !!t && this.isAdmin && s.by === t.from && (this.hooks.clock?.() ?? Date.now()) <= t.until && groupMetaNewer(s, t.base);
+  }
+
+  /**
+   * Whether a statement I would take (`takesOver`) was on its way when the role moved, as far as I can tell: a member
+   * other than its signer handed it to me (a hub's relay included), or said in a sync it holds that one or a later one
+   * under the same commit. The former admin alone could sign new ones after the hand-over, each taken for the whole group.
+   */
+  private vouches(from: string, s: GroupMetaStatement): boolean {
+    const v = this.takeover?.vouched;
+    return from !== s.by || (!!v && v.e === s.e && v.r >= s.r);
+  }
+
+  /** The former admin's statement nobody else has shown it holds: the latest is kept until a sync does (`vouch`). */
+  private holdTaken(from: string, raw: unknown, s: GroupMetaStatement): void {
+    const t = this.takeover!;
+    if (!t.held || groupMetaNewer(s, t.held.s)) t.held = { from, raw, s };
+  }
+
+  /**
+   * A member's sync names the statement it holds: one signed under a commit of the admin before me, by another member
+   * than them, vouches for theirs up to it, and the one held is taken if it now is.
+   */
+  private async vouch(from: string, tag: unknown): Promise<void> {
+    const t = this.takeover, v = parseGroupMetaTag(tag), commit = v ? this.state.chain[v.e] : undefined;
+    if (!t || !v || !commit || from === t.from || rosterAdmin(this.rosterAt(this.hashOf(commit)) ?? []) !== t.from) return;
+    if (t.vouched && !groupMetaNewer(v, t.vouched)) return;
+    t.vouched = v;
+    const held = t.held;
+    if (held && this.vouches(held.from, held.s)) { t.held = undefined; await this.receiveMeta(held.from, held.raw); }
   }
 
   /**

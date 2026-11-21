@@ -17,7 +17,7 @@ import { asCliError, CliError } from "./errors";
 import { EventHub, type GhostlyEvent } from "./events";
 import { GroupAutoJoin } from "./groupAuto";
 import { resumeHolds } from "./holds";
-import { ownFolder, ownProfile, privateFolder } from "./privateFolder";
+import { dropRuntimeFolder, ownFolder, ownProfile, privateFolder } from "./privateFolder";
 import { acquireLock, startingPath, type ProfilePaths } from "./profiles";
 import { startRuntime, type RuntimeOptions } from "./runtime/engine";
 import { flushCardUpdates } from "./statusCards";
@@ -219,7 +219,9 @@ export async function serve(host: Host): Promise<Served> {
       // it has stopped. The other way round, a client that found the secret gone in between (a read whose hello's
       // answer came just before) asked again on the socket still listening, and the close ended that connection as well:
       // "The daemon went away before it answered chat.list, twice".
-      server.close(() => resolve());
+      // The socket's file goes as the server closes; the folder made for it outside the profile goes once it has, when
+      // empty: before the profile's lock is let go, so no next daemon of the profile has a socket in it yet.
+      server.close(() => { dropRuntimeFolder(path); resolve(); });
       removeDaemonSecret(ctx.runtime.paths.dir);
       // The waits still open answer with what they know (`waits.ts`) before their connections end: a `send --wait`
       // ended by a restart has its `messageId`, and its message goes on, where it failed as "The daemon went away".
