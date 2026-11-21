@@ -1,5 +1,5 @@
 import type { AttentionEvent } from "@ghostly/browser/shared/rpc";
-import { attentionOutcome, chatOfLink, mutedFor } from "../../ui/src/lib/chatMute";
+import { attentionOutcome, callRings, chatOfLink, mutedFor } from "../../ui/src/lib/chatMute";
 import type { NotificationSettings } from "../../ui/src/lib/settings";
 import { getPrefix } from "../../ui/src/lib/storage";
 import { profileWords } from "./viewerWords";
@@ -33,6 +33,42 @@ export async function noticeUnheard(event: AttentionEvent, chatView: (linkId: st
   const { t } = await profileWords();
   const body = event.type === "reaction" ? t("chat.reactions.notice") : t("settings.privateNotice");
   await chrome.runtime.sendMessage({ target: "background", type: "notify", body, ...(chat ? { chat } : {}) } satisfies RuntimeMessage);
+}
+
+/**
+ * How long a contact's call rings, as the app's `RING_MS` (@ghostly/react, which this document does not load): a ring
+ * nobody answered is over by then in a tab too, and its notification goes.
+ */
+export const CALL_RING_MS = 60_000;
+
+/** Per chat link, the notification of its call ringing with no tab open: its id, its showing, and the end of its ring. */
+const rings = new Map<string, { id: string; shown: Promise<unknown>; timer: ReturnType<typeof setTimeout> }>();
+
+/**
+ * Tells the person of a contact's call that rings with no tab open (`EngineServer.unheardCall`), as a tab out of sight
+ * does (useIncomingCallNotice): "Incoming call", private, when Settings → Notifications shows them, in a chat whose calls
+ * ring (`callRings`: a muted chat's still do). A click opens the chat, which rings while the offer is fresh. `signal`
+ * null: the ring is over (hung up, or answered or declined in a tab opened since), and its notification goes, as it does
+ * once the call rang its whole minute. A newer offer of the same call takes the place of the one before.
+ */
+export function noticeUnheardCall(linkId: string, signal: string | null, chatView: (linkId: string) => { id: string; peerPubKeyZ32: string } | undefined): void {
+  const ring = rings.get(linkId);
+  if (ring) clearTimeout(ring.timer);
+  const view = signal !== null && !linkId.startsWith("group:") ? chatView(linkId) : undefined;
+  const chat = view ? chatOfLink(linkId, [view]) : undefined;
+  if (!chat || !notificationSettings().systemEnabled || !callRings(chat)) {
+    if (!ring) return;
+    rings.delete(linkId);
+    // Once it is shown: a ring that ended at once would otherwise leave the notification it was about to show.
+    void ring.shown.then(() => chrome.runtime.sendMessage({ target: "background", type: "unnotify", id: ring.id } satisfies RuntimeMessage)).catch(() => {});
+    return;
+  }
+  const id = ring?.id ?? crypto.randomUUID();
+  const shown = (ring?.shown ?? Promise.resolve())
+    .then(() => profileWords())
+    .then(({ t }) => chrome.runtime.sendMessage({ target: "background", type: "notify", body: t("pwa.wakeCall"), chat, id } satisfies RuntimeMessage))
+    .catch(() => {});
+  rings.set(linkId, { id, shown, timer: setTimeout(() => noticeUnheardCall(linkId, null, chatView), CALL_RING_MS) });
 }
 
 /**

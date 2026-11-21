@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { Outlet, useLocation } from "react-router-dom";
 import { Sidebar } from "./components/Sidebar";
 import { ListNotices } from "./components/ListNotices";
+import { OfflineBanner } from "./components/OfflineBanner";
 import { ReconnectingBanner } from "./components/ReconnectingBanner";
 import { MobileTabBar } from "./components/MobileTabBar";
 import { InstallSteps } from "./components/InstallApp";
@@ -266,6 +267,7 @@ export function App() {
             <div key="page" className="row-start-3 col-start-1 flex flex-col min-w-0 min-h-0">
               {/* Shows on a phone only (the list beside the page says it here), but stays in the tree as there: a turn
                   to two panes (or back) keeps the open page mounted. */}
+              {!inGroup && <OfflineBanner onPage />}
               {!inGroup && <ReconnectingBanner onPage />}
               <Outlet />
             </div>
@@ -296,7 +298,8 @@ export function App() {
         <Fragment key="chats">{chats("flex-1 flex flex-col min-h-0 min-w-0")}</Fragment>
         {!onChatList && !inChat && (
           <div key="page" className="flex-1 flex flex-col min-h-0 min-w-0">
-            {/* The list's "Reconnecting…" is hidden with it: a group says it under its own header. */}
+            {/* The list's "Offline" and "Reconnecting…" are hidden with it: a group says them under its own header. */}
+            {!inGroup && <OfflineBanner onPage />}
             {!inGroup && <ReconnectingBanner onPage />}
             <Outlet />
           </div>

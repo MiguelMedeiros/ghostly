@@ -1034,6 +1034,26 @@ describe("a staging namespace that is not installed (WISP 06 § Installing the s
     expect(w.takerRecords.record.handoff).toMatchObject({ step: "stopped", staging: staged });
   });
 
+  it("a forced takeover during the copy, or after it stalled: the pull ends and the whole staging goes before it writes", async () => {
+    const w = world();
+    const staged = await partlyStaged(w);
+    await w.taker.abandon();
+    expect(w.taker.view()).toMatchObject({ step: "failed", failure: "cancelled" });
+    expect(w.storage.dropped).toEqual([staged]);
+    expect(w.storage.spaces.has(staged)).toBe(false);
+    expect(w.takerRecords.record.handoff?.staging).toBeUndefined();
+
+    vi.useFakeTimers({ ...FAKE, toFake: [...FAKE.toFake] });
+    const v = world();
+    const kept = await partlyStaged(v);
+    v.link.meddle = (from, frame) => (from === A ? null : frame);
+    await vi.advanceTimersByTimeAsync(HANDOFF_TIMINGS.stuckMs + HANDOFF_TIMINGS.stuckMs / 4);
+    await until(() => v.taker.view()?.failure === "stalled");
+    await v.taker.abandon();
+    expect(v.storage.dropped).toEqual([kept]);
+    expect(v.takerRecords.record.handoff?.staging).toBeUndefined();
+  });
+
   it("a stopped staging kept past 24 hours goes at the next start; a younger one stays", async () => {
     const w = world();
     const note = { role: "taking" as const, step: "stopped", id: "x".repeat(22), peer: A, from: N, old: "ghostly" };
@@ -1257,13 +1277,27 @@ describe("Try again on the active device after a move that stopped", () => {
     await fullPull(w);
     await settle();
     expect(w.giver.view()?.step).toBe("switching");
-    // Not the taker, or not past the turn the handoff started at: nothing changes.
-    await w.giver.turnTaken(C, N + 1);
-    await w.giver.turnTaken(B, N);
+    // Not past the turn the handoff started at: nothing changes.
+    await w.giver.turnTaken(N);
     expect(w.giver.view()?.step).toBe("switching");
-    await w.giver.turnTaken(B, N + 1);
+    await w.giver.turnTaken(N + 1);
     expect(w.giver.view()).toBeNull();
     expect(w.giverRecords.record.handoff).toBeUndefined();
+  });
+
+  it("a standby that released ends the release when a turn read names another device's record at the release's turn (a forced takeover won)", async () => {
+    const w = world();
+    w.profile.add("f1", bytesOf(100));
+    w.link.meddle = (_from, frame) => (frame.t === "handoff-done" ? null : frame);
+    await fullPull(w);
+    await settle();
+    expect(w.giver.view()?.step).toBe("switching");
+    await w.giver.turnTaken(N + 1);
+    expect(w.giver.view()).toBeNull();
+    expect(w.giverRecords.record.handoff).toBeUndefined();
+    // After a restart it is a plain standby too.
+    await w.giver.resume();
+    expect(w.giver.view()).toBeNull();
   });
 });
 

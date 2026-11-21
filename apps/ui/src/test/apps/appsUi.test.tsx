@@ -19,6 +19,7 @@ import { Settings } from "../../pages/Settings";
 import { registerRunningApp, setAppOpener, setLinkedFiles } from "../../lib/apps/open";
 import { appsAvailable, forgetAppsAvailable, webKitAppLeak } from "../../lib/apps/flag";
 import { forgetInstalledApps, useInstalledApps } from "../../lib/apps/installed";
+import { webLinkedFiles } from "../../lib/apps/webFiles";
 import type { ChatMessage } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { shownInName } from "../labelInName";
@@ -1197,6 +1198,47 @@ describe("with the apps flag on", () => {
     expect(fetches).toEqual([]);
   });
 
+  describe("a grant of files starts with no links: what was picked under an earlier grant does not come back", () => {
+    const linked = async () => {
+      const files = webLinkedFiles({ text: () => ({}) as never, ask: async () => ({ files: [{ path: "Private/tax.pdf", file: new Blob(["1040"]) }] }) });
+      await files.pick(REF, "Chess", { folder: true, accept: [] });
+      expect(await files.list(REF, "Chess")).toHaveLength(1);
+      setLinkedFiles(files);
+      return files;
+    };
+    afterEach(() => setLinkedFiles(null));
+
+    it("an update that asks for files again: its Update drops the links picked before", async () => {
+      const files = await linked();
+      fakeEngine.on("appList", () => []).on("appUpdateAccept", () => installed({ permissions: ["chat", "files"] }));
+      const { user } = renderApp(<InstalledAppDialog onClose={() => {}} onOpen={() => {}}
+        app={installed({ pending: { sequence: 9, version: "1.4.0", added: ["files"] } })} />);
+      await user.click(await screen.findByTestId("app-update-accept"));
+      await waitFor(() => expect(fakeEngine.callsTo("appUpdateAccept")).toHaveLength(1));
+      await waitFor(async () => expect(await files.list(REF, "Chess")).toEqual([]));
+    });
+
+    it("an update installed from its link that asks for files: Update drops them too", async () => {
+      const files = await linked();
+      fakeEngine.on("appPreview", () => preview({ install: "update", asks: ["files"] })).on("appInstall", () => installed({ permissions: ["chat", "files"] }));
+      const onInstalled = vi.fn();
+      const { user } = renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} onInstalled={onInstalled} />);
+      await user.click(await screen.findByTestId("app-install-confirm"));
+      await waitFor(() => expect(onInstalled).toHaveBeenCalled());
+      expect(await files.list(REF, "Chess")).toEqual([]);
+    });
+
+    it("an update that adds another permission keeps them", async () => {
+      const files = await linked();
+      fakeEngine.on("appList", () => []).on("appUpdateAccept", () => installed({ permissions: ["chat", "files", "name"] }));
+      const { user } = renderApp(<InstalledAppDialog onClose={() => {}} onOpen={() => {}}
+        app={installed({ permissions: ["chat", "files"], pending: { sequence: 9, version: "1.4.0", added: ["name"] } })} />);
+      await user.click(await screen.findByTestId("app-update-accept"));
+      await waitFor(() => expect(fakeEngine.callsTo("appUpdateAccept")).toHaveLength(1));
+      expect(await files.list(REF, "Chess")).toHaveLength(1);
+    });
+  });
+
   it("an installed app's row is named with all it shows, then details, so a stopped app says so to a screen reader", async () => {
     const run = { status: "removed" as const, by: [{ store: "s", name: "Ghostly", reason: "Malware", at: 1 }] };
     fakeEngine.on("appList", () => [installed({ run })]).on("appStoreList", () => []).on("appCheckUpdates", () => []);
@@ -1319,6 +1361,31 @@ describe("with the apps flag on", () => {
     await user.click(screen.getByTestId("app-store-remove-confirm"));
     expect(fakeEngine.callsTo("appStoreRemove")).toEqual([{ key: "s" }]);
     await waitFor(() => expect(screen.queryByTestId("app-store")).not.toBeInTheDocument());
+  });
+
+  it("a store's Remove names the installed apps it took down, listed or not, and says their takedown ends with it", async () => {
+    const store = (apps: { ref: string; sequence: number; digest: string; urls: string[]; title: string; tagline: string }[]) => ({ key: "s", fingerprint: "abcd efgh ijkl mnop",
+      url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json", preloaded: false, name: "Hunt", kind: "curated" as const, sequence: 2,
+      expires: 2_000_000_000, expired: false, fetchedAt: 1, apps, removed: [{ ref: REF, digest: DIGEST, reason: "It steals your messages", at: 1 }] });
+    let stores = [store([])];
+    fakeEngine.on("appList", () => [installed({ run: { status: "removed", by: [{ store: "s", name: "Hunt", reason: "It steals your messages", at: 1 }] } })])
+      .on("appStoreList", () => stores).on("appCheckUpdates", () => []);
+    const { user, unmount } = renderApp(<Apps />, { route: "/apps" });
+    await user.click(await screen.findByTestId("app-store-remove"));
+    // No longer listed: the question named no app, and Remove gave Chess its Open back with no word.
+    let question = screen.getByTestId("app-store-remove-question");
+    expect(question).toHaveTextContent("Chess");
+    expect(question).toHaveTextContent("took down");
+    expect(question).toHaveTextContent("ends that takedown");
+    unmount();
+
+    // Still listed (a newer version), it is named once, as taken down, not only as an app that gets no more takedowns.
+    stores = [store([{ ref: REF, sequence: 8, digest: "b".repeat(43), urls: [URL_], title: "Chess", tagline: "Play chess with a contact" }])];
+    renderApp(<Apps />, { route: "/apps" });
+    await user.click(await screen.findByTestId("app-store-remove"));
+    question = screen.getByTestId("app-store-remove-question");
+    expect(question).toHaveTextContent("ends that takedown");
+    expect(question).not.toHaveTextContent("updates or takedowns");
   });
 
   it("a store that lists none of the installed apps says only how to get it back", async () => {

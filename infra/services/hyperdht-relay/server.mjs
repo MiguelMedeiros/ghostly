@@ -6,7 +6,7 @@ import { DEFAULT_LIMITS, limitVariable, listenProblem, networkOf, readSettings, 
 //   GHOSTLY_HYPERDHT_TESTNET    size of an in-process HyperDHT network instead of any other (e2e); not with BOOTSTRAP
 //   GHOSTLY_RELAY_ORIGINS       allowed origins, comma-separated (empty: any): https://app.example, read as a browser
 //                               sends it (no path; case, a default port and a trailing / do not matter)
-//   GHOSTLY_RELAY_CLOUDFLARE    "1" behind Cloudflare (a tunnel): each client counts by CF-Connecting-IP
+//   GHOSTLY_RELAY_CLOUDFLARE    "1" behind Cloudflare (a tunnel): each client counts by CF-Connecting-IP; not with PROXIES
 //   GHOSTLY_RELAY_PROXIES       reverse proxies in front of it (0): each client counts by the X-Forwarded-For entry
 //                               that many from the end. A client that reaches the port past them could write either
 //                               header itself, so HOST is loopback by default with either set.

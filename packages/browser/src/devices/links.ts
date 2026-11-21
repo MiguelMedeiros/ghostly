@@ -33,6 +33,8 @@ export interface DeviceHandoffHandler {
   call?(method: string, params: unknown): Promise<unknown> | undefined;
   /** What a turn read found: a standby that released learns from it that its release was taken. */
   turnRead?(outcome: TurnOutcome): void;
+  /** A forced takeover is about to write: a pull here ends, and its staging goes (`HandoffTaker.abandon`). */
+  dropStaging?(): Promise<void>;
   stop(): void;
 }
 
@@ -1226,6 +1228,7 @@ export class DeviceLinks implements DeviceLinkEngine {
           amend: (patch) => amendDevice(this.options.profile, patch),
           proves: (verifier, password) => provesHandoffPassword(verifier, password),
           keeper: () => this.turnKeeper(),
+          dropStaging: async () => { await this.handoff?.dropStaging?.(); },
         }, { password: typeof p.password === "string" ? p.password : "", name: typeof p.name === "string" ? p.name : "" });
         // Lost or stolen: once the profile opens here, the money checklist comes first, then removing that device.
         if (outcome.kind === "start" && p.lost === true) {

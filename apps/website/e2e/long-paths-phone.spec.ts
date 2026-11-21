@@ -35,16 +35,18 @@ for (const path of ["/wisps/306-bitcoin", "/roadmap"]) {
 /**
  * A reader with larger text: Chrome's "Very large" default font (24 px) or the WCAG 1.4.12 text spacing. The press
  * address on /brand lost ".com.br" at the screen's edge (and pushed its card's text with it), the host names in
- * /privacy ran past it, and a WISP paragraph's slash list (GhostStory/FeatureLedger/GhostFinale) lost its end.
+ * /privacy ran past it, and a WISP paragraph's slash list (GhostStory/FeatureLedger/GhostFinale) lost its end. With
+ * a 32 px default font (200%), the relay host names in bold on /terms (pkarr.miguelmedeiros.dev) were cut the same way.
  */
 const SPACING = "*:not(svg):not(svg *){line-height:1.5!important;letter-spacing:.12em!important;word-spacing:.16em!important}p{margin-bottom:2em!important}";
-for (const [path, mode] of [["/brand", "font24"], ["/privacy", "font24"], ["/wisps/adapter-roadmap", "spacing"]] as const) {
-  test(`${path}: long strings wrap inside a 375 px phone with ${mode === "font24" ? "a 24 px default font" : "WCAG text spacing"}`, async ({ page }) => {
+for (const [path, mode] of [["/brand", "font24"], ["/privacy", "font24"], ["/terms", "font32"], ["/wisps/adapter-roadmap", "spacing"]] as const) {
+  const font = mode === "font24" ? 24 : mode === "font32" ? 32 : 0;
+  test(`${path}: long strings wrap inside a 375 px phone with ${font ? `a ${font} px default font` : "WCAG text spacing"}`, async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
-    if (mode === "font24") {
+    if (font) {
       const cdp = await page.context().newCDPSession(page);
       await cdp.send("Page.enable");
-      await cdp.send("Page.setFontSizes", { fontSizes: { standard: 24, fixed: 20 } });
+      await cdp.send("Page.setFontSizes", { fontSizes: { standard: font, fixed: Math.round(font * 0.8125) } });
     }
     await page.goto(path);
     if (mode === "spacing") await page.addStyleTag({ content: SPACING });

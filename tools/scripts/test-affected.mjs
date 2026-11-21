@@ -319,9 +319,11 @@ async function runE2e() {
   const needsExt = e2eSelected.some((s) => s.startsWith("e2e/extension/"));
   let url = webUrl;
   let preview = null;
-  // The suite's build: the local OIDC issuer and the SDK example's adapters (see e2e/playwright.config.ts).
+  // The suite's build: the local OIDC issuer, the SDK example's adapters and a services host on this port, so a
+  // contact's shared app opens on `<label>.localhost` (see e2e/playwright.config.ts).
   const issuer = /OIDC_TEST_ISSUER\s*=.*?"([^"]+)"/.exec(readFileSync(join(ROOT, "e2e/support/oidcIssuer.ts"), "utf8"))?.[1];
-  const suiteEnv = { VITE_OIDC_TEST_ISSUER: process.env.E2E_OIDC_ISSUER ?? issuer, VITE_ATPROTO_TEST_PLC: "https://plc.ghostly.test", GHOSTLY_PLUGINS: "packages/sdk/examples/adapter/src/index.ts", VITE_APPS_TEST: "1" };
+  const suiteEnv = { VITE_OIDC_TEST_ISSUER: process.env.E2E_OIDC_ISSUER ?? issuer, VITE_ATPROTO_TEST_PLC: "https://plc.ghostly.test", GHOSTLY_PLUGINS: "packages/sdk/examples/adapter/src/index.ts", VITE_APPS_TEST: "1",
+    VITE_SERVICES_HOST: `http://*.localhost:${port}`, VITE_SERVICES_APP_ORIGIN: `http://localhost:${port}` };
   // Extension specs pair with the web app too (interop), so a build is served whatever was picked.
   if (!url) {
     // Something already answering there is another session's build: testing it would test the wrong app.

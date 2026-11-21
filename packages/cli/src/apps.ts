@@ -1,5 +1,5 @@
 import { createHash, createPrivateKey, generateKeyPairSync } from "node:crypto";
-import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, existsSync, constants as fsConstants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import {
   APP_BUNDLE_LIMITS, APP_PREFIXES, appFingerprint, appRef, appRevocationFor, appStoreDecision, assembleAppBundle, canonicalJson, canonicalJsonBytes,
@@ -140,10 +140,36 @@ function refuseRepeatedKey(path: string, text: string): void {
 
 /** A bundle file's bytes: its size is checked before it is read, so a huge file is refused unread. */
 function readBundleFile(path: string): Uint8Array {
-  const info = statSync(path);
-  if (info.isDirectory()) throw new CliError("bad_request", `${path} is a folder: name a .ghostlyapp file`);
-  if (info.size > APP_BUNDLE_LIMITS.bundleBytes) throw refused(`${path} is not a valid bundle`, { reason: "too-large", detail: `${info.size} bytes` });
-  return new Uint8Array(readFileSync(path));
+  if (statSync(path).isDirectory()) throw new CliError("bad_request", `${path} is a folder: name a .ghostlyapp file`);
+  return readLocalFile(path, APP_BUNDLE_LIMITS.bundleBytes, (bytes) => refused(`${path} is not a valid bundle`, { reason: "too-large", detail: `${bytes} bytes` }));
+}
+
+/** A file of an app's folder (its `ghostly-app.json`, its `ghostly-revoke.json`, a file to bundle): no larger than a bundle. */
+const readFolderFile = (path: string) =>
+  readLocalFile(path, APP_BUNDLE_LIMITS.bundleBytes, (bytes) => refused(`${path} is larger than a bundle may be`, { reason: "too-large", detail: `${bytes} bytes` }));
+
+/**
+ * A file's bytes, at most `limit` of them. A regular file only: a device or a FIFO (or a link to one) says size 0 and
+ * may never end, so it is refused unopened. The size is checked on the open file before it is read, and the read stops
+ * past `limit` whatever the file became in between.
+ */
+function readLocalFile(path: string, limit: number, tooLarge: (bytes: number | string) => CliError): Uint8Array {
+  if (!statSync(path).isFile()) throw new CliError("bad_request", `${path} is not a file`);
+  // Non-blocking: a FIFO put there since the check does not hold the open.
+  const fd = openSync(path, fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK ?? 0));
+  try {
+    const info = fstatSync(fd);
+    if (!info.isFile()) throw new CliError("bad_request", `${path} is not a file`);
+    if (info.size > limit) throw tooLarge(info.size);
+    let bytes = Buffer.alloc(info.size + 1);
+    let total = 0;
+    for (let n; (n = readSync(fd, bytes, total, bytes.length - total, null)) > 0;) {
+      total += n;
+      if (total > limit) throw tooLarge(`more than ${limit}`);
+      if (total === bytes.length) bytes = Buffer.concat([bytes, Buffer.alloc(Math.min(bytes.length, limit + 1 - bytes.length))]);
+    }
+    return new Uint8Array(bytes.subarray(0, total));
+  } finally { closeSync(fd); }
 }
 
 /**
@@ -244,16 +270,17 @@ export async function verifyApp(source: string): Promise<Record<string, unknown>
 
 /**
  * The revocations of a `ghostly-revoke.json`, a URL or a file, as a client reads it. None there, one that does not
- * answer, or one a client would not read, revokes nothing.
+ * answer, or one a client would not read, revokes nothing. A revocation `checked` holds is not verified again: one
+ * repeated in a file, or in the files beside the URL and its sources, is checked once.
  */
-async function revocationsIn(file: string, isUrl: boolean): Promise<SignedAppRevocation[]> {
+async function revocationsIn(file: string, isUrl: boolean, checked?: Set<string>): Promise<SignedAppRevocation[]> {
   let bytes: Uint8Array;
   try {
     if (isUrl) bytes = await fetchBundle(file);
     else if (!existsSync(file)) return [];
     else bytes = readBundleFile(file);
   } catch { return []; }
-  const read = readAppRevocations(bytes);
+  const read = readAppRevocations(bytes, checked);
   return read.ok ? read.revocations : [];
 }
 
@@ -286,8 +313,10 @@ export async function checkedBundle(source: string): Promise<{ bundle: AppBundle
   const files = isUrl
     ? new Set([source, ...(m.sources ?? []).filter(isAppFetchUrl)].flatMap(besideUrl))
     : [join(dirname(userPath(source)), APP_REVOKE_FILE)];
-  // Read together: one host that does not answer holds the check for one wait, not one per file after it.
-  const lists = await Promise.all([...files].map((file) => revocationsIn(file, isUrl)));
+  // Read together: one host that does not answer holds the check for one wait, not one per file after it. Each
+  // revocation's signature is checked once across them all (at most 9 files of 4096).
+  const checked = new Set<string>();
+  const lists = await Promise.all([...files].map((file) => revocationsIn(file, isUrl, checked)));
   for (const [i, file] of [...files].entries()) {
     const revocation = appRevocationFor(version, lists[i]!);
     if (revocation) {
@@ -418,8 +447,9 @@ const WRITTEN = ["publisher", "files"] as const;
 
 function readSource(path: string): Record<string, unknown> {
   if (!existsSync(path)) throw new CliError("not_found", `No ${APP_SOURCE} in ${dirname(path)}: it holds the manifest's fields (name, version, title, tagline, entry, permissions, runtime, license, ...) but publisher, sequence and files, which publish writes`);
-  let text: string, value: unknown;
-  try { text = readFileSync(path, "utf8"); value = JSON.parse(text); } catch (error) { throw new CliError("bad_request", `${path} is not JSON: ${error instanceof Error ? error.message : String(error)}`); }
+  const text = Buffer.from(readFolderFile(path)).toString("utf8");
+  let value: unknown;
+  try { value = JSON.parse(text); } catch (error) { throw new CliError("bad_request", `${path} is not JSON: ${error instanceof Error ? error.message : String(error)}`); }
   refuseRepeatedKey(path, text);
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new CliError("bad_request", `${path} is not a JSON object`);
   const draft = value as Record<string, unknown>;
@@ -493,7 +523,7 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
   // The folder's revocations and those beside the output (where `app revoke --bundle` writes them), one list when the same.
   const lists = [...new Set([join(dir, APP_REVOKE_FILE), join(dirname(out), APP_REVOKE_FILE)])];
   const { files, skipped } = collectFiles(dir, new Set([sourcePath, out, join(dir, APP_BUNDLE_FILE), ...lists]));
-  const contents = files.map((f) => ({ path: f.path, bytes: new Uint8Array(readFileSync(f.full)) }));
+  const contents = files.map((f) => ({ path: f.path, bytes: readFolderFile(f.full) }));
   // A bundle is public: a private key found in the folder (an old key, a store key, any PEM) stops the publish.
   const keyFile = contents.find((f) => PRIVATE_KEY.test(Buffer.from(f.bytes).toString("latin1")));
   if (keyFile) throw refused(`${keyFile.path} in ${dir} holds a private key, and a bundle is public: move it out of the app's folder`, { reason: "private-key", detail: keyFile.path });
@@ -521,7 +551,7 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
   const ref = appRef(key.key, checked.manifest.name);
   const held = lists.flatMap((path) => {
     if (!existsSync(path)) return [];
-    const revocations = readAppRevocations(new Uint8Array(readFileSync(path)));
+    const revocations = readAppRevocations(readFolderFile(path));
     return revocations.ok ? revocations.revocations.map((r) => ({ path, r })) : [];
   });
   const stopping = held.find(({ r }) => appRevocationFor({ ref, sequence, digest: read.bundle.digest }, [r]));
@@ -614,7 +644,7 @@ export async function revokeApp(dirArg: string, keyArg: string, what: { digests?
   const checked = new Set<string>();
   let list: SignedAppRevocation[] = [];
   if (existsSync(listPath)) {
-    const held = readAppRevocations(new Uint8Array(readFileSync(listPath)), checked);
+    const held = readAppRevocations(readFolderFile(listPath), checked);
     if (!held.ok) throw refused(`${listPath} is there and is not a valid ghostly-revoke.json: fix or move it first`, held);
     list = held.revocations;
   }
